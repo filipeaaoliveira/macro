@@ -125,10 +125,12 @@ async fn deleting_a_run_removes_its_steps(pool: PgPool) {
     repo.delete_run(id).await.expect("delete");
 
     assert_eq!(repo.get_run(id).await.expect("get"), None);
-    let steps: i64 = sqlx::query_scalar("SELECT count(*) FROM factory_step WHERE run_id = $1")
-        .bind(id.as_uuid())
-        .fetch_one(&pool)
-        .await
-        .expect("count");
+    let steps = sqlx::query_scalar!(
+        r#"SELECT count(*) AS "count!" FROM factory_step WHERE run_id = $1"#,
+        id.as_uuid()
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("count");
     assert_eq!(steps, 0);
 }
