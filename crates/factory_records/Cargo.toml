@@ -1,0 +1,21 @@
+[package]
+edition = "2024"
+name = "factory_records"
+publish = false
+version = "0.1.0"
+
+[dependencies]
+chrono = { workspace = true, features = ["serde"] }
+lazy-regex = { workspace = true }
+serde = { workspace = true }
+sqlx = { workspace = true }
+strum = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+utoipa = { workspace = true }
+uuid = { workspace = true, features = ["serde", "v7"] }
+workspace-hack = { version = "0.1", path = "../workspace-hack" }
+
+[dev-dependencies]
+macro_db_migrator = { path = "../macro_db_migrator" }
+serde_json = { workspace = true }

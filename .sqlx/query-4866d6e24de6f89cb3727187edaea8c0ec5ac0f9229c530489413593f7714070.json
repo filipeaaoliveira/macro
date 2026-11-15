@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE factory_run\n            SET outcome = $2, ended_at = now()\n            WHERE id = $1 AND outcome IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4866d6e24de6f89cb3727187edaea8c0ec5ac0f9229c530489413593f7714070"
+}
