@@ -385,6 +385,7 @@ fn update_running(stage: &Stage, args: &UpdateArgs) -> Result<Vec<String>> {
         Some(super::inventory::services_named(mode, &args.services)?)
     };
     adopt_proxy_config(stage, &instance, mode, &env, &state)?;
+    let added = adopt_compose_config(stage, &instance, mode, &env, &state)?;
     let mut reloaded = Vec::new();
     let remounted = if let Some(source) = args.binaries_dir.as_deref() {
         let new = super::build::BinariesDir::classify(source)?;
@@ -413,6 +414,7 @@ fn update_running(stage: &Stage, args: &UpdateArgs) -> Result<Vec<String>> {
         )?;
         false
     };
+    start_added_services(stage, &instance, &env, &added)?;
     if remounted || args.binaries_dir.is_some() {
         super::staleness::clear(&instance);
     }
@@ -442,6 +444,7 @@ fn update_running(stage: &Stage, args: &UpdateArgs) -> Result<Vec<String>> {
                 "frontend_updated": args.frontend,
                 "aux_services_rebuilt": args.build_aux_services,
                 "reloaded": reloaded,
+                "started": added,
                 "stale_services": stale,
             }))?
         );
@@ -468,6 +471,129 @@ fn adopt_proxy_config(
         stage.is_dry_run(),
         || stage.run("Recreating proxy (configuration changed)", &mut up),
     )
+}
+
+/// The services a stack's definition holds that no container runs, in the
+/// order they start: the infra, then the Rust services that use it.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct AddedServices {
+    infra: Vec<String>,
+    rust: Vec<String>,
+}
+
+impl AddedServices {
+    /// The services in `defined` that none of `existing` runs. Only a mode
+    /// that runs its own infra starts infra; dev uses the shared one.
+    fn between(mode: Mode, defined: &[String], existing: &[&str]) -> Self {
+        let rust_services: Vec<&str> = super::inventory::services_for_mode(mode)
+            .map(|svc| svc.compose_name)
+            .collect();
+        let mut added = AddedServices::default();
+        for service in defined {
+            if existing.contains(&service.as_str()) {
+                continue;
+            }
+
+            if rust_services.contains(&service.as_str()) {
+                added.rust.push(service.clone());
+            } else if mode.spec().runs_local_infra {
+                added.infra.push(service.clone());
+            }
+        }
+        added
+    }
+}
+
+/// Regenerate the instance's Compose override from this checkout and start
+/// the infra it adds, leaving every existing container as it is, so a stack
+/// started before a service existed gains it with its data intact. `stack up`
+/// would wipe it. New infra is healthy and the database migrated before this
+/// returns; the added Rust services it returns start once the rebuild has
+/// built their binaries ([`start_added_services`]).
+fn adopt_compose_config(
+    stage: &Stage,
+    instance: &Instance,
+    mode: Mode,
+    env: &env_layer::ResolvedEnv,
+    state: &StackState,
+) -> Result<Vec<String>> {
+    if stage.is_dry_run() {
+        return Ok(Vec::new());
+    }
+
+    let binaries_dir = match &state.binaries_dir {
+        Some(dir) => dir.clone(),
+        None => super::workspace_root().join(arch::detect()?.debug_dir()),
+    };
+    super::gen_compose::generate(
+        mode,
+        instance,
+        &super::build::BinariesDir::classify(&binaries_dir)?,
+        state.serves_bundle(),
+        super::gen_compose::Sidecars::from_env(mode, &env.merged),
+        &state.computers(mode, instance),
+    )?;
+
+    let defined = defined_services(instance, env)?;
+    let containers = super::docker::project_containers(instance.project_name())?;
+    let existing: Vec<&str> = containers
+        .iter()
+        .filter_map(|container| container.service.as_deref())
+        .collect();
+    let added = AddedServices::between(mode, &defined, &existing);
+
+    if !added.infra.is_empty() {
+        let mut up = super::compose_cmd(instance, env);
+        up.args(["up", "-d", "--wait", "--no-deps"])
+            .args(&added.infra);
+        stage.run(
+            &format!("Starting new infra ({})", added.infra.join(", ")),
+            &mut up,
+        )?;
+    }
+    // A service added since the stack started may bring tables with it.
+    let adds_any = !added.infra.is_empty() || !added.rust.is_empty();
+    if adds_any && mode.spec().migrates_db {
+        super::db::migrate(stage, instance)?;
+    }
+    Ok(added.rust)
+}
+
+/// Start the Rust services [`adopt_compose_config`] found without a container.
+fn start_added_services(
+    stage: &Stage,
+    instance: &Instance,
+    env: &env_layer::ResolvedEnv,
+    added: &[String],
+) -> Result<()> {
+    if added.is_empty() {
+        return Ok(());
+    }
+    let mut up = super::compose_cmd(instance, env);
+    up.args(["up", "-d", "--no-deps"]).args(added);
+    stage.run(
+        &format!("Starting new services ({})", added.join(", ")),
+        &mut up,
+    )
+}
+
+/// The services the instance's Compose files define, in its active profiles.
+fn defined_services(instance: &Instance, env: &env_layer::ResolvedEnv) -> Result<Vec<String>> {
+    let output = super::compose_cmd(instance, env)
+        .args(["config", "--services"])
+        .output()
+        .context("listing the stack's Compose services")?;
+    if !output.status.success() {
+        bail!(
+            "listing the stack's Compose services: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    Ok(String::from_utf8(output.stdout)
+        .context("reading the stack's Compose services")?
+        .lines()
+        .map(str::to_owned)
+        .collect())
 }
 
 /// Put `config` at `path` and `reload` whatever runs it, only when it differs.

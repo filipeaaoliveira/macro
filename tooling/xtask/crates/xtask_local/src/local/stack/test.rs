@@ -234,3 +234,46 @@ mod replace_running_config {
         assert!(!fresh.exists());
     }
 }
+
+/// A stack started before `temporal` and `factory_service` existed gains them
+/// on a rebuild: the infra in the first wave, the Rust service in the second,
+/// and nothing that already has a container.
+#[test]
+fn a_rebuild_starts_only_the_services_without_a_container() {
+    let defined: Vec<String> = [
+        "postgres",
+        "temporal",
+        "authentication-service",
+        "factory_service",
+        "proxy",
+    ]
+    .map(str::to_owned)
+    .to_vec();
+    let existing = ["postgres", "authentication-service", "proxy"];
+
+    assert_eq!(
+        AddedServices::between(Mode::Local, &defined, &existing),
+        AddedServices {
+            infra: vec!["temporal".to_owned()],
+            rust: vec!["factory_service".to_owned()],
+        }
+    );
+}
+
+/// Dev's infra is the shared dev environment, so a dev rebuild never starts
+/// the local infra its Compose files also define.
+#[test]
+fn a_dev_rebuild_starts_no_infra() {
+    let defined: Vec<String> = ["postgres", "redis", "authentication-service"]
+        .map(str::to_owned)
+        .to_vec();
+    let existing = ["redis"];
+
+    assert_eq!(
+        AddedServices::between(Mode::Dev, &defined, &existing),
+        AddedServices {
+            infra: Vec::new(),
+            rust: vec!["authentication-service".to_owned()],
+        }
+    );
+}

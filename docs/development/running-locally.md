@@ -853,6 +853,14 @@ Press `r`, or run `just run_local rebuild`, to rebuild the binaries. Only servic
 whose binary is newer than their container restart, so a build that failed partway
 still gets its finished services reloaded next time.
 
+`just run_local rebuild` and `just stack update` also regenerate the instance's
+Compose override and start every service it defines that has no container yet,
+keeping the existing containers and their data. A stack started before a service
+was added to the stack gains it this way: new infra (such as `temporal`) starts
+first and is waited on until healthy, then migrations run, then the new Rust
+services (such as `factory_service`) start on the binaries just built. The `r`
+hotkey only rebuilds and reloads.
+
 To rebuild only the services you are working on, pass `--services` with compose or
 binary names, comma-separated: `just run_local rebuild --services contacts_service`
 or `just stack update --services contacts_service,email_service`. An edit to a crate
