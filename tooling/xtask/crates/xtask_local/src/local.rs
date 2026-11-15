@@ -1154,8 +1154,16 @@ fn bring_up_infra(
     // only confirms "running"; LocalStack readiness is polled below. FusionAuth
     // is deliberately excluded — its healthcheck gives up (5 retries) long before
     // its ~minute kickstart finishes, so it's started + polled separately.
+    // Temporal is waited for so `factory_service` finds its namespace ready.
     let waited: &[&str] = if spec.runs_local_infra {
-        &["postgres", "redis", "search", "kafka", "localstack"]
+        &[
+            "postgres",
+            "redis",
+            "search",
+            "kafka",
+            "localstack",
+            "temporal",
+        ]
     } else {
         &["redis", "kafka", "localstack"]
     };
@@ -1683,9 +1691,10 @@ fn external_volumes(instance: &Instance) -> [String; 6] {
 
 /// Every owned volume removed by intentional full-stack teardown.
 fn instance_volumes(instance: &Instance) -> impl Iterator<Item = String> {
-    external_volumes(instance)
-        .into_iter()
-        .chain([format!("{}_openbao_data", instance.project_name())])
+    external_volumes(instance).into_iter().chain([
+        format!("{}_openbao_data", instance.project_name()),
+        gen_compose::temporal_volume(instance),
+    ])
 }
 
 /// Whether the instance already has any data volume, which a bring-up must not

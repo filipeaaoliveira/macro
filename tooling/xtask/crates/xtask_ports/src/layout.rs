@@ -123,6 +123,12 @@ pub enum Port {
     /// The Outlook emulator: Microsoft's sign-in page for the browser, and
     /// its control API.
     OutlookEmulator = 8481,
+    /// `factory_service`, the software factory's Run API.
+    Factory = 8113,
+    /// The Temporal dev server's gRPC frontend. Loopback-only.
+    Temporal = 7233,
+    /// The Temporal dev server's web UI. Loopback-only.
+    TemporalUi = 8233,
 }
 
 impl Port {

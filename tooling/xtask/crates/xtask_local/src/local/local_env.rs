@@ -239,6 +239,7 @@ struct InfraEnv {
     local_aws_url: String,
     local_aws_public_url: String,
     kafka_brokers: String,
+    temporal_address: String,
 }
 
 impl InfraEnv {
@@ -252,6 +253,8 @@ impl InfraEnv {
             // The broker's in-network listener (see docker/docker-compose-databases.yml);
             // host processes use localhost:9092 instead.
             kafka_brokers: "kafka:29092".into(),
+            // The Temporal dev server `gen_compose` adds to the stack.
+            temporal_address: "http://temporal:7233".into(),
         }
     }
 
@@ -281,6 +284,7 @@ impl InfraEnv {
             ),
         );
         env.insert("KAFKA_BROKERS".into(), self.kafka_brokers.clone());
+        env.insert("TEMPORAL_ADDRESS".into(), self.temporal_address.clone());
         // In-network services resolve the gateway through the OVERRIDE_ var;
         // without it the resolver's Environment::Local default
         // (http://localhost:8082) points at the calling container itself and

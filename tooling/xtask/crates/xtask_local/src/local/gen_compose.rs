@@ -25,7 +25,7 @@ use sha2::{Digest, Sha256};
 use super::build::{BinariesDir, runtime_image_tag};
 use super::computers::{Computers, Fleet};
 use super::instance::{Instance, Port};
-use super::inventory::{OPENBAO_IMAGE, RustService, services_for_mode};
+use super::inventory::{OPENBAO_IMAGE, RustService, TEMPORAL_IMAGE, services_for_mode};
 use super::{Mode, google_emulator, microsoft_emulator, repo_root};
 
 #[cfg(test)]
@@ -517,6 +517,69 @@ fn add_local_infra(
         }),
     );
 
+    // The software factory's workflows run here. The dev server keeps its
+    // SQLite database on a named volume, so Runs survive a restart. The image
+    // runs as `temporal`; a new volume on its home takes that owner, while one
+    // on a new directory would be root's.
+    services.insert(
+        "temporal".to_string(),
+        Some(dct::Service {
+            image: Some(TEMPORAL_IMAGE.to_string()),
+            command: Some(dct::Command::Args(
+                [
+                    "server",
+                    "start-dev",
+                    "--ip",
+                    "0.0.0.0",
+                    "--port",
+                    "7233",
+                    "--ui-port",
+                    "8233",
+                    "--db-filename",
+                    "/home/temporal/temporal.db",
+                ]
+                .iter()
+                .map(|arg| arg.to_string())
+                .collect(),
+            )),
+            volumes: vec![dct::Volumes::Simple(
+                "temporal_data:/home/temporal".to_string(),
+            )],
+            restart: Some("unless-stopped".to_string()),
+            ports: dct::Ports::Short(vec![
+                format!("127.0.0.1:{}:7233", instance.port(Port::Temporal)),
+                format!("127.0.0.1:{}:8233", instance.port(Port::TemporalUi)),
+            ]),
+            // Healthy once the default namespace answers, not only once the
+            // server listens: until then a started workflow is refused.
+            healthcheck: Some(dct::Healthcheck {
+                test: Some(dct::HealthcheckTest::Multiple(
+                    [
+                        "CMD",
+                        "temporal",
+                        "workflow",
+                        "list",
+                        "--namespace",
+                        "default",
+                        "--limit",
+                        "1",
+                        "--address",
+                        "127.0.0.1:7233",
+                    ]
+                    .iter()
+                    .map(|arg| arg.to_string())
+                    .collect(),
+                )),
+                interval: Some("5s".to_string()),
+                timeout: Some("3s".to_string()),
+                retries: 20,
+                ..Default::default()
+            }),
+            networks: net_aliases(&[("services", &["temporal"])]),
+            ..Default::default()
+        }),
+    );
+
     // This per-instance directory belongs only to FusionAuth. Private SELinux
     // relabeling keeps the kickstart readable without sharing its container label.
     let mut fusionauth = dct::Service {
@@ -715,6 +778,18 @@ fn set_networks_and_volumes(value: &mut Value, mode: Mode, instance: &Instance) 
         }))
         .expect("volume configuration is serializable"),
     );
+    volumes.insert(
+        "temporal_data".into(),
+        serde_yaml::to_value(serde_json::json!({
+            "name": temporal_volume(instance)
+        }))
+        .expect("volume configuration is serializable"),
+    );
+}
+
+/// The volume the instance's Temporal dev server keeps its database on.
+pub fn temporal_volume(instance: &Instance) -> String {
+    format!("{}_temporal_data", instance.project_name())
 }
 
 /// Define the per-instance external networks and volumes (named-instance only).

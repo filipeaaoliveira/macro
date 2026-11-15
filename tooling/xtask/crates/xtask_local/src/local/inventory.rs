@@ -16,6 +16,10 @@ use super::microsoft_emulator;
 /// OpenBao release with namespaces, KV v2, JWT auth, and TOTP support.
 pub const OPENBAO_IMAGE: &str = "openbao/openbao:2.7.2";
 
+/// Temporal CLI release whose `server start-dev` runs the local Temporal
+/// server (Server 1.32, UI 2.54).
+pub const TEMPORAL_IMAGE: &str = "temporalio/temporal:1.9.1";
+
 /// A Rust service whose binary the orchestrator builds on the host and mounts
 /// into the runtime image at `/app/out/<cargo_bin>`. Several fields document
 /// the inventory and back validation/diagnostics rather than the hot path.
@@ -299,6 +303,19 @@ pub const RUST_SERVICES: &[RustService] = &[
         is_websocket: false,
         // Local-only: under `run-dev` it would take leases on shared-dev
         // accounts from the deployed replicas.
+        modes: &[Mode::Local],
+        opt_in: false,
+    },
+    RustService {
+        compose_name: "factory_service",
+        cargo_bin: "factory_service",
+        package: "factory_service",
+        host_port: Some(Port::Factory),
+        // Internal callers only; the frontend does not reach it.
+        path_prefix: None,
+        is_websocket: false,
+        // Local-only: its workflows run on the local stack's Temporal server,
+        // which no deployed environment has yet.
         modes: &[Mode::Local],
         opt_in: false,
     },

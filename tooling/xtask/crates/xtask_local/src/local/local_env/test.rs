@@ -84,6 +84,7 @@ fn emits_required_keys() {
         "OPENSEARCH_URL",
         "LOCAL_AWS_URL",
         "LOCAL_AWS_PUBLIC_URL",
+        "TEMPORAL_ADDRESS",
         "AWS_ACCESS_KEY_ID",
         "STATIC_STORAGE_BUCKET",
         "CONNECTION_GATEWAY_TABLE",
