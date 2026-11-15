@@ -193,6 +193,7 @@ members = [
   "services/contacts_service",
   "services/convert_service",
   "services/dataloss_prevention_handler",
+  "services/factory_service",
   "services/delete_chat_handler",
   "services/deleted_item_poller",
   "services/agent_harness_service/load-test",

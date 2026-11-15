@@ -8380,6 +8380,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "factory_service"
+version = "0.1.0"
+dependencies = [
+ "aws-sdk-secretsmanager",
+ "axum",
+ "database_env_vars",
+ "factory_engine",
+ "factory_records",
+ "macro_auth",
+ "macro_authorization",
+ "macro_aws_config",
+ "macro_config",
+ "macro_cors",
+ "macro_entrypoint",
+ "macro_env",
+ "macro_env_var",
+ "macro_tower_layers",
+ "rootcause",
+ "secretsmanager_client",
+ "serde_json",
+ "sqlx",
+ "temporalio-client",
+ "temporalio-sdk",
+ "tokio",
+ "tokio-util",
+ "tower 0.5.3",
+ "tower-http",
+ "tracing",
+ "url",
+ "utoipa",
+ "utoipa-swagger-ui",
+ "workspace-hack",
+]
+
+[[package]]
 name = "fallible-iterator"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
