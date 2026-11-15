@@ -76,6 +76,7 @@ members = [
   "crates/entity_registry/entity_registry",
   "crates/entity_registry/entity_registry_db_utils",
   "crates/entity_registry/shared_entity_registry",
+  "crates/factory_engine",
   "crates/factory_records",
   "crates/favorites",
   "crates/feature_flags",
@@ -473,6 +474,14 @@ symphonia = { version = "0.6.1", default-features = false, features = [
   "wav",
 ] }
 tar = "0.4.46"
+# The Temporal Rust SDK. The crates release together and the workflow macros
+# expand to paths in temporalio-sdk and temporalio-workflow, so all five are
+# pinned to one version. vendored-protox compiles the protos without protoc.
+temporalio-client = "=1.1.0"
+temporalio-common = { version = "=1.1.0", features = ["vendored-protox"] }
+temporalio-macros = "=1.1.0"
+temporalio-sdk = "=1.1.0"
+temporalio-workflow = "=1.1.0"
 tempfile = "3"
 thiserror = "2.0.0"
 time = "0.3.37"

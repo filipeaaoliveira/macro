@@ -1,0 +1,68 @@
+{
+  "description": "Takes a task to a merged pull request: plan, write, review and fix, publish, CI, merge. A review that keeps finding blockers holds the pull request for a person.",
+  "facts": { "panel_ran": false, "held": false },
+  "entries": [
+    { "id": "plan", "step": "plan" },
+    {
+      "id": "write",
+      "step": "write",
+      "on": {
+        "done": [{ "to": { "kind": "entry", "entry": "review" } }],
+        "unchanged": [{ "to": { "kind": "entry", "entry": "publish" } }]
+      }
+    },
+    {
+      "id": "review",
+      "step": "review",
+      "max_visits": 2,
+      "on_exhausted": [
+        { "to": { "kind": "entry", "entry": "publish" }, "set": { "held": true } }
+      ],
+      "on": {
+        "clean": [
+          { "to": { "kind": "entry", "entry": "publish" }, "set": { "panel_ran": true } }
+        ],
+        "blockers": [
+          { "to": { "kind": "entry", "entry": "fix" }, "set": { "panel_ran": true } }
+        ]
+      }
+    },
+    { "id": "fix", "step": "fix", "next": { "kind": "entry", "entry": "review" } },
+    {
+      "id": "publish",
+      "step": "publish",
+      "on": { "published": [{ "to": { "kind": "entry", "entry": "ci" } }] }
+    },
+    {
+      "id": "ci",
+      "step": "ci",
+      "on": {
+        "green": [{ "to": { "kind": "entry", "entry": "merge" } }],
+        "red": [{ "to": { "kind": "entry", "entry": "ci-fix" } }]
+      }
+    },
+    {
+      "id": "ci-fix",
+      "step": "ci_fix",
+      "max_visits": 2,
+      "on_exhausted": [{ "to": { "kind": "end", "outcome": "manual" } }],
+      "on": {
+        "done": [
+          {
+            "when": [{ "fact": "panel_ran", "equals": true }],
+            "to": { "kind": "entry", "entry": "review" },
+            "reset": ["review"]
+          },
+          { "to": { "kind": "entry", "entry": "publish" } }
+        ]
+      }
+    },
+    {
+      "id": "merge",
+      "step": "merge",
+      "when": [{ "fact": "held", "equals": false }],
+      "next": { "kind": "end", "outcome": "manual" },
+      "on": { "merged": [{ "to": { "kind": "end", "outcome": "success" } }] }
+    }
+  ]
+}

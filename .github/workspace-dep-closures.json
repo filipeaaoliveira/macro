@@ -7751,6 +7751,24 @@
       "crates/single_flight",
       "crates/workspace-hack"
     ],
+    "factory_engine": [
+      "crates/bot_id",
+      "crates/bot_token",
+      "crates/cowlike",
+      "crates/factory_engine",
+      "crates/factory_records",
+      "crates/harness_id",
+      "crates/harness_token",
+      "crates/macro_auth",
+      "crates/macro_authorization",
+      "crates/macro_env",
+      "crates/macro_env_var",
+      "crates/macro_user_id",
+      "crates/model-error-response",
+      "crates/model_user",
+      "crates/remote_env_var",
+      "crates/workspace-hack"
+    ],
     "factory_records": [
       "crates/factory_records",
       "crates/workspace-hack"
