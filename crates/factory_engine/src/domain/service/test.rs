@@ -10,7 +10,9 @@ use serde_json::json;
 
 use super::{FactoryServiceImpl, StepServiceImpl};
 use crate::domain::flow::StepName;
-use crate::domain::models::{FactoryError, RunFinish, RunStart, StepReport, StepRequest};
+use crate::domain::models::{
+    FactoryError, RunFinish, RunStart, StepInput, StepReport, StepRequest,
+};
 use crate::domain::ports::{FactoryService, RunScheduler, StepExecutor, StepService};
 
 #[derive(Debug, thiserror::Error)]
@@ -118,16 +120,19 @@ impl RunScheduler for FakeScheduler {
     }
 }
 
-/// Serves `reply`, which ends `done` with a fixed output.
+/// Serves `reply`, which ends `done` with a fixed output, and keeps the
+/// entries of the earlier Steps each run was given.
 #[derive(Clone)]
 struct FakeExecutor {
     output: String,
+    given: Arc<Mutex<Vec<Vec<String>>>>,
 }
 
 impl Default for FakeExecutor {
     fn default() -> Self {
         Self {
             output: "Replied".to_string(),
+            given: Arc::default(),
         }
     }
 }
@@ -139,7 +144,13 @@ impl StepExecutor for FakeExecutor {
         step.as_str() == "reply"
     }
 
-    async fn run(&self, _step: &StepName, _request: &str) -> Result<StepReport, FakeError> {
+    async fn run(&self, _step: &StepName, input: StepInput<'_>) -> Result<StepReport, FakeError> {
+        let earlier = input
+            .earlier
+            .iter()
+            .map(|step| format!("{}#{}", step.entry, step.visit))
+            .collect();
+        self.given.lock().expect("given").push(earlier);
         Ok(StepReport {
             outcome: Outcome::try_from("done".to_string()).expect("valid"),
             output: self.output.clone(),
@@ -266,6 +277,29 @@ async fn running_a_step_records_its_start_outcome_and_output() {
 }
 
 #[tokio::test]
+async fn a_step_is_given_the_steps_that_ended_before_it() {
+    let repo = FakeRepo::default();
+    let run = repo
+        .insert_run(RunId::generate(), "Summarise")
+        .await
+        .expect("insert");
+    let executor = FakeExecutor::default();
+    let steps = StepServiceImpl::new(repo.clone(), executor.clone());
+
+    steps.run_step(reply_step(run.id)).await.expect("first");
+    steps
+        .run_step(StepRequest {
+            visit: 2,
+            ..reply_step(run.id)
+        })
+        .await
+        .expect("second");
+
+    let given = executor.given.lock().expect("given").clone();
+    assert_eq!(given, [Vec::<String>::new(), vec!["reply#1".to_string()]]);
+}
+
+#[tokio::test]
 async fn a_step_whose_output_is_too_large_is_left_unended() {
     let repo = FakeRepo::default();
     let run = repo
@@ -274,6 +308,7 @@ async fn a_step_whose_output_is_too_large_is_left_unended() {
         .expect("insert");
     let executor = FakeExecutor {
         output: "x".repeat(65_537),
+        ..FakeExecutor::default()
     };
     let steps = StepServiceImpl::new(repo.clone(), executor);
 

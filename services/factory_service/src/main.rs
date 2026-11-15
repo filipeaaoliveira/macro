@@ -9,9 +9,10 @@ use std::time::Duration;
 
 use axum::Router;
 use config::Config;
+use factory_engine::domain::built_in_steps::BuiltInSteps;
 use factory_engine::domain::service::{FactoryServiceImpl, StepServiceImpl};
 use factory_engine::inbound::http::{ApiDoc, FactoryRouterState, factory_router};
-use factory_engine::outbound::built_in_steps::BuiltInSteps;
+use factory_engine::outbound::local_agent::LocalAgent;
 use factory_engine::outbound::temporal_scheduler::TemporalRunScheduler;
 use factory_records::outbound::pg_run_repository::PgRunRepository;
 use macro_auth::middleware::decode_jwt::JwtValidationArgs;
@@ -66,11 +67,15 @@ async fn run() -> Result<(), rootcause::Report> {
     )
     .await?;
 
+    // No agent runtime is wired in yet, so the agent Steps run on the local
+    // stand-in, which does no work.
+    let steps = BuiltInSteps::new(LocalAgent);
+
     let runtime = Runtime::from_current_tokio(Default::default())?;
     let mut worker = factory_engine::inbound::temporal::worker(
         &runtime,
         client.clone(),
-        StepServiceImpl::new(repo.clone(), BuiltInSteps),
+        StepServiceImpl::new(repo.clone(), steps),
     )?;
     let stop_worker = worker.shutdown_handle();
 
@@ -96,7 +101,7 @@ async fn run() -> Result<(), rootcause::Report> {
     let service = Arc::new(FactoryServiceImpl::new(
         repo,
         TemporalRunScheduler::new(client),
-        BuiltInSteps,
+        steps,
     ));
     let api = factory_router(FactoryRouterState::new(service, authorization_state))
         .merge(health::router());

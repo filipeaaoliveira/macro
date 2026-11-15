@@ -134,6 +134,11 @@ impl Outcome {
         Self("done".to_string())
     }
 
+    /// The outcome of a Step that found nothing to change.
+    pub fn unchanged() -> Self {
+        Self("unchanged".to_string())
+    }
+
     /// The outcome of a Step whose work failed after its retries. A Flow may
     /// route it like any other outcome.
     pub fn failed() -> Self {

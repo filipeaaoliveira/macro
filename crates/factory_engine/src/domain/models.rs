@@ -31,6 +31,40 @@ pub struct StepRequest {
     pub request: String,
 }
 
+/// What a Step's work is given: the Run's request, and what the Run's Steps
+/// before it produced.
+#[derive(Debug, Clone, Copy)]
+pub struct StepInput<'a> {
+    /// The Run the Step belongs to.
+    pub run_id: RunId,
+    /// What the Run was asked to do.
+    pub request: &'a str,
+    /// The Run's Steps that ended before this one, in the order they started.
+    pub earlier: &'a [Step],
+}
+
+/// What an agent is asked to do for one Step.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentTask {
+    /// The Run the Step belongs to.
+    pub run_id: RunId,
+    /// The Step.
+    pub step: StepName,
+    /// The Step's instructions, the Run's request and its earlier Steps.
+    pub prompt: String,
+    /// The outcomes the agent may end the Step with.
+    pub outcomes: Vec<Outcome>,
+}
+
+/// What an agent handed back for a Step.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentAnswer {
+    /// One of the task's outcomes.
+    pub outcome: Outcome,
+    /// What it did, for a person and the Run's later Steps to read.
+    pub text: String,
+}
+
 /// How a Step ended.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StepReport {

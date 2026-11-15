@@ -9,7 +9,7 @@ use factory_records::domain::ports::RunRepository;
 
 use crate::domain::flow::Flow;
 use crate::domain::models::{
-    FactoryError, RunDetail, RunFinish, RunStart, StepError, StepReport, StepRequest,
+    FactoryError, RunDetail, RunFinish, RunStart, StepError, StepInput, StepReport, StepRequest,
 };
 use crate::domain::ports::{FactoryService, RunScheduler, StepExecutor, StepService};
 
@@ -141,9 +141,23 @@ where
             .await
             .map_err(internal)?;
 
+        // The Step reads what the Run's Steps before it produced.
+        let earlier: Vec<_> = self
+            .repo
+            .list_steps(request.run_id)
+            .await
+            .map_err(internal)?
+            .into_iter()
+            .filter(|step| step.end.is_some())
+            .collect();
+        let input = StepInput {
+            run_id: request.run_id,
+            request: &request.request,
+            earlier: &earlier,
+        };
         let report = self
             .executor
-            .run(&request.step, &request.request)
+            .run(&request.step, input)
             .await
             .map_err(internal)?;
         if report.output.len() > MAX_OUTPUT_BYTES {

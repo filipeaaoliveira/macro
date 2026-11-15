@@ -1,0 +1,14 @@
+{
+  "description": "Plans the change a request asks for, then writes it.",
+  "entries": [
+    { "id": "plan", "step": "plan" },
+    {
+      "id": "write",
+      "step": "write",
+      "on": {
+        "done": [{ "to": { "kind": "end", "outcome": "success" } }],
+        "unchanged": [{ "to": { "kind": "end", "outcome": "success" } }]
+      }
+    }
+  ]
+}

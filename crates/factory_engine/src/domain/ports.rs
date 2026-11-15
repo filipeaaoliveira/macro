@@ -4,7 +4,8 @@ use factory_records::domain::models::RunId;
 
 use crate::domain::flow::StepName;
 use crate::domain::models::{
-    FactoryError, RunDetail, RunFinish, RunStart, StepError, StepReport, StepRequest,
+    AgentAnswer, AgentTask, FactoryError, RunDetail, RunFinish, RunStart, StepError, StepInput,
+    StepReport, StepRequest,
 };
 
 /// Starts a Run's workflow.
@@ -25,13 +26,27 @@ pub trait StepExecutor: Send + Sync + 'static {
     /// Whether it does `step`'s work.
     fn serves(&self, step: &StepName) -> bool;
 
-    /// Do `step`'s work for `request`. A Temporal retry may call it again for
-    /// the same Step.
+    /// Do `step`'s work on `input`. A Temporal retry may call it again for the
+    /// same Step.
     fn run(
         &self,
         step: &StepName,
-        request: &str,
+        input: StepInput<'_>,
     ) -> impl Future<Output = Result<StepReport, Self::Err>> + Send;
+}
+
+/// An agent that does a Step's work: it reads the task's prompt, works, and
+/// ends with one of the task's outcomes.
+pub trait StepAgent: Send + Sync + 'static {
+    /// The error type returned when the agent cannot do the task.
+    type Err: std::error::Error + Send + Sync + 'static;
+
+    /// Do `task` and hand back how it ended. A Temporal retry may ask again
+    /// for the same Step.
+    fn answer(
+        &self,
+        task: AgentTask,
+    ) -> impl Future<Output = Result<AgentAnswer, Self::Err>> + Send;
 }
 
 /// Inbound service port: the Run API used by drivers (HTTP).

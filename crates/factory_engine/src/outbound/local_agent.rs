@@ -1,0 +1,31 @@
+//! A [`StepAgent`] for a machine where no agent can run.
+
+use crate::domain::models::{AgentAnswer, AgentTask};
+use crate::domain::ports::StepAgent;
+
+/// The task gave the agent no outcome to end with.
+#[derive(Debug, thiserror::Error)]
+#[error("the task names no outcome to end with")]
+pub struct NoOutcome;
+
+/// Does no work: ends every task with its first outcome and hands back the
+/// prompt it was given. A Flow's agent Steps then run end to end, showing
+/// what each was asked, on a machine with no agent runtime or model access.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct LocalAgent;
+
+impl StepAgent for LocalAgent {
+    type Err = NoOutcome;
+
+    #[tracing::instrument(err, skip_all, fields(run_id = %task.run_id, step = %task.step))]
+    async fn answer(&self, task: AgentTask) -> Result<AgentAnswer, NoOutcome> {
+        let outcome = task.outcomes.first().cloned().ok_or(NoOutcome)?;
+        Ok(AgentAnswer {
+            outcome,
+            text: format!(
+                "No agent ran this step: the local agent stands in for one. It was asked:\n\n{}",
+                task.prompt
+            ),
+        })
+    }
+}
