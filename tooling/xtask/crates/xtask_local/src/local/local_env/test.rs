@@ -216,6 +216,26 @@ fn boot_stubs_are_local_only() {
     );
 }
 
+/// authentication-service refuses to start unless every Stripe price id looks
+/// like `price_` and a safe suffix (`configured_price_id`), so the local stubs
+/// must too.
+#[test]
+fn stripe_price_id_stubs_are_valid_price_ids() {
+    let price_id = regex::Regex::new(r"^price_[A-Za-z0-9_]{1,64}$").unwrap();
+    let env = local_env();
+    let stubs: Vec<_> = env
+        .iter()
+        .filter(|(key, _)| key.starts_with("STRIPE_") && key.ends_with("PRICE_ID"))
+        .collect();
+    assert!(!stubs.is_empty(), "the local env stubs no Stripe price id");
+    for (key, value) in stubs {
+        assert!(
+            price_id.is_match(value),
+            "{key}={value:?} is not a Stripe price id"
+        );
+    }
+}
+
 #[test]
 fn internal_auth_values_are_authoritative_local_env() {
     let env = LocalEnv::for_instance(
