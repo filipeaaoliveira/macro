@@ -3,7 +3,6 @@ import { toast } from '@core/component/Toast/Toast';
 import { fireAndForget } from '@core/util/fireAndForget';
 import { Button } from '@ui';
 import { Show } from 'solid-js';
-import { GateCard } from '../../components/gate-card';
 import { CancelRun, RunSteps, RunSummary } from '../../components/run-details';
 import type { RunActionResult } from '../../context/runs-context';
 import type { Run } from '../../core/run';
@@ -57,28 +56,21 @@ export function RunContent(props: {
   );
 }
 
-/** The Gate the Run waits on, with its answers: the view pins it in reach. */
-export function RunGate(props: { controller: RunController }) {
-  return (
-    <Show when={props.controller.waiting()}>
-      {(waiting) => (
-        <GateCard
-          question={waiting().gate.question}
-          answers={waiting().gate.answers}
-          note={props.controller.note()}
-          onNoteChange={props.controller.setNote}
-          locked={props.controller.gateLocked()}
-          answering={props.controller.answering()}
-          onAnswer={(value) =>
-            fireAndForget(
-              props.controller.answer(value).then(notifyAnswer),
-              'factory-runs'
-            )
-          }
-        />
-      )}
-    </Show>
-  );
+/**
+ * Sends an answer and says what went wrong, if anything. Resolves whether
+ * the answer went through, or was already on its way.
+ */
+export async function answerGate(
+  controller: RunController,
+  value: string
+): Promise<boolean> {
+  const result = await controller.answer(value);
+  notifyAnswer(result);
+  return result === undefined || result.ok;
+}
+
+async function cancelRun(controller: RunController) {
+  notifyCancel(await controller.cancel());
 }
 
 /** Cancel run, until the Run ends. */
@@ -87,10 +79,7 @@ export function RunCancel(props: { controller: RunController }) {
     <CancelRun
       cancelling={props.controller.cancelling()}
       onCancel={() =>
-        fireAndForget(
-          props.controller.cancel().then(notifyCancel),
-          'factory-runs'
-        )
+        fireAndForget(cancelRun(props.controller), 'factory-runs')
       }
     />
   );

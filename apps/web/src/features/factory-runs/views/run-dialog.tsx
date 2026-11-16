@@ -3,13 +3,14 @@ import { LoadingSpinner } from '@core/component/LoadingSpinner';
 import XIcon from '@icon/system/regular/x.svg';
 import { ActionDialogShell, Button, Dialog } from '@ui';
 import { createSignal, Match, Show, Switch } from 'solid-js';
+import { GateCard } from '../components/gate-card';
 import { runTitle } from '../core/run';
 import { createFocusRescue } from '../primitives/focus-rescue';
 import type { RunController } from '../primitives/run-controller';
 import {
+  answerGate,
   RunCancel,
   RunContent,
-  RunGate,
   RunLoadFailed,
 } from './shared/run-parts';
 import { formatRunTime } from './shared/run-time';
@@ -30,6 +31,25 @@ function RunDialogHeader(props: { title: string }) {
         <XIcon aria-hidden="true" class="size-4" />
       </Dialog.CloseButton>
     </div>
+  );
+}
+
+/** The Gate the Run waits on, pinned under the Steps. */
+function RunGate(props: { controller: RunController }) {
+  return (
+    <Show when={props.controller.waiting()}>
+      {(waiting) => (
+        <GateCard
+          question={waiting().gate.question}
+          answers={waiting().gate.answers}
+          note={props.controller.note()}
+          onNoteChange={props.controller.setNote}
+          locked={props.controller.gateLocked()}
+          answering={props.controller.answering()}
+          onAnswer={(value) => answerGate(props.controller, value)}
+        />
+      )}
+    </Show>
   );
 }
 
@@ -97,6 +117,8 @@ export function RunDialog(props: {
                   />
                 </ActionDialogShell.Body>
                 <Show when={props.controller.waiting()}>
+                  {/* Pinned; its question and note scroll inside past a few
+                      lines, so the answers stay in reach. */}
                   <div class="shrink-0 border-t border-edge-divider px-5 pt-3">
                     <RunGate controller={props.controller} />
                   </div>

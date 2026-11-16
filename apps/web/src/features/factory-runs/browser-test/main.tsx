@@ -17,6 +17,16 @@ import { TaskRunsSection } from '../views/task-runs-section';
 document.documentElement.dataset.touchDevice = String(isTouchDevice());
 
 const MINUTE = 60_000;
+
+// `?long-question` asks a Gate question long enough to fill a phone.
+const LONG_QUESTION = new URLSearchParams(location.search).has('long-question');
+const QUESTION = LONG_QUESTION
+  ? Array.from(
+      { length: 14 },
+      (_, line) =>
+        `${line + 1}. Check that the plan covers this case before it goes on.`
+    ).join('\n')
+  : 'Approve this plan, or send it back with a note on what to change?';
 const at = (minutesAgo: number) =>
   new Date(Date.now() - minutesAgo * MINUTE).toISOString();
 
@@ -57,8 +67,7 @@ const INITIAL_RUNS: Run[] = [
         startedAt: at(8),
         end: { outcome: 'done', output: PLAN, endedAt: at(6) },
         gate: {
-          question:
-            'Approve this plan, or send it back with a note on what to change?',
+          question: QUESTION,
           answers: ['approve', 'revise'],
           openedAt: at(6),
         },

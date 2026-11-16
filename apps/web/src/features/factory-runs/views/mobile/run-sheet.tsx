@@ -1,24 +1,31 @@
+import { Card } from '@app/features/agent-cards/components/kit/card';
 import { t } from '@app/lib/i18n';
 import { MobileDrawer } from '@components/app/mobile/MobileDrawer';
 import { LoadingSpinner } from '@core/component/LoadingSpinner';
-import { createSignal, Match, onCleanup, Show, Switch } from 'solid-js';
+import { createSignal, Match, Show, Switch } from 'solid-js';
+import {
+  GateAnswers,
+  GateGroup,
+  GateNote,
+  GateQuestion,
+} from '../../components/gate-card';
 import { runTitle } from '../../core/run';
 import { createFocusRescue } from '../../primitives/focus-rescue';
 import type { RunController } from '../../primitives/run-controller';
 import {
+  answerGate,
   RunCancel,
   RunContent,
-  RunGate,
   RunLoadFailed,
 } from '../shared/run-parts';
 import { formatRunTime } from '../shared/run-time';
 
-/** Slide-out length; keep at least MobileDrawer's transition. */
-const CLOSE_MS = 250;
-
 /**
- * The Run on a phone: a sheet whose pinned chrome, between the handle and
- * the scrolling Steps, holds the Gate it waits on and Cancel run.
+ * The Run on a phone. Its pinned chrome, between the handle and the
+ * scrolling content, holds only actions: the note and answers for the Gate
+ * it waits on, and Cancel run. The Gate's question opens the scrolling
+ * content, above the plan it asks about, so a long question or a phone
+ * keyboard never pushes the answers off the sheet.
  */
 export function MobileRunSheet(props: {
   controller: RunController;
@@ -27,20 +34,12 @@ export function MobileRunSheet(props: {
   const [open, setOpen] = createSignal(true);
   let content: HTMLDivElement | undefined;
   let status: HTMLElement | undefined;
-  let closeTimer: ReturnType<typeof setTimeout> | undefined;
-  onCleanup(() => clearTimeout(closeTimer));
   const source = props.controller.source;
   createFocusRescue(
     props.controller,
     () => content,
     () => status
   );
-
-  const close = () => {
-    if (!open()) return;
-    setOpen(false);
-    closeTimer = setTimeout(props.onClose, CLOSE_MS);
-  };
 
   const title = () => {
     const run = source.data();
@@ -51,7 +50,11 @@ export function MobileRunSheet(props: {
     <MobileDrawer
       side="bottom"
       open={open()}
-      onOpenChange={(next) => !next && close()}
+      onOpenChange={(next) => !next && setOpen(false)}
+      // Unmount once the sheet has slid out.
+      onContentPresentChange={(present) => {
+        if (!present) queueMicrotask(props.onClose);
+      }}
     >
       <MobileDrawer.Portal>
         <MobileDrawer.Overlay />
@@ -66,18 +69,34 @@ export function MobileRunSheet(props: {
           </MobileDrawer.Title>
           <Show when={source.data()}>
             {(run) => (
-              <>
-                <Show when={props.controller.waiting()}>
-                  <div class="shrink-0 px-4 pb-3">
-                    <RunGate controller={props.controller} />
-                  </div>
-                </Show>
-                <Show when={!run().end}>
-                  <div class="flex shrink-0 justify-end px-4 pb-3">
+              <Show when={!run().end}>
+                <div class="flex shrink-0 flex-col gap-3 px-5 pb-3">
+                  <Show when={props.controller.waiting()}>
+                    {(waiting) => (
+                      <GateGroup class="flex flex-col gap-3">
+                        <GateNote
+                          note={props.controller.note()}
+                          onNoteChange={props.controller.setNote}
+                          locked={props.controller.gateLocked()}
+                        />
+                        <div class="flex flex-wrap items-center justify-end gap-2">
+                          <GateAnswers
+                            answers={waiting().gate.answers}
+                            locked={props.controller.gateLocked()}
+                            answering={props.controller.answering()}
+                            onAnswer={(value) =>
+                              answerGate(props.controller, value)
+                            }
+                          />
+                        </div>
+                      </GateGroup>
+                    )}
+                  </Show>
+                  <div class="flex justify-end">
                     <RunCancel controller={props.controller} />
                   </div>
-                </Show>
-              </>
+                </div>
+              </Show>
             )}
           </Show>
           <MobileDrawer.ScrollBody>
@@ -93,14 +112,23 @@ export function MobileRunSheet(props: {
                 </Match>
                 <Match when={source.data()}>
                   {(run) => (
-                    <RunContent
-                      controller={props.controller}
-                      run={run()}
-                      time={formatRunTime}
-                      statusRef={(element) => {
-                        status = element;
-                      }}
-                    />
+                    <>
+                      <Show when={props.controller.waiting()}>
+                        {(waiting) => (
+                          <Card width="wide" data-agent-card="gate-question">
+                            <GateQuestion question={waiting().gate.question} />
+                          </Card>
+                        )}
+                      </Show>
+                      <RunContent
+                        controller={props.controller}
+                        run={run()}
+                        time={formatRunTime}
+                        statusRef={(element) => {
+                          status = element;
+                        }}
+                      />
+                    </>
                   )}
                 </Match>
               </Switch>

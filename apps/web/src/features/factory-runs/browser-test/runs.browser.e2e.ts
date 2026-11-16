@@ -103,3 +103,39 @@ test('answers a Gate, starts a Run and cancels one', async ({
 
   expect(errors).toEqual([]);
 });
+
+test('keeps a long Gate question and note from pushing the answers away', async ({
+  page,
+}, testInfo) => {
+  await page.goto('/?long-question');
+  const show = page.getByRole('button', { name: 'Show details' });
+  if (await show.isVisible()) await show.click();
+  await page.locator('[data-agent-activity-item]').first().click();
+  const dialog = page.getByRole('dialog', {
+    name: 'Add a due date column to the task list',
+  });
+  await dialog
+    .getByPlaceholder('Add a note for the next steps (optional)')
+    .fill(
+      Array.from({ length: 12 }, (_, line) => `Note line ${line + 1}`).join(
+        '\n'
+      )
+    );
+
+  await expect(
+    dialog.getByRole('button', { name: 'Approve' })
+  ).toBeInViewport();
+  await expect(
+    dialog.getByRole('button', { name: 'Cancel run' })
+  ).toBeInViewport();
+  const question = dialog.getByText('14. Check that the plan covers this case');
+  await question.scrollIntoViewIfNeeded();
+  await expect(question).toBeInViewport();
+  const steps = dialog.getByText('Plan · visit 2');
+  await steps.scrollIntoViewIfNeeded();
+  await expect(steps).toBeInViewport();
+  await expect(
+    dialog.getByRole('button', { name: 'Approve' })
+  ).toBeInViewport();
+  await shoot(page, 'run-long-question', testInfo.project.name);
+});
