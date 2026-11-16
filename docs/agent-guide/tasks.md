@@ -1380,7 +1380,8 @@ per answer, the Flow's first answer primary) is pinned below them, the
 question and note scrolling inside past a few lines. On touch the pinned
 chrome between the handle and the Steps holds only the note and the
 answers, and the question opens the scrolling content. **Cancel run** is
-pinned on both and confirms in place. Phone sheets have no close button. When an answer or a
+pinned on both and confirms in place. Phone sheets have no close button.
+When an answer or a
 cancel goes through and takes the focused control away, focus moves to the
 Run's status line; a refused answer gives focus back to its button.
 A second answer to a Gate, or a cancel of a Run that already ended, shows a
