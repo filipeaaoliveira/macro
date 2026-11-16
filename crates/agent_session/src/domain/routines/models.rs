@@ -207,3 +207,31 @@ pub enum RoutineSessionError {
     #[error("routine session operation failed")]
     OperationFailed,
 }
+
+impl RoutineSessionError {
+    /// Whether the same command may succeed if sent again later, with
+    /// nothing else changed: a runtime or port that was unavailable, or a
+    /// billing check that could not run. A refusal, a mismatch or a conflict
+    /// answers the same way again, and a prompt of unknown delivery must
+    /// never be sent again.
+    pub fn is_transient(&self) -> bool {
+        match self {
+            #[cfg(feature = "admission")]
+            Self::Admission(error) => error.is_retryable(),
+            Self::RuntimeUnavailable | Self::OperationFailed => true,
+            Self::InvalidCommand
+            | Self::PersonaUnavailable
+            | Self::Forbidden
+            | Self::AppNotConnected
+            | Self::AppsUnsupported
+            | Self::TeamAgentComputer
+            | Self::SessionMismatch
+            | Self::ModelMismatch
+            | Self::Conflict
+            | Self::PromptDeliveryUnknown => false,
+        }
+    }
+}
+
+#[cfg(test)]
+mod test;
