@@ -95,7 +95,8 @@ where
 }
 
 /// The user an internal caller acts for. Every Run call but a hand back
-/// needs one.
+/// needs one. Its id is lowercase, whatever case the caller named it in: a
+/// `MacroUserIdStr` lowercases what it parses, as `"User".id` is stored.
 fn acting_user(caller: InternalAuthorization) -> Result<MacroUserIdStr<'static>, FactoryError> {
     caller
         .acting_user

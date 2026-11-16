@@ -165,6 +165,30 @@ async fn an_internal_call_acts_for_its_acting_user_and_never_without_one() {
     );
 }
 
+/// The acting user's id is lowercased once, where the call comes in, so a
+/// Run created for `macro|Julia@Example.com` is owned by the account the
+/// lowercased `"User".id` names, and owner checks compare like with like.
+#[tokio::test]
+async fn a_run_is_created_for_the_lowercased_acting_user() {
+    let (router, service) = router(|| FactoryError::EmptyRequest);
+
+    let response = router
+        .oneshot(call(
+            "POST",
+            "/runs",
+            Some("macro|Julia@Example.com"),
+            serde_json::json!({ "flow": {}, "request": "Fix the login bug" }),
+        ))
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        *service.actors.lock().expect("actors"),
+        ["macro|julia@example.com"]
+    );
+}
+
 /// The caller of a Run that Temporal can't reach is told to try again
 /// later, in the shape every Macro client reads an upstream failure in.
 #[tokio::test]
