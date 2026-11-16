@@ -97,13 +97,10 @@ where
 /// The user an internal caller acts for. Every Run call but a hand back
 /// needs one.
 fn acting_user(caller: InternalAuthorization) -> Result<MacroUserIdStr<'static>, FactoryError> {
-    required(caller.acting_user.map(|user| user.macro_user_id))
-}
-
-fn required(
-    acting_user: Option<MacroUserIdStr<'static>>,
-) -> Result<MacroUserIdStr<'static>, FactoryError> {
-    acting_user.ok_or(FactoryError::NoActingUser)
+    caller
+        .acting_user
+        .map(|user| user.macro_user_id)
+        .ok_or(FactoryError::NoActingUser)
 }
 
 /// Request body for creating a Run.

@@ -8390,6 +8390,7 @@ dependencies = [
  "temporalio-workflow",
  "thiserror 2.0.18",
  "tokio",
+ "tower 0.5.3",
  "tracing",
  "trigger_context",
  "upstream_error",
