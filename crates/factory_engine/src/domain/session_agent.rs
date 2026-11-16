@@ -8,7 +8,7 @@ mod test;
 use std::time::Duration;
 
 use agent_runtime_protocol::domain::action::AgentActionId;
-use agent_session::domain::model::{AgentSessionId, SessionSource};
+use agent_session::domain::model::{AgentSessionId, SessionSource, SessionVisibility};
 use agent_session::domain::routines::{
     PrepareRoutineSession, PromptRoutineSession, RoutineActionStatus, RoutineFailureReason,
     RoutinePendingReason, RoutineSessionAction, RoutineSessionError, RoutineSessions,
@@ -18,6 +18,7 @@ use bot_id::BotId;
 use factory_records::domain::models::{Outcome, StepKey, StepSession};
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
+use trigger_context::TriggerOrigin;
 use uuid::Uuid;
 
 use crate::domain::models::{AgentAnswer, AgentTask};
@@ -156,9 +157,14 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
                     mcp_servers: Vec::new(),
                 },
                 session_id: action.session_id,
+                // The owner asked for the Run, and reads its Steps in it: a
+                // background session of theirs, hidden, notifying nobody,
+                // and deleted once the Step is done with it.
                 source: SessionSource::User,
-                visibility: Default::default(),
-                origin: Default::default(),
+                visibility: SessionVisibility::Hidden,
+                origin: TriggerOrigin::Requested {
+                    by: task.owner.clone(),
+                },
                 billing: Default::default(),
                 instructions: None,
             })
@@ -237,6 +243,15 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
         )
     }
 
+    /// Delete the Step's session, which nothing reads once the Step is done
+    /// with it. A delete that fails leaves a hidden session, so it is logged,
+    /// not raised.
+    async fn delete(&self, action: &RoutineSessionAction) {
+        if let Err(error) = self.sessions.delete(action.clone()).await {
+            tracing::warn!(?error, "a factory step's agent session was not deleted");
+        }
+    }
+
     /// Wait for the first prompt's turn to end.
     async fn finished(&self, action: &RoutineSessionAction) -> Result<(), SessionAgentError> {
         let started = tokio::time::Instant::now();
@@ -299,6 +314,7 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
             .await
             .map_err(Self::records)?
             .ok_or(SessionAgentError::NothingHandedBack)?;
+        self.delete(&action).await;
         Ok(AgentAnswer {
             outcome: handed.outcome,
             text: handed.output,
@@ -331,9 +347,7 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
             tokio::time::sleep(wait).await;
             wait = (wait * 2).min(LONGEST_WAIT);
             match self.sessions.status(action.clone()).await {
-                Ok(RoutineActionStatus::Succeeded | RoutineActionStatus::Failed(_)) => {
-                    return Ok(());
-                }
+                Ok(RoutineActionStatus::Succeeded | RoutineActionStatus::Failed(_)) => break,
                 Ok(RoutineActionStatus::Pending(RoutinePendingReason::AwaitingPrompt)) | Err(_) => {
                 }
                 Ok(RoutineActionStatus::Pending(_)) => {
@@ -341,6 +355,7 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
                 }
             }
         }
+        self.delete(&action).await;
         Ok(())
     }
 }

@@ -32,6 +32,7 @@ temporalio-sdk = { workspace = true }
 temporalio-workflow = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["macros", "time"] }
+trigger_context = { path = "../trigger_context" }
 tracing = { workspace = true }
 upstream_error = { path = "../upstream_error", default-features = false, features = ["axum"] }
 utoipa = { workspace = true }

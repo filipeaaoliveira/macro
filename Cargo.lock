@@ -8390,6 +8390,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "trigger_context",
  "upstream_error",
  "utoipa",
  "uuid",

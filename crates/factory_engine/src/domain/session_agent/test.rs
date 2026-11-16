@@ -6,6 +6,7 @@ use agent_session::domain::routines::{
     RoutineFailureReason, RoutinePendingReason, RoutinePromptAccepted, RoutineSessionAction,
     RoutineSessionError, RoutineSessions, ValidateRoutineSession, ValidatedRoutineSession,
 };
+use agent_session::domain::model::SessionVisibility;
 use bot_id::BotId;
 use factory_records::domain::models::{
     EntryId, HandBack, Outcome, RunId, RunInsert, StepKey, StepSession,
@@ -50,6 +51,7 @@ struct FakeSessions {
     prepared_calls: Arc<Mutex<Vec<PrepareRoutineSession>>>,
     prompt_calls: Arc<Mutex<Vec<PromptRoutineSession>>>,
     cancelled: Arc<Mutex<Vec<RoutineSessionAction>>>,
+    deleted: Arc<Mutex<Vec<RoutineSessionAction>>>,
     /// Stops the session ignores before its turn ends cancelled, as when a
     /// prompt on its way lands after the first stop.
     ignored_stops: usize,
@@ -68,6 +70,7 @@ impl FakeSessions {
             prepared_calls: Arc::default(),
             prompt_calls: Arc::default(),
             cancelled: Arc::default(),
+            deleted: Arc::default(),
             ignored_stops: 0,
         }
     }
@@ -182,6 +185,11 @@ impl RoutineSessions for FakeSessions {
         self.cancelled.lock().expect("cancelled").push(command);
         Ok(())
     }
+
+    async fn delete(&self, command: RoutineSessionAction) -> Result<(), RoutineSessionError> {
+        self.deleted.lock().expect("deleted").push(command);
+        Ok(())
+    }
 }
 
 fn julia() -> MacroUserIdStr<'static> {
@@ -240,6 +248,11 @@ async fn a_step_runs_in_a_session_of_its_owner_and_returns_what_the_agent_handed
     let prepared = sessions.prepared_calls.lock().expect("prepared");
     assert_eq!(prepared.len(), 1);
     assert_eq!(prepared[0].selection.owner, julia());
+    assert_eq!(prepared[0].visibility, SessionVisibility::Hidden);
+    assert_eq!(
+        sessions.deleted.lock().expect("deleted")[0].session_id,
+        prepared[0].session_id
+    );
     let prompts = sessions.prompt_calls.lock().expect("prompts");
     assert_eq!(prompts.len(), 1);
     assert!(prompts[0].prompt.starts_with("Plan the change"));
@@ -392,6 +405,7 @@ async fn stopping_a_step_stops_its_session_until_the_turn_ends() {
         .expect("claimed");
     let cancelled = sessions.cancelled.lock().expect("cancelled").clone();
     assert_eq!(cancelled.len(), 2);
+    assert_eq!(sessions.deleted.lock().expect("deleted").len(), 1);
     assert!(
         cancelled
             .iter()
