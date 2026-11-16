@@ -152,7 +152,7 @@ struct Parts {
     port: u16,
     repo: PgRunRepository,
     users: AuthUserDirectory,
-    github: GithubPullRequests,
+    github: GithubPullRequests<AuthServiceClient>,
     tasks: DocumentTaskDirectory<EntityAccessServiceImpl<PgAccessRepository>>,
     client: Client,
     authorization_state: MacroAuthorizationState<Authorization>,
@@ -166,7 +166,7 @@ type Authorization = MacroAuthorizationServiceImpl<MacroAuthJwtValidator>;
 /// signal or until either stops.
 async fn serve<A: StepAgent + Clone>(
     parts: Parts,
-    steps: BuiltInSteps<A, GithubPullRequests, PgRunRepository>,
+    steps: BuiltInSteps<A, GithubPullRequests<AuthServiceClient>, PgRunRepository>,
 ) -> Result<(), rootcause::Report> {
     let runtime = Runtime::from_current_tokio(Default::default())?;
     let worker = factory_engine::inbound::temporal::worker(

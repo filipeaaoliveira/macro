@@ -17,7 +17,7 @@ use factory_records::domain::ports::RunRepository;
 use github::domain::models::MacroTaskId;
 
 use crate::domain::models::{
-    Check, CodeRepository, Merging, OpenPullRequest, Opening, PullRequest, PullRequestState,
+    CodeRepository, HeadChecks, Merging, OpenPullRequest, Opening, PullRequest, PullRequestState,
     StepInput, StepReport, run_branch,
 };
 use crate::domain::ports::{PullRequests, Retryable};
@@ -32,7 +32,10 @@ const CI_POLL: Duration = Duration::from_secs(20);
 /// The longest pull request title the Steps write.
 const MAX_TITLE_CHARS: usize = 72;
 
-/// The conclusions of a completed check that let a pull request merge.
+/// The most characters GitHub keeps in a pull request's description.
+const MAX_BODY_CHARS: usize = 65_536;
+
+/// The conclusions of a completed check suite that let a pull request merge.
 const PASSING: [&str; 3] = ["success", "neutral", "skipped"];
 
 /// Why a pull request Step could not be done.
@@ -97,51 +100,75 @@ impl Retryable for PullRequestStepError {
 /// What a pull request's checks on its head say.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Verdict {
-    /// Some check has not finished, or none was reported yet.
+    /// A check has not finished, or none was reported yet.
     Pending,
-    /// Every check passed, or the pull request merged.
-    Green,
-    /// These checks failed.
-    Red(Vec<Check>),
+    /// Every check suite and commit status passed: the suites' ids and the
+    /// statuses' contexts that did, so two reads can tell whether a check
+    /// appeared between them.
+    Green(Vec<String>),
+    /// These checks failed, one line each for a person and the CI fix.
+    Red(Vec<String>),
     /// The pull request was closed without merging.
     Closed,
 }
 
-/// What the checks of `pull_request` say. Checks that could not be read, or
-/// a head with none yet, wait: CI may not have reported on a fresh push.
-fn verdict(pull_request: &PullRequest) -> Verdict {
+/// What the checks of `pull_request` say. Only suites that hold a run
+/// count: an app that checks nothing on the commit leaves an empty suite
+/// queued for good. Nothing reported yet waits, as CI may not have started
+/// on a fresh push; a merged pull request is green.
+fn verdict(pull_request: &PullRequest, checks: &HeadChecks) -> Verdict {
     match pull_request.state {
-        PullRequestState::Merged => return Verdict::Green,
+        PullRequestState::Merged => return Verdict::Green(Vec::new()),
         PullRequestState::Closed => return Verdict::Closed,
         PullRequestState::Open => {}
     }
-    let Some(checks) = pull_request
-        .checks
-        .as_ref()
-        .filter(|checks| !checks.is_empty())
-    else {
-        return Verdict::Pending;
-    };
-
-    let failed: Vec<Check> = checks
+    let suites: Vec<_> = checks
+        .suites
         .iter()
-        .filter(|check| {
-            check.status == "completed"
-                && !check
-                    .conclusion
-                    .as_deref()
-                    .is_some_and(|conclusion| PASSING.contains(&conclusion))
-        })
-        .cloned()
+        .filter(|suite| suite.check_runs > 0)
         .collect();
+
+    // A failure anywhere is red at once; the failed runs name what failed
+    // in a suite.
+    let mut failed = Vec::new();
+    for suite in &suites {
+        let passed = suite
+            .conclusion
+            .as_deref()
+            .is_some_and(|conclusion| PASSING.contains(&conclusion));
+        if suite.status == "completed" && !passed {
+            let conclusion = suite.conclusion.as_deref().unwrap_or("no conclusion");
+            failed.push(format!("- {} checks ({conclusion})", suite.app));
+        }
+    }
+    for run in &checks.failed_runs {
+        let conclusion = run.conclusion.as_deref().unwrap_or("no conclusion");
+        let url = run.url.as_deref().unwrap_or("no page");
+        failed.push(format!("  - {} ({conclusion}): {url}", run.name));
+    }
+    for status in &checks.statuses {
+        if matches!(status.state.as_str(), "failure" | "error") {
+            let url = status.url.as_deref().unwrap_or("no page");
+            failed.push(format!("- {} ({}): {url}", status.context, status.state));
+        }
+    }
     if !failed.is_empty() {
         return Verdict::Red(failed);
     }
-    if checks.iter().all(|check| check.status == "completed") {
-        Verdict::Green
-    } else {
-        Verdict::Pending
+
+    let reported = !suites.is_empty() || !checks.statuses.is_empty();
+    let finished = suites.iter().all(|suite| suite.status == "completed")
+        && checks
+            .statuses
+            .iter()
+            .all(|status| status.state == "success");
+    if !reported || !finished {
+        return Verdict::Pending;
     }
+    let mut passed: Vec<String> = suites.iter().map(|suite| suite.id.to_string()).collect();
+    passed.extend(checks.statuses.iter().map(|status| status.context.clone()));
+    passed.sort();
+    Verdict::Green(passed)
 }
 
 fn outcome(name: &str) -> Outcome {
@@ -180,18 +207,31 @@ fn title(request: &str) -> String {
 
 /// The description of the Run's pull request: the request, then the task it
 /// works on, written so GitHub's webhook links the pull request to the task.
+/// A request too long for GitHub's [`MAX_BODY_CHARS`] is cut, never the
+/// lines after it.
 fn body(input: &StepInput<'_>) -> String {
-    let mut body = format!(
-        "{}\n\nOpened by a Macro factory run ({}).",
-        input.request, input.key.run_id
-    );
+    const CUT: &str = "\n\n(The rest of the request is left out.)";
+
+    let mut footer = format!("\n\nOpened by a Macro factory run ({}).", input.key.run_id);
     if let Some(task_id) = input.task_id {
-        body.push_str(&format!(
+        footer.push_str(&format!(
             "\n\nTask: {}",
             MacroTaskId::from_uuid(&task_id).to_task_id_string()
         ));
     }
-    body
+
+    let room = MAX_BODY_CHARS - footer.chars().count();
+    let request = if input.request.chars().count() <= room {
+        input.request.to_string()
+    } else {
+        let kept: String = input
+            .request
+            .chars()
+            .take(room - CUT.chars().count())
+            .collect();
+        format!("{kept}{CUT}")
+    };
+    format!("{request}{footer}")
 }
 
 /// The pull request Steps, on GitHub through `github`, keeping the commit a
@@ -278,37 +318,56 @@ impl<G: PullRequests, R: RunRepository> PullRequestSteps<G, R> {
         })
     }
 
+    /// The pull request from the Run's branch with the checks on its head,
+    /// read with one token.
+    async fn find_with_checks(
+        &self,
+        input: &StepInput<'_>,
+        repository: &CodeRepository,
+    ) -> Result<(PullRequest, HeadChecks), PullRequestStepError> {
+        self.github
+            .find_with_checks(input.owner, repository, &run_branch(input.key.run_id))
+            .await
+            .map_err(PullRequestStepError::github)?
+            .ok_or(PullRequestStepError::NoPullRequest)
+    }
+
     /// Wait for the checks on the head of the Run's pull request: `green`
-    /// once they all passed, `red` with the failing ones as soon as one
-    /// fails, `timeout` after [`CI_WAIT`], or `closed` when a person closed
-    /// the pull request. A pull request that merged meanwhile is `green`.
+    /// once every check suite and commit status passed on two reads in a
+    /// row that saw the same checks, so a check that appears late, such as
+    /// a job that waits on another, is waited for; `red` with the failing
+    /// ones as soon as one fails; `timeout` after [`CI_WAIT`]; or `closed`
+    /// when a person closed the pull request. A pull request that merged
+    /// meanwhile is `green`.
     pub async fn ci(&self, input: StepInput<'_>) -> Result<StepReport, PullRequestStepError> {
         let (repository, _) = Self::repository(&input)?;
         let deadline = tokio::time::Instant::now() + CI_WAIT;
+        // The head and the checks the last read saw all pass, if it did.
+        let mut last_green: Option<(String, Vec<String>)> = None;
         loop {
-            let pull_request = self
-                .find(&input, &repository)
-                .await?
-                .ok_or(PullRequestStepError::NoPullRequest)?;
-            let head = pull_request.head_sha.as_deref().unwrap_or("its head");
-            match verdict(&pull_request) {
-                Verdict::Green => {
-                    return Ok(report(
-                        "green",
-                        format!("{}\n\nEvery check passed on {head}.", named(&pull_request)),
-                    ));
+            let (pull_request, checks) = self.find_with_checks(&input, &repository).await?;
+            let head = pull_request.head_sha.clone();
+            match verdict(&pull_request, &checks) {
+                Verdict::Green(passed) => {
+                    let seen = (head.clone(), passed);
+                    let merged = pull_request.state == PullRequestState::Merged;
+                    if merged || last_green.as_ref() == Some(&seen) {
+                        return Ok(report(
+                            "green",
+                            format!("{}\n\nEvery check passed on {head}.", named(&pull_request)),
+                        ));
+                    }
+                    last_green = Some(seen);
                 }
                 Verdict::Red(failed) => {
-                    let mut output = format!(
-                        "{}\n\nThese checks failed on {head}:\n",
-                        named(&pull_request)
-                    );
-                    for check in failed {
-                        let conclusion = check.conclusion.as_deref().unwrap_or("no conclusion");
-                        let url = check.url.as_deref().unwrap_or("no page");
-                        output.push_str(&format!("\n- {} ({conclusion}): {url}", check.name));
-                    }
-                    return Ok(report("red", output));
+                    return Ok(report(
+                        "red",
+                        format!(
+                            "{}\n\nThese checks failed on {head}:\n\n{}",
+                            named(&pull_request),
+                            failed.join("\n")
+                        ),
+                    ));
                 }
                 Verdict::Closed => {
                     return Ok(report(
@@ -316,7 +375,7 @@ impl<G: PullRequests, R: RunRepository> PullRequestSteps<G, R> {
                         format!("{}\n\nIt was closed without merging.", named(&pull_request)),
                     ));
                 }
-                Verdict::Pending => {}
+                Verdict::Pending => last_green = None,
             }
 
             if tokio::time::Instant::now() + CI_POLL > deadline {
@@ -343,10 +402,7 @@ impl<G: PullRequests, R: RunRepository> PullRequestSteps<G, R> {
         input: StepInput<'_>,
     ) -> Result<StepReport, PullRequestStepError> {
         let (repository, _) = Self::repository(&input)?;
-        let pull_request = self
-            .find(&input, &repository)
-            .await?
-            .ok_or(PullRequestStepError::NoPullRequest)?;
+        let (pull_request, checks) = self.find_with_checks(&input, &repository).await?;
 
         match pull_request.state {
             PullRequestState::Merged => {
@@ -360,18 +416,16 @@ impl<G: PullRequests, R: RunRepository> PullRequestSteps<G, R> {
             }
             PullRequestState::Open => {}
         }
-        let head = match (&pull_request.head_sha, verdict(&pull_request)) {
-            (Some(head), Verdict::Green) => head.clone(),
-            _ => {
-                return Ok(report(
-                    "changed",
-                    format!(
-                        "{}\n\nIts head changed since its checks passed.",
-                        named(&pull_request)
-                    ),
-                ));
-            }
-        };
+        if !matches!(verdict(&pull_request, &checks), Verdict::Green(_)) {
+            return Ok(report(
+                "changed",
+                format!(
+                    "{}\n\nIts head changed since its checks passed.",
+                    named(&pull_request)
+                ),
+            ));
+        }
+        let head = pull_request.head_sha.clone();
 
         self.repo
             .set_merge_head(input.key.run_id, &head)

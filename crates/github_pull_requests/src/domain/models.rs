@@ -26,15 +26,17 @@ pub use index::{PullRequestIndexOutcome, PullRequestIndexRecord, PullRequestInde
 pub use key::GithubKey;
 pub use pull_request::{
     EnrichGithubPullRequestsProxyRequest, EnrichGithubPullRequestsResponse,
-    EnrichedGithubPullRequest, GITHUB_PULL_REQUEST_FOREIGN_ENTITY_SOURCE, GithubMergeMethod,
-    GithubMergeOutcome, GithubMergeRejection, GithubOpenPullRequest, GithubOpenPullRequestOutcome,
-    GithubPullRequestCheckRun, GithubPullRequestComment, GithubPullRequestDetails,
+    EnrichedGithubPullRequest, GITHUB_PULL_REQUEST_FOREIGN_ENTITY_SOURCE, GithubCheckSuite,
+    GithubCommitStatus, GithubMergeMethod, GithubMergeOutcome, GithubMergeRejection,
+    GithubOpenPullRequest, GithubOpenPullRequestOutcome, GithubPullRequestCheckRun,
+    GithubPullRequestComment, GithubPullRequestDetails, GithubPullRequestHead,
     GithubPullRequestLabel, GithubPullRequestMerge, GithubPullRequestMergeability,
     GithubPullRequestMergeabilityEntry, GithubPullRequestMergeabilityRequest,
     GithubPullRequestMergeabilityResponse, GithubPullRequestNumber, GithubPullRequestRef,
     GithubPullRequestReview, GithubPullRequestReviewDecision, GithubPullRequestReviewState,
-    GithubPullRequestStatus, GithubPullRequestUser, GithubRepositoryMergeSettings,
-    MergeGithubPullRequestRequest, MergeGithubPullRequestResponse, latest_reviews,
+    GithubPullRequestStatus, GithubPullRequestUser, GithubRepositoryAccess,
+    GithubRepositoryMergeSettings, MergeGithubPullRequestRequest, MergeGithubPullRequestResponse,
+    latest_reviews,
 };
 pub use update::{
     GithubDraftOutcome, GithubPullRequestState, GithubPullRequestUpdateRejection,

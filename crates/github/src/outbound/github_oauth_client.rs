@@ -13,15 +13,15 @@ use super::pull_request_metadata::fetch_pull_request_metadata;
 use crate::domain::{
     models::{
         GithubDraftOutcome, GithubError, GithubExchangeTokenResponse, GithubMergeMethod,
-        GithubMergeOutcome, GithubMergeRejection, GithubOpenPullRequest,
-        GithubOpenPullRequestOutcome, GithubPullRequestDetails, GithubPullRequestMerge,
+        GithubMergeOutcome, GithubMergeRejection, GithubPullRequestDetails, GithubPullRequestMerge,
         GithubPullRequestMergeability, GithubPullRequestMergeabilityEntry, GithubPullRequestNumber,
-        GithubPullRequestState, GithubPullRequestUpdateRejection, GithubRepository,
-        GithubRepositoryMergeSettings, GithubStateOutcome, GithubUserInfo,
+        GithubPullRequestState, GithubPullRequestUpdateRejection, GithubRepositoryMergeSettings,
+        GithubStateOutcome, GithubUserInfo,
     },
     ports::GithubOauth,
 };
 
+mod pull_requests;
 #[cfg(test)]
 mod test;
 
@@ -167,24 +167,6 @@ struct RepositorySettingsResponse {
 
 fn default_true() -> bool {
     true
-}
-
-/// A repository as GitHub returns it.
-#[derive(serde::Deserialize)]
-struct RepositoryResponse {
-    id: u64,
-    name: String,
-    owner: RepositoryOwnerResponse,
-    html_url: String,
-    /// Absent on a repository with no commits.
-    #[serde(default)]
-    default_branch: Option<String>,
-    private: bool,
-}
-
-#[derive(serde::Deserialize)]
-struct RepositoryOwnerResponse {
-    login: String,
 }
 
 /// A GraphQL answer: data, errors, or both when part of the query failed.
@@ -642,172 +624,6 @@ impl GithubOauth for GithubOauthImpl {
             .unwrap_or_else(|_| "GitHub declined to merge the pull request.".to_string());
 
         Ok(GithubMergeOutcome::Rejected { rejection, message })
-    }
-
-    #[tracing::instrument(skip(self, access_token), err)]
-    async fn get_repository(
-        &self,
-        access_token: &str,
-        owner: &str,
-        repo: &str,
-    ) -> Result<Option<GithubRepository>, Self::Err> {
-        let response = self
-            .client
-            .get(format!("{}/repos/{owner}/{repo}", self.api_base_url()))
-            .header("Authorization", format!("Bearer {access_token}"))
-            .header("Accept", "application/vnd.github+json")
-            .header("User-Agent", USER_AGENT)
-            .header("X-GitHub-Api-Version", "2022-11-28")
-            .timeout(REQUEST_TIMEOUT)
-            .send()
-            .await
-            .map_err(transport_error)?;
-
-        // GitHub answers a private repository the user cannot see as missing.
-        if response.status() == StatusCode::NOT_FOUND {
-            return Ok(None);
-        }
-        if !response.status().is_success() {
-            return Err(unexpected_response(response, "failed to read repository").await);
-        }
-
-        let repository: RepositoryResponse = response.json().await.map_err(transport_error)?;
-        Ok(Some(GithubRepository {
-            owner: repository.owner.login,
-            name: repository.name,
-            html_url: repository.html_url,
-            default_branch: repository.default_branch,
-            private: repository.private,
-            id: repository.id,
-        }))
-    }
-
-    #[tracing::instrument(skip(self, access_token), err)]
-    async fn find_pull_request_by_head(
-        &self,
-        access_token: &str,
-        owner: &str,
-        repo: &str,
-        head: &str,
-    ) -> Result<Option<u64>, Self::Err> {
-        #[derive(serde::Deserialize)]
-        struct PullRequestNumber {
-            number: u64,
-        }
-
-        // GitHub names a head as `owner:branch`; newest first, so a branch
-        // whose pull request was closed and opened again reads the open one.
-        let response = self
-            .client
-            .get(format!(
-                "{}/repos/{owner}/{repo}/pulls",
-                self.api_base_url()
-            ))
-            .query(&[
-                ("head", format!("{owner}:{head}").as_str()),
-                ("state", "all"),
-                ("sort", "created"),
-                ("direction", "desc"),
-                ("per_page", "1"),
-            ])
-            .header("Authorization", format!("Bearer {access_token}"))
-            .header("Accept", "application/vnd.github+json")
-            .header("User-Agent", USER_AGENT)
-            .header("X-GitHub-Api-Version", "2022-11-28")
-            .timeout(REQUEST_TIMEOUT)
-            .send()
-            .await
-            .map_err(transport_error)?;
-
-        if !response.status().is_success() {
-            return Err(unexpected_response(response, "failed to find pull request").await);
-        }
-
-        let pull_requests: Vec<PullRequestNumber> =
-            response.json().await.map_err(transport_error)?;
-        Ok(pull_requests
-            .first()
-            .map(|pull_request| pull_request.number))
-    }
-
-    #[tracing::instrument(skip(self, access_token, pull_request), fields(head = %pull_request.head, base = %pull_request.base), err)]
-    async fn open_pull_request(
-        &self,
-        access_token: &str,
-        owner: &str,
-        repo: &str,
-        pull_request: &GithubOpenPullRequest,
-    ) -> Result<GithubOpenPullRequestOutcome, Self::Err> {
-        #[derive(serde::Serialize)]
-        struct OpenRequest<'a> {
-            title: &'a str,
-            body: &'a str,
-            head: &'a str,
-            base: &'a str,
-        }
-
-        #[derive(serde::Deserialize)]
-        struct Opened {
-            number: u64,
-        }
-
-        let response = self
-            .client
-            .post(format!(
-                "{}/repos/{owner}/{repo}/pulls",
-                self.api_base_url()
-            ))
-            .header("Authorization", format!("Bearer {access_token}"))
-            .header("Accept", "application/vnd.github+json")
-            .header("User-Agent", USER_AGENT)
-            .header("X-GitHub-Api-Version", "2022-11-28")
-            .json(&OpenRequest {
-                title: &pull_request.title,
-                body: &pull_request.body,
-                head: &pull_request.head,
-                base: &pull_request.base,
-            })
-            .timeout(REQUEST_TIMEOUT)
-            .send()
-            .await
-            .map_err(transport_error)?;
-
-        let status = response.status();
-        if status.is_success() {
-            let opened: Opened = response.json().await.map_err(transport_error)?;
-            return Ok(GithubOpenPullRequestOutcome::Opened(opened.number));
-        }
-
-        let headers = response.headers().clone();
-        let body = response_text(response).await;
-        // A throttled request is a 403 too; it must not read as a refusal.
-        if throttling(status, &headers, &body).is_some() {
-            return Err(unexpected(
-                status,
-                &headers,
-                body,
-                "failed to open pull request",
-            ));
-        }
-
-        // The statuses GitHub documents for this endpoint, each a decision
-        // about the pull request rather than a failure to reach GitHub.
-        if !matches!(
-            status,
-            StatusCode::FORBIDDEN | StatusCode::NOT_FOUND | StatusCode::UNPROCESSABLE_ENTITY
-        ) {
-            return Err(unexpected(
-                status,
-                &headers,
-                body,
-                "failed to open pull request",
-            ));
-        }
-        let message = serde_json::from_str::<GithubErrorBody>(&body)
-            .map(GithubErrorBody::reason)
-            .unwrap_or_else(|_| "GitHub declined to open the pull request.".to_string());
-
-        Ok(GithubOpenPullRequestOutcome::Rejected(message))
     }
 
     #[tracing::instrument(skip(self, access_token), err)]

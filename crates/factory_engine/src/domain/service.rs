@@ -80,22 +80,26 @@ where
     }
 
     /// The repository `repo_url` names, with the branch its Run starts from,
-    /// when `user_id` reaches it with their GitHub account.
+    /// when `user_id` reaches it with their GitHub account and may push to
+    /// it, as the Run's agents push its branch and the Run merges it.
     async fn reachable_repository(
         &self,
         user_id: &MacroUserIdStr<'static>,
         repo_url: &str,
     ) -> Result<Repository, FactoryError> {
         let repository = CodeRepository::parse(repo_url).ok_or(FactoryError::InvalidRepository)?;
-        let base_branch = self
+        let access = self
             .github
-            .default_branch(user_id, &repository)
+            .repository_access(user_id, &repository)
             .await
             .map_err(internal)?
             .ok_or(FactoryError::UnreachableRepository)?;
+        if !access.can_push {
+            return Err(FactoryError::NoPushAccess);
+        }
         Ok(Repository {
             url: repository.url(),
-            base_branch,
+            base_branch: access.default_branch,
         })
     }
 

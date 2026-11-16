@@ -793,6 +793,59 @@ pub enum GithubOpenPullRequestOutcome {
     Rejected(String),
 }
 
+/// What a user may do with a repository, as GitHub says.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GithubRepositoryAccess {
+    /// The branch a clone checks out, absent for a repository with no
+    /// commits.
+    pub default_branch: Option<String>,
+    /// Whether the user may push to it.
+    pub push: bool,
+}
+
+/// A pull request's number, state and head, from GitHub's pull request
+/// list: one call, without its discussion or checks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GithubPullRequestHead {
+    /// Its number in its repository.
+    pub number: u64,
+    /// Its page on GitHub.
+    pub html_url: String,
+    /// GitHub's state: `open` or `closed`.
+    pub state: String,
+    /// Whether it was merged.
+    pub merged: bool,
+    /// The commit its head branch is at.
+    pub head_sha: String,
+}
+
+/// A check suite on a commit: one per app that checks it, such as a CI.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GithubCheckSuite {
+    /// GitHub's id for it.
+    pub id: u64,
+    /// The app that runs it, by its slug.
+    pub app: String,
+    /// GitHub's status: `queued`, `in_progress` or `completed`.
+    pub status: String,
+    /// How it concluded, once completed.
+    pub conclusion: Option<String>,
+    /// How many check runs it holds; an app that runs nothing on the commit
+    /// leaves an empty suite queued.
+    pub check_runs: u64,
+}
+
+/// The latest commit status of one context on a commit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GithubCommitStatus {
+    /// The context it reports, such as a CI's name.
+    pub context: String,
+    /// `success`, `pending`, `failure` or `error`.
+    pub state: String,
+    /// Its page, when it gives one.
+    pub target_url: Option<String>,
+}
+
 /// A request to merge one pull request on the user's behalf.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]

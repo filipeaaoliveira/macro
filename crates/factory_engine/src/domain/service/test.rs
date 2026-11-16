@@ -268,14 +268,17 @@ async fn a_code_run_keeps_its_repository_and_its_base_branch() {
     assert_eq!(workflows.started.lock().expect("started").len(), 1);
 }
 
-/// A Flow that works on a repository needs one its owner reaches with their
-/// GitHub account, and the others take none; nothing is kept otherwise.
+/// A Flow that works on a repository needs one its owner reaches and may
+/// push to with their GitHub account, and the others take none; nothing is
+/// kept otherwise.
 #[tokio::test]
 async fn a_run_s_repository_must_fit_its_flow_and_be_reachable() {
     let repo = FakeRepo::default();
     let workflows = FakeWorkflows::default();
     let unreachable = FakeGithub::default();
     unreachable.state().unreachable = true;
+    let read_only = FakeGithub::default();
+    read_only.state().read_only = true;
     let create = |flow: &str, repo_url: Option<&str>, github: &FakeGithub| {
         let service = code_service(&repo, &workflows, github);
         let flow = flow.to_string();
@@ -307,6 +310,7 @@ async fn a_run_s_repository_must_fit_its_flow_and_be_reachable() {
     )
     .await;
     let out_of_reach = create("code", Some("https://github.com/macro/app"), &unreachable).await;
+    let not_pushable = create("code", Some("https://github.com/macro/app"), &read_only).await;
 
     assert!(matches!(none, Err(FactoryError::RepositoryRequired)));
     assert!(matches!(unused, Err(FactoryError::RepositoryNotUsed)));
@@ -315,6 +319,7 @@ async fn a_run_s_repository_must_fit_its_flow_and_be_reachable() {
         out_of_reach,
         Err(FactoryError::UnreachableRepository)
     ));
+    assert!(matches!(not_pushable, Err(FactoryError::NoPushAccess)));
     assert!(repo.runs.lock().expect("runs").is_empty());
     assert!(workflows.started.lock().expect("started").is_empty());
 }

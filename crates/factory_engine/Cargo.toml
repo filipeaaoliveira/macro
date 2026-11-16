@@ -42,6 +42,7 @@ uuid = { workspace = true }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]
+anyhow = { workspace = true }
 macro_authorization = { path = "../macro_authorization", default-features = false, features = ["axum", "outbound"] }
 macro_env_var = { path = "../macro_env_var" }
 model_user = { path = "../model_user" }

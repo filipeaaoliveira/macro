@@ -1,5 +1,8 @@
 //! What the factory's use cases take and return.
 
+#[cfg(test)]
+mod test;
+
 use factory_records::domain::models::{
     EntryId, Outcome, Repository, Run, RunId, RunOutcome, Step, StepKey,
 };
@@ -88,9 +91,10 @@ pub struct CodeRepository {
 impl CodeRepository {
     /// The repository `url` names. It must be exactly
     /// `https://github.com/owner/name`, each segment of `[A-Za-z0-9._-]` and
-    /// neither `.` nor `..`, as the agent egress reads a session's repository:
-    /// the two ends must agree on which repository a Run works on, and the
-    /// segments are put into GitHub's API paths.
+    /// neither `.` nor `..`, with no `.git` ending or trailing slash: the
+    /// canonical form a coding session's repository takes, so a Run and its
+    /// sessions agree on which repository they work on. The segments are put
+    /// into GitHub's API paths.
     pub fn parse(url: &str) -> Option<Self> {
         let path = url.strip_prefix("https://github.com/")?;
         let (owner, name) = path.split_once('/')?;
@@ -102,7 +106,9 @@ impl CodeRepository {
                     .chars()
                     .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
         };
-        if !segment(owner) || !segment(name) {
+        // A `.git` ending names the same repository as one without; one
+        // form keeps a Run's record and its session's equal.
+        if !segment(owner) || !segment(name) || name.ends_with(".git") {
             return None;
         }
         Some(Self {
@@ -134,6 +140,15 @@ pub fn run_branch(run_id: RunId) -> String {
     format!("factory/{run_id}")
 }
 
+/// What a Run's owner may do with a repository on GitHub.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepositoryAccess {
+    /// The branch it checks out by default.
+    pub default_branch: String,
+    /// Whether the owner may push to it.
+    pub can_push: bool,
+}
+
 /// A pull request as the Run's owner sees it on GitHub.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PullRequest {
@@ -143,10 +158,8 @@ pub struct PullRequest {
     pub url: String,
     /// Whether it is open, closed, or merged.
     pub state: PullRequestState,
-    /// The commit its head branch is at, when GitHub says.
-    pub head_sha: Option<String>,
-    /// The checks on that commit; none when they could not be read.
-    pub checks: Option<Vec<Check>>,
+    /// The commit its head branch is at.
+    pub head_sha: String,
 }
 
 /// Whether a pull request is open, closed, or merged.
@@ -160,14 +173,51 @@ pub enum PullRequestState {
     Merged,
 }
 
-/// One check on a commit, such as a CI job.
+/// What GitHub says of the checks on a pull request's head commit.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct HeadChecks {
+    /// Its check suites, one per app that checks it, such as a CI.
+    pub suites: Vec<CheckSuite>,
+    /// Its commit statuses, the latest of each context.
+    pub statuses: Vec<CommitStatus>,
+    /// Its check runs that failed, read only when a suite failed, to name
+    /// them.
+    pub failed_runs: Vec<Check>,
+}
+
+/// One app's checks on a commit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckSuite {
+    /// GitHub's id for it.
+    pub id: u64,
+    /// The app that runs it.
+    pub app: String,
+    /// `queued`, `in_progress` or `completed`, among others.
+    pub status: String,
+    /// How it concluded, once completed.
+    pub conclusion: Option<String>,
+    /// How many check runs it holds: an app that runs nothing on the commit
+    /// leaves an empty suite queued for good.
+    pub check_runs: u64,
+}
+
+/// The latest commit status of one context.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitStatus {
+    /// The context, such as a CI's name.
+    pub context: String,
+    /// `success`, `pending`, `failure` or `error`.
+    pub state: String,
+    /// Its page, when it gives one.
+    pub url: Option<String>,
+}
+
+/// One check run, such as a CI job.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Check {
     /// Its name.
     pub name: String,
-    /// GitHub's status: `queued`, `in_progress` or `completed`, among others.
-    pub status: String,
-    /// How it concluded, once completed: `success`, `failure` and so on.
+    /// How it concluded, once completed.
     pub conclusion: Option<String>,
     /// Its page, when GitHub gives one.
     pub url: Option<String>,
@@ -307,6 +357,9 @@ pub enum FactoryError {
         "the run's owner must connect GitHub to Macro and be able to reach the repository, which needs a branch"
     )]
     UnreachableRepository,
+    /// The Run's owner may read the repository, but not push to it.
+    #[error("the run's owner must be able to push to the repository")]
+    NoPushAccess,
     /// The Gate does not offer the answer.
     #[error("the gate offers {offered:?}")]
     AnswerNotOffered {

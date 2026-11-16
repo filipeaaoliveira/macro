@@ -8376,6 +8376,7 @@ dependencies = [
  "agent_correlation",
  "agent_runtime_protocol",
  "agent_session",
+ "anyhow",
  "async-trait",
  "authentication_service_client",
  "axum",

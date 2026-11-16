@@ -26,7 +26,7 @@ use uuid::Uuid;
 use super::worker_on;
 use crate::domain::built_in_flows::BuiltInFlow;
 use crate::domain::built_in_steps::BuiltInSteps;
-use crate::domain::fakes::{FakeGithub, FakeRepo, check};
+use crate::domain::fakes::{FakeGithub, FakeRepo, ci};
 use crate::domain::flow::Flow;
 use crate::domain::gate::AnswerGate;
 use crate::domain::models::{AgentAnswer, AgentTask, PullRequestState, RunStart};
@@ -514,9 +514,9 @@ impl StepAgent for CodeAgent {
             "ci_fix" => {
                 let mut github = self.github.state();
                 if let Some(pull_request) = github.pull_request.as_mut() {
-                    pull_request.head_sha = Some(FIXED_HEAD.to_string());
+                    pull_request.head_sha = FIXED_HEAD.to_string();
                 }
-                github.checks = [vec![check("test", Some("success"))]].into();
+                github.checks = [ci(Some("success"))].into();
                 "done"
             }
             _ => "done",
@@ -700,7 +700,7 @@ where
 #[ignore = "Temporal doesn't exist in CI"]
 async fn a_code_run_merges_its_pull_request_once_a_person_approves() {
     let github = FakeGithub::default();
-    github.state().checks = [vec![check("test", Some("success"))]].into();
+    github.state().checks = [ci(Some("success"))].into();
     let agent = CodeAgent::new(&github);
 
     let ended = walk_code(&agent, &github, |run| {
@@ -735,7 +735,7 @@ async fn a_code_run_merges_its_pull_request_once_a_person_approves() {
 #[ignore = "Temporal doesn't exist in CI"]
 async fn red_ci_is_fixed_and_the_fixed_commit_merges() {
     let github = FakeGithub::default();
-    github.state().checks = [vec![check("test", Some("failure"))]].into();
+    github.state().checks = [ci(Some("failure"))].into();
     let agent = CodeAgent::new(&github);
 
     let ended = walk_code(&agent, &github, |run| async move {
@@ -760,7 +760,7 @@ async fn red_ci_is_fixed_and_the_fixed_commit_merges() {
 #[ignore = "Temporal doesn't exist in CI"]
 async fn revising_or_cancelling_at_the_merge_question_merges_nothing() {
     let github = FakeGithub::default();
-    github.state().checks = [vec![check("test", Some("success"))]].into();
+    github.state().checks = [ci(Some("success"))].into();
     let agent = CodeAgent::new(&github);
 
     let ended = walk_code(&agent, &github, |run| async move {
@@ -787,7 +787,7 @@ async fn revising_or_cancelling_at_the_merge_question_merges_nothing() {
 #[ignore = "Temporal doesn't exist in CI"]
 async fn a_review_that_keeps_asking_for_changes_leaves_the_pull_request_for_a_person() {
     let github = FakeGithub::default();
-    github.state().checks = [vec![check("test", Some("success"))]].into();
+    github.state().checks = [ci(Some("success"))].into();
     let agent = CodeAgent::new(&github);
     *agent.reviews.lock().expect("reviews") = vec!["changes", "changes", "changes"];
 
@@ -814,7 +814,7 @@ async fn a_review_that_keeps_asking_for_changes_leaves_the_pull_request_for_a_pe
 #[ignore = "Temporal doesn't exist in CI"]
 async fn cancelling_while_ci_waits_ends_the_run_with_nothing_merged() {
     let github = FakeGithub::default();
-    github.state().checks = [vec![check("test", None)]].into();
+    github.state().checks = [ci(None)].into();
     let agent = CodeAgent::new(&github);
 
     let ended = walk_code(&agent, &github, |run| {
@@ -838,4 +838,34 @@ async fn cancelling_while_ci_waits_ends_the_run_with_nothing_merged() {
         "{ended:?}"
     );
     assert!(github.state().merges.is_empty());
+}
+
+/// A head that moves after the person agreed to merge is not merged: the
+/// Run goes back to CI, asks again, and merges the new head once agreed.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "Temporal doesn't exist in CI"]
+async fn a_head_that_moves_before_the_merge_goes_back_to_ci() {
+    let github = FakeGithub::default();
+    github.state().checks = [ci(Some("success"))].into();
+    let agent = CodeAgent::new(&github);
+
+    let ended = walk_code(&agent, &github, |run| {
+        let github = github.clone();
+        async move {
+            run.answer_next_gate("approve").await;
+            let merge_question = run.next_gate().await;
+            // Someone pushes after the person was asked.
+            if let Some(pull_request) = github.state().pull_request.as_mut() {
+                pull_request.head_sha = FIXED_HEAD.to_string();
+            }
+            run.answer(merge_question, "approve").await;
+            run.answer_next_gate("approve").await;
+        }
+    })
+    .await;
+
+    assert!(matches!(ended, Ok(RunOutcome::Success)), "{ended:?}");
+    let github = github.state();
+    assert_eq!(github.merges, [FakeGithub::HEAD, FIXED_HEAD]);
+    assert_eq!(github.opened, 1);
 }
