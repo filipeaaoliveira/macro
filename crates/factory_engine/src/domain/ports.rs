@@ -195,6 +195,17 @@ pub trait FactoryService: Send + Sync + 'static {
         id: RunId,
     ) -> impl Future<Output = Result<RunDetail, FactoryError>> + Send;
 
+    /// `actor`'s Runs on the task document `task_id`, newest first, each
+    /// with its Steps: at most the newest [`TASK_RUNS_LISTED`]. The actor
+    /// must see the task.
+    ///
+    /// [`TASK_RUNS_LISTED`]: crate::domain::service::TASK_RUNS_LISTED
+    fn list_task_runs(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        task_id: Uuid,
+    ) -> impl Future<Output = Result<Vec<RunDetail>, FactoryError>> + Send;
+
     /// Link `actor`'s Run to the task document `task_id`, replacing any task
     /// it had. The actor must see the task.
     fn link_task(

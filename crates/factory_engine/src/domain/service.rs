@@ -38,6 +38,9 @@ impl From<RunWorkflowsError> for FactoryError {
     }
 }
 
+/// The most Runs a task's list holds: its owner's newest.
+pub const TASK_RUNS_LISTED: u16 = 50;
+
 /// How old a Run with no Step and no workflow must be before it counts as
 /// one whose workflow never started.
 const UNSTARTED_AFTER: chrono::TimeDelta = chrono::TimeDelta::minutes(5);
@@ -238,6 +241,42 @@ where
             run = self.owned_run(actor, id).await?;
         }
         Ok(RunDetail { run, steps })
+    }
+
+    #[tracing::instrument(skip(self, actor))]
+    async fn list_task_runs(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        task_id: Uuid,
+    ) -> Result<Vec<RunDetail>, FactoryError> {
+        // A task the caller can't see reads as missing, as a missing one does.
+        let task =
+            TaskDocumentId::parse(&task_id.to_string()).map_err(|_| FactoryError::TaskNotFound)?;
+        match self
+            .tasks
+            .task_access(actor, &task)
+            .await
+            .map_err(internal)?
+        {
+            TaskAccess::Visible => {}
+            TaskAccess::NotATask => return Err(FactoryError::NotATask),
+            TaskAccess::NotFound => return Err(FactoryError::TaskNotFound),
+        }
+
+        let runs = self
+            .repo
+            .list_task_runs(task_id, actor, TASK_RUNS_LISTED)
+            .await
+            .map_err(internal)?;
+        let ids: Vec<RunId> = runs.iter().map(|run| run.id).collect();
+        let mut steps = self.repo.list_runs_steps(&ids).await.map_err(internal)?;
+        Ok(runs
+            .into_iter()
+            .map(|run| {
+                let steps = steps.remove(&run.id).unwrap_or_default();
+                RunDetail { run, steps }
+            })
+            .collect())
     }
 
     #[tracing::instrument(skip(self, actor))]

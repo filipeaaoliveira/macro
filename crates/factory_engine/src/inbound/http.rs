@@ -71,6 +71,8 @@ impl<S, Auth> FromRef<FactoryRouterState<S, Auth>> for MacroAuthorizationState<A
 /// - `GET /flows` — the built-in Flows a Run can be started of.
 /// - `POST /runs` — create a Run of a built-in Flow, owned by the acting
 ///   user, and start it.
+/// - `GET /tasks/{task_id}/runs` — the caller's Runs on a task, newest
+///   first.
 /// - `GET /runs/{id}` — read a Run and the Steps it took.
 /// - `POST /runs/{id}/steps/{seq}/answer` — answer the Gate of the Run's
 ///   Step `seq`.
@@ -86,6 +88,10 @@ where
     Router::new()
         .route("/flows", get(list_flows_handler::<S, Auth>))
         .route("/runs", post(create_run_handler::<S, Auth>))
+        .route(
+            "/tasks/{task_id}/runs",
+            get(list_task_runs_handler::<S, Auth>),
+        )
         .route("/runs/{id}", get(get_run_handler::<S, Auth>))
         .route(
             "/runs/{id}/steps/{seq}/answer",
@@ -123,6 +129,21 @@ pub struct CreateRunRequest {
 pub struct LinkTaskRequest {
     /// The task document's id.
     pub task_id: Uuid,
+}
+
+/// Path params naming a task.
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Path)]
+pub struct TaskRunsParams {
+    /// The task document's id.
+    pub task_id: Uuid,
+}
+
+/// A task's Runs, as the caller sees them.
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct TaskRunsResponse {
+    /// The caller's Runs on the task, newest first: at most the newest 50.
+    pub runs: Vec<RunDetail>,
 }
 
 /// Path params naming a Run.
@@ -226,6 +247,38 @@ where
         .create_run(actor, body.flow, body.request, body.task_id)
         .await?;
     Ok((StatusCode::CREATED, Json(created)))
+}
+
+/// List the caller's Runs on a task they can see, newest first, each with
+/// the Steps it took. Other people's Runs on the task are not listed.
+#[utoipa::path(
+    get,
+    tag = "factory",
+    operation_id = "list_factory_task_runs",
+    path = "/tasks/{task_id}/runs",
+    params(TaskRunsParams),
+    responses(
+        (status = 200, body = TaskRunsResponse),
+        (status = 400, body = ErrorResponse),
+        (status = 401, body = ErrorResponse),
+        (status = 403, body = ErrorResponse),
+        (status = 404, body = ErrorResponse),
+        (status = 500, body = ErrorResponse),
+    )
+)]
+#[tracing::instrument(skip_all, fields(task_id = %params.task_id))]
+pub async fn list_task_runs_handler<S, Auth>(
+    State(state): State<FactoryRouterState<S, Auth>>,
+    caller: MacroAuthorizationExtractor<Auth, UserOrInternal>,
+    Path(params): Path<TaskRunsParams>,
+) -> Result<Json<TaskRunsResponse>, FactoryError>
+where
+    S: FactoryService,
+    Auth: MacroAuthorizationService,
+{
+    let actor = caller.authorization.user.macro_user_id;
+    let runs = state.service.list_task_runs(&actor, params.task_id).await?;
+    Ok(Json(TaskRunsResponse { runs }))
 }
 
 /// Read one of the caller's Runs and the Steps it took.
@@ -433,7 +486,7 @@ impl FactoryError {
             | FactoryError::OutcomeNotOffered { .. }
             | FactoryError::HandBackTooLarge { .. } => StatusCode::BAD_REQUEST,
             FactoryError::NotTheOwner => StatusCode::FORBIDDEN,
-            FactoryError::NotFound => StatusCode::NOT_FOUND,
+            FactoryError::NotFound | FactoryError::TaskNotFound => StatusCode::NOT_FOUND,
             FactoryError::RunEnded | FactoryError::AnswerRefused(_) | FactoryError::StepEnded => {
                 StatusCode::CONFLICT
             }
@@ -475,6 +528,7 @@ impl IntoResponse for FactoryError {
 #[openapi(
     paths(
         list_flows_handler,
+        list_task_runs_handler,
         create_run_handler,
         get_run_handler,
         answer_gate_handler,
@@ -485,6 +539,7 @@ impl IntoResponse for FactoryError {
     components(schemas(
         FlowsResponse,
         FlowSummary,
+        TaskRunsResponse,
         CreateRunRequest,
         AnswerGateRequest,
         LinkTaskRequest,

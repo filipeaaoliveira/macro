@@ -56,7 +56,9 @@ Macro task: `POST /runs` takes an optional `taskId` (the task document's id),
 and `PUT /runs/{id}/task` links or relinks one. The owner must see the document
 through entity access, and document storage must say it is a task that is not
 deleted (`outbound/document_task_directory.rs`); a hidden document and a missing
-one are both "no task" (400).
+one are both "no task" (400). `GET /tasks/{task_id}/runs` lists the caller's own
+Runs on a task they can see, newest first, at most `TASK_RUNS_LISTED`; other
+people's Runs on it are not listed, and a hidden or missing task is 404.
 
 `POST /runs/{id}/cancel` cancels the workflow through Temporal; cancelling a
 cancelled Run again is accepted, and a Run whose workflow never started ends

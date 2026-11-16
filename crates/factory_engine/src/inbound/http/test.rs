@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use axum::Router;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode};
-use factory_records::domain::models::{HandBack, Outcome, RunId, RunInsert};
+use factory_records::domain::models::{EntryId, HandBack, Outcome, RunId, RunInsert, StepKey};
 use factory_records::domain::ports::RunRepository;
 use macro_authorization::{
     CredentialOrigin, INTERNAL_API_KEY_HEADER, INTERNAL_MACRO_USER_ID_HEADER, InternalAuthConfig,
@@ -142,6 +142,14 @@ impl FactoryService for FakeService {
         actor: &MacroUserIdStr<'static>,
         _id: RunId,
     ) -> Result<RunDetail, FactoryError> {
+        Err(self.refusing(actor))
+    }
+
+    async fn list_task_runs(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        _task_id: Uuid,
+    ) -> Result<Vec<RunDetail>, FactoryError> {
         Err(self.refusing(actor))
     }
 
@@ -580,4 +588,114 @@ async fn a_run_starts_only_of_a_built_in_flow_on_a_task_the_caller_sees() {
     assert_eq!(unknown, StatusCode::BAD_REQUEST);
     assert_eq!(hidden_task, StatusCode::BAD_REQUEST);
     assert!(repo.runs.lock().expect("runs").is_empty());
+}
+
+/// Each person lists their own Runs on a task, newest first, each with its
+/// Steps; someone else's Runs on the same task are not theirs to see.
+#[tokio::test]
+async fn a_task_s_runs_are_the_caller_s_own_newest_first() {
+    let repo = FakeRepo::default();
+    let task = Uuid::now_v7();
+    repo.tasks.lock().expect("tasks").insert(task);
+    let router = records_router(&repo);
+    let start = |token: &'static str, request: &'static str| {
+        let router = router.clone();
+        async move {
+            let response = router
+                .oneshot(call(
+                    "POST",
+                    "/runs",
+                    Caller::User(token),
+                    serde_json::json!({ "flow": "plan", "request": request, "taskId": task }),
+                ))
+                .await
+                .expect("response");
+            body(response).await["run"]["id"].clone()
+        }
+    };
+    let first = start("alice", "Plan the export").await;
+    let theirs = start("eve", "Plan the import").await;
+    let second = start("alice", "Plan the export again").await;
+    let first_id: RunId = serde_json::from_value(first.clone()).expect("run id");
+    repo.start_step(
+        StepKey {
+            run_id: first_id,
+            seq: 1,
+        },
+        &EntryId::try_from("plan".to_string()).expect("entry"),
+        1,
+    )
+    .await
+    .expect("start");
+    let list = |token: &'static str| {
+        let router = router.clone();
+        async move {
+            router
+                .oneshot(call(
+                    "GET",
+                    &format!("/tasks/{task}/runs"),
+                    Caller::User(token),
+                    serde_json::Value::Null,
+                ))
+                .await
+                .expect("response")
+        }
+    };
+
+    let alice_s = list("alice").await;
+    let eve_s = list("eve").await;
+
+    assert_eq!(alice_s.status(), StatusCode::OK);
+    let runs = body(alice_s).await["runs"].clone();
+    let ids: Vec<serde_json::Value> = runs
+        .as_array()
+        .expect("runs")
+        .iter()
+        .map(|detail| detail["run"]["id"].clone())
+        .collect();
+    assert_eq!(ids, [second, first]);
+    assert_eq!(runs[0]["steps"], serde_json::json!([]));
+    assert_eq!(runs[1]["steps"][0]["entry"], "plan");
+    let runs = body(eve_s).await["runs"].clone();
+    assert_eq!(runs.as_array().expect("runs").len(), 1);
+    assert_eq!(runs[0]["run"]["id"], theirs);
+}
+
+/// A task the caller cannot see, or one that does not exist, is missing to
+/// them; a caller with no login is refused before that.
+#[tokio::test]
+async fn a_task_the_caller_cannot_see_has_no_runs_to_list() {
+    let repo = FakeRepo::default();
+    let task = Uuid::now_v7();
+    repo.tasks.lock().expect("tasks").insert(task);
+    repo.hidden
+        .lock()
+        .expect("hidden")
+        .insert((EVE.to_string(), task));
+    let router = records_router(&repo);
+    let list = |caller: Caller<'static>, task: Uuid| {
+        let router = router.clone();
+        async move {
+            router
+                .oneshot(call(
+                    "GET",
+                    &format!("/tasks/{task}/runs"),
+                    caller,
+                    serde_json::Value::Null,
+                ))
+                .await
+                .expect("response")
+                .status()
+        }
+    };
+
+    let hidden = list(Caller::User("eve"), task).await;
+    let missing = list(Caller::User("alice"), Uuid::now_v7()).await;
+    let anonymous = list(Caller::Nobody, task).await;
+    let seen = list(Caller::User("alice"), task).await;
+
+    assert_eq!(hidden, StatusCode::NOT_FOUND);
+    assert_eq!(missing, StatusCode::NOT_FOUND);
+    assert_eq!(anonymous, StatusCode::UNAUTHORIZED);
+    assert_eq!(seen, StatusCode::OK);
 }

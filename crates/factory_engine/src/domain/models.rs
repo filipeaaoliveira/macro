@@ -146,6 +146,9 @@ pub enum FactoryError {
     /// No task the Run's owner can see has this id.
     #[error("no task the run's owner can see has this id")]
     UnknownTask,
+    /// No task the caller can see has the id the path names.
+    #[error("task not found")]
+    TaskNotFound,
     /// No built-in Flow has this name.
     #[error("no flow has this name")]
     UnknownFlow,
