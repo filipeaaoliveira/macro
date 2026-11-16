@@ -31,6 +31,20 @@ impl PgRunRepository {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
+
+    /// Whether a factory Step works, or worked, in the agent session
+    /// `session`. Other services ask it to tell a Step's session apart; the
+    /// unique index on `session_id` serves it.
+    #[tracing::instrument(err, skip(self))]
+    pub async fn is_step_session(&self, session: Uuid) -> Result<bool, PgRunRepositoryErr> {
+        let is_step_session = sqlx::query_scalar!(
+            r#"SELECT EXISTS (SELECT 1 FROM factory_step WHERE session_id = $1) AS "is_step_session!""#,
+            session,
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(is_step_session)
+    }
 }
 
 /// Errors produced by the Postgres Run repository.

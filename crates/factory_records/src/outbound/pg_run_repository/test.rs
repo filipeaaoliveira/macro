@@ -561,3 +561,30 @@ async fn a_step_holds_its_session_until_it_lets_go_or_ends(pool: PgPool) {
     assert!(!holds(key(ended_run, 1)).await, "its run ended");
     assert!(!holds(key(id, 4)).await, "never claimed one");
 }
+
+/// A session a Step claimed is a Step's session, whether the Step still
+/// works in it or not; any other session is not.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "fixtures", scripts("people"))
+)]
+async fn a_session_a_step_claimed_is_a_step_session(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let id = RunId::generate();
+    insert(&repo, id, "Plan the dark mode toggle").await;
+    repo.start_step(key(id, 1), &entry("plan"), 1)
+        .await
+        .expect("start");
+    let claimed = repo
+        .claim_session(key(id, 1), session(), &[outcome("done")])
+        .await
+        .expect("claim")
+        .session
+        .session_id;
+    repo.end_step(key(id, 1), &outcome("done"), "The plan")
+        .await
+        .expect("end");
+
+    assert!(repo.is_step_session(claimed).await.expect("read"));
+    assert!(!repo.is_step_session(Uuid::now_v7()).await.expect("read"));
+}

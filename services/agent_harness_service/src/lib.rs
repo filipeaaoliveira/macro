@@ -800,7 +800,9 @@ pub async fn run() -> anyhow::Result<()> {
         runs: Arc::new(
             suggestions::outbound::pg_suggestion_repo::PgSuggestionRepo::new(pool.clone()),
         ),
-        factory_steps: Arc::new(code_mode::PgFactoryStepSessions { pool: pool.clone() }),
+        factory_steps: Arc::new(code_mode::FactoryStepRecords(
+            factory_records::outbound::pg_run_repository::PgRunRepository::new(pool.clone()),
+        )),
     });
     let public_code_mode = match &code_runner {
         Some((_, public, _, _)) => Some(public_mcp::PublicCodeMode {

@@ -1,11 +1,11 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT EXISTS (SELECT 1 FROM factory_step WHERE session_id = $1) AS \"works!\"",
+  "query": "SELECT EXISTS (SELECT 1 FROM factory_step WHERE session_id = $1) AS \"is_step_session!\"",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "works!",
+        "name": "is_step_session!",
         "type_info": "Bool"
       }
     ],
@@ -18,5 +18,5 @@
       null
     ]
   },
-  "hash": "824c7b9002d6a95fc38fb95e14ad531ab652a1e1337a4b75f857dceb185897f7"
+  "hash": "1402f75070889c3105483d100b42df38fac69efb86a85daed79e01987647114c"
 }
