@@ -118,13 +118,14 @@ export function isFeatureEnabled(flag: Flag): boolean {
 
 /**
  * Runs of the software factory's Flows on a task (`features/factory-runs`).
- * On only for local stacks, the one place the factory service runs; hosted
- * environments follow PostHog.
+ * Off by default, local stacks included: the factory service does not serve
+ * the routes the section reads yet, nor sit behind the `/factory` proxy.
+ * Follows PostHog everywhere; opt in locally with
+ * VITE_ENABLE_FACTORY_RUNS=true.
  */
 export const enableFactoryRuns = defineFlag({
   key: 'enable-factory-runs',
   env: 'ENABLE_FACTORY_RUNS',
-  default: LOCAL_ONLY || undefined,
 });
 
 /** Databases rollout. Local HMR is on; deployed environments defer to PostHog. */

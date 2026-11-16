@@ -1365,7 +1365,8 @@ tags start expanded. Filter-menu options continue to show full tag names.
 
 ## Runs
 
-With `enable-factory-runs` on (local stacks by default), an open task's side
+With `enable-factory-runs` on (off by default; set
+`VITE_ENABLE_FACTORY_RUNS=true` to try it locally), an open task's side
 panel has a **Runs** section: each Run of the software factory on the task,
 newest first, with a dot for where it is (running, needs input, done, failed or
 cancelled), the Step it is on, and when it started. **New run** asks for a
@@ -1376,7 +1377,8 @@ closes): its request, its Steps on a timeline with each Step's outcome, its
 time (`5m`) and its output as markdown, and, while the Run waits on a Gate,
 the question and a note field under the output it asks about. The answers
 sit in the dialog's pinned footer beside **Cancel run**; the Flow's first
-answer is the primary button. Phone sheets have no close button. **Cancel run** confirms inside the
+answer is the primary button. Phone sheets have no close button.
+**Cancel run** confirms inside the
 dialog, like a booking's cancel. A second answer to a Gate, or a cancel of a
 Run that already ended, shows a toast and reads the Run again. Open Runs and a
 task with a Run going are read again every 3 seconds until they end.
