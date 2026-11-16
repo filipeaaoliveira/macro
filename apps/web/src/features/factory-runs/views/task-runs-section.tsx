@@ -1,11 +1,21 @@
+import { ListSkeleton } from '@app/components/view-shell/ListSkeleton';
+import { ActivityRow } from '@app/features/agent-session-activity/components/activity-row';
 import { formatCompactRelativeTimestamp } from '@app/features/entity/utils/timestamp';
 import { t } from '@app/lib/i18n';
 import { SidePanel, useSidePanel } from '@components/app/side-panel';
 import { isTouchDevice } from '@core/mobile/isTouchDevice';
 import PlusIcon from '@icon/system/regular/plus.svg';
 import { Button } from '@ui';
-import { createSignal, For, Match, Show, Switch } from 'solid-js';
-import { RunRow } from '../components/run-row';
+import {
+  createSignal,
+  For,
+  Index,
+  Match,
+  onCleanup,
+  Show,
+  Switch,
+} from 'solid-js';
+import { RunStatusDot, runStatusDetail } from '../components/run-status';
 import { StartRunDialog } from '../components/start-run-dialog';
 import { useRunsContext } from '../context/runs-context';
 import { runStatus, runTitle } from '../core/run';
@@ -40,6 +50,31 @@ function StartRun(props: {
   );
 }
 
+// How often row times move on, as in the agent activity section.
+const CLOCK_MS = 30_000;
+
+/** Placeholder rows in the geometry of the activity rows they become. */
+function RunRowsSkeleton() {
+  return (
+    <ListSkeleton.Root label={t('factoryRuns.loading')} class="-mx-2">
+      <Index each={[0, 1]}>
+        {() => (
+          <div class="flex items-start gap-2 px-2 py-1.5 touch:min-h-11">
+            <span class="flex h-4.5 items-center">
+              <ListSkeleton.Bar class="size-1.5" />
+            </span>
+            <span class="flex min-w-0 flex-1 flex-col gap-1.5 pt-1">
+              <ListSkeleton.Bar class="w-40 max-w-full" />
+              <ListSkeleton.Bar class="h-2 w-24" />
+            </span>
+            <ListSkeleton.Bar class="mt-1 w-6" />
+          </div>
+        )}
+      </Index>
+    </ListSkeleton.Root>
+  );
+}
+
 /** A task's Runs in its side panel, with New run and each Run's dialog. */
 export function TaskRunsSection(props: { taskId: string; order: number }) {
   const context = useRunsContext();
@@ -53,6 +88,14 @@ export function TaskRunsSection(props: { taskId: string; order: number }) {
     if (isTouchDevice()) sidePanel?.setIsOpen(false);
   };
   const count = () => runs.data()?.length ?? 0;
+  // Polling stops once every Run has ended; the clock keeps "5m" honest.
+  const [now, setNow] = createSignal(Date.now());
+  const clock = setInterval(() => setNow(Date.now()), CLOCK_MS);
+  onCleanup(() => clearInterval(clock));
+  const time = (value: string) => {
+    now();
+    return formatCompactRelativeTimestamp(value);
+  };
 
   return (
     <>
@@ -82,9 +125,7 @@ export function TaskRunsSection(props: { taskId: string; order: number }) {
       >
         <Switch>
           <Match when={runs.state() === 'pending'}>
-            <div class="text-xs text-ink-placeholder" role="status">
-              {t('factoryRuns.loading')}
-            </div>
+            <RunRowsSkeleton />
           </Match>
           <Match when={runs.state() === 'error'}>
             <div class="flex items-center gap-2 text-xs">
@@ -109,10 +150,15 @@ export function TaskRunsSection(props: { taskId: string; order: number }) {
                 <div class="-mx-2 flex flex-col">
                   <For each={list()}>
                     {(run) => (
-                      <RunRow
-                        title={runTitle(run)}
-                        status={runStatus(run)}
-                        time={formatCompactRelativeTimestamp(run.createdAt)}
+                      <ActivityRow
+                        name={runTitle(run)}
+                        icon={<RunStatusDot status={runStatus(run)} />}
+                        latest={runStatusDetail(runStatus(run))}
+                        time={time(run.createdAt)}
+                        unseen={false}
+                        steps={[]}
+                        expanded={false}
+                        onToggle={() => {}}
                         onOpen={() => {
                           leaveSheet();
                           setOpenRunId(run.id);

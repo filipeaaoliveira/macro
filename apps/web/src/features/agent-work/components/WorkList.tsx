@@ -4,7 +4,14 @@ import { cn } from '@ui';
 import { For, Show } from 'solid-js';
 import type { WorkItem, WorkItemState } from '../core/work-item';
 
-function WorkDot(props: { state: WorkItemState }) {
+/** Where a piece of work is; `done` for work that finished. */
+export type WorkDotState = WorkItemState | 'done';
+
+/**
+ * Work's state as a dot: accent while it runs, warning while it waits on a
+ * person, failure when it stopped short, success when it finished.
+ */
+export function WorkDot(props: { state: WorkDotState }) {
   return (
     <span
       aria-hidden="true"
@@ -13,6 +20,7 @@ function WorkDot(props: { state: WorkItemState }) {
         props.state === 'running' && 'bg-accent motion-safe:animate-pulse',
         props.state === 'needs_input' && 'bg-warning',
         props.state === 'failed' && 'bg-failure',
+        props.state === 'done' && 'bg-success',
         props.state === 'idle' && 'bg-ink-disabled'
       )}
     />

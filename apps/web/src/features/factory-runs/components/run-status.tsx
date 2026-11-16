@@ -1,19 +1,18 @@
+import {
+  WorkDot,
+  type WorkDotState,
+} from '@app/features/agent-work/components/WorkList';
 import { t } from '@app/lib/i18n';
-import { cn } from '@ui';
 import { match } from 'ts-pattern';
 import { flowWordLabel } from '../core/flow-words';
 import type { RunOutcome, RunStatus } from '../core/run';
 
-/**
- * A Run's state as a dot, in the colors Work gives an agent's sessions:
- * accent while it runs, warning while it waits on a person, failure when it
- * stopped short.
- */
+/** A Run's state as Work's status dot. */
 export function RunStatusDot(props: { status: RunStatus }) {
-  const tone = () =>
+  const state = (): WorkDotState =>
     match(props.status)
       .with({ kind: 'running' }, () => 'running' as const)
-      .with({ kind: 'waiting' }, () => 'waiting' as const)
+      .with({ kind: 'waiting' }, () => 'needs_input' as const)
       .with({ kind: 'ended' }, (status) =>
         match(status.outcome)
           .with('success', () => 'done' as const)
@@ -23,19 +22,7 @@ export function RunStatusDot(props: { status: RunStatus }) {
       )
       .exhaustive();
 
-  return (
-    <span
-      aria-hidden="true"
-      class={cn(
-        'size-1.5 shrink-0 rounded-full',
-        tone() === 'running' && 'bg-accent motion-safe:animate-pulse',
-        tone() === 'waiting' && 'bg-warning',
-        tone() === 'done' && 'bg-success',
-        tone() === 'failed' && 'bg-failure',
-        tone() === 'idle' && 'bg-ink-disabled'
-      )}
-    />
-  );
+  return <WorkDot state={state()} />;
 }
 
 function runOutcomeLabel(outcome: RunOutcome): string {

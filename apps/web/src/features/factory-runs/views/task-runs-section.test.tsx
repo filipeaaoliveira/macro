@@ -63,14 +63,21 @@ const started: Run = {
   steps: [],
 };
 
-function mount(runs: Run[]) {
+function mount(
+  runs: Run[],
+  options: {
+    listState?: Accessor<'pending' | 'error' | 'ready'>;
+    retry?: () => void;
+    startRun?: RunsContext['startRun'];
+  } = {}
+) {
   const [list, setList] = createSignal(runs);
   const openedRuns: string[] = [];
   const context: RunsContext = {
     taskRuns: () => ({
-      state: () => 'ready',
-      data: list,
-      retry: vi.fn(),
+      state: options.listState ?? (() => 'ready'),
+      data: () => (options.listState?.() === 'error' ? undefined : list()),
+      retry: options.retry ?? vi.fn(),
     }),
     run: (runId: Accessor<string>) => {
       openedRuns.push(runId());
@@ -88,10 +95,12 @@ function mount(runs: Run[]) {
       ],
       retry: vi.fn(),
     }),
-    startRun: vi.fn(async () => {
-      setList((current) => [started, ...current]);
-      return { ok: true as const, value: started };
-    }),
+    startRun:
+      options.startRun ??
+      vi.fn(async () => {
+        setList((current) => [started, ...current]);
+        return { ok: true as const, value: started };
+      }),
     answerGate: vi.fn(),
     cancelRun: vi.fn(),
   };
@@ -145,5 +154,63 @@ describe('TaskRunsSection', () => {
     );
     await waitFor(() => expect(openedRuns).toEqual(['run-2']));
     expect(screen.queryByRole('button', { name: 'Start run' })).toBeNull();
+  });
+
+  it('retries a list that couldn’t be loaded', () => {
+    const [state, setState] = createSignal<'pending' | 'error' | 'ready'>(
+      'pending'
+    );
+    const retry = vi.fn(() => setState('ready'));
+    mount([running], { listState: state, retry });
+
+    expect(screen.getByRole('status', { name: 'Loading runs…' })).toBeTruthy();
+    setState('error');
+    expect(screen.getByText('Runs couldn’t be loaded')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(retry).toHaveBeenCalledOnce();
+    expect(screen.getByText('Rename the column')).toBeTruthy();
+  });
+
+  it('keeps the start dialog open with its error when starting fails', async () => {
+    const { openedRuns } = mount([running], {
+      startRun: vi.fn(async () => ({
+        ok: false as const,
+        reason: 'failed' as const,
+      })),
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'New run' }));
+    fireEvent.input(await screen.findByLabelText('Request'), {
+      target: { value: 'Add a due date column' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Start run' }));
+
+    expect(
+      await screen.findByText('Couldn’t start the run. Please try again.')
+    ).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Start run' })).toBeTruthy();
+    expect(
+      (screen.getByLabelText('Request') as HTMLTextAreaElement).value
+    ).toBe('Add a due date column');
+    expect(openedRuns).toEqual([]);
+  });
+
+  it('moves row times on after every Run has ended', () => {
+    vi.useFakeTimers({ now: new Date('2026-11-16T09:00:30Z') });
+    try {
+      mount([
+        {
+          ...running,
+          end: { outcome: 'success', endedAt: '2026-11-16T09:00:20Z' },
+        },
+      ]);
+      expect(screen.getAllByText('now')).not.toHaveLength(0);
+
+      vi.advanceTimersByTime(60_000);
+      expect(screen.getAllByText('1m')).not.toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
