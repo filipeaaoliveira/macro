@@ -27,9 +27,16 @@ CREATE TABLE factory_run (
     CONSTRAINT factory_run_end CHECK ((outcome IS NULL) = (ended_at IS NULL))
 );
 
--- Deleting a user or a task document finds its Runs without a full scan.
+-- Deleting a user finds their Runs without a full scan.
 CREATE INDEX factory_run_user_id_idx ON factory_run (user_id);
-CREATE INDEX factory_run_task_id_idx ON factory_run (task_id) WHERE task_id IS NOT NULL;
+
+-- A task's Runs are listed for the person who started them, newest first:
+-- this index finds one person's Runs on one task in that order and stops at
+-- the page's end. Its leading column also finds a deleted task document's
+-- Runs.
+CREATE INDEX factory_run_task_owner_idx
+    ON factory_run (task_id, user_id, created_at DESC, id DESC)
+    WHERE task_id IS NOT NULL;
 
 -- A Step belongs to its Run and goes with it. `seq` is its place among the
 -- Run's Steps; a reset numbers an entry's visits from 1 again, but never
