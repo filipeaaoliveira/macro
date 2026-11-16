@@ -691,3 +691,27 @@ async fn cancelling_a_run_whose_workflow_completed_is_a_conflict() {
 
     assert!(matches!(refused, Err(FactoryError::RunEnded)));
 }
+
+/// A Run kept when Temporal could not say whether its workflow started,
+/// and whose workflow never came, ends failed once it is old enough; a new
+/// Run waiting for its first Step is left alone.
+#[tokio::test]
+async fn reading_a_run_whose_workflow_never_started_ends_it() {
+    let repo = FakeRepo::default();
+    let workflows = FakeWorkflows::default();
+    let stuck = julia_s_run(&repo).await;
+    let new = julia_s_run(&repo).await;
+    if let Some(run) = repo.runs.lock().expect("runs").get_mut(&stuck) {
+        run.created_at -= chrono::TimeDelta::minutes(10);
+    }
+    let service = service(&repo, &workflows);
+
+    let stuck = service.get_run(&julia(), stuck).await.expect("read");
+    let new = service.get_run(&julia(), new).await.expect("read");
+
+    assert_eq!(
+        stuck.run.end.map(|end| end.outcome),
+        Some(RunOutcome::Failed)
+    );
+    assert_eq!(new.run.end, None);
+}

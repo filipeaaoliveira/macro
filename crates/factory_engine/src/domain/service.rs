@@ -11,6 +11,7 @@ use factory_records::domain::models::{
 };
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
+use chrono::Utc;
 use uuid::Uuid;
 
 use crate::domain::flow::Flow;
@@ -36,6 +37,10 @@ impl From<RunWorkflowsError> for FactoryError {
         }
     }
 }
+
+/// How old a Run with no Step and no workflow must be before it counts as
+/// one whose workflow never started.
+const UNSTARTED_AFTER: chrono::TimeDelta = chrono::TimeDelta::minutes(5);
 
 /// The Run API, over the Run records, the Runs' workflows, the worker that
 /// says which Steps it serves, and the people and tasks Runs name.
@@ -196,8 +201,25 @@ where
         actor: &MacroUserIdStr<'static>,
         id: RunId,
     ) -> Result<RunDetail, FactoryError> {
-        let run = self.owned_run(actor, id).await?;
+        let mut run = self.owned_run(actor, id).await?;
         let steps = self.repo.list_steps(id).await.map_err(internal)?;
+
+        // A Run kept when its workflow's start could not be checked, and
+        // whose workflow never came, would wait forever: once it is old
+        // enough that a started workflow would have taken a Step, and
+        // Temporal says it has no workflow, it ends failed.
+        let stale = Utc::now() - run.created_at > UNSTARTED_AFTER;
+        if run.end.is_none()
+            && steps.is_empty()
+            && stale
+            && let Ok(false) = self.workflows.exists(id).await
+        {
+            self.repo
+                .end_run(id, RunOutcome::Failed)
+                .await
+                .map_err(internal)?;
+            run = self.owned_run(actor, id).await?;
+        }
         Ok(RunDetail { run, steps })
     }
 
