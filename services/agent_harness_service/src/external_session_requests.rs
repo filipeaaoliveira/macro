@@ -33,16 +33,30 @@ pub trait RuntimeUsers: Send + Sync + 'static {
     fn runtime_user_for_bot(
         &self,
         bot: bot_id::BotId,
-    ) -> impl Future<Output = sqlx::Result<Option<String>>> + Send;
+    ) -> impl Future<Output = agent_session::domain::error::Result<Option<String>>> + Send;
 }
 
 impl RuntimeUsers for PgHarnessRepo {
-    fn runtime_user_for_bot(
+    async fn runtime_user_for_bot(
         &self,
         bot: bot_id::BotId,
-    ) -> impl Future<Output = sqlx::Result<Option<String>>> + Send {
+    ) -> agent_session::domain::error::Result<Option<String>> {
         PgHarnessRepo::runtime_user_for_bot(self, bot)
+            .await
+            .map_err(|error| AgentSessionError::Unknown(anyhow::anyhow!(error)))
     }
+}
+
+/// Who started the session and where it is shown, when either differs from
+/// what a runtime records on a session it creates: a person's, listed. The
+/// requester records them on the row once it exists, so a hidden background
+/// session, such as a routine draft's, is hidden and deletable on a
+/// runtime's agent as it is on a managed one.
+fn origin_to_record(
+    request: &RequestedExternalSession,
+) -> Option<(SessionSource, SessionVisibility)> {
+    (request.source != SessionSource::User || request.visibility != SessionVisibility::default())
+        .then_some((request.source, request.visibility))
 }
 
 /// [`ExternalSessionRequester`] over the trigger topic and the session table.
@@ -77,7 +91,7 @@ where
     ) -> agent_session::domain::error::Result<AgentSession> {
         let session_id = request.session_id;
         // What the runtime does not record on the row it creates.
-        let origin = request.origin_to_record();
+        let origin = origin_to_record(&request);
         // A caller-named id that already holds a session is taken, whoever's
         // it is: answering with it would hand a retry or a racing create a
         // session this request did not open, and its first prompt with it.
@@ -88,11 +102,7 @@ where
         }
         // The runtime's stream authenticates as its harness's owner, not as
         // whichever teammate asked, so the request names both.
-        let runtime_user = self
-            .harnesses
-            .runtime_user_for_bot(request.bot_id)
-            .await
-            .map_err(|error| AgentSessionError::Unknown(anyhow::anyhow!(error)))?;
+        let runtime_user = self.harnesses.runtime_user_for_bot(request.bot_id).await?;
         let event = AgentSessionMacroEvent::requested_event(AgentSessionRequestedEvent {
             bot_id: request.bot_id,
             repo_url: request.repo_url,

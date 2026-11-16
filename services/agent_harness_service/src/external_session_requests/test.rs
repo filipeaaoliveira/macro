@@ -57,7 +57,10 @@ impl MacroEventBroker for Runtime {
 struct Owners;
 
 impl RuntimeUsers for Owners {
-    async fn runtime_user_for_bot(&self, _bot: BotId) -> sqlx::Result<Option<String>> {
+    async fn runtime_user_for_bot(
+        &self,
+        _bot: BotId,
+    ) -> agent_session::domain::error::Result<Option<String>> {
         Ok(Some(owner().as_ref().to_owned()))
     }
 }
