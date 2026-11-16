@@ -240,6 +240,7 @@ impl<Directory: CodingAgentDirectory, Sessions: RoutineSessions, Updates: Coding
                 .prepare(PrepareRoutineSession {
                     billing: Default::default(),
                     instructions: None,
+                    repo_url: None,
                     selection: ValidateRoutineSession {
                         owner: command.user_id.clone(),
                         bot_id,

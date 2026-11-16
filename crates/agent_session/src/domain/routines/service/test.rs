@@ -281,6 +281,7 @@ impl Fixture {
             session_id: self.session.id,
             source: SessionSource::Routine,
             visibility: SessionVisibility::Unlisted,
+            repo_url: None,
         }
     }
 
@@ -330,6 +331,24 @@ async fn managed_preparation_opens_the_session_with_the_openers_instructions() {
     fx.service.prepare(command).await.unwrap();
     let requests = fx.openings.managed.lock().unwrap();
     assert_eq!(requests[0].instructions.as_deref(), Some("Draft routines"));
+}
+
+/// A session that works in a repository has its runtime check it out,
+/// managed or external.
+#[tokio::test]
+async fn preparation_hands_the_runtime_the_session_s_repository() {
+    for managed in [true, false] {
+        let fx = Fixture::new(managed);
+        let mut command = fx.prepare();
+        command.repo_url = Some("https://github.com/macro/app".to_owned());
+        fx.service.prepare(command).await.unwrap();
+        let repo_url = if managed {
+            fx.openings.managed.lock().unwrap()[0].repo_url.clone()
+        } else {
+            fx.openings.external.lock().unwrap()[0].repo_url.clone()
+        };
+        assert_eq!(repo_url.as_deref(), Some("https://github.com/macro/app"));
+    }
 }
 
 #[tokio::test]

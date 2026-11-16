@@ -187,7 +187,7 @@ where
                 self.opener
                     .open_managed_session(OpenManagedSession {
                         id: Some(command.session_id),
-                        repo_url: None,
+                        repo_url: command.repo_url,
                         repo_branch: None,
                         owner: owner.clone(),
                         prompt: None,
@@ -207,7 +207,7 @@ where
                         session_id: command.session_id,
                         bot_id,
                         owner: selection.owner,
-                        repo_url: None,
+                        repo_url: command.repo_url,
                         model: selection.model.clone(),
                         source: command.source,
                         visibility: command.visibility,
