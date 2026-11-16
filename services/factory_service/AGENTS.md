@@ -40,7 +40,8 @@ worker that walks each Run's Flow, in one process.
 
 - `FACTORY_AGENT_ID` names the agent (a bot id) whose sessions do the agent
   Steps, as each Run's owner; the owner must be allowed to use it. Unset, the
-  agent Steps run on `LocalAgent`, which does no work. A macrod agent's
+  agent Steps run on `LocalAgent`, which does no work. Locally, set it in the
+  `--env-file` the stack is started with (`docs/development/running-locally.md`). A macrod agent's
   sessions need its machine connected, and routine apps are refused for it.
 
 - Local-only: the local stack runs a Temporal dev server (`temporal`, UI on

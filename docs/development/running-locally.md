@@ -369,6 +369,7 @@ A `--no-doppler` stack supplies deterministic stubs for required configuration. 
 | Microsoft login / Outlook | `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET`, `MICROSOFT_TENANT_ID` | The Outlook emulator answers in Microsoft's place: Microsoft sign-in, Outlook linking and Outlook calendar sync work with its seeded users, never a real account. A real client id switches the emulator off. |
 | GitHub login | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_IDP_ID` | Login with GitHub is unavailable |
 | Stripe billing | `STRIPE_SECRET_KEY`, `STRIPE_PRICE_ID` | Checkout and subscription endpoints fail. Signup skips Stripe and leaves profile billing unset, so free-team creation works. Only the required legacy account field stores a local placeholder. |
+| Software factory agent | `FACTORY_AGENT_ID` | The factory's agent Steps run on a stand-in that does no work. Set it to the id of an agent the Run's owner may use (a machine's agent, for example) to run them in that agent's sessions. |
 | CloudFront signed URLs | `DOCUMENT_STORAGE_SERVICE_CLOUDFRONT_DISTRIBUTION_URL`, `DOCUMENT_STORAGE_SERVICE_CLOUDFRONT_SIGNER_PUBLIC_KEY_ID`, `DOCUMENT_STORAGE_SERVICE_CLOUDFRONT_SIGNER_PRIVATE_KEY` | Document download URLs are unsigned (fine against local S3) |
 
 The other stubbed keys (`REDIS_HOST`, `MACRO_DB_URL`, `INTERNAL_API_KEY`, `AUTHENTICATION_SERVICE_SECRET_KEY`, `ACCOUNT_LINK_STATE_SECRET`, `OPENSEARCH_USERNAME`, `OPENSEARCH_PASSWORD`) are internal plumbing with correct local values — you never need to override them.
@@ -380,7 +381,7 @@ to `run_local`:
 just run_local --no-doppler --env-file ./local.env
 ```
 
-Keys in the file override the code-defined defaults, so you only need to list the integrations you care about. With Doppler access, `just run_local` (without `--no-doppler`) supplies everything automatically.
+Keys in the file override the code-defined defaults, so you only need to list the integrations you care about. The stack records the file, so a later `just run_local rebuild` or `just stack update`, which regenerates the env, keeps its keys. Keep a file with personal ids or keys outside the repository, for example `~/.config/macro/local.env`. With Doppler access, `just run_local` (without `--no-doppler`) supplies everything automatically.
 
 ## Tracing, Logs, and the Debug Browser
 
