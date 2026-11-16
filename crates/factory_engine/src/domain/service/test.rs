@@ -126,6 +126,15 @@ impl StepExecutor for FakeExecutor {
     ) -> Result<(), WorkFailure> {
         Ok(())
     }
+
+    async fn release(
+        &self,
+        _step: &StepName,
+        _key: StepKey,
+        _owner: &MacroUserIdStr<'static>,
+    ) -> Result<(), WorkFailure> {
+        Ok(())
+    }
 }
 
 fn julia() -> MacroUserIdStr<'static> {

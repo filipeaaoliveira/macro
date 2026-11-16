@@ -44,6 +44,14 @@ impl StepAgent for FakeAgent {
         Ok(())
     }
 
+    async fn release(
+        &self,
+        _key: StepKey,
+        _owner: &MacroUserIdStr<'static>,
+    ) -> Result<(), FakeError> {
+        Ok(())
+    }
+
     async fn answer(&self, task: AgentTask) -> Result<AgentAnswer, FakeError> {
         self.tasks.lock().expect("tasks").push(task);
         Ok(AgentAnswer {

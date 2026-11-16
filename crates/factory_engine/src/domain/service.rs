@@ -448,6 +448,16 @@ where
         Ok(())
     }
 
+    #[tracing::instrument(err, skip_all, fields(run_id = %request.key.run_id, seq = request.key.seq))]
+    async fn release_step(&self, request: StepRequest) -> Result<(), StepError> {
+        let run = self.run_of(&request).await?;
+        self.executor
+            .release(&request.step, request.key, &run.user_id)
+            .await
+            .map_err(internal)?;
+        Ok(())
+    }
+
     #[tracing::instrument(err, skip_all, fields(run_id = %ending.key.run_id, seq = ending.key.seq, outcome = %ending.report.outcome))]
     async fn end_step(&self, ending: StepEnding) -> Result<(), StepError> {
         self.repo

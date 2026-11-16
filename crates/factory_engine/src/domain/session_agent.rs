@@ -252,6 +252,14 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
         }
     }
 
+    /// Ask the session to stop its turn. A stop that fails is logged: the
+    /// caller watches the session to tell whether it still works.
+    async fn cancel(&self, action: &RoutineSessionAction) {
+        if let Err(error) = self.sessions.cancel(action.clone()).await {
+            tracing::warn!(?error, "a factory step's agent session was not stopped");
+        }
+    }
+
     /// Wait for the first prompt's turn to end.
     async fn finished(&self, action: &RoutineSessionAction) -> Result<(), SessionAgentError> {
         let started = tokio::time::Instant::now();
@@ -308,13 +316,14 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
         self.prompt_once(&task, &action).await?;
         self.finished(&action).await?;
 
+        // The session stays until the Step's end is recorded: a retry of an
+        // attempt whose answer Temporal lost goes on in it.
         let handed = self
             .repo
             .handed_back(task.key)
             .await
             .map_err(Self::records)?
             .ok_or(SessionAgentError::NothingHandedBack)?;
-        self.delete(&action).await;
         Ok(AgentAnswer {
             outcome: handed.outcome,
             text: handed.output,
@@ -338,9 +347,12 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
 
         // A prompt already on its way can land after the first stop and
         // start the turn again, so the stop is sent again while the session
-        // still works, until its turn has ended or the watch is over.
+        // still works, until its turn has ended or the watch is over. A stop
+        // that fails is not the Step's failure: a session that was claimed
+        // but never opened has nothing to stop, and a session that works on
+        // is stopped again by the watch. The session is deleted either way.
         let action = self.action(owner, session);
-        self.sessions.cancel(action.clone()).await?;
+        self.cancel(&action).await;
         let deadline = tokio::time::Instant::now() + STOP_WATCH;
         let mut wait = FIRST_LOOK;
         while tokio::time::Instant::now() < deadline {
@@ -350,12 +362,27 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
                 Ok(RoutineActionStatus::Succeeded | RoutineActionStatus::Failed(_)) => break,
                 Ok(RoutineActionStatus::Pending(RoutinePendingReason::AwaitingPrompt)) | Err(_) => {
                 }
-                Ok(RoutineActionStatus::Pending(_)) => {
-                    self.sessions.cancel(action.clone()).await?;
-                }
+                Ok(RoutineActionStatus::Pending(_)) => self.cancel(&action).await,
             }
         }
         self.delete(&action).await;
+        Ok(())
+    }
+
+    #[tracing::instrument(err, skip_all, fields(run_id = %key.run_id, seq = key.seq))]
+    async fn release(
+        &self,
+        key: StepKey,
+        owner: &MacroUserIdStr<'static>,
+    ) -> Result<(), SessionAgentError> {
+        let claimed = self
+            .repo
+            .claimed_session(key)
+            .await
+            .map_err(Self::records)?;
+        if let Some(session) = claimed {
+            self.delete(&self.action(owner, session)).await;
+        }
         Ok(())
     }
 }

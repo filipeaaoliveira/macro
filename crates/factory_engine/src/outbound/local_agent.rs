@@ -41,4 +41,12 @@ impl StepAgent for LocalAgent {
     async fn stop(&self, _key: StepKey, _owner: &MacroUserIdStr<'static>) -> Result<(), NoOutcome> {
         Ok(())
     }
+
+    async fn release(
+        &self,
+        _key: StepKey,
+        _owner: &MacroUserIdStr<'static>,
+    ) -> Result<(), NoOutcome> {
+        Ok(())
+    }
 }

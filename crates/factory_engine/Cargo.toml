@@ -42,7 +42,7 @@ workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]
 macro_authorization = { path = "../macro_authorization", default-features = false, features = ["axum", "outbound"] }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "test-util"] }
 tower = { workspace = true }
 
 [package.metadata.cargo-shear]

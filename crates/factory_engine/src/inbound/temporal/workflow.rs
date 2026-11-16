@@ -10,9 +10,12 @@
 //! recorded outcomes and answers.
 //!
 //! Cancelling the workflow cancels the running Step, whose activity drops
-//! its work and asks the Step's agent to stop before the cancellation
-//! completes, or the wait for an answer; the Run's end is then recorded as
-//! `cancelled`, which also ends its open Steps.
+//! its work before the cancellation completes, or the wait for an answer.
+//! The workflow then stops the Step's agent, which only it can tell was
+//! cancelled with the Run, and records the Run's end as `cancelled`, which
+//! also ends its open Steps. A Step whose work failed for good has its agent
+//! stopped too; one that ended has its agent let go once its end is
+//! recorded.
 
 use std::time::Duration;
 
@@ -48,6 +51,10 @@ const STEP_ATTEMPTS: u32 = 3;
 /// How long recording a Step, a Gate or a Run's end may take.
 const RECORD_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// How long one attempt to stop a Step's agent may take: past the agent's
+/// own watch of its stopped session, and the session's delete.
+const STOP_TIMEOUT: Duration = Duration::from_secs(3 * 60);
+
 /// The workflow of one Run.
 #[workflow]
 #[derive(Default)]
@@ -68,9 +75,9 @@ impl FlowWorkflow {
     ) -> WorkflowResult<RunOutcome> {
         let interpreter = Interpreter::new(&start.flow);
         let mut state = interpreter.start();
-        // The Step's work is dropped and its agent asked to stop before its
-        // cancellation completes, and the Run's `cancelled` end closes the
-        // Step, so a late end of it records nothing.
+        // The Step's work is dropped before its cancellation completes, so
+        // the agent is stopped after it, and the Run's `cancelled` end
+        // closes the Step, so a late end of it records nothing.
         let work_options = ActivityOptions::with_start_to_close_timeout(STEP_TIMEOUT)
             .heartbeat_timeout(STEP_HEARTBEAT_TIMEOUT)
             .cancellation_type(ActivityCancellationType::WaitCancellationCompleted)
@@ -81,19 +88,13 @@ impl FlowWorkflow {
             )
             .build();
         let record_options = ActivityOptions::start_to_close_timeout(RECORD_TIMEOUT);
-        // Stopping a failed Step's agent is tried a few times, then given up
-        // on: the Step's end must not wait on an agent that won't answer.
-        let stop_options = ActivityOptions::with_start_to_close_timeout(RECORD_TIMEOUT)
-            .retry_policy(
-                RetryPolicy::builder()
-                    .maximum_attempts(STEP_ATTEMPTS)
-                    .build(),
-            )
-            .build();
 
         // A Flow that cannot go on still records the Run's end, then fails
         // the workflow with why, for Temporal to show.
         let mut stopped = None;
+        // The Step whose agent may still hold what its work used: from its
+        // work's start until the agent is stopped or let go.
+        let mut held = None;
         let outcome = loop {
             let next = match interpreter.next_step(&mut state) {
                 Ok(next) => next,
@@ -134,6 +135,7 @@ impl FlowWorkflow {
             // A Step that still fails after its retries ends `failed`, with
             // why as its output; the Flow may route it like any other
             // outcome. A Step stopped by cancelling the Run ends the Run.
+            held = Some(request.clone());
             let worked = ctx
                 .execute_activity(
                     FactoryActivities::run_step,
@@ -147,16 +149,8 @@ impl FlowWorkflow {
                 Err(_) => {
                     // The work failed for good: stop its agent, so an entry
                     // that fixes or retries it never runs beside it.
-                    let stopped = ctx
-                        .execute_activity(
-                            FactoryActivities::stop_step,
-                            request.clone(),
-                            stop_options.clone(),
-                        )
-                        .await;
-                    if stopped.is_err() && is_cancelled(ctx) {
-                        break RunOutcome::Cancelled;
-                    }
+                    stop(ctx, &request).await;
+                    held = None;
                     // The owner reads the output; why the work failed is
                     // internal detail, which the worker logged.
                     StepReport {
@@ -180,6 +174,25 @@ impl FlowWorkflow {
                 ended?;
             }
 
+            // No attempt of the Step's work comes once its end is recorded,
+            // so its agent lets go of the Step's session.
+            if held.take().is_some() {
+                let released = ctx
+                    .execute_activity(
+                        FactoryActivities::release_step,
+                        request.clone(),
+                        record_options.clone(),
+                    )
+                    .await;
+                if released.is_err() {
+                    if is_cancelled(ctx) {
+                        held = Some(request.clone());
+                        break RunOutcome::Cancelled;
+                    }
+                    released?;
+                }
+            }
+
             let outcome = match &entry.gate {
                 Some(gate) if reported == Outcome::done() => match ask(ctx, key, gate).await {
                     Ok(answer) => answer,
@@ -193,6 +206,13 @@ impl FlowWorkflow {
                 break RunOutcome::Failed;
             }
         };
+
+        // A cancelled Run's Step may still have its agent at work.
+        if outcome == RunOutcome::Cancelled
+            && let Some(request) = held
+        {
+            stop(ctx, &request).await;
+        }
 
         // A cancelled workflow records its end on a token of its own, which
         // the cancellation does not reach.
@@ -232,6 +252,27 @@ impl FlowWorkflow {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         check_answer(self.open.as_ref(), self.answer.is_some(), answer).map_err(Into::into)
     }
+}
+
+/// Stop the agent of the Step `request`, for good: after the Run was
+/// cancelled, on a token of its own the cancellation does not reach, or after
+/// its work failed for good. It is tried a few times, then given up on: the
+/// Run must not wait on an agent that won't answer.
+async fn stop(ctx: &mut WorkflowContext<FlowWorkflow>, request: &StepRequest) {
+    let options = ActivityOptions::with_start_to_close_timeout(STOP_TIMEOUT)
+        .heartbeat_timeout(STEP_HEARTBEAT_TIMEOUT)
+        .cancellation_token(WorkflowCancellationToken::new())
+        .retry_policy(
+            RetryPolicy::builder()
+                .maximum_attempts(STEP_ATTEMPTS)
+                .build(),
+        )
+        .build();
+    // A stop given up on shows in the workflow's history; the worker logged
+    // why.
+    let _ = ctx
+        .execute_activity(FactoryActivities::stop_step, request.clone(), options)
+        .await;
 }
 
 /// Whether the Run's workflow was cancelled.

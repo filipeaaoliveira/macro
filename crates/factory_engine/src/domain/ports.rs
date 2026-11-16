@@ -82,10 +82,19 @@ pub trait StepExecutor: Send + Sync + 'static {
         input: StepInput<'_>,
     ) -> impl Future<Output = Result<StepReport, Self::Err>> + Send;
 
-    /// Stop the work of the Step `key`, which its Run's cancellation cut
-    /// short. Stopping work that never started, or that ended, changes
-    /// nothing.
+    /// Stop the work of the Step `key` for good, as its Run was cancelled or
+    /// its work failed for good, and let go of what it held. Stopping work
+    /// that never started, or that ended, changes nothing.
     fn stop(
+        &self,
+        step: &StepName,
+        key: StepKey,
+        owner: &MacroUserIdStr<'static>,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// Let go of what the work of the Step `key` held, once its end is
+    /// recorded. No retry of its work comes after that.
+    fn release(
         &self,
         step: &StepName,
         key: StepKey,
@@ -106,8 +115,16 @@ pub trait StepAgent: Send + Sync + 'static {
         task: AgentTask,
     ) -> impl Future<Output = Result<AgentAnswer, Self::Err>> + Send;
 
-    /// Stop working on the Step `key` for `owner`.
+    /// Stop working on the Step `key` for `owner`, for good.
     fn stop(
+        &self,
+        key: StepKey,
+        owner: &MacroUserIdStr<'static>,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// Let go of the Step `key`'s work for `owner`, which ended and whose end
+    /// is recorded.
+    fn release(
         &self,
         key: StepKey,
         owner: &MacroUserIdStr<'static>,
@@ -225,9 +242,16 @@ pub trait StepService: Send + Sync + 'static {
         request: StepRequest,
     ) -> impl Future<Output = Result<StepReport, StepError>> + Send;
 
-    /// Stop a Step whose Run was cancelled while it worked.
+    /// Stop a Step whose Run was cancelled while it worked, or whose work
+    /// failed for good.
     fn stop_step(&self, request: StepRequest)
     -> impl Future<Output = Result<(), StepError>> + Send;
+
+    /// Let go of what a Step's work held, once its end is recorded.
+    fn release_step(
+        &self,
+        request: StepRequest,
+    ) -> impl Future<Output = Result<(), StepError>> + Send;
 
     /// Record how a Step ended.
     fn end_step(&self, ending: StepEnding) -> impl Future<Output = Result<(), StepError>> + Send;

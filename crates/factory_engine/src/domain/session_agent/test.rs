@@ -38,7 +38,8 @@ const WORKS: Reply = Reply {
 /// lands; the prompt is in its history once a prompt lands, and the agent
 /// then hands `handed` back. The turn ends with `ending`; until the prompt
 /// lands the status says `AwaitingPrompt`. Each call takes its next reply,
-/// else works.
+/// else works. A deleted session is gone: a later prepare opens a new one
+/// under its id.
 #[derive(Clone)]
 struct FakeSessions {
     repo: FakeRepo,
@@ -182,12 +183,21 @@ impl RoutineSessions for FakeSessions {
     }
 
     async fn cancel(&self, command: RoutineSessionAction) -> Result<(), RoutineSessionError> {
+        if !*self.open.lock().expect("open") {
+            return Err(RoutineSessionError::OperationFailed);
+        }
         self.cancelled.lock().expect("cancelled").push(command);
         Ok(())
     }
 
     async fn delete(&self, command: RoutineSessionAction) -> Result<(), RoutineSessionError> {
         self.deleted.lock().expect("deleted").push(command);
+        let mut open = self.open.lock().expect("open");
+        if !*open {
+            return Err(RoutineSessionError::OperationFailed);
+        }
+        *open = false;
+        *self.prompted.lock().expect("prompted") = false;
         Ok(())
     }
 }
@@ -249,10 +259,7 @@ async fn a_step_runs_in_a_session_of_its_owner_and_returns_what_the_agent_handed
     assert_eq!(prepared.len(), 1);
     assert_eq!(prepared[0].selection.owner, julia());
     assert_eq!(prepared[0].visibility, SessionVisibility::Hidden);
-    assert_eq!(
-        sessions.deleted.lock().expect("deleted")[0].session_id,
-        prepared[0].session_id
-    );
+    assert!(sessions.deleted.lock().expect("deleted").is_empty());
     let prompts = sessions.prompt_calls.lock().expect("prompts");
     assert_eq!(prompts.len(), 1);
     assert!(prompts[0].prompt.starts_with("Plan the change"));
@@ -261,7 +268,9 @@ async fn a_step_runs_in_a_session_of_its_owner_and_returns_what_the_agent_handed
 
 /// A retry whose first attempt opened and prompted the session finds both
 /// done: the session's conflict on prepare says it is open, and its status
-/// shows the prompt, so nothing is sent again.
+/// shows the prompt, so nothing is sent again. That holds for a retry after
+/// an attempt whose answer Temporal lost: the session stays until the Step's
+/// end is recorded.
 #[tokio::test]
 async fn a_retried_step_goes_on_in_the_session_it_already_prompted() {
     let repo = FakeRepo::default();
@@ -276,6 +285,31 @@ async fn a_retried_step_goes_on_in_the_session_it_already_prompted() {
 
     assert_eq!(answer.text, "Add a toggle to the settings page");
     assert_eq!(sessions.prompts(), 1);
+    assert!(sessions.deleted.lock().expect("deleted").is_empty());
+}
+
+/// Once the Step's end is recorded, its session is deleted.
+#[tokio::test]
+async fn releasing_a_step_deletes_its_session() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
+    let task = plan_task(&repo).await;
+    let key = task.key;
+    agent(&sessions, &repo).answer(task).await.expect("answer");
+
+    agent(&sessions, &repo)
+        .release(key, &julia())
+        .await
+        .expect("release");
+
+    let claimed = repo
+        .claimed_session(key)
+        .await
+        .expect("read")
+        .expect("claimed");
+    let deleted = sessions.deleted.lock().expect("deleted");
+    assert_eq!(deleted.len(), 1);
+    assert_eq!(deleted[0].session_id.as_uuid(), claimed.session_id);
 }
 
 /// A prepare that timed out at a gateway may still have opened the session:
@@ -411,4 +445,30 @@ async fn stopping_a_step_stops_its_session_until_the_turn_ends() {
             .iter()
             .all(|stop| stop.session_id.as_uuid() == claimed.session_id)
     );
+}
+
+/// A Step stopped before its session opened has nothing to stop; the delete
+/// is still tried, and the stop does not fail.
+#[tokio::test(start_paused = true)]
+async fn stopping_a_step_whose_session_never_opened_succeeds() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
+    let task = plan_task(&repo).await;
+    repo.claim_session(
+        task.key,
+        StepSession {
+            session_id: Uuid::now_v7(),
+            action_id: Uuid::now_v7(),
+        },
+        &task.outcomes,
+    )
+    .await
+    .expect("claim");
+
+    agent(&sessions, &repo)
+        .stop(task.key, &julia())
+        .await
+        .expect("stop");
+
+    assert_eq!(sessions.deleted.lock().expect("deleted").len(), 1);
 }

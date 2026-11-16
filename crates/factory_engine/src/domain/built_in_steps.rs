@@ -175,6 +175,23 @@ impl<A: StepAgent> StepExecutor for BuiltInSteps<A> {
             Some(BuiltInStep::Reply) | None => Ok(()),
         }
     }
+
+    async fn release(
+        &self,
+        step: &StepName,
+        key: StepKey,
+        owner: &MacroUserIdStr<'static>,
+    ) -> Result<(), BuiltInStepError> {
+        match BuiltInStep::named(step) {
+            Some(BuiltInStep::Plan | BuiltInStep::Write) => self
+                .agent
+                .release(key, owner)
+                .await
+                .map_err(BuiltInStepError::agent),
+            // A reply holds nothing.
+            Some(BuiltInStep::Reply) | None => Ok(()),
+        }
+    }
 }
 
 /// The most bytes of the Run's earlier Steps a prompt carries.
