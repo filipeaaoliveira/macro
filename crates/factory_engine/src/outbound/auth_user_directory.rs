@@ -1,5 +1,10 @@
 //! [`UserDirectory`] over the authentication service, which owns accounts.
 
+#[cfg(test)]
+mod test;
+
+use std::collections::HashSet;
+
 use authentication_service_client::AuthServiceClient;
 use macro_user_id::user_id::MacroUserIdStr;
 
@@ -36,6 +41,13 @@ impl UserDirectory for AuthUserDirectory {
             .get_existing_users(&[user_id.as_ref()])
             .await
             .map_err(|error| AuthUserDirectoryErr(rootcause::report!("{error:#}")))?;
-        Ok(existing.contains(user_id.as_ref()))
+        Ok(names(&existing, user_id.as_ref()))
     }
+}
+
+/// Whether the ids the authentication service says exist name `user_id`. It
+/// answers with the ids it stores, which it lowercases, so the comparison
+/// ignores case.
+fn names(existing: &HashSet<String>, user_id: &str) -> bool {
+    existing.iter().any(|id| id.eq_ignore_ascii_case(user_id))
 }
