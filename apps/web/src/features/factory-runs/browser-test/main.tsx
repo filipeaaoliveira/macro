@@ -1,0 +1,242 @@
+import { SidePanel } from '@components/app/side-panel';
+import { ToastRegion } from '@core/component/Toast/ToastRegion';
+import { UserContextProvider } from '@core/context/user';
+import { queryClient } from '@queries/client';
+import { QueryClientProvider } from '@tanstack/solid-query';
+import { ImperativeDialogHost } from '@ui';
+import { type Accessor, createSignal } from 'solid-js';
+import { render } from 'solid-js/web';
+import '@fontsource-variable/inter';
+import '../../../index.css';
+import { type RunsContext, RunsProvider } from '../context/runs-context';
+import type { Run } from '../core/run';
+import { TaskRunsSection } from '../views/task-runs-section';
+
+const MINUTE = 60_000;
+const at = (minutesAgo: number) =>
+  new Date(Date.now() - minutesAgo * MINUTE).toISOString();
+
+const PLAN = `Add a **Due date** column to the task list.
+
+1. Read the due date property in \`use-tasks-query.ts\` and sort on it.
+2. Render it in the list row beside Assignees, with the calendar icon.
+3. Cover the empty state with the slashed calendar.`;
+
+// A Run waiting on a person, one still running, and two that ended.
+const INITIAL_RUNS: Run[] = [
+  {
+    id: 'run-waiting',
+    request: 'Add a due date column to the task list\n\nSort by it too.',
+    createdAt: at(12),
+    taskId: 'task-1',
+    steps: [
+      {
+        entry: 'plan',
+        visit: 1,
+        startedAt: at(12),
+        end: { outcome: 'done', output: 'A first plan.', endedAt: at(10) },
+        gate: {
+          question:
+            'Approve this plan, or send it back with a note on what to change?',
+          answers: ['approve', 'revise'],
+          openedAt: at(10),
+          answer: {
+            answer: 'revise',
+            note: 'Keep the column narrow.',
+            answeredAt: at(8),
+          },
+        },
+      },
+      {
+        entry: 'plan',
+        visit: 2,
+        startedAt: at(8),
+        end: { outcome: 'done', output: PLAN, endedAt: at(6) },
+        gate: {
+          question:
+            'Approve this plan, or send it back with a note on what to change?',
+          answers: ['approve', 'revise'],
+          openedAt: at(6),
+        },
+      },
+    ],
+  },
+  {
+    id: 'run-running',
+    request: 'Fix the empty state of the board',
+    createdAt: at(40),
+    taskId: 'task-1',
+    steps: [
+      {
+        entry: 'plan',
+        visit: 1,
+        startedAt: at(40),
+        end: {
+          outcome: 'done',
+          output: 'Use the shared empty state.',
+          endedAt: at(38),
+        },
+      },
+      {
+        entry: 'write',
+        visit: 1,
+        startedAt: at(38),
+        end: { outcome: 'done', output: 'Changed two files.', endedAt: at(30) },
+      },
+      { entry: 'review', visit: 1, startedAt: at(30) },
+    ],
+  },
+  {
+    id: 'run-done',
+    request: 'Rename the Updated column',
+    createdAt: at(60 * 26),
+    taskId: 'task-1',
+    end: { outcome: 'success', endedAt: at(60 * 25) },
+    steps: [
+      {
+        entry: 'write',
+        visit: 1,
+        startedAt: at(60 * 26),
+        end: { outcome: 'done', output: 'Renamed it.', endedAt: at(60 * 25) },
+      },
+    ],
+  },
+  {
+    id: 'run-cancelled',
+    request: 'Try a denser row layout',
+    createdAt: at(60 * 24 * 3),
+    taskId: 'task-1',
+    end: { outcome: 'cancelled', endedAt: at(60 * 24 * 3 - 5) },
+    steps: [],
+  },
+];
+
+/** A factory in memory: Runs move on when a Gate is answered or a Run ends. */
+function createFixtureContext(): RunsContext {
+  const [runs, setRuns] = createSignal(INITIAL_RUNS);
+  const update = (id: string, change: (run: Run) => Run) =>
+    setRuns((current) =>
+      current.map((run) => (run.id === id ? change(run) : run))
+    );
+  const ready = <T,>(data: Accessor<T>) => ({
+    state: () => 'ready' as const,
+    data,
+    retry: () => {},
+  });
+
+  return {
+    taskRuns: () => ready(runs),
+    run: (runId) => ready(() => runs().find((run) => run.id === runId())),
+    flows: () =>
+      ready(() => [
+        {
+          name: 'plan',
+          description:
+            'Plans the change, asks you to approve the plan, then writes it.',
+        },
+        {
+          name: 'code',
+          description:
+            'Takes the task to a merged pull request: plan, write, review, publish, CI, merge.',
+        },
+      ]),
+    async startRun(input) {
+      const run: Run = {
+        id: `run-${runs().length + 1}`,
+        request: input.request,
+        createdAt: new Date().toISOString(),
+        taskId: input.taskId,
+        steps: [
+          { entry: 'plan', visit: 1, startedAt: new Date().toISOString() },
+        ],
+      };
+      setRuns((current) => [run, ...current]);
+      return { ok: true, value: run };
+    },
+    async answerGate(input) {
+      const run = runs().find((candidate) => candidate.id === input.runId);
+      const step = run?.steps.at(-1);
+      // A second answer, like the service's 409.
+      if (!step?.gate || step.gate.answer) {
+        return { ok: false, reason: 'conflict' };
+      }
+      const now = new Date().toISOString();
+      update(input.runId, (current) => ({
+        ...current,
+        steps: [
+          ...current.steps.slice(0, -1),
+          {
+            ...step,
+            gate: step.gate && {
+              ...step.gate,
+              answer: {
+                answer: input.answer,
+                note: input.note,
+                answeredAt: now,
+              },
+            },
+          },
+          {
+            entry: input.answer === 'approve' ? 'write' : 'plan',
+            visit: input.answer === 'approve' ? 1 : step.visit + 1,
+            startedAt: now,
+          },
+        ],
+      }));
+      return { ok: true, value: undefined };
+    },
+    async cancelRun(runId) {
+      const run = runs().find((candidate) => candidate.id === runId);
+      if (run?.end) return { ok: false, reason: 'conflict' };
+      update(runId, (current) => ({
+        ...current,
+        end: { outcome: 'cancelled', endedAt: new Date().toISOString() },
+      }));
+      return { ok: true, value: undefined };
+    },
+  };
+}
+
+function Fixture() {
+  return (
+    <main class="flex h-dvh flex-col bg-page p-3">
+      <SidePanel.Root
+        floating
+        persistentFloating
+        defaultOpen
+        persistKey="factory-runs-test"
+      >
+        <SidePanel.Toggle />
+        <div class="relative min-h-0 flex-1">
+          <SidePanel.Layout headerToggle={false} floating persistentFloating>
+            <SidePanel.Section
+              id="properties"
+              title="Properties"
+              defaultOpen
+              order={25}
+            >
+              <span class="text-xs text-ink-placeholder">Status, Priority</span>
+            </SidePanel.Section>
+            <RunsProvider value={createFixtureContext()}>
+              <TaskRunsSection taskId="task-1" order={36} />
+            </RunsProvider>
+            <section class="size-full" aria-label="Task" />
+          </SidePanel.Layout>
+        </div>
+      </SidePanel.Root>
+      <ImperativeDialogHost />
+      <ToastRegion />
+    </main>
+  );
+}
+
+render(
+  () => (
+    <QueryClientProvider client={queryClient}>
+      <UserContextProvider>
+        <Fixture />
+      </UserContextProvider>
+    </QueryClientProvider>
+  ),
+  document.getElementById('root')!
+);
