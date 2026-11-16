@@ -37,9 +37,9 @@ const WORKS: Reply = Reply {
 /// The agent sessions of one Step. The session is open once a prepare
 /// lands; the prompt is in its history once a prompt lands, and the agent
 /// then hands `handed` back. The turn ends with `ending`; until the prompt
-/// lands the status says `AwaitingPrompt`. Each call takes its next reply,
-/// else works. A deleted session is gone: a later prepare opens a new one
-/// under its id.
+/// lands the status says `AwaitingPrompt`, or `Disconnected` for a session
+/// whose runtime went away. Each call takes its next reply, else works. A
+/// deleted session is gone: a later prepare opens a new one under its id.
 #[derive(Clone)]
 struct FakeSessions {
     repo: FakeRepo,
@@ -51,6 +51,11 @@ struct FakeSessions {
     prompted: Arc<Mutex<bool>>,
     prepared_calls: Arc<Mutex<Vec<PrepareRoutineSession>>>,
     prompt_calls: Arc<Mutex<Vec<PromptRoutineSession>>>,
+    /// Prompts that landed in a session's history.
+    landed: Arc<Mutex<usize>>,
+    /// Reads of the status that fail before one works.
+    failing_reads: Arc<Mutex<usize>>,
+    disconnected: bool,
     cancelled: Arc<Mutex<Vec<RoutineSessionAction>>>,
     deleted: Arc<Mutex<Vec<RoutineSessionAction>>>,
     /// Stops the session ignores before its turn ends cancelled, as when a
@@ -70,6 +75,9 @@ impl FakeSessions {
             prompted: Arc::default(),
             prepared_calls: Arc::default(),
             prompt_calls: Arc::default(),
+            landed: Arc::default(),
+            failing_reads: Arc::default(),
+            disconnected: false,
             cancelled: Arc::default(),
             deleted: Arc::default(),
             ignored_stops: 0,
@@ -92,6 +100,10 @@ impl FakeSessions {
 
     fn prompts(&self) -> usize {
         self.prompt_calls.lock().expect("prompts").len()
+    }
+
+    fn landed(&self) -> usize {
+        *self.landed.lock().expect("landed")
     }
 }
 
@@ -145,6 +157,7 @@ impl RoutineSessions for FakeSessions {
             .unwrap_or(WORKS);
         if reply.lands {
             *self.prompted.lock().expect("prompted") = true;
+            *self.landed.lock().expect("landed") += 1;
             // The agent works and hands back from the session, as code mode
             // would through the Run API.
             if let Some(handed) = &self.handed {
@@ -167,6 +180,13 @@ impl RoutineSessions for FakeSessions {
         &self,
         _command: RoutineSessionAction,
     ) -> Result<RoutineActionStatus, RoutineSessionError> {
+        {
+            let mut failing = self.failing_reads.lock().expect("failing reads");
+            if *failing > 0 {
+                *failing -= 1;
+                return Err(RoutineSessionError::OperationFailed);
+            }
+        }
         if !*self.open.lock().expect("open") {
             return Err(RoutineSessionError::OperationFailed);
         }
@@ -175,6 +195,10 @@ impl RoutineSessions for FakeSessions {
             Ok(RoutineActionStatus::Failed(RoutineFailureReason::Cancelled))
         } else if *self.prompted.lock().expect("prompted") {
             Ok(self.ending)
+        } else if self.disconnected {
+            Ok(RoutineActionStatus::Pending(
+                RoutinePendingReason::Disconnected,
+            ))
         } else {
             Ok(RoutineActionStatus::Pending(
                 RoutinePendingReason::AwaitingPrompt,
@@ -267,10 +291,9 @@ async fn a_step_runs_in_a_session_of_its_owner_and_returns_what_the_agent_handed
 }
 
 /// A retry whose first attempt opened and prompted the session finds both
-/// done: the session's conflict on prepare says it is open, and its status
-/// shows the prompt, so nothing is sent again. That holds for a retry after
-/// an attempt whose answer Temporal lost: the session stays until the Step's
-/// end is recorded.
+/// done: the session's conflicts on prepare and prompt say so, so nothing is
+/// sent again. That holds for a retry after an attempt whose answer Temporal
+/// lost: the session stays until the Step's end is recorded.
 #[tokio::test]
 async fn a_retried_step_goes_on_in_the_session_it_already_prompted() {
     let repo = FakeRepo::default();
@@ -284,7 +307,8 @@ async fn a_retried_step_goes_on_in_the_session_it_already_prompted() {
     let answer = agent(&sessions, &repo).answer(task).await.expect("retry");
 
     assert_eq!(answer.text, "Add a toggle to the settings page");
-    assert_eq!(sessions.prompts(), 1);
+    assert_eq!(sessions.prepares(), 2);
+    assert_eq!(sessions.landed(), 1);
     assert!(sessions.deleted.lock().expect("deleted").is_empty());
 }
 
@@ -310,6 +334,69 @@ async fn releasing_a_step_deletes_its_session() {
     let deleted = sessions.deleted.lock().expect("deleted");
     assert_eq!(deleted.len(), 1);
     assert_eq!(deleted[0].session_id.as_uuid(), claimed.session_id);
+}
+
+/// A session whose runtime disconnected before its prompt shows nothing of
+/// the prompt either way: the Step asks, and the session takes it.
+#[tokio::test(start_paused = true)]
+async fn a_disconnected_session_that_never_took_its_prompt_is_prompted() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions {
+        disconnected: true,
+        ..FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded)
+    };
+    let task = plan_task(&repo).await;
+
+    let answer = agent(&sessions, &repo).answer(task).await.expect("answer");
+
+    assert_eq!(answer.outcome, Outcome::done());
+    assert_eq!(sessions.landed(), 1);
+}
+
+/// Each prompt of unknown delivery may have landed: once the attempt's
+/// prompts are spent, no retry sends more.
+#[tokio::test(start_paused = true)]
+async fn prompts_whose_delivery_stays_unknown_fail_the_step_for_good() {
+    let unknown = Reply {
+        error: Some(RoutineSessionError::PromptDeliveryUnknown),
+        lands: false,
+    };
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded)
+        .prompting(&[unknown, unknown]);
+
+    let failed = agent(&sessions, &repo).answer(plan_task(&repo).await).await;
+
+    let Err(error) = failed else {
+        panic!("no prompt showed");
+    };
+    assert!(matches!(error, SessionAgentError::PromptUnsettled));
+    assert!(!error.retryable());
+    assert_eq!(sessions.prompts(), 2);
+}
+
+/// Time spent opening and prompting the session counts too, so the Step
+/// gives up on its session before Temporal times the attempt out.
+#[tokio::test(start_paused = true)]
+async fn the_session_deadline_counts_from_the_attempt_s_start() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(
+        &repo,
+        Some(the_plan()),
+        RoutineActionStatus::Pending(RoutinePendingReason::Running),
+    )
+    .preparing(&[Reply {
+        error: Some(RoutineSessionError::RuntimeUnavailable),
+        lands: true,
+    }]);
+    *sessions.failing_reads.lock().expect("failing reads") = 12;
+    let task = plan_task(&repo).await;
+    let started = tokio::time::Instant::now();
+
+    let failed = agent(&sessions, &repo).answer(task).await;
+
+    assert!(matches!(failed, Err(SessionAgentError::TooSlow(_))));
+    assert!(started.elapsed() <= super::SESSION_DEADLINE + super::LONGEST_WAIT);
 }
 
 /// A prepare that timed out at a gateway may still have opened the session:

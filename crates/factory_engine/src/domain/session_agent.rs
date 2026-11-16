@@ -37,7 +37,7 @@ const LONGEST_WAIT: Duration = Duration::from_secs(10);
 const OPEN_SETTLE: Duration = Duration::from_secs(200);
 
 /// How long a prompt whose delivery is unknown is given to show in the
-/// session, and how many prompts the Step sends at most.
+/// session, and how many prompts an attempt of the Step sends at most.
 const PROMPT_SETTLE: Duration = Duration::from_secs(60);
 const PROMPT_TRIES: u8 = 2;
 
@@ -49,8 +49,9 @@ const STOP_WATCH: Duration = Duration::from_secs(60);
 /// Step gives up on it.
 const MAX_FAILED_READS: u8 = 5;
 
-/// How long a Step's session may work before the Step gives up on it, short
-/// of the Step's own timeout so the failure says why.
+/// How long an attempt of a Step may take before it gives up on its session,
+/// counted from the attempt's start and short of the Step's own timeout, so
+/// the failure says why.
 const SESSION_DEADLINE: Duration = Duration::from_secs(29 * 60);
 
 /// Why a Step's session did not hand back a result.
@@ -65,6 +66,10 @@ pub enum SessionAgentError {
     /// The session did not open, or did not show it opened in time.
     #[error("the agent session did not open")]
     NotOpened,
+    /// Every prompt's delivery was unknown, and the session never showed
+    /// one arrived.
+    #[error("the agent session never showed its prompt arrived")]
+    PromptUnsettled,
     /// The session's turn ended unsuccessfully.
     #[error("the agent's turn ended unsuccessfully: {0:?}")]
     TurnFailed(RoutineFailureReason),
@@ -79,7 +84,8 @@ pub enum SessionAgentError {
 impl Retryable for SessionAgentError {
     /// A turn that ended without a result, or ran past its deadline, ends
     /// the same way when asked again, as does a session its owner may not
-    /// open; a failed read or write may not.
+    /// open; a failed read or write may not. A prompt whose delivery stayed
+    /// unknown is not tried again either: another attempt would send more.
     fn retryable(&self) -> bool {
         match self {
             SessionAgentError::Records(_) | SessionAgentError::NotOpened => true,
@@ -94,6 +100,7 @@ impl Retryable for SessionAgentError {
             ),
             SessionAgentError::TurnFailed(_)
             | SessionAgentError::NothingHandedBack
+            | SessionAgentError::PromptUnsettled
             | SessionAgentError::TooSlow(_) => false,
         }
     }
@@ -189,22 +196,18 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
         }
     }
 
-    /// Prompt the session once. A prompt whose delivery is unknown is never
-    /// sent again on that word alone: the session's status settles it. Only
-    /// a session that still shows no sign of the prompt (`AwaitingPrompt`)
-    /// once the wait is over is prompted again, and the session refuses a
-    /// prompt it already has or holds queued with a conflict.
+    /// Prompt the session once. The session refuses a prompt it already
+    /// has in its history or holds queued with a conflict, so a retried Step
+    /// always asks, and only a session that took no prompt yet takes one. A
+    /// prompt whose delivery is unknown is never sent again on that word
+    /// alone: the session's status settles it, and only a session that still
+    /// shows no sign of it once the wait is over is asked again.
     async fn prompt_once(
         &self,
         task: &AgentTask,
         action: &RoutineSessionAction,
     ) -> Result<(), SessionAgentError> {
         for _ in 0..PROMPT_TRIES {
-            // A retried Step whose session already has the prompt goes on.
-            if self.has_prompt(action).await {
-                return Ok(());
-            }
-
             let prompted = self
                 .sessions
                 .prompt(PromptRoutineSession {
@@ -216,31 +219,40 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
             match prompted {
                 Ok(_) | Err(RoutineSessionError::Conflict) => return Ok(()),
                 Err(RoutineSessionError::PromptDeliveryUnknown) => {
-                    let deadline = tokio::time::Instant::now() + PROMPT_SETTLE;
-                    let mut wait = FIRST_LOOK;
-                    while tokio::time::Instant::now() < deadline {
-                        tokio::time::sleep(wait).await;
-                        wait = (wait * 2).min(LONGEST_WAIT);
-                        if self.has_prompt(action).await {
-                            return Ok(());
-                        }
+                    if self.prompt_shows(action).await {
+                        return Ok(());
                     }
                 }
                 Err(error) => return Err(error.into()),
             }
         }
-        Err(RoutineSessionError::PromptDeliveryUnknown.into())
+        Err(SessionAgentError::PromptUnsettled)
     }
 
-    /// Whether the session's status shows its first prompt: anything but
-    /// `AwaitingPrompt`, which says the prompt is not in its history.
-    async fn has_prompt(&self, action: &RoutineSessionAction) -> bool {
-        !matches!(
-            self.sessions.status(action.clone()).await,
-            Ok(RoutineActionStatus::Pending(
-                RoutinePendingReason::AwaitingPrompt
-            )) | Err(_)
-        )
+    /// Whether the session shows its first prompt within [`PROMPT_SETTLE`]:
+    /// a turn that runs, waits on a person, or ended. A session awaiting its
+    /// prompt, or whose runtime disconnected, shows nothing either way.
+    async fn prompt_shows(&self, action: &RoutineSessionAction) -> bool {
+        let deadline = tokio::time::Instant::now() + PROMPT_SETTLE;
+        let mut wait = FIRST_LOOK;
+        while tokio::time::Instant::now() < deadline {
+            tokio::time::sleep(wait).await;
+            wait = (wait * 2).min(LONGEST_WAIT);
+            let shows = matches!(
+                self.sessions.status(action.clone()).await,
+                Ok(RoutineActionStatus::Succeeded
+                    | RoutineActionStatus::Failed(_)
+                    | RoutineActionStatus::Pending(
+                        RoutinePendingReason::Running
+                            | RoutinePendingReason::Permission
+                            | RoutinePendingReason::Elicitation
+                    ))
+            );
+            if shows {
+                return true;
+            }
+        }
+        false
     }
 
     /// Delete the Step's session, which nothing reads once the Step is done
@@ -260,9 +272,12 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
         }
     }
 
-    /// Wait for the first prompt's turn to end.
-    async fn finished(&self, action: &RoutineSessionAction) -> Result<(), SessionAgentError> {
-        let started = tokio::time::Instant::now();
+    /// Wait for the first prompt's turn to end, until `deadline`.
+    async fn finished(
+        &self,
+        action: &RoutineSessionAction,
+        deadline: tokio::time::Instant,
+    ) -> Result<(), SessionAgentError> {
         let mut wait = FIRST_LOOK;
         let mut failed_reads = 0;
         loop {
@@ -282,7 +297,7 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
                 }
             }
 
-            if started.elapsed() >= SESSION_DEADLINE {
+            if tokio::time::Instant::now() >= deadline {
                 return Err(SessionAgentError::TooSlow(SESSION_DEADLINE));
             }
             tokio::time::sleep(wait).await;
@@ -296,6 +311,8 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
 
     #[tracing::instrument(err, skip_all, fields(run_id = %task.key.run_id, seq = task.key.seq, step = %task.step))]
     async fn answer(&self, task: AgentTask) -> Result<AgentAnswer, SessionAgentError> {
+        // Opening and prompting count against the deadline too.
+        let deadline = tokio::time::Instant::now() + SESSION_DEADLINE;
         // A retried Step goes on in the session its first attempt claimed,
         // so the work is never started twice.
         let claimed = self
@@ -314,7 +331,7 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
 
         self.open(&task, &action).await?;
         self.prompt_once(&task, &action).await?;
-        self.finished(&action).await?;
+        self.finished(&action, deadline).await?;
 
         // The session stays until the Step's end is recorded: a retry of an
         // attempt whose answer Temporal lost goes on in it.
