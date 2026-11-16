@@ -1,6 +1,7 @@
 import { SidePanel } from '@components/app/side-panel';
 import { ToastRegion } from '@core/component/Toast/ToastRegion';
 import { UserContextProvider } from '@core/context/user';
+import { isTouchDevice } from '@core/mobile/isTouchDevice';
 import { queryClient } from '@queries/client';
 import { QueryClientProvider } from '@tanstack/solid-query';
 import { ImperativeDialogHost } from '@ui';
@@ -11,6 +12,9 @@ import '../../../index.css';
 import { type RunsContext, RunsProvider } from '../context/runs-context';
 import type { Run } from '../core/run';
 import { TaskRunsSection } from '../views/task-runs-section';
+
+// `touch:` styles key on this attribute, as the app shell sets it.
+document.documentElement.dataset.touchDevice = String(isTouchDevice());
 
 const MINUTE = 60_000;
 const at = (minutesAgo: number) =>
