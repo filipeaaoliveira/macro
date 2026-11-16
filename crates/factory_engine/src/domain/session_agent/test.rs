@@ -694,21 +694,42 @@ async fn a_session_let_go_while_it_opened_is_never_prompted() {
     );
 }
 
-/// A refusal, a mismatch or a conflict from the session answers the same
-/// way again: only an outage is worth the Step's retries.
-#[test]
-fn only_an_outage_of_the_session_is_tried_again() {
-    for (error, retryable) in [
-        (RoutineSessionError::RuntimeUnavailable, true),
-        (RoutineSessionError::OperationFailed, true),
-        (RoutineSessionError::SessionMismatch, false),
-        (RoutineSessionError::ModelMismatch, false),
-        (RoutineSessionError::Forbidden, false),
-    ] {
-        assert_eq!(
-            SessionAgentError::Session(error).retryable(),
-            retryable,
-            "{error:?}"
-        );
-    }
+/// A session that answers with a mismatch answers the same on every attempt:
+/// the Step fails for good on the first, never preparing again.
+#[tokio::test]
+async fn a_mismatched_session_fails_the_step_for_good() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded)
+        .preparing(&[Reply {
+            error: Some(RoutineSessionError::SessionMismatch),
+            lands: false,
+        }]);
+
+    let failed = agent(&sessions, &repo).answer(plan_task(&repo).await).await;
+
+    let Err(error) = failed else {
+        panic!("the session mismatched");
+    };
+    assert!(!error.retryable(), "{error:?}");
+    assert_eq!(sessions.prepares(), 1);
+}
+
+/// A harness that is down answers a prompt it never got: the attempt fails
+/// in a way the next one may get past.
+#[tokio::test]
+async fn a_prompt_the_harness_was_down_for_is_tried_again() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded)
+        .prompting(&[Reply {
+            error: Some(RoutineSessionError::RuntimeUnavailable),
+            lands: false,
+        }]);
+
+    let failed = agent(&sessions, &repo).answer(plan_task(&repo).await).await;
+
+    let Err(error) = failed else {
+        panic!("the harness was down");
+    };
+    assert!(error.retryable(), "{error:?}");
+    assert_eq!(sessions.landed(), 0);
 }
