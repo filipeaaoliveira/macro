@@ -1363,6 +1363,28 @@ filtering; clicking an actual tag selects only that tag, including when it has
 children. Personal and team paths stay separate. Ancestors of restored selected
 tags start expanded. Filter-menu options continue to show full tag names.
 
+## Runs
+
+With `enable-factory-runs` on (local stacks by default), an open task's side
+panel has a **Runs** section: each Run of the software factory on the task,
+newest first, with a dot for where it is (running, needs input, done, failed or
+cancelled), the Step it is on, and when it started. **New run** asks for a
+request and a Flow, starts the Run and opens it.
+
+A Run opens in a dialog (a sheet on touch, after the side panel's sheet
+closes): its request, its Steps on a timeline with each Step's outcome and its
+output as markdown, and, while the Run waits on a Gate, the question with a
+note field and one button per answer under the output it asks about. The
+Flow's first answer is the primary button. **Cancel run** confirms inside the
+dialog, like a booking's cancel. A second answer to a Gate, or a cancel of a
+Run that already ended, shows a toast and reads the Run again. Open Runs and a
+task with a Run going are read again every 3 seconds until they end.
+
+The browser regression runs the section and dialog on an in-memory factory:
+`bunx playwright test --config src/features/factory-runs/browser-test/playwright.config.ts`
+from `apps/web`; set `FACTORY_RUNS_SCREENSHOT_DIR` to save desktop and phone
+screenshots.
+
 ## Tasks — `/app/component/tasks`
 
 Task navigation uses `My Tasks`, `All Tasks`, and `Created by me`. The desktop
