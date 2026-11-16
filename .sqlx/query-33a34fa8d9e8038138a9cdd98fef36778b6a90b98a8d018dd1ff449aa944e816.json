@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT run_id, entry, session_id AS \"session_id!\"\n            FROM (\n                SELECT run_id, entry, session_id\n                FROM factory_step\n                WHERE run_id = ANY($1)\n                OFFSET 0\n            ) steps\n            WHERE session_id IS NOT NULL\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "run_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "entry",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "session_id!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "33a34fa8d9e8038138a9cdd98fef36778b6a90b98a8d018dd1ff449aa944e816"
+}

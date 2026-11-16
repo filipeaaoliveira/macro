@@ -1,5 +1,6 @@
 //! PostgreSQL implementation of the [`RunRepository`] port.
 
+mod insights;
 #[cfg(test)]
 mod test;
 
