@@ -181,3 +181,35 @@ test('moves focus to the status line when someone else answered first', async ({
   await expect(dialog.getByText('Your answer is needed')).toBeHidden();
   await expect(dialog.locator('[data-run-status]')).toBeFocused();
 });
+
+test('leaves focus on Cancel run when an answer in flight fails', async ({
+  page,
+}) => {
+  const dialog = await openWaitingRun(page);
+  await dialog
+    .getByPlaceholder('Add a note for the next steps (optional)')
+    .fill('slow-fail');
+  await dialog.getByRole('button', { name: 'Approve' }).click();
+  await dialog.getByRole('button', { name: 'Cancel run' }).click();
+  const keep = dialog.getByRole('button', { name: 'Keep running' });
+  await expect(keep).toBeFocused();
+
+  await expect(page.getByText('Couldn’t send your answer')).toBeVisible();
+  await expect(keep).toBeFocused();
+});
+
+test('moves focus after a cancel even when an answer in flight fails', async ({
+  page,
+}) => {
+  const dialog = await openWaitingRun(page);
+  await dialog
+    .getByPlaceholder('Add a note for the next steps (optional)')
+    .fill('slow-fail');
+  await dialog.getByRole('button', { name: 'Approve' }).click();
+  await dialog.getByRole('button', { name: 'Cancel run' }).click();
+  await dialog.getByRole('button', { name: 'Cancel run' }).click();
+
+  await expect(page.getByText('Couldn’t send your answer')).toBeVisible();
+  await expect(dialog.getByText('Cancelled').first()).toBeVisible();
+  await expect(dialog.locator('[data-run-status]')).toBeFocused();
+});

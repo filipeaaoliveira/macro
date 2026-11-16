@@ -209,8 +209,13 @@ function createFixtureContext(): RunsContext {
       return { ok: true, value: run };
     },
     async answerGate(input) {
-      // A note of "fail" stands in for a failed request.
+      // A note of "fail" stands in for a failed request; "slow-fail" for
+      // one that fails after a moment, while the person does something else.
       if (input.note === 'fail') return { ok: false, reason: 'failed' };
+      if (input.note === 'slow-fail') {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        return { ok: false, reason: 'failed' };
+      }
       // A note of "conflict" stands in for someone else answering first: the
       // service refuses this answer, and a read moments later shows theirs.
       if (input.note === 'conflict') {
@@ -222,10 +227,15 @@ function createFixtureContext(): RunsContext {
     async cancelRun(runId) {
       const run = runs().find((candidate) => candidate.id === runId);
       if (run?.end) return { ok: false, reason: 'conflict' };
-      update(runId, (current) => ({
-        ...current,
-        end: { outcome: 'cancelled', endedAt: new Date().toISOString() },
-      }));
+      // The service takes the cancel at once; a later read shows it ended.
+      setTimeout(
+        () =>
+          update(runId, (current) => ({
+            ...current,
+            end: { outcome: 'cancelled', endedAt: new Date().toISOString() },
+          })),
+        500
+      );
       return { ok: true, value: undefined };
     },
   };

@@ -94,6 +94,13 @@ export function GateAnswers(props: {
     queueMicrotask(() => {
       // The Gate went (someone answered first): the status line takes focus.
       if (!button.isConnected) return;
+      // Leave focus alone if the person has moved on, to Cancel run say.
+      const active = document.activeElement;
+      const lost =
+        !active ||
+        active === document.body ||
+        active === button.closest('[role="dialog"]');
+      if (!lost) return;
       button.focus();
       // The buttons are locked: keep focus on the Gate.
       if (document.activeElement !== button) {

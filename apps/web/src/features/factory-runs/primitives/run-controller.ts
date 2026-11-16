@@ -67,9 +67,10 @@ export function createRunController(
     if (result.ok) {
       setAnsweredGate(gateKey(gate.step));
       setNote('');
-    } else if (result.reason === 'failed') {
+    } else if (result.reason === 'failed' && rescue() === 'answer') {
       // A refused answer (409) means the Gate was answered or the Run moved
-      // on: the next read takes the buttons away, so the rescue stays.
+      // on: the next read takes the buttons away, so the rescue stays. A
+      // cancel sent meanwhile keeps its own.
       setRescue(undefined);
     }
     return result;
@@ -83,7 +84,7 @@ export function createRunController(
     const result = await context.cancelRun(run.id);
     setCancelling(false);
     if (result.ok) setCancelSent(true);
-    else setRescue(undefined);
+    else if (rescue() === 'cancel') setRescue(undefined);
     return result;
   };
 
