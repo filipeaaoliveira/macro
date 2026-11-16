@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use agent_correlation::inbound::CorrelationState;
 use agent_harness_service_client::routine_sessions::AgentSessionClient;
+use ai_usage::outbound::pg_session_usage::PgSessionUsageReader;
 use authentication_service_client::AuthServiceClient;
 use axum::Router;
 use config::Config;
@@ -18,10 +19,12 @@ use document_storage_service_client::DocumentStorageServiceClient;
 use entity_access::domain::service::EntityAccessServiceImpl;
 use entity_access::outbound::PgAccessRepository;
 use factory_engine::domain::built_in_steps::BuiltInSteps;
+use factory_engine::domain::insights::InsightsServiceImpl;
 use factory_engine::domain::ports::StepAgent;
 use factory_engine::domain::service::{FactoryServiceImpl, StepServiceImpl};
 use factory_engine::domain::session_agent::SessionAgent;
 use factory_engine::inbound::http::{ApiDoc, FactoryRouterState, factory_router};
+use factory_engine::inbound::insights::{InsightsApiDoc, InsightsRouterState, insights_router};
 use factory_engine::outbound::auth_user_directory::AuthUserDirectory;
 use factory_engine::outbound::document_task_directory::DocumentTaskDirectory;
 use factory_engine::outbound::local_agent::LocalAgent;
@@ -103,6 +106,7 @@ async fn run() -> Result<(), rootcause::Report> {
     let parts = Parts {
         port: config.port,
         repo: repo.clone(),
+        usage: PgSessionUsageReader::new(db.clone()),
         users: AuthUserDirectory::new(AuthServiceClient::new(
             config.authentication_service_secret_key.clone(),
             AuthServiceUrl::new()?.to_string(),
@@ -142,6 +146,7 @@ async fn run() -> Result<(), rootcause::Report> {
 struct Parts {
     port: u16,
     repo: PgRunRepository,
+    usage: PgSessionUsageReader,
     users: AuthUserDirectory,
     tasks: DocumentTaskDirectory<EntityAccessServiceImpl<PgAccessRepository>>,
     client: Client,
@@ -165,6 +170,7 @@ async fn serve<A: StepAgent + Clone>(
         StepServiceImpl::new(parts.repo.clone(), steps.clone()),
     )?;
 
+    let insights = Arc::new(InsightsServiceImpl::new(parts.repo.clone(), parts.usage));
     let service = Arc::new(FactoryServiceImpl::new(
         parts.repo,
         TemporalRunWorkflows::new(parts.client),
@@ -172,12 +178,21 @@ async fn serve<A: StepAgent + Clone>(
         parts.users,
         parts.tasks,
     ));
-    let api = factory_router(FactoryRouterState::new(service, parts.authorization_state))
-        .merge(health::router());
+    let api = factory_router(FactoryRouterState::new(
+        service,
+        parts.authorization_state.clone(),
+    ))
+    .merge(insights_router(InsightsRouterState::new(
+        insights,
+        parts.authorization_state,
+    )))
+    .merge(health::router());
+    let mut openapi = ApiDoc::openapi();
+    openapi.merge(InsightsApiDoc::openapi());
     // The correlation layer finds the agent session behind a code-mode
     // credential, and holds a scoped session to its scope.
     let app = traced(mount_at_root_and_prefix(api))
-        .merge(SwaggerUi::new("/docs").url("/api-doc/openapi.json", ApiDoc::openapi()))
+        .merge(SwaggerUi::new("/docs").url("/api-doc/openapi.json", openapi))
         .layer(axum::middleware::from_fn_with_state(
             parts.correlation,
             agent_correlation::inbound::propagate,

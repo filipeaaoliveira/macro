@@ -8,10 +8,12 @@ version = "0.1.0"
 agent_correlation = { path = "../agent_correlation" }
 agent_runtime_protocol = { path = "../agent_runtime_protocol", default-features = false }
 agent_session = { path = "../agent_session", default-features = false }
+ai_usage = { path = "../ai_usage" }
 async-trait = { workspace = true }
 authentication_service_client = { path = "../authentication_service_client" }
 axum = { workspace = true }
 chrono = { workspace = true }
+chrono-tz = { workspace = true }
 bot_id = { path = "../bot_id" }
 document_storage_service_client = { path = "../document_storage_service_client" }
 document_sub_type = { path = "../document_sub_type" }
