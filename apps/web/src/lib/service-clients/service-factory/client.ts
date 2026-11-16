@@ -23,7 +23,7 @@ const host = () => SERVER_HOSTS.factory;
  * Runs only. The routes and shapes are the service's generated client's.
  */
 export const factoryClient = {
-  /** The caller's Runs of a task, newest first. */
+  /** The caller's Runs of a task, newest first; the service returns 50 at most. */
   listTaskRuns(taskId: string, signal?: AbortSignal) {
     return fetchWithToken<TaskRunsResponse>(
       `${host()}${getListFactoryTaskRunsUrl(encodeURIComponent(taskId))}`,
@@ -70,7 +70,10 @@ export const factoryClient = {
     ).then((result) => result.map(() => undefined));
   },
 
-  /** Cancels a Run (202, no body). One that has ended fails `CONFLICT`. */
+  /**
+   * Cancels a Run (202, no body). Cancelling a cancelled Run is accepted
+   * again; one that ended some other way fails `CONFLICT`.
+   */
   cancelRun(runId: string) {
     return fetchWithToken<Record<string, never>>(
       `${host()}${getCancelFactoryRunUrl(encodeURIComponent(runId))}`,
