@@ -1,6 +1,7 @@
 //! Ports (trait contracts) of the factory's use cases.
 
 use factory_records::domain::models::RunId;
+use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
 use crate::domain::flow::StepName;
@@ -74,16 +75,19 @@ pub trait StepAgent: Send + Sync + 'static {
 
 /// Inbound service port: the Run API used by drivers (HTTP).
 pub trait FactoryService: Send + Sync + 'static {
-    /// Record a new Run of the Flow `definition` for `request`, working on
-    /// the task document `task_id` if one is given, and start it.
+    /// Record `user_id`'s new Run of the Flow `definition` for `request`,
+    /// working on the task document `task_id` if one is given, and start it.
+    /// The user must exist and see the task.
     fn create_run(
         &self,
         definition: serde_json::Value,
         request: String,
+        user_id: MacroUserIdStr<'static>,
         task_id: Option<Uuid>,
     ) -> impl Future<Output = Result<RunDetail, FactoryError>> + Send;
 
     /// Link a Run to the task document `task_id`, replacing any task it had.
+    /// The Run's owner must see the task.
     fn link_task(
         &self,
         id: RunId,
@@ -124,4 +128,29 @@ pub trait StepService: Send + Sync + 'static {
 
     /// Record how a Run ended.
     fn end_run(&self, finish: RunFinish) -> impl Future<Output = Result<(), StepError>> + Send;
+}
+
+/// What a person may know of a task document.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskAccess {
+    /// A task the person can see.
+    Visible,
+    /// A document the person can see, but not a task.
+    NotATask,
+    /// No document, a deleted one, or one the person cannot see: the same
+    /// answer, so a hidden task is not revealed.
+    NotFound,
+}
+
+/// The tasks Macro keeps, as one person sees them.
+pub trait TaskDirectory: Send + Sync + 'static {
+    /// The error type returned when the check cannot be made.
+    type Err: std::error::Error + Send + Sync + 'static;
+
+    /// What `user_id` may know of the task document `task_id`.
+    fn task_access(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        task_id: Uuid,
+    ) -> impl Future<Output = Result<TaskAccess, Self::Err>> + Send;
 }

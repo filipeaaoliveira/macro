@@ -13,6 +13,7 @@ the Gates they asked people in MacroDB, and defines the names Flows use
 - `src/domain/ports.rs`: `RunRepository`, the port `factory_engine` writes through.
 - `src/outbound/pg_run_repository.rs`: the `factory_run`, `factory_step` and
   `factory_gate` queries.
+- `src/outbound/pg_user_directory.rs`: whether a user id names an account.
 
 ## Scope
 
@@ -35,6 +36,7 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   its activity: `start_step` and `open_gate` ignore a conflict, and `end_run`
   and `answer_gate` keep the first end and answer. Keep new writes safe to
   repeat.
+- `factory_run.user_id` is the Run's owner and goes with their account.
 - `factory_run.task_id` references `"Document"` and is cleared when the task
   document is deleted; `link_task` reports a missing task or Run instead of
   failing.

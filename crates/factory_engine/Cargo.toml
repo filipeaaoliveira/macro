@@ -5,8 +5,12 @@ publish = false
 version = "0.1.0"
 
 [dependencies]
+anyhow = { workspace = true }
 async-trait = { workspace = true }
 axum = { workspace = true }
+document_storage_service_client = { path = "../document_storage_service_client" }
+document_sub_type = { path = "../document_sub_type" }
+entity_access = { path = "../entity_access", default-features = false, features = ["ports"] }
 factory_records = { path = "../factory_records" }
 # The activities macro expands to paths in this crate.
 futures = { workspace = true }

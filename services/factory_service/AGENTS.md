@@ -9,7 +9,8 @@ worker that walks each Run's Flow, in one process.
 
 - `src/main.rs`: composition root — config, MacroDB pool, Temporal client and
   worker, router, shutdown.
-- `src/config.rs`: `DATABASE_URL`, `INTERNAL_API_KEY`, `TEMPORAL_ADDRESS`.
+- `src/config.rs`: `DATABASE_URL`, `INTERNAL_API_KEY`, `TEMPORAL_ADDRESS`,
+  `DOCUMENT_STORAGE_SERVICE_AUTH_KEY` (reading the tasks Runs work on).
 
 ## Scope
 
@@ -23,7 +24,7 @@ worker that walks each Run's Flow, in one process.
 - `cargo build -p factory_service`
 - `curl http://localhost:8113/health` after `just run_local`.
 - A Run end to end: `POST http://localhost:8113/runs` with the
-  `x-internal-auth-key` header (the stack's `INTERNAL_API_KEY`) and `{"flow": <crates/factory_engine/flows/reply.json>, "request": "..."}`,
+  `x-internal-auth-key` header (the stack's `INTERNAL_API_KEY`) and `{"flow": <crates/factory_engine/flows/reply.json>, "request": "...", "userId": "macro|<email>"}`,
   then `GET /runs/<id>`. `flows/plan.json` runs the agent Steps `plan` and
   `write`, with a Gate between them: answer it with
   `POST /runs/<id>/gates/plan/<visit>/answer` and

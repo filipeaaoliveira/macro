@@ -94,6 +94,8 @@ pub struct CreateRunRequest {
     pub flow: serde_json::Value,
     /// What the Run is asked to do.
     pub request: String,
+    /// Who starts the Run: its owner, as whom its agent Steps run.
+    pub user_id: MacroUserIdStr<'static>,
     /// The Macro task the Run works on: its task document's id.
     #[serde(default)]
     pub task_id: Option<Uuid>,
@@ -167,7 +169,7 @@ where
 {
     let created = state
         .service
-        .create_run(body.flow, body.request, body.task_id)
+        .create_run(body.flow, body.request, body.user_id, body.task_id)
         .await?;
     Ok((StatusCode::CREATED, Json(created)))
 }
@@ -312,7 +314,9 @@ impl IntoResponse for FactoryError {
             | FactoryError::EmptyRequest
             | FactoryError::RequestTooLarge { .. }
             | FactoryError::NoteTooLarge { .. }
-            | FactoryError::UnknownTask => StatusCode::BAD_REQUEST,
+            | FactoryError::UnknownTask
+            | FactoryError::NotATask
+            | FactoryError::UnknownUser => StatusCode::BAD_REQUEST,
             FactoryError::NotFound => StatusCode::NOT_FOUND,
             FactoryError::RunEnded | FactoryError::AnswerRefused(_) => StatusCode::CONFLICT,
             FactoryError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,

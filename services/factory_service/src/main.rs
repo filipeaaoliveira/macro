@@ -1,5 +1,7 @@
 //! Composition root of the factory service: the Run API, and the Temporal
 //! worker that walks each Run's Flow.
+// The Run API's handler futures nest every port of the factory service.
+#![recursion_limit = "256"]
 
 mod config;
 mod health;
@@ -9,18 +11,24 @@ use std::time::Duration;
 
 use axum::Router;
 use config::Config;
+use document_storage_service_client::DocumentStorageServiceClient;
+use entity_access::domain::service::EntityAccessServiceImpl;
+use entity_access::outbound::PgAccessRepository;
 use factory_engine::domain::built_in_steps::BuiltInSteps;
 use factory_engine::domain::service::{FactoryServiceImpl, StepServiceImpl};
 use factory_engine::inbound::http::{ApiDoc, FactoryRouterState, factory_router};
+use factory_engine::outbound::document_task_directory::DocumentTaskDirectory;
 use factory_engine::outbound::local_agent::LocalAgent;
 use factory_engine::outbound::temporal_run_workflows::TemporalRunWorkflows;
 use factory_records::outbound::pg_run_repository::PgRunRepository;
+use factory_records::outbound::pg_user_directory::PgUserDirectory;
 use macro_auth::middleware::decode_jwt::JwtValidationArgs;
 use macro_authorization::{
     InternalAuthConfig, MacroAuthJwtValidator, MacroAuthorizationServiceImpl,
     MacroAuthorizationState, NoBotAuthorizer, NoUserApiKeyAuthorizer,
 };
 use macro_entrypoint::{MacroEntrypoint, shutdown_signal};
+use macro_service_urls::DocumentStorageServiceUrl;
 use macro_tower_layers::MacroRequestIdAndTracingLayer;
 use sqlx::postgres::PgPoolOptions;
 use temporalio_client::{Client, ClientOptions, ConnectionOptions};
@@ -56,7 +64,15 @@ async fn run() -> Result<(), rootcause::Report> {
         .max_connections(10)
         .connect(config.database_url.as_ref())
         .await?;
-    let repo = PgRunRepository::new(db);
+    let repo = PgRunRepository::new(db.clone());
+    let users = PgUserDirectory::new(db.clone());
+    let tasks = DocumentTaskDirectory::new(
+        EntityAccessServiceImpl::new(PgAccessRepository::new(db)),
+        DocumentStorageServiceClient::new(
+            config.document_storage_service_auth_key.clone(),
+            DocumentStorageServiceUrl::new()?.to_string(),
+        ),
+    );
 
     let temporal_address = url::Url::parse(config.temporal_address.as_ref())?;
     let client = Client::connect(
@@ -102,6 +118,8 @@ async fn run() -> Result<(), rootcause::Report> {
         repo,
         TemporalRunWorkflows::new(client),
         steps,
+        users,
+        tasks,
     ));
     let api = factory_router(FactoryRouterState::new(service, authorization_state))
         .merge(health::router());

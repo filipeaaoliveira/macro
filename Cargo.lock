@@ -8363,9 +8363,13 @@ dependencies = [
 name = "factory_engine"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-trait",
  "axum",
  "chrono",
+ "document_storage_service_client",
+ "document_sub_type",
+ "entity_access",
  "factory_records",
  "futures",
  "macro_authorization",
@@ -8413,6 +8417,8 @@ dependencies = [
  "aws-sdk-secretsmanager",
  "axum",
  "database_env_vars",
+ "document_storage_service_client",
+ "entity_access",
  "factory_engine",
  "factory_records",
  "macro_auth",
@@ -8423,6 +8429,7 @@ dependencies = [
  "macro_entrypoint",
  "macro_env",
  "macro_env_var",
+ "macro_service_urls",
  "macro_tower_layers",
  "rootcause",
  "secretsmanager_client",

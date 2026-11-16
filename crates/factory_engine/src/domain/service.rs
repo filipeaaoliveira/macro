@@ -7,7 +7,8 @@ mod test;
 use factory_records::domain::models::{
     MAX_NOTE_BYTES, MAX_OUTPUT_BYTES, MAX_REQUEST_BYTES, RunId, TaskLink,
 };
-use factory_records::domain::ports::RunRepository;
+use factory_records::domain::ports::{RunRepository, UserDirectory};
+use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
 use crate::domain::flow::Flow;
@@ -16,34 +17,68 @@ use crate::domain::models::{
     FactoryError, RunDetail, RunFinish, RunStart, StepError, StepInput, StepReport, StepRequest,
 };
 use crate::domain::ports::{
-    AnswerDelivery, FactoryService, RunWorkflows, StepExecutor, StepService,
+    AnswerDelivery, FactoryService, RunWorkflows, StepExecutor, StepService, TaskAccess,
+    TaskDirectory,
 };
 
 fn internal(error: impl std::error::Error + Send + Sync + 'static) -> rootcause::Report {
     rootcause::Report::new(error).into_dynamic()
 }
 
-/// The Run API, over the Run records, the Runs' workflows, and the worker
-/// that says which Steps it serves.
+/// The Run API, over the Run records, the Runs' workflows, the worker that
+/// says which Steps it serves, and the people and tasks Runs name.
 #[derive(Debug, Clone)]
-pub struct FactoryServiceImpl<R, W, E> {
+pub struct FactoryServiceImpl<R, W, E, U, T> {
     repo: R,
     workflows: W,
     executor: E,
+    users: U,
+    tasks: T,
 }
 
-impl<R, W, E> FactoryServiceImpl<R, W, E>
+impl<R, W, E, U, T> FactoryServiceImpl<R, W, E, U, T>
 where
     R: RunRepository,
     W: RunWorkflows,
     E: StepExecutor,
+    U: UserDirectory,
+    T: TaskDirectory,
 {
     /// Create the Run API.
-    pub fn new(repo: R, workflows: W, executor: E) -> Self {
+    pub fn new(repo: R, workflows: W, executor: E, users: U, tasks: T) -> Self {
         Self {
             repo,
             workflows,
             executor,
+            users,
+            tasks,
+        }
+    }
+
+    /// Fails unless `user_id` names an account.
+    async fn known(&self, user_id: &MacroUserIdStr<'static>) -> Result<(), FactoryError> {
+        if self.users.user_exists(user_id).await.map_err(internal)? {
+            Ok(())
+        } else {
+            Err(FactoryError::UnknownUser)
+        }
+    }
+
+    /// Fails unless `task_id` is a task `user_id` can see.
+    async fn visible_task(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        task_id: Uuid,
+    ) -> Result<(), FactoryError> {
+        match self
+            .tasks
+            .task_access(user_id, task_id)
+            .await
+            .map_err(internal)?
+        {
+            TaskAccess::Visible => Ok(()),
+            TaskAccess::NotATask => Err(FactoryError::NotATask),
+            TaskAccess::NotFound => Err(FactoryError::UnknownTask),
         }
     }
 
@@ -62,17 +97,20 @@ where
     }
 }
 
-impl<R, W, E> FactoryService for FactoryServiceImpl<R, W, E>
+impl<R, W, E, U, T> FactoryService for FactoryServiceImpl<R, W, E, U, T>
 where
     R: RunRepository,
     W: RunWorkflows,
     E: StepExecutor,
+    U: UserDirectory,
+    T: TaskDirectory,
 {
     #[tracing::instrument(err, skip_all, fields(run_id = tracing::field::Empty))]
     async fn create_run(
         &self,
         definition: serde_json::Value,
         request: String,
+        user_id: MacroUserIdStr<'static>,
         task_id: Option<Uuid>,
     ) -> Result<RunDetail, FactoryError> {
         let flow = Flow::parse(definition, |step| self.executor.serves(step))?;
@@ -85,15 +123,20 @@ where
             });
         }
 
+        self.known(&user_id).await?;
+        if let Some(task_id) = task_id {
+            self.visible_task(&user_id, task_id).await?;
+        }
+
         let run_id = RunId::generate();
         tracing::Span::current().record("run_id", tracing::field::display(run_id));
         let mut run = self
             .repo
-            .insert_run(run_id, &request)
+            .insert_run(run_id, &request, &user_id)
             .await
             .map_err(internal)?;
 
-        // A Run for a task that does not exist is not kept.
+        // A task deleted since it was checked leaves no Run behind.
         if let Some(task_id) = task_id {
             let linked = self.repo.link_task(run_id, task_id).await;
             if !matches!(linked, Ok(TaskLink::Linked)) {
@@ -143,6 +186,14 @@ where
 
     #[tracing::instrument(err, skip(self))]
     async fn link_task(&self, id: RunId, task_id: Uuid) -> Result<RunDetail, FactoryError> {
+        let run = self
+            .repo
+            .get_run(id)
+            .await
+            .map_err(internal)?
+            .ok_or(FactoryError::NotFound)?;
+        self.visible_task(&run.user_id, task_id).await?;
+
         match self.repo.link_task(id, task_id).await.map_err(internal)? {
             TaskLink::Linked => self.get_run(id).await,
             TaskLink::NoSuchRun => Err(FactoryError::NotFound),
@@ -158,6 +209,7 @@ where
                 max: MAX_NOTE_BYTES,
             });
         }
+        self.known(&answer.user_id).await?;
         self.running(id).await?;
 
         // The workflow decides whether it takes the answer: only it knows

@@ -20,11 +20,14 @@ answer as the entry's outcome. The update's validator (`domain/gate.rs`)
 refuses an answer to a Gate the Run does not wait on, a second answer, and an
 answer the Gate does not offer; the API answers those 409.
 
-A Run may work on a Macro task: `POST /runs` takes an optional `taskId` (the
-task document's id), and `PUT /runs/{id}/task` links or relinks one. A task id
-no document has is refused (400), and a Run created for one is not kept.
-Whether the document is a task, and whether anyone may see it, is not checked
-yet: that needs the Run's owner, which Runs do not have.
+Every Run has an owner: `POST /runs` takes the starting user's `userId`, which
+must name an account (400 otherwise), and the Run's agent Steps run as them. A
+Run may work on a Macro task: `POST /runs` takes an optional `taskId` (the task
+document's id), and `PUT /runs/{id}/task` links or relinks one. The owner must
+see the document through entity access, and document storage must say it is a
+task (`outbound/document_task_directory.rs`); a hidden document and a missing
+one are both "no task" (400). A Gate answer from a user id with no account is
+refused (400) before it reaches the workflow.
 
 `POST /runs/{id}/cancel` cancels the workflow through Temporal. The running
 Step or the wait for an answer stops, and the workflow records the Run's end
@@ -61,8 +64,9 @@ prompt it was given.
 
 ## Boundaries
 
-- Depends on: `factory_records`, `macro_authorization`, `macro_user_id`, the
-  Temporal Rust SDK.
+- Depends on: `factory_records`, `macro_authorization`, `macro_user_id`,
+  `entity_access` (ports), `document_storage_service_client`, the Temporal
+  Rust SDK.
 - Used by: `services/factory_service`.
 
 ## Recipes

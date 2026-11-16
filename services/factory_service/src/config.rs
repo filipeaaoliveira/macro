@@ -26,4 +26,7 @@ pub struct Config {
     pub internal_api_key: InternalApiKey,
     /// The Temporal server the Runs' workflows run on.
     pub temporal_address: TemporalAddress,
+    /// The key document storage's internal routes take, to read the tasks
+    /// Runs work on.
+    pub document_storage_service_auth_key: String,
 }

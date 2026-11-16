@@ -17,6 +17,8 @@ path = "src/openapi.rs"
 aws-sdk-secretsmanager = { workspace = true }
 axum = { workspace = true }
 database_env_vars = { path = "../../crates/database_env_vars" }
+document_storage_service_client = { path = "../../crates/document_storage_service_client" }
+entity_access = { path = "../../crates/entity_access", default-features = false, features = ["outbound"] }
 factory_engine = { path = "../../crates/factory_engine" }
 factory_records = { path = "../../crates/factory_records" }
 macro_auth = { path = "../../crates/macro_auth" }
@@ -27,6 +29,7 @@ macro_cors = { path = "../../crates/macro_cors" }
 macro_entrypoint = { path = "../../crates/macro_entrypoint" }
 macro_env = { path = "../../crates/macro_env" }
 macro_env_var = { path = "../../crates/macro_env_var" }
+macro_service_urls = { path = "../../crates/macro_service_urls" }
 macro_tower_layers = { path = "../../crates/macro_tower_layers" }
 rootcause = { workspace = true }
 secretsmanager_client = { path = "../../crates/secretsmanager_client" }

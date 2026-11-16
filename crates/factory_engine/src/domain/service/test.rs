@@ -5,7 +5,7 @@ use chrono::Utc;
 use factory_records::domain::models::{
     EntryId, Outcome, Run, RunEnd, RunId, RunOutcome, Step, StepEnd, TaskLink,
 };
-use factory_records::domain::ports::RunRepository;
+use factory_records::domain::ports::{RunRepository, UserDirectory};
 use macro_user_id::user_id::MacroUserIdStr;
 use serde_json::json;
 use uuid::Uuid;
@@ -17,7 +17,8 @@ use crate::domain::models::{
     FactoryError, RunFinish, RunStart, StepInput, StepReport, StepRequest,
 };
 use crate::domain::ports::{
-    AnswerDelivery, FactoryService, RunWorkflows, StepExecutor, StepService,
+    AnswerDelivery, FactoryService, RunWorkflows, StepExecutor, StepService, TaskAccess,
+    TaskDirectory,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -30,15 +31,51 @@ struct FakeRepo {
     steps: Arc<Mutex<Vec<(RunId, Step)>>>,
     /// The task documents that exist.
     tasks: Arc<Mutex<BTreeSet<Uuid>>>,
+    /// The documents that exist and are not tasks.
+    documents: Arc<Mutex<BTreeSet<Uuid>>>,
+}
+
+/// Everyone has an account but `macro|nobody@example.com`.
+impl UserDirectory for FakeRepo {
+    type Err = FakeError;
+
+    async fn user_exists(&self, user_id: &MacroUserIdStr<'static>) -> Result<bool, FakeError> {
+        Ok(user_id.as_ref() != "macro|nobody@example.com")
+    }
+}
+
+/// Every task is visible to everyone.
+impl TaskDirectory for FakeRepo {
+    type Err = FakeError;
+
+    async fn task_access(
+        &self,
+        _user_id: &MacroUserIdStr<'static>,
+        task_id: Uuid,
+    ) -> Result<TaskAccess, FakeError> {
+        if self.tasks.lock().expect("tasks").contains(&task_id) {
+            Ok(TaskAccess::Visible)
+        } else if self.documents.lock().expect("documents").contains(&task_id) {
+            Ok(TaskAccess::NotATask)
+        } else {
+            Ok(TaskAccess::NotFound)
+        }
+    }
 }
 
 impl RunRepository for FakeRepo {
     type Err = FakeError;
 
-    async fn insert_run(&self, id: RunId, request: &str) -> Result<Run, FakeError> {
+    async fn insert_run(
+        &self,
+        id: RunId,
+        request: &str,
+        user_id: &MacroUserIdStr<'static>,
+    ) -> Result<Run, FakeError> {
         let run = Run {
             id,
             request: request.to_string(),
+            user_id: user_id.clone(),
             created_at: Utc::now(),
             task_id: None,
             end: None,
@@ -248,12 +285,19 @@ fn reply_step(run_id: RunId) -> StepRequest {
 async fn creating_a_run_records_it_and_starts_its_workflow() {
     let repo = FakeRepo::default();
     let workflows = FakeWorkflows::default();
-    let service = FactoryServiceImpl::new(repo.clone(), workflows.clone(), FakeExecutor::default());
+    let service = FactoryServiceImpl::new(
+        repo.clone(),
+        workflows.clone(),
+        FakeExecutor::default(),
+        repo.clone(),
+        repo.clone(),
+    );
 
     let created = service
         .create_run(
             reply_flow(),
             "Summarise the release notes".to_string(),
+            julia(),
             None,
         )
         .await
@@ -275,12 +319,19 @@ async fn a_run_whose_workflow_does_not_start_is_not_kept() {
         fail: true,
         ..FakeWorkflows::default()
     };
-    let service = FactoryServiceImpl::new(repo.clone(), workflows, FakeExecutor::default());
+    let service = FactoryServiceImpl::new(
+        repo.clone(),
+        workflows,
+        FakeExecutor::default(),
+        repo.clone(),
+        repo.clone(),
+    );
 
     let refused = service
         .create_run(
             reply_flow(),
             "Summarise the release notes".to_string(),
+            julia(),
             None,
         )
         .await;
@@ -293,11 +344,17 @@ async fn a_run_whose_workflow_does_not_start_is_not_kept() {
 async fn a_flow_with_a_step_no_worker_serves_is_refused_before_anything_is_kept() {
     let repo = FakeRepo::default();
     let workflows = FakeWorkflows::default();
-    let service = FactoryServiceImpl::new(repo.clone(), workflows.clone(), FakeExecutor::default());
+    let service = FactoryServiceImpl::new(
+        repo.clone(),
+        workflows.clone(),
+        FakeExecutor::default(),
+        repo.clone(),
+        repo.clone(),
+    );
     let flow = json!({ "entries": [{ "id": "plan", "step": "plan" }] });
 
     let refused = service
-        .create_run(flow, "Plan the migration".to_string(), None)
+        .create_run(flow, "Plan the migration".to_string(), julia(), None)
         .await;
 
     assert!(matches!(refused, Err(FactoryError::InvalidFlow(_))));
@@ -311,10 +368,12 @@ async fn an_empty_request_is_refused() {
         FakeRepo::default(),
         FakeWorkflows::default(),
         FakeExecutor::default(),
+        FakeRepo::default(),
+        FakeRepo::default(),
     );
 
     let refused = service
-        .create_run(reply_flow(), "  ".to_string(), None)
+        .create_run(reply_flow(), "  ".to_string(), julia(), None)
         .await;
 
     assert!(matches!(refused, Err(FactoryError::EmptyRequest)));
@@ -326,6 +385,8 @@ async fn reading_an_unknown_run_is_not_found() {
         FakeRepo::default(),
         FakeWorkflows::default(),
         FakeExecutor::default(),
+        FakeRepo::default(),
+        FakeRepo::default(),
     );
 
     let missing = service.get_run(RunId::generate()).await;
@@ -337,7 +398,7 @@ async fn reading_an_unknown_run_is_not_found() {
 async fn running_a_step_records_its_start_outcome_and_output() {
     let repo = FakeRepo::default();
     let run = repo
-        .insert_run(RunId::generate(), "Summarise")
+        .insert_run(RunId::generate(), "Summarise", &julia())
         .await
         .expect("insert");
     let steps = StepServiceImpl::new(repo.clone(), FakeExecutor::default());
@@ -356,7 +417,7 @@ async fn running_a_step_records_its_start_outcome_and_output() {
 async fn a_step_is_given_the_steps_that_ended_before_it() {
     let repo = FakeRepo::default();
     let run = repo
-        .insert_run(RunId::generate(), "Summarise")
+        .insert_run(RunId::generate(), "Summarise", &julia())
         .await
         .expect("insert");
     let executor = FakeExecutor::default();
@@ -379,7 +440,7 @@ async fn a_step_is_given_the_steps_that_ended_before_it() {
 async fn a_step_whose_output_is_too_large_is_left_unended() {
     let repo = FakeRepo::default();
     let run = repo
-        .insert_run(RunId::generate(), "Summarise")
+        .insert_run(RunId::generate(), "Summarise", &julia())
         .await
         .expect("insert");
     let executor = FakeExecutor {
@@ -399,7 +460,7 @@ async fn a_step_whose_output_is_too_large_is_left_unended() {
 async fn ending_a_run_records_its_outcome() {
     let repo = FakeRepo::default();
     let run = repo
-        .insert_run(RunId::generate(), "Summarise")
+        .insert_run(RunId::generate(), "Summarise", &julia())
         .await
         .expect("insert");
     let steps = StepServiceImpl::new(repo.clone(), FakeExecutor::default());
@@ -431,10 +492,16 @@ async fn an_answer_is_sent_to_the_run_s_workflow() {
     let repo = FakeRepo::default();
     let workflows = FakeWorkflows::default();
     let run = repo
-        .insert_run(RunId::generate(), "Plan")
+        .insert_run(RunId::generate(), "Plan", &julia())
         .await
         .expect("insert");
-    let service = FactoryServiceImpl::new(repo, workflows.clone(), FakeExecutor::default());
+    let service = FactoryServiceImpl::new(
+        repo.clone(),
+        workflows.clone(),
+        FakeExecutor::default(),
+        repo.clone(),
+        repo.clone(),
+    );
 
     service
         .answer_gate(run.id, approval(Some("Go ahead".to_string())))
@@ -453,10 +520,16 @@ async fn an_answer_the_workflow_refuses_is_a_conflict() {
         ..FakeWorkflows::default()
     };
     let run = repo
-        .insert_run(RunId::generate(), "Plan")
+        .insert_run(RunId::generate(), "Plan", &julia())
         .await
         .expect("insert");
-    let service = FactoryServiceImpl::new(repo, workflows, FakeExecutor::default());
+    let service = FactoryServiceImpl::new(
+        repo.clone(),
+        workflows,
+        FakeExecutor::default(),
+        repo.clone(),
+        repo.clone(),
+    );
 
     let refused = service.answer_gate(run.id, approval(None)).await;
 
@@ -468,13 +541,19 @@ async fn a_run_that_ended_takes_no_answer_and_no_cancel() {
     let repo = FakeRepo::default();
     let workflows = FakeWorkflows::default();
     let run = repo
-        .insert_run(RunId::generate(), "Plan")
+        .insert_run(RunId::generate(), "Plan", &julia())
         .await
         .expect("insert");
     repo.end_run(run.id, RunOutcome::Success)
         .await
         .expect("end");
-    let service = FactoryServiceImpl::new(repo, workflows.clone(), FakeExecutor::default());
+    let service = FactoryServiceImpl::new(
+        repo.clone(),
+        workflows.clone(),
+        FakeExecutor::default(),
+        repo.clone(),
+        repo.clone(),
+    );
 
     let answered = service.answer_gate(run.id, approval(None)).await;
     let cancelled = service.cancel_run(run.id).await;
@@ -490,10 +569,16 @@ async fn a_note_larger_than_a_gate_keeps_is_refused() {
     let repo = FakeRepo::default();
     let workflows = FakeWorkflows::default();
     let run = repo
-        .insert_run(RunId::generate(), "Plan")
+        .insert_run(RunId::generate(), "Plan", &julia())
         .await
         .expect("insert");
-    let service = FactoryServiceImpl::new(repo, workflows.clone(), FakeExecutor::default());
+    let service = FactoryServiceImpl::new(
+        repo.clone(),
+        workflows.clone(),
+        FakeExecutor::default(),
+        repo.clone(),
+        repo.clone(),
+    );
 
     let refused = service
         .answer_gate(run.id, approval(Some("x".repeat(4_097))))
@@ -508,10 +593,16 @@ async fn cancelling_a_running_run_cancels_its_workflow() {
     let repo = FakeRepo::default();
     let workflows = FakeWorkflows::default();
     let run = repo
-        .insert_run(RunId::generate(), "Plan")
+        .insert_run(RunId::generate(), "Plan", &julia())
         .await
         .expect("insert");
-    let service = FactoryServiceImpl::new(repo, workflows.clone(), FakeExecutor::default());
+    let service = FactoryServiceImpl::new(
+        repo.clone(),
+        workflows.clone(),
+        FakeExecutor::default(),
+        repo.clone(),
+        repo.clone(),
+    );
 
     service.cancel_run(run.id).await.expect("cancel");
 
@@ -527,10 +618,17 @@ async fn a_run_created_for_a_task_is_linked_to_it() {
         repo.clone(),
         FakeWorkflows::default(),
         FakeExecutor::default(),
+        repo.clone(),
+        repo.clone(),
     );
 
     let created = service
-        .create_run(reply_flow(), "Fix the login bug".to_string(), Some(task_id))
+        .create_run(
+            reply_flow(),
+            "Fix the login bug".to_string(),
+            julia(),
+            Some(task_id),
+        )
         .await
         .expect("create");
 
@@ -543,12 +641,19 @@ async fn a_run_created_for_a_task_is_linked_to_it() {
 async fn a_run_for_a_task_that_does_not_exist_is_not_kept_or_started() {
     let repo = FakeRepo::default();
     let workflows = FakeWorkflows::default();
-    let service = FactoryServiceImpl::new(repo.clone(), workflows.clone(), FakeExecutor::default());
+    let service = FactoryServiceImpl::new(
+        repo.clone(),
+        workflows.clone(),
+        FakeExecutor::default(),
+        repo.clone(),
+        repo.clone(),
+    );
 
     let refused = service
         .create_run(
             reply_flow(),
             "Fix the login bug".to_string(),
+            julia(),
             Some(Uuid::now_v7()),
         )
         .await;
@@ -565,13 +670,15 @@ async fn linking_a_run_replaces_its_task() {
     let second = Uuid::now_v7();
     repo.tasks.lock().expect("tasks").extend([first, second]);
     let run = repo
-        .insert_run(RunId::generate(), "Fix")
+        .insert_run(RunId::generate(), "Fix", &julia())
         .await
         .expect("insert");
     let service = FactoryServiceImpl::new(
         repo.clone(),
         FakeWorkflows::default(),
         FakeExecutor::default(),
+        repo.clone(),
+        repo.clone(),
     );
 
     service.link_task(run.id, first).await.expect("link");
@@ -580,4 +687,92 @@ async fn linking_a_run_replaces_its_task() {
 
     assert_eq!(relinked.run.task_id, Some(second));
     assert!(matches!(missing, Err(FactoryError::NotFound)));
+}
+
+fn julia() -> MacroUserIdStr<'static> {
+    MacroUserIdStr::try_from("macro|julia@example.com".to_string()).expect("valid")
+}
+
+fn nobody() -> MacroUserIdStr<'static> {
+    MacroUserIdStr::try_from("macro|nobody@example.com".to_string()).expect("valid")
+}
+
+#[tokio::test]
+async fn a_run_for_a_user_with_no_account_is_refused() {
+    let repo = FakeRepo::default();
+    let service = FactoryServiceImpl::new(
+        repo.clone(),
+        FakeWorkflows::default(),
+        FakeExecutor::default(),
+        repo.clone(),
+        repo.clone(),
+    );
+
+    let refused = service
+        .create_run(
+            reply_flow(),
+            "Fix the login bug".to_string(),
+            nobody(),
+            None,
+        )
+        .await;
+
+    assert!(matches!(refused, Err(FactoryError::UnknownUser)));
+    assert!(repo.runs.lock().expect("runs").is_empty());
+}
+
+#[tokio::test]
+async fn a_run_for_a_document_that_is_not_a_task_is_refused() {
+    let repo = FakeRepo::default();
+    let note = Uuid::now_v7();
+    repo.documents.lock().expect("documents").insert(note);
+    let service = FactoryServiceImpl::new(
+        repo.clone(),
+        FakeWorkflows::default(),
+        FakeExecutor::default(),
+        repo.clone(),
+        repo.clone(),
+    );
+
+    let refused = service
+        .create_run(
+            reply_flow(),
+            "Fix the login bug".to_string(),
+            julia(),
+            Some(note),
+        )
+        .await;
+
+    assert!(matches!(refused, Err(FactoryError::NotATask)));
+    assert!(repo.runs.lock().expect("runs").is_empty());
+}
+
+#[tokio::test]
+async fn an_answer_from_a_user_with_no_account_never_reaches_the_workflow() {
+    let repo = FakeRepo::default();
+    let workflows = FakeWorkflows::default();
+    let run = repo
+        .insert_run(RunId::generate(), "Plan", &julia())
+        .await
+        .expect("insert");
+    let service = FactoryServiceImpl::new(
+        repo.clone(),
+        workflows.clone(),
+        FakeExecutor::default(),
+        repo.clone(),
+        repo.clone(),
+    );
+
+    let refused = service
+        .answer_gate(
+            run.id,
+            AnswerGate {
+                user_id: nobody(),
+                ..approval(None)
+            },
+        )
+        .await;
+
+    assert!(matches!(refused, Err(FactoryError::UnknownUser)));
+    assert!(workflows.answers.lock().expect("answers").is_empty());
 }

@@ -13,11 +13,12 @@ pub trait RunRepository: Send + Sync + 'static {
     /// The error type returned by repository operations.
     type Err: std::error::Error + Send + Sync + 'static;
 
-    /// Keep a new Run that has not started yet.
+    /// Keep a new Run of `user_id` that has not started yet.
     fn insert_run(
         &self,
         id: RunId,
         request: &str,
+        user_id: &MacroUserIdStr<'static>,
     ) -> impl Future<Output = Result<Run, Self::Err>> + Send;
 
     /// Link the Run to the task document `task_id`, replacing any task it
@@ -85,4 +86,16 @@ pub trait RunRepository: Send + Sync + 'static {
         id: RunId,
         outcome: RunOutcome,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+}
+
+/// The people Macro knows.
+pub trait UserDirectory: Send + Sync + 'static {
+    /// The error type returned when the directory cannot be read.
+    type Err: std::error::Error + Send + Sync + 'static;
+
+    /// Whether `user_id` names an account.
+    fn user_exists(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+    ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
 }

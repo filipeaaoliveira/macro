@@ -62,6 +62,7 @@ pub enum PgRunRepositoryErr {
 struct RunRow {
     id: Uuid,
     request: String,
+    user_id: String,
     created_at: DateTime<Utc>,
     task_id: Option<String>,
     outcome: Option<String>,
@@ -85,6 +86,8 @@ impl TryFrom<RunRow> for Run {
         Ok(Run {
             id: RunId::from_uuid(row.id),
             request: row.request,
+            user_id: MacroUserIdStr::try_from(row.user_id.clone())
+                .map_err(|_| PgRunRepositoryErr::InvalidUserId(row.user_id))?,
             created_at: row.created_at,
             task_id: row
                 .task_id
@@ -176,17 +179,23 @@ impl TryFrom<StepRow> for Step {
 impl RunRepository for PgRunRepository {
     type Err = PgRunRepositoryErr;
 
-    #[tracing::instrument(err, skip(self, request))]
-    async fn insert_run(&self, id: RunId, request: &str) -> Result<Run, Self::Err> {
+    #[tracing::instrument(err, skip(self, request, user_id))]
+    async fn insert_run(
+        &self,
+        id: RunId,
+        request: &str,
+        user_id: &MacroUserIdStr<'static>,
+    ) -> Result<Run, Self::Err> {
         let row = sqlx::query_as!(
             RunRow,
             r#"
-            INSERT INTO factory_run (id, request)
-            VALUES ($1, $2)
-            RETURNING id, request, created_at, task_id, outcome, ended_at
+            INSERT INTO factory_run (id, request, user_id)
+            VALUES ($1, $2, $3)
+            RETURNING id, request, user_id, created_at, task_id, outcome, ended_at
             "#,
             id.as_uuid(),
             request,
+            user_id.as_ref(),
         )
         .fetch_one(&self.pool)
         .await?;
@@ -226,7 +235,7 @@ impl RunRepository for PgRunRepository {
         let row = sqlx::query_as!(
             RunRow,
             r#"
-            SELECT id, request, created_at, task_id, outcome, ended_at
+            SELECT id, request, user_id, created_at, task_id, outcome, ended_at
             FROM factory_run
             WHERE id = $1
             "#,

@@ -227,6 +227,8 @@ pub struct Run {
     pub id: RunId,
     /// What the Run was asked to do.
     pub request: String,
+    /// Who started the Run: its agent Steps run as them.
+    pub user_id: MacroUserIdStr<'static>,
     /// When the Run was created.
     pub created_at: DateTime<Utc>,
     /// The Macro task the Run works on: its task document's id. None when
