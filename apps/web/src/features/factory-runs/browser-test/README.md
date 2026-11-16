@@ -29,3 +29,9 @@ The tests, on desktop and on a phone with touch styles:
   put, and a sent cancel still moves focus once the Run reads as ended);
 - confirm Cancel run, then press Approve: the Gate is locked, and focus moves
   to the status line once the Run reads as cancelled.
+
+`insights.html` mounts Run insights on fixed numbers (`insights.tsx`); a read
+takes 400 ms. `insights.browser.e2e.ts` checks the placeholder, then the
+page, filters it to the code Flow and opens a Run from **Where runs stop**;
+`?error` fails the first read (Retry reads again) and `?empty` has no Runs.
+No page scrolls sideways, on desktop or on a phone.
