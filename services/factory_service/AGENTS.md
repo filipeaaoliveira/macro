@@ -32,8 +32,9 @@ worker that walks each Run's Flow, in one process.
 - A Run end to end: `POST http://localhost:8113/runs` with the
   `x-internal-auth-key` header (the stack's `INTERNAL_API_KEY`), the
   `x-internal-macro-user-id` header (`macro|<email>`), and
-  `{"flow": <crates/factory_engine/flows/reply.json>, "request": "..."}`,
-  then `GET /runs/<id>`. `flows/plan.json` runs the agent Steps `plan` and
+  `{"flow": "reply", "request": "..."}` (a built-in Flow's name, which
+  `GET /flows` lists), then `GET /runs/<id>`. The `plan` Flow runs the agent
+  Steps `plan` and
   `write`, with a Gate between them: answer it with
   `POST /runs/<id>/steps/<seq>/answer` and `{"answer": "approve"}`.
   `POST /runs/<id>/cancel` cancels a Run. Add

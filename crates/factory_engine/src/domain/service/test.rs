@@ -6,7 +6,6 @@ use factory_records::domain::models::{
 };
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
-use serde_json::json;
 use uuid::Uuid;
 
 use super::{FactoryServiceImpl, StepServiceImpl};
@@ -159,16 +158,6 @@ fn nobody() -> MacroUserIdStr<'static> {
     MacroUserIdStr::try_from("macro|nobody@example.com".to_string()).expect("valid")
 }
 
-fn reply_flow() -> serde_json::Value {
-    json!({
-        "entries": [{
-            "id": "reply",
-            "step": "reply",
-            "on": { "done": [{ "to": { "kind": "end", "outcome": "success" } }] }
-        }]
-    })
-}
-
 fn reply_step(run_id: RunId, seq: u16) -> StepRequest {
     StepRequest {
         key: StepKey { run_id, seq },
@@ -213,7 +202,7 @@ async fn creating_a_run_records_it_for_its_owner_and_starts_its_workflow() {
     let created = service
         .create_run(
             julia(),
-            reply_flow(),
+            "reply".to_string(),
             "Summarise the release notes".to_string(),
             None,
         )
@@ -240,7 +229,7 @@ async fn a_run_whose_workflow_does_not_start_is_not_kept() {
     };
 
     let refused = service(&repo, &workflows)
-        .create_run(julia(), reply_flow(), "Summarise".to_string(), None)
+        .create_run(julia(), "reply".to_string(), "Summarise".to_string(), None)
         .await;
 
     assert!(matches!(refused, Err(FactoryError::Internal(_))));
@@ -259,21 +248,26 @@ async fn a_run_whose_workflow_started_despite_a_failed_start_is_kept() {
     };
 
     let refused = service(&repo, &workflows)
-        .create_run(julia(), reply_flow(), "Summarise".to_string(), None)
+        .create_run(julia(), "reply".to_string(), "Summarise".to_string(), None)
         .await;
 
     assert!(refused.is_err());
     assert_eq!(repo.runs.lock().expect("runs").len(), 1);
 }
 
+/// The built-in `plan` Flow names Steps this worker does not serve.
 #[tokio::test]
 async fn a_flow_with_a_step_no_worker_serves_is_refused_before_anything_is_kept() {
     let repo = FakeRepo::default();
     let workflows = FakeWorkflows::default();
-    let flow = json!({ "entries": [{ "id": "plan", "step": "plan" }] });
 
     let refused = service(&repo, &workflows)
-        .create_run(julia(), flow, "Plan the migration".to_string(), None)
+        .create_run(
+            julia(),
+            "plan".to_string(),
+            "Plan the migration".to_string(),
+            None,
+        )
         .await;
 
     assert!(matches!(refused, Err(FactoryError::InvalidFlow(_))));
@@ -282,9 +276,28 @@ async fn a_flow_with_a_step_no_worker_serves_is_refused_before_anything_is_kept(
 }
 
 #[tokio::test]
+async fn a_flow_no_built_in_flow_is_named_for_is_refused_before_anything_is_kept() {
+    let repo = FakeRepo::default();
+    let workflows = FakeWorkflows::default();
+
+    let refused = service(&repo, &workflows)
+        .create_run(
+            julia(),
+            "deploy".to_string(),
+            "Deploy the release".to_string(),
+            None,
+        )
+        .await;
+
+    assert!(matches!(refused, Err(FactoryError::UnknownFlow)));
+    assert!(repo.runs.lock().expect("runs").is_empty());
+    assert!(workflows.started.lock().expect("started").is_empty());
+}
+
+#[tokio::test]
 async fn an_empty_request_is_refused() {
     let refused = service(&FakeRepo::default(), &FakeWorkflows::default())
-        .create_run(julia(), reply_flow(), "  ".to_string(), None)
+        .create_run(julia(), "reply".to_string(), "  ".to_string(), None)
         .await;
 
     assert!(matches!(refused, Err(FactoryError::EmptyRequest)));
@@ -297,7 +310,7 @@ async fn a_run_for_a_user_with_no_account_is_refused() {
     let refused = service(&repo, &FakeWorkflows::default())
         .create_run(
             nobody(),
-            reply_flow(),
+            "reply".to_string(),
             "Fix the login bug".to_string(),
             None,
         )
@@ -441,7 +454,7 @@ async fn a_run_created_for_a_task_keeps_it() {
     let created = service
         .create_run(
             julia(),
-            reply_flow(),
+            "reply".to_string(),
             "Fix the login bug".to_string(),
             Some(task_id),
         )
@@ -460,12 +473,12 @@ async fn a_run_for_a_document_that_is_not_a_task_or_is_missing_is_refused() {
     let service = service(&repo, &workflows);
 
     let not_a_task = service
-        .create_run(julia(), reply_flow(), "Fix".to_string(), Some(note))
+        .create_run(julia(), "reply".to_string(), "Fix".to_string(), Some(note))
         .await;
     let missing = service
         .create_run(
             julia(),
-            reply_flow(),
+            "reply".to_string(),
             "Fix".to_string(),
             Some(Uuid::now_v7()),
         )

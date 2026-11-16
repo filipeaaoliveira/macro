@@ -14,8 +14,7 @@ use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
-use crate::domain::built_in_flows::BUILT_IN_FLOWS;
-use crate::domain::flow::Flow;
+use crate::domain::built_in_flows::{BUILT_IN_FLOWS, BuiltInFlow};
 use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening};
 use crate::domain::models::{
     FactoryError, FlowSummary, RunDetail, RunFinish, RunStart, StepEnding, StepError, StepInput,
@@ -165,11 +164,13 @@ where
     async fn create_run(
         &self,
         actor: MacroUserIdStr<'static>,
-        definition: serde_json::Value,
+        flow: String,
         request: String,
         task_id: Option<Uuid>,
     ) -> Result<RunDetail, FactoryError> {
-        let flow = Flow::parse(definition, |step| self.executor.serves(step))?;
+        let flow = BuiltInFlow::named(&flow)
+            .ok_or(FactoryError::UnknownFlow)?
+            .read(|step| self.executor.serves(step))?;
         if request.trim().is_empty() {
             return Err(FactoryError::EmptyRequest);
         }

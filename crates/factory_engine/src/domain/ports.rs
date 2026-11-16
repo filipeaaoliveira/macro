@@ -175,13 +175,13 @@ pub trait FactoryService: Send + Sync + 'static {
     /// Steps the worker serves.
     fn list_flows(&self) -> Vec<FlowSummary>;
 
-    /// Record `actor`'s new Run of the Flow `definition` for `request`,
-    /// working on the task document `task_id` if one is given, and start it.
-    /// The actor must have an account and see the task.
+    /// Record `actor`'s new Run of the built-in Flow named `flow` for
+    /// `request`, working on the task document `task_id` if one is given,
+    /// and start it. The actor must have an account and see the task.
     fn create_run(
         &self,
         actor: MacroUserIdStr<'static>,
-        definition: serde_json::Value,
+        flow: String,
         request: String,
         task_id: Option<Uuid>,
     ) -> impl Future<Output = Result<RunDetail, FactoryError>> + Send;

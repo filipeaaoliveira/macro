@@ -16,8 +16,8 @@ use factory_records::domain::models::{
     EntryId, Gate, GateAnswer, HandBack, Outcome, Run, RunEnd, RunId, RunOutcome, Step, StepEnd,
 };
 use macro_authorization::{
-    InternalAuthorization, InternalOnly, MacroAuthorizationExtractor, MacroAuthorizationService,
-    MacroAuthorizationState, UserOnly, UserOrInternal,
+    MacroAuthorizationExtractor, MacroAuthorizationService, MacroAuthorizationState, UserOnly,
+    UserOrInternal,
 };
 use macro_user_id::user_id::MacroUserIdStr;
 use model_error_response::ErrorResponse;
@@ -63,14 +63,14 @@ impl<S, Auth> FromRef<FactoryRouterState<S, Auth>> for MacroAuthorizationState<A
 
 /// Build the Run API router. People call it with their own login, and
 /// internal callers for an acting user (the identity headers of the internal
-/// key); either way the call reaches only that user's Runs. `POST /runs` is
-/// for internal callers only. `POST /hand-backs` is an agent session's: its
-/// code-mode SDK calls it as the Run's owner.
+/// key); either way the call reaches only that user's Runs. `POST
+/// /hand-backs` is an agent session's: its code-mode SDK calls it as the
+/// Run's owner.
 ///
 /// Routes:
 /// - `GET /flows` — the built-in Flows a Run can be started of.
-/// - `POST /runs` — create a Run of a Flow, owned by the acting user, and
-///   start it.
+/// - `POST /runs` — create a Run of a built-in Flow, owned by the acting
+///   user, and start it.
 /// - `GET /runs/{id}` — read a Run and the Steps it took.
 /// - `POST /runs/{id}/steps/{seq}/answer` — answer the Gate of the Run's
 ///   Step `seq`.
@@ -97,16 +97,6 @@ where
         .with_state(state)
 }
 
-/// The user an internal caller acts for. Every Run call but a hand back
-/// needs one. Its id is lowercase, whatever case the caller named it in: a
-/// `MacroUserIdStr` lowercases what it parses, as `"User".id` is stored.
-fn acting_user(caller: InternalAuthorization) -> Result<MacroUserIdStr<'static>, FactoryError> {
-    caller
-        .acting_user
-        .map(|user| user.macro_user_id)
-        .ok_or(FactoryError::NoActingUser)
-}
-
 /// The Flows a Run can be started of.
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct FlowsResponse {
@@ -118,9 +108,8 @@ pub struct FlowsResponse {
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateRunRequest {
-    /// The Flow definition the Run walks.
-    #[schema(value_type = Object)]
-    pub flow: serde_json::Value,
+    /// The name of the built-in Flow the Run walks, one `GET /flows` lists.
+    pub flow: String,
     /// What the Run is asked to do.
     pub request: String,
     /// The Macro task the Run works on: its task document's id.
@@ -201,7 +190,8 @@ where
     })
 }
 
-/// Create a Run of a Flow, owned by the acting user, and start its workflow.
+/// Create a Run of a built-in Flow, owned by the caller, and start its
+/// workflow.
 #[utoipa::path(
     post,
     tag = "factory",
@@ -221,14 +211,16 @@ where
 #[tracing::instrument(skip_all)]
 pub async fn create_run_handler<S, Auth>(
     State(state): State<FactoryRouterState<S, Auth>>,
-    caller: MacroAuthorizationExtractor<Auth, InternalOnly>,
+    caller: MacroAuthorizationExtractor<Auth, UserOrInternal>,
     Json(body): Json<CreateRunRequest>,
 ) -> Result<(StatusCode, Json<RunDetail>), FactoryError>
 where
     S: FactoryService,
     Auth: MacroAuthorizationService,
 {
-    let actor = acting_user(caller.authorization)?;
+    // The id is lowercase, whatever case the caller named it in: a
+    // `MacroUserIdStr` lowercases what it parses, as `"User".id` is stored.
+    let actor = caller.authorization.user.macro_user_id;
     let created = state
         .service
         .create_run(actor, body.flow, body.request, body.task_id)
@@ -435,7 +427,7 @@ impl FactoryError {
             | FactoryError::UnknownTask
             | FactoryError::NotATask
             | FactoryError::UnknownUser
-            | FactoryError::NoActingUser
+            | FactoryError::UnknownFlow
             | FactoryError::AnswerNotOffered { .. }
             | FactoryError::NotAStepSession
             | FactoryError::OutcomeNotOffered { .. }

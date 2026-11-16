@@ -7,7 +7,7 @@ outcomes say where a Run goes next, as one durable Temporal workflow per Run.
 
 ## How it works
 
-`POST /runs` parses the Flow, records the Run (`factory_records`), and starts
+`POST /runs` reads its Flow, records the Run (`factory_records`), and starts
 `FlowWorkflow` with the Run's id as its workflow id. For each Step the
 interpreter names, the workflow records its start (`factory_start_step`), runs
 its work (`factory_run_step`), records its end (`factory_end_step`), and feeds
@@ -47,11 +47,11 @@ before it is sent (400); the update's validator (`domain/gate.rs`) refuses an
 answer to a Gate the Run does not wait on and a second answer (409).
 
 People call the Run API with their own login (`UserOrInternal`), and internal
-services for an acting user (the internal key's identity headers); `POST /runs`
-is for internal callers only. The acting user owns the Runs they create, and
-reads, answers, links and cancels only those; someone else's Run reads as
-missing (404). A call with no user is refused (401), and one whose user has no
-account (400). A Run may work on a
+services for an acting user (the internal key's identity headers). A Run starts
+only of a built-in Flow, by name: no caller sends a Flow definition. The acting
+user owns the Runs they create, and reads, answers, links and cancels only
+those; someone else's Run reads as missing (404). A call with no user is
+refused (401), and one whose user has no account (400). A Run may work on a
 Macro task: `POST /runs` takes an optional `taskId` (the task document's id),
 and `PUT /runs/{id}/task` links or relinks one. The owner must see the document
 through entity access, and document storage must say it is a task that is not

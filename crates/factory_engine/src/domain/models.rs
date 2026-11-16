@@ -146,9 +146,9 @@ pub enum FactoryError {
     /// No task the Run's owner can see has this id.
     #[error("no task the run's owner can see has this id")]
     UnknownTask,
-    /// The internal caller named no acting user.
-    #[error("the request names no acting user")]
-    NoActingUser,
+    /// No built-in Flow has this name.
+    #[error("no flow has this name")]
+    UnknownFlow,
     /// The Gate does not offer the answer.
     #[error("the gate offers {offered:?}")]
     AnswerNotOffered {

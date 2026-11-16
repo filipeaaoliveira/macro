@@ -130,7 +130,7 @@ impl FactoryService for FakeService {
     async fn create_run(
         &self,
         actor: MacroUserIdStr<'static>,
-        _definition: serde_json::Value,
+        _flow: String,
         _request: String,
         _task_id: Option<Uuid>,
     ) -> Result<RunDetail, FactoryError> {
@@ -315,7 +315,7 @@ async fn a_run_is_created_for_the_lowercased_acting_user() {
             "POST",
             "/runs",
             Caller::Internal(Some("macro|Julia@Example.com")),
-            serde_json::json!({ "flow": {}, "request": "Fix the login bug" }),
+            serde_json::json!({ "flow": "reply", "request": "Fix the login bug" }),
         ))
         .await
         .expect("response");
@@ -506,4 +506,78 @@ async fn a_signed_in_user_lists_the_flows_the_worker_runs() {
             .starts_with("Plans the change")
     );
     assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
+}
+
+/// A person starts a Run of a built-in Flow by its name, on a task they can
+/// see, and owns it.
+#[tokio::test]
+async fn a_signed_in_user_starts_a_run_of_a_flow_by_its_name() {
+    let repo = FakeRepo::default();
+    let task = Uuid::now_v7();
+    repo.tasks.lock().expect("tasks").insert(task);
+
+    let response = records_router(&repo)
+        .oneshot(call(
+            "POST",
+            "/runs",
+            Caller::User("alice"),
+            serde_json::json!({ "flow": "plan", "request": "Add a due date column", "taskId": task }),
+        ))
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let created = body(response).await;
+    assert_eq!(created["run"]["userId"], ALICE);
+    assert_eq!(created["run"]["taskId"], task.to_string());
+    assert_eq!(created["steps"], serde_json::json!([]));
+    assert_eq!(repo.runs.lock().expect("runs").len(), 1);
+}
+
+/// Only a built-in Flow starts: a whole definition, or a name no Flow has,
+/// is refused, and so is a task the caller cannot see. Nothing is kept.
+#[tokio::test]
+async fn a_run_starts_only_of_a_built_in_flow_on_a_task_the_caller_sees() {
+    let repo = FakeRepo::default();
+    let task = Uuid::now_v7();
+    repo.tasks.lock().expect("tasks").insert(task);
+    repo.hidden
+        .lock()
+        .expect("hidden")
+        .insert((EVE.to_string(), task));
+    let router = records_router(&repo);
+    let start = |token: &'static str, body: serde_json::Value| {
+        let router = router.clone();
+        async move {
+            router
+                .oneshot(call("POST", "/runs", Caller::User(token), body))
+                .await
+                .expect("response")
+                .status()
+        }
+    };
+
+    let definition = start(
+        "alice",
+        serde_json::json!({
+            "flow": { "entries": [{ "id": "reply", "step": "reply" }] },
+            "request": "Say hello",
+        }),
+    )
+    .await;
+    let unknown = start(
+        "alice",
+        serde_json::json!({ "flow": "deploy", "request": "Ship it" }),
+    )
+    .await;
+    let hidden_task = start(
+        "eve",
+        serde_json::json!({ "flow": "plan", "request": "Plan it", "taskId": task }),
+    )
+    .await;
+
+    assert!(definition.is_client_error(), "{definition}");
+    assert_eq!(unknown, StatusCode::BAD_REQUEST);
+    assert_eq!(hidden_task, StatusCode::BAD_REQUEST);
+    assert!(repo.runs.lock().expect("runs").is_empty());
 }
