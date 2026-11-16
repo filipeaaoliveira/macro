@@ -13,7 +13,9 @@ interpreter names, the workflow records its start (`factory_start_step`), runs
 its work (`factory_run_step`), records its end (`factory_end_step`), and feeds
 the outcome back; then it records the Run's end (`factory_end_run`). A Step is
 keyed by its place among the Run's Steps (`seq`), which a reset never reuses.
-Work that fails after its retries ends the Step `failed`, with a fixed
+Work that fails for good, or still fails after two hours of retries (not a
+count of attempts, which a worker shutting down uses up), ends the Step
+`failed`, with a fixed
 output (why is in the worker's logs). The work heartbeats. A cancelled
 activity only drops its work: it can't tell the Run's cancellation from a
 worker shutting down or a timed-out attempt, and a retry goes on in the same
@@ -61,9 +63,11 @@ and what the Run's earlier Steps produced. The agent is the `StepAgent` port.
 session of the configured agent, owned by the Run's owner, through the routine
 sessions capability (`agent_harness_service_client`). The Step claims its
 session in `factory_step` first, so a retried Step goes on in the same session
-and never prompts twice: it always asks, and the session refuses a prompt it
-already has with a conflict. The session's status settles only a prompt
-whose delivery is unknown. The prompt asks the agent to hand back its result
+and does not start the work over: it always asks, and the session refuses a
+prompt it already has with a conflict. That guard is a check of the
+session's history, not exactly-once delivery, so a prompt whose delivery is
+unknown is never sent again: the session's status settles it, and one that
+never shows fails the Step for good. The prompt asks the agent to hand back its result
 with `macro.factory.handBack({ outcome, text })` from code mode, which reaches
 `POST /hand-backs` as the Run's owner; the correlation layer names the session
 (`agent_correlation::context::current_session`), and the hand back must offer
