@@ -227,6 +227,8 @@ pub struct Run {
     pub id: RunId,
     /// What the Run was asked to do.
     pub request: String,
+    /// Who started the Run: its agent Steps run as them.
+    pub user_id: MacroUserIdStr<'static>,
     /// When the Run was created.
     pub created_at: DateTime<Utc>,
     /// The Macro task the Run works on: its task document's id. None when
@@ -234,6 +236,16 @@ pub struct Run {
     pub task_id: Option<Uuid>,
     /// How and when it ended; none while it runs.
     pub end: Option<RunEnd>,
+}
+
+/// What keeping a new Run came to.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RunInsert {
+    /// The Run is kept.
+    Inserted(Run),
+    /// No document has the task id the Run was to work on, so nothing was
+    /// kept.
+    NoSuchTask,
 }
 
 /// Whether a Run was linked to a task.
@@ -287,10 +299,26 @@ pub struct Gate {
     pub answer: Option<GateAnswer>,
 }
 
+/// The most Steps a Run takes; past it the Run ends `blocked`, so a Flow
+/// that loops cannot run forever.
+pub const MAX_STEPS: u16 = 200;
+
+/// Which of a Run's Steps: its place among them, from 1. A Step keeps its
+/// place even when a reset numbers its entry's visits from 1 again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct StepKey {
+    /// The Run.
+    pub run_id: RunId,
+    /// The Step's place in it, from 1.
+    pub seq: u16,
+}
+
 /// One visit of one of a Run's entries.
 #[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Step {
+    /// The Step's place among the Run's Steps, from 1.
+    pub seq: u16,
     /// The entry the Step visits.
     pub entry: EntryId,
     /// Which visit of the entry it is, from 1.
@@ -301,4 +329,58 @@ pub struct Step {
     pub end: Option<StepEnd>,
     /// The question its end put to a person, if its entry has a Gate.
     pub gate: Option<Gate>,
+}
+
+/// The agent session a Step works in: the session, and the action of the
+/// prompt that starts the Step's work. Both are UUIDv7s the factory makes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StepSession {
+    /// The agent session.
+    pub session_id: Uuid,
+    /// Its first prompt's action.
+    pub action_id: Uuid,
+}
+
+/// A Step's session as `RunRepository::claim_session` left it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClaimedSession {
+    /// The session the Step works in.
+    pub session: StepSession,
+    /// Whether this claim recorded it; false when an earlier attempt of the
+    /// Step already had.
+    pub new: bool,
+}
+
+/// The session a Step claimed, as a stop sees it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StoppingSession {
+    /// The session.
+    pub session: StepSession,
+    /// Whether an attempt saw it open.
+    pub opened: bool,
+    /// Whether a prepare sent for it may still open it: one was sent, and
+    /// less long ago than the bound the stop gave.
+    pub may_still_open: bool,
+}
+
+/// A Step as the agent session it works in finds it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SessionStep {
+    /// The Step.
+    pub key: StepKey,
+    /// The Run's owner, as whom the session runs.
+    pub owner: MacroUserIdStr<'static>,
+    /// The outcomes the agent may hand back.
+    pub offered: Vec<Outcome>,
+    /// Whether the Step has ended.
+    pub ended: bool,
+}
+
+/// What an agent handed back for its Step.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HandBack {
+    /// One of the outcomes the Step offered.
+    pub outcome: Outcome,
+    /// What the agent produced, for a person and the Run's later Steps.
+    pub output: String,
 }

@@ -124,6 +124,7 @@ const postReads = new Set([
 const labels: Record<string, string> = {
   'cognition.decisions': 'Classify content',
   'cognition.structuredCompletion': 'Generate structured content',
+  'factory.handBackFactoryStep': 'Hand back factory step',
   'scheduled-action.checkScheduledAction': 'Check routine',
   'storage.postItemsSoupAst': 'Browse workspace',
   'search.unifiedSearch': 'Search workspace',
@@ -139,6 +140,7 @@ for (const [service, directory] of Object.entries({
   cognition: 'cognition',
   contacts: 'contacts',
   email: 'email',
+  factory: 'factory',
   notification: 'notification',
   properties: 'properties',
   search: 'search',

@@ -7,15 +7,152 @@
 import type {
   AnswerGateRequest,
   CreateRunRequest,
-  EntryId,
   ErrorResponse,
+  FlowsResponse,
+  HandBackRequest,
   LinkTaskRequest,
   RunDetail,
   RunId,
+  TaskRunsResponse,
 } from './schemas';
 
 /**
- * @summary Create a Run of a Flow and start its workflow.
+ * @summary List the built-in Flows a Run can be started of, by name.
+ */
+export type listFactoryFlowsResponse200 = {
+  data: FlowsResponse;
+  status: 200;
+};
+
+export type listFactoryFlowsResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type listFactoryFlowsResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type listFactoryFlowsResponseSuccess = listFactoryFlowsResponse200 & {
+  headers: Headers;
+};
+export type listFactoryFlowsResponseError = (
+  | listFactoryFlowsResponse401
+  | listFactoryFlowsResponse403
+) & {
+  headers: Headers;
+};
+
+export type listFactoryFlowsResponse =
+  | listFactoryFlowsResponseSuccess
+  | listFactoryFlowsResponseError;
+
+export const getListFactoryFlowsUrl = () => {
+  return `/flows`;
+};
+
+export const listFactoryFlows = async (
+  options?: RequestInit
+): Promise<listFactoryFlowsResponse> => {
+  const res = await fetch(getListFactoryFlowsUrl(), {
+    ...options,
+    method: 'GET',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: listFactoryFlowsResponse['data'] = body ? JSON.parse(body) : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as listFactoryFlowsResponse;
+};
+
+/**
+ * @summary Hand back the result of the factory Step the calling agent session works
+on. The session's latest hand back is the Step's result once its turn
+ends.
+ */
+export type handBackFactoryStepResponse204 = {
+  data: void;
+  status: 204;
+};
+
+export type handBackFactoryStepResponse400 = {
+  data: ErrorResponse;
+  status: 400;
+};
+
+export type handBackFactoryStepResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type handBackFactoryStepResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type handBackFactoryStepResponse409 = {
+  data: ErrorResponse;
+  status: 409;
+};
+
+export type handBackFactoryStepResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type handBackFactoryStepResponseSuccess =
+  handBackFactoryStepResponse204 & {
+    headers: Headers;
+  };
+export type handBackFactoryStepResponseError = (
+  | handBackFactoryStepResponse400
+  | handBackFactoryStepResponse401
+  | handBackFactoryStepResponse403
+  | handBackFactoryStepResponse409
+  | handBackFactoryStepResponse500
+) & {
+  headers: Headers;
+};
+
+export type handBackFactoryStepResponse =
+  | handBackFactoryStepResponseSuccess
+  | handBackFactoryStepResponseError;
+
+export const getHandBackFactoryStepUrl = () => {
+  return `/hand-backs`;
+};
+
+export const handBackFactoryStep = async (
+  handBackRequest: HandBackRequest,
+  options?: RequestInit
+): Promise<handBackFactoryStepResponse> => {
+  const res = await fetch(getHandBackFactoryStepUrl(), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(handBackRequest),
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: handBackFactoryStepResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as handBackFactoryStepResponse;
+};
+
+/**
+ * @summary Create a Run of a built-in Flow, owned by the caller, and start its
+workflow.
  */
 export type createFactoryRunResponse201 = {
   data: RunDetail;
@@ -42,6 +179,16 @@ export type createFactoryRunResponse500 = {
   status: 500;
 };
 
+export type createFactoryRunResponse502 = {
+  data: ErrorResponse;
+  status: 502;
+};
+
+export type createFactoryRunResponse503 = {
+  data: ErrorResponse;
+  status: 503;
+};
+
 export type createFactoryRunResponseSuccess = createFactoryRunResponse201 & {
   headers: Headers;
 };
@@ -50,6 +197,8 @@ export type createFactoryRunResponseError = (
   | createFactoryRunResponse401
   | createFactoryRunResponse403
   | createFactoryRunResponse500
+  | createFactoryRunResponse502
+  | createFactoryRunResponse503
 ) & {
   headers: Headers;
 };
@@ -84,11 +233,16 @@ export const createFactoryRun = async (
 };
 
 /**
- * @summary Read a Run and the Steps it took.
+ * @summary Read one of the caller's Runs and the Steps it took.
  */
 export type getFactoryRunResponse200 = {
   data: RunDetail;
   status: 200;
+};
+
+export type getFactoryRunResponse400 = {
+  data: ErrorResponse;
+  status: 400;
 };
 
 export type getFactoryRunResponse401 = {
@@ -115,6 +269,7 @@ export type getFactoryRunResponseSuccess = getFactoryRunResponse200 & {
   headers: Headers;
 };
 export type getFactoryRunResponseError = (
+  | getFactoryRunResponse400
   | getFactoryRunResponse401
   | getFactoryRunResponse403
   | getFactoryRunResponse404
@@ -151,12 +306,18 @@ export const getFactoryRun = async (
 };
 
 /**
- * @summary Cancel a Run that has not ended. Its running Step or Gate stops, and
+ * @summary Cancel one of the caller's Runs. Its running Step or Gate stops, and
 reading the Run shows it `cancelled` once its workflow recorded that.
+Cancelling a cancelled Run again is accepted and changes nothing.
  */
 export type cancelFactoryRunResponse202 = {
   data: void;
   status: 202;
+};
+
+export type cancelFactoryRunResponse400 = {
+  data: ErrorResponse;
+  status: 400;
 };
 
 export type cancelFactoryRunResponse401 = {
@@ -184,15 +345,28 @@ export type cancelFactoryRunResponse500 = {
   status: 500;
 };
 
+export type cancelFactoryRunResponse502 = {
+  data: ErrorResponse;
+  status: 502;
+};
+
+export type cancelFactoryRunResponse503 = {
+  data: ErrorResponse;
+  status: 503;
+};
+
 export type cancelFactoryRunResponseSuccess = cancelFactoryRunResponse202 & {
   headers: Headers;
 };
 export type cancelFactoryRunResponseError = (
+  | cancelFactoryRunResponse400
   | cancelFactoryRunResponse401
   | cancelFactoryRunResponse403
   | cancelFactoryRunResponse404
   | cancelFactoryRunResponse409
   | cancelFactoryRunResponse500
+  | cancelFactoryRunResponse502
+  | cancelFactoryRunResponse503
 ) & {
   headers: Headers;
 };
@@ -225,8 +399,10 @@ export const cancelFactoryRun = async (
 };
 
 /**
- * @summary Answer the Gate a Run waits on. The Run goes on once its workflow took
-the answer; reading the Run shows the answer once it is recorded.
+ * @summary Answer, as the caller, the Gate one of their Runs waits on. The Run
+goes on once its workflow took the answer; reading the Run shows the
+answer once it is recorded. A Gate asks a person: an agent's program
+acting for the owner is refused (403).
  */
 export type answerFactoryGateResponse202 = {
   data: void;
@@ -263,6 +439,16 @@ export type answerFactoryGateResponse500 = {
   status: 500;
 };
 
+export type answerFactoryGateResponse502 = {
+  data: ErrorResponse;
+  status: 502;
+};
+
+export type answerFactoryGateResponse503 = {
+  data: ErrorResponse;
+  status: 503;
+};
+
 export type answerFactoryGateResponseSuccess = answerFactoryGateResponse202 & {
   headers: Headers;
 };
@@ -273,6 +459,8 @@ export type answerFactoryGateResponseError = (
   | answerFactoryGateResponse404
   | answerFactoryGateResponse409
   | answerFactoryGateResponse500
+  | answerFactoryGateResponse502
+  | answerFactoryGateResponse503
 ) & {
   headers: Headers;
 };
@@ -281,22 +469,17 @@ export type answerFactoryGateResponse =
   | answerFactoryGateResponseSuccess
   | answerFactoryGateResponseError;
 
-export const getAnswerFactoryGateUrl = (
-  id: RunId,
-  entry: EntryId,
-  visit: number
-) => {
-  return `/runs/${id}/gates/${entry}/${visit}/answer`;
+export const getAnswerFactoryGateUrl = (id: RunId, seq: number) => {
+  return `/runs/${id}/steps/${seq}/answer`;
 };
 
 export const answerFactoryGate = async (
   id: RunId,
-  entry: EntryId,
-  visit: number,
+  seq: number,
   answerGateRequest: AnswerGateRequest,
   options?: RequestInit
 ): Promise<answerFactoryGateResponse> => {
-  const res = await fetch(getAnswerFactoryGateUrl(id, entry, visit), {
+  const res = await fetch(getAnswerFactoryGateUrl(id, seq), {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
@@ -314,7 +497,8 @@ export const answerFactoryGate = async (
 };
 
 /**
- * @summary Link a Run to the Macro task it works on, replacing any task it had.
+ * @summary Link one of the caller's Runs to a Macro task they can see,
+replacing any task it had.
  */
 export type linkFactoryRunTaskResponse200 = {
   data: RunDetail;
@@ -388,4 +572,81 @@ export const linkFactoryRunTask = async (
     status: res.status,
     headers: res.headers,
   } as linkFactoryRunTaskResponse;
+};
+
+/**
+ * @summary List the caller's Runs on a task they can see, newest first, each with
+the Steps it took. Other people's Runs on the task are not listed.
+ */
+export type listFactoryTaskRunsResponse200 = {
+  data: TaskRunsResponse;
+  status: 200;
+};
+
+export type listFactoryTaskRunsResponse400 = {
+  data: ErrorResponse;
+  status: 400;
+};
+
+export type listFactoryTaskRunsResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type listFactoryTaskRunsResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type listFactoryTaskRunsResponse404 = {
+  data: ErrorResponse;
+  status: 404;
+};
+
+export type listFactoryTaskRunsResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type listFactoryTaskRunsResponseSuccess =
+  listFactoryTaskRunsResponse200 & {
+    headers: Headers;
+  };
+export type listFactoryTaskRunsResponseError = (
+  | listFactoryTaskRunsResponse400
+  | listFactoryTaskRunsResponse401
+  | listFactoryTaskRunsResponse403
+  | listFactoryTaskRunsResponse404
+  | listFactoryTaskRunsResponse500
+) & {
+  headers: Headers;
+};
+
+export type listFactoryTaskRunsResponse =
+  | listFactoryTaskRunsResponseSuccess
+  | listFactoryTaskRunsResponseError;
+
+export const getListFactoryTaskRunsUrl = (taskId: string) => {
+  return `/tasks/${taskId}/runs`;
+};
+
+export const listFactoryTaskRuns = async (
+  taskId: string,
+  options?: RequestInit
+): Promise<listFactoryTaskRunsResponse> => {
+  const res = await fetch(getListFactoryTaskRunsUrl(taskId), {
+    ...options,
+    method: 'GET',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: listFactoryTaskRunsResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as listFactoryTaskRunsResponse;
 };

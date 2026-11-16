@@ -4,6 +4,8 @@
  * factory_engine
  * OpenAPI spec version: 0.1.0
  */
+
+import type { MacroUserIdStr } from './macroUserIdStr';
 import type { RunEndProperty } from './runEndProperty';
 import type { RunId } from './runId';
 import type { RunTaskId } from './runTaskId';
@@ -22,4 +24,6 @@ export interface Run {
   /** The Macro task the Run works on: its task document's id. None when
 the Run has no task, or its task was deleted. */
   taskId?: RunTaskId;
+  /** Who started the Run: its agent Steps run as them. */
+  userId: MacroUserIdStr;
 }

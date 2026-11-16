@@ -108,6 +108,7 @@ const methods: Record<string, Partial<Record<SdkVerb, string>>> = {
     restored: 'restoreSuggestion',
   },
   unfurl: { read: 'getUnfurl getUnfurlBulk' },
+  factory: { submitted: 'handBackFactoryStep' },
   auth: {
     read: 'macroApiToken getReferralCode getTeam getUserInfo postProfilePictures',
     listed:

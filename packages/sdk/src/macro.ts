@@ -17,6 +17,7 @@ import { DocumentNamespace } from './entities/documents/namespace';
 import { EmailNamespace } from './entities/email/namespace';
 import { EntityMentionNamespace } from './entities/entity-mentions/namespace';
 import { ExternalChatsNamespace } from './entities/external-chat/namespace';
+import { FactoryNamespace } from './entities/factory/namespace';
 import { FavoritesNamespace } from './entities/favorites/namespace';
 import { ForeignEntityNamespace } from './entities/foreign/namespace';
 import { FormNamespace } from './entities/forms/namespace';
@@ -151,6 +152,8 @@ export class Macro<T extends MacroOpts = MacroOpts> {
 
   /** unfurls resources and operations. */
   readonly unfurls: UnfurlNamespace;
+  /** The software factory: an agent Step's hand back. */
+  readonly factory: FactoryNamespace;
 
   /** agents resources and operations. */
   readonly agents: AgentNamespace;
@@ -277,6 +280,7 @@ export class Macro<T extends MacroOpts = MacroOpts> {
     this.routines = new RoutineNamespace(client);
     this.suggestions = new SuggestionNamespace(client);
     this.unfurls = new UnfurlNamespace(client);
+    this.factory = new FactoryNamespace(client);
     this.agents = new AgentNamespace(client);
     this.initiatives = new InitiativeNamespace(client);
     this.apiKeys = new ApiKeyNamespace(client);

@@ -800,6 +800,9 @@ pub async fn run() -> anyhow::Result<()> {
         runs: Arc::new(
             suggestions::outbound::pg_suggestion_repo::PgSuggestionRepo::new(pool.clone()),
         ),
+        factory_steps: Arc::new(code_mode::FactoryStepRecords(
+            factory_records::outbound::pg_run_repository::PgRunRepository::new(pool.clone()),
+        )),
     });
     let public_code_mode = match &code_runner {
         Some((_, public, _, _)) => Some(public_mcp::PublicCodeMode {
@@ -1860,6 +1863,8 @@ pub async fn run() -> anyhow::Result<()> {
         entity_access.clone(),
         MacroAuthorizationState::new(Arc::new(authorization_service.clone())),
     );
+    // Requested sessions settle in tasks of their own, drained on shutdown.
+    let session_request_tasks = tokio_util::task::TaskTracker::new();
     let bots_directory = Arc::new(PgBotDirectory::new(
         PgBotsRepo::new(pool.clone()),
         computers::harness_service(&pool),
@@ -1872,6 +1877,7 @@ pub async fn run() -> anyhow::Result<()> {
                 broker.clone(),
                 session_repo.clone(),
                 PgHarnessRepo::new(pool.clone()),
+                session_request_tasks.clone(),
             ),
         ),
         harness.clone(),
@@ -1886,6 +1892,7 @@ pub async fn run() -> anyhow::Result<()> {
             broker.clone(),
             session_repo.clone(),
             PgHarnessRepo::new(pool.clone()),
+            session_request_tasks.clone(),
         ),
         PgConnectionRepo::new(pool.clone()),
         MacroAuthorizationState::new(Arc::new(authorization_service.clone())),
@@ -1908,6 +1915,7 @@ pub async fn run() -> anyhow::Result<()> {
                 broker.clone(),
                 session_repo.clone(),
                 PgHarnessRepo::new(pool.clone()),
+                session_request_tasks.clone(),
             ),
             draining_sessions.clone(),
             (*harness).clone(),
@@ -2652,7 +2660,18 @@ pub async fn run() -> anyhow::Result<()> {
     if let Some((sessions, public, routines, _)) = &code_runner {
         tokio::join!(sessions.shutdown(), public.shutdown(), routines.shutdown());
     }
-    let stop_failures = container_shutdown.shutdown_all().await;
+    // Sessions still settling finish beside the sandboxes' stop, not before
+    // it: both must fit inside the grace ECS gives a stopping task.
+    let (stop_failures, settled) = tokio::join!(
+        container_shutdown.shutdown_all(),
+        external_session_requests::drain(
+            &session_request_tasks,
+            external_session_requests::SHUTDOWN_DRAIN,
+        ),
+    );
+    if !settled {
+        tracing::warn!("timed out settling requested sessions");
+    }
     if stop_failures > 0 {
         tracing::error!(stop_failures, "some sandboxes failed to stop");
     }

@@ -9,35 +9,61 @@ worker that walks each Run's Flow, in one process.
 
 - `src/main.rs`: composition root — config, MacroDB pool, Temporal client and
   worker, router, shutdown.
-- `src/config.rs`: `DATABASE_URL`, `INTERNAL_API_KEY`, `TEMPORAL_ADDRESS`.
+- `src/config.rs`: `DATABASE_URL`, `INTERNAL_API_KEY`, `TEMPORAL_ADDRESS`,
+  `DOCUMENT_STORAGE_SERVICE_AUTH_KEY` (reading the tasks Runs work on),
+  `AUTHENTICATION_SERVICE_SECRET_KEY` (telling which accounts exist),
+  `FACTORY_AGENT_ID` (optional: the agent doing agent Steps).
 
 ## Scope
 
 - Owns: wiring `factory_engine` and `factory_records` into a process.
 - Not here: Flows, the workflow and the API's handlers → `crates/factory_engine`;
   the Run tables → `crates/factory_records`.
-- Callers: internal services, with the internal API key. Users are refused.
+- Callers: people, with their own login or user API key, and internal
+  services, with the internal API key and an acting user
+  (`x-internal-macro-user-id`). Either way the user owns the Runs they create.
+  Bots are refused.
 
 ## Checks
 
 - `cargo build -p factory_service`
-- `curl http://localhost:8113/health` after `just run_local`.
+- `curl http://localhost:8113/health` after `just run_local`, and
+  `curl https://localhost:8090/factory/health` through the local proxy.
 - A Run end to end: `POST http://localhost:8113/runs` with the
-  `x-internal-auth-key` header (the stack's `INTERNAL_API_KEY`) and `{"flow": <crates/factory_engine/flows/reply.json>, "request": "..."}`,
-  then `GET /runs/<id>`. `flows/plan.json` runs the agent Steps `plan` and
+  `x-internal-auth-key` header (the stack's `INTERNAL_API_KEY`), the
+  `x-internal-macro-user-id` header (`macro|<email>`), and
+  `{"flow": "reply", "request": "..."}` (a built-in Flow's name, which
+  `GET /flows` lists), then `GET /runs/<id>`. The `plan` Flow runs the agent
+  Steps `plan` and
   `write`, with a Gate between them: answer it with
-  `POST /runs/<id>/gates/plan/<visit>/answer` and
-  `{"answer": "approve", "userId": "macro|<email>"}`. `POST /runs/<id>/cancel`
-  cancels a Run. Add `"taskId": "<task document id>"` to link a Run to a task,
-  or `PUT /runs/<id>/task` later.
+  `POST /runs/<id>/steps/<seq>/answer` and `{"answer": "approve"}`.
+  `POST /runs/<id>/cancel` cancels a Run. Add
+  `"taskId": "<task document id>"` to link a Run to a task, or
+  `PUT /runs/<id>/task` later.
 
 ## Gotchas
 
-- The agent Steps run on `LocalAgent`, which does no work: no adapter to a
-  real agent runtime is wired in yet.
+- `FACTORY_AGENT_ID` names the agent (a bot id) whose sessions do the agent
+  Steps, as each Run's owner; the owner must be allowed to use it. Unset, the
+  agent Steps run on `LocalAgent`, which does no work. Locally, set it in the
+  `--env-file` the stack is started with
+  (`docs/development/running-locally.md`). A macrod agent's sessions need
+  its machine connected, and routine apps are refused for it.
+- The service tells which accounts exist with the authentication service's
+  `POST /internal/get_existing_users`, so it requires the auth service's fix
+  that serves that route as POST: before it, the route answered only GET,
+  and every Run was refused as having no account.
 
+- Open for deploying: the service reaches the harness's routine sessions at
+  `AgentHarnessServiceUrl`, which outside the local stack is the public
+  gateway, as for every Macro caller outside the harness's process (the
+  scheduler runs inside it). While the harness deploys, the gateway answers
+  502 or 503, so a prompt sent then is `PromptDeliveryUnknown` and its Step
+  fails for good after a minute's wait. Macro has no in-network address for
+  the harness to use instead.
 - Local-only: the local stack runs a Temporal dev server (`temporal`, UI on
   `localhost:8233`); no deployed environment has Temporal yet, so the service
-  has no deploy inventory, Doppler project or gateway route.
+  has no deploy inventory, Doppler project or gateway route. The local proxy
+  serves it at `/factory`, where the web app reaches it.
 - The API and the worker stop together: when either stops, the process
   shuts the other down and exits.

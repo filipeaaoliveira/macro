@@ -218,11 +218,12 @@ fn boot_stubs_are_local_only() {
 }
 
 /// authentication-service refuses to start unless every Stripe price id looks
-/// like `price_` and a safe suffix (`configured_price_id`), so the local stubs
-/// must too.
+/// like `price_` and a safe suffix, so the local stubs must too. The pattern
+/// is `configured_price_id`'s in `services/authentication_service/src/config.rs`;
+/// change both together.
 #[test]
 fn stripe_price_id_stubs_are_valid_price_ids() {
-    let price_id = regex::Regex::new(r"^price_[A-Za-z0-9_]{1,64}$").unwrap();
+    let price_id = lazy_regex::regex!(r"^price_[A-Za-z0-9_]{1,64}$");
     let env = local_env();
     let stubs: Vec<_> = env
         .iter()
@@ -320,6 +321,10 @@ fn emits_in_network_service_url_overrides() {
             "http://contacts-service:8080",
         ),
         ("OVERRIDE_UNFURL_SERVICE_URL", "http://unfurl-service:8080"),
+        (
+            "OVERRIDE_FACTORY_SERVICE_URL",
+            "http://factory-service:8080",
+        ),
         (
             "OVERRIDE_AGENT_HARNESS_SERVICE_URL",
             "http://agent-harness-service:8080",

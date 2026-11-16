@@ -3,28 +3,24 @@
 #[cfg(test)]
 mod test;
 
-use factory_records::domain::models::{EntryId, Outcome, RunId};
+use factory_records::domain::models::{Outcome, StepKey};
 use macro_user_id::user_id::MacroUserIdStr;
 use serde::{Deserialize, Serialize};
 
 /// The Gate a Run waits on: the Step that asked, and the answers it offers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OpenGate {
-    /// The entry whose Step asked.
-    pub entry: EntryId,
-    /// Which visit of the entry asked.
-    pub visit: u16,
+    /// The place of the Step that asked, among the Run's Steps.
+    pub seq: u16,
     /// The answers it offers.
     pub answers: Vec<Outcome>,
 }
 
-/// A person's answer to the Gate of one visit of an entry.
+/// A person's answer to the Gate of one of a Run's Steps.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AnswerGate {
-    /// The entry whose Step asked.
-    pub entry: EntryId,
-    /// Which visit of the entry asked.
-    pub visit: u16,
+    /// The place of the Step that asked, among the Run's Steps.
+    pub seq: u16,
     /// The answer, one the Gate offers.
     pub answer: Outcome,
     /// What the person adds, for the Run's later Steps to read.
@@ -36,12 +32,8 @@ pub struct AnswerGate {
 /// A Gate a Run's workflow opened, for its worker to record.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GateOpening {
-    /// The Run.
-    pub run_id: RunId,
-    /// The entry whose Step asked.
-    pub entry: EntryId,
-    /// Which visit of the entry asked.
-    pub visit: u16,
+    /// The Step that asked.
+    pub key: StepKey,
     /// The question.
     pub question: String,
     /// The answers it offers.
@@ -51,8 +43,8 @@ pub struct GateOpening {
 /// An answer a Run's workflow took, for its worker to record.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GateAnswered {
-    /// The Run.
-    pub run_id: RunId,
+    /// The Step that asked.
+    pub key: StepKey,
     /// The answer.
     pub answer: AnswerGate,
 }
@@ -61,12 +53,10 @@ pub struct GateAnswered {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum GateRefusal {
     /// The Run is not waiting on this Gate: it waits on none, or on another.
-    #[error("the run is not waiting on a gate of entry {entry}, visit {visit}")]
+    #[error("the run is not waiting on a gate of step {seq}")]
     NotWaiting {
-        /// The entry the answer names.
-        entry: EntryId,
-        /// The visit the answer names.
-        visit: u16,
+        /// The Step the answer names.
+        seq: u16,
     },
     /// The Gate already has its answer.
     #[error("the gate already has an answer")]
@@ -83,12 +73,8 @@ pub fn check_answer(
     answered: bool,
     answer: &AnswerGate,
 ) -> Result<(), GateRefusal> {
-    let waiting = open.filter(|gate| gate.entry == answer.entry && gate.visit == answer.visit);
-    let Some(gate) = waiting else {
-        return Err(GateRefusal::NotWaiting {
-            entry: answer.entry.clone(),
-            visit: answer.visit,
-        });
+    let Some(gate) = open.filter(|gate| gate.seq == answer.seq) else {
+        return Err(GateRefusal::NotWaiting { seq: answer.seq });
     };
 
     if answered {

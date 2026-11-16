@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE factory_step\n            SET outcome = $3, output = $4, ended_at = now()\n            WHERE run_id = $1 AND seq = $2 AND ended_at IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "36294af9afb64196a3ae7cbb1c1c26b4253ac1b30824d1918201ea33b1d9db78"
+}

@@ -4,15 +4,14 @@
  * factory_engine
  * OpenAPI spec version: 0.1.0
  */
-import type { CreateRunRequestFlow } from './createRunRequestFlow';
 import type { CreateRunRequestTaskId } from './createRunRequestTaskId';
 
 /**
  * Request body for creating a Run.
  */
 export interface CreateRunRequest {
-  /** The Flow definition the Run walks. */
-  flow: CreateRunRequestFlow;
+  /** The name of the built-in Flow the Run walks, one `GET /flows` lists. */
+  flow: string;
   /** What the Run is asked to do. */
   request: string;
   /** The Macro task the Run works on: its task document's id. */

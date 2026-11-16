@@ -331,6 +331,10 @@ impl InfraEnv {
             "OVERRIDE_UNFURL_SERVICE_URL".into(),
             "http://unfurl-service:8080".into(),
         );
+        env.insert(
+            "OVERRIDE_FACTORY_SERVICE_URL".into(),
+            "http://factory-service:8080".into(),
+        );
         // Account deletion awaits both owning services from the auth container.
         env.insert(
             "OVERRIDE_AGENT_HARNESS_SERVICE_URL".into(),

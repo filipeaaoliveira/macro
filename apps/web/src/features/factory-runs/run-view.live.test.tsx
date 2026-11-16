@@ -38,10 +38,12 @@ const planning: RunDetail = {
     request: 'Add a due date column',
     createdAt: '2026-11-16T09:00:00Z',
     taskId: 'task-1',
+    userId: 'macro|owner@example.com',
     end: null,
   },
   steps: [
     {
+      seq: 1,
       entry: 'plan',
       visit: 1,
       startedAt: '2026-11-16T09:00:00Z',
@@ -55,6 +57,7 @@ const waiting: RunDetail = {
   ...planning,
   steps: [
     {
+      seq: 1,
       entry: 'plan',
       visit: 1,
       startedAt: '2026-11-16T09:00:00Z',

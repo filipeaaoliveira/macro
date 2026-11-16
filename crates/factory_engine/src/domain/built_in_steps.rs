@@ -4,11 +4,12 @@
 #[cfg(test)]
 mod test;
 
-use factory_records::domain::models::Outcome;
+use factory_records::domain::models::{Outcome, Step, StepKey};
+use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::flow::StepName;
 use crate::domain::models::{AgentTask, StepInput, StepReport};
-use crate::domain::ports::{StepAgent, StepExecutor};
+use crate::domain::ports::{Retryable, StepAgent, StepExecutor};
 
 /// What the agent is told for a `plan` Step.
 const PLAN_INSTRUCTIONS: &str = include_str!("built_in_steps/plan.md");
@@ -45,8 +46,13 @@ pub enum BuiltInStepError {
     #[error("no built-in step is named {0}")]
     UnknownStep(StepName),
     /// The agent could not do the Step.
-    #[error("the agent failed: {0:?}")]
-    Agent(rootcause::Report),
+    #[error("the agent failed: {report:?}")]
+    Agent {
+        /// Why.
+        report: rootcause::Report,
+        /// Whether asking the agent again may succeed.
+        retryable: bool,
+    },
     /// The agent ended the Step with an outcome the Step does not have.
     #[error("the agent ended step {step} with {outcome}, which it does not end with")]
     UnexpectedOutcome {
@@ -55,6 +61,24 @@ pub enum BuiltInStepError {
         /// The outcome the agent handed back.
         outcome: Outcome,
     },
+}
+
+impl BuiltInStepError {
+    fn agent(error: impl std::error::Error + Retryable + Send + Sync + 'static) -> Self {
+        BuiltInStepError::Agent {
+            retryable: error.retryable(),
+            report: rootcause::Report::new(error).into_dynamic(),
+        }
+    }
+}
+
+impl Retryable for BuiltInStepError {
+    fn retryable(&self) -> bool {
+        match self {
+            BuiltInStepError::Agent { retryable, .. } => *retryable,
+            BuiltInStepError::UnknownStep(_) | BuiltInStepError::UnexpectedOutcome { .. } => false,
+        }
+    }
 }
 
 /// The built-in Steps, over the agent that does `plan` and `write`.
@@ -79,14 +103,17 @@ impl<A: StepAgent> BuiltInSteps<A> {
         input: StepInput<'_>,
     ) -> Result<StepReport, BuiltInStepError> {
         let task = AgentTask {
-            run_id: input.run_id,
+            key: input.key,
+            owner: input.owner.clone(),
             step: step.clone(),
             prompt: prompt(instructions, &outcomes, input),
             outcomes: outcomes.clone(),
         };
-        let answer = self.agent.answer(task).await.map_err(|error| {
-            BuiltInStepError::Agent(rootcause::Report::new(error).into_dynamic())
-        })?;
+        let answer = self
+            .agent
+            .answer(task)
+            .await
+            .map_err(BuiltInStepError::agent)?;
 
         if !outcomes.contains(&answer.outcome) {
             return Err(BuiltInStepError::UnexpectedOutcome {
@@ -131,44 +158,129 @@ impl<A: StepAgent> StepExecutor for BuiltInSteps<A> {
             }
         }
     }
+
+    async fn stop(
+        &self,
+        step: &StepName,
+        key: StepKey,
+        owner: &MacroUserIdStr<'static>,
+    ) -> Result<(), BuiltInStepError> {
+        match BuiltInStep::named(step) {
+            Some(BuiltInStep::Plan | BuiltInStep::Write) => self
+                .agent
+                .stop(key, owner)
+                .await
+                .map_err(BuiltInStepError::agent),
+            // A reply is done before anything could stop it.
+            Some(BuiltInStep::Reply) | None => Ok(()),
+        }
+    }
+
+    async fn release(
+        &self,
+        step: &StepName,
+        key: StepKey,
+        owner: &MacroUserIdStr<'static>,
+    ) -> Result<(), BuiltInStepError> {
+        match BuiltInStep::named(step) {
+            Some(BuiltInStep::Plan | BuiltInStep::Write) => self
+                .agent
+                .release(key, owner)
+                .await
+                .map_err(BuiltInStepError::agent),
+            // A reply holds nothing.
+            Some(BuiltInStep::Reply) | None => Ok(()),
+        }
+    }
 }
 
+/// The most bytes of the Run's earlier Steps a prompt carries.
+const HISTORY_BUDGET: usize = 48 * 1024;
+
 /// The agent's prompt: the Step's instructions, the outcomes it may end
-/// with, the Run's request, and what each earlier Step produced and how a
-/// person answered its Gate, oldest first, so a later Step reads the plan it
-/// carries out and what people said about it.
+/// with, the Run's request, then the Run's earlier Steps ([`history`]).
 fn prompt(instructions: &str, outcomes: &[Outcome], input: StepInput<'_>) -> String {
     let outcomes = outcomes
         .iter()
         .map(|outcome| format!("`{outcome}`"))
         .collect::<Vec<_>>()
         .join(", ");
-    let mut prompt = format!(
+    format!(
         "{instructions}\nEnd the step with one of these outcomes: {outcomes}.\n\n\
-         ## Request\n\n{}\n",
-        input.request
-    );
+         ## Request\n\n{}\n{}",
+        input.request,
+        history(input.earlier)
+    )
+}
 
-    for step in input.earlier {
-        let Some(end) = &step.end else {
-            continue;
-        };
-        prompt.push_str(&format!(
-            "\n## Step {}, visit {}: {}\n\n{}\n",
-            step.entry, step.visit, end.outcome, end.output
-        ));
-
-        let answer = step
-            .gate
-            .as_ref()
-            .and_then(|gate| gate.answer.as_ref().map(|answer| (&gate.question, answer)));
-        if let Some((question, answer)) = answer {
-            let note = answer.note.as_deref().unwrap_or("(no note)");
-            prompt.push_str(&format!(
-                "\nA person was asked \"{question}\" and answered `{}`: {note}\n",
-                answer.answer
-            ));
+/// What the Run's earlier Steps produced and how a person answered their
+/// Gates, so a later Step reads the plan it carries out and what people said
+/// about it: the latest visit of each entry, newest first, as many as fit
+/// in [`HISTORY_BUDGET`]. A loop that visits an entry again and again adds
+/// nothing but its latest round. The newest Step is never left out: when it
+/// alone is past the budget, its end is cut.
+fn history(earlier: &[Step]) -> String {
+    let mut latest: Vec<&Step> = Vec::new();
+    for step in earlier.iter().rev() {
+        if step.end.is_some() && !latest.iter().any(|kept| kept.entry == step.entry) {
+            latest.push(step);
         }
     }
-    prompt
+
+    let mut history = String::new();
+    let mut left_out = 0;
+    for step in latest {
+        let section = section(step);
+        if history.len() + section.len() <= HISTORY_BUDGET {
+            history.push_str(&section);
+        } else if history.is_empty() {
+            history.push_str(cut(&section, HISTORY_BUDGET - CUT_NOTE.len()));
+            history.push_str(CUT_NOTE);
+        } else {
+            left_out += 1;
+        }
+    }
+    if left_out > 0 {
+        history.push_str(&format!(
+            "\n({left_out} earlier steps are left out: the prompt has no room for them.)\n"
+        ));
+    }
+    history
+}
+
+/// What ends a section cut to fit the prompt.
+const CUT_NOTE: &str = "\n\n(The rest of this step is left out: the prompt has no room for it.)\n";
+
+/// The longest start of `text` at most `max` bytes long, cut between two
+/// characters.
+fn cut(text: &str, max: usize) -> &str {
+    let mut end = max.min(text.len());
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
+}
+
+/// One earlier Step: its outcome and output, and its Gate's answer.
+fn section(step: &Step) -> String {
+    let Some(end) = &step.end else {
+        return String::new();
+    };
+    let mut section = format!(
+        "\n## Step {}, visit {}: {}\n\n{}\n",
+        step.entry, step.visit, end.outcome, end.output
+    );
+
+    let answer = step
+        .gate
+        .as_ref()
+        .and_then(|gate| gate.answer.as_ref().map(|answer| (&gate.question, answer)));
+    if let Some((question, answer)) = answer {
+        let note = answer.note.as_deref().unwrap_or("(no note)");
+        section.push_str(&format!(
+            "\nA person was asked \"{question}\" and answered `{}`: {note}\n",
+            answer.answer
+        ));
+    }
+    section
 }

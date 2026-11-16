@@ -12,6 +12,7 @@ export const services = [
   'connection',
   'contacts',
   'email',
+  'factory',
   'notification',
   'properties',
   'scheduled-action',

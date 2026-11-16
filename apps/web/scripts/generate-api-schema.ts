@@ -24,13 +24,13 @@ const serviceToCrate: Record<string, string> = {
 	"static-files": "static_file_service",
 	"connection-gateway": "connection_gateway",
 	"contacts-service": "contacts_service",
+	"factory-service": "factory_service",
 	"unfurl-service": "unfurl_service",
 	"agent-harness": "agent_harness_service",
 	"calendar-service": "calendar_service",
 	"email-service": "email_service",
 	"search-service": "search_service",
-	"scheduled-action": "scheduled_action",
-	"factory-service": "factory_service",
+	"scheduled-action": "scheduled_action"
 };
 
 const getRustWorkspaceDir = () =>

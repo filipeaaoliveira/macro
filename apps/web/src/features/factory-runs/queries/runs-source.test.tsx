@@ -26,6 +26,7 @@ const ended: RunDetail = {
     request: 'Rename the column',
     createdAt: '2026-11-16T09:00:00Z',
     taskId: 'task-1',
+    userId: 'macro|owner@example.com',
     end: { outcome: 'success', endedAt: '2026-11-16T09:10:00Z' },
   },
   steps: [],

@@ -1,10 +1,17 @@
 use macro_db_migrator::MACRO_DB_MIGRATIONS;
 use macro_user_id::user_id::MacroUserIdStr;
 use sqlx::PgPool;
+use uuid::Uuid;
 
 use super::PgRunRepository;
-use crate::domain::models::{EntryId, Outcome, RunId, RunOutcome, TaskLink};
+use crate::domain::models::{
+    ClaimedSession, EntryId, HandBack, Outcome, Run, RunId, RunInsert, RunOutcome, StepKey,
+    StepSession, TaskLink,
+};
 use crate::domain::ports::RunRepository;
+
+const LOGIN_TASK: &str = "00000000-0000-7000-8000-000000000101";
+const DARK_MODE_TASK: &str = "00000000-0000-7000-8000-000000000102";
 
 fn entry(id: &str) -> EntryId {
     EntryId::try_from(id.to_string()).expect("valid entry id")
@@ -14,15 +21,39 @@ fn outcome(name: &str) -> Outcome {
     Outcome::try_from(name.to_string()).expect("valid outcome")
 }
 
-#[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
+fn julia() -> MacroUserIdStr<'static> {
+    MacroUserIdStr::try_from("macro|julia@example.com".to_string()).expect("valid user id")
+}
+
+fn task(id: &str) -> Uuid {
+    Uuid::parse_str(id).expect("valid task id")
+}
+
+fn key(run_id: RunId, seq: u16) -> StepKey {
+    StepKey { run_id, seq }
+}
+
+/// Keep a new Run of Julia's with no task.
+async fn insert(repo: &PgRunRepository, id: RunId, request: &str) -> Run {
+    match repo
+        .insert_run(id, request, &julia(), None)
+        .await
+        .expect("insert")
+    {
+        RunInsert::Inserted(run) => run,
+        RunInsert::NoSuchTask => panic!("a run with no task has no task to miss"),
+    }
+}
+
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "fixtures", scripts("people"))
+)]
 async fn a_new_run_is_running_with_no_steps(pool: PgPool) {
     let repo = PgRunRepository::new(pool);
     let id = RunId::generate();
 
-    let inserted = repo
-        .insert_run(id, "Summarise the release notes")
-        .await
-        .expect("insert");
+    let inserted = insert(&repo, id, "Summarise the release notes").await;
     let read = repo
         .get_run(id)
         .await
@@ -30,74 +61,118 @@ async fn a_new_run_is_running_with_no_steps(pool: PgPool) {
         .expect("the run exists");
 
     assert_eq!(read, inserted);
-    assert_eq!(read.request, "Summarise the release notes");
+    assert_eq!(read.user_id, julia());
     assert_eq!(read.end, None);
     assert!(repo.list_steps(id).await.expect("steps").is_empty());
 }
 
-#[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
-async fn steps_record_their_visits_in_the_order_they_started(pool: PgPool) {
+/// A reset numbers an entry's visits from 1 again: `ci-fix` resets
+/// `review`, whose second round is its visit 1 once more. Both rounds keep
+/// their own Step and Gate.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "fixtures", scripts("people"))
+)]
+async fn a_reset_entry_keeps_every_visit_it_made(pool: PgPool) {
     let repo = PgRunRepository::new(pool);
     let id = RunId::generate();
-    repo.insert_run(id, "Fix the flaky test")
-        .await
-        .expect("insert");
+    insert(&repo, id, "Fix the flaky test").await;
+    let rounds = [
+        (1, "review", "Two blockers"),
+        (2, "ci-fix", "Fixed the build"),
+        (3, "review", "Clean"),
+    ];
 
-    repo.start_step(id, &entry("review"), 1)
-        .await
-        .expect("start");
-    repo.end_step(
-        id,
-        &entry("review"),
-        1,
-        &outcome("blockers"),
-        "Two blockers",
-    )
-    .await
-    .expect("end");
-    repo.start_step(id, &entry("fix"), 1).await.expect("start");
-    repo.start_step(id, &entry("review"), 2)
-        .await
-        .expect("start");
+    for (seq, name, output) in rounds {
+        repo.start_step(key(id, seq), &entry(name), 1)
+            .await
+            .expect("start");
+        repo.open_gate(key(id, seq), "Go on?", &[outcome("yes")])
+            .await
+            .expect("open");
+        repo.answer_gate(key(id, seq), &outcome("yes"), Some(output), &julia())
+            .await
+            .expect("answer");
+        repo.end_step(key(id, seq), &outcome("done"), output)
+            .await
+            .expect("end");
+    }
 
     let steps = repo.list_steps(id).await.expect("steps");
-    let visits: Vec<(&str, u16)> = steps
+    let kept: Vec<(u16, &str, u16, &str)> = steps
         .iter()
-        .map(|step| (step.entry.as_str(), step.visit))
+        .map(|step| {
+            let end = step.end.as_ref().expect("the step ended");
+            (
+                step.seq,
+                step.entry.as_str(),
+                step.visit,
+                end.output.as_str(),
+            )
+        })
         .collect();
-    assert_eq!(visits, [("review", 1), ("fix", 1), ("review", 2)]);
-
-    let first = steps[0].end.as_ref().expect("the first step ended");
-    assert_eq!(first.outcome, outcome("blockers"));
-    assert_eq!(first.output, "Two blockers");
-    assert_eq!(steps[1].end, None);
+    assert_eq!(
+        kept,
+        [
+            (1, "review", 1, "Two blockers"),
+            (2, "ci-fix", 1, "Fixed the build"),
+            (3, "review", 1, "Clean"),
+        ]
+    );
+    let notes: Vec<Option<&str>> = steps
+        .iter()
+        .map(|step| {
+            step.gate
+                .as_ref()
+                .and_then(|gate| gate.answer.as_ref())
+                .and_then(|answer| answer.note.as_deref())
+        })
+        .collect();
+    assert_eq!(
+        notes,
+        [Some("Two blockers"), Some("Fixed the build"), Some("Clean")]
+    );
 }
 
-#[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
-async fn a_retried_step_start_keeps_one_step(pool: PgPool) {
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "fixtures", scripts("people"))
+)]
+async fn a_retried_step_keeps_one_step_and_its_first_end(pool: PgPool) {
     let repo = PgRunRepository::new(pool);
     let id = RunId::generate();
-    repo.insert_run(id, "Reply to the request")
-        .await
-        .expect("insert");
+    insert(&repo, id, "Reply to the request").await;
 
-    repo.start_step(id, &entry("reply"), 1)
+    repo.start_step(key(id, 1), &entry("reply"), 1)
         .await
         .expect("start");
-    repo.start_step(id, &entry("reply"), 1)
+    repo.start_step(key(id, 1), &entry("reply"), 1)
         .await
         .expect("start again");
+    repo.end_step(key(id, 1), &outcome("done"), "Replied")
+        .await
+        .expect("end");
+    repo.end_step(key(id, 1), &outcome("failed"), "Too late")
+        .await
+        .expect("end again");
 
-    assert_eq!(repo.list_steps(id).await.expect("steps").len(), 1);
+    let steps = repo.list_steps(id).await.expect("steps");
+    assert_eq!(steps.len(), 1);
+    let end = steps[0].end.as_ref().expect("the step ended");
+    assert_eq!(
+        (end.outcome.as_str(), end.output.as_str()),
+        ("done", "Replied")
+    );
 }
 
-#[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "fixtures", scripts("people"))
+)]
 async fn a_run_that_ended_keeps_its_first_end(pool: PgPool) {
     let repo = PgRunRepository::new(pool);
     let id = RunId::generate();
-    repo.insert_run(id, "Reply to the request")
-        .await
-        .expect("insert");
+    insert(&repo, id, "Reply to the request").await;
 
     repo.end_run(id, RunOutcome::Success).await.expect("end");
     repo.end_run(id, RunOutcome::Failed)
@@ -112,14 +187,39 @@ async fn a_run_that_ended_keeps_its_first_end(pool: PgPool) {
     assert_eq!(run.end.map(|end| end.outcome), Some(RunOutcome::Success));
 }
 
-#[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "fixtures", scripts("people"))
+)]
+async fn cancelling_a_run_ends_its_open_steps_and_nothing_ends_them_later(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let id = RunId::generate();
+    insert(&repo, id, "Plan the migration").await;
+    repo.start_step(key(id, 1), &entry("plan"), 1)
+        .await
+        .expect("start");
+
+    repo.end_run(id, RunOutcome::Cancelled).await.expect("end");
+    repo.end_step(key(id, 1), &outcome("done"), "The plan, finished late")
+        .await
+        .expect("a late end");
+
+    let run = repo.get_run(id).await.expect("get").expect("exists");
+    assert_eq!(run.end.map(|end| end.outcome), Some(RunOutcome::Cancelled));
+    let steps = repo.list_steps(id).await.expect("steps");
+    let end = steps[0].end.as_ref().expect("the step ended");
+    assert_eq!(end.outcome.as_str(), "cancelled");
+}
+
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "fixtures", scripts("people"))
+)]
 async fn deleting_a_run_removes_its_steps(pool: PgPool) {
     let repo = PgRunRepository::new(pool.clone());
     let id = RunId::generate();
-    repo.insert_run(id, "Reply to the request")
-        .await
-        .expect("insert");
-    repo.start_step(id, &entry("reply"), 1)
+    insert(&repo, id, "Reply to the request").await;
+    repo.start_step(key(id, 1), &entry("reply"), 1)
         .await
         .expect("start");
 
@@ -136,10 +236,6 @@ async fn deleting_a_run_removes_its_steps(pool: PgPool) {
     assert_eq!(steps, 0);
 }
 
-fn julia() -> MacroUserIdStr<'static> {
-    MacroUserIdStr::try_from("macro|julia@example.com".to_string()).expect("valid user id")
-}
-
 #[sqlx::test(
     migrator = "MACRO_DB_MIGRATIONS",
     fixtures(path = "fixtures", scripts("people"))
@@ -147,16 +243,16 @@ fn julia() -> MacroUserIdStr<'static> {
 async fn a_gate_waits_then_keeps_its_first_answer(pool: PgPool) {
     let repo = PgRunRepository::new(pool);
     let id = RunId::generate();
-    repo.insert_run(id, "Plan the migration")
+    insert(&repo, id, "Plan the migration").await;
+    repo.start_step(key(id, 1), &entry("plan"), 1)
         .await
-        .expect("insert");
-    repo.start_step(id, &entry("plan"), 1).await.expect("start");
+        .expect("start");
     let answers = [outcome("approve"), outcome("revise")];
 
-    repo.open_gate(id, &entry("plan"), 1, "Approve the plan?", &answers)
+    repo.open_gate(key(id, 1), "Approve the plan?", &answers)
         .await
         .expect("open");
-    repo.open_gate(id, &entry("plan"), 1, "Approve the plan?", &answers)
+    repo.open_gate(key(id, 1), "Approve the plan?", &answers)
         .await
         .expect("open again");
     let waiting = repo.list_steps(id).await.expect("steps");
@@ -166,16 +262,14 @@ async fn a_gate_waits_then_keeps_its_first_answer(pool: PgPool) {
     assert_eq!(gate.answer, None);
 
     repo.answer_gate(
-        id,
-        &entry("plan"),
-        1,
+        key(id, 1),
         &outcome("revise"),
         Some("Keep the old index"),
         &julia(),
     )
     .await
     .expect("answer");
-    repo.answer_gate(id, &entry("plan"), 1, &outcome("approve"), None, &julia())
+    repo.answer_gate(key(id, 1), &outcome("approve"), None, &julia())
         .await
         .expect("answer again");
 
@@ -190,25 +284,25 @@ async fn a_gate_waits_then_keeps_its_first_answer(pool: PgPool) {
     assert_eq!(answer.user_id, Some(julia()));
 }
 
-#[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
-async fn an_answer_from_an_unknown_user_records_no_one(pool: PgPool) {
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "fixtures", scripts("people"))
+)]
+async fn an_answer_from_an_account_gone_since_records_no_one(pool: PgPool) {
     let repo = PgRunRepository::new(pool);
     let id = RunId::generate();
-    repo.insert_run(id, "Plan the migration")
+    insert(&repo, id, "Plan the migration").await;
+    repo.start_step(key(id, 1), &entry("plan"), 1)
         .await
-        .expect("insert");
-    repo.start_step(id, &entry("plan"), 1).await.expect("start");
-    repo.open_gate(
-        id,
-        &entry("plan"),
-        1,
-        "Approve the plan?",
-        &[outcome("approve")],
-    )
-    .await
-    .expect("open");
+        .expect("start");
+    repo.open_gate(key(id, 1), "Approve the plan?", &[outcome("approve")])
+        .await
+        .expect("open");
 
-    repo.answer_gate(id, &entry("plan"), 1, &outcome("approve"), None, &julia())
+    // The API refuses an unknown user, but an account can go between that
+    // check and the workflow recording the answer.
+    let gone = MacroUserIdStr::try_from("macro|gone@example.com".to_string()).expect("valid");
+    repo.answer_gate(key(id, 1), &outcome("approve"), None, &gone)
         .await
         .expect("answer");
 
@@ -222,29 +316,33 @@ async fn an_answer_from_an_unknown_user_records_no_one(pool: PgPool) {
     assert_eq!(answer.user_id, None);
 }
 
-#[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
-async fn a_run_can_end_cancelled(pool: PgPool) {
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "fixtures", scripts("people", "tasks"))
+)]
+async fn a_run_is_kept_with_its_task_in_one_write(pool: PgPool) {
     let repo = PgRunRepository::new(pool);
     let id = RunId::generate();
-    repo.insert_run(id, "Plan the migration")
+
+    let inserted = repo
+        .insert_run(id, "Fix the login bug", &julia(), Some(task(LOGIN_TASK)))
         .await
         .expect("insert");
-
-    repo.end_run(id, RunOutcome::Cancelled).await.expect("end");
-
-    let run = repo
-        .get_run(id)
+    let missing = repo
+        .insert_run(
+            RunId::generate(),
+            "Fix the login bug",
+            &julia(),
+            Some(Uuid::now_v7()),
+        )
         .await
-        .expect("get")
-        .expect("the run exists");
-    assert_eq!(run.end.map(|end| end.outcome), Some(RunOutcome::Cancelled));
-}
+        .expect("insert for a missing task");
 
-const LOGIN_TASK: &str = "00000000-0000-7000-8000-000000000101";
-const DARK_MODE_TASK: &str = "00000000-0000-7000-8000-000000000102";
-
-fn task(id: &str) -> uuid::Uuid {
-    uuid::Uuid::parse_str(id).expect("valid task id")
+    let RunInsert::Inserted(run) = inserted else {
+        panic!("the task exists");
+    };
+    assert_eq!(run.task_id, Some(task(LOGIN_TASK)));
+    assert_eq!(missing, RunInsert::NoSuchTask);
 }
 
 #[sqlx::test(
@@ -254,9 +352,7 @@ fn task(id: &str) -> uuid::Uuid {
 async fn a_run_links_to_one_task_at_a_time(pool: PgPool) {
     let repo = PgRunRepository::new(pool);
     let id = RunId::generate();
-    repo.insert_run(id, "Fix the login bug")
-        .await
-        .expect("insert");
+    insert(&repo, id, "Fix the login bug").await;
 
     let first = repo.link_task(id, task(LOGIN_TASK)).await.expect("link");
     let second = repo
@@ -265,21 +361,18 @@ async fn a_run_links_to_one_task_at_a_time(pool: PgPool) {
         .expect("relink");
 
     assert_eq!((first, second), (TaskLink::Linked, TaskLink::Linked));
-    let run = repo
-        .get_run(id)
-        .await
-        .expect("get")
-        .expect("the run exists");
+    let run = repo.get_run(id).await.expect("get").expect("exists");
     assert_eq!(run.task_id, Some(task(DARK_MODE_TASK)));
 }
 
-#[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "fixtures", scripts("people"))
+)]
 async fn a_task_that_does_not_exist_or_a_run_that_does_not_is_not_linked(pool: PgPool) {
     let repo = PgRunRepository::new(pool);
     let id = RunId::generate();
-    repo.insert_run(id, "Fix the login bug")
-        .await
-        .expect("insert");
+    insert(&repo, id, "Fix the login bug").await;
 
     let no_task = repo.link_task(id, task(LOGIN_TASK)).await.expect("link");
     let no_run = repo
@@ -289,12 +382,6 @@ async fn a_task_that_does_not_exist_or_a_run_that_does_not_is_not_linked(pool: P
 
     assert_eq!(no_task, TaskLink::NoSuchTask);
     assert_eq!(no_run, TaskLink::NoSuchRun);
-    let run = repo
-        .get_run(id)
-        .await
-        .expect("get")
-        .expect("the run exists");
-    assert_eq!(run.task_id, None);
 }
 
 #[sqlx::test(
@@ -304,9 +391,7 @@ async fn a_task_that_does_not_exist_or_a_run_that_does_not_is_not_linked(pool: P
 async fn deleting_its_task_unlinks_a_run_and_keeps_it(pool: PgPool) {
     let repo = PgRunRepository::new(pool.clone());
     let id = RunId::generate();
-    repo.insert_run(id, "Fix the login bug")
-        .await
-        .expect("insert");
+    insert(&repo, id, "Fix the login bug").await;
     repo.link_task(id, task(LOGIN_TASK)).await.expect("link");
 
     sqlx::query!(r#"DELETE FROM "Document" WHERE id = $1"#, LOGIN_TASK)
@@ -320,4 +405,451 @@ async fn deleting_its_task_unlinks_a_run_and_keeps_it(pool: PgPool) {
         .expect("get")
         .expect("the run is kept");
     assert_eq!(run.task_id, None);
+}
+
+fn session() -> StepSession {
+    StepSession {
+        session_id: Uuid::now_v7(),
+        action_id: Uuid::now_v7(),
+    }
+}
+
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "fixtures", scripts("people"))
+)]
+async fn a_retried_step_keeps_the_session_its_first_attempt_claimed(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let id = RunId::generate();
+    insert(&repo, id, "Plan the migration").await;
+    repo.start_step(key(id, 1), &entry("plan"), 1)
+        .await
+        .expect("start");
+    let offered = [outcome("done")];
+    let first = session();
+
+    let claimed = repo
+        .claim_session(key(id, 1), first, &offered)
+        .await
+        .expect("claim");
+    let retried = repo
+        .claim_session(key(id, 1), session(), &offered)
+        .await
+        .expect("claim again");
+
+    assert_eq!(
+        claimed,
+        ClaimedSession {
+            session: first,
+            new: true
+        }
+    );
+    assert_eq!(
+        retried,
+        ClaimedSession {
+            session: first,
+            new: false
+        }
+    );
+    assert_eq!(
+        repo.claimed_session(key(id, 1)).await.expect("read"),
+        Some(first)
+    );
+    let step = repo
+        .session_step(first.session_id)
+        .await
+        .expect("read")
+        .expect("the session has a step");
+    assert_eq!((step.key, step.owner), (key(id, 1), julia()));
+    assert_eq!(step.offered, offered);
+    assert!(!step.ended);
+}
+
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "fixtures", scripts("people"))
+)]
+async fn the_latest_hand_back_counts_until_the_step_ends(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let id = RunId::generate();
+    insert(&repo, id, "Write the change").await;
+    repo.start_step(key(id, 1), &entry("write"), 1)
+        .await
+        .expect("start");
+    let claimed = repo
+        .claim_session(
+            key(id, 1),
+            session(),
+            &[outcome("done"), outcome("unchanged")],
+        )
+        .await
+        .expect("claim");
+    let session_id = claimed.session.session_id;
+    let unchanged = HandBack {
+        outcome: outcome("unchanged"),
+        output: "Nothing to do".to_string(),
+    };
+    let committed = HandBack {
+        outcome: outcome("done"),
+        output: "Committed the toggle".to_string(),
+    };
+
+    assert_eq!(repo.handed_back(key(id, 1)).await.expect("read"), None);
+    let first = repo
+        .hand_back(session_id, &unchanged)
+        .await
+        .expect("hand back");
+    let second = repo
+        .hand_back(session_id, &committed)
+        .await
+        .expect("hand back again");
+    repo.end_step(key(id, 1), &outcome("done"), "Committed the toggle")
+        .await
+        .expect("end");
+    let late = repo
+        .hand_back(session_id, &unchanged)
+        .await
+        .expect("hand back after the end");
+
+    assert_eq!((first, second, late), (true, true, false));
+    assert_eq!(
+        repo.handed_back(key(id, 1)).await.expect("read"),
+        Some(committed)
+    );
+}
+
+/// A Step holds its session until it lets go of it, ends, or its Run ends:
+/// an attempt still running after that must not open it again.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "fixtures", scripts("people"))
+)]
+async fn a_step_holds_its_session_until_it_lets_go_or_ends(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let id = RunId::generate();
+    insert(&repo, id, "Plan the dark mode toggle").await;
+    let ended_run = RunId::generate();
+    insert(&repo, ended_run, "Plan the login fix").await;
+    let steps = [key(id, 1), key(id, 2), key(id, 3), key(ended_run, 1)];
+    for step in steps {
+        repo.start_step(step, &entry("plan"), 1)
+            .await
+            .expect("start");
+        repo.claim_session(step, session(), &[outcome("done")])
+            .await
+            .expect("claim");
+    }
+    repo.start_step(key(id, 4), &entry("reply"), 1)
+        .await
+        .expect("start");
+
+    repo.release_session(key(id, 1)).await.expect("release");
+    repo.release_session(key(id, 1))
+        .await
+        .expect("release again");
+    repo.end_step(key(id, 2), &outcome("done"), "The plan")
+        .await
+        .expect("end");
+    repo.end_run(ended_run, RunOutcome::Success)
+        .await
+        .expect("end run");
+
+    let holds = async |step| repo.holds_session(step).await.expect("read");
+    assert!(!holds(key(id, 1)).await, "let go");
+    assert!(!holds(key(id, 2)).await, "ended");
+    assert!(holds(key(id, 3)).await, "still working");
+    assert!(!holds(key(ended_run, 1)).await, "its run ended");
+    assert!(!holds(key(id, 4)).await, "never claimed one");
+}
+
+/// A session a Step claimed is a Step's session, whether the Step still
+/// works in it or not; any other session is not.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "fixtures", scripts("people"))
+)]
+async fn a_session_a_step_claimed_is_a_step_session(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let id = RunId::generate();
+    insert(&repo, id, "Plan the dark mode toggle").await;
+    repo.start_step(key(id, 1), &entry("plan"), 1)
+        .await
+        .expect("start");
+    let claimed = repo
+        .claim_session(key(id, 1), session(), &[outcome("done")])
+        .await
+        .expect("claim")
+        .session
+        .session_id;
+    repo.end_step(key(id, 1), &outcome("done"), "The plan")
+        .await
+        .expect("end");
+
+    assert!(repo.is_step_session(claimed).await.expect("read"));
+    assert!(!repo.is_step_session(Uuid::now_v7()).await.expect("read"));
+}
+
+/// A stop tells a session that may still open from one that never will by
+/// what the attempts recorded: a prepare sent lately may still land; one
+/// that opened never counts as gone; and a Step that let go of its session
+/// sends no prepare.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "fixtures", scripts("people"))
+)]
+async fn a_stop_sees_what_the_attempts_recorded_of_a_session(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let id = RunId::generate();
+    insert(&repo, id, "Plan the dark mode toggle").await;
+    repo.start_step(key(id, 1), &entry("plan"), 1)
+        .await
+        .expect("start");
+    let claimed = repo
+        .claim_session(key(id, 1), session(), &[outcome("done")])
+        .await
+        .expect("claim")
+        .session;
+    let unprepared = repo
+        .stopping_session(key(id, 1), std::time::Duration::from_secs(3600))
+        .await
+        .expect("read")
+        .expect("claimed");
+
+    let prepared = repo
+        .record_prepare(key(id, 1))
+        .await
+        .expect("prepare")
+        .is_some();
+    let lately = repo
+        .stopping_session(key(id, 1), std::time::Duration::from_secs(3600))
+        .await
+        .expect("read")
+        .expect("claimed");
+    let long_ago = repo
+        .stopping_session(key(id, 1), std::time::Duration::ZERO)
+        .await
+        .expect("read")
+        .expect("claimed");
+    repo.record_open(key(id, 1)).await.expect("open");
+    let opened = repo
+        .stopping_session(key(id, 1), std::time::Duration::ZERO)
+        .await
+        .expect("read")
+        .expect("claimed");
+    repo.release_session(key(id, 1)).await.expect("release");
+    let after_release = repo
+        .record_prepare(key(id, 1))
+        .await
+        .expect("prepare")
+        .is_some();
+
+    assert_eq!(unprepared.session, claimed);
+    assert!(!unprepared.opened && !unprepared.may_still_open);
+    assert!(prepared);
+    assert!(lately.may_still_open && !lately.opened);
+    assert!(!long_ago.may_still_open);
+    assert!(opened.opened);
+    assert!(
+        !after_release,
+        "a Step that let go of its session sends no prepare"
+    );
+}
+
+/// A prepare that was refused, or never showed its session open, is no
+/// longer in flight; one whose session opened stays on record. A Step that
+/// ended sends no prepare.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "fixtures", scripts("people"))
+)]
+async fn a_forgotten_prepare_is_not_in_flight_and_an_ended_step_sends_none(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let id = RunId::generate();
+    insert(&repo, id, "Plan the dark mode toggle").await;
+    for seq in [1, 2, 3] {
+        repo.start_step(key(id, seq), &entry("plan"), 1)
+            .await
+            .expect("start");
+        repo.claim_session(key(id, seq), session(), &[outcome("done")])
+            .await
+            .expect("claim");
+        repo.record_prepare(key(id, seq))
+            .await
+            .expect("prepare")
+            .expect("recorded");
+    }
+    repo.record_open(key(id, 2)).await.expect("open");
+    repo.end_step(key(id, 3), &outcome("done"), "The plan")
+        .await
+        .expect("end");
+
+    let first = repo
+        .record_prepare(key(id, 1))
+        .await
+        .expect("prepare")
+        .expect("recorded");
+    let second = repo
+        .record_prepare(key(id, 2))
+        .await
+        .expect("prepare")
+        .expect("recorded");
+    repo.forget_prepare(key(id, 1), first)
+        .await
+        .expect("forget");
+    repo.forget_prepare(key(id, 2), second)
+        .await
+        .expect("forget");
+    let ended = repo.record_prepare(key(id, 3)).await.expect("prepare");
+
+    let in_flight = async |seq| {
+        repo.stopping_session(key(id, seq), std::time::Duration::from_secs(3600))
+            .await
+            .expect("read")
+            .expect("claimed")
+            .may_still_open
+    };
+    assert!(!in_flight(1).await, "refused");
+    assert!(in_flight(2).await, "opened: kept");
+    assert!(ended.is_none(), "an ended Step sends no prepare");
+}
+
+/// An attempt that gives up on its prepare clears its own record only: a
+/// later attempt's prepare, still in flight, stays on record.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "fixtures", scripts("people"))
+)]
+async fn an_old_attempt_never_forgets_a_newer_attempt_s_prepare(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let id = RunId::generate();
+    insert(&repo, id, "Plan the dark mode toggle").await;
+    repo.start_step(key(id, 1), &entry("plan"), 1)
+        .await
+        .expect("start");
+    repo.claim_session(key(id, 1), session(), &[outcome("done")])
+        .await
+        .expect("claim");
+    let old = repo
+        .record_prepare(key(id, 1))
+        .await
+        .expect("prepare")
+        .expect("recorded");
+    let newer = repo
+        .record_prepare(key(id, 1))
+        .await
+        .expect("prepare")
+        .expect("recorded");
+
+    repo.forget_prepare(key(id, 1), old).await.expect("forget");
+
+    let stopping = repo
+        .stopping_session(key(id, 1), std::time::Duration::from_secs(3600))
+        .await
+        .expect("read")
+        .expect("claimed");
+    assert!(newer > old);
+    assert!(
+        stopping.may_still_open,
+        "the newer prepare is still in flight"
+    );
+}
+
+fn teo() -> MacroUserIdStr<'static> {
+    MacroUserIdStr::try_from("macro|teo@example.com".to_string()).expect("valid user id")
+}
+
+/// Keep a new Run of `user_id`'s on the task `task_id`.
+async fn insert_on_task(
+    repo: &PgRunRepository,
+    user_id: &MacroUserIdStr<'static>,
+    task_id: &str,
+    request: &str,
+) -> RunId {
+    let id = RunId::generate();
+    match repo
+        .insert_run(id, request, user_id, Some(task(task_id)))
+        .await
+        .expect("insert")
+    {
+        RunInsert::Inserted(run) => run.id,
+        RunInsert::NoSuchTask => panic!("the task exists"),
+    }
+}
+
+/// A task's Runs are its owner's own, newest first: someone else's Runs on
+/// the task, and the owner's Runs on another task or none, are left out.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "fixtures", scripts("people", "tasks"))
+)]
+async fn a_task_s_runs_are_its_owner_s_newest_first(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let first = insert_on_task(&repo, &julia(), LOGIN_TASK, "Find the bug").await;
+    insert_on_task(&repo, &teo(), LOGIN_TASK, "Reproduce the bug").await;
+    insert_on_task(&repo, &julia(), DARK_MODE_TASK, "Add the toggle").await;
+    insert(&repo, RunId::generate(), "Summarise the notes").await;
+    let second = insert_on_task(&repo, &julia(), LOGIN_TASK, "Fix the bug").await;
+    let third = insert_on_task(&repo, &julia(), LOGIN_TASK, "Test the fix").await;
+
+    let all = repo
+        .list_task_runs(task(LOGIN_TASK), &julia(), 10)
+        .await
+        .expect("list");
+    let newest_two = repo
+        .list_task_runs(task(LOGIN_TASK), &julia(), 2)
+        .await
+        .expect("list");
+
+    let ids: Vec<RunId> = all.iter().map(|run| run.id).collect();
+    assert_eq!(ids, [third, second, first]);
+    assert!(all.iter().all(|run| run.user_id == julia()));
+    let ids: Vec<RunId> = newest_two.iter().map(|run| run.id).collect();
+    assert_eq!(ids, [third, second]);
+}
+
+/// Each Run's Steps come back in order, under that Run, with their Gates;
+/// a Run with no Steps has no entry.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "fixtures", scripts("people"))
+)]
+async fn the_steps_of_several_runs_come_back_by_run(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let planned = RunId::generate();
+    let replied = RunId::generate();
+    let waiting = RunId::generate();
+    for (id, request) in [(planned, "Plan"), (replied, "Reply"), (waiting, "Wait")] {
+        insert(&repo, id, request).await;
+    }
+    repo.start_step(key(planned, 1), &entry("plan"), 1)
+        .await
+        .expect("start");
+    repo.end_step(key(planned, 1), &outcome("done"), "The plan")
+        .await
+        .expect("end");
+    repo.open_gate(key(planned, 1), "Approve?", &[outcome("approve")])
+        .await
+        .expect("open");
+    repo.start_step(key(planned, 2), &entry("write"), 1)
+        .await
+        .expect("start");
+    repo.start_step(key(replied, 1), &entry("reply"), 1)
+        .await
+        .expect("start");
+
+    let steps = repo
+        .list_runs_steps(&[planned, replied, waiting])
+        .await
+        .expect("list");
+
+    let places = |id: RunId| -> Vec<u16> { steps[&id].iter().map(|step| step.seq).collect() };
+    assert_eq!(places(planned), [1, 2]);
+    assert_eq!(places(replied), [1]);
+    assert!(!steps.contains_key(&waiting));
+    let gate = steps[&planned][0].gate.as_ref().expect("the plan's gate");
+    assert_eq!(gate.question, "Approve?");
+    assert_eq!(
+        steps[&planned],
+        repo.list_steps(planned).await.expect("steps")
+    );
 }

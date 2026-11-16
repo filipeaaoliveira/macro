@@ -31,10 +31,35 @@ pub trait SessionScopes: Send + Sync + 'static {
 /// Suggestion generation sessions read, and write only through their own
 /// tools and email drafts, until they are deleted: one whose turn ended but
 /// is still being stopped, or whose delete was given up, keeps the scope. A
-/// background run whose suggestion sends nothing reaches nobody.
+/// background run whose suggestion sends nothing reaches nobody, and neither
+/// does an agent working on a software factory Step: its prompt carries the
+/// Run's request and earlier Steps' output, text anyone who could edit them
+/// wrote, so it may change its owner's items but reach no one else.
 pub struct HarnessScopes {
     pub generations: Arc<dyn suggestions::domain::ports::GenerationSessions>,
     pub runs: Arc<dyn suggestions::domain::ports::RunScopes>,
+    pub factory_steps: Arc<dyn FactoryStepSessions>,
+}
+
+/// The agent sessions software factory Steps work in.
+#[async_trait]
+pub trait FactoryStepSessions: Send + Sync + 'static {
+    /// Whether a factory Step works in `session`.
+    async fn works_on_a_step(&self, session: uuid::Uuid) -> Result<bool, rootcause::Report>;
+}
+
+/// [`FactoryStepSessions`] over the factory's records, which say which
+/// sessions its Steps work in.
+pub struct FactoryStepRecords(pub factory_records::outbound::pg_run_repository::PgRunRepository);
+
+#[async_trait]
+impl FactoryStepSessions for FactoryStepRecords {
+    async fn works_on_a_step(&self, session: uuid::Uuid) -> Result<bool, rootcause::Report> {
+        self.0
+            .is_step_session(session)
+            .await
+            .map_err(|error| rootcause::Report::new(error).into_dynamic())
+    }
 }
 
 #[async_trait]
@@ -43,11 +68,9 @@ impl SessionScopes for HarnessScopes {
         if self.generations.undeleted(session).await? {
             return Ok(Some(SessionScope::Generation));
         }
-        Ok(self
-            .runs
-            .sends_nothing(session)
-            .await?
-            .then_some(SessionScope::NoSend))
+        let sends_nothing = self.runs.sends_nothing(session).await?
+            || self.factory_steps.works_on_a_step(session).await?;
+        Ok(sends_nothing.then_some(SessionScope::NoSend))
     }
 }
 
@@ -275,6 +298,7 @@ enum SdkHost {
     Connection,
     Contacts,
     Unfurl,
+    Factory,
 }
 
 impl SdkHost {
@@ -301,19 +325,33 @@ impl SdkHost {
             Self::Connection => ConnectionGatewayUrl::new()?.to_string(),
             Self::Contacts => ContactsServiceUrl::new()?.to_string(),
             Self::Unfurl => UnfurlServiceUrl::new()?.to_string(),
+            Self::Factory => FactoryServiceUrl::new()?.to_string(),
         })
     }
 }
 
 pub fn sdk_endpoints() -> anyhow::Result<SdkEndpoints> {
     use strum::IntoEnumIterator;
+    let factory = factory_configured()?;
     let hosts = SdkHost::iter()
+        .filter(|host| *host != SdkHost::Factory || factory)
         .map(|host| Ok((<&'static str>::from(host).to_owned(), host.url()?)))
         .collect::<anyhow::Result<_>>()?;
     Ok(SdkEndpoints {
         hosts,
         web_app_url: macro_service_urls::AppServiceUrl::new()?.to_string(),
     })
+}
+
+/// Whether this deployment runs the software factory: only where its URL is
+/// set (`OVERRIDE_FACTORY_SERVICE_URL`, which local stacks set). No deployed
+/// environment runs it yet, so code mode elsewhere is not handed its host,
+/// and `macro.factory` reaches nothing.
+fn factory_configured() -> anyhow::Result<bool> {
+    let configured = macro_service_urls::read_override_env(
+        macro_service_urls::FactoryServiceUrl::OVERRIDE_ENV_VAR_NAME,
+    )?;
+    Ok(configured.is_some())
 }
 
 pub mod connected_apps;

@@ -6,7 +6,6 @@
  */
 
 import type { AnswerGateRequestNote } from './answerGateRequestNote';
-import type { MacroUserIdStr } from './macroUserIdStr';
 import type { Outcome } from './outcome';
 
 /**
@@ -17,6 +16,4 @@ export interface AnswerGateRequest {
   answer: Outcome;
   /** What the person adds, for the Run's later Steps to read. */
   note?: AnswerGateRequestNote;
-  /** Who answered. */
-  userId: MacroUserIdStr;
 }

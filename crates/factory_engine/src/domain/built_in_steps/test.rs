@@ -1,16 +1,25 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 
 use chrono::Utc;
-use factory_records::domain::models::{EntryId, Gate, GateAnswer, Outcome, RunId, Step, StepEnd};
+use factory_records::domain::models::{
+    EntryId, Gate, GateAnswer, Outcome, RunId, Step, StepEnd, StepKey,
+};
+use macro_user_id::user_id::MacroUserIdStr;
 
 use super::{BuiltInStepError, BuiltInSteps};
 use crate::domain::flow::{Flow, StepName};
 use crate::domain::models::{AgentAnswer, AgentTask, StepInput};
-use crate::domain::ports::{StepAgent, StepExecutor};
+use crate::domain::ports::{Retryable, StepAgent, StepExecutor};
 
 #[derive(Debug, thiserror::Error)]
 #[error("fake agent failure")]
 struct FakeError;
+
+impl Retryable for FakeError {
+    fn retryable(&self) -> bool {
+        true
+    }
+}
 
 /// Keeps every task it is given and ends each with `outcome`.
 #[derive(Clone)]
@@ -31,6 +40,18 @@ impl FakeAgent {
 impl StepAgent for FakeAgent {
     type Err = FakeError;
 
+    async fn stop(&self, _key: StepKey, _owner: &MacroUserIdStr<'static>) -> Result<(), FakeError> {
+        Ok(())
+    }
+
+    async fn release(
+        &self,
+        _key: StepKey,
+        _owner: &MacroUserIdStr<'static>,
+    ) -> Result<(), FakeError> {
+        Ok(())
+    }
+
     async fn answer(&self, task: AgentTask) -> Result<AgentAnswer, FakeError> {
         self.tasks.lock().expect("tasks").push(task);
         Ok(AgentAnswer {
@@ -44,9 +65,17 @@ fn step(name: &str) -> StepName {
     StepName::try_from(name.to_string()).expect("valid")
 }
 
+static JULIA: LazyLock<MacroUserIdStr<'static>> = LazyLock::new(|| {
+    MacroUserIdStr::try_from("macro|julia@example.com".to_string()).expect("valid")
+});
+
 fn input<'a>(earlier: &'a [Step]) -> StepInput<'a> {
     StepInput {
-        run_id: RunId::generate(),
+        key: StepKey {
+            run_id: RunId::generate(),
+            seq: 2,
+        },
+        owner: &JULIA,
         request: "Add a dark mode toggle",
         earlier,
     }
@@ -93,6 +122,7 @@ async fn a_write_is_given_the_plan_an_earlier_step_produced() {
     let agent = FakeAgent::ending_with("unchanged");
     let steps = BuiltInSteps::new(agent.clone());
     let earlier = [Step {
+        seq: 1,
         entry: EntryId::try_from("plan".to_string()).expect("valid"),
         visit: 1,
         started_at: Utc::now(),
@@ -146,6 +176,7 @@ async fn a_plan_reads_what_a_person_answered_the_last_one() {
     let steps = BuiltInSteps::new(agent.clone());
     let revise = Outcome::try_from("revise".to_string()).expect("valid");
     let earlier = [Step {
+        seq: 1,
         entry: EntryId::try_from("plan".to_string()).expect("valid"),
         visit: 1,
         started_at: Utc::now(),
@@ -175,4 +206,102 @@ async fn a_plan_reads_what_a_person_answered_the_last_one() {
     let tasks = agent.tasks.lock().expect("tasks");
     assert!(tasks[0].prompt.contains("revise"));
     assert!(tasks[0].prompt.contains("Keep the old index"));
+}
+
+/// An ended Step of entry `entry` at place `seq`, which produced `output`.
+fn ended(seq: u16, entry: &str, visit: u16, output: &str) -> Step {
+    Step {
+        seq,
+        entry: EntryId::try_from(entry.to_string()).expect("valid"),
+        visit,
+        started_at: Utc::now(),
+        end: Some(StepEnd {
+            outcome: Outcome::done(),
+            output: output.to_string(),
+            ended_at: Utc::now(),
+        }),
+        gate: None,
+    }
+}
+
+/// A loop's earlier rounds are history the agent doesn't need, and a Run
+/// that loops would otherwise grow its prompt without bound.
+#[tokio::test]
+async fn a_prompt_carries_the_latest_visit_of_each_entry_newest_first() {
+    let agent = FakeAgent::ending_with("done");
+    let steps = BuiltInSteps::new(agent.clone());
+    let earlier = [
+        ended(1, "plan", 1, "First plan"),
+        ended(2, "review", 1, "First review"),
+        ended(3, "plan", 2, "Second plan"),
+        ended(4, "review", 2, "Second review"),
+    ];
+
+    steps
+        .run(&step("write"), input(&earlier))
+        .await
+        .expect("write");
+
+    let tasks = agent.tasks.lock().expect("tasks");
+    let prompt = &tasks[0].prompt;
+    assert!(!prompt.contains("First plan"));
+    assert!(!prompt.contains("First review"));
+    let review = prompt.find("Second review").expect("the latest review");
+    let plan = prompt.find("Second plan").expect("the latest plan");
+    assert!(review < plan, "newest first");
+}
+
+#[tokio::test]
+async fn a_prompt_leaves_out_the_oldest_steps_past_its_budget() {
+    let agent = FakeAgent::ending_with("done");
+    let steps = BuiltInSteps::new(agent.clone());
+    let earlier = [
+        ended(1, "plan", 1, &"p".repeat(40 * 1024)),
+        ended(2, "review", 1, &"r".repeat(40 * 1024)),
+    ];
+
+    steps
+        .run(&step("write"), input(&earlier))
+        .await
+        .expect("write");
+
+    let tasks = agent.tasks.lock().expect("tasks");
+    let prompt = &tasks[0].prompt;
+    assert!(prompt.contains(&"r".repeat(40 * 1024)));
+    assert!(!prompt.contains(&"p".repeat(40 * 1024)));
+    assert!(prompt.contains("1 earlier steps are left out"));
+}
+
+/// A plan may be as large as a Step's output allows, past what the prompt
+/// has room for: the Step after it reads as much of it as fits, never none,
+/// cut between two characters wherever the budget falls.
+#[tokio::test]
+async fn a_prompt_cuts_a_newest_step_past_its_budget_rather_than_leave_it_out() {
+    // A 3-byte character, after pads of each length its width allows, so
+    // the budget falls inside a character in at least one of them.
+    for pad in 0..3 {
+        let agent = FakeAgent::ending_with("done");
+        let steps = BuiltInSteps::new(agent.clone());
+        let plan = format!("Plan:{} {}", "_".repeat(pad), "€".repeat(24 * 1024));
+        let earlier = [
+            ended(1, "request", 1, "Earlier"),
+            ended(2, "plan", 1, &plan),
+        ];
+
+        steps
+            .run(&step("write"), input(&earlier))
+            .await
+            .expect("write");
+
+        let tasks = agent.tasks.lock().expect("tasks");
+        let prompt = &tasks[0].prompt;
+        assert!(prompt.contains("€€"), "pad {pad}");
+        assert!(!prompt.contains(&plan), "pad {pad}");
+        assert!(
+            prompt.contains("The rest of this step is left out"),
+            "pad {pad}"
+        );
+        assert!(prompt.contains("1 earlier steps are left out"), "pad {pad}");
+        assert!(prompt.len() < plan.len(), "pad {pad}");
+    }
 }

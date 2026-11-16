@@ -631,6 +631,13 @@ service_url! {
             dev: "https://dev-gateway.macro.com/unfurl",
             prod: "https://gateway.macro.com/unfurl",
         },
+        /// The software factory's Run API (`factory_service`). Only local
+        /// stacks run it so far.
+        pub FactoryServiceUrl {
+            local: "http://localhost:8113",
+            dev: "https://dev-gateway.macro.com/factory",
+            prod: "https://gateway.macro.com/factory",
+        },
         /// Contacts service API URL.
         pub ContactsServiceUrl {
             local: "http://localhost:8083",

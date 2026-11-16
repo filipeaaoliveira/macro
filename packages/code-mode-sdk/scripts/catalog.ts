@@ -17,6 +17,7 @@ export const entityDirectories: readonly string[] = [
   'workspace',
   'chats',
   'unfurls',
+  'factory',
   'web',
   'memory',
   'activity',

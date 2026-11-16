@@ -113,20 +113,20 @@ export const services: Service[] = [
 		orvalKey: "searchService",
 	},
 	{
-		name: "scheduled-action",
-		dev: "https://dev-gateway.macro.com/scheduled-action/api-doc/openapi.json",
-		prod: "https://gateway.macro.com/scheduled-action/api-doc/openapi.json",
-		local: "http://localhost:8099/api-doc/openapi.json",
-		output: "../src/lib/service-clients/service-scheduled-action/",
-		orvalKey: "scheduledActionService",
-	},
-	{
 		name: "factory-service",
 		dev: "https://dev-gateway.macro.com/factory/api-doc/openapi.json",
 		prod: "https://gateway.macro.com/factory/api-doc/openapi.json",
 		local: "http://localhost:8113/api-doc/openapi.json",
 		output: "../src/lib/service-clients/service-factory/",
 		orvalKey: "factoryService",
+	},
+	{
+		name: "scheduled-action",
+		dev: "https://dev-gateway.macro.com/scheduled-action/api-doc/openapi.json",
+		prod: "https://gateway.macro.com/scheduled-action/api-doc/openapi.json",
+		local: "http://localhost:8099/api-doc/openapi.json",
+		output: "../src/lib/service-clients/service-scheduled-action/",
+		orvalKey: "scheduledActionService",
 	},
 ];
 

@@ -9,6 +9,7 @@ const serviceClientDirectories = {
   connection: 'service-connection',
   contacts: 'service-contacts',
   email: 'service-email',
+  factory: 'service-factory',
   notification: 'service-notification',
   properties: 'service-properties',
   'scheduled-action': 'service-scheduled-action',

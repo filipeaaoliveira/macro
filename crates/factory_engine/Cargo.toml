@@ -5,8 +5,17 @@ publish = false
 version = "0.1.0"
 
 [dependencies]
+agent_correlation = { path = "../agent_correlation" }
+agent_runtime_protocol = { path = "../agent_runtime_protocol", default-features = false }
+agent_session = { path = "../agent_session", default-features = false }
 async-trait = { workspace = true }
+authentication_service_client = { path = "../authentication_service_client" }
 axum = { workspace = true }
+chrono = { workspace = true }
+bot_id = { path = "../bot_id" }
+document_storage_service_client = { path = "../document_storage_service_client" }
+document_sub_type = { path = "../document_sub_type" }
+entity_access = { path = "../entity_access", default-features = false, features = ["ports"] }
 factory_records = { path = "../factory_records" }
 # The activities macro expands to paths in this crate.
 futures = { workspace = true }
@@ -23,14 +32,19 @@ temporalio-sdk = { workspace = true }
 # The workflow macros expand to paths in this crate.
 temporalio-workflow = { workspace = true }
 thiserror = { workspace = true }
+tokio = { workspace = true, features = ["macros", "time"] }
+trigger_context = { path = "../trigger_context" }
 tracing = { workspace = true }
+upstream_error = { path = "../upstream_error", default-features = false, features = ["axum"] }
 utoipa = { workspace = true }
 uuid = { workspace = true }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]
-chrono = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+macro_authorization = { path = "../macro_authorization", default-features = false, features = ["axum", "outbound"] }
+macro_env_var = { path = "../macro_env_var" }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "test-util"] }
+tower = { workspace = true }
 
 [package.metadata.cargo-shear]
 # Only referenced by the code the Temporal macros expand to.

@@ -17,12 +17,13 @@ the Gates they asked people in MacroDB, and defines the names Flows use
 ## Scope
 
 - Owns: the `factory_run`, `factory_step` and `factory_gate` tables
-  (migrations in `crates/macro_db_client/migrations/`).
+  (`crates/macro_db_client/migrations/20261116083957_factory.sql`, and the
+  index in `20261116210000_factory_run_task_owner_index.sql`).
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
 
 ## Boundaries
 
-- Depends on: `macro_user_id` (who answered a Gate).
+- Depends on: `macro_user_id` (who owns a Run and answered a Gate).
 - Used by: `crates/factory_engine`, `services/factory_service`.
 
 ## Checks
@@ -32,14 +33,25 @@ the Gates they asked people in MacroDB, and defines the names Flows use
 ## Gotchas
 
 - Every write a Step or a Run's end makes is repeated when Temporal retries
-  its activity: `start_step` and `open_gate` ignore a conflict, and `end_run`
-  and `answer_gate` keep the first end and answer. Keep new writes safe to
-  repeat.
+  its activity: `start_step` and `open_gate` ignore a conflict, and `end_step`,
+  `end_run` and `answer_gate` keep the first end and answer. Keep new writes
+  safe to repeat.
+- Steps and Gates are keyed by `(run_id, seq)`, the Step's place in its Run.
+  `visit` is only the entry's count, which a reset restarts, so never key on
+  it.
+- `factory_run.user_id` is the Run's owner and goes with their account.
+- An agent Step records its session (`session_id`, `action_id`, `offered`)
+  once, in `claim_session`; the agent's latest hand back is kept on the Step
+  while it runs (`hand_back`), and read when its turn ends (`handed_back`).
 - `factory_run.task_id` references `"Document"` and is cleared when the task
   document is deleted; `link_task` reports a missing task or Run instead of
-  failing.
+  failing. `list_task_runs` reads one owner's Runs on a task newest first
+  through `factory_run_task_owner_idx` and stops at its limit: keep its
+  `WHERE` and `ORDER BY` on that index's columns.
 - `answer_gate` runs after the workflow took the answer, so it must not fail on
-  a user id with no account: it records no one instead.
+  an account deleted since: it records the answer with no author instead.
+  The crate never reads `"User"`; who has an account is the authentication
+  service's to say (`factory_engine`'s `UserDirectory`).
 - A Run's or Step's end columns are all null or all set (`factory_*_end`
   checks); the row mappings refuse anything else.
 

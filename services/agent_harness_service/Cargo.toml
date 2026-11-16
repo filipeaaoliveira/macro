@@ -45,6 +45,8 @@ agent_egress = { path = "../../crates/agent_egress" }
 agent_git = { path = "../../crates/agent_git" }
 agent_fold = { path = "../../crates/folds/agent_fold" }
 agent_harness = { path = "../../crates/agent_harness" }
+agent_harness_service_client = { path = "../../crates/agent_harness_service_client" }
+factory_records = { path = "../../crates/factory_records" }
 agent_inmem = { path = "../../crates/agent_inmem" }
 agent_preview = { path = "../../crates/agent_preview" }
 agent_runtime_protocol = { path = "../../crates/agent_runtime_protocol", features = ["utoipa"] }
