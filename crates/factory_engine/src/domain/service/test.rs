@@ -31,6 +31,8 @@ struct FakeWorkflows {
     fail: bool,
     started_anyway: bool,
     refuse: bool,
+    /// The workflow completed, though the Run's end is not recorded yet.
+    completed: bool,
 }
 
 impl RunWorkflows for FakeWorkflows {
@@ -58,9 +60,9 @@ impl RunWorkflows for FakeWorkflows {
         Ok(AnswerDelivery::Taken)
     }
 
-    async fn cancel(&self, run_id: RunId) -> Result<(), RunWorkflowsError> {
+    async fn cancel(&self, run_id: RunId) -> Result<bool, RunWorkflowsError> {
         self.cancelled.lock().expect("cancelled").push(run_id);
-        Ok(())
+        Ok(!self.completed)
     }
 }
 
@@ -672,4 +674,18 @@ async fn work_that_fails_for_good_is_not_retried_and_other_failures_are() {
         passing_failure,
         Err(crate::domain::models::StepError::Internal(_))
     ));
+}
+
+#[tokio::test]
+async fn cancelling_a_run_whose_workflow_completed_is_a_conflict() {
+    let repo = FakeRepo::default();
+    let workflows = FakeWorkflows {
+        completed: true,
+        ..FakeWorkflows::default()
+    };
+    let run_id = julia_s_run(&repo).await;
+
+    let refused = service(&repo, &workflows).cancel_run(&julia(), run_id).await;
+
+    assert!(matches!(refused, Err(FactoryError::RunEnded)));
 }

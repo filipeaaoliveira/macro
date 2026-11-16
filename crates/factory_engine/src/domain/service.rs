@@ -319,9 +319,14 @@ where
     ) -> Result<(), FactoryError> {
         let run = self.owned_run(actor, id).await?;
         match run.end.map(|end| end.outcome) {
+            // A workflow that completed before its Run's end was recorded
+            // has ended the Run, though the records don't say so yet.
             None => {
-                self.workflows.cancel(id).await?;
-                Ok(())
+                if self.workflows.cancel(id).await? {
+                    Ok(())
+                } else {
+                    Err(FactoryError::RunEnded)
+                }
             }
             // Cancelling again is what the first cancel already did.
             Some(RunOutcome::Cancelled) => Ok(()),

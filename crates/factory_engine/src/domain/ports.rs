@@ -53,8 +53,10 @@ pub trait RunWorkflows: Send + Sync + 'static {
     ) -> impl Future<Output = Result<AnswerDelivery, RunWorkflowsError>> + Send;
 
     /// Ask the workflow of `run_id` to stop its Step or Gate and end the Run
-    /// cancelled. Asking again, or once the workflow ended, changes nothing.
-    fn cancel(&self, run_id: RunId) -> impl Future<Output = Result<(), RunWorkflowsError>> + Send;
+    /// cancelled. Asking again changes nothing. Whether the workflow was
+    /// still there to ask: false once it completed.
+    fn cancel(&self, run_id: RunId)
+    -> impl Future<Output = Result<bool, RunWorkflowsError>> + Send;
 }
 
 /// Whether failed work is worth trying again: false when it would fail the

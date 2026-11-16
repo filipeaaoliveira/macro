@@ -57,6 +57,32 @@ fn other(error: impl std::error::Error + Send + Sync + 'static) -> RunWorkflowsE
     RunWorkflowsError::Other(rootcause::Report::new(error).into_dynamic())
 }
 
+/// What became of an answer. The workflow's validator refuses one it does
+/// not take, and a workflow that completed takes none: both are refusals,
+/// never a failure of ours.
+fn delivery(sent: Result<(), WorkflowUpdateError>) -> Result<AnswerDelivery, RunWorkflowsError> {
+    match sent {
+        Ok(()) => Ok(AnswerDelivery::Taken),
+        Err(WorkflowUpdateError::Failed(failure)) => Ok(AnswerDelivery::Refused(failure.message)),
+        Err(WorkflowUpdateError::NotFound(_)) => {
+            Ok(AnswerDelivery::Refused("the run has ended".to_string()))
+        }
+        Err(WorkflowUpdateError::Rpc(status)) => Err(from_status(status)),
+        Err(error) => Err(other(error)),
+    }
+}
+
+/// Whether a cancel reached a workflow still running: a workflow that
+/// completed is not found.
+fn cancelled(sent: Result<(), WorkflowInteractionError>) -> Result<bool, RunWorkflowsError> {
+    match sent {
+        Ok(()) => Ok(true),
+        Err(WorkflowInteractionError::NotFound(_)) => Ok(false),
+        Err(WorkflowInteractionError::Rpc(status)) => Err(from_status(status)),
+        Err(error) => Err(other(error)),
+    }
+}
+
 impl RunWorkflows for TemporalRunWorkflows {
     #[tracing::instrument(err, skip_all, fields(run_id = %start.run_id))]
     async fn start(&self, start: &RunStart) -> Result<(), RunWorkflowsError> {
@@ -101,30 +127,17 @@ impl RunWorkflows for TemporalRunWorkflows {
                 WorkflowExecuteUpdateOptions::default(),
             )
             .await;
-        match sent {
-            Ok(()) => Ok(AnswerDelivery::Taken),
-            // The workflow's validator refused the answer.
-            Err(WorkflowUpdateError::Failed(failure)) => {
-                Ok(AnswerDelivery::Refused(failure.message))
-            }
-            Err(WorkflowUpdateError::Rpc(status)) => Err(from_status(status)),
-            Err(error) => Err(other(error)),
-        }
+        delivery(sent)
     }
 
     #[tracing::instrument(err, skip_all, fields(run_id = %run_id))]
-    async fn cancel(&self, run_id: RunId) -> Result<(), RunWorkflowsError> {
+    async fn cancel(&self, run_id: RunId) -> Result<bool, RunWorkflowsError> {
         let handle = self
             .client
             .get_workflow_handle::<FlowWorkflowDefinition>(run_id.to_string());
         let options = WorkflowCancelOptions::builder()
             .reason(CANCEL_REASON.to_string())
             .build();
-        match handle.cancel(options).await {
-            // A workflow that already ended has nothing left to cancel.
-            Ok(()) | Err(WorkflowInteractionError::NotFound(_)) => Ok(()),
-            Err(WorkflowInteractionError::Rpc(status)) => Err(from_status(status)),
-            Err(error) => Err(other(error)),
-        }
+        cancelled(handle.cancel(options).await)
     }
 }
