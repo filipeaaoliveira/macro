@@ -1375,11 +1375,14 @@ request and a Flow, starts the Run and opens it.
 A Run opens in a dialog on desktop and in a sheet on touch (after the side
 panel's sheet closes). Its Steps scroll: each with its outcome, its time
 (`5m`) and its output as markdown, the output a waiting Gate asks about
-open. Pinned below them on desktop, and between the handle and the Steps on
-touch, are the Gate's question, a note field and one button per answer (the
-Flow's first answer is the primary button), and **Cancel run**, which
-confirms in place. Phone sheets have no close button. When an answer or a
-cancel takes the focused control away, focus moves to the Run's status line.
+open. On desktop the Gate card (its question, a note field and one button
+per answer, the Flow's first answer primary) is pinned below them, the
+question and note scrolling inside past a few lines. On touch the pinned
+chrome between the handle and the Steps holds only the note and the
+answers, and the question opens the scrolling content. **Cancel run** is
+pinned on both and confirms in place. Phone sheets have no close button. When an answer or a
+cancel goes through and takes the focused control away, focus moves to the
+Run's status line; a refused answer gives focus back to its button.
 A second answer to a Gate, or a cancel of a Run that already ended, shows a
 toast and reads the Run again. An open Run,
 and a task with a Step running, are read again every 3 seconds; a task whose
