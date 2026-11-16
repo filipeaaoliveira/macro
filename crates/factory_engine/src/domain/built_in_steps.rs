@@ -217,7 +217,8 @@ fn prompt(instructions: &str, outcomes: &[Outcome], input: StepInput<'_>) -> Str
 /// Gates, so a later Step reads the plan it carries out and what people said
 /// about it: the latest visit of each entry, newest first, as many as fit
 /// in [`HISTORY_BUDGET`]. A loop that visits an entry again and again adds
-/// nothing but its latest round.
+/// nothing but its latest round. The newest Step is never left out: when it
+/// alone is past the budget, its end is cut.
 fn history(earlier: &[Step]) -> String {
     let mut latest: Vec<&Step> = Vec::new();
     for step in earlier.iter().rev() {
@@ -230,11 +231,14 @@ fn history(earlier: &[Step]) -> String {
     let mut left_out = 0;
     for step in latest {
         let section = section(step);
-        if history.len() + section.len() > HISTORY_BUDGET {
+        if history.len() + section.len() <= HISTORY_BUDGET {
+            history.push_str(&section);
+        } else if history.is_empty() {
+            history.push_str(cut(&section, HISTORY_BUDGET - CUT_NOTE.len()));
+            history.push_str(CUT_NOTE);
+        } else {
             left_out += 1;
-            continue;
         }
-        history.push_str(&section);
     }
     if left_out > 0 {
         history.push_str(&format!(
@@ -242,6 +246,19 @@ fn history(earlier: &[Step]) -> String {
         ));
     }
     history
+}
+
+/// What ends a section cut to fit the prompt.
+const CUT_NOTE: &str = "\n\n(The rest of this step is left out: the prompt has no room for it.)\n";
+
+/// The longest start of `text` at most `max` bytes long, cut between two
+/// characters.
+fn cut(text: &str, max: usize) -> &str {
+    let mut end = max.min(text.len());
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
 }
 
 /// One earlier Step: its outcome and output, and its Gate's answer.

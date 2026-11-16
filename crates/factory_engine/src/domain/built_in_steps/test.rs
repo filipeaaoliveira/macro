@@ -271,3 +271,29 @@ async fn a_prompt_leaves_out_the_oldest_steps_past_its_budget() {
     assert!(!prompt.contains(&"p".repeat(40 * 1024)));
     assert!(prompt.contains("1 earlier steps are left out"));
 }
+
+/// A plan may be as large as a Step's output allows, past what the prompt
+/// has room for: the Step after it reads as much of it as fits, never none.
+#[tokio::test]
+async fn a_prompt_cuts_a_newest_step_past_its_budget_rather_than_leave_it_out() {
+    let agent = FakeAgent::ending_with("done");
+    let steps = BuiltInSteps::new(agent.clone());
+    let plan = format!("Plan: {}", "é".repeat(32 * 1024));
+    let earlier = [
+        ended(1, "request", 1, "Earlier"),
+        ended(2, "plan", 1, &plan),
+    ];
+
+    steps
+        .run(&step("write"), input(&earlier))
+        .await
+        .expect("write");
+
+    let tasks = agent.tasks.lock().expect("tasks");
+    let prompt = &tasks[0].prompt;
+    assert!(prompt.contains("Plan: éé"));
+    assert!(!prompt.contains(&plan));
+    assert!(prompt.contains("The rest of this step is left out"));
+    assert!(prompt.contains("1 earlier steps are left out"));
+    assert!(prompt.len() < plan.len());
+}
