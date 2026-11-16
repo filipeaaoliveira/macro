@@ -140,6 +140,18 @@ pub struct RequestedExternalSession {
     pub origin: trigger_context::TriggerOrigin,
 }
 
+impl RequestedExternalSession {
+    /// Who started the session and where it is shown, when either differs
+    /// from what a runtime records on a session it creates: a person's,
+    /// listed. The requester records them on the row once it exists, so a
+    /// hidden background session, such as a routine draft's, is hidden and
+    /// deletable on a runtime's agent as it is on a managed one.
+    pub fn origin_to_record(&self) -> Option<(SessionSource, SessionVisibility)> {
+        (self.source != SessionSource::User || self.visibility != SessionVisibility::default())
+            .then_some((self.source, self.visibility))
+    }
+}
+
 /// Validate the base branch supported by external repository provisioning.
 /// External runtimes currently create every new worktree from origin/main.
 pub fn external_repository(
