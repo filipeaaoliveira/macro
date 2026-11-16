@@ -37,9 +37,61 @@ export type CreateRunRequest = {
 };
 
 /**
+ * A spread of durations: how many, their median and 90th percentile.
+ */
+export type DurationStats = {
+    /**
+     * How many durations were measured.
+     */
+    count: number;
+    /**
+     * The median, in seconds.
+     */
+    medianSeconds: number;
+    /**
+     * The 90th percentile, in seconds.
+     */
+    p90Seconds: number;
+};
+
+/**
  * The id of one of a Flow's entries. A Step is a visit of an entry.
  */
 export type EntryId = string;
+
+/**
+ * One of a Flow's entries, across the period's Runs.
+ */
+export type EntryInsight = {
+    duration?: null | DurationStats;
+    /**
+     * The entry's id, as its Flow names it.
+     */
+    entry: string;
+    gate?: null | GateInsight;
+    /**
+     * How its Steps ended, most often first.
+     */
+    outcomes: Array<NamedCount>;
+    /**
+     * The Runs that visited it more than once: sent back to it, or started
+     * over.
+     */
+    revisitedRuns: number;
+    /**
+     * The Runs that visited it.
+     */
+    runs: number;
+    /**
+     * Its Steps.
+     */
+    steps: number;
+    tokens?: null | TokenCounts;
+    /**
+     * The newest Runs where it failed or was visited more than once.
+     */
+    trouble: Array<TroubleRun>;
+};
 
 /**
  * A plain old json error response for use with axum.
@@ -50,6 +102,20 @@ export type ErrorResponse = {
      * Message to explain failure
      */
     message: string;
+};
+
+/**
+ * The Runs of one Flow.
+ */
+export type FlowInsight = {
+    /**
+     * How its Runs went.
+     */
+    counts: OutcomeCounts;
+    /**
+     * The Flow's name; none for Runs recorded before the Flow was kept.
+     */
+    flow?: string | null;
 };
 
 /**
@@ -115,6 +181,25 @@ export type GateAnswer = {
 };
 
 /**
+ * A Gate's questions and their answers.
+ */
+export type GateInsight = {
+    /**
+     * Gates a person answered.
+     */
+    answered: number;
+    /**
+     * How often each answer was given, most given first.
+     */
+    answers: Array<NamedCount>;
+    /**
+     * Gates opened.
+     */
+    opened: number;
+    wait?: null | DurationStats;
+};
+
+/**
  * Request body for handing back an agent Step's result.
  */
 export type HandBackRequest = {
@@ -126,6 +211,20 @@ export type HandBackRequest = {
      * What the agent produced, for the Run's later Steps and for people.
      */
     text: string;
+};
+
+/**
+ * The Runs created on one day of the period.
+ */
+export type InsightDay = {
+    /**
+     * How its Runs went.
+     */
+    counts: OutcomeCounts;
+    /**
+     * The day, in the period's time zone.
+     */
+    date: string;
 };
 
 /**
@@ -141,10 +240,54 @@ export type LinkTaskRequest = {
 export type MacroUserIdStr = string;
 
 /**
+ * A name a Flow gives (an outcome, a Gate's answer) and how often it came.
+ */
+export type NamedCount = {
+    /**
+     * How many times.
+     */
+    count: number;
+    /**
+     * The name, as the Flow writes it.
+     */
+    name: string;
+};
+
+/**
  * How a Step ended, in the words of its Flow (`done`, `clean`, `blockers`,
  * ...). The Flow decides where each outcome takes the Run.
  */
 export type Outcome = string;
+
+/**
+ * How many Runs went each way: still going, or ended with each outcome.
+ */
+export type OutcomeCounts = {
+    /**
+     * Runs that ran out of visits, or of Steps, with nowhere to go.
+     */
+    blocked: number;
+    /**
+     * Runs a person cancelled.
+     */
+    cancelled: number;
+    /**
+     * Runs that ended failed.
+     */
+    failed: number;
+    /**
+     * Runs that ended for a person to take over.
+     */
+    manual: number;
+    /**
+     * Runs still going.
+     */
+    running: number;
+    /**
+     * Runs whose Flow reached its successful end.
+     */
+    success: number;
+};
 
 /**
  * One Run of a Flow.
@@ -208,9 +351,93 @@ export type RunEnd = {
 export type RunId = string;
 
 /**
+ * How a person's Runs went over a period.
+ */
+export type RunInsights = {
+    /**
+     * Whether the period reached that cap, so older Runs may be left out.
+     */
+    capped: boolean;
+    /**
+     * The Runs created each day of the period, every day listed.
+     */
+    days: Array<InsightDay>;
+    /**
+     * The Flows' entries the Runs visited, in their Flows' order.
+     */
+    entries: Array<EntryInsight>;
+    /**
+     * The Flow read, or none for every Flow.
+     */
+    flow?: string | null;
+    /**
+     * The Runs of each Flow, most Runs first.
+     */
+    flows: Array<FlowInsight>;
+    /**
+     * The period's first day.
+     */
+    from: string;
+    /**
+     * The most Runs read: the newest in the period.
+     */
+    runCap: number;
+    runDuration?: null | DurationStats;
+    /**
+     * The time zone its days are in.
+     */
+    timeZone: string;
+    /**
+     * Its last day.
+     */
+    to: string;
+    /**
+     * How the Runs went.
+     */
+    totals: OutcomeCounts;
+    /**
+     * What the agent Steps used.
+     */
+    usage: UsageInsight;
+};
+
+/**
+ * One of the period's Runs, to link to.
+ */
+export type RunLink = {
+    /**
+     * When it was created.
+     */
+    createdAt: string;
+    /**
+     * The Run.
+     */
+    id: RunId;
+    outcome?: null | RunOutcome;
+    /**
+     * The first line of its request.
+     */
+    title: string;
+};
+
+/**
  * How a Run ended.
  */
 export type RunOutcome = 'success' | 'manual' | 'blocked' | 'failed' | 'cancelled';
+
+/**
+ * One of the period's Runs and the tokens its agent Steps used.
+ */
+export type RunTokens = {
+    /**
+     * The Run.
+     */
+    run: RunLink;
+    /**
+     * What its agents used.
+     */
+    tokens: TokenCounts;
+};
 
 /**
  * One visit of one of a Run's entries.
@@ -264,6 +491,73 @@ export type TaskRunsResponse = {
     runs: Array<RunDetail>;
 };
 
+/**
+ * Tokens agent model calls used.
+ */
+export type TokenCounts = {
+    /**
+     * Input tokens read from the prompt cache.
+     */
+    cacheRead: number;
+    /**
+     * Input tokens written to the prompt cache.
+     */
+    cacheWrite: number;
+    /**
+     * Input tokens, besides those read from or written to the prompt cache.
+     */
+    input: number;
+    /**
+     * Output tokens.
+     */
+    output: number;
+};
+
+/**
+ * A Run where an entry failed or was visited more than once.
+ */
+export type TroubleRun = {
+    /**
+     * Whether one of the entry's Steps in it failed.
+     */
+    failed: boolean;
+    /**
+     * The Run.
+     */
+    run: RunLink;
+    /**
+     * How many times it visited the entry.
+     */
+    visits: number;
+};
+
+/**
+ * What the period's agent Steps used.
+ */
+export type UsageInsight = {
+    /**
+     * Steps an agent worked on, in a session.
+     */
+    agentSteps: number;
+    /**
+     * The Runs that used the most tokens, most first.
+     */
+    heaviest: Array<RunTokens>;
+    /**
+     * Runs with any usage recorded.
+     */
+    measuredRuns: number;
+    /**
+     * Those whose session has usage recorded. An agent that runs on a
+     * person's own computer records none.
+     */
+    measuredSteps: number;
+    /**
+     * What they used, summed.
+     */
+    tokens: TokenCounts;
+};
+
 export type ListFactoryFlowsData = {
     body?: never;
     path?: never;
@@ -306,6 +600,45 @@ export type HandBackFactoryStepResponses = {
 };
 
 export type HandBackFactoryStepResponse = HandBackFactoryStepResponses[keyof HandBackFactoryStepResponses];
+
+export type GetFactoryInsightsData = {
+    body?: never;
+    path?: never;
+    query: {
+        /**
+         * The period's first day, `YYYY-MM-DD`.
+         */
+        from: string;
+        /**
+         * Its last day, included. The period lasts at most 366 days.
+         */
+        to: string;
+        /**
+         * The IANA time zone the days are in, such as `Europe/Lisbon`.
+         */
+        timeZone: string;
+        /**
+         * A built-in Flow's name, to read only its Runs.
+         */
+        flow?: string;
+    };
+    url: '/insights';
+};
+
+export type GetFactoryInsightsErrors = {
+    400: ErrorResponse;
+    401: ErrorResponse;
+    403: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type GetFactoryInsightsError = GetFactoryInsightsErrors[keyof GetFactoryInsightsErrors];
+
+export type GetFactoryInsightsResponses = {
+    200: RunInsights;
+};
+
+export type GetFactoryInsightsResponse = GetFactoryInsightsResponses[keyof GetFactoryInsightsResponses];
 
 export type CreateFactoryRunData = {
     body: CreateRunRequest;

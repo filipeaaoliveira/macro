@@ -9,10 +9,12 @@ import type {
   CreateRunRequest,
   ErrorResponse,
   FlowsResponse,
+  GetFactoryInsightsParams,
   HandBackRequest,
   LinkTaskRequest,
   RunDetail,
   RunId,
+  RunInsights,
   TaskRunsResponse,
 } from './schemas';
 
@@ -148,6 +150,89 @@ export const handBackFactoryStep = async (
     status: res.status,
     headers: res.headers,
   } as handBackFactoryStepResponse;
+};
+
+/**
+ * @summary How the caller's own Runs went over a period: Runs by day, outcome and
+Flow, how long Runs and Steps took, how often each entry failed or was
+visited again, and the tokens their agents used. At most the newest
+1,000 Runs of the period are read.
+ */
+export type getFactoryInsightsResponse200 = {
+  data: RunInsights;
+  status: 200;
+};
+
+export type getFactoryInsightsResponse400 = {
+  data: ErrorResponse;
+  status: 400;
+};
+
+export type getFactoryInsightsResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type getFactoryInsightsResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type getFactoryInsightsResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type getFactoryInsightsResponseSuccess =
+  getFactoryInsightsResponse200 & {
+    headers: Headers;
+  };
+export type getFactoryInsightsResponseError = (
+  | getFactoryInsightsResponse400
+  | getFactoryInsightsResponse401
+  | getFactoryInsightsResponse403
+  | getFactoryInsightsResponse500
+) & {
+  headers: Headers;
+};
+
+export type getFactoryInsightsResponse =
+  | getFactoryInsightsResponseSuccess
+  | getFactoryInsightsResponseError;
+
+export const getGetFactoryInsightsUrl = (params: GetFactoryInsightsParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/insights?${stringifiedParams}`
+    : `/insights`;
+};
+
+export const getFactoryInsights = async (
+  params: GetFactoryInsightsParams,
+  options?: RequestInit
+): Promise<getFactoryInsightsResponse> => {
+  const res = await fetch(getGetFactoryInsightsUrl(params), {
+    ...options,
+    method: 'GET',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: getFactoryInsightsResponse['data'] = body ? JSON.parse(body) : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as getFactoryInsightsResponse;
 };
 
 /**
@@ -401,8 +486,8 @@ export const cancelFactoryRun = async (
 /**
  * @summary Answer, as the caller, the Gate one of their Runs waits on. The Run
 goes on once its workflow took the answer; reading the Run shows the
-answer once it is recorded. A Gate asks a person: an agent's program
-acting for the owner is refused (403).
+answer once it is recorded. A Gate asks a person: only the owner's own
+signed-in session answers it (403 otherwise).
  */
 export type answerFactoryGateResponse202 = {
   data: void;

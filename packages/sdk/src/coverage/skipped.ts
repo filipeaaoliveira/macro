@@ -509,6 +509,7 @@ export const factoryExcluded = [
   'answerFactoryGate',
   'cancelFactoryRun',
   'createFactoryRun',
+  'getFactoryInsights',
   'getFactoryRun',
   'linkFactoryRunTask',
   'listFactoryFlows',

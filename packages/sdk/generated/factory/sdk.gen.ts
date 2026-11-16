@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AnswerFactoryGateData, AnswerFactoryGateErrors, AnswerFactoryGateResponses, CancelFactoryRunData, CancelFactoryRunErrors, CancelFactoryRunResponses, CreateFactoryRunData, CreateFactoryRunErrors, CreateFactoryRunResponses, GetFactoryRunData, GetFactoryRunErrors, GetFactoryRunResponses, HandBackFactoryStepData, HandBackFactoryStepErrors, HandBackFactoryStepResponses, LinkFactoryRunTaskData, LinkFactoryRunTaskErrors, LinkFactoryRunTaskResponses, ListFactoryFlowsData, ListFactoryFlowsErrors, ListFactoryFlowsResponses, ListFactoryTaskRunsData, ListFactoryTaskRunsErrors, ListFactoryTaskRunsResponses } from './types.gen';
+import type { AnswerFactoryGateData, AnswerFactoryGateErrors, AnswerFactoryGateResponses, CancelFactoryRunData, CancelFactoryRunErrors, CancelFactoryRunResponses, CreateFactoryRunData, CreateFactoryRunErrors, CreateFactoryRunResponses, GetFactoryInsightsData, GetFactoryInsightsErrors, GetFactoryInsightsResponses, GetFactoryRunData, GetFactoryRunErrors, GetFactoryRunResponses, HandBackFactoryStepData, HandBackFactoryStepErrors, HandBackFactoryStepResponses, LinkFactoryRunTaskData, LinkFactoryRunTaskErrors, LinkFactoryRunTaskResponses, ListFactoryFlowsData, ListFactoryFlowsErrors, ListFactoryFlowsResponses, ListFactoryTaskRunsData, ListFactoryTaskRunsErrors, ListFactoryTaskRunsResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -81,6 +81,16 @@ export class Sdk extends HeyApiClient {
     }
 
     /**
+     * How the caller's own Runs went over a period: Runs by day, outcome and
+     * Flow, how long Runs and Steps took, how often each entry failed or was
+     * visited again, and the tokens their agents used. At most the newest
+     * 1,000 Runs of the period are read.
+     */
+    public getFactoryInsights<ThrowOnError extends boolean = false>(options: Options<GetFactoryInsightsData, ThrowOnError>): RequestResult<GetFactoryInsightsResponses, GetFactoryInsightsErrors, ThrowOnError> {
+        return (options.client ?? this.client).get<GetFactoryInsightsResponses, GetFactoryInsightsErrors, ThrowOnError>({ url: '/insights', ...options });
+    }
+
+    /**
      * Create a Run of a built-in Flow, owned by the caller, and start its
      * workflow.
      */
@@ -114,8 +124,8 @@ export class Sdk extends HeyApiClient {
     /**
      * Answer, as the caller, the Gate one of their Runs waits on. The Run
      * goes on once its workflow took the answer; reading the Run shows the
-     * answer once it is recorded. A Gate asks a person: an agent's program
-     * acting for the owner is refused (403).
+     * answer once it is recorded. A Gate asks a person: only the owner's own
+     * signed-in session answers it (403 otherwise).
      */
     public answerFactoryGate<ThrowOnError extends boolean = false>(options: Options<AnswerFactoryGateData, ThrowOnError>): RequestResult<AnswerFactoryGateResponses, AnswerFactoryGateErrors, ThrowOnError> {
         return (options.client ?? this.client).post<AnswerFactoryGateResponses, AnswerFactoryGateErrors, ThrowOnError>({

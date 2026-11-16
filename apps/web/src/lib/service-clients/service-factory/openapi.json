@@ -120,6 +120,105 @@
         }
       }
     },
+    "/insights": {
+      "get": {
+        "tags": ["factory"],
+        "summary": "How the caller's own Runs went over a period: Runs by day, outcome and\nFlow, how long Runs and Steps took, how often each entry failed or was\nvisited again, and the tokens their agents used. At most the newest\n1,000 Runs of the period are read.",
+        "operationId": "get_factory_insights",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "description": "The period's first day, `YYYY-MM-DD`.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Its last day, included. The period lasts at most 366 days.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "timeZone",
+            "in": "query",
+            "description": "The IANA time zone the days are in, such as `Europe/Lisbon`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "flow",
+            "in": "query",
+            "description": "A built-in Flow's name, to read only its Runs.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunInsights"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/runs": {
       "post": {
         "tags": ["factory"],
@@ -395,7 +494,7 @@
     "/runs/{id}/steps/{seq}/answer": {
       "post": {
         "tags": ["factory"],
-        "summary": "Answer, as the caller, the Gate one of their Runs waits on. The Run\ngoes on once its workflow took the answer; reading the Run shows the\nanswer once it is recorded. A Gate asks a person: an agent's program\nacting for the owner is refused (403).",
+        "summary": "Answer, as the caller, the Gate one of their Runs waits on. The Run\ngoes on once its workflow took the answer; reading the Run shows the\nanswer once it is recorded. A Gate asks a person: only the owner's own\nsigned-in session answers it (403 otherwise).",
         "operationId": "answer_factory_gate",
         "parameters": [
           {
@@ -725,9 +824,115 @@
           }
         }
       },
+      "DurationStats": {
+        "type": "object",
+        "description": "A spread of durations: how many, their median and 90th percentile.",
+        "required": ["count", "medianSeconds", "p90Seconds"],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many durations were measured.",
+            "minimum": 0
+          },
+          "medianSeconds": {
+            "type": "number",
+            "format": "double",
+            "description": "The median, in seconds."
+          },
+          "p90Seconds": {
+            "type": "number",
+            "format": "double",
+            "description": "The 90th percentile, in seconds."
+          }
+        }
+      },
       "EntryId": {
         "type": "string",
         "description": "The id of one of a Flow's entries. A Step is a visit of an entry."
+      },
+      "EntryInsight": {
+        "type": "object",
+        "description": "One of a Flow's entries, across the period's Runs.",
+        "required": [
+          "entry",
+          "steps",
+          "runs",
+          "revisitedRuns",
+          "outcomes",
+          "trouble"
+        ],
+        "properties": {
+          "duration": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DurationStats",
+                "description": "How long its Steps took, a cancelled Run's left out."
+              }
+            ]
+          },
+          "entry": {
+            "type": "string",
+            "description": "The entry's id, as its Flow names it."
+          },
+          "gate": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/GateInsight",
+                "description": "Its Gate, if its Steps opened one."
+              }
+            ]
+          },
+          "outcomes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NamedCount"
+            },
+            "description": "How its Steps ended, most often first."
+          },
+          "revisitedRuns": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The Runs that visited it more than once: sent back to it, or started\nover.",
+            "minimum": 0
+          },
+          "runs": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The Runs that visited it.",
+            "minimum": 0
+          },
+          "steps": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Its Steps.",
+            "minimum": 0
+          },
+          "tokens": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TokenCounts",
+                "description": "The tokens its agent Steps used, if any recorded usage."
+              }
+            ]
+          },
+          "trouble": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TroubleRun"
+            },
+            "description": "The newest Runs where it failed or was visited more than once."
+          }
+        }
       },
       "ErrorResponse": {
         "type": "object",
@@ -737,6 +942,21 @@
           "message": {
             "type": "string",
             "description": "Message to explain failure"
+          }
+        }
+      },
+      "FlowInsight": {
+        "type": "object",
+        "description": "The Runs of one Flow.",
+        "required": ["counts"],
+        "properties": {
+          "counts": {
+            "$ref": "#/components/schemas/OutcomeCounts",
+            "description": "How its Runs went."
+          },
+          "flow": {
+            "type": ["string", "null"],
+            "description": "The Flow's name; none for Runs recorded before the Flow was kept."
           }
         }
       },
@@ -834,6 +1054,43 @@
           }
         }
       },
+      "GateInsight": {
+        "type": "object",
+        "description": "A Gate's questions and their answers.",
+        "required": ["opened", "answered", "answers"],
+        "properties": {
+          "answered": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Gates a person answered.",
+            "minimum": 0
+          },
+          "answers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NamedCount"
+            },
+            "description": "How often each answer was given, most given first."
+          },
+          "opened": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Gates opened.",
+            "minimum": 0
+          },
+          "wait": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DurationStats",
+                "description": "How long people took to answer."
+              }
+            ]
+          }
+        }
+      },
       "HandBackRequest": {
         "type": "object",
         "description": "Request body for handing back an agent Step's result.",
@@ -846,6 +1103,22 @@
           "text": {
             "type": "string",
             "description": "What the agent produced, for the Run's later Steps and for people."
+          }
+        }
+      },
+      "InsightDay": {
+        "type": "object",
+        "description": "The Runs created on one day of the period.",
+        "required": ["date", "counts"],
+        "properties": {
+          "counts": {
+            "$ref": "#/components/schemas/OutcomeCounts",
+            "description": "How its Runs went."
+          },
+          "date": {
+            "type": "string",
+            "format": "date",
+            "description": "The day, in the period's time zone."
           }
         }
       },
@@ -864,9 +1137,76 @@
       "MacroUserIdStr": {
         "type": "string"
       },
+      "NamedCount": {
+        "type": "object",
+        "description": "A name a Flow gives (an outcome, a Gate's answer) and how often it came.",
+        "required": ["name", "count"],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many times.",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string",
+            "description": "The name, as the Flow writes it."
+          }
+        }
+      },
       "Outcome": {
         "type": "string",
         "description": "How a Step ended, in the words of its Flow (`done`, `clean`, `blockers`,\n...). The Flow decides where each outcome takes the Run."
+      },
+      "OutcomeCounts": {
+        "type": "object",
+        "description": "How many Runs went each way: still going, or ended with each outcome.",
+        "required": [
+          "running",
+          "success",
+          "manual",
+          "blocked",
+          "failed",
+          "cancelled"
+        ],
+        "properties": {
+          "blocked": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Runs that ran out of visits, or of Steps, with nowhere to go.",
+            "minimum": 0
+          },
+          "cancelled": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Runs a person cancelled.",
+            "minimum": 0
+          },
+          "failed": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Runs that ended failed.",
+            "minimum": 0
+          },
+          "manual": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Runs that ended for a person to take over.",
+            "minimum": 0
+          },
+          "running": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Runs still going.",
+            "minimum": 0
+          },
+          "success": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Runs whose Flow reached its successful end.",
+            "minimum": 0
+          }
+        }
       },
       "Run": {
         "type": "object",
@@ -947,10 +1287,142 @@
         "format": "uuid",
         "description": "A Run's id."
       },
+      "RunInsights": {
+        "type": "object",
+        "description": "How a person's Runs went over a period.",
+        "required": [
+          "from",
+          "to",
+          "timeZone",
+          "runCap",
+          "capped",
+          "totals",
+          "days",
+          "flows",
+          "entries",
+          "usage"
+        ],
+        "properties": {
+          "capped": {
+            "type": "boolean",
+            "description": "Whether the period reached that cap, so older Runs may be left out."
+          },
+          "days": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InsightDay"
+            },
+            "description": "The Runs created each day of the period, every day listed."
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EntryInsight"
+            },
+            "description": "The Flows' entries the Runs visited, in their Flows' order."
+          },
+          "flow": {
+            "type": ["string", "null"],
+            "description": "The Flow read, or none for every Flow."
+          },
+          "flows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FlowInsight"
+            },
+            "description": "The Runs of each Flow, most Runs first."
+          },
+          "from": {
+            "type": "string",
+            "format": "date",
+            "description": "The period's first day."
+          },
+          "runCap": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The most Runs read: the newest in the period.",
+            "minimum": 0
+          },
+          "runDuration": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DurationStats",
+                "description": "How long Runs took from creation to their end, cancelled Runs and\nRuns still going left out."
+              }
+            ]
+          },
+          "timeZone": {
+            "type": "string",
+            "description": "The time zone its days are in."
+          },
+          "to": {
+            "type": "string",
+            "format": "date",
+            "description": "Its last day."
+          },
+          "totals": {
+            "$ref": "#/components/schemas/OutcomeCounts",
+            "description": "How the Runs went."
+          },
+          "usage": {
+            "$ref": "#/components/schemas/UsageInsight",
+            "description": "What the agent Steps used."
+          }
+        }
+      },
+      "RunLink": {
+        "type": "object",
+        "description": "One of the period's Runs, to link to.",
+        "required": ["id", "title", "createdAt"],
+        "properties": {
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was created."
+          },
+          "id": {
+            "$ref": "#/components/schemas/RunId",
+            "description": "The Run."
+          },
+          "outcome": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RunOutcome",
+                "description": "How it ended; none while it goes."
+              }
+            ]
+          },
+          "title": {
+            "type": "string",
+            "description": "The first line of its request."
+          }
+        }
+      },
       "RunOutcome": {
         "type": "string",
         "description": "How a Run ended.",
         "enum": ["success", "manual", "blocked", "failed", "cancelled"]
+      },
+      "RunTokens": {
+        "type": "object",
+        "description": "One of the period's Runs and the tokens its agent Steps used.",
+        "required": ["run", "tokens"],
+        "properties": {
+          "run": {
+            "$ref": "#/components/schemas/RunLink",
+            "description": "The Run."
+          },
+          "tokens": {
+            "$ref": "#/components/schemas/TokenCounts",
+            "description": "What its agents used."
+          }
+        }
       },
       "Step": {
         "type": "object",
@@ -1033,6 +1505,100 @@
               "$ref": "#/components/schemas/RunDetail"
             },
             "description": "The caller's Runs on the task, newest first: at most the newest 50."
+          }
+        }
+      },
+      "TokenCounts": {
+        "type": "object",
+        "description": "Tokens agent model calls used.",
+        "required": ["input", "output", "cacheRead", "cacheWrite"],
+        "properties": {
+          "cacheRead": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Input tokens read from the prompt cache.",
+            "minimum": 0
+          },
+          "cacheWrite": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Input tokens written to the prompt cache.",
+            "minimum": 0
+          },
+          "input": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Input tokens, besides those read from or written to the prompt cache.",
+            "minimum": 0
+          },
+          "output": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Output tokens.",
+            "minimum": 0
+          }
+        }
+      },
+      "TroubleRun": {
+        "type": "object",
+        "description": "A Run where an entry failed or was visited more than once.",
+        "required": ["run", "failed", "visits"],
+        "properties": {
+          "failed": {
+            "type": "boolean",
+            "description": "Whether one of the entry's Steps in it failed."
+          },
+          "run": {
+            "$ref": "#/components/schemas/RunLink",
+            "description": "The Run."
+          },
+          "visits": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many times it visited the entry.",
+            "minimum": 0
+          }
+        }
+      },
+      "UsageInsight": {
+        "type": "object",
+        "description": "What the period's agent Steps used.",
+        "required": [
+          "agentSteps",
+          "measuredSteps",
+          "measuredRuns",
+          "tokens",
+          "heaviest"
+        ],
+        "properties": {
+          "agentSteps": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Steps an agent worked on, in a session.",
+            "minimum": 0
+          },
+          "heaviest": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunTokens"
+            },
+            "description": "The Runs that used the most tokens, most first."
+          },
+          "measuredRuns": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Runs with any usage recorded.",
+            "minimum": 0
+          },
+          "measuredSteps": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Those whose session has usage recorded. An agent that runs on a\nperson's own computer records none.",
+            "minimum": 0
+          },
+          "tokens": {
+            "$ref": "#/components/schemas/TokenCounts",
+            "description": "What they used, summed."
           }
         }
       }
