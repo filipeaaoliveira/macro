@@ -335,13 +335,26 @@ impl SdkHost {
 
 pub fn sdk_endpoints() -> anyhow::Result<SdkEndpoints> {
     use strum::IntoEnumIterator;
+    let factory = factory_configured()?;
     let hosts = SdkHost::iter()
+        .filter(|host| *host != SdkHost::Factory || factory)
         .map(|host| Ok((<&'static str>::from(host).to_owned(), host.url()?)))
         .collect::<anyhow::Result<_>>()?;
     Ok(SdkEndpoints {
         hosts,
         web_app_url: macro_service_urls::AppServiceUrl::new()?.to_string(),
     })
+}
+
+/// Whether this deployment runs the software factory: only where its URL is
+/// set (`OVERRIDE_FACTORY_SERVICE_URL`, which local stacks set). No deployed
+/// environment runs it yet, so code mode elsewhere is not handed its host,
+/// and `macro.factory` reaches nothing.
+fn factory_configured() -> anyhow::Result<bool> {
+    let configured = macro_service_urls::read_override_env(
+        macro_service_urls::FactoryServiceUrl::OVERRIDE_ENV_VAR_NAME,
+    )?;
+    Ok(configured.is_some())
 }
 
 pub mod connected_apps;

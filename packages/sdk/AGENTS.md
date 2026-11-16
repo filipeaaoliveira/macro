@@ -44,7 +44,10 @@ enforced by the ordinary backend APIs.
 - `src/entities/factory/`: `macro.factory.handBack`, how the agent session
   doing a software factory Step hands back its result. It is the factory's
   only SDK endpoint; the Run API is internal (`coverage/skipped.ts`), and the
-  service runs only on local stacks so far.
+  service runs only on local stacks so far. Code mode is handed the factory's
+  host only where the service runs (`OVERRIDE_FACTORY_SERVICE_URL`); the
+  published SDK has no way to leave a namespace out, so `macro.factory`
+  elsewhere reaches a gateway route that does not exist yet.
 - `src/entities/routines/`, `agents/`, `harnesses/`: automation and agent hosts.
   `harnesses.directory()` lists teammates' hosts and `Harness.requestAccess()`
   asks for one. Granting takes the owner's own session, so the server refuses
