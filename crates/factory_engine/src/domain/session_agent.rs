@@ -87,21 +87,20 @@ pub enum SessionAgentError {
 
 impl Retryable for SessionAgentError {
     /// A turn that ended without a result, or ran past its deadline, ends
-    /// the same way when asked again, as does a session its owner may not
-    /// open; a failed read or write may not. A prompt whose delivery stayed
-    /// unknown is not tried again either: another attempt would send more.
+    /// the same way when asked again, as does a refusal, a mismatch or a
+    /// conflict from the session (only an outage passes on a retry). A
+    /// prompt whose delivery stayed unknown is not tried again either:
+    /// another attempt would send more.
+    ///
+    /// The records are retried: the agent's reads and writes are keyed by
+    /// the Step and violate no constraint in use, so a failure is the
+    /// database's, and the Step's two hours bound one that is not. A session
+    /// that never showed it opened is retried too: it follows only an
+    /// outage's answer to the prepare, never a refusal, which ends the Step.
     fn retryable(&self) -> bool {
         match self {
             SessionAgentError::Records(_) | SessionAgentError::NotOpened => true,
-            SessionAgentError::Session(error) => !matches!(
-                error,
-                RoutineSessionError::InvalidCommand
-                    | RoutineSessionError::PersonaUnavailable
-                    | RoutineSessionError::Forbidden
-                    | RoutineSessionError::AppNotConnected
-                    | RoutineSessionError::AppsUnsupported
-                    | RoutineSessionError::TeamAgentComputer
-            ),
+            SessionAgentError::Session(error) => error.is_transient(),
             SessionAgentError::TurnFailed(_)
             | SessionAgentError::NothingHandedBack
             | SessionAgentError::PromptUnsettled

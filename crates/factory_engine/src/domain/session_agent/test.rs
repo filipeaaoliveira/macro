@@ -609,3 +609,22 @@ async fn a_session_let_go_while_it_opened_is_never_prompted() {
     assert!(matches!(late, Err(SessionAgentError::Released)), "{late:?}");
     assert_eq!(sessions.prompts(), 0);
 }
+
+/// A refusal, a mismatch or a conflict from the session answers the same
+/// way again: only an outage is worth the Step's retries.
+#[test]
+fn only_an_outage_of_the_session_is_tried_again() {
+    for (error, retryable) in [
+        (RoutineSessionError::RuntimeUnavailable, true),
+        (RoutineSessionError::OperationFailed, true),
+        (RoutineSessionError::SessionMismatch, false),
+        (RoutineSessionError::ModelMismatch, false),
+        (RoutineSessionError::Forbidden, false),
+    ] {
+        assert_eq!(
+            SessionAgentError::Session(error).retryable(),
+            retryable,
+            "{error:?}"
+        );
+    }
+}
