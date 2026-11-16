@@ -115,19 +115,13 @@ export function RunDialog(props: { runId: string; onClose: () => void }) {
       >
         <Switch>
           <Match when={source.state() === 'pending'}>
-            <RunDetailsHeader
-              title={t('factoryRuns.runDetails')}
-              onClose={close}
-            />
+            <RunDetailsHeader title={t('factoryRuns.runDetails')} />
             <ActionDialogShell.Body class="flex justify-center">
               <LoadingSpinner />
             </ActionDialogShell.Body>
           </Match>
           <Match when={source.state() === 'error'}>
-            <RunDetailsHeader
-              title={t('factoryRuns.runDetails')}
-              onClose={close}
-            />
+            <RunDetailsHeader title={t('factoryRuns.runDetails')} />
             <ActionDialogShell.Body class="flex items-center gap-2">
               <p class="text-sm text-ink-muted">
                 {t('factoryRuns.runLoadFailed')}
@@ -158,7 +152,6 @@ export function RunDialog(props: { runId: string; onClose: () => void }) {
                     status={status()}
                     time={formatTime}
                     stepTime={stepTime}
-                    onClose={close}
                     cancelling={cancelling() || cancelSent()}
                     onCancel={
                       status().kind === 'ended'

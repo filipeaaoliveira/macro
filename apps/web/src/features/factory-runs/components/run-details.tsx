@@ -1,5 +1,4 @@
 import { t } from '@app/lib/i18n';
-import { isMobile } from '@core/mobile/isMobile';
 import XIcon from '@icon/system/regular/x.svg';
 import { ActionDialogShell, Button, Dialog } from '@ui';
 import { createSignal, createUniqueId, type JSX, Show } from 'solid-js';
@@ -8,28 +7,23 @@ import { RunStatusDot, runStatusLabel } from './run-status';
 import { RunTimeline } from './run-timeline';
 
 /** The header of the Run dialog: its request's first line and the close. */
-export function RunDetailsHeader(props: {
-  title: string;
-  onClose: () => void;
-}) {
+export function RunDetailsHeader(props: { title: string }) {
   return (
     <div class="flex shrink-0 items-center justify-between gap-3 border-b border-edge-divider px-5 py-4">
       <Dialog.Title class="min-w-0 truncate text-lg font-semibold">
         {props.title}
       </Dialog.Title>
-      {/* Phone drawers close by handle, backdrop or Escape, with no X. */}
-      <Show when={!isMobile()}>
-        <Button
-          aria-label={t('factoryRuns.closeRun')}
-          tooltip={{ content: t('factoryRuns.closeRun'), disabled: true }}
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          onClick={() => props.onClose()}
-        >
-          <XIcon aria-hidden="true" class="size-4" />
-        </Button>
-      </Show>
+      {/* Dialog's close button renders nothing on a phone sheet, which
+          closes by its handle, backdrop or Escape. */}
+      <Dialog.CloseButton
+        as={Button}
+        aria-label={t('factoryRuns.closeRun')}
+        tooltip={{ content: t('factoryRuns.closeRun'), disabled: true }}
+        variant="ghost"
+        size="icon-sm"
+      >
+        <XIcon aria-hidden="true" class="size-4" />
+      </Dialog.CloseButton>
     </div>
   );
 }
@@ -50,7 +44,6 @@ export function RunDetails(props: {
   time: (value: string) => string;
   /** A Step's time, compact like the activity rows: `5m`. */
   stepTime: (value: string) => string;
-  onClose: () => void;
   onCancel?: () => void;
   cancelling: boolean;
 }) {
@@ -79,7 +72,7 @@ export function RunDetails(props: {
 
   return (
     <>
-      <RunDetailsHeader title={runTitle(props.run)} onClose={props.onClose} />
+      <RunDetailsHeader title={runTitle(props.run)} />
       <ActionDialogShell.Body class="min-h-0 overflow-y-auto">
         <Show when={confirming() && props.onCancel}>
           {(cancel) => (
