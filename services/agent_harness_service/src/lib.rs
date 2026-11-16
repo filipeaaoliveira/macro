@@ -1863,6 +1863,8 @@ pub async fn run() -> anyhow::Result<()> {
         entity_access.clone(),
         MacroAuthorizationState::new(Arc::new(authorization_service.clone())),
     );
+    // Requested sessions settle in tasks of their own, drained on shutdown.
+    let session_request_tasks = tokio_util::task::TaskTracker::new();
     let bots_directory = Arc::new(PgBotDirectory::new(
         PgBotsRepo::new(pool.clone()),
         computers::harness_service(&pool),
@@ -1875,6 +1877,7 @@ pub async fn run() -> anyhow::Result<()> {
                 broker.clone(),
                 session_repo.clone(),
                 PgHarnessRepo::new(pool.clone()),
+                session_request_tasks.clone(),
             ),
         ),
         harness.clone(),
@@ -1889,6 +1892,7 @@ pub async fn run() -> anyhow::Result<()> {
             broker.clone(),
             session_repo.clone(),
             PgHarnessRepo::new(pool.clone()),
+            session_request_tasks.clone(),
         ),
         PgConnectionRepo::new(pool.clone()),
         MacroAuthorizationState::new(Arc::new(authorization_service.clone())),
@@ -1911,6 +1915,7 @@ pub async fn run() -> anyhow::Result<()> {
                 broker.clone(),
                 session_repo.clone(),
                 PgHarnessRepo::new(pool.clone()),
+                session_request_tasks.clone(),
             ),
             draining_sessions.clone(),
             (*harness).clone(),
@@ -2640,6 +2645,16 @@ pub async fn run() -> anyhow::Result<()> {
     activity_summary_tasks.wait().await;
     work_registration_tasks.close();
     work_registration_tasks.wait().await;
+    session_request_tasks.close();
+    if tokio::time::timeout(
+        external_session_requests::RUNTIME_ANSWER_TIMEOUT,
+        session_request_tasks.wait(),
+    )
+    .await
+    .is_err()
+    {
+        tracing::warn!("timed out settling requested sessions");
+    }
     http.abort();
     if let Err(error) = agent_git::drain(&agent_git_tasks).await {
         tracing::warn!(error = ?error, "agent git processes outlived shutdown");

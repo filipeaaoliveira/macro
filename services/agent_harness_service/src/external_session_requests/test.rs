@@ -11,6 +11,7 @@ use macro_event_broker::{EventBrokerError, MacroEvent, MacroEventBroker};
 use macro_user_id::user_id::MacroUserIdStr;
 use model_owner::Owner;
 use tokio::sync::Notify;
+use tokio_util::task::TaskTracker;
 
 use super::{BrokerExternalSessionRequests, RuntimeUsers};
 
@@ -28,6 +29,8 @@ struct Runtime {
     bot: BotId,
     requests: Arc<Mutex<usize>>,
     opens: Option<Arc<Notify>>,
+    /// Whether the row it creates is someone else's.
+    taken: bool,
 }
 
 impl MacroEventBroker for Runtime {
@@ -38,7 +41,14 @@ impl MacroEventBroker for Runtime {
         *self.requests.lock().expect("requests") += 1;
         let mut session = test_agent_session(self.creates);
         session.bot_id = self.bot;
-        session.owner_id = Owner::User(owner());
+        session.owner_id = if self.taken {
+            Owner::User(
+                MacroUserIdStr::try_from("macro|other@example.com".to_string())
+                    .expect("valid user id"),
+            )
+        } else {
+            Owner::User(owner())
+        };
         session.source = SessionSource::User;
         session.visibility = SessionVisibility::Listed;
         let sessions = self.sessions.clone();
@@ -80,8 +90,14 @@ async fn a_hidden_session_a_runtime_opens_is_recorded_hidden() {
         bot,
         requests: Arc::default(),
         opens: None,
+        taken: false,
     };
-    let requests = BrokerExternalSessionRequests::new(runtime.clone(), sessions.clone(), Owners);
+    let requests = BrokerExternalSessionRequests::new(
+        runtime.clone(),
+        sessions.clone(),
+        Owners,
+        TaskTracker::new(),
+    );
 
     let opened = requests
         .request(RequestedExternalSession {
@@ -119,8 +135,10 @@ async fn a_session_a_runtime_opens_after_its_caller_left_is_still_hidden() {
         bot,
         requests: Arc::default(),
         opens: Some(opens.clone()),
+        taken: false,
     };
-    let requests = BrokerExternalSessionRequests::new(runtime, sessions.clone(), Owners);
+    let requests =
+        BrokerExternalSessionRequests::new(runtime, sessions.clone(), Owners, TaskTracker::new());
     let request = RequestedExternalSession {
         session_id,
         bot_id: bot,
@@ -151,4 +169,75 @@ async fn a_session_a_runtime_opens_after_its_caller_left_is_still_hidden() {
 
     let stored = stored.expect("the row ends up hidden");
     assert_eq!(stored.source, SessionSource::User);
+}
+
+/// Counts the warnings logged while it is the default subscriber.
+#[derive(Default)]
+struct Warnings(std::sync::atomic::AtomicUsize);
+
+impl tracing::Subscriber for Warnings {
+    fn enabled(&self, _metadata: &tracing::Metadata<'_>) -> bool {
+        true
+    }
+
+    fn new_span(&self, _span: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+        tracing::span::Id::from_u64(1)
+    }
+
+    fn record(&self, _span: &tracing::span::Id, _values: &tracing::span::Record<'_>) {}
+
+    fn record_follows_from(&self, _span: &tracing::span::Id, _follows: &tracing::span::Id) {}
+
+    fn event(&self, event: &tracing::Event<'_>) {
+        if *event.metadata().level() == tracing::Level::WARN {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    fn enter(&self, _span: &tracing::span::Id) {}
+
+    fn exit(&self, _span: &tracing::span::Id) {}
+}
+
+/// A settle that fails after its caller left has nobody to answer: it is
+/// logged, not lost.
+#[tokio::test(start_paused = true)]
+async fn a_settle_that_fails_after_its_caller_left_is_logged() {
+    let warnings = Arc::new(Warnings::default());
+    let _default = tracing::subscriber::set_default(warnings.clone());
+    let sessions = InMemoryAgentSessionRepo::new();
+    let session_id = AgentSessionId::new();
+    let bot = BotId::new_from_uuid(macro_uuid::generate_uuid_v7());
+    let opens = Arc::new(Notify::new());
+    let runtime = Runtime {
+        sessions: sessions.clone(),
+        creates: session_id,
+        bot,
+        requests: Arc::default(),
+        opens: Some(opens.clone()),
+        taken: true,
+    };
+    let tasks = TaskTracker::new();
+    let requests = BrokerExternalSessionRequests::new(runtime, sessions, Owners, tasks.clone());
+    let request = RequestedExternalSession {
+        session_id,
+        bot_id: bot,
+        owner: owner(),
+        model: None,
+        repo_url: None,
+        source: SessionSource::User,
+        visibility: SessionVisibility::Hidden,
+        origin: trigger_context::TriggerOrigin::Requested { by: owner() },
+    };
+
+    let waited = tokio::time::timeout(Duration::from_secs(30), requests.request(request)).await;
+    assert!(
+        waited.is_err(),
+        "the caller gave up before the row appeared"
+    );
+    opens.notify_one();
+    tasks.close();
+    tasks.wait().await;
+
+    assert_eq!(warnings.0.load(std::sync::atomic::Ordering::SeqCst), 1);
 }

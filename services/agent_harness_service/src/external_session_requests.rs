@@ -19,12 +19,18 @@ use agent_trigger::domain::broker_events::{AgentSessionMacroEvent, AgentSessionR
 use harnesses::outbound::pg_harness_repo::PgHarnessRepo;
 use macro_event_broker::MacroEventBroker;
 use model_owner::Owner;
+use tokio_util::task::TaskTracker;
 use tracing::Instrument as _;
 
 /// How long a runtime gets to create the session before the request is
 /// refused. A daemon that is up answers well inside this; one that is down
 /// or too old to know the event never will.
-const RUNTIME_ANSWER_TIMEOUT: Duration = Duration::from_secs(180);
+pub(crate) const RUNTIME_ANSWER_TIMEOUT: Duration = Duration::from_secs(180);
+
+/// The longest a requested session is waited on and given its model and
+/// origin, its database calls included: past the runtime's answer, with a
+/// margin.
+const SETTLE_TIMEOUT: Duration = Duration::from_secs(210);
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
 
 /// The user each bot's runtime authenticates its event stream as.
@@ -64,16 +70,24 @@ pub struct BrokerExternalSessionRequests<Broker, Sessions, Runtimes = PgHarnessR
     broker: Broker,
     sessions: Sessions,
     harnesses: Runtimes,
+    tasks: TaskTracker,
 }
 
 impl<Broker, Sessions, Runtimes> BrokerExternalSessionRequests<Broker, Sessions, Runtimes> {
     /// Publish through `broker`; watch `sessions` for the created row;
-    /// address the request to the bot's runtime through `harnesses`.
-    pub fn new(broker: Broker, sessions: Sessions, harnesses: Runtimes) -> Self {
+    /// address the request to the bot's runtime through `harnesses`; wait
+    /// for the row on `tasks`, which shutdown drains.
+    pub fn new(
+        broker: Broker,
+        sessions: Sessions,
+        harnesses: Runtimes,
+        tasks: TaskTracker,
+    ) -> Self {
         Self {
             broker,
             sessions,
             harnesses,
+            tasks,
         }
     }
 }
@@ -125,19 +139,36 @@ where
         // The wait, and what the row is given once it appears, run on in a
         // task of their own: a caller that stops waiting (a route's timeout,
         // a dropped connection) must not leave a hidden session listed.
-        // Giving the row its model and origin twice changes nothing.
-        let settling = settle(
-            self.sessions.clone(),
-            Settle {
-                session_id,
-                bot_id: request.bot_id,
-                owner: request.owner,
-                model: request.model,
-                origin,
-            },
-        )
+        // Giving the row its model and origin twice changes nothing. The
+        // task is bounded, database calls and all, and its failure is logged
+        // there: its caller may be gone.
+        let sessions = self.sessions.clone();
+        let settling = async move {
+            let settled = tokio::time::timeout(
+                SETTLE_TIMEOUT,
+                settle(
+                    sessions,
+                    Settle {
+                        session_id,
+                        bot_id: request.bot_id,
+                        owner: request.owner,
+                        model: request.model,
+                        origin,
+                    },
+                ),
+            )
+            .await
+            .unwrap_or(Err(AgentSessionError::RuntimeUnavailable(
+                "this agent's machine did not open the session; make sure macrod is running and up to date",
+            )));
+            if let Err(error) = &settled {
+                tracing::warn!(%session_id, ?error, "a requested session was not settled");
+            }
+            settled
+        }
         .instrument(tracing::info_span!("settle_requested_session", %session_id));
-        tokio::spawn(settling)
+        self.tasks
+            .spawn(settling)
             .await
             .map_err(|error| AgentSessionError::Unknown(anyhow::anyhow!(error)))?
     }
