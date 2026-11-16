@@ -5,6 +5,9 @@
 //! it was handed, and this side waits for that row to appear so the caller
 //! gets the session back the way every other create does.
 
+#[cfg(test)]
+mod test;
+
 use std::time::Duration;
 
 use agent_session::domain::error::AgentSessionError;
@@ -23,17 +26,35 @@ use model_owner::Owner;
 const RUNTIME_ANSWER_TIMEOUT: Duration = Duration::from_secs(180);
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
 
-/// [`ExternalSessionRequester`] over the trigger topic and the session table.
-pub struct BrokerExternalSessionRequests<Broker, Sessions> {
-    broker: Broker,
-    sessions: Sessions,
-    harnesses: PgHarnessRepo,
+/// The user each bot's runtime authenticates its event stream as.
+pub trait RuntimeUsers: Send + Sync + 'static {
+    /// The user `bot`'s runtime answers to; `None` when it has none.
+    fn runtime_user_for_bot(
+        &self,
+        bot: bot_id::BotId,
+    ) -> impl Future<Output = sqlx::Result<Option<String>>> + Send;
 }
 
-impl<Broker, Sessions> BrokerExternalSessionRequests<Broker, Sessions> {
+impl RuntimeUsers for PgHarnessRepo {
+    fn runtime_user_for_bot(
+        &self,
+        bot: bot_id::BotId,
+    ) -> impl Future<Output = sqlx::Result<Option<String>>> + Send {
+        PgHarnessRepo::runtime_user_for_bot(self, bot)
+    }
+}
+
+/// [`ExternalSessionRequester`] over the trigger topic and the session table.
+pub struct BrokerExternalSessionRequests<Broker, Sessions, Runtimes = PgHarnessRepo> {
+    broker: Broker,
+    sessions: Sessions,
+    harnesses: Runtimes,
+}
+
+impl<Broker, Sessions, Runtimes> BrokerExternalSessionRequests<Broker, Sessions, Runtimes> {
     /// Publish through `broker`; watch `sessions` for the created row;
     /// address the request to the bot's runtime through `harnesses`.
-    pub fn new(broker: Broker, sessions: Sessions, harnesses: PgHarnessRepo) -> Self {
+    pub fn new(broker: Broker, sessions: Sessions, harnesses: Runtimes) -> Self {
         Self {
             broker,
             sessions,
@@ -42,10 +63,12 @@ impl<Broker, Sessions> BrokerExternalSessionRequests<Broker, Sessions> {
     }
 }
 
-impl<Broker, Sessions> ExternalSessionRequester for BrokerExternalSessionRequests<Broker, Sessions>
+impl<Broker, Sessions, Runtimes> ExternalSessionRequester
+    for BrokerExternalSessionRequests<Broker, Sessions, Runtimes>
 where
     Broker: MacroEventBroker,
     Sessions: AgentSessionRepo,
+    Runtimes: RuntimeUsers,
 {
     async fn request(
         &self,
