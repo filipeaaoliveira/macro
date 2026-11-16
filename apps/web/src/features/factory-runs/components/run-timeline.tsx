@@ -60,10 +60,7 @@ function TimelineStep(props: {
   return (
     // Rail and dot sit where the agent activity timeline puts them
     // (`ActivityStep`), centred on the 28px heading row (36px on touch).
-    <li
-      class="relative pl-8"
-      data-factory-run-step={`${props.step.entry}:${props.step.visit}`}
-    >
+    <li class="relative pl-8" data-factory-run-step={props.step.seq}>
       <span
         aria-hidden="true"
         class={cn(

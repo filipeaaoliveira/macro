@@ -25,9 +25,8 @@ function lastCall() {
   };
 }
 
-// The routes the web app needs from the factory service. When the service
-// publishes them, its generated types replace `pending-routes.ts`, and this
-// keeps the switch honest.
+// The person routes the web app calls on the factory service, built from
+// its generated client's URLs.
 describe('factoryClient routes', () => {
   it('reads a task’s Runs and the Flows', async () => {
     await factoryClient.listTaskRuns('task 1');
@@ -66,12 +65,12 @@ describe('factoryClient routes', () => {
   });
 
   it('answers a Gate without naming the person, and cancels', async () => {
-    await factoryClient.answerGate('run-1', 'ci-fix', 2, {
+    await factoryClient.answerGate('run-1', 3, {
       answer: 'approve',
       note: 'Keep it small',
     });
     expect(lastCall()).toEqual({
-      url: 'https://factory.example.com/runs/run-1/gates/ci-fix/2/answer',
+      url: 'https://factory.example.com/runs/run-1/steps/3/answer',
       method: 'POST',
       body: { answer: 'approve', note: 'Keep it small' },
     });

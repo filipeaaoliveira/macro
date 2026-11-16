@@ -1,70 +1,79 @@
 import { SERVER_HOSTS } from '@core/constant/servers';
 import { fetchWithToken } from '@core/util/fetchWithToken';
-import type { RunDetail } from './generated/schemas';
+import {
+  getAnswerFactoryGateUrl,
+  getCancelFactoryRunUrl,
+  getCreateFactoryRunUrl,
+  getGetFactoryRunUrl,
+  getListFactoryFlowsUrl,
+  getListFactoryTaskRunsUrl,
+} from './generated/client';
 import type {
+  AnswerGateRequest,
+  CreateRunRequest,
   FlowsResponse,
-  GateAnswerRequest,
-  StartRunRequest,
+  RunDetail,
   TaskRunsResponse,
-} from './pending-routes';
+} from './generated/schemas';
 
 const host = () => SERVER_HOSTS.factory;
 
-/** The software factory's Runs, as the signed-in person sees them. */
+/**
+ * The software factory's Runs, as the signed-in person sees them: their own
+ * Runs only. The routes and shapes are the service's generated client's.
+ */
 export const factoryClient = {
-  /** The Runs of a task, newest first. */
+  /** The caller's Runs of a task, newest first. */
   listTaskRuns(taskId: string, signal?: AbortSignal) {
     return fetchWithToken<TaskRunsResponse>(
-      `${host()}/tasks/${encodeURIComponent(taskId)}/runs`,
+      `${host()}${getListFactoryTaskRunsUrl(encodeURIComponent(taskId))}`,
       { method: 'GET', signal }
     ).then((result) => result.map((data) => data.runs));
   },
 
   getRun(runId: string, signal?: AbortSignal) {
     return fetchWithToken<RunDetail>(
-      `${host()}/runs/${encodeURIComponent(runId)}`,
-      {
-        method: 'GET',
-        signal,
-      }
+      `${host()}${getGetFactoryRunUrl(encodeURIComponent(runId))}`,
+      { method: 'GET', signal }
     );
   },
 
   /** The Flows a Run can be started from. */
   listFlows(signal?: AbortSignal) {
-    return fetchWithToken<FlowsResponse>(`${host()}/flows`, {
-      method: 'GET',
-      signal,
-    }).then((result) => result.map((data) => data.flows));
+    return fetchWithToken<FlowsResponse>(
+      `${host()}${getListFactoryFlowsUrl()}`,
+      {
+        method: 'GET',
+        signal,
+      }
+    ).then((result) => result.map((data) => data.flows));
   },
 
-  startRun(request: StartRunRequest) {
-    return fetchWithToken<RunDetail>(`${host()}/runs`, {
+  /** Starts a Run of a Flow, by its name. */
+  startRun(request: CreateRunRequest) {
+    return fetchWithToken<RunDetail>(`${host()}${getCreateFactoryRunUrl()}`, {
       method: 'POST',
       body: JSON.stringify(request),
     });
   },
 
   /**
-   * Answers the Gate the Run waits on at `entry`'s `visit`. A Gate that was
-   * already answered, or that the Run no longer waits on, fails `CONFLICT`.
+   * Answers the Gate of the Run's Step `seq`; the service answers 202 with
+   * no body. A Gate that was already answered, or that the Run no longer
+   * waits on, fails `CONFLICT`; an agent answering for its owner fails
+   * `FORBIDDEN`.
    */
-  answerGate(
-    runId: string,
-    entry: string,
-    visit: number,
-    answer: GateAnswerRequest
-  ) {
+  answerGate(runId: string, seq: number, answer: AnswerGateRequest) {
     return fetchWithToken<Record<string, never>>(
-      `${host()}/runs/${encodeURIComponent(runId)}/gates/${encodeURIComponent(entry)}/${visit}/answer`,
+      `${host()}${getAnswerFactoryGateUrl(encodeURIComponent(runId), seq)}`,
       { method: 'POST', body: JSON.stringify(answer) }
     ).then((result) => result.map(() => undefined));
   },
 
-  /** Cancels a Run. One that has already ended fails `CONFLICT`. */
+  /** Cancels a Run (202, no body). One that has ended fails `CONFLICT`. */
   cancelRun(runId: string) {
     return fetchWithToken<Record<string, never>>(
-      `${host()}/runs/${encodeURIComponent(runId)}/cancel`,
+      `${host()}${getCancelFactoryRunUrl(encodeURIComponent(runId))}`,
       { method: 'POST' }
     ).then((result) => result.map(() => undefined));
   },

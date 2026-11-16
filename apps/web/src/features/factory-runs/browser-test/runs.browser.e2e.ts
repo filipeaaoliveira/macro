@@ -57,9 +57,7 @@ test('answers a Gate, starts a Run and cancels one', async ({
   await expect(dialog.locator('[data-run-status]')).toBeFocused();
   await expect(dialog.getByText('Answered: Approve')).toBeVisible();
   await expect(dialog.getByText('Ship it behind the flag.')).toBeVisible();
-  await expect(
-    dialog.locator('[data-factory-run-step="write:1"]')
-  ).toBeVisible();
+  await expect(dialog.locator('[data-factory-run-step="3"]')).toBeVisible();
   await shoot(page, 'run-answered', testInfo.project.name);
 
   // Cancel asks first, then ends the Run.

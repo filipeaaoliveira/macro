@@ -61,7 +61,9 @@ const running: Run = {
   request: 'Rename the column',
   createdAt: '2026-11-16T09:00:00Z',
   taskId: 'task-1',
-  steps: [{ entry: 'write', visit: 1, startedAt: '2026-11-16T09:00:00Z' }],
+  steps: [
+    { seq: 1, entry: 'write', visit: 1, startedAt: '2026-11-16T09:00:00Z' },
+  ],
 };
 
 const started: Run = {

@@ -43,6 +43,7 @@ const waitingRun: Run = {
   taskId: 'task-1',
   steps: [
     {
+      seq: 1,
       entry: 'plan',
       visit: 1,
       startedAt: '2026-11-16T09:00:00Z',
@@ -213,7 +214,7 @@ describe('RunView', () => {
             answer: { answer: 'revise', answeredAt: '2026-11-16T09:02:00Z' },
           },
         },
-        { ...first, visit: 2, startedAt: '2026-11-16T09:02:00Z' },
+        { ...first, seq: 2, visit: 2, startedAt: '2026-11-16T09:02:00Z' },
       ],
     });
 
@@ -324,7 +325,12 @@ describe('RunView', () => {
             answer: { answer: 'approve', answeredAt: '2026-11-16T09:02:00Z' },
           },
         },
-        { entry: 'write', visit: 1, startedAt: '2026-11-16T09:02:00Z' },
+        {
+          seq: 2,
+          entry: 'write',
+          visit: 1,
+          startedAt: '2026-11-16T09:02:00Z',
+        },
       ],
     });
     await new Promise<void>((resolve) => queueMicrotask(resolve));
@@ -359,12 +365,55 @@ describe('RunView', () => {
             answer: { answer: 'revise', answeredAt: '2026-11-16T09:09:00Z' },
           },
         },
-        { ...first, visit: 2, gate: undefined },
+        { ...first, seq: 2, visit: 2, gate: undefined },
       ],
     });
     await new Promise<void>((resolve) => queueMicrotask(resolve));
     await new Promise<void>((resolve) => queueMicrotask(resolve));
 
     expect(document.activeElement).not.toBe(status);
+  });
+
+  it('unlocks a Gate that a reset brings back at the same visit', async () => {
+    const { setRun } = mount({});
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve' }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Approve' }).hasAttribute('disabled')
+      ).toBe(true)
+    );
+
+    // A reset restarts the entry's visits: its next Step is visit 1 again,
+    // a new Step all the same.
+    const [first] = waitingRun.steps;
+    if (!first?.gate) throw new Error('No first Gate');
+    setRun({
+      ...waitingRun,
+      steps: [
+        {
+          ...first,
+          gate: {
+            ...first.gate,
+            answer: { answer: 'approve', answeredAt: '2026-11-16T09:02:00Z' },
+          },
+        },
+        {
+          seq: 2,
+          entry: 'write',
+          visit: 1,
+          startedAt: '2026-11-16T09:02:00Z',
+          end: {
+            outcome: 'done',
+            output: 'Wrote it.',
+            endedAt: '2026-11-16T09:03:00Z',
+          },
+        },
+        { ...first, seq: 3, startedAt: '2026-11-16T09:03:00Z' },
+      ],
+    });
+
+    expect(
+      screen.getByRole('button', { name: 'Approve' }).hasAttribute('disabled')
+    ).toBe(false);
   });
 });

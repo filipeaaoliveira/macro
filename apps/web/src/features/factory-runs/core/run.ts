@@ -24,6 +24,8 @@ export type Gate = {
 
 /** One visit of one of a Flow's entries. */
 export type RunStep = {
+  /** The Step's place among the Run's Steps, from 1: what keys it. */
+  seq: number;
   entry: string;
   /** Which visit of the entry it is, from 1. */
   visit: number;

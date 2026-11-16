@@ -10,8 +10,9 @@ import { type Run, type RunStep, runStatus } from '../core/run';
 /** How often Step times ("5m") move on. */
 const CLOCK_MS = 30_000;
 
-function gateKey(step: Pick<RunStep, 'entry' | 'visit'>): string {
-  return `${step.entry}:${step.visit}`;
+/** A Gate is its Step's: Steps are keyed by `seq`, as a reset restarts `visit`. */
+function gateKey(step: Pick<RunStep, 'seq'>): number {
+  return step.seq;
 }
 
 /**
@@ -27,7 +28,7 @@ export function createRunController(
   const [note, setNote] = createSignal('');
   // The Gate this person answered stays locked until the Run is read again
   // past it, so a second click can't send a second answer.
-  const [answeredGate, setAnsweredGate] = createSignal<string>();
+  const [answeredGate, setAnsweredGate] = createSignal<number>();
   const [answering, setAnswering] = createSignal<string>();
   const [cancelling, setCancelling] = createSignal(false);
   // A sent cancel keeps its controls locked until the Run reads as ended.

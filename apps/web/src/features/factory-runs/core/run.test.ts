@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { type Run, type RunStep, runStatus } from './run';
 
 const plan: RunStep = {
+  seq: 1,
   entry: 'plan',
   visit: 1,
   startedAt: '2026-11-16T09:00:00Z',
@@ -58,6 +59,7 @@ describe('runStatus', () => {
 
   it('does not wait on an earlier Step once a later one started', () => {
     const write: RunStep = {
+      seq: 2,
       entry: 'write',
       visit: 1,
       startedAt: '2026-11-16T09:03:00Z',

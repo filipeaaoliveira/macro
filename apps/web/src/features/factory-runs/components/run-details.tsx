@@ -87,8 +87,7 @@ export function RunSteps(props: {
           time={props.time}
           outputOpen={(step) =>
             props.status.kind === 'waiting' &&
-            props.status.step.entry === step.entry &&
-            props.status.step.visit === step.visit
+            props.status.step.seq === step.seq
           }
         />
       </Show>

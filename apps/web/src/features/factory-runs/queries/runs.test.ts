@@ -72,6 +72,7 @@ describe('createAppRunsContext', () => {
       end: undefined,
       steps: [
         {
+          seq: 1,
           entry: 'plan',
           visit: 1,
           startedAt: '2026-11-16T09:00:01Z',
@@ -93,7 +94,7 @@ describe('createAppRunsContext', () => {
     const context = createAppRunsContext(new QueryClient());
     const input = {
       runId: 'run-2',
-      step: { entry: 'plan', visit: 1 },
+      step: { seq: 1 },
       answer: 'approve',
     };
 
@@ -107,6 +108,15 @@ describe('createAppRunsContext', () => {
 
     vi.mocked(factoryClient.answerGate).mockResolvedValueOnce(
       err([{ code: 'SERVER_ERROR', message: 'Internal server error' }])
+    );
+    expect(await context.answerGate(input)).toEqual({
+      ok: false,
+      reason: 'failed',
+    });
+
+    // An agent answering for its owner: only a person may answer a Gate.
+    vi.mocked(factoryClient.answerGate).mockResolvedValueOnce(
+      err([{ code: 'FORBIDDEN', message: 'Forbidden' }])
     );
     expect(await context.answerGate(input)).toEqual({
       ok: false,
@@ -263,7 +273,7 @@ describe('createAppRunsContext', () => {
 
     const result = await createAppRunsContext(client).answerGate({
       runId: 'run-2',
-      step: { entry: 'plan', visit: 1 },
+      step: { seq: 1 },
       answer: 'approve',
     });
 

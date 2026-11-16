@@ -28,7 +28,7 @@ export type StartRunInput = {
 
 export type AnswerGateInput = {
   runId: string;
-  step: Pick<RunStep, 'entry' | 'visit'>;
+  step: Pick<RunStep, 'seq'>;
   answer: string;
   note?: string;
 };

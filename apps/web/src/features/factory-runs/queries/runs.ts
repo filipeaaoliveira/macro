@@ -44,6 +44,7 @@ function toRun(detail: RunDetail): Run {
     taskId: run.taskId ?? undefined,
     end: run.end ?? undefined,
     steps: detail.steps.map((step) => ({
+      seq: step.seq,
       entry: step.entry,
       visit: step.visit,
       startedAt: step.startedAt,
@@ -180,8 +181,7 @@ export function createAppRunsContext(client: QueryClient): RunsContext {
     async answerGate(input) {
       const result = await factoryClient.answerGate(
         input.runId,
-        input.step.entry,
-        input.step.visit,
+        input.step.seq,
         { answer: input.answer, note: input.note }
       );
       // Refused or not, the Run has moved on from what this person saw.

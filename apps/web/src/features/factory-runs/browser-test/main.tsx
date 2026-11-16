@@ -10,6 +10,7 @@ import { render } from 'solid-js/web';
 import '@fontsource-variable/inter';
 import '../../../index.css';
 import {
+  type AnswerGateInput,
   type RunActionResult,
   type RunsContext,
   RunsProvider,
@@ -49,6 +50,7 @@ const INITIAL_RUNS: Run[] = [
     taskId: 'task-1',
     steps: [
       {
+        seq: 1,
         entry: 'plan',
         visit: 1,
         startedAt: at(12),
@@ -66,6 +68,7 @@ const INITIAL_RUNS: Run[] = [
         },
       },
       {
+        seq: 2,
         entry: 'plan',
         visit: 2,
         startedAt: at(8),
@@ -85,6 +88,7 @@ const INITIAL_RUNS: Run[] = [
     taskId: 'task-1',
     steps: [
       {
+        seq: 1,
         entry: 'plan',
         visit: 1,
         startedAt: at(40),
@@ -95,12 +99,13 @@ const INITIAL_RUNS: Run[] = [
         },
       },
       {
+        seq: 2,
         entry: 'write',
         visit: 1,
         startedAt: at(38),
         end: { outcome: 'done', output: 'Changed two files.', endedAt: at(30) },
       },
-      { entry: 'review', visit: 1, startedAt: at(30) },
+      { seq: 3, entry: 'review', visit: 1, startedAt: at(30) },
     ],
   },
   {
@@ -111,6 +116,7 @@ const INITIAL_RUNS: Run[] = [
     end: { outcome: 'success', endedAt: at(60 * 25) },
     steps: [
       {
+        seq: 1,
         entry: 'write',
         visit: 1,
         startedAt: at(60 * 26),
@@ -142,15 +148,12 @@ function createFixtureContext(): RunsContext {
   });
 
   /** Answers the Gate the Run waits on, as the service would. */
-  const answer = (input: {
-    runId: string;
-    answer: string;
-    note?: string;
-  }): RunActionResult => {
+  const answer = (input: AnswerGateInput): RunActionResult => {
     const run = runs().find((candidate) => candidate.id === input.runId);
     const step = run?.steps.at(-1);
-    // A second answer, like the service's 409.
-    if (!step?.gate || step.gate.answer) {
+    // A second answer, or one to a Step the Run no longer waits on, like the
+    // service's 409.
+    if (!step?.gate || step.gate.answer || step.seq !== input.step.seq) {
       return { ok: false, reason: 'conflict' };
     }
     const now = new Date().toISOString();
@@ -170,6 +173,7 @@ function createFixtureContext(): RunsContext {
           },
         },
         {
+          seq: current.steps.length + 1,
           entry: input.answer === 'approve' ? 'write' : 'plan',
           visit: input.answer === 'approve' ? 1 : step.visit + 1,
           startedAt: now,
@@ -202,7 +206,12 @@ function createFixtureContext(): RunsContext {
         createdAt: new Date().toISOString(),
         taskId: input.taskId,
         steps: [
-          { entry: 'plan', visit: 1, startedAt: new Date().toISOString() },
+          {
+            seq: 1,
+            entry: 'plan',
+            visit: 1,
+            startedAt: new Date().toISOString(),
+          },
         ],
       };
       setRuns((current) => [run, ...current]);
