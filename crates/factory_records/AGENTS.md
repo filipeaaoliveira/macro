@@ -13,11 +13,14 @@ the Gates they asked people in MacroDB, and defines the names Flows use
 - `src/domain/ports.rs`: `RunRepository`, the port `factory_engine` writes through.
 - `src/outbound/pg_run_repository.rs`: the `factory_run`, `factory_step` and
   `factory_gate` queries.
+- `src/domain/insights.rs` and `src/outbound/pg_run_repository/insights.rs`:
+  `RunInsightsRepository`, the reads behind Run insights.
 
 ## Scope
 
 - Owns: the `factory_run`, `factory_step` and `factory_gate` tables
-  (`crates/macro_db_client/migrations/20261116083957_factory.sql`).
+  (`crates/macro_db_client/migrations/20261116083957_factory.sql`,
+  `20261116213000_factory_run_flow.sql`).
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
 
 ## Boundaries
@@ -51,6 +54,13 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   an account deleted since: it records the answer with no author instead.
   The crate never reads `"User"`; who has an account is the authentication
   service's to say (`factory_engine`'s `UserDirectory`).
+- `factory_run.flow` is the built-in Flow's name, which `insert_run` keeps;
+  it is null only for Runs recorded before it was.
+- `read_insights` reads one person's newest Runs in a period through
+  `factory_run_user_created_idx` (`user_id, created_at DESC, id DESC`), up to
+  its cap, then their Steps and Gates by primary key, in one read-only
+  snapshot under a 5 s timeout. Keep its first `WHERE` and `ORDER BY` on that
+  index, and every later read on the Runs' ids.
 - A Run's or Step's end columns are all null or all set (`factory_*_end`
   checks); the row mappings refuse anything else.
 

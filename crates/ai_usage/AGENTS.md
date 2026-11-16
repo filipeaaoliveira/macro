@@ -18,6 +18,10 @@ flexible admin query API.
   for analytics regardless of billing status.
 - `src/domain/counting.rs`: `is_billable_feature` and the
   `NON_BILLABLE_AI_FEATURES` allowlist.
+- `src/domain/session_usage.rs` + `src/outbound/pg_session_usage.rs`:
+  `SessionUsageReader`, the tokens recorded for given agent sessions of one
+  user (factory insights). Usage recorded with a session only as its
+  `entity`, as the harness's model gateway records it, is not counted.
 - `src/outbound/pg_usage_repo.rs`, `pg_tracking_repo.rs`,
   `pg_financial_usage_repo.rs`: the Postgres adapters.
 
@@ -33,7 +37,7 @@ flexible admin query API.
 - Used by: `agent`, `agent_session`, `agent_harness`, `agent_trigger`,
   `ai_billing`, `ai_tools`, `ai_projections`, `anthropic`, `call`,
   `documents`, `import`, `image_generation`, `memory`, `channel_bots`,
-  `agent_inmem`, `dictation`, `task_dedup`, `jev`.
+  `agent_inmem`, `dictation`, `task_dedup`, `jev`, `factory_engine`.
 
 ## Recipes
 

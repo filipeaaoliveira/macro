@@ -64,6 +64,15 @@ Runs on a task they can see, newest first, at most `TASK_RUNS_LISTED`; other
 people's Runs on it are not listed, and a hidden or missing task, or a document
 that is not a task, is 404.
 
+`GET /insights?from=&to=&timeZone=&flow=` (`inbound/insights.rs`,
+`domain/insights.rs`) sums up how the caller's own Runs went over a period of
+at most 366 days in a time zone: Runs by day, outcome and Flow, Run and Step
+durations, Gate waits and answers, the entries that failed or were revisited
+with their newest Runs, and the tokens each agent Step's session used, read
+from the usage log by session id (`ai_usage`'s `SessionUsageReader`). It
+reads the newest `INSIGHTS_RUN_CAP` Runs of the period. A bad period, time
+zone or Flow name is 400.
+
 `POST /runs/{id}/cancel` cancels the workflow through Temporal; cancelling a
 cancelled Run again is accepted, and a Run whose workflow never started ends
 `cancelled` (its workflow, should it start late, takes no Step). Reading a Run
@@ -119,7 +128,8 @@ service's when no agent is configured.
 
 ## Boundaries
 
-- Depends on: `factory_records`, `agent_session` (the routine sessions port),
+- Depends on: `factory_records`, `ai_usage` (agent sessions' usage),
+  `agent_session` (the routine sessions port),
   `agent_correlation`, `macro_authorization`, `macro_user_id`,
   `entity_access` (ports), `document_storage_service_client`, the Temporal
   Rust SDK.

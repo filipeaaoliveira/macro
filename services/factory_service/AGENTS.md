@@ -16,7 +16,9 @@ worker that walks each Run's Flow, in one process.
 
 ## Scope
 
-- Owns: wiring `factory_engine` and `factory_records` into a process.
+- Owns: wiring `factory_engine` and `factory_records` into a process, and
+  the insights router beside the Run API (its OpenAPI merged into the Run
+  API's).
 - Not here: Flows, the workflow and the API's handlers → `crates/factory_engine`;
   the Run tables → `crates/factory_records`.
 - Callers: people, with their own login or user API key, and internal

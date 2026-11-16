@@ -1389,7 +1389,23 @@ already ended, shows a toast and reads the Run again. An open Run, and a
 task with a Step running, are read again every 3 seconds; a task whose live
 Runs all wait on a Gate, every minute; nothing once every Run has ended.
 
-The browser regression runs the section and dialog on an in-memory factory:
+The chart button beside **New run** opens **Run insights**
+(`/app/factory/insights`) in a new pane: how the person's own Runs went over
+the last 7, 30 or 90 days, of one Flow or all (the filter in the header; a
+drawer on touch). It shows a donut of how Runs ended with their total,
+success rate (Runs that ended on their own) and median and slowest run
+times; Runs by day, stacked by outcome, with the daily table under **View
+daily data**; each Step of the Flows in order with its median and slowest
+times, the Runs that went back to it, its Gate's wait and answers, its
+outcomes and tokens; **Where runs stop**, the Steps that failed or were
+revisited with their latest Runs, which open as from a task; Runs by Flow;
+and **Agent usage**, the tokens Macro recorded for the agent Steps (none for
+an agent on the person's own computer). The page reads at most the newest
+1,000 Runs of a period.
+
+The browser regression runs the section and dialog on an in-memory factory,
+and the insights page on another (`insights.html`; `?error` fails the first
+read, `?empty` has no Runs):
 `bunx playwright test --config src/features/factory-runs/browser-test/playwright.config.ts`
 from `apps/web`; set `FACTORY_RUNS_SCREENSHOT_DIR` to save desktop and phone
 screenshots.
