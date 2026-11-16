@@ -199,3 +199,67 @@ async fn a_plan_reads_what_a_person_answered_the_last_one() {
     assert!(tasks[0].prompt.contains("revise"));
     assert!(tasks[0].prompt.contains("Keep the old index"));
 }
+
+/// An ended Step of entry `entry` at place `seq`, which produced `output`.
+fn ended(seq: u16, entry: &str, visit: u16, output: &str) -> Step {
+    Step {
+        seq,
+        entry: EntryId::try_from(entry.to_string()).expect("valid"),
+        visit,
+        started_at: Utc::now(),
+        end: Some(StepEnd {
+            outcome: Outcome::done(),
+            output: output.to_string(),
+            ended_at: Utc::now(),
+        }),
+        gate: None,
+    }
+}
+
+/// A loop's earlier rounds are history the agent doesn't need, and a Run
+/// that loops would otherwise grow its prompt without bound.
+#[tokio::test]
+async fn a_prompt_carries_the_latest_visit_of_each_entry_newest_first() {
+    let agent = FakeAgent::ending_with("done");
+    let steps = BuiltInSteps::new(agent.clone());
+    let earlier = [
+        ended(1, "plan", 1, "First plan"),
+        ended(2, "review", 1, "First review"),
+        ended(3, "plan", 2, "Second plan"),
+        ended(4, "review", 2, "Second review"),
+    ];
+
+    steps
+        .run(&step("write"), input(&earlier))
+        .await
+        .expect("write");
+
+    let tasks = agent.tasks.lock().expect("tasks");
+    let prompt = &tasks[0].prompt;
+    assert!(!prompt.contains("First plan"));
+    assert!(!prompt.contains("First review"));
+    let review = prompt.find("Second review").expect("the latest review");
+    let plan = prompt.find("Second plan").expect("the latest plan");
+    assert!(review < plan, "newest first");
+}
+
+#[tokio::test]
+async fn a_prompt_leaves_out_the_oldest_steps_past_its_budget() {
+    let agent = FakeAgent::ending_with("done");
+    let steps = BuiltInSteps::new(agent.clone());
+    let earlier = [
+        ended(1, "plan", 1, &"p".repeat(40 * 1024)),
+        ended(2, "review", 1, &"r".repeat(40 * 1024)),
+    ];
+
+    steps
+        .run(&step("write"), input(&earlier))
+        .await
+        .expect("write");
+
+    let tasks = agent.tasks.lock().expect("tasks");
+    let prompt = &tasks[0].prompt;
+    assert!(prompt.contains(&"r".repeat(40 * 1024)));
+    assert!(!prompt.contains(&"p".repeat(40 * 1024)));
+    assert!(prompt.contains("1 earlier steps are left out"));
+}

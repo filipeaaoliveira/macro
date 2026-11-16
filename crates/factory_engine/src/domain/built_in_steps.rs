@@ -4,7 +4,7 @@
 #[cfg(test)]
 mod test;
 
-use factory_records::domain::models::{Outcome, StepKey};
+use factory_records::domain::models::{Outcome, Step, StepKey};
 use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::flow::StepName;
@@ -177,42 +177,76 @@ impl<A: StepAgent> StepExecutor for BuiltInSteps<A> {
     }
 }
 
+/// The most bytes of the Run's earlier Steps a prompt carries.
+const HISTORY_BUDGET: usize = 48 * 1024;
+
 /// The agent's prompt: the Step's instructions, the outcomes it may end
-/// with, the Run's request, and what each earlier Step produced and how a
-/// person answered its Gate, oldest first, so a later Step reads the plan it
-/// carries out and what people said about it.
+/// with, the Run's request, then the Run's earlier Steps ([`history`]).
 fn prompt(instructions: &str, outcomes: &[Outcome], input: StepInput<'_>) -> String {
     let outcomes = outcomes
         .iter()
         .map(|outcome| format!("`{outcome}`"))
         .collect::<Vec<_>>()
         .join(", ");
-    let mut prompt = format!(
+    format!(
         "{instructions}\nEnd the step with one of these outcomes: {outcomes}.\n\n\
-         ## Request\n\n{}\n",
-        input.request
-    );
+         ## Request\n\n{}\n{}",
+        input.request,
+        history(input.earlier)
+    )
+}
 
-    for step in input.earlier {
-        let Some(end) = &step.end else {
-            continue;
-        };
-        prompt.push_str(&format!(
-            "\n## Step {}, visit {}: {}\n\n{}\n",
-            step.entry, step.visit, end.outcome, end.output
-        ));
-
-        let answer = step
-            .gate
-            .as_ref()
-            .and_then(|gate| gate.answer.as_ref().map(|answer| (&gate.question, answer)));
-        if let Some((question, answer)) = answer {
-            let note = answer.note.as_deref().unwrap_or("(no note)");
-            prompt.push_str(&format!(
-                "\nA person was asked \"{question}\" and answered `{}`: {note}\n",
-                answer.answer
-            ));
+/// What the Run's earlier Steps produced and how a person answered their
+/// Gates, so a later Step reads the plan it carries out and what people said
+/// about it: the latest visit of each entry, newest first, as many as fit
+/// in [`HISTORY_BUDGET`]. A loop that visits an entry again and again adds
+/// nothing but its latest round.
+fn history(earlier: &[Step]) -> String {
+    let mut latest: Vec<&Step> = Vec::new();
+    for step in earlier.iter().rev() {
+        if step.end.is_some() && !latest.iter().any(|kept| kept.entry == step.entry) {
+            latest.push(step);
         }
     }
-    prompt
+
+    let mut history = String::new();
+    let mut left_out = 0;
+    for step in latest {
+        let section = section(step);
+        if history.len() + section.len() > HISTORY_BUDGET {
+            left_out += 1;
+            continue;
+        }
+        history.push_str(&section);
+    }
+    if left_out > 0 {
+        history.push_str(&format!(
+            "\n({left_out} earlier steps are left out: the prompt has no room for them.)\n"
+        ));
+    }
+    history
+}
+
+/// One earlier Step: its outcome and output, and its Gate's answer.
+fn section(step: &Step) -> String {
+    let Some(end) = &step.end else {
+        return String::new();
+    };
+    let mut section = format!(
+        "\n## Step {}, visit {}: {}\n\n{}\n",
+        step.entry, step.visit, end.outcome, end.output
+    );
+
+    let answer = step
+        .gate
+        .as_ref()
+        .and_then(|gate| gate.answer.as_ref().map(|answer| (&gate.question, answer)));
+    if let Some((question, answer)) = answer {
+        let note = answer.note.as_deref().unwrap_or("(no note)");
+        section.push_str(&format!(
+            "\nA person was asked \"{question}\" and answered `{}`: {note}\n",
+            answer.answer
+        ));
+    }
+    section
 }
