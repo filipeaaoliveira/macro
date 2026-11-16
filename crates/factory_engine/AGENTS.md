@@ -13,12 +13,18 @@ interpreter names, the workflow records its start (`factory_start_step`), runs
 its work (`factory_run_step`), records its end (`factory_end_step`), and feeds
 the outcome back; then it records the Run's end (`factory_end_run`). A Step is
 keyed by its place among the Run's Steps (`seq`), which a reset never reuses.
-Work that fails after its retries ends the Step `failed`, with why as its
-output. The work heartbeats; cancelling the Run cancels it with
-`WaitCancellationCompleted`: the activity drops the work and asks the Step's
-agent to stop, sending the stop again for a minute while the session still
-works (a prompt on its way can restart it), before the Run ends `cancelled`.
-A cancelled Run's open Steps end `cancelled` with it. A
+Work that fails after its retries ends the Step `failed`, with a fixed
+output (why is in the worker's logs). The work heartbeats. A cancelled
+activity only drops its work: it can't tell the Run's cancellation from a
+worker shutting down or a timed-out attempt, and a retry goes on in the same
+agent session. The workflow stops the agent (`factory_stop_step`, on a token
+the cancellation does not reach) when the Run was cancelled, and when the
+work failed for good; the stop is sent again for a minute while the session
+still works (a prompt on its way can restart it), then the session is
+deleted. A Step that ended has its session deleted once its end is recorded
+(`factory_release_step`). A shutting-down worker gives running Steps a few
+seconds, then cancels them, so Temporal retries them on another worker at
+once. A cancelled Run's open Steps end `cancelled` with it. A
 Run takes at most `MAX_STEPS` Steps, then ends `blocked`. Workflow inputs carry
 ids, never the request's text.
 
@@ -41,7 +47,10 @@ task that is not deleted (`outbound/document_task_directory.rs`); a hidden
 document and a missing one are both "no task" (400).
 
 `POST /runs/{id}/cancel` cancels the workflow through Temporal; cancelling a
-cancelled Run again is accepted. A Temporal outage answers 503 (or 502 for an
+cancelled Run again is accepted, and a Run whose workflow never started ends
+`cancelled` (its workflow, should it start late, takes no Step). Reading a
+Run whose workflow never started ends it `failed` once it is five minutes
+old. A Temporal outage answers 503 (or 502 for an
 unusable answer), never 500.
 
 The built-in Steps (`src/domain/built_in_steps.rs`) are `reply`, which
@@ -52,7 +61,9 @@ and what the Run's earlier Steps produced. The agent is the `StepAgent` port.
 session of the configured agent, owned by the Run's owner, through the routine
 sessions capability (`agent_harness_service_client`). The Step claims its
 session in `factory_step` first, so a retried Step goes on in the same session
-and never prompts twice. The prompt asks the agent to hand back its result
+and never prompts twice: it always asks, and the session refuses a prompt it
+already has with a conflict. The session's status settles only a prompt
+whose delivery is unknown. The prompt asks the agent to hand back its result
 with `macro.factory.handBack({ outcome, text })` from code mode, which reaches
 `POST /hand-backs` as the Run's owner; the correlation layer names the session
 (`agent_correlation::context::current_session`), and the hand back must offer
@@ -102,6 +113,9 @@ the service's when no agent is configured.
 ## Checks
 
 - `cargo test -p factory_engine`
+- The workflow on a running Temporal (`src/inbound/temporal/test.rs`, ignored
+  in CI): `cargo test -p factory_engine -- --ignored` with the local stack
+  up, or `TEMPORAL_ADDRESS` set to another dev server.
 
 ## Gotchas
 

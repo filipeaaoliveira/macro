@@ -34,16 +34,22 @@ worker that walks each Run's Flow, in one process.
   then `GET /runs/<id>`. `flows/plan.json` runs the agent Steps `plan` and
   `write`, with a Gate between them: answer it with
   `POST /runs/<id>/steps/<seq>/answer` and `{"answer": "approve"}`.
-  `POST /runs/<id>/cancel` cancels a Run. Add `"taskId": "<task document id>"` to link a Run to a task,
-  or `PUT /runs/<id>/task` later.
+  `POST /runs/<id>/cancel` cancels a Run. Add
+  `"taskId": "<task document id>"` to link a Run to a task, or
+  `PUT /runs/<id>/task` later.
 
 ## Gotchas
 
 - `FACTORY_AGENT_ID` names the agent (a bot id) whose sessions do the agent
   Steps, as each Run's owner; the owner must be allowed to use it. Unset, the
   agent Steps run on `LocalAgent`, which does no work. Locally, set it in the
-  `--env-file` the stack is started with (`docs/development/running-locally.md`). A macrod agent's
-  sessions need its machine connected, and routine apps are refused for it.
+  `--env-file` the stack is started with
+  (`docs/development/running-locally.md`). A macrod agent's sessions need
+  its machine connected, and routine apps are refused for it.
+- The service tells which accounts exist with the authentication service's
+  `POST /internal/get_existing_users`. Before
+  `fix/auth-existing-users-method`, that route answered only GET, and every
+  Run was refused as having no account: the factory needs that fix.
 
 - Local-only: the local stack runs a Temporal dev server (`temporal`, UI on
   `localhost:8233`); no deployed environment has Temporal yet, so the service

@@ -182,7 +182,9 @@ pub trait FactoryService: Send + Sync + 'static {
         task_id: Option<Uuid>,
     ) -> impl Future<Output = Result<RunDetail, FactoryError>> + Send;
 
-    /// `actor`'s Run and the Steps it took.
+    /// `actor`'s Run and the Steps it took. Reading a Run whose workflow
+    /// never started, once it is old enough that a started one would have
+    /// taken a Step, ends it `failed`: the one read that writes.
     fn get_run(
         &self,
         actor: &MacroUserIdStr<'static>,
