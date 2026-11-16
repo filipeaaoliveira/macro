@@ -8,12 +8,14 @@ export type InsightSeries = {
   color: string;
 };
 
-const TIP = {
+/** The pointer tip's look, on the menu surface. */
+export const TIP = {
   fill: 'var(--color-menu)',
   stroke: 'var(--color-edge)',
   fontSize: 12,
 };
-const integerTick = (value: number) =>
+/** Whole numbers only, so a small axis never reads 0.5 bookings. */
+export const integerTick = (value: number) =>
   Number.isInteger(value) ? value.toLocaleString() : '';
 const dateLabel = (date: Date) =>
   new Intl.DateTimeFormat(undefined, {

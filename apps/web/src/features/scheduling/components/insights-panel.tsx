@@ -54,7 +54,8 @@ function formatDate(date: string, long = false): string {
   }).format(new Date(`${date}T12:00:00Z`));
 }
 
-function InsightSection(props: {
+/** A titled section of an insights page, ruled off from the one above. */
+export function InsightSection(props: {
   title: string;
   description?: string;
   actions?: JSX.Element;
@@ -76,15 +77,20 @@ function InsightSection(props: {
   );
 }
 
-function Metric(props: {
+/**
+ * One figure with its definition, and how it moved since the previous period
+ * when `previous` is given.
+ */
+export function Metric(props: {
   label: string;
   definition: string;
   value: number;
-  previous: number;
+  previous?: number;
   unit?: string;
   lowerIsBetter?: boolean;
 }) {
   const improved = () =>
+    props.previous !== undefined &&
     props.value !== props.previous &&
     (props.lowerIsBetter
       ? props.value < props.previous
@@ -113,18 +119,20 @@ function Metric(props: {
           </span>
         </Show>
       </p>
-      <div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-ink-muted">
-        <span
-          class="rounded px-1.5 py-0.5 font-medium tabular-nums"
-          classList={{
-            'bg-success-bg text-success-ink': improved(),
-            'bg-surface-2 text-ink-muted': !improved(),
-          }}
-        >
-          {insightComparison(props.value, props.previous)}
-        </span>
-        <span>from last period</span>
-      </div>
+      <Show when={props.previous !== undefined}>
+        <div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-ink-muted">
+          <span
+            class="rounded px-1.5 py-0.5 font-medium tabular-nums"
+            classList={{
+              'bg-success-bg text-success-ink': improved(),
+              'bg-surface-2 text-ink-muted': !improved(),
+            }}
+          >
+            {insightComparison(props.value, props.previous ?? 0)}
+          </span>
+          <span>from last period</span>
+        </div>
+      </Show>
     </div>
   );
 }
@@ -304,7 +312,8 @@ function HourChart(props: { hours: number[] }) {
   );
 }
 
-function RankedList(props: {
+/** Named counts as bars, longest first, or `empty` when there are none. */
+export function RankedList(props: {
   title: string;
   description: string;
   rows: { id: string; name: string; count: number }[];
