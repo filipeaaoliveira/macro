@@ -113,7 +113,7 @@ impl<A: StepAgent> BuiltInSteps<A> {
             .agent
             .answer(task)
             .await
-            .map_err(|error| BuiltInStepError::agent(error))?;
+            .map_err(BuiltInStepError::agent)?;
 
         if !outcomes.contains(&answer.outcome) {
             return Err(BuiltInStepError::UnexpectedOutcome {
@@ -170,7 +170,7 @@ impl<A: StepAgent> StepExecutor for BuiltInSteps<A> {
                 .agent
                 .stop(key, owner)
                 .await
-                .map_err(|error| BuiltInStepError::agent(error)),
+                .map_err(BuiltInStepError::agent),
             // A reply is done before anything could stop it.
             Some(BuiltInStep::Reply) | None => Ok(()),
         }
