@@ -7,8 +7,8 @@ mod test;
 use agent_session::domain::session_task::TaskDocumentId;
 use chrono::Utc;
 use factory_records::domain::models::{
-    HandBack, MAX_NOTE_BYTES, MAX_OUTPUT_BYTES, MAX_REQUEST_BYTES, Outcome, Run, RunId, RunInsert,
-    RunOutcome, TaskLink,
+    HandBack, MAX_NOTE_BYTES, MAX_OUTPUT_BYTES, MAX_REQUEST_BYTES, Outcome, Repository, Run, RunId,
+    RunInsert, RunOutcome, TaskLink,
 };
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
@@ -17,12 +17,12 @@ use uuid::Uuid;
 use crate::domain::built_in_flows::{BUILT_IN_FLOWS, BuiltInFlow};
 use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening};
 use crate::domain::models::{
-    FactoryError, FlowSummary, RunDetail, RunFinish, RunStart, StepEnding, StepError, StepInput,
-    StepReport, StepRequest, StepStart,
+    CodeRepository, FactoryError, FlowSummary, RunDetail, RunFinish, RunStart, StepEnding,
+    StepError, StepInput, StepReport, StepRequest, StepStart,
 };
 use crate::domain::ports::{
-    AnswerDelivery, FactoryService, Retryable, RunWorkflows, RunWorkflowsError, StepExecutor,
-    StepService, TaskAccess, TaskDirectory, UserDirectory,
+    AnswerDelivery, FactoryService, PullRequests, Retryable, RunWorkflows, RunWorkflowsError,
+    StepExecutor, StepService, TaskAccess, TaskDirectory, UserDirectory,
 };
 
 fn internal(error: impl std::error::Error + Send + Sync + 'static) -> rootcause::Report {
@@ -46,33 +46,57 @@ pub const TASK_RUNS_LISTED: u16 = 50;
 const UNSTARTED_AFTER: chrono::TimeDelta = chrono::TimeDelta::minutes(5);
 
 /// The Run API, over the Run records, the Runs' workflows, the worker that
-/// says which Steps it serves, and the people and tasks Runs name.
+/// says which Steps it serves, the people and tasks Runs name, and GitHub,
+/// which says whether a Run's owner reaches its repository.
 #[derive(Debug, Clone)]
-pub struct FactoryServiceImpl<R, W, E, U, T> {
+pub struct FactoryServiceImpl<R, W, E, U, T, G> {
     repo: R,
     workflows: W,
     executor: E,
     users: U,
     tasks: T,
+    github: G,
 }
 
-impl<R, W, E, U, T> FactoryServiceImpl<R, W, E, U, T>
+impl<R, W, E, U, T, G> FactoryServiceImpl<R, W, E, U, T, G>
 where
     R: RunRepository,
     W: RunWorkflows,
     E: StepExecutor,
     U: UserDirectory,
     T: TaskDirectory,
+    G: PullRequests,
 {
     /// Create the Run API.
-    pub fn new(repo: R, workflows: W, executor: E, users: U, tasks: T) -> Self {
+    pub fn new(repo: R, workflows: W, executor: E, users: U, tasks: T, github: G) -> Self {
         Self {
             repo,
             workflows,
             executor,
             users,
             tasks,
+            github,
         }
+    }
+
+    /// The repository `repo_url` names, with the branch its Run starts from,
+    /// when `user_id` reaches it with their GitHub account.
+    async fn reachable_repository(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        repo_url: &str,
+    ) -> Result<Repository, FactoryError> {
+        let repository = CodeRepository::parse(repo_url).ok_or(FactoryError::InvalidRepository)?;
+        let base_branch = self
+            .github
+            .default_branch(user_id, &repository)
+            .await
+            .map_err(internal)?
+            .ok_or(FactoryError::UnreachableRepository)?;
+        Ok(Repository {
+            url: repository.url(),
+            base_branch,
+        })
     }
 
     /// Fails unless `user_id` names an account.
@@ -140,13 +164,14 @@ where
     }
 }
 
-impl<R, W, E, U, T> FactoryService for FactoryServiceImpl<R, W, E, U, T>
+impl<R, W, E, U, T, G> FactoryService for FactoryServiceImpl<R, W, E, U, T, G>
 where
     R: RunRepository,
     W: RunWorkflows,
     E: StepExecutor,
     U: UserDirectory,
     T: TaskDirectory,
+    G: PullRequests,
 {
     fn list_flows(&self) -> Vec<FlowSummary> {
         // A Flow that names a Step the worker does not serve yet is not
@@ -170,6 +195,7 @@ where
         flow: String,
         request: String,
         task_id: Option<Uuid>,
+        repo_url: Option<String>,
     ) -> Result<RunDetail, FactoryError> {
         let flow = BuiltInFlow::named(&flow)
             .ok_or(FactoryError::UnknownFlow)?
@@ -182,10 +208,21 @@ where
                 max: MAX_REQUEST_BYTES,
             });
         }
+        match (flow.repository, &repo_url) {
+            (true, None) => return Err(FactoryError::RepositoryRequired),
+            (false, Some(_)) => return Err(FactoryError::RepositoryNotUsed),
+            _ => {}
+        }
         self.known(&actor).await?;
         if let Some(task_id) = task_id {
             self.visible_task(&actor, task_id).await?;
         }
+        // The owner's GitHub account must reach the repository now: every
+        // Step that works on it acts as them.
+        let repository = match &repo_url {
+            Some(repo_url) => Some(self.reachable_repository(&actor, repo_url).await?),
+            None => None,
+        };
 
         // The Run and its task are kept in one write, so a task deleted
         // since it was checked leaves nothing behind.
@@ -193,7 +230,7 @@ where
         tracing::Span::current().record("run_id", tracing::field::display(run_id));
         let run = match self
             .repo
-            .insert_run(run_id, &request, &actor, task_id)
+            .insert_run(run_id, &request, &actor, task_id, repository.as_ref())
             .await
             .map_err(internal)?
         {
@@ -497,6 +534,8 @@ where
             key: request.key,
             owner: &run.user_id,
             request: &run.request,
+            task_id: run.task_id,
+            repository: run.repository.as_ref(),
             earlier: &earlier,
         };
         let report = self

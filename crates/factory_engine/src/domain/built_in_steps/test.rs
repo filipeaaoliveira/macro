@@ -2,14 +2,16 @@ use std::sync::{Arc, LazyLock, Mutex};
 
 use chrono::Utc;
 use factory_records::domain::models::{
-    EntryId, Gate, GateAnswer, Outcome, RunId, Step, StepEnd, StepKey,
+    EntryId, Gate, GateAnswer, Outcome, Repository, RunId, Step, StepEnd, StepKey,
 };
 use macro_user_id::user_id::MacroUserIdStr;
 
 use super::{BuiltInStepError, BuiltInSteps};
+use crate::domain::fakes::{FakeGithub, FakeRepo};
 use crate::domain::flow::{Flow, StepName};
 use crate::domain::models::{AgentAnswer, AgentTask, StepInput};
 use crate::domain::ports::{Retryable, StepAgent, StepExecutor};
+use crate::domain::pull_request_steps::PullRequestSteps;
 
 #[derive(Debug, thiserror::Error)]
 #[error("fake agent failure")]
@@ -61,6 +63,10 @@ impl StepAgent for FakeAgent {
     }
 }
 
+fn pull_requests() -> PullRequestSteps<FakeGithub, FakeRepo> {
+    PullRequestSteps::new(FakeGithub::default(), FakeRepo::default())
+}
+
 fn step(name: &str) -> StepName {
     StepName::try_from(name.to_string()).expect("valid")
 }
@@ -77,24 +83,94 @@ fn input<'a>(earlier: &'a [Step]) -> StepInput<'a> {
         },
         owner: &JULIA,
         request: "Add a dark mode toggle",
+        task_id: None,
+        repository: None,
         earlier,
     }
 }
 
 #[test]
-fn reply_plan_and_write_are_served() {
-    let steps = BuiltInSteps::new(FakeAgent::ending_with("done"));
+fn the_code_flow_s_steps_are_served() {
+    let steps = BuiltInSteps::new(FakeAgent::ending_with("done"), pull_requests());
 
-    assert!(steps.serves(&step("reply")));
-    assert!(steps.serves(&step("plan")));
-    assert!(steps.serves(&step("write")));
-    assert!(!steps.serves(&step("review")));
+    for name in [
+        "reply",
+        "plan",
+        "write",
+        "review",
+        "fix",
+        "ci_fix",
+        "publish",
+        "ci",
+        "ready_to_merge",
+        "merge",
+    ] {
+        assert!(steps.serves(&step(name)), "{name}");
+    }
+    assert!(!steps.serves(&step("deploy")));
+}
+
+/// An agent Step of a Run that works on a repository works in its own
+/// session's checkout of it, told the Run's branch and its base.
+#[tokio::test]
+async fn an_agent_step_works_in_the_run_s_repository_on_its_branch() {
+    let agent = FakeAgent::ending_with("changes");
+    let steps = BuiltInSteps::new(agent.clone(), pull_requests());
+    let repository = Repository {
+        url: "https://github.com/macro/app".to_string(),
+        base_branch: "trunk".to_string(),
+    };
+    let mut in_repository = input(&[]);
+    in_repository.repository = Some(&repository);
+    let branch = format!("factory/{}", in_repository.key.run_id);
+
+    let report = steps
+        .run(&step("review"), in_repository)
+        .await
+        .expect("review");
+
+    assert_eq!(report.outcome.as_str(), "changes");
+    let tasks = agent.tasks.lock().expect("tasks");
+    assert_eq!(
+        tasks[0].repo_url.as_deref(),
+        Some("https://github.com/macro/app")
+    );
+    assert!(
+        tasks[0]
+            .prompt
+            .contains(&format!("git push origin {branch}"))
+    );
+    assert!(tasks[0].prompt.contains("`origin/trunk`"));
+    assert_eq!(
+        tasks[0].outcomes,
+        [
+            Outcome::try_from("pass".to_string()).expect("valid"),
+            Outcome::try_from("changes".to_string()).expect("valid"),
+        ]
+    );
+}
+
+/// A Step that only works on a repository fails for good in a Run with
+/// none, before any agent is asked.
+#[tokio::test]
+async fn a_repository_step_of_a_run_with_no_repository_fails_for_good() {
+    let agent = FakeAgent::ending_with("done");
+    let steps = BuiltInSteps::new(agent.clone(), pull_requests());
+
+    let failed = steps.run(&step("fix"), input(&[])).await;
+
+    let Err(error) = failed else {
+        panic!("a fix needs a repository");
+    };
+    assert!(matches!(error, BuiltInStepError::NoRepository(_)));
+    assert!(!error.retryable());
+    assert!(agent.tasks.lock().expect("tasks").is_empty());
 }
 
 #[tokio::test]
 async fn a_reply_is_done_and_answers_the_request() {
     let agent = FakeAgent::ending_with("done");
-    let steps = BuiltInSteps::new(agent.clone());
+    let steps = BuiltInSteps::new(agent.clone(), pull_requests());
 
     let report = steps.run(&step("reply"), input(&[])).await.expect("reply");
 
@@ -106,7 +182,7 @@ async fn a_reply_is_done_and_answers_the_request() {
 #[tokio::test]
 async fn a_plan_hands_the_request_to_the_agent_and_keeps_its_answer() {
     let agent = FakeAgent::ending_with("done");
-    let steps = BuiltInSteps::new(agent.clone());
+    let steps = BuiltInSteps::new(agent.clone(), pull_requests());
 
     let report = steps.run(&step("plan"), input(&[])).await.expect("plan");
 
@@ -120,7 +196,7 @@ async fn a_plan_hands_the_request_to_the_agent_and_keeps_its_answer() {
 #[tokio::test]
 async fn a_write_is_given_the_plan_an_earlier_step_produced() {
     let agent = FakeAgent::ending_with("unchanged");
-    let steps = BuiltInSteps::new(agent.clone());
+    let steps = BuiltInSteps::new(agent.clone(), pull_requests());
     let earlier = [Step {
         seq: 1,
         entry: EntryId::try_from("plan".to_string()).expect("valid"),
@@ -150,7 +226,7 @@ async fn a_write_is_given_the_plan_an_earlier_step_produced() {
 
 #[tokio::test]
 async fn an_outcome_the_step_does_not_have_fails_it() {
-    let steps = BuiltInSteps::new(FakeAgent::ending_with("merged"));
+    let steps = BuiltInSteps::new(FakeAgent::ending_with("merged"), pull_requests());
 
     let refused = steps.run(&step("plan"), input(&[])).await;
 
@@ -162,7 +238,7 @@ async fn an_outcome_the_step_does_not_have_fails_it() {
 
 #[test]
 fn the_plan_flow_runs_on_the_built_in_steps() {
-    let steps = BuiltInSteps::new(FakeAgent::ending_with("done"));
+    let steps = BuiltInSteps::new(FakeAgent::ending_with("done"), pull_requests());
     let definition = serde_json::from_str(include_str!("../../../flows/plan.json")).expect("JSON");
 
     let parsed = Flow::parse(definition, |name| steps.serves(name));
@@ -173,7 +249,7 @@ fn the_plan_flow_runs_on_the_built_in_steps() {
 #[tokio::test]
 async fn a_plan_reads_what_a_person_answered_the_last_one() {
     let agent = FakeAgent::ending_with("done");
-    let steps = BuiltInSteps::new(agent.clone());
+    let steps = BuiltInSteps::new(agent.clone(), pull_requests());
     let revise = Outcome::try_from("revise".to_string()).expect("valid");
     let earlier = [Step {
         seq: 1,
@@ -229,7 +305,7 @@ fn ended(seq: u16, entry: &str, visit: u16, output: &str) -> Step {
 #[tokio::test]
 async fn a_prompt_carries_the_latest_visit_of_each_entry_newest_first() {
     let agent = FakeAgent::ending_with("done");
-    let steps = BuiltInSteps::new(agent.clone());
+    let steps = BuiltInSteps::new(agent.clone(), pull_requests());
     let earlier = [
         ended(1, "plan", 1, "First plan"),
         ended(2, "review", 1, "First review"),
@@ -254,7 +330,7 @@ async fn a_prompt_carries_the_latest_visit_of_each_entry_newest_first() {
 #[tokio::test]
 async fn a_prompt_leaves_out_the_oldest_steps_past_its_budget() {
     let agent = FakeAgent::ending_with("done");
-    let steps = BuiltInSteps::new(agent.clone());
+    let steps = BuiltInSteps::new(agent.clone(), pull_requests());
     let earlier = [
         ended(1, "plan", 1, &"p".repeat(40 * 1024)),
         ended(2, "review", 1, &"r".repeat(40 * 1024)),
@@ -281,7 +357,7 @@ async fn a_prompt_cuts_a_newest_step_past_its_budget_rather_than_leave_it_out() 
     // the budget falls inside a character in at least one of them.
     for pad in 0..3 {
         let agent = FakeAgent::ending_with("done");
-        let steps = BuiltInSteps::new(agent.clone());
+        let steps = BuiltInSteps::new(agent.clone(), pull_requests());
         let plan = format!("Plan:{} {}", "_".repeat(pad), "€".repeat(24 * 1024));
         let earlier = [
             ended(1, "request", 1, "Earlier"),

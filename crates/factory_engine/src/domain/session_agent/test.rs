@@ -267,7 +267,13 @@ fn julia() -> MacroUserIdStr<'static> {
 /// A `plan` task of a new Run of Julia's, its Step started.
 async fn plan_task(repo: &FakeRepo) -> AgentTask {
     let run = repo
-        .insert_run(RunId::generate(), "Add a dark mode toggle", &julia(), None)
+        .insert_run(
+            RunId::generate(),
+            "Add a dark mode toggle",
+            &julia(),
+            None,
+            None,
+        )
         .await
         .expect("insert");
     let RunInsert::Inserted(run) = run else {
@@ -285,6 +291,7 @@ async fn plan_task(repo: &FakeRepo) -> AgentTask {
         step: StepName::try_from("plan".to_string()).expect("valid"),
         prompt: "Plan the change".to_string(),
         outcomes: vec![Outcome::done()],
+        repo_url: None,
     }
 }
 
@@ -325,6 +332,7 @@ async fn a_step_runs_in_a_session_of_its_owner_and_returns_what_the_agent_handed
     assert_eq!(prepared.len(), 1);
     assert_eq!(prepared[0].selection.owner, julia());
     assert_eq!(prepared[0].visibility, SessionVisibility::Hidden);
+    assert_eq!(prepared[0].repo_url, None);
     assert!(sessions.deleted.lock().expect("deleted").is_empty());
     let prompts = sessions.prompt_calls.lock().expect("prompts");
     assert_eq!(prompts.len(), 1);
@@ -334,6 +342,26 @@ async fn a_step_runs_in_a_session_of_its_owner_and_returns_what_the_agent_handed
         prompts[0]
             .prompt
             .contains("leave nothing running in the background")
+    );
+}
+
+/// A Step of a Run that works on a repository opens its session in it, so
+/// the session's runtime checks the repository out.
+#[tokio::test]
+async fn a_step_on_a_repository_opens_its_session_in_it() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
+    let task = AgentTask {
+        repo_url: Some("https://github.com/macro/app".to_string()),
+        ..plan_task(&repo).await
+    };
+
+    agent(&sessions, &repo).answer(task).await.expect("answer");
+
+    let prepared = sessions.prepared_calls.lock().expect("prepared");
+    assert_eq!(
+        prepared[0].repo_url.as_deref(),
+        Some("https://github.com/macro/app")
     );
 }
 

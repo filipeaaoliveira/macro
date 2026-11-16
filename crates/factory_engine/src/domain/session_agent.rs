@@ -192,7 +192,7 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
                 },
                 billing: Default::default(),
                 instructions: None,
-                repo_url: None,
+                repo_url: task.repo_url.clone(),
             })
             .await;
         match prepared {

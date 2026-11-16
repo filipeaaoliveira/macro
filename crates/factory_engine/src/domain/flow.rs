@@ -178,6 +178,10 @@ pub struct Flow {
     /// What the Flow does, for a person.
     #[serde(default)]
     pub description: String,
+    /// Whether a Run of it works on a GitHub repository: one is started with
+    /// the repository, and the others with none.
+    #[serde(default)]
+    pub repository: bool,
     /// The facts the Flow keeps, with their values when a Run starts.
     #[serde(default)]
     pub facts: BTreeMap<FactName, bool>,

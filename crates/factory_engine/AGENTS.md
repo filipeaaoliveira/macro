@@ -71,9 +71,12 @@ whose workflow never started ends it `failed` once it is five minutes old. A
 Temporal outage answers 503 (or 502 for an unusable answer), never 500.
 
 The built-in Steps (`src/domain/built_in_steps.rs`) are `reply`, which
-acknowledges the request, and `plan` and `write`, which hand an agent a prompt
-built from the Step's instructions (`built_in_steps/*.md`), the Run's request,
-and what the Run's earlier Steps produced. The agent is the `StepAgent` port.
+acknowledges the request; `plan`, `write`, `review`, `fix` and `ci_fix`, which
+hand an agent a prompt built from the Step's instructions
+(`built_in_steps/*.md`), the Run's request, and what the Run's earlier Steps
+produced; and `publish`, `ci`, `ready_to_merge` and `merge`, which take the
+Run's branch to a merged pull request (`src/domain/pull_request_steps.rs`). The
+agent is the `StepAgent` port.
 `SessionAgent` (`src/domain/session_agent.rs`) does the Step in a Macro agent
 session of the configured agent, owned by the Run's owner, through the routine
 sessions capability (`agent_harness_service_client`). The Step claims its
@@ -91,6 +94,31 @@ back is the Step's outcome and output; none fails the Step. `LocalAgent` does no
 work and hands back the prompt it was given: the tests' stand-in, and the
 service's when no agent is configured.
 
+A Flow with `"repository": true` (`code`) works on one GitHub repository: `POST
+/runs` must name it as `repoUrl` (`https://github.com/owner/name`, the form a
+coding session takes), other Flows refuse one, and the owner's linked GitHub
+account must reach it; its default branch, read then, is the Run's base
+(`factory_run.repo_url`, `base_branch`). Each agent Step of such a Run opens its
+session with that repository (`PrepareRoutineSession.repo_url`), so its runtime
+checks it out: a managed sandbox through the agent egress, macrod in a
+per-session worktree or its configured workspace. The prompt names the Run's
+branch, `factory/{run id}`, and its base: the agent checks the branch out, and
+`write`, `fix` and `ci_fix` commit and push it from their runtime; `review`
+changes nothing. The pull request Steps act on GitHub as the Run's owner, with
+the token of the GitHub account they linked to Macro, which the authentication
+service gives (`outbound/github_pull_requests.rs`, the `github` crate's
+user-token client); an owner with none fails the Step for good. Each reads
+before it writes, so a retry or a Run sent back finds what it did: `publish`
+finds the branch's pull request or opens it, and a refusal because another
+attempt opened it reads as published; `ci` reads the checks on the pull
+request's head every 20 s, heartbeating, until one fails (`red`), all pass
+(`green`), or 25 minutes pass (`timeout`), within one Step attempt;
+`ready_to_merge` keeps the head whose checks passed (`factory_run.merge_head_sha`)
+and ends `done`, so its Gate asks the owner whether to merge; `merge` merges
+only that commit, naming it to GitHub, and a merged pull request reads as
+merged. A head that moved goes back to `ci`. The pull request's description
+names the Run's task as `MACRO-{short id}`, so GitHub's webhook links them.
+
 ## Start here
 
 - `src/domain/flow.rs`: the Flow model and the checks a definition must pass.
@@ -103,17 +131,18 @@ service's when no agent is configured.
 - `src/domain/built_in_steps.rs`: the Steps the worker serves and their
   prompts.
 - `src/domain/session_agent.rs`: an agent Step in a Macro agent session.
+- `src/domain/pull_request_steps.rs`: `publish`, `ci`, `ready_to_merge` and
+  `merge`, over the `PullRequests` port.
 - `flows/`: the built-in Flows, each named for its file
   (`src/domain/built_in_flows.rs`). `GET /flows` lists those whose Steps the
-  worker serves, with their `description`: `plan` and `reply`; `code.json`
-  also names Steps no worker serves yet.
+  worker serves, with their `description`: `code`, `plan` and `reply`.
 
 ## Scope
 
 - Owns: the Flow format, its interpreter, Gates, the workflow and its
-  activities, the Run API's router, the built-in Flows (`flows/`) and Steps
-  (`reply`, `plan`, `write`), and the `StepAgent` port with its local
-  stand-in.
+  activities, the Run API's router, the built-in Flows (`flows/`) and Steps,
+  the `StepAgent` port with its local stand-in, and the `PullRequests` port
+  with its GitHub adapter.
 - Not here: the Run, Step and Gate tables → `crates/factory_records`; the process
   that hosts the API and the worker → `services/factory_service`.
 
@@ -121,8 +150,9 @@ service's when no agent is configured.
 
 - Depends on: `factory_records`, `agent_session` (the routine sessions port),
   `agent_correlation`, `macro_authorization`, `macro_user_id`,
-  `entity_access` (ports), `document_storage_service_client`, the Temporal
-  Rust SDK.
+  `entity_access` (ports), `document_storage_service_client`,
+  `authentication_service_client` (accounts and linked GitHub tokens),
+  `github` (the user-token client), the Temporal Rust SDK.
 - Used by: `services/factory_service`.
 
 ## Recipes
@@ -142,6 +172,15 @@ service's when no agent is configured.
   up, or `TEMPORAL_ADDRESS` set to another dev server.
 
 ## Gotchas
+- The pull request Steps hold no session: `stop` and `release` do nothing
+  for them, and a cancelled `ci` only drops its wait. A CI wait is bounded by
+  one Step attempt (25 of its 30 minutes); a longer one needs the workflow to
+  wait on a timer instead.
+- The agent pushes the Run's branch with its runtime's own git credentials
+  (the egress's GitHub App token in a managed sandbox, the operator's git on
+  macrod), and the pull request Steps use the owner's linked account: both
+  must reach the repository. A macrod that manages no repositories serves
+  only the repository its workspace is configured with.
 
 - A Step or Run that ended can still have its agent at work until the stop
   lands, up to the stop's fifteen minutes of retries. Its hand back is refused

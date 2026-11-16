@@ -11,9 +11,9 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::domain::models::{
-    ClaimedSession, EntryId, Gate, GateAnswer, HandBack, InvalidName, Outcome, Run, RunEnd, RunId,
-    RunInsert, RunOutcome, SessionStep, Step, StepEnd, StepKey, StepSession, StoppingSession,
-    TaskLink,
+    ClaimedSession, EntryId, Gate, GateAnswer, HandBack, InvalidName, Outcome, Repository, Run,
+    RunEnd, RunId, RunInsert, RunOutcome, SessionStep, Step, StepEnd, StepKey, StepSession,
+    StoppingSession, TaskLink,
 };
 use crate::domain::ports::RunRepository;
 
@@ -68,6 +68,10 @@ pub enum PgRunRepositoryErr {
     /// A stored Run or Step has only part of its end.
     #[error("a stored end has an outcome but no time, or the other way round")]
     PartialEnd,
+    /// A stored Run has a repository but no base branch, or the other way
+    /// round.
+    #[error("a stored run has a repository but no base branch, or the other way round")]
+    PartialRepository,
     /// A stored Gate has only part of its question or its answer.
     #[error("a stored gate has only part of its question or its answer")]
     PartialGate,
@@ -88,6 +92,8 @@ struct RunRow {
     user_id: String,
     created_at: DateTime<Utc>,
     task_id: Option<String>,
+    repo_url: Option<String>,
+    base_branch: Option<String>,
     outcome: Option<String>,
     ended_at: Option<DateTime<Utc>>,
 }
@@ -106,6 +112,11 @@ impl TryFrom<RunRow> for Run {
             (None, None) => None,
             _ => return Err(PgRunRepositoryErr::PartialEnd),
         };
+        let repository = match (row.repo_url, row.base_branch) {
+            (Some(url), Some(base_branch)) => Some(Repository { url, base_branch }),
+            (None, None) => None,
+            _ => return Err(PgRunRepositoryErr::PartialRepository),
+        };
         Ok(Run {
             id: RunId::from_uuid(row.id),
             request: row.request,
@@ -116,6 +127,7 @@ impl TryFrom<RunRow> for Run {
                 .task_id
                 .map(|id| Uuid::parse_str(&id).map_err(|_| PgRunRepositoryErr::InvalidTaskId(id)))
                 .transpose()?,
+            repository,
             end,
         })
     }
@@ -216,18 +228,22 @@ impl RunRepository for PgRunRepository {
         request: &str,
         user_id: &MacroUserIdStr<'static>,
         task_id: Option<Uuid>,
+        repository: Option<&Repository>,
     ) -> Result<RunInsert, Self::Err> {
         let inserted = sqlx::query_as!(
             RunRow,
             r#"
-            INSERT INTO factory_run (id, request, user_id, task_id)
-            VALUES ($1, $2, $3, $4)
-            RETURNING id, request, user_id, created_at, task_id, outcome, ended_at
+            INSERT INTO factory_run (id, request, user_id, task_id, repo_url, base_branch)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING
+                id, request, user_id, created_at, task_id, repo_url, base_branch, outcome, ended_at
             "#,
             id.as_uuid(),
             request,
             user_id.as_ref(),
             task_id.map(|task_id| task_id.to_string()),
+            repository.map(|repository| repository.url.as_str()),
+            repository.map(|repository| repository.base_branch.as_str()),
         )
         .fetch_one(&self.pool)
         .await;
@@ -262,6 +278,29 @@ impl RunRepository for PgRunRepository {
     }
 
     #[tracing::instrument(err, skip(self))]
+    async fn set_merge_head(&self, id: RunId, sha: &str) -> Result<(), Self::Err> {
+        sqlx::query!(
+            "UPDATE factory_run SET merge_head_sha = $2 WHERE id = $1",
+            id.as_uuid(),
+            sha,
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn merge_head(&self, id: RunId) -> Result<Option<String>, Self::Err> {
+        let sha = sqlx::query_scalar!(
+            "SELECT merge_head_sha FROM factory_run WHERE id = $1",
+            id.as_uuid(),
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(sha.flatten())
+    }
+
+    #[tracing::instrument(err, skip(self))]
     async fn delete_run(&self, id: RunId) -> Result<(), Self::Err> {
         sqlx::query!("DELETE FROM factory_run WHERE id = $1", id.as_uuid())
             .execute(&self.pool)
@@ -274,7 +313,8 @@ impl RunRepository for PgRunRepository {
         let row = sqlx::query_as!(
             RunRow,
             r#"
-            SELECT id, request, user_id, created_at, task_id, outcome, ended_at
+            SELECT
+                id, request, user_id, created_at, task_id, repo_url, base_branch, outcome, ended_at
             FROM factory_run
             WHERE id = $1
             "#,
@@ -335,7 +375,8 @@ impl RunRepository for PgRunRepository {
         let rows = sqlx::query_as!(
             RunRow,
             r#"
-            SELECT id, request, user_id, created_at, task_id, outcome, ended_at
+            SELECT
+                id, request, user_id, created_at, task_id, repo_url, base_branch, outcome, ended_at
             FROM factory_run
             WHERE task_id = $1 AND user_id = $2
             ORDER BY created_at DESC, id DESC

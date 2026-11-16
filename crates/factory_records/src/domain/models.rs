@@ -234,8 +234,22 @@ pub struct Run {
     /// The Macro task the Run works on: its task document's id. None when
     /// the Run has no task, or its task was deleted.
     pub task_id: Option<Uuid>,
+    /// The GitHub repository the Run works on; none for a Run that works on
+    /// no code.
+    pub repository: Option<Repository>,
     /// How and when it ended; none while it runs.
     pub end: Option<RunEnd>,
+}
+
+/// The GitHub repository a Run works on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Repository {
+    /// Its `https://github.com/owner/name` URL.
+    pub url: String,
+    /// The branch the Run's work starts from and proposes its change to: the
+    /// repository's default when the Run started.
+    pub base_branch: String,
 }
 
 /// What keeping a new Run came to.

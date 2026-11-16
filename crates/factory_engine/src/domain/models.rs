@@ -1,8 +1,11 @@
 //! What the factory's use cases take and return.
 
-use factory_records::domain::models::{EntryId, Outcome, Run, RunId, RunOutcome, Step, StepKey};
+use factory_records::domain::models::{
+    EntryId, Outcome, Repository, Run, RunId, RunOutcome, Step, StepKey,
+};
 use macro_user_id::user_id::MacroUserIdStr;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::domain::flow::{Flow, FlowError, StepName};
 
@@ -48,6 +51,10 @@ pub struct StepInput<'a> {
     pub owner: &'a MacroUserIdStr<'static>,
     /// What the Run was asked to do.
     pub request: &'a str,
+    /// The Macro task the Run works on: its task document's id.
+    pub task_id: Option<Uuid>,
+    /// The repository the Run works on, if it works on one.
+    pub repository: Option<&'a Repository>,
     /// The Run's Steps that ended before this one, in order.
     pub earlier: &'a [Step],
 }
@@ -65,6 +72,139 @@ pub struct AgentTask {
     pub prompt: String,
     /// The outcomes the agent may end the Step with.
     pub outcomes: Vec<Outcome>,
+    /// The repository the agent works in, as its
+    /// `https://github.com/owner/name` URL, if the Run works on one.
+    pub repo_url: Option<String>,
+}
+
+/// A GitHub repository, named by its owner and name: the two segments of
+/// the `https://github.com/owner/name` URL a coding session takes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodeRepository {
+    owner: String,
+    name: String,
+}
+
+impl CodeRepository {
+    /// The repository `url` names. It must be exactly
+    /// `https://github.com/owner/name`, each segment of `[A-Za-z0-9._-]` and
+    /// neither `.` nor `..`, as the agent egress reads a session's repository:
+    /// the two ends must agree on which repository a Run works on, and the
+    /// segments are put into GitHub's API paths.
+    pub fn parse(url: &str) -> Option<Self> {
+        let path = url.strip_prefix("https://github.com/")?;
+        let (owner, name) = path.split_once('/')?;
+        let segment = |part: &str| {
+            !part.is_empty()
+                && part != "."
+                && part != ".."
+                && part
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+        };
+        if !segment(owner) || !segment(name) {
+            return None;
+        }
+        Some(Self {
+            owner: owner.to_string(),
+            name: name.to_string(),
+        })
+    }
+
+    /// The account the repository lives under.
+    pub fn owner(&self) -> &str {
+        &self.owner
+    }
+
+    /// The repository's name, without its owner.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Its `https://github.com/owner/name` URL.
+    pub fn url(&self) -> String {
+        format!("https://github.com/{}/{}", self.owner, self.name)
+    }
+}
+
+/// The branch a Run's work is pushed to and proposed from. A Run has one, so
+/// every Step of it, and every retry of a Step, finds the same branch and the
+/// same pull request.
+pub fn run_branch(run_id: RunId) -> String {
+    format!("factory/{run_id}")
+}
+
+/// A pull request as the Run's owner sees it on GitHub.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PullRequest {
+    /// Its number in its repository.
+    pub number: u64,
+    /// Its page on GitHub.
+    pub url: String,
+    /// Whether it is open, closed, or merged.
+    pub state: PullRequestState,
+    /// The commit its head branch is at, when GitHub says.
+    pub head_sha: Option<String>,
+    /// The checks on that commit; none when they could not be read.
+    pub checks: Option<Vec<Check>>,
+}
+
+/// Whether a pull request is open, closed, or merged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PullRequestState {
+    /// Open.
+    Open,
+    /// Closed without merging.
+    Closed,
+    /// Merged.
+    Merged,
+}
+
+/// One check on a commit, such as a CI job.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Check {
+    /// Its name.
+    pub name: String,
+    /// GitHub's status: `queued`, `in_progress` or `completed`, among others.
+    pub status: String,
+    /// How it concluded, once completed: `success`, `failure` and so on.
+    pub conclusion: Option<String>,
+    /// Its page, when GitHub gives one.
+    pub url: Option<String>,
+}
+
+/// A pull request to open.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenPullRequest {
+    /// The branch whose commits it proposes.
+    pub branch: String,
+    /// The branch it proposes them to.
+    pub base: String,
+    /// Its title.
+    pub title: String,
+    /// Its description.
+    pub body: String,
+}
+
+/// What asking GitHub to open a pull request came to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Opening {
+    /// GitHub opened it.
+    Opened,
+    /// GitHub declined, for this reason: one is already open for the
+    /// branch, or the branch has nothing its base lacks.
+    Refused(String),
+}
+
+/// What asking GitHub to merge a pull request came to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Merging {
+    /// GitHub merged it.
+    Merged,
+    /// Its head is no longer the commit the merge named.
+    HeadChanged,
+    /// GitHub declined, for this reason.
+    Refused(String),
 }
 
 /// What an agent handed back for a Step.
@@ -152,6 +292,21 @@ pub enum FactoryError {
     /// No built-in Flow has this name.
     #[error("no flow has this name")]
     UnknownFlow,
+    /// The Flow works on a repository, and the Run names none.
+    #[error("this flow works on a repository: give its repoUrl")]
+    RepositoryRequired,
+    /// The Flow works on no repository, and the Run names one.
+    #[error("this flow works on no repository")]
+    RepositoryNotUsed,
+    /// The repository is not named by a `https://github.com/owner/name` URL.
+    #[error("the repository must be named by a https://github.com/owner/name URL")]
+    InvalidRepository,
+    /// The Run's owner cannot reach the repository with their GitHub
+    /// account, has not connected one, or the repository has no branch yet.
+    #[error(
+        "the run's owner must connect GitHub to Macro and be able to reach the repository, which needs a branch"
+    )]
+    UnreachableRepository,
     /// The Gate does not offer the answer.
     #[error("the gate offers {offered:?}")]
     AnswerNotOffered {
