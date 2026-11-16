@@ -4,6 +4,7 @@ import {
   getAnswerFactoryGateUrl,
   getCancelFactoryRunUrl,
   getCreateFactoryRunUrl,
+  getGetFactoryInsightsUrl,
   getGetFactoryRunUrl,
   getListFactoryFlowsUrl,
   getListFactoryTaskRunsUrl,
@@ -12,7 +13,9 @@ import type {
   AnswerGateRequest,
   CreateRunRequest,
   FlowsResponse,
+  GetFactoryInsightsParams,
   RunDetail,
+  RunInsights,
   TaskRunsResponse,
 } from './generated/schemas';
 
@@ -34,6 +37,17 @@ export const factoryClient = {
   getRun(runId: string, signal?: AbortSignal) {
     return fetchWithToken<RunDetail>(
       `${host()}${getGetFactoryRunUrl(encodeURIComponent(runId))}`,
+      { method: 'GET', signal }
+    );
+  },
+
+  /**
+   * How the caller's own Runs went over a period: the newest 1,000 of its
+   * Runs, by day, outcome and Flow, with their Steps and agent usage.
+   */
+  getInsights(params: GetFactoryInsightsParams, signal?: AbortSignal) {
+    return fetchWithToken<RunInsights>(
+      `${host()}${getGetFactoryInsightsUrl(params)}`,
       { method: 'GET', signal }
     );
   },

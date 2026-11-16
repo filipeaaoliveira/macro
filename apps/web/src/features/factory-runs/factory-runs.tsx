@@ -1,16 +1,65 @@
 import { ShowFeatureFlag } from '@app/lib/analytics/posthog';
+import { useOptionalSplitRouter } from '@app/lib/split-router';
+import { PaneContext } from '@app/lib/split-router/solid/context';
+import { factoryInsightsRoute } from '@app/routes/routes';
 import { enableFactoryRuns } from '@core/constant/featureFlags';
+import { fireAndForget } from '@core/util/fireAndForget';
 import { queryClient } from '@queries/client';
+import { useContext } from 'solid-js';
+import { InsightsProvider } from './context/insights-context';
 import { RunsProvider } from './context/runs-context';
+import { RunInsightsView } from './insights-view';
+import { createAppInsightsContext } from './queries/insights';
 import { createAppRunsContext } from './queries/runs';
 import { TaskRunsSection } from './views/task-runs-section';
 
+/**
+ * Opens Run insights in a new pane beside the one asking; none outside the
+ * split router.
+ */
+function useOpenInsights(): (() => void) | undefined {
+  const router = useOptionalSplitRouter();
+  const pane = useContext(PaneContext);
+  if (!router) return;
+
+  return () =>
+    fireAndForget(
+      router.open(
+        { route: factoryInsightsRoute },
+        { newPane: true, source: pane?.pane() }
+      ),
+      'factory-runs'
+    );
+}
+
 /** A task's Runs, as a section of its side panel. */
 export function TaskRuns(props: { taskId: string; order: number }) {
+  const openInsights = useOpenInsights();
+
   return (
     <ShowFeatureFlag flag={enableFactoryRuns}>
       <RunsProvider value={createAppRunsContext(queryClient)}>
-        <TaskRunsSection taskId={props.taskId} order={props.order} />
+        <TaskRunsSection
+          taskId={props.taskId}
+          order={props.order}
+          onOpenInsights={openInsights}
+        />
+      </RunsProvider>
+    </ShowFeatureFlag>
+  );
+}
+
+/** How the person's Runs went, as a page of its own. */
+export function FactoryInsights() {
+  return (
+    <ShowFeatureFlag flag={enableFactoryRuns}>
+      <RunsProvider value={createAppRunsContext(queryClient)}>
+        <InsightsProvider value={createAppInsightsContext()}>
+          <RunInsightsView
+            timeZone={Intl.DateTimeFormat().resolvedOptions().timeZone}
+            now={() => new Date()}
+          />
+        </InsightsProvider>
       </RunsProvider>
     </ShowFeatureFlag>
   );

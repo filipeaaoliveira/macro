@@ -103,7 +103,7 @@ export function runOptions(runId: string) {
   });
 }
 
-function flowsOptions() {
+export function flowsOptions() {
   return queryOptions({
     queryKey: factoryRunKeys.flows.queryKey,
     queryFn: ({ signal }) => throwOnErr(() => factoryClient.listFlows(signal)),
@@ -111,7 +111,7 @@ function flowsOptions() {
   });
 }
 
-function toSource<T>(query: UseQueryResult<T>): RunsSource<T> {
+export function toSource<T>(query: UseQueryResult<T>): RunsSource<T> {
   // Reading `data` while pending would suspend the enclosing section.
   const data = () => (query.isPending ? undefined : query.data);
   return {

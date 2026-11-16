@@ -25,7 +25,8 @@ export function RunStatusDot(props: { status: RunStatus }) {
   return <WorkDot state={state()} />;
 }
 
-function runOutcomeLabel(outcome: RunOutcome): string {
+/** The word for how a Run ended. */
+export function runOutcomeLabel(outcome: RunOutcome): string {
   return match(outcome)
     .with('success', () => t('factoryRuns.outcomeSuccess'))
     .with('manual', () => t('factoryRuns.outcomeManual'))

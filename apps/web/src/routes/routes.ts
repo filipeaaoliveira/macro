@@ -774,6 +774,12 @@ export const externalRoute = defineRoute({
   externalSearch: ['whatsappPairing'],
 });
 
+/** How the person's factory Runs went, behind the factory Runs flag. */
+export const factoryInsightsRoute = defineRoute({
+  id: 'view-factory-insights',
+  path: 'factory/insights',
+});
+
 export const bookingLinksRoute = defineRoute({
   id: 'view-booking-links',
   path: 'scheduling',

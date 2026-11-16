@@ -19,6 +19,7 @@ import emailThread from './en/email-thread';
 import emailViews from './en/email-views';
 import entityActions from './en/entity-actions';
 import entityIcons from './en/entity-icons';
+import factoryInsights from './en/factory-insights';
 import factoryRuns from './en/factory-runs';
 import localRuntime from './en/local-runtime';
 import markdownEditor from './en/markdown-editor';
@@ -67,6 +68,7 @@ export default {
   emailViews,
   entityActions,
   entityIcons,
+  factoryInsights,
   factoryRuns,
   localRuntime,
   markdownEditor,

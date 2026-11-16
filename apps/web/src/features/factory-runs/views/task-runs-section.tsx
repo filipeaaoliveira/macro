@@ -4,6 +4,7 @@ import { formatCompactRelativeTimestamp } from '@app/features/entity/utils/times
 import { t } from '@app/lib/i18n';
 import { SidePanel, useSidePanel } from '@components/app/side-panel';
 import { isTouchDevice } from '@core/mobile/isTouchDevice';
+import ChartBarIcon from '@icon/system/regular/chart-bar.svg';
 import PlusIcon from '@icon/system/regular/plus.svg';
 import { Button } from '@ui';
 import {
@@ -75,8 +76,15 @@ function RunRowsSkeleton() {
   );
 }
 
-/** A task's Runs in its side panel, with New run and each Run's dialog. */
-export function TaskRunsSection(props: { taskId: string; order: number }) {
+/**
+ * A task's Runs in its side panel, with New run and each Run's dialog, and a
+ * way to the person's Run insights when the host offers one.
+ */
+export function TaskRunsSection(props: {
+  taskId: string;
+  order: number;
+  onOpenInsights?: () => void;
+}) {
   const context = useRunsContext();
   const runs = context.taskRuns(() => props.taskId);
   const sidePanel = useSidePanel();
@@ -108,17 +116,35 @@ export function TaskRunsSection(props: { taskId: string; order: number }) {
           />
         }
         actions={
-          <Button
-            variant="ghost"
-            size="xs"
-            onClick={() => {
-              leaveSheet();
-              setStarting(true);
-            }}
-          >
-            <PlusIcon class="size-3 touch:size-6 shrink-0 pointer-events-none" />
-            {t('factoryRuns.newRun')}
-          </Button>
+          <>
+            <Show when={props.onOpenInsights}>
+              {(openInsights) => (
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={t('factoryInsights.title')}
+                  tooltip={t('factoryInsights.title')}
+                  onClick={() => {
+                    leaveSheet();
+                    openInsights()();
+                  }}
+                >
+                  <ChartBarIcon class="size-3 touch:size-6 shrink-0 pointer-events-none" />
+                </Button>
+              )}
+            </Show>
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={() => {
+                leaveSheet();
+                setStarting(true);
+              }}
+            >
+              <PlusIcon class="size-3 touch:size-6 shrink-0 pointer-events-none" />
+              {t('factoryRuns.newRun')}
+            </Button>
+          </>
         }
         defaultOpen
         order={props.order}
