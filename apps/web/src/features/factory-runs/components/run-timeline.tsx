@@ -50,7 +50,10 @@ function TimelineStep(props: {
   defaultOpen: boolean;
   time: (value: string) => string;
 }) {
-  const [open, setOpen] = createSignal(props.defaultOpen);
+  // Follows `defaultOpen` until the person toggles it: a Step that ends at a
+  // Gate while the dialog is open shows the output the Gate asks about.
+  const [toggled, setToggled] = createSignal<boolean>();
+  const open = () => toggled() ?? props.defaultOpen;
   const output = () => props.step.end?.output.trim() ?? '';
   const answer = () => props.step.gate?.answer;
 
@@ -108,7 +111,7 @@ function TimelineStep(props: {
             aria-label={t('factoryRuns.showOutput', {
               step: stepLabel(props.step),
             })}
-            onClick={() => setOpen((value) => !value)}
+            onClick={() => setToggled(!open())}
           >
             <CaretDownIcon
               class={cn(
