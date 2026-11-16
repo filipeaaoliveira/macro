@@ -7,7 +7,9 @@ use agent_session::domain::routines::{
     RoutineSessionError, RoutineSessions, ValidateRoutineSession, ValidatedRoutineSession,
 };
 use bot_id::BotId;
-use factory_records::domain::models::{EntryId, HandBack, Outcome, RunId, RunInsert, StepKey};
+use factory_records::domain::models::{
+    EntryId, HandBack, Outcome, RunId, RunInsert, StepKey, StepSession,
+};
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
@@ -48,6 +50,9 @@ struct FakeSessions {
     prepared_calls: Arc<Mutex<Vec<PrepareRoutineSession>>>,
     prompt_calls: Arc<Mutex<Vec<PromptRoutineSession>>>,
     cancelled: Arc<Mutex<Vec<RoutineSessionAction>>>,
+    /// Stops the session ignores before its turn ends cancelled, as when a
+    /// prompt on its way lands after the first stop.
+    ignored_stops: usize,
 }
 
 impl FakeSessions {
@@ -63,6 +68,7 @@ impl FakeSessions {
             prepared_calls: Arc::default(),
             prompt_calls: Arc::default(),
             cancelled: Arc::default(),
+            ignored_stops: 0,
         }
     }
 
@@ -150,7 +156,10 @@ impl RoutineSessions for FakeSessions {
         if !*self.open.lock().expect("open") {
             return Err(RoutineSessionError::OperationFailed);
         }
-        if *self.prompted.lock().expect("prompted") {
+        let stops = self.cancelled.lock().expect("cancelled").len();
+        if stops > self.ignored_stops {
+            Ok(RoutineActionStatus::Failed(RoutineFailureReason::Cancelled))
+        } else if *self.prompted.lock().expect("prompted") {
             Ok(self.ending)
         } else {
             Ok(RoutineActionStatus::Pending(
@@ -328,13 +337,34 @@ async fn a_turn_that_fails_fails_the_step() {
     ));
 }
 
-#[tokio::test]
-async fn stopping_a_step_cancels_the_session_it_claimed() {
+/// A prompt still on its way when the Step is stopped starts the turn
+/// again: the stop is sent again until the session shows its turn ended.
+#[tokio::test(start_paused = true)]
+async fn stopping_a_step_stops_its_session_until_the_turn_ends() {
     let repo = FakeRepo::default();
-    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
+    let sessions = FakeSessions {
+        ignored_stops: 1,
+        ..FakeSessions::new(
+            &repo,
+            Some(the_plan()),
+            RoutineActionStatus::Pending(RoutinePendingReason::Running),
+        )
+    };
     let task = plan_task(&repo).await;
     let key = task.key;
-    agent(&sessions, &repo).answer(task).await.expect("answer");
+    // The Step's session is open and working on its prompt.
+    repo.claim_session(
+        key,
+        StepSession {
+            session_id: Uuid::now_v7(),
+            action_id: Uuid::now_v7(),
+        },
+        &task.outcomes,
+    )
+    .await
+    .expect("claim");
+    *sessions.open.lock().expect("open") = true;
+    *sessions.prompted.lock().expect("prompted") = true;
 
     agent(&sessions, &repo)
         .stop(key, &julia())
@@ -347,6 +377,10 @@ async fn stopping_a_step_cancels_the_session_it_claimed() {
         .expect("read")
         .expect("claimed");
     let cancelled = sessions.cancelled.lock().expect("cancelled").clone();
-    assert_eq!(cancelled.len(), 1);
-    assert_eq!(cancelled[0].session_id.as_uuid(), claimed.session_id);
+    assert_eq!(cancelled.len(), 2);
+    assert!(
+        cancelled
+            .iter()
+            .all(|stop| stop.session_id.as_uuid() == claimed.session_id)
+    );
 }

@@ -9,9 +9,10 @@
 //! The interpreter is pure, so a replay walks the Flow the same way from the
 //! recorded outcomes and answers.
 //!
-//! Cancelling the workflow cancels the running Step, which stops its work
-//! before the cancellation completes, or the wait for an answer; the Run's
-//! end is then recorded as `cancelled`.
+//! Cancelling the workflow cancels the running Step, whose activity drops
+//! its work and asks the Step's agent to stop before the cancellation
+//! completes, or the wait for an answer; the Run's end is then recorded as
+//! `cancelled`, which also ends its open Steps.
 
 use std::time::Duration;
 
@@ -64,8 +65,9 @@ impl FlowWorkflow {
     ) -> WorkflowResult<RunOutcome> {
         let interpreter = Interpreter::new(&start.flow);
         let mut state = interpreter.start();
-        // The Step's work stops before its cancellation completes, so
-        // nothing it does lands after the Run's `cancelled` end.
+        // The Step's work is dropped and its agent asked to stop before its
+        // cancellation completes, and the Run's `cancelled` end closes the
+        // Step, so a late end of it records nothing.
         let work_options = ActivityOptions::with_start_to_close_timeout(STEP_TIMEOUT)
             .heartbeat_timeout(STEP_HEARTBEAT_TIMEOUT)
             .cancellation_type(ActivityCancellationType::WaitCancellationCompleted)

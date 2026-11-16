@@ -40,6 +40,10 @@ const OPEN_SETTLE: Duration = Duration::from_secs(200);
 const PROMPT_SETTLE: Duration = Duration::from_secs(60);
 const PROMPT_TRIES: u8 = 2;
 
+/// How long a stopped Step's session is watched, to stop it again if a
+/// prompt still on its way started it.
+const STOP_WATCH: Duration = Duration::from_secs(60);
+
 /// How many reads of the session's status in a row may fail before the
 /// Step gives up on it.
 const MAX_FAILED_READS: u8 = 5;
@@ -289,8 +293,30 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
             .claimed_session(key)
             .await
             .map_err(Self::records)?;
-        if let Some(session) = claimed {
-            self.sessions.cancel(self.action(owner, session)).await?;
+        let Some(session) = claimed else {
+            return Ok(());
+        };
+
+        // A prompt already on its way can land after the first stop and
+        // start the turn again, so the stop is sent again while the session
+        // still works, until its turn has ended or the watch is over.
+        let action = self.action(owner, session);
+        self.sessions.cancel(action.clone()).await?;
+        let deadline = tokio::time::Instant::now() + STOP_WATCH;
+        let mut wait = FIRST_LOOK;
+        while tokio::time::Instant::now() < deadline {
+            tokio::time::sleep(wait).await;
+            wait = (wait * 2).min(LONGEST_WAIT);
+            match self.sessions.status(action.clone()).await {
+                Ok(RoutineActionStatus::Succeeded | RoutineActionStatus::Failed(_)) => {
+                    return Ok(());
+                }
+                Ok(RoutineActionStatus::Pending(RoutinePendingReason::AwaitingPrompt))
+                | Err(_) => {}
+                Ok(RoutineActionStatus::Pending(_)) => {
+                    self.sessions.cancel(action.clone()).await?;
+                }
+            }
         }
         Ok(())
     }

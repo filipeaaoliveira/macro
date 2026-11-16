@@ -104,23 +104,20 @@ impl FactoryActivities {
     }
 
     /// Do a Step's work, heartbeating while it goes. When the Run is
-    /// cancelled, stop the work, then report the cancellation.
+    /// cancelled, drop the work, so nothing more of it is sent, then ask the
+    /// Step's agent to stop, then report the cancellation.
     #[activity(name = "factory_run_step")]
     pub async fn run_step(
         self: Arc<Self>,
         ctx: ActivityContext,
         request: StepRequest,
     ) -> Result<StepReport, ActivityError> {
-        let work = self.steps.run_step(request.clone());
-        tokio::pin!(work);
+        let mut work = Box::pin(self.steps.run_step(request.clone()));
         let mut beat = tokio::time::interval(HEARTBEAT_EVERY);
         loop {
             tokio::select! {
                 done = &mut work => return done.map_err(failure),
-                () = ctx.cancelled() => {
-                    self.steps.stop_step(request).await.map_err(failure)?;
-                    return Err(ActivityError::cancelled());
-                }
+                () = ctx.cancelled() => break,
                 _ = beat.tick() => {
                     if let Err(error) = ctx.record_heartbeat(()).await {
                         tracing::warn!(?error, "a step's heartbeat was not recorded");
@@ -128,6 +125,10 @@ impl FactoryActivities {
                 }
             }
         }
+
+        drop(work);
+        self.steps.stop_step(request).await.map_err(failure)?;
+        Err(ActivityError::cancelled())
     }
 
     /// Record how a Step ended.

@@ -15,8 +15,10 @@ the outcome back; then it records the Run's end (`factory_end_run`). A Step is
 keyed by its place among the Run's Steps (`seq`), which a reset never reuses.
 Work that fails after its retries ends the Step `failed`, with why as its
 output. The work heartbeats; cancelling the Run cancels it with
-`WaitCancellationCompleted`, so the Step's agent is stopped before the Run
-ends `cancelled`, and a cancelled Run's open Steps end `cancelled` with it. A
+`WaitCancellationCompleted`: the activity drops the work and asks the Step's
+agent to stop, sending the stop again for a minute while the session still
+works (a prompt on its way can restart it), before the Run ends `cancelled`.
+A cancelled Run's open Steps end `cancelled` with it. A
 Run takes at most `MAX_STEPS` Steps, then ends `blocked`. Workflow inputs carry
 ids, never the request's text.
 
