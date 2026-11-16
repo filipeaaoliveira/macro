@@ -142,6 +142,7 @@ describe('TaskRunsSection', () => {
     fireEvent.input(screen.getByLabelText('Request'), {
       target: { value: '  Add a due date column  ' },
     });
+    expect(screen.getByRole('radiogroup', { name: 'Flow' })).toBeTruthy();
     fireEvent.click(screen.getByRole('radio', { name: /Code/ }));
     fireEvent.click(start);
 
