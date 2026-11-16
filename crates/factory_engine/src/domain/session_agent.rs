@@ -37,9 +37,8 @@ const LONGEST_WAIT: Duration = Duration::from_secs(10);
 const OPEN_SETTLE: Duration = Duration::from_secs(200);
 
 /// How long a prompt whose delivery is unknown is given to show in the
-/// session, and how many prompts an attempt of the Step sends at most.
+/// session.
 const PROMPT_SETTLE: Duration = Duration::from_secs(60);
-const PROMPT_TRIES: u8 = 2;
 
 /// How long a stopped Step's session is watched, to stop it again if a
 /// prompt still on its way started it.
@@ -66,8 +65,8 @@ pub enum SessionAgentError {
     /// The session did not open, or did not show it opened in time.
     #[error("the agent session did not open")]
     NotOpened,
-    /// Every prompt's delivery was unknown, and the session never showed
-    /// one arrived.
+    /// The prompt's delivery was unknown, and the session never showed it
+    /// arrived.
     #[error("the agent session never showed its prompt arrived")]
     PromptUnsettled,
     /// The Step let go of its session, or it or its Run ended, while this
@@ -205,34 +204,34 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
     /// Prompt the session once. The session refuses a prompt it already
     /// has in its history or holds queued with a conflict, so a retried Step
     /// always asks, and only a session that took no prompt yet takes one. A
-    /// prompt whose delivery is unknown is never sent again on that word
-    /// alone: the session's status settles it, and only a session that still
-    /// shows no sign of it once the wait is over is asked again.
+    /// prompt whose delivery is unknown may still land, so it is never sent
+    /// again, as the routine sessions port says: the session's status
+    /// settles it, and a session that shows no sign of it once the wait is
+    /// over fails the Step for good.
     async fn prompt_once(
         &self,
         task: &AgentTask,
         action: &RoutineSessionAction,
     ) -> Result<(), SessionAgentError> {
-        for _ in 0..PROMPT_TRIES {
-            let prompted = self
-                .sessions
-                .prompt(PromptRoutineSession {
-                    action: action.clone(),
-                    prompt: prompt(task),
-                    context: None,
-                })
-                .await;
-            match prompted {
-                Ok(_) | Err(RoutineSessionError::Conflict) => return Ok(()),
-                Err(RoutineSessionError::PromptDeliveryUnknown) => {
-                    if self.prompt_shows(action).await {
-                        return Ok(());
-                    }
+        let prompted = self
+            .sessions
+            .prompt(PromptRoutineSession {
+                action: action.clone(),
+                prompt: prompt(task),
+                context: None,
+            })
+            .await;
+        match prompted {
+            Ok(_) | Err(RoutineSessionError::Conflict) => Ok(()),
+            Err(RoutineSessionError::PromptDeliveryUnknown) => {
+                if self.prompt_shows(action).await {
+                    Ok(())
+                } else {
+                    Err(SessionAgentError::PromptUnsettled)
                 }
-                Err(error) => return Err(error.into()),
             }
+            Err(error) => Err(error.into()),
         }
-        Err(SessionAgentError::PromptUnsettled)
     }
 
     /// Whether the session shows its first prompt within [`PROMPT_SETTLE`]:
@@ -281,9 +280,13 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
 
     /// Ask the session to stop its turn. A stop that fails is logged: the
     /// caller watches the session to tell whether it still works.
-    async fn cancel(&self, action: &RoutineSessionAction) {
-        if let Err(error) = self.sessions.cancel(action.clone()).await {
-            tracing::warn!(?error, "a factory step's agent session was not stopped");
+    async fn cancel(&self, action: &RoutineSessionAction) -> bool {
+        match self.sessions.cancel(action.clone()).await {
+            Ok(()) => true,
+            Err(error) => {
+                tracing::warn!(?error, "a factory step's agent session was not stopped");
+                false
+            }
         }
     }
 
@@ -396,7 +399,10 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
             .await
             .map_err(Self::records)?;
         let action = self.action(owner, session);
-        self.cancel(&action).await;
+        // A session that refused the stop and can't be read either was never
+        // opened, or is gone: the routine sessions port has no "not found",
+        // so that pair stands for it, and there is nothing to watch.
+        let mut reached = self.cancel(&action).await;
         let deadline = tokio::time::Instant::now() + STOP_WATCH;
         let mut wait = FIRST_LOOK;
         while tokio::time::Instant::now() < deadline {
@@ -404,9 +410,15 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
             wait = (wait * 2).min(LONGEST_WAIT);
             match self.sessions.status(action.clone()).await {
                 Ok(RoutineActionStatus::Succeeded | RoutineActionStatus::Failed(_)) => break,
-                Ok(RoutineActionStatus::Pending(RoutinePendingReason::AwaitingPrompt)) | Err(_) => {
+                Err(_) if !reached => break,
+                Ok(RoutineActionStatus::Pending(RoutinePendingReason::AwaitingPrompt)) => {
+                    reached = true;
                 }
-                Ok(RoutineActionStatus::Pending(_)) => self.cancel(&action).await,
+                Err(_) => {}
+                Ok(RoutineActionStatus::Pending(_)) => {
+                    reached = true;
+                    self.cancel(&action).await;
+                }
             }
         }
         self.delete(&action).await;

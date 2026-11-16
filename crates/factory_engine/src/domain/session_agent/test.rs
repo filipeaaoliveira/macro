@@ -369,8 +369,8 @@ async fn a_disconnected_session_that_never_took_its_prompt_is_prompted() {
     assert_eq!(sessions.landed(), 1);
 }
 
-/// Each prompt of unknown delivery may have landed: once the attempt's
-/// prompts are spent, no retry sends more.
+/// A prompt of unknown delivery may still land: one that never shows in
+/// the session is never sent again, by this attempt or a retry.
 #[tokio::test(start_paused = true)]
 async fn prompts_whose_delivery_stays_unknown_fail_the_step_for_good() {
     let unknown = Reply {
@@ -379,7 +379,7 @@ async fn prompts_whose_delivery_stays_unknown_fail_the_step_for_good() {
     };
     let repo = FakeRepo::default();
     let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded)
-        .prompting(&[unknown, unknown]);
+        .prompting(&[unknown]);
 
     let failed = agent(&sessions, &repo).answer(plan_task(&repo).await).await;
 
@@ -388,7 +388,7 @@ async fn prompts_whose_delivery_stays_unknown_fail_the_step_for_good() {
     };
     assert!(matches!(error, SessionAgentError::PromptUnsettled));
     assert!(!error.retryable());
-    assert_eq!(sessions.prompts(), 2);
+    assert_eq!(sessions.prompts(), 1);
 }
 
 /// Time spent opening and prompting the session counts too, so the Step
@@ -450,24 +450,6 @@ async fn a_prompt_of_unknown_delivery_that_arrived_is_not_sent_again() {
 
     assert_eq!(answer.outcome, Outcome::done());
     assert_eq!(sessions.prompts(), 1);
-}
-
-/// A prompt whose delivery is unknown and that never shows in the session
-/// is sent once more, after the wait.
-#[tokio::test(start_paused = true)]
-async fn a_prompt_of_unknown_delivery_that_never_arrived_is_sent_once_more() {
-    let repo = FakeRepo::default();
-    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded)
-        .prompting(&[Reply {
-            error: Some(RoutineSessionError::PromptDeliveryUnknown),
-            lands: false,
-        }]);
-    let task = plan_task(&repo).await;
-
-    let answer = agent(&sessions, &repo).answer(task).await.expect("answer");
-
-    assert_eq!(answer.outcome, Outcome::done());
-    assert_eq!(sessions.prompts(), 2);
 }
 
 #[tokio::test]
@@ -550,8 +532,8 @@ async fn stopping_a_step_stops_its_session_until_the_turn_ends() {
     );
 }
 
-/// A Step stopped before its session opened has nothing to stop; the delete
-/// is still tried, and the stop does not fail.
+/// A Step stopped before its session opened has nothing to stop: the stop
+/// neither fails nor waits out the watch, and the delete is still tried.
 #[tokio::test(start_paused = true)]
 async fn stopping_a_step_whose_session_never_opened_succeeds() {
     let repo = FakeRepo::default();
@@ -568,12 +550,19 @@ async fn stopping_a_step_whose_session_never_opened_succeeds() {
     .await
     .expect("claim");
 
+    let started = tokio::time::Instant::now();
+
     agent(&sessions, &repo)
         .stop(task.key, &julia())
         .await
         .expect("stop");
 
     assert_eq!(sessions.deleted.lock().expect("deleted").len(), 1);
+    assert!(
+        started.elapsed() < super::STOP_WATCH,
+        "{:?}",
+        started.elapsed()
+    );
 }
 
 /// An attempt Temporal gave up on may still run after the Step let go of
