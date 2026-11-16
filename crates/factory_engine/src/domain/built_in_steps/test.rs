@@ -1,7 +1,8 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 
 use chrono::Utc;
 use factory_records::domain::models::{EntryId, Gate, GateAnswer, Outcome, RunId, Step, StepEnd};
+use macro_user_id::user_id::MacroUserIdStr;
 
 use super::{BuiltInStepError, BuiltInSteps};
 use crate::domain::flow::{Flow, StepName};
@@ -44,9 +45,19 @@ fn step(name: &str) -> StepName {
     StepName::try_from(name.to_string()).expect("valid")
 }
 
+static JULIA: LazyLock<MacroUserIdStr<'static>> = LazyLock::new(|| {
+    MacroUserIdStr::try_from("macro|julia@example.com".to_string()).expect("valid")
+});
+
+static ENTRY: LazyLock<EntryId> =
+    LazyLock::new(|| EntryId::try_from("step".to_string()).expect("valid"));
+
 fn input<'a>(earlier: &'a [Step]) -> StepInput<'a> {
     StepInput {
         run_id: RunId::generate(),
+        owner: &JULIA,
+        entry: &ENTRY,
+        visit: 1,
         request: "Add a dark mode toggle",
         earlier,
     }

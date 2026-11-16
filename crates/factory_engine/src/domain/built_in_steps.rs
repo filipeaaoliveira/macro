@@ -80,6 +80,9 @@ impl<A: StepAgent> BuiltInSteps<A> {
     ) -> Result<StepReport, BuiltInStepError> {
         let task = AgentTask {
             run_id: input.run_id,
+            owner: input.owner.clone(),
+            entry: input.entry.clone(),
+            visit: input.visit,
             step: step.clone(),
             prompt: prompt(instructions, &outcomes, input),
             outcomes: outcomes.clone(),

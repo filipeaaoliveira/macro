@@ -5,9 +5,13 @@ publish = false
 version = "0.1.0"
 
 [dependencies]
+agent_correlation = { path = "../agent_correlation" }
+agent_runtime_protocol = { path = "../agent_runtime_protocol", default-features = false }
+agent_session = { path = "../agent_session", default-features = false }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 axum = { workspace = true }
+bot_id = { path = "../bot_id" }
 document_storage_service_client = { path = "../document_storage_service_client" }
 document_sub_type = { path = "../document_sub_type" }
 entity_access = { path = "../entity_access", default-features = false, features = ["ports"] }
@@ -27,6 +31,7 @@ temporalio-sdk = { workspace = true }
 # The workflow macros expand to paths in this crate.
 temporalio-workflow = { workspace = true }
 thiserror = { workspace = true }
+tokio = { workspace = true, features = ["time"] }
 tracing = { workspace = true }
 utoipa = { workspace = true }
 uuid = { workspace = true }

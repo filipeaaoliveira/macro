@@ -1,188 +1,21 @@
-use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
-use chrono::Utc;
-use factory_records::domain::models::{
-    EntryId, Outcome, Run, RunEnd, RunId, RunOutcome, Step, StepEnd, TaskLink,
-};
-use factory_records::domain::ports::{RunRepository, UserDirectory};
+use factory_records::domain::models::{EntryId, HandBack, Outcome, RunId, RunOutcome, StepSession};
+use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
 use serde_json::json;
 use uuid::Uuid;
 
 use super::{FactoryServiceImpl, StepServiceImpl};
+use crate::domain::fakes::{FakeError, FakeRepo};
 use crate::domain::flow::StepName;
 use crate::domain::gate::AnswerGate;
 use crate::domain::models::{
     FactoryError, RunFinish, RunStart, StepInput, StepReport, StepRequest,
 };
 use crate::domain::ports::{
-    AnswerDelivery, FactoryService, RunWorkflows, StepExecutor, StepService, TaskAccess,
-    TaskDirectory,
+    AnswerDelivery, FactoryService, RunWorkflows, StepExecutor, StepService,
 };
-
-#[derive(Debug, thiserror::Error)]
-#[error("fake failure")]
-struct FakeError;
-
-#[derive(Clone, Default)]
-struct FakeRepo {
-    runs: Arc<Mutex<BTreeMap<RunId, Run>>>,
-    steps: Arc<Mutex<Vec<(RunId, Step)>>>,
-    /// The task documents that exist.
-    tasks: Arc<Mutex<BTreeSet<Uuid>>>,
-    /// The documents that exist and are not tasks.
-    documents: Arc<Mutex<BTreeSet<Uuid>>>,
-}
-
-/// Everyone has an account but `macro|nobody@example.com`.
-impl UserDirectory for FakeRepo {
-    type Err = FakeError;
-
-    async fn user_exists(&self, user_id: &MacroUserIdStr<'static>) -> Result<bool, FakeError> {
-        Ok(user_id.as_ref() != "macro|nobody@example.com")
-    }
-}
-
-/// Every task is visible to everyone.
-impl TaskDirectory for FakeRepo {
-    type Err = FakeError;
-
-    async fn task_access(
-        &self,
-        _user_id: &MacroUserIdStr<'static>,
-        task_id: Uuid,
-    ) -> Result<TaskAccess, FakeError> {
-        if self.tasks.lock().expect("tasks").contains(&task_id) {
-            Ok(TaskAccess::Visible)
-        } else if self.documents.lock().expect("documents").contains(&task_id) {
-            Ok(TaskAccess::NotATask)
-        } else {
-            Ok(TaskAccess::NotFound)
-        }
-    }
-}
-
-impl RunRepository for FakeRepo {
-    type Err = FakeError;
-
-    async fn insert_run(
-        &self,
-        id: RunId,
-        request: &str,
-        user_id: &MacroUserIdStr<'static>,
-    ) -> Result<Run, FakeError> {
-        let run = Run {
-            id,
-            request: request.to_string(),
-            user_id: user_id.clone(),
-            created_at: Utc::now(),
-            task_id: None,
-            end: None,
-        };
-        self.runs.lock().expect("runs").insert(id, run.clone());
-        Ok(run)
-    }
-
-    async fn link_task(&self, id: RunId, task_id: Uuid) -> Result<TaskLink, FakeError> {
-        if !self.tasks.lock().expect("tasks").contains(&task_id) {
-            return Ok(TaskLink::NoSuchTask);
-        }
-        match self.runs.lock().expect("runs").get_mut(&id) {
-            Some(run) => {
-                run.task_id = Some(task_id);
-                Ok(TaskLink::Linked)
-            }
-            None => Ok(TaskLink::NoSuchRun),
-        }
-    }
-
-    async fn delete_run(&self, id: RunId) -> Result<(), FakeError> {
-        self.runs.lock().expect("runs").remove(&id);
-        Ok(())
-    }
-
-    async fn get_run(&self, id: RunId) -> Result<Option<Run>, FakeError> {
-        Ok(self.runs.lock().expect("runs").get(&id).cloned())
-    }
-
-    async fn list_steps(&self, id: RunId) -> Result<Vec<Step>, FakeError> {
-        let steps = self.steps.lock().expect("steps");
-        Ok(steps
-            .iter()
-            .filter(|(run, _)| *run == id)
-            .map(|(_, step)| step.clone())
-            .collect())
-    }
-
-    async fn start_step(&self, id: RunId, entry: &EntryId, visit: u16) -> Result<(), FakeError> {
-        self.steps.lock().expect("steps").push((
-            id,
-            Step {
-                entry: entry.clone(),
-                visit,
-                started_at: Utc::now(),
-                end: None,
-                gate: None,
-            },
-        ));
-        Ok(())
-    }
-
-    async fn end_step(
-        &self,
-        id: RunId,
-        entry: &EntryId,
-        visit: u16,
-        outcome: &Outcome,
-        output: &str,
-    ) -> Result<(), FakeError> {
-        let mut steps = self.steps.lock().expect("steps");
-        for (run, step) in steps.iter_mut() {
-            if *run == id && step.entry == *entry && step.visit == visit {
-                step.end = Some(StepEnd {
-                    outcome: outcome.clone(),
-                    output: output.to_string(),
-                    ended_at: Utc::now(),
-                });
-            }
-        }
-        Ok(())
-    }
-
-    async fn open_gate(
-        &self,
-        _id: RunId,
-        _entry: &EntryId,
-        _visit: u16,
-        _question: &str,
-        _answers: &[Outcome],
-    ) -> Result<(), FakeError> {
-        Ok(())
-    }
-
-    async fn answer_gate(
-        &self,
-        _id: RunId,
-        _entry: &EntryId,
-        _visit: u16,
-        _answer: &Outcome,
-        _note: Option<&str>,
-        _user_id: &MacroUserIdStr<'static>,
-    ) -> Result<(), FakeError> {
-        Ok(())
-    }
-
-    async fn end_run(&self, id: RunId, outcome: RunOutcome) -> Result<(), FakeError> {
-        if let Some(run) = self.runs.lock().expect("runs").get_mut(&id) {
-            run.end = Some(RunEnd {
-                outcome,
-                ended_at: Utc::now(),
-            });
-        }
-        Ok(())
-    }
-}
 
 /// Keeps what it was sent. Refuses every answer when `refuse` is set.
 #[derive(Clone, Default)]
@@ -775,4 +608,83 @@ async fn an_answer_from_a_user_with_no_account_never_reaches_the_workflow() {
 
     assert!(matches!(refused, Err(FactoryError::UnknownUser)));
     assert!(workflows.answers.lock().expect("answers").is_empty());
+}
+
+/// A Run whose `plan` Step works in a claimed session offering `done`.
+async fn step_in_a_session(repo: &FakeRepo) -> (RunId, Uuid) {
+    let run = repo
+        .insert_run(RunId::generate(), "Plan", &julia())
+        .await
+        .expect("insert");
+    let entry = EntryId::try_from("plan".to_string()).expect("valid");
+    repo.start_step(run.id, &entry, 1).await.expect("start");
+    let session = StepSession {
+        session_id: Uuid::now_v7(),
+        action_id: Uuid::now_v7(),
+    };
+    repo.claim_session(run.id, &entry, 1, session, &[Outcome::done()])
+        .await
+        .expect("claim");
+    (run.id, session.session_id)
+}
+
+fn handing_back(outcome: Outcome) -> HandBack {
+    HandBack {
+        outcome,
+        output: "The plan".to_string(),
+    }
+}
+
+#[tokio::test]
+async fn the_owner_s_session_hands_back_an_offered_outcome() {
+    let repo = FakeRepo::default();
+    let (run_id, session_id) = step_in_a_session(&repo).await;
+    let service = FactoryServiceImpl::new(
+        repo.clone(),
+        FakeWorkflows::default(),
+        FakeExecutor::default(),
+        repo.clone(),
+        repo.clone(),
+    );
+    let entry = EntryId::try_from("plan".to_string()).expect("valid");
+
+    service
+        .hand_back(session_id, julia(), handing_back(Outcome::done()))
+        .await
+        .expect("hand back");
+
+    let handed = repo.handed_back(run_id, &entry, 1).await.expect("read");
+    assert_eq!(handed, Some(handing_back(Outcome::done())));
+}
+
+#[tokio::test]
+async fn a_hand_back_is_refused_from_another_user_another_session_or_with_another_outcome() {
+    let repo = FakeRepo::default();
+    let (_, session_id) = step_in_a_session(&repo).await;
+    let service = FactoryServiceImpl::new(
+        repo.clone(),
+        FakeWorkflows::default(),
+        FakeExecutor::default(),
+        repo.clone(),
+        repo.clone(),
+    );
+    let someone_else =
+        MacroUserIdStr::try_from("macro|teo@example.com".to_string()).expect("valid");
+
+    let other_user = service
+        .hand_back(session_id, someone_else, handing_back(Outcome::done()))
+        .await;
+    let other_session = service
+        .hand_back(Uuid::now_v7(), julia(), handing_back(Outcome::done()))
+        .await;
+    let other_outcome = service
+        .hand_back(session_id, julia(), handing_back(Outcome::unchanged()))
+        .await;
+
+    assert!(matches!(other_user, Err(FactoryError::NotTheOwner)));
+    assert!(matches!(other_session, Err(FactoryError::NotAStepSession)));
+    assert!(matches!(
+        other_outcome,
+        Err(FactoryError::OutcomeNotOffered { .. })
+    ));
 }

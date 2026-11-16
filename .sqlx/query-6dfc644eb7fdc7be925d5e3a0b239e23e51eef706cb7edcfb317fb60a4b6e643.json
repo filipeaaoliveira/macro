@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT session_id AS \"session_id!\", action_id AS \"action_id!\"\n            FROM factory_step\n            WHERE run_id = $1 AND entry = $2 AND visit = $3 AND session_id IS NOT NULL\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "session_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "action_id!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      true,
+      true
+    ]
+  },
+  "hash": "6dfc644eb7fdc7be925d5e3a0b239e23e51eef706cb7edcfb317fb60a4b6e643"
+}

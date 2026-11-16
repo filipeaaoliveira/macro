@@ -304,3 +304,49 @@ pub struct Step {
     /// The question its end put to a person, if its entry has a Gate.
     pub gate: Option<Gate>,
 }
+
+/// The agent session a Step works in: the session, and the action of the
+/// prompt that starts the Step's work. Both are UUIDv7s the factory makes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StepSession {
+    /// The agent session.
+    pub session_id: Uuid,
+    /// Its first prompt's action.
+    pub action_id: Uuid,
+}
+
+/// A Step's session as `RunRepository::claim_session` left it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClaimedSession {
+    /// The session the Step works in.
+    pub session: StepSession,
+    /// Whether this claim recorded it; false when an earlier attempt of the
+    /// Step already had.
+    pub new: bool,
+}
+
+/// A Step as the agent session it works in finds it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SessionStep {
+    /// The Run.
+    pub run_id: RunId,
+    /// The entry the Step visits.
+    pub entry: EntryId,
+    /// Which visit it is.
+    pub visit: u16,
+    /// The Run's owner, as whom the session runs.
+    pub owner: MacroUserIdStr<'static>,
+    /// The outcomes the agent may hand back.
+    pub offered: Vec<Outcome>,
+    /// Whether the Step has ended.
+    pub ended: bool,
+}
+
+/// What an agent handed back for its Step.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HandBack {
+    /// One of the outcomes the Step offered.
+    pub outcome: Outcome,
+    /// What the agent produced, for a person and the Run's later Steps.
+    pub output: String,
+}

@@ -61,7 +61,9 @@ impl FactoryActivities {
 /// the same way again.
 fn failure(error: StepError) -> ActivityError {
     match error {
-        StepError::OutputTooLarge { .. } => ApplicationFailure::non_retryable(error).into(),
+        StepError::OutputTooLarge { .. } | StepError::NoSuchRun => {
+            ApplicationFailure::non_retryable(error).into()
+        }
         StepError::Internal(_) => ApplicationFailure::new(error).into(),
     }
 }

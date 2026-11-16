@@ -8363,9 +8363,13 @@ dependencies = [
 name = "factory_engine"
 version = "0.1.0"
 dependencies = [
+ "agent_correlation",
+ "agent_runtime_protocol",
+ "agent_session",
  "anyhow",
  "async-trait",
  "axum",
+ "bot_id",
  "chrono",
  "document_storage_service_client",
  "document_sub_type",
@@ -8414,8 +8418,11 @@ dependencies = [
 name = "factory_service"
 version = "0.1.0"
 dependencies = [
+ "agent_correlation",
+ "agent_harness_service_client",
  "aws-sdk-secretsmanager",
  "axum",
+ "bot_id",
  "database_env_vars",
  "document_storage_service_client",
  "entity_access",

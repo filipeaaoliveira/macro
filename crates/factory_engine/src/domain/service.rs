@@ -5,7 +5,7 @@
 mod test;
 
 use factory_records::domain::models::{
-    MAX_NOTE_BYTES, MAX_OUTPUT_BYTES, MAX_REQUEST_BYTES, RunId, TaskLink,
+    HandBack, MAX_NOTE_BYTES, MAX_OUTPUT_BYTES, MAX_REQUEST_BYTES, RunId, TaskLink,
 };
 use factory_records::domain::ports::{RunRepository, UserDirectory};
 use macro_user_id::user_id::MacroUserIdStr;
@@ -220,6 +220,44 @@ where
         }
     }
 
+    #[tracing::instrument(err, skip(self, user_id, hand_back), fields(outcome = %hand_back.outcome))]
+    async fn hand_back(
+        &self,
+        session_id: Uuid,
+        user_id: MacroUserIdStr<'static>,
+        hand_back: HandBack,
+    ) -> Result<(), FactoryError> {
+        if hand_back.output.len() > MAX_OUTPUT_BYTES {
+            return Err(FactoryError::HandBackTooLarge {
+                max: MAX_OUTPUT_BYTES,
+            });
+        }
+        let step = self
+            .repo
+            .session_step(session_id)
+            .await
+            .map_err(internal)?
+            .ok_or(FactoryError::NotAStepSession)?;
+
+        // The session runs as the Run's owner, so its code-mode calls do too.
+        if step.owner != user_id {
+            return Err(FactoryError::NotTheOwner);
+        }
+        if step.ended {
+            return Err(FactoryError::StepEnded);
+        }
+        if !step.offered.contains(&hand_back.outcome) {
+            return Err(FactoryError::OutcomeNotOffered {
+                offered: step.offered.iter().map(|o| o.as_str().to_owned()).collect(),
+            });
+        }
+        self.repo
+            .hand_back(session_id, &hand_back)
+            .await
+            .map_err(internal)?;
+        Ok(())
+    }
+
     #[tracing::instrument(err, skip(self))]
     async fn cancel_run(&self, id: RunId) -> Result<(), FactoryError> {
         self.running(id).await?;
@@ -272,8 +310,17 @@ where
             .into_iter()
             .filter(|step| step.end.is_some())
             .collect();
+        let run = self
+            .repo
+            .get_run(request.run_id)
+            .await
+            .map_err(internal)?
+            .ok_or(StepError::NoSuchRun)?;
         let input = StepInput {
             run_id: request.run_id,
+            owner: &run.user_id,
+            entry: &request.entry,
+            visit: request.visit,
             request: &request.request,
             earlier: &earlier,
         };

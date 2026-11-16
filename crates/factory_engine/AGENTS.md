@@ -36,9 +36,19 @@ as `cancelled` on a cancellation token of its own.
 The built-in Steps (`src/domain/built_in_steps.rs`) are `reply`, which
 acknowledges the request, and `plan` and `write`, which hand an agent a prompt
 built from the Step's instructions (`built_in_steps/*.md`), the Run's request,
-and what the Run's earlier Steps produced. The agent is the `StepAgent` port;
-the only adapter so far is `LocalAgent`, which does no work and hands back the
-prompt it was given.
+and what the Run's earlier Steps produced. The agent is the `StepAgent` port.
+`SessionAgent` (`src/domain/session_agent.rs`) does the Step in a Macro agent
+session of the configured agent, owned by the Run's owner, through the routine
+sessions capability (`agent_harness_service_client`). The Step claims its
+session in `factory_step` first, so a retried Step goes on in the same session
+and never prompts twice. The prompt asks the agent to hand back its result
+with `macro.factory.handBack({ outcome, text })` from code mode, which reaches
+`POST /hand-backs` as the Run's owner; the correlation layer names the session
+(`agent_correlation::context::current_session`), and the hand back must offer
+one of the Step's outcomes. When the session's first turn ends, the latest
+hand back is the Step's outcome and output; none fails the Step. `LocalAgent`
+does no work and hands back the prompt it was given: the tests' stand-in, and
+the service's when no agent is configured.
 
 ## Start here
 
@@ -51,6 +61,7 @@ prompt it was given.
 - `src/domain/gate.rs`: the Gate a Run waits on and the answers it takes.
 - `src/domain/built_in_steps.rs`: the Steps the worker serves and their
   prompts.
+- `src/domain/session_agent.rs`: an agent Step in a Macro agent session.
 - `flows/`: example Flows, read by the tests. `plan.json` runs on the
   built-in Steps; `code.json` also names Steps no worker serves yet.
 
@@ -64,7 +75,8 @@ prompt it was given.
 
 ## Boundaries
 
-- Depends on: `factory_records`, `macro_authorization`, `macro_user_id`,
+- Depends on: `factory_records`, `agent_session` (the routine sessions port),
+  `agent_correlation`, `macro_authorization`, `macro_user_id`,
   `entity_access` (ports), `document_storage_service_client`, the Temporal
   Rust SDK.
 - Used by: `services/factory_service`.

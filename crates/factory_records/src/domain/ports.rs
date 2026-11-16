@@ -3,7 +3,10 @@
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
-use crate::domain::models::{EntryId, Outcome, Run, RunId, RunOutcome, Step, TaskLink};
+use crate::domain::models::{
+    ClaimedSession, EntryId, HandBack, Outcome, Run, RunId, RunOutcome, SessionStep, Step,
+    StepSession, TaskLink,
+};
 
 /// Where Runs and their Steps are kept.
 ///
@@ -79,6 +82,41 @@ pub trait RunRepository: Send + Sync + 'static {
         note: Option<&str>,
         user_id: &MacroUserIdStr<'static>,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// Record that the Run's `visit` of `entry` works in `session`, offering
+    /// its agent `offered`, unless an earlier attempt of the Step already
+    /// recorded a session: then that one is returned and kept.
+    fn claim_session(
+        &self,
+        id: RunId,
+        entry: &EntryId,
+        visit: u16,
+        session: StepSession,
+        offered: &[Outcome],
+    ) -> impl Future<Output = Result<ClaimedSession, Self::Err>> + Send;
+
+    /// The Step that works in the agent session `session_id`, if any.
+    fn session_step(
+        &self,
+        session_id: Uuid,
+    ) -> impl Future<Output = Result<Option<SessionStep>, Self::Err>> + Send;
+
+    /// Record what the agent in `session_id` handed back, replacing an
+    /// earlier hand back, while its Step has not ended.
+    fn hand_back(
+        &self,
+        session_id: Uuid,
+        hand_back: &HandBack,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// What the agent handed back for the Run's `visit` of `entry`, if it
+    /// did.
+    fn handed_back(
+        &self,
+        id: RunId,
+        entry: &EntryId,
+        visit: u16,
+    ) -> impl Future<Output = Result<Option<HandBack>, Self::Err>> + Send;
 
     /// Record how the Run ended. A Run that already ended keeps its end.
     fn end_run(

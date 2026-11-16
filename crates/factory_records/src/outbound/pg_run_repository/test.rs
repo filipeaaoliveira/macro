@@ -3,7 +3,9 @@ use macro_user_id::user_id::MacroUserIdStr;
 use sqlx::PgPool;
 
 use super::PgRunRepository;
-use crate::domain::models::{EntryId, Outcome, RunId, RunOutcome, TaskLink};
+use crate::domain::models::{
+    ClaimedSession, EntryId, HandBack, Outcome, RunId, RunOutcome, StepSession, TaskLink,
+};
 use crate::domain::ports::RunRepository;
 
 fn entry(id: &str) -> EntryId {
@@ -347,4 +349,123 @@ async fn deleting_its_task_unlinks_a_run_and_keeps_it(pool: PgPool) {
         .expect("get")
         .expect("the run is kept");
     assert_eq!(run.task_id, None);
+}
+
+fn session() -> StepSession {
+    StepSession {
+        session_id: uuid::Uuid::now_v7(),
+        action_id: uuid::Uuid::now_v7(),
+    }
+}
+
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "fixtures", scripts("people"))
+)]
+async fn a_retried_step_keeps_the_session_its_first_attempt_claimed(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let id = RunId::generate();
+    repo.insert_run(id, "Plan the migration", &julia())
+        .await
+        .expect("insert");
+    repo.start_step(id, &entry("plan"), 1).await.expect("start");
+    let offered = [outcome("done")];
+    let first = session();
+
+    let claimed = repo
+        .claim_session(id, &entry("plan"), 1, first, &offered)
+        .await
+        .expect("claim");
+    let retried = repo
+        .claim_session(id, &entry("plan"), 1, session(), &offered)
+        .await
+        .expect("claim again");
+
+    assert_eq!(
+        claimed,
+        ClaimedSession {
+            session: first,
+            new: true
+        }
+    );
+    assert_eq!(
+        retried,
+        ClaimedSession {
+            session: first,
+            new: false
+        }
+    );
+    let step = repo
+        .session_step(first.session_id)
+        .await
+        .expect("read")
+        .expect("the session has a step");
+    assert_eq!(
+        (step.entry, step.visit, step.owner),
+        (entry("plan"), 1, julia())
+    );
+    assert_eq!(step.offered, offered);
+    assert!(!step.ended);
+}
+
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "fixtures", scripts("people"))
+)]
+async fn the_latest_hand_back_counts_until_the_step_ends(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let id = RunId::generate();
+    repo.insert_run(id, "Write the change", &julia())
+        .await
+        .expect("insert");
+    repo.start_step(id, &entry("write"), 1)
+        .await
+        .expect("start");
+    let claimed = repo
+        .claim_session(
+            id,
+            &entry("write"),
+            1,
+            session(),
+            &[outcome("done"), outcome("unchanged")],
+        )
+        .await
+        .expect("claim");
+    let session_id = claimed.session.session_id;
+    let hand_back = |outcome_name: &str, output: &str| HandBack {
+        outcome: outcome(outcome_name),
+        output: output.to_string(),
+    };
+
+    assert_eq!(
+        repo.handed_back(id, &entry("write"), 1)
+            .await
+            .expect("read"),
+        None
+    );
+    repo.hand_back(session_id, &hand_back("unchanged", "Nothing to do"))
+        .await
+        .expect("hand back");
+    repo.hand_back(session_id, &hand_back("done", "Committed the toggle"))
+        .await
+        .expect("hand back again");
+    repo.end_step(
+        id,
+        &entry("write"),
+        1,
+        &outcome("done"),
+        "Committed the toggle",
+    )
+    .await
+    .expect("end");
+    repo.hand_back(session_id, &hand_back("unchanged", "Too late"))
+        .await
+        .expect("hand back after the end");
+
+    assert_eq!(
+        repo.handed_back(id, &entry("write"), 1)
+            .await
+            .expect("read"),
+        Some(hand_back("done", "Committed the toggle"))
+    );
 }

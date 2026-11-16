@@ -9,8 +9,8 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::domain::models::{
-    EntryId, Gate, GateAnswer, InvalidName, Outcome, Run, RunEnd, RunId, RunOutcome, Step, StepEnd,
-    TaskLink,
+    ClaimedSession, EntryId, Gate, GateAnswer, HandBack, InvalidName, Outcome, Run, RunEnd, RunId,
+    RunOutcome, SessionStep, Step, StepEnd, StepSession, TaskLink,
 };
 use crate::domain::ports::RunRepository;
 
@@ -51,6 +51,9 @@ pub enum PgRunRepositoryErr {
     /// A stored Gate has only part of its question or its answer.
     #[error("a stored gate has only part of its question or its answer")]
     PartialGate,
+    /// The Step does not exist.
+    #[error("the step does not exist")]
+    NoSuchStep,
     /// A stored task id is not a UUID.
     #[error("stored task id {0:?} is not a UUID")]
     InvalidTaskId(String),
@@ -379,6 +382,142 @@ impl RunRepository for PgRunRepository {
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    #[tracing::instrument(err, skip(self, offered), fields(entry = %entry))]
+    async fn claim_session(
+        &self,
+        id: RunId,
+        entry: &EntryId,
+        visit: u16,
+        session: StepSession,
+        offered: &[Outcome],
+    ) -> Result<ClaimedSession, Self::Err> {
+        let offered: Vec<String> = offered.iter().map(|o| o.as_str().to_owned()).collect();
+        // The first attempt of a Step records its session; a retry finds it.
+        let claimed = sqlx::query!(
+            r#"
+            UPDATE factory_step
+            SET session_id = $4, action_id = $5, offered = $6
+            WHERE run_id = $1 AND entry = $2 AND visit = $3 AND session_id IS NULL
+            "#,
+            id.as_uuid(),
+            entry.as_str(),
+            i32::from(visit),
+            session.session_id,
+            session.action_id,
+            &offered,
+        )
+        .execute(&self.pool)
+        .await?;
+        if claimed.rows_affected() == 1 {
+            return Ok(ClaimedSession { session, new: true });
+        }
+
+        let recorded = sqlx::query!(
+            r#"
+            SELECT session_id AS "session_id!", action_id AS "action_id!"
+            FROM factory_step
+            WHERE run_id = $1 AND entry = $2 AND visit = $3 AND session_id IS NOT NULL
+            "#,
+            id.as_uuid(),
+            entry.as_str(),
+            i32::from(visit),
+        )
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(PgRunRepositoryErr::NoSuchStep)?;
+        Ok(ClaimedSession {
+            session: StepSession {
+                session_id: recorded.session_id,
+                action_id: recorded.action_id,
+            },
+            new: false,
+        })
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn session_step(&self, session_id: Uuid) -> Result<Option<SessionStep>, Self::Err> {
+        let row = sqlx::query!(
+            r#"
+            SELECT
+                s.run_id,
+                s.entry,
+                s.visit,
+                r.user_id,
+                s.offered AS "offered!",
+                s.ended_at IS NOT NULL AS "ended!"
+            FROM factory_step s
+            JOIN factory_run r ON r.id = s.run_id
+            WHERE s.session_id = $1
+            "#,
+            session_id,
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+
+        Ok(Some(SessionStep {
+            run_id: RunId::from_uuid(row.run_id),
+            entry: EntryId::try_from(row.entry)?,
+            visit: u16::try_from(row.visit)
+                .map_err(|_| PgRunRepositoryErr::VisitOutOfRange(row.visit))?,
+            owner: MacroUserIdStr::try_from(row.user_id.clone())
+                .map_err(|_| PgRunRepositoryErr::InvalidUserId(row.user_id))?,
+            offered: row
+                .offered
+                .into_iter()
+                .map(Outcome::try_from)
+                .collect::<Result<_, _>>()?,
+            ended: row.ended,
+        }))
+    }
+
+    #[tracing::instrument(err, skip(self, hand_back), fields(outcome = %hand_back.outcome))]
+    async fn hand_back(&self, session_id: Uuid, hand_back: &HandBack) -> Result<(), Self::Err> {
+        sqlx::query!(
+            r#"
+            UPDATE factory_step
+            SET handed_outcome = $2, handed_output = $3, handed_at = now()
+            WHERE session_id = $1 AND ended_at IS NULL
+            "#,
+            session_id,
+            hand_back.outcome.as_str(),
+            hand_back.output,
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    #[tracing::instrument(err, skip(self), fields(entry = %entry))]
+    async fn handed_back(
+        &self,
+        id: RunId,
+        entry: &EntryId,
+        visit: u16,
+    ) -> Result<Option<HandBack>, Self::Err> {
+        let row = sqlx::query!(
+            r#"
+            SELECT handed_outcome AS "outcome!", handed_output AS "output!"
+            FROM factory_step
+            WHERE run_id = $1 AND entry = $2 AND visit = $3 AND handed_at IS NOT NULL
+            "#,
+            id.as_uuid(),
+            entry.as_str(),
+            i32::from(visit),
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        row.map(|row| {
+            Ok(HandBack {
+                outcome: Outcome::try_from(row.outcome)?,
+                output: row.output,
+            })
+        })
+        .transpose()
     }
 
     #[tracing::instrument(err, skip(self))]

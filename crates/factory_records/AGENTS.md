@@ -37,6 +37,9 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   and `answer_gate` keep the first end and answer. Keep new writes safe to
   repeat.
 - `factory_run.user_id` is the Run's owner and goes with their account.
+- An agent Step records its session (`session_id`, `action_id`, `offered`)
+  once, in `claim_session`; the agent's latest hand back is kept on the Step
+  while it runs (`hand_back`), and read when its turn ends (`handed_back`).
 - `factory_run.task_id` references `"Document"` and is cleared when the task
   document is deleted; `link_task` reports a missing task or Run instead of
   failing.

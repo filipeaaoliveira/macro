@@ -1,5 +1,6 @@
 //! Startup configuration.
 
+use bot_id::BotId;
 use database_env_vars::DatabaseUrl;
 use macro_auth::InternalApiKey;
 use macro_env::Environment;
@@ -29,4 +30,7 @@ pub struct Config {
     /// The key document storage's internal routes take, to read the tasks
     /// Runs work on.
     pub document_storage_service_auth_key: String,
+    /// The agent whose sessions do the agent Steps, as each Run's owner. Unset,
+    /// they run on a local stand-in that does no work.
+    pub factory_agent_id: Option<BotId>,
 }

@@ -10,10 +10,11 @@ use axum::{
     routing::{get, post, put},
 };
 use factory_records::domain::models::{
-    EntryId, Gate, GateAnswer, Outcome, Run, RunEnd, RunId, RunOutcome, Step, StepEnd,
+    EntryId, Gate, GateAnswer, HandBack, Outcome, Run, RunEnd, RunId, RunOutcome, Step, StepEnd,
 };
 use macro_authorization::{
     InternalOnly, MacroAuthorizationExtractor, MacroAuthorizationService, MacroAuthorizationState,
+    UserOnly,
 };
 use macro_user_id::user_id::MacroUserIdStr;
 use model_error_response::ErrorResponse;
@@ -58,7 +59,9 @@ impl<S, Auth> FromRef<FactoryRouterState<S, Auth>> for MacroAuthorizationState<A
     }
 }
 
-/// Build the Run API router. Only internal callers may use it.
+/// Build the Run API router. Only internal callers may use it, but for
+/// `POST /hand-backs`, which an agent session's code-mode SDK calls as the
+/// Run's owner.
 ///
 /// Routes:
 /// - `POST /runs` — create a Run of a Flow and start it.
@@ -67,6 +70,7 @@ impl<S, Auth> FromRef<FactoryRouterState<S, Auth>> for MacroAuthorizationState<A
 ///   waits on.
 /// - `POST /runs/{id}/cancel` — cancel a Run that has not ended.
 /// - `PUT /runs/{id}/task` — link a Run to the Macro task it works on.
+/// - `POST /hand-backs` — an agent Step's session hands back its result.
 pub fn factory_router<S, Auth, T>(state: FactoryRouterState<S, Auth>) -> Router<T>
 where
     S: FactoryService,
@@ -82,6 +86,7 @@ where
         )
         .route("/runs/{id}/cancel", post(cancel_run_handler::<S, Auth>))
         .route("/runs/{id}/task", put(link_task_handler::<S, Auth>))
+        .route("/hand-backs", post(hand_back_handler::<S, Auth>))
         .with_state(state)
 }
 
@@ -307,6 +312,59 @@ where
     ))
 }
 
+/// Request body for handing back an agent Step's result.
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct HandBackRequest {
+    /// How the Step ended: one of the outcomes it offers.
+    pub outcome: Outcome,
+    /// What the agent produced, for the Run's later Steps and for people.
+    pub text: String,
+}
+
+/// Hand back the result of the factory Step the calling agent session works
+/// on. The session's latest hand back is the Step's result once its turn
+/// ends.
+#[utoipa::path(
+    post,
+    tag = "factory",
+    operation_id = "hand_back_factory_step",
+    path = "/hand-backs",
+    request_body = HandBackRequest,
+    responses(
+        (status = 204),
+        (status = 400, body = ErrorResponse),
+        (status = 401, body = ErrorResponse),
+        (status = 403, body = ErrorResponse),
+        (status = 409, body = ErrorResponse),
+        (status = 500, body = ErrorResponse),
+    )
+)]
+#[tracing::instrument(err, skip_all)]
+pub async fn hand_back_handler<S, Auth>(
+    State(state): State<FactoryRouterState<S, Auth>>,
+    caller: MacroAuthorizationExtractor<Auth, UserOnly>,
+    Json(body): Json<HandBackRequest>,
+) -> Result<StatusCode, FactoryError>
+where
+    S: FactoryService,
+    Auth: MacroAuthorizationService,
+{
+    // The session behind the code-mode credential, validated against it by
+    // the correlation layer; no other caller names one.
+    let session_id =
+        agent_correlation::context::current_session().ok_or(FactoryError::NotAStepSession)?;
+    let hand_back = HandBack {
+        outcome: body.outcome,
+        output: body.text,
+    };
+    state
+        .service
+        .hand_back(session_id, caller.authorization.macro_user_id, hand_back)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 impl IntoResponse for FactoryError {
     fn into_response(self) -> axum::response::Response {
         let status_code = match &self {
@@ -316,9 +374,15 @@ impl IntoResponse for FactoryError {
             | FactoryError::NoteTooLarge { .. }
             | FactoryError::UnknownTask
             | FactoryError::NotATask
-            | FactoryError::UnknownUser => StatusCode::BAD_REQUEST,
+            | FactoryError::UnknownUser
+            | FactoryError::NotAStepSession
+            | FactoryError::OutcomeNotOffered { .. }
+            | FactoryError::HandBackTooLarge { .. } => StatusCode::BAD_REQUEST,
+            FactoryError::NotTheOwner => StatusCode::FORBIDDEN,
             FactoryError::NotFound => StatusCode::NOT_FOUND,
-            FactoryError::RunEnded | FactoryError::AnswerRefused(_) => StatusCode::CONFLICT,
+            FactoryError::RunEnded | FactoryError::AnswerRefused(_) | FactoryError::StepEnded => {
+                StatusCode::CONFLICT
+            }
             FactoryError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
 
@@ -348,12 +412,14 @@ impl IntoResponse for FactoryError {
         get_run_handler,
         answer_gate_handler,
         cancel_run_handler,
-        link_task_handler
+        link_task_handler,
+        hand_back_handler
     ),
     components(schemas(
         CreateRunRequest,
         AnswerGateRequest,
         LinkTaskRequest,
+        HandBackRequest,
         RunDetail,
         Run,
         RunEnd,

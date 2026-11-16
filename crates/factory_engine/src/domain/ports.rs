@@ -1,6 +1,6 @@
 //! Ports (trait contracts) of the factory's use cases.
 
-use factory_records::domain::models::RunId;
+use factory_records::domain::models::{HandBack, RunId};
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
@@ -102,6 +102,15 @@ pub trait FactoryService: Send + Sync + 'static {
         &self,
         id: RunId,
         answer: AnswerGate,
+    ) -> impl Future<Output = Result<(), FactoryError>> + Send;
+
+    /// Keep what the agent working in the session `session_id`, acting as
+    /// `user_id`, hands back for its Step, replacing an earlier hand back.
+    fn hand_back(
+        &self,
+        session_id: Uuid,
+        user_id: MacroUserIdStr<'static>,
+        hand_back: HandBack,
     ) -> impl Future<Output = Result<(), FactoryError>> + Send;
 
     /// Cancel a Run that has not ended.

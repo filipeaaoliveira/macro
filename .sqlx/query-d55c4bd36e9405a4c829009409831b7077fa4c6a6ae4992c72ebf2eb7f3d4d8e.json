@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE factory_step\n            SET handed_outcome = $2, handed_output = $3, handed_at = now()\n            WHERE session_id = $1 AND ended_at IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d55c4bd36e9405a4c829009409831b7077fa4c6a6ae4992c72ebf2eb7f3d4d8e"
+}

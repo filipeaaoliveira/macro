@@ -1,6 +1,7 @@
 //! What the factory's use cases take and return.
 
 use factory_records::domain::models::{EntryId, Outcome, Run, RunId, RunOutcome, Step};
+use macro_user_id::user_id::MacroUserIdStr;
 use serde::{Deserialize, Serialize};
 
 use crate::domain::flow::{Flow, FlowError, StepName};
@@ -37,6 +38,12 @@ pub struct StepRequest {
 pub struct StepInput<'a> {
     /// The Run the Step belongs to.
     pub run_id: RunId,
+    /// The Run's owner, as whom an agent does the Step.
+    pub owner: &'a MacroUserIdStr<'static>,
+    /// The entry the Step visits.
+    pub entry: &'a EntryId,
+    /// Which visit of the entry it is.
+    pub visit: u16,
     /// What the Run was asked to do.
     pub request: &'a str,
     /// The Run's Steps that ended before this one, in the order they started.
@@ -48,6 +55,12 @@ pub struct StepInput<'a> {
 pub struct AgentTask {
     /// The Run the Step belongs to.
     pub run_id: RunId,
+    /// The Run's owner, as whom the agent works.
+    pub owner: MacroUserIdStr<'static>,
+    /// The entry the Step visits.
+    pub entry: EntryId,
+    /// Which visit of the entry it is.
+    pub visit: u16,
     /// The Step.
     pub step: StepName,
     /// The Step's instructions, the Run's request and its earlier Steps.
@@ -120,6 +133,27 @@ pub enum FactoryError {
     /// The user id names no account.
     #[error("no user has this id")]
     UnknownUser,
+    /// A hand back came from outside a Step's agent session.
+    #[error("only a factory step's agent session can hand back, from its code")]
+    NotAStepSession,
+    /// A hand back came from someone other than the Run's owner.
+    #[error("only the run's owner can hand back its step")]
+    NotTheOwner,
+    /// A hand back named an outcome its Step does not offer.
+    #[error("the step ends with one of {offered:?}")]
+    OutcomeNotOffered {
+        /// The outcomes the Step offers.
+        offered: Vec<String>,
+    },
+    /// A hand back is larger than a Step's output keeps.
+    #[error("what is handed back must be at most {max} bytes")]
+    HandBackTooLarge {
+        /// The most bytes it may hold.
+        max: usize,
+    },
+    /// The Step already ended.
+    #[error("the step has ended")]
+    StepEnded,
     /// The Run has ended, so it takes no answer and cannot be cancelled.
     #[error("the run has ended")]
     RunEnded,
@@ -146,6 +180,9 @@ impl From<rootcause::Report> for FactoryError {
 /// Errors of running a Step or recording a Run's end.
 #[derive(Debug, thiserror::Error)]
 pub enum StepError {
+    /// The Step's Run is not recorded.
+    #[error("the step's run does not exist")]
+    NoSuchRun,
     /// The Step produced more output than a Step keeps.
     #[error("the step's output must be at most {max} bytes")]
     OutputTooLarge {

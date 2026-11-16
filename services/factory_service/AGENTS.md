@@ -10,7 +10,8 @@ worker that walks each Run's Flow, in one process.
 - `src/main.rs`: composition root — config, MacroDB pool, Temporal client and
   worker, router, shutdown.
 - `src/config.rs`: `DATABASE_URL`, `INTERNAL_API_KEY`, `TEMPORAL_ADDRESS`,
-  `DOCUMENT_STORAGE_SERVICE_AUTH_KEY` (reading the tasks Runs work on).
+  `DOCUMENT_STORAGE_SERVICE_AUTH_KEY` (reading the tasks Runs work on),
+  `FACTORY_AGENT_ID` (optional: the agent doing agent Steps).
 
 ## Scope
 
@@ -34,8 +35,10 @@ worker that walks each Run's Flow, in one process.
 
 ## Gotchas
 
-- The agent Steps run on `LocalAgent`, which does no work: no adapter to a
-  real agent runtime is wired in yet.
+- `FACTORY_AGENT_ID` names the agent (a bot id) whose sessions do the agent
+  Steps, as each Run's owner; the owner must be allowed to use it. Unset, the
+  agent Steps run on `LocalAgent`, which does no work. A macrod agent's
+  sessions need its machine connected, and routine apps are refused for it.
 
 - Local-only: the local stack runs a Temporal dev server (`temporal`, UI on
   `localhost:8233`); no deployed environment has Temporal yet, so the service
