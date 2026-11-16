@@ -249,7 +249,8 @@ where
         actor: &MacroUserIdStr<'static>,
         task_id: Uuid,
     ) -> Result<Vec<RunDetail>, FactoryError> {
-        // A task the caller can't see reads as missing, as a missing one does.
+        // The path names a task: a document that is not one, one the
+        // caller can't see, and a missing one all read as no such task.
         let task =
             TaskDocumentId::parse(&task_id.to_string()).map_err(|_| FactoryError::TaskNotFound)?;
         match self
@@ -259,8 +260,7 @@ where
             .map_err(internal)?
         {
             TaskAccess::Visible => {}
-            TaskAccess::NotATask => return Err(FactoryError::NotATask),
-            TaskAccess::NotFound => return Err(FactoryError::TaskNotFound),
+            TaskAccess::NotATask | TaskAccess::NotFound => return Err(FactoryError::TaskNotFound),
         }
 
         let runs = self

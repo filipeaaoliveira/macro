@@ -697,13 +697,16 @@ async fn a_task_s_runs_are_the_caller_s_own_newest_first() {
     assert_eq!(runs[0]["run"]["id"], theirs);
 }
 
-/// A task the caller cannot see, or one that does not exist, is missing to
-/// them; a caller with no login is refused before that.
+/// A task the caller cannot see, one that does not exist, and a document
+/// that is not a task are all missing to them; a caller with no login is
+/// refused before that.
 #[tokio::test]
 async fn a_task_the_caller_cannot_see_has_no_runs_to_list() {
     let repo = FakeRepo::default();
     let task = Uuid::now_v7();
+    let note = Uuid::now_v7();
     repo.tasks.lock().expect("tasks").insert(task);
+    repo.documents.lock().expect("documents").insert(note);
     repo.hidden
         .lock()
         .expect("hidden")
@@ -727,11 +730,13 @@ async fn a_task_the_caller_cannot_see_has_no_runs_to_list() {
 
     let hidden = list(Caller::User("eve"), task).await;
     let missing = list(Caller::User("alice"), Uuid::now_v7()).await;
+    let not_a_task = list(Caller::User("alice"), note).await;
     let anonymous = list(Caller::Nobody, task).await;
     let seen = list(Caller::User("alice"), task).await;
 
     assert_eq!(hidden, StatusCode::NOT_FOUND);
     assert_eq!(missing, StatusCode::NOT_FOUND);
+    assert_eq!(not_a_task, StatusCode::NOT_FOUND);
     assert_eq!(anonymous, StatusCode::UNAUTHORIZED);
     assert_eq!(seen, StatusCode::OK);
 }
