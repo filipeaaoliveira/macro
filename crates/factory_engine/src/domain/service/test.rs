@@ -184,7 +184,7 @@ fn service(
 /// A Run of Julia's, kept with no task.
 async fn julia_s_run(repo: &FakeRepo) -> RunId {
     match repo
-        .insert_run(RunId::generate(), "Plan", &julia(), None)
+        .insert_run(RunId::generate(), "plan", "Plan", &julia(), None)
         .await
         .expect("insert")
     {
@@ -869,6 +869,7 @@ async fn a_task_s_list_holds_its_owner_s_fifty_newest_runs() {
         match repo
             .insert_run(
                 RunId::generate(),
+                "plan",
                 &format!("Run {n}"),
                 &julia(),
                 Some(task_id),

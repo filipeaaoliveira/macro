@@ -213,6 +213,7 @@ impl RunRepository for PgRunRepository {
     async fn insert_run(
         &self,
         id: RunId,
+        flow: &str,
         request: &str,
         user_id: &MacroUserIdStr<'static>,
         task_id: Option<Uuid>,
@@ -220,11 +221,12 @@ impl RunRepository for PgRunRepository {
         let inserted = sqlx::query_as!(
             RunRow,
             r#"
-            INSERT INTO factory_run (id, request, user_id, task_id)
-            VALUES ($1, $2, $3, $4)
+            INSERT INTO factory_run (id, flow, request, user_id, task_id)
+            VALUES ($1, $2, $3, $4, $5)
             RETURNING id, request, user_id, created_at, task_id, outcome, ended_at
             "#,
             id.as_uuid(),
+            flow,
             request,
             user_id.as_ref(),
             task_id.map(|task_id| task_id.to_string()),

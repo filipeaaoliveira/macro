@@ -171,9 +171,8 @@ where
         request: String,
         task_id: Option<Uuid>,
     ) -> Result<RunDetail, FactoryError> {
-        let flow = BuiltInFlow::named(&flow)
-            .ok_or(FactoryError::UnknownFlow)?
-            .read(|step| self.executor.serves(step))?;
+        let built_in = BuiltInFlow::named(&flow).ok_or(FactoryError::UnknownFlow)?;
+        let flow = built_in.read(|step| self.executor.serves(step))?;
         if request.trim().is_empty() {
             return Err(FactoryError::EmptyRequest);
         }
@@ -193,7 +192,7 @@ where
         tracing::Span::current().record("run_id", tracing::field::display(run_id));
         let run = match self
             .repo
-            .insert_run(run_id, &request, &actor, task_id)
+            .insert_run(run_id, built_in.name, &request, &actor, task_id)
             .await
             .map_err(internal)?
         {

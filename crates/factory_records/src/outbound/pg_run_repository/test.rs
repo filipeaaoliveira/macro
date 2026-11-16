@@ -36,7 +36,7 @@ fn key(run_id: RunId, seq: u16) -> StepKey {
 /// Keep a new Run of Julia's with no task.
 async fn insert(repo: &PgRunRepository, id: RunId, request: &str) -> Run {
     match repo
-        .insert_run(id, request, &julia(), None)
+        .insert_run(id, "plan", request, &julia(), None)
         .await
         .expect("insert")
     {
@@ -325,12 +325,19 @@ async fn a_run_is_kept_with_its_task_in_one_write(pool: PgPool) {
     let id = RunId::generate();
 
     let inserted = repo
-        .insert_run(id, "Fix the login bug", &julia(), Some(task(LOGIN_TASK)))
+        .insert_run(
+            id,
+            "plan",
+            "Fix the login bug",
+            &julia(),
+            Some(task(LOGIN_TASK)),
+        )
         .await
         .expect("insert");
     let missing = repo
         .insert_run(
             RunId::generate(),
+            "plan",
             "Fix the login bug",
             &julia(),
             Some(Uuid::now_v7()),
@@ -767,7 +774,7 @@ async fn insert_on_task(
 ) -> RunId {
     let id = RunId::generate();
     match repo
-        .insert_run(id, request, user_id, Some(task(task_id)))
+        .insert_run(id, "plan", request, user_id, Some(task(task_id)))
         .await
         .expect("insert")
     {

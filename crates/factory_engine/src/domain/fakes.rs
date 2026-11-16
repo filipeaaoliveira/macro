@@ -108,6 +108,7 @@ impl RunRepository for FakeRepo {
     async fn insert_run(
         &self,
         id: RunId,
+        _flow: &str,
         request: &str,
         user_id: &MacroUserIdStr<'static>,
         task_id: Option<Uuid>,

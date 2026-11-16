@@ -278,7 +278,7 @@ fn records_router(repo: &FakeRepo) -> Router {
 async fn alice_s_run(repo: &FakeRepo) -> RunId {
     let alice = MacroUserIdStr::try_from(ALICE.to_string()).expect("valid");
     match repo
-        .insert_run(RunId::generate(), "Plan the export", &alice, None)
+        .insert_run(RunId::generate(), "plan", "Plan the export", &alice, None)
         .await
         .expect("insert")
     {

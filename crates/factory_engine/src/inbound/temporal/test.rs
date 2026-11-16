@@ -148,7 +148,13 @@ async fn client() -> Client {
 async fn plan_run(repo: &FakeRepo) -> RunStart {
     let julia = MacroUserIdStr::try_from("macro|julia@example.com".to_string()).expect("valid");
     let RunInsert::Inserted(run) = repo
-        .insert_run(RunId::generate(), "Add a dark mode toggle", &julia, None)
+        .insert_run(
+            RunId::generate(),
+            "plan",
+            "Add a dark mode toggle",
+            &julia,
+            None,
+        )
         .await
         .expect("insert")
     else {

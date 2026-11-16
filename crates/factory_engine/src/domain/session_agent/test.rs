@@ -267,7 +267,13 @@ fn julia() -> MacroUserIdStr<'static> {
 /// A `plan` task of a new Run of Julia's, its Step started.
 async fn plan_task(repo: &FakeRepo) -> AgentTask {
     let run = repo
-        .insert_run(RunId::generate(), "Add a dark mode toggle", &julia(), None)
+        .insert_run(
+            RunId::generate(),
+            "plan",
+            "Add a dark mode toggle",
+            &julia(),
+            None,
+        )
         .await
         .expect("insert");
     let RunInsert::Inserted(run) = run else {

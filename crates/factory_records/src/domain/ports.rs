@@ -19,11 +19,13 @@ pub trait RunRepository: Send + Sync + 'static {
     /// The error type returned by repository operations.
     type Err: std::error::Error + Send + Sync + 'static;
 
-    /// Keep a new Run of `user_id` that has not started yet, working on the
-    /// task document `task_id` if one is given, in one write.
+    /// Keep a new Run of `user_id` that has not started yet, of the built-in
+    /// Flow named `flow`, working on the task document `task_id` if one is
+    /// given, in one write.
     fn insert_run(
         &self,
         id: RunId,
+        flow: &str,
         request: &str,
         user_id: &MacroUserIdStr<'static>,
         task_id: Option<Uuid>,
