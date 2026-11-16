@@ -241,3 +241,29 @@ async fn a_settle_that_fails_after_its_caller_left_is_logged() {
 
     assert_eq!(warnings.0.load(std::sync::atomic::Ordering::SeqCst), 1);
 }
+
+/// Shutdown waits for sessions still settling only so long: a task that
+/// hangs gives way, inside the stop's grace.
+#[tokio::test(start_paused = true)]
+async fn shutdown_waits_for_settling_sessions_only_so_long() {
+    let finishing = TaskTracker::new();
+    finishing.spawn(tokio::time::sleep(Duration::from_secs(5)));
+    let hanging = TaskTracker::new();
+    hanging.spawn(std::future::pending::<()>());
+    let started = tokio::time::Instant::now();
+
+    let finished = super::drain(&finishing, super::SHUTDOWN_DRAIN).await;
+    let gave_up = tokio::time::timeout(
+        Duration::from_secs(120),
+        super::drain(&hanging, super::SHUTDOWN_DRAIN),
+    )
+    .await;
+
+    assert!(finished);
+    assert_eq!(gave_up, Ok(false), "a hanging settle gives way");
+    assert!(
+        started.elapsed() <= Duration::from_secs(70),
+        "{:?}",
+        started.elapsed()
+    );
+}

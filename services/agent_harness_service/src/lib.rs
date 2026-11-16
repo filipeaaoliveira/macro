@@ -2645,16 +2645,6 @@ pub async fn run() -> anyhow::Result<()> {
     activity_summary_tasks.wait().await;
     work_registration_tasks.close();
     work_registration_tasks.wait().await;
-    session_request_tasks.close();
-    if tokio::time::timeout(
-        external_session_requests::RUNTIME_ANSWER_TIMEOUT,
-        session_request_tasks.wait(),
-    )
-    .await
-    .is_err()
-    {
-        tracing::warn!("timed out settling requested sessions");
-    }
     http.abort();
     if let Err(error) = agent_git::drain(&agent_git_tasks).await {
         tracing::warn!(error = ?error, "agent git processes outlived shutdown");
@@ -2670,7 +2660,18 @@ pub async fn run() -> anyhow::Result<()> {
     if let Some((sessions, public, routines, _)) = &code_runner {
         tokio::join!(sessions.shutdown(), public.shutdown(), routines.shutdown());
     }
-    let stop_failures = container_shutdown.shutdown_all().await;
+    // Sessions still settling finish beside the sandboxes' stop, not before
+    // it: both must fit inside the grace ECS gives a stopping task.
+    let (stop_failures, settled) = tokio::join!(
+        container_shutdown.shutdown_all(),
+        external_session_requests::drain(
+            &session_request_tasks,
+            external_session_requests::SHUTDOWN_DRAIN,
+        ),
+    );
+    if !settled {
+        tracing::warn!("timed out settling requested sessions");
+    }
     if stop_failures > 0 {
         tracing::error!(stop_failures, "some sandboxes failed to stop");
     }

@@ -25,7 +25,13 @@ use tracing::Instrument as _;
 /// How long a runtime gets to create the session before the request is
 /// refused. A daemon that is up answers well inside this; one that is down
 /// or too old to know the event never will.
-pub(crate) const RUNTIME_ANSWER_TIMEOUT: Duration = Duration::from_secs(180);
+const RUNTIME_ANSWER_TIMEOUT: Duration = Duration::from_secs(180);
+
+/// How long shutdown waits for requested sessions still settling. It runs
+/// beside the sandboxes' stop, inside the 120 s ECS gives a stopping task
+/// before it kills it, and leaves the rest of that for the shutdown steps
+/// before and after the stop. A session still settling then may stay listed.
+pub(crate) const SHUTDOWN_DRAIN: Duration = Duration::from_secs(60);
 
 /// The longest a requested session is waited on and given its model and
 /// origin, its database calls included: past the runtime's answer, with a
@@ -158,15 +164,20 @@ where
                 ),
             )
             .await
-            .unwrap_or(Err(AgentSessionError::RuntimeUnavailable(
-                "this agent's machine did not open the session; make sure macrod is running and up to date",
-            )));
+            .unwrap_or_else(|_| {
+                Err(AgentSessionError::Unknown(anyhow::anyhow!(
+                    "settling the requested session took over {}s",
+                    SETTLE_TIMEOUT.as_secs()
+                )))
+            });
             if let Err(error) = &settled {
                 tracing::warn!(%session_id, ?error, "a requested session was not settled");
             }
             settled
         }
         .instrument(tracing::info_span!("settle_requested_session", %session_id));
+        // No cancellation token: the task is bounded and runs once, and
+        // cancelling it would leave a hidden session listed.
         self.tasks
             .spawn(settling)
             .await
@@ -182,6 +193,13 @@ struct Settle {
     owner: macro_user_id::user_id::MacroUserIdStr<'static>,
     model: Option<String>,
     origin: Option<(SessionSource, SessionVisibility)>,
+}
+
+/// Wait up to `within` for the requested sessions settling on `tasks`;
+/// whether they all finished.
+pub(crate) async fn drain(tasks: &TaskTracker, within: Duration) -> bool {
+    tasks.close();
+    tokio::time::timeout(within, tasks.wait()).await.is_ok()
 }
 
 /// Wait up to [`RUNTIME_ANSWER_TIMEOUT`] for the runtime to create the
