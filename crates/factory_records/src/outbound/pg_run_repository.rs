@@ -500,7 +500,7 @@ impl RunRepository for PgRunRepository {
         )
         .execute(&self.pool)
         .await?;
-        Ok(kept.rows_affected() <= 1)
+        Ok(kept.rows_affected() == 1)
     }
 
     #[tracing::instrument(err, skip(self))]
