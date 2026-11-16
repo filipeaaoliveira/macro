@@ -311,6 +311,19 @@ impl RunRepository for FakeRepo {
                 outcome,
                 ended_at: Utc::now(),
             });
+            // A cancelled Run's open Steps end with it.
+            if outcome == RunOutcome::Cancelled {
+                let cancelled =
+                    Outcome::try_from("cancelled".to_string()).map_err(|_| FakeError)?;
+                let mut steps = self.steps.lock().expect("steps");
+                for (_, step) in steps.iter_mut().filter(|(run, _)| *run == id) {
+                    step.end.get_or_insert_with(|| StepEnd {
+                        outcome: cancelled.clone(),
+                        output: "The run was cancelled.".to_string(),
+                        ended_at: Utc::now(),
+                    });
+                }
+            }
         }
         Ok(())
     }

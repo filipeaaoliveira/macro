@@ -2,7 +2,7 @@
 
 pub mod built_in_steps;
 #[cfg(test)]
-mod fakes;
+pub(crate) mod fakes;
 pub mod flow;
 pub mod gate;
 pub mod interpreter;

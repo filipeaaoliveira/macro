@@ -8386,6 +8386,7 @@ dependencies = [
  "factory_records",
  "futures",
  "macro_authorization",
+ "macro_env_var",
  "macro_user_id",
  "model-error-response",
  "rootcause",
