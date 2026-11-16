@@ -113,7 +113,12 @@ fn router(answer: fn() -> FactoryError) -> (Router, Arc<FakeService>) {
 }
 
 /// An internal call, for `acting_user` when one is named.
-fn call(method: &str, path: &str, acting_user: Option<&str>, body: serde_json::Value) -> Request<Body> {
+fn call(
+    method: &str,
+    path: &str,
+    acting_user: Option<&str>,
+    body: serde_json::Value,
+) -> Request<Body> {
     let mut request = Request::builder()
         .method(method)
         .uri(path)
@@ -139,7 +144,12 @@ async fn an_internal_call_acts_for_its_acting_user_and_never_without_one() {
 
     let acted = router
         .clone()
-        .oneshot(call("GET", &run, Some("macro|julia@example.com"), serde_json::Value::Null))
+        .oneshot(call(
+            "GET",
+            &run,
+            Some("macro|julia@example.com"),
+            serde_json::Value::Null,
+        ))
         .await
         .expect("response");
     let anonymous = router
