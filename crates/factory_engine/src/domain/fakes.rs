@@ -162,6 +162,39 @@ impl RunRepository for FakeRepo {
         Ok(steps)
     }
 
+    async fn list_task_runs(
+        &self,
+        task_id: Uuid,
+        user_id: &MacroUserIdStr<'static>,
+        limit: u16,
+    ) -> Result<Vec<Run>, FakeError> {
+        let mut runs: Vec<Run> = self
+            .runs
+            .lock()
+            .expect("runs")
+            .values()
+            .filter(|run| run.task_id == Some(task_id) && run.user_id == *user_id)
+            .cloned()
+            .collect();
+        runs.sort_by_key(|run| std::cmp::Reverse((run.created_at, run.id)));
+        runs.truncate(usize::from(limit));
+        Ok(runs)
+    }
+
+    async fn list_runs_steps(
+        &self,
+        ids: &[RunId],
+    ) -> Result<BTreeMap<RunId, Vec<Step>>, FakeError> {
+        let mut steps = BTreeMap::new();
+        for id in ids {
+            let run_steps = self.list_steps(*id).await?;
+            if !run_steps.is_empty() {
+                steps.insert(*id, run_steps);
+            }
+        }
+        Ok(steps)
+    }
+
     async fn start_step(&self, key: StepKey, entry: &EntryId, visit: u16) -> Result<(), FakeError> {
         if self.with_step(key, |_| ()).is_some() {
             return Ok(());

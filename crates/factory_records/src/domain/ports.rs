@@ -1,5 +1,7 @@
 //! The port the factory's records are kept behind.
 
+use std::collections::BTreeMap;
+
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
@@ -43,6 +45,22 @@ pub trait RunRepository: Send + Sync + 'static {
 
     /// The Run's Steps, in order.
     fn list_steps(&self, id: RunId) -> impl Future<Output = Result<Vec<Step>, Self::Err>> + Send;
+
+    /// The newest `limit` Runs of `user_id` that work on the task document
+    /// `task_id`, newest first.
+    fn list_task_runs(
+        &self,
+        task_id: Uuid,
+        user_id: &MacroUserIdStr<'static>,
+        limit: u16,
+    ) -> impl Future<Output = Result<Vec<Run>, Self::Err>> + Send;
+
+    /// The Steps of the Runs `ids`, each Run's in order. A Run with no Steps
+    /// has no entry.
+    fn list_runs_steps(
+        &self,
+        ids: &[RunId],
+    ) -> impl Future<Output = Result<BTreeMap<RunId, Vec<Step>>, Self::Err>> + Send;
 
     /// Record that the Step `key`, the `visit` of `entry`, started.
     /// Recording it again changes nothing.

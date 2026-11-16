@@ -753,3 +753,103 @@ async fn an_old_attempt_never_forgets_a_newer_attempt_s_prepare(pool: PgPool) {
         "the newer prepare is still in flight"
     );
 }
+
+fn teo() -> MacroUserIdStr<'static> {
+    MacroUserIdStr::try_from("macro|teo@example.com".to_string()).expect("valid user id")
+}
+
+/// Keep a new Run of `user_id`'s on the task `task_id`.
+async fn insert_on_task(
+    repo: &PgRunRepository,
+    user_id: &MacroUserIdStr<'static>,
+    task_id: &str,
+    request: &str,
+) -> RunId {
+    let id = RunId::generate();
+    match repo
+        .insert_run(id, request, user_id, Some(task(task_id)))
+        .await
+        .expect("insert")
+    {
+        RunInsert::Inserted(run) => run.id,
+        RunInsert::NoSuchTask => panic!("the task exists"),
+    }
+}
+
+/// A task's Runs are its owner's own, newest first: someone else's Runs on
+/// the task, and the owner's Runs on another task or none, are left out.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "fixtures", scripts("people", "tasks"))
+)]
+async fn a_task_s_runs_are_its_owner_s_newest_first(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let first = insert_on_task(&repo, &julia(), LOGIN_TASK, "Find the bug").await;
+    insert_on_task(&repo, &teo(), LOGIN_TASK, "Reproduce the bug").await;
+    insert_on_task(&repo, &julia(), DARK_MODE_TASK, "Add the toggle").await;
+    insert(&repo, RunId::generate(), "Summarise the notes").await;
+    let second = insert_on_task(&repo, &julia(), LOGIN_TASK, "Fix the bug").await;
+    let third = insert_on_task(&repo, &julia(), LOGIN_TASK, "Test the fix").await;
+
+    let all = repo
+        .list_task_runs(task(LOGIN_TASK), &julia(), 10)
+        .await
+        .expect("list");
+    let newest_two = repo
+        .list_task_runs(task(LOGIN_TASK), &julia(), 2)
+        .await
+        .expect("list");
+
+    let ids: Vec<RunId> = all.iter().map(|run| run.id).collect();
+    assert_eq!(ids, [third, second, first]);
+    assert!(all.iter().all(|run| run.user_id == julia()));
+    let ids: Vec<RunId> = newest_two.iter().map(|run| run.id).collect();
+    assert_eq!(ids, [third, second]);
+}
+
+/// Each Run's Steps come back in order, under that Run, with their Gates;
+/// a Run with no Steps has no entry.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "fixtures", scripts("people"))
+)]
+async fn the_steps_of_several_runs_come_back_by_run(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let planned = RunId::generate();
+    let replied = RunId::generate();
+    let waiting = RunId::generate();
+    for (id, request) in [(planned, "Plan"), (replied, "Reply"), (waiting, "Wait")] {
+        insert(&repo, id, request).await;
+    }
+    repo.start_step(key(planned, 1), &entry("plan"), 1)
+        .await
+        .expect("start");
+    repo.end_step(key(planned, 1), &outcome("done"), "The plan")
+        .await
+        .expect("end");
+    repo.open_gate(key(planned, 1), "Approve?", &[outcome("approve")])
+        .await
+        .expect("open");
+    repo.start_step(key(planned, 2), &entry("write"), 1)
+        .await
+        .expect("start");
+    repo.start_step(key(replied, 1), &entry("reply"), 1)
+        .await
+        .expect("start");
+
+    let steps = repo
+        .list_runs_steps(&[planned, replied, waiting])
+        .await
+        .expect("list");
+
+    let places = |id: RunId| -> Vec<u16> { steps[&id].iter().map(|step| step.seq).collect() };
+    assert_eq!(places(planned), [1, 2]);
+    assert_eq!(places(replied), [1]);
+    assert!(!steps.contains_key(&waiting));
+    let gate = steps[&planned][0].gate.as_ref().expect("the plan's gate");
+    assert_eq!(gate.question, "Approve?");
+    assert_eq!(
+        steps[&planned],
+        repo.list_steps(planned).await.expect("steps")
+    );
+}

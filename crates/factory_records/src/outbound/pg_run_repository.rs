@@ -3,6 +3,8 @@
 #[cfg(test)]
 mod test;
 
+use std::collections::BTreeMap;
+
 use chrono::{DateTime, Utc};
 use macro_user_id::user_id::MacroUserIdStr;
 use sqlx::PgPool;
@@ -120,6 +122,7 @@ impl TryFrom<RunRow> for Run {
 }
 
 struct StepRow {
+    run_id: Uuid,
     seq: i32,
     entry: String,
     visit: i32,
@@ -288,6 +291,7 @@ impl RunRepository for PgRunRepository {
             StepRow,
             r#"
             SELECT
+                s.run_id,
                 s.seq,
                 s.entry,
                 s.visit,
@@ -312,6 +316,82 @@ impl RunRepository for PgRunRepository {
         .fetch_all(&self.pool)
         .await?;
         rows.into_iter().map(Step::try_from).collect()
+    }
+
+    #[tracing::instrument(err, skip(self, user_id))]
+    async fn list_task_runs(
+        &self,
+        task_id: Uuid,
+        user_id: &MacroUserIdStr<'static>,
+        limit: u16,
+    ) -> Result<Vec<Run>, Self::Err> {
+        // `factory_run_task_owner_idx` reads one person's Runs on the task
+        // newest first and stops at the limit; the timeout bounds the read
+        // all the same.
+        let mut transaction = self.pool.begin().await?;
+        sqlx::query!("SET LOCAL statement_timeout = '5s'")
+            .execute(&mut *transaction)
+            .await?;
+        let rows = sqlx::query_as!(
+            RunRow,
+            r#"
+            SELECT id, request, user_id, created_at, task_id, outcome, ended_at
+            FROM factory_run
+            WHERE task_id = $1 AND user_id = $2
+            ORDER BY created_at DESC, id DESC
+            LIMIT $3
+            "#,
+            task_id.to_string(),
+            user_id.as_ref(),
+            i64::from(limit),
+        )
+        .fetch_all(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        rows.into_iter().map(Run::try_from).collect()
+    }
+
+    #[tracing::instrument(err, skip(self, ids), fields(runs = ids.len()))]
+    async fn list_runs_steps(
+        &self,
+        ids: &[RunId],
+    ) -> Result<BTreeMap<RunId, Vec<Step>>, Self::Err> {
+        let ids: Vec<Uuid> = ids.iter().map(RunId::as_uuid).collect();
+        let rows = sqlx::query_as!(
+            StepRow,
+            r#"
+            SELECT
+                s.run_id,
+                s.seq,
+                s.entry,
+                s.visit,
+                s.started_at,
+                s.outcome,
+                s.output,
+                s.ended_at,
+                g.question AS "question?",
+                g.answers AS "answers?",
+                g.opened_at AS "opened_at?",
+                g.answer,
+                g.note,
+                g.user_id,
+                g.answered_at
+            FROM factory_step s
+            LEFT JOIN factory_gate g ON g.run_id = s.run_id AND g.seq = s.seq
+            WHERE s.run_id = ANY($1)
+            ORDER BY s.run_id, s.seq
+            "#,
+            &ids,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut steps: BTreeMap<RunId, Vec<Step>> = BTreeMap::new();
+        for row in rows {
+            let run_id = RunId::from_uuid(row.run_id);
+            steps.entry(run_id).or_default().push(Step::try_from(row)?);
+        }
+        Ok(steps)
     }
 
     #[tracing::instrument(err, skip(self), fields(entry = %entry))]

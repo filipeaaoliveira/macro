@@ -17,7 +17,8 @@ the Gates they asked people in MacroDB, and defines the names Flows use
 ## Scope
 
 - Owns: the `factory_run`, `factory_step` and `factory_gate` tables
-  (`crates/macro_db_client/migrations/20261116083957_factory.sql`).
+  (`crates/macro_db_client/migrations/20261116083957_factory.sql`, and the
+  index in `20261116210000_factory_run_task_owner_index.sql`).
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
 
 ## Boundaries
@@ -44,7 +45,9 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   while it runs (`hand_back`), and read when its turn ends (`handed_back`).
 - `factory_run.task_id` references `"Document"` and is cleared when the task
   document is deleted; `link_task` reports a missing task or Run instead of
-  failing.
+  failing. `list_task_runs` reads one owner's Runs on a task newest first
+  through `factory_run_task_owner_idx` and stops at its limit: keep its
+  `WHERE` and `ORDER BY` on that index's columns.
 - `answer_gate` runs after the workflow took the answer, so it must not fail on
   an account deleted since: it records the answer with no author instead.
   The crate never reads `"User"`; who has an account is the authentication
