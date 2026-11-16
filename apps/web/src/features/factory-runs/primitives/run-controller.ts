@@ -67,7 +67,9 @@ export function createRunController(
     if (result.ok) {
       setAnsweredGate(gateKey(gate.step));
       setNote('');
-    } else {
+    } else if (result.reason === 'failed') {
+      // A refused answer (409) means the Gate was answered or the Run moved
+      // on: the next read takes the buttons away, so the rescue stays.
       setRescue(undefined);
     }
     return result;

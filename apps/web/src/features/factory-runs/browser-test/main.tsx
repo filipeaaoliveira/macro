@@ -9,7 +9,11 @@ import { type Accessor, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import '@fontsource-variable/inter';
 import '../../../index.css';
-import { type RunsContext, RunsProvider } from '../context/runs-context';
+import {
+  type RunActionResult,
+  type RunsContext,
+  RunsProvider,
+} from '../context/runs-context';
 import type { Run } from '../core/run';
 import { TaskRunsSection } from '../views/task-runs-section';
 
@@ -137,6 +141,44 @@ function createFixtureContext(): RunsContext {
     retry: () => {},
   });
 
+  /** Answers the Gate the Run waits on, as the service would. */
+  const answer = (input: {
+    runId: string;
+    answer: string;
+    note?: string;
+  }): RunActionResult => {
+    const run = runs().find((candidate) => candidate.id === input.runId);
+    const step = run?.steps.at(-1);
+    // A second answer, like the service's 409.
+    if (!step?.gate || step.gate.answer) {
+      return { ok: false, reason: 'conflict' };
+    }
+    const now = new Date().toISOString();
+    update(input.runId, (current) => ({
+      ...current,
+      steps: [
+        ...current.steps.slice(0, -1),
+        {
+          ...step,
+          gate: step.gate && {
+            ...step.gate,
+            answer: {
+              answer: input.answer,
+              note: input.note,
+              answeredAt: now,
+            },
+          },
+        },
+        {
+          entry: input.answer === 'approve' ? 'write' : 'plan',
+          visit: input.answer === 'approve' ? 1 : step.visit + 1,
+          startedAt: now,
+        },
+      ],
+    }));
+    return { ok: true, value: undefined };
+  };
+
   return {
     taskRuns: () => ready(runs),
     run: (runId) => ready(() => runs().find((run) => run.id === runId())),
@@ -167,38 +209,15 @@ function createFixtureContext(): RunsContext {
       return { ok: true, value: run };
     },
     async answerGate(input) {
-      const run = runs().find((candidate) => candidate.id === input.runId);
-      const step = run?.steps.at(-1);
-      // A note of "conflict" stands in for someone answering first.
-      if (input.note === 'conflict') return { ok: false, reason: 'conflict' };
-      // A second answer, like the service's 409.
-      if (!step?.gate || step.gate.answer) {
+      // A note of "fail" stands in for a failed request.
+      if (input.note === 'fail') return { ok: false, reason: 'failed' };
+      // A note of "conflict" stands in for someone else answering first: the
+      // service refuses this answer, and a read moments later shows theirs.
+      if (input.note === 'conflict') {
+        setTimeout(() => answer({ ...input, note: undefined }), 30);
         return { ok: false, reason: 'conflict' };
       }
-      const now = new Date().toISOString();
-      update(input.runId, (current) => ({
-        ...current,
-        steps: [
-          ...current.steps.slice(0, -1),
-          {
-            ...step,
-            gate: step.gate && {
-              ...step.gate,
-              answer: {
-                answer: input.answer,
-                note: input.note,
-                answeredAt: now,
-              },
-            },
-          },
-          {
-            entry: input.answer === 'approve' ? 'write' : 'plan',
-            visit: input.answer === 'approve' ? 1 : step.visit + 1,
-            startedAt: now,
-          },
-        ],
-      }));
-      return { ok: true, value: undefined };
+      return answer(input);
     },
     async cancelRun(runId) {
       const run = runs().find((candidate) => candidate.id === runId);

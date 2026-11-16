@@ -92,8 +92,10 @@ export function GateAnswers(props: {
     const sent = await props.onAnswer(value);
     if (sent) return;
     queueMicrotask(() => {
+      // The Gate went (someone answered first): the status line takes focus.
+      if (!button.isConnected) return;
       button.focus();
-      // A Gate read again as answered locks its buttons; keep focus on it.
+      // The buttons are locked: keep focus on the Gate.
       if (document.activeElement !== button) {
         button.closest<HTMLElement>('[role="group"]')?.focus();
       }

@@ -128,6 +128,11 @@ test('keeps a long Gate question and note from pushing the answers away', async 
   await expect(
     dialog.getByRole('button', { name: 'Cancel run' })
   ).toBeInViewport();
+  // The note scrolls past a few lines rather than growing.
+  const noteBox = await dialog
+    .getByPlaceholder('Add a note for the next steps (optional)')
+    .boundingBox();
+  expect(noteBox?.height ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(100);
   const question = dialog.getByText('14. Check that the plan covers this case');
   await question.scrollIntoViewIfNeeded();
   await expect(question).toBeInViewport();
@@ -140,21 +145,39 @@ test('keeps a long Gate question and note from pushing the answers away', async 
   await shoot(page, 'run-long-question', testInfo.project.name);
 });
 
-test('gives focus back to an answer the service refused', async ({ page }) => {
+async function openWaitingRun(page: Page) {
   await page.goto('/');
   const show = page.getByRole('button', { name: 'Show details' });
   if (await show.isVisible()) await show.click();
   await page.locator('[data-agent-activity-item]').first().click();
-  const dialog = page.getByRole('dialog', {
+  return page.getByRole('dialog', {
     name: 'Add a due date column to the task list',
   });
+}
+
+test('gives focus back to an answer that failed', async ({ page }) => {
+  const dialog = await openWaitingRun(page);
+  await dialog
+    .getByPlaceholder('Add a note for the next steps (optional)')
+    .fill('fail');
+  const approve = dialog.getByRole('button', { name: 'Approve' });
+  await approve.click();
+  await expect(page.getByText('Couldn’t send your answer')).toBeVisible();
+  await expect(approve).toBeFocused();
+});
+
+test('moves focus to the status line when someone else answered first', async ({
+  page,
+}) => {
+  const dialog = await openWaitingRun(page);
   await dialog
     .getByPlaceholder('Add a note for the next steps (optional)')
     .fill('conflict');
-  const approve = dialog.getByRole('button', { name: 'Approve' });
-  await approve.click();
+  await dialog.getByRole('button', { name: 'Approve' }).click();
   await expect(
     page.getByText('This question was already answered')
   ).toBeVisible();
-  await expect(approve).toBeFocused();
+  // The read that shows their answer takes the Gate away.
+  await expect(dialog.getByText('Your answer is needed')).toBeHidden();
+  await expect(dialog.locator('[data-run-status]')).toBeFocused();
 });
