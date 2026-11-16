@@ -45,8 +45,9 @@ records the answer (`factory_answer_gate` activity), and routes the answer as
 the entry's outcome. An answer the recorded Gate does not offer is refused
 before it is sent (400); the update's validator (`domain/gate.rs`) refuses an
 answer to a Gate the Run does not wait on and a second answer (409). Only the
-Run's owner answers its Gates, and only as a person: an agent's program acting
-for them (`is_agent_run`) is refused (403).
+Run's owner answers its Gates, in their own signed-in session: an internal
+caller, a user API key or Macro API token, and an agent's program acting for
+them are refused (403).
 
 People call the Run API with their own login (`UserOrInternal`), and internal
 services for an acting user (the internal key's identity headers). A Run starts
