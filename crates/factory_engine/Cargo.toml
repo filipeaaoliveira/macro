@@ -31,8 +31,9 @@ temporalio-sdk = { workspace = true }
 # The workflow macros expand to paths in this crate.
 temporalio-workflow = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["time"] }
+tokio = { workspace = true, features = ["macros", "time"] }
 tracing = { workspace = true }
+upstream_error = { path = "../upstream_error", default-features = false, features = ["axum"] }
 utoipa = { workspace = true }
 uuid = { workspace = true }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }

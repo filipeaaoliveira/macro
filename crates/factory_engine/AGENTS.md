@@ -8,30 +8,39 @@ outcomes say where a Run goes next, as one durable Temporal workflow per Run.
 ## How it works
 
 `POST /runs` parses the Flow, records the Run (`factory_records`), and starts
-`FlowWorkflow` with the Run's id as its workflow id. The workflow asks the
-interpreter for the next Step, runs it as the `factory_run_step` activity,
-feeds the outcome back, and records the Run's end with `factory_end_run`.
+`FlowWorkflow` with the Run's id as its workflow id. For each Step the
+interpreter names, the workflow records its start (`factory_start_step`), runs
+its work (`factory_run_step`), records its end (`factory_end_step`), and feeds
+the outcome back; then it records the Run's end (`factory_end_run`). A Step is
+keyed by its place among the Run's Steps (`seq`), which a reset never reuses.
+Work that fails after its retries ends the Step `failed`, with why as its
+output. The work heartbeats; cancelling the Run cancels it with
+`WaitCancellationCompleted`, so the Step's agent is stopped before the Run
+ends `cancelled`, and a cancelled Run's open Steps end `cancelled` with it. A
+Run takes at most `MAX_STEPS` Steps, then ends `blocked`. Workflow inputs carry
+ids, never the request's text.
 
 An entry with a `gate` asks a person a question once its Step ends `done`:
 the workflow records the Gate (`factory_open_gate`), waits for the
-`factory_answer_gate` update that `POST /runs/{id}/gates/{entry}/{visit}/answer`
+`factory_answer_gate` update that `POST /runs/{id}/steps/{seq}/answer`
 sends, records the answer (`factory_answer_gate` activity), and routes the
-answer as the entry's outcome. The update's validator (`domain/gate.rs`)
-refuses an answer to a Gate the Run does not wait on, a second answer, and an
-answer the Gate does not offer; the API answers those 409.
+answer as the entry's outcome. An answer the recorded Gate does not offer is
+refused before it is sent (400); the update's validator (`domain/gate.rs`)
+refuses an answer to a Gate the Run does not wait on and a second answer (409).
 
-Every Run has an owner: `POST /runs` takes the starting user's `userId`, which
-must name an account (400 otherwise), and the Run's agent Steps run as them. A
-Run may work on a Macro task: `POST /runs` takes an optional `taskId` (the task
+The Run API is for internal callers acting for a user: the acting user from
+the internal key's identity headers owns the Runs they create, and reads,
+answers, links and cancels only those; someone else's Run reads as missing. A
+call with no acting user, or one with no account, is refused (400). A Run may
+work on a Macro task: `POST /runs` takes an optional `taskId` (the task
 document's id), and `PUT /runs/{id}/task` links or relinks one. The owner must
 see the document through entity access, and document storage must say it is a
-task (`outbound/document_task_directory.rs`); a hidden document and a missing
-one are both "no task" (400). A Gate answer from a user id with no account is
-refused (400) before it reaches the workflow.
+task that is not deleted (`outbound/document_task_directory.rs`); a hidden
+document and a missing one are both "no task" (400).
 
-`POST /runs/{id}/cancel` cancels the workflow through Temporal. The running
-Step or the wait for an answer stops, and the workflow records the Run's end
-as `cancelled` on a cancellation token of its own.
+`POST /runs/{id}/cancel` cancels the workflow through Temporal; cancelling a
+cancelled Run again is accepted. A Temporal outage answers 503 (or 502 for an
+unusable answer), never 500.
 
 The built-in Steps (`src/domain/built_in_steps.rs`) are `reply`, which
 acknowledges the request, and `plan` and `write`, which hand an agent a prompt
@@ -98,6 +107,9 @@ the service's when no agent is configured.
   interpreter and the activities' results, never a clock, a random number or I/O.
 - Renaming `TASK_QUEUE`, `FLOW_WORKFLOW`, `ANSWER_GATE_UPDATE` or an
   activity's `name` strands the Runs in flight on the old name.
+- Changing what the workflow or the interpreter decides breaks the replay of
+  Runs already running: gate the change with Temporal patching
+  (`ctx.patched`) or worker versioning.
 - A Gate opens only for a Step that ends `done`; any other outcome routes as
   usual, so a failed plan is never put to a person.
 - `#[activities]` takes no generic type, so `FactoryActivities` holds the Step

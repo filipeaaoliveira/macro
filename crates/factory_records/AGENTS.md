@@ -18,7 +18,7 @@ the Gates they asked people in MacroDB, and defines the names Flows use
 ## Scope
 
 - Owns: the `factory_run`, `factory_step` and `factory_gate` tables
-  (migrations in `crates/macro_db_client/migrations/`).
+  (`crates/macro_db_client/migrations/20261116083957_factory.sql`).
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
 
 ## Boundaries
@@ -33,9 +33,12 @@ the Gates they asked people in MacroDB, and defines the names Flows use
 ## Gotchas
 
 - Every write a Step or a Run's end makes is repeated when Temporal retries
-  its activity: `start_step` and `open_gate` ignore a conflict, and `end_run`
-  and `answer_gate` keep the first end and answer. Keep new writes safe to
-  repeat.
+  its activity: `start_step` and `open_gate` ignore a conflict, and `end_step`,
+  `end_run` and `answer_gate` keep the first end and answer. Keep new writes
+  safe to repeat.
+- Steps and Gates are keyed by `(run_id, seq)`, the Step's place in its Run.
+  `visit` is only the entry's count, which a reset restarts, so never key on
+  it.
 - `factory_run.user_id` is the Run's owner and goes with their account.
 - An agent Step records its session (`session_id`, `action_id`, `offered`)
   once, in `claim_session`; the agent's latest hand back is kept on the Step

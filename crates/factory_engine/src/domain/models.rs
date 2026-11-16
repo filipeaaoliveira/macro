@@ -1,66 +1,64 @@
 //! What the factory's use cases take and return.
 
-use factory_records::domain::models::{EntryId, Outcome, Run, RunId, RunOutcome, Step};
+use factory_records::domain::models::{EntryId, Outcome, Run, RunId, RunOutcome, Step, StepKey};
 use macro_user_id::user_id::MacroUserIdStr;
 use serde::{Deserialize, Serialize};
 
 use crate::domain::flow::{Flow, FlowError, StepName};
 
-/// What a Run's workflow starts with.
+/// What a Run's workflow starts with. The Run's request stays in its
+/// records, so a Run's history carries ids, not its text.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunStart {
     /// The Run, already recorded.
     pub run_id: RunId,
     /// The Flow it walks.
     pub flow: Flow,
-    /// What it was asked to do.
-    pub request: String,
 }
 
 /// One Step for a worker to run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StepRequest {
-    /// The Run the Step belongs to.
-    pub run_id: RunId,
+    /// The Step: its Run and its place in it.
+    pub key: StepKey,
     /// The entry it visits.
     pub entry: EntryId,
     /// The work it does.
     pub step: StepName,
     /// Which visit of the entry it is, from 1.
     pub visit: u16,
-    /// What the Run was asked to do.
-    pub request: String,
+}
+
+/// How a Step ended, for its workflow to record.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StepEnding {
+    /// The Step.
+    pub key: StepKey,
+    /// How it ended.
+    pub report: StepReport,
 }
 
 /// What a Step's work is given: the Run's request, and what the Run's Steps
 /// before it produced.
 #[derive(Debug, Clone, Copy)]
 pub struct StepInput<'a> {
-    /// The Run the Step belongs to.
-    pub run_id: RunId,
+    /// The Step: its Run and its place in it.
+    pub key: StepKey,
     /// The Run's owner, as whom an agent does the Step.
     pub owner: &'a MacroUserIdStr<'static>,
-    /// The entry the Step visits.
-    pub entry: &'a EntryId,
-    /// Which visit of the entry it is.
-    pub visit: u16,
     /// What the Run was asked to do.
     pub request: &'a str,
-    /// The Run's Steps that ended before this one, in the order they started.
+    /// The Run's Steps that ended before this one, in order.
     pub earlier: &'a [Step],
 }
 
 /// What an agent is asked to do for one Step.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentTask {
-    /// The Run the Step belongs to.
-    pub run_id: RunId,
+    /// The Step: its Run and its place in it.
+    pub key: StepKey,
     /// The Run's owner, as whom the agent works.
     pub owner: MacroUserIdStr<'static>,
-    /// The entry the Step visits.
-    pub entry: EntryId,
-    /// Which visit of the entry it is.
-    pub visit: u16,
     /// The Step.
     pub step: StepName,
     /// The Step's instructions, the Run's request and its earlier Steps.
@@ -127,6 +125,18 @@ pub enum FactoryError {
     /// No task the Run's owner can see has this id.
     #[error("no task the run's owner can see has this id")]
     UnknownTask,
+    /// The internal caller named no acting user.
+    #[error("the request names no acting user")]
+    NoActingUser,
+    /// The Gate does not offer the answer.
+    #[error("the gate offers {offered:?}")]
+    AnswerNotOffered {
+        /// The answers it offers.
+        offered: Vec<String>,
+    },
+    /// Temporal could not be reached or did not answer.
+    #[error(transparent)]
+    Upstream(#[from] upstream_error::UpstreamError),
     /// The document is not a task.
     #[error("the document is not a task")]
     NotATask,
@@ -154,7 +164,8 @@ pub enum FactoryError {
     /// The Step already ended.
     #[error("the step has ended")]
     StepEnded,
-    /// The Run has ended, so it takes no answer and cannot be cancelled.
+    /// The Run has ended, so it takes no answer and cannot be cancelled
+    /// again.
     #[error("the run has ended")]
     RunEnded,
     /// The note on an answer is larger than a Gate keeps.
@@ -163,7 +174,8 @@ pub enum FactoryError {
         /// The most bytes a note may hold.
         max: usize,
     },
-    /// The Run's workflow did not take the answer, and said why.
+    /// The Run's workflow did not take the answer, and said why: it waits
+    /// on no Gate of that Step, or the Gate was answered.
     #[error("the answer was refused: {0}")]
     AnswerRefused(String),
     /// Any other internal error.

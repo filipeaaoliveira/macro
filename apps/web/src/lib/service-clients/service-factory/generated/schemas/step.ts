@@ -17,6 +17,11 @@ export interface Step {
   /** The entry the Step visits. */
   entry: EntryId;
   gate?: StepGate;
+  /**
+   * The Step's place among the Run's Steps, from 1.
+   * @minimum 0
+   */
+  seq: number;
   /** When the Step started. */
   startedAt: string;
   /**

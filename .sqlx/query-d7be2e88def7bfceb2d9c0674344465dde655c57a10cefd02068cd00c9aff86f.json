@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT session_id AS \"session_id!\", action_id AS \"action_id!\"\n            FROM factory_step\n            WHERE run_id = $1 AND entry = $2 AND visit = $3 AND session_id IS NOT NULL\n            ",
+  "query": "\n            SELECT session_id AS \"session_id!\", action_id AS \"action_id!\"\n            FROM factory_step\n            WHERE run_id = $1 AND seq = $2 AND session_id IS NOT NULL\n            ",
   "describe": {
     "columns": [
       {
@@ -17,7 +17,6 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Text",
         "Int4"
       ]
     },
@@ -26,5 +25,5 @@
       true
     ]
   },
-  "hash": "6dfc644eb7fdc7be925d5e3a0b239e23e51eef706cb7edcfb317fb60a4b6e643"
+  "hash": "d7be2e88def7bfceb2d9c0674344465dde655c57a10cefd02068cd00c9aff86f"
 }

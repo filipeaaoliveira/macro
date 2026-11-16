@@ -18,19 +18,22 @@ worker that walks each Run's Flow, in one process.
 - Owns: wiring `factory_engine` and `factory_records` into a process.
 - Not here: Flows, the workflow and the API's handlers → `crates/factory_engine`;
   the Run tables → `crates/factory_records`.
-- Callers: internal services, with the internal API key. Users are refused.
+- Callers: internal services, with the internal API key and an acting user
+  (`x-internal-macro-user-id`), who owns the Runs they create. Users are
+  refused, but for an agent session's hand back.
 
 ## Checks
 
 - `cargo build -p factory_service`
 - `curl http://localhost:8113/health` after `just run_local`.
 - A Run end to end: `POST http://localhost:8113/runs` with the
-  `x-internal-auth-key` header (the stack's `INTERNAL_API_KEY`) and `{"flow": <crates/factory_engine/flows/reply.json>, "request": "...", "userId": "macro|<email>"}`,
+  `x-internal-auth-key` header (the stack's `INTERNAL_API_KEY`), the
+  `x-internal-macro-user-id` header (`macro|<email>`), and
+  `{"flow": <crates/factory_engine/flows/reply.json>, "request": "..."}`,
   then `GET /runs/<id>`. `flows/plan.json` runs the agent Steps `plan` and
   `write`, with a Gate between them: answer it with
-  `POST /runs/<id>/gates/plan/<visit>/answer` and
-  `{"answer": "approve", "userId": "macro|<email>"}`. `POST /runs/<id>/cancel`
-  cancels a Run. Add `"taskId": "<task document id>"` to link a Run to a task,
+  `POST /runs/<id>/steps/<seq>/answer` and `{"answer": "approve"}`.
+  `POST /runs/<id>/cancel` cancels a Run. Add `"taskId": "<task document id>"` to link a Run to a task,
   or `PUT /runs/<id>/task` later.
 
 ## Gotchas

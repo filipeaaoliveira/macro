@@ -3,10 +3,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
+use agent_session::domain::session_task::TaskDocumentId;
 use chrono::Utc;
 use factory_records::domain::models::{
-    ClaimedSession, EntryId, HandBack, Outcome, Run, RunEnd, RunId, RunOutcome, SessionStep, Step,
-    StepEnd, StepSession, TaskLink,
+    ClaimedSession, EntryId, Gate, HandBack, Outcome, Run, RunEnd, RunId, RunInsert, RunOutcome,
+    SessionStep, Step, StepEnd, StepKey, StepSession, TaskLink,
 };
 use factory_records::domain::ports::{RunRepository, UserDirectory};
 use macro_user_id::user_id::MacroUserIdStr;
@@ -17,9 +18,7 @@ use crate::domain::ports::{TaskAccess, TaskDirectory};
 /// The session an agent Step claimed, and what it handed back.
 #[derive(Clone)]
 pub(crate) struct FakeSession {
-    pub(crate) run_id: RunId,
-    pub(crate) entry: EntryId,
-    pub(crate) visit: u16,
+    pub(crate) key: StepKey,
     pub(crate) session: StepSession,
     pub(crate) offered: Vec<Outcome>,
     pub(crate) handed: Option<HandBack>,
@@ -29,6 +28,8 @@ pub(crate) struct FakeSession {
 #[error("fake failure")]
 pub(crate) struct FakeError;
 
+/// Runs, Steps and sessions in memory, with the same first-write-wins rules
+/// as the Postgres repository.
 #[derive(Clone, Default)]
 pub(crate) struct FakeRepo {
     pub(crate) runs: Arc<Mutex<BTreeMap<RunId, Run>>>,
@@ -57,15 +58,31 @@ impl TaskDirectory for FakeRepo {
     async fn task_access(
         &self,
         _user_id: &MacroUserIdStr<'static>,
-        task_id: Uuid,
+        task: &TaskDocumentId,
     ) -> Result<TaskAccess, FakeError> {
-        if self.tasks.lock().expect("tasks").contains(&task_id) {
+        let id = Uuid::parse_str(task.as_str()).map_err(|_| FakeError)?;
+        if self.tasks.lock().expect("tasks").contains(&id) {
             Ok(TaskAccess::Visible)
-        } else if self.documents.lock().expect("documents").contains(&task_id) {
+        } else if self.documents.lock().expect("documents").contains(&id) {
             Ok(TaskAccess::NotATask)
         } else {
             Ok(TaskAccess::NotFound)
         }
+    }
+}
+
+impl FakeRepo {
+    fn with_step<T>(&self, key: StepKey, change: impl FnOnce(&mut Step) -> T) -> Option<T> {
+        let mut steps = self.steps.lock().expect("steps");
+        steps
+            .iter_mut()
+            .find(|(run, step)| *run == key.run_id && step.seq == key.seq)
+            .map(|(_, step)| change(step))
+    }
+
+    fn step_ended(&self, key: StepKey) -> bool {
+        self.with_step(key, |step| step.end.is_some())
+            .unwrap_or(false)
     }
 }
 
@@ -77,17 +94,23 @@ impl RunRepository for FakeRepo {
         id: RunId,
         request: &str,
         user_id: &MacroUserIdStr<'static>,
-    ) -> Result<Run, FakeError> {
+        task_id: Option<Uuid>,
+    ) -> Result<RunInsert, FakeError> {
+        if let Some(task_id) = task_id
+            && !self.tasks.lock().expect("tasks").contains(&task_id)
+        {
+            return Ok(RunInsert::NoSuchTask);
+        }
         let run = Run {
             id,
             request: request.to_string(),
             user_id: user_id.clone(),
             created_at: Utc::now(),
-            task_id: None,
+            task_id,
             end: None,
         };
         self.runs.lock().expect("runs").insert(id, run.clone());
-        Ok(run)
+        Ok(RunInsert::Inserted(run))
     }
 
     async fn link_task(&self, id: RunId, task_id: Uuid) -> Result<TaskLink, FakeError> {
@@ -114,17 +137,23 @@ impl RunRepository for FakeRepo {
 
     async fn list_steps(&self, id: RunId) -> Result<Vec<Step>, FakeError> {
         let steps = self.steps.lock().expect("steps");
-        Ok(steps
+        let mut steps: Vec<Step> = steps
             .iter()
             .filter(|(run, _)| *run == id)
             .map(|(_, step)| step.clone())
-            .collect())
+            .collect();
+        steps.sort_by_key(|step| step.seq);
+        Ok(steps)
     }
 
-    async fn start_step(&self, id: RunId, entry: &EntryId, visit: u16) -> Result<(), FakeError> {
+    async fn start_step(&self, key: StepKey, entry: &EntryId, visit: u16) -> Result<(), FakeError> {
+        if self.with_step(key, |_| ()).is_some() {
+            return Ok(());
+        }
         self.steps.lock().expect("steps").push((
-            id,
+            key.run_id,
             Step {
+                seq: key.seq,
                 entry: entry.clone(),
                 visit,
                 started_at: Utc::now(),
@@ -137,41 +166,42 @@ impl RunRepository for FakeRepo {
 
     async fn end_step(
         &self,
-        id: RunId,
-        entry: &EntryId,
-        visit: u16,
+        key: StepKey,
         outcome: &Outcome,
         output: &str,
     ) -> Result<(), FakeError> {
-        let mut steps = self.steps.lock().expect("steps");
-        for (run, step) in steps.iter_mut() {
-            if *run == id && step.entry == *entry && step.visit == visit {
+        self.with_step(key, |step| {
+            if step.end.is_none() {
                 step.end = Some(StepEnd {
                     outcome: outcome.clone(),
                     output: output.to_string(),
                     ended_at: Utc::now(),
                 });
             }
-        }
+        });
         Ok(())
     }
 
     async fn open_gate(
         &self,
-        _id: RunId,
-        _entry: &EntryId,
-        _visit: u16,
-        _question: &str,
-        _answers: &[Outcome],
+        key: StepKey,
+        question: &str,
+        answers: &[Outcome],
     ) -> Result<(), FakeError> {
+        self.with_step(key, |step| {
+            step.gate.get_or_insert_with(|| Gate {
+                question: question.to_string(),
+                answers: answers.to_vec(),
+                opened_at: Utc::now(),
+                answer: None,
+            });
+        });
         Ok(())
     }
 
     async fn answer_gate(
         &self,
-        _id: RunId,
-        _entry: &EntryId,
-        _visit: u16,
+        _key: StepKey,
         _answer: &Outcome,
         _note: Option<&str>,
         _user_id: &MacroUserIdStr<'static>,
@@ -181,26 +211,19 @@ impl RunRepository for FakeRepo {
 
     async fn claim_session(
         &self,
-        id: RunId,
-        entry: &EntryId,
-        visit: u16,
+        key: StepKey,
         session: StepSession,
         offered: &[Outcome],
     ) -> Result<ClaimedSession, FakeError> {
         let mut sessions = self.sessions.lock().expect("sessions");
-        let claimed = sessions.iter().find(|claimed| {
-            claimed.run_id == id && claimed.entry == *entry && claimed.visit == visit
-        });
-        if let Some(claimed) = claimed {
+        if let Some(claimed) = sessions.iter().find(|claimed| claimed.key == key) {
             return Ok(ClaimedSession {
                 session: claimed.session,
                 new: false,
             });
         }
         sessions.push(FakeSession {
-            run_id: id,
-            entry: entry.clone(),
-            visit,
+            key,
             session,
             offered: offered.to_vec(),
             handed: None,
@@ -208,65 +231,73 @@ impl RunRepository for FakeRepo {
         Ok(ClaimedSession { session, new: true })
     }
 
-    async fn session_step(&self, session_id: Uuid) -> Result<Option<SessionStep>, FakeError> {
+    async fn claimed_session(&self, key: StepKey) -> Result<Option<StepSession>, FakeError> {
         let sessions = self.sessions.lock().expect("sessions");
-        let Some(claimed) = sessions
+        Ok(sessions
+            .iter()
+            .find(|claimed| claimed.key == key)
+            .map(|claimed| claimed.session))
+    }
+
+    async fn session_step(&self, session_id: Uuid) -> Result<Option<SessionStep>, FakeError> {
+        let claimed = self
+            .sessions
+            .lock()
+            .expect("sessions")
             .iter()
             .find(|claimed| claimed.session.session_id == session_id)
-        else {
+            .cloned();
+        let Some(claimed) = claimed else {
             return Ok(None);
         };
         let owner = self
             .runs
             .lock()
             .expect("runs")
-            .get(&claimed.run_id)
+            .get(&claimed.key.run_id)
             .map(|run| run.user_id.clone())
             .ok_or(FakeError)?;
-        let ended = self.steps.lock().expect("steps").iter().any(|(run, step)| {
-            *run == claimed.run_id
-                && step.entry == claimed.entry
-                && step.visit == claimed.visit
-                && step.end.is_some()
-        });
         Ok(Some(SessionStep {
-            run_id: claimed.run_id,
-            entry: claimed.entry.clone(),
-            visit: claimed.visit,
+            key: claimed.key,
             owner,
-            offered: claimed.offered.clone(),
-            ended,
+            offered: claimed.offered,
+            ended: self.step_ended(claimed.key),
         }))
     }
 
     async fn hand_back(&self, session_id: Uuid, hand_back: &HandBack) -> Result<(), FakeError> {
-        let mut sessions = self.sessions.lock().expect("sessions");
-        if let Some(claimed) = sessions
-            .iter_mut()
+        let key = self
+            .sessions
+            .lock()
+            .expect("sessions")
+            .iter()
             .find(|claimed| claimed.session.session_id == session_id)
-        {
+            .map(|claimed| claimed.key);
+        let Some(key) = key else {
+            return Ok(());
+        };
+        if self.step_ended(key) {
+            return Ok(());
+        }
+        let mut sessions = self.sessions.lock().expect("sessions");
+        if let Some(claimed) = sessions.iter_mut().find(|claimed| claimed.key == key) {
             claimed.handed = Some(hand_back.clone());
         }
         Ok(())
     }
 
-    async fn handed_back(
-        &self,
-        id: RunId,
-        entry: &EntryId,
-        visit: u16,
-    ) -> Result<Option<HandBack>, FakeError> {
+    async fn handed_back(&self, key: StepKey) -> Result<Option<HandBack>, FakeError> {
         let sessions = self.sessions.lock().expect("sessions");
         Ok(sessions
             .iter()
-            .find(|claimed| {
-                claimed.run_id == id && claimed.entry == *entry && claimed.visit == visit
-            })
+            .find(|claimed| claimed.key == key)
             .and_then(|claimed| claimed.handed.clone()))
     }
 
     async fn end_run(&self, id: RunId, outcome: RunOutcome) -> Result<(), FakeError> {
-        if let Some(run) = self.runs.lock().expect("runs").get_mut(&id) {
+        if let Some(run) = self.runs.lock().expect("runs").get_mut(&id)
+            && run.end.is_none()
+        {
             run.end = Some(RunEnd {
                 outcome,
                 ended_at: Utc::now(),

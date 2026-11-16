@@ -6,7 +6,6 @@
  */
 import type { CreateRunRequestFlow } from './createRunRequestFlow';
 import type { CreateRunRequestTaskId } from './createRunRequestTaskId';
-import type { MacroUserIdStr } from './macroUserIdStr';
 
 /**
  * Request body for creating a Run.
@@ -18,6 +17,4 @@ export interface CreateRunRequest {
   request: string;
   /** The Macro task the Run works on: its task document's id. */
   taskId?: CreateRunRequestTaskId;
-  /** Who starts the Run: its owner, as whom its agent Steps run. */
-  userId: MacroUserIdStr;
 }

@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO factory_step (run_id, seq, entry, visit)\n            VALUES ($1, $2, $3, $4)\n            ON CONFLICT (run_id, seq) DO NOTHING\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "68de627f3bfb84441b1341b7856052edc804cc44be65ab387a0a241123a54b7e"
+}

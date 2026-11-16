@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT handed_outcome AS \"outcome!\", handed_output AS \"output!\"\n            FROM factory_step\n            WHERE run_id = $1 AND entry = $2 AND visit = $3 AND handed_at IS NOT NULL\n            ",
+  "query": "\n            SELECT handed_outcome AS \"outcome!\", handed_output AS \"output!\"\n            FROM factory_step\n            WHERE run_id = $1 AND seq = $2 AND handed_at IS NOT NULL\n            ",
   "describe": {
     "columns": [
       {
@@ -17,7 +17,6 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Text",
         "Int4"
       ]
     },
@@ -26,5 +25,5 @@
       true
     ]
   },
-  "hash": "e00869696dbab149195f3b04017f2c4f4eaae810d1f8e287d62d689dca136468"
+  "hash": "50e310cb93e666c00b63a216af1665d1561764c935c91fcc0d9caf67a2ee646d"
 }

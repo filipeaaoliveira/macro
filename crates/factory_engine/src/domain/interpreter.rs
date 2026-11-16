@@ -8,7 +8,7 @@ mod test;
 
 use std::collections::BTreeMap;
 
-use factory_records::domain::models::{EntryId, Outcome, RunOutcome};
+use factory_records::domain::models::{EntryId, MAX_STEPS, Outcome, RunOutcome};
 
 use crate::domain::flow::{Condition, Entry, FactName, Flow, Target, Transition};
 
@@ -25,6 +25,8 @@ enum Position {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunState {
     position: Position,
+    /// The Steps the Run has taken; never reset.
+    steps: u16,
     visits: BTreeMap<EntryId, u16>,
     facts: BTreeMap<FactName, bool>,
 }
@@ -45,6 +47,9 @@ pub enum NextStep<'a> {
         entry: &'a Entry,
         /// Which visit of the entry this is, from 1.
         visit: u16,
+        /// The Step's place among the Run's Steps, from 1. Unlike a visit, a
+        /// reset never numbers it again.
+        seq: u16,
     },
     /// The Run has ended.
     End(RunOutcome),
@@ -95,6 +100,7 @@ impl<'a> Interpreter<'a> {
     pub fn start(&self) -> RunState {
         RunState {
             position: Position::Entry(0),
+            steps: 0,
             visits: BTreeMap::new(),
             facts: self.flow.facts.clone(),
         }
@@ -130,11 +136,23 @@ impl<'a> Interpreter<'a> {
                 continue;
             }
 
+            // A Flow that loops ends blocked once the Run took its most
+            // Steps, however its resets count visits.
+            if state.steps >= MAX_STEPS {
+                state.position = Position::End(RunOutcome::Blocked);
+                return Ok(NextStep::End(RunOutcome::Blocked));
+            }
+
             let visit = visits
                 .checked_add(1)
                 .ok_or_else(|| InterpreterError::TooManyVisits(entry.id.clone()))?;
             state.visits.insert(entry.id.clone(), visit);
-            return Ok(NextStep::Run { entry, visit });
+            state.steps += 1;
+            return Ok(NextStep::Run {
+                entry,
+                visit,
+                seq: state.steps,
+            });
         }
         Err(InterpreterError::NoStepToRun)
     }

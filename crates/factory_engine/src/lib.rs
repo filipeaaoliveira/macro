@@ -8,9 +8,11 @@
 //!
 //! # Architecture
 //!
-//! - **domain**: the Flow model, the interpreter, and the Run use cases.
+//! - **domain**: the Flow model, the interpreter, Gates, the built-in Steps,
+//!   the agent session Steps, and the Run use cases.
 //! - **inbound**: the HTTP API, and the Temporal workflow and activities.
-//! - **outbound**: the Temporal scheduler and the built-in Steps.
+//! - **outbound**: the Temporal client, the task directory and the local
+//!   stand-in agent.
 //! - **temporal**: the names and types both Temporal adapters agree on.
 
 pub mod domain;

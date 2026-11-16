@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                s.run_id,\n                s.seq,\n                r.user_id,\n                s.offered AS \"offered!\",\n                s.ended_at IS NOT NULL AS \"ended!\"\n            FROM factory_step s\n            JOIN factory_run r ON r.id = s.run_id\n            WHERE s.session_id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "run_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "seq",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "user_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "offered!",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 4,
+        "name": "ended!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      null
+    ]
+  },
+  "hash": "9c0f265976617504529c0e2ee75e351575e3ded1ffc25386957348133951cf0f"
+}

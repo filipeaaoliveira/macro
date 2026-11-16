@@ -1,7 +1,9 @@
 use std::sync::{Arc, LazyLock, Mutex};
 
 use chrono::Utc;
-use factory_records::domain::models::{EntryId, Gate, GateAnswer, Outcome, RunId, Step, StepEnd};
+use factory_records::domain::models::{
+    EntryId, Gate, GateAnswer, Outcome, RunId, Step, StepEnd, StepKey,
+};
 use macro_user_id::user_id::MacroUserIdStr;
 
 use super::{BuiltInStepError, BuiltInSteps};
@@ -32,6 +34,10 @@ impl FakeAgent {
 impl StepAgent for FakeAgent {
     type Err = FakeError;
 
+    async fn stop(&self, _key: StepKey, _owner: &MacroUserIdStr<'static>) -> Result<(), FakeError> {
+        Ok(())
+    }
+
     async fn answer(&self, task: AgentTask) -> Result<AgentAnswer, FakeError> {
         self.tasks.lock().expect("tasks").push(task);
         Ok(AgentAnswer {
@@ -49,15 +55,13 @@ static JULIA: LazyLock<MacroUserIdStr<'static>> = LazyLock::new(|| {
     MacroUserIdStr::try_from("macro|julia@example.com".to_string()).expect("valid")
 });
 
-static ENTRY: LazyLock<EntryId> =
-    LazyLock::new(|| EntryId::try_from("step".to_string()).expect("valid"));
-
 fn input<'a>(earlier: &'a [Step]) -> StepInput<'a> {
     StepInput {
-        run_id: RunId::generate(),
+        key: StepKey {
+            run_id: RunId::generate(),
+            seq: 2,
+        },
         owner: &JULIA,
-        entry: &ENTRY,
-        visit: 1,
         request: "Add a dark mode toggle",
         earlier,
     }
@@ -104,6 +108,7 @@ async fn a_write_is_given_the_plan_an_earlier_step_produced() {
     let agent = FakeAgent::ending_with("unchanged");
     let steps = BuiltInSteps::new(agent.clone());
     let earlier = [Step {
+        seq: 1,
         entry: EntryId::try_from("plan".to_string()).expect("valid"),
         visit: 1,
         started_at: Utc::now(),
@@ -157,6 +162,7 @@ async fn a_plan_reads_what_a_person_answered_the_last_one() {
     let steps = BuiltInSteps::new(agent.clone());
     let revise = Outcome::try_from("revise".to_string()).expect("valid");
     let earlier = [Step {
+        seq: 1,
         entry: EntryId::try_from("plan".to_string()).expect("valid"),
         visit: 1,
         started_at: Utc::now(),

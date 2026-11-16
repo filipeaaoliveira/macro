@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                UPDATE factory_step\n                SET outcome = 'cancelled', output = 'The run was cancelled.', ended_at = now()\n                WHERE run_id = $1 AND ended_at IS NULL\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "098eda09fc8720fb9c00719c0330081353fcb7a16edf2a50c0237fe68ca4dab4"
+}

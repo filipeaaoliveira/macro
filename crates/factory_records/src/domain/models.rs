@@ -238,6 +238,16 @@ pub struct Run {
     pub end: Option<RunEnd>,
 }
 
+/// What keeping a new Run came to.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RunInsert {
+    /// The Run is kept.
+    Inserted(Run),
+    /// No document has the task id the Run was to work on, so nothing was
+    /// kept.
+    NoSuchTask,
+}
+
 /// Whether a Run was linked to a task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskLink {
@@ -289,10 +299,26 @@ pub struct Gate {
     pub answer: Option<GateAnswer>,
 }
 
+/// The most Steps a Run takes; past it the Run ends `blocked`, so a Flow
+/// that loops cannot run forever.
+pub const MAX_STEPS: u16 = 200;
+
+/// Which of a Run's Steps: its place among them, from 1. A Step keeps its
+/// place even when a reset numbers its entry's visits from 1 again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct StepKey {
+    /// The Run.
+    pub run_id: RunId,
+    /// The Step's place in it, from 1.
+    pub seq: u16,
+}
+
 /// One visit of one of a Run's entries.
 #[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Step {
+    /// The Step's place among the Run's Steps, from 1.
+    pub seq: u16,
     /// The entry the Step visits.
     pub entry: EntryId,
     /// Which visit of the entry it is, from 1.
@@ -328,12 +354,8 @@ pub struct ClaimedSession {
 /// A Step as the agent session it works in finds it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SessionStep {
-    /// The Run.
-    pub run_id: RunId,
-    /// The entry the Step visits.
-    pub entry: EntryId,
-    /// Which visit it is.
-    pub visit: u16,
+    /// The Step.
+    pub key: StepKey,
     /// The Run's owner, as whom the session runs.
     pub owner: MacroUserIdStr<'static>,
     /// The outcomes the agent may hand back.

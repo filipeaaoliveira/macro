@@ -1,40 +1,47 @@
 //! `FlowWorkflow`: the one workflow that walks any Flow.
 //!
-//! It asks the interpreter for the next Step, runs it as an activity, and
-//! hands the interpreter the Step's outcome, until the Run ends; then it
-//! records the end. An entry with a Gate waits, once its Step ends `done`,
-//! for a person's answer, delivered as an update; the answer is the outcome
-//! the interpreter gets. The interpreter is pure, so a replay walks the Flow
-//! the same way from the recorded outcomes and answers.
+//! It asks the interpreter for the next Step, records its start, runs its
+//! work, records its end, and hands the interpreter the Step's outcome, until
+//! the Run ends; then it records the end. Each record is its own activity,
+//! so a failed write is retried without repeating the Step's work. An entry
+//! with a Gate waits, once its Step ends `done`, for a person's answer,
+//! delivered as an update; the answer is the outcome the interpreter gets.
+//! The interpreter is pure, so a replay walks the Flow the same way from the
+//! recorded outcomes and answers.
 //!
-//! Cancelling the workflow cancels the running Step or the wait for an
-//! answer; the Run's end is then recorded as `cancelled`.
+//! Cancelling the workflow cancels the running Step, which stops its work
+//! before the cancellation completes, or the wait for an answer; the Run's
+//! end is then recorded as `cancelled`.
 
 use std::time::Duration;
 
-use factory_records::domain::models::{Outcome, RunId, RunOutcome};
+use factory_records::domain::models::{MAX_OUTPUT_BYTES, Outcome, RunOutcome, StepKey};
 use temporalio_common::RetryPolicy;
 use temporalio_common::error::ApplicationFailure;
 use temporalio_macros::{workflow, workflow_methods};
 use temporalio_sdk::{
-    ActivityOptions, SyncWorkflowContext, WorkflowCancellationToken, WorkflowContext,
-    WorkflowContextView, WorkflowResult, WorkflowTermination,
+    ActivityCancellationType, ActivityOptions, SyncWorkflowContext, WorkflowCancellationToken,
+    WorkflowContext, WorkflowContextView, WorkflowResult, WorkflowTermination,
 };
 
-use crate::domain::flow::{Entry, GateDefinition};
+use crate::domain::flow::GateDefinition;
 use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening, OpenGate, check_answer};
 use crate::domain::interpreter::{Interpreter, NextStep};
-use crate::domain::models::{RunFinish, RunStart, StepRequest};
+use crate::domain::models::{RunFinish, RunStart, StepEnding, StepReport, StepRequest};
 use crate::inbound::temporal::activities::FactoryActivities;
 use crate::temporal::{ANSWER_GATE_UPDATE, FLOW_WORKFLOW};
 
-/// How long one attempt of a Step may take.
+/// How long one attempt of a Step's work may take.
 const STEP_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
-/// How many times a Step is tried before it ends `failed`.
+/// How long a Step's work may go without a heartbeat before Temporal counts
+/// its worker as gone and tries again elsewhere.
+const STEP_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// How many times a Step's work is tried before it ends `failed`.
 const STEP_ATTEMPTS: u32 = 3;
 
-/// How long recording a Gate or a Run's end may take.
+/// How long recording a Step, a Gate or a Run's end may take.
 const RECORD_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// The workflow of one Run.
@@ -57,13 +64,18 @@ impl FlowWorkflow {
     ) -> WorkflowResult<RunOutcome> {
         let interpreter = Interpreter::new(&start.flow);
         let mut state = interpreter.start();
-        let step_options = ActivityOptions::with_start_to_close_timeout(STEP_TIMEOUT)
+        // The Step's work stops before its cancellation completes, so
+        // nothing it does lands after the Run's `cancelled` end.
+        let work_options = ActivityOptions::with_start_to_close_timeout(STEP_TIMEOUT)
+            .heartbeat_timeout(STEP_HEARTBEAT_TIMEOUT)
+            .cancellation_type(ActivityCancellationType::WaitCancellationCompleted)
             .retry_policy(
                 RetryPolicy::builder()
                     .maximum_attempts(STEP_ATTEMPTS)
                     .build(),
             )
             .build();
+        let record_options = ActivityOptions::start_to_close_timeout(RECORD_TIMEOUT);
 
         // A Flow that cannot go on still records the Run's end, then fails
         // the workflow with why, for Temporal to show.
@@ -76,35 +88,71 @@ impl FlowWorkflow {
                     break RunOutcome::Failed;
                 }
             };
-            let (entry, visit) = match next {
+            let (entry, visit, seq) = match next {
                 NextStep::End(outcome) => break outcome,
-                NextStep::Run { entry, visit } => (entry, visit),
+                NextStep::Run { entry, visit, seq } => (entry, visit, seq),
             };
 
-            let request = StepRequest {
+            let key = StepKey {
                 run_id: start.run_id,
+                seq,
+            };
+            let request = StepRequest {
+                key,
                 entry: entry.id.clone(),
                 step: entry.step.clone(),
                 visit,
-                request: start.request.clone(),
             };
-            // A Step that still fails after its retries ends `failed`, which
-            // the Flow may route like any other outcome. A Step stopped by
-            // cancelling the Run ends the Run.
-            let report = ctx
-                .execute_activity(FactoryActivities::run_step, request, step_options.clone())
+            let started = ctx
+                .execute_activity(
+                    FactoryActivities::start_step,
+                    request.clone(),
+                    record_options.clone(),
+                )
                 .await;
-            let outcome = match (report, &entry.gate) {
-                (Ok(report), Some(gate)) if report.outcome == Outcome::done() => {
-                    match ask(ctx, start.run_id, entry, visit, gate).await {
-                        Ok(answer) => answer,
-                        Err(_) if is_cancelled(ctx) => break RunOutcome::Cancelled,
-                        Err(termination) => return Err(termination),
-                    }
+            if started.is_err() {
+                if is_cancelled(ctx) {
+                    break RunOutcome::Cancelled;
                 }
-                (Ok(report), _) => report.outcome,
-                (Err(_), _) if is_cancelled(ctx) => break RunOutcome::Cancelled,
-                (Err(_), _) => Outcome::failed(),
+                started?;
+            }
+
+            // A Step that still fails after its retries ends `failed`, with
+            // why as its output; the Flow may route it like any other
+            // outcome. A Step stopped by cancelling the Run ends the Run.
+            let worked = ctx
+                .execute_activity(FactoryActivities::run_step, request, work_options.clone())
+                .await;
+            let report = match worked {
+                Ok(report) => report,
+                Err(_) if is_cancelled(ctx) => break RunOutcome::Cancelled,
+                Err(error) => StepReport {
+                    outcome: Outcome::failed(),
+                    output: bounded(format!("The step failed: {error}")),
+                },
+            };
+            let reported = report.outcome.clone();
+            let ended = ctx
+                .execute_activity(
+                    FactoryActivities::end_step,
+                    StepEnding { key, report },
+                    record_options.clone(),
+                )
+                .await;
+            if ended.is_err() {
+                if is_cancelled(ctx) {
+                    break RunOutcome::Cancelled;
+                }
+                ended?;
+            }
+
+            let outcome = match &entry.gate {
+                Some(gate) if reported == Outcome::done() => match ask(ctx, key, gate).await {
+                    Ok(answer) => answer,
+                    Err(_) if is_cancelled(ctx) => break RunOutcome::Cancelled,
+                    Err(termination) => return Err(termination),
+                },
+                _ => reported,
             };
             if let Err(error) = interpreter.record(&mut state, &outcome) {
                 stopped = Some(error);
@@ -157,20 +205,28 @@ fn is_cancelled(ctx: &WorkflowContext<FlowWorkflow>) -> bool {
     ctx.cancellation_token().is_cancelled()
 }
 
-/// Open `entry`'s Gate for its `visit`, wait for a person's answer, record
-/// it, and return it as the entry's outcome.
+/// `text`, cut to what a Step's output keeps, on a character boundary.
+fn bounded(mut text: String) -> String {
+    if text.len() > MAX_OUTPUT_BYTES {
+        let mut end = MAX_OUTPUT_BYTES;
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        text.truncate(end);
+    }
+    text
+}
+
+/// Open the Gate of the Step `key`, wait for a person's answer, record it,
+/// and return it as the entry's outcome.
 async fn ask(
     ctx: &mut WorkflowContext<FlowWorkflow>,
-    run_id: RunId,
-    entry: &Entry,
-    visit: u16,
+    key: StepKey,
     gate: &GateDefinition,
 ) -> WorkflowResult<Outcome> {
     let record_options = ActivityOptions::start_to_close_timeout(RECORD_TIMEOUT);
     let opening = GateOpening {
-        run_id,
-        entry: entry.id.clone(),
-        visit,
+        key,
         question: gate.question.clone(),
         answers: gate.answers.clone(),
     };
@@ -185,12 +241,12 @@ async fn ask(
     // answers a Gate the Run's records do not show.
     ctx.state_mut(|workflow| {
         workflow.open = Some(OpenGate {
-            entry: entry.id.clone(),
-            visit,
+            seq: key.seq,
             answers: gate.answers.clone(),
         });
         workflow.answer = None;
     });
+
     // The Gate closes in the same change that takes its answer, so no
     // second answer slips in between.
     let answer = loop {
@@ -211,7 +267,7 @@ async fn ask(
     let outcome = answer.answer.clone();
     ctx.execute_activity(
         FactoryActivities::answer_gate,
-        GateAnswered { run_id, answer },
+        GateAnswered { key, answer },
         record_options,
     )
     .await?;

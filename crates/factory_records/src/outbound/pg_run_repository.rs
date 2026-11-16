@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::domain::models::{
     ClaimedSession, EntryId, Gate, GateAnswer, HandBack, InvalidName, Outcome, Run, RunEnd, RunId,
-    RunOutcome, SessionStep, Step, StepEnd, StepSession, TaskLink,
+    RunInsert, RunOutcome, SessionStep, Step, StepEnd, StepKey, StepSession, TaskLink,
 };
 use crate::domain::ports::RunRepository;
 
@@ -42,9 +42,9 @@ pub enum PgRunRepositoryErr {
     /// A stored Run outcome is not one this code knows.
     #[error("unknown run outcome {0:?}")]
     UnknownRunOutcome(String),
-    /// A stored visit does not fit a visit number.
-    #[error("visit {0} is out of range")]
-    VisitOutOfRange(i32),
+    /// A stored visit or place does not fit its number.
+    #[error("visit or place {0} is out of range")]
+    OutOfRange(i32),
     /// A stored Run or Step has only part of its end.
     #[error("a stored end has an outcome but no time, or the other way round")]
     PartialEnd,
@@ -102,6 +102,7 @@ impl TryFrom<RunRow> for Run {
 }
 
 struct StepRow {
+    seq: i32,
     entry: String,
     visit: i32,
     started_at: DateTime<Utc>,
@@ -154,6 +155,11 @@ impl StepRow {
     }
 }
 
+/// A stored visit or place, which the schema keeps between 1 and 65535.
+fn number(stored: i32) -> Result<u16, PgRunRepositoryErr> {
+    u16::try_from(stored).map_err(|_| PgRunRepositoryErr::OutOfRange(stored))
+}
+
 impl TryFrom<StepRow> for Step {
     type Error = PgRunRepositoryErr;
 
@@ -169,9 +175,9 @@ impl TryFrom<StepRow> for Step {
             _ => return Err(PgRunRepositoryErr::PartialEnd),
         };
         Ok(Step {
+            seq: number(row.seq)?,
             entry: EntryId::try_from(row.entry)?,
-            visit: u16::try_from(row.visit)
-                .map_err(|_| PgRunRepositoryErr::VisitOutOfRange(row.visit))?,
+            visit: number(row.visit)?,
             started_at: row.started_at,
             end,
             gate,
@@ -188,21 +194,30 @@ impl RunRepository for PgRunRepository {
         id: RunId,
         request: &str,
         user_id: &MacroUserIdStr<'static>,
-    ) -> Result<Run, Self::Err> {
-        let row = sqlx::query_as!(
+        task_id: Option<Uuid>,
+    ) -> Result<RunInsert, Self::Err> {
+        let inserted = sqlx::query_as!(
             RunRow,
             r#"
-            INSERT INTO factory_run (id, request, user_id)
-            VALUES ($1, $2, $3)
+            INSERT INTO factory_run (id, request, user_id, task_id)
+            VALUES ($1, $2, $3, $4)
             RETURNING id, request, user_id, created_at, task_id, outcome, ended_at
             "#,
             id.as_uuid(),
             request,
             user_id.as_ref(),
+            task_id.map(|task_id| task_id.to_string()),
         )
         .fetch_one(&self.pool)
-        .await?;
-        Run::try_from(row)
+        .await;
+
+        match inserted {
+            Ok(row) => Ok(RunInsert::Inserted(Run::try_from(row)?)),
+            Err(sqlx::Error::Database(error)) if error.constraint() == Some(TASK_FOREIGN_KEY) => {
+                Ok(RunInsert::NoSuchTask)
+            }
+            Err(error) => Err(error.into()),
+        }
     }
 
     #[tracing::instrument(err, skip(self))]
@@ -255,6 +270,7 @@ impl RunRepository for PgRunRepository {
             StepRow,
             r#"
             SELECT
+                s.seq,
                 s.entry,
                 s.visit,
                 s.started_at,
@@ -269,10 +285,9 @@ impl RunRepository for PgRunRepository {
                 g.user_id,
                 g.answered_at
             FROM factory_step s
-            LEFT JOIN factory_gate g
-                ON g.run_id = s.run_id AND g.entry = s.entry AND g.visit = s.visit
+            LEFT JOIN factory_gate g ON g.run_id = s.run_id AND g.seq = s.seq
             WHERE s.run_id = $1
-            ORDER BY s.started_at, s.entry, s.visit
+            ORDER BY s.seq
             "#,
             id.as_uuid(),
         )
@@ -282,14 +297,15 @@ impl RunRepository for PgRunRepository {
     }
 
     #[tracing::instrument(err, skip(self), fields(entry = %entry))]
-    async fn start_step(&self, id: RunId, entry: &EntryId, visit: u16) -> Result<(), Self::Err> {
+    async fn start_step(&self, key: StepKey, entry: &EntryId, visit: u16) -> Result<(), Self::Err> {
         sqlx::query!(
             r#"
-            INSERT INTO factory_step (run_id, entry, visit)
-            VALUES ($1, $2, $3)
-            ON CONFLICT (run_id, entry, visit) DO NOTHING
+            INSERT INTO factory_step (run_id, seq, entry, visit)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (run_id, seq) DO NOTHING
             "#,
-            id.as_uuid(),
+            key.run_id.as_uuid(),
+            i32::from(key.seq),
             entry.as_str(),
             i32::from(visit),
         )
@@ -298,24 +314,21 @@ impl RunRepository for PgRunRepository {
         Ok(())
     }
 
-    #[tracing::instrument(err, skip(self, output), fields(entry = %entry, outcome = %outcome))]
+    #[tracing::instrument(err, skip(self, output), fields(outcome = %outcome))]
     async fn end_step(
         &self,
-        id: RunId,
-        entry: &EntryId,
-        visit: u16,
+        key: StepKey,
         outcome: &Outcome,
         output: &str,
     ) -> Result<(), Self::Err> {
         sqlx::query!(
             r#"
             UPDATE factory_step
-            SET outcome = $4, output = $5, ended_at = now()
-            WHERE run_id = $1 AND entry = $2 AND visit = $3
+            SET outcome = $3, output = $4, ended_at = now()
+            WHERE run_id = $1 AND seq = $2 AND ended_at IS NULL
             "#,
-            id.as_uuid(),
-            entry.as_str(),
-            i32::from(visit),
+            key.run_id.as_uuid(),
+            i32::from(key.seq),
             outcome.as_str(),
             output,
         )
@@ -324,25 +337,22 @@ impl RunRepository for PgRunRepository {
         Ok(())
     }
 
-    #[tracing::instrument(err, skip(self, question, answers), fields(entry = %entry))]
+    #[tracing::instrument(err, skip(self, question, answers))]
     async fn open_gate(
         &self,
-        id: RunId,
-        entry: &EntryId,
-        visit: u16,
+        key: StepKey,
         question: &str,
         answers: &[Outcome],
     ) -> Result<(), Self::Err> {
         let answers: Vec<String> = answers.iter().map(|a| a.as_str().to_owned()).collect();
         sqlx::query!(
             r#"
-            INSERT INTO factory_gate (run_id, entry, visit, question, answers)
-            VALUES ($1, $2, $3, $4, $5)
-            ON CONFLICT (run_id, entry, visit) DO NOTHING
+            INSERT INTO factory_gate (run_id, seq, question, answers)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (run_id, seq) DO NOTHING
             "#,
-            id.as_uuid(),
-            entry.as_str(),
-            i32::from(visit),
+            key.run_id.as_uuid(),
+            i32::from(key.seq),
             question,
             &answers,
         )
@@ -351,30 +361,28 @@ impl RunRepository for PgRunRepository {
         Ok(())
     }
 
-    #[tracing::instrument(err, skip(self, note, user_id), fields(entry = %entry, answer = %answer))]
+    #[tracing::instrument(err, skip(self, note, user_id), fields(answer = %answer))]
     async fn answer_gate(
         &self,
-        id: RunId,
-        entry: &EntryId,
-        visit: u16,
+        key: StepKey,
         answer: &Outcome,
         note: Option<&str>,
         user_id: &MacroUserIdStr<'static>,
     ) -> Result<(), Self::Err> {
-        // The answer is recorded once the Run's workflow took it, so a user
-        // id with no account must not stop it: it records no one.
+        // The answer is recorded once the Run's workflow took it, so an
+        // account deleted since the API checked it must not stop it: it
+        // records no one.
         sqlx::query!(
             r#"
             UPDATE factory_gate
-            SET answer = $4,
-                note = $5,
-                user_id = (SELECT id FROM "User" WHERE id = $6),
+            SET answer = $3,
+                note = $4,
+                user_id = (SELECT id FROM "User" WHERE id = $5),
                 answered_at = now()
-            WHERE run_id = $1 AND entry = $2 AND visit = $3 AND answer IS NULL
+            WHERE run_id = $1 AND seq = $2 AND answer IS NULL
             "#,
-            id.as_uuid(),
-            entry.as_str(),
-            i32::from(visit),
+            key.run_id.as_uuid(),
+            i32::from(key.seq),
             answer.as_str(),
             note,
             user_id.as_ref(),
@@ -384,12 +392,10 @@ impl RunRepository for PgRunRepository {
         Ok(())
     }
 
-    #[tracing::instrument(err, skip(self, offered), fields(entry = %entry))]
+    #[tracing::instrument(err, skip(self, offered))]
     async fn claim_session(
         &self,
-        id: RunId,
-        entry: &EntryId,
-        visit: u16,
+        key: StepKey,
         session: StepSession,
         offered: &[Outcome],
     ) -> Result<ClaimedSession, Self::Err> {
@@ -398,12 +404,11 @@ impl RunRepository for PgRunRepository {
         let claimed = sqlx::query!(
             r#"
             UPDATE factory_step
-            SET session_id = $4, action_id = $5, offered = $6
-            WHERE run_id = $1 AND entry = $2 AND visit = $3 AND session_id IS NULL
+            SET session_id = $3, action_id = $4, offered = $5
+            WHERE run_id = $1 AND seq = $2 AND session_id IS NULL
             "#,
-            id.as_uuid(),
-            entry.as_str(),
-            i32::from(visit),
+            key.run_id.as_uuid(),
+            i32::from(key.seq),
             session.session_id,
             session.action_id,
             &offered,
@@ -414,26 +419,33 @@ impl RunRepository for PgRunRepository {
             return Ok(ClaimedSession { session, new: true });
         }
 
-        let recorded = sqlx::query!(
+        let recorded = self
+            .claimed_session(key)
+            .await?
+            .ok_or(PgRunRepositoryErr::NoSuchStep)?;
+        Ok(ClaimedSession {
+            session: recorded,
+            new: false,
+        })
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn claimed_session(&self, key: StepKey) -> Result<Option<StepSession>, Self::Err> {
+        let row = sqlx::query!(
             r#"
             SELECT session_id AS "session_id!", action_id AS "action_id!"
             FROM factory_step
-            WHERE run_id = $1 AND entry = $2 AND visit = $3 AND session_id IS NOT NULL
+            WHERE run_id = $1 AND seq = $2 AND session_id IS NOT NULL
             "#,
-            id.as_uuid(),
-            entry.as_str(),
-            i32::from(visit),
+            key.run_id.as_uuid(),
+            i32::from(key.seq),
         )
         .fetch_optional(&self.pool)
-        .await?
-        .ok_or(PgRunRepositoryErr::NoSuchStep)?;
-        Ok(ClaimedSession {
-            session: StepSession {
-                session_id: recorded.session_id,
-                action_id: recorded.action_id,
-            },
-            new: false,
-        })
+        .await?;
+        Ok(row.map(|row| StepSession {
+            session_id: row.session_id,
+            action_id: row.action_id,
+        }))
     }
 
     #[tracing::instrument(err, skip(self))]
@@ -442,8 +454,7 @@ impl RunRepository for PgRunRepository {
             r#"
             SELECT
                 s.run_id,
-                s.entry,
-                s.visit,
+                s.seq,
                 r.user_id,
                 s.offered AS "offered!",
                 s.ended_at IS NOT NULL AS "ended!"
@@ -460,10 +471,10 @@ impl RunRepository for PgRunRepository {
         };
 
         Ok(Some(SessionStep {
-            run_id: RunId::from_uuid(row.run_id),
-            entry: EntryId::try_from(row.entry)?,
-            visit: u16::try_from(row.visit)
-                .map_err(|_| PgRunRepositoryErr::VisitOutOfRange(row.visit))?,
+            key: StepKey {
+                run_id: RunId::from_uuid(row.run_id),
+                seq: number(row.seq)?,
+            },
             owner: MacroUserIdStr::try_from(row.user_id.clone())
                 .map_err(|_| PgRunRepositoryErr::InvalidUserId(row.user_id))?,
             offered: row
@@ -492,22 +503,16 @@ impl RunRepository for PgRunRepository {
         Ok(())
     }
 
-    #[tracing::instrument(err, skip(self), fields(entry = %entry))]
-    async fn handed_back(
-        &self,
-        id: RunId,
-        entry: &EntryId,
-        visit: u16,
-    ) -> Result<Option<HandBack>, Self::Err> {
+    #[tracing::instrument(err, skip(self))]
+    async fn handed_back(&self, key: StepKey) -> Result<Option<HandBack>, Self::Err> {
         let row = sqlx::query!(
             r#"
             SELECT handed_outcome AS "outcome!", handed_output AS "output!"
             FROM factory_step
-            WHERE run_id = $1 AND entry = $2 AND visit = $3 AND handed_at IS NOT NULL
+            WHERE run_id = $1 AND seq = $2 AND handed_at IS NOT NULL
             "#,
-            id.as_uuid(),
-            entry.as_str(),
-            i32::from(visit),
+            key.run_id.as_uuid(),
+            i32::from(key.seq),
         )
         .fetch_optional(&self.pool)
         .await?;
@@ -522,7 +527,10 @@ impl RunRepository for PgRunRepository {
 
     #[tracing::instrument(err, skip(self))]
     async fn end_run(&self, id: RunId, outcome: RunOutcome) -> Result<(), Self::Err> {
-        sqlx::query!(
+        // The Run's end and, for a cancelled Run, its open Steps' ends land
+        // together, so a Step can't end after the Run that cancelled it.
+        let mut transaction = self.pool.begin().await?;
+        let ended = sqlx::query!(
             r#"
             UPDATE factory_run
             SET outcome = $2, ended_at = now()
@@ -531,8 +539,21 @@ impl RunRepository for PgRunRepository {
             id.as_uuid(),
             outcome.as_ref(),
         )
-        .execute(&self.pool)
+        .execute(&mut *transaction)
         .await?;
+        if ended.rows_affected() == 1 && outcome == RunOutcome::Cancelled {
+            sqlx::query!(
+                r#"
+                UPDATE factory_step
+                SET outcome = 'cancelled', output = 'The run was cancelled.', ended_at = now()
+                WHERE run_id = $1 AND ended_at IS NULL
+                "#,
+                id.as_uuid(),
+            )
+            .execute(&mut *transaction)
+            .await?;
+        }
+        transaction.commit().await?;
         Ok(())
     }
 }

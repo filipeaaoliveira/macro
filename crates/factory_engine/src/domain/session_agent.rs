@@ -14,8 +14,9 @@ use agent_session::domain::routines::{
     RoutineSessionAction, RoutineSessionError, RoutineSessions, ValidateRoutineSession,
 };
 use bot_id::BotId;
-use factory_records::domain::models::{Outcome, StepSession};
+use factory_records::domain::models::{Outcome, StepKey, StepSession};
 use factory_records::domain::ports::RunRepository;
+use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
 use crate::domain::models::{AgentAnswer, AgentTask};
@@ -77,6 +78,20 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
         SessionAgentError::Records(rootcause::Report::new(error).into_dynamic())
     }
 
+    /// The first prompt of `owner`'s session `session`.
+    fn action(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        session: StepSession,
+    ) -> RoutineSessionAction {
+        RoutineSessionAction {
+            owner: owner.clone(),
+            bot_id: self.bot_id,
+            session_id: AgentSessionId::new_from_uuid(session.session_id),
+            action_id: AgentActionId::from_uuid(session.action_id),
+        }
+    }
+
     /// Wait for the first prompt's turn to end.
     async fn finished(&self, action: &RoutineSessionAction) -> Result<(), SessionAgentError> {
         let started = tokio::time::Instant::now();
@@ -102,16 +117,14 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
 impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
     type Err = SessionAgentError;
 
-    #[tracing::instrument(err, skip_all, fields(run_id = %task.run_id, step = %task.step))]
+    #[tracing::instrument(err, skip_all, fields(run_id = %task.key.run_id, seq = task.key.seq, step = %task.step))]
     async fn answer(&self, task: AgentTask) -> Result<AgentAnswer, SessionAgentError> {
         // A retried Step goes on in the session its first attempt claimed,
         // so the work is never started twice.
         let claimed = self
             .repo
             .claim_session(
-                task.run_id,
-                &task.entry,
-                task.visit,
+                task.key,
                 StepSession {
                     session_id: Uuid::now_v7(),
                     action_id: Uuid::now_v7(),
@@ -120,12 +133,7 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
             )
             .await
             .map_err(Self::records)?;
-        let action = RoutineSessionAction {
-            owner: task.owner.clone(),
-            bot_id: self.bot_id,
-            session_id: AgentSessionId::new_from_uuid(claimed.session.session_id),
-            action_id: AgentActionId::from_uuid(claimed.session.action_id),
-        };
+        let action = self.action(&task.owner, claimed.session);
 
         // The first attempt opens the session; a retry opens it only when
         // the session cannot be read, as when the attempt failed opening it.
@@ -167,7 +175,7 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
         self.finished(&action).await?;
         let handed = self
             .repo
-            .handed_back(task.run_id, &task.entry, task.visit)
+            .handed_back(task.key)
             .await
             .map_err(Self::records)?
             .ok_or(SessionAgentError::NothingHandedBack)?;
@@ -175,6 +183,23 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
             outcome: handed.outcome,
             text: handed.output,
         })
+    }
+
+    #[tracing::instrument(err, skip_all, fields(run_id = %key.run_id, seq = key.seq))]
+    async fn stop(
+        &self,
+        key: StepKey,
+        owner: &MacroUserIdStr<'static>,
+    ) -> Result<(), SessionAgentError> {
+        let claimed = self
+            .repo
+            .claimed_session(key)
+            .await
+            .map_err(Self::records)?;
+        if let Some(session) = claimed {
+            self.sessions.cancel(self.action(owner, session)).await?;
+        }
+        Ok(())
     }
 }
 

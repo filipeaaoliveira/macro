@@ -7,7 +7,6 @@
 import type {
   AnswerGateRequest,
   CreateRunRequest,
-  EntryId,
   ErrorResponse,
   HandBackRequest,
   LinkTaskRequest,
@@ -96,7 +95,7 @@ export const handBackFactoryStep = async (
 };
 
 /**
- * @summary Create a Run of a Flow and start its workflow.
+ * @summary Create a Run of a Flow, owned by the acting user, and start its workflow.
  */
 export type createFactoryRunResponse201 = {
   data: RunDetail;
@@ -123,6 +122,16 @@ export type createFactoryRunResponse500 = {
   status: 500;
 };
 
+export type createFactoryRunResponse502 = {
+  data: ErrorResponse;
+  status: 502;
+};
+
+export type createFactoryRunResponse503 = {
+  data: ErrorResponse;
+  status: 503;
+};
+
 export type createFactoryRunResponseSuccess = createFactoryRunResponse201 & {
   headers: Headers;
 };
@@ -131,6 +140,8 @@ export type createFactoryRunResponseError = (
   | createFactoryRunResponse401
   | createFactoryRunResponse403
   | createFactoryRunResponse500
+  | createFactoryRunResponse502
+  | createFactoryRunResponse503
 ) & {
   headers: Headers;
 };
@@ -165,11 +176,16 @@ export const createFactoryRun = async (
 };
 
 /**
- * @summary Read a Run and the Steps it took.
+ * @summary Read one of the acting user's Runs and the Steps it took.
  */
 export type getFactoryRunResponse200 = {
   data: RunDetail;
   status: 200;
+};
+
+export type getFactoryRunResponse400 = {
+  data: ErrorResponse;
+  status: 400;
 };
 
 export type getFactoryRunResponse401 = {
@@ -196,6 +212,7 @@ export type getFactoryRunResponseSuccess = getFactoryRunResponse200 & {
   headers: Headers;
 };
 export type getFactoryRunResponseError = (
+  | getFactoryRunResponse400
   | getFactoryRunResponse401
   | getFactoryRunResponse403
   | getFactoryRunResponse404
@@ -232,12 +249,18 @@ export const getFactoryRun = async (
 };
 
 /**
- * @summary Cancel a Run that has not ended. Its running Step or Gate stops, and
+ * @summary Cancel one of the acting user's Runs. Its running Step or Gate stops, and
 reading the Run shows it `cancelled` once its workflow recorded that.
+Cancelling a cancelled Run again is accepted and changes nothing.
  */
 export type cancelFactoryRunResponse202 = {
   data: void;
   status: 202;
+};
+
+export type cancelFactoryRunResponse400 = {
+  data: ErrorResponse;
+  status: 400;
 };
 
 export type cancelFactoryRunResponse401 = {
@@ -265,15 +288,28 @@ export type cancelFactoryRunResponse500 = {
   status: 500;
 };
 
+export type cancelFactoryRunResponse502 = {
+  data: ErrorResponse;
+  status: 502;
+};
+
+export type cancelFactoryRunResponse503 = {
+  data: ErrorResponse;
+  status: 503;
+};
+
 export type cancelFactoryRunResponseSuccess = cancelFactoryRunResponse202 & {
   headers: Headers;
 };
 export type cancelFactoryRunResponseError = (
+  | cancelFactoryRunResponse400
   | cancelFactoryRunResponse401
   | cancelFactoryRunResponse403
   | cancelFactoryRunResponse404
   | cancelFactoryRunResponse409
   | cancelFactoryRunResponse500
+  | cancelFactoryRunResponse502
+  | cancelFactoryRunResponse503
 ) & {
   headers: Headers;
 };
@@ -306,8 +342,9 @@ export const cancelFactoryRun = async (
 };
 
 /**
- * @summary Answer the Gate a Run waits on. The Run goes on once its workflow took
-the answer; reading the Run shows the answer once it is recorded.
+ * @summary Answer, as the acting user, the Gate one of their Runs waits on. The Run
+goes on once its workflow took the answer; reading the Run shows the
+answer once it is recorded.
  */
 export type answerFactoryGateResponse202 = {
   data: void;
@@ -344,6 +381,16 @@ export type answerFactoryGateResponse500 = {
   status: 500;
 };
 
+export type answerFactoryGateResponse502 = {
+  data: ErrorResponse;
+  status: 502;
+};
+
+export type answerFactoryGateResponse503 = {
+  data: ErrorResponse;
+  status: 503;
+};
+
 export type answerFactoryGateResponseSuccess = answerFactoryGateResponse202 & {
   headers: Headers;
 };
@@ -354,6 +401,8 @@ export type answerFactoryGateResponseError = (
   | answerFactoryGateResponse404
   | answerFactoryGateResponse409
   | answerFactoryGateResponse500
+  | answerFactoryGateResponse502
+  | answerFactoryGateResponse503
 ) & {
   headers: Headers;
 };
@@ -362,22 +411,17 @@ export type answerFactoryGateResponse =
   | answerFactoryGateResponseSuccess
   | answerFactoryGateResponseError;
 
-export const getAnswerFactoryGateUrl = (
-  id: RunId,
-  entry: EntryId,
-  visit: number
-) => {
-  return `/runs/${id}/gates/${entry}/${visit}/answer`;
+export const getAnswerFactoryGateUrl = (id: RunId, seq: number) => {
+  return `/runs/${id}/steps/${seq}/answer`;
 };
 
 export const answerFactoryGate = async (
   id: RunId,
-  entry: EntryId,
-  visit: number,
+  seq: number,
   answerGateRequest: AnswerGateRequest,
   options?: RequestInit
 ): Promise<answerFactoryGateResponse> => {
-  const res = await fetch(getAnswerFactoryGateUrl(id, entry, visit), {
+  const res = await fetch(getAnswerFactoryGateUrl(id, seq), {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
@@ -395,7 +439,8 @@ export const answerFactoryGate = async (
 };
 
 /**
- * @summary Link a Run to the Macro task it works on, replacing any task it had.
+ * @summary Link one of the acting user's Runs to a Macro task they can see,
+replacing any task it had.
  */
 export type linkFactoryRunTaskResponse200 = {
   data: RunDetail;

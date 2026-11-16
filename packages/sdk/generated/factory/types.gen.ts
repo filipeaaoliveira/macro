@@ -16,10 +16,6 @@ export type AnswerGateRequest = {
      * What the person adds, for the Run's later Steps to read.
      */
     note?: string | null;
-    /**
-     * Who answered.
-     */
-    userId: MacroUserIdStr;
 };
 
 /**
@@ -40,10 +36,6 @@ export type CreateRunRequest = {
      * The Macro task the Run works on: its task document's id.
      */
     taskId?: string | null;
-    /**
-     * Who starts the Run: its owner, as whom its agent Steps run.
-     */
-    userId: MacroUserIdStr;
 };
 
 /**
@@ -209,6 +201,10 @@ export type Step = {
     entry: EntryId;
     gate?: null | Gate;
     /**
+     * The Step's place among the Run's Steps, from 1.
+     */
+    seq: number;
+    /**
      * When the Step started.
      */
     startedAt: string;
@@ -271,6 +267,8 @@ export type CreateFactoryRunErrors = {
     401: ErrorResponse;
     403: ErrorResponse;
     500: ErrorResponse;
+    502: ErrorResponse;
+    503: ErrorResponse;
 };
 
 export type CreateFactoryRunError = CreateFactoryRunErrors[keyof CreateFactoryRunErrors];
@@ -294,6 +292,7 @@ export type GetFactoryRunData = {
 };
 
 export type GetFactoryRunErrors = {
+    400: ErrorResponse;
     401: ErrorResponse;
     403: ErrorResponse;
     404: ErrorResponse;
@@ -321,11 +320,14 @@ export type CancelFactoryRunData = {
 };
 
 export type CancelFactoryRunErrors = {
+    400: ErrorResponse;
     401: ErrorResponse;
     403: ErrorResponse;
     404: ErrorResponse;
     409: ErrorResponse;
     500: ErrorResponse;
+    502: ErrorResponse;
+    503: ErrorResponse;
 };
 
 export type CancelFactoryRunError = CancelFactoryRunErrors[keyof CancelFactoryRunErrors];
@@ -342,16 +344,12 @@ export type AnswerFactoryGateData = {
          */
         id: RunId;
         /**
-         * The entry whose Step asked.
+         * The place, among the Run's Steps, of the Step whose Gate it answers.
          */
-        entry: EntryId;
-        /**
-         * Which visit of the entry asked.
-         */
-        visit: number;
+        seq: number;
     };
     query?: never;
-    url: '/runs/{id}/gates/{entry}/{visit}/answer';
+    url: '/runs/{id}/steps/{seq}/answer';
 };
 
 export type AnswerFactoryGateErrors = {
@@ -361,6 +359,8 @@ export type AnswerFactoryGateErrors = {
     404: ErrorResponse;
     409: ErrorResponse;
     500: ErrorResponse;
+    502: ErrorResponse;
+    503: ErrorResponse;
 };
 
 export type AnswerFactoryGateError = AnswerFactoryGateErrors[keyof AnswerFactoryGateErrors];

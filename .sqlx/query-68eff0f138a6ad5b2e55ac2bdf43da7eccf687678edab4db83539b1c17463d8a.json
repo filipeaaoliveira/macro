@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO factory_gate (run_id, seq, question, answers)\n            VALUES ($1, $2, $3, $4)\n            ON CONFLICT (run_id, seq) DO NOTHING\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Text",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "68eff0f138a6ad5b2e55ac2bdf43da7eccf687678edab4db83539b1c17463d8a"
+}

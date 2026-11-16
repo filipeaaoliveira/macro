@@ -1,5 +1,8 @@
 //! A [`StepAgent`] for a machine where no agent can run.
 
+use factory_records::domain::models::StepKey;
+use macro_user_id::user_id::MacroUserIdStr;
+
 use crate::domain::models::{AgentAnswer, AgentTask};
 use crate::domain::ports::StepAgent;
 
@@ -17,7 +20,7 @@ pub struct LocalAgent;
 impl StepAgent for LocalAgent {
     type Err = NoOutcome;
 
-    #[tracing::instrument(err, skip_all, fields(run_id = %task.run_id, step = %task.step))]
+    #[tracing::instrument(err, skip_all, fields(run_id = %task.key.run_id, step = %task.step))]
     async fn answer(&self, task: AgentTask) -> Result<AgentAnswer, NoOutcome> {
         let outcome = task.outcomes.first().cloned().ok_or(NoOutcome)?;
         Ok(AgentAnswer {
@@ -27,5 +30,9 @@ impl StepAgent for LocalAgent {
                 task.prompt
             ),
         })
+    }
+
+    async fn stop(&self, _key: StepKey, _owner: &MacroUserIdStr<'static>) -> Result<(), NoOutcome> {
+        Ok(())
     }
 }

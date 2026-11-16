@@ -22,7 +22,7 @@ fn walk(flow: &Flow, outcomes: &[&str]) -> (Vec<String>, Result<RunOutcome, Inte
         match interpreter.next_step(&mut state) {
             Ok(NextStep::End(end)) => return (steps, Ok(end)),
             Err(error) => return (steps, Err(error)),
-            Ok(NextStep::Run { entry, visit }) => {
+            Ok(NextStep::Run { entry, visit, .. }) => {
                 steps.push(format!("{}#{visit}", entry.id));
                 let next = outcomes
                     .next()
@@ -79,10 +79,11 @@ fn an_outcome_without_a_transition_goes_to_the_entry_below() {
         )
         .expect("plan has a way on");
 
-    let NextStep::Run { entry, visit } = interpreter.next_step(&mut state).expect("next") else {
+    let NextStep::Run { entry, visit, seq } = interpreter.next_step(&mut state).expect("next")
+    else {
         panic!("the run ended after plan");
     };
-    assert_eq!((entry.id.as_str(), visit), ("write", 1));
+    assert_eq!((entry.id.as_str(), visit, seq), ("write", 1, 2));
 }
 
 #[test]
@@ -260,4 +261,45 @@ fn a_flow_that_skips_every_entry_it_reaches_stops_instead_of_looping() {
 
     assert!(steps.is_empty());
     assert_eq!(end, Err(InterpreterError::NoStepToRun));
+}
+
+/// A reset takes an entry's visits back to 1, so `max_visits` alone does not
+/// stop a Flow that loops: the Run's cap on Steps does.
+#[test]
+fn a_flow_that_loops_forever_ends_blocked_at_the_most_steps() {
+    let looping = flow(
+        r#"{
+            "entries": [
+                { "id": "work", "step": "work", "max_visits": 2,
+                  "on": { "done": [{ "to": { "kind": "entry", "entry": "again" } }] } },
+                { "id": "again", "step": "again",
+                  "on": { "done": [{ "to": { "kind": "entry", "entry": "work" }, "reset": ["work"] }] } }
+            ]
+        }"#,
+    );
+    let interpreter = Interpreter::new(&looping);
+    let mut state = interpreter.start();
+    let mut places = Vec::new();
+
+    let end = loop {
+        match interpreter.next_step(&mut state).expect("next") {
+            NextStep::End(end) => break end,
+            NextStep::Run { seq, .. } => {
+                places.push(seq);
+                interpreter
+                    .record(&mut state, &Outcome::done())
+                    .expect("record");
+            }
+        }
+    };
+
+    assert_eq!(end, RunOutcome::Blocked);
+    assert_eq!(
+        places.len(),
+        usize::from(factory_records::domain::models::MAX_STEPS)
+    );
+    assert_eq!(
+        places.last(),
+        Some(&factory_records::domain::models::MAX_STEPS)
+    );
 }

@@ -4,8 +4,10 @@
 #[cfg(test)]
 mod test;
 
+use agent_session::domain::session_task::TaskDocumentId;
 use factory_records::domain::models::{
-    HandBack, MAX_NOTE_BYTES, MAX_OUTPUT_BYTES, MAX_REQUEST_BYTES, RunId, TaskLink,
+    HandBack, MAX_NOTE_BYTES, MAX_OUTPUT_BYTES, MAX_REQUEST_BYTES, Outcome, Run, RunId, RunInsert,
+    RunOutcome, TaskLink,
 };
 use factory_records::domain::ports::{RunRepository, UserDirectory};
 use macro_user_id::user_id::MacroUserIdStr;
@@ -14,15 +16,25 @@ use uuid::Uuid;
 use crate::domain::flow::Flow;
 use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening};
 use crate::domain::models::{
-    FactoryError, RunDetail, RunFinish, RunStart, StepError, StepInput, StepReport, StepRequest,
+    FactoryError, RunDetail, RunFinish, RunStart, StepEnding, StepError, StepInput, StepReport,
+    StepRequest,
 };
 use crate::domain::ports::{
-    AnswerDelivery, FactoryService, RunWorkflows, StepExecutor, StepService, TaskAccess,
-    TaskDirectory,
+    AnswerDelivery, FactoryService, RunWorkflows, RunWorkflowsError, StepExecutor, StepService,
+    TaskAccess, TaskDirectory,
 };
 
 fn internal(error: impl std::error::Error + Send + Sync + 'static) -> rootcause::Report {
     rootcause::Report::new(error).into_dynamic()
+}
+
+impl From<RunWorkflowsError> for FactoryError {
+    fn from(error: RunWorkflowsError) -> Self {
+        match error {
+            RunWorkflowsError::Unavailable(upstream) => FactoryError::Upstream(upstream),
+            RunWorkflowsError::Other(report) => FactoryError::Internal(report),
+        }
+    }
 }
 
 /// The Run API, over the Run records, the Runs' workflows, the worker that
@@ -64,15 +76,17 @@ where
         }
     }
 
-    /// Fails unless `task_id` is a task `user_id` can see.
+    /// Fails unless the task document `task_id` is a task `user_id` can see.
     async fn visible_task(
         &self,
         user_id: &MacroUserIdStr<'static>,
         task_id: Uuid,
     ) -> Result<(), FactoryError> {
+        let task =
+            TaskDocumentId::parse(&task_id.to_string()).map_err(|_| FactoryError::UnknownTask)?;
         match self
             .tasks
-            .task_access(user_id, task_id)
+            .task_access(user_id, &task)
             .await
             .map_err(internal)?
         {
@@ -82,17 +96,38 @@ where
         }
     }
 
-    /// Fails unless the Run exists and has not ended.
-    async fn running(&self, id: RunId) -> Result<(), FactoryError> {
-        let run = self
-            .repo
+    /// `actor`'s Run. Someone else's Run reads as missing, so a Run id says
+    /// nothing to anyone but its owner.
+    async fn owned_run(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        id: RunId,
+    ) -> Result<Run, FactoryError> {
+        self.repo
             .get_run(id)
             .await
             .map_err(internal)?
-            .ok_or(FactoryError::NotFound)?;
-        match run.end {
-            Some(_) => Err(FactoryError::RunEnded),
-            None => Ok(()),
+            .filter(|run| run.user_id == *actor)
+            .ok_or(FactoryError::NotFound)
+    }
+
+    /// Remove a Run whose workflow did not start, unless it did after all:
+    /// a start that failed after the server took it leaves a workflow
+    /// behind, which needs its Run.
+    async fn forget_unstarted(&self, run_id: RunId) {
+        match self.workflows.exists(run_id).await {
+            Ok(false) => {
+                if let Err(cleanup) = self.repo.delete_run(run_id).await {
+                    tracing::error!(error = ?cleanup, "failed to remove a run whose workflow did not start");
+                }
+            }
+            Ok(true) => {}
+            Err(error) => {
+                tracing::error!(
+                    ?error,
+                    "could not tell whether a run's workflow started; the run is kept"
+                );
+            }
         }
     }
 }
@@ -105,12 +140,12 @@ where
     U: UserDirectory,
     T: TaskDirectory,
 {
-    #[tracing::instrument(err, skip_all, fields(run_id = tracing::field::Empty))]
+    #[tracing::instrument(skip_all, fields(run_id = tracing::field::Empty))]
     async fn create_run(
         &self,
+        actor: MacroUserIdStr<'static>,
         definition: serde_json::Value,
         request: String,
-        user_id: MacroUserIdStr<'static>,
         task_id: Option<Uuid>,
     ) -> Result<RunDetail, FactoryError> {
         let flow = Flow::parse(definition, |step| self.executor.serves(step))?;
@@ -122,48 +157,31 @@ where
                 max: MAX_REQUEST_BYTES,
             });
         }
-
-        self.known(&user_id).await?;
+        self.known(&actor).await?;
         if let Some(task_id) = task_id {
-            self.visible_task(&user_id, task_id).await?;
+            self.visible_task(&actor, task_id).await?;
         }
 
+        // The Run and its task are kept in one write, so a task deleted
+        // since it was checked leaves nothing behind.
         let run_id = RunId::generate();
         tracing::Span::current().record("run_id", tracing::field::display(run_id));
-        let mut run = self
+        let run = match self
             .repo
-            .insert_run(run_id, &request, &user_id)
+            .insert_run(run_id, &request, &actor, task_id)
             .await
-            .map_err(internal)?;
-
-        // A task deleted since it was checked leaves no Run behind.
-        if let Some(task_id) = task_id {
-            let linked = self.repo.link_task(run_id, task_id).await;
-            if !matches!(linked, Ok(TaskLink::Linked)) {
-                if let Err(cleanup) = self.repo.delete_run(run_id).await {
-                    tracing::error!(error = ?cleanup, "failed to remove a run whose task did not link");
-                }
-                return match linked {
-                    Err(error) => Err(internal(error).into()),
-                    Ok(_) => Err(FactoryError::UnknownTask),
-                };
-            }
-            run.task_id = Some(task_id);
-        }
+            .map_err(internal)?
+        {
+            RunInsert::Inserted(run) => run,
+            RunInsert::NoSuchTask => return Err(FactoryError::UnknownTask),
+        };
 
         // The Run is recorded before its workflow starts, so the workflow can
-        // record its Steps against it. A workflow that does not start leaves
-        // no Run behind.
-        let start = RunStart {
-            run_id,
-            flow,
-            request,
-        };
+        // record its Steps against it.
+        let start = RunStart { run_id, flow };
         if let Err(error) = self.workflows.start(&start).await {
-            if let Err(cleanup) = self.repo.delete_run(run_id).await {
-                tracing::error!(error = ?cleanup, "failed to remove a run whose workflow did not start");
-            }
-            return Err(internal(error).into());
+            self.forget_unstarted(run_id).await;
+            return Err(error.into());
         }
 
         Ok(RunDetail {
@@ -172,55 +190,83 @@ where
         })
     }
 
-    #[tracing::instrument(err, skip(self))]
-    async fn get_run(&self, id: RunId) -> Result<RunDetail, FactoryError> {
-        let run = self
-            .repo
-            .get_run(id)
-            .await
-            .map_err(internal)?
-            .ok_or(FactoryError::NotFound)?;
+    #[tracing::instrument(skip(self, actor))]
+    async fn get_run(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        id: RunId,
+    ) -> Result<RunDetail, FactoryError> {
+        let run = self.owned_run(actor, id).await?;
         let steps = self.repo.list_steps(id).await.map_err(internal)?;
         Ok(RunDetail { run, steps })
     }
 
-    #[tracing::instrument(err, skip(self))]
-    async fn link_task(&self, id: RunId, task_id: Uuid) -> Result<RunDetail, FactoryError> {
-        let run = self
-            .repo
-            .get_run(id)
-            .await
-            .map_err(internal)?
-            .ok_or(FactoryError::NotFound)?;
-        self.visible_task(&run.user_id, task_id).await?;
+    #[tracing::instrument(skip(self, actor))]
+    async fn link_task(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        id: RunId,
+        task_id: Uuid,
+    ) -> Result<RunDetail, FactoryError> {
+        self.owned_run(actor, id).await?;
+        self.visible_task(actor, task_id).await?;
 
         match self.repo.link_task(id, task_id).await.map_err(internal)? {
-            TaskLink::Linked => self.get_run(id).await,
+            TaskLink::Linked => self.get_run(actor, id).await,
             TaskLink::NoSuchRun => Err(FactoryError::NotFound),
             TaskLink::NoSuchTask => Err(FactoryError::UnknownTask),
         }
     }
 
-    #[tracing::instrument(err, skip(self, answer), fields(entry = %answer.entry, visit = answer.visit))]
-    async fn answer_gate(&self, id: RunId, answer: AnswerGate) -> Result<(), FactoryError> {
-        let note_bytes = answer.note.as_ref().map_or(0, String::len);
+    #[tracing::instrument(skip(self, actor, answer, note), fields(answer = %answer))]
+    async fn answer_gate(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        id: RunId,
+        seq: u16,
+        answer: Outcome,
+        note: Option<String>,
+    ) -> Result<(), FactoryError> {
+        let note_bytes = note.as_ref().map_or(0, String::len);
         if note_bytes > MAX_NOTE_BYTES {
             return Err(FactoryError::NoteTooLarge {
                 max: MAX_NOTE_BYTES,
             });
         }
-        self.known(&answer.user_id).await?;
-        self.running(id).await?;
+        self.known(&actor).await?;
+        let run = self.owned_run(&actor, id).await?;
+        if run.end.is_some() {
+            return Err(FactoryError::RunEnded);
+        }
 
-        // The workflow decides whether it takes the answer: only it knows
-        // which Gate it waits on right now.
-        match self.workflows.answer(id, &answer).await.map_err(internal)? {
+        // An answer the recorded Gate does not offer is the caller's mistake;
+        // which Gate the Run waits on right now only its workflow knows.
+        let steps = self.repo.list_steps(id).await.map_err(internal)?;
+        let gate = steps
+            .iter()
+            .find(|step| step.seq == seq)
+            .and_then(|step| step.gate.as_ref());
+        if let Some(gate) = gate
+            && !gate.answers.contains(&answer)
+        {
+            return Err(FactoryError::AnswerNotOffered {
+                offered: gate.answers.iter().map(|a| a.as_str().to_owned()).collect(),
+            });
+        }
+
+        let answer = AnswerGate {
+            seq,
+            answer,
+            note,
+            user_id: actor,
+        };
+        match self.workflows.answer(id, &answer).await? {
             AnswerDelivery::Taken => Ok(()),
             AnswerDelivery::Refused(why) => Err(FactoryError::AnswerRefused(why)),
         }
     }
 
-    #[tracing::instrument(err, skip(self, user_id, hand_back), fields(outcome = %hand_back.outcome))]
+    #[tracing::instrument(skip(self, user_id, hand_back), fields(outcome = %hand_back.outcome))]
     async fn hand_back(
         &self,
         session_id: Uuid,
@@ -258,16 +304,27 @@ where
         Ok(())
     }
 
-    #[tracing::instrument(err, skip(self))]
-    async fn cancel_run(&self, id: RunId) -> Result<(), FactoryError> {
-        self.running(id).await?;
-        self.workflows.cancel(id).await.map_err(internal)?;
-        Ok(())
+    #[tracing::instrument(skip(self, actor))]
+    async fn cancel_run(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        id: RunId,
+    ) -> Result<(), FactoryError> {
+        let run = self.owned_run(actor, id).await?;
+        match run.end.map(|end| end.outcome) {
+            None => {
+                self.workflows.cancel(id).await?;
+                Ok(())
+            }
+            // Cancelling again is what the first cancel already did.
+            Some(RunOutcome::Cancelled) => Ok(()),
+            Some(_) => Err(FactoryError::RunEnded),
+        }
     }
 }
 
-/// What a Run's worker does for its workflow: run and record Steps, and
-/// record the Run's end.
+/// What a Run's worker does for its workflow: run Steps, and record Steps,
+/// Gates and the Run's end, each on its own.
 #[derive(Debug, Clone)]
 pub struct StepServiceImpl<R, E> {
     repo: R,
@@ -283,6 +340,14 @@ where
     pub fn new(repo: R, executor: E) -> Self {
         Self { repo, executor }
     }
+
+    async fn run_of(&self, request: &StepRequest) -> Result<Run, StepError> {
+        self.repo
+            .get_run(request.key.run_id)
+            .await
+            .map_err(internal)?
+            .ok_or(StepError::NoSuchRun)
+    }
 }
 
 impl<R, E> StepService for StepServiceImpl<R, E>
@@ -290,38 +355,32 @@ where
     R: RunRepository,
     E: StepExecutor,
 {
-    #[tracing::instrument(
-        err,
-        skip_all,
-        fields(run_id = %request.run_id, entry = %request.entry, visit = request.visit)
-    )]
-    async fn run_step(&self, request: StepRequest) -> Result<StepReport, StepError> {
+    #[tracing::instrument(err, skip_all, fields(run_id = %request.key.run_id, seq = request.key.seq))]
+    async fn start_step(&self, request: StepRequest) -> Result<(), StepError> {
         self.repo
-            .start_step(request.run_id, &request.entry, request.visit)
+            .start_step(request.key, &request.entry, request.visit)
             .await
             .map_err(internal)?;
+        Ok(())
+    }
+
+    #[tracing::instrument(err, skip_all, fields(run_id = %request.key.run_id, seq = request.key.seq))]
+    async fn run_step(&self, request: StepRequest) -> Result<StepReport, StepError> {
+        let run = self.run_of(&request).await?;
 
         // The Step reads what the Run's Steps before it produced.
         let earlier: Vec<_> = self
             .repo
-            .list_steps(request.run_id)
+            .list_steps(request.key.run_id)
             .await
             .map_err(internal)?
             .into_iter()
-            .filter(|step| step.end.is_some())
+            .filter(|step| step.seq < request.key.seq && step.end.is_some())
             .collect();
-        let run = self
-            .repo
-            .get_run(request.run_id)
-            .await
-            .map_err(internal)?
-            .ok_or(StepError::NoSuchRun)?;
         let input = StepInput {
-            run_id: request.run_id,
+            key: request.key,
             owner: &run.user_id,
-            entry: &request.entry,
-            visit: request.visit,
-            request: &request.request,
+            request: &run.request,
             earlier: &earlier,
         };
         let report = self
@@ -334,43 +393,43 @@ where
                 max: MAX_OUTPUT_BYTES,
             });
         }
-
-        self.repo
-            .end_step(
-                request.run_id,
-                &request.entry,
-                request.visit,
-                &report.outcome,
-                &report.output,
-            )
-            .await
-            .map_err(internal)?;
         Ok(report)
     }
 
-    #[tracing::instrument(err, skip_all, fields(run_id = %opening.run_id, entry = %opening.entry))]
-    async fn open_gate(&self, opening: GateOpening) -> Result<(), StepError> {
-        self.repo
-            .open_gate(
-                opening.run_id,
-                &opening.entry,
-                opening.visit,
-                &opening.question,
-                &opening.answers,
-            )
+    #[tracing::instrument(err, skip_all, fields(run_id = %request.key.run_id, seq = request.key.seq))]
+    async fn stop_step(&self, request: StepRequest) -> Result<(), StepError> {
+        let run = self.run_of(&request).await?;
+        self.executor
+            .stop(&request.step, request.key, &run.user_id)
             .await
             .map_err(internal)?;
         Ok(())
     }
 
-    #[tracing::instrument(err, skip_all, fields(run_id = %answered.run_id, entry = %answered.answer.entry))]
+    #[tracing::instrument(err, skip_all, fields(run_id = %ending.key.run_id, seq = ending.key.seq, outcome = %ending.report.outcome))]
+    async fn end_step(&self, ending: StepEnding) -> Result<(), StepError> {
+        self.repo
+            .end_step(ending.key, &ending.report.outcome, &ending.report.output)
+            .await
+            .map_err(internal)?;
+        Ok(())
+    }
+
+    #[tracing::instrument(err, skip_all, fields(run_id = %opening.key.run_id, seq = opening.key.seq))]
+    async fn open_gate(&self, opening: GateOpening) -> Result<(), StepError> {
+        self.repo
+            .open_gate(opening.key, &opening.question, &opening.answers)
+            .await
+            .map_err(internal)?;
+        Ok(())
+    }
+
+    #[tracing::instrument(err, skip_all, fields(run_id = %answered.key.run_id, seq = answered.key.seq))]
     async fn answer_gate(&self, answered: GateAnswered) -> Result<(), StepError> {
         let answer = &answered.answer;
         self.repo
             .answer_gate(
-                answered.run_id,
-                &answer.entry,
-                answer.visit,
+                answered.key,
                 &answer.answer,
                 answer.note.as_deref(),
                 &answer.user_id,

@@ -1,12 +1,12 @@
 //! [`TaskDirectory`] over Macro's entity access checks and the document
 //! storage service.
 
+use agent_session::domain::session_task::TaskDocumentId;
 use document_storage_service_client::DocumentStorageServiceClient;
 use document_sub_type::DocumentSubType;
 use entity_access::domain::models::{AccessError, EntityType, ViewAccessLevel};
 use entity_access::domain::ports::EntityAccessService;
 use macro_user_id::user_id::MacroUserIdStr;
-use uuid::Uuid;
 
 use crate::domain::ports::{TaskAccess, TaskDirectory};
 
@@ -40,13 +40,13 @@ pub enum DocumentTaskDirectoryErr {
 impl<A: EntityAccessService> TaskDirectory for DocumentTaskDirectory<A> {
     type Err = DocumentTaskDirectoryErr;
 
-    #[tracing::instrument(err, skip(self, user_id))]
+    #[tracing::instrument(err, skip(self, user_id), fields(task = task.as_str()))]
     async fn task_access(
         &self,
         user_id: &MacroUserIdStr<'static>,
-        task_id: Uuid,
+        task: &TaskDocumentId,
     ) -> Result<TaskAccess, Self::Err> {
-        let document_id = task_id.to_string();
+        let document_id = task.as_str();
 
         // A hidden document and a missing one are the same answer.
         let receipt = self
@@ -54,7 +54,7 @@ impl<A: EntityAccessService> TaskDirectory for DocumentTaskDirectory<A> {
             .generate_entity_access_receipt::<ViewAccessLevel>(
                 user_id,
                 None,
-                &document_id,
+                document_id,
                 EntityType::Document,
             )
             .await;
@@ -71,7 +71,7 @@ impl<A: EntityAccessService> TaskDirectory for DocumentTaskDirectory<A> {
 
         let document = self
             .documents
-            .get_document_basic(&document_id)
+            .get_document_basic(document_id)
             .await
             .map_err(DocumentTaskDirectoryErr::Documents)?;
         let Some(document) = document.filter(|document| document.deleted_at.is_none()) else {

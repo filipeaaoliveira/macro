@@ -4,7 +4,8 @@
 #[cfg(test)]
 mod test;
 
-use factory_records::domain::models::Outcome;
+use factory_records::domain::models::{Outcome, StepKey};
+use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::flow::StepName;
 use crate::domain::models::{AgentTask, StepInput, StepReport};
@@ -79,10 +80,8 @@ impl<A: StepAgent> BuiltInSteps<A> {
         input: StepInput<'_>,
     ) -> Result<StepReport, BuiltInStepError> {
         let task = AgentTask {
-            run_id: input.run_id,
+            key: input.key,
             owner: input.owner.clone(),
-            entry: input.entry.clone(),
-            visit: input.visit,
             step: step.clone(),
             prompt: prompt(instructions, &outcomes, input),
             outcomes: outcomes.clone(),
@@ -132,6 +131,23 @@ impl<A: StepAgent> StepExecutor for BuiltInSteps<A> {
                 self.ask_agent(step, WRITE_INSTRUCTIONS, outcomes, input)
                     .await
             }
+        }
+    }
+
+    async fn stop(
+        &self,
+        step: &StepName,
+        key: StepKey,
+        owner: &MacroUserIdStr<'static>,
+    ) -> Result<(), BuiltInStepError> {
+        match BuiltInStep::named(step) {
+            Some(BuiltInStep::Plan | BuiltInStep::Write) => {
+                self.agent.stop(key, owner).await.map_err(|error| {
+                    BuiltInStepError::Agent(rootcause::Report::new(error).into_dynamic())
+                })
+            }
+            // A reply is done before anything could stop it.
+            Some(BuiltInStep::Reply) | None => Ok(()),
         }
     }
 }

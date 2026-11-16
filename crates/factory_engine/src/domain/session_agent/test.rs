@@ -6,7 +6,7 @@ use agent_session::domain::routines::{
     RoutineSessions, ValidateRoutineSession, ValidatedRoutineSession,
 };
 use bot_id::BotId;
-use factory_records::domain::models::{EntryId, HandBack, Outcome, RunId};
+use factory_records::domain::models::{EntryId, HandBack, Outcome, RunId, RunInsert, StepKey};
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
@@ -29,6 +29,7 @@ struct FakeSessions {
     prompted: bool,
     prepared: Arc<Mutex<Vec<PrepareRoutineSession>>>,
     prompts: Arc<Mutex<Vec<PromptRoutineSession>>>,
+    cancelled: Arc<Mutex<Vec<RoutineSessionAction>>>,
 }
 
 impl FakeSessions {
@@ -40,6 +41,7 @@ impl FakeSessions {
             prompted: false,
             prepared: Arc::default(),
             prompts: Arc::default(),
+            cancelled: Arc::default(),
         }
     }
 }
@@ -91,7 +93,8 @@ impl RoutineSessions for FakeSessions {
         Ok(self.status)
     }
 
-    async fn cancel(&self, _command: RoutineSessionAction) -> Result<(), RoutineSessionError> {
+    async fn cancel(&self, command: RoutineSessionAction) -> Result<(), RoutineSessionError> {
+        self.cancelled.lock().expect("cancelled").push(command);
         Ok(())
     }
 }
@@ -103,16 +106,21 @@ fn julia() -> MacroUserIdStr<'static> {
 /// A `plan` task of a new Run of Julia's, its Step started.
 async fn plan_task(repo: &FakeRepo) -> AgentTask {
     let run = repo
-        .insert_run(RunId::generate(), "Add a dark mode toggle", &julia())
+        .insert_run(RunId::generate(), "Add a dark mode toggle", &julia(), None)
         .await
         .expect("insert");
-    let entry = EntryId::try_from("plan".to_string()).expect("valid");
-    repo.start_step(run.id, &entry, 1).await.expect("start");
-    AgentTask {
+    let RunInsert::Inserted(run) = run else {
+        panic!("a run with no task is kept");
+    };
+    let key = StepKey {
         run_id: run.id,
+        seq: 1,
+    };
+    let entry = EntryId::try_from("plan".to_string()).expect("valid");
+    repo.start_step(key, &entry, 1).await.expect("start");
+    AgentTask {
+        key,
         owner: julia(),
-        entry,
-        visit: 1,
         step: StepName::try_from("plan".to_string()).expect("valid"),
         prompt: "Plan the change".to_string(),
         outcomes: vec![Outcome::done()],
@@ -200,4 +208,29 @@ async fn a_turn_that_fails_fails_the_step() {
         failed,
         Err(SessionAgentError::TurnFailed(RoutineFailureReason::Refusal))
     ));
+}
+
+#[tokio::test]
+async fn stopping_a_step_cancels_the_session_it_claimed() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
+    let agent = SessionAgent::new(
+        sessions.clone(),
+        repo.clone(),
+        BotId::new_from_uuid(Uuid::now_v7()),
+    );
+    let task = plan_task(&repo).await;
+    let key = task.key;
+    agent.answer(task).await.expect("answer");
+
+    agent.stop(key, &julia()).await.expect("stop");
+
+    let claimed = repo
+        .claimed_session(key)
+        .await
+        .expect("read")
+        .expect("claimed");
+    let cancelled = sessions.cancelled.lock().expect("cancelled").clone();
+    assert_eq!(cancelled.len(), 1);
+    assert_eq!(cancelled[0].session_id.as_uuid(), claimed.session_id);
 }
