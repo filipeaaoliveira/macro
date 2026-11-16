@@ -8,7 +8,7 @@ import {
   waitFor,
 } from '@solidjs/testing-library';
 import { createSignal } from 'solid-js';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   type RunActionResult,
   type RunsContext,
@@ -25,6 +25,10 @@ vi.mock('@core/component/Toast/Toast', () => ({
 vi.mock('@app/features/block-agent/component/parts/TextPart', () => ({
   TextPart: (props: { text: string }) => <div>{props.text}</div>,
 }));
+
+beforeAll(() => {
+  Element.prototype.scrollIntoView = vi.fn();
+});
 
 // The shared collapse animation measures with ResizeObserver, which jsdom lacks.
 vi.stubGlobal(
