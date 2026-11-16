@@ -1,0 +1,37 @@
+# agent_harness_service_client
+
+## What it is
+
+Part of agent sessions: the HTTP client other services use to run agent
+sessions through `agent_harness_service`'s internal routes. It implements the
+`RoutineSessions` port of `crates/agent_session` over
+`/internal/routine-sessions/*`.
+
+## Start here
+
+- `src/routine_sessions.rs`: `AgentSessionClient`, each operation's route and
+  timeout, and how HTTP failures map onto `RoutineSessionError`.
+
+## Scope
+
+- Owns: the transport. No credentials beyond the internal key, no retries, no
+  usage accounting, no provisioning.
+- Not here: the capability and its rules → `crates/agent_session`
+  (`domain/routines.rs`); the routes → `crates/agent_session/src/inbound/routine_sessions.rs`.
+
+## Boundaries
+
+- Depends on: `agent_session` (domain only), `macro_authorization` (the
+  internal key header), `macro_tower_layers` (trace propagation).
+- Used by: `services/agent_harness_service` (routines' scheduler),
+  `services/factory_service` (the software factory's agent Steps).
+
+## Checks
+
+- `cargo test -p agent_harness_service_client`
+
+## Gotchas
+
+- Prepare and prompt are never replayed after an ambiguous failure: the
+  client maps them to `OperationFailed` and `PromptDeliveryUnknown` and leaves
+  recovery to the caller.

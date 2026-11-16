@@ -21,6 +21,7 @@ mod routine_analytics;
 mod routine_drafting;
 mod routine_run_notifications;
 pub mod routine_suggestions;
+use agent_harness_service_client::routine_sessions::AgentSessionClient;
 use config::Config;
 use scheduled_action::domain::code_upgrade;
 use scheduled_action::domain::drafts::finding::DraftFinding;
@@ -56,7 +57,6 @@ use scheduled_action::inbound::suggestion_router::{
 use scheduled_action::inbound::template_router::{
     RoutineTemplateRouterState, routine_template_router,
 };
-use scheduled_action::outbound::agent_session_client::AgentSessionClient;
 use scheduled_action::outbound::conn_gateway_live_updates::ConnGatewayLiveUpdates;
 use scheduled_action::outbound::event_access::EventAccessAdapter;
 use scheduled_action::outbound::event_content::EventContentAdapter;

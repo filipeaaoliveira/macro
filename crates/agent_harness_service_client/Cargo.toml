@@ -1,0 +1,26 @@
+[package]
+edition = "2024"
+name = "agent_harness_service_client"
+publish = false
+version = "0.1.0"
+
+[dependencies]
+agent_session = { path = "../agent_session", default-features = false, features = ["admission"] }
+anyhow = { workspace = true }
+macro_authorization = { path = "../macro_authorization" }
+macro_tower_layers = { path = "../macro_tower_layers" }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+workspace-hack = { version = "0.1", path = "../workspace-hack" }
+
+[dev-dependencies]
+agent_runtime_protocol = { path = "../agent_runtime_protocol", default-features = false }
+ai_billing = { path = "../ai_billing" }
+bot_id = { path = "../bot_id" }
+bots = { path = "../bots", default-features = false }
+chrono = { workspace = true }
+macro_user_id = { path = "../macro_user_id" }
+macro_uuid = { path = "../macro_uuid" }
+tokio = { workspace = true, features = ["macros", "net", "io-util", "rt-multi-thread", "time"] }
+trigger_context = { path = "../trigger_context" }

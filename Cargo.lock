@@ -648,6 +648,7 @@ dependencies = [
  "agent_fold",
  "agent_git",
  "agent_harness",
+ "agent_harness_service_client",
  "agent_inmem",
  "agent_preview",
  "agent_runtime_protocol",
@@ -830,6 +831,29 @@ dependencies = [
  "uuid",
  "web_search",
  "wiremock",
+ "workspace-hack",
+]
+
+[[package]]
+name = "agent_harness_service_client"
+version = "0.1.0"
+dependencies = [
+ "agent_runtime_protocol",
+ "agent_session",
+ "ai_billing",
+ "anyhow",
+ "bot_id",
+ "bots",
+ "chrono",
+ "macro_authorization",
+ "macro_tower_layers",
+ "macro_user_id",
+ "macro_uuid",
+ "reqwest 0.13.4",
+ "serde",
+ "serde_json",
+ "tokio",
+ "trigger_context",
  "workspace-hack",
 ]
 
@@ -18532,7 +18556,6 @@ dependencies = [
  "models_properties",
  "properties",
  "rdkafka",
- "reqwest 0.13.4",
  "rootcause",
  "routine_program",
  "serde",

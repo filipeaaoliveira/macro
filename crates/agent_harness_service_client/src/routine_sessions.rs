@@ -1,4 +1,5 @@
-//! Bounded internal transport for the session domain's routine capability.
+//! Bounded internal transport for the session domain's routine capability:
+//! `RoutineSessions` over `/internal/routine-sessions/*`.
 
 use std::time::Duration;
 
