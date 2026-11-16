@@ -685,7 +685,9 @@ async fn cancelling_a_run_whose_workflow_completed_is_a_conflict() {
     };
     let run_id = julia_s_run(&repo).await;
 
-    let refused = service(&repo, &workflows).cancel_run(&julia(), run_id).await;
+    let refused = service(&repo, &workflows)
+        .cancel_run(&julia(), run_id)
+        .await;
 
     assert!(matches!(refused, Err(FactoryError::RunEnded)));
 }

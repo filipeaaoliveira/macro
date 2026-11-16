@@ -16,7 +16,7 @@
 
 use std::time::Duration;
 
-use factory_records::domain::models::{MAX_OUTPUT_BYTES, Outcome, RunOutcome, StepKey};
+use factory_records::domain::models::{Outcome, RunOutcome, StepKey};
 use temporalio_common::RetryPolicy;
 use temporalio_common::error::ApplicationFailure;
 use temporalio_macros::{workflow, workflow_methods};
@@ -31,6 +31,9 @@ use crate::domain::interpreter::{Interpreter, NextStep};
 use crate::domain::models::{RunFinish, RunStart, StepEnding, StepReport, StepRequest};
 use crate::inbound::temporal::activities::FactoryActivities;
 use crate::temporal::{ANSWER_GATE_UPDATE, FLOW_WORKFLOW};
+
+/// What a Step whose work failed for good shows its owner.
+const FAILED_STEP_OUTPUT: &str = "The step's work failed. The factory service's logs say why.";
 
 /// How long one attempt of a Step's work may take.
 const STEP_TIMEOUT: Duration = Duration::from_secs(30 * 60);
@@ -141,7 +144,7 @@ impl FlowWorkflow {
             let report = match worked {
                 Ok(report) => report,
                 Err(_) if is_cancelled(ctx) => break RunOutcome::Cancelled,
-                Err(error) => {
+                Err(_) => {
                     // The work failed for good: stop its agent, so an entry
                     // that fixes or retries it never runs beside it.
                     let stopped = ctx
@@ -154,9 +157,11 @@ impl FlowWorkflow {
                     if stopped.is_err() && is_cancelled(ctx) {
                         break RunOutcome::Cancelled;
                     }
+                    // The owner reads the output; why the work failed is
+                    // internal detail, which the worker logged.
                     StepReport {
                         outcome: Outcome::failed(),
-                        output: bounded(format!("The step failed: {error}")),
+                        output: FAILED_STEP_OUTPUT.to_string(),
                     }
                 }
             };
@@ -232,18 +237,6 @@ impl FlowWorkflow {
 /// Whether the Run's workflow was cancelled.
 fn is_cancelled(ctx: &WorkflowContext<FlowWorkflow>) -> bool {
     ctx.cancellation_token().is_cancelled()
-}
-
-/// `text`, cut to what a Step's output keeps, on a character boundary.
-fn bounded(mut text: String) -> String {
-    if text.len() > MAX_OUTPUT_BYTES {
-        let mut end = MAX_OUTPUT_BYTES;
-        while !text.is_char_boundary(end) {
-            end -= 1;
-        }
-        text.truncate(end);
-    }
-    text
 }
 
 /// Open the Gate of the Step `key`, wait for a person's answer, record it,
