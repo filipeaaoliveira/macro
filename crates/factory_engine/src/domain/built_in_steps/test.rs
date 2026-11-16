@@ -273,27 +273,34 @@ async fn a_prompt_leaves_out_the_oldest_steps_past_its_budget() {
 }
 
 /// A plan may be as large as a Step's output allows, past what the prompt
-/// has room for: the Step after it reads as much of it as fits, never none.
+/// has room for: the Step after it reads as much of it as fits, never none,
+/// cut between two characters wherever the budget falls.
 #[tokio::test]
 async fn a_prompt_cuts_a_newest_step_past_its_budget_rather_than_leave_it_out() {
-    let agent = FakeAgent::ending_with("done");
-    let steps = BuiltInSteps::new(agent.clone());
-    let plan = format!("Plan: {}", "é".repeat(32 * 1024));
-    let earlier = [
-        ended(1, "request", 1, "Earlier"),
-        ended(2, "plan", 1, &plan),
-    ];
+    // A 3-byte character, after pads of each length its width allows, so
+    // the budget falls inside a character in at least one of them.
+    for pad in 0..3 {
+        let agent = FakeAgent::ending_with("done");
+        let steps = BuiltInSteps::new(agent.clone());
+        let plan = format!("Plan:{} {}", "_".repeat(pad), "€".repeat(24 * 1024));
+        let earlier = [
+            ended(1, "request", 1, "Earlier"),
+            ended(2, "plan", 1, &plan),
+        ];
 
-    steps
-        .run(&step("write"), input(&earlier))
-        .await
-        .expect("write");
+        steps
+            .run(&step("write"), input(&earlier))
+            .await
+            .expect("write");
 
-    let tasks = agent.tasks.lock().expect("tasks");
-    let prompt = &tasks[0].prompt;
-    assert!(prompt.contains("Plan: éé"));
-    assert!(!prompt.contains(&plan));
-    assert!(prompt.contains("The rest of this step is left out"));
-    assert!(prompt.contains("1 earlier steps are left out"));
-    assert!(prompt.len() < plan.len());
+        let tasks = agent.tasks.lock().expect("tasks");
+        let prompt = &tasks[0].prompt;
+        assert!(prompt.contains("€€"), "pad {pad}");
+        assert!(!prompt.contains(&plan), "pad {pad}");
+        assert!(
+            prompt.contains("The rest of this step is left out"),
+            "pad {pad}"
+        );
+        assert!(prompt.contains("1 earlier steps are left out"), "pad {pad}");
+    }
 }

@@ -103,7 +103,8 @@ fn failure(error: StepError) -> ActivityError {
 
 /// What a Step's work needs of its activity's context: to hear that the
 /// activity was cancelled, and to tell Temporal the worker is alive. The
-/// tests stand one in for Temporal's.
+/// tests stand one in for Temporal's, since the SDK's `ActivityEnvironment`
+/// needs its `testing` feature, whose test server workspace-hack can't unify.
 trait Liveness: Sync {
     /// Resolves once the activity is cancelled.
     fn cancelled(&self) -> impl Future<Output = ()> + Send;

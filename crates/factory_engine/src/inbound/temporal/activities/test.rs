@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use factory_records::domain::models::{EntryId, RunId, StepKey};
 use temporalio_sdk::activities::ActivityError;
-use tokio::sync::watch;
+use tokio::sync::{Notify, watch};
 
 use super::{FactoryActivities, Liveness};
 use crate::domain::flow::StepName;
@@ -45,12 +45,14 @@ impl Liveness for Context {
 }
 
 /// A Step service whose work never ends, and whose stop takes `stop_takes`.
-/// It counts the stops, and whether the work is still held.
+/// It says when the work starts, and counts the stops, and whether the work
+/// is still held.
 #[derive(Clone, Default)]
 struct Steps {
     stops: Arc<AtomicUsize>,
     stop_takes: Duration,
     working: Arc<Mutex<bool>>,
+    started: Arc<Notify>,
 }
 
 /// Clears `working` when the work is dropped.
@@ -70,6 +72,7 @@ impl StepService for Steps {
     async fn run_step(&self, _request: StepRequest) -> Result<StepReport, StepError> {
         *self.working.lock().expect("working") = true;
         let _working = Working(self.working.clone());
+        self.started.notify_one();
         std::future::pending().await
     }
 
@@ -123,7 +126,7 @@ async fn a_cancelled_step_drops_its_work_and_leaves_its_agent_be() {
 
     let work = activities.work(&context, plan_request());
     let cancel = async {
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        steps.started.notified().await;
         assert!(*steps.working.lock().expect("working"));
         context.cancelled.send_replace(true);
     };
