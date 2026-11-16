@@ -22,6 +22,15 @@ flexible admin query API.
   `SessionUsageReader`, the tokens recorded for given agent sessions of one
   user (factory insights). Usage recorded with a session only as its
   `entity`, as the harness's model gateway records it, is not counted.
+  Its read starts from the session ids and looks each up through
+  `ai_usage_agent_session_id_idx`, the user check fenced out of the lookup
+  (`OFFSET 0`). Measured on PostgreSQL 18 with 5.96M `ai_usage` rows (361,000
+  of them one user's) and 3,000 sessions of 6 calls each, every plan uses
+  only that index for 6 rows per session: fresh statistics, custom plan 33.8
+  and 32.8 ms, generic 32.1 and 32.3 ms; stale statistics (the table looks
+  empty), custom 33.4 and 33.7 ms, generic 34.8 and 37.9 ms. Without the
+  fence, stale statistics add the user's index to every lookup: 39.4 s
+  generic, and the custom plan reads all of the user's rows.
 - `src/outbound/pg_usage_repo.rs`, `pg_tracking_repo.rs`,
   `pg_financial_usage_repo.rs`: the Postgres adapters.
 

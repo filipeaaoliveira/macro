@@ -8,10 +8,10 @@
 SET LOCAL lock_timeout = '5s';
 
 -- A Run belongs to the user who started it: its agent Steps run as them,
--- and it goes with their account. It walks one built-in Flow, by name (null
--- only for Runs recorded before the Flow was kept). It may work on one Macro
--- task, which relinking replaces; deleting the task document unlinks it
--- rather than deleting the Run.
+-- and it goes with their account. It walks one built-in Flow, by name;
+-- `flow` is nullable only for Runs recorded by early local builds. It may
+-- work on one Macro task, which relinking replaces; deleting the task
+-- document unlinks it rather than deleting the Run.
 CREATE TABLE factory_run (
     id uuid PRIMARY KEY,
     user_id text NOT NULL REFERENCES "User" (id) ON DELETE CASCADE,

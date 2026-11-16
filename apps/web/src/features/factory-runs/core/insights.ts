@@ -68,11 +68,6 @@ export function successRate(counts: OutcomeCounts): number | undefined {
   return counts.success / ended;
 }
 
-/** How many of an entry's Steps ended with `outcome`. */
-export function outcomeCount(entry: EntryInsight, outcome: string): number {
-  return entry.outcomes.find((count) => count.name === outcome)?.count ?? 0;
-}
-
 /**
  * The entries where Runs stop or go round again, worst first: the Runs in
  * which one of its Steps failed, plus the Runs that visited it more than
