@@ -55,6 +55,8 @@ struct FakeSessions {
     landed: Arc<Mutex<usize>>,
     /// Reads of the status that fail before one works.
     failing_reads: Arc<Mutex<usize>>,
+    /// Stops that fail before one works, as while the harness is down.
+    failing_cancels: Arc<Mutex<usize>>,
     disconnected: bool,
     /// The Step lets go of its session while a prepare is in flight, as
     /// when Temporal gave the attempt up and another one ended the Step.
@@ -80,6 +82,7 @@ impl FakeSessions {
             prompt_calls: Arc::default(),
             landed: Arc::default(),
             failing_reads: Arc::default(),
+            failing_cancels: Arc::default(),
             disconnected: false,
             releases_on_prepare: false,
             cancelled: Arc::default(),
@@ -223,6 +226,13 @@ impl RoutineSessions for FakeSessions {
     }
 
     async fn cancel(&self, command: RoutineSessionAction) -> Result<(), RoutineSessionError> {
+        {
+            let mut failing = self.failing_cancels.lock().expect("failing cancels");
+            if *failing > 0 {
+                *failing -= 1;
+                return Err(RoutineSessionError::RuntimeUnavailable);
+            }
+        }
         if !*self.open.lock().expect("open") {
             return Err(RoutineSessionError::OperationFailed);
         }
@@ -537,10 +547,11 @@ async fn stopping_a_step_stops_its_session_until_the_turn_ends() {
     );
 }
 
-/// A Step stopped before its session opened has nothing to stop: the stop
-/// neither fails nor waits out the watch, and the delete is still tried.
+/// A Step stopped before its session opened may still see it open, if its
+/// prepare is in flight: the stop watches it, tries the delete, and fails
+/// when the delete does, for Temporal to try again.
 #[tokio::test(start_paused = true)]
-async fn stopping_a_step_whose_session_never_opened_succeeds() {
+async fn stopping_a_step_whose_session_never_opened_is_tried_again() {
     let repo = FakeRepo::default();
     let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
     let task = plan_task(&repo).await;
@@ -555,19 +566,49 @@ async fn stopping_a_step_whose_session_never_opened_succeeds() {
     .await
     .expect("claim");
 
-    let started = tokio::time::Instant::now();
+    let stopped = agent(&sessions, &repo).stop(task.key, &julia()).await;
+
+    let Err(error) = stopped else {
+        panic!("a delete that failed fails the stop");
+    };
+    assert!(error.retryable());
+    assert_eq!(sessions.deleted.lock().expect("deleted").len(), 1);
+    assert!(!repo.holds_session(task.key).await.expect("read"), "let go");
+}
+
+/// A harness that fails a while answers neither the stop nor a read: the
+/// stop keeps watching, stops the session once it answers, and deletes it.
+#[tokio::test(start_paused = true)]
+async fn stopping_a_step_rides_out_a_harness_that_fails_a_while() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(
+        &repo,
+        Some(the_plan()),
+        RoutineActionStatus::Pending(RoutinePendingReason::Running),
+    );
+    let task = plan_task(&repo).await;
+    repo.claim_session(
+        task.key,
+        StepSession {
+            session_id: Uuid::now_v7(),
+            action_id: Uuid::now_v7(),
+        },
+        &task.outcomes,
+    )
+    .await
+    .expect("claim");
+    *sessions.open.lock().expect("open") = true;
+    *sessions.prompted.lock().expect("prompted") = true;
+    *sessions.failing_cancels.lock().expect("failing cancels") = 2;
+    *sessions.failing_reads.lock().expect("failing reads") = 2;
 
     agent(&sessions, &repo)
         .stop(task.key, &julia())
         .await
         .expect("stop");
 
+    assert!(!sessions.cancelled.lock().expect("cancelled").is_empty());
     assert_eq!(sessions.deleted.lock().expect("deleted").len(), 1);
-    assert!(
-        started.elapsed() < super::STOP_WATCH,
-        "{:?}",
-        started.elapsed()
-    );
 }
 
 /// An attempt Temporal gave up on may still run after the Step let go of
@@ -608,6 +649,11 @@ async fn a_session_let_go_while_it_opened_is_never_prompted() {
 
     assert!(matches!(late, Err(SessionAgentError::Released)), "{late:?}");
     assert_eq!(sessions.prompts(), 0);
+    assert_eq!(
+        sessions.deleted.lock().expect("deleted").len(),
+        1,
+        "the session it opened is deleted"
+    );
 }
 
 /// A refusal, a mismatch or a conflict from the session answers the same

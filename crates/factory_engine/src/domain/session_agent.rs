@@ -279,13 +279,9 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
 
     /// Ask the session to stop its turn. A stop that fails is logged: the
     /// caller watches the session to tell whether it still works.
-    async fn cancel(&self, action: &RoutineSessionAction) -> bool {
-        match self.sessions.cancel(action.clone()).await {
-            Ok(()) => true,
-            Err(error) => {
-                tracing::warn!(?error, "a factory step's agent session was not stopped");
-                false
-            }
+    async fn cancel(&self, action: &RoutineSessionAction) {
+        if let Err(error) = self.sessions.cancel(action.clone()).await {
+            tracing::warn!(?error, "a factory step's agent session was not stopped");
         }
     }
 
@@ -352,7 +348,12 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
         // go of its session, so it checks before each.
         self.still_holds(task.key).await?;
         self.open(&task, &action).await?;
-        self.still_holds(task.key).await?;
+        // The session just opened is this attempt's to delete when the Step
+        // let go of it meanwhile: nothing else will.
+        if let Err(released) = self.still_holds(task.key).await {
+            self.delete(&action).await;
+            return Err(released);
+        }
         self.prompt_once(&task, &action).await?;
         self.finished(&action, deadline).await?;
 
@@ -397,11 +398,13 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
             .release_session(key)
             .await
             .map_err(Self::records)?;
+        // The session is watched for the whole minute, whatever it answers:
+        // one whose prepare is still in flight, or a harness that fails a
+        // while, answers neither the stop nor a read, yet may open or work
+        // on. It is then deleted; a delete that fails fails the stop, which
+        // Temporal tries again.
         let action = self.action(owner, session);
-        // A session that refused the stop and can't be read either was never
-        // opened, or is gone: the routine sessions port has no "not found",
-        // so that pair stands for it, and there is nothing to watch.
-        let mut reached = self.cancel(&action).await;
+        self.cancel(&action).await;
         let deadline = tokio::time::Instant::now() + STOP_WATCH;
         let mut wait = FIRST_LOOK;
         while tokio::time::Instant::now() < deadline {
@@ -409,18 +412,14 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
             wait = (wait * 2).min(LONGEST_WAIT);
             match self.sessions.status(action.clone()).await {
                 Ok(RoutineActionStatus::Succeeded | RoutineActionStatus::Failed(_)) => break,
-                Err(_) if !reached => break,
-                Ok(RoutineActionStatus::Pending(RoutinePendingReason::AwaitingPrompt)) => {
-                    reached = true;
+                Ok(RoutineActionStatus::Pending(RoutinePendingReason::AwaitingPrompt)) | Err(_) => {
                 }
-                Err(_) => {}
                 Ok(RoutineActionStatus::Pending(_)) => {
-                    reached = true;
                     self.cancel(&action).await;
                 }
             }
         }
-        self.delete(&action).await;
+        self.sessions.delete(action).await?;
         Ok(())
     }
 

@@ -155,21 +155,18 @@ impl FlowWorkflow {
                     work_options.clone(),
                 )
                 .await;
-            let report = match worked {
-                Ok(report) => report,
+            let (report, failed) = match worked {
+                Ok(report) => (report, false),
                 Err(_) if is_cancelled(ctx) => break RunOutcome::Cancelled,
-                Err(_) => {
-                    // The work failed for good: stop its agent, so an entry
-                    // that fixes or retries it never runs beside it.
-                    stop(ctx, &request).await;
-                    held = None;
-                    // The owner reads the output; why the work failed is
-                    // internal detail, which the worker logged.
+                // The owner reads the output; why the work failed is
+                // internal detail, which the worker logged.
+                Err(_) => (
                     StepReport {
                         outcome: Outcome::failed(),
                         output: FAILED_STEP_OUTPUT.to_string(),
-                    }
-                }
+                    },
+                    true,
+                ),
             };
             let reported = report.outcome.clone();
             let ended = ctx
@@ -186,9 +183,15 @@ impl FlowWorkflow {
                 ended?;
             }
 
-            // No attempt of the Step's work comes once its end is recorded,
+            // Work that failed for good has its agent stopped once the Step's
+            // end is recorded, so the Step reads as failed meanwhile, and an
+            // entry that fixes or retries it never runs beside it. Otherwise
+            // no attempt of the Step's work comes once its end is recorded,
             // so its agent lets go of the Step's session.
-            if held.take().is_some() {
+            if failed {
+                held = None;
+                stop(ctx, &request).await;
+            } else if held.take().is_some() {
                 let released = ctx
                     .execute_activity(
                         FactoryActivities::release_step,
@@ -219,13 +222,6 @@ impl FlowWorkflow {
             }
         };
 
-        // A cancelled Run's Step may still have its agent at work.
-        if outcome == RunOutcome::Cancelled
-            && let Some(request) = held
-        {
-            stop(ctx, &request).await;
-        }
-
         // A cancelled workflow records its end on a token of its own, which
         // the cancellation does not reach.
         let finish = RunFinish {
@@ -240,6 +236,14 @@ impl FlowWorkflow {
                 .build(),
         )
         .await?;
+
+        // A cancelled Run's Step may still have its agent at work. The Run
+        // reads as cancelled first: stopping an agent may take a while.
+        if outcome == RunOutcome::Cancelled
+            && let Some(request) = held
+        {
+            stop(ctx, &request).await;
+        }
 
         match (outcome, stopped) {
             (RunOutcome::Cancelled, _) => Err(WorkflowTermination::cancelled()),
