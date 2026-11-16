@@ -17,7 +17,7 @@ test('answers a Gate, starts a Run and cancels one', async ({
   const show = page.getByRole('button', { name: 'Show details' });
   if (await show.isVisible()) await show.click();
 
-  const rows = page.locator('[data-factory-run-row]');
+  const rows = page.locator('[data-agent-activity-item]');
   await expect(rows).toHaveCount(4);
   await expect(rows.first()).toContainText('Plan needs your answer');
   await expect(rows.nth(1)).toContainText('Running Review');
@@ -31,6 +31,17 @@ test('answers a Gate, starts a Run and cancels one', async ({
   await expect(dialog.getByText('Your answer is needed')).toBeVisible();
   // The plan renders as markdown.
   await expect(dialog.getByText('Due date', { exact: true })).toBeVisible();
+  // The answers and Cancel sit in the pinned footer, in reach unscrolled.
+  await expect(
+    dialog.getByRole('button', { name: 'Approve' })
+  ).toBeInViewport();
+  await expect(
+    dialog.getByRole('button', { name: 'Cancel run' })
+  ).toBeInViewport();
+  // A phone sheet closes by its handle, with no X.
+  await expect(dialog.getByRole('button', { name: 'Close run' })).toHaveCount(
+    testInfo.project.name === 'mobile' ? 0 : 1
+  );
   await shoot(page, 'run-gate', testInfo.project.name);
   await dialog
     .getByPlaceholder('Add a note for the next steps (optional)')
@@ -65,9 +76,17 @@ test('answers a Gate, starts a Run and cancels one', async ({
   await start.getByText('Code', { exact: true }).click();
   await shoot(page, 'start-run', testInfo.project.name);
   await start.getByRole('button', { name: 'Start run' }).click();
-  await expect(
-    page.getByRole('dialog', { name: 'Show overdue tasks in red' })
-  ).toBeVisible();
+  const started = page.getByRole('dialog', {
+    name: 'Show overdue tasks in red',
+  });
+  await expect(started).toBeVisible();
+  await expect(start).toBeHidden();
+  // Focus moves into the Run that opened, not back to New run.
+  await expect
+    .poll(() =>
+      started.evaluate((element) => element.contains(document.activeElement))
+    )
+    .toBe(true);
   await shoot(page, 'run-started', testInfo.project.name);
   await page.keyboard.press('Escape');
   if (await show.isVisible()) await show.click();
