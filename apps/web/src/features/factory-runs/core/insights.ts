@@ -75,12 +75,11 @@ export function outcomeCount(entry: EntryInsight, outcome: string): number {
 
 /**
  * The entries where Runs stop or go round again, worst first: the Runs in
- * which one of its Steps failed or it was visited more than once. Entries
- * with neither are left out.
+ * which one of its Steps failed, plus the Runs that visited it more than
+ * once. Entries with neither are left out.
  */
 export function troubledEntries(entries: EntryInsight[]): EntryInsight[] {
-  const score = (entry: EntryInsight) =>
-    outcomeCount(entry, 'failed') + entry.revisitedRuns;
+  const score = (entry: EntryInsight) => entry.failedRuns + entry.revisitedRuns;
   return entries
     .filter((entry) => score(entry) > 0)
     .sort((a, b) => score(b) - score(a));

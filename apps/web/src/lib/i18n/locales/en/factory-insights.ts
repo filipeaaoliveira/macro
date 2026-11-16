@@ -62,10 +62,13 @@ export default {
   // Where Runs stop.
   whereRunsStop: 'Where runs stop',
   whereRunsStopDescription:
-    'Steps that failed, or that runs went back to, with the latest of those runs',
+    'Steps where runs failed or went back, counted in runs, with the latest of those runs',
   nothingStopped: 'No step failed or went again in this period.',
-  failedRuns: { other: '{{count}} failed' },
-  againRuns: { other: '{{count}} went again' },
+  failedRuns: { one: '{{count}} run failed', other: '{{count}} runs failed' },
+  againRuns: {
+    one: '{{count}} run went again',
+    other: '{{count}} runs went again',
+  },
   runsAt: 'Runs at {{step}}',
   failed: 'Failed',
   visits: { other: '{{count}} visits' },

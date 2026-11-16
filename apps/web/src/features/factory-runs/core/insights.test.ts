@@ -20,14 +20,16 @@ const counts = (changes: Partial<OutcomeCounts>): OutcomeCounts => ({
 
 const entry = (
   name: string,
-  failed: number,
+  failedSteps: number,
+  failedRuns: number,
   revisitedRuns: number
 ): EntryInsight => ({
   entry: name,
-  steps: 4,
+  steps: 9,
   runs: 4,
   revisitedRuns,
-  outcomes: failed > 0 ? [{ name: 'failed', count: failed }] : [],
+  failedRuns,
+  outcomes: failedSteps > 0 ? [{ name: 'failed', count: failedSteps }] : [],
   trouble: [],
 });
 
@@ -47,18 +49,20 @@ describe('successRate', () => {
 });
 
 describe('troubledEntries', () => {
-  it('lists the entries that failed or went again, worst first', () => {
+  it('lists the entries where runs failed or went again, worst first', () => {
+    // CI failed five times in one run that went again: two runs in all,
+    // fewer than the three of review.
     const entries = [
-      entry('plan', 0, 1),
-      entry('write', 0, 0),
-      entry('ci', 2, 1),
-      entry('review', 1, 0),
+      entry('plan', 0, 0, 1),
+      entry('write', 0, 0, 0),
+      entry('ci', 5, 1, 1),
+      entry('review', 2, 2, 1),
     ];
 
     expect(troubledEntries(entries).map((found) => found.entry)).toEqual([
+      'review',
       'ci',
       'plan',
-      'review',
     ]);
   });
 });

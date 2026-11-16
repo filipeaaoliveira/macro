@@ -2,7 +2,7 @@ import { InsightSection } from '@app/features/scheduling/components/insights-pan
 import { t } from '@app/lib/i18n';
 import { For } from 'solid-js';
 import { flowWordLabel } from '../core/flow-words';
-import { type EntryInsight, outcomeCount } from '../core/insights';
+import type { EntryInsight } from '../core/insights';
 import { RunLinkList } from './run-link-list';
 
 /**
@@ -16,9 +16,7 @@ export function TroubleList(props: {
   const most = () =>
     Math.max(
       1,
-      ...props.entries.map(
-        (entry) => outcomeCount(entry, 'failed') + entry.revisitedRuns
-      )
+      ...props.entries.map((entry) => entry.failedRuns + entry.revisitedRuns)
     );
 
   return (
@@ -36,7 +34,7 @@ export function TroubleList(props: {
           }
         >
           {(entry) => {
-            const failed = () => outcomeCount(entry, 'failed');
+            const failed = () => entry.failedRuns;
             return (
               <div class="flex flex-col gap-2">
                 <div class="flex items-center justify-between gap-3 text-sm">
