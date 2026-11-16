@@ -86,11 +86,11 @@ test('shows how runs went, filters by flow and opens a run', async ({
     await expect(page.getByRole('button', { name: /Code/ })).toBeVisible();
     await page.keyboard.press('Escape');
   }
-  await expect(page.getByRole('heading', { name: 'Ci fix' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'CI fix' })).toBeVisible();
   await expect(page.getByText('Reply', { exact: true })).toHaveCount(0);
 
   // A run where CI needed a fix opens as from its task.
-  const stops = page.getByRole('list', { name: 'Runs at Ci', exact: true });
+  const stops = page.getByRole('list', { name: 'Runs at CI', exact: true });
   await stops
     .getByRole('button', { name: /Add a due date column to the task list/ })
     .click();
