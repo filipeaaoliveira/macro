@@ -32,7 +32,7 @@ import {
 
 /** A duration as a figure and its unit, in the interface's language. */
 function durationFigure(seconds: number | undefined) {
-  if (seconds === undefined) return { value: 0, unit: undefined };
+  if (seconds === undefined) return { value: undefined, unit: undefined };
   const { value, unit } = durationIn(seconds);
   const rounded = Math.round(value * 10) / 10;
   const parts = new Intl.NumberFormat(formatLocale(), {
@@ -117,7 +117,11 @@ function InsightsSections(props: {
             <Metric
               label={t('factoryInsights.successRate')}
               definition={t('factoryInsights.successRateDefinition')}
-              value={Math.round((rate() ?? 0) * 100)}
+              value={
+                rate() === undefined
+                  ? undefined
+                  : Math.round((rate() ?? 0) * 100)
+              }
               unit="%"
             />
             <Metric

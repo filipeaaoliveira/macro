@@ -85,17 +85,18 @@ export function InsightSection(props: {
 
 /**
  * One figure with its definition, and how it moved since the previous period
- * when `previous` is given.
+ * when `previous` is given. A figure with no value reads as a dash.
  */
 export function Metric(props: {
   label: string;
   definition: string;
-  value: number;
+  value: number | undefined;
   previous?: number;
   unit?: string;
   lowerIsBetter?: boolean;
 }) {
   const improved = () =>
+    props.value !== undefined &&
     props.previous !== undefined &&
     props.value !== props.previous &&
     (props.lowerIsBetter
@@ -116,16 +117,20 @@ export function Metric(props: {
         </Tooltip>
       </div>
       <p class="text-2xl font-medium tracking-tight tabular-nums">
-        {Number.isInteger(props.value)
-          ? props.value.toLocaleString()
-          : props.value.toLocaleString(undefined, { maximumFractionDigits: 1 })}
-        <Show when={props.unit}>
+        <Show when={props.value !== undefined} fallback="–">
+          {Number.isInteger(props.value)
+            ? props.value?.toLocaleString()
+            : props.value?.toLocaleString(undefined, {
+                maximumFractionDigits: 1,
+              })}
+        </Show>
+        <Show when={props.value !== undefined && props.unit}>
           <span class="ml-1 text-base font-normal text-ink-muted">
             {props.unit}
           </span>
         </Show>
       </p>
-      <Show when={props.previous !== undefined}>
+      <Show when={props.value !== undefined && props.previous !== undefined}>
         <div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-ink-muted">
           <span
             class="rounded px-1.5 py-0.5 font-medium tabular-nums"
@@ -134,7 +139,7 @@ export function Metric(props: {
               'bg-surface-2 text-ink-muted': !improved(),
             }}
           >
-            {insightComparison(props.value, props.previous ?? 0)}
+            {insightComparison(props.value ?? 0, props.previous ?? 0)}
           </span>
           <span>from last period</span>
         </div>

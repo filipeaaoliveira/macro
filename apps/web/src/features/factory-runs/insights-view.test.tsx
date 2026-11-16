@@ -81,6 +81,7 @@ const november: RunInsights = {
       steps: 3,
       runs: 2,
       revisitedRuns: 1,
+      failedRuns: 1,
       duration: { count: 3, medianSeconds: 300, p90Seconds: 540 },
       outcomes: [
         { name: 'done', count: 2 },
@@ -233,6 +234,12 @@ describe('RunInsightsView', () => {
     });
 
     expect(screen.getByText(/No runs match this period/)).toBeTruthy();
+    // With no run ended, there is no rate or time to show, not a zero.
+    const figure = (label: string) =>
+      screen.getByText(label).closest('div')?.parentElement?.querySelector('p')
+        ?.textContent;
+    expect(figure('Success rate')).toBe('–');
+    expect(figure('Median run time')).toBe('–');
     expect(
       screen.getByText('No step failed or went again in this period.')
     ).toBeTruthy();
