@@ -227,6 +227,19 @@ export default defineConfig({
       target: './service-unfurl/openapi.json',
     },
   },
+  factoryService: {
+    output: {
+      client: 'fetch',
+      target: './service-factory/generated/client.ts',
+      schemas: './service-factory/generated/schemas',
+      override: {
+        useDates: false,
+      },
+    },
+    input: {
+      target: './service-factory/openapi.json',
+    },
+  },
   agentHarnessService: {
     output: {
       client: 'fetch',

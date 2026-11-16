@@ -1,0 +1,720 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "factory_engine",
+    "description": "",
+    "license": {
+      "name": ""
+    },
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/runs": {
+      "post": {
+        "tags": ["factory"],
+        "summary": "Create a Run of a Flow and start its workflow.",
+        "operationId": "create_factory_run",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/{id}": {
+      "get": {
+        "tags": ["factory"],
+        "summary": "Read a Run and the Steps it took.",
+        "operationId": "get_factory_run",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The Run's id.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/RunId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/{id}/cancel": {
+      "post": {
+        "tags": ["factory"],
+        "summary": "Cancel a Run that has not ended. Its running Step or Gate stops, and\nreading the Run shows it `cancelled` once its workflow recorded that.",
+        "operationId": "cancel_factory_run",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The Run's id.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/RunId"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": ""
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/{id}/gates/{entry}/{visit}/answer": {
+      "post": {
+        "tags": ["factory"],
+        "summary": "Answer the Gate a Run waits on. The Run goes on once its workflow took\nthe answer; reading the Run shows the answer once it is recorded.",
+        "operationId": "answer_factory_gate",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The Run's id.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/RunId"
+            }
+          },
+          {
+            "name": "entry",
+            "in": "path",
+            "description": "The entry whose Step asked.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/EntryId"
+            }
+          },
+          {
+            "name": "visit",
+            "in": "path",
+            "description": "Which visit of the entry asked.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnswerGateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/{id}/task": {
+      "put": {
+        "tags": ["factory"],
+        "summary": "Link a Run to the Macro task it works on, replacing any task it had.",
+        "operationId": "link_factory_run_task",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The Run's id.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/RunId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkTaskRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AnswerGateRequest": {
+        "type": "object",
+        "description": "Request body for answering a Gate.",
+        "required": ["answer", "userId"],
+        "properties": {
+          "answer": {
+            "$ref": "#/components/schemas/Outcome",
+            "description": "The answer, one the Gate offers."
+          },
+          "note": {
+            "type": ["string", "null"],
+            "description": "What the person adds, for the Run's later Steps to read."
+          },
+          "userId": {
+            "$ref": "#/components/schemas/MacroUserIdStr",
+            "description": "Who answered."
+          }
+        }
+      },
+      "CreateRunRequest": {
+        "type": "object",
+        "description": "Request body for creating a Run.",
+        "required": ["flow", "request"],
+        "properties": {
+          "flow": {
+            "type": "object",
+            "description": "The Flow definition the Run walks."
+          },
+          "request": {
+            "type": "string",
+            "description": "What the Run is asked to do."
+          },
+          "taskId": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "The Macro task the Run works on: its task document's id."
+          }
+        }
+      },
+      "EntryId": {
+        "type": "string",
+        "description": "The id of one of a Flow's entries. A Step is a visit of an entry."
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "description": "A plain old json error response for use with axum.\nyup, thats it.",
+        "required": ["message"],
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "Message to explain failure"
+          }
+        }
+      },
+      "Gate": {
+        "type": "object",
+        "description": "A question a Step's end puts to a person. The Run waits for the answer.",
+        "required": ["question", "answers", "openedAt"],
+        "properties": {
+          "answer": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/GateAnswer",
+                "description": "The person's answer; none while the Run waits."
+              }
+            ]
+          },
+          "answers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Outcome"
+            },
+            "description": "The answers it offers, in the Flow's order."
+          },
+          "openedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the Run started waiting."
+          },
+          "question": {
+            "type": "string",
+            "description": "The question."
+          }
+        }
+      },
+      "GateAnswer": {
+        "type": "object",
+        "description": "A person's answer to a Gate.",
+        "required": ["answer", "answeredAt"],
+        "properties": {
+          "answer": {
+            "$ref": "#/components/schemas/Outcome",
+            "description": "The answer, one the Gate offered: the outcome the Flow routes."
+          },
+          "answeredAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When they answered."
+          },
+          "note": {
+            "type": ["string", "null"],
+            "description": "What the person added, for the Run's later Steps to read."
+          },
+          "userId": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MacroUserIdStr",
+                "description": "Who answered; none once their account is gone."
+              }
+            ]
+          }
+        }
+      },
+      "LinkTaskRequest": {
+        "type": "object",
+        "description": "Request body for linking a Run to a task.",
+        "required": ["taskId"],
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The task document's id."
+          }
+        }
+      },
+      "MacroUserIdStr": {
+        "type": "string"
+      },
+      "Outcome": {
+        "type": "string",
+        "description": "How a Step ended, in the words of its Flow (`done`, `clean`, `blockers`,\n...). The Flow decides where each outcome takes the Run."
+      },
+      "Run": {
+        "type": "object",
+        "description": "One Run of a Flow.",
+        "required": ["id", "request", "createdAt"],
+        "properties": {
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the Run was created."
+          },
+          "end": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RunEnd",
+                "description": "How and when it ended; none while it runs."
+              }
+            ]
+          },
+          "id": {
+            "$ref": "#/components/schemas/RunId",
+            "description": "The Run's id, also its Temporal workflow id."
+          },
+          "request": {
+            "type": "string",
+            "description": "What the Run was asked to do."
+          },
+          "taskId": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "The Macro task the Run works on: its task document's id. None when\nthe Run has no task, or its task was deleted."
+          }
+        }
+      },
+      "RunDetail": {
+        "type": "object",
+        "description": "A Run and the Steps it took.",
+        "required": ["run", "steps"],
+        "properties": {
+          "run": {
+            "$ref": "#/components/schemas/Run",
+            "description": "The Run."
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Step"
+            },
+            "description": "Its Steps, in the order they started."
+          }
+        }
+      },
+      "RunEnd": {
+        "type": "object",
+        "description": "A Run that has ended: how, and when.",
+        "required": ["outcome", "endedAt"],
+        "properties": {
+          "endedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it ended."
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/RunOutcome",
+            "description": "How the Run ended."
+          }
+        }
+      },
+      "RunId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "A Run's id."
+      },
+      "RunOutcome": {
+        "type": "string",
+        "description": "How a Run ended.",
+        "enum": ["success", "manual", "blocked", "failed", "cancelled"]
+      },
+      "Step": {
+        "type": "object",
+        "description": "One visit of one of a Run's entries.",
+        "required": ["entry", "visit", "startedAt"],
+        "properties": {
+          "end": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/StepEnd",
+                "description": "How and when it ended; none while it runs."
+              }
+            ]
+          },
+          "entry": {
+            "$ref": "#/components/schemas/EntryId",
+            "description": "The entry the Step visits."
+          },
+          "gate": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Gate",
+                "description": "The question its end put to a person, if its entry has a Gate."
+              }
+            ]
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the Step started."
+          },
+          "visit": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Which visit of the entry it is, from 1.",
+            "minimum": 0
+          }
+        }
+      },
+      "StepEnd": {
+        "type": "object",
+        "description": "A Step that has ended: its outcome, what it produced, and when.",
+        "required": ["outcome", "output", "endedAt"],
+        "properties": {
+          "endedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it ended."
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/Outcome",
+            "description": "How the Step ended."
+          },
+          "output": {
+            "type": "string",
+            "description": "What the Step produced, for a person to read."
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "factory",
+      "description": "Runs of the software factory's Flows"
+    }
+  ]
+}

@@ -120,6 +120,14 @@ export const services: Service[] = [
 		output: "../src/lib/service-clients/service-scheduled-action/",
 		orvalKey: "scheduledActionService",
 	},
+	{
+		name: "factory-service",
+		dev: "https://dev-gateway.macro.com/factory/api-doc/openapi.json",
+		prod: "https://gateway.macro.com/factory/api-doc/openapi.json",
+		local: "http://localhost:8113/api-doc/openapi.json",
+		output: "../src/lib/service-clients/service-factory/",
+		orvalKey: "factoryService",
+	},
 ];
 
 export const documentCognitionBase: Service = {
