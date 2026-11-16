@@ -332,4 +332,39 @@ describe('RunView', () => {
 
     expect(document.activeElement).not.toBe(status);
   });
+
+  it('leaves focus alone on a later poll after a 409 that kept its Gate', async () => {
+    const { setRun } = mount({
+      answerGate: vi.fn(async () => ({
+        ok: false as const,
+        reason: 'conflict' as const,
+      })),
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve' }));
+    await waitFor(() => expect(toast.alert).toHaveBeenCalled());
+    const status = document.querySelector<HTMLElement>('[data-run-status]');
+    screen.getByRole('dialog').focus();
+
+    // Later, someone else answers and a poll reads the Run past the Gate.
+    const [first] = waitingRun.steps;
+    if (!first?.gate) throw new Error('No first Gate');
+    setRun({
+      ...waitingRun,
+      steps: [
+        {
+          ...first,
+          gate: {
+            ...first.gate,
+            answer: { answer: 'revise', answeredAt: '2026-11-16T09:09:00Z' },
+          },
+        },
+        { ...first, visit: 2, gate: undefined },
+      ],
+    });
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+    expect(document.activeElement).not.toBe(status);
+  });
 });

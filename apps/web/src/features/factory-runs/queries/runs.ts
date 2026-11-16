@@ -123,12 +123,19 @@ function toSource<T>(query: UseQueryResult<T>): RunsSource<T> {
   };
 }
 
-function failure(errors: ResultError[]): RunActionResult<never> {
+function failure(
+  errors: ResultError[]
+): Extract<RunActionResult, { ok: false }> {
   const conflict = errors.some((error) => error.code === 'CONFLICT');
   return { ok: false, reason: conflict ? 'conflict' : 'failed' };
 }
 
-function refreshRun(client: QueryClient, runId: string, taskId?: string) {
+/** Reads the Run, and its task's list, again; resolves once they are read. */
+function refreshRun(
+  client: QueryClient,
+  runId: string,
+  taskId?: string
+): Promise<unknown> {
   const reads = [
     client.invalidateQueries({ queryKey: factoryRunKeys.run(runId).queryKey }),
   ];
@@ -139,7 +146,7 @@ function refreshRun(client: QueryClient, runId: string, taskId?: string) {
       })
     );
   }
-  fireAndForget(Promise.all(reads), 'factory-runs');
+  return Promise.all(reads);
 }
 
 function taskOfRun(client: QueryClient, runId: string) {
@@ -178,14 +185,32 @@ export function createAppRunsContext(client: QueryClient): RunsContext {
         { answer: input.answer, note: input.note }
       );
       // Refused or not, the Run has moved on from what this person saw.
-      refreshRun(client, input.runId, taskOfRun(client, input.runId));
-      if (result.isErr()) return failure(result.error);
-      return { ok: true, value: undefined };
+      const reads = refreshRun(
+        client,
+        input.runId,
+        taskOfRun(client, input.runId)
+      );
+      if (result.isOk()) {
+        fireAndForget(reads, 'factory-runs');
+        return { ok: true, value: undefined };
+      }
+      const refused = failure(result.error);
+      // A refused answer resolves once the Run is read again, so the caller
+      // sees whether the Gate it answered is still the one the Run waits on.
+      if (refused.reason === 'conflict') {
+        await reads.catch(() => undefined);
+      } else {
+        fireAndForget(reads, 'factory-runs');
+      }
+      return refused;
     },
 
     async cancelRun(runId) {
       const result = await factoryClient.cancelRun(runId);
-      refreshRun(client, runId, taskOfRun(client, runId));
+      fireAndForget(
+        refreshRun(client, runId, taskOfRun(client, runId)),
+        'factory-runs'
+      );
       if (result.isErr()) return failure(result.error);
       return { ok: true, value: undefined };
     },

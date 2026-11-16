@@ -244,4 +244,31 @@ describe('createAppRunsContext', () => {
       vi.useRealTimers();
     }
   });
+
+  it('reads the Run again before reporting a refused answer', async () => {
+    const client = new QueryClient();
+    const observer = new QueryObserver(client, runOptions('run-2'));
+    const unsubscribe = observer.subscribe(() => {});
+    vi.mocked(factoryClient.getRun).mockResolvedValue(ok(started));
+    await vi.waitFor(() =>
+      expect(observer.getCurrentResult().isSuccess).toBe(true)
+    );
+    const readsBefore = vi.mocked(factoryClient.getRun).mock.calls.length;
+    vi.mocked(factoryClient.answerGate).mockResolvedValue(
+      err([{ code: 'CONFLICT', message: 'Resource conflict' }])
+    );
+
+    const result = await createAppRunsContext(client).answerGate({
+      runId: 'run-2',
+      step: { entry: 'plan', visit: 1 },
+      answer: 'approve',
+    });
+
+    expect(result).toEqual({ ok: false, reason: 'conflict' });
+    expect(vi.mocked(factoryClient.getRun).mock.calls.length).toBe(
+      readsBefore + 1
+    );
+    expect(observer.getCurrentResult().isFetching).toBe(false);
+    unsubscribe();
+  });
 });

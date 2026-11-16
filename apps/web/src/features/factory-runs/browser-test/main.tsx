@@ -216,10 +216,11 @@ function createFixtureContext(): RunsContext {
         await new Promise((resolve) => setTimeout(resolve, 200));
         return { ok: false, reason: 'failed' };
       }
-      // A note of "conflict" stands in for someone else answering first: the
-      // service refuses this answer, and a read moments later shows theirs.
+      // A note of "conflict" stands in for someone else answering first.
       if (input.note === 'conflict') {
-        setTimeout(() => answer({ ...input, note: undefined }), 30);
+        // Their answer is already in when this one is refused, so the read
+        // a 409 triggers shows it.
+        answer({ ...input, note: undefined });
         return { ok: false, reason: 'conflict' };
       }
       return answer(input);

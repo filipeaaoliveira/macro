@@ -23,7 +23,9 @@ The tests, on desktop and on a phone with touch styles:
   note, and check Approve and Cancel stay in view, the note stops growing,
   and the question and Steps can be reached;
 - answer with a note of `fail` (a failed request: focus returns to the
-  button), `conflict` (someone else answered first: the Gate goes a moment
-  later and focus moves to the status line) or `slow-fail` (fails after
-  200 ms, while the person moves on to Cancel run: focus stays put, and a
-  sent cancel still moves focus once the Run reads as ended).
+  button), `conflict` (someone else answered first: the read the 409 brings
+  takes the Gate away and focus moves to the status line) or `slow-fail`
+  (fails after 200 ms, while the person moves on to Cancel run: focus stays
+  put, and a sent cancel still moves focus once the Run reads as ended);
+- confirm Cancel run, then press Approve: the Gate is locked, and focus moves
+  to the status line once the Run reads as cancelled.

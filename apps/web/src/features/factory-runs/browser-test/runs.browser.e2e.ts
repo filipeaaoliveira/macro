@@ -227,3 +227,20 @@ test('moves focus after a cancel even when an answer in flight fails', async ({
   await expect(dialog.getByText('Cancelled').first()).toBeVisible();
   await expect(dialog.locator('[data-run-status]')).toBeFocused();
 });
+
+test('locks the Gate once a cancel is confirmed', async ({ page }) => {
+  const dialog = await openWaitingRun(page);
+  await dialog
+    .getByPlaceholder('Add a note for the next steps (optional)')
+    .fill('slow-fail');
+  await dialog.getByRole('button', { name: 'Cancel run' }).click();
+  await dialog.getByRole('button', { name: 'Cancel run' }).click();
+
+  const approve = dialog.getByRole('button', { name: 'Approve' });
+  await expect(approve).toBeDisabled();
+  // A press on the locked answer sends nothing.
+  await approve.click({ force: true });
+
+  await expect(dialog.getByText('Cancelled').first()).toBeVisible();
+  await expect(dialog.locator('[data-run-status]')).toBeFocused();
+});

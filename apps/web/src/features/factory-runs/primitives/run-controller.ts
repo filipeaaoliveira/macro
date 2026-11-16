@@ -53,7 +53,10 @@ export function createRunController(
   ): Promise<RunActionResult | undefined> => {
     const run = source.data();
     const gate = waiting();
-    if (!run || !gate || answering()) return undefined;
+    // A cancel on its way or sent ends the Run: the Gate takes no answer.
+    if (!run || !gate || answering() || cancelling() || cancelSent()) {
+      return undefined;
+    }
     setAnswering(value);
     // Set before the answer is sent: the Run can be read past it first.
     setRescue('answer');
@@ -67,11 +70,16 @@ export function createRunController(
     if (result.ok) {
       setAnsweredGate(gateKey(gate.step));
       setNote('');
-    } else if (result.reason === 'failed' && rescue() === 'answer') {
-      // A refused answer (409) means the Gate was answered or the Run moved
-      // on: the next read takes the buttons away, so the rescue stays. A
-      // cancel sent meanwhile keeps its own.
-      setRescue(undefined);
+    } else if (rescue() === 'answer') {
+      // A refused answer (409) arrives with the Run read again. When that
+      // read took the Gate away, focus has already moved; when it still
+      // shows the same Gate, nothing of this answer goes away, so a later
+      // poll must not move focus either. A failed request drops the rescue
+      // too, and a cancel sent meanwhile keeps its own.
+      const still = waiting();
+      const sameGate =
+        still !== undefined && gateKey(still.step) === gateKey(gate.step);
+      if (result.reason === 'failed' || sameGate) setRescue(undefined);
     }
     return result;
   };
@@ -99,7 +107,12 @@ export function createRunController(
     gateLocked: () => {
       const gate = waiting();
       if (!gate) return true;
-      return answering() !== undefined || answeredGate() === gateKey(gate.step);
+      return (
+        answering() !== undefined ||
+        answeredGate() === gateKey(gate.step) ||
+        cancelling() ||
+        cancelSent()
+      );
     },
     /** A cancel is on the wire, or was sent and the Run has not ended yet. */
     cancelling: () => cancelling() || cancelSent(),
