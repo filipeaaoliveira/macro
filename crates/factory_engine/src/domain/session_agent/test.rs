@@ -57,6 +57,9 @@ struct FakeSessions {
     failing_reads: Arc<Mutex<usize>>,
     /// Stops that fail before one works, as while the harness is down.
     failing_cancels: Arc<Mutex<usize>>,
+    /// Whether a delete answers a session that is not there as deleted, as
+    /// the routine sessions delete does.
+    deletes_missing: bool,
     disconnected: bool,
     /// The Step lets go of its session while a prepare is in flight, as
     /// when Temporal gave the attempt up and another one ended the Step.
@@ -83,6 +86,7 @@ impl FakeSessions {
             landed: Arc::default(),
             failing_reads: Arc::default(),
             failing_cancels: Arc::default(),
+            deletes_missing: false,
             disconnected: false,
             releases_on_prepare: false,
             cancelled: Arc::default(),
@@ -244,7 +248,11 @@ impl RoutineSessions for FakeSessions {
         self.deleted.lock().expect("deleted").push(command);
         let mut open = self.open.lock().expect("open");
         if !*open {
-            return Err(RoutineSessionError::OperationFailed);
+            return if self.deletes_missing {
+                Ok(())
+            } else {
+                Err(RoutineSessionError::OperationFailed)
+            };
         }
         *open = false;
         *self.prompted.lock().expect("prompted") = false;
@@ -855,4 +863,36 @@ async fn a_step_whose_prepare_was_refused_stops_promptly() {
         "{:?}",
         started.elapsed()
     );
+}
+
+/// The routine sessions delete answers a session that is not there as
+/// deleted. A stop while a prepare is in flight must not take that for done:
+/// it is tried again, and deletes the session once the prepare opens it.
+#[tokio::test(start_paused = true)]
+async fn a_session_whose_prepare_is_in_flight_is_deleted_once_it_opens() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions {
+        deletes_missing: true,
+        ..FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded)
+    };
+    let task = plan_task(&repo).await;
+    repo.claim_session(
+        task.key,
+        StepSession {
+            session_id: Uuid::now_v7(),
+            action_id: Uuid::now_v7(),
+        },
+        &task.outcomes,
+    )
+    .await
+    .expect("claim");
+    repo.record_prepare(task.key).await.expect("prepare");
+
+    let in_flight = agent(&sessions, &repo).stop(task.key, &julia()).await;
+    *sessions.open.lock().expect("open") = true;
+    let opened = agent(&sessions, &repo).stop(task.key, &julia()).await;
+
+    assert!(in_flight.is_err_and(|error| error.retryable()));
+    opened.expect("the session the prepare opened is deleted");
+    assert!(!*sessions.open.lock().expect("open"));
 }

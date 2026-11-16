@@ -26,15 +26,17 @@ failed for good: the stop is sent again for a minute while the session still
 works (a prompt on its way can restart it), then the session is deleted. A
 failed delete is retried, unless no attempt saw the session open and its last
 prepare (recorded at the database's time before each) is over five minutes old:
-then the session is not there. A Step that ended has its session deleted
-(`factory_release_step`). Either way the Step first records that it let go of
-the session. An attempt checks that record before it prepares and before it
-prompts, so none starts either after it; one that passed a check just before
-can still prepare or prompt, and the stop's watch and retried delete cover it.
-A prepare refused outright, or never shown open, is no longer in flight. A shutting-down worker gives running Steps a few seconds, then cancels them,
-so Temporal retries them on another worker at once. A cancelled Run's open Steps
-end `cancelled` with it. A Run takes at most `MAX_STEPS` Steps, then ends
-`blocked`. Workflow inputs carry ids, never the request's text.
+then the session is not there. A delete that answers a missing session as
+deleted is retried too while such a prepare may still open it. A Step that ended
+has its session deleted (`factory_release_step`). Either way the Step first
+records that it let go of the session. An attempt checks that record before it
+prepares and before it prompts, so none starts either after it; one that passed
+a check just before can still prepare or prompt, and the stop's watch and
+retried delete cover it. A prepare refused outright, or never shown open, is no
+longer in flight. A shutting-down worker gives running Steps a few seconds, then
+cancels them, so Temporal retries them on another worker at once. A cancelled
+Run's open Steps end `cancelled` with it. A Run takes at most `MAX_STEPS` Steps,
+then ends `blocked`. Workflow inputs carry ids, never the request's text.
 
 An entry with a `gate` asks a person a question once its Step ends `done`: the
 workflow records the Gate (`factory_open_gate`), waits for the

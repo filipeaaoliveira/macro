@@ -82,6 +82,10 @@ pub enum SessionAgentError {
     /// stopped it.
     #[error("the step no longer holds its agent session")]
     Released,
+    /// The stop found no session, while a prepare sent lately may still
+    /// open one: the stop is tried again until it opens or no prepare can.
+    #[error("the agent session may still open")]
+    MayStillOpen,
     /// The session's turn ended unsuccessfully.
     #[error("the agent's turn ended unsuccessfully: {0:?}")]
     TurnFailed(RoutineFailureReason),
@@ -107,7 +111,9 @@ impl Retryable for SessionAgentError {
     /// outage's answer to the prepare, never a refusal, which ends the Step.
     fn retryable(&self) -> bool {
         match self {
-            SessionAgentError::Records(_) | SessionAgentError::NotOpened => true,
+            SessionAgentError::Records(_)
+            | SessionAgentError::NotOpened
+            | SessionAgentError::MayStillOpen => true,
             SessionAgentError::Session(error) => error.is_transient(),
             SessionAgentError::TurnFailed(_)
             | SessionAgentError::NothingHandedBack
@@ -427,8 +433,9 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
         };
         // A session no attempt saw open, and no prepare sent lately may
         // still open, is not there and never will be. Any other session may
-        // be working, whatever a read or a delete answers: the client's
-        // catch-all error is as likely a timeout as a missing session.
+        // be working, or about to open, whatever a read or a delete answers:
+        // the client's catch-all error is as likely a timeout as a missing
+        // session, and a delete answers a missing session as deleted.
         let written_off = !stopping.opened && !stopping.may_still_open;
 
         // A prompt already on its way can land after the first stop and
@@ -446,7 +453,10 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
             tokio::time::sleep(wait).await;
             wait = (wait * 2).min(LONGEST_WAIT);
             match self.sessions.status(action.clone()).await {
-                Ok(RoutineActionStatus::Succeeded | RoutineActionStatus::Failed(_)) => break,
+                Ok(RoutineActionStatus::Succeeded | RoutineActionStatus::Failed(_)) => {
+                    seen = true;
+                    break;
+                }
                 Ok(RoutineActionStatus::Pending(RoutinePendingReason::AwaitingPrompt)) => {
                     seen = true;
                 }
@@ -460,8 +470,14 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
         }
         // A delete that fails fails the stop, which Temporal tries again,
         // unless the session was written off: then there is nothing to
-        // delete.
+        // delete. A delete answers a missing session as deleted, yet one no
+        // attempt saw open, whose prepare was sent lately, may open after it:
+        // the stop is tried again until it opens and is deleted, or no
+        // prepare can open it any more.
         match self.sessions.delete(action).await {
+            Ok(()) if !seen && !stopping.opened && stopping.may_still_open => {
+                Err(SessionAgentError::MayStillOpen)
+            }
             Ok(()) => Ok(()),
             Err(_) if !seen && written_off => {
                 tracing::info!("a stopped factory step never opened its agent session");
