@@ -3,9 +3,9 @@ import { MobileDrawer } from '@components/app/mobile/MobileDrawer';
 import { LoadingSpinner } from '@core/component/LoadingSpinner';
 import { createSignal, Match, onCleanup, Show, Switch } from 'solid-js';
 import { runTitle } from '../../core/run';
+import { createFocusRescue } from '../../primitives/focus-rescue';
 import type { RunController } from '../../primitives/run-controller';
 import {
-  createFocusRescue,
   RunCancel,
   RunContent,
   RunGate,

@@ -303,4 +303,33 @@ describe('RunView', () => {
     });
     expect(screen.queryByRole('button', { name: 'Cancel run' })).toBeNull();
   });
+  it('leaves focus where it is when a poll moves the Run on', async () => {
+    const { setRun } = mount({});
+    await screen.findByRole('button', { name: 'Approve' });
+    const status = document.querySelector<HTMLElement>('[data-run-status]');
+    if (!status) throw new Error('No status line');
+    // Where focus lands when a control goes away, or a click on text.
+    screen.getByRole('dialog').focus();
+
+    // Someone else answered the Gate; a poll reads the Run past it.
+    const [first] = waitingRun.steps;
+    if (!first?.gate) throw new Error('No first Gate');
+    setRun({
+      ...waitingRun,
+      steps: [
+        {
+          ...first,
+          gate: {
+            ...first.gate,
+            answer: { answer: 'approve', answeredAt: '2026-11-16T09:02:00Z' },
+          },
+        },
+        { entry: 'write', visit: 1, startedAt: '2026-11-16T09:02:00Z' },
+      ],
+    });
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+    expect(document.activeElement).not.toBe(status);
+  });
 });

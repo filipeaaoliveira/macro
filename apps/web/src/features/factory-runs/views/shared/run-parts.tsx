@@ -2,7 +2,7 @@ import { t } from '@app/lib/i18n';
 import { toast } from '@core/component/Toast/Toast';
 import { fireAndForget } from '@core/util/fireAndForget';
 import { Button } from '@ui';
-import { createEffect, on, Show } from 'solid-js';
+import { Show } from 'solid-js';
 import { GateCard } from '../../components/gate-card';
 import { CancelRun, RunSteps, RunSummary } from '../../components/run-details';
 import type { RunActionResult } from '../../context/runs-context';
@@ -105,31 +105,5 @@ export function RunLoadFailed(props: { onRetry: () => void }) {
         {t('common.retry')}
       </Button>
     </div>
-  );
-}
-
-/**
- * When an answered Gate or a cancelled Run takes the focused control away,
- * focus would fall to the page or the sheet itself; it goes to the Run's
- * status line instead, which says what happened.
- */
-export function createFocusRescue(
-  controller: RunController,
-  root: () => HTMLElement | undefined,
-  target: () => HTMLElement | undefined
-) {
-  createEffect(
-    on(
-      () => [controller.waiting()?.gate, controller.status()?.kind] as const,
-      (_next, previous) => {
-        // The first read, or the Run loading, takes no control away.
-        if (!previous?.[1]) return;
-        queueMicrotask(() => {
-          const active = document.activeElement;
-          const lost = !active || active === document.body || active === root();
-          if (lost) target()?.focus();
-        });
-      }
-    )
   );
 }

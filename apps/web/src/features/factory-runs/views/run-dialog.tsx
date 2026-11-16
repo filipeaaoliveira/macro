@@ -4,9 +4,9 @@ import XIcon from '@icon/system/regular/x.svg';
 import { ActionDialogShell, Button, Dialog } from '@ui';
 import { createSignal, Match, Show, Switch } from 'solid-js';
 import { runTitle } from '../core/run';
+import { createFocusRescue } from '../primitives/focus-rescue';
 import type { RunController } from '../primitives/run-controller';
 import {
-  createFocusRescue,
   RunCancel,
   RunContent,
   RunGate,

@@ -32,6 +32,9 @@ export function createRunController(
   const [cancelling, setCancelling] = createSignal(false);
   // A sent cancel keeps its controls locked until the Run reads as ended.
   const [cancelSent, setCancelSent] = createSignal(false);
+  // This person's own answer or cancel went through, so the control they
+  // used goes away once the Run is read past it.
+  const [rescue, setRescue] = createSignal<'answer' | 'cancel'>();
   const [now, setNow] = createSignal(Date.now());
   const clock = setInterval(() => setNow(Date.now()), CLOCK_MS);
   onCleanup(() => clearInterval(clock));
@@ -52,6 +55,8 @@ export function createRunController(
     const gate = waiting();
     if (!run || !gate || answering()) return undefined;
     setAnswering(value);
+    // Set before the answer is sent: the Run can be read past it first.
+    setRescue('answer');
     const result = await context.answerGate({
       runId: run.id,
       step: gate.step,
@@ -62,6 +67,8 @@ export function createRunController(
     if (result.ok) {
       setAnsweredGate(gateKey(gate.step));
       setNote('');
+    } else {
+      setRescue(undefined);
     }
     return result;
   };
@@ -70,9 +77,11 @@ export function createRunController(
     const run = source.data();
     if (!run || cancelling() || cancelSent()) return undefined;
     setCancelling(true);
+    setRescue('cancel');
     const result = await context.cancelRun(run.id);
     setCancelling(false);
     if (result.ok) setCancelSent(true);
+    else setRescue(undefined);
     return result;
   };
 
@@ -98,6 +107,9 @@ export function createRunController(
     },
     answer,
     cancel,
+    /** Whose control a coming read takes away: this person's answer or cancel. */
+    rescue,
+    clearRescue: () => setRescue(undefined),
   };
 }
 
