@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use agent_correlation::inbound::CorrelationState;
 use agent_harness_service_client::routine_sessions::AgentSessionClient;
+use authentication_service_client::AuthServiceClient;
 use axum::Router;
 use config::Config;
 use document_storage_service_client::DocumentStorageServiceClient;
@@ -21,18 +22,18 @@ use factory_engine::domain::ports::StepAgent;
 use factory_engine::domain::service::{FactoryServiceImpl, StepServiceImpl};
 use factory_engine::domain::session_agent::SessionAgent;
 use factory_engine::inbound::http::{ApiDoc, FactoryRouterState, factory_router};
+use factory_engine::outbound::auth_user_directory::AuthUserDirectory;
 use factory_engine::outbound::document_task_directory::DocumentTaskDirectory;
 use factory_engine::outbound::local_agent::LocalAgent;
 use factory_engine::outbound::temporal_run_workflows::TemporalRunWorkflows;
 use factory_records::outbound::pg_run_repository::PgRunRepository;
-use factory_records::outbound::pg_user_directory::PgUserDirectory;
 use macro_auth::middleware::decode_jwt::JwtValidationArgs;
 use macro_authorization::{
     InternalAuthConfig, MacroAuthJwtValidator, MacroAuthorizationServiceImpl,
     MacroAuthorizationState, NoBotAuthorizer, NoUserApiKeyAuthorizer,
 };
 use macro_entrypoint::{MacroEntrypoint, shutdown_signal};
-use macro_service_urls::{AgentHarnessServiceUrl, DocumentStorageServiceUrl};
+use macro_service_urls::{AgentHarnessServiceUrl, AuthServiceUrl, DocumentStorageServiceUrl};
 use macro_tower_layers::MacroRequestIdAndTracingLayer;
 use sqlx::postgres::PgPoolOptions;
 use temporalio_client::{Client, ClientOptions, ConnectionOptions};
@@ -101,7 +102,10 @@ async fn run() -> Result<(), rootcause::Report> {
     let parts = Parts {
         port: config.port,
         repo: repo.clone(),
-        users: PgUserDirectory::new(db.clone()),
+        users: AuthUserDirectory::new(AuthServiceClient::new(
+            config.authentication_service_secret_key.clone(),
+            AuthServiceUrl::new()?.to_string(),
+        )),
         tasks: DocumentTaskDirectory::new(
             EntityAccessServiceImpl::new(PgAccessRepository::new(db.clone())),
             DocumentStorageServiceClient::new(
@@ -137,7 +141,7 @@ async fn run() -> Result<(), rootcause::Report> {
 struct Parts {
     port: u16,
     repo: PgRunRepository,
-    users: PgUserDirectory,
+    users: AuthUserDirectory,
     tasks: DocumentTaskDirectory<EntityAccessServiceImpl<PgAccessRepository>>,
     client: Client,
     authorization_state: MacroAuthorizationState<Authorization>,

@@ -9,11 +9,11 @@ use factory_records::domain::models::{
     ClaimedSession, EntryId, Gate, HandBack, Outcome, Run, RunEnd, RunId, RunInsert, RunOutcome,
     SessionStep, Step, StepEnd, StepKey, StepSession, TaskLink,
 };
-use factory_records::domain::ports::{RunRepository, UserDirectory};
+use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
-use crate::domain::ports::{Retryable, TaskAccess, TaskDirectory};
+use crate::domain::ports::{Retryable, TaskAccess, TaskDirectory, UserDirectory};
 
 /// The session an agent Step claimed, and what it handed back.
 #[derive(Clone)]

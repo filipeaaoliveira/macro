@@ -1,12 +1,12 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
+use agent_session::domain::model::SessionVisibility;
 use agent_session::domain::routines::{
     PrepareRoutineSession, PreparedRoutineSession, PromptRoutineSession, RoutineActionStatus,
     RoutineFailureReason, RoutinePendingReason, RoutinePromptAccepted, RoutineSessionAction,
     RoutineSessionError, RoutineSessions, ValidateRoutineSession, ValidatedRoutineSession,
 };
-use agent_session::domain::model::SessionVisibility;
 use bot_id::BotId;
 use factory_records::domain::models::{
     EntryId, HandBack, Outcome, RunId, RunInsert, StepKey, StepSession,

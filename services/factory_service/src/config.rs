@@ -30,6 +30,9 @@ pub struct Config {
     /// The key document storage's internal routes take, to read the tasks
     /// Runs work on.
     pub document_storage_service_auth_key: String,
+    /// The key the authentication service's internal routes take, to tell
+    /// which accounts exist.
+    pub authentication_service_secret_key: String,
     /// The agent whose sessions do the agent Steps, as each Run's owner. Unset,
     /// they run on a local stand-in that does no work.
     pub factory_agent_id: Option<BotId>,

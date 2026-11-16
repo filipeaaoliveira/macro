@@ -8,9 +8,8 @@
 //!
 //! # Architecture
 //!
-//! - **domain**: the record models, the repository port and the user
-//!   directory port.
-//! - **outbound**: their Postgres adapters.
+//! - **domain**: the record models and the repository port.
+//! - **outbound**: the Postgres repository.
 
 pub mod domain;
 pub mod outbound;

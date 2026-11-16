@@ -10,6 +10,7 @@ agent_runtime_protocol = { path = "../agent_runtime_protocol", default-features 
 agent_session = { path = "../agent_session", default-features = false }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
+authentication_service_client = { path = "../authentication_service_client" }
 axum = { workspace = true }
 bot_id = { path = "../bot_id" }
 document_storage_service_client = { path = "../document_storage_service_client" }

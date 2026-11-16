@@ -13,7 +13,6 @@ the Gates they asked people in MacroDB, and defines the names Flows use
 - `src/domain/ports.rs`: `RunRepository`, the port `factory_engine` writes through.
 - `src/outbound/pg_run_repository.rs`: the `factory_run`, `factory_step` and
   `factory_gate` queries.
-- `src/outbound/pg_user_directory.rs`: whether a user id names an account.
 
 ## Scope
 
@@ -23,7 +22,7 @@ the Gates they asked people in MacroDB, and defines the names Flows use
 
 ## Boundaries
 
-- Depends on: `macro_user_id` (who answered a Gate).
+- Depends on: `macro_user_id` (who owns a Run and answered a Gate).
 - Used by: `crates/factory_engine`, `services/factory_service`.
 
 ## Checks
@@ -47,7 +46,9 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   document is deleted; `link_task` reports a missing task or Run instead of
   failing.
 - `answer_gate` runs after the workflow took the answer, so it must not fail on
-  a user id with no account: it records no one instead.
+  an account deleted since: it records the answer with no author instead.
+  The crate never reads `"User"`; who has an account is the authentication
+  service's to say (`factory_engine`'s `UserDirectory`).
 - A Run's or Step's end columns are all null or all set (`factory_*_end`
   checks); the row mappings refuse anything else.
 

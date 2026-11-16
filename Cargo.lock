@@ -8369,6 +8369,7 @@ dependencies = [
  "agent_session",
  "anyhow",
  "async-trait",
+ "authentication_service_client",
  "axum",
  "bot_id",
  "chrono",
@@ -8423,6 +8424,7 @@ version = "0.1.0"
 dependencies = [
  "agent_correlation",
  "agent_harness_service_client",
+ "authentication_service_client",
  "aws-sdk-secretsmanager",
  "axum",
  "bot_id",

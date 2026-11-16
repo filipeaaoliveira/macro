@@ -112,6 +112,18 @@ pub trait StepAgent: Send + Sync + 'static {
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 }
 
+/// The people Macro knows.
+pub trait UserDirectory: Send + Sync + 'static {
+    /// The error type returned when the directory cannot be read.
+    type Err: std::error::Error + Send + Sync + 'static;
+
+    /// Whether `user_id` names an account.
+    fn user_exists(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+    ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
+}
+
 /// What a person may know of a task document.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskAccess {

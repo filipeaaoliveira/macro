@@ -9,7 +9,7 @@ use factory_records::domain::models::{
     HandBack, MAX_NOTE_BYTES, MAX_OUTPUT_BYTES, MAX_REQUEST_BYTES, Outcome, Run, RunId, RunInsert,
     RunOutcome, TaskLink,
 };
-use factory_records::domain::ports::{RunRepository, UserDirectory};
+use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
@@ -21,7 +21,7 @@ use crate::domain::models::{
 };
 use crate::domain::ports::{
     AnswerDelivery, FactoryService, Retryable, RunWorkflows, RunWorkflowsError, StepExecutor,
-    StepService, TaskAccess, TaskDirectory,
+    StepService, TaskAccess, TaskDirectory, UserDirectory,
 };
 
 fn internal(error: impl std::error::Error + Send + Sync + 'static) -> rootcause::Report {

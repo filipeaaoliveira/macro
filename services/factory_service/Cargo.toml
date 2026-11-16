@@ -17,6 +17,7 @@ path = "src/openapi.rs"
 agent_correlation = { path = "../../crates/agent_correlation", features = ["http", "postgres"] }
 agent_harness_service_client = { path = "../../crates/agent_harness_service_client" }
 aws-sdk-secretsmanager = { workspace = true }
+authentication_service_client = { path = "../../crates/authentication_service_client" }
 axum = { workspace = true }
 bot_id = { path = "../../crates/bot_id" }
 database_env_vars = { path = "../../crates/database_env_vars" }

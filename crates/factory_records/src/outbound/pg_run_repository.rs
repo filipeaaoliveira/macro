@@ -17,6 +17,9 @@ use crate::domain::ports::RunRepository;
 /// The foreign key from a Run to its task document.
 const TASK_FOREIGN_KEY: &str = "factory_run_task_id_fkey";
 
+/// The foreign key from a Gate's answer to the user who gave it.
+const GATE_USER_FOREIGN_KEY: &str = "factory_gate_user_id_fkey";
+
 /// Postgres-backed Run repository.
 #[derive(Debug, Clone)]
 pub struct PgRunRepository {
@@ -370,26 +373,44 @@ impl RunRepository for PgRunRepository {
         user_id: &MacroUserIdStr<'static>,
     ) -> Result<(), Self::Err> {
         // The answer is recorded once the Run's workflow took it, so an
-        // account deleted since the API checked it must not stop it: it
-        // records no one.
-        sqlx::query!(
+        // account deleted since the API checked it must not stop it: the
+        // answer is kept with no one as its author.
+        let answered = sqlx::query!(
             r#"
             UPDATE factory_gate
-            SET answer = $3,
-                note = $4,
-                user_id = (SELECT id FROM "User" WHERE id = $5),
-                answered_at = now()
+            SET answer = $3, note = $4, user_id = $5, answered_at = now()
             WHERE run_id = $1 AND seq = $2 AND answer IS NULL
             "#,
             key.run_id.as_uuid(),
             i32::from(key.seq),
             answer.as_str(),
             note,
-            user_id.as_ref(),
+            Some(user_id.as_ref()),
         )
         .execute(&self.pool)
-        .await?;
-        Ok(())
+        .await;
+        match answered {
+            Ok(_) => Ok(()),
+            Err(sqlx::Error::Database(error))
+                if error.constraint() == Some(GATE_USER_FOREIGN_KEY) =>
+            {
+                sqlx::query!(
+                    r#"
+                    UPDATE factory_gate
+                    SET answer = $3, note = $4, user_id = NULL, answered_at = now()
+                    WHERE run_id = $1 AND seq = $2 AND answer IS NULL
+                    "#,
+                    key.run_id.as_uuid(),
+                    i32::from(key.seq),
+                    answer.as_str(),
+                    note,
+                )
+                .execute(&self.pool)
+                .await?;
+                Ok(())
+            }
+            Err(error) => Err(error.into()),
+        }
     }
 
     #[tracing::instrument(err, skip(self, offered))]

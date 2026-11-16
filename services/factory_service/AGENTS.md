@@ -11,6 +11,7 @@ worker that walks each Run's Flow, in one process.
   worker, router, shutdown.
 - `src/config.rs`: `DATABASE_URL`, `INTERNAL_API_KEY`, `TEMPORAL_ADDRESS`,
   `DOCUMENT_STORAGE_SERVICE_AUTH_KEY` (reading the tasks Runs work on),
+  `AUTHENTICATION_SERVICE_SECRET_KEY` (telling which accounts exist),
   `FACTORY_AGENT_ID` (optional: the agent doing agent Steps).
 
 ## Scope
