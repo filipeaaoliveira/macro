@@ -298,8 +298,8 @@ async fn malformed_and_ambiguous_prompt_responses_never_replay() {
     }
 }
 
-/// A harness that refuses the connection, as while it deploys, never got
-/// the prompt: that is a definite failure, safe to send again.
+/// A harness nothing listens for refuses the connection, and never got the
+/// prompt: that is a definite failure, safe to send again.
 #[tokio::test]
 async fn a_prompt_the_harness_never_connected_for_was_not_delivered() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

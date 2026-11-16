@@ -125,8 +125,9 @@ impl AgentSessionClient {
             .await
             .map_err(|error| {
                 // A request that never connected never reached the harness,
-                // as while it deploys: it is safe to send again. Anything
-                // later may have taken effect.
+                // as when nothing listens at its address: it is safe to send
+                // again. Anything later may have taken effect, and a gateway
+                // in front of the harness answers for it with a status.
                 if error.is_connect() {
                     RoutineSessionError::RuntimeUnavailable
                 } else {

@@ -51,6 +51,13 @@ worker that walks each Run's Flow, in one process.
   that serves that route as POST: before it, the route answered only GET,
   and every Run was refused as having no account.
 
+- Open for deploying: the service reaches the harness's routine sessions at
+  `AgentHarnessServiceUrl`, which outside the local stack is the public
+  gateway, as for every Macro caller outside the harness's process (the
+  scheduler runs inside it). While the harness deploys, the gateway answers
+  502 or 503, so a prompt sent then is `PromptDeliveryUnknown` and its Step
+  fails for good after a minute's wait. Macro has no in-network address for
+  the harness to use instead.
 - Local-only: the local stack runs a Temporal dev server (`temporal`, UI on
   `localhost:8233`); no deployed environment has Temporal yet, so the service
   has no deploy inventory, Doppler project or gateway route.

@@ -123,6 +123,14 @@ service's when no agent is configured.
 
 ## Gotchas
 
+- A Step or Run that ended can still have its agent at work until the stop
+  lands, up to the stop's fifteen minutes of retries. Its hand back is refused
+  meanwhile: the Step's end is recorded first, and a hand back needs a Step
+  that has not ended. If every stop fails, nothing in the factory ends the
+  agent's turn: it runs until the agent ends it, in a session no attempt
+  opens or prompts again.
+- `RoutineSessionError::is_transient` (in `agent_session`) exists for the
+  factory's retries; it is not meant for upstream on its own.
 - The workflow must stay deterministic: everything it decides comes from the
   interpreter and the activities' results, never a clock, a random number or I/O.
 - Renaming `TASK_QUEUE`, `FLOW_WORKFLOW`, `ANSWER_GATE_UPDATE` or an
