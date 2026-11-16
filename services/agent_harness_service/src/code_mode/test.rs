@@ -648,3 +648,63 @@ async fn a_run_signs_its_sessions_scope_into_its_credential(pool: sqlx::PgPool) 
         assert_eq!(signed(&run.token).as_deref(), name, "MCP run {scope:?}");
     }
 }
+
+/// Whether each kind of session a lookup is asked about is one: a
+/// suggestion generation's, a run that sends nothing, a factory Step's.
+struct Kinds {
+    generation: bool,
+    sends_nothing: bool,
+    factory_step: bool,
+}
+
+#[async_trait::async_trait]
+impl suggestions::domain::ports::GenerationSessions for Kinds {
+    async fn open_session(
+        &self,
+        _session: uuid::Uuid,
+    ) -> Result<Option<suggestions::domain::model::GenerationSession>, rootcause::Report> {
+        Ok(None)
+    }
+
+    async fn undeleted(&self, _session: uuid::Uuid) -> Result<bool, rootcause::Report> {
+        Ok(self.generation)
+    }
+}
+
+#[async_trait::async_trait]
+impl suggestions::domain::ports::RunScopes for Kinds {
+    async fn sends_nothing(&self, _session: uuid::Uuid) -> Result<bool, rootcause::Report> {
+        Ok(self.sends_nothing)
+    }
+}
+
+#[async_trait::async_trait]
+impl FactoryStepSessions for Kinds {
+    async fn works_on_a_step(&self, _session: uuid::Uuid) -> Result<bool, rootcause::Report> {
+        Ok(self.factory_step)
+    }
+}
+
+/// A factory Step's agent reads text the Run's request and earlier Steps
+/// carry, so its code may change its owner's items but reach no one else.
+#[tokio::test]
+async fn a_factory_step_s_session_sends_nothing() {
+    let kinds = |factory_step| {
+        let kinds = Arc::new(Kinds {
+            generation: false,
+            sends_nothing: false,
+            factory_step,
+        });
+        HarnessScopes {
+            generations: kinds.clone(),
+            runs: kinds.clone(),
+            factory_steps: kinds,
+        }
+    };
+
+    let step = kinds(true).scope(uuid::Uuid::nil()).await.expect("scope");
+    let other = kinds(false).scope(uuid::Uuid::nil()).await.expect("scope");
+
+    assert_eq!(step, Some(SessionScope::NoSend));
+    assert_eq!(other, None);
+}

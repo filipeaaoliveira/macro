@@ -31,10 +31,38 @@ pub trait SessionScopes: Send + Sync + 'static {
 /// Suggestion generation sessions read, and write only through their own
 /// tools and email drafts, until they are deleted: one whose turn ended but
 /// is still being stopped, or whose delete was given up, keeps the scope. A
-/// background run whose suggestion sends nothing reaches nobody.
+/// background run whose suggestion sends nothing reaches nobody, and neither
+/// does an agent working on a software factory Step: its prompt carries the
+/// Run's request and earlier Steps' output, text anyone who could edit them
+/// wrote, so it may change its owner's items but reach no one else.
 pub struct HarnessScopes {
     pub generations: Arc<dyn suggestions::domain::ports::GenerationSessions>,
     pub runs: Arc<dyn suggestions::domain::ports::RunScopes>,
+    pub factory_steps: Arc<dyn FactoryStepSessions>,
+}
+
+/// The agent sessions software factory Steps work in.
+#[async_trait]
+pub trait FactoryStepSessions: Send + Sync + 'static {
+    /// Whether a factory Step works in `session`.
+    async fn works_on_a_step(&self, session: uuid::Uuid) -> Result<bool, rootcause::Report>;
+}
+
+/// [`FactoryStepSessions`] over the factory's records.
+pub struct FactoryStepRecords<R>(pub R);
+
+#[async_trait]
+impl<R: factory_records::domain::ports::RunRepository> FactoryStepSessions
+    for FactoryStepRecords<R>
+{
+    async fn works_on_a_step(&self, session: uuid::Uuid) -> Result<bool, rootcause::Report> {
+        let step = self
+            .0
+            .session_step(session)
+            .await
+            .map_err(|error| rootcause::Report::new(error).into_dynamic())?;
+        Ok(step.is_some())
+    }
 }
 
 #[async_trait]
@@ -43,11 +71,9 @@ impl SessionScopes for HarnessScopes {
         if self.generations.undeleted(session).await? {
             return Ok(Some(SessionScope::Generation));
         }
-        Ok(self
-            .runs
-            .sends_nothing(session)
-            .await?
-            .then_some(SessionScope::NoSend))
+        let sends_nothing = self.runs.sends_nothing(session).await?
+            || self.factory_steps.works_on_a_step(session).await?;
+        Ok(sends_nothing.then_some(SessionScope::NoSend))
     }
 }
 
