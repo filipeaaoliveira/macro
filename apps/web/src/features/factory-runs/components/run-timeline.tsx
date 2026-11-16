@@ -64,7 +64,9 @@ function TimelineStep(props: {
         class={cn(
           'absolute left-[6.5px] w-px bg-ink-placeholder/45',
           props.first ? 'top-3.5' : 'top-0',
-          props.latest ? 'h-3.5' : 'bottom-0'
+          props.latest ? 'h-3.5' : 'bottom-0',
+          // A lone Step has no rail to draw.
+          props.first && props.latest && 'hidden'
         )}
       />
       <span
