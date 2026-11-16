@@ -3,12 +3,14 @@ use std::sync::{Arc, Mutex};
 use axum::Router;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode};
+use bot_id::BotId;
 use factory_records::domain::models::{EntryId, HandBack, Outcome, RunId, RunInsert, StepKey};
 use factory_records::domain::ports::RunRepository;
 use macro_authorization::{
-    CredentialOrigin, INTERNAL_API_KEY_HEADER, INTERNAL_MACRO_USER_ID_HEADER, InternalAuthConfig,
-    JwtValidator, MacroAuthorizationError, MacroAuthorizationServiceImpl, MacroAuthorizationState,
-    NoBotAuthorizer, NoUserApiKeyAuthorizer, ValidatedCredential, ValidatedIdentity,
+    CODE_EXECUTION_HEADER, CredentialOrigin, INTERNAL_API_KEY_HEADER,
+    INTERNAL_MACRO_USER_ID_HEADER, InternalAuthConfig, JwtValidator, MacroAuthorizationError,
+    MacroAuthorizationServiceImpl, MacroAuthorizationState, NoBotAuthorizer,
+    NoUserApiKeyAuthorizer, ValidatedCredential, ValidatedIdentity,
 };
 use macro_user_id::user_id::MacroUserIdStr;
 use rootcause::Report;
@@ -30,7 +32,8 @@ const ALICE: &str = "macro|alice@example.com";
 const EVE: &str = "macro|eve@example.com";
 
 /// Accepts the bearer tokens `alice` and `eve`, each its person's own
-/// session.
+/// session, and `agent`: Alice's SDK token carrying an agent's attribution,
+/// as code mode mints.
 #[derive(Clone, Copy)]
 struct Tokens;
 
@@ -39,15 +42,16 @@ impl JwtValidator for Tokens {
         &self,
         jwt: &str,
     ) -> Result<ValidatedCredential, Report<MacroAuthorizationError>> {
-        let user_id = match jwt {
-            "alice" => ALICE,
-            "eve" => EVE,
+        let (user_id, agent_id) = match jwt {
+            "alice" => (ALICE, None),
+            "eve" => (EVE, None),
+            "agent" => (ALICE, Some(BotId::new_from_uuid(Uuid::from_u128(0xB07A)))),
             _ => return Err(Report::new(MacroAuthorizationError::InvalidCredentials)),
         };
         Ok(ValidatedCredential {
             origin: CredentialOrigin::Session,
             identity: ValidatedIdentity {
-                agent_id: None,
+                agent_id,
                 agent_via: None,
                 user_id: user_id.to_string(),
                 fusion_user_id: format!("fusion-{jwt}"),
@@ -698,4 +702,37 @@ async fn a_task_the_caller_cannot_see_has_no_runs_to_list() {
     assert_eq!(missing, StatusCode::NOT_FOUND);
     assert_eq!(anonymous, StatusCode::UNAUTHORIZED);
     assert_eq!(seen, StatusCode::OK);
+}
+
+/// A Gate asks a person: an agent working as the Run's owner, by its token's
+/// attribution or a code-mode run's header, cannot answer it for them.
+#[tokio::test]
+async fn an_agent_acting_for_the_owner_cannot_answer_a_gate() {
+    let (router, service) = router(|| FactoryError::NotFound);
+    let path = format!("/runs/{}/steps/1/answer", RunId::generate());
+    let answer = serde_json::json!({ "answer": "approve" });
+
+    let attributed = router
+        .clone()
+        .oneshot(call("POST", &path, Caller::User("agent"), answer.clone()))
+        .await
+        .expect("response");
+    let mut in_code_mode = call("POST", &path, Caller::User("alice"), answer.clone());
+    in_code_mode
+        .headers_mut()
+        .insert(CODE_EXECUTION_HEADER, "true".parse().expect("header"));
+    let in_code_mode = router
+        .clone()
+        .oneshot(in_code_mode)
+        .await
+        .expect("response");
+    let person = router
+        .oneshot(call("POST", &path, Caller::User("alice"), answer))
+        .await
+        .expect("response");
+
+    assert_eq!(attributed.status(), StatusCode::FORBIDDEN);
+    assert_eq!(in_code_mode.status(), StatusCode::FORBIDDEN);
+    assert_eq!(person.status(), StatusCode::NOT_FOUND);
+    assert_eq!(*service.actors.lock().expect("actors"), [ALICE]);
 }

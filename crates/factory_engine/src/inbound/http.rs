@@ -8,7 +8,7 @@ use std::sync::Arc;
 use axum::{
     Json, Router,
     extract::{FromRef, Path, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::{get, post, put},
 };
@@ -17,7 +17,7 @@ use factory_records::domain::models::{
 };
 use macro_authorization::{
     MacroAuthorizationExtractor, MacroAuthorizationService, MacroAuthorizationState, UserOnly,
-    UserOrInternal,
+    UserOrInternal, is_agent_run,
 };
 use macro_user_id::user_id::MacroUserIdStr;
 use model_error_response::ErrorResponse;
@@ -313,7 +313,8 @@ where
 
 /// Answer, as the caller, the Gate one of their Runs waits on. The Run
 /// goes on once its workflow took the answer; reading the Run shows the
-/// answer once it is recorded.
+/// answer once it is recorded. A Gate asks a person: an agent's program
+/// acting for the owner is refused (403).
 #[utoipa::path(
     post,
     tag = "factory",
@@ -337,6 +338,7 @@ where
 pub async fn answer_gate_handler<S, Auth>(
     State(state): State<FactoryRouterState<S, Auth>>,
     caller: MacroAuthorizationExtractor<Auth, UserOrInternal>,
+    headers: HeaderMap,
     Path(params): Path<AnswerGateParams>,
     Json(body): Json<AnswerGateRequest>,
 ) -> Result<StatusCode, FactoryError>
@@ -344,7 +346,13 @@ where
     S: FactoryService,
     Auth: MacroAuthorizationService,
 {
-    let actor = caller.authorization.user.macro_user_id;
+    // An agent works as the Run's owner, so its code could otherwise
+    // approve the plan it wrote.
+    let user = caller.authorization.user;
+    if is_agent_run(user.agent_id.is_some(), &headers) {
+        return Err(FactoryError::AgentAnswer);
+    }
+    let actor = user.macro_user_id;
     state
         .service
         .answer_gate(actor, params.id, params.seq, body.answer, body.note)
@@ -485,7 +493,7 @@ impl FactoryError {
             | FactoryError::NotAStepSession
             | FactoryError::OutcomeNotOffered { .. }
             | FactoryError::HandBackTooLarge { .. } => StatusCode::BAD_REQUEST,
-            FactoryError::NotTheOwner => StatusCode::FORBIDDEN,
+            FactoryError::NotTheOwner | FactoryError::AgentAnswer => StatusCode::FORBIDDEN,
             FactoryError::NotFound | FactoryError::TaskNotFound => StatusCode::NOT_FOUND,
             FactoryError::RunEnded | FactoryError::AnswerRefused(_) | FactoryError::StepEnded => {
                 StatusCode::CONFLICT
