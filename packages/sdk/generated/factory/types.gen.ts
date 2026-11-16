@@ -23,11 +23,9 @@ export type AnswerGateRequest = {
  */
 export type CreateRunRequest = {
     /**
-     * The Flow definition the Run walks.
+     * The name of the built-in Flow the Run walks, one `GET /flows` lists.
      */
-    flow: {
-        [key: string]: unknown;
-    };
+    flow: string;
     /**
      * What the Run is asked to do.
      */
@@ -52,6 +50,30 @@ export type ErrorResponse = {
      * Message to explain failure
      */
     message: string;
+};
+
+/**
+ * A Flow a person can start a Run of.
+ */
+export type FlowSummary = {
+    /**
+     * What it does, for a person.
+     */
+    description: string;
+    /**
+     * Its name, which a Run of it is started with.
+     */
+    name: string;
+};
+
+/**
+ * The Flows a Run can be started of.
+ */
+export type FlowsResponse = {
+    /**
+     * The Flows, by name.
+     */
+    flows: Array<FlowSummary>;
 };
 
 /**
@@ -232,6 +254,36 @@ export type StepEnd = {
     output: string;
 };
 
+/**
+ * A task's Runs, as the caller sees them.
+ */
+export type TaskRunsResponse = {
+    /**
+     * The caller's Runs on the task, newest first: at most the newest 50.
+     */
+    runs: Array<RunDetail>;
+};
+
+export type ListFactoryFlowsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/flows';
+};
+
+export type ListFactoryFlowsErrors = {
+    401: ErrorResponse;
+    403: ErrorResponse;
+};
+
+export type ListFactoryFlowsError = ListFactoryFlowsErrors[keyof ListFactoryFlowsErrors];
+
+export type ListFactoryFlowsResponses = {
+    200: FlowsResponse;
+};
+
+export type ListFactoryFlowsResponse = ListFactoryFlowsResponses[keyof ListFactoryFlowsResponses];
+
 export type HandBackFactoryStepData = {
     body: HandBackRequest;
     path?: never;
@@ -396,3 +448,31 @@ export type LinkFactoryRunTaskResponses = {
 };
 
 export type LinkFactoryRunTaskResponse = LinkFactoryRunTaskResponses[keyof LinkFactoryRunTaskResponses];
+
+export type ListFactoryTaskRunsData = {
+    body?: never;
+    path: {
+        /**
+         * The task document's id.
+         */
+        task_id: string;
+    };
+    query?: never;
+    url: '/tasks/{task_id}/runs';
+};
+
+export type ListFactoryTaskRunsErrors = {
+    400: ErrorResponse;
+    401: ErrorResponse;
+    403: ErrorResponse;
+    404: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type ListFactoryTaskRunsError = ListFactoryTaskRunsErrors[keyof ListFactoryTaskRunsErrors];
+
+export type ListFactoryTaskRunsResponses = {
+    200: TaskRunsResponse;
+};
+
+export type ListFactoryTaskRunsResponse = ListFactoryTaskRunsResponses[keyof ListFactoryTaskRunsResponses];

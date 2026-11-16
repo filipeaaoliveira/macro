@@ -8,10 +8,11 @@
 export * from './answerGateRequest';
 export * from './answerGateRequestNote';
 export * from './createRunRequest';
-export * from './createRunRequestFlow';
 export * from './createRunRequestTaskId';
 export * from './entryId';
 export * from './errorResponse';
+export * from './flowSummary';
+export * from './flowsResponse';
 export * from './gate';
 export * from './gateAnswer';
 export * from './gateAnswerNote';
@@ -32,3 +33,4 @@ export * from './step';
 export * from './stepEnd';
 export * from './stepEndProperty';
 export * from './stepGate';
+export * from './taskRunsResponse';

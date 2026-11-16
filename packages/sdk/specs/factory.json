@@ -9,6 +9,45 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/flows": {
+      "get": {
+        "tags": ["factory"],
+        "summary": "List the built-in Flows a Run can be started of, by name.",
+        "operationId": "list_factory_flows",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlowsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/hand-backs": {
       "post": {
         "tags": ["factory"],
@@ -84,7 +123,7 @@
     "/runs": {
       "post": {
         "tags": ["factory"],
-        "summary": "Create a Run of a Flow, owned by the acting user, and start its workflow.",
+        "summary": "Create a Run of a built-in Flow, owned by the caller, and start its\nworkflow.",
         "operationId": "create_factory_run",
         "requestBody": {
           "content": {
@@ -173,7 +212,7 @@
     "/runs/{id}": {
       "get": {
         "tags": ["factory"],
-        "summary": "Read one of the acting user's Runs and the Steps it took.",
+        "summary": "Read one of the caller's Runs and the Steps it took.",
         "operationId": "get_factory_run",
         "parameters": [
           {
@@ -253,7 +292,7 @@
     "/runs/{id}/cancel": {
       "post": {
         "tags": ["factory"],
-        "summary": "Cancel one of the acting user's Runs. Its running Step or Gate stops, and\nreading the Run shows it `cancelled` once its workflow recorded that.\nCancelling a cancelled Run again is accepted and changes nothing.",
+        "summary": "Cancel one of the caller's Runs. Its running Step or Gate stops, and\nreading the Run shows it `cancelled` once its workflow recorded that.\nCancelling a cancelled Run again is accepted and changes nothing.",
         "operationId": "cancel_factory_run",
         "parameters": [
           {
@@ -356,7 +395,7 @@
     "/runs/{id}/steps/{seq}/answer": {
       "post": {
         "tags": ["factory"],
-        "summary": "Answer, as the acting user, the Gate one of their Runs waits on. The Run\ngoes on once its workflow took the answer; reading the Run shows the\nanswer once it is recorded.",
+        "summary": "Answer, as the caller, the Gate one of their Runs waits on. The Run\ngoes on once its workflow took the answer; reading the Run shows the\nanswer once it is recorded. A Gate asks a person: an agent's program\nacting for the owner is refused (403).",
         "operationId": "answer_factory_gate",
         "parameters": [
           {
@@ -480,7 +519,7 @@
     "/runs/{id}/task": {
       "put": {
         "tags": ["factory"],
-        "summary": "Link one of the acting user's Runs to a Macro task they can see,\nreplacing any task it had.",
+        "summary": "Link one of the caller's Runs to a Macro task they can see,\nreplacing any task it had.",
         "operationId": "link_factory_run_task",
         "parameters": [
           {
@@ -566,6 +605,87 @@
           }
         }
       }
+    },
+    "/tasks/{task_id}/runs": {
+      "get": {
+        "tags": ["factory"],
+        "summary": "List the caller's Runs on a task they can see, newest first, each with\nthe Steps it took. Other people's Runs on the task are not listed.",
+        "operationId": "list_factory_task_runs",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "description": "The task document's id.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskRunsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -591,8 +711,8 @@
         "required": ["flow", "request"],
         "properties": {
           "flow": {
-            "type": "object",
-            "description": "The Flow definition the Run walks."
+            "type": "string",
+            "description": "The name of the built-in Flow the Run walks, one `GET /flows` lists."
           },
           "request": {
             "type": "string",
@@ -617,6 +737,35 @@
           "message": {
             "type": "string",
             "description": "Message to explain failure"
+          }
+        }
+      },
+      "FlowSummary": {
+        "type": "object",
+        "description": "A Flow a person can start a Run of.",
+        "required": ["name", "description"],
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "What it does, for a person."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name, which a Run of it is started with."
+          }
+        }
+      },
+      "FlowsResponse": {
+        "type": "object",
+        "description": "The Flows a Run can be started of.",
+        "required": ["flows"],
+        "properties": {
+          "flows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FlowSummary"
+            },
+            "description": "The Flows, by name."
           }
         }
       },
@@ -870,6 +1019,20 @@
           "output": {
             "type": "string",
             "description": "What the Step produced, for a person to read."
+          }
+        }
+      },
+      "TaskRunsResponse": {
+        "type": "object",
+        "description": "A task's Runs, as the caller sees them.",
+        "required": ["runs"],
+        "properties": {
+          "runs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunDetail"
+            },
+            "description": "The caller's Runs on the task, newest first: at most the newest 50."
           }
         }
       }

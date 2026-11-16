@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AnswerFactoryGateData, AnswerFactoryGateErrors, AnswerFactoryGateResponses, CancelFactoryRunData, CancelFactoryRunErrors, CancelFactoryRunResponses, CreateFactoryRunData, CreateFactoryRunErrors, CreateFactoryRunResponses, GetFactoryRunData, GetFactoryRunErrors, GetFactoryRunResponses, HandBackFactoryStepData, HandBackFactoryStepErrors, HandBackFactoryStepResponses, LinkFactoryRunTaskData, LinkFactoryRunTaskErrors, LinkFactoryRunTaskResponses } from './types.gen';
+import type { AnswerFactoryGateData, AnswerFactoryGateErrors, AnswerFactoryGateResponses, CancelFactoryRunData, CancelFactoryRunErrors, CancelFactoryRunResponses, CreateFactoryRunData, CreateFactoryRunErrors, CreateFactoryRunResponses, GetFactoryRunData, GetFactoryRunErrors, GetFactoryRunResponses, HandBackFactoryStepData, HandBackFactoryStepErrors, HandBackFactoryStepResponses, LinkFactoryRunTaskData, LinkFactoryRunTaskErrors, LinkFactoryRunTaskResponses, ListFactoryFlowsData, ListFactoryFlowsErrors, ListFactoryFlowsResponses, ListFactoryTaskRunsData, ListFactoryTaskRunsErrors, ListFactoryTaskRunsResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -58,6 +58,13 @@ export class Sdk extends HeyApiClient {
     }
 
     /**
+     * List the built-in Flows a Run can be started of, by name.
+     */
+    public listFactoryFlows<ThrowOnError extends boolean = false>(options?: Options<ListFactoryFlowsData, ThrowOnError>): RequestResult<ListFactoryFlowsResponses, ListFactoryFlowsErrors, ThrowOnError> {
+        return (options?.client ?? this.client).get<ListFactoryFlowsResponses, ListFactoryFlowsErrors, ThrowOnError>({ url: '/flows', ...options });
+    }
+
+    /**
      * Hand back the result of the factory Step the calling agent session works
      * on. The session's latest hand back is the Step's result once its turn
      * ends.
@@ -74,7 +81,8 @@ export class Sdk extends HeyApiClient {
     }
 
     /**
-     * Create a Run of a Flow, owned by the acting user, and start its workflow.
+     * Create a Run of a built-in Flow, owned by the caller, and start its
+     * workflow.
      */
     public createFactoryRun<ThrowOnError extends boolean = false>(options: Options<CreateFactoryRunData, ThrowOnError>): RequestResult<CreateFactoryRunResponses, CreateFactoryRunErrors, ThrowOnError> {
         return (options.client ?? this.client).post<CreateFactoryRunResponses, CreateFactoryRunErrors, ThrowOnError>({
@@ -88,14 +96,14 @@ export class Sdk extends HeyApiClient {
     }
 
     /**
-     * Read one of the acting user's Runs and the Steps it took.
+     * Read one of the caller's Runs and the Steps it took.
      */
     public getFactoryRun<ThrowOnError extends boolean = false>(options: Options<GetFactoryRunData, ThrowOnError>): RequestResult<GetFactoryRunResponses, GetFactoryRunErrors, ThrowOnError> {
         return (options.client ?? this.client).get<GetFactoryRunResponses, GetFactoryRunErrors, ThrowOnError>({ url: '/runs/{id}', ...options });
     }
 
     /**
-     * Cancel one of the acting user's Runs. Its running Step or Gate stops, and
+     * Cancel one of the caller's Runs. Its running Step or Gate stops, and
      * reading the Run shows it `cancelled` once its workflow recorded that.
      * Cancelling a cancelled Run again is accepted and changes nothing.
      */
@@ -104,9 +112,10 @@ export class Sdk extends HeyApiClient {
     }
 
     /**
-     * Answer, as the acting user, the Gate one of their Runs waits on. The Run
+     * Answer, as the caller, the Gate one of their Runs waits on. The Run
      * goes on once its workflow took the answer; reading the Run shows the
-     * answer once it is recorded.
+     * answer once it is recorded. A Gate asks a person: an agent's program
+     * acting for the owner is refused (403).
      */
     public answerFactoryGate<ThrowOnError extends boolean = false>(options: Options<AnswerFactoryGateData, ThrowOnError>): RequestResult<AnswerFactoryGateResponses, AnswerFactoryGateErrors, ThrowOnError> {
         return (options.client ?? this.client).post<AnswerFactoryGateResponses, AnswerFactoryGateErrors, ThrowOnError>({
@@ -120,7 +129,7 @@ export class Sdk extends HeyApiClient {
     }
 
     /**
-     * Link one of the acting user's Runs to a Macro task they can see,
+     * Link one of the caller's Runs to a Macro task they can see,
      * replacing any task it had.
      */
     public linkFactoryRunTask<ThrowOnError extends boolean = false>(options: Options<LinkFactoryRunTaskData, ThrowOnError>): RequestResult<LinkFactoryRunTaskResponses, LinkFactoryRunTaskErrors, ThrowOnError> {
@@ -132,5 +141,13 @@ export class Sdk extends HeyApiClient {
                 ...options.headers
             }
         });
+    }
+
+    /**
+     * List the caller's Runs on a task they can see, newest first, each with
+     * the Steps it took. Other people's Runs on the task are not listed.
+     */
+    public listFactoryTaskRuns<ThrowOnError extends boolean = false>(options: Options<ListFactoryTaskRunsData, ThrowOnError>): RequestResult<ListFactoryTaskRunsResponses, ListFactoryTaskRunsErrors, ThrowOnError> {
+        return (options.client ?? this.client).get<ListFactoryTaskRunsResponses, ListFactoryTaskRunsErrors, ThrowOnError>({ url: '/tasks/{task_id}/runs', ...options });
     }
 }

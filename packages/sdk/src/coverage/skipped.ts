@@ -504,13 +504,15 @@ export const unfurlExcluded = [
 export const unfurlBacklog = [] as const satisfies readonly (keyof UnfurlSdk)[];
 
 export const factoryExcluded = [
-  // The Run API serves internal services only; an agent session reaches the
-  // factory just to hand back its Step's result.
+  // People use the Run API from the web app; an agent session reaches the
+  // factory only to hand back its Step's result, and may not answer a Gate.
   'answerFactoryGate',
   'cancelFactoryRun',
   'createFactoryRun',
   'getFactoryRun',
   'linkFactoryRunTask',
+  'listFactoryFlows',
+  'listFactoryTaskRuns',
 ] as const satisfies readonly (keyof FactorySdk)[];
 
 export const factoryBacklog =

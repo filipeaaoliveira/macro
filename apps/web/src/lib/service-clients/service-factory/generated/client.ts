@@ -8,11 +8,67 @@ import type {
   AnswerGateRequest,
   CreateRunRequest,
   ErrorResponse,
+  FlowsResponse,
   HandBackRequest,
   LinkTaskRequest,
   RunDetail,
   RunId,
+  TaskRunsResponse,
 } from './schemas';
+
+/**
+ * @summary List the built-in Flows a Run can be started of, by name.
+ */
+export type listFactoryFlowsResponse200 = {
+  data: FlowsResponse;
+  status: 200;
+};
+
+export type listFactoryFlowsResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type listFactoryFlowsResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type listFactoryFlowsResponseSuccess = listFactoryFlowsResponse200 & {
+  headers: Headers;
+};
+export type listFactoryFlowsResponseError = (
+  | listFactoryFlowsResponse401
+  | listFactoryFlowsResponse403
+) & {
+  headers: Headers;
+};
+
+export type listFactoryFlowsResponse =
+  | listFactoryFlowsResponseSuccess
+  | listFactoryFlowsResponseError;
+
+export const getListFactoryFlowsUrl = () => {
+  return `/flows`;
+};
+
+export const listFactoryFlows = async (
+  options?: RequestInit
+): Promise<listFactoryFlowsResponse> => {
+  const res = await fetch(getListFactoryFlowsUrl(), {
+    ...options,
+    method: 'GET',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: listFactoryFlowsResponse['data'] = body ? JSON.parse(body) : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as listFactoryFlowsResponse;
+};
 
 /**
  * @summary Hand back the result of the factory Step the calling agent session works
@@ -95,7 +151,8 @@ export const handBackFactoryStep = async (
 };
 
 /**
- * @summary Create a Run of a Flow, owned by the acting user, and start its workflow.
+ * @summary Create a Run of a built-in Flow, owned by the caller, and start its
+workflow.
  */
 export type createFactoryRunResponse201 = {
   data: RunDetail;
@@ -176,7 +233,7 @@ export const createFactoryRun = async (
 };
 
 /**
- * @summary Read one of the acting user's Runs and the Steps it took.
+ * @summary Read one of the caller's Runs and the Steps it took.
  */
 export type getFactoryRunResponse200 = {
   data: RunDetail;
@@ -249,7 +306,7 @@ export const getFactoryRun = async (
 };
 
 /**
- * @summary Cancel one of the acting user's Runs. Its running Step or Gate stops, and
+ * @summary Cancel one of the caller's Runs. Its running Step or Gate stops, and
 reading the Run shows it `cancelled` once its workflow recorded that.
 Cancelling a cancelled Run again is accepted and changes nothing.
  */
@@ -342,9 +399,10 @@ export const cancelFactoryRun = async (
 };
 
 /**
- * @summary Answer, as the acting user, the Gate one of their Runs waits on. The Run
+ * @summary Answer, as the caller, the Gate one of their Runs waits on. The Run
 goes on once its workflow took the answer; reading the Run shows the
-answer once it is recorded.
+answer once it is recorded. A Gate asks a person: an agent's program
+acting for the owner is refused (403).
  */
 export type answerFactoryGateResponse202 = {
   data: void;
@@ -439,7 +497,7 @@ export const answerFactoryGate = async (
 };
 
 /**
- * @summary Link one of the acting user's Runs to a Macro task they can see,
+ * @summary Link one of the caller's Runs to a Macro task they can see,
 replacing any task it had.
  */
 export type linkFactoryRunTaskResponse200 = {
@@ -514,4 +572,81 @@ export const linkFactoryRunTask = async (
     status: res.status,
     headers: res.headers,
   } as linkFactoryRunTaskResponse;
+};
+
+/**
+ * @summary List the caller's Runs on a task they can see, newest first, each with
+the Steps it took. Other people's Runs on the task are not listed.
+ */
+export type listFactoryTaskRunsResponse200 = {
+  data: TaskRunsResponse;
+  status: 200;
+};
+
+export type listFactoryTaskRunsResponse400 = {
+  data: ErrorResponse;
+  status: 400;
+};
+
+export type listFactoryTaskRunsResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type listFactoryTaskRunsResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type listFactoryTaskRunsResponse404 = {
+  data: ErrorResponse;
+  status: 404;
+};
+
+export type listFactoryTaskRunsResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type listFactoryTaskRunsResponseSuccess =
+  listFactoryTaskRunsResponse200 & {
+    headers: Headers;
+  };
+export type listFactoryTaskRunsResponseError = (
+  | listFactoryTaskRunsResponse400
+  | listFactoryTaskRunsResponse401
+  | listFactoryTaskRunsResponse403
+  | listFactoryTaskRunsResponse404
+  | listFactoryTaskRunsResponse500
+) & {
+  headers: Headers;
+};
+
+export type listFactoryTaskRunsResponse =
+  | listFactoryTaskRunsResponseSuccess
+  | listFactoryTaskRunsResponseError;
+
+export const getListFactoryTaskRunsUrl = (taskId: string) => {
+  return `/tasks/${taskId}/runs`;
+};
+
+export const listFactoryTaskRuns = async (
+  taskId: string,
+  options?: RequestInit
+): Promise<listFactoryTaskRunsResponse> => {
+  const res = await fetch(getListFactoryTaskRunsUrl(taskId), {
+    ...options,
+    method: 'GET',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: listFactoryTaskRunsResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as listFactoryTaskRunsResponse;
 };
