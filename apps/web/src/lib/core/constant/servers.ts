@@ -22,6 +22,7 @@ const serverHostLocal: Servers = {
   'agent-harness': 'http://localhost:8101',
   preview: 'http://localhost:8101/preview',
   'agent-git': 'http://localhost:8101/agent-git',
+  factory: 'http://localhost:8113',
 } as const;
 
 const devServerSuffix = import.meta.env.MODE === 'development' ? '-dev' : '';
@@ -55,6 +56,7 @@ const directServerHostRemote = {
   'agent-harness': `${gatewayHost}/agent-harness`,
   preview: `${gatewayHost}/preview`,
   'agent-git': `${gatewayHost}/agent-git`,
+  factory: `${gatewayHost}/factory`,
 } as const;
 
 type Servers = Record<keyof typeof directServerHostRemote, string>;
@@ -143,6 +145,7 @@ function proxyServers(): Servers | undefined {
     'image-proxy-service': `${proxyOrigin}/image-proxy`,
     'scheduled-action': `${proxyOrigin}/scheduled-action`,
     'agent-git': `${proxyOrigin}/agent-git`,
+    factory: `${proxyOrigin}/factory`,
   };
 }
 
@@ -255,6 +258,7 @@ const nativeSessionServices = {
   preview: SERVER_HOSTS['preview'],
   // Git remotes for agent workspaces; the app sends no requests to it.
   'agent-git': undefined,
+  factory: SERVER_HOSTS.factory,
 } satisfies Record<keyof Servers, string | undefined>;
 
 /**

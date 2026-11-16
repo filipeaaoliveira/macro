@@ -311,8 +311,7 @@ pub const RUST_SERVICES: &[RustService] = &[
         cargo_bin: "factory_service",
         package: "factory_service",
         host_port: Some(Port::Factory),
-        // Internal callers only; the frontend does not reach it.
-        path_prefix: None,
+        path_prefix: Some("/factory"),
         is_websocket: false,
         // Local-only: its workflows run on the local stack's Temporal server,
         // which no deployed environment has yet.
