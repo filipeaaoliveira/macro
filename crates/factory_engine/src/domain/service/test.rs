@@ -732,7 +732,10 @@ async fn cancelling_a_run_whose_workflow_never_started_ends_it_cancelled() {
 
     let run = repo.get_run(run_id).await.expect("read").expect("kept");
     assert_eq!(run.end.map(|end| end.outcome), Some(RunOutcome::Cancelled));
-    assert!(matches!(started, Ok(StepStart::RunEnded)));
+    assert_eq!(
+        started.ok(),
+        Some(StepStart::RunEnded(RunOutcome::Cancelled))
+    );
     assert!(repo.list_steps(run_id).await.expect("read").is_empty());
 }
 

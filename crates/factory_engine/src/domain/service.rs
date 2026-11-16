@@ -410,8 +410,8 @@ where
     #[tracing::instrument(err, skip_all, fields(run_id = %request.key.run_id, seq = request.key.seq))]
     async fn start_step(&self, request: StepRequest) -> Result<StepStart, StepError> {
         // A Run cancelled before its workflow started takes no Step.
-        if self.run_of(&request).await?.end.is_some() {
-            return Ok(StepStart::RunEnded);
+        if let Some(end) = self.run_of(&request).await?.end {
+            return Ok(StepStart::RunEnded(end.outcome));
         }
         self.repo
             .start_step(request.key, &request.entry, request.visit)

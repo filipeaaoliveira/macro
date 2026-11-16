@@ -81,9 +81,10 @@ pub struct AgentAnswer {
 pub enum StepStart {
     /// The Step is recorded, and its work may begin.
     Started,
-    /// The Step's Run ended before it started: it was cancelled before its
-    /// workflow did. The workflow ends as the Run did.
-    RunEnded,
+    /// The Step's Run ended before it started, as one cancelled, or ended
+    /// for good by the sweep, before its workflow did. The workflow ends as
+    /// the Run did.
+    RunEnded(RunOutcome),
 }
 
 /// How a Step ended.
@@ -205,8 +206,8 @@ pub enum StepError {
     /// The Step's Run is not recorded.
     #[error("the step's run does not exist")]
     NoSuchRun,
-    /// The Step's Run ended before the Step started, as a Run cancelled
-    /// before its workflow did.
+    /// The Step's Run ended: before the Step started, as a Run cancelled
+    /// before its workflow did, or while it worked.
     #[error("the step's run has ended")]
     RunEnded,
     /// The Step produced more output than a Step keeps.

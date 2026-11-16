@@ -299,6 +299,20 @@ async fn a_workflow_whose_run_was_cancelled_before_it_started_ends_cancelled() {
     assert!(repo.list_steps(run_id).await.expect("read").is_empty());
 }
 
+/// A workflow that starts after the sweep ended its Run failed ends as the
+/// Run did, not as a cancelled one.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "Temporal doesn't exist in CI"]
+async fn a_workflow_whose_run_ended_before_it_started_ends_as_the_run_did() {
+    let agent = Agent::doing(Work::Ends);
+
+    let (ended, repo, run_id) = walk_after(&agent, RunOutcome::Failed, |_, _| async {}).await;
+
+    assert!(matches!(ended, Ok(RunOutcome::Failed)), "{ended:?}");
+    assert!(agent.tasks.lock().expect("tasks").is_empty());
+    assert!(repo.list_steps(run_id).await.expect("read").is_empty());
+}
+
 /// A Step that fails for good has its agent stopped, so nothing after it
 /// runs beside it, and ends `failed` with nothing internal in its output.
 #[tokio::test(flavor = "multi_thread")]

@@ -137,9 +137,9 @@ impl FlowWorkflow {
                 .await;
             match started {
                 Ok(StepStart::Started) => {}
-                // The Run was cancelled before this workflow started: it
-                // ends as the Run did, never as a failure.
-                Ok(StepStart::RunEnded) => break RunOutcome::Cancelled,
+                // The Run ended before this workflow started, cancelled or
+                // swept: the workflow ends as the Run did.
+                Ok(StepStart::RunEnded(outcome)) => break outcome,
                 Err(_) if is_cancelled(ctx) => break RunOutcome::Cancelled,
                 Err(error) => return Err(error.into()),
             }
