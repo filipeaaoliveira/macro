@@ -6,6 +6,12 @@ import {
   InsightPlot,
   type InsightPlotModule,
 } from '@app/features/scheduling/components/insight-plot';
+import {
+  DailyDataTable,
+  DayExplorer,
+  SeriesToggles,
+  toggleSeries,
+} from '@app/features/scheduling/components/insight-trend-parts';
 import { InsightSection } from '@app/features/scheduling/components/insights-panel';
 import { formatLocale, t } from '@app/lib/i18n';
 import type { PlotOptions } from '@observablehq/plot';
@@ -15,7 +21,10 @@ import {
   type InsightDay,
   type InsightOutcome,
 } from '../core/insights';
-import { insightOutcomeColor, insightOutcomeLabel } from './insight-outcomes';
+import {
+  INSIGHT_OUTCOME_COLORS,
+  insightOutcomeLabel,
+} from './insight-outcomes';
 
 /** A day of the period, as an axis or a table names it. */
 export function formatInsightDay(date: string, long = false): string {
@@ -83,7 +92,7 @@ function runsByDayPlot(
     },
     color: {
       domain: outcomes.map(insightOutcomeLabel),
-      range: outcomes.map(insightOutcomeColor),
+      range: outcomes.map((outcome) => INSIGHT_OUTCOME_COLORS[outcome]),
       legend: false,
     },
     marks: [
@@ -102,6 +111,12 @@ function runsByDayPlot(
 
 /** The period's Runs by day, with a legend that hides and shows states. */
 export function RunsByDayChart(props: { days: InsightDay[] }) {
+  const series = () =>
+    INSIGHT_OUTCOMES.map((outcome) => ({
+      key: outcome,
+      label: insightOutcomeLabel(outcome),
+      color: INSIGHT_OUTCOME_COLORS[outcome],
+    }));
   const [visible, setVisible] = createSignal<InsightOutcome[]>([
     ...INSIGHT_OUTCOMES,
   ]);
@@ -112,85 +127,52 @@ export function RunsByDayChart(props: { days: InsightDay[] }) {
     <InsightSection
       title={t('factoryInsights.runsByDay')}
       actions={
-        <div
-          class="flex flex-wrap gap-1.5"
-          role="group"
-          aria-label={t('factoryInsights.visibleStates')}
-        >
-          <For each={INSIGHT_OUTCOMES}>
-            {(outcome) => (
-              <button
-                type="button"
-                aria-pressed={visible().includes(outcome)}
-                onClick={() =>
-                  setVisible((current) =>
-                    current.includes(outcome)
-                      ? current.filter((key) => key !== outcome)
-                      : [...current, outcome]
-                  )
-                }
-                class="inline-flex items-center gap-1.5 rounded-md border border-edge-muted bg-panel px-2 py-1 text-xs text-ink-muted hover:bg-hover focus-visible:outline-2 focus-visible:outline-ink"
-                classList={{ 'opacity-40': !visible().includes(outcome) }}
-              >
-                <span
-                  class="size-2 rounded-full"
-                  style={{ background: insightOutcomeColor(outcome) }}
-                />
-                {insightOutcomeLabel(outcome)}
-              </button>
-            )}
-          </For>
-        </div>
+        <SeriesToggles
+          label={t('factoryInsights.visibleStates')}
+          series={series()}
+          visible={visible()}
+          onToggle={(key) =>
+            setVisible((current) => toggleSeries(current, key))
+          }
+        />
       }
     >
       <div class="px-4 pb-4 pt-3 sm:px-6">
-        <InsightPlot
-          label={t('factoryInsights.runsByDayChart')}
-          height={240}
-          options={(plot, width) =>
-            runsByDayPlot(plot, width, props.days, plotted())
-          }
+        <DayExplorer
+          days={props.days}
+          label={t('factoryInsights.runsByDayExplore')}
+          status={(day) => (
+            <>
+              <span class="font-medium text-ink">
+                {formatInsightDay(day.date, true)}
+              </span>
+              <For each={plotted()}>
+                {(outcome) => (
+                  <span>
+                    {insightOutcomeLabel(outcome)}: {day.counts[outcome]}
+                  </span>
+                )}
+              </For>
+            </>
+          )}
+        >
+          <InsightPlot
+            label={t('factoryInsights.runsByDayChart')}
+            height={240}
+            options={(plot, width) =>
+              runsByDayPlot(plot, width, props.days, plotted())
+            }
+          />
+        </DayExplorer>
+        <DailyDataTable
+          summary={t('factoryInsights.viewDailyData')}
+          caption={t('factoryInsights.runsByDay')}
+          dateHeading={t('factoryInsights.date')}
+          days={props.days}
+          date={(day) => formatInsightDay(day.date)}
+          columns={series()}
+          value={(day, key) => day.counts[key]}
         />
-        <details class="mt-4 text-xs text-ink-muted">
-          <summary class="w-fit rounded py-1 focus-visible:outline-2 focus-visible:outline-ink">
-            {t('factoryInsights.viewDailyData')}
-          </summary>
-          <div class="mt-2 max-h-60 overflow-auto rounded-lg border border-edge-muted">
-            <table class="w-full text-left tabular-nums">
-              <caption class="sr-only">
-                {t('factoryInsights.runsByDay')}
-              </caption>
-              <thead class="bg-surface-2">
-                <tr>
-                  <th class="p-3">{t('factoryInsights.date')}</th>
-                  <For each={INSIGHT_OUTCOMES}>
-                    {(outcome) => (
-                      <th class="p-3 font-medium">
-                        {insightOutcomeLabel(outcome)}
-                      </th>
-                    )}
-                  </For>
-                </tr>
-              </thead>
-              <tbody>
-                <For each={props.days}>
-                  {(day) => (
-                    <tr class="border-t border-edge-muted">
-                      <th class="whitespace-nowrap p-3 font-normal">
-                        {formatInsightDay(day.date)}
-                      </th>
-                      <For each={INSIGHT_OUTCOMES}>
-                        {(outcome) => (
-                          <td class="p-3">{day.counts[outcome]}</td>
-                        )}
-                      </For>
-                    </tr>
-                  )}
-                </For>
-              </tbody>
-            </table>
-          </div>
-        </details>
       </div>
     </InsightSection>
   );

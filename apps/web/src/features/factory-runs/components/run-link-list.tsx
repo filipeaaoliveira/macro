@@ -1,7 +1,10 @@
 import { For, type JSX } from 'solid-js';
 import type { RunLink } from '../core/insights';
 import { formatRunDate } from './insight-format';
-import { insightOutcomeColor, insightOutcomeLabel } from './insight-outcomes';
+import {
+  INSIGHT_OUTCOME_COLORS,
+  insightOutcomeLabel,
+} from './insight-outcomes';
 
 /** Runs to open, each with its state, title, date and a trailing figure. */
 export function RunLinkList(props: {
@@ -22,9 +25,8 @@ export function RunLinkList(props: {
               <span
                 class="size-2 shrink-0 rounded-full"
                 style={{
-                  background: insightOutcomeColor(
-                    item.run.outcome ?? 'running'
-                  ),
+                  background:
+                    INSIGHT_OUTCOME_COLORS[item.run.outcome ?? 'running'],
                 }}
               />
               <span class="sr-only">

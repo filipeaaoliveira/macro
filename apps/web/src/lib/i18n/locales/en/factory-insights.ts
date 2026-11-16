@@ -37,6 +37,8 @@ export default {
   showPercentages: 'Show percentages',
   runsByDay: 'Runs by day',
   runsByDayChart: 'Runs started each day, by how they went',
+  runsByDayExplore:
+    'Runs by day chart. Use the left and right arrow keys to explore the days.',
   visibleStates: 'Visible run states',
   viewDailyData: 'View daily data',
   date: 'Date',

@@ -54,6 +54,14 @@ test('shows how runs went, filters by flow and opens a run', async ({
   await expectNoSideScroll(page);
   await shoot(page, 'insights', project);
 
+  // The daily chart is explored by keyboard: focus picks today, the left
+  // arrow the day before, and the picked day's runs are read out.
+  const chart = page.getByRole('group', { name: /Runs by day chart/ });
+  await chart.focus();
+  await expect(chart.getByRole('status')).toContainText('Nov 16');
+  await page.keyboard.press('ArrowLeft');
+  await expect(chart.getByRole('status')).toContainText('Nov 15');
+
   // Only the code Flow: plan, then its own steps, and no reply.
   if (project === 'mobile') {
     // The shared filter drawer names its trigger itself.

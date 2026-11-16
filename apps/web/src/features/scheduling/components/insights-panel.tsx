@@ -23,6 +23,12 @@ import { EventOutcomesChart } from './event-outcomes-chart';
 import { SelectInput } from './fields';
 import { hourLabel, hourPlot, trendPlot } from './insight-chart-options';
 import { InsightPlot } from './insight-plot';
+import {
+  DailyDataTable,
+  DayExplorer,
+  SeriesToggles,
+  toggleSeries,
+} from './insight-trend-parts';
 import { InsightHostAvatar, InsightsHostFilter } from './insights-host-filter';
 import { InsightsRangeSelector } from './insights-range-selector';
 import { SchedulingFilterSection } from './scheduling-filter-section';
@@ -141,66 +147,40 @@ function TrendChart(props: { days: InsightDay[] }) {
   const [visible, setVisible] = createSignal<InsightMetric[]>(
     SERIES.map((series) => series.key)
   );
-  const [selectedDay, setSelectedDay] = createSignal<number>();
   const plotted = () =>
     SERIES.filter((series) => visible().includes(series.key));
-  const activeDay = () =>
-    selectedDay() === undefined
-      ? undefined
-      : props.days[Math.min(selectedDay()!, props.days.length - 1)];
   return (
     <InsightSection
       title="Event trends"
       actions={
-        <div class="flex flex-wrap gap-1.5" aria-label="Visible chart series">
-          <For each={SERIES}>
-            {(series) => (
-              <button
-                type="button"
-                aria-pressed={visible().includes(series.key)}
-                onClick={() =>
-                  setVisible((current) =>
-                    current.includes(series.key)
-                      ? current.filter((key) => key !== series.key)
-                      : [...current, series.key]
-                  )
-                }
-                class="inline-flex items-center gap-1.5 rounded-md border border-edge-muted bg-panel px-2 py-1 text-xs text-ink-muted hover:bg-hover focus-visible:outline-2 focus-visible:outline-ink"
-                classList={{ 'opacity-40': !visible().includes(series.key) }}
-              >
-                <span
-                  class="size-2 rounded-full"
-                  style={{ background: series.color }}
-                />
-                {series.label}
-              </button>
-            )}
-          </For>
-        </div>
+        <SeriesToggles
+          label="Visible chart series"
+          series={SERIES}
+          visible={visible()}
+          onToggle={(key) =>
+            setVisible((current) => toggleSeries(current, key))
+          }
+        />
       }
     >
       <div class="px-4 pb-4 pt-3 sm:px-6">
-        <div
-          class="rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ink/20"
-          tabIndex={0}
-          role="group"
-          aria-label="Event trends chart. Use left and right arrow keys to explore dates."
-          onFocus={() => setSelectedDay(props.days.length - 1)}
-          onBlur={() => setSelectedDay(undefined)}
-          onKeyDown={(event) => {
-            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
-            event.preventDefault();
-            setSelectedDay((index) =>
-              Math.max(
-                0,
-                Math.min(
-                  props.days.length - 1,
-                  (index ?? props.days.length - 1) +
-                    (event.key === 'ArrowRight' ? 1 : -1)
-                )
-              )
-            );
-          }}
+        <DayExplorer
+          days={props.days}
+          label="Event trends chart. Use left and right arrow keys to explore dates."
+          status={(day) => (
+            <>
+              <span class="font-medium text-ink">
+                {formatDate(day.date, true)}
+              </span>
+              <For each={plotted()}>
+                {(series) => (
+                  <span>
+                    {series.label}: {day[series.key]}
+                  </span>
+                )}
+              </For>
+            </>
+          )}
         >
           <InsightPlot
             label="Daily booking totals and outcomes"
@@ -209,61 +189,16 @@ function TrendChart(props: { days: InsightDay[] }) {
               trendPlot(plot, width, props.days, plotted())
             }
           />
-          <Show when={activeDay()}>
-            {(day) => (
-              <div
-                role="status"
-                aria-live="polite"
-                class="flex flex-wrap gap-x-4 gap-y-1 rounded-md bg-surface-1 px-3 py-2 text-xs text-ink-muted"
-              >
-                <span class="font-medium text-ink">
-                  {formatDate(day().date, true)}
-                </span>
-                <For each={plotted()}>
-                  {(series) => (
-                    <span>
-                      {series.label}: {day()[series.key]}
-                    </span>
-                  )}
-                </For>
-              </div>
-            )}
-          </Show>
-        </div>
-        <details class="mt-4 text-xs text-ink-muted">
-          <summary class="w-fit rounded py-1 focus-visible:outline-2 focus-visible:outline-ink">
-            View daily data
-          </summary>
-          <div class="mt-2 max-h-60 overflow-auto rounded-lg border border-edge-muted">
-            <table class="w-full text-left tabular-nums">
-              <caption class="sr-only">Daily bookings and outcomes</caption>
-              <thead class="bg-surface-2">
-                <tr>
-                  <th class="p-3">Date</th>
-                  <For each={SERIES}>
-                    {(series) => (
-                      <th class="p-3 font-medium">{series.label}</th>
-                    )}
-                  </For>
-                </tr>
-              </thead>
-              <tbody>
-                <For each={props.days}>
-                  {(day) => (
-                    <tr class="border-t border-edge-muted">
-                      <th class="whitespace-nowrap p-3 font-normal">
-                        {formatDate(day.date)}
-                      </th>
-                      <For each={SERIES}>
-                        {(series) => <td class="p-3">{day[series.key]}</td>}
-                      </For>
-                    </tr>
-                  )}
-                </For>
-              </tbody>
-            </table>
-          </div>
-        </details>
+        </DayExplorer>
+        <DailyDataTable
+          summary="View daily data"
+          caption="Daily bookings and outcomes"
+          dateHeading="Date"
+          days={props.days}
+          date={(day) => formatDate(day.date)}
+          columns={SERIES}
+          value={(day, key) => day[key]}
+        />
       </div>
     </InsightSection>
   );

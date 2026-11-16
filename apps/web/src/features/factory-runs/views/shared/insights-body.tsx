@@ -1,4 +1,5 @@
 import { ListSkeleton } from '@app/components/view-shell/ListSkeleton';
+import { EventOutcomesChart } from '@app/features/scheduling/components/event-outcomes-chart';
 import {
   InsightSection,
   Metric,
@@ -8,7 +9,10 @@ import { formatLocale, t } from '@app/lib/i18n';
 import { Button } from '@ui';
 import { Index, type JSX, Match, Show, Switch } from 'solid-js';
 import { EntryList } from '../../components/entry-list';
-import { RunOutcomesChart } from '../../components/run-outcomes-chart';
+import {
+  INSIGHT_OUTCOME_COLORS,
+  insightOutcomeLabel,
+} from '../../components/insight-outcomes';
 import {
   formatInsightDay,
   RunsByDayChart,
@@ -19,6 +23,7 @@ import type { RunsSource } from '../../context/runs-context';
 import { flowWordLabel } from '../../core/flow-words';
 import {
   durationIn,
+  INSIGHT_OUTCOMES,
   type RunInsights,
   runCount,
   successRate,
@@ -80,7 +85,29 @@ function InsightsSections(props: {
     <div class="grid min-w-0 grid-cols-1 items-start gap-5 @min-[1000px]/insights:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
       <div class="@container/insight-main flex min-w-0 flex-col gap-5">
         <InsightSection title={t('factoryInsights.runs')}>
-          <RunOutcomesChart counts={totals()} />
+          <EventOutcomesChart
+            rows={INSIGHT_OUTCOMES.map((outcome) => ({
+              key: outcome,
+              label: insightOutcomeLabel(outcome),
+              count: totals()[outcome],
+            }))}
+            colors={INSIGHT_OUTCOME_COLORS}
+            totalLabel={t('factoryInsights.totalRuns')}
+            chartLabel={t('factoryInsights.outcomesChart')}
+            listLabel={t('factoryInsights.outcomes')}
+            emptyText={t('factoryInsights.noRunsInPeriod')}
+            hintText={t('factoryInsights.oneStatePerRun')}
+            showCountsLabel={t('factoryInsights.showCounts')}
+            showPercentagesLabel={t('factoryInsights.showPercentages')}
+            locale={formatLocale()}
+            describe={(row, count, share) =>
+              t('factoryInsights.outcomeShare', {
+                outcome: row.label,
+                count,
+                share,
+              })
+            }
+          />
           <div class="grid grid-cols-1 divide-y divide-edge-muted @sm/insight-main:grid-cols-2 @3xl/insight-main:grid-cols-4 @3xl/insight-main:divide-x @3xl/insight-main:divide-y-0">
             <Metric
               label={t('factoryInsights.totalRuns')}
