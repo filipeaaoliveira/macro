@@ -16,6 +16,7 @@ export type ServiceName =
   | 'static-files'
   | 'connection'
   | 'contacts'
+  | 'factory'
   | 'unfurl';
 
 export const WEB_APP_URLS: Record<Env, string> = {
@@ -39,6 +40,7 @@ export const HOSTS: Record<Env, Record<ServiceName, string>> = {
     'static-files': 'https://static-file-service-dev.macro.com',
     connection: 'https://dev-gateway.macro.com/connection-gateway',
     contacts: 'https://dev-gateway.macro.com/contacts',
+    factory: 'https://dev-gateway.macro.com/factory',
     unfurl: 'https://dev-gateway.macro.com/unfurl',
   },
   prod: {
@@ -55,6 +57,7 @@ export const HOSTS: Record<Env, Record<ServiceName, string>> = {
     'static-files': 'https://static-file-service.macro.com',
     connection: 'https://gateway.macro.com/connection-gateway',
     contacts: 'https://gateway.macro.com/contacts',
+    factory: 'https://gateway.macro.com/factory',
     unfurl: 'https://gateway.macro.com/unfurl',
   },
   local: {
@@ -74,6 +77,7 @@ export const HOSTS: Record<Env, Record<ServiceName, string>> = {
     'static-files': 'http://localhost:8100',
     connection: 'http://localhost:8082',
     contacts: 'http://localhost:8083',
+    factory: 'http://localhost:8113',
     unfurl: 'http://localhost:8095',
   },
 };

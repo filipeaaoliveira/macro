@@ -346,6 +346,7 @@ const SERVICE_PREFIXES: &[&str] = &[
     "/contacts",
     "/dss",
     "/email",
+    "/factory",
     "/notification",
     "/scheduled-action",
     "/unfurl",

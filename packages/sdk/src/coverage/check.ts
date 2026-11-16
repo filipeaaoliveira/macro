@@ -28,6 +28,7 @@ const ACCESSORS: Partial<Record<(typeof services)[number], string>> = {
   cognition: 'cognition',
   contacts: 'contacts',
   email: 'email',
+  factory: 'factory',
   notification: 'notification',
   properties: 'properties',
   search: 'search',

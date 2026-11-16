@@ -321,6 +321,10 @@ fn emits_in_network_service_url_overrides() {
         ),
         ("OVERRIDE_UNFURL_SERVICE_URL", "http://unfurl-service:8080"),
         (
+            "OVERRIDE_FACTORY_SERVICE_URL",
+            "http://factory-service:8080",
+        ),
+        (
             "OVERRIDE_AGENT_HARNESS_SERVICE_URL",
             "http://agent-harness-service:8080",
         ),

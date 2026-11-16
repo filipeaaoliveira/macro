@@ -5,6 +5,7 @@ import { Sdk as CalendarSdk } from '../../generated/calendar/sdk.gen';
 import { Sdk as CognitionSdk } from '../../generated/cognition/sdk.gen';
 import { Sdk as ContactsSdk } from '../../generated/contacts/sdk.gen';
 import { Sdk as EmailSdk } from '../../generated/email/sdk.gen';
+import { Sdk as FactorySdk } from '../../generated/factory/sdk.gen';
 import { Sdk as NotificationSdk } from '../../generated/notification/sdk.gen';
 import { Sdk as PropertiesSdk } from '../../generated/properties/sdk.gen';
 import { Sdk as ScheduledActionSdk } from '../../generated/scheduled-action/sdk.gen';
@@ -102,6 +103,7 @@ export class MacroClient {
   readonly scheduledAction: ScheduledActionSdk;
 
   readonly unfurl: UnfurlSdk;
+  readonly factory: FactorySdk;
 
   readonly agentHarness: AgentHarnessSdk;
 
@@ -177,6 +179,11 @@ export class MacroClient {
     this.unfurl = observeSdk(
       new UnfurlSdk({ client: this.makeClient(hosts.unfurl) }),
       'unfurl',
+      opts.onRequest,
+    );
+    this.factory = observeSdk(
+      new FactorySdk({ client: this.makeClient(hosts.factory) }),
+      'factory',
       opts.onRequest,
     );
     this.agentHarness = observeSdk(

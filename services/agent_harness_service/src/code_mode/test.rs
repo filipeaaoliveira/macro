@@ -488,7 +488,8 @@ fn enforcement(host: SdkHost) -> ScopeEnforcement {
         | SdkHost::Notification
         | SdkHost::ScheduledAction
         | SdkHost::Connection
-        | SdkHost::Contacts => ScopeEnforcement::Propagate,
+        | SdkHost::Contacts
+        | SdkHost::Factory => ScopeEnforcement::Propagate,
         // The static file service and the CDN in front of it.
         SdkHost::StaticFiles | SdkHost::StaticContent => ScopeEnforcement::SignedScope,
         // CloudFront serves document content only to URLs the storage service

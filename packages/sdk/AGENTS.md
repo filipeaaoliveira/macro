@@ -41,6 +41,10 @@ enforced by the ordinary backend APIs.
   (`BookingLink`), settings, booked meetings (`Booking`) and insights over calendar
   `/scheduling`. Link writes carry the user's quoted `userConfirmation`, which the
   route rejects when blank; `BookingLink` handles keep their `team` for edits.
+- `src/entities/factory/`: `macro.factory.handBack`, how the agent session
+  doing a software factory Step hands back its result. It is the factory's
+  only SDK endpoint; the Run API is internal (`coverage/skipped.ts`), and the
+  service runs only on local stacks so far.
 - `src/entities/routines/`, `agents/`, `harnesses/`: automation and agent hosts.
   `harnesses.directory()` lists teammates' hosts and `Harness.requestAccess()`
   asks for one. Granting takes the owner's own session, so the server refuses

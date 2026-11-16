@@ -275,6 +275,7 @@ enum SdkHost {
     Connection,
     Contacts,
     Unfurl,
+    Factory,
 }
 
 impl SdkHost {
@@ -301,6 +302,7 @@ impl SdkHost {
             Self::Connection => ConnectionGatewayUrl::new()?.to_string(),
             Self::Contacts => ContactsServiceUrl::new()?.to_string(),
             Self::Unfurl => UnfurlServiceUrl::new()?.to_string(),
+            Self::Factory => FactoryServiceUrl::new()?.to_string(),
         })
     }
 }

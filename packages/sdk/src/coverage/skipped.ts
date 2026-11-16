@@ -16,6 +16,7 @@ import type { Sdk as CognitionSdk } from '../../generated/cognition/sdk.gen';
 import type { Sdk as ConnectionSdk } from '../../generated/connection/sdk.gen';
 import type { Sdk as ContactsSdk } from '../../generated/contacts/sdk.gen';
 import type { Sdk as EmailSdk } from '../../generated/email/sdk.gen';
+import type { Sdk as FactorySdk } from '../../generated/factory/sdk.gen';
 import type { Sdk as NotificationSdk } from '../../generated/notification/sdk.gen';
 import type { Sdk as PropertiesSdk } from '../../generated/properties/sdk.gen';
 import type { Sdk as ScheduledActionSdk } from '../../generated/scheduled-action/sdk.gen';
@@ -501,3 +502,16 @@ export const unfurlExcluded = [
 ] as const satisfies readonly (keyof UnfurlSdk)[];
 
 export const unfurlBacklog = [] as const satisfies readonly (keyof UnfurlSdk)[];
+
+export const factoryExcluded = [
+  // The Run API serves internal services only; an agent session reaches the
+  // factory just to hand back its Step's result.
+  'answerFactoryGate',
+  'cancelFactoryRun',
+  'createFactoryRun',
+  'getFactoryRun',
+  'linkFactoryRunTask',
+] as const satisfies readonly (keyof FactorySdk)[];
+
+export const factoryBacklog =
+  [] as const satisfies readonly (keyof FactorySdk)[];
