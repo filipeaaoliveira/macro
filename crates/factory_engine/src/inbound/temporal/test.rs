@@ -67,6 +67,7 @@ struct Agent {
     asked: Arc<Notify>,
     tasks: Arc<Mutex<Vec<StepKey>>>,
     stops: Arc<AtomicUsize>,
+    stopped_at: Arc<Mutex<Option<tokio::time::Instant>>>,
     releases: Arc<AtomicUsize>,
 }
 
@@ -77,6 +78,7 @@ impl Agent {
             asked: Arc::default(),
             tasks: Arc::default(),
             stops: Arc::default(),
+            stopped_at: Arc::default(),
             releases: Arc::default(),
         }
     }
@@ -111,6 +113,10 @@ impl StepAgent for Agent {
         _owner: &MacroUserIdStr<'static>,
     ) -> Result<(), AgentFailed> {
         self.stops.fetch_add(1, Ordering::SeqCst);
+        self.stopped_at
+            .lock()
+            .expect("stopped at")
+            .get_or_insert_with(tokio::time::Instant::now);
         Ok(())
     }
 
@@ -248,16 +254,23 @@ async fn asked(agent: &Agent) {
 }
 
 /// The activity cancelled with the Run can't tell why it was: the workflow
-/// stops the agent, once, and the Run and its Step end cancelled.
+/// stops the agent, once, and the Run and its Step end cancelled. The cancel
+/// reaches the working Step within a few seconds, not on the heartbeat
+/// timeout's schedule.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "Temporal doesn't exist in CI"]
 async fn cancelling_a_run_stops_its_working_step_s_agent_once() {
     let agent = Agent::doing(Work::Works);
 
+    let cancelled_at = Arc::new(Mutex::new(None));
     let (ended, repo, run_id) = walk(&agent, |client, run_id| {
         let agent = agent.clone();
+        let cancelled_at = cancelled_at.clone();
         async move {
+            // The Step's work just started, and with it its first heartbeat:
+            // the next one is held back as long as the worker allows.
             asked(&agent).await;
+            *cancelled_at.lock().expect("cancelled at") = Some(tokio::time::Instant::now());
             client
                 .get_workflow_handle::<FlowWorkflowDefinition>(run_id.to_string())
                 .cancel(WorkflowCancelOptions::builder().build())
@@ -273,6 +286,17 @@ async fn cancelling_a_run_stops_its_working_step_s_agent_once() {
     ));
     assert_eq!(agent.stops.load(Ordering::SeqCst), 1);
     assert_eq!(agent.releases.load(Ordering::SeqCst), 0);
+    let cancelled_at = cancelled_at
+        .lock()
+        .expect("cancelled at")
+        .expect("cancelled");
+    let stopped_at = agent
+        .stopped_at
+        .lock()
+        .expect("stopped at")
+        .expect("stopped");
+    let latency = stopped_at - cancelled_at;
+    assert!(latency < Duration::from_secs(10), "{latency:?}");
     let run = repo.get_run(run_id).await.expect("read").expect("kept");
     assert_eq!(run.end.map(|end| end.outcome), Some(RunOutcome::Cancelled));
     let steps = repo.list_steps(run_id).await.expect("read");

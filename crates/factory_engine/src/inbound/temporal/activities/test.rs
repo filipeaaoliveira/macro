@@ -159,14 +159,3 @@ async fn stopping_a_step_heartbeats_while_it_goes() {
     assert_eq!(steps.stops.load(Ordering::SeqCst), 1);
     assert!(context.beats.load(Ordering::SeqCst) >= 4);
 }
-
-/// A Run's cancel reaches a working Step on the answer to a heartbeat, which
-/// the SDK sends at most every 80% of the heartbeat timeout: the Step must
-/// hear of it within 15 s, and beat several times inside each timeout.
-#[test]
-fn a_cancel_reaches_a_working_step_within_fifteen_seconds() {
-    use crate::inbound::temporal::workflow::STEP_HEARTBEAT_TIMEOUT;
-
-    assert!(STEP_HEARTBEAT_TIMEOUT.mul_f64(0.8) <= Duration::from_secs(15));
-    assert!(super::HEARTBEAT_EVERY * 3 <= STEP_HEARTBEAT_TIMEOUT);
-}

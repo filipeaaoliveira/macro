@@ -14,11 +14,11 @@ use crate::domain::gate::{GateAnswered, GateOpening};
 use crate::domain::models::{RunFinish, StepEnding, StepError, StepReport, StepRequest, StepStart};
 use crate::domain::ports::StepService;
 
-/// How often a Step's work tells Temporal its worker is alive, well inside
-/// the workflow's heartbeat timeout. The SDK sends them on at most every
-/// 80% of that timeout, and a cancel reaches the work only on the answer to
-/// one, so the timeout, not this, sets how soon a cancel lands.
-pub(super) const HEARTBEAT_EVERY: Duration = Duration::from_secs(4);
+/// How often a Step's work tells Temporal its worker is alive. The worker
+/// sends them on at most every few seconds (`MAX_HEARTBEAT_THROTTLE` in
+/// `inbound::temporal`), and a cancel reaches the work only on the answer to
+/// one, so beating more often than that changes nothing.
+const HEARTBEAT_EVERY: Duration = Duration::from_secs(2);
 
 /// The Step service as a trait object. `#[activities]` does not take a
 /// generic type, so the activities hold the service behind `dyn`, which needs

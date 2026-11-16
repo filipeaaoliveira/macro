@@ -21,6 +21,11 @@ use crate::temporal::TASK_QUEUE;
 /// agent session, rather than after the Step's heartbeat timeout.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
+/// The longest a worker holds back a running activity's heartbeat. A Run's
+/// cancel reaches a working Step only on the answer to one, so within about
+/// this; the SDK would otherwise wait up to 80% of the heartbeat timeout.
+const MAX_HEARTBEAT_THROTTLE: Duration = Duration::from_secs(4);
+
 /// A worker on the factory's task queue that runs the Flow workflow and its
 /// activities, over `steps`.
 pub fn worker(
@@ -42,6 +47,7 @@ fn worker_on(
         .register_workflow::<FlowWorkflow>()?
         .register_activities(FactoryActivities::new(steps))
         .graceful_shutdown_period(SHUTDOWN_GRACE)
+        .max_heartbeat_throttle_interval(MAX_HEARTBEAT_THROTTLE)
         .build();
     Ok(Worker::new(runtime, client, options)?)
 }
