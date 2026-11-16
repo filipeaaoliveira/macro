@@ -8,12 +8,14 @@
 SET LOCAL lock_timeout = '5s';
 
 -- A Run belongs to the user who started it: its agent Steps run as them,
--- and it goes with their account. It may work on one Macro task, which
--- relinking replaces; deleting the task document unlinks it rather than
--- deleting the Run.
+-- and it goes with their account. It walks one built-in Flow, by name (null
+-- only for Runs recorded before the Flow was kept). It may work on one Macro
+-- task, which relinking replaces; deleting the task document unlinks it
+-- rather than deleting the Run.
 CREATE TABLE factory_run (
     id uuid PRIMARY KEY,
     user_id text NOT NULL REFERENCES "User" (id) ON DELETE CASCADE,
+    flow text CHECK (flow ~ '^[a-z0-9_-]{1,64}$'),
     request text NOT NULL CHECK (octet_length(request) <= 65536),
     task_id text REFERENCES "Document" (id) ON DELETE SET NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
@@ -27,8 +29,11 @@ CREATE TABLE factory_run (
     CONSTRAINT factory_run_end CHECK ((outcome IS NULL) = (ended_at IS NULL))
 );
 
--- Deleting a user finds their Runs without a full scan.
-CREATE INDEX factory_run_user_id_idx ON factory_run (user_id);
+-- Insights read one person's Runs created in a time range, newest first, and
+-- stop at a cap. Its leading column also finds a deleted user's Runs without
+-- a full scan.
+CREATE INDEX factory_run_user_created_idx
+    ON factory_run (user_id, created_at DESC, id DESC);
 
 -- A task's Runs are listed for the person who started them, newest first:
 -- this index finds one person's Runs on one task in that order and stops at
