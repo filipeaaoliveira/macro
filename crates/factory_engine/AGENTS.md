@@ -15,21 +15,24 @@ the outcome back; then it records the Run's end (`factory_end_run`). A Step is
 keyed by its place among the Run's Steps (`seq`), which a reset never reuses.
 Work that fails for good, or still fails after two hours of retries (not a count
 of attempts, which a worker shutting down uses up), ends the Step `failed`, with
-a fixed output (why is in the worker's logs). The work heartbeats every 4 s
-against a 15 s timeout, so a cancel reaches it within about 12 s. A cancelled
-activity only drops its work: it can't tell the Run's cancellation from a worker
-shutting down or a timed-out attempt, and a retry goes on in the same agent
-session. Once the Step's or the Run's end is recorded, the workflow stops the
-agent (`factory_stop_step`, on a token the cancellation does not reach) when the
-Run was cancelled, or the work failed for good: the stop is sent again for a
-minute while the session still works (a prompt on its way can restart it), then
-the session is deleted, and a failed delete is retried. A Step that ended has
-its session deleted (`factory_release_step`). Either way the Step first records
-that it let go of the session, and no attempt opens or prompts a session its
-Step let go of. A shutting-down worker gives running Steps a few seconds, then
-cancels them, so Temporal retries them on another worker at once. A cancelled
-Run's open Steps end `cancelled` with it. A Run takes at most `MAX_STEPS` Steps,
-then ends `blocked`. Workflow inputs carry ids, never the request's text.
+a fixed output (why is in the worker's logs). The work heartbeats every 2 s
+against a 30 s timeout, and the worker holds a heartbeat back at most 4 s, so a
+cancel reaches it within about 4 s. A cancelled activity only drops its work: it
+can't tell the Run's cancellation from a worker shutting down or a timed-out
+attempt, and a retry goes on in the same agent session. Once the Step's or the
+Run's end is recorded, the workflow stops the agent (`factory_stop_step`, on a
+token the cancellation does not reach) when the Run was cancelled, or the work
+failed for good: the stop is sent again for a minute while the session still
+works (a prompt on its way can restart it), then the session is deleted. A
+failed delete is retried, unless no attempt saw the session open and its last
+prepare (recorded at the database's time before each) is over five minutes old:
+then the session is not there. A Step that ended has its session deleted
+(`factory_release_step`). Either way the Step first records that it let go of
+the session, and no attempt prepares, opens or prompts a session its Step let go
+of. A shutting-down worker gives running Steps a few seconds, then cancels them,
+so Temporal retries them on another worker at once. A cancelled Run's open Steps
+end `cancelled` with it. A Run takes at most `MAX_STEPS` Steps, then ends
+`blocked`. Workflow inputs carry ids, never the request's text.
 
 An entry with a `gate` asks a person a question once its Step ends `done`: the
 workflow records the Gate (`factory_open_gate`), waits for the
@@ -129,6 +132,10 @@ service's when no agent is configured.
   that has not ended. If every stop fails, nothing in the factory ends the
   agent's turn: it runs until the agent ends it, in a session no attempt
   opens or prompts again.
+- A runtime that opens a requested session more than five minutes after its
+  prepare, as macrod may when its event stream lags or replays, leaves a
+  session no stop deletes: by then the stop has written it off. The recorded
+  prepare and open narrow that window; no bound closes it.
 - `RoutineSessionError::is_transient` (in `agent_session`) exists for the
   factory's retries; it is not meant for upstream on its own.
 - The workflow must stay deterministic: everything it decides comes from the
