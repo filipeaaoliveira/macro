@@ -42,8 +42,11 @@ const FAILED_STEP_OUTPUT: &str = "The step's work failed. The factory service's 
 const STEP_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 /// How long a Step's work may go without a heartbeat before Temporal counts
-/// its worker as gone and tries again elsewhere.
-const STEP_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(60);
+/// its worker as gone and tries again elsewhere, in the same agent session.
+/// The SDK heartbeats at most every 80% of it, 12 s, and a Run's cancel
+/// reaches the Step's work only on a heartbeat's answer: so within about
+/// 12 s.
+pub(super) const STEP_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// How long a Step's work may take in all, across its attempts. Attempts
 /// are not counted: a worker shutting down fails the attempt it runs, so a
