@@ -342,12 +342,20 @@ where
         let run = self.owned_run(actor, id).await?;
         match run.end.map(|end| end.outcome) {
             // A workflow that completed before its Run's end was recorded
-            // has ended the Run, though the records don't say so yet.
+            // has ended the Run, though the records don't say so yet. A Run
+            // whose workflow never started has nothing to stop: it ends
+            // cancelled here, and a workflow that starts late takes no Step.
             None => {
                 if self.workflows.cancel(id).await? {
                     Ok(())
-                } else {
+                } else if self.workflows.exists(id).await? {
                     Err(FactoryError::RunEnded)
+                } else {
+                    self.repo
+                        .end_run(id, RunOutcome::Cancelled)
+                        .await
+                        .map_err(internal)?;
+                    Ok(())
                 }
             }
             // Cancelling again is what the first cancel already did.
@@ -391,6 +399,10 @@ where
 {
     #[tracing::instrument(err, skip_all, fields(run_id = %request.key.run_id, seq = request.key.seq))]
     async fn start_step(&self, request: StepRequest) -> Result<(), StepError> {
+        // A Run cancelled before its workflow started takes no Step.
+        if self.run_of(&request).await?.end.is_some() {
+            return Err(StepError::RunEnded);
+        }
         self.repo
             .start_step(request.key, &request.entry, request.visit)
             .await

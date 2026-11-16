@@ -195,6 +195,10 @@ pub enum StepError {
     /// The Step's Run is not recorded.
     #[error("the step's run does not exist")]
     NoSuchRun,
+    /// The Step's Run ended before the Step started, as a Run cancelled
+    /// before its workflow did.
+    #[error("the step's run has ended")]
+    RunEnded,
     /// The Step produced more output than a Step keeps.
     #[error("the step's output must be at most {max} bytes")]
     OutputTooLarge {

@@ -13,7 +13,7 @@ use crate::domain::fakes::FakeRepo;
 use crate::domain::flow::StepName;
 use crate::domain::gate::AnswerGate;
 use crate::domain::models::{
-    FactoryError, RunFinish, RunStart, StepEnding, StepInput, StepReport, StepRequest,
+    FactoryError, RunFinish, RunStart, StepEnding, StepError, StepInput, StepReport, StepRequest,
 };
 use crate::domain::ports::{
     AnswerDelivery, FactoryService, Retryable, RunWorkflows, RunWorkflowsError, StepExecutor,
@@ -33,6 +33,8 @@ struct FakeWorkflows {
     refuse: bool,
     /// The workflow completed, though the Run's end is not recorded yet.
     completed: bool,
+    /// The workflow never started.
+    unstarted: bool,
 }
 
 impl RunWorkflows for FakeWorkflows {
@@ -45,7 +47,7 @@ impl RunWorkflows for FakeWorkflows {
     }
 
     async fn exists(&self, _run_id: RunId) -> Result<bool, RunWorkflowsError> {
-        Ok(self.started_anyway)
+        Ok(self.started_anyway || self.completed)
     }
 
     async fn answer(
@@ -62,7 +64,7 @@ impl RunWorkflows for FakeWorkflows {
 
     async fn cancel(&self, run_id: RunId) -> Result<bool, RunWorkflowsError> {
         self.cancelled.lock().expect("cancelled").push(run_id);
-        Ok(!self.completed)
+        Ok(!self.completed && !self.unstarted)
     }
 }
 
@@ -699,6 +701,31 @@ async fn cancelling_a_run_whose_workflow_completed_is_a_conflict() {
         .await;
 
     assert!(matches!(refused, Err(FactoryError::RunEnded)));
+}
+
+/// A Run whose workflow never started has nothing to stop: cancelling it
+/// ends it, and a workflow that starts late takes no Step of it.
+#[tokio::test]
+async fn cancelling_a_run_whose_workflow_never_started_ends_it_cancelled() {
+    let repo = FakeRepo::default();
+    let workflows = FakeWorkflows {
+        unstarted: true,
+        ..FakeWorkflows::default()
+    };
+    let run_id = julia_s_run(&repo).await;
+
+    service(&repo, &workflows)
+        .cancel_run(&julia(), run_id)
+        .await
+        .expect("cancel");
+    let started = StepServiceImpl::new(repo.clone(), FakeExecutor::default())
+        .start_step(reply_step(run_id, 1))
+        .await;
+
+    let run = repo.get_run(run_id).await.expect("read").expect("kept");
+    assert_eq!(run.end.map(|end| end.outcome), Some(RunOutcome::Cancelled));
+    assert!(matches!(started, Err(StepError::RunEnded)));
+    assert!(repo.list_steps(run_id).await.expect("read").is_empty());
 }
 
 /// A Run kept when Temporal could not say whether its workflow started,
