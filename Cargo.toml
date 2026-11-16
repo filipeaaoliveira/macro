@@ -479,11 +479,11 @@ tar = "0.4.46"
 # The Temporal Rust SDK. The crates release together and the workflow macros
 # expand to paths in temporalio-sdk and temporalio-workflow, so all five are
 # pinned to one version. vendored-protox compiles the protos without protoc.
-temporalio-client = "=1.1.0"
-temporalio-common = { version = "=1.1.0", features = ["vendored-protox"] }
-temporalio-macros = "=1.1.0"
-temporalio-sdk = "=1.1.0"
-temporalio-workflow = "=1.1.0"
+temporalio-client = "=1.2.0"
+temporalio-common = { version = "=1.2.0", features = ["vendored-protox"] }
+temporalio-macros = "=1.2.0"
+temporalio-sdk = "=1.2.0"
+temporalio-workflow = "=1.2.0"
 tempfile = "3"
 thiserror = "2.0.0"
 time = "0.3.37"
