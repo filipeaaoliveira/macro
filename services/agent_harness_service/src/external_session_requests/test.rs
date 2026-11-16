@@ -1,4 +1,5 @@
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use agent_session::domain::model::{AgentSessionId, SessionSource, SessionVisibility};
 use agent_session::domain::ports::{
@@ -9,6 +10,7 @@ use bot_id::BotId;
 use macro_event_broker::{EventBrokerError, MacroEvent, MacroEventBroker};
 use macro_user_id::user_id::MacroUserIdStr;
 use model_owner::Owner;
+use tokio::sync::Notify;
 
 use super::{BrokerExternalSessionRequests, RuntimeUsers};
 
@@ -17,13 +19,15 @@ fn owner() -> MacroUserIdStr<'static> {
 }
 
 /// A runtime that answers a session request the way macrod does: it creates
-/// the row under the requested id itself, as a person's listed session.
+/// the row under the requested id itself, as a person's listed session; when
+/// `opens` is set, only once told to.
 #[derive(Clone)]
 struct Runtime {
     sessions: InMemoryAgentSessionRepo,
     creates: AgentSessionId,
     bot: BotId,
     requests: Arc<Mutex<usize>>,
+    opens: Option<Arc<Notify>>,
 }
 
 impl MacroEventBroker for Runtime {
@@ -37,7 +41,14 @@ impl MacroEventBroker for Runtime {
         session.owner_id = Owner::User(owner());
         session.source = SessionSource::User;
         session.visibility = SessionVisibility::Listed;
-        self.sessions.insert_session(session);
+        let sessions = self.sessions.clone();
+        let opens = self.opens.clone();
+        tokio::spawn(async move {
+            if let Some(opens) = opens {
+                opens.notified().await;
+            }
+            sessions.insert_session(session);
+        });
         Ok(tokio::spawn(async { Ok(()) }))
     }
 }
@@ -65,6 +76,7 @@ async fn a_hidden_session_a_runtime_opens_is_recorded_hidden() {
         creates: session_id,
         bot,
         requests: Arc::default(),
+        opens: None,
     };
     let requests = BrokerExternalSessionRequests::new(runtime.clone(), sessions.clone(), Owners);
 
@@ -87,4 +99,53 @@ async fn a_hidden_session_a_runtime_opens_is_recorded_hidden() {
     assert_eq!(stored.visibility, SessionVisibility::Hidden);
     assert_eq!(stored.source, SessionSource::User);
     assert_eq!(*runtime.requests.lock().expect("requests"), 1);
+}
+
+/// A caller can stop waiting before the runtime creates the row, as when
+/// the route times out or the connection drops: the row is still given the
+/// requested visibility once it appears.
+#[tokio::test(start_paused = true)]
+async fn a_session_a_runtime_opens_after_its_caller_left_is_still_hidden() {
+    let sessions = InMemoryAgentSessionRepo::new();
+    let session_id = AgentSessionId::new();
+    let bot = BotId::new_from_uuid(macro_uuid::generate_uuid_v7());
+    let opens = Arc::new(Notify::new());
+    let runtime = Runtime {
+        sessions: sessions.clone(),
+        creates: session_id,
+        bot,
+        requests: Arc::default(),
+        opens: Some(opens.clone()),
+    };
+    let requests = BrokerExternalSessionRequests::new(runtime, sessions.clone(), Owners);
+    let request = RequestedExternalSession {
+        session_id,
+        bot_id: bot,
+        owner: owner(),
+        model: None,
+        repo_url: None,
+        source: SessionSource::User,
+        visibility: SessionVisibility::Hidden,
+        origin: trigger_context::TriggerOrigin::Requested { by: owner() },
+    };
+
+    let waited = tokio::time::timeout(Duration::from_secs(30), requests.request(request)).await;
+    assert!(
+        waited.is_err(),
+        "the caller gave up before the row appeared"
+    );
+    opens.notify_one();
+    let mut stored = None;
+    for _ in 0..20 {
+        tokio::time::sleep(super::POLL_INTERVAL).await;
+        if let Ok(session) = sessions.get(session_id).await
+            && session.visibility == SessionVisibility::Hidden
+        {
+            stored = Some(session);
+            break;
+        }
+    }
+
+    let stored = stored.expect("the row ends up hidden");
+    assert_eq!(stored.source, SessionSource::User);
 }

@@ -11,7 +11,7 @@ mod test;
 use std::time::Duration;
 
 use agent_session::domain::error::AgentSessionError;
-use agent_session::domain::model::AgentSession;
+use agent_session::domain::model::{AgentSession, SessionSource, SessionVisibility};
 use agent_session::domain::ports::{
     AgentSessionRepo, ExternalSessionRequester, RequestedExternalSession,
 };
@@ -19,6 +19,7 @@ use agent_trigger::domain::broker_events::{AgentSessionMacroEvent, AgentSessionR
 use harnesses::outbound::pg_harness_repo::PgHarnessRepo;
 use macro_event_broker::MacroEventBroker;
 use model_owner::Owner;
+use tracing::Instrument as _;
 
 /// How long a runtime gets to create the session before the request is
 /// refused. A daemon that is up answers well inside this; one that is down
@@ -67,7 +68,7 @@ impl<Broker, Sessions, Runtimes> ExternalSessionRequester
     for BrokerExternalSessionRequests<Broker, Sessions, Runtimes>
 where
     Broker: MacroEventBroker,
-    Sessions: AgentSessionRepo,
+    Sessions: AgentSessionRepo + Clone,
     Runtimes: RuntimeUsers,
 {
     async fn request(
@@ -111,55 +112,94 @@ where
             .map_err(|error| AgentSessionError::Unknown(anyhow::anyhow!(error)))?;
 
         // The runtime creates the row; there is no other signal to wait on.
-        let deadline = tokio::time::Instant::now() + RUNTIME_ANSWER_TIMEOUT;
-        loop {
-            match self.sessions.get(session_id).await {
-                Ok(session) => {
-                    // The id is the caller's, so the row may be a session
-                    // someone else already holds. Never touch or return it.
-                    if session.bot_id != request.bot_id
-                        || session.owner_id != Owner::User(request.owner.clone())
-                    {
-                        return Err(AgentSessionError::SessionIdTaken(session_id));
-                    }
-                    if request.model.is_none() && origin.is_none() {
-                        return Ok(session);
-                    }
-                    // The runtime created the row on the persona's default.
-                    // The choice goes on the row now, ahead of the first
-                    // prompt - which the caller cannot send before this
-                    // answers - so the session binds on it, exactly as it
-                    // would on the persona's own.
-                    if let Some(model) = &request.model {
-                        self.sessions.set_model(session_id, model).await?;
-                    }
-                    // The runtime does not know who started it, or where it is
-                    // shown, either.
-                    if let Some((source, visibility)) = origin {
-                        self.sessions
-                            .set_origin(session_id, source, visibility)
-                            .await?;
-                    }
-                    return self.sessions.get(session_id).await;
+        // The wait, and what the row is given once it appears, run on in a
+        // task of their own: a caller that stops waiting (a route's timeout,
+        // a dropped connection) must not leave a hidden session listed.
+        // Giving the row its model and origin twice changes nothing.
+        let settling = settle(
+            self.sessions.clone(),
+            Settle {
+                session_id,
+                bot_id: request.bot_id,
+                owner: request.owner,
+                model: request.model,
+                origin,
+            },
+        )
+        .instrument(tracing::info_span!("settle_requested_session", %session_id));
+        tokio::spawn(settling)
+            .await
+            .map_err(|error| AgentSessionError::Unknown(anyhow::anyhow!(error)))?
+    }
+}
+
+/// What a requested session's row is checked against and given once the
+/// runtime creates it.
+struct Settle {
+    session_id: agent_session::domain::model::AgentSessionId,
+    bot_id: bot_id::BotId,
+    owner: macro_user_id::user_id::MacroUserIdStr<'static>,
+    model: Option<String>,
+    origin: Option<(SessionSource, SessionVisibility)>,
+}
+
+/// Wait up to [`RUNTIME_ANSWER_TIMEOUT`] for the runtime to create the
+/// session's row, then give it the requested model and origin.
+async fn settle<Sessions: AgentSessionRepo>(
+    sessions: Sessions,
+    request: Settle,
+) -> agent_session::domain::error::Result<AgentSession> {
+    let Settle {
+        session_id,
+        bot_id,
+        owner,
+        model,
+        origin,
+    } = request;
+    let deadline = tokio::time::Instant::now() + RUNTIME_ANSWER_TIMEOUT;
+    loop {
+        match sessions.get(session_id).await {
+            Ok(session) => {
+                // The id is the caller's, so the row may be a session
+                // someone else already holds. Never touch or return it.
+                if session.bot_id != bot_id || session.owner_id != Owner::User(owner.clone()) {
+                    return Err(AgentSessionError::SessionIdTaken(session_id));
                 }
-                Err(error) => {
-                    if tokio::time::Instant::now() >= deadline {
-                        // Warn: the caller has waited the whole timeout and
-                        // gets an error, and nothing else records why.
-                        tracing::warn!(
-                            %session_id,
-                            bot_id = %request.bot_id,
-                            waited_secs = RUNTIME_ANSWER_TIMEOUT.as_secs(),
-                            last_error = %error,
-                            "no runtime created the requested session in time"
-                        );
-                        return Err(AgentSessionError::RuntimeUnavailable(
-                            "this agent's machine did not open the session; make sure macrod is running and up to date",
-                        ));
-                    }
+                if model.is_none() && origin.is_none() {
+                    return Ok(session);
+                }
+                // The runtime created the row on the persona's default.
+                // The choice goes on the row now, ahead of the first
+                // prompt - which the caller cannot send before this
+                // answers - so the session binds on it, exactly as it
+                // would on the persona's own.
+                if let Some(model) = &model {
+                    sessions.set_model(session_id, model).await?;
+                }
+                // The runtime does not know who started it, or where it is
+                // shown, either.
+                if let Some((source, visibility)) = origin {
+                    sessions.set_origin(session_id, source, visibility).await?;
+                }
+                return sessions.get(session_id).await;
+            }
+            Err(error) => {
+                if tokio::time::Instant::now() >= deadline {
+                    // Warn: the caller has waited the whole timeout and
+                    // gets an error, and nothing else records why.
+                    tracing::warn!(
+                        %session_id,
+                        %bot_id,
+                        waited_secs = RUNTIME_ANSWER_TIMEOUT.as_secs(),
+                        last_error = %error,
+                        "no runtime created the requested session in time"
+                    );
+                    return Err(AgentSessionError::RuntimeUnavailable(
+                        "this agent's machine did not open the session; make sure macrod is running and up to date",
+                    ));
                 }
             }
-            tokio::time::sleep(POLL_INTERVAL).await;
         }
+        tokio::time::sleep(POLL_INTERVAL).await;
     }
 }
