@@ -263,6 +263,8 @@ deny = [
     "rootcause-tracing",         # External rootcause integration requires tracing-subscriber
     "search_service",            # Search-term redaction span tests only (dev-dependency)
     "sync_service",              # Cloudflare/WASM tracing setup uses tracing-web
+    "temporalio-common",         # External Temporal SDK crate requires tracing-subscriber
+    "temporalio-common-wasm",    # External Temporal SDK crate requires tracing-subscriber
     "tracing-opentelemetry",     # OpenTelemetry integration requires tracing-subscriber
     "tracing-panic",             # External crate allowed to use tracing-subscriber
     "tracing-tree",
