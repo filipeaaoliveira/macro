@@ -102,6 +102,9 @@ fn a_run_that_sends_nothing_reaches_nobody() {
         ("POST", "/agent-sessions/01a1/reviews/02b2"),
         ("PATCH", "/agent-sessions/01a1/permissions"),
         ("POST", "/agent-harness/agent-sessions/warm"),
+        // A factory Run's agent Steps, and the Gate answer that resumes them.
+        ("POST", "/factory/runs"),
+        ("POST", "/factory/runs/01a1/steps/2/answer"),
         ("POST", "/agent-sessions/01a1/app-connections"),
         ("POST", "/cognition/chats/01a1/tool/call"),
         ("POST", "/cognition/chats/01a1/tool/update"),
