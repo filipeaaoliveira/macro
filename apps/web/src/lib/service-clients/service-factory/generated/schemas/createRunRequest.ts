@@ -4,6 +4,7 @@
  * factory_engine
  * OpenAPI spec version: 0.1.0
  */
+import type { CreateRunRequestRepoUrl } from './createRunRequestRepoUrl';
 import type { CreateRunRequestTaskId } from './createRunRequestTaskId';
 
 /**
@@ -12,6 +13,11 @@ import type { CreateRunRequestTaskId } from './createRunRequestTaskId';
 export interface CreateRunRequest {
   /** The name of the built-in Flow the Run walks, one `GET /flows` lists. */
   flow: string;
+  /** The GitHub repository the Run works on, as its
+`https://github.com/owner/name` URL: required by a Flow that works
+on one, such as `code`, and refused by the others. The caller's
+linked GitHub account must reach it. */
+  repoUrl?: CreateRunRequestRepoUrl;
   /** What the Run is asked to do. */
   request: string;
   /** The Macro task the Run works on: its task document's id. */

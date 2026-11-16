@@ -8,6 +8,7 @@
 import type { MacroUserIdStr } from './macroUserIdStr';
 import type { RunEndProperty } from './runEndProperty';
 import type { RunId } from './runId';
+import type { RunRepository } from './runRepository';
 import type { RunTaskId } from './runTaskId';
 
 /**
@@ -19,6 +20,7 @@ export interface Run {
   end?: RunEndProperty;
   /** The Run's id, also its Temporal workflow id. */
   id: RunId;
+  repository?: RunRepository;
   /** What the Run was asked to do. */
   request: string;
   /** The Macro task the Run works on: its task document's id. None when

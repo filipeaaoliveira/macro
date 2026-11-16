@@ -17,7 +17,8 @@ import type { UsageInsight } from './usageInsight';
  * How a person's Runs went over a period.
  */
 export interface RunInsights {
-  /** Whether the period reached that cap, so older Runs may be left out. */
+  /** Whether the period had more Runs than that, so the oldest are left
+out. */
   capped: boolean;
   /** The Runs created each day of the period, every day listed. */
   days: InsightDay[];

@@ -17,6 +17,11 @@ export interface EntryInsight {
   duration?: EntryInsightDuration;
   /** The entry's id, as its Flow names it. */
   entry: string;
+  /**
+   * The Runs in which one of its Steps failed.
+   * @minimum 0
+   */
+  failedRuns: number;
   gate?: EntryInsightGate;
   /** How its Steps ended, most often first. */
   outcomes: NamedCount[];

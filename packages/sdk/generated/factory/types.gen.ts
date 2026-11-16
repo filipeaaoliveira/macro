@@ -27,6 +27,13 @@ export type CreateRunRequest = {
      */
     flow: string;
     /**
+     * The GitHub repository the Run works on, as its
+     * `https://github.com/owner/name` URL: required by a Flow that works
+     * on one, such as `code`, and refused by the others. The caller's
+     * linked GitHub account must reach it.
+     */
+    repoUrl?: string | null;
+    /**
      * What the Run is asked to do.
      */
     request: string;
@@ -68,6 +75,10 @@ export type EntryInsight = {
      * The entry's id, as its Flow names it.
      */
     entry: string;
+    /**
+     * The Runs in which one of its Steps failed.
+     */
+    failedRuns: number;
     gate?: null | GateInsight;
     /**
      * How its Steps ended, most often first.
@@ -290,6 +301,21 @@ export type OutcomeCounts = {
 };
 
 /**
+ * The GitHub repository a Run works on.
+ */
+export type Repository = {
+    /**
+     * The branch the Run's work starts from and proposes its change to: the
+     * repository's default when the Run started.
+     */
+    baseBranch: string;
+    /**
+     * Its `https://github.com/owner/name` URL.
+     */
+    url: string;
+};
+
+/**
  * One Run of a Flow.
  */
 export type Run = {
@@ -302,6 +328,7 @@ export type Run = {
      * The Run's id, also its Temporal workflow id.
      */
     id: RunId;
+    repository?: null | Repository;
     /**
      * What the Run was asked to do.
      */
@@ -355,7 +382,8 @@ export type RunId = string;
  */
 export type RunInsights = {
     /**
-     * Whether the period reached that cap, so older Runs may be left out.
+     * Whether the period had more Runs than that, so the oldest are left
+     * out.
      */
     capped: boolean;
     /**

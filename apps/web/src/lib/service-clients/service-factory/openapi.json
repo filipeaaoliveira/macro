@@ -813,6 +813,10 @@
             "type": "string",
             "description": "The name of the built-in Flow the Run walks, one `GET /flows` lists."
           },
+          "repoUrl": {
+            "type": ["string", "null"],
+            "description": "The GitHub repository the Run works on, as its\n`https://github.com/owner/name` URL: required by a Flow that works\non one, such as `code`, and refused by the others. The caller's\nlinked GitHub account must reach it."
+          },
           "request": {
             "type": "string",
             "description": "What the Run is asked to do."
@@ -859,6 +863,7 @@
           "steps",
           "runs",
           "revisitedRuns",
+          "failedRuns",
           "outcomes",
           "trouble"
         ],
@@ -877,6 +882,12 @@
           "entry": {
             "type": "string",
             "description": "The entry's id, as its Flow names it."
+          },
+          "failedRuns": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The Runs in which one of its Steps failed.",
+            "minimum": 0
           },
           "gate": {
             "oneOf": [
@@ -1208,6 +1219,21 @@
           }
         }
       },
+      "Repository": {
+        "type": "object",
+        "description": "The GitHub repository a Run works on.",
+        "required": ["url", "baseBranch"],
+        "properties": {
+          "baseBranch": {
+            "type": "string",
+            "description": "The branch the Run's work starts from and proposes its change to: the\nrepository's default when the Run started."
+          },
+          "url": {
+            "type": "string",
+            "description": "Its `https://github.com/owner/name` URL."
+          }
+        }
+      },
       "Run": {
         "type": "object",
         "description": "One Run of a Flow.",
@@ -1232,6 +1258,17 @@
           "id": {
             "$ref": "#/components/schemas/RunId",
             "description": "The Run's id, also its Temporal workflow id."
+          },
+          "repository": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Repository",
+                "description": "The GitHub repository the Run works on; none for a Run that works on\nno code."
+              }
+            ]
           },
           "request": {
             "type": "string",
@@ -1305,7 +1342,7 @@
         "properties": {
           "capped": {
             "type": "boolean",
-            "description": "Whether the period reached that cap, so older Runs may be left out."
+            "description": "Whether the period had more Runs than that, so the oldest are left\nout."
           },
           "days": {
             "type": "array",
