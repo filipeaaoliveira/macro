@@ -4,8 +4,11 @@
 #[cfg(test)]
 mod test;
 
-use factory_records::domain::models::{MAX_NOTE_BYTES, MAX_OUTPUT_BYTES, MAX_REQUEST_BYTES, RunId};
+use factory_records::domain::models::{
+    MAX_NOTE_BYTES, MAX_OUTPUT_BYTES, MAX_REQUEST_BYTES, RunId, TaskLink,
+};
 use factory_records::domain::ports::RunRepository;
+use uuid::Uuid;
 
 use crate::domain::flow::Flow;
 use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening};
@@ -70,6 +73,7 @@ where
         &self,
         definition: serde_json::Value,
         request: String,
+        task_id: Option<Uuid>,
     ) -> Result<RunDetail, FactoryError> {
         let flow = Flow::parse(definition, |step| self.executor.serves(step))?;
         if request.trim().is_empty() {
@@ -83,11 +87,26 @@ where
 
         let run_id = RunId::generate();
         tracing::Span::current().record("run_id", tracing::field::display(run_id));
-        let run = self
+        let mut run = self
             .repo
             .insert_run(run_id, &request)
             .await
             .map_err(internal)?;
+
+        // A Run for a task that does not exist is not kept.
+        if let Some(task_id) = task_id {
+            let linked = self.repo.link_task(run_id, task_id).await;
+            if !matches!(linked, Ok(TaskLink::Linked)) {
+                if let Err(cleanup) = self.repo.delete_run(run_id).await {
+                    tracing::error!(error = ?cleanup, "failed to remove a run whose task did not link");
+                }
+                return match linked {
+                    Err(error) => Err(internal(error).into()),
+                    Ok(_) => Err(FactoryError::UnknownTask),
+                };
+            }
+            run.task_id = Some(task_id);
+        }
 
         // The Run is recorded before its workflow starts, so the workflow can
         // record its Steps against it. A workflow that does not start leaves
@@ -120,6 +139,15 @@ where
             .ok_or(FactoryError::NotFound)?;
         let steps = self.repo.list_steps(id).await.map_err(internal)?;
         Ok(RunDetail { run, steps })
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn link_task(&self, id: RunId, task_id: Uuid) -> Result<RunDetail, FactoryError> {
+        match self.repo.link_task(id, task_id).await.map_err(internal)? {
+            TaskLink::Linked => self.get_run(id).await,
+            TaskLink::NoSuchRun => Err(FactoryError::NotFound),
+            TaskLink::NoSuchTask => Err(FactoryError::UnknownTask),
+        }
     }
 
     #[tracing::instrument(err, skip(self, answer), fields(entry = %answer.entry, visit = answer.visit))]

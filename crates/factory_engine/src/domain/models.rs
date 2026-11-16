@@ -111,6 +111,9 @@ pub enum FactoryError {
     /// No Run has this id.
     #[error("run not found")]
     NotFound,
+    /// No document has the task id the Run was to work on.
+    #[error("no task has this id")]
+    UnknownTask,
     /// The Run has ended, so it takes no answer and cannot be cancelled.
     #[error("the run has ended")]
     RunEnded,

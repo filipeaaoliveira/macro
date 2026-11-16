@@ -1,6 +1,7 @@
 //! Ports (trait contracts) of the factory's use cases.
 
 use factory_records::domain::models::RunId;
+use uuid::Uuid;
 
 use crate::domain::flow::StepName;
 use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening};
@@ -73,11 +74,20 @@ pub trait StepAgent: Send + Sync + 'static {
 
 /// Inbound service port: the Run API used by drivers (HTTP).
 pub trait FactoryService: Send + Sync + 'static {
-    /// Record a new Run of the Flow `definition` for `request`, and start it.
+    /// Record a new Run of the Flow `definition` for `request`, working on
+    /// the task document `task_id` if one is given, and start it.
     fn create_run(
         &self,
         definition: serde_json::Value,
         request: String,
+        task_id: Option<Uuid>,
+    ) -> impl Future<Output = Result<RunDetail, FactoryError>> + Send;
+
+    /// Link a Run to the task document `task_id`, replacing any task it had.
+    fn link_task(
+        &self,
+        id: RunId,
+        task_id: Uuid,
     ) -> impl Future<Output = Result<RunDetail, FactoryError>> + Send;
 
     /// The Run and the Steps it took.

@@ -35,6 +35,9 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   its activity: `start_step` and `open_gate` ignore a conflict, and `end_run`
   and `answer_gate` keep the first end and answer. Keep new writes safe to
   repeat.
+- `factory_run.task_id` references `"Document"` and is cleared when the task
+  document is deleted; `link_task` reports a missing task or Run instead of
+  failing.
 - `answer_gate` runs after the workflow took the answer, so it must not fail on
   a user id with no account: it records no one instead.
 - A Run's or Step's end columns are all null or all set (`factory_*_end`

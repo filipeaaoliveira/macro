@@ -1,13 +1,14 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
 use chrono::Utc;
 use factory_records::domain::models::{
-    EntryId, Outcome, Run, RunEnd, RunId, RunOutcome, Step, StepEnd,
+    EntryId, Outcome, Run, RunEnd, RunId, RunOutcome, Step, StepEnd, TaskLink,
 };
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
 use serde_json::json;
+use uuid::Uuid;
 
 use super::{FactoryServiceImpl, StepServiceImpl};
 use crate::domain::flow::StepName;
@@ -27,6 +28,8 @@ struct FakeError;
 struct FakeRepo {
     runs: Arc<Mutex<BTreeMap<RunId, Run>>>,
     steps: Arc<Mutex<Vec<(RunId, Step)>>>,
+    /// The task documents that exist.
+    tasks: Arc<Mutex<BTreeSet<Uuid>>>,
 }
 
 impl RunRepository for FakeRepo {
@@ -37,10 +40,24 @@ impl RunRepository for FakeRepo {
             id,
             request: request.to_string(),
             created_at: Utc::now(),
+            task_id: None,
             end: None,
         };
         self.runs.lock().expect("runs").insert(id, run.clone());
         Ok(run)
+    }
+
+    async fn link_task(&self, id: RunId, task_id: Uuid) -> Result<TaskLink, FakeError> {
+        if !self.tasks.lock().expect("tasks").contains(&task_id) {
+            return Ok(TaskLink::NoSuchTask);
+        }
+        match self.runs.lock().expect("runs").get_mut(&id) {
+            Some(run) => {
+                run.task_id = Some(task_id);
+                Ok(TaskLink::Linked)
+            }
+            None => Ok(TaskLink::NoSuchRun),
+        }
     }
 
     async fn delete_run(&self, id: RunId) -> Result<(), FakeError> {
@@ -234,7 +251,11 @@ async fn creating_a_run_records_it_and_starts_its_workflow() {
     let service = FactoryServiceImpl::new(repo.clone(), workflows.clone(), FakeExecutor::default());
 
     let created = service
-        .create_run(reply_flow(), "Summarise the release notes".to_string())
+        .create_run(
+            reply_flow(),
+            "Summarise the release notes".to_string(),
+            None,
+        )
         .await
         .expect("create");
 
@@ -257,7 +278,11 @@ async fn a_run_whose_workflow_does_not_start_is_not_kept() {
     let service = FactoryServiceImpl::new(repo.clone(), workflows, FakeExecutor::default());
 
     let refused = service
-        .create_run(reply_flow(), "Summarise the release notes".to_string())
+        .create_run(
+            reply_flow(),
+            "Summarise the release notes".to_string(),
+            None,
+        )
         .await;
 
     assert!(matches!(refused, Err(FactoryError::Internal(_))));
@@ -272,7 +297,7 @@ async fn a_flow_with_a_step_no_worker_serves_is_refused_before_anything_is_kept(
     let flow = json!({ "entries": [{ "id": "plan", "step": "plan" }] });
 
     let refused = service
-        .create_run(flow, "Plan the migration".to_string())
+        .create_run(flow, "Plan the migration".to_string(), None)
         .await;
 
     assert!(matches!(refused, Err(FactoryError::InvalidFlow(_))));
@@ -288,7 +313,9 @@ async fn an_empty_request_is_refused() {
         FakeExecutor::default(),
     );
 
-    let refused = service.create_run(reply_flow(), "  ".to_string()).await;
+    let refused = service
+        .create_run(reply_flow(), "  ".to_string(), None)
+        .await;
 
     assert!(matches!(refused, Err(FactoryError::EmptyRequest)));
 }
@@ -489,4 +516,68 @@ async fn cancelling_a_running_run_cancels_its_workflow() {
     service.cancel_run(run.id).await.expect("cancel");
 
     assert_eq!(*workflows.cancelled.lock().expect("cancelled"), [run.id]);
+}
+
+#[tokio::test]
+async fn a_run_created_for_a_task_is_linked_to_it() {
+    let repo = FakeRepo::default();
+    let task_id = Uuid::now_v7();
+    repo.tasks.lock().expect("tasks").insert(task_id);
+    let service = FactoryServiceImpl::new(
+        repo.clone(),
+        FakeWorkflows::default(),
+        FakeExecutor::default(),
+    );
+
+    let created = service
+        .create_run(reply_flow(), "Fix the login bug".to_string(), Some(task_id))
+        .await
+        .expect("create");
+
+    assert_eq!(created.run.task_id, Some(task_id));
+    let read = service.get_run(created.run.id).await.expect("get");
+    assert_eq!(read.run.task_id, Some(task_id));
+}
+
+#[tokio::test]
+async fn a_run_for_a_task_that_does_not_exist_is_not_kept_or_started() {
+    let repo = FakeRepo::default();
+    let workflows = FakeWorkflows::default();
+    let service = FactoryServiceImpl::new(repo.clone(), workflows.clone(), FakeExecutor::default());
+
+    let refused = service
+        .create_run(
+            reply_flow(),
+            "Fix the login bug".to_string(),
+            Some(Uuid::now_v7()),
+        )
+        .await;
+
+    assert!(matches!(refused, Err(FactoryError::UnknownTask)));
+    assert!(repo.runs.lock().expect("runs").is_empty());
+    assert!(workflows.started.lock().expect("started").is_empty());
+}
+
+#[tokio::test]
+async fn linking_a_run_replaces_its_task() {
+    let repo = FakeRepo::default();
+    let first = Uuid::now_v7();
+    let second = Uuid::now_v7();
+    repo.tasks.lock().expect("tasks").extend([first, second]);
+    let run = repo
+        .insert_run(RunId::generate(), "Fix")
+        .await
+        .expect("insert");
+    let service = FactoryServiceImpl::new(
+        repo.clone(),
+        FakeWorkflows::default(),
+        FakeExecutor::default(),
+    );
+
+    service.link_task(run.id, first).await.expect("link");
+    let relinked = service.link_task(run.id, second).await.expect("relink");
+    let missing = service.link_task(RunId::generate(), first).await;
+
+    assert_eq!(relinked.run.task_id, Some(second));
+    assert!(matches!(missing, Err(FactoryError::NotFound)));
 }

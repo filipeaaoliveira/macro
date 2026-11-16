@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            INSERT INTO factory_run (id, request)\n            VALUES ($1, $2)\n            RETURNING id, request, created_at, outcome, ended_at\n            ",
+  "query": "\n            INSERT INTO factory_run (id, request)\n            VALUES ($1, $2)\n            RETURNING id, request, created_at, task_id, outcome, ended_at\n            ",
   "describe": {
     "columns": [
       {
@@ -20,11 +20,16 @@
       },
       {
         "ordinal": 3,
-        "name": "outcome",
+        "name": "task_id",
         "type_info": "Text"
       },
       {
         "ordinal": 4,
+        "name": "outcome",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
         "name": "ended_at",
         "type_info": "Timestamptz"
       }
@@ -40,8 +45,9 @@
       false,
       false,
       true,
+      true,
       true
     ]
   },
-  "hash": "97bad1d1962821fa6894c9672e312bdc7ebd4d929c4e11093fc0a10b008456a5"
+  "hash": "2034ab8c65d63407b927d62ff4633740c40bf8763fc525d96cb22eff76789abd"
 }

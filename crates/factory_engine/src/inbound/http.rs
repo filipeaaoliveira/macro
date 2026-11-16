@@ -7,7 +7,7 @@ use axum::{
     extract::{FromRef, Path, State},
     http::StatusCode,
     response::IntoResponse,
-    routing::{get, post},
+    routing::{get, post, put},
 };
 use factory_records::domain::models::{
     EntryId, Gate, GateAnswer, Outcome, Run, RunEnd, RunId, RunOutcome, Step, StepEnd,
@@ -18,6 +18,7 @@ use macro_authorization::{
 use macro_user_id::user_id::MacroUserIdStr;
 use model_error_response::ErrorResponse;
 use serde::Deserialize;
+use uuid::Uuid;
 
 use crate::domain::gate::AnswerGate;
 use crate::domain::models::{FactoryError, RunDetail};
@@ -65,6 +66,7 @@ impl<S, Auth> FromRef<FactoryRouterState<S, Auth>> for MacroAuthorizationState<A
 /// - `POST /runs/{id}/gates/{entry}/{visit}/answer` — answer the Gate the Run
 ///   waits on.
 /// - `POST /runs/{id}/cancel` — cancel a Run that has not ended.
+/// - `PUT /runs/{id}/task` — link a Run to the Macro task it works on.
 pub fn factory_router<S, Auth, T>(state: FactoryRouterState<S, Auth>) -> Router<T>
 where
     S: FactoryService,
@@ -79,6 +81,7 @@ where
             post(answer_gate_handler::<S, Auth>),
         )
         .route("/runs/{id}/cancel", post(cancel_run_handler::<S, Auth>))
+        .route("/runs/{id}/task", put(link_task_handler::<S, Auth>))
         .with_state(state)
 }
 
@@ -91,6 +94,17 @@ pub struct CreateRunRequest {
     pub flow: serde_json::Value,
     /// What the Run is asked to do.
     pub request: String,
+    /// The Macro task the Run works on: its task document's id.
+    #[serde(default)]
+    pub task_id: Option<Uuid>,
+}
+
+/// Request body for linking a Run to a task.
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct LinkTaskRequest {
+    /// The task document's id.
+    pub task_id: Uuid,
 }
 
 /// Path params naming a Run.
@@ -151,7 +165,10 @@ where
     S: FactoryService,
     Auth: MacroAuthorizationService,
 {
-    let created = state.service.create_run(body.flow, body.request).await?;
+    let created = state
+        .service
+        .create_run(body.flow, body.request, body.task_id)
+        .await?;
     Ok((StatusCode::CREATED, Json(created)))
 }
 
@@ -255,13 +272,47 @@ where
     Ok(StatusCode::ACCEPTED)
 }
 
+/// Link a Run to the Macro task it works on, replacing any task it had.
+#[utoipa::path(
+    put,
+    tag = "factory",
+    operation_id = "link_factory_run_task",
+    path = "/runs/{id}/task",
+    params(GetRunParams),
+    request_body = LinkTaskRequest,
+    responses(
+        (status = 200, body = RunDetail),
+        (status = 400, body = ErrorResponse),
+        (status = 401, body = ErrorResponse),
+        (status = 403, body = ErrorResponse),
+        (status = 404, body = ErrorResponse),
+        (status = 500, body = ErrorResponse),
+    )
+)]
+#[tracing::instrument(err, skip_all, fields(run_id = %params.id))]
+pub async fn link_task_handler<S, Auth>(
+    State(state): State<FactoryRouterState<S, Auth>>,
+    _caller: MacroAuthorizationExtractor<Auth, InternalOnly>,
+    Path(params): Path<GetRunParams>,
+    Json(body): Json<LinkTaskRequest>,
+) -> Result<Json<RunDetail>, FactoryError>
+where
+    S: FactoryService,
+    Auth: MacroAuthorizationService,
+{
+    Ok(Json(
+        state.service.link_task(params.id, body.task_id).await?,
+    ))
+}
+
 impl IntoResponse for FactoryError {
     fn into_response(self) -> axum::response::Response {
         let status_code = match &self {
             FactoryError::InvalidFlow(_)
             | FactoryError::EmptyRequest
             | FactoryError::RequestTooLarge { .. }
-            | FactoryError::NoteTooLarge { .. } => StatusCode::BAD_REQUEST,
+            | FactoryError::NoteTooLarge { .. }
+            | FactoryError::UnknownTask => StatusCode::BAD_REQUEST,
             FactoryError::NotFound => StatusCode::NOT_FOUND,
             FactoryError::RunEnded | FactoryError::AnswerRefused(_) => StatusCode::CONFLICT,
             FactoryError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -292,11 +343,13 @@ impl IntoResponse for FactoryError {
         create_run_handler,
         get_run_handler,
         answer_gate_handler,
-        cancel_run_handler
+        cancel_run_handler,
+        link_task_handler
     ),
     components(schemas(
         CreateRunRequest,
         AnswerGateRequest,
+        LinkTaskRequest,
         RunDetail,
         Run,
         RunEnd,

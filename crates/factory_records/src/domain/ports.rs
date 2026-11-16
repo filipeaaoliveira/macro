@@ -1,8 +1,9 @@
 //! The port the factory's records are kept behind.
 
 use macro_user_id::user_id::MacroUserIdStr;
+use uuid::Uuid;
 
-use crate::domain::models::{EntryId, Outcome, Run, RunId, RunOutcome, Step};
+use crate::domain::models::{EntryId, Outcome, Run, RunId, RunOutcome, Step, TaskLink};
 
 /// Where Runs and their Steps are kept.
 ///
@@ -18,6 +19,14 @@ pub trait RunRepository: Send + Sync + 'static {
         id: RunId,
         request: &str,
     ) -> impl Future<Output = Result<Run, Self::Err>> + Send;
+
+    /// Link the Run to the task document `task_id`, replacing any task it
+    /// had. Linking it again changes nothing.
+    fn link_task(
+        &self,
+        id: RunId,
+        task_id: Uuid,
+    ) -> impl Future<Output = Result<TaskLink, Self::Err>> + Send;
 
     /// Remove a Run whose workflow never started, with its Steps.
     fn delete_run(&self, id: RunId) -> impl Future<Output = Result<(), Self::Err>> + Send;

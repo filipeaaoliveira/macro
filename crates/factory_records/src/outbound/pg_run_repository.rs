@@ -10,8 +10,12 @@ use uuid::Uuid;
 
 use crate::domain::models::{
     EntryId, Gate, GateAnswer, InvalidName, Outcome, Run, RunEnd, RunId, RunOutcome, Step, StepEnd,
+    TaskLink,
 };
 use crate::domain::ports::RunRepository;
+
+/// The foreign key from a Run to its task document.
+const TASK_FOREIGN_KEY: &str = "factory_run_task_id_fkey";
 
 /// Postgres-backed Run repository.
 #[derive(Debug, Clone)]
@@ -47,6 +51,9 @@ pub enum PgRunRepositoryErr {
     /// A stored Gate has only part of its question or its answer.
     #[error("a stored gate has only part of its question or its answer")]
     PartialGate,
+    /// A stored task id is not a UUID.
+    #[error("stored task id {0:?} is not a UUID")]
+    InvalidTaskId(String),
     /// A stored user id does not read as one.
     #[error("stored user id {0:?} does not read as one")]
     InvalidUserId(String),
@@ -56,6 +63,7 @@ struct RunRow {
     id: Uuid,
     request: String,
     created_at: DateTime<Utc>,
+    task_id: Option<String>,
     outcome: Option<String>,
     ended_at: Option<DateTime<Utc>>,
 }
@@ -78,6 +86,10 @@ impl TryFrom<RunRow> for Run {
             id: RunId::from_uuid(row.id),
             request: row.request,
             created_at: row.created_at,
+            task_id: row
+                .task_id
+                .map(|id| Uuid::parse_str(&id).map_err(|_| PgRunRepositoryErr::InvalidTaskId(id)))
+                .transpose()?,
             end,
         })
     }
@@ -171,7 +183,7 @@ impl RunRepository for PgRunRepository {
             r#"
             INSERT INTO factory_run (id, request)
             VALUES ($1, $2)
-            RETURNING id, request, created_at, outcome, ended_at
+            RETURNING id, request, created_at, task_id, outcome, ended_at
             "#,
             id.as_uuid(),
             request,
@@ -179,6 +191,26 @@ impl RunRepository for PgRunRepository {
         .fetch_one(&self.pool)
         .await?;
         Run::try_from(row)
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn link_task(&self, id: RunId, task_id: Uuid) -> Result<TaskLink, Self::Err> {
+        let linked = sqlx::query!(
+            "UPDATE factory_run SET task_id = $2 WHERE id = $1",
+            id.as_uuid(),
+            task_id.to_string(),
+        )
+        .execute(&self.pool)
+        .await;
+
+        match linked {
+            Ok(done) if done.rows_affected() == 0 => Ok(TaskLink::NoSuchRun),
+            Ok(_) => Ok(TaskLink::Linked),
+            Err(sqlx::Error::Database(error)) if error.constraint() == Some(TASK_FOREIGN_KEY) => {
+                Ok(TaskLink::NoSuchTask)
+            }
+            Err(error) => Err(error.into()),
+        }
     }
 
     #[tracing::instrument(err, skip(self))]
@@ -194,7 +226,7 @@ impl RunRepository for PgRunRepository {
         let row = sqlx::query_as!(
             RunRow,
             r#"
-            SELECT id, request, created_at, outcome, ended_at
+            SELECT id, request, created_at, task_id, outcome, ended_at
             FROM factory_run
             WHERE id = $1
             "#,

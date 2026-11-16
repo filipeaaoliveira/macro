@@ -3,7 +3,7 @@ use macro_user_id::user_id::MacroUserIdStr;
 use sqlx::PgPool;
 
 use super::PgRunRepository;
-use crate::domain::models::{EntryId, Outcome, RunId, RunOutcome};
+use crate::domain::models::{EntryId, Outcome, RunId, RunOutcome, TaskLink};
 use crate::domain::ports::RunRepository;
 
 fn entry(id: &str) -> EntryId {
@@ -238,4 +238,86 @@ async fn a_run_can_end_cancelled(pool: PgPool) {
         .expect("get")
         .expect("the run exists");
     assert_eq!(run.end.map(|end| end.outcome), Some(RunOutcome::Cancelled));
+}
+
+const LOGIN_TASK: &str = "00000000-0000-7000-8000-000000000101";
+const DARK_MODE_TASK: &str = "00000000-0000-7000-8000-000000000102";
+
+fn task(id: &str) -> uuid::Uuid {
+    uuid::Uuid::parse_str(id).expect("valid task id")
+}
+
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "fixtures", scripts("people", "tasks"))
+)]
+async fn a_run_links_to_one_task_at_a_time(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let id = RunId::generate();
+    repo.insert_run(id, "Fix the login bug")
+        .await
+        .expect("insert");
+
+    let first = repo.link_task(id, task(LOGIN_TASK)).await.expect("link");
+    let second = repo
+        .link_task(id, task(DARK_MODE_TASK))
+        .await
+        .expect("relink");
+
+    assert_eq!((first, second), (TaskLink::Linked, TaskLink::Linked));
+    let run = repo
+        .get_run(id)
+        .await
+        .expect("get")
+        .expect("the run exists");
+    assert_eq!(run.task_id, Some(task(DARK_MODE_TASK)));
+}
+
+#[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
+async fn a_task_that_does_not_exist_or_a_run_that_does_not_is_not_linked(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let id = RunId::generate();
+    repo.insert_run(id, "Fix the login bug")
+        .await
+        .expect("insert");
+
+    let no_task = repo.link_task(id, task(LOGIN_TASK)).await.expect("link");
+    let no_run = repo
+        .link_task(RunId::generate(), task(LOGIN_TASK))
+        .await
+        .expect("link");
+
+    assert_eq!(no_task, TaskLink::NoSuchTask);
+    assert_eq!(no_run, TaskLink::NoSuchRun);
+    let run = repo
+        .get_run(id)
+        .await
+        .expect("get")
+        .expect("the run exists");
+    assert_eq!(run.task_id, None);
+}
+
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "fixtures", scripts("people", "tasks"))
+)]
+async fn deleting_its_task_unlinks_a_run_and_keeps_it(pool: PgPool) {
+    let repo = PgRunRepository::new(pool.clone());
+    let id = RunId::generate();
+    repo.insert_run(id, "Fix the login bug")
+        .await
+        .expect("insert");
+    repo.link_task(id, task(LOGIN_TASK)).await.expect("link");
+
+    sqlx::query!(r#"DELETE FROM "Document" WHERE id = $1"#, LOGIN_TASK)
+        .execute(&pool)
+        .await
+        .expect("delete the task");
+
+    let run = repo
+        .get_run(id)
+        .await
+        .expect("get")
+        .expect("the run is kept");
+    assert_eq!(run.task_id, None);
 }

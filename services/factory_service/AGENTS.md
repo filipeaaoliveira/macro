@@ -28,7 +28,8 @@ worker that walks each Run's Flow, in one process.
   `write`, with a Gate between them: answer it with
   `POST /runs/<id>/gates/plan/<visit>/answer` and
   `{"answer": "approve", "userId": "macro|<email>"}`. `POST /runs/<id>/cancel`
-  cancels a Run.
+  cancels a Run. Add `"taskId": "<task document id>"` to link a Run to a task,
+  or `PUT /runs/<id>/task` later.
 
 ## Gotchas
 

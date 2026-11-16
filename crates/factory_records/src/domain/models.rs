@@ -229,8 +229,22 @@ pub struct Run {
     pub request: String,
     /// When the Run was created.
     pub created_at: DateTime<Utc>,
+    /// The Macro task the Run works on: its task document's id. None when
+    /// the Run has no task, or its task was deleted.
+    pub task_id: Option<Uuid>,
     /// How and when it ended; none while it runs.
     pub end: Option<RunEnd>,
+}
+
+/// Whether a Run was linked to a task.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskLink {
+    /// The Run now works on the task.
+    Linked,
+    /// No Run has this id.
+    NoSuchRun,
+    /// No document has the task's id.
+    NoSuchTask,
 }
 
 /// A Step that has ended: its outcome, what it produced, and when.
