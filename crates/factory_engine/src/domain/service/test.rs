@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use factory_records::domain::models::{
@@ -14,6 +15,7 @@ use crate::domain::flow::StepName;
 use crate::domain::gate::AnswerGate;
 use crate::domain::models::{
     FactoryError, RunFinish, RunStart, StepEnding, StepError, StepInput, StepReport, StepRequest,
+    StepStart,
 };
 use crate::domain::ports::{
     AnswerDelivery, FactoryService, Retryable, RunWorkflows, RunWorkflowsError, StepExecutor,
@@ -35,6 +37,10 @@ struct FakeWorkflows {
     completed: bool,
     /// The workflow never started.
     unstarted: bool,
+    /// What the next cancels and existence checks answer, ahead of the
+    /// flags above: a workflow that starts or completes between two calls.
+    cancel_answers: Arc<Mutex<VecDeque<bool>>>,
+    exists_answers: Arc<Mutex<VecDeque<bool>>>,
 }
 
 impl RunWorkflows for FakeWorkflows {
@@ -47,7 +53,8 @@ impl RunWorkflows for FakeWorkflows {
     }
 
     async fn exists(&self, _run_id: RunId) -> Result<bool, RunWorkflowsError> {
-        Ok(self.started_anyway || self.completed)
+        let scripted = self.exists_answers.lock().expect("exists").pop_front();
+        Ok(scripted.unwrap_or(self.started_anyway || self.completed))
     }
 
     async fn answer(
@@ -64,7 +71,8 @@ impl RunWorkflows for FakeWorkflows {
 
     async fn cancel(&self, run_id: RunId) -> Result<bool, RunWorkflowsError> {
         self.cancelled.lock().expect("cancelled").push(run_id);
-        Ok(!self.completed && !self.unstarted)
+        let scripted = self.cancel_answers.lock().expect("cancels").pop_front();
+        Ok(scripted.unwrap_or(!self.completed && !self.unstarted))
     }
 }
 
@@ -724,8 +732,75 @@ async fn cancelling_a_run_whose_workflow_never_started_ends_it_cancelled() {
 
     let run = repo.get_run(run_id).await.expect("read").expect("kept");
     assert_eq!(run.end.map(|end| end.outcome), Some(RunOutcome::Cancelled));
-    assert!(matches!(started, Err(StepError::RunEnded)));
+    assert!(matches!(started, Ok(StepStart::RunEnded)));
     assert!(repo.list_steps(run_id).await.expect("read").is_empty());
+}
+
+/// Workflows that answer cancels with `cancels` and existence checks with
+/// `exists`, in turn.
+fn scripted(cancels: &[bool], exists: &[bool]) -> FakeWorkflows {
+    FakeWorkflows {
+        cancel_answers: Arc::new(Mutex::new(cancels.iter().copied().collect())),
+        exists_answers: Arc::new(Mutex::new(exists.iter().copied().collect())),
+        ..FakeWorkflows::default()
+    }
+}
+
+/// A workflow that starts just as its Run is cancelled, found there once
+/// the Run's end is recorded, is cancelled too.
+#[tokio::test]
+async fn a_workflow_that_starts_as_its_run_is_cancelled_is_cancelled_too() {
+    let repo = FakeRepo::default();
+    let workflows = scripted(&[false, true], &[false, true]);
+    let run_id = julia_s_run(&repo).await;
+
+    service(&repo, &workflows)
+        .cancel_run(&julia(), run_id)
+        .await
+        .expect("cancel");
+
+    let run = repo.get_run(run_id).await.expect("read").expect("kept");
+    assert_eq!(run.end.map(|end| end.outcome), Some(RunOutcome::Cancelled));
+    assert_eq!(workflows.cancelled.lock().expect("cancelled").len(), 2);
+}
+
+/// A workflow that started between the cancel and the check is running,
+/// not ended: it is cancelled, never answered with a conflict.
+#[tokio::test]
+async fn a_workflow_that_started_after_the_cancel_was_sent_is_cancelled() {
+    let repo = FakeRepo::default();
+    let workflows = scripted(&[false, true], &[true]);
+    let run_id = julia_s_run(&repo).await;
+
+    service(&repo, &workflows)
+        .cancel_run(&julia(), run_id)
+        .await
+        .expect("cancel");
+
+    let run = repo.get_run(run_id).await.expect("read").expect("kept");
+    assert_eq!(run.end, None, "its workflow records the end");
+    assert_eq!(workflows.cancelled.lock().expect("cancelled").len(), 2);
+}
+
+/// A Run that ended does no more work, whichever attempt of a Step asks.
+#[tokio::test]
+async fn a_step_of_a_run_that_ended_does_no_work() {
+    let repo = FakeRepo::default();
+    let run_id = julia_s_run(&repo).await;
+    let executor = FakeExecutor::default();
+    let steps = StepServiceImpl::new(repo.clone(), executor.clone());
+    steps
+        .start_step(reply_step(run_id, 1))
+        .await
+        .expect("start");
+    repo.end_run(run_id, RunOutcome::Cancelled)
+        .await
+        .expect("end");
+
+    let worked = steps.run_step(reply_step(run_id, 1)).await;
+
+    assert!(matches!(worked, Err(StepError::RunEnded)), "{worked:?}");
+    assert!(executor.given.lock().expect("given").is_empty());
 }
 
 /// A Run kept when Temporal could not say whether its workflow started,

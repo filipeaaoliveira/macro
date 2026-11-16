@@ -18,7 +18,7 @@ use crate::domain::flow::Flow;
 use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening};
 use crate::domain::models::{
     FactoryError, RunDetail, RunFinish, RunStart, StepEnding, StepError, StepInput, StepReport,
-    StepRequest,
+    StepRequest, StepStart,
 };
 use crate::domain::ports::{
     AnswerDelivery, FactoryService, Retryable, RunWorkflows, RunWorkflowsError, StepExecutor,
@@ -341,22 +341,32 @@ where
     ) -> Result<(), FactoryError> {
         let run = self.owned_run(actor, id).await?;
         match run.end.map(|end| end.outcome) {
-            // A workflow that completed before its Run's end was recorded
-            // has ended the Run, though the records don't say so yet. A Run
-            // whose workflow never started has nothing to stop: it ends
-            // cancelled here, and a workflow that starts late takes no Step.
             None => {
                 if self.workflows.cancel(id).await? {
-                    Ok(())
-                } else if self.workflows.exists(id).await? {
-                    Err(FactoryError::RunEnded)
-                } else {
-                    self.repo
-                        .end_run(id, RunOutcome::Cancelled)
-                        .await
-                        .map_err(internal)?;
-                    Ok(())
+                    return Ok(());
                 }
+                // Temporal had no running workflow for the Run. One may have
+                // started since, which a second cancel reaches; one that
+                // completed before its Run's end was recorded has ended the
+                // Run, though the records don't say so yet.
+                if self.workflows.exists(id).await? {
+                    return if self.workflows.cancel(id).await? {
+                        Ok(())
+                    } else {
+                        Err(FactoryError::RunEnded)
+                    };
+                }
+                // A Run whose workflow never started has nothing to stop: it
+                // ends cancelled here. A workflow that starts late takes no
+                // Step of it, and is cancelled if it is there by now.
+                self.repo
+                    .end_run(id, RunOutcome::Cancelled)
+                    .await
+                    .map_err(internal)?;
+                if self.workflows.exists(id).await? {
+                    self.workflows.cancel(id).await?;
+                }
+                Ok(())
             }
             // Cancelling again is what the first cancel already did.
             Some(RunOutcome::Cancelled) => Ok(()),
@@ -398,21 +408,25 @@ where
     E: StepExecutor,
 {
     #[tracing::instrument(err, skip_all, fields(run_id = %request.key.run_id, seq = request.key.seq))]
-    async fn start_step(&self, request: StepRequest) -> Result<(), StepError> {
+    async fn start_step(&self, request: StepRequest) -> Result<StepStart, StepError> {
         // A Run cancelled before its workflow started takes no Step.
         if self.run_of(&request).await?.end.is_some() {
-            return Err(StepError::RunEnded);
+            return Ok(StepStart::RunEnded);
         }
         self.repo
             .start_step(request.key, &request.entry, request.visit)
             .await
             .map_err(internal)?;
-        Ok(())
+        Ok(StepStart::Started)
     }
 
     #[tracing::instrument(err, skip_all, fields(run_id = %request.key.run_id, seq = request.key.seq))]
     async fn run_step(&self, request: StepRequest) -> Result<StepReport, StepError> {
         let run = self.run_of(&request).await?;
+        // A Run that ended does no more work, whichever attempt asks.
+        if run.end.is_some() {
+            return Err(StepError::RunEnded);
+        }
 
         // The Step reads what the Run's Steps before it produced.
         let earlier: Vec<_> = self

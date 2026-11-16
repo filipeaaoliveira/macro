@@ -11,7 +11,7 @@ use temporalio_macros::activities;
 use temporalio_sdk::activities::{ActivityContext, ActivityError};
 
 use crate::domain::gate::{GateAnswered, GateOpening};
-use crate::domain::models::{RunFinish, StepEnding, StepError, StepReport, StepRequest};
+use crate::domain::models::{RunFinish, StepEnding, StepError, StepReport, StepRequest, StepStart};
 use crate::domain::ports::StepService;
 
 /// How often a Step's work tells Temporal its worker is alive, well inside
@@ -23,7 +23,7 @@ const HEARTBEAT_EVERY: Duration = Duration::from_secs(15);
 /// an object-safe (`async_trait`) trait.
 #[async_trait::async_trait]
 trait DynStepService: Send + Sync {
-    async fn start_step(&self, request: StepRequest) -> Result<(), StepError>;
+    async fn start_step(&self, request: StepRequest) -> Result<StepStart, StepError>;
 
     async fn run_step(&self, request: StepRequest) -> Result<StepReport, StepError>;
 
@@ -42,7 +42,7 @@ trait DynStepService: Send + Sync {
 
 #[async_trait::async_trait]
 impl<T: StepService> DynStepService for T {
-    async fn start_step(&self, request: StepRequest) -> Result<(), StepError> {
+    async fn start_step(&self, request: StepRequest) -> Result<StepStart, StepError> {
         StepService::start_step(self, request).await
     }
 
@@ -164,13 +164,13 @@ impl FactoryActivities {
 
 #[activities]
 impl FactoryActivities {
-    /// Record that a Step started.
+    /// Record that a Step started, unless its Run already ended.
     #[activity(name = "factory_start_step")]
     pub async fn start_step(
         self: Arc<Self>,
         _ctx: ActivityContext,
         request: StepRequest,
-    ) -> Result<(), ActivityError> {
+    ) -> Result<StepStart, ActivityError> {
         self.steps.start_step(request).await.map_err(failure)
     }
 

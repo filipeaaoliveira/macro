@@ -9,7 +9,7 @@ use crate::domain::flow::StepName;
 use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening};
 use crate::domain::models::{
     AgentAnswer, AgentTask, FactoryError, RunDetail, RunFinish, RunStart, StepEnding, StepError,
-    StepInput, StepReport, StepRequest,
+    StepInput, StepReport, StepRequest, StepStart,
 };
 
 /// What a Run's workflow did with an answer it was sent.
@@ -231,11 +231,11 @@ pub trait FactoryService: Send + Sync + 'static {
 /// Inbound service port: what a Run's workflow asks its worker to do. Each
 /// record is its own call, so a failed write never repeats a Step's work.
 pub trait StepService: Send + Sync + 'static {
-    /// Record that a Step started.
+    /// Record that a Step started, unless its Run already ended.
     fn start_step(
         &self,
         request: StepRequest,
-    ) -> impl Future<Output = Result<(), StepError>> + Send;
+    ) -> impl Future<Output = Result<StepStart, StepError>> + Send;
 
     /// Do a Step's work, and say how it ended. It records nothing of the
     /// Step's end.

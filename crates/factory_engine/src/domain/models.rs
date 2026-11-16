@@ -76,6 +76,16 @@ pub struct AgentAnswer {
     pub text: String,
 }
 
+/// Whether a Step started.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StepStart {
+    /// The Step is recorded, and its work may begin.
+    Started,
+    /// The Step's Run ended before it started: it was cancelled before its
+    /// workflow did. The workflow ends as the Run did.
+    RunEnded,
+}
+
 /// How a Step ended.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StepReport {

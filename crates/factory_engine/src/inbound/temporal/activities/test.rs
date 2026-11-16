@@ -12,7 +12,7 @@ use tokio::sync::watch;
 use super::{FactoryActivities, Liveness};
 use crate::domain::flow::StepName;
 use crate::domain::gate::{GateAnswered, GateOpening};
-use crate::domain::models::{RunFinish, StepEnding, StepError, StepReport, StepRequest};
+use crate::domain::models::{RunFinish, StepEnding, StepError, StepReport, StepRequest, StepStart};
 use crate::domain::ports::StepService;
 
 /// An activity context the test cancels, which counts its heartbeats.
@@ -63,8 +63,8 @@ impl Drop for Working {
 }
 
 impl StepService for Steps {
-    async fn start_step(&self, _request: StepRequest) -> Result<(), StepError> {
-        Ok(())
+    async fn start_step(&self, _request: StepRequest) -> Result<StepStart, StepError> {
+        Ok(StepStart::Started)
     }
 
     async fn run_step(&self, _request: StepRequest) -> Result<StepReport, StepError> {

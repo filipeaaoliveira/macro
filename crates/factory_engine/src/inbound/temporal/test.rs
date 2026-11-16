@@ -175,10 +175,36 @@ async fn walk<F>(
 where
     F: Future<Output = ()>,
 {
+    walk_with(agent, None, drive).await
+}
+
+/// [`walk`] a Run that ended `outcome` before its workflow started.
+async fn walk_after<F>(
+    agent: &Agent,
+    outcome: RunOutcome,
+    drive: impl FnOnce(Client, RunId) -> F,
+) -> (Result<RunOutcome, WorkflowGetResultError>, FakeRepo, RunId)
+where
+    F: Future<Output = ()>,
+{
+    walk_with(agent, Some(outcome), drive).await
+}
+
+async fn walk_with<F>(
+    agent: &Agent,
+    ended_before: Option<RunOutcome>,
+    drive: impl FnOnce(Client, RunId) -> F,
+) -> (Result<RunOutcome, WorkflowGetResultError>, FakeRepo, RunId)
+where
+    F: Future<Output = ()>,
+{
     let client = client().await;
     let repo = FakeRepo::default();
     let start = plan_run(&repo).await;
     let run_id = start.run_id;
+    if let Some(outcome) = ended_before {
+        repo.end_run(run_id, outcome).await.expect("end");
+    }
     let task_queue = format!("factory-test-{}", Uuid::now_v7());
     let runtime = Runtime::from_current_tokio(Default::default()).expect("runtime");
     let worker = worker_on(
@@ -254,6 +280,23 @@ async fn cancelling_a_run_stops_its_working_step_s_agent_once() {
         steps[0].end.as_ref().map(|end| end.outcome.as_str()),
         Some("cancelled")
     );
+}
+
+/// A workflow that starts after its Run was cancelled, as one whose start
+/// raced the cancel, takes no Step and ends cancelled, never failed.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "Temporal doesn't exist in CI"]
+async fn a_workflow_whose_run_was_cancelled_before_it_started_ends_cancelled() {
+    let agent = Agent::doing(Work::Ends);
+
+    let (ended, repo, run_id) = walk_after(&agent, RunOutcome::Cancelled, |_, _| async {}).await;
+
+    assert!(
+        matches!(ended, Err(WorkflowGetResultError::Cancelled { .. })),
+        "{ended:?}"
+    );
+    assert!(agent.tasks.lock().expect("tasks").is_empty());
+    assert!(repo.list_steps(run_id).await.expect("read").is_empty());
 }
 
 /// A Step that fails for good has its agent stopped, so nothing after it

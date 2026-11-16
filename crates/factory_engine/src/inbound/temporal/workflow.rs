@@ -31,7 +31,7 @@ use temporalio_sdk::{
 use crate::domain::flow::GateDefinition;
 use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening, OpenGate, check_answer};
 use crate::domain::interpreter::{Interpreter, NextStep};
-use crate::domain::models::{RunFinish, RunStart, StepEnding, StepReport, StepRequest};
+use crate::domain::models::{RunFinish, RunStart, StepEnding, StepReport, StepRequest, StepStart};
 use crate::inbound::temporal::activities::FactoryActivities;
 use crate::temporal::{ANSWER_GATE_UPDATE, FLOW_WORKFLOW};
 
@@ -132,14 +132,16 @@ impl FlowWorkflow {
                     record_options.clone(),
                 )
                 .await;
-            if started.is_err() {
-                if is_cancelled(ctx) {
-                    break RunOutcome::Cancelled;
-                }
-                started?;
+            match started {
+                Ok(StepStart::Started) => {}
+                // The Run was cancelled before this workflow started: it
+                // ends as the Run did, never as a failure.
+                Ok(StepStart::RunEnded) => break RunOutcome::Cancelled,
+                Err(_) if is_cancelled(ctx) => break RunOutcome::Cancelled,
+                Err(error) => return Err(error.into()),
             }
 
-            // A Step that still fails after its retries ends `failed`, with
+            // A Step that still fails for good ends `failed`, with
             // why as its output; the Flow may route it like any other
             // outcome. A Step stopped by cancelling the Run ends the Run.
             held = Some(request.clone());
