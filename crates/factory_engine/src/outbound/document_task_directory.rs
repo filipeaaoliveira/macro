@@ -34,7 +34,7 @@ pub enum DocumentTaskDirectoryErr {
     Access(AccessError),
     /// The document storage service did not answer.
     #[error("the document could not be read: {0:?}")]
-    Documents(anyhow::Error),
+    Documents(rootcause::Report),
 }
 
 impl<A: EntityAccessService> TaskDirectory for DocumentTaskDirectory<A> {
@@ -73,7 +73,9 @@ impl<A: EntityAccessService> TaskDirectory for DocumentTaskDirectory<A> {
             .documents
             .get_document_basic(document_id)
             .await
-            .map_err(DocumentTaskDirectoryErr::Documents)?;
+            .map_err(|error| {
+                DocumentTaskDirectoryErr::Documents(rootcause::report!("{error:#}"))
+            })?;
         let Some(document) = document.filter(|document| document.deleted_at.is_none()) else {
             return Ok(TaskAccess::NotFound);
         };

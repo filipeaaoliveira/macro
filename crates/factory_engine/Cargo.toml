@@ -8,7 +8,6 @@ version = "0.1.0"
 agent_correlation = { path = "../agent_correlation" }
 agent_runtime_protocol = { path = "../agent_runtime_protocol", default-features = false }
 agent_session = { path = "../agent_session", default-features = false }
-anyhow = { workspace = true }
 async-trait = { workspace = true }
 authentication_service_client = { path = "../authentication_service_client" }
 axum = { workspace = true }
