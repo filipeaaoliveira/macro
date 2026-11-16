@@ -6,8 +6,8 @@
 //! test runs its own worker on a task queue of its own, so the stack's
 //! factory worker never takes its work.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use factory_records::domain::models::{Outcome, RunId, RunInsert, RunOutcome, StepKey};
@@ -44,6 +44,9 @@ enum Work {
     FailsForGood,
     /// Works until stopped.
     Works,
+    /// Works until stopped the first time it is asked, and ends `done` when
+    /// asked again.
+    WorksThenEnds,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -57,11 +60,12 @@ impl Retryable for AgentFailed {
 }
 
 /// An agent that does `work`, says when a task reaches it, and counts the
-/// times it was stopped and let go.
+/// times it was asked, stopped and let go, and the Steps it was asked for.
 #[derive(Clone)]
 struct Agent {
     work: Work,
     asked: Arc<Notify>,
+    tasks: Arc<Mutex<Vec<StepKey>>>,
     stops: Arc<AtomicUsize>,
     releases: Arc<AtomicUsize>,
 }
@@ -71,6 +75,7 @@ impl Agent {
         Self {
             work,
             asked: Arc::default(),
+            tasks: Arc::default(),
             stops: Arc::default(),
             releases: Arc::default(),
         }
@@ -80,15 +85,23 @@ impl Agent {
 impl StepAgent for Agent {
     type Err = AgentFailed;
 
-    async fn answer(&self, _task: AgentTask) -> Result<AgentAnswer, AgentFailed> {
+    async fn answer(&self, task: AgentTask) -> Result<AgentAnswer, AgentFailed> {
+        let asked = {
+            let mut tasks = self.tasks.lock().expect("tasks");
+            tasks.push(task.key);
+            tasks.len()
+        };
         self.asked.notify_one();
+        let ends = AgentAnswer {
+            outcome: Outcome::done(),
+            text: "The plan".to_string(),
+        };
         match self.work {
-            Work::Ends => Ok(AgentAnswer {
-                outcome: Outcome::done(),
-                text: "The plan".to_string(),
-            }),
+            Work::Ends => Ok(ends),
             Work::FailsForGood => Err(AgentFailed),
             Work::Works => std::future::pending().await,
+            Work::WorksThenEnds if asked == 1 => std::future::pending().await,
+            Work::WorksThenEnds => Ok(ends),
         }
     }
 
@@ -277,4 +290,62 @@ async fn a_step_that_ends_has_its_agent_let_go() {
         steps[0].end.as_ref().map(|end| end.output.as_str()),
         Some("The plan")
     );
+}
+
+/// A worker shut down while a Step works, as on a deploy, gives the Step a
+/// few seconds, then drops its work; Temporal hands the Step to the next
+/// worker at once, not after the heartbeat timeout, and the agent goes on
+/// with the same Step, never stopped.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "Temporal doesn't exist in CI"]
+async fn a_step_whose_worker_shuts_down_goes_on_at_once_on_the_next() {
+    let agent = Agent::doing(Work::WorksThenEnds);
+    let client = client().await;
+    let repo = FakeRepo::default();
+    let start = plan_run(&repo).await;
+    let run_id = start.run_id;
+    let task_queue = format!("factory-test-{}", Uuid::now_v7());
+    let runtime = Runtime::from_current_tokio(Default::default()).expect("runtime");
+    let steps = || StepServiceImpl::new(repo.clone(), BuiltInSteps::new(agent.clone()));
+    let handle = client
+        .start_workflow(
+            FlowWorkflowDefinition,
+            start,
+            WorkflowStartOptions::new(task_queue.clone(), run_id.to_string()).build(),
+        )
+        .await
+        .expect("start");
+
+    let first = worker_on(&task_queue, &runtime, client.clone(), steps()).expect("worker");
+    // The first worker shuts down once the Step reaches the agent.
+    tokio::time::timeout(PATIENCE, first.run_until(asked(&agent)))
+        .await
+        .expect("the first worker shuts down")
+        .expect("the first worker ran");
+    let restarted = tokio::time::Instant::now();
+
+    let second = worker_on(&task_queue, &runtime, client.clone(), steps()).expect("worker");
+    let done = Notify::new();
+    let walked = async {
+        asked(&agent).await;
+        let waited = restarted.elapsed();
+        let ended = tokio::time::timeout(
+            PATIENCE,
+            handle.get_result(WorkflowGetResultOptions::default()),
+        )
+        .await
+        .expect("the workflow ends");
+        done.notify_one();
+        (waited, ended)
+    };
+    let (worked, (waited, ended)) = tokio::join!(second.run_until(done.notified()), walked);
+    worked.expect("the second worker ran");
+
+    assert!(matches!(ended, Ok(RunOutcome::Success)), "{ended:?}");
+    assert!(waited < Duration::from_secs(30), "{waited:?}");
+    let tasks = agent.tasks.lock().expect("tasks").clone();
+    assert_eq!(tasks.len(), 2);
+    assert_eq!(tasks[0], tasks[1]);
+    assert_eq!(agent.stops.load(Ordering::SeqCst), 0);
+    assert_eq!(agent.releases.load(Ordering::SeqCst), 1);
 }
