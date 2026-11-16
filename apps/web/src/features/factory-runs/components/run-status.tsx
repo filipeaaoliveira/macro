@@ -4,7 +4,7 @@ import {
 } from '@app/features/agent-work/components/WorkList';
 import { t } from '@app/lib/i18n';
 import { match } from 'ts-pattern';
-import { flowWordLabel } from '../core/flow-words';
+import { flowWordLabel, flowWordText } from '../core/flow-words';
 import type { RunOutcome, RunStatus } from '../core/run';
 
 /** A Run's state as Work's status dot. */
@@ -49,7 +49,7 @@ export function runStatusDetail(status: RunStatus): string {
   return match(status)
     .with({ kind: 'running' }, ({ step }) =>
       step
-        ? t('factoryRuns.runningStep', { step: flowWordLabel(step.entry) })
+        ? t('factoryRuns.runningStep', { step: flowWordText(step.entry) })
         : t('factoryRuns.starting')
     )
     .with({ kind: 'waiting' }, ({ step }) =>

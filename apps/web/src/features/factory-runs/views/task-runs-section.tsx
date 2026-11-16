@@ -19,7 +19,7 @@ import { RunStatusDot, runStatusDetail } from '../components/run-status';
 import { StartRunDialog } from '../components/start-run-dialog';
 import { useRunsContext } from '../context/runs-context';
 import { runStatus, runTitle } from '../core/run';
-import { RunDialog } from './run-dialog';
+import { RunView } from '../run-view';
 
 /** Starts a Run on the task with the Flows the factory offers. */
 function StartRun(props: {
@@ -181,7 +181,7 @@ export function TaskRunsSection(props: { taskId: string; order: number }) {
       </Show>
       <Show when={openRunId()} keyed>
         {(runId) => (
-          <RunDialog runId={runId} onClose={() => setOpenRunId(undefined)} />
+          <RunView runId={runId} onClose={() => setOpenRunId(undefined)} />
         )}
       </Show>
     </>

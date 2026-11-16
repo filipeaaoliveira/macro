@@ -5,9 +5,9 @@ import { cleanup, render, screen } from '@solidjs/testing-library';
 import { QueryClient, QueryClientProvider } from '@tanstack/solid-query';
 import { ok } from 'neverthrow';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { RunsProvider } from '../context/runs-context';
-import { createAppRunsContext } from '../queries/runs';
-import { RunDialog } from './run-dialog';
+import { RunsProvider } from './context/runs-context';
+import { createAppRunsContext } from './queries/runs';
+import { RunView } from './run-view';
 
 vi.mock('@service-factory/client', () => ({
   factoryClient: {
@@ -79,7 +79,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe('RunDialog on the factory', () => {
+describe('RunView on the factory', () => {
   it('opens the plan a Gate asks about when its Step ends while open', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.mocked(factoryClient.getRun)
@@ -89,7 +89,7 @@ describe('RunDialog on the factory', () => {
     render(() => (
       <QueryClientProvider client={client}>
         <RunsProvider value={createAppRunsContext(client)}>
-          <RunDialog runId="run-1" onClose={() => {}} />
+          <RunView runId="run-1" onClose={() => {}} />
         </RunsProvider>
       </QueryClientProvider>
     ));

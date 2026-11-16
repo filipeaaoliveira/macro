@@ -6,6 +6,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@solidjs/testing-library';
 import { type Accessor, createSignal } from 'solid-js';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -13,9 +14,9 @@ import {
   type RunActionResult,
   type RunsContext,
   RunsProvider,
-} from '../context/runs-context';
-import type { Run } from '../core/run';
-import { RunDialog } from './run-dialog';
+} from './context/runs-context';
+import type { Run } from './core/run';
+import { RunView } from './run-view';
 
 vi.mock('@core/component/Toast/Toast', () => ({
   toast: { alert: vi.fn(), failure: vi.fn(), success: vi.fn() },
@@ -87,7 +88,7 @@ function mount(options: {
   };
   render(() => (
     <RunsProvider value={context}>
-      <RunDialog runId="run-1" onClose={vi.fn()} />
+      <RunView runId="run-1" onClose={vi.fn()} />
     </RunsProvider>
   ));
   return { context, setRun };
@@ -98,7 +99,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe('RunDialog', () => {
+describe('RunView', () => {
   it('answers the open Gate once, with the note', async () => {
     let finish!: (result: RunActionResult) => void;
     const answerGate = vi.fn(
@@ -235,5 +236,71 @@ describe('RunDialog', () => {
     expect(
       screen.getByText('Approve this plan, or send it back with a note?')
     ).toBeTruthy();
+  });
+
+  it('offers the Flow’s main answer last, as the primary action', async () => {
+    const { setRun } = mount({});
+    const [first] = waitingRun.steps;
+    if (!first?.gate) throw new Error('No first Gate');
+    setRun({
+      ...waitingRun,
+      steps: [
+        {
+          ...first,
+          gate: { ...first.gate, answers: ['approve', 'revise', 'reject'] },
+        },
+      ],
+    });
+
+    const group = await screen.findByRole('group', {
+      name: 'Your answer is needed',
+    });
+    const answers = within(group)
+      .getAllByRole('button')
+      .map((button) => button.textContent);
+    expect(answers).toEqual(['Reject', 'Revise', 'Approve']);
+  });
+
+  it('says so when an answer fails for another reason', async () => {
+    mount({
+      answerGate: vi.fn(async () => ({
+        ok: false as const,
+        reason: 'failed' as const,
+      })),
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve' }));
+
+    await waitFor(() =>
+      expect(toast.failure).toHaveBeenCalledWith('Couldn’t send your answer')
+    );
+    expect(toast.alert).not.toHaveBeenCalled();
+    // A failed answer leaves the Gate open to answer again.
+    expect(
+      screen.getByRole('button', { name: 'Approve' }).hasAttribute('disabled')
+    ).toBe(false);
+  });
+
+  it('keeps Cancel run locked after a cancel until the Run reads as ended', async () => {
+    const { setRun } = mount({});
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel run' }));
+    const confirm = screen
+      .getAllByRole('button', { name: 'Cancel run' })
+      .find((button) => button.getAttribute('data-variant') === 'danger');
+    if (!confirm) throw new Error('No confirm button');
+    fireEvent.click(confirm);
+
+    await waitFor(() => expect(confirm.getAttribute('aria-busy')).toBe('true'));
+    expect(screen.getByRole('button', { name: 'Keep running' })).toHaveProperty(
+      'disabled',
+      true
+    );
+
+    setRun({
+      ...waitingRun,
+      end: { outcome: 'cancelled', endedAt: '2026-11-16T09:05:00Z' },
+    });
+    expect(screen.queryByRole('button', { name: 'Cancel run' })).toBeNull();
   });
 });

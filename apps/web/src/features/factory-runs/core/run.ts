@@ -87,3 +87,9 @@ export function runStatus(run: Run): RunStatus {
 export function runTitle(run: Run): string {
   return run.request.trim().split('\n', 1)[0] ?? '';
 }
+
+/** What the request says after the first line, which is the Run's title. */
+export function runRequestBody(run: Run): string {
+  const [, ...rest] = run.request.trim().split('\n');
+  return rest.join('\n').trim();
+}

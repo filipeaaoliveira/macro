@@ -20,7 +20,7 @@ test('answers a Gate, starts a Run and cancels one', async ({
   const rows = page.locator('[data-agent-activity-item]');
   await expect(rows).toHaveCount(4);
   await expect(rows.first()).toContainText('Plan needs your answer');
-  await expect(rows.nth(1)).toContainText('Running Review');
+  await expect(rows.nth(1)).toContainText('Running review');
   await shoot(page, 'runs-section', testInfo.project.name);
 
   // The waiting Run shows the plan its Gate asks about, and takes an answer.
@@ -31,7 +31,12 @@ test('answers a Gate, starts a Run and cancels one', async ({
   await expect(dialog.getByText('Your answer is needed')).toBeVisible();
   // The plan renders as markdown.
   await expect(dialog.getByText('Due date', { exact: true })).toBeVisible();
-  // The answers and Cancel sit in the pinned footer, in reach unscrolled.
+  // The Gate's question, its answers and Cancel are pinned, in view together.
+  await expect(
+    dialog.getByText(
+      'Approve this plan, or send it back with a note on what to change?'
+    )
+  ).toBeInViewport();
   await expect(
     dialog.getByRole('button', { name: 'Approve' })
   ).toBeInViewport();
@@ -48,6 +53,8 @@ test('answers a Gate, starts a Run and cancels one', async ({
     .fill('Ship it behind the flag.');
   await dialog.getByRole('button', { name: 'Approve' }).click();
   await expect(dialog.getByText('Your answer is needed')).toBeHidden();
+  // The Gate's controls are gone; focus lands on where the Run is now.
+  await expect(dialog.locator('[data-run-status]')).toBeFocused();
   await expect(dialog.getByText('Answered: Approve')).toBeVisible();
   await expect(dialog.getByText('Ship it behind the flag.')).toBeVisible();
   await expect(
@@ -59,8 +66,9 @@ test('answers a Gate, starts a Run and cancels one', async ({
   await dialog.getByRole('button', { name: 'Cancel run' }).click();
   await expect(dialog.getByText('Cancel this run?')).toBeVisible();
   await shoot(page, 'run-cancel-confirm', testInfo.project.name);
-  await dialog.getByRole('button', { name: 'Cancel run' }).first().click();
+  await dialog.getByRole('button', { name: 'Cancel run' }).click();
   await expect(dialog.getByText('Cancelled').first()).toBeVisible();
+  await expect(dialog.locator('[data-run-status]')).toBeFocused();
   await expect(dialog.getByRole('button', { name: 'Cancel run' })).toHaveCount(
     0
   );

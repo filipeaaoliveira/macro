@@ -1,6 +1,7 @@
 import {
   Card,
   CardBody,
+  CardFooter,
   CardHeader,
 } from '@app/features/agent-cards/components/kit/card';
 import { Tile, Well } from '@app/features/agent-cards/components/kit/parts';
@@ -12,18 +13,28 @@ import { flowWordLabel } from '../core/flow-words';
 
 /**
  * The question a Run waits on, as an agent card asking for input: the
- * question in a well and an optional note. Its answers sit in the dialog's
- * footer (`GateAnswers`), so they stay in reach while the plan scrolls.
+ * question in a well, an optional note, and one button per answer. It sits
+ * in the Run view's pinned area, so the question is in view whenever its
+ * answers are. The Flow lists its main answer first, so that one is the
+ * primary action, last on the right.
  */
 export function GateCard(props: {
   question: string;
+  answers: readonly string[];
   note: string;
   onNoteChange: (note: string) => void;
-  disabled: boolean;
+  /** Nothing here can be used: an answer is sent, or the Gate was answered. */
+  locked: boolean;
+  /** The answer on the wire, shown loading. */
+  answering?: string;
+  onAnswer: (answer: string) => void;
 }) {
+  const main = () => props.answers[0];
+  const others = () => props.answers.slice(1).reverse();
+
   return (
-    <Card width="wide" class="max-w-none">
-      <section aria-label={t('factoryRuns.gateTitle')} class="contents">
+    <div role="group" aria-label={t('factoryRuns.gateTitle')}>
+      <Card width="wide">
         <CardHeader
           tile={
             <Tile size={32} tone="accent">
@@ -41,61 +52,47 @@ export function GateCard(props: {
           <TextField
             value={props.note}
             onChange={props.onNoteChange}
-            disabled={props.disabled}
+            disabled={props.locked}
           >
             <TextField.Label class="sr-only">
               {t('factoryRuns.noteLabel')}
             </TextField.Label>
             <TextField.TextArea
               autoResize
-              rows={2}
+              rows={1}
               placeholder={t('factoryRuns.notePlaceholder')}
             />
           </TextField>
         </CardBody>
-      </section>
-    </Card>
-  );
-}
-
-/**
- * One button per answer the Gate offers. The Flow lists its main answer
- * first, so that one is the primary action, last on the right.
- */
-export function GateAnswers(props: {
-  answers: readonly string[];
-  disabled: boolean;
-  onAnswer: (answer: string) => void;
-}) {
-  const main = () => props.answers[0];
-  const others = () => props.answers.slice(1).reverse();
-
-  return (
-    <>
-      <For each={others()}>
-        {(answer) => (
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={props.disabled}
-            onClick={() => props.onAnswer(answer)}
-          >
-            {flowWordLabel(answer)}
-          </Button>
-        )}
-      </For>
-      <Show when={main()}>
-        {(answer) => (
-          <Button
-            type="button"
-            variant="primary"
-            disabled={props.disabled}
-            onClick={() => props.onAnswer(answer())}
-          >
-            {flowWordLabel(answer())}
-          </Button>
-        )}
-      </Show>
-    </>
+        <CardFooter class="justify-end pt-0">
+          <For each={others()}>
+            {(answer) => (
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={props.locked}
+                loading={props.answering === answer}
+                onClick={() => props.onAnswer(answer)}
+              >
+                {flowWordLabel(answer)}
+              </Button>
+            )}
+          </For>
+          <Show when={main()}>
+            {(answer) => (
+              <Button
+                type="button"
+                variant="primary"
+                disabled={props.locked}
+                loading={props.answering === answer()}
+                onClick={() => props.onAnswer(answer())}
+              >
+                {flowWordLabel(answer())}
+              </Button>
+            )}
+          </Show>
+        </CardFooter>
+      </Card>
+    </div>
   );
 }

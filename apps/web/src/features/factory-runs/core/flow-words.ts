@@ -4,6 +4,11 @@
  * shown as written rather than translated.
  */
 export function flowWordLabel(word: string): string {
-  const spaced = word.replace(/[-_]+/g, ' ').trim();
+  const spaced = flowWordText(word);
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+/** A Flow's word inside a sentence: `ci fix`, as in "Running ci fix". */
+export function flowWordText(word: string): string {
+  return word.replace(/[-_]+/g, ' ').trim();
 }

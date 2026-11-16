@@ -123,7 +123,7 @@ describe('TaskRunsSection', () => {
 
     expect(screen.getByText('Runs (1)')).toBeTruthy();
     expect(screen.getByText('Rename the column')).toBeTruthy();
-    expect(screen.getByText('Running Write')).toBeTruthy();
+    expect(screen.getByText('Running write')).toBeTruthy();
   });
 
   it('says when the task has no Runs', () => {

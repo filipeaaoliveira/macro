@@ -1372,15 +1372,16 @@ newest first, with a dot for where it is (running, needs input, done, failed or
 cancelled), the Step it is on, and when it started. **New run** asks for a
 request and a Flow, starts the Run and opens it.
 
-A Run opens in a dialog (a sheet on touch, after the side panel's sheet
-closes): its request, its Steps on a timeline with each Step's outcome, its
-time (`5m`) and its output as markdown, and, while the Run waits on a Gate,
-the question and a note field under the output it asks about. The answers
-sit in the dialog's pinned footer beside **Cancel run**; the Flow's first
-answer is the primary button. Phone sheets have no close button.
-**Cancel run** confirms inside the
-dialog, like a booking's cancel. A second answer to a Gate, or a cancel of a
-Run that already ended, shows a toast and reads the Run again. An open Run,
+A Run opens in a dialog on desktop and in a sheet on touch (after the side
+panel's sheet closes). Its Steps scroll: each with its outcome, its time
+(`5m`) and its output as markdown, the output a waiting Gate asks about
+open. Pinned below them on desktop, and between the handle and the Steps on
+touch, are the Gate's question, a note field and one button per answer (the
+Flow's first answer is the primary button), and **Cancel run**, which
+confirms in place. Phone sheets have no close button. When an answer or a
+cancel takes the focused control away, focus moves to the Run's status line.
+A second answer to a Gate, or a cancel of a Run that already ended, shows a
+toast and reads the Run again. An open Run,
 and a task with a Step running, are read again every 3 seconds; a task whose
 live Runs all wait on a Gate, every minute; nothing once every Run has ended.
 
