@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (SELECT 1 FROM factory_step WHERE session_id = $1) AS \"works!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "works!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "824c7b9002d6a95fc38fb95e14ad531ab652a1e1337a4b75f857dceb185897f7"
+}

@@ -708,7 +708,6 @@ dependencies = [
  "entity_access_management",
  "entity_registry",
  "entity_registry_db_utils",
- "factory_records",
  "feature_flags",
  "foreign_entity",
  "frecency",

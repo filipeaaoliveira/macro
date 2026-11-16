@@ -48,20 +48,23 @@ pub trait FactoryStepSessions: Send + Sync + 'static {
     async fn works_on_a_step(&self, session: uuid::Uuid) -> Result<bool, rootcause::Report>;
 }
 
-/// [`FactoryStepSessions`] over the factory's records.
-pub struct FactoryStepRecords<R>(pub R);
+/// [`FactoryStepSessions`] over MacroDB: a factory Step records the session
+/// it works in on its row of `factory_step`, before the session opens.
+pub struct PgFactoryStepSessions {
+    pub pool: sqlx::PgPool,
+}
 
 #[async_trait]
-impl<R: factory_records::domain::ports::RunRepository> FactoryStepSessions
-    for FactoryStepRecords<R>
-{
+impl FactoryStepSessions for PgFactoryStepSessions {
     async fn works_on_a_step(&self, session: uuid::Uuid) -> Result<bool, rootcause::Report> {
-        let step = self
-            .0
-            .session_step(session)
-            .await
-            .map_err(|error| rootcause::Report::new(error).into_dynamic())?;
-        Ok(step.is_some())
+        let works = sqlx::query_scalar!(
+            r#"SELECT EXISTS (SELECT 1 FROM factory_step WHERE session_id = $1) AS "works!""#,
+            session,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|error| rootcause::Report::new(error).into_dynamic())?;
+        Ok(works)
     }
 }
 
