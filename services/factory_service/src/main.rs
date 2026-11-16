@@ -158,12 +158,11 @@ async fn serve<A: StepAgent + Clone>(
     steps: BuiltInSteps<A>,
 ) -> Result<(), rootcause::Report> {
     let runtime = Runtime::from_current_tokio(Default::default())?;
-    let mut worker = factory_engine::inbound::temporal::worker(
+    let worker = factory_engine::inbound::temporal::worker(
         &runtime,
         parts.client.clone(),
         StepServiceImpl::new(parts.repo.clone(), steps.clone()),
     )?;
-    let stop_worker = worker.shutdown_handle();
 
     let service = Arc::new(FactoryServiceImpl::new(
         parts.repo,
@@ -196,26 +195,23 @@ async fn serve<A: StepAgent + Clone>(
     });
 
     // The API and the worker stop together: on a shutdown signal, or when
-    // either of them stops on its own.
-    let serving = axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown.clone().cancelled_owned())
-        .into_future();
-    let working = worker.run();
-    tokio::pin!(serving, working);
-    tokio::select! {
-        served = &mut serving => {
-            stop_worker();
-            let worked = (&mut working).await;
-            served?;
-            worked?;
-        }
-        worked = &mut working => {
-            shutdown.cancel();
-            let served = (&mut serving).await;
-            worked?;
-            served?;
-        }
-    }
+    // either of them stops on its own. The worker gives running Steps a
+    // grace period, then cancels them, before it returns.
+    let serving = async {
+        let served = axum::serve(listener, app)
+            .with_graceful_shutdown(shutdown.clone().cancelled_owned())
+            .await;
+        shutdown.cancel();
+        served
+    };
+    let working = async {
+        let worked = worker.run_until(shutdown.clone().cancelled_owned()).await;
+        shutdown.cancel();
+        worked
+    };
+    let (served, worked) = tokio::join!(serving, working);
+    served?;
+    worked?;
     Ok(())
 }
 
