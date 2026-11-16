@@ -1380,8 +1380,9 @@ sit in the dialog's pinned footer beside **Cancel run**; the Flow's first
 answer is the primary button. Phone sheets have no close button.
 **Cancel run** confirms inside the
 dialog, like a booking's cancel. A second answer to a Gate, or a cancel of a
-Run that already ended, shows a toast and reads the Run again. Open Runs and a
-task with a Run going are read again every 3 seconds until they end.
+Run that already ended, shows a toast and reads the Run again. An open Run,
+and a task with a Step running, are read again every 3 seconds; a task whose
+live Runs all wait on a Gate, every minute; nothing once every Run has ended.
 
 The browser regression runs the section and dialog on an in-memory factory:
 `bunx playwright test --config src/features/factory-runs/browser-test/playwright.config.ts`

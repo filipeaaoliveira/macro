@@ -14,11 +14,26 @@ import type {
   RunsContext,
   RunsSource,
 } from '../context/runs-context';
-import type { Run } from '../core/run';
+import { type Run, runStatus } from '../core/run';
 import { factoryRunKeys } from './keys';
 
 /** How often an open Run, or a task with a Run going, is read again. */
 const LIVE_POLL_MS = 3_000;
+
+/**
+ * How often a task whose live Runs all wait on a person is read again. A
+ * Gate can wait for days, and every open task polls; this still catches an
+ * answer given somewhere else.
+ */
+const WAITING_POLL_MS = 60_000;
+
+/** A task's Runs are read fast while a Step runs, slowly while they wait. */
+function taskRunsPollMs(runs: Run[] | undefined): number | false {
+  const live = (runs ?? []).filter((run) => !run.end);
+  if (live.length === 0) return false;
+  const running = live.some((run) => runStatus(run).kind === 'running');
+  return running ? LIVE_POLL_MS : WAITING_POLL_MS;
+}
 
 function toRun(detail: RunDetail): Run {
   const { run } = detail;
@@ -55,7 +70,7 @@ function seedRun(client: QueryClient, run: Run) {
   client.setQueryData(factoryRunKeys.run(run.id).queryKey, run);
 }
 
-function taskRunsOptions(client: QueryClient, taskId: string) {
+export function taskRunsOptions(client: QueryClient, taskId: string) {
   return queryOptions({
     queryKey: factoryRunKeys.task(taskId).queryKey,
     enabled: Boolean(taskId),
@@ -68,8 +83,7 @@ function taskRunsOptions(client: QueryClient, taskId: string) {
       for (const run of runs) seedRun(client, run);
       return runs;
     },
-    refetchInterval: (query) =>
-      query.state.data?.some((run) => !run.end) ? LIVE_POLL_MS : false,
+    refetchInterval: (query) => taskRunsPollMs(query.state.data),
     reconcile: 'id',
   });
 }

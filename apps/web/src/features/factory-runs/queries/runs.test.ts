@@ -5,7 +5,7 @@ import { err, ok } from 'neverthrow';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Run } from '../core/run';
 import { factoryRunKeys } from './keys';
-import { createAppRunsContext, runOptions } from './runs';
+import { createAppRunsContext, runOptions, taskRunsOptions } from './runs';
 
 vi.mock('@service-factory/client', () => ({
   factoryClient: {
@@ -160,6 +160,85 @@ describe('createAppRunsContext', () => {
       expect(factoryClient.getRun).toHaveBeenCalledTimes(2);
       await vi.advanceTimersByTimeAsync(30_000);
       expect(factoryClient.getRun).toHaveBeenCalledTimes(2);
+      unsubscribe();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops reading a task once its Runs end, and starts again for a new one', async () => {
+    vi.useFakeTimers();
+    try {
+      const ended: RunDetail = {
+        ...started,
+        run: {
+          ...started.run,
+          end: { outcome: 'success', endedAt: '2026-11-16T09:10:00Z' },
+        },
+      };
+      vi.mocked(factoryClient.listTaskRuns).mockResolvedValue(ok([ended]));
+      const client = new QueryClient();
+      const observer = new QueryObserver(
+        client,
+        taskRunsOptions(client, 'task-1')
+      );
+      const unsubscribe = observer.subscribe(() => {});
+
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(factoryClient.listTaskRuns).toHaveBeenCalledTimes(1);
+
+      vi.mocked(factoryClient.startRun).mockResolvedValue(ok(started));
+      await createAppRunsContext(client).startRun({
+        taskId: 'task-1',
+        flow: 'plan',
+        request: 'Add a due date column',
+      });
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(factoryClient.listTaskRuns).toHaveBeenCalledTimes(2);
+      unsubscribe();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reads a task whose live Runs all wait on a Gate only slowly', async () => {
+    vi.useFakeTimers();
+    try {
+      const waiting: RunDetail = {
+        ...started,
+        steps: [
+          {
+            entry: 'plan',
+            visit: 1,
+            startedAt: '2026-11-16T09:00:01Z',
+            end: {
+              outcome: 'done',
+              output: 'A plan.',
+              endedAt: '2026-11-16T09:01:00Z',
+            },
+            gate: {
+              question: 'Approve this plan?',
+              answers: ['approve'],
+              openedAt: '2026-11-16T09:01:00Z',
+              answer: null,
+            },
+          },
+        ],
+      };
+      vi.mocked(factoryClient.listTaskRuns).mockResolvedValue(ok([waiting]));
+      const client = new QueryClient();
+      const observer = new QueryObserver(
+        client,
+        taskRunsOptions(client, 'task-1')
+      );
+      const unsubscribe = observer.subscribe(() => {});
+
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(factoryClient.listTaskRuns).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(factoryClient.listTaskRuns).toHaveBeenCalledTimes(2);
       unsubscribe();
     } finally {
       vi.useRealTimers();
