@@ -1,0 +1,47 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH calls AS MATERIALIZED (\n                SELECT agent_session_id, user_id, input_tokens, output_tokens,\n                       cache_read_input_tokens, cache_write_input_tokens\n                FROM ai_usage\n                WHERE agent_session_id = ANY($1)\n            )\n            SELECT\n                agent_session_id AS \"session_id!\",\n                sum(input_tokens)::bigint AS \"input!\",\n                sum(output_tokens)::bigint AS \"output!\",\n                sum(cache_read_input_tokens)::bigint AS \"cache_read!\",\n                sum(cache_write_input_tokens)::bigint AS \"cache_write!\"\n            FROM calls\n            WHERE user_id = $2\n            GROUP BY agent_session_id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "session_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "input!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "output!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "cache_read!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "cache_write!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "Text"
+      ]
+    },
+    "nullable": [
+      true,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "327660810fb81c472abc83b80ce8f4ebc63928977eb135444aca75521ec62198"
+}
