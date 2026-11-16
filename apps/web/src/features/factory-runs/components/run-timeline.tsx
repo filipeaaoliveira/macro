@@ -1,0 +1,150 @@
+import { TextPart } from '@app/features/block-agent/component/parts/TextPart';
+import { t } from '@app/lib/i18n';
+import CaretDownIcon from '@icon/system/regular/caret-down.svg';
+import { Badge, cn } from '@ui';
+import { CollapseTransition } from '@ui/components/CollapseTransition';
+import { createSignal, For, type JSX, Show } from 'solid-js';
+import { flowWordLabel } from '../core/flow-words';
+import type { RunStep } from '../core/run';
+
+function stepLabel(step: Pick<RunStep, 'entry' | 'visit'>): string {
+  const entry = flowWordLabel(step.entry);
+  if (step.visit <= 1) return entry;
+  return t('factoryRuns.stepVisit', { entry, visit: step.visit });
+}
+
+/**
+ * A Run's Steps, oldest first, on a rail like an agent's activity timeline.
+ * Each Step shows its outcome; its output (an agent's plan, a review) opens
+ * below it as markdown.
+ */
+export function RunTimeline(props: {
+  steps: RunStep[];
+  /** Whether a Step's output starts open, e.g. the plan a Gate asks about. */
+  outputOpen: (step: RunStep) => boolean;
+  time: (value: string) => string;
+}) {
+  return (
+    <ol class="flex flex-col" aria-label={t('factoryRuns.steps')}>
+      <For each={props.steps}>
+        {(step, index) => (
+          <TimelineStep
+            step={step}
+            first={index() === 0}
+            latest={index() === props.steps.length - 1}
+            defaultOpen={props.outputOpen(step)}
+            time={props.time}
+          />
+        )}
+      </For>
+    </ol>
+  );
+}
+
+function TimelineStep(props: {
+  step: RunStep;
+  first: boolean;
+  latest: boolean;
+  defaultOpen: boolean;
+  time: (value: string) => string;
+}) {
+  const [open, setOpen] = createSignal(props.defaultOpen);
+  const output = () => props.step.end?.output.trim() ?? '';
+  const answer = () => props.step.gate?.answer;
+
+  return (
+    <li
+      class="relative pl-6"
+      data-factory-run-step={`${props.step.entry}:${props.step.visit}`}
+    >
+      <span
+        aria-hidden="true"
+        class={cn(
+          'absolute left-[6.5px] w-px bg-ink-placeholder/45',
+          props.first ? 'top-3.5' : 'top-0',
+          props.latest ? 'h-3.5' : 'bottom-0'
+        )}
+      />
+      <span
+        aria-hidden="true"
+        class={cn(
+          'absolute top-3.5 left-[3.5px] size-[7px] -translate-y-1/2 rounded-full border-[1.5px]',
+          props.step.end
+            ? 'border-ink-subtle bg-ink-subtle'
+            : 'border-accent bg-accent motion-safe:animate-pulse'
+        )}
+      />
+      <div class="flex min-h-7 min-w-0 items-center gap-2 text-sm touch:min-h-9">
+        <span class="min-w-0 truncate font-medium text-ink">
+          {stepLabel(props.step)}
+        </span>
+        <Show
+          when={props.step.end}
+          fallback={
+            <span class="text-xs text-ink-subtle">
+              {t('factoryRuns.stepRunning')}
+            </span>
+          }
+        >
+          {(end) => (
+            <Badge variant="outline" size="xs">
+              {flowWordLabel(end().outcome)}
+            </Badge>
+          )}
+        </Show>
+        <span class="ml-auto shrink-0 text-xs tabular-nums text-ink-subtle">
+          {props.time(props.step.end?.endedAt ?? props.step.startedAt)}
+        </span>
+        <Show when={output()}>
+          <button
+            type="button"
+            class="flex size-6 shrink-0 items-center justify-center rounded-md text-ink-subtle outline-none hover:bg-active hover:text-ink focus-visible:outline-2 focus-visible:outline-accent touch:size-9"
+            aria-expanded={open()}
+            aria-label={t('factoryRuns.showOutput', {
+              step: stepLabel(props.step),
+            })}
+            onClick={() => setOpen((value) => !value)}
+          >
+            <CaretDownIcon
+              class={cn(
+                'size-3 transition-transform duration-150 motion-reduce:transition-none',
+                open() && 'rotate-180'
+              )}
+            />
+          </button>
+        </Show>
+      </div>
+      <Show when={answer()}>
+        {(answer) => (
+          <StepNote>
+            {t('factoryRuns.answered', {
+              answer: flowWordLabel(answer().answer),
+            })}
+            <Show when={answer().note}>
+              {(note) => (
+                <span class="block whitespace-pre-wrap text-ink-muted">
+                  {note()}
+                </span>
+              )}
+            </Show>
+          </StepNote>
+        )}
+      </Show>
+      <Show when={output()}>
+        <CollapseTransition open={open()}>
+          <div class="mt-1 mb-3 min-w-0 rounded-lg bg-surface px-3 py-2.5 text-sm">
+            <TextPart text={output()} />
+          </div>
+        </CollapseTransition>
+      </Show>
+    </li>
+  );
+}
+
+function StepNote(props: { children: JSX.Element }) {
+  return (
+    <p class="mb-2 min-w-0 text-xs leading-5 text-ink-subtle [overflow-wrap:anywhere]">
+      {props.children}
+    </p>
+  );
+}

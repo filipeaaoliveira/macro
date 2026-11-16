@@ -1,0 +1,191 @@
+/** @vitest-environment jsdom */
+import { toast } from '@core/component/Toast/Toast';
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@solidjs/testing-library';
+import { createSignal } from 'solid-js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  type RunActionResult,
+  type RunsContext,
+  RunsProvider,
+} from '../context/runs-context';
+import type { Run } from '../core/run';
+import { RunDialog } from './run-dialog';
+
+vi.mock('@core/component/Toast/Toast', () => ({
+  toast: { alert: vi.fn(), failure: vi.fn(), success: vi.fn() },
+}));
+
+// Step output renders through the agent's markdown; its parsing is not under test.
+vi.mock('@app/features/block-agent/component/parts/TextPart', () => ({
+  TextPart: (props: { text: string }) => <div>{props.text}</div>,
+}));
+
+// The shared collapse animation measures with ResizeObserver, which jsdom lacks.
+vi.stubGlobal(
+  'ResizeObserver',
+  class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+);
+
+const waitingRun: Run = {
+  id: 'run-1',
+  request: 'Add a due date column\n\nShow it in the task list.',
+  createdAt: '2026-11-16T09:00:00Z',
+  taskId: 'task-1',
+  steps: [
+    {
+      entry: 'plan',
+      visit: 1,
+      startedAt: '2026-11-16T09:00:00Z',
+      end: {
+        outcome: 'done',
+        output: 'Add a `due_date` column to the list.',
+        endedAt: '2026-11-16T09:01:00Z',
+      },
+      gate: {
+        question: 'Approve this plan, or send it back with a note?',
+        answers: ['approve', 'revise'],
+        openedAt: '2026-11-16T09:01:00Z',
+      },
+    },
+  ],
+};
+
+const DONE: RunActionResult = { ok: true, value: undefined };
+
+function mount(options: {
+  answerGate?: RunsContext['answerGate'];
+  cancelRun?: RunsContext['cancelRun'];
+}) {
+  const [run] = createSignal<Run | undefined>(waitingRun);
+  const context: RunsContext = {
+    taskRuns: () => ({
+      state: () => 'ready',
+      data: () => [waitingRun],
+      retry: vi.fn(),
+    }),
+    run: () => ({
+      state: () => (run() ? 'ready' : 'pending'),
+      data: run,
+      retry: vi.fn(),
+    }),
+    flows: () => ({ state: () => 'ready', data: () => [], retry: vi.fn() }),
+    startRun: vi.fn(),
+    answerGate: options.answerGate ?? vi.fn(async () => DONE),
+    cancelRun: options.cancelRun ?? vi.fn(async () => DONE),
+  };
+  render(() => (
+    <RunsProvider value={context}>
+      <RunDialog runId="run-1" onClose={vi.fn()} />
+    </RunsProvider>
+  ));
+  return context;
+}
+
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
+
+describe('RunDialog', () => {
+  it('answers the open Gate once, with the note', async () => {
+    let finish!: (result: RunActionResult) => void;
+    const answerGate = vi.fn(
+      () =>
+        new Promise<RunActionResult>((resolve) => {
+          finish = resolve;
+        })
+    );
+    mount({ answerGate });
+
+    expect(
+      await screen.findByText('Approve this plan, or send it back with a note?')
+    ).toBeTruthy();
+    // The plan the Gate asks about is open to read.
+    expect(
+      screen.getByText('Add a `due_date` column to the list.')
+    ).toBeTruthy();
+
+    fireEvent.input(
+      screen.getByPlaceholderText('Add a note for the next steps (optional)'),
+      { target: { value: 'Keep the column narrow' } }
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Revise' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+
+    expect(answerGate).toHaveBeenCalledTimes(1);
+    expect(answerGate).toHaveBeenCalledWith({
+      runId: 'run-1',
+      step: waitingRun.steps[0],
+      answer: 'revise',
+      note: 'Keep the column narrow',
+    });
+
+    finish({ ok: true, value: undefined });
+    const note = screen.getByPlaceholderText(
+      'Add a note for the next steps (optional)'
+    );
+    await waitFor(() => expect((note as HTMLTextAreaElement).value).toBe(''));
+    // Until the Run is read past it, the answered Gate stays locked.
+    expect(
+      screen.getByRole('button', { name: 'Approve' }).hasAttribute('disabled')
+    ).toBe(true);
+  });
+
+  it('says so when someone else answered first', async () => {
+    mount({
+      answerGate: vi.fn(async () => ({
+        ok: false as const,
+        reason: 'conflict' as const,
+      })),
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve' }));
+
+    await waitFor(() =>
+      expect(toast.alert).toHaveBeenCalledWith(
+        'This question was already answered',
+        { subtext: 'The run has moved on and now shows where it is' }
+      )
+    );
+    expect(toast.failure).not.toHaveBeenCalled();
+  });
+
+  it('cancels only after the person confirms', async () => {
+    const cancelRun = vi.fn(async () => ({
+      ok: false as const,
+      reason: 'conflict' as const,
+    }));
+    mount({ cancelRun });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel run' }));
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Keep running' })
+    );
+    expect(screen.queryByText('Cancel this run?')).toBeNull();
+    expect(cancelRun).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel run' }));
+    expect(screen.getByText('Cancel this run?')).toBeTruthy();
+    const confirm = screen
+      .getAllByRole('button', { name: 'Cancel run' })
+      .find((button) => button.getAttribute('data-variant') === 'danger');
+    if (!confirm) throw new Error('No confirm button');
+    fireEvent.click(confirm);
+
+    expect(cancelRun).toHaveBeenCalledTimes(1);
+    expect(cancelRun).toHaveBeenCalledWith('run-1');
+    await waitFor(() =>
+      expect(toast.alert).toHaveBeenCalledWith('This run has already ended')
+    );
+  });
+});

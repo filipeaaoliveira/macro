@@ -1,4 +1,5 @@
 import { EntityActivitySectionConditional } from '@app/features/activity/views/entity-activity-section';
+import { TaskRuns } from '@app/features/factory-runs/factory-runs';
 import {
   EntityPropertiesSection,
   EntityTagsSection,
@@ -101,6 +102,7 @@ export function MarkdownSidePanelSections() {
       <NotificationsSectionConditional entity={entity()} />
       <ReferencesSectionConditional documentId={documentId()} />
       <Show when={isTask()}>
+        <TaskRuns taskId={documentId()} order={36} />
         <TaskDuplicateMatchesSidePanelSection />
       </Show>
     </>
