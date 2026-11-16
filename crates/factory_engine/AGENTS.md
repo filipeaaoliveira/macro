@@ -13,47 +13,47 @@ interpreter names, the workflow records its start (`factory_start_step`), runs
 its work (`factory_run_step`), records its end (`factory_end_step`), and feeds
 the outcome back; then it records the Run's end (`factory_end_run`). A Step is
 keyed by its place among the Run's Steps (`seq`), which a reset never reuses.
-Work that fails for good, or still fails after two hours of retries (not a
-count of attempts, which a worker shutting down uses up), ends the Step
-`failed`, with a fixed
-output (why is in the worker's logs). The work heartbeats. A cancelled
-activity only drops its work: it can't tell the Run's cancellation from a
-worker shutting down or a timed-out attempt, and a retry goes on in the same
-agent session. The workflow stops the agent (`factory_stop_step`, on a token
-the cancellation does not reach) when the Run was cancelled, and when the
-work failed for good; the stop is sent again for a minute while the session
-still works (a prompt on its way can restart it), then the session is
-deleted. A Step that ended has its session deleted once its end is recorded
-(`factory_release_step`). A shutting-down worker gives running Steps a few
-seconds, then cancels them, so Temporal retries them on another worker at
-once. A cancelled Run's open Steps end `cancelled` with it. A
-Run takes at most `MAX_STEPS` Steps, then ends `blocked`. Workflow inputs carry
-ids, never the request's text.
+Work that fails for good, or still fails after two hours of retries (not a count
+of attempts, which a worker shutting down uses up), ends the Step `failed`, with
+a fixed output (why is in the worker's logs). The work heartbeats every 4 s
+against a 15 s timeout, so a cancel reaches it within about 12 s. A cancelled
+activity only drops its work: it can't tell the Run's cancellation from a worker
+shutting down or a timed-out attempt, and a retry goes on in the same agent
+session. Once the Step's or the Run's end is recorded, the workflow stops the
+agent (`factory_stop_step`, on a token the cancellation does not reach) when the
+Run was cancelled, or the work failed for good: the stop is sent again for a
+minute while the session still works (a prompt on its way can restart it), then
+the session is deleted, and a failed delete is retried. A Step that ended has
+its session deleted (`factory_release_step`). Either way the Step first records
+that it let go of the session, and no attempt opens or prompts a session its
+Step let go of. A shutting-down worker gives running Steps a few seconds, then
+cancels them, so Temporal retries them on another worker at once. A cancelled
+Run's open Steps end `cancelled` with it. A Run takes at most `MAX_STEPS` Steps,
+then ends `blocked`. Workflow inputs carry ids, never the request's text.
 
-An entry with a `gate` asks a person a question once its Step ends `done`:
-the workflow records the Gate (`factory_open_gate`), waits for the
-`factory_answer_gate` update that `POST /runs/{id}/steps/{seq}/answer`
-sends, records the answer (`factory_answer_gate` activity), and routes the
-answer as the entry's outcome. An answer the recorded Gate does not offer is
-refused before it is sent (400); the update's validator (`domain/gate.rs`)
-refuses an answer to a Gate the Run does not wait on and a second answer (409).
+An entry with a `gate` asks a person a question once its Step ends `done`: the
+workflow records the Gate (`factory_open_gate`), waits for the
+`factory_answer_gate` update that `POST /runs/{id}/steps/{seq}/answer` sends,
+records the answer (`factory_answer_gate` activity), and routes the answer as
+the entry's outcome. An answer the recorded Gate does not offer is refused
+before it is sent (400); the update's validator (`domain/gate.rs`) refuses an
+answer to a Gate the Run does not wait on and a second answer (409).
 
-The Run API is for internal callers acting for a user: the acting user from
-the internal key's identity headers owns the Runs they create, and reads,
-answers, links and cancels only those; someone else's Run reads as missing. A
-call with no acting user, or one with no account, is refused (400). A Run may
-work on a Macro task: `POST /runs` takes an optional `taskId` (the task
-document's id), and `PUT /runs/{id}/task` links or relinks one. The owner must
-see the document through entity access, and document storage must say it is a
-task that is not deleted (`outbound/document_task_directory.rs`); a hidden
-document and a missing one are both "no task" (400).
+The Run API is for internal callers acting for a user: the acting user from the
+internal key's identity headers owns the Runs they create, and reads, answers,
+links and cancels only those; someone else's Run reads as missing. A call with
+no acting user, or one with no account, is refused (400). A Run may work on a
+Macro task: `POST /runs` takes an optional `taskId` (the task document's id),
+and `PUT /runs/{id}/task` links or relinks one. The owner must see the document
+through entity access, and document storage must say it is a task that is not
+deleted (`outbound/document_task_directory.rs`); a hidden document and a missing
+one are both "no task" (400).
 
 `POST /runs/{id}/cancel` cancels the workflow through Temporal; cancelling a
 cancelled Run again is accepted, and a Run whose workflow never started ends
-`cancelled` (its workflow, should it start late, takes no Step). Reading a
-Run whose workflow never started ends it `failed` once it is five minutes
-old. A Temporal outage answers 503 (or 502 for an
-unusable answer), never 500.
+`cancelled` (its workflow, should it start late, takes no Step). Reading a Run
+whose workflow never started ends it `failed` once it is five minutes old. A
+Temporal outage answers 503 (or 502 for an unusable answer), never 500.
 
 The built-in Steps (`src/domain/built_in_steps.rs`) are `reply`, which
 acknowledges the request, and `plan` and `write`, which hand an agent a prompt
@@ -64,17 +64,17 @@ session of the configured agent, owned by the Run's owner, through the routine
 sessions capability (`agent_harness_service_client`). The Step claims its
 session in `factory_step` first, so a retried Step goes on in the same session
 and does not start the work over: it always asks, and the session refuses a
-prompt it already has with a conflict. That guard is a check of the
-session's history, not exactly-once delivery, so a prompt whose delivery is
-unknown is never sent again: the session's status settles it, and one that
-never shows fails the Step for good. The prompt asks the agent to hand back its result
-with `macro.factory.handBack({ outcome, text })` from code mode, which reaches
-`POST /hand-backs` as the Run's owner; the correlation layer names the session
+prompt it already has with a conflict. That guard is a check of the session's
+history, not exactly-once delivery, so a prompt whose delivery is unknown is
+never sent again: the session's status settles it, and one that never shows
+fails the Step for good. The prompt asks the agent to hand back its result with
+`macro.factory.handBack({ outcome, text })` from code mode, which reaches `POST
+/hand-backs` as the Run's owner; the correlation layer names the session
 (`agent_correlation::context::current_session`), and the hand back must offer
-one of the Step's outcomes. When the session's first turn ends, the latest
-hand back is the Step's outcome and output; none fails the Step. `LocalAgent`
-does no work and hands back the prompt it was given: the tests' stand-in, and
-the service's when no agent is configured.
+one of the Step's outcomes. When the session's first turn ends, the latest hand
+back is the Step's outcome and output; none fails the Step. `LocalAgent` does no
+work and hands back the prompt it was given: the tests' stand-in, and the
+service's when no agent is configured.
 
 ## Start here
 

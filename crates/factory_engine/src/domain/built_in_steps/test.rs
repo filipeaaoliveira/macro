@@ -302,5 +302,6 @@ async fn a_prompt_cuts_a_newest_step_past_its_budget_rather_than_leave_it_out() 
             "pad {pad}"
         );
         assert!(prompt.contains("1 earlier steps are left out"), "pad {pad}");
+        assert!(prompt.len() < plan.len(), "pad {pad}");
     }
 }
