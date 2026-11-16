@@ -386,25 +386,23 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
             return Ok(());
         };
 
-        // A prompt already on its way can land after the first stop and
-        // start the turn again, so the stop is sent again while the session
-        // still works, until its turn has ended or the watch is over. A stop
-        // that fails is not the Step's failure: a session that was claimed
-        // but never opened has nothing to stop, and a session that works on
-        // is stopped again by the watch. The session is deleted either way.
         // Recorded first, so no attempt opens the session again once it is
         // deleted.
         self.repo
             .release_session(key)
             .await
             .map_err(Self::records)?;
-        // The session is watched for the whole minute, whatever it answers:
-        // one whose prepare is still in flight, or a harness that fails a
-        // while, answers neither the stop nor a read, yet may open or work
-        // on. It is then deleted; a delete that fails fails the stop, which
-        // Temporal tries again.
+        // A prompt already on its way can land after the first stop and
+        // start the turn again, so the stop is sent again while the session
+        // still works, until its turn has ended or the watch is over. One
+        // whose prepare is still in flight, or a harness that fails a while,
+        // answers neither the stop nor a read, yet may open or work on, so
+        // the watch rides that out. A session that never answered once no
+        // prepare can still open it never will: it is missing, and there is
+        // nothing to watch.
         let action = self.action(owner, session);
         self.cancel(&action).await;
+        let mut seen = false;
         let deadline = tokio::time::Instant::now() + STOP_WATCH;
         let mut wait = FIRST_LOOK;
         while tokio::time::Instant::now() < deadline {
@@ -412,15 +410,33 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
             wait = (wait * 2).min(LONGEST_WAIT);
             match self.sessions.status(action.clone()).await {
                 Ok(RoutineActionStatus::Succeeded | RoutineActionStatus::Failed(_)) => break,
-                Ok(RoutineActionStatus::Pending(RoutinePendingReason::AwaitingPrompt)) | Err(_) => {
+                Ok(RoutineActionStatus::Pending(RoutinePendingReason::AwaitingPrompt)) => {
+                    seen = true;
                 }
                 Ok(RoutineActionStatus::Pending(_)) => {
+                    seen = true;
                     self.cancel(&action).await;
                 }
+                Err(RoutineSessionError::OperationFailed)
+                    if !seen && !could_still_open(session) =>
+                {
+                    break;
+                }
+                Err(_) => {}
             }
         }
-        self.sessions.delete(action).await?;
-        Ok(())
+        // A delete that misses once no prepare can open the session means
+        // there is none: it never opened, or a delete whose answer was lost
+        // already took it. Any other failed delete fails the stop, which
+        // Temporal tries again.
+        match self.sessions.delete(action).await {
+            Ok(()) => Ok(()),
+            Err(RoutineSessionError::OperationFailed) if !could_still_open(session) => {
+                tracing::info!("a stopped factory step's agent session is already gone");
+                Ok(())
+            }
+            Err(error) => Err(error.into()),
+        }
     }
 
     #[tracing::instrument(err, skip_all, fields(run_id = %key.run_id, seq = key.seq))]
@@ -443,6 +459,22 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
         }
         Ok(())
     }
+}
+
+/// Whether a prepare could still open `session`: its id, a UUIDv7, says
+/// when the Step claimed it, and no prepare outlives [`OPEN_SETTLE`] after
+/// that.
+fn could_still_open(session: StepSession) -> bool {
+    let Some((secs, nanos)) = session.session_id.get_timestamp().map(|at| at.to_unix()) else {
+        return true;
+    };
+    let claimed = i64::try_from(secs)
+        .ok()
+        .and_then(|secs| chrono::DateTime::<chrono::Utc>::from_timestamp(secs, nanos));
+    let (Some(claimed), Ok(settle)) = (claimed, chrono::TimeDelta::from_std(OPEN_SETTLE)) else {
+        return true;
+    };
+    chrono::Utc::now() - claimed < settle
 }
 
 /// The task's prompt, then how to hand back one of its outcomes.

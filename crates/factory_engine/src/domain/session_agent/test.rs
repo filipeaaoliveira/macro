@@ -547,33 +547,71 @@ async fn stopping_a_step_stops_its_session_until_the_turn_ends() {
     );
 }
 
-/// A Step stopped before its session opened may still see it open, if its
-/// prepare is in flight: the stop watches it, tries the delete, and fails
-/// when the delete does, for Temporal to try again.
+/// A session claimed `ago` before now: its UUIDv7 id says when.
+fn claimed_ago(ago: std::time::Duration) -> StepSession {
+    let at = chrono::Utc::now() - chrono::TimeDelta::from_std(ago).expect("short");
+    let secs = u64::try_from(at.timestamp()).expect("after the epoch");
+    let timestamp = uuid::Timestamp::from_unix(uuid::NoContext, secs, 0);
+    StepSession {
+        session_id: Uuid::new_v7(timestamp),
+        action_id: Uuid::now_v7(),
+    }
+}
+
+/// Claim `session` for `task`'s Step without opening it, as an attempt whose
+/// prepare was refused, or that died between claim and prepare.
+async fn claim_unopened(repo: &FakeRepo, task: &AgentTask, session: StepSession) {
+    repo.claim_session(task.key, session, &task.outcomes)
+        .await
+        .expect("claim");
+}
+
+/// A Step whose session never opened, claimed longer ago than any prepare
+/// takes, has nothing that could still appear: the stop neither waits out
+/// its watch nor fails, so the Flow goes on.
 #[tokio::test(start_paused = true)]
-async fn stopping_a_step_whose_session_never_opened_is_tried_again() {
+async fn stopping_a_step_whose_session_never_opened_ends_promptly() {
     let repo = FakeRepo::default();
     let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
     let task = plan_task(&repo).await;
-    repo.claim_session(
-        task.key,
-        StepSession {
-            session_id: Uuid::now_v7(),
-            action_id: Uuid::now_v7(),
-        },
-        &task.outcomes,
+    claim_unopened(
+        &repo,
+        &task,
+        claimed_ago(std::time::Duration::from_secs(600)),
     )
-    .await
-    .expect("claim");
+    .await;
+    let started = tokio::time::Instant::now();
+
+    agent(&sessions, &repo)
+        .stop(task.key, &julia())
+        .await
+        .expect("stop");
+
+    assert!(
+        started.elapsed() < super::STOP_WATCH,
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(sessions.deleted.lock().expect("deleted").len(), 1);
+    assert!(!repo.holds_session(task.key).await.expect("read"), "let go");
+}
+
+/// A session claimed moments ago may still be opened by a prepare in
+/// flight: a delete that misses fails the stop, for Temporal to try again.
+#[tokio::test(start_paused = true)]
+async fn stopping_a_step_whose_session_may_still_open_is_tried_again() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
+    let task = plan_task(&repo).await;
+    claim_unopened(&repo, &task, claimed_ago(std::time::Duration::ZERO)).await;
 
     let stopped = agent(&sessions, &repo).stop(task.key, &julia()).await;
 
     let Err(error) = stopped else {
-        panic!("a delete that failed fails the stop");
+        panic!("a delete that missed a session that may still open fails the stop");
     };
     assert!(error.retryable());
     assert_eq!(sessions.deleted.lock().expect("deleted").len(), 1);
-    assert!(!repo.holds_session(task.key).await.expect("read"), "let go");
 }
 
 /// A harness that fails a while answers neither the stop nor a read: the
