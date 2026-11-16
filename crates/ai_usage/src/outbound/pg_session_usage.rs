@@ -58,32 +58,36 @@ impl SessionUsageReader for PgSessionUsageReader {
             return Ok(Vec::new());
         }
 
-        // `ai_usage_agent_session_id_idx` finds each session's rows, fenced
-        // so the planner does not also read the person's whole history
-        // through their own index; the user check then keeps a caller to
-        // usage that ran as them. A session makes one row per model call, so
-        // the timeout bounds a long one.
+        // Driven from the session ids: each session's calls are looked up
+        // through `ai_usage_agent_session_id_idx`, so the read is bounded by
+        // the sessions asked for and their calls, whatever the planner
+        // believes about the table. The user check keeps a caller to usage
+        // that ran as them; it is fenced out of the lookup (`OFFSET 0`), or a
+        // planner with stale statistics adds the user's own index to every
+        // lookup and reads their whole history once per session. A session
+        // makes one row per model call, so the timeout bounds a long one.
         let mut transaction = self.pool.begin().await?;
         sqlx::query!("SET LOCAL statement_timeout = '5s'")
             .execute(&mut *transaction)
             .await?;
         let rows = sqlx::query!(
             r#"
-            WITH calls AS MATERIALIZED (
-                SELECT agent_session_id, user_id, input_tokens, output_tokens,
-                       cache_read_input_tokens, cache_write_input_tokens
-                FROM ai_usage
-                WHERE agent_session_id = ANY($1)
-            )
             SELECT
-                agent_session_id AS "session_id!",
-                sum(input_tokens)::bigint AS "input!",
-                sum(output_tokens)::bigint AS "output!",
-                sum(cache_read_input_tokens)::bigint AS "cache_read!",
-                sum(cache_write_input_tokens)::bigint AS "cache_write!"
-            FROM calls
-            WHERE user_id = $2
-            GROUP BY agent_session_id
+                sessions.id AS "session_id!",
+                sum(calls.input_tokens)::bigint AS "input!",
+                sum(calls.output_tokens)::bigint AS "output!",
+                sum(calls.cache_read_input_tokens)::bigint AS "cache_read!",
+                sum(calls.cache_write_input_tokens)::bigint AS "cache_write!"
+            FROM unnest($1::uuid[]) AS sessions(id)
+            CROSS JOIN LATERAL (
+                SELECT user_id, input_tokens, output_tokens, cache_read_input_tokens,
+                       cache_write_input_tokens
+                FROM ai_usage
+                WHERE agent_session_id = sessions.id
+                OFFSET 0
+            ) calls
+            WHERE calls.user_id = $2
+            GROUP BY sessions.id
             "#,
             sessions,
             user.as_ref(),
