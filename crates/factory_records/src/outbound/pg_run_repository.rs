@@ -485,8 +485,11 @@ impl RunRepository for PgRunRepository {
     }
 
     #[tracing::instrument(err, skip(self))]
-    async fn record_prepare(&self, key: StepKey) -> Result<bool, Self::Err> {
-        let recorded = sqlx::query!(
+    async fn record_prepare(
+        &self,
+        key: StepKey,
+    ) -> Result<Option<chrono::DateTime<chrono::Utc>>, Self::Err> {
+        let prepared_at = sqlx::query_scalar!(
             r#"
             UPDATE factory_step s
             SET prepared_at = now()
@@ -494,25 +497,31 @@ impl RunRepository for PgRunRepository {
             WHERE r.id = s.run_id AND s.run_id = $1 AND s.seq = $2
                 AND s.session_id IS NOT NULL AND s.session_released_at IS NULL
                 AND s.ended_at IS NULL AND r.ended_at IS NULL
+            RETURNING s.prepared_at AS "prepared_at!"
             "#,
             key.run_id.as_uuid(),
             i32::from(key.seq),
         )
-        .execute(&self.pool)
+        .fetch_optional(&self.pool)
         .await?;
-        Ok(recorded.rows_affected() == 1)
+        Ok(prepared_at)
     }
 
     #[tracing::instrument(err, skip(self))]
-    async fn forget_prepare(&self, key: StepKey) -> Result<(), Self::Err> {
+    async fn forget_prepare(
+        &self,
+        key: StepKey,
+        prepared_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<(), Self::Err> {
         sqlx::query!(
             r#"
             UPDATE factory_step
             SET prepared_at = NULL
-            WHERE run_id = $1 AND seq = $2 AND opened_at IS NULL
+            WHERE run_id = $1 AND seq = $2 AND prepared_at = $3 AND opened_at IS NULL
             "#,
             key.run_id.as_uuid(),
             i32::from(key.seq),
+            prepared_at,
         )
         .execute(&self.pool)
         .await?;

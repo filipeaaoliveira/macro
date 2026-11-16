@@ -365,19 +365,20 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
         // so a stop can tell a session that may still open from one that
         // never will. A Step that let go of its session, or that ended, or
         // whose Run ended, sends no prepare.
-        if !self
+        let Some(prepared_at) = self
             .repo
             .record_prepare(task.key)
             .await
             .map_err(Self::records)?
-        {
+        else {
             return Err(SessionAgentError::Released);
-        }
+        };
         if let Err(error) = self.open(&task, &action).await {
-            // Refused outright, or never shown open within the settle: no
-            // prepare is in flight, so a stop need not wait for one.
+            // Refused outright, or never shown open within the settle: this
+            // prepare is not in flight, so a stop need not wait for it. A
+            // later attempt's prepare keeps its record.
             self.repo
-                .forget_prepare(task.key)
+                .forget_prepare(task.key, prepared_at)
                 .await
                 .map_err(Self::records)?;
             return Err(error);

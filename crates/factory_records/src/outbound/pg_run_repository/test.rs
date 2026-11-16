@@ -615,7 +615,11 @@ async fn a_stop_sees_what_the_attempts_recorded_of_a_session(pool: PgPool) {
         .expect("read")
         .expect("claimed");
 
-    let prepared = repo.record_prepare(key(id, 1)).await.expect("prepare");
+    let prepared = repo
+        .record_prepare(key(id, 1))
+        .await
+        .expect("prepare")
+        .is_some();
     let lately = repo
         .stopping_session(key(id, 1), std::time::Duration::from_secs(3600))
         .await
@@ -633,7 +637,11 @@ async fn a_stop_sees_what_the_attempts_recorded_of_a_session(pool: PgPool) {
         .expect("read")
         .expect("claimed");
     repo.release_session(key(id, 1)).await.expect("release");
-    let after_release = repo.record_prepare(key(id, 1)).await.expect("prepare");
+    let after_release = repo
+        .record_prepare(key(id, 1))
+        .await
+        .expect("prepare")
+        .is_some();
 
     assert_eq!(unprepared.session, claimed);
     assert!(!unprepared.opened && !unprepared.may_still_open);
@@ -665,15 +673,32 @@ async fn a_forgotten_prepare_is_not_in_flight_and_an_ended_step_sends_none(pool:
         repo.claim_session(key(id, seq), session(), &[outcome("done")])
             .await
             .expect("claim");
-        repo.record_prepare(key(id, seq)).await.expect("prepare");
+        repo.record_prepare(key(id, seq))
+            .await
+            .expect("prepare")
+            .expect("recorded");
     }
     repo.record_open(key(id, 2)).await.expect("open");
     repo.end_step(key(id, 3), &outcome("done"), "The plan")
         .await
         .expect("end");
 
-    repo.forget_prepare(key(id, 1)).await.expect("forget");
-    repo.forget_prepare(key(id, 2)).await.expect("forget");
+    let first = repo
+        .record_prepare(key(id, 1))
+        .await
+        .expect("prepare")
+        .expect("recorded");
+    let second = repo
+        .record_prepare(key(id, 2))
+        .await
+        .expect("prepare")
+        .expect("recorded");
+    repo.forget_prepare(key(id, 1), first)
+        .await
+        .expect("forget");
+    repo.forget_prepare(key(id, 2), second)
+        .await
+        .expect("forget");
     let ended = repo.record_prepare(key(id, 3)).await.expect("prepare");
 
     let in_flight = async |seq| {
@@ -685,5 +710,46 @@ async fn a_forgotten_prepare_is_not_in_flight_and_an_ended_step_sends_none(pool:
     };
     assert!(!in_flight(1).await, "refused");
     assert!(in_flight(2).await, "opened: kept");
-    assert!(!ended, "an ended Step sends no prepare");
+    assert!(ended.is_none(), "an ended Step sends no prepare");
+}
+
+/// An attempt that gives up on its prepare clears its own record only: a
+/// later attempt's prepare, still in flight, stays on record.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "fixtures", scripts("people"))
+)]
+async fn an_old_attempt_never_forgets_a_newer_attempt_s_prepare(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let id = RunId::generate();
+    insert(&repo, id, "Plan the dark mode toggle").await;
+    repo.start_step(key(id, 1), &entry("plan"), 1)
+        .await
+        .expect("start");
+    repo.claim_session(key(id, 1), session(), &[outcome("done")])
+        .await
+        .expect("claim");
+    let old = repo
+        .record_prepare(key(id, 1))
+        .await
+        .expect("prepare")
+        .expect("recorded");
+    let newer = repo
+        .record_prepare(key(id, 1))
+        .await
+        .expect("prepare")
+        .expect("recorded");
+
+    repo.forget_prepare(key(id, 1), old).await.expect("forget");
+
+    let stopping = repo
+        .stopping_session(key(id, 1), std::time::Duration::from_secs(3600))
+        .await
+        .expect("read")
+        .expect("claimed");
+    assert!(newer > old);
+    assert!(
+        stopping.may_still_open,
+        "the newer prepare is still in flight"
+    );
 }

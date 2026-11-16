@@ -261,7 +261,10 @@ impl RunRepository for FakeRepo {
         Ok(())
     }
 
-    async fn record_prepare(&self, key: StepKey) -> Result<bool, FakeError> {
+    async fn record_prepare(
+        &self,
+        key: StepKey,
+    ) -> Result<Option<chrono::DateTime<Utc>>, FakeError> {
         let run_ended = self
             .runs
             .lock()
@@ -269,25 +272,28 @@ impl RunRepository for FakeRepo {
             .get(&key.run_id)
             .is_none_or(|run| run.end.is_some());
         if run_ended || self.step_ended(key) {
-            return Ok(false);
+            return Ok(None);
         }
         let mut sessions = self.sessions.lock().expect("sessions");
         let claimed = sessions
             .iter_mut()
             .find(|claimed| claimed.key == key && !claimed.released);
-        let recorded = claimed.is_some();
-        if let Some(claimed) = claimed {
-            claimed.prepared_at = Some(Utc::now());
-        }
-        Ok(recorded)
+        Ok(claimed.map(|claimed| {
+            let now = Utc::now();
+            claimed.prepared_at = Some(now);
+            now
+        }))
     }
 
-    async fn forget_prepare(&self, key: StepKey) -> Result<(), FakeError> {
+    async fn forget_prepare(
+        &self,
+        key: StepKey,
+        prepared_at: chrono::DateTime<Utc>,
+    ) -> Result<(), FakeError> {
         let mut sessions = self.sessions.lock().expect("sessions");
-        if let Some(claimed) = sessions
-            .iter_mut()
-            .find(|claimed| claimed.key == key && !claimed.opened)
-        {
+        if let Some(claimed) = sessions.iter_mut().find(|claimed| {
+            claimed.key == key && !claimed.opened && claimed.prepared_at == Some(prepared_at)
+        }) {
             claimed.prepared_at = None;
         }
         Ok(())
