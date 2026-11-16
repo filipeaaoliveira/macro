@@ -48,6 +48,7 @@ export default {
   alreadyEnded: 'This run has already ended',
   // A Gate.
   gateTitle: 'Your answer is needed',
+  question: 'Question',
   gateWaiting: 'The run waits for an answer before it goes on.',
   noteLabel: 'Note',
   notePlaceholder: 'Add a note for the next steps (optional)',

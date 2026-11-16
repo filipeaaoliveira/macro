@@ -2,7 +2,7 @@ import { Card } from '@app/features/agent-cards/components/kit/card';
 import { t } from '@app/lib/i18n';
 import { MobileDrawer } from '@components/app/mobile/MobileDrawer';
 import { LoadingSpinner } from '@core/component/LoadingSpinner';
-import { createSignal, Match, Show, Switch } from 'solid-js';
+import { createSignal, createUniqueId, Match, Show, Switch } from 'solid-js';
 import {
   GateAnswers,
   GateGroup,
@@ -32,6 +32,7 @@ export function MobileRunSheet(props: {
   onClose: () => void;
 }) {
   const [open, setOpen] = createSignal(true);
+  const questionId = createUniqueId();
   let content: HTMLDivElement | undefined;
   let status: HTMLElement | undefined;
   const source = props.controller.source;
@@ -73,7 +74,10 @@ export function MobileRunSheet(props: {
                 <div class="flex shrink-0 flex-col gap-3 px-5 pb-3">
                   <Show when={props.controller.waiting()}>
                     {(waiting) => (
-                      <GateGroup class="flex flex-col gap-3">
+                      <GateGroup
+                        class="flex flex-col gap-3"
+                        describedBy={questionId}
+                      >
                         <GateNote
                           note={props.controller.note()}
                           onNoteChange={props.controller.setNote}
@@ -116,7 +120,10 @@ export function MobileRunSheet(props: {
                       <Show when={props.controller.waiting()}>
                         {(waiting) => (
                           <Card width="wide" data-agent-card="gate-question">
-                            <GateQuestion question={waiting().gate.question} />
+                            <GateQuestion
+                              id={questionId}
+                              question={waiting().gate.question}
+                            />
                           </Card>
                         )}
                       </Show>

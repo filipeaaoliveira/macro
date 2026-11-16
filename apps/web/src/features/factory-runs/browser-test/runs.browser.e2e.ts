@@ -133,6 +133,20 @@ test('keeps a long Gate question and note from pushing the answers away', async 
     .getByPlaceholder('Add a note for the next steps (optional)')
     .boundingBox();
   expect(noteBox?.height ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(100);
+  if (testInfo.project.name === 'mobile') {
+    // The pinned answers name the question they answer, above the Steps.
+    const describedBy = await dialog
+      .getByRole('group', { name: 'Your answer is needed' })
+      .getAttribute('aria-describedby');
+    await expect(dialog.locator(`[id="${describedBy}"]`)).toContainText(
+      '14. Check that the plan covers this case'
+    );
+  } else {
+    // The capped question is a tab stop, so it can be scrolled from the
+    // keyboard; Chrome would make a scroller one anyway, Safari would not.
+    const region = dialog.getByRole('region', { name: 'Question' });
+    await expect(region).toHaveAttribute('tabindex', '0');
+  }
   const question = dialog.getByText('14. Check that the plan covers this case');
   await question.scrollIntoViewIfNeeded();
   await expect(question).toBeInViewport();

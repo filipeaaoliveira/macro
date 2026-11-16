@@ -11,7 +11,19 @@ Set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to use an existing Chromium, and
 `FACTORY_RUNS_BROWSER_PORT` overrides port 3019; the harness owns its Vite
 server.
 
-The fixture mounts the real side panel, Runs section and Run dialog on an
+The fixture mounts the real side panel, Runs section and Run view on an
 in-memory factory (`main.tsx`): one Run waits at a Gate, one runs, two have
-ended. The test answers the Gate with a note, cancels the Run after its inline
-confirmation, and starts a new Run from a chosen Flow.
+ended. Its cancel shows the Run ended half a second later, as a read would.
+The tests, on desktop and on a phone with touch styles:
+
+- answer the Gate with a note, cancel the Run after its confirmation, and
+  start a new Run from a chosen Flow, checking that the Gate's question and
+  answers are in view together and where focus lands;
+- open `/?long-question`, whose Gate asks a 14-line question, type a long
+  note, and check Approve and Cancel stay in view, the note stops growing,
+  and the question and Steps can be reached;
+- answer with a note of `fail` (a failed request: focus returns to the
+  button), `conflict` (someone else answered first: the Gate goes a moment
+  later and focus moves to the status line) or `slow-fail` (fails after
+  200 ms, while the person moves on to Cancel run: focus stays put, and a
+  sent cancel still moves focus once the Run reads as ended).

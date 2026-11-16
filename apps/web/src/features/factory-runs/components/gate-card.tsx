@@ -15,8 +15,13 @@ import { flowWordLabel } from '../core/flow-words';
 /** The Gate's header and its question, in a well. */
 export function GateQuestion(props: {
   question: string;
-  /** Cap the question's height and scroll it, where it is pinned. */
+  /**
+   * Cap the question's height where it is pinned; it scrolls, and takes
+   * keyboard focus so it can be scrolled without a pointer.
+   */
   capped?: boolean;
+  /** For a group of answers elsewhere to name the question it answers. */
+  id?: string;
 }) {
   return (
     <>
@@ -31,13 +36,19 @@ export function GateQuestion(props: {
         wrap
       />
       <CardBody>
-        <Well
-          class={cn(
-            'text-sm leading-5 whitespace-pre-wrap [overflow-wrap:anywhere]',
-            props.capped && 'max-h-32 overflow-y-auto'
-          )}
-        >
-          {props.question}
+        <Well class="text-sm leading-5 whitespace-pre-wrap [overflow-wrap:anywhere]">
+          <div
+            id={props.id}
+            role={props.capped ? 'region' : undefined}
+            aria-label={props.capped ? t('factoryRuns.question') : undefined}
+            tabIndex={props.capped ? 0 : undefined}
+            class={cn(
+              props.capped &&
+                'max-h-32 overflow-y-auto rounded-sm outline-none focus-visible:outline-2 focus-visible:outline-accent'
+            )}
+          >
+            {props.question}
+          </div>
         </Well>
       </CardBody>
     </>
@@ -142,11 +153,17 @@ export function GateAnswers(props: {
 }
 
 /** A named group around a Gate's parts, wherever a view places them. */
-export function GateGroup(props: { children: JSX.Element; class?: string }) {
+export function GateGroup(props: {
+  children: JSX.Element;
+  class?: string;
+  /** The question's id, where the question sits outside the group. */
+  describedBy?: string;
+}) {
   return (
     <div
       role="group"
       aria-label={t('factoryRuns.gateTitle')}
+      aria-describedby={props.describedBy}
       tabIndex={-1}
       class={cn('outline-none', props.class)}
     >

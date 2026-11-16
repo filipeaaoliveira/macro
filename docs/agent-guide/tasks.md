@@ -1381,13 +1381,13 @@ question and note scrolling inside past a few lines. On touch the pinned
 chrome between the handle and the Steps holds only the note and the
 answers, and the question opens the scrolling content. **Cancel run** is
 pinned on both and confirms in place. Phone sheets have no close button.
-When an answer or a
-cancel goes through and takes the focused control away, focus moves to the
-Run's status line; a refused answer gives focus back to its button.
-A second answer to a Gate, or a cancel of a Run that already ended, shows a
-toast and reads the Run again. An open Run,
-and a task with a Step running, are read again every 3 seconds; a task whose
-live Runs all wait on a Gate, every minute; nothing once every Run has ended.
+When an answer or a cancel takes the focused control away, focus moves to
+the Run's status line; that includes an answer refused because someone
+else answered first. An answer that fails gives focus back to its button,
+unless the person has moved on. A refused answer, or a cancel of a Run that
+already ended, shows a toast and reads the Run again. An open Run, and a
+task with a Step running, are read again every 3 seconds; a task whose live
+Runs all wait on a Gate, every minute; nothing once every Run has ended.
 
 The browser regression runs the section and dialog on an in-memory factory:
 `bunx playwright test --config src/features/factory-runs/browser-test/playwright.config.ts`
