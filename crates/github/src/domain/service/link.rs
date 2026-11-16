@@ -307,6 +307,7 @@ impl<R: GithubRepo, U: GithubOauth, F: Auth, E: GithubPullRequestService> Github
                 &request.repo,
                 request.number,
                 merge_method,
+                None,
             )
             .await
             .map_err(Into::into)?;

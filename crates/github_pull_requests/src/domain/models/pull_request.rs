@@ -768,6 +768,31 @@ pub enum GithubMergeOutcome {
     },
 }
 
+/// A pull request to open on the user's behalf, from a branch of the
+/// repository it is opened in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GithubOpenPullRequest {
+    /// The branch whose commits it proposes.
+    pub head: String,
+    /// The branch it proposes them to.
+    pub base: String,
+    /// Its title.
+    pub title: String,
+    /// Its description.
+    pub body: String,
+}
+
+/// GitHub's answer to opening a pull request: opened, or declined with its
+/// reason, such as one already open for the same branches, or a head with no
+/// commits the base lacks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GithubOpenPullRequestOutcome {
+    /// The pull request was opened with this number.
+    Opened(u64),
+    /// GitHub declined, with the reason it gave.
+    Rejected(String),
+}
+
 /// A request to merge one pull request on the user's behalf.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]

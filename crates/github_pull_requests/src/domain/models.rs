@@ -27,14 +27,14 @@ pub use key::GithubKey;
 pub use pull_request::{
     EnrichGithubPullRequestsProxyRequest, EnrichGithubPullRequestsResponse,
     EnrichedGithubPullRequest, GITHUB_PULL_REQUEST_FOREIGN_ENTITY_SOURCE, GithubMergeMethod,
-    GithubMergeOutcome, GithubMergeRejection, GithubPullRequestCheckRun, GithubPullRequestComment,
-    GithubPullRequestDetails, GithubPullRequestLabel, GithubPullRequestMerge,
-    GithubPullRequestMergeability, GithubPullRequestMergeabilityEntry,
-    GithubPullRequestMergeabilityRequest, GithubPullRequestMergeabilityResponse,
-    GithubPullRequestNumber, GithubPullRequestRef, GithubPullRequestReview,
-    GithubPullRequestReviewDecision, GithubPullRequestReviewState, GithubPullRequestStatus,
-    GithubPullRequestUser, GithubRepositoryMergeSettings, MergeGithubPullRequestRequest,
-    MergeGithubPullRequestResponse, latest_reviews,
+    GithubMergeOutcome, GithubMergeRejection, GithubOpenPullRequest, GithubOpenPullRequestOutcome,
+    GithubPullRequestCheckRun, GithubPullRequestComment, GithubPullRequestDetails,
+    GithubPullRequestLabel, GithubPullRequestMerge, GithubPullRequestMergeability,
+    GithubPullRequestMergeabilityEntry, GithubPullRequestMergeabilityRequest,
+    GithubPullRequestMergeabilityResponse, GithubPullRequestNumber, GithubPullRequestRef,
+    GithubPullRequestReview, GithubPullRequestReviewDecision, GithubPullRequestReviewState,
+    GithubPullRequestStatus, GithubPullRequestUser, GithubRepositoryMergeSettings,
+    MergeGithubPullRequestRequest, MergeGithubPullRequestResponse, latest_reviews,
 };
 pub use update::{
     GithubDraftOutcome, GithubPullRequestState, GithubPullRequestUpdateRejection,
