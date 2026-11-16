@@ -7,7 +7,7 @@ import {
   screen,
   waitFor,
 } from '@solidjs/testing-library';
-import { createSignal } from 'solid-js';
+import { type Accessor, createSignal } from 'solid-js';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   type RunActionResult,
@@ -19,11 +19,6 @@ import { RunDialog } from './run-dialog';
 
 vi.mock('@core/component/Toast/Toast', () => ({
   toast: { alert: vi.fn(), failure: vi.fn(), success: vi.fn() },
-}));
-
-// Step output renders through the agent's markdown; its parsing is not under test.
-vi.mock('@app/features/block-agent/component/parts/TextPart', () => ({
-  TextPart: (props: { text: string }) => <div>{props.text}</div>,
 }));
 
 beforeAll(() => {
@@ -69,8 +64,10 @@ const DONE: RunActionResult = { ok: true, value: undefined };
 function mount(options: {
   answerGate?: RunsContext['answerGate'];
   cancelRun?: RunsContext['cancelRun'];
+  state?: Accessor<'pending' | 'error' | 'ready'>;
+  retry?: () => void;
 }) {
-  const [run] = createSignal<Run | undefined>(waitingRun);
+  const [run, setRun] = createSignal<Run | undefined>(waitingRun);
   const context: RunsContext = {
     taskRuns: () => ({
       state: () => 'ready',
@@ -78,9 +75,10 @@ function mount(options: {
       retry: vi.fn(),
     }),
     run: () => ({
-      state: () => (run() ? 'ready' : 'pending'),
-      data: run,
-      retry: vi.fn(),
+      state: options.state ?? (() => 'ready'),
+      data: () =>
+        options.state && options.state() !== 'ready' ? undefined : run(),
+      retry: options.retry ?? vi.fn(),
     }),
     flows: () => ({ state: () => 'ready', data: () => [], retry: vi.fn() }),
     startRun: vi.fn(),
@@ -92,7 +90,7 @@ function mount(options: {
       <RunDialog runId="run-1" onClose={vi.fn()} />
     </RunsProvider>
   ));
-  return context;
+  return { context, setRun };
 }
 
 afterEach(() => {
@@ -115,9 +113,7 @@ describe('RunDialog', () => {
       await screen.findByText('Approve this plan, or send it back with a note?')
     ).toBeTruthy();
     // The plan the Gate asks about is open to read.
-    expect(
-      screen.getByText('Add a `due_date` column to the list.')
-    ).toBeTruthy();
+    expect(screen.getByText('due_date')).toBeTruthy();
 
     fireEvent.input(
       screen.getByPlaceholderText('Add a note for the next steps (optional)'),
@@ -191,5 +187,53 @@ describe('RunDialog', () => {
     await waitFor(() =>
       expect(toast.alert).toHaveBeenCalledWith('This run has already ended')
     );
+  });
+
+  it('unlocks the answers once the Run is read at its next Gate', async () => {
+    const { setRun } = mount({});
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Revise' }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Approve' }).hasAttribute('disabled')
+      ).toBe(true)
+    );
+
+    // The service took the answer and planned again: a new Gate opens.
+    const [first] = waitingRun.steps;
+    if (!first?.gate) throw new Error('No first Gate');
+    setRun({
+      ...waitingRun,
+      steps: [
+        {
+          ...first,
+          gate: {
+            ...first.gate,
+            answer: { answer: 'revise', answeredAt: '2026-11-16T09:02:00Z' },
+          },
+        },
+        { ...first, visit: 2, startedAt: '2026-11-16T09:02:00Z' },
+      ],
+    });
+
+    expect(
+      screen.getByRole('button', { name: 'Approve' }).hasAttribute('disabled')
+    ).toBe(false);
+  });
+
+  it('retries a Run that couldn’t be loaded', () => {
+    const [state, setState] = createSignal<'pending' | 'error' | 'ready'>(
+      'error'
+    );
+    const retry = vi.fn(() => setState('ready'));
+    mount({ state, retry });
+
+    expect(screen.getByText('This run couldn’t be loaded')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+    expect(retry).toHaveBeenCalledOnce();
+    expect(
+      screen.getByText('Approve this plan, or send it back with a note?')
+    ).toBeTruthy();
   });
 });

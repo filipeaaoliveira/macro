@@ -74,7 +74,7 @@ function taskRunsOptions(client: QueryClient, taskId: string) {
   });
 }
 
-function runOptions(runId: string) {
+export function runOptions(runId: string) {
   return queryOptions({
     queryKey: factoryRunKeys.run(runId).queryKey,
     enabled: Boolean(runId),
@@ -82,6 +82,9 @@ function runOptions(runId: string) {
       toRun(await throwOnErr(() => factoryClient.getRun(runId, signal))),
     refetchInterval: (query) =>
       query.state.data && !query.state.data.end ? LIVE_POLL_MS : false,
+    // Polled under an open dialog: keep its Steps' nodes, and their open
+    // outputs, across reads.
+    reconcile: 'id',
   });
 }
 

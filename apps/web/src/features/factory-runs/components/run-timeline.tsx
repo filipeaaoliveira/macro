@@ -1,7 +1,9 @@
-import { TextPart } from '@app/features/block-agent/component/parts/TextPart';
+import { Well } from '@app/features/agent-cards/components/kit/parts';
 import { t } from '@app/lib/i18n';
+import { StaticMarkdown } from '@core/component/LexicalMarkdown/component/core/StaticMarkdown';
+import { channelTheme } from '@core/component/LexicalMarkdown/theme';
 import CaretDownIcon from '@icon/system/regular/caret-down.svg';
-import { Badge, cn } from '@ui';
+import { Badge, Button, cn } from '@ui';
 import { CollapseTransition } from '@ui/components/CollapseTransition';
 import { createSignal, For, type JSX, Show } from 'solid-js';
 import { flowWordLabel } from '../core/flow-words';
@@ -96,9 +98,10 @@ function TimelineStep(props: {
           {props.time(props.step.end?.endedAt ?? props.step.startedAt)}
         </span>
         <Show when={output()}>
-          <button
+          <Button
             type="button"
-            class="flex size-6 shrink-0 items-center justify-center rounded-md text-ink-subtle outline-none hover:bg-active hover:text-ink focus-visible:outline-2 focus-visible:outline-accent touch:size-9"
+            variant="ghost"
+            size="icon-xs"
             aria-expanded={open()}
             aria-label={t('factoryRuns.showOutput', {
               step: stepLabel(props.step),
@@ -107,11 +110,11 @@ function TimelineStep(props: {
           >
             <CaretDownIcon
               class={cn(
-                'size-3 transition-transform duration-150 motion-reduce:transition-none',
+                'size-3 touch:size-6 shrink-0 transition-transform duration-150 motion-reduce:transition-none',
                 open() && 'rotate-180'
               )}
             />
-          </button>
+          </Button>
         </Show>
       </div>
       <Show when={answer()}>
@@ -132,9 +135,17 @@ function TimelineStep(props: {
       </Show>
       <Show when={output()}>
         <CollapseTransition open={open()}>
-          <div class="mt-1 mb-3 min-w-0 rounded-lg bg-surface px-3 py-2.5 text-sm">
-            <TextPart text={output()} />
-          </div>
+          <Well class="mt-1 mb-3">
+            {/* Agent prose as its messages render it, at the well's size. */}
+            <div class="chat-markdown-container max-w-full text-sm whitespace-pre-wrap wrap-break-word">
+              <StaticMarkdown
+                markdown={output()}
+                theme={channelTheme}
+                target="internal"
+                lazy={false}
+              />
+            </div>
+          </Well>
         </CollapseTransition>
       </Show>
     </li>

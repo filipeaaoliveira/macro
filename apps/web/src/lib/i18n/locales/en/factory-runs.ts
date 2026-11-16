@@ -40,7 +40,6 @@ export default {
   stepVisit: '{{entry}} · visit {{visit}}',
   stepRunning: 'Running…',
   showOutput: 'Show output for {{step}}',
-  emptyOutput: 'No output',
   cancelRun: 'Cancel run',
   cancelTitle: 'Cancel this run?',
   cancelBody:

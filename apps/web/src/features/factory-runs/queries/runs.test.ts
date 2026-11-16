@@ -1,11 +1,11 @@
 import { factoryClient } from '@service-factory/client';
 import type { RunDetail } from '@service-factory/generated/schemas';
-import { QueryClient } from '@tanstack/solid-query';
+import { QueryClient, QueryObserver } from '@tanstack/solid-query';
 import { err, ok } from 'neverthrow';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Run } from '../core/run';
 import { factoryRunKeys } from './keys';
-import { createAppRunsContext } from './runs';
+import { createAppRunsContext, runOptions } from './runs';
 
 vi.mock('@service-factory/client', () => ({
   factoryClient: {
@@ -134,5 +134,35 @@ describe('createAppRunsContext', () => {
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: factoryRunKeys.task('task-1').queryKey,
     });
+  });
+
+  it('stops reading a Run again once it has ended', async () => {
+    vi.useFakeTimers();
+    try {
+      const running: RunDetail = { ...started };
+      const ended: RunDetail = {
+        ...started,
+        run: {
+          ...started.run,
+          end: { outcome: 'success', endedAt: '2026-11-16T09:10:00Z' },
+        },
+      };
+      vi.mocked(factoryClient.getRun)
+        .mockResolvedValueOnce(ok(running))
+        .mockResolvedValue(ok(ended));
+      const client = new QueryClient();
+      const observer = new QueryObserver(client, runOptions('run-2'));
+      const unsubscribe = observer.subscribe(() => {});
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(factoryClient.getRun).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(factoryClient.getRun).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(factoryClient.getRun).toHaveBeenCalledTimes(2);
+      unsubscribe();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -1,11 +1,20 @@
+import { formatCompactRelativeTimestamp } from '@app/features/entity/utils/timestamp';
 import { formatLocale, t } from '@app/lib/i18n';
 import { StaticMarkdownContext } from '@core/component/LexicalMarkdown/component/core/StaticMarkdown';
 import { LoadingSpinner } from '@core/component/LoadingSpinner';
 import { toast } from '@core/component/Toast/Toast';
+import { isMobile } from '@core/mobile/isMobile';
 import { fireAndForget } from '@core/util/fireAndForget';
 import { ActionDialogShell, Button, Dialog } from '@ui';
-import { createMemo, createSignal, Match, Show, Switch } from 'solid-js';
-import { GateCard } from '../components/gate-card';
+import {
+  createMemo,
+  createSignal,
+  Match,
+  onCleanup,
+  Show,
+  Switch,
+} from 'solid-js';
+import { GateAnswers, GateCard } from '../components/gate-card';
 import { RunDetails, RunDetailsHeader } from '../components/run-details';
 import { useRunsContext } from '../context/runs-context';
 import { type Run, type RunStep, runStatus } from '../core/run';
@@ -16,6 +25,8 @@ function formatTime(value: string): string {
     timeStyle: 'short',
   }).format(new Date(value));
 }
+
+const CLOCK_MS = 30_000;
 
 function gateKey(step: Pick<RunStep, 'entry' | 'visit'>): string {
   return `${step.entry}:${step.visit}`;
@@ -34,6 +45,15 @@ export function RunDialog(props: { runId: string; onClose: () => void }) {
   const [cancelling, setCancelling] = createSignal(false);
   // A sent cancel keeps its controls locked until the Run reads as ended.
   const [cancelSent, setCancelSent] = createSignal(false);
+
+  // Step times read "5m"; they move on after the Run stops being polled.
+  const [now, setNow] = createSignal(Date.now());
+  const clock = setInterval(() => setNow(Date.now()), CLOCK_MS);
+  onCleanup(() => clearInterval(clock));
+  const stepTime = (value: string) => {
+    now();
+    return formatCompactRelativeTimestamp(value);
+  };
 
   const close = () => {
     if (!open()) return;
@@ -89,7 +109,10 @@ export function RunDialog(props: { runId: string; onClose: () => void }) {
       animate
       class="w-full max-w-[min(42rem,calc(100vw-16px))] overflow-hidden"
     >
-      <ActionDialogShell class="max-h-[calc(100dvh-16px)]">
+      {/* On a phone the drawer's own maxHeight sizes the sheet. */}
+      <ActionDialogShell
+        class={isMobile() ? undefined : 'max-h-[calc(100dvh-16px)]'}
+      >
         <Switch>
           <Match when={source.state() === 'pending'}>
             <RunDetailsHeader
@@ -122,6 +145,11 @@ export function RunDialog(props: { runId: string; onClose: () => void }) {
                 if (current.kind !== 'waiting') return undefined;
                 return current;
               });
+              const gateLocked = () => {
+                const gate = waiting();
+                if (!gate) return true;
+                return answering() || answeredGate() === gateKey(gate.step);
+              };
 
               return (
                 <StaticMarkdownContext>
@@ -129,6 +157,7 @@ export function RunDialog(props: { runId: string; onClose: () => void }) {
                     run={run()}
                     status={status()}
                     time={formatTime}
+                    stepTime={stepTime}
                     onClose={close}
                     cancelling={cancelling() || cancelSent()}
                     onCancel={
@@ -138,16 +167,20 @@ export function RunDialog(props: { runId: string; onClose: () => void }) {
                     }
                     gate={
                       <Show when={waiting()}>
+                        <GateCard
+                          question={waiting()?.gate.question ?? ''}
+                          note={note()}
+                          onNoteChange={setNote}
+                          disabled={gateLocked()}
+                        />
+                      </Show>
+                    }
+                    answers={
+                      <Show when={waiting()}>
                         {(gate) => (
-                          <GateCard
-                            question={gate().gate.question}
+                          <GateAnswers
                             answers={gate().gate.answers}
-                            note={note()}
-                            onNoteChange={setNote}
-                            disabled={
-                              answering() ||
-                              answeredGate() === gateKey(gate().step)
-                            }
+                            disabled={gateLocked()}
                             onAnswer={(value) =>
                               fireAndForget(
                                 answer(run(), gate().step, value),
