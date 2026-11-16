@@ -75,7 +75,8 @@ export function GateNote(props: {
 /**
  * One button per answer. The Flow lists its main answer first, so that one
  * is the primary action, last on the right. `onAnswer` resolves whether the
- * answer went through.
+ * answer went through; when it did not, focus goes back to the button,
+ * which its loading state had taken focus from.
  */
 export function GateAnswers(props: {
   answers: readonly string[];
@@ -87,6 +88,18 @@ export function GateAnswers(props: {
   const main = () => props.answers[0];
   const others = () => props.answers.slice(1).reverse();
 
+  const answer = async (value: string, button: HTMLButtonElement) => {
+    const sent = await props.onAnswer(value);
+    if (sent) return;
+    queueMicrotask(() => {
+      button.focus();
+      // A Gate read again as answered locks its buttons; keep focus on it.
+      if (document.activeElement !== button) {
+        button.closest<HTMLElement>('[role="group"]')?.focus();
+      }
+    });
+  };
+
   const AnswerButton = (answerProps: {
     answer: string;
     variant: 'primary' | 'secondary';
@@ -96,8 +109,11 @@ export function GateAnswers(props: {
       variant={answerProps.variant}
       disabled={props.locked}
       loading={props.answering === answerProps.answer}
-      onClick={() =>
-        fireAndForget(props.onAnswer(answerProps.answer), 'factory-runs')
+      onClick={(event: MouseEvent & { currentTarget: HTMLButtonElement }) =>
+        fireAndForget(
+          answer(answerProps.answer, event.currentTarget),
+          'factory-runs'
+        )
       }
     >
       {flowWordLabel(answerProps.answer)}
@@ -122,7 +138,8 @@ export function GateGroup(props: { children: JSX.Element; class?: string }) {
     <div
       role="group"
       aria-label={t('factoryRuns.gateTitle')}
-      class={props.class}
+      tabIndex={-1}
+      class={cn('outline-none', props.class)}
     >
       {props.children}
     </div>

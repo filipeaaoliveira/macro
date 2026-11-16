@@ -169,6 +169,8 @@ function createFixtureContext(): RunsContext {
     async answerGate(input) {
       const run = runs().find((candidate) => candidate.id === input.runId);
       const step = run?.steps.at(-1);
+      // A note of "conflict" stands in for someone answering first.
+      if (input.note === 'conflict') return { ok: false, reason: 'conflict' };
       // A second answer, like the service's 409.
       if (!step?.gate || step.gate.answer) {
         return { ok: false, reason: 'conflict' };

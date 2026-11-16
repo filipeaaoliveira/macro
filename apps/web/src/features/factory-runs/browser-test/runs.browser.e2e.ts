@@ -139,3 +139,22 @@ test('keeps a long Gate question and note from pushing the answers away', async 
   ).toBeInViewport();
   await shoot(page, 'run-long-question', testInfo.project.name);
 });
+
+test('gives focus back to an answer the service refused', async ({ page }) => {
+  await page.goto('/');
+  const show = page.getByRole('button', { name: 'Show details' });
+  if (await show.isVisible()) await show.click();
+  await page.locator('[data-agent-activity-item]').first().click();
+  const dialog = page.getByRole('dialog', {
+    name: 'Add a due date column to the task list',
+  });
+  await dialog
+    .getByPlaceholder('Add a note for the next steps (optional)')
+    .fill('conflict');
+  const approve = dialog.getByRole('button', { name: 'Approve' });
+  await approve.click();
+  await expect(
+    page.getByText('This question was already answered')
+  ).toBeVisible();
+  await expect(approve).toBeFocused();
+});
