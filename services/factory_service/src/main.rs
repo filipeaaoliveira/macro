@@ -30,7 +30,8 @@ use factory_records::outbound::pg_run_repository::PgRunRepository;
 use macro_auth::middleware::decode_jwt::JwtValidationArgs;
 use macro_authorization::{
     InternalAuthConfig, MacroAuthJwtValidator, MacroAuthorizationServiceImpl,
-    MacroAuthorizationState, NoBotAuthorizer, NoUserApiKeyAuthorizer,
+    MacroAuthorizationState, NoBotAuthorizer, PgUserApiKeyAuthorizationRepo,
+    PgUserApiKeyAuthorizer,
 };
 use macro_entrypoint::{MacroEntrypoint, shutdown_signal};
 use macro_service_urls::{AgentHarnessServiceUrl, AuthServiceUrl, DocumentStorageServiceUrl};
@@ -86,8 +87,8 @@ async fn run() -> Result<(), rootcause::Report> {
     let jwt_args =
         JwtValidationArgs::new_with_secret_manager(config.environment, &secretsmanager_client)
             .await?;
-    // Users, bots and user API keys are refused everywhere but the hand
-    // back, which an agent session's code-mode credential makes as its user.
+    // People call the Run API with their own login or user API key, and
+    // internal services for an acting user. Bots are refused.
     let authorization_state =
         MacroAuthorizationState::new(Arc::new(MacroAuthorizationServiceImpl::new(
             MacroAuthJwtValidator::new(jwt_args.clone()),
@@ -96,7 +97,7 @@ async fn run() -> Result<(), rootcause::Report> {
                 default_user_id: None,
             },
             NoBotAuthorizer,
-            NoUserApiKeyAuthorizer,
+            PgUserApiKeyAuthorizer::new(PgUserApiKeyAuthorizationRepo::new(db.clone())),
         )));
 
     let parts = Parts {

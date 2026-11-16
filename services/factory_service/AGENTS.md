@@ -19,9 +19,10 @@ worker that walks each Run's Flow, in one process.
 - Owns: wiring `factory_engine` and `factory_records` into a process.
 - Not here: Flows, the workflow and the API's handlers → `crates/factory_engine`;
   the Run tables → `crates/factory_records`.
-- Callers: internal services, with the internal API key and an acting user
-  (`x-internal-macro-user-id`), who owns the Runs they create. Users are
-  refused, but for an agent session's hand back.
+- Callers: people, with their own login or user API key, and internal
+  services, with the internal API key and an acting user
+  (`x-internal-macro-user-id`). Either way the user owns the Runs they create.
+  Bots are refused.
 
 ## Checks
 

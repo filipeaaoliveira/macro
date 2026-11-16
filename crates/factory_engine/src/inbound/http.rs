@@ -17,7 +17,7 @@ use factory_records::domain::models::{
 };
 use macro_authorization::{
     InternalAuthorization, InternalOnly, MacroAuthorizationExtractor, MacroAuthorizationService,
-    MacroAuthorizationState, UserOnly,
+    MacroAuthorizationState, UserOnly, UserOrInternal,
 };
 use macro_user_id::user_id::MacroUserIdStr;
 use model_error_response::ErrorResponse;
@@ -61,10 +61,11 @@ impl<S, Auth> FromRef<FactoryRouterState<S, Auth>> for MacroAuthorizationState<A
     }
 }
 
-/// Build the Run API router. Internal callers use it for an acting user (the
-/// identity headers of the internal key), and reach only that user's Runs.
-/// `POST /hand-backs` is the exception: an agent session's code-mode SDK
-/// calls it as the Run's owner.
+/// Build the Run API router. People call it with their own login, and
+/// internal callers for an acting user (the identity headers of the internal
+/// key); either way the call reaches only that user's Runs. `POST /runs` is
+/// for internal callers only. `POST /hand-backs` is an agent session's: its
+/// code-mode SDK calls it as the Run's owner.
 ///
 /// Routes:
 /// - `POST /runs` — create a Run of a Flow, owned by the acting user, and
@@ -200,7 +201,7 @@ where
     Ok((StatusCode::CREATED, Json(created)))
 }
 
-/// Read one of the acting user's Runs and the Steps it took.
+/// Read one of the caller's Runs and the Steps it took.
 #[utoipa::path(
     get,
     tag = "factory",
@@ -219,18 +220,18 @@ where
 #[tracing::instrument(skip_all, fields(run_id = %params.id))]
 pub async fn get_run_handler<S, Auth>(
     State(state): State<FactoryRouterState<S, Auth>>,
-    caller: MacroAuthorizationExtractor<Auth, InternalOnly>,
+    caller: MacroAuthorizationExtractor<Auth, UserOrInternal>,
     Path(params): Path<GetRunParams>,
 ) -> Result<Json<RunDetail>, FactoryError>
 where
     S: FactoryService,
     Auth: MacroAuthorizationService,
 {
-    let actor = acting_user(caller.authorization)?;
+    let actor = caller.authorization.user.macro_user_id;
     Ok(Json(state.service.get_run(&actor, params.id).await?))
 }
 
-/// Answer, as the acting user, the Gate one of their Runs waits on. The Run
+/// Answer, as the caller, the Gate one of their Runs waits on. The Run
 /// goes on once its workflow took the answer; reading the Run shows the
 /// answer once it is recorded.
 #[utoipa::path(
@@ -255,7 +256,7 @@ where
 #[tracing::instrument(skip_all, fields(run_id = %params.id, seq = params.seq))]
 pub async fn answer_gate_handler<S, Auth>(
     State(state): State<FactoryRouterState<S, Auth>>,
-    caller: MacroAuthorizationExtractor<Auth, InternalOnly>,
+    caller: MacroAuthorizationExtractor<Auth, UserOrInternal>,
     Path(params): Path<AnswerGateParams>,
     Json(body): Json<AnswerGateRequest>,
 ) -> Result<StatusCode, FactoryError>
@@ -263,7 +264,7 @@ where
     S: FactoryService,
     Auth: MacroAuthorizationService,
 {
-    let actor = acting_user(caller.authorization)?;
+    let actor = caller.authorization.user.macro_user_id;
     state
         .service
         .answer_gate(actor, params.id, params.seq, body.answer, body.note)
@@ -271,7 +272,7 @@ where
     Ok(StatusCode::ACCEPTED)
 }
 
-/// Cancel one of the acting user's Runs. Its running Step or Gate stops, and
+/// Cancel one of the caller's Runs. Its running Step or Gate stops, and
 /// reading the Run shows it `cancelled` once its workflow recorded that.
 /// Cancelling a cancelled Run again is accepted and changes nothing.
 #[utoipa::path(
@@ -295,19 +296,19 @@ where
 #[tracing::instrument(skip_all, fields(run_id = %params.id))]
 pub async fn cancel_run_handler<S, Auth>(
     State(state): State<FactoryRouterState<S, Auth>>,
-    caller: MacroAuthorizationExtractor<Auth, InternalOnly>,
+    caller: MacroAuthorizationExtractor<Auth, UserOrInternal>,
     Path(params): Path<GetRunParams>,
 ) -> Result<StatusCode, FactoryError>
 where
     S: FactoryService,
     Auth: MacroAuthorizationService,
 {
-    let actor = acting_user(caller.authorization)?;
+    let actor = caller.authorization.user.macro_user_id;
     state.service.cancel_run(&actor, params.id).await?;
     Ok(StatusCode::ACCEPTED)
 }
 
-/// Link one of the acting user's Runs to a Macro task they can see,
+/// Link one of the caller's Runs to a Macro task they can see,
 /// replacing any task it had.
 #[utoipa::path(
     put,
@@ -328,7 +329,7 @@ where
 #[tracing::instrument(skip_all, fields(run_id = %params.id))]
 pub async fn link_task_handler<S, Auth>(
     State(state): State<FactoryRouterState<S, Auth>>,
-    caller: MacroAuthorizationExtractor<Auth, InternalOnly>,
+    caller: MacroAuthorizationExtractor<Auth, UserOrInternal>,
     Path(params): Path<GetRunParams>,
     Json(body): Json<LinkTaskRequest>,
 ) -> Result<Json<RunDetail>, FactoryError>
@@ -336,7 +337,7 @@ where
     S: FactoryService,
     Auth: MacroAuthorizationService,
 {
-    let actor = acting_user(caller.authorization)?;
+    let actor = caller.authorization.user.macro_user_id;
     Ok(Json(
         state
             .service

@@ -51,6 +51,8 @@ pub(crate) struct FakeRepo {
     pub(crate) tasks: Arc<Mutex<BTreeSet<Uuid>>>,
     /// The documents that exist and are not tasks.
     pub(crate) documents: Arc<Mutex<BTreeSet<Uuid>>>,
+    /// The task documents a user cannot see: their id and the task's.
+    pub(crate) hidden: Arc<Mutex<BTreeSet<(String, Uuid)>>>,
 }
 
 /// Everyone has an account but `macro|nobody@example.com`.
@@ -62,17 +64,20 @@ impl UserDirectory for FakeRepo {
     }
 }
 
-/// Every task is visible to everyone.
+/// Every task is visible to everyone it is not hidden from.
 impl TaskDirectory for FakeRepo {
     type Err = FakeError;
 
     async fn task_access(
         &self,
-        _user_id: &MacroUserIdStr<'static>,
+        user_id: &MacroUserIdStr<'static>,
         task: &TaskDocumentId,
     ) -> Result<TaskAccess, FakeError> {
         let id = Uuid::parse_str(task.as_str()).map_err(|_| FakeError)?;
-        if self.tasks.lock().expect("tasks").contains(&id) {
+        let hidden = (user_id.as_ref().to_string(), id);
+        if self.hidden.lock().expect("hidden").contains(&hidden) {
+            Ok(TaskAccess::NotFound)
+        } else if self.tasks.lock().expect("tasks").contains(&id) {
             Ok(TaskAccess::Visible)
         } else if self.documents.lock().expect("documents").contains(&id) {
             Ok(TaskAccess::NotATask)

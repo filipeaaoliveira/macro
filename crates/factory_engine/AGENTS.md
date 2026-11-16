@@ -46,10 +46,12 @@ the entry's outcome. An answer the recorded Gate does not offer is refused
 before it is sent (400); the update's validator (`domain/gate.rs`) refuses an
 answer to a Gate the Run does not wait on and a second answer (409).
 
-The Run API is for internal callers acting for a user: the acting user from the
-internal key's identity headers owns the Runs they create, and reads, answers,
-links and cancels only those; someone else's Run reads as missing. A call with
-no acting user, or one with no account, is refused (400). A Run may work on a
+People call the Run API with their own login (`UserOrInternal`), and internal
+services for an acting user (the internal key's identity headers); `POST /runs`
+is for internal callers only. The acting user owns the Runs they create, and
+reads, answers, links and cancels only those; someone else's Run reads as
+missing (404). A call with no user is refused (401), and one whose user has no
+account (400). A Run may work on a
 Macro task: `POST /runs` takes an optional `taskId` (the task document's id),
 and `PUT /runs/{id}/task` links or relinks one. The owner must see the document
 through entity access, and document storage must say it is a task that is not

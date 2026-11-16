@@ -26,7 +26,9 @@ entity_access = { path = "../../crates/entity_access", default-features = false,
 factory_engine = { path = "../../crates/factory_engine" }
 factory_records = { path = "../../crates/factory_records" }
 macro_auth = { path = "../../crates/macro_auth" }
-macro_authorization = { path = "../../crates/macro_authorization" }
+macro_authorization = { path = "../../crates/macro_authorization", features = [
+  "postgres",
+] }
 macro_aws_config = { path = "../../crates/macro_aws_config" }
 macro_config = { path = "../../crates/macro_config" }
 macro_cors = { path = "../../crates/macro_cors" }
