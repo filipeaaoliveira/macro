@@ -8,12 +8,6 @@ import type {
   TaskRunsResponse,
 } from './pending-routes';
 
-export type {
-  FlowSummary,
-  GateAnswerRequest,
-  StartRunRequest,
-} from './pending-routes';
-
 const host = () => SERVER_HOSTS.factory;
 
 /** The software factory's Runs, as the signed-in person sees them. */

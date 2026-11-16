@@ -27,7 +27,7 @@ export function RunTimeline(props: {
   time: (value: string) => string;
 }) {
   return (
-    <ol class="flex flex-col" aria-label={t('factoryRuns.steps')}>
+    <ol class="-ml-2 flex flex-col" aria-label={t('factoryRuns.steps')}>
       <For each={props.steps}>
         {(step, index) => (
           <TimelineStep
@@ -58,16 +58,18 @@ function TimelineStep(props: {
   const answer = () => props.step.gate?.answer;
 
   return (
+    // Rail and dot sit where the agent activity timeline puts them
+    // (`ActivityStep`), centred on the 28px heading row (36px on touch).
     <li
-      class="relative pl-6"
+      class="relative pl-8"
       data-factory-run-step={`${props.step.entry}:${props.step.visit}`}
     >
       <span
         aria-hidden="true"
         class={cn(
-          'absolute left-[6.5px] w-px bg-ink-placeholder/45',
-          props.first ? 'top-3.5' : 'top-0',
-          props.latest ? 'h-3.5' : 'bottom-0',
+          'absolute left-[15.5px] w-px bg-ink-placeholder/45',
+          props.first ? 'top-3.5 touch:top-4.5' : 'top-0',
+          props.latest ? 'h-3.5 touch:h-4.5' : 'bottom-0',
           // A lone Step has no rail to draw.
           props.first && props.latest && 'hidden'
         )}
@@ -75,7 +77,7 @@ function TimelineStep(props: {
       <span
         aria-hidden="true"
         class={cn(
-          'absolute top-3.5 left-[3.5px] size-[7px] -translate-y-1/2 rounded-full border-[1.5px]',
+          'absolute top-3.5 left-[12.5px] size-[7px] -translate-y-1/2 rounded-full border-[1.5px] touch:top-4.5',
           props.step.end
             ? 'border-ink-subtle bg-ink-subtle'
             : 'border-accent bg-accent motion-safe:animate-pulse'
@@ -102,7 +104,13 @@ function TimelineStep(props: {
         <span class="ml-auto shrink-0 text-xs tabular-nums text-ink-subtle">
           {props.time(props.step.end?.endedAt ?? props.step.startedAt)}
         </span>
-        <Show when={output()}>
+        <Show
+          when={output()}
+          fallback={
+            // Keeps the time column in line with Steps that have output.
+            <span aria-hidden="true" class="size-6 shrink-0 touch:size-9" />
+          }
+        >
           <Button
             type="button"
             variant="ghost"
