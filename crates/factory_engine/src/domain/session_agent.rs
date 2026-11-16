@@ -70,6 +70,11 @@ pub enum SessionAgentError {
     /// one arrived.
     #[error("the agent session never showed its prompt arrived")]
     PromptUnsettled,
+    /// The Step let go of its session, or it or its Run ended, while this
+    /// attempt still ran: Temporal gave the Step to another attempt, or
+    /// stopped it.
+    #[error("the step no longer holds its agent session")]
+    Released,
     /// The session's turn ended unsuccessfully.
     #[error("the agent's turn ended unsuccessfully: {0:?}")]
     TurnFailed(RoutineFailureReason),
@@ -101,6 +106,7 @@ impl Retryable for SessionAgentError {
             SessionAgentError::TurnFailed(_)
             | SessionAgentError::NothingHandedBack
             | SessionAgentError::PromptUnsettled
+            | SessionAgentError::Released
             | SessionAgentError::TooSlow(_) => false,
         }
     }
@@ -264,6 +270,15 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
         }
     }
 
+    /// Fails unless the Step `key` still holds its session.
+    async fn still_holds(&self, key: StepKey) -> Result<(), SessionAgentError> {
+        if self.repo.holds_session(key).await.map_err(Self::records)? {
+            Ok(())
+        } else {
+            Err(SessionAgentError::Released)
+        }
+    }
+
     /// Ask the session to stop its turn. A stop that fails is logged: the
     /// caller watches the session to tell whether it still works.
     async fn cancel(&self, action: &RoutineSessionAction) {
@@ -329,7 +344,13 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
             .map_err(Self::records)?;
         let action = self.action(&task.owner, claimed.session);
 
+        // A deleted session is gone: preparing it again would open a fresh
+        // one under its id, and prompting it would start the work over. An
+        // attempt Temporal gave up on may still run here after the Step let
+        // go of its session, so it checks before each.
+        self.still_holds(task.key).await?;
         self.open(&task, &action).await?;
+        self.still_holds(task.key).await?;
         self.prompt_once(&task, &action).await?;
         self.finished(&action, deadline).await?;
 
@@ -368,6 +389,12 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
         // that fails is not the Step's failure: a session that was claimed
         // but never opened has nothing to stop, and a session that works on
         // is stopped again by the watch. The session is deleted either way.
+        // Recorded first, so no attempt opens the session again once it is
+        // deleted.
+        self.repo
+            .release_session(key)
+            .await
+            .map_err(Self::records)?;
         let action = self.action(owner, session);
         self.cancel(&action).await;
         let deadline = tokio::time::Instant::now() + STOP_WATCH;
@@ -398,6 +425,10 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
             .await
             .map_err(Self::records)?;
         if let Some(session) = claimed {
+            self.repo
+                .release_session(key)
+                .await
+                .map_err(Self::records)?;
             self.delete(&self.action(owner, session)).await;
         }
         Ok(())

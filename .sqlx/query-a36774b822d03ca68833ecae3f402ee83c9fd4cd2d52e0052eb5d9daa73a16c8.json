@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT EXISTS (\n                SELECT 1\n                FROM factory_step s\n                JOIN factory_run r ON r.id = s.run_id\n                WHERE s.run_id = $1 AND s.seq = $2\n                    AND s.session_id IS NOT NULL\n                    AND s.session_released_at IS NULL\n                    AND s.ended_at IS NULL\n                    AND r.ended_at IS NULL\n            ) AS \"holds!\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "holds!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "a36774b822d03ca68833ecae3f402ee83c9fd4cd2d52e0052eb5d9daa73a16c8"
+}

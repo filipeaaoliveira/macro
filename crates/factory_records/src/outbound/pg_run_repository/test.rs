@@ -517,3 +517,47 @@ async fn the_latest_hand_back_counts_until_the_step_ends(pool: PgPool) {
         Some(committed)
     );
 }
+
+/// A Step holds its session until it lets go of it, ends, or its Run ends:
+/// an attempt still running after that must not open it again.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "fixtures", scripts("people"))
+)]
+async fn a_step_holds_its_session_until_it_lets_go_or_ends(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let id = RunId::generate();
+    insert(&repo, id, "Plan the dark mode toggle").await;
+    let ended_run = RunId::generate();
+    insert(&repo, ended_run, "Plan the login fix").await;
+    let steps = [key(id, 1), key(id, 2), key(id, 3), key(ended_run, 1)];
+    for step in steps {
+        repo.start_step(step, &entry("plan"), 1)
+            .await
+            .expect("start");
+        repo.claim_session(step, session(), &[outcome("done")])
+            .await
+            .expect("claim");
+    }
+    repo.start_step(key(id, 4), &entry("reply"), 1)
+        .await
+        .expect("start");
+
+    repo.release_session(key(id, 1)).await.expect("release");
+    repo.release_session(key(id, 1))
+        .await
+        .expect("release again");
+    repo.end_step(key(id, 2), &outcome("done"), "The plan")
+        .await
+        .expect("end");
+    repo.end_run(ended_run, RunOutcome::Success)
+        .await
+        .expect("end run");
+
+    let holds = async |step| repo.holds_session(step).await.expect("read");
+    assert!(!holds(key(id, 1)).await, "let go");
+    assert!(!holds(key(id, 2)).await, "ended");
+    assert!(holds(key(id, 3)).await, "still working");
+    assert!(!holds(key(ended_run, 1)).await, "its run ended");
+    assert!(!holds(key(id, 4)).await, "never claimed one");
+}

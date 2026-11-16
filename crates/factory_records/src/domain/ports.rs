@@ -97,6 +97,15 @@ pub trait RunRepository: Send + Sync + 'static {
         key: StepKey,
     ) -> impl Future<Output = Result<Option<StepSession>, Self::Err>> + Send;
 
+    /// Record that the Step `key` let go of its session: stopped it for
+    /// good, or is done with it. Recording it again changes nothing.
+    fn release_session(&self, key: StepKey) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// Whether the Step `key` still holds the session it claimed: neither the
+    /// Step nor its Run ended, and the session was not let go. An attempt of
+    /// the Step opens or prompts its session only while it does.
+    fn holds_session(&self, key: StepKey) -> impl Future<Output = Result<bool, Self::Err>> + Send;
+
     /// The Step that works in the agent session `session_id`, if any.
     fn session_step(
         &self,

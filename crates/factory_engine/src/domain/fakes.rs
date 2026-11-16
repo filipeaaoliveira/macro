@@ -22,6 +22,7 @@ pub(crate) struct FakeSession {
     pub(crate) session: StepSession,
     pub(crate) offered: Vec<Outcome>,
     pub(crate) handed: Option<HandBack>,
+    pub(crate) released: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -234,6 +235,7 @@ impl RunRepository for FakeRepo {
             session,
             offered: offered.to_vec(),
             handed: None,
+            released: false,
         });
         Ok(ClaimedSession { session, new: true })
     }
@@ -244,6 +246,30 @@ impl RunRepository for FakeRepo {
             .iter()
             .find(|claimed| claimed.key == key)
             .map(|claimed| claimed.session))
+    }
+
+    async fn release_session(&self, key: StepKey) -> Result<(), FakeError> {
+        let mut sessions = self.sessions.lock().expect("sessions");
+        if let Some(claimed) = sessions.iter_mut().find(|claimed| claimed.key == key) {
+            claimed.released = true;
+        }
+        Ok(())
+    }
+
+    async fn holds_session(&self, key: StepKey) -> Result<bool, FakeError> {
+        let held = self
+            .sessions
+            .lock()
+            .expect("sessions")
+            .iter()
+            .any(|claimed| claimed.key == key && !claimed.released);
+        let run_ended = self
+            .runs
+            .lock()
+            .expect("runs")
+            .get(&key.run_id)
+            .is_none_or(|run| run.end.is_some());
+        Ok(held && !self.step_ended(key) && !run_ended)
     }
 
     async fn session_step(&self, session_id: Uuid) -> Result<Option<SessionStep>, FakeError> {

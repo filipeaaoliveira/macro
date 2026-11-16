@@ -470,6 +470,46 @@ impl RunRepository for PgRunRepository {
     }
 
     #[tracing::instrument(err, skip(self))]
+    async fn release_session(&self, key: StepKey) -> Result<(), Self::Err> {
+        sqlx::query!(
+            r#"
+            UPDATE factory_step
+            SET session_released_at = now()
+            WHERE run_id = $1 AND seq = $2
+                AND session_id IS NOT NULL AND session_released_at IS NULL
+            "#,
+            key.run_id.as_uuid(),
+            i32::from(key.seq),
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn holds_session(&self, key: StepKey) -> Result<bool, Self::Err> {
+        let holds = sqlx::query_scalar!(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM factory_step s
+                JOIN factory_run r ON r.id = s.run_id
+                WHERE s.run_id = $1 AND s.seq = $2
+                    AND s.session_id IS NOT NULL
+                    AND s.session_released_at IS NULL
+                    AND s.ended_at IS NULL
+                    AND r.ended_at IS NULL
+            ) AS "holds!"
+            "#,
+            key.run_id.as_uuid(),
+            i32::from(key.seq),
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(holds)
+    }
+
+    #[tracing::instrument(err, skip(self))]
     async fn session_step(&self, session_id: Uuid) -> Result<Option<SessionStep>, Self::Err> {
         let row = sqlx::query!(
             r#"

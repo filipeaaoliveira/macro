@@ -56,6 +56,9 @@ struct FakeSessions {
     /// Reads of the status that fail before one works.
     failing_reads: Arc<Mutex<usize>>,
     disconnected: bool,
+    /// The Step lets go of its session while a prepare is in flight, as
+    /// when Temporal gave the attempt up and another one ended the Step.
+    releases_on_prepare: bool,
     cancelled: Arc<Mutex<Vec<RoutineSessionAction>>>,
     deleted: Arc<Mutex<Vec<RoutineSessionAction>>>,
     /// Stops the session ignores before its turn ends cancelled, as when a
@@ -78,6 +81,7 @@ impl FakeSessions {
             landed: Arc::default(),
             failing_reads: Arc::default(),
             disconnected: false,
+            releases_on_prepare: false,
             cancelled: Arc::default(),
             deleted: Arc::default(),
             ignored_stops: 0,
@@ -121,6 +125,18 @@ impl RoutineSessions for FakeSessions {
     ) -> Result<PreparedRoutineSession, RoutineSessionError> {
         let session_id = command.session_id;
         self.prepared_calls.lock().expect("prepared").push(command);
+        if self.releases_on_prepare {
+            let key = self
+                .repo
+                .sessions
+                .lock()
+                .expect("sessions")
+                .iter()
+                .find(|claimed| claimed.session.session_id == session_id.as_uuid())
+                .map(|claimed| claimed.key)
+                .expect("a claimed session");
+            self.repo.release_session(key).await.expect("release");
+        }
         let reply = self
             .prepares
             .lock()
@@ -558,4 +574,44 @@ async fn stopping_a_step_whose_session_never_opened_succeeds() {
         .expect("stop");
 
     assert_eq!(sessions.deleted.lock().expect("deleted").len(), 1);
+}
+
+/// An attempt Temporal gave up on may still run after the Step let go of
+/// its session and deleted it: it must not prepare the session again, which
+/// would open a fresh one under its id and start the work over.
+#[tokio::test]
+async fn a_step_that_let_go_of_its_session_never_opens_it_again() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
+    let task = plan_task(&repo).await;
+    agent(&sessions, &repo)
+        .answer(task.clone())
+        .await
+        .expect("answer");
+    agent(&sessions, &repo)
+        .release(task.key, &julia())
+        .await
+        .expect("release");
+
+    let late = agent(&sessions, &repo).answer(task).await;
+
+    assert!(matches!(late, Err(SessionAgentError::Released)), "{late:?}");
+    assert_eq!(sessions.prepares(), 1);
+    assert_eq!(sessions.landed(), 1);
+}
+
+/// The Step can let go of its session while an attempt opens it: the
+/// attempt then sends no prompt.
+#[tokio::test]
+async fn a_session_let_go_while_it_opened_is_never_prompted() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions {
+        releases_on_prepare: true,
+        ..FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded)
+    };
+
+    let late = agent(&sessions, &repo).answer(plan_task(&repo).await).await;
+
+    assert!(matches!(late, Err(SessionAgentError::Released)), "{late:?}");
+    assert_eq!(sessions.prompts(), 0);
 }
