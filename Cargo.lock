@@ -8390,6 +8390,7 @@ dependencies = [
  "macro_env_var",
  "macro_user_id",
  "model-error-response",
+ "model_user",
  "rootcause",
  "serde",
  "serde_json",

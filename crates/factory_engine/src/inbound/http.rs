@@ -16,8 +16,8 @@ use factory_records::domain::models::{
     EntryId, Gate, GateAnswer, HandBack, Outcome, Run, RunEnd, RunId, RunOutcome, Step, StepEnd,
 };
 use macro_authorization::{
-    MacroAuthorizationExtractor, MacroAuthorizationService, MacroAuthorizationState, UserOnly,
-    UserOrInternal, is_agent_run,
+    CODE_EXECUTION_HEADER, MacroAuthorizationExtractor, MacroAuthorizationService,
+    MacroAuthorizationState, UserOnly, UserOrInternal, UserOrInternalCaller,
 };
 use macro_user_id::user_id::MacroUserIdStr;
 use model_error_response::ErrorResponse;
@@ -313,8 +313,8 @@ where
 
 /// Answer, as the caller, the Gate one of their Runs waits on. The Run
 /// goes on once its workflow took the answer; reading the Run shows the
-/// answer once it is recorded. A Gate asks a person: an agent's program
-/// acting for the owner is refused (403).
+/// answer once it is recorded. A Gate asks a person: only the owner's own
+/// signed-in session answers it (403 otherwise).
 #[utoipa::path(
     post,
     tag = "factory",
@@ -346,13 +346,18 @@ where
     S: FactoryService,
     Auth: MacroAuthorizationService,
 {
-    // An agent works as the Run's owner, so its code could otherwise
-    // approve the plan it wrote.
-    let user = caller.authorization.user;
-    if is_agent_run(user.agent_id.is_some(), &headers) {
-        return Err(FactoryError::AgentAnswer);
+    // Only the person in their own session answers: not an internal caller
+    // acting for them, nor an API key or token, nor an agent's program. An
+    // agent works as the Run's owner, so its code could otherwise approve
+    // the plan it wrote.
+    let authorization = caller.authorization;
+    let in_person = authorization.caller == UserOrInternalCaller::User
+        && authorization.user.is_human_session()
+        && !headers.contains_key(CODE_EXECUTION_HEADER);
+    if !in_person {
+        return Err(FactoryError::NotAPerson);
     }
-    let actor = user.macro_user_id;
+    let actor = authorization.user.macro_user_id;
     state
         .service
         .answer_gate(actor, params.id, params.seq, body.answer, body.note)
@@ -493,7 +498,7 @@ impl FactoryError {
             | FactoryError::NotAStepSession
             | FactoryError::OutcomeNotOffered { .. }
             | FactoryError::HandBackTooLarge { .. } => StatusCode::BAD_REQUEST,
-            FactoryError::NotTheOwner | FactoryError::AgentAnswer => StatusCode::FORBIDDEN,
+            FactoryError::NotTheOwner | FactoryError::NotAPerson => StatusCode::FORBIDDEN,
             FactoryError::NotFound | FactoryError::TaskNotFound => StatusCode::NOT_FOUND,
             FactoryError::RunEnded | FactoryError::AnswerRefused(_) | FactoryError::StepEnded => {
                 StatusCode::CONFLICT

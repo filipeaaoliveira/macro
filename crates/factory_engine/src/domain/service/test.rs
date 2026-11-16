@@ -856,3 +856,37 @@ fn only_the_flows_the_worker_runs_are_offered() {
         "Replies to the Run's request in one Step."
     );
 }
+
+/// A task's list holds its owner's 50 newest Runs, however many they
+/// started on it.
+#[tokio::test]
+async fn a_task_s_list_holds_its_owner_s_fifty_newest_runs() {
+    let repo = FakeRepo::default();
+    let task_id = Uuid::now_v7();
+    repo.tasks.lock().expect("tasks").insert(task_id);
+    let mut started = Vec::new();
+    for n in 0..51 {
+        match repo
+            .insert_run(
+                RunId::generate(),
+                &format!("Run {n}"),
+                &julia(),
+                Some(task_id),
+            )
+            .await
+            .expect("insert")
+        {
+            RunInsert::Inserted(run) => started.push(run.id),
+            RunInsert::NoSuchTask => panic!("the task exists"),
+        }
+    }
+
+    let listed = service(&repo, &FakeWorkflows::default())
+        .list_task_runs(&julia(), task_id)
+        .await
+        .expect("list");
+
+    let listed: Vec<RunId> = listed.iter().map(|detail| detail.run.id).collect();
+    let newest: Vec<RunId> = started.iter().rev().take(50).copied().collect();
+    assert_eq!(listed, newest);
+}

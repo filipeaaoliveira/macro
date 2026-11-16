@@ -7,12 +7,13 @@ use bot_id::BotId;
 use factory_records::domain::models::{EntryId, HandBack, Outcome, RunId, RunInsert, StepKey};
 use factory_records::domain::ports::RunRepository;
 use macro_authorization::{
-    CODE_EXECUTION_HEADER, CredentialOrigin, INTERNAL_API_KEY_HEADER,
+    AuthorizedUserApiKey, CODE_EXECUTION_HEADER, CredentialOrigin, INTERNAL_API_KEY_HEADER,
     INTERNAL_MACRO_USER_ID_HEADER, InternalAuthConfig, JwtValidator, MacroAuthorizationError,
-    MacroAuthorizationServiceImpl, MacroAuthorizationState, NoBotAuthorizer,
-    NoUserApiKeyAuthorizer, ValidatedCredential, ValidatedIdentity,
+    MacroAuthorizationServiceImpl, MacroAuthorizationState, NoBotAuthorizer, USER_API_KEY_HEADER,
+    UserApiKeyAuthorizer, ValidatedCredential, ValidatedIdentity,
 };
 use macro_user_id::user_id::MacroUserIdStr;
+use model_user::UserContext;
 use rootcause::Report;
 use tower::ServiceExt as _;
 use upstream_error::{UpstreamError, UpstreamFailure};
@@ -32,8 +33,8 @@ const ALICE: &str = "macro|alice@example.com";
 const EVE: &str = "macro|eve@example.com";
 
 /// Accepts the bearer tokens `alice` and `eve`, each its person's own
-/// session, and `agent`: Alice's SDK token carrying an agent's attribution,
-/// as code mode mints.
+/// session, `sdk`: Alice's Macro API token, and `agent`: that token carrying
+/// an agent's attribution, as code mode mints.
 #[derive(Clone, Copy)]
 struct Tokens;
 
@@ -42,14 +43,16 @@ impl JwtValidator for Tokens {
         &self,
         jwt: &str,
     ) -> Result<ValidatedCredential, Report<MacroAuthorizationError>> {
-        let (user_id, agent_id) = match jwt {
-            "alice" => (ALICE, None),
-            "eve" => (EVE, None),
-            "agent" => (ALICE, Some(BotId::new_from_uuid(Uuid::from_u128(0xB07A)))),
+        let agent = BotId::new_from_uuid(Uuid::from_u128(0xB07A));
+        let (user_id, origin, agent_id) = match jwt {
+            "alice" => (ALICE, CredentialOrigin::Session, None),
+            "eve" => (EVE, CredentialOrigin::Session, None),
+            "sdk" => (ALICE, CredentialOrigin::MacroApiJwt, None),
+            "agent" => (ALICE, CredentialOrigin::MacroApiJwt, Some(agent)),
             _ => return Err(Report::new(MacroAuthorizationError::InvalidCredentials)),
         };
         Ok(ValidatedCredential {
-            origin: CredentialOrigin::Session,
+            origin,
             identity: ValidatedIdentity {
                 agent_id,
                 agent_via: None,
@@ -62,6 +65,30 @@ impl JwtValidator for Tokens {
     }
 }
 
+/// Accepts the user API key `alice-key`, Alice's own.
+#[derive(Clone, Copy)]
+struct ApiKeys;
+
+impl UserApiKeyAuthorizer for ApiKeys {
+    async fn authorize_user_api_key(
+        &self,
+        api_key: &str,
+    ) -> Result<AuthorizedUserApiKey, Report<MacroAuthorizationError>> {
+        if api_key != "alice-key" {
+            return Err(Report::new(MacroAuthorizationError::InvalidCredentials));
+        }
+        Ok(AuthorizedUserApiKey {
+            user_context: UserContext {
+                user_id: ALICE.to_string(),
+                fusion_user_id: "fusion-alice".to_string(),
+                permissions: None,
+                organization_id: None,
+            },
+            account_manager: None,
+        })
+    }
+}
+
 fn authorization() -> MacroAuthorizationState<MacroAuthorizationServiceImpl<Tokens>> {
     MacroAuthorizationState::new(Arc::new(MacroAuthorizationServiceImpl::new(
         Tokens,
@@ -70,7 +97,7 @@ fn authorization() -> MacroAuthorizationState<MacroAuthorizationServiceImpl<Toke
             default_user_id: None,
         },
         NoBotAuthorizer,
-        NoUserApiKeyAuthorizer,
+        ApiKeys,
     )))
 }
 
@@ -81,6 +108,8 @@ enum Caller<'a> {
     Nobody,
     /// A person signed in with this bearer token.
     User(&'a str),
+    /// A person's user API key.
+    ApiKey(&'a str),
     /// An internal service, for this acting user when one is named.
     Internal(Option<&'a str>),
 }
@@ -94,6 +123,9 @@ fn call(method: &str, path: &str, caller: Caller<'_>, body: serde_json::Value) -
         Caller::Nobody => {}
         Caller::User(token) => {
             request = request.header("authorization", format!("Bearer {token}"));
+        }
+        Caller::ApiKey(key) => {
+            request = request.header(USER_API_KEY_HEADER, key);
         }
         Caller::Internal(acting_user) => {
             request = request.header(INTERNAL_API_KEY_HEADER, KEY);
@@ -665,13 +697,16 @@ async fn a_task_s_runs_are_the_caller_s_own_newest_first() {
     assert_eq!(runs[0]["run"]["id"], theirs);
 }
 
-/// A task the caller cannot see, or one that does not exist, is missing to
-/// them; a caller with no login is refused before that.
+/// A task the caller cannot see, one that does not exist, and a document
+/// that is not a task are all missing to them; a caller with no login is
+/// refused before that.
 #[tokio::test]
 async fn a_task_the_caller_cannot_see_has_no_runs_to_list() {
     let repo = FakeRepo::default();
     let task = Uuid::now_v7();
+    let note = Uuid::now_v7();
     repo.tasks.lock().expect("tasks").insert(task);
+    repo.documents.lock().expect("documents").insert(note);
     repo.hidden
         .lock()
         .expect("hidden")
@@ -695,44 +730,80 @@ async fn a_task_the_caller_cannot_see_has_no_runs_to_list() {
 
     let hidden = list(Caller::User("eve"), task).await;
     let missing = list(Caller::User("alice"), Uuid::now_v7()).await;
+    let not_a_task = list(Caller::User("alice"), note).await;
     let anonymous = list(Caller::Nobody, task).await;
     let seen = list(Caller::User("alice"), task).await;
 
     assert_eq!(hidden, StatusCode::NOT_FOUND);
     assert_eq!(missing, StatusCode::NOT_FOUND);
+    assert_eq!(not_a_task, StatusCode::NOT_FOUND);
     assert_eq!(anonymous, StatusCode::UNAUTHORIZED);
     assert_eq!(seen, StatusCode::OK);
 }
 
-/// A Gate asks a person: an agent working as the Run's owner, by its token's
-/// attribution or a code-mode run's header, cannot answer it for them.
+/// A Gate asks a person: only the owner in their own signed-in session
+/// answers it. An internal caller acting for them, their user API key or
+/// Macro API token, and an agent working as them, by its token's
+/// attribution or a code-mode run's header, are refused before the Run is
+/// looked at.
 #[tokio::test]
-async fn an_agent_acting_for_the_owner_cannot_answer_a_gate() {
+async fn only_the_owner_s_own_session_answers_a_gate() {
     let (router, service) = router(|| FactoryError::NotFound);
     let path = format!("/runs/{}/steps/1/answer", RunId::generate());
     let answer = serde_json::json!({ "answer": "approve" });
+    let send = |request: Request<Body>| {
+        let router = router.clone();
+        async move { router.oneshot(request).await.expect("response").status() }
+    };
 
-    let attributed = router
-        .clone()
-        .oneshot(call("POST", &path, Caller::User("agent"), answer.clone()))
-        .await
-        .expect("response");
+    let internal = send(call(
+        "POST",
+        &path,
+        Caller::Internal(Some(ALICE)),
+        answer.clone(),
+    ))
+    .await;
+    let api_key = send(call(
+        "POST",
+        &path,
+        Caller::ApiKey("alice-key"),
+        answer.clone(),
+    ))
+    .await;
+    let sdk = send(call("POST", &path, Caller::User("sdk"), answer.clone())).await;
+    let attributed = send(call("POST", &path, Caller::User("agent"), answer.clone())).await;
     let mut in_code_mode = call("POST", &path, Caller::User("alice"), answer.clone());
     in_code_mode
         .headers_mut()
         .insert(CODE_EXECUTION_HEADER, "true".parse().expect("header"));
-    let in_code_mode = router
-        .clone()
-        .oneshot(in_code_mode)
-        .await
-        .expect("response");
-    let person = router
-        .oneshot(call("POST", &path, Caller::User("alice"), answer))
+    let in_code_mode = send(in_code_mode).await;
+    let person = send(call("POST", &path, Caller::User("alice"), answer)).await;
+
+    assert_eq!(internal, StatusCode::FORBIDDEN);
+    assert_eq!(api_key, StatusCode::FORBIDDEN);
+    assert_eq!(sdk, StatusCode::FORBIDDEN);
+    assert_eq!(attributed, StatusCode::FORBIDDEN);
+    assert_eq!(in_code_mode, StatusCode::FORBIDDEN);
+    assert_eq!(person, StatusCode::NOT_FOUND);
+    assert_eq!(*service.actors.lock().expect("actors"), [ALICE]);
+}
+
+/// A person's user API key reaches the Run API as them, as their login
+/// does.
+#[tokio::test]
+async fn a_user_api_key_acts_for_its_owner() {
+    let (router, service) = router(|| FactoryError::NotFound);
+
+    let response = router
+        .oneshot(call(
+            "GET",
+            &format!("/runs/{}", RunId::generate()),
+            Caller::ApiKey("alice-key"),
+            serde_json::Value::Null,
+        ))
         .await
         .expect("response");
 
-    assert_eq!(attributed.status(), StatusCode::FORBIDDEN);
-    assert_eq!(in_code_mode.status(), StatusCode::FORBIDDEN);
-    assert_eq!(person.status(), StatusCode::NOT_FOUND);
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
     assert_eq!(*service.actors.lock().expect("actors"), [ALICE]);
 }

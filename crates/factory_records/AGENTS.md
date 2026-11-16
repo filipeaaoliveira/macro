@@ -17,8 +17,7 @@ the Gates they asked people in MacroDB, and defines the names Flows use
 ## Scope
 
 - Owns: the `factory_run`, `factory_step` and `factory_gate` tables
-  (`crates/macro_db_client/migrations/20261116083957_factory.sql`, and the
-  index in `20261116210000_factory_run_task_owner_index.sql`).
+  (`crates/macro_db_client/migrations/20261116083957_factory.sql`).
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
 
 ## Boundaries

@@ -45,8 +45,9 @@ records the answer (`factory_answer_gate` activity), and routes the answer as
 the entry's outcome. An answer the recorded Gate does not offer is refused
 before it is sent (400); the update's validator (`domain/gate.rs`) refuses an
 answer to a Gate the Run does not wait on and a second answer (409). Only the
-Run's owner answers its Gates, and only as a person: an agent's program acting
-for them (`is_agent_run`) is refused (403).
+Run's owner answers its Gates, in their own signed-in session: an internal
+caller, a user API key or Macro API token, and an agent's program acting for
+them are refused (403).
 
 People call the Run API with their own login (`UserOrInternal`), and internal
 services for an acting user (the internal key's identity headers). A Run starts
@@ -60,7 +61,8 @@ through entity access, and document storage must say it is a task that is not
 deleted (`outbound/document_task_directory.rs`); a hidden document and a missing
 one are both "no task" (400). `GET /tasks/{task_id}/runs` lists the caller's own
 Runs on a task they can see, newest first, at most `TASK_RUNS_LISTED`; other
-people's Runs on it are not listed, and a hidden or missing task is 404.
+people's Runs on it are not listed, and a hidden or missing task, or a document
+that is not a task, is 404.
 
 `POST /runs/{id}/cancel` cancels the workflow through Temporal; cancelling a
 cancelled Run again is accepted, and a Run whose workflow never started ends

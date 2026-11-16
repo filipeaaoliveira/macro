@@ -170,9 +170,11 @@ pub enum FactoryError {
     /// A hand back came from outside a Step's agent session.
     #[error("only a factory step's agent session can hand back, from its code")]
     NotAStepSession,
-    /// An agent's program, rather than a person, answered a Gate.
-    #[error("only a person can answer a gate")]
-    AgentAnswer,
+    /// Someone other than the person in their own signed-in session
+    /// answered a Gate: an internal caller, an API key or token, or an
+    /// agent's program acting for them.
+    #[error("only the run's owner, signed in to Macro, can answer its gate")]
+    NotAPerson,
     /// A hand back came from someone other than the Run's owner.
     #[error("only the run's owner can hand back its step")]
     NotTheOwner,
