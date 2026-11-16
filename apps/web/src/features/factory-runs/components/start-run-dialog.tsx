@@ -1,7 +1,16 @@
+import { ListSkeleton } from '@app/components/view-shell/ListSkeleton';
 import { t } from '@app/lib/i18n';
 import { fireAndForget } from '@core/util/fireAndForget';
 import { ActionDialogShell, Button, Dialog, RadioGroup, TextField } from '@ui';
-import { createSignal, For, type JSX, Match, Show, Switch } from 'solid-js';
+import {
+  createSignal,
+  For,
+  Index,
+  type JSX,
+  Match,
+  Show,
+  Switch,
+} from 'solid-js';
 import { flowWordLabel } from '../core/flow-words';
 import type { Flow } from '../core/run';
 
@@ -46,7 +55,6 @@ export function StartRunDialog(props: {
       }}
       position="center"
       class="w-120"
-      visibleScrim
     >
       <ActionDialogShell>
         <form
@@ -75,9 +83,7 @@ export function StartRunDialog(props: {
             <Switch>
               <Match when={props.flowsState === 'pending'}>
                 <FlowsNotice>
-                  <p role="status" class="text-sm text-ink-muted">
-                    {t('factoryRuns.flowsLoading')}
-                  </p>
+                  <FlowCardsSkeleton />
                 </FlowsNotice>
               </Match>
               <Match when={props.flowsState === 'error'}>
@@ -106,7 +112,8 @@ export function StartRunDialog(props: {
                     disabled={pending()}
                     class="grid-cols-1"
                   >
-                    <RadioGroup.Label class="text-[13px] leading-[18px] font-medium">
+                    {/* The dialog body styles the text-field label slot. */}
+                    <RadioGroup.Label data-slot="text-field-label">
                       {t('factoryRuns.flowLabel')}
                     </RadioGroup.Label>
                     <For each={flows()}>
@@ -143,10 +150,13 @@ export function StartRunDialog(props: {
             >
               {t('common.cancel')}
             </Button>
-            <Button type="submit" variant="primary" disabled={!canSubmit()}>
-              {pending()
-                ? t('factoryRuns.startingRun')
-                : t('factoryRuns.startRun')}
+            <Button
+              type="submit"
+              variant="primary"
+              loading={pending()}
+              disabled={!pending() && !canSubmit()}
+            >
+              {t('factoryRuns.startRun')}
             </Button>
           </ActionDialogShell.Footer>
         </form>
@@ -159,10 +169,26 @@ export function StartRunDialog(props: {
 function FlowsNotice(props: { children: JSX.Element }) {
   return (
     <div class="flex flex-col gap-2">
-      <span class="text-[13px] leading-[18px] font-medium">
-        {t('factoryRuns.flowLabel')}
-      </span>
+      <span data-slot="text-field-label">{t('factoryRuns.flowLabel')}</span>
       {props.children}
     </div>
+  );
+}
+
+/** The Flow cards' placeholder, in their geometry. */
+function FlowCardsSkeleton() {
+  return (
+    <ListSkeleton.Root label={t('factoryRuns.flowsLoading')}>
+      <div class="grid gap-2">
+        <Index each={[0, 1]}>
+          {() => (
+            <div class="flex flex-col gap-2 rounded-lg border border-edge-button p-3">
+              <ListSkeleton.Bar class="w-20" />
+              <ListSkeleton.Bar class="h-2 w-64 max-w-full" />
+            </div>
+          )}
+        </Index>
+      </div>
+    </ListSkeleton.Root>
   );
 }

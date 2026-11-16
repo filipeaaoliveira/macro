@@ -28,7 +28,6 @@ export default {
   flowsLoading: 'Loading flows…',
   flowsFailed: 'Flows couldn’t be loaded',
   startRun: 'Start run',
-  startingRun: 'Starting…',
   startFailed: 'Couldn’t start the run. Please try again.',
   // A Run.
   runDetails: 'Run details',

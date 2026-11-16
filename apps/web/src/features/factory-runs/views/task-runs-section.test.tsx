@@ -12,8 +12,17 @@ import { type RunsContext, RunsProvider } from '../context/runs-context';
 import type { Run } from '../core/run';
 import { TaskRunsSection } from './task-runs-section';
 
+const device = vi.hoisted(() => ({
+  touch: false,
+  setPanelOpen: vi.fn<(open: boolean) => void>(),
+}));
+
+vi.mock('@core/mobile/isTouchDevice', () => ({
+  isTouchDevice: () => device.touch,
+}));
+
 vi.mock('@components/app/side-panel', () => ({
-  useSidePanel: () => null,
+  useSidePanel: () => ({ setIsOpen: device.setPanelOpen }),
   SidePanel: {
     Section: (props: {
       title: JSX.Element;
@@ -69,6 +78,8 @@ function mount(
     listState?: Accessor<'pending' | 'error' | 'ready'>;
     retry?: () => void;
     startRun?: RunsContext['startRun'];
+    flowsState?: Accessor<'pending' | 'error' | 'ready'>;
+    flowsRetry?: () => void;
   } = {}
 ) {
   const [list, setList] = createSignal(runs);
@@ -88,12 +99,21 @@ function mount(
       };
     },
     flows: () => ({
-      state: () => 'ready',
-      data: () => [
-        { name: 'plan', description: 'Plans the change, then writes it.' },
-        { name: 'code', description: 'Takes a task to a merged pull request.' },
-      ],
-      retry: vi.fn(),
+      state: options.flowsState ?? (() => 'ready'),
+      data: () =>
+        options.flowsState && options.flowsState() !== 'ready'
+          ? undefined
+          : [
+              {
+                name: 'plan',
+                description: 'Plans the change, then writes it.',
+              },
+              {
+                name: 'code',
+                description: 'Takes a task to a merged pull request.',
+              },
+            ],
+      retry: options.flowsRetry ?? vi.fn(),
     }),
     startRun:
       options.startRun ??
@@ -113,6 +133,7 @@ function mount(
 }
 
 afterEach(() => {
+  device.touch = false;
   cleanup();
   vi.clearAllMocks();
 });
@@ -213,5 +234,57 @@ describe('TaskRunsSection', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('retries Flows that couldn’t be loaded', async () => {
+    const [flowsState, setFlowsState] = createSignal<
+      'pending' | 'error' | 'ready'
+    >('error');
+    const flowsRetry = vi.fn(() => setFlowsState('ready'));
+    mount([running], { flowsState, flowsRetry });
+
+    fireEvent.click(screen.getByRole('button', { name: 'New run' }));
+    expect(await screen.findByText('Flows couldn’t be loaded')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+    expect(flowsRetry).toHaveBeenCalledOnce();
+    expect(screen.getByRole('radiogroup', { name: 'Flow' })).toBeTruthy();
+  });
+
+  it('keeps the start dialog open while a start is on the wire', async () => {
+    let finish!: () => void;
+    mount([running], {
+      startRun: vi.fn(
+        () =>
+          new Promise<{ ok: false; reason: 'failed' }>((resolve) => {
+            finish = () => resolve({ ok: false, reason: 'failed' });
+          })
+      ),
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'New run' }));
+    fireEvent.input(await screen.findByLabelText('Request'), {
+      target: { value: 'Add a due date column' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Start run' }));
+    fireEvent.keyDown(screen.getByLabelText('Request'), { key: 'Escape' });
+
+    expect(screen.getByRole('button', { name: 'Start run' })).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: 'Cancel' }).hasAttribute('disabled')
+    ).toBe(true);
+    finish();
+    expect(
+      await screen.findByText('Couldn’t start the run. Please try again.')
+    ).toBeTruthy();
+  });
+
+  it('closes the side panel’s sheet on touch before a Run opens', () => {
+    device.touch = true;
+    mount([running]);
+
+    fireEvent.click(screen.getByText('Rename the column'));
+
+    expect(device.setPanelOpen).toHaveBeenCalledWith(false);
   });
 });
