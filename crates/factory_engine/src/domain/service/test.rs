@@ -9,14 +9,15 @@ use serde_json::json;
 use uuid::Uuid;
 
 use super::{FactoryServiceImpl, StepServiceImpl};
-use crate::domain::fakes::{FakeError, FakeRepo};
+use crate::domain::fakes::FakeRepo;
 use crate::domain::flow::StepName;
 use crate::domain::gate::AnswerGate;
 use crate::domain::models::{
     FactoryError, RunFinish, RunStart, StepEnding, StepInput, StepReport, StepRequest,
 };
 use crate::domain::ports::{
-    AnswerDelivery, FactoryService, RunWorkflows, RunWorkflowsError, StepExecutor, StepService,
+    AnswerDelivery, FactoryService, Retryable, RunWorkflows, RunWorkflowsError, StepExecutor,
+    StepService,
 };
 
 /// Keeps what it was sent. Refuses every answer when `refuse` is set; a
@@ -63,11 +64,13 @@ impl RunWorkflows for FakeWorkflows {
     }
 }
 
-/// Serves `reply`, which ends `done` with a fixed output, and keeps the
-/// places of the earlier Steps each run was given.
+/// Serves `reply`, which ends `done` with a fixed output, or fails with
+/// `failure` when it is set, and keeps the places of the earlier Steps each
+/// run was given.
 #[derive(Clone)]
 struct FakeExecutor {
     output: String,
+    failure: Option<WorkFailure>,
     given: Arc<Mutex<Vec<Vec<u16>>>>,
 }
 
@@ -75,19 +78,36 @@ impl Default for FakeExecutor {
     fn default() -> Self {
         Self {
             output: "Replied".to_string(),
+            failure: None,
             given: Arc::default(),
         }
     }
 }
 
+/// A Step's work that failed, for good or not.
+#[derive(Debug, Clone, Copy, thiserror::Error)]
+#[error("the work failed")]
+struct WorkFailure {
+    retryable: bool,
+}
+
+impl Retryable for WorkFailure {
+    fn retryable(&self) -> bool {
+        self.retryable
+    }
+}
+
 impl StepExecutor for FakeExecutor {
-    type Err = FakeError;
+    type Err = WorkFailure;
 
     fn serves(&self, step: &StepName) -> bool {
         step.as_str() == "reply"
     }
 
-    async fn run(&self, _step: &StepName, input: StepInput<'_>) -> Result<StepReport, FakeError> {
+    async fn run(&self, _step: &StepName, input: StepInput<'_>) -> Result<StepReport, WorkFailure> {
+        if let Some(failure) = self.failure {
+            return Err(failure);
+        }
         let earlier = input.earlier.iter().map(|step| step.seq).collect();
         self.given.lock().expect("given").push(earlier);
         Ok(StepReport {
@@ -101,7 +121,7 @@ impl StepExecutor for FakeExecutor {
         _step: &StepName,
         _key: StepKey,
         _owner: &MacroUserIdStr<'static>,
-    ) -> Result<(), FakeError> {
+    ) -> Result<(), WorkFailure> {
         Ok(())
     }
 }
@@ -620,4 +640,36 @@ async fn an_answer_the_gate_does_not_offer_never_reaches_the_workflow() {
         Err(FactoryError::AnswerNotOffered { .. })
     ));
     assert!(workflows.answers.lock().expect("answers").is_empty());
+}
+
+#[tokio::test]
+async fn work_that_fails_for_good_is_not_retried_and_other_failures_are() {
+    let repo = FakeRepo::default();
+    let run_id = julia_s_run(&repo).await;
+    let for_good = StepServiceImpl::new(
+        repo.clone(),
+        FakeExecutor {
+            failure: Some(WorkFailure { retryable: false }),
+            ..FakeExecutor::default()
+        },
+    );
+    let for_now = StepServiceImpl::new(
+        repo.clone(),
+        FakeExecutor {
+            failure: Some(WorkFailure { retryable: true }),
+            ..FakeExecutor::default()
+        },
+    );
+
+    let final_failure = for_good.run_step(reply_step(run_id, 1)).await;
+    let passing_failure = for_now.run_step(reply_step(run_id, 1)).await;
+
+    assert!(matches!(
+        final_failure,
+        Err(crate::domain::models::StepError::Final(_))
+    ));
+    assert!(matches!(
+        passing_failure,
+        Err(crate::domain::models::StepError::Internal(_))
+    ));
 }

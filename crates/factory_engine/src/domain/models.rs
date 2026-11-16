@@ -201,6 +201,9 @@ pub enum StepError {
         /// The most bytes an output may hold.
         max: usize,
     },
+    /// The Step's work failed in a way trying again would repeat.
+    #[error("the step's work failed for good: {0:?}")]
+    Final(rootcause::Report),
     /// Any other internal error.
     #[error("internal step error: {0:?}")]
     Internal(rootcause::Report),

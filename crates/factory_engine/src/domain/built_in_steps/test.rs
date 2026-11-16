@@ -9,11 +9,17 @@ use macro_user_id::user_id::MacroUserIdStr;
 use super::{BuiltInStepError, BuiltInSteps};
 use crate::domain::flow::{Flow, StepName};
 use crate::domain::models::{AgentAnswer, AgentTask, StepInput};
-use crate::domain::ports::{StepAgent, StepExecutor};
+use crate::domain::ports::{Retryable, StepAgent, StepExecutor};
 
 #[derive(Debug, thiserror::Error)]
 #[error("fake agent failure")]
 struct FakeError;
+
+impl Retryable for FakeError {
+    fn retryable(&self) -> bool {
+        true
+    }
+}
 
 /// Keeps every task it is given and ends each with `outcome`.
 #[derive(Clone)]

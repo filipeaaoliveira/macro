@@ -9,7 +9,7 @@ use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::flow::StepName;
 use crate::domain::models::{AgentTask, StepInput, StepReport};
-use crate::domain::ports::{StepAgent, StepExecutor};
+use crate::domain::ports::{Retryable, StepAgent, StepExecutor};
 
 /// What the agent is told for a `plan` Step.
 const PLAN_INSTRUCTIONS: &str = include_str!("built_in_steps/plan.md");
@@ -46,8 +46,13 @@ pub enum BuiltInStepError {
     #[error("no built-in step is named {0}")]
     UnknownStep(StepName),
     /// The agent could not do the Step.
-    #[error("the agent failed: {0:?}")]
-    Agent(rootcause::Report),
+    #[error("the agent failed: {report:?}")]
+    Agent {
+        /// Why.
+        report: rootcause::Report,
+        /// Whether asking the agent again may succeed.
+        retryable: bool,
+    },
     /// The agent ended the Step with an outcome the Step does not have.
     #[error("the agent ended step {step} with {outcome}, which it does not end with")]
     UnexpectedOutcome {
@@ -56,6 +61,24 @@ pub enum BuiltInStepError {
         /// The outcome the agent handed back.
         outcome: Outcome,
     },
+}
+
+impl BuiltInStepError {
+    fn agent(error: impl std::error::Error + Retryable + Send + Sync + 'static) -> Self {
+        BuiltInStepError::Agent {
+            retryable: error.retryable(),
+            report: rootcause::Report::new(error).into_dynamic(),
+        }
+    }
+}
+
+impl Retryable for BuiltInStepError {
+    fn retryable(&self) -> bool {
+        match self {
+            BuiltInStepError::Agent { retryable, .. } => *retryable,
+            BuiltInStepError::UnknownStep(_) | BuiltInStepError::UnexpectedOutcome { .. } => false,
+        }
+    }
 }
 
 /// The built-in Steps, over the agent that does `plan` and `write`.
@@ -86,9 +109,11 @@ impl<A: StepAgent> BuiltInSteps<A> {
             prompt: prompt(instructions, &outcomes, input),
             outcomes: outcomes.clone(),
         };
-        let answer = self.agent.answer(task).await.map_err(|error| {
-            BuiltInStepError::Agent(rootcause::Report::new(error).into_dynamic())
-        })?;
+        let answer = self
+            .agent
+            .answer(task)
+            .await
+            .map_err(|error| BuiltInStepError::agent(error))?;
 
         if !outcomes.contains(&answer.outcome) {
             return Err(BuiltInStepError::UnexpectedOutcome {
@@ -141,11 +166,11 @@ impl<A: StepAgent> StepExecutor for BuiltInSteps<A> {
         owner: &MacroUserIdStr<'static>,
     ) -> Result<(), BuiltInStepError> {
         match BuiltInStep::named(step) {
-            Some(BuiltInStep::Plan | BuiltInStep::Write) => {
-                self.agent.stop(key, owner).await.map_err(|error| {
-                    BuiltInStepError::Agent(rootcause::Report::new(error).into_dynamic())
-                })
-            }
+            Some(BuiltInStep::Plan | BuiltInStep::Write) => self
+                .agent
+                .stop(key, owner)
+                .await
+                .map_err(|error| BuiltInStepError::agent(error)),
             // A reply is done before anything could stop it.
             Some(BuiltInStep::Reply) | None => Ok(()),
         }

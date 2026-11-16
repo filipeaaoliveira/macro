@@ -84,7 +84,7 @@ impl FactoryActivities {
 /// the same way again.
 fn failure(error: StepError) -> ActivityError {
     match error {
-        StepError::OutputTooLarge { .. } | StepError::NoSuchRun => {
+        StepError::OutputTooLarge { .. } | StepError::NoSuchRun | StepError::Final(_) => {
             ApplicationFailure::non_retryable(error).into()
         }
         StepError::Internal(_) => ApplicationFailure::new(error).into(),
@@ -129,6 +129,17 @@ impl FactoryActivities {
         drop(work);
         self.steps.stop_step(request).await.map_err(failure)?;
         Err(ActivityError::cancelled())
+    }
+
+    /// Stop the agent of a Step whose work failed for good, so nothing that
+    /// follows the Step runs beside it.
+    #[activity(name = "factory_stop_step")]
+    pub async fn stop_step(
+        self: Arc<Self>,
+        _ctx: ActivityContext,
+        request: StepRequest,
+    ) -> Result<(), ActivityError> {
+        self.steps.stop_step(request).await.map_err(failure)
     }
 
     /// Record how a Step ended.

@@ -13,7 +13,7 @@ use factory_records::domain::ports::{RunRepository, UserDirectory};
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
-use crate::domain::ports::{TaskAccess, TaskDirectory};
+use crate::domain::ports::{Retryable, TaskAccess, TaskDirectory};
 
 /// The session an agent Step claimed, and what it handed back.
 #[derive(Clone)]
@@ -27,6 +27,13 @@ pub(crate) struct FakeSession {
 #[derive(Debug, thiserror::Error)]
 #[error("fake failure")]
 pub(crate) struct FakeError;
+
+/// A fake's failure is the transport's: worth trying again.
+impl Retryable for FakeError {
+    fn retryable(&self) -> bool {
+        true
+    }
+}
 
 /// Runs, Steps and sessions in memory, with the same first-write-wins rules
 /// as the Postgres repository.

@@ -4,12 +4,18 @@ use factory_records::domain::models::StepKey;
 use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::models::{AgentAnswer, AgentTask};
-use crate::domain::ports::StepAgent;
+use crate::domain::ports::{Retryable, StepAgent};
 
 /// The task gave the agent no outcome to end with.
 #[derive(Debug, thiserror::Error)]
 #[error("the task names no outcome to end with")]
 pub struct NoOutcome;
+
+impl Retryable for NoOutcome {
+    fn retryable(&self) -> bool {
+        false
+    }
+}
 
 /// Does no work: ends every task with its first outcome and hands back the
 /// prompt it was given. A Flow's agent Steps then run end to end, showing

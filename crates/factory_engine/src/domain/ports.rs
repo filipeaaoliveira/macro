@@ -57,10 +57,17 @@ pub trait RunWorkflows: Send + Sync + 'static {
     fn cancel(&self, run_id: RunId) -> impl Future<Output = Result<(), RunWorkflowsError>> + Send;
 }
 
+/// Whether failed work is worth trying again: false when it would fail the
+/// same way, such as an agent's turn that ended without a result.
+pub trait Retryable {
+    /// Whether trying the work again may succeed.
+    fn retryable(&self) -> bool;
+}
+
 /// Does the work of a Flow's Steps.
 pub trait StepExecutor: Send + Sync + 'static {
     /// The error type returned when a Step's work fails.
-    type Err: std::error::Error + Send + Sync + 'static;
+    type Err: std::error::Error + Retryable + Send + Sync + 'static;
 
     /// Whether it does `step`'s work.
     fn serves(&self, step: &StepName) -> bool;
@@ -88,7 +95,7 @@ pub trait StepExecutor: Send + Sync + 'static {
 /// ends with one of the task's outcomes.
 pub trait StepAgent: Send + Sync + 'static {
     /// The error type returned when the agent cannot do the task.
-    type Err: std::error::Error + Send + Sync + 'static;
+    type Err: std::error::Error + Retryable + Send + Sync + 'static;
 
     /// Do `task` and hand back how it ended. A Temporal retry may ask again
     /// for the same Step: the agent goes on with it, never starts it twice.

@@ -20,8 +20,8 @@ use crate::domain::models::{
     StepRequest,
 };
 use crate::domain::ports::{
-    AnswerDelivery, FactoryService, RunWorkflows, RunWorkflowsError, StepExecutor, StepService,
-    TaskAccess, TaskDirectory,
+    AnswerDelivery, FactoryService, Retryable, RunWorkflows, RunWorkflowsError, StepExecutor,
+    StepService, TaskAccess, TaskDirectory,
 };
 
 fn internal(error: impl std::error::Error + Send + Sync + 'static) -> rootcause::Report {
@@ -394,7 +394,15 @@ where
             .executor
             .run(&request.step, input)
             .await
-            .map_err(internal)?;
+            .map_err(|error| {
+                let final_failure = !error.retryable();
+                let report = internal(error);
+                if final_failure {
+                    StepError::Final(report)
+                } else {
+                    StepError::Internal(report)
+                }
+            })?;
         if report.output.len() > MAX_OUTPUT_BYTES {
             return Err(StepError::OutputTooLarge {
                 max: MAX_OUTPUT_BYTES,

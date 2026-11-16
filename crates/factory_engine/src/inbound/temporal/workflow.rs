@@ -78,6 +78,15 @@ impl FlowWorkflow {
             )
             .build();
         let record_options = ActivityOptions::start_to_close_timeout(RECORD_TIMEOUT);
+        // Stopping a failed Step's agent is tried a few times, then given up
+        // on: the Step's end must not wait on an agent that won't answer.
+        let stop_options = ActivityOptions::with_start_to_close_timeout(RECORD_TIMEOUT)
+            .retry_policy(
+                RetryPolicy::builder()
+                    .maximum_attempts(STEP_ATTEMPTS)
+                    .build(),
+            )
+            .build();
 
         // A Flow that cannot go on still records the Run's end, then fails
         // the workflow with why, for Temporal to show.
@@ -123,15 +132,33 @@ impl FlowWorkflow {
             // why as its output; the Flow may route it like any other
             // outcome. A Step stopped by cancelling the Run ends the Run.
             let worked = ctx
-                .execute_activity(FactoryActivities::run_step, request, work_options.clone())
+                .execute_activity(
+                    FactoryActivities::run_step,
+                    request.clone(),
+                    work_options.clone(),
+                )
                 .await;
             let report = match worked {
                 Ok(report) => report,
                 Err(_) if is_cancelled(ctx) => break RunOutcome::Cancelled,
-                Err(error) => StepReport {
-                    outcome: Outcome::failed(),
-                    output: bounded(format!("The step failed: {error}")),
-                },
+                Err(error) => {
+                    // The work failed for good: stop its agent, so an entry
+                    // that fixes or retries it never runs beside it.
+                    let stopped = ctx
+                        .execute_activity(
+                            FactoryActivities::stop_step,
+                            request.clone(),
+                            stop_options.clone(),
+                        )
+                        .await;
+                    if stopped.is_err() && is_cancelled(ctx) {
+                        break RunOutcome::Cancelled;
+                    }
+                    StepReport {
+                        outcome: Outcome::failed(),
+                        output: bounded(format!("The step failed: {error}")),
+                    }
+                }
             };
             let reported = report.outcome.clone();
             let ended = ctx

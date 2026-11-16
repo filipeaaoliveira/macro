@@ -21,7 +21,7 @@ use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
 use crate::domain::models::{AgentAnswer, AgentTask};
-use crate::domain::ports::StepAgent;
+use crate::domain::ports::{Retryable, StepAgent};
 
 /// What the agent is told about handing its result back.
 const HAND_BACK: &str = include_str!("session_agent/hand_back.md");
@@ -73,6 +73,29 @@ pub enum SessionAgentError {
     /// The session worked past the Step's deadline.
     #[error("the agent did not finish within {0:?}")]
     TooSlow(Duration),
+}
+
+impl Retryable for SessionAgentError {
+    /// A turn that ended without a result, or ran past its deadline, ends
+    /// the same way when asked again, as does a session its owner may not
+    /// open; a failed read or write may not.
+    fn retryable(&self) -> bool {
+        match self {
+            SessionAgentError::Records(_) | SessionAgentError::NotOpened => true,
+            SessionAgentError::Session(error) => !matches!(
+                error,
+                RoutineSessionError::InvalidCommand
+                    | RoutineSessionError::PersonaUnavailable
+                    | RoutineSessionError::Forbidden
+                    | RoutineSessionError::AppNotConnected
+                    | RoutineSessionError::AppsUnsupported
+                    | RoutineSessionError::TeamAgentComputer
+            ),
+            SessionAgentError::TurnFailed(_)
+            | SessionAgentError::NothingHandedBack
+            | SessionAgentError::TooSlow(_) => false,
+        }
+    }
 }
 
 /// Runs each task in a session of the agent `bot_id`, owned by the Run's
@@ -311,8 +334,8 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
                 Ok(RoutineActionStatus::Succeeded | RoutineActionStatus::Failed(_)) => {
                     return Ok(());
                 }
-                Ok(RoutineActionStatus::Pending(RoutinePendingReason::AwaitingPrompt))
-                | Err(_) => {}
+                Ok(RoutineActionStatus::Pending(RoutinePendingReason::AwaitingPrompt)) | Err(_) => {
+                }
                 Ok(RoutineActionStatus::Pending(_)) => {
                     self.sessions.cancel(action.clone()).await?;
                 }

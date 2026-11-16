@@ -18,7 +18,7 @@ use super::{SessionAgent, SessionAgentError};
 use crate::domain::fakes::FakeRepo;
 use crate::domain::flow::StepName;
 use crate::domain::models::AgentTask;
-use crate::domain::ports::StepAgent;
+use crate::domain::ports::{Retryable, StepAgent};
 
 /// What happens to one call: it works, or fails with this error. A call
 /// that fails ambiguously may still take effect (`lands`).
@@ -105,7 +105,12 @@ impl RoutineSessions for FakeSessions {
     ) -> Result<PreparedRoutineSession, RoutineSessionError> {
         let session_id = command.session_id;
         self.prepared_calls.lock().expect("prepared").push(command);
-        let reply = self.prepares.lock().expect("prepares").pop_front().unwrap_or(WORKS);
+        let reply = self
+            .prepares
+            .lock()
+            .expect("prepares")
+            .pop_front()
+            .unwrap_or(WORKS);
         let mut open = self.open.lock().expect("open");
         let was_open = *open;
         if reply.lands {
@@ -128,7 +133,12 @@ impl RoutineSessions for FakeSessions {
         if *self.prompted.lock().expect("prompted") {
             return Err(RoutineSessionError::Conflict);
         }
-        let reply = self.prompts.lock().expect("prompts").pop_front().unwrap_or(WORKS);
+        let reply = self
+            .prompts
+            .lock()
+            .expect("prompts")
+            .pop_front()
+            .unwrap_or(WORKS);
         if reply.lands {
             *self.prompted.lock().expect("prompted") = true;
             // The agent works and hands back from the session, as code mode
@@ -311,13 +321,17 @@ async fn a_prompt_of_unknown_delivery_that_never_arrived_is_sent_once_more() {
 }
 
 #[tokio::test]
-async fn a_turn_that_ends_with_nothing_handed_back_fails_the_step() {
+async fn a_turn_that_ends_with_nothing_handed_back_fails_the_step_for_good() {
     let repo = FakeRepo::default();
     let sessions = FakeSessions::new(&repo, None, RoutineActionStatus::Succeeded);
 
     let failed = agent(&sessions, &repo).answer(plan_task(&repo).await).await;
 
-    assert!(matches!(failed, Err(SessionAgentError::NothingHandedBack)));
+    let Err(error) = failed else {
+        panic!("nothing was handed back");
+    };
+    assert!(matches!(error, SessionAgentError::NothingHandedBack));
+    assert!(!error.retryable());
 }
 
 #[tokio::test]
