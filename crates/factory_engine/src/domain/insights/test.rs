@@ -56,6 +56,7 @@ fn entry_summary(id: &str, steps: u32) -> EntrySummary {
         runs: steps,
         revisited_runs: 0,
         failed_runs: 0,
+        troubled_runs: 0,
         duration: None,
         gates_opened: 0,
         gates_answered: 0,

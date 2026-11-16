@@ -165,6 +165,7 @@ async fn each_entry_sums_up_its_steps_gates_and_loops(pool: PgPool) {
                 runs: 3,
                 revisited_runs: 1,
                 failed_runs: 1,
+                troubled_runs: 2,
                 duration: Some(DurationSpread {
                     count: 4,
                     median_seconds: 300.0,
@@ -185,6 +186,7 @@ async fn each_entry_sums_up_its_steps_gates_and_loops(pool: PgPool) {
                 runs: 1,
                 revisited_runs: 0,
                 failed_runs: 0,
+                troubled_runs: 0,
                 duration: None,
                 gates_opened: 0,
                 gates_answered: 0,
@@ -198,6 +200,7 @@ async fn each_entry_sums_up_its_steps_gates_and_loops(pool: PgPool) {
                 runs: 2,
                 revisited_runs: 0,
                 failed_runs: 0,
+                troubled_runs: 0,
                 duration: Some(DurationSpread {
                     count: 1,
                     median_seconds: 600.0,
@@ -332,8 +335,11 @@ async fn an_entry_names_at_most_its_five_newest_troubled_runs(pool: PgPool) {
         .await
         .expect("read");
 
-    // All seven failed at plan; the five newest are named.
+    // All seven failed at plan, and the newest also went back to it: it
+    // counts once among the troubled Runs. The five newest are named.
     assert_eq!(records.entries[0].failed_runs, 7);
+    assert_eq!(records.entries[0].revisited_runs, 1);
+    assert_eq!(records.entries[0].troubled_runs, 7);
     assert_eq!(
         records
             .trouble
@@ -370,7 +376,7 @@ async fn a_period_with_more_runs_than_the_cap_says_so(pool: PgPool) {
     // The oldest is left out, and so are its Steps.
     assert_eq!(over.runs.len(), 6);
     assert_eq!(over.runs.last().map(|run| run.id), Some(plan(2)));
-    assert_eq!(over.entries[0].steps, 6);
+    assert_eq!(over.entries[0].steps, 7);
 }
 
 #[sqlx::test(

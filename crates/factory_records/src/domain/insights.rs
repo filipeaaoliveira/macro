@@ -67,6 +67,9 @@ pub struct EntrySummary {
     pub revisited_runs: u32,
     /// The Runs in which one of its Steps failed.
     pub failed_runs: u32,
+    /// The Runs in which one of its Steps failed, or that visited it more
+    /// than once, each counted once.
+    pub troubled_runs: u32,
     /// How long its Steps that ended took; none if none did. A Step a
     /// cancelled Run stopped is left out.
     pub duration: Option<DurationSpread>,

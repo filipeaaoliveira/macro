@@ -69,15 +69,14 @@ export function successRate(counts: OutcomeCounts): number | undefined {
 }
 
 /**
- * The entries where Runs stop or go round again, worst first: the Runs in
- * which one of its Steps failed, plus the Runs that visited it more than
- * once. Entries with neither are left out.
+ * The entries where Runs stop or go round again, worst first: by the Runs
+ * in which one of its Steps failed or that visited it more than once, each
+ * Run counted once. Entries with none are left out.
  */
 export function troubledEntries(entries: EntryInsight[]): EntryInsight[] {
-  const score = (entry: EntryInsight) => entry.failedRuns + entry.revisitedRuns;
   return entries
-    .filter((entry) => score(entry) > 0)
-    .sort((a, b) => score(b) - score(a));
+    .filter((entry) => entry.troubledRuns > 0)
+    .sort((a, b) => b.troubledRuns - a.troubledRuns);
 }
 
 /** The unit a duration reads best in, and its value in that unit. */

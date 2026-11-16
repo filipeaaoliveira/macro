@@ -22,13 +22,15 @@ const entry = (
   name: string,
   failedSteps: number,
   failedRuns: number,
-  revisitedRuns: number
+  revisitedRuns: number,
+  troubledRuns: number
 ): EntryInsight => ({
   entry: name,
   steps: 9,
   runs: 4,
   revisitedRuns,
   failedRuns,
+  troubledRuns,
   outcomes: failedSteps > 0 ? [{ name: 'failed', count: failedSteps }] : [],
   trouble: [],
 });
@@ -50,19 +52,22 @@ describe('successRate', () => {
 
 describe('troubledEntries', () => {
   it('lists the entries where runs failed or went again, worst first', () => {
-    // CI failed five times in one run that went again: two runs in all,
-    // fewer than the three of review.
+    // CI failed five times in one run that went back too: one troubled
+    // run. Review has two failed runs, one of which went back: two. Fix had
+    // three runs go back: three. Ties keep their order.
     const entries = [
-      entry('plan', 0, 0, 1),
-      entry('write', 0, 0, 0),
-      entry('ci', 5, 1, 1),
-      entry('review', 2, 2, 1),
+      entry('plan', 0, 0, 1, 1),
+      entry('write', 0, 0, 0, 0),
+      entry('ci', 5, 1, 1, 1),
+      entry('review', 2, 2, 1, 2),
+      entry('fix', 0, 0, 3, 3),
     ];
 
     expect(troubledEntries(entries).map((found) => found.entry)).toEqual([
+      'fix',
       'review',
-      'ci',
       'plan',
+      'ci',
     ]);
   });
 });

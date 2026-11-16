@@ -864,6 +864,7 @@
           "runs",
           "revisitedRuns",
           "failedRuns",
+          "troubledRuns",
           "outcomes",
           "trouble"
         ],
@@ -942,6 +943,12 @@
               "$ref": "#/components/schemas/TroubleRun"
             },
             "description": "The newest Runs where it failed or was visited more than once."
+          },
+          "troubledRuns": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The Runs in which one of its Steps failed or that visited it more\nthan once, each counted once.",
+            "minimum": 0
           }
         }
       },

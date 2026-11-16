@@ -102,6 +102,11 @@ export type EntryInsight = {
      * The newest Runs where it failed or was visited more than once.
      */
     trouble: Array<TroubleRun>;
+    /**
+     * The Runs in which one of its Steps failed or that visited it more
+     * than once, each counted once.
+     */
+    troubledRuns: number;
 };
 
 /**

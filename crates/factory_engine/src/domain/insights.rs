@@ -282,6 +282,9 @@ pub struct EntryInsight {
     pub revisited_runs: u32,
     /// The Runs in which one of its Steps failed.
     pub failed_runs: u32,
+    /// The Runs in which one of its Steps failed or that visited it more
+    /// than once, each counted once.
+    pub troubled_runs: u32,
     /// How long its Steps took, a cancelled Run's left out.
     pub duration: Option<DurationStats>,
     /// How its Steps ended, most often first.
@@ -601,6 +604,7 @@ fn summarize(
                 runs: summary.runs,
                 revisited_runs: summary.revisited_runs,
                 failed_runs: summary.failed_runs,
+                troubled_runs: summary.troubled_runs,
                 duration: summary.duration.map(DurationStats::from),
                 outcomes: by_count_then_name(outcomes.remove(entry).unwrap_or_default()),
                 gate,

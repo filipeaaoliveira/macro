@@ -44,4 +44,10 @@ over.
   tokens?: EntryInsightTokens;
   /** The newest Runs where it failed or was visited more than once. */
   trouble: TroubleRun[];
+  /**
+   * The Runs in which one of its Steps failed or that visited it more
+than once, each counted once.
+   * @minimum 0
+   */
+  troubledRuns: number;
 }

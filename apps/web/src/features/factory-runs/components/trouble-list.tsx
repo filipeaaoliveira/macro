@@ -14,10 +14,7 @@ export function TroubleList(props: {
   onOpenRun: (runId: string) => void;
 }) {
   const most = () =>
-    Math.max(
-      1,
-      ...props.entries.map((entry) => entry.failedRuns + entry.revisitedRuns)
-    );
+    Math.max(1, ...props.entries.map((entry) => entry.troubledRuns));
 
   return (
     <InsightSection
@@ -47,6 +44,8 @@ export function TroubleList(props: {
                     })}
                   </span>
                 </div>
+                {/* The bar counts each troubled Run once: those that
+                    failed, then those that only went back. */}
                 <div class="flex h-1.5 overflow-hidden rounded-full bg-surface-2">
                   <div
                     class="h-full bg-failure"
@@ -55,7 +54,7 @@ export function TroubleList(props: {
                   <div
                     class="h-full bg-ink/70"
                     style={{
-                      width: `${(entry.revisitedRuns / most()) * 100}%`,
+                      width: `${((entry.troubledRuns - failed()) / most()) * 100}%`,
                     }}
                   />
                 </div>

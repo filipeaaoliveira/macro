@@ -128,6 +128,7 @@ const PLAN: EntryInsight = {
   runs: 44,
   revisitedRuns: 11,
   failedRuns: 3,
+  troubledRuns: 13,
   duration: { count: 57, medianSeconds: 212, p90Seconds: 540 },
   outcomes: [
     { name: 'done', count: 55 },
@@ -161,6 +162,7 @@ const CODE_ENTRIES: EntryInsight[] = [
     runs: 40,
     revisitedRuns: 0,
     failedRuns: 1,
+    troubledRuns: 1,
     duration: { count: 39, medianSeconds: 1_260, p90Seconds: 3_300 },
     outcomes: [
       { name: 'done', count: 36 },
@@ -181,6 +183,7 @@ const CODE_ENTRIES: EntryInsight[] = [
     runs: 34,
     revisitedRuns: 14,
     failedRuns: 0,
+    troubledRuns: 14,
     duration: { count: 52, medianSeconds: 420, p90Seconds: 900 },
     outcomes: [
       { name: 'clean', count: 31 },
@@ -200,6 +203,7 @@ const CODE_ENTRIES: EntryInsight[] = [
     runs: 14,
     revisitedRuns: 5,
     failedRuns: 0,
+    troubledRuns: 5,
     duration: { count: 21, medianSeconds: 640, p90Seconds: 1_500 },
     outcomes: [{ name: 'done', count: 21 }],
     tokens: {
@@ -216,6 +220,7 @@ const CODE_ENTRIES: EntryInsight[] = [
     runs: 30,
     revisitedRuns: 6,
     failedRuns: 1,
+    troubledRuns: 6,
     duration: { count: 37, medianSeconds: 780, p90Seconds: 1_800 },
     outcomes: [
       { name: 'green', count: 29 },
@@ -230,6 +235,7 @@ const CODE_ENTRIES: EntryInsight[] = [
     runs: 6,
     revisitedRuns: 2,
     failedRuns: 0,
+    troubledRuns: 2,
     duration: { count: 8, medianSeconds: 900, p90Seconds: 2_000 },
     outcomes: [{ name: 'done', count: 8 }],
     tokens: {

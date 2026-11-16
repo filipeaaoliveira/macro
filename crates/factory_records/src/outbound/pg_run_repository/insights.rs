@@ -181,7 +181,8 @@ impl RunInsightsRepository for PgRunRepository {
                 SELECT entry,
                        count(*) AS runs,
                        count(*) FILTER (WHERE visits > 1) AS revisited_runs,
-                       count(*) FILTER (WHERE failed) AS failed_runs
+                       count(*) FILTER (WHERE failed) AS failed_runs,
+                       count(*) FILTER (WHERE failed OR visits > 1) AS troubled_runs
                 FROM visits
                 GROUP BY entry
             )
@@ -191,6 +192,7 @@ impl RunInsightsRepository for PgRunRepository {
                 r.runs AS "runs!",
                 r.revisited_runs AS "revisited_runs!",
                 r.failed_runs AS "failed_runs!",
+                r.troubled_runs AS "troubled_runs!",
                 e.timed AS "timed!",
                 e.duration_median,
                 e.duration_p90,
@@ -214,6 +216,7 @@ impl RunInsightsRepository for PgRunRepository {
                 runs: count(row.runs),
                 revisited_runs: count(row.revisited_runs),
                 failed_runs: count(row.failed_runs),
+                troubled_runs: count(row.troubled_runs),
                 duration: spread(row.timed, row.duration_median, row.duration_p90),
                 gates_opened: count(row.gates_opened),
                 gates_answered: count(row.gates_answered),

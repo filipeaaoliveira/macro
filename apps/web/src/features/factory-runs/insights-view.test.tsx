@@ -82,6 +82,7 @@ const november: RunInsights = {
       runs: 2,
       revisitedRuns: 1,
       failedRuns: 1,
+      troubledRuns: 1,
       duration: { count: 3, medianSeconds: 300, p90Seconds: 540 },
       outcomes: [
         { name: 'done', count: 2 },
