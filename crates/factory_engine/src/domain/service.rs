@@ -297,11 +297,18 @@ where
                 offered: step.offered.iter().map(|o| o.as_str().to_owned()).collect(),
             });
         }
-        self.repo
+        // The Step can end between the read above and this write: a hand
+        // back that lands after it is lost, and the agent must hear so.
+        let kept = self
+            .repo
             .hand_back(session_id, &hand_back)
             .await
             .map_err(internal)?;
-        Ok(())
+        if kept {
+            Ok(())
+        } else {
+            Err(FactoryError::StepEnded)
+        }
     }
 
     #[tracing::instrument(skip(self, actor))]

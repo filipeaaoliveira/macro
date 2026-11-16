@@ -495,19 +495,23 @@ async fn the_latest_hand_back_counts_until_the_step_ends(pool: PgPool) {
     };
 
     assert_eq!(repo.handed_back(key(id, 1)).await.expect("read"), None);
-    repo.hand_back(session_id, &unchanged)
+    let first = repo
+        .hand_back(session_id, &unchanged)
         .await
         .expect("hand back");
-    repo.hand_back(session_id, &committed)
+    let second = repo
+        .hand_back(session_id, &committed)
         .await
         .expect("hand back again");
     repo.end_step(key(id, 1), &outcome("done"), "Committed the toggle")
         .await
         .expect("end");
-    repo.hand_back(session_id, &unchanged)
+    let late = repo
+        .hand_back(session_id, &unchanged)
         .await
         .expect("hand back after the end");
 
+    assert_eq!((first, second, late), (true, true, false));
     assert_eq!(
         repo.handed_back(key(id, 1)).await.expect("read"),
         Some(committed)

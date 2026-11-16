@@ -265,7 +265,7 @@ impl RunRepository for FakeRepo {
         }))
     }
 
-    async fn hand_back(&self, session_id: Uuid, hand_back: &HandBack) -> Result<(), FakeError> {
+    async fn hand_back(&self, session_id: Uuid, hand_back: &HandBack) -> Result<bool, FakeError> {
         let key = self
             .sessions
             .lock()
@@ -274,16 +274,18 @@ impl RunRepository for FakeRepo {
             .find(|claimed| claimed.session.session_id == session_id)
             .map(|claimed| claimed.key);
         let Some(key) = key else {
-            return Ok(());
+            return Ok(false);
         };
         if self.step_ended(key) {
-            return Ok(());
+            return Ok(false);
         }
         let mut sessions = self.sessions.lock().expect("sessions");
-        if let Some(claimed) = sessions.iter_mut().find(|claimed| claimed.key == key) {
+        let claimed = sessions.iter_mut().find(|claimed| claimed.key == key);
+        let kept = claimed.is_some();
+        if let Some(claimed) = claimed {
             claimed.handed = Some(hand_back.clone());
         }
-        Ok(())
+        Ok(kept)
     }
 
     async fn handed_back(&self, key: StepKey) -> Result<Option<HandBack>, FakeError> {

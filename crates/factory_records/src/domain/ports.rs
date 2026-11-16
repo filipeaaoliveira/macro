@@ -104,12 +104,13 @@ pub trait RunRepository: Send + Sync + 'static {
     ) -> impl Future<Output = Result<Option<SessionStep>, Self::Err>> + Send;
 
     /// Record what the agent in `session_id` handed back, replacing an
-    /// earlier hand back, while its Step has not ended.
+    /// earlier hand back, while its Step has not ended. Whether it was kept:
+    /// false once the Step ended.
     fn hand_back(
         &self,
         session_id: Uuid,
         hand_back: &HandBack,
-    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+    ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
 
     /// What the agent handed back for the Step `key`, if it did.
     fn handed_back(

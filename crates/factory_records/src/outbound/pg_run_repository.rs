@@ -487,8 +487,8 @@ impl RunRepository for PgRunRepository {
     }
 
     #[tracing::instrument(err, skip(self, hand_back), fields(outcome = %hand_back.outcome))]
-    async fn hand_back(&self, session_id: Uuid, hand_back: &HandBack) -> Result<(), Self::Err> {
-        sqlx::query!(
+    async fn hand_back(&self, session_id: Uuid, hand_back: &HandBack) -> Result<bool, Self::Err> {
+        let kept = sqlx::query!(
             r#"
             UPDATE factory_step
             SET handed_outcome = $2, handed_output = $3, handed_at = now()
@@ -500,7 +500,7 @@ impl RunRepository for PgRunRepository {
         )
         .execute(&self.pool)
         .await?;
-        Ok(())
+        Ok(kept.rows_affected() <= 1)
     }
 
     #[tracing::instrument(err, skip(self))]
