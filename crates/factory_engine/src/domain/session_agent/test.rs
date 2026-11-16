@@ -304,6 +304,11 @@ async fn a_step_runs_in_a_session_of_its_owner_and_returns_what_the_agent_handed
     assert_eq!(prompts.len(), 1);
     assert!(prompts[0].prompt.starts_with("Plan the change"));
     assert!(prompts[0].prompt.contains("macro.factory.handBack"));
+    assert!(
+        prompts[0]
+            .prompt
+            .contains("leave nothing running in the background")
+    );
 }
 
 /// A retry whose first attempt opened and prompted the session finds both
