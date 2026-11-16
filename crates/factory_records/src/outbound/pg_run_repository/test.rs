@@ -646,3 +646,44 @@ async fn a_stop_sees_what_the_attempts_recorded_of_a_session(pool: PgPool) {
         "a Step that let go of its session sends no prepare"
     );
 }
+
+/// A prepare that was refused, or never showed its session open, is no
+/// longer in flight; one whose session opened stays on record. A Step that
+/// ended sends no prepare.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "fixtures", scripts("people"))
+)]
+async fn a_forgotten_prepare_is_not_in_flight_and_an_ended_step_sends_none(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let id = RunId::generate();
+    insert(&repo, id, "Plan the dark mode toggle").await;
+    for seq in [1, 2, 3] {
+        repo.start_step(key(id, seq), &entry("plan"), 1)
+            .await
+            .expect("start");
+        repo.claim_session(key(id, seq), session(), &[outcome("done")])
+            .await
+            .expect("claim");
+        repo.record_prepare(key(id, seq)).await.expect("prepare");
+    }
+    repo.record_open(key(id, 2)).await.expect("open");
+    repo.end_step(key(id, 3), &outcome("done"), "The plan")
+        .await
+        .expect("end");
+
+    repo.forget_prepare(key(id, 1)).await.expect("forget");
+    repo.forget_prepare(key(id, 2)).await.expect("forget");
+    let ended = repo.record_prepare(key(id, 3)).await.expect("prepare");
+
+    let in_flight = async |seq| {
+        repo.stopping_session(key(id, seq), std::time::Duration::from_secs(3600))
+            .await
+            .expect("read")
+            .expect("claimed")
+            .may_still_open
+    };
+    assert!(!in_flight(1).await, "refused");
+    assert!(in_flight(2).await, "opened: kept");
+    assert!(!ended, "an ended Step sends no prepare");
+}

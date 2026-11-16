@@ -262,6 +262,15 @@ impl RunRepository for FakeRepo {
     }
 
     async fn record_prepare(&self, key: StepKey) -> Result<bool, FakeError> {
+        let run_ended = self
+            .runs
+            .lock()
+            .expect("runs")
+            .get(&key.run_id)
+            .is_none_or(|run| run.end.is_some());
+        if run_ended || self.step_ended(key) {
+            return Ok(false);
+        }
         let mut sessions = self.sessions.lock().expect("sessions");
         let claimed = sessions
             .iter_mut()
@@ -271,6 +280,17 @@ impl RunRepository for FakeRepo {
             claimed.prepared_at = Some(Utc::now());
         }
         Ok(recorded)
+    }
+
+    async fn forget_prepare(&self, key: StepKey) -> Result<(), FakeError> {
+        let mut sessions = self.sessions.lock().expect("sessions");
+        if let Some(claimed) = sessions
+            .iter_mut()
+            .find(|claimed| claimed.key == key && !claimed.opened)
+        {
+            claimed.prepared_at = None;
+        }
+        Ok(())
     }
 
     async fn record_open(&self, key: StepKey) -> Result<(), FakeError> {

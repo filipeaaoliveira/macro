@@ -354,10 +354,11 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
         // one under its id, and prompting it would start the work over. An
         // attempt Temporal gave up on may still run here after the Step let
         // go of its session, so it checks before each.
-        self.still_holds(task.key).await?;
-        // Recorded at the database's time before each prepare, so a stop
-        // can tell a session that may still open from one that never will.
-        // A Step that let go of its session sends no prepare.
+        //
+        // The prepare is recorded at the database's time before it is sent,
+        // so a stop can tell a session that may still open from one that
+        // never will. A Step that let go of its session, or that ended, or
+        // whose Run ended, sends no prepare.
         if !self
             .repo
             .record_prepare(task.key)
@@ -366,7 +367,15 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
         {
             return Err(SessionAgentError::Released);
         }
-        self.open(&task, &action).await?;
+        if let Err(error) = self.open(&task, &action).await {
+            // Refused outright, or never shown open within the settle: no
+            // prepare is in flight, so a stop need not wait for one.
+            self.repo
+                .forget_prepare(task.key)
+                .await
+                .map_err(Self::records)?;
+            return Err(error);
+        }
         // The session just opened is this attempt's to delete when the Step
         // let go of it meanwhile: nothing else will.
         if let Err(released) = self.still_holds(task.key).await {

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE factory_step s\n            SET prepared_at = now()\n            FROM factory_run r\n            WHERE r.id = s.run_id AND s.run_id = $1 AND s.seq = $2\n                AND s.session_id IS NOT NULL AND s.session_released_at IS NULL\n                AND s.ended_at IS NULL AND r.ended_at IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "489d6e08f2223a25df99fe0b4312d780595fb2ffdc1e17950553ac523fda6f27"
+}

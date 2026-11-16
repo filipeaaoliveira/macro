@@ -488,10 +488,12 @@ impl RunRepository for PgRunRepository {
     async fn record_prepare(&self, key: StepKey) -> Result<bool, Self::Err> {
         let recorded = sqlx::query!(
             r#"
-            UPDATE factory_step
+            UPDATE factory_step s
             SET prepared_at = now()
-            WHERE run_id = $1 AND seq = $2
-                AND session_id IS NOT NULL AND session_released_at IS NULL
+            FROM factory_run r
+            WHERE r.id = s.run_id AND s.run_id = $1 AND s.seq = $2
+                AND s.session_id IS NOT NULL AND s.session_released_at IS NULL
+                AND s.ended_at IS NULL AND r.ended_at IS NULL
             "#,
             key.run_id.as_uuid(),
             i32::from(key.seq),
@@ -499,6 +501,22 @@ impl RunRepository for PgRunRepository {
         .execute(&self.pool)
         .await?;
         Ok(recorded.rows_affected() == 1)
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn forget_prepare(&self, key: StepKey) -> Result<(), Self::Err> {
+        sqlx::query!(
+            r#"
+            UPDATE factory_step
+            SET prepared_at = NULL
+            WHERE run_id = $1 AND seq = $2 AND opened_at IS NULL
+            "#,
+            key.run_id.as_uuid(),
+            i32::from(key.seq),
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     #[tracing::instrument(err, skip(self))]

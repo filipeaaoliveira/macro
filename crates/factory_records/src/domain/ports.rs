@@ -99,8 +99,14 @@ pub trait RunRepository: Send + Sync + 'static {
 
     /// Record that an attempt of the Step `key` is about to ask for its
     /// session to be opened, at the database's time. False once the Step
-    /// let go of the session: no prepare may be sent then.
+    /// let go of the session, or it or its Run ended: no prepare may be sent
+    /// then.
     fn record_prepare(&self, key: StepKey) -> impl Future<Output = Result<bool, Self::Err>> + Send;
+
+    /// Record that no prepare of the Step `key`'s session is in flight: the
+    /// last was refused, or never showed the session open. A session an
+    /// attempt saw open keeps its record.
+    fn forget_prepare(&self, key: StepKey) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// Record that an attempt of the Step `key` saw its session open.
     fn record_open(&self, key: StepKey) -> impl Future<Output = Result<(), Self::Err>> + Send;

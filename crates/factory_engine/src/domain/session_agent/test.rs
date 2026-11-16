@@ -565,10 +565,16 @@ async fn stopping_a_step_whose_session_opened_is_tried_again_when_its_delete_fai
     let repo = FakeRepo::default();
     let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
     let task = plan_task(&repo).await;
+    let claimed_long_ago = uuid::Timestamp::from_unix(
+        uuid::NoContext,
+        u64::try_from((chrono::Utc::now() - chrono::TimeDelta::minutes(30)).timestamp())
+            .expect("after the epoch"),
+        0,
+    );
     repo.claim_session(
         task.key,
         StepSession {
-            session_id: Uuid::now_v7(),
+            session_id: Uuid::new_v7(claimed_long_ago),
             action_id: Uuid::now_v7(),
         },
         &task.outcomes,
@@ -823,4 +829,30 @@ async fn a_prompt_the_harness_was_down_for_is_tried_again() {
         assert!(error.retryable(), "{error:?}");
         assert_eq!(sessions.landed(), 0);
     }
+}
+
+/// A prepare refused outright opens nothing: a stop that follows need not
+/// wait for it, and ends promptly.
+#[tokio::test(start_paused = true)]
+async fn a_step_whose_prepare_was_refused_stops_promptly() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded)
+        .preparing(&[Reply {
+            error: Some(RoutineSessionError::Forbidden),
+            lands: false,
+        }]);
+    let task = plan_task(&repo).await;
+    let key = task.key;
+    let refused = agent(&sessions, &repo).answer(task).await;
+    let started = tokio::time::Instant::now();
+
+    let stopped = agent(&sessions, &repo).stop(key, &julia()).await;
+
+    assert!(refused.is_err());
+    stopped.expect("nothing to wait for");
+    assert!(
+        started.elapsed() < super::STOP_WATCH,
+        "{:?}",
+        started.elapsed()
+    );
 }
