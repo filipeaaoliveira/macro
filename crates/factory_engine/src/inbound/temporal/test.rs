@@ -44,9 +44,9 @@ enum Work {
     FailsForGood,
     /// Works until stopped.
     Works,
-    /// Works until stopped the first time it is asked, and ends `done` when
-    /// asked again.
-    WorksThenEnds,
+    /// Works until stopped the first given number of times it is asked,
+    /// and ends `done` when asked again.
+    WorksThenEnds(usize),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -100,8 +100,8 @@ impl StepAgent for Agent {
             Work::Ends => Ok(ends),
             Work::FailsForGood => Err(AgentFailed),
             Work::Works => std::future::pending().await,
-            Work::WorksThenEnds if asked == 1 => std::future::pending().await,
-            Work::WorksThenEnds => Ok(ends),
+            Work::WorksThenEnds(works) if asked <= works => std::future::pending().await,
+            Work::WorksThenEnds(_) => Ok(ends),
         }
     }
 
@@ -292,14 +292,19 @@ async fn a_step_that_ends_has_its_agent_let_go() {
     );
 }
 
+/// How many times the tests shut a Step's worker down under it: more than
+/// a count of attempts would allow.
+const SHUTDOWNS: usize = 3;
+
 /// A worker shut down while a Step works, as on a deploy, gives the Step a
 /// few seconds, then drops its work; Temporal hands the Step to the next
 /// worker at once, not after the heartbeat timeout, and the agent goes on
-/// with the same Step, never stopped.
+/// with the same Step, never stopped. However many deploys come, they never
+/// use the Step up.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "Temporal doesn't exist in CI"]
 async fn a_step_whose_worker_shuts_down_goes_on_at_once_on_the_next() {
-    let agent = Agent::doing(Work::WorksThenEnds);
+    let agent = Agent::doing(Work::WorksThenEnds(SHUTDOWNS));
     let client = client().await;
     let repo = FakeRepo::default();
     let start = plan_run(&repo).await;
@@ -316,19 +321,28 @@ async fn a_step_whose_worker_shuts_down_goes_on_at_once_on_the_next() {
         .await
         .expect("start");
 
-    let first = worker_on(&task_queue, &runtime, client.clone(), steps()).expect("worker");
-    // The first worker shuts down once the Step reaches the agent.
-    tokio::time::timeout(PATIENCE, first.run_until(asked(&agent)))
-        .await
-        .expect("the first worker shuts down")
-        .expect("the first worker ran");
-    let restarted = tokio::time::Instant::now();
+    // Each worker shuts down once the Step reaches the agent; the next one
+    // gets it within a few seconds.
+    let mut restarted = None;
+    for _ in 0..SHUTDOWNS {
+        let worker = worker_on(&task_queue, &runtime, client.clone(), steps()).expect("worker");
+        let reached = async {
+            asked(&agent).await;
+            if let Some(restarted) = restarted {
+                let waited = tokio::time::Instant::elapsed(&restarted);
+                assert!(waited < Duration::from_secs(30), "{waited:?}");
+            }
+        };
+        tokio::time::timeout(PATIENCE, worker.run_until(reached))
+            .await
+            .expect("the worker shuts down")
+            .expect("the worker ran");
+        restarted = Some(tokio::time::Instant::now());
+    }
 
-    let second = worker_on(&task_queue, &runtime, client.clone(), steps()).expect("worker");
+    let last = worker_on(&task_queue, &runtime, client.clone(), steps()).expect("worker");
     let done = Notify::new();
     let walked = async {
-        asked(&agent).await;
-        let waited = restarted.elapsed();
         let ended = tokio::time::timeout(
             PATIENCE,
             handle.get_result(WorkflowGetResultOptions::default()),
@@ -336,16 +350,15 @@ async fn a_step_whose_worker_shuts_down_goes_on_at_once_on_the_next() {
         .await
         .expect("the workflow ends");
         done.notify_one();
-        (waited, ended)
+        ended
     };
-    let (worked, (waited, ended)) = tokio::join!(second.run_until(done.notified()), walked);
-    worked.expect("the second worker ran");
+    let (worked, ended) = tokio::join!(last.run_until(done.notified()), walked);
+    worked.expect("the last worker ran");
 
     assert!(matches!(ended, Ok(RunOutcome::Success)), "{ended:?}");
-    assert!(waited < Duration::from_secs(30), "{waited:?}");
     let tasks = agent.tasks.lock().expect("tasks").clone();
-    assert_eq!(tasks.len(), 2);
-    assert_eq!(tasks[0], tasks[1]);
+    assert_eq!(tasks.len(), SHUTDOWNS + 1);
+    assert!(tasks.iter().all(|task| *task == tasks[0]));
     assert_eq!(agent.stops.load(Ordering::SeqCst), 0);
     assert_eq!(agent.releases.load(Ordering::SeqCst), 1);
 }

@@ -20,12 +20,12 @@
 use std::time::Duration;
 
 use factory_records::domain::models::{Outcome, RunOutcome, StepKey};
-use temporalio_common::RetryPolicy;
 use temporalio_common::error::ApplicationFailure;
 use temporalio_macros::{workflow, workflow_methods};
 use temporalio_sdk::{
-    ActivityCancellationType, ActivityOptions, SyncWorkflowContext, WorkflowCancellationToken,
-    WorkflowContext, WorkflowContextView, WorkflowResult, WorkflowTermination,
+    ActivityCancellationType, ActivityCloseTimeouts, ActivityOptions, SyncWorkflowContext,
+    WorkflowCancellationToken, WorkflowContext, WorkflowContextView, WorkflowResult,
+    WorkflowTermination,
 };
 
 use crate::domain::flow::GateDefinition;
@@ -45,8 +45,12 @@ const STEP_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 /// its worker as gone and tries again elsewhere.
 const STEP_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// How many times a Step's work is tried before it ends `failed`.
-const STEP_ATTEMPTS: u32 = 3;
+/// How long a Step's work may take in all, across its attempts. Attempts
+/// are not counted: a worker shutting down fails the attempt it runs, so a
+/// count would let a few deploys fail a healthy Step for good. Work that
+/// would fail the same way again fails at once, and each attempt gives up on
+/// its agent session within its own timeout.
+const STEP_TOTAL: Duration = Duration::from_secs(2 * 60 * 60);
 
 /// How long recording a Step, a Gate or a Run's end may take.
 const RECORD_TIMEOUT: Duration = Duration::from_secs(60);
@@ -54,6 +58,10 @@ const RECORD_TIMEOUT: Duration = Duration::from_secs(60);
 /// How long one attempt to stop a Step's agent may take: past the agent's
 /// own watch of its stopped session, and the session's delete.
 const STOP_TIMEOUT: Duration = Duration::from_secs(3 * 60);
+
+/// How long stopping a Step's agent may take in all, across its attempts,
+/// before it is given up on.
+const STOP_TOTAL: Duration = Duration::from_secs(15 * 60);
 
 /// The workflow of one Run.
 #[workflow]
@@ -78,14 +86,13 @@ impl FlowWorkflow {
         // The Step's work is dropped before its cancellation completes, so
         // the agent is stopped after it, and the Run's `cancelled` end
         // closes the Step, so a late end of it records nothing.
-        let work_options = ActivityOptions::with_start_to_close_timeout(STEP_TIMEOUT)
+        let work_options =
+            ActivityOptions::with_close_timeouts(ActivityCloseTimeouts::ScheduleAndStartToClose {
+                schedule_to_close: STEP_TOTAL,
+                start_to_close: STEP_TIMEOUT,
+            })
             .heartbeat_timeout(STEP_HEARTBEAT_TIMEOUT)
             .cancellation_type(ActivityCancellationType::WaitCancellationCompleted)
-            .retry_policy(
-                RetryPolicy::builder()
-                    .maximum_attempts(STEP_ATTEMPTS)
-                    .build(),
-            )
             .build();
         let record_options = ActivityOptions::start_to_close_timeout(RECORD_TIMEOUT);
 
@@ -256,17 +263,16 @@ impl FlowWorkflow {
 
 /// Stop the agent of the Step `request`, for good: after the Run was
 /// cancelled, on a token of its own the cancellation does not reach, or after
-/// its work failed for good. It is tried a few times, then given up on: the
-/// Run must not wait on an agent that won't answer.
+/// its work failed for good. It is tried until [`STOP_TOTAL`], then given up
+/// on: the Run must not wait on an agent that won't answer.
 async fn stop(ctx: &mut WorkflowContext<FlowWorkflow>, request: &StepRequest) {
-    let options = ActivityOptions::with_start_to_close_timeout(STOP_TIMEOUT)
+    let options =
+        ActivityOptions::with_close_timeouts(ActivityCloseTimeouts::ScheduleAndStartToClose {
+            schedule_to_close: STOP_TOTAL,
+            start_to_close: STOP_TIMEOUT,
+        })
         .heartbeat_timeout(STEP_HEARTBEAT_TIMEOUT)
         .cancellation_token(WorkflowCancellationToken::new())
-        .retry_policy(
-            RetryPolicy::builder()
-                .maximum_attempts(STEP_ATTEMPTS)
-                .build(),
-        )
         .build();
     // A stop given up on shows in the workflow's history; the worker logged
     // why.
