@@ -7,7 +7,7 @@ use agent_session::domain::session_task::TaskDocumentId;
 use chrono::Utc;
 use factory_records::domain::models::{
     ClaimedSession, EntryId, Gate, HandBack, Outcome, Run, RunEnd, RunId, RunInsert, RunOutcome,
-    SessionStep, Step, StepEnd, StepKey, StepSession, TaskLink,
+    SessionStep, Step, StepEnd, StepKey, StepSession, StoppingSession, TaskLink,
 };
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
@@ -23,6 +23,9 @@ pub(crate) struct FakeSession {
     pub(crate) offered: Vec<Outcome>,
     pub(crate) handed: Option<HandBack>,
     pub(crate) released: bool,
+    /// When an attempt last asked for the session to be opened.
+    pub(crate) prepared_at: Option<chrono::DateTime<Utc>>,
+    pub(crate) opened: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -236,6 +239,8 @@ impl RunRepository for FakeRepo {
             offered: offered.to_vec(),
             handed: None,
             released: false,
+            prepared_at: None,
+            opened: false,
         });
         Ok(ClaimedSession { session, new: true })
     }
@@ -254,6 +259,45 @@ impl RunRepository for FakeRepo {
             claimed.released = true;
         }
         Ok(())
+    }
+
+    async fn record_prepare(&self, key: StepKey) -> Result<bool, FakeError> {
+        let mut sessions = self.sessions.lock().expect("sessions");
+        let claimed = sessions
+            .iter_mut()
+            .find(|claimed| claimed.key == key && !claimed.released);
+        let recorded = claimed.is_some();
+        if let Some(claimed) = claimed {
+            claimed.prepared_at = Some(Utc::now());
+        }
+        Ok(recorded)
+    }
+
+    async fn record_open(&self, key: StepKey) -> Result<(), FakeError> {
+        let mut sessions = self.sessions.lock().expect("sessions");
+        if let Some(claimed) = sessions.iter_mut().find(|claimed| claimed.key == key) {
+            claimed.opened = true;
+        }
+        Ok(())
+    }
+
+    async fn stopping_session(
+        &self,
+        key: StepKey,
+        lands_within: std::time::Duration,
+    ) -> Result<Option<StoppingSession>, FakeError> {
+        let within = chrono::TimeDelta::from_std(lands_within).map_err(|_| FakeError)?;
+        let sessions = self.sessions.lock().expect("sessions");
+        Ok(sessions
+            .iter()
+            .find(|claimed| claimed.key == key)
+            .map(|claimed| StoppingSession {
+                session: claimed.session,
+                opened: claimed.opened,
+                may_still_open: claimed
+                    .prepared_at
+                    .is_some_and(|at| Utc::now() - at < within),
+            }))
     }
 
     async fn holds_session(&self, key: StepKey) -> Result<bool, FakeError> {

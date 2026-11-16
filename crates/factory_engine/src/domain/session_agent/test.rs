@@ -300,11 +300,19 @@ async fn a_step_runs_in_a_session_of_its_owner_and_returns_what_the_agent_handed
     let repo = FakeRepo::default();
     let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
     let task = plan_task(&repo).await;
+    let key = task.key;
 
     let answer = agent(&sessions, &repo).answer(task).await.expect("answer");
+    let stopping = repo
+        .stopping_session(key, std::time::Duration::from_secs(3600))
+        .await
+        .expect("read")
+        .expect("claimed");
 
     assert_eq!(answer.outcome, Outcome::done());
     assert_eq!(answer.text, "Add a toggle to the settings page");
+    // The prepare and the open are on record, for a stop to go by.
+    assert!(stopping.opened && stopping.may_still_open);
     let prepared = sessions.prepared_calls.lock().expect("prepared");
     assert_eq!(prepared.len(), 1);
     assert_eq!(prepared[0].selection.owner, julia());
@@ -524,6 +532,8 @@ async fn stopping_a_step_stops_its_session_until_the_turn_ends() {
     )
     .await
     .expect("claim");
+    // An attempt opened the session and saw it open.
+    repo.record_open(key).await.expect("open");
     *sessions.open.lock().expect("open") = true;
     *sessions.prompted.lock().expect("prompted") = true;
 
@@ -547,39 +557,59 @@ async fn stopping_a_step_stops_its_session_until_the_turn_ends() {
     );
 }
 
-/// A session claimed `ago` before now: its UUIDv7 id says when.
-fn claimed_ago(ago: std::time::Duration) -> StepSession {
-    let at = chrono::Utc::now() - chrono::TimeDelta::from_std(ago).expect("short");
-    let secs = u64::try_from(at.timestamp()).expect("after the epoch");
-    let timestamp = uuid::Timestamp::from_unix(uuid::NoContext, secs, 0);
-    StepSession {
-        session_id: Uuid::new_v7(timestamp),
-        action_id: Uuid::now_v7(),
+/// A session an attempt saw open is never written off: a delete that fails,
+/// however long ago its prepare was, fails the stop, which Temporal tries
+/// again, for the catch-all error is as likely a timeout as a missing one.
+#[tokio::test(start_paused = true)]
+async fn stopping_a_step_whose_session_opened_is_tried_again_when_its_delete_fails() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
+    let task = plan_task(&repo).await;
+    repo.claim_session(
+        task.key,
+        StepSession {
+            session_id: Uuid::now_v7(),
+            action_id: Uuid::now_v7(),
+        },
+        &task.outcomes,
+    )
+    .await
+    .expect("claim");
+    if let Some(claimed) = repo.sessions.lock().expect("sessions").first_mut() {
+        claimed.prepared_at = Some(chrono::Utc::now() - chrono::TimeDelta::minutes(30));
+        claimed.opened = true;
     }
+
+    let stopped = agent(&sessions, &repo).stop(task.key, &julia()).await;
+
+    let Err(error) = stopped else {
+        panic!("a session that opened is never written off");
+    };
+    assert!(error.retryable());
+    assert_eq!(sessions.deleted.lock().expect("deleted").len(), 1);
 }
 
-/// Claim `session` for `task`'s Step without opening it, as an attempt whose
-/// prepare was refused, or that died between claim and prepare.
-async fn claim_unopened(repo: &FakeRepo, task: &AgentTask, session: StepSession) {
-    repo.claim_session(task.key, session, &task.outcomes)
-        .await
-        .expect("claim");
-}
-
-/// A Step whose session never opened, claimed longer ago than any prepare
-/// takes, has nothing that could still appear: the stop neither waits out
-/// its watch nor fails, so the Flow goes on.
+/// A session no attempt saw open, whose last prepare is older than any
+/// takes to land, is not there: the stop neither waits out its watch nor
+/// fails, so the Flow goes on.
 #[tokio::test(start_paused = true)]
 async fn stopping_a_step_whose_session_never_opened_ends_promptly() {
     let repo = FakeRepo::default();
     let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
     let task = plan_task(&repo).await;
-    claim_unopened(
-        &repo,
-        &task,
-        claimed_ago(std::time::Duration::from_secs(600)),
+    repo.claim_session(
+        task.key,
+        StepSession {
+            session_id: Uuid::now_v7(),
+            action_id: Uuid::now_v7(),
+        },
+        &task.outcomes,
     )
-    .await;
+    .await
+    .expect("claim");
+    if let Some(claimed) = repo.sessions.lock().expect("sessions").first_mut() {
+        claimed.prepared_at = Some(chrono::Utc::now() - chrono::TimeDelta::minutes(30));
+    }
     let started = tokio::time::Instant::now();
 
     agent(&sessions, &repo)
@@ -596,22 +626,70 @@ async fn stopping_a_step_whose_session_never_opened_ends_promptly() {
     assert!(!repo.holds_session(task.key).await.expect("read"), "let go");
 }
 
-/// A session claimed moments ago may still be opened by a prepare in
-/// flight: a delete that misses fails the stop, for Temporal to try again.
+/// A session whose prepare was sent lately may still open: a delete that
+/// misses fails the stop, for Temporal to try again.
 #[tokio::test(start_paused = true)]
-async fn stopping_a_step_whose_session_may_still_open_is_tried_again() {
+async fn stopping_a_step_whose_prepare_was_sent_lately_is_tried_again() {
     let repo = FakeRepo::default();
     let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
     let task = plan_task(&repo).await;
-    claim_unopened(&repo, &task, claimed_ago(std::time::Duration::ZERO)).await;
+    repo.claim_session(
+        task.key,
+        StepSession {
+            session_id: Uuid::now_v7(),
+            action_id: Uuid::now_v7(),
+        },
+        &task.outcomes,
+    )
+    .await
+    .expect("claim");
+    repo.record_prepare(task.key).await.expect("prepare");
 
     let stopped = agent(&sessions, &repo).stop(task.key, &julia()).await;
 
     let Err(error) = stopped else {
-        panic!("a delete that missed a session that may still open fails the stop");
+        panic!("a session that may still open is not written off");
     };
     assert!(error.retryable());
     assert_eq!(sessions.deleted.lock().expect("deleted").len(), 1);
+}
+
+/// A retry prepares again long after the Step claimed its session. Cancelled
+/// while that prepare is in flight, the stop must not write the session off
+/// by the claim's age: it is tried again, and deletes the session once the
+/// prepare lands.
+#[tokio::test(start_paused = true)]
+async fn a_session_a_retry_prepares_as_the_run_is_cancelled_is_still_deleted() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
+    let task = plan_task(&repo).await;
+    let claimed_long_ago = uuid::Timestamp::from_unix(
+        uuid::NoContext,
+        u64::try_from((chrono::Utc::now() - chrono::TimeDelta::minutes(30)).timestamp())
+            .expect("after the epoch"),
+        0,
+    );
+    repo.claim_session(
+        task.key,
+        StepSession {
+            session_id: Uuid::new_v7(claimed_long_ago),
+            action_id: Uuid::now_v7(),
+        },
+        &task.outcomes,
+    )
+    .await
+    .expect("claim");
+    repo.record_prepare(task.key)
+        .await
+        .expect("the retry's prepare");
+
+    let in_flight = agent(&sessions, &repo).stop(task.key, &julia()).await;
+    *sessions.open.lock().expect("open") = true;
+    let landed = agent(&sessions, &repo).stop(task.key, &julia()).await;
+
+    assert!(in_flight.is_err_and(|error| error.retryable()));
+    landed.expect("the session the prepare opened is deleted");
+    assert!(!*sessions.open.lock().expect("open"));
 }
 
 /// A harness that fails a while answers neither the stop nor a read: the
@@ -635,6 +713,8 @@ async fn stopping_a_step_rides_out_a_harness_that_fails_a_while() {
     )
     .await
     .expect("claim");
+    // An attempt opened the session and saw it open.
+    repo.record_open(task.key).await.expect("open");
     *sessions.open.lock().expect("open") = true;
     *sessions.prompted.lock().expect("prompted") = true;
     *sessions.failing_cancels.lock().expect("failing cancels") = 2;
@@ -694,42 +774,53 @@ async fn a_session_let_go_while_it_opened_is_never_prompted() {
     );
 }
 
-/// A session that answers with a mismatch answers the same on every attempt:
+/// A session that refuses or mismatches answers the same on every attempt:
 /// the Step fails for good on the first, never preparing again.
 #[tokio::test]
-async fn a_mismatched_session_fails_the_step_for_good() {
-    let repo = FakeRepo::default();
-    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded)
-        .preparing(&[Reply {
-            error: Some(RoutineSessionError::SessionMismatch),
-            lands: false,
-        }]);
+async fn a_refused_or_mismatched_session_fails_the_step_for_good() {
+    for refusal in [
+        RoutineSessionError::SessionMismatch,
+        RoutineSessionError::ModelMismatch,
+        RoutineSessionError::Forbidden,
+    ] {
+        let repo = FakeRepo::default();
+        let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded)
+            .preparing(&[Reply {
+                error: Some(refusal),
+                lands: false,
+            }]);
 
-    let failed = agent(&sessions, &repo).answer(plan_task(&repo).await).await;
+        let failed = agent(&sessions, &repo).answer(plan_task(&repo).await).await;
 
-    let Err(error) = failed else {
-        panic!("the session mismatched");
-    };
-    assert!(!error.retryable(), "{error:?}");
-    assert_eq!(sessions.prepares(), 1);
+        let Err(error) = failed else {
+            panic!("the session answered {refusal:?}");
+        };
+        assert!(!error.retryable(), "{error:?}");
+        assert_eq!(sessions.prepares(), 1);
+    }
 }
 
-/// A harness that is down answers a prompt it never got: the attempt fails
-/// in a way the next one may get past.
+/// A harness that is down, or failed, answers a prompt it never took: the
+/// attempt fails in a way the next one may get past.
 #[tokio::test]
 async fn a_prompt_the_harness_was_down_for_is_tried_again() {
-    let repo = FakeRepo::default();
-    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded)
-        .prompting(&[Reply {
-            error: Some(RoutineSessionError::RuntimeUnavailable),
-            lands: false,
-        }]);
+    for outage in [
+        RoutineSessionError::RuntimeUnavailable,
+        RoutineSessionError::OperationFailed,
+    ] {
+        let repo = FakeRepo::default();
+        let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded)
+            .prompting(&[Reply {
+                error: Some(outage),
+                lands: false,
+            }]);
 
-    let failed = agent(&sessions, &repo).answer(plan_task(&repo).await).await;
+        let failed = agent(&sessions, &repo).answer(plan_task(&repo).await).await;
 
-    let Err(error) = failed else {
-        panic!("the harness was down");
-    };
-    assert!(error.retryable(), "{error:?}");
-    assert_eq!(sessions.landed(), 0);
+        let Err(error) = failed else {
+            panic!("the harness answered {outage:?}");
+        };
+        assert!(error.retryable(), "{error:?}");
+        assert_eq!(sessions.landed(), 0);
+    }
 }

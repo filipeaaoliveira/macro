@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::domain::models::{
     ClaimedSession, EntryId, HandBack, Outcome, Run, RunId, RunInsert, RunOutcome, SessionStep,
-    Step, StepKey, StepSession, TaskLink,
+    Step, StepKey, StepSession, StoppingSession, TaskLink,
 };
 
 /// Where Runs and their Steps are kept.
@@ -96,6 +96,23 @@ pub trait RunRepository: Send + Sync + 'static {
         &self,
         key: StepKey,
     ) -> impl Future<Output = Result<Option<StepSession>, Self::Err>> + Send;
+
+    /// Record that an attempt of the Step `key` is about to ask for its
+    /// session to be opened, at the database's time. False once the Step
+    /// let go of the session: no prepare may be sent then.
+    fn record_prepare(&self, key: StepKey) -> impl Future<Output = Result<bool, Self::Err>> + Send;
+
+    /// Record that an attempt of the Step `key` saw its session open.
+    fn record_open(&self, key: StepKey) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// The session the Step `key` claimed, as a stop sees it: whether it
+    /// opened, and whether a prepare sent less than `lands_within` ago may
+    /// still open it.
+    fn stopping_session(
+        &self,
+        key: StepKey,
+        lands_within: std::time::Duration,
+    ) -> impl Future<Output = Result<Option<StoppingSession>, Self::Err>> + Send;
 
     /// Record that the Step `key` let go of its session: stopped it for
     /// good, or is done with it. Recording it again changes nothing.

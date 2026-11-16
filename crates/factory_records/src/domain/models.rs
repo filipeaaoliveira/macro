@@ -351,6 +351,18 @@ pub struct ClaimedSession {
     pub new: bool,
 }
 
+/// The session a Step claimed, as a stop sees it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StoppingSession {
+    /// The session.
+    pub session: StepSession,
+    /// Whether an attempt saw it open.
+    pub opened: bool,
+    /// Whether a prepare sent for it may still open it: one was sent, and
+    /// less long ago than the bound the stop gave.
+    pub may_still_open: bool,
+}
+
 /// A Step as the agent session it works in finds it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SessionStep {

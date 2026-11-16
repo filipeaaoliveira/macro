@@ -588,3 +588,61 @@ async fn a_session_a_step_claimed_is_a_step_session(pool: PgPool) {
     assert!(repo.is_step_session(claimed).await.expect("read"));
     assert!(!repo.is_step_session(Uuid::now_v7()).await.expect("read"));
 }
+
+/// A stop tells a session that may still open from one that never will by
+/// what the attempts recorded: a prepare sent lately may still land; one
+/// that opened never counts as gone; and a Step that let go of its session
+/// sends no prepare.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "fixtures", scripts("people"))
+)]
+async fn a_stop_sees_what_the_attempts_recorded_of_a_session(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let id = RunId::generate();
+    insert(&repo, id, "Plan the dark mode toggle").await;
+    repo.start_step(key(id, 1), &entry("plan"), 1)
+        .await
+        .expect("start");
+    let claimed = repo
+        .claim_session(key(id, 1), session(), &[outcome("done")])
+        .await
+        .expect("claim")
+        .session;
+    let unprepared = repo
+        .stopping_session(key(id, 1), std::time::Duration::from_secs(3600))
+        .await
+        .expect("read")
+        .expect("claimed");
+
+    let prepared = repo.record_prepare(key(id, 1)).await.expect("prepare");
+    let lately = repo
+        .stopping_session(key(id, 1), std::time::Duration::from_secs(3600))
+        .await
+        .expect("read")
+        .expect("claimed");
+    let long_ago = repo
+        .stopping_session(key(id, 1), std::time::Duration::ZERO)
+        .await
+        .expect("read")
+        .expect("claimed");
+    repo.record_open(key(id, 1)).await.expect("open");
+    let opened = repo
+        .stopping_session(key(id, 1), std::time::Duration::ZERO)
+        .await
+        .expect("read")
+        .expect("claimed");
+    repo.release_session(key(id, 1)).await.expect("release");
+    let after_release = repo.record_prepare(key(id, 1)).await.expect("prepare");
+
+    assert_eq!(unprepared.session, claimed);
+    assert!(!unprepared.opened && !unprepared.may_still_open);
+    assert!(prepared);
+    assert!(lately.may_still_open && !lately.opened);
+    assert!(!long_ago.may_still_open);
+    assert!(opened.opened);
+    assert!(
+        !after_release,
+        "a Step that let go of its session sends no prepare"
+    );
+}

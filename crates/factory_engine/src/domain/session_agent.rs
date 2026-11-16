@@ -36,6 +36,14 @@ const LONGEST_WAIT: Duration = Duration::from_secs(10);
 /// longest a machine's agent takes to open one.
 const OPEN_SETTLE: Duration = Duration::from_secs(200);
 
+/// How long after a prepare was sent its session may still open: past the
+/// routine sessions route's 30 s and [`OPEN_SETTLE`], with a margin. A stop
+/// writes off a session it can't delete only when none opened and the last
+/// prepare is older than this. A runtime that opens a requested session
+/// later still, as macrod may when its event stream lags or replays, leaves
+/// a session no stop deletes: the record narrows that, no bound closes it.
+const PREPARE_LANDS_WITHIN: Duration = Duration::from_secs(5 * 60);
+
 /// How long a prompt whose delivery is unknown is given to show in the
 /// session.
 const PROMPT_SETTLE: Duration = Duration::from_secs(60);
@@ -347,6 +355,17 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
         // attempt Temporal gave up on may still run here after the Step let
         // go of its session, so it checks before each.
         self.still_holds(task.key).await?;
+        // Recorded at the database's time before each prepare, so a stop
+        // can tell a session that may still open from one that never will.
+        // A Step that let go of its session sends no prepare.
+        if !self
+            .repo
+            .record_prepare(task.key)
+            .await
+            .map_err(Self::records)?
+        {
+            return Err(SessionAgentError::Released);
+        }
         self.open(&task, &action).await?;
         // The session just opened is this attempt's to delete when the Step
         // let go of it meanwhile: nothing else will.
@@ -354,6 +373,11 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
             self.delete(&action).await;
             return Err(released);
         }
+        // A session that opened is never written off by a stop.
+        self.repo
+            .record_open(task.key)
+            .await
+            .map_err(Self::records)?;
         self.prompt_once(&task, &action).await?;
         self.finished(&action, deadline).await?;
 
@@ -377,30 +401,34 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
         key: StepKey,
         owner: &MacroUserIdStr<'static>,
     ) -> Result<(), SessionAgentError> {
-        let claimed = self
-            .repo
-            .claimed_session(key)
-            .await
-            .map_err(Self::records)?;
-        let Some(session) = claimed else {
-            return Ok(());
-        };
-
-        // Recorded first, so no attempt opens the session again once it is
-        // deleted.
+        // Recorded first, so no attempt prepares or opens the session again
+        // once it is deleted, and what the attempts recorded before is all
+        // there will be.
         self.repo
             .release_session(key)
             .await
             .map_err(Self::records)?;
+        let stopping = self
+            .repo
+            .stopping_session(key, PREPARE_LANDS_WITHIN)
+            .await
+            .map_err(Self::records)?;
+        let Some(stopping) = stopping else {
+            return Ok(());
+        };
+        // A session no attempt saw open, and no prepare sent lately may
+        // still open, is not there and never will be. Any other session may
+        // be working, whatever a read or a delete answers: the client's
+        // catch-all error is as likely a timeout as a missing session.
+        let written_off = !stopping.opened && !stopping.may_still_open;
+
         // A prompt already on its way can land after the first stop and
         // start the turn again, so the stop is sent again while the session
         // still works, until its turn has ended or the watch is over. One
         // whose prepare is still in flight, or a harness that fails a while,
         // answers neither the stop nor a read, yet may open or work on, so
-        // the watch rides that out. A session that never answered once no
-        // prepare can still open it never will: it is missing, and there is
-        // nothing to watch.
-        let action = self.action(owner, session);
+        // the watch rides that out.
+        let action = self.action(owner, stopping.session);
         self.cancel(&action).await;
         let mut seen = false;
         let deadline = tokio::time::Instant::now() + STOP_WATCH;
@@ -417,22 +445,17 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
                     seen = true;
                     self.cancel(&action).await;
                 }
-                Err(RoutineSessionError::OperationFailed)
-                    if !seen && !could_still_open(session) =>
-                {
-                    break;
-                }
+                Err(_) if !seen && written_off => break,
                 Err(_) => {}
             }
         }
-        // A delete that misses once no prepare can open the session means
-        // there is none: it never opened, or a delete whose answer was lost
-        // already took it. Any other failed delete fails the stop, which
-        // Temporal tries again.
+        // A delete that fails fails the stop, which Temporal tries again,
+        // unless the session was written off: then there is nothing to
+        // delete.
         match self.sessions.delete(action).await {
             Ok(()) => Ok(()),
-            Err(RoutineSessionError::OperationFailed) if !could_still_open(session) => {
-                tracing::info!("a stopped factory step's agent session is already gone");
+            Err(_) if !seen && written_off => {
+                tracing::info!("a stopped factory step never opened its agent session");
                 Ok(())
             }
             Err(error) => Err(error.into()),
@@ -459,22 +482,6 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
         }
         Ok(())
     }
-}
-
-/// Whether a prepare could still open `session`: its id, a UUIDv7, says
-/// when the Step claimed it, and no prepare outlives [`OPEN_SETTLE`] after
-/// that.
-fn could_still_open(session: StepSession) -> bool {
-    let Some((secs, nanos)) = session.session_id.get_timestamp().map(|at| at.to_unix()) else {
-        return true;
-    };
-    let claimed = i64::try_from(secs)
-        .ok()
-        .and_then(|secs| chrono::DateTime::<chrono::Utc>::from_timestamp(secs, nanos));
-    let (Some(claimed), Ok(settle)) = (claimed, chrono::TimeDelta::from_std(OPEN_SETTLE)) else {
-        return true;
-    };
-    chrono::Utc::now() - claimed < settle
 }
 
 /// The task's prompt, then how to hand back one of its outcomes.

@@ -10,7 +10,8 @@ use uuid::Uuid;
 
 use crate::domain::models::{
     ClaimedSession, EntryId, Gate, GateAnswer, HandBack, InvalidName, Outcome, Run, RunEnd, RunId,
-    RunInsert, RunOutcome, SessionStep, Step, StepEnd, StepKey, StepSession, TaskLink,
+    RunInsert, RunOutcome, SessionStep, Step, StepEnd, StepKey, StepSession, StoppingSession,
+    TaskLink,
 };
 use crate::domain::ports::RunRepository;
 
@@ -480,6 +481,73 @@ impl RunRepository for PgRunRepository {
         Ok(row.map(|row| StepSession {
             session_id: row.session_id,
             action_id: row.action_id,
+        }))
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn record_prepare(&self, key: StepKey) -> Result<bool, Self::Err> {
+        let recorded = sqlx::query!(
+            r#"
+            UPDATE factory_step
+            SET prepared_at = now()
+            WHERE run_id = $1 AND seq = $2
+                AND session_id IS NOT NULL AND session_released_at IS NULL
+            "#,
+            key.run_id.as_uuid(),
+            i32::from(key.seq),
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(recorded.rows_affected() == 1)
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn record_open(&self, key: StepKey) -> Result<(), Self::Err> {
+        sqlx::query!(
+            r#"
+            UPDATE factory_step
+            SET opened_at = now()
+            WHERE run_id = $1 AND seq = $2
+                AND session_id IS NOT NULL AND opened_at IS NULL
+            "#,
+            key.run_id.as_uuid(),
+            i32::from(key.seq),
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn stopping_session(
+        &self,
+        key: StepKey,
+        lands_within: std::time::Duration,
+    ) -> Result<Option<StoppingSession>, Self::Err> {
+        let row = sqlx::query!(
+            r#"
+            SELECT
+                session_id AS "session_id!",
+                action_id AS "action_id!",
+                opened_at IS NOT NULL AS "opened!",
+                COALESCE(prepared_at > now() - make_interval(secs => $3), false)
+                    AS "may_still_open!"
+            FROM factory_step
+            WHERE run_id = $1 AND seq = $2 AND session_id IS NOT NULL
+            "#,
+            key.run_id.as_uuid(),
+            i32::from(key.seq),
+            lands_within.as_secs_f64(),
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|row| StoppingSession {
+            session: StepSession {
+                session_id: row.session_id,
+                action_id: row.action_id,
+            },
+            opened: row.opened,
+            may_still_open: row.may_still_open,
         }))
     }
 

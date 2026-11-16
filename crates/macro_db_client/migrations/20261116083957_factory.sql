@@ -59,6 +59,11 @@ CREATE TABLE factory_step (
     -- it once its end was recorded. An attempt still running after that,
     -- such as one Temporal timed out, must not open it again under its id.
     session_released_at timestamptz,
+    -- When an attempt of the Step last asked for its session to be opened,
+    -- and when one first saw it open. A stop writes off a session it can't
+    -- delete only when none opened and no prepare can still land.
+    prepared_at timestamptz,
+    opened_at timestamptz,
     CONSTRAINT factory_step_end CHECK (
         (outcome IS NULL) = (ended_at IS NULL) AND (output IS NULL) = (ended_at IS NULL)
     ),
@@ -68,6 +73,10 @@ CREATE TABLE factory_step (
     ),
     CONSTRAINT factory_step_session_released CHECK (
         session_released_at IS NULL OR session_id IS NOT NULL
+    ),
+    CONSTRAINT factory_step_session_opening CHECK (
+        (prepared_at IS NULL OR session_id IS NOT NULL)
+        AND (opened_at IS NULL OR session_id IS NOT NULL)
     ),
     CONSTRAINT factory_step_hand_back CHECK (
         (handed_outcome IS NULL) = (handed_at IS NULL)
