@@ -21,10 +21,10 @@ use macro_authorization::{
 };
 use macro_user_id::user_id::MacroUserIdStr;
 use model_error_response::ErrorResponse;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::domain::models::{FactoryError, RunDetail};
+use crate::domain::models::{FactoryError, FlowSummary, RunDetail};
 use crate::domain::ports::FactoryService;
 
 /// Router state for the Run API.
@@ -68,6 +68,7 @@ impl<S, Auth> FromRef<FactoryRouterState<S, Auth>> for MacroAuthorizationState<A
 /// code-mode SDK calls it as the Run's owner.
 ///
 /// Routes:
+/// - `GET /flows` — the built-in Flows a Run can be started of.
 /// - `POST /runs` — create a Run of a Flow, owned by the acting user, and
 ///   start it.
 /// - `GET /runs/{id}` — read a Run and the Steps it took.
@@ -83,6 +84,7 @@ where
     T: Send + Sync + 'static,
 {
     Router::new()
+        .route("/flows", get(list_flows_handler::<S, Auth>))
         .route("/runs", post(create_run_handler::<S, Auth>))
         .route("/runs/{id}", get(get_run_handler::<S, Auth>))
         .route(
@@ -103,6 +105,13 @@ fn acting_user(caller: InternalAuthorization) -> Result<MacroUserIdStr<'static>,
         .acting_user
         .map(|user| user.macro_user_id)
         .ok_or(FactoryError::NoActingUser)
+}
+
+/// The Flows a Run can be started of.
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct FlowsResponse {
+    /// The Flows, by name.
+    pub flows: Vec<FlowSummary>,
 }
 
 /// Request body for creating a Run.
@@ -164,6 +173,32 @@ pub struct HandBackRequest {
     pub outcome: Outcome,
     /// What the agent produced, for the Run's later Steps and for people.
     pub text: String,
+}
+
+/// List the built-in Flows a Run can be started of, by name.
+#[utoipa::path(
+    get,
+    tag = "factory",
+    operation_id = "list_factory_flows",
+    path = "/flows",
+    responses(
+        (status = 200, body = FlowsResponse),
+        (status = 401, body = ErrorResponse),
+        (status = 403, body = ErrorResponse),
+    )
+)]
+#[tracing::instrument(skip_all)]
+pub async fn list_flows_handler<S, Auth>(
+    State(state): State<FactoryRouterState<S, Auth>>,
+    _caller: MacroAuthorizationExtractor<Auth, UserOrInternal>,
+) -> Json<FlowsResponse>
+where
+    S: FactoryService,
+    Auth: MacroAuthorizationService,
+{
+    Json(FlowsResponse {
+        flows: state.service.list_flows(),
+    })
 }
 
 /// Create a Run of a Flow, owned by the acting user, and start its workflow.
@@ -447,6 +482,7 @@ impl IntoResponse for FactoryError {
 #[derive(utoipa::OpenApi)]
 #[openapi(
     paths(
+        list_flows_handler,
         create_run_handler,
         get_run_handler,
         answer_gate_handler,
@@ -455,6 +491,8 @@ impl IntoResponse for FactoryError {
         hand_back_handler
     ),
     components(schemas(
+        FlowsResponse,
+        FlowSummary,
         CreateRunRequest,
         AnswerGateRequest,
         LinkTaskRequest,

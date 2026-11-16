@@ -14,11 +14,12 @@ use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
+use crate::domain::built_in_flows::BUILT_IN_FLOWS;
 use crate::domain::flow::Flow;
 use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening};
 use crate::domain::models::{
-    FactoryError, RunDetail, RunFinish, RunStart, StepEnding, StepError, StepInput, StepReport,
-    StepRequest, StepStart,
+    FactoryError, FlowSummary, RunDetail, RunFinish, RunStart, StepEnding, StepError, StepInput,
+    StepReport, StepRequest, StepStart,
 };
 use crate::domain::ports::{
     AnswerDelivery, FactoryService, Retryable, RunWorkflows, RunWorkflowsError, StepExecutor,
@@ -145,6 +146,21 @@ where
     U: UserDirectory,
     T: TaskDirectory,
 {
+    fn list_flows(&self) -> Vec<FlowSummary> {
+        // A Flow that names a Step the worker does not serve yet is not
+        // offered: a Run of it would be refused.
+        BUILT_IN_FLOWS
+            .into_iter()
+            .filter_map(|flow| {
+                let read = flow.read(|step| self.executor.serves(step)).ok()?;
+                Some(FlowSummary {
+                    name: flow.name.to_string(),
+                    description: read.description,
+                })
+            })
+            .collect()
+    }
+
     #[tracing::instrument(skip_all, fields(run_id = tracing::field::Empty))]
     async fn create_run(
         &self,

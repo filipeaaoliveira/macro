@@ -8,8 +8,8 @@ use uuid::Uuid;
 use crate::domain::flow::StepName;
 use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening};
 use crate::domain::models::{
-    AgentAnswer, AgentTask, FactoryError, RunDetail, RunFinish, RunStart, StepEnding, StepError,
-    StepInput, StepReport, StepRequest, StepStart,
+    AgentAnswer, AgentTask, FactoryError, FlowSummary, RunDetail, RunFinish, RunStart, StepEnding,
+    StepError, StepInput, StepReport, StepRequest, StepStart,
 };
 
 /// What a Run's workflow did with an answer it was sent.
@@ -171,6 +171,10 @@ pub trait TaskDirectory: Send + Sync + 'static {
 /// Inbound service port: the Run API used by drivers (HTTP). Every call but
 /// a hand back is made for an acting user, and reaches only that user's Runs.
 pub trait FactoryService: Send + Sync + 'static {
+    /// The built-in Flows a Run can be started of: those that name only
+    /// Steps the worker serves.
+    fn list_flows(&self) -> Vec<FlowSummary>;
+
     /// Record `actor`'s new Run of the Flow `definition` for `request`,
     /// working on the task document `task_id` if one is given, and start it.
     /// The actor must have an account and see the task.

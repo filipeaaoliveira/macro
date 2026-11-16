@@ -115,6 +115,16 @@ pub struct RunDetail {
     pub steps: Vec<Step>,
 }
 
+/// A Flow a person can start a Run of.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FlowSummary {
+    /// Its name, which a Run of it is started with.
+    pub name: String,
+    /// What it does, for a person.
+    pub description: String,
+}
+
 /// Errors of the factory's Run use cases.
 #[derive(Debug, thiserror::Error)]
 pub enum FactoryError {

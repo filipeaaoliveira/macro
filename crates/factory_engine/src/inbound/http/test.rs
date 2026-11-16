@@ -20,7 +20,7 @@ use super::{FactoryRouterState, factory_router};
 use crate::domain::built_in_steps::BuiltInSteps;
 use crate::domain::fakes::FakeRepo;
 use crate::domain::gate::AnswerGate;
-use crate::domain::models::{FactoryError, RunDetail, RunStart};
+use crate::domain::models::{FactoryError, FlowSummary, RunDetail, RunStart};
 use crate::domain::ports::{AnswerDelivery, FactoryService, RunWorkflows, RunWorkflowsError};
 use crate::domain::service::FactoryServiceImpl;
 use crate::outbound::local_agent::LocalAgent;
@@ -123,6 +123,10 @@ impl FakeService {
 }
 
 impl FactoryService for FakeService {
+    fn list_flows(&self) -> Vec<FlowSummary> {
+        Vec::new()
+    }
+
     async fn create_run(
         &self,
         actor: MacroUserIdStr<'static>,
@@ -458,4 +462,48 @@ async fn a_run_is_not_linked_to_a_task_its_owner_cannot_see() {
 
     assert_eq!(seen.status(), StatusCode::OK);
     assert_eq!(hidden.status(), StatusCode::BAD_REQUEST);
+}
+
+/// The Flows a person can start, with what each does; the `code` Flow names
+/// Steps no worker serves yet, so it is not offered.
+#[tokio::test]
+async fn a_signed_in_user_lists_the_flows_the_worker_runs() {
+    let router = records_router(&FakeRepo::default());
+
+    let listed = router
+        .clone()
+        .oneshot(call(
+            "GET",
+            "/flows",
+            Caller::User("alice"),
+            serde_json::Value::Null,
+        ))
+        .await
+        .expect("response");
+    let anonymous = router
+        .oneshot(call(
+            "GET",
+            "/flows",
+            Caller::Nobody,
+            serde_json::Value::Null,
+        ))
+        .await
+        .expect("response");
+
+    assert_eq!(listed.status(), StatusCode::OK);
+    let flows = body(listed).await["flows"].clone();
+    let names: Vec<&str> = flows
+        .as_array()
+        .expect("flows")
+        .iter()
+        .map(|flow| flow["name"].as_str().expect("name"))
+        .collect();
+    assert_eq!(names, ["plan", "reply"]);
+    assert!(
+        flows[0]["description"]
+            .as_str()
+            .expect("description")
+            .starts_with("Plans the change")
+    );
+    assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
 }

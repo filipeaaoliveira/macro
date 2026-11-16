@@ -829,3 +829,17 @@ async fn reading_a_run_whose_workflow_never_started_ends_it() {
     );
     assert_eq!(new.run.end, None);
 }
+
+/// Only the Flows whose Steps the worker serves are offered: this one
+/// serves `reply` alone.
+#[test]
+fn only_the_flows_the_worker_runs_are_offered() {
+    let flows = service(&FakeRepo::default(), &FakeWorkflows::default()).list_flows();
+
+    let names: Vec<&str> = flows.iter().map(|flow| flow.name.as_str()).collect();
+    assert_eq!(names, ["reply"]);
+    assert_eq!(
+        flows[0].description,
+        "Replies to the Run's request in one Step."
+    );
+}

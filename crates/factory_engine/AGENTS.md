@@ -97,14 +97,17 @@ service's when no agent is configured.
 - `src/domain/built_in_steps.rs`: the Steps the worker serves and their
   prompts.
 - `src/domain/session_agent.rs`: an agent Step in a Macro agent session.
-- `flows/`: example Flows, read by the tests. `plan.json` runs on the
-  built-in Steps; `code.json` also names Steps no worker serves yet.
+- `flows/`: the built-in Flows, each named for its file
+  (`src/domain/built_in_flows.rs`). `GET /flows` lists those whose Steps the
+  worker serves, with their `description`: `plan` and `reply`; `code.json`
+  also names Steps no worker serves yet.
 
 ## Scope
 
 - Owns: the Flow format, its interpreter, Gates, the workflow and its
-  activities, the Run API's router, the built-in Steps (`reply`, `plan`,
-  `write`), and the `StepAgent` port with its local stand-in.
+  activities, the Run API's router, the built-in Flows (`flows/`) and Steps
+  (`reply`, `plan`, `write`), and the `StepAgent` port with its local
+  stand-in.
 - Not here: the Run, Step and Gate tables → `crates/factory_records`; the process
   that hosts the API and the worker → `services/factory_service`.
 
@@ -118,6 +121,8 @@ service's when no agent is configured.
 
 ## Recipes
 
+- Add a built-in Flow: a file in `flows/` with a `description`, and an entry
+  in `BUILT_IN_FLOWS` (`src/domain/built_in_flows.rs`).
 - Add a built-in Step: `src/domain/built_in_steps.rs` (`BuiltInStep`, `named`
   and `run`); an agent Step also gets its instructions in `built_in_steps/`.
 - Add a Flow keyword: `src/domain/flow.rs` (field and check) →
