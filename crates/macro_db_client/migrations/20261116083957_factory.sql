@@ -55,12 +55,19 @@ CREATE TABLE factory_step (
     handed_outcome text,
     handed_output text CHECK (octet_length(handed_output) <= 65536),
     handed_at timestamptz,
+    -- When the Step let go of its session: stopped it for good, or deleted
+    -- it once its end was recorded. An attempt still running after that,
+    -- such as one Temporal timed out, must not open it again under its id.
+    session_released_at timestamptz,
     CONSTRAINT factory_step_end CHECK (
         (outcome IS NULL) = (ended_at IS NULL) AND (output IS NULL) = (ended_at IS NULL)
     ),
     CONSTRAINT factory_step_session CHECK (
         (session_id IS NULL) = (action_id IS NULL)
         AND (session_id IS NULL) = (offered IS NULL)
+    ),
+    CONSTRAINT factory_step_session_released CHECK (
+        session_released_at IS NULL OR session_id IS NOT NULL
     ),
     CONSTRAINT factory_step_hand_back CHECK (
         (handed_outcome IS NULL) = (handed_at IS NULL)
