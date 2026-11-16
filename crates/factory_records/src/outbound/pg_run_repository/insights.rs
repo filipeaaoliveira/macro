@@ -84,9 +84,10 @@ impl RunInsightsRepository for PgRunRepository {
             .await?;
 
         // `factory_run_user_created_idx` reads the person's Runs in the range
-        // newest first and stops at the cap. A Flow filter drops the other
-        // Flows' Runs from that walk.
-        let runs = sqlx::query_as!(
+        // newest first and stops one past the cap, which tells whether Runs
+        // were left out. A Flow filter drops the other Flows' Runs from that
+        // walk.
+        let mut runs = sqlx::query_as!(
             RunSummaryRow,
             r#"
             SELECT
@@ -108,7 +109,7 @@ impl RunInsightsRepository for PgRunRepository {
             scope.from,
             scope.to,
             scope.flow.as_deref(),
-            i64::from(scope.cap),
+            i64::from(scope.cap) + 1,
             TITLE_CHARS,
         )
         .fetch_all(&mut *transaction)
@@ -116,6 +117,9 @@ impl RunInsightsRepository for PgRunRepository {
         .into_iter()
         .map(RunSummary::try_from)
         .collect::<Result<Vec<_>, _>>()?;
+
+        let capped = runs.len() > usize::from(scope.cap);
+        runs.truncate(usize::from(scope.cap));
 
         if runs.is_empty() {
             transaction.commit().await?;
@@ -169,14 +173,15 @@ impl RunInsightsRepository for PgRunRepository {
                 GROUP BY entry
             ),
             visits AS (
-                SELECT entry, count(*) AS visits
+                SELECT entry, count(*) AS visits, bool_or(outcome = 'failed') AS failed
                 FROM steps
                 GROUP BY entry, run_id
             ),
             by_run AS (
                 SELECT entry,
                        count(*) AS runs,
-                       count(*) FILTER (WHERE visits > 1) AS revisited_runs
+                       count(*) FILTER (WHERE visits > 1) AS revisited_runs,
+                       count(*) FILTER (WHERE failed) AS failed_runs
                 FROM visits
                 GROUP BY entry
             )
@@ -185,6 +190,7 @@ impl RunInsightsRepository for PgRunRepository {
                 e.steps AS "steps!",
                 r.runs AS "runs!",
                 r.revisited_runs AS "revisited_runs!",
+                r.failed_runs AS "failed_runs!",
                 e.timed AS "timed!",
                 e.duration_median,
                 e.duration_p90,
@@ -207,6 +213,7 @@ impl RunInsightsRepository for PgRunRepository {
                 steps: count(row.steps),
                 runs: count(row.runs),
                 revisited_runs: count(row.revisited_runs),
+                failed_runs: count(row.failed_runs),
                 duration: spread(row.timed, row.duration_median, row.duration_p90),
                 gates_opened: count(row.gates_opened),
                 gates_answered: count(row.gates_answered),
@@ -331,6 +338,7 @@ impl RunInsightsRepository for PgRunRepository {
         transaction.commit().await?;
         Ok(InsightsRecords {
             runs,
+            capped,
             entries,
             counts,
             trouble,

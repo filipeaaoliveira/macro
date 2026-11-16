@@ -43,9 +43,6 @@ pub enum InsightsError {
     /// The period ends before it starts, or is too long.
     #[error("the period must end on or after its start and last at most {MAX_INSIGHTS_DAYS} days")]
     InvalidPeriod,
-    /// The time zone is not one the IANA database names.
-    #[error("no time zone has this name")]
-    UnknownTimeZone,
     /// The Flow filter is not a Flow name.
     #[error(transparent)]
     InvalidFlow(#[from] factory_records::domain::models::InvalidName),
@@ -69,7 +66,9 @@ pub struct InsightsQuery {
 
 impl InsightsQuery {
     /// The days `from` to `to`, both included, in the IANA time zone
-    /// `time_zone`, of the Flow named `flow` or of every Flow.
+    /// `time_zone`, of the Flow named `flow` or of every Flow. A time zone
+    /// the time zone database does not name, as a browser may report one,
+    /// reads as UTC; the insights say which time zone they used.
     pub fn new(
         from: NaiveDate,
         to: NaiveDate,
@@ -80,9 +79,7 @@ impl InsightsQuery {
         if !(0..MAX_INSIGHTS_DAYS).contains(&days) {
             return Err(InsightsError::InvalidPeriod);
         }
-        let time_zone = time_zone
-            .parse::<Tz>()
-            .map_err(|_| InsightsError::UnknownTimeZone)?;
+        let time_zone = time_zone.parse::<Tz>().unwrap_or(Tz::UTC);
         let flow = flow.map(|flow| checked_name("flow", flow)).transpose()?;
         Ok(Self {
             from,
@@ -283,6 +280,8 @@ pub struct EntryInsight {
     /// The Runs that visited it more than once: sent back to it, or started
     /// over.
     pub revisited_runs: u32,
+    /// The Runs in which one of its Steps failed.
+    pub failed_runs: u32,
     /// How long its Steps took, a cancelled Run's left out.
     pub duration: Option<DurationStats>,
     /// How its Steps ended, most often first.
@@ -336,7 +335,8 @@ pub struct RunInsights {
     pub flow: Option<String>,
     /// The most Runs read: the newest in the period.
     pub run_cap: u16,
-    /// Whether the period reached that cap, so older Runs may be left out.
+    /// Whether the period had more Runs than that, so the oldest are left
+    /// out.
     pub capped: bool,
     /// How the Runs went.
     pub totals: OutcomeCounts,
@@ -600,6 +600,7 @@ fn summarize(
                 steps: summary.steps,
                 runs: summary.runs,
                 revisited_runs: summary.revisited_runs,
+                failed_runs: summary.failed_runs,
                 duration: summary.duration.map(DurationStats::from),
                 outcomes: by_count_then_name(outcomes.remove(entry).unwrap_or_default()),
                 gate,
@@ -614,14 +615,13 @@ fn summarize(
             .then_with(|| a.entry.cmp(&b.entry))
     });
 
-    let capped = records.runs.len() >= usize::from(INSIGHTS_RUN_CAP);
     RunInsights {
         from: query.from,
         to: query.to,
         time_zone: query.time_zone.name().to_string(),
         flow: query.flow.clone(),
         run_cap: INSIGHTS_RUN_CAP,
-        capped,
+        capped: records.capped,
         totals,
         days: days
             .into_iter()

@@ -65,6 +65,8 @@ pub struct EntrySummary {
     pub runs: u32,
     /// The Runs that visited it more than once.
     pub revisited_runs: u32,
+    /// The Runs in which one of its Steps failed.
+    pub failed_runs: u32,
     /// How long its Steps that ended took; none if none did. A Step a
     /// cancelled Run stopped is left out.
     pub duration: Option<DurationSpread>,
@@ -128,6 +130,9 @@ pub struct StepSessionRef {
 pub struct InsightsRecords {
     /// The Runs, newest first.
     pub runs: Vec<RunSummary>,
+    /// Whether the scope had more Runs than its cap, so the oldest are left
+    /// out.
+    pub capped: bool,
     /// Their Steps, summed up by entry.
     pub entries: Vec<EntrySummary>,
     /// Their Steps' outcomes and their Gates' answers, by entry.

@@ -226,7 +226,6 @@ async fn a_bad_period_time_zone_or_flow_is_refused() {
     let bad = [
         "/insights?from=2026-11-30&to=2026-11-01&timeZone=UTC",
         "/insights?from=2025-01-01&to=2026-11-01&timeZone=UTC",
-        "/insights?from=2026-11-01&to=2026-11-30&timeZone=Mars/Olympus",
         "/insights?from=2026-11-01&to=2026-11-30&timeZone=UTC&flow=Not%20a%20flow",
         "/insights?from=2026-11-01&timeZone=UTC",
     ];

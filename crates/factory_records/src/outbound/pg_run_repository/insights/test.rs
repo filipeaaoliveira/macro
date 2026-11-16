@@ -164,6 +164,7 @@ async fn each_entry_sums_up_its_steps_gates_and_loops(pool: PgPool) {
                 steps: 4,
                 runs: 3,
                 revisited_runs: 1,
+                failed_runs: 1,
                 duration: Some(DurationSpread {
                     count: 4,
                     median_seconds: 300.0,
@@ -183,6 +184,7 @@ async fn each_entry_sums_up_its_steps_gates_and_loops(pool: PgPool) {
                 steps: 1,
                 runs: 1,
                 revisited_runs: 0,
+                failed_runs: 0,
                 duration: None,
                 gates_opened: 0,
                 gates_answered: 0,
@@ -195,6 +197,7 @@ async fn each_entry_sums_up_its_steps_gates_and_loops(pool: PgPool) {
                 steps: 2,
                 runs: 2,
                 revisited_runs: 0,
+                failed_runs: 0,
                 duration: Some(DurationSpread {
                     count: 1,
                     median_seconds: 600.0,
@@ -311,4 +314,91 @@ async fn a_person_with_no_runs_reads_nothing(pool: PgPool) {
         .expect("read");
 
     assert_eq!(records, InsightsRecords::default());
+}
+
+fn plan(n: u32) -> RunId {
+    run(&format!("00000000-0000-7000-8000-0000000005{n:02}"))
+}
+
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "insights_failed_plans"))
+)]
+async fn an_entry_names_at_most_its_five_newest_troubled_runs(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+
+    let records = repo
+        .read_insights(&november("macro|julia@example.com"))
+        .await
+        .expect("read");
+
+    // All seven failed at plan; the five newest are named.
+    assert_eq!(records.entries[0].failed_runs, 7);
+    assert_eq!(
+        records
+            .trouble
+            .iter()
+            .map(|trouble| trouble.run_id)
+            .collect::<Vec<_>>(),
+        vec![plan(7), plan(6), plan(5), plan(4), plan(3)]
+    );
+}
+
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "insights_failed_plans"))
+)]
+async fn a_period_with_more_runs_than_the_cap_says_so(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let julia = november("macro|julia@example.com");
+
+    let exactly = repo
+        .read_insights(&InsightsScope {
+            cap: 7,
+            ..julia.clone()
+        })
+        .await
+        .expect("read at the cap");
+    let over = repo
+        .read_insights(&InsightsScope { cap: 6, ..julia })
+        .await
+        .expect("read past the cap");
+
+    assert!(!exactly.capped);
+    assert_eq!(exactly.runs.len(), 7);
+    assert!(over.capped);
+    // The oldest is left out, and so are its Steps.
+    assert_eq!(over.runs.len(), 6);
+    assert_eq!(over.runs.last().map(|run| run.id), Some(plan(2)));
+    assert_eq!(over.entries[0].steps, 6);
+}
+
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "insights"))
+)]
+async fn a_step_a_cancelled_run_stopped_takes_no_time(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+
+    let records = repo
+        .read_insights(&november("macro|julia@example.com"))
+        .await
+        .expect("read");
+
+    // Two write Steps: the export's took 600 s; the dark mode's was
+    // cancelled after 840 s and is not timed.
+    let write = records
+        .entries
+        .iter()
+        .find(|summary| summary.entry == entry("write"))
+        .expect("write");
+    assert_eq!(write.steps, 2);
+    assert_eq!(
+        write.duration,
+        Some(DurationSpread {
+            count: 1,
+            median_seconds: 600.0,
+            p90_seconds: 600.0,
+        })
+    );
 }

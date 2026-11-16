@@ -55,6 +55,7 @@ fn entry_summary(id: &str, steps: u32) -> EntrySummary {
         steps,
         runs: steps,
         revisited_runs: 0,
+        failed_runs: 0,
         duration: None,
         gates_opened: 0,
         gates_answered: 0,
@@ -240,6 +241,7 @@ async fn entries_follow_their_flows_order_with_their_outcomes_and_troubled_runs(
             visits: 2,
         }],
         sessions: Vec::new(),
+        capped: false,
     };
     let service = service(records, Vec::new());
 
@@ -361,8 +363,7 @@ fn a_period_that_ends_first_or_lasts_too_long_is_refused() {
 }
 
 #[test]
-fn an_unknown_time_zone_or_a_flow_that_is_no_name_is_refused() {
-    let zone = InsightsQuery::new(day("2026-11-10"), day("2026-11-10"), "Mars/Olympus", None);
+fn a_flow_that_is_no_name_is_refused() {
     let flow = InsightsQuery::new(
         day("2026-11-10"),
         day("2026-11-10"),
@@ -370,6 +371,47 @@ fn an_unknown_time_zone_or_a_flow_that_is_no_name_is_refused() {
         Some("Plan; DROP".to_string()),
     );
 
-    assert!(matches!(zone, Err(InsightsError::UnknownTimeZone)));
     assert!(matches!(flow, Err(InsightsError::InvalidFlow(_))));
+}
+
+#[tokio::test]
+async fn a_time_zone_the_database_does_not_name_reads_as_utc() {
+    let service = service(InsightsRecords::default(), Vec::new());
+
+    let insights = service
+        .insights(&julia(), query("2026-11-10", "2026-11-10", "Mars/Olympus"))
+        .await
+        .expect("insights");
+
+    assert_eq!(insights.time_zone, "UTC");
+    assert_eq!(
+        service.repo.asked.lock().expect("asked")[0].from,
+        at("2026-11-10T00:00:00Z")
+    );
+}
+
+#[test]
+fn a_day_whose_midnight_a_clock_change_skips_starts_at_its_first_hour() {
+    // Sao Paulo moved its clocks from midnight to 01:00 on 2018-11-04.
+    let start = super::start_of_day(chrono_tz::America::Sao_Paulo, day("2018-11-04"));
+
+    assert_eq!(start, Some(at("2018-11-04T03:00:00Z")));
+}
+
+#[tokio::test]
+async fn a_period_with_more_runs_than_the_cap_says_so() {
+    let records = InsightsRecords {
+        capped: true,
+        runs: vec![summary(1, Some("plan"), "2026-11-10T10:00:00Z", None)],
+        ..InsightsRecords::default()
+    };
+    let service = service(records, Vec::new());
+
+    let insights = service
+        .insights(&julia(), query("2026-11-10", "2026-11-10", "UTC"))
+        .await
+        .expect("insights");
+
+    assert!(insights.capped);
+    assert_eq!(insights.run_cap, INSIGHTS_RUN_CAP);
 }
