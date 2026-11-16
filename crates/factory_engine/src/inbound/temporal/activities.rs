@@ -6,6 +6,7 @@ use temporalio_common::error::ApplicationFailure;
 use temporalio_macros::activities;
 use temporalio_sdk::activities::{ActivityContext, ActivityError};
 
+use crate::domain::gate::{GateAnswered, GateOpening};
 use crate::domain::models::{RunFinish, StepError, StepReport, StepRequest};
 use crate::domain::ports::StepService;
 
@@ -16,6 +17,10 @@ use crate::domain::ports::StepService;
 trait DynStepService: Send + Sync {
     async fn run_step(&self, request: StepRequest) -> Result<StepReport, StepError>;
 
+    async fn open_gate(&self, opening: GateOpening) -> Result<(), StepError>;
+
+    async fn answer_gate(&self, answered: GateAnswered) -> Result<(), StepError>;
+
     async fn end_run(&self, finish: RunFinish) -> Result<(), StepError>;
 }
 
@@ -23,6 +28,14 @@ trait DynStepService: Send + Sync {
 impl<T: StepService> DynStepService for T {
     async fn run_step(&self, request: StepRequest) -> Result<StepReport, StepError> {
         StepService::run_step(self, request).await
+    }
+
+    async fn open_gate(&self, opening: GateOpening) -> Result<(), StepError> {
+        StepService::open_gate(self, opening).await
+    }
+
+    async fn answer_gate(&self, answered: GateAnswered) -> Result<(), StepError> {
+        StepService::answer_gate(self, answered).await
     }
 
     async fn end_run(&self, finish: RunFinish) -> Result<(), StepError> {
@@ -63,6 +76,26 @@ impl FactoryActivities {
         request: StepRequest,
     ) -> Result<StepReport, ActivityError> {
         self.steps.run_step(request).await.map_err(failure)
+    }
+
+    /// Record that a Run waits for a person to answer a Gate.
+    #[activity(name = "factory_open_gate")]
+    pub async fn open_gate(
+        self: Arc<Self>,
+        _ctx: ActivityContext,
+        opening: GateOpening,
+    ) -> Result<(), ActivityError> {
+        self.steps.open_gate(opening).await.map_err(failure)
+    }
+
+    /// Record the answer a Run's workflow took.
+    #[activity(name = "factory_answer_gate")]
+    pub async fn answer_gate(
+        self: Arc<Self>,
+        _ctx: ActivityContext,
+        answered: GateAnswered,
+    ) -> Result<(), ActivityError> {
+        self.steps.answer_gate(answered).await.map_err(failure)
     }
 
     /// Record how a Run ended.

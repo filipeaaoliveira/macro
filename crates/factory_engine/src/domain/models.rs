@@ -111,6 +111,18 @@ pub enum FactoryError {
     /// No Run has this id.
     #[error("run not found")]
     NotFound,
+    /// The Run has ended, so it takes no answer and cannot be cancelled.
+    #[error("the run has ended")]
+    RunEnded,
+    /// The note on an answer is larger than a Gate keeps.
+    #[error("the note must be at most {max} bytes")]
+    NoteTooLarge {
+        /// The most bytes a note may hold.
+        max: usize,
+    },
+    /// The Run's workflow did not take the answer, and said why.
+    #[error("the answer was refused: {0}")]
+    AnswerRefused(String),
     /// Any other internal error.
     #[error("internal factory error: {0:?}")]
     Internal(rootcause::Report),

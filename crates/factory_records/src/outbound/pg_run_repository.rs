@@ -4,11 +4,12 @@
 mod test;
 
 use chrono::{DateTime, Utc};
+use macro_user_id::user_id::MacroUserIdStr;
 use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::domain::models::{
-    EntryId, InvalidName, Outcome, Run, RunEnd, RunId, RunOutcome, Step, StepEnd,
+    EntryId, Gate, GateAnswer, InvalidName, Outcome, Run, RunEnd, RunId, RunOutcome, Step, StepEnd,
 };
 use crate::domain::ports::RunRepository;
 
@@ -43,6 +44,12 @@ pub enum PgRunRepositoryErr {
     /// A stored Run or Step has only part of its end.
     #[error("a stored end has an outcome but no time, or the other way round")]
     PartialEnd,
+    /// A stored Gate has only part of its question or its answer.
+    #[error("a stored gate has only part of its question or its answer")]
+    PartialGate,
+    /// A stored user id does not read as one.
+    #[error("stored user id {0:?} does not read as one")]
+    InvalidUserId(String),
 }
 
 struct RunRow {
@@ -83,12 +90,57 @@ struct StepRow {
     outcome: Option<String>,
     output: Option<String>,
     ended_at: Option<DateTime<Utc>>,
+    question: Option<String>,
+    answers: Option<Vec<String>>,
+    opened_at: Option<DateTime<Utc>>,
+    answer: Option<String>,
+    note: Option<String>,
+    user_id: Option<String>,
+    answered_at: Option<DateTime<Utc>>,
+}
+
+impl StepRow {
+    /// The Step's Gate, from the columns its left join filled.
+    fn gate(&mut self) -> Result<Option<Gate>, PgRunRepositoryErr> {
+        let answer = match (self.answer.take(), self.answered_at) {
+            (Some(answer), Some(answered_at)) => Some(GateAnswer {
+                answer: Outcome::try_from(answer)?,
+                note: self.note.take(),
+                user_id: self
+                    .user_id
+                    .take()
+                    .map(|id| {
+                        MacroUserIdStr::try_from(id.clone())
+                            .map_err(|_| PgRunRepositoryErr::InvalidUserId(id))
+                    })
+                    .transpose()?,
+                answered_at,
+            }),
+            (None, None) => None,
+            _ => return Err(PgRunRepositoryErr::PartialGate),
+        };
+
+        match (self.question.take(), self.answers.take(), self.opened_at) {
+            (Some(question), Some(answers), Some(opened_at)) => Ok(Some(Gate {
+                question,
+                answers: answers
+                    .into_iter()
+                    .map(Outcome::try_from)
+                    .collect::<Result<_, _>>()?,
+                opened_at,
+                answer,
+            })),
+            (None, None, None) if answer.is_none() => Ok(None),
+            _ => Err(PgRunRepositoryErr::PartialGate),
+        }
+    }
 }
 
 impl TryFrom<StepRow> for Step {
     type Error = PgRunRepositoryErr;
 
-    fn try_from(row: StepRow) -> Result<Self, Self::Error> {
+    fn try_from(mut row: StepRow) -> Result<Self, Self::Error> {
+        let gate = row.gate()?;
         let end = match (row.outcome, row.output, row.ended_at) {
             (Some(outcome), Some(output), Some(ended_at)) => Some(StepEnd {
                 outcome: Outcome::try_from(outcome)?,
@@ -104,6 +156,7 @@ impl TryFrom<StepRow> for Step {
                 .map_err(|_| PgRunRepositoryErr::VisitOutOfRange(row.visit))?,
             started_at: row.started_at,
             end,
+            gate,
         })
     }
 }
@@ -157,10 +210,25 @@ impl RunRepository for PgRunRepository {
         let rows = sqlx::query_as!(
             StepRow,
             r#"
-            SELECT entry, visit, started_at, outcome, output, ended_at
-            FROM factory_step
-            WHERE run_id = $1
-            ORDER BY started_at, entry, visit
+            SELECT
+                s.entry,
+                s.visit,
+                s.started_at,
+                s.outcome,
+                s.output,
+                s.ended_at,
+                g.question AS "question?",
+                g.answers AS "answers?",
+                g.opened_at AS "opened_at?",
+                g.answer,
+                g.note,
+                g.user_id,
+                g.answered_at
+            FROM factory_step s
+            LEFT JOIN factory_gate g
+                ON g.run_id = s.run_id AND g.entry = s.entry AND g.visit = s.visit
+            WHERE s.run_id = $1
+            ORDER BY s.started_at, s.entry, s.visit
             "#,
             id.as_uuid(),
         )
@@ -206,6 +274,66 @@ impl RunRepository for PgRunRepository {
             i32::from(visit),
             outcome.as_str(),
             output,
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    #[tracing::instrument(err, skip(self, question, answers), fields(entry = %entry))]
+    async fn open_gate(
+        &self,
+        id: RunId,
+        entry: &EntryId,
+        visit: u16,
+        question: &str,
+        answers: &[Outcome],
+    ) -> Result<(), Self::Err> {
+        let answers: Vec<String> = answers.iter().map(|a| a.as_str().to_owned()).collect();
+        sqlx::query!(
+            r#"
+            INSERT INTO factory_gate (run_id, entry, visit, question, answers)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (run_id, entry, visit) DO NOTHING
+            "#,
+            id.as_uuid(),
+            entry.as_str(),
+            i32::from(visit),
+            question,
+            &answers,
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    #[tracing::instrument(err, skip(self, note, user_id), fields(entry = %entry, answer = %answer))]
+    async fn answer_gate(
+        &self,
+        id: RunId,
+        entry: &EntryId,
+        visit: u16,
+        answer: &Outcome,
+        note: Option<&str>,
+        user_id: &MacroUserIdStr<'static>,
+    ) -> Result<(), Self::Err> {
+        // The answer is recorded once the Run's workflow took it, so a user
+        // id with no account must not stop it: it records no one.
+        sqlx::query!(
+            r#"
+            UPDATE factory_gate
+            SET answer = $4,
+                note = $5,
+                user_id = (SELECT id FROM "User" WHERE id = $6),
+                answered_at = now()
+            WHERE run_id = $1 AND entry = $2 AND visit = $3 AND answer IS NULL
+            "#,
+            id.as_uuid(),
+            entry.as_str(),
+            i32::from(visit),
+            answer.as_str(),
+            note,
+            user_id.as_ref(),
         )
         .execute(&self.pool)
         .await?;

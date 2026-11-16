@@ -12,6 +12,18 @@ outcomes say where a Run goes next, as one durable Temporal workflow per Run.
 interpreter for the next Step, runs it as the `factory_run_step` activity,
 feeds the outcome back, and records the Run's end with `factory_end_run`.
 
+An entry with a `gate` asks a person a question once its Step ends `done`:
+the workflow records the Gate (`factory_open_gate`), waits for the
+`factory_answer_gate` update that `POST /runs/{id}/gates/{entry}/{visit}/answer`
+sends, records the answer (`factory_answer_gate` activity), and routes the
+answer as the entry's outcome. The update's validator (`domain/gate.rs`)
+refuses an answer to a Gate the Run does not wait on, a second answer, and an
+answer the Gate does not offer; the API answers those 409.
+
+`POST /runs/{id}/cancel` cancels the workflow through Temporal. The running
+Step or the wait for an answer stops, and the workflow records the Run's end
+as `cancelled` on a cancellation token of its own.
+
 The built-in Steps (`src/domain/built_in_steps.rs`) are `reply`, which
 acknowledges the request, and `plan` and `write`, which hand an agent a prompt
 built from the Step's instructions (`built_in_steps/*.md`), the Run's request,
@@ -25,7 +37,9 @@ prompt it was given.
 - `src/domain/interpreter.rs`: `when`, `max_visits`, `on_exhausted`, `on`,
   `next`, facts and resets, with no Temporal in it.
 - `src/inbound/temporal/workflow.rs`: the workflow that drives the interpreter.
-- `src/temporal.rs`: the task queue and the workflow's name and types.
+- `src/temporal.rs`: the task queue and the workflow's and its update's names
+  and types.
+- `src/domain/gate.rs`: the Gate a Run waits on and the answers it takes.
 - `src/domain/built_in_steps.rs`: the Steps the worker serves and their
   prompts.
 - `flows/`: example Flows, read by the tests. `plan.json` runs on the
@@ -33,15 +47,16 @@ prompt it was given.
 
 ## Scope
 
-- Owns: the Flow format, its interpreter, the workflow and its activities, the
-  Run API's router, the built-in Steps (`reply`, `plan`, `write`), and the
-  `StepAgent` port with its local stand-in.
-- Not here: the Run and Step tables → `crates/factory_records`; the process
+- Owns: the Flow format, its interpreter, Gates, the workflow and its
+  activities, the Run API's router, the built-in Steps (`reply`, `plan`,
+  `write`), and the `StepAgent` port with its local stand-in.
+- Not here: the Run, Step and Gate tables → `crates/factory_records`; the process
   that hosts the API and the worker → `services/factory_service`.
 
 ## Boundaries
 
-- Depends on: `factory_records`, `macro_authorization`, the Temporal Rust SDK.
+- Depends on: `factory_records`, `macro_authorization`, `macro_user_id`, the
+  Temporal Rust SDK.
 - Used by: `services/factory_service`.
 
 ## Recipes
@@ -59,7 +74,9 @@ prompt it was given.
 
 - The workflow must stay deterministic: everything it decides comes from the
   interpreter and the activities' results, never a clock, a random number or I/O.
-- Renaming `TASK_QUEUE`, `FLOW_WORKFLOW` or an activity's `name` strands the Runs
-  in flight on the old name.
+- Renaming `TASK_QUEUE`, `FLOW_WORKFLOW`, `ANSWER_GATE_UPDATE` or an
+  activity's `name` strands the Runs in flight on the old name.
+- A Gate opens only for a Step that ends `done`; any other outcome routes as
+  usual, so a failed plan is never put to a person.
 - `#[activities]` takes no generic type, so `FactoryActivities` holds the Step
   service as a trait object.

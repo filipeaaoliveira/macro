@@ -10,14 +10,16 @@ use axum::{
     routing::{get, post},
 };
 use factory_records::domain::models::{
-    EntryId, Outcome, Run, RunEnd, RunId, RunOutcome, Step, StepEnd,
+    EntryId, Gate, GateAnswer, Outcome, Run, RunEnd, RunId, RunOutcome, Step, StepEnd,
 };
 use macro_authorization::{
     InternalOnly, MacroAuthorizationExtractor, MacroAuthorizationService, MacroAuthorizationState,
 };
+use macro_user_id::user_id::MacroUserIdStr;
 use model_error_response::ErrorResponse;
 use serde::Deserialize;
 
+use crate::domain::gate::AnswerGate;
 use crate::domain::models::{FactoryError, RunDetail};
 use crate::domain::ports::FactoryService;
 
@@ -60,6 +62,9 @@ impl<S, Auth> FromRef<FactoryRouterState<S, Auth>> for MacroAuthorizationState<A
 /// Routes:
 /// - `POST /runs` — create a Run of a Flow and start it.
 /// - `GET /runs/{id}` — read a Run and the Steps it took.
+/// - `POST /runs/{id}/gates/{entry}/{visit}/answer` — answer the Gate the Run
+///   waits on.
+/// - `POST /runs/{id}/cancel` — cancel a Run that has not ended.
 pub fn factory_router<S, Auth, T>(state: FactoryRouterState<S, Auth>) -> Router<T>
 where
     S: FactoryService,
@@ -69,6 +74,11 @@ where
     Router::new()
         .route("/runs", post(create_run_handler::<S, Auth>))
         .route("/runs/{id}", get(get_run_handler::<S, Auth>))
+        .route(
+            "/runs/{id}/gates/{entry}/{visit}/answer",
+            post(answer_gate_handler::<S, Auth>),
+        )
+        .route("/runs/{id}/cancel", post(cancel_run_handler::<S, Auth>))
         .with_state(state)
 }
 
@@ -83,12 +93,37 @@ pub struct CreateRunRequest {
     pub request: String,
 }
 
-/// Path params for reading a Run.
+/// Path params naming a Run.
 #[derive(Debug, Deserialize, utoipa::IntoParams)]
 #[into_params(parameter_in = Path)]
 pub struct GetRunParams {
     /// The Run's id.
     pub id: RunId,
+}
+
+/// Path params for answering a Gate.
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Path)]
+pub struct AnswerGateParams {
+    /// The Run's id.
+    pub id: RunId,
+    /// The entry whose Step asked.
+    pub entry: EntryId,
+    /// Which visit of the entry asked.
+    pub visit: u16,
+}
+
+/// Request body for answering a Gate.
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AnswerGateRequest {
+    /// The answer, one the Gate offers.
+    pub answer: Outcome,
+    /// What the person adds, for the Run's later Steps to read.
+    #[serde(default)]
+    pub note: Option<String>,
+    /// Who answered.
+    pub user_id: MacroUserIdStr<'static>,
 }
 
 /// Create a Run of a Flow and start its workflow.
@@ -148,13 +183,87 @@ where
     Ok(Json(state.service.get_run(params.id).await?))
 }
 
+/// Answer the Gate a Run waits on. The Run goes on once its workflow took
+/// the answer; reading the Run shows the answer once it is recorded.
+#[utoipa::path(
+    post,
+    tag = "factory",
+    operation_id = "answer_factory_gate",
+    path = "/runs/{id}/gates/{entry}/{visit}/answer",
+    params(AnswerGateParams),
+    request_body = AnswerGateRequest,
+    responses(
+        (status = 202),
+        (status = 400, body = ErrorResponse),
+        (status = 401, body = ErrorResponse),
+        (status = 403, body = ErrorResponse),
+        (status = 404, body = ErrorResponse),
+        (status = 409, body = ErrorResponse),
+        (status = 500, body = ErrorResponse),
+    )
+)]
+#[tracing::instrument(err, skip_all, fields(run_id = %params.id, entry = %params.entry, visit = params.visit))]
+pub async fn answer_gate_handler<S, Auth>(
+    State(state): State<FactoryRouterState<S, Auth>>,
+    _caller: MacroAuthorizationExtractor<Auth, InternalOnly>,
+    Path(params): Path<AnswerGateParams>,
+    Json(body): Json<AnswerGateRequest>,
+) -> Result<StatusCode, FactoryError>
+where
+    S: FactoryService,
+    Auth: MacroAuthorizationService,
+{
+    let answer = AnswerGate {
+        entry: params.entry,
+        visit: params.visit,
+        answer: body.answer,
+        note: body.note,
+        user_id: body.user_id,
+    };
+    state.service.answer_gate(params.id, answer).await?;
+    Ok(StatusCode::ACCEPTED)
+}
+
+/// Cancel a Run that has not ended. Its running Step or Gate stops, and
+/// reading the Run shows it `cancelled` once its workflow recorded that.
+#[utoipa::path(
+    post,
+    tag = "factory",
+    operation_id = "cancel_factory_run",
+    path = "/runs/{id}/cancel",
+    params(GetRunParams),
+    responses(
+        (status = 202),
+        (status = 401, body = ErrorResponse),
+        (status = 403, body = ErrorResponse),
+        (status = 404, body = ErrorResponse),
+        (status = 409, body = ErrorResponse),
+        (status = 500, body = ErrorResponse),
+    )
+)]
+#[tracing::instrument(err, skip_all, fields(run_id = %params.id))]
+pub async fn cancel_run_handler<S, Auth>(
+    State(state): State<FactoryRouterState<S, Auth>>,
+    _caller: MacroAuthorizationExtractor<Auth, InternalOnly>,
+    Path(params): Path<GetRunParams>,
+) -> Result<StatusCode, FactoryError>
+where
+    S: FactoryService,
+    Auth: MacroAuthorizationService,
+{
+    state.service.cancel_run(params.id).await?;
+    Ok(StatusCode::ACCEPTED)
+}
+
 impl IntoResponse for FactoryError {
     fn into_response(self) -> axum::response::Response {
         let status_code = match &self {
             FactoryError::InvalidFlow(_)
             | FactoryError::EmptyRequest
-            | FactoryError::RequestTooLarge { .. } => StatusCode::BAD_REQUEST,
+            | FactoryError::RequestTooLarge { .. }
+            | FactoryError::NoteTooLarge { .. } => StatusCode::BAD_REQUEST,
             FactoryError::NotFound => StatusCode::NOT_FOUND,
+            FactoryError::RunEnded | FactoryError::AnswerRefused(_) => StatusCode::CONFLICT,
             FactoryError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
 
@@ -179,15 +288,24 @@ impl IntoResponse for FactoryError {
 /// The Run API's OpenAPI document.
 #[derive(utoipa::OpenApi)]
 #[openapi(
-    paths(create_run_handler, get_run_handler),
+    paths(
+        create_run_handler,
+        get_run_handler,
+        answer_gate_handler,
+        cancel_run_handler
+    ),
     components(schemas(
         CreateRunRequest,
+        AnswerGateRequest,
         RunDetail,
         Run,
         RunEnd,
         RunOutcome,
         Step,
         StepEnd,
+        Gate,
+        GateAnswer,
+        MacroUserIdStr,
         EntryId,
         Outcome,
         RunId,

@@ -3,19 +3,41 @@
 use factory_records::domain::models::RunId;
 
 use crate::domain::flow::StepName;
+use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening};
 use crate::domain::models::{
     AgentAnswer, AgentTask, FactoryError, RunDetail, RunFinish, RunStart, StepError, StepInput,
     StepReport, StepRequest,
 };
 
-/// Starts a Run's workflow.
-pub trait RunScheduler: Send + Sync + 'static {
-    /// The error type returned when the workflow does not start.
+/// What a Run's workflow did with an answer it was sent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AnswerDelivery {
+    /// The workflow took the answer; the Run goes on.
+    Taken,
+    /// The workflow refused the answer, for this reason.
+    Refused(String),
+}
+
+/// Starts, answers and cancels the workflows that walk Runs.
+pub trait RunWorkflows: Send + Sync + 'static {
+    /// The error type returned when the workflow cannot be reached.
     type Err: std::error::Error + Send + Sync + 'static;
 
     /// Start the workflow of `start.run_id`. Starting a Run that already
     /// started changes nothing.
     fn start(&self, start: &RunStart) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// Send `answer` to the workflow of `run_id`, which takes it or says why
+    /// not.
+    fn answer(
+        &self,
+        run_id: RunId,
+        answer: &AnswerGate,
+    ) -> impl Future<Output = Result<AnswerDelivery, Self::Err>> + Send;
+
+    /// Ask the workflow of `run_id` to stop its Step or Gate and end the Run
+    /// cancelled. Asking again, or once the workflow ended, changes nothing.
+    fn cancel(&self, run_id: RunId) -> impl Future<Output = Result<(), Self::Err>> + Send;
 }
 
 /// Does the work of a Flow's Steps.
@@ -60,6 +82,16 @@ pub trait FactoryService: Send + Sync + 'static {
 
     /// The Run and the Steps it took.
     fn get_run(&self, id: RunId) -> impl Future<Output = Result<RunDetail, FactoryError>> + Send;
+
+    /// Give a person's answer to the Gate the Run waits on.
+    fn answer_gate(
+        &self,
+        id: RunId,
+        answer: AnswerGate,
+    ) -> impl Future<Output = Result<(), FactoryError>> + Send;
+
+    /// Cancel a Run that has not ended.
+    fn cancel_run(&self, id: RunId) -> impl Future<Output = Result<(), FactoryError>> + Send;
 }
 
 /// Inbound service port: what a Run's workflow asks its worker to do.
@@ -69,6 +101,16 @@ pub trait StepService: Send + Sync + 'static {
         &self,
         request: StepRequest,
     ) -> impl Future<Output = Result<StepReport, StepError>> + Send;
+
+    /// Record that a Run waits for a person to answer a Gate.
+    fn open_gate(&self, opening: GateOpening)
+    -> impl Future<Output = Result<(), StepError>> + Send;
+
+    /// Record the answer a Run's workflow took.
+    fn answer_gate(
+        &self,
+        answered: GateAnswered,
+    ) -> impl Future<Output = Result<(), StepError>> + Send;
 
     /// Record how a Run ended.
     fn end_run(&self, finish: RunFinish) -> impl Future<Output = Result<(), StepError>> + Send;

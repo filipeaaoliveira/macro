@@ -6,14 +6,18 @@ use factory_records::domain::models::{
     EntryId, Outcome, Run, RunEnd, RunId, RunOutcome, Step, StepEnd,
 };
 use factory_records::domain::ports::RunRepository;
+use macro_user_id::user_id::MacroUserIdStr;
 use serde_json::json;
 
 use super::{FactoryServiceImpl, StepServiceImpl};
 use crate::domain::flow::StepName;
+use crate::domain::gate::AnswerGate;
 use crate::domain::models::{
     FactoryError, RunFinish, RunStart, StepInput, StepReport, StepRequest,
 };
-use crate::domain::ports::{FactoryService, RunScheduler, StepExecutor, StepService};
+use crate::domain::ports::{
+    AnswerDelivery, FactoryService, RunWorkflows, StepExecutor, StepService,
+};
 
 #[derive(Debug, thiserror::Error)]
 #[error("fake failure")]
@@ -65,6 +69,7 @@ impl RunRepository for FakeRepo {
                 visit,
                 started_at: Utc::now(),
                 end: None,
+                gate: None,
             },
         ));
         Ok(())
@@ -91,6 +96,29 @@ impl RunRepository for FakeRepo {
         Ok(())
     }
 
+    async fn open_gate(
+        &self,
+        _id: RunId,
+        _entry: &EntryId,
+        _visit: u16,
+        _question: &str,
+        _answers: &[Outcome],
+    ) -> Result<(), FakeError> {
+        Ok(())
+    }
+
+    async fn answer_gate(
+        &self,
+        _id: RunId,
+        _entry: &EntryId,
+        _visit: u16,
+        _answer: &Outcome,
+        _note: Option<&str>,
+        _user_id: &MacroUserIdStr<'static>,
+    ) -> Result<(), FakeError> {
+        Ok(())
+    }
+
     async fn end_run(&self, id: RunId, outcome: RunOutcome) -> Result<(), FakeError> {
         if let Some(run) = self.runs.lock().expect("runs").get_mut(&id) {
             run.end = Some(RunEnd {
@@ -102,13 +130,17 @@ impl RunRepository for FakeRepo {
     }
 }
 
+/// Keeps what it was sent. Refuses every answer when `refuse` is set.
 #[derive(Clone, Default)]
-struct FakeScheduler {
+struct FakeWorkflows {
     started: Arc<Mutex<Vec<RunStart>>>,
+    answers: Arc<Mutex<Vec<AnswerGate>>>,
+    cancelled: Arc<Mutex<Vec<RunId>>>,
     fail: bool,
+    refuse: bool,
 }
 
-impl RunScheduler for FakeScheduler {
+impl RunWorkflows for FakeWorkflows {
     type Err = FakeError;
 
     async fn start(&self, start: &RunStart) -> Result<(), FakeError> {
@@ -116,6 +148,23 @@ impl RunScheduler for FakeScheduler {
             return Err(FakeError);
         }
         self.started.lock().expect("started").push(start.clone());
+        Ok(())
+    }
+
+    async fn answer(
+        &self,
+        _run_id: RunId,
+        answer: &AnswerGate,
+    ) -> Result<AnswerDelivery, FakeError> {
+        if self.refuse {
+            return Ok(AnswerDelivery::Refused("not waiting".to_string()));
+        }
+        self.answers.lock().expect("answers").push(answer.clone());
+        Ok(AnswerDelivery::Taken)
+    }
+
+    async fn cancel(&self, run_id: RunId) -> Result<(), FakeError> {
+        self.cancelled.lock().expect("cancelled").push(run_id);
         Ok(())
     }
 }
@@ -181,15 +230,15 @@ fn reply_step(run_id: RunId) -> StepRequest {
 #[tokio::test]
 async fn creating_a_run_records_it_and_starts_its_workflow() {
     let repo = FakeRepo::default();
-    let scheduler = FakeScheduler::default();
-    let service = FactoryServiceImpl::new(repo.clone(), scheduler.clone(), FakeExecutor::default());
+    let workflows = FakeWorkflows::default();
+    let service = FactoryServiceImpl::new(repo.clone(), workflows.clone(), FakeExecutor::default());
 
     let created = service
         .create_run(reply_flow(), "Summarise the release notes".to_string())
         .await
         .expect("create");
 
-    let started = scheduler.started.lock().expect("started").clone();
+    let started = workflows.started.lock().expect("started").clone();
     assert_eq!(started.len(), 1);
     assert_eq!(started[0].run_id, created.run.id);
     assert_eq!(started[0].request, "Summarise the release notes");
@@ -201,11 +250,11 @@ async fn creating_a_run_records_it_and_starts_its_workflow() {
 #[tokio::test]
 async fn a_run_whose_workflow_does_not_start_is_not_kept() {
     let repo = FakeRepo::default();
-    let scheduler = FakeScheduler {
+    let workflows = FakeWorkflows {
         fail: true,
-        ..FakeScheduler::default()
+        ..FakeWorkflows::default()
     };
-    let service = FactoryServiceImpl::new(repo.clone(), scheduler, FakeExecutor::default());
+    let service = FactoryServiceImpl::new(repo.clone(), workflows, FakeExecutor::default());
 
     let refused = service
         .create_run(reply_flow(), "Summarise the release notes".to_string())
@@ -218,8 +267,8 @@ async fn a_run_whose_workflow_does_not_start_is_not_kept() {
 #[tokio::test]
 async fn a_flow_with_a_step_no_worker_serves_is_refused_before_anything_is_kept() {
     let repo = FakeRepo::default();
-    let scheduler = FakeScheduler::default();
-    let service = FactoryServiceImpl::new(repo.clone(), scheduler.clone(), FakeExecutor::default());
+    let workflows = FakeWorkflows::default();
+    let service = FactoryServiceImpl::new(repo.clone(), workflows.clone(), FakeExecutor::default());
     let flow = json!({ "entries": [{ "id": "plan", "step": "plan" }] });
 
     let refused = service
@@ -228,14 +277,14 @@ async fn a_flow_with_a_step_no_worker_serves_is_refused_before_anything_is_kept(
 
     assert!(matches!(refused, Err(FactoryError::InvalidFlow(_))));
     assert!(repo.runs.lock().expect("runs").is_empty());
-    assert!(scheduler.started.lock().expect("started").is_empty());
+    assert!(workflows.started.lock().expect("started").is_empty());
 }
 
 #[tokio::test]
 async fn an_empty_request_is_refused() {
     let service = FactoryServiceImpl::new(
         FakeRepo::default(),
-        FakeScheduler::default(),
+        FakeWorkflows::default(),
         FakeExecutor::default(),
     );
 
@@ -248,7 +297,7 @@ async fn an_empty_request_is_refused() {
 async fn reading_an_unknown_run_is_not_found() {
     let service = FactoryServiceImpl::new(
         FakeRepo::default(),
-        FakeScheduler::default(),
+        FakeWorkflows::default(),
         FakeExecutor::default(),
     );
 
@@ -338,4 +387,106 @@ async fn ending_a_run_records_its_outcome() {
 
     let ended = repo.get_run(run.id).await.expect("get").expect("exists");
     assert_eq!(ended.end.map(|end| end.outcome), Some(RunOutcome::Success));
+}
+
+fn approval(note: Option<String>) -> AnswerGate {
+    AnswerGate {
+        entry: EntryId::try_from("plan".to_string()).expect("valid"),
+        visit: 1,
+        answer: Outcome::try_from("approve".to_string()).expect("valid"),
+        note,
+        user_id: MacroUserIdStr::try_from("macro|julia@example.com".to_string()).expect("valid"),
+    }
+}
+
+#[tokio::test]
+async fn an_answer_is_sent_to_the_run_s_workflow() {
+    let repo = FakeRepo::default();
+    let workflows = FakeWorkflows::default();
+    let run = repo
+        .insert_run(RunId::generate(), "Plan")
+        .await
+        .expect("insert");
+    let service = FactoryServiceImpl::new(repo, workflows.clone(), FakeExecutor::default());
+
+    service
+        .answer_gate(run.id, approval(Some("Go ahead".to_string())))
+        .await
+        .expect("answer");
+
+    let answers = workflows.answers.lock().expect("answers").clone();
+    assert_eq!(answers, [approval(Some("Go ahead".to_string()))]);
+}
+
+#[tokio::test]
+async fn an_answer_the_workflow_refuses_is_a_conflict() {
+    let repo = FakeRepo::default();
+    let workflows = FakeWorkflows {
+        refuse: true,
+        ..FakeWorkflows::default()
+    };
+    let run = repo
+        .insert_run(RunId::generate(), "Plan")
+        .await
+        .expect("insert");
+    let service = FactoryServiceImpl::new(repo, workflows, FakeExecutor::default());
+
+    let refused = service.answer_gate(run.id, approval(None)).await;
+
+    assert!(matches!(refused, Err(FactoryError::AnswerRefused(_))));
+}
+
+#[tokio::test]
+async fn a_run_that_ended_takes_no_answer_and_no_cancel() {
+    let repo = FakeRepo::default();
+    let workflows = FakeWorkflows::default();
+    let run = repo
+        .insert_run(RunId::generate(), "Plan")
+        .await
+        .expect("insert");
+    repo.end_run(run.id, RunOutcome::Success)
+        .await
+        .expect("end");
+    let service = FactoryServiceImpl::new(repo, workflows.clone(), FakeExecutor::default());
+
+    let answered = service.answer_gate(run.id, approval(None)).await;
+    let cancelled = service.cancel_run(run.id).await;
+
+    assert!(matches!(answered, Err(FactoryError::RunEnded)));
+    assert!(matches!(cancelled, Err(FactoryError::RunEnded)));
+    assert!(workflows.answers.lock().expect("answers").is_empty());
+    assert!(workflows.cancelled.lock().expect("cancelled").is_empty());
+}
+
+#[tokio::test]
+async fn a_note_larger_than_a_gate_keeps_is_refused() {
+    let repo = FakeRepo::default();
+    let workflows = FakeWorkflows::default();
+    let run = repo
+        .insert_run(RunId::generate(), "Plan")
+        .await
+        .expect("insert");
+    let service = FactoryServiceImpl::new(repo, workflows.clone(), FakeExecutor::default());
+
+    let refused = service
+        .answer_gate(run.id, approval(Some("x".repeat(4_097))))
+        .await;
+
+    assert!(matches!(refused, Err(FactoryError::NoteTooLarge { .. })));
+    assert!(workflows.answers.lock().expect("answers").is_empty());
+}
+
+#[tokio::test]
+async fn cancelling_a_running_run_cancels_its_workflow() {
+    let repo = FakeRepo::default();
+    let workflows = FakeWorkflows::default();
+    let run = repo
+        .insert_run(RunId::generate(), "Plan")
+        .await
+        .expect("insert");
+    let service = FactoryServiceImpl::new(repo, workflows.clone(), FakeExecutor::default());
+
+    service.cancel_run(run.id).await.expect("cancel");
+
+    assert_eq!(*workflows.cancelled.lock().expect("cancelled"), [run.id]);
 }

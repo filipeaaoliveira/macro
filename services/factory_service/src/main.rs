@@ -13,7 +13,7 @@ use factory_engine::domain::built_in_steps::BuiltInSteps;
 use factory_engine::domain::service::{FactoryServiceImpl, StepServiceImpl};
 use factory_engine::inbound::http::{ApiDoc, FactoryRouterState, factory_router};
 use factory_engine::outbound::local_agent::LocalAgent;
-use factory_engine::outbound::temporal_scheduler::TemporalRunScheduler;
+use factory_engine::outbound::temporal_run_workflows::TemporalRunWorkflows;
 use factory_records::outbound::pg_run_repository::PgRunRepository;
 use macro_auth::middleware::decode_jwt::JwtValidationArgs;
 use macro_authorization::{
@@ -100,7 +100,7 @@ async fn run() -> Result<(), rootcause::Report> {
 
     let service = Arc::new(FactoryServiceImpl::new(
         repo,
-        TemporalRunScheduler::new(client),
+        TemporalRunWorkflows::new(client),
         steps,
     ));
     let api = factory_router(FactoryRouterState::new(service, authorization_state))

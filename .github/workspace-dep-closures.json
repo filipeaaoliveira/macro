@@ -7770,7 +7770,9 @@
       "crates/workspace-hack"
     ],
     "factory_records": [
+      "crates/cowlike",
       "crates/factory_records",
+      "crates/macro_user_id",
       "crates/workspace-hack"
     ],
     "factory_service": [

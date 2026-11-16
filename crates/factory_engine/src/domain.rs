@@ -2,6 +2,7 @@
 
 pub mod built_in_steps;
 pub mod flow;
+pub mod gate;
 pub mod interpreter;
 pub mod models;
 pub mod ports;

@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use chrono::Utc;
-use factory_records::domain::models::{EntryId, Outcome, RunId, Step, StepEnd};
+use factory_records::domain::models::{EntryId, Gate, GateAnswer, Outcome, RunId, Step, StepEnd};
 
 use super::{BuiltInStepError, BuiltInSteps};
 use crate::domain::flow::{Flow, StepName};
@@ -101,6 +101,7 @@ async fn a_write_is_given_the_plan_an_earlier_step_produced() {
             output: "Add a toggle to the settings page".to_string(),
             ended_at: Utc::now(),
         }),
+        gate: None,
     }];
 
     let report = steps
@@ -137,4 +138,41 @@ fn the_plan_flow_runs_on_the_built_in_steps() {
     let parsed = Flow::parse(definition, |name| steps.serves(name));
 
     assert!(parsed.is_ok(), "{parsed:?}");
+}
+
+#[tokio::test]
+async fn a_plan_reads_what_a_person_answered_the_last_one() {
+    let agent = FakeAgent::ending_with("done");
+    let steps = BuiltInSteps::new(agent.clone());
+    let revise = Outcome::try_from("revise".to_string()).expect("valid");
+    let earlier = [Step {
+        entry: EntryId::try_from("plan".to_string()).expect("valid"),
+        visit: 1,
+        started_at: Utc::now(),
+        end: Some(StepEnd {
+            outcome: Outcome::done(),
+            output: "Rebuild the index".to_string(),
+            ended_at: Utc::now(),
+        }),
+        gate: Some(Gate {
+            question: "Approve the plan?".to_string(),
+            answers: vec![Outcome::done(), revise.clone()],
+            opened_at: Utc::now(),
+            answer: Some(GateAnswer {
+                answer: revise,
+                note: Some("Keep the old index".to_string()),
+                user_id: None,
+                answered_at: Utc::now(),
+            }),
+        }),
+    }];
+
+    steps
+        .run(&step("plan"), input(&earlier))
+        .await
+        .expect("plan");
+
+    let tasks = agent.tasks.lock().expect("tasks");
+    assert!(tasks[0].prompt.contains("revise"));
+    assert!(tasks[0].prompt.contains("Keep the old index"));
 }

@@ -1,5 +1,7 @@
 //! The port the factory's records are kept behind.
 
+use macro_user_id::user_id::MacroUserIdStr;
+
 use crate::domain::models::{EntryId, Outcome, Run, RunId, RunOutcome, Step};
 
 /// Where Runs and their Steps are kept.
@@ -43,6 +45,29 @@ pub trait RunRepository: Send + Sync + 'static {
         visit: u16,
         outcome: &Outcome,
         output: &str,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// Record that the Run's `visit` of `entry` waits for a person to answer
+    /// `question` with one of `answers`. Recording it again changes nothing.
+    fn open_gate(
+        &self,
+        id: RunId,
+        entry: &EntryId,
+        visit: u16,
+        question: &str,
+        answers: &[Outcome],
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// Record `user_id`'s answer to the Gate of the Run's `visit` of
+    /// `entry`. A Gate already answered keeps its first answer.
+    fn answer_gate(
+        &self,
+        id: RunId,
+        entry: &EntryId,
+        visit: u16,
+        answer: &Outcome,
+        note: Option<&str>,
+        user_id: &MacroUserIdStr<'static>,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// Record how the Run ended. A Run that already ended keeps its end.

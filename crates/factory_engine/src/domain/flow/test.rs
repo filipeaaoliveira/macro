@@ -79,3 +79,29 @@ fn an_unknown_key_is_refused() {
 
     assert!(matches!(refused, Err(FlowError::Unreadable(_))));
 }
+
+#[test]
+fn a_gate_needs_a_question_and_an_answer() {
+    let refused = parse(json!({
+        "entries": [{
+            "id": "reply",
+            "step": "reply",
+            "gate": { "question": " ", "answers": ["approve"] }
+        }]
+    }));
+
+    assert!(matches!(refused, Err(FlowError::IncompleteGate(_))));
+}
+
+#[test]
+fn a_gate_offers_each_answer_once() {
+    let refused = parse(json!({
+        "entries": [{
+            "id": "reply",
+            "step": "reply",
+            "gate": { "question": "Send it?", "answers": ["approve", "approve"] }
+        }]
+    }));
+
+    assert!(matches!(refused, Err(FlowError::DuplicateAnswer { .. })));
+}

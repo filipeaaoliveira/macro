@@ -1,4 +1,5 @@
 use macro_db_migrator::MACRO_DB_MIGRATIONS;
+use macro_user_id::user_id::MacroUserIdStr;
 use sqlx::PgPool;
 
 use super::PgRunRepository;
@@ -133,4 +134,108 @@ async fn deleting_a_run_removes_its_steps(pool: PgPool) {
     .await
     .expect("count");
     assert_eq!(steps, 0);
+}
+
+fn julia() -> MacroUserIdStr<'static> {
+    MacroUserIdStr::try_from("macro|julia@example.com".to_string()).expect("valid user id")
+}
+
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "fixtures", scripts("people"))
+)]
+async fn a_gate_waits_then_keeps_its_first_answer(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let id = RunId::generate();
+    repo.insert_run(id, "Plan the migration")
+        .await
+        .expect("insert");
+    repo.start_step(id, &entry("plan"), 1).await.expect("start");
+    let answers = [outcome("approve"), outcome("revise")];
+
+    repo.open_gate(id, &entry("plan"), 1, "Approve the plan?", &answers)
+        .await
+        .expect("open");
+    repo.open_gate(id, &entry("plan"), 1, "Approve the plan?", &answers)
+        .await
+        .expect("open again");
+    let waiting = repo.list_steps(id).await.expect("steps");
+    let gate = waiting[0].gate.as_ref().expect("the step has a gate");
+    assert_eq!(gate.question, "Approve the plan?");
+    assert_eq!(gate.answers, answers);
+    assert_eq!(gate.answer, None);
+
+    repo.answer_gate(
+        id,
+        &entry("plan"),
+        1,
+        &outcome("revise"),
+        Some("Keep the old index"),
+        &julia(),
+    )
+    .await
+    .expect("answer");
+    repo.answer_gate(id, &entry("plan"), 1, &outcome("approve"), None, &julia())
+        .await
+        .expect("answer again");
+
+    let answered = repo.list_steps(id).await.expect("steps");
+    let answer = answered[0]
+        .gate
+        .as_ref()
+        .and_then(|gate| gate.answer.as_ref())
+        .expect("the gate is answered");
+    assert_eq!(answer.answer, outcome("revise"));
+    assert_eq!(answer.note.as_deref(), Some("Keep the old index"));
+    assert_eq!(answer.user_id, Some(julia()));
+}
+
+#[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
+async fn an_answer_from_an_unknown_user_records_no_one(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let id = RunId::generate();
+    repo.insert_run(id, "Plan the migration")
+        .await
+        .expect("insert");
+    repo.start_step(id, &entry("plan"), 1).await.expect("start");
+    repo.open_gate(
+        id,
+        &entry("plan"),
+        1,
+        "Approve the plan?",
+        &[outcome("approve")],
+    )
+    .await
+    .expect("open");
+
+    repo.answer_gate(id, &entry("plan"), 1, &outcome("approve"), None, &julia())
+        .await
+        .expect("answer");
+
+    let steps = repo.list_steps(id).await.expect("steps");
+    let answer = steps[0]
+        .gate
+        .as_ref()
+        .and_then(|gate| gate.answer.as_ref())
+        .expect("the gate is answered");
+    assert_eq!(answer.answer, outcome("approve"));
+    assert_eq!(answer.user_id, None);
+}
+
+#[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
+async fn a_run_can_end_cancelled(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let id = RunId::generate();
+    repo.insert_run(id, "Plan the migration")
+        .await
+        .expect("insert");
+
+    repo.end_run(id, RunOutcome::Cancelled).await.expect("end");
+
+    let run = repo
+        .get_run(id)
+        .await
+        .expect("get")
+        .expect("the run exists");
+    assert_eq!(run.end.map(|end| end.outcome), Some(RunOutcome::Cancelled));
 }

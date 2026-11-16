@@ -134,8 +134,9 @@ impl<A: StepAgent> StepExecutor for BuiltInSteps<A> {
 }
 
 /// The agent's prompt: the Step's instructions, the outcomes it may end
-/// with, the Run's request, and what each earlier Step produced, oldest
-/// first, so a later Step reads the plan it carries out.
+/// with, the Run's request, and what each earlier Step produced and how a
+/// person answered its Gate, oldest first, so a later Step reads the plan it
+/// carries out and what people said about it.
 fn prompt(instructions: &str, outcomes: &[Outcome], input: StepInput<'_>) -> String {
     let outcomes = outcomes
         .iter()
@@ -156,6 +157,18 @@ fn prompt(instructions: &str, outcomes: &[Outcome], input: StepInput<'_>) -> Str
             "\n## Step {}, visit {}: {}\n\n{}\n",
             step.entry, step.visit, end.outcome, end.output
         ));
+
+        let answer = step
+            .gate
+            .as_ref()
+            .and_then(|gate| gate.answer.as_ref().map(|answer| (&gate.question, answer)));
+        if let Some((question, answer)) = answer {
+            let note = answer.note.as_deref().unwrap_or("(no note)");
+            prompt.push_str(&format!(
+                "\nA person was asked \"{question}\" and answered `{}`: {note}\n",
+                answer.answer
+            ));
+        }
     }
     prompt
 }

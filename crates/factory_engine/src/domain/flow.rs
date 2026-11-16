@@ -8,7 +8,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::num::NonZeroU8;
 
-use factory_records::domain::models::{EntryId, InvalidName, Outcome, RunOutcome, checked_name};
+use factory_records::domain::models::{
+    EntryId, InvalidName, MAX_QUESTION_BYTES, Outcome, RunOutcome, checked_name,
+};
 use serde::{Deserialize, Serialize};
 
 /// A fact a Flow keeps while a Run goes: a yes or no its transitions set and
@@ -125,6 +127,17 @@ impl Transition {
     }
 }
 
+/// A question an entry puts to a person once its Step ends `done`. The Run
+/// waits for the answer, and the answer is the outcome the Flow routes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GateDefinition {
+    /// The question, shown with the Step's output.
+    pub question: String,
+    /// The answers a person may give.
+    pub answers: Vec<Outcome>,
+}
+
 /// One entry of a Flow: a Step to run, when, how often, and where each of its
 /// outcomes goes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -152,6 +165,10 @@ pub struct Entry {
     /// Where each outcome goes: the first transition whose conditions hold.
     #[serde(default)]
     pub on: BTreeMap<Outcome, Vec<Transition>>,
+    /// The question the entry asks once its Step ends `done`; its answer is
+    /// then the outcome `on` routes.
+    #[serde(default)]
+    pub gate: Option<GateDefinition>,
 }
 
 /// A Flow definition.
@@ -196,6 +213,19 @@ pub enum FlowError {
         /// The fact it names.
         fact: FactName,
     },
+    /// A Gate has no question, a question too long to keep, or no answers.
+    #[error(
+        "entry {0} has a gate with no question, a question over {MAX_QUESTION_BYTES} bytes, or no answers"
+    )]
+    IncompleteGate(EntryId),
+    /// A Gate offers one answer twice.
+    #[error("entry {entry}'s gate offers {answer} twice")]
+    DuplicateAnswer {
+        /// The entry.
+        entry: EntryId,
+        /// The answer.
+        answer: Outcome,
+    },
     /// An entry runs a Step the worker does not serve.
     #[error("entry {entry} runs step {step}, which no worker serves")]
     UnknownStep {
@@ -239,6 +269,10 @@ impl Flow {
                 });
             }
 
+            if let Some(gate) = &entry.gate {
+                check_gate(&entry.id, gate)?;
+            }
+
             let transitions = entry.on.values().flatten().chain(&entry.on_exhausted);
             let mut targets: Vec<&Target> = transitions.clone().map(|t| &t.to).collect();
             targets.extend(&entry.next);
@@ -267,4 +301,20 @@ impl Flow {
         }
         Ok(())
     }
+}
+
+fn check_gate(entry: &EntryId, gate: &GateDefinition) -> Result<(), FlowError> {
+    let question = gate.question.trim();
+    if question.is_empty() || gate.question.len() > MAX_QUESTION_BYTES || gate.answers.is_empty() {
+        return Err(FlowError::IncompleteGate(entry.clone()));
+    }
+
+    let mut offered = BTreeSet::new();
+    if let Some(twice) = gate.answers.iter().find(|answer| !offered.insert(*answer)) {
+        return Err(FlowError::DuplicateAnswer {
+            entry: entry.clone(),
+            answer: twice.clone(),
+        });
+    }
+    Ok(())
 }

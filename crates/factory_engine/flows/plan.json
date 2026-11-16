@@ -1,7 +1,20 @@
 {
-  "description": "Plans the change a request asks for, then writes it.",
+  "description": "Plans the change a request asks for, asks a person to approve the plan, then writes it. A plan sent back is planned again, up to three times.",
   "entries": [
-    { "id": "plan", "step": "plan" },
+    {
+      "id": "plan",
+      "step": "plan",
+      "max_visits": 3,
+      "on_exhausted": [{ "to": { "kind": "end", "outcome": "manual" } }],
+      "gate": {
+        "question": "Approve this plan, or send it back with a note on what to change?",
+        "answers": ["approve", "revise"]
+      },
+      "on": {
+        "approve": [{ "to": { "kind": "entry", "entry": "write" } }],
+        "revise": [{ "to": { "kind": "entry", "entry": "plan" } }]
+      }
+    },
     {
       "id": "write",
       "step": "write",

@@ -7,6 +7,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
+use macro_user_id::user_id::MacroUserIdStr;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -15,6 +16,14 @@ pub const MAX_REQUEST_BYTES: usize = 65_536;
 
 /// The most bytes a Step's output may hold (the `factory_step.output` check).
 pub const MAX_OUTPUT_BYTES: usize = 65_536;
+
+/// The most bytes a Gate's question may hold (the `factory_gate.question`
+/// check).
+pub const MAX_QUESTION_BYTES: usize = 4_096;
+
+/// The most bytes the note on a Gate's answer may hold (the
+/// `factory_gate.note` check).
+pub const MAX_NOTE_BYTES: usize = 4_096;
 
 /// A Run's id.
 #[derive(
@@ -196,6 +205,8 @@ pub enum RunOutcome {
     Blocked,
     /// A Step failed with nowhere to go, or the Flow had no way on.
     Failed,
+    /// A person cancelled the Run.
+    Cancelled,
 }
 
 /// A Run that has ended: how, and when.
@@ -234,6 +245,34 @@ pub struct StepEnd {
     pub ended_at: DateTime<Utc>,
 }
 
+/// A person's answer to a Gate.
+#[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GateAnswer {
+    /// The answer, one the Gate offered: the outcome the Flow routes.
+    pub answer: Outcome,
+    /// What the person added, for the Run's later Steps to read.
+    pub note: Option<String>,
+    /// Who answered; none once their account is gone.
+    pub user_id: Option<MacroUserIdStr<'static>>,
+    /// When they answered.
+    pub answered_at: DateTime<Utc>,
+}
+
+/// A question a Step's end puts to a person. The Run waits for the answer.
+#[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Gate {
+    /// The question.
+    pub question: String,
+    /// The answers it offers, in the Flow's order.
+    pub answers: Vec<Outcome>,
+    /// When the Run started waiting.
+    pub opened_at: DateTime<Utc>,
+    /// The person's answer; none while the Run waits.
+    pub answer: Option<GateAnswer>,
+}
+
 /// One visit of one of a Run's entries.
 #[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -246,4 +285,6 @@ pub struct Step {
     pub started_at: DateTime<Utc>,
     /// How and when it ended; none while it runs.
     pub end: Option<StepEnd>,
+    /// The question its end put to a person, if its entry has a Gate.
+    pub gate: Option<Gate>,
 }
