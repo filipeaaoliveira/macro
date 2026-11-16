@@ -5,12 +5,13 @@ use std::future::Future;
 use crate::domain::models::{
     EnrichedGithubPullRequest, GithubAccessToken, GithubDraftOutcome, GithubError,
     GithubExchangeTokenResponse, GithubGrantLinkOutcome, GithubLink, GithubLinkStatus,
-    GithubMergeMethod, GithubMergeOutcome, GithubPullRequestDetails,
-    GithubPullRequestMergeabilityEntry, GithubPullRequestNumber, GithubPullRequestRef,
-    GithubPullRequestState, GithubRepositoryMergeSettings, GithubStateOutcome, GithubUserInfo,
-    MergeGithubPullRequestRequest, MergeGithubPullRequestResponse,
-    SetGithubPullRequestDraftRequest, SetGithubPullRequestDraftResponse,
-    SetGithubPullRequestStateRequest, SetGithubPullRequestStateResponse,
+    GithubMergeMethod, GithubMergeOutcome, GithubOpenPullRequest, GithubOpenPullRequestOutcome,
+    GithubPullRequestDetails, GithubPullRequestMergeabilityEntry, GithubPullRequestNumber,
+    GithubPullRequestRef, GithubPullRequestState, GithubRepository, GithubRepositoryMergeSettings,
+    GithubStateOutcome, GithubUserInfo, MergeGithubPullRequestRequest,
+    MergeGithubPullRequestResponse, SetGithubPullRequestDraftRequest,
+    SetGithubPullRequestDraftResponse, SetGithubPullRequestStateRequest,
+    SetGithubPullRequestStateResponse,
 };
 use macro_user_id::{lowercased::Lowercase, user_id::MacroUserId};
 
@@ -148,10 +149,14 @@ pub trait GithubOauth: Send + Sync + 'static {
         repo: &str,
     ) -> impl Future<Output = Result<GithubRepositoryMergeSettings, Self::Err>> + Send;
 
-    /// Merges a pull request as the user.
+    /// Merges a pull request as the user. With `head_sha`, GitHub merges
+    /// only while the pull request's head is that commit, and declines with
+    /// [`GithubMergeRejection::HeadChanged`] once it moved.
     ///
     /// GitHub declining the merge is a [`GithubMergeOutcome::Rejected`]
     /// value, not an error: the request reached GitHub and was answered.
+    ///
+    /// [`GithubMergeRejection::HeadChanged`]: crate::domain::models::GithubMergeRejection::HeadChanged
     fn merge_pull_request(
         &self,
         access_token: &str,
@@ -159,7 +164,39 @@ pub trait GithubOauth: Send + Sync + 'static {
         repo: &str,
         number: u64,
         merge_method: GithubMergeMethod,
+        head_sha: Option<String>,
     ) -> impl Future<Output = Result<GithubMergeOutcome, Self::Err>> + Send;
+
+    /// The repository as the user sees it, or `None` when their grant
+    /// cannot see it.
+    fn get_repository(
+        &self,
+        access_token: &str,
+        owner: &str,
+        repo: &str,
+    ) -> impl Future<Output = Result<Option<GithubRepository>, Self::Err>> + Send;
+
+    /// The number of the newest pull request, open or closed, from the
+    /// repository's own branch `head`, as the user sees it.
+    fn find_pull_request_by_head(
+        &self,
+        access_token: &str,
+        owner: &str,
+        repo: &str,
+        head: &str,
+    ) -> impl Future<Output = Result<Option<u64>, Self::Err>> + Send;
+
+    /// Opens a pull request as the user.
+    ///
+    /// GitHub declining it is a [`GithubOpenPullRequestOutcome::Rejected`]
+    /// value, not an error.
+    fn open_pull_request(
+        &self,
+        access_token: &str,
+        owner: &str,
+        repo: &str,
+        pull_request: &GithubOpenPullRequest,
+    ) -> impl Future<Output = Result<GithubOpenPullRequestOutcome, Self::Err>> + Send;
 
     /// Converts a pull request to a draft, or marks it ready for review, as
     /// the user. A change GitHub declines is a [`GithubDraftOutcome::Rejected`]

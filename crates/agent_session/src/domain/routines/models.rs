@@ -63,6 +63,12 @@ pub struct PrepareRoutineSession {
     /// schedulers omit it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instructions: Option<String>,
+    /// The repository the session works in, as the
+    /// `https://github.com/owner/name` URL a coding session takes, when it
+    /// works in one: its runtime checks the repository out for it, as for a
+    /// coding session started with that repository. Older callers omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo_url: Option<String>,
 }
 
 /// A verified, persisted session ready for its first prompt.

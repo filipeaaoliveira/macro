@@ -5,8 +5,8 @@ use uuid::Uuid;
 
 use super::PgRunRepository;
 use crate::domain::models::{
-    ClaimedSession, EntryId, HandBack, Outcome, Run, RunId, RunInsert, RunOutcome, StepKey,
-    StepSession, TaskLink,
+    ClaimedSession, EntryId, HandBack, Outcome, Repository, Run, RunId, RunInsert, RunOutcome,
+    StepKey, StepSession, TaskLink,
 };
 use crate::domain::ports::RunRepository;
 
@@ -36,7 +36,7 @@ fn key(run_id: RunId, seq: u16) -> StepKey {
 /// Keep a new Run of Julia's with no task.
 async fn insert(repo: &PgRunRepository, id: RunId, request: &str) -> Run {
     match repo
-        .insert_run(id, "plan", request, &julia(), None)
+        .insert_run(id, "plan", request, &julia(), None, None)
         .await
         .expect("insert")
     {
@@ -316,6 +316,53 @@ async fn an_answer_from_an_account_gone_since_records_no_one(pool: PgPool) {
     assert_eq!(answer.user_id, None);
 }
 
+/// A Run kept with a repository reads it back, and keeps the last commit it
+/// asks a person to merge; a Run with none reads none of either.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "fixtures", scripts("people"))
+)]
+async fn a_run_keeps_its_repository_and_the_commit_it_asks_to_merge(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let id = RunId::generate();
+    let repository = Repository {
+        url: "https://github.com/macro/app".to_string(),
+        base_branch: "main".to_string(),
+    };
+
+    let inserted = repo
+        .insert_run(
+            id,
+            "code",
+            "Collapse dashes",
+            &julia(),
+            None,
+            Some(&repository),
+        )
+        .await
+        .expect("insert");
+    repo.set_merge_head(id, "1111111111111111111111111111111111111111")
+        .await
+        .expect("set");
+    repo.set_merge_head(id, "2222222222222222222222222222222222222222")
+        .await
+        .expect("set again");
+    let without = insert(&repo, RunId::generate(), "Summarise").await;
+
+    let RunInsert::Inserted(run) = inserted else {
+        panic!("a run with no task has no task to miss");
+    };
+    assert_eq!(run.repository.as_ref(), Some(&repository));
+    let read = repo.get_run(id).await.expect("get").expect("kept");
+    assert_eq!(read.repository, Some(repository));
+    assert_eq!(
+        repo.merge_head(id).await.expect("read").as_deref(),
+        Some("2222222222222222222222222222222222222222")
+    );
+    assert_eq!(without.repository, None);
+    assert_eq!(repo.merge_head(without.id).await.expect("read"), None);
+}
+
 #[sqlx::test(
     migrator = "MACRO_DB_MIGRATIONS",
     fixtures(path = "fixtures", scripts("people", "tasks"))
@@ -331,6 +378,7 @@ async fn a_run_is_kept_with_its_task_in_one_write(pool: PgPool) {
             "Fix the login bug",
             &julia(),
             Some(task(LOGIN_TASK)),
+            None,
         )
         .await
         .expect("insert");
@@ -341,6 +389,7 @@ async fn a_run_is_kept_with_its_task_in_one_write(pool: PgPool) {
             "Fix the login bug",
             &julia(),
             Some(Uuid::now_v7()),
+            None,
         )
         .await
         .expect("insert for a missing task");
@@ -774,7 +823,7 @@ async fn insert_on_task(
 ) -> RunId {
     let id = RunId::generate();
     match repo
-        .insert_run(id, "plan", request, user_id, Some(task(task_id)))
+        .insert_run(id, "plan", request, user_id, Some(task(task_id)), None)
         .await
         .expect("insert")
     {

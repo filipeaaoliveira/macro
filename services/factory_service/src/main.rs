@@ -21,12 +21,14 @@ use entity_access::outbound::PgAccessRepository;
 use factory_engine::domain::built_in_steps::BuiltInSteps;
 use factory_engine::domain::insights::InsightsServiceImpl;
 use factory_engine::domain::ports::StepAgent;
+use factory_engine::domain::pull_request_steps::PullRequestSteps;
 use factory_engine::domain::service::{FactoryServiceImpl, StepServiceImpl};
 use factory_engine::domain::session_agent::SessionAgent;
 use factory_engine::inbound::http::{ApiDoc, FactoryRouterState, factory_router};
 use factory_engine::inbound::insights::{InsightsApiDoc, InsightsRouterState, insights_router};
 use factory_engine::outbound::auth_user_directory::AuthUserDirectory;
 use factory_engine::outbound::document_task_directory::DocumentTaskDirectory;
+use factory_engine::outbound::github_pull_requests::GithubPullRequests;
 use factory_engine::outbound::local_agent::LocalAgent;
 use factory_engine::outbound::temporal_run_workflows::TemporalRunWorkflows;
 use factory_records::outbound::pg_run_repository::PgRunRepository;
@@ -103,14 +105,19 @@ async fn run() -> Result<(), rootcause::Report> {
             PgUserApiKeyAuthorizer::new(PgUserApiKeyAuthorizationRepo::new(db.clone())),
         )));
 
+    // The authentication service says which accounts exist, and holds the
+    // GitHub account each person linked, as whom the Steps act on GitHub.
+    let auth = AuthServiceClient::new(
+        config.authentication_service_secret_key.clone(),
+        AuthServiceUrl::new()?.to_string(),
+    );
+    let github = GithubPullRequests::new(auth.clone());
     let parts = Parts {
         port: config.port,
         repo: repo.clone(),
         usage: PgSessionUsageReader::new(db.clone()),
-        users: AuthUserDirectory::new(AuthServiceClient::new(
-            config.authentication_service_secret_key.clone(),
-            AuthServiceUrl::new()?.to_string(),
-        )),
+        users: AuthUserDirectory::new(auth),
+        github: github.clone(),
         tasks: DocumentTaskDirectory::new(
             EntityAccessServiceImpl::new(PgAccessRepository::new(db.clone())),
             DocumentStorageServiceClient::new(
@@ -123,6 +130,8 @@ async fn run() -> Result<(), rootcause::Report> {
         correlation: CorrelationState::new(db, jwt_args),
     };
 
+    let pull_requests = PullRequestSteps::new(github, repo.clone());
+
     // The agent Steps run as the Run's owner in sessions of the configured
     // agent. Without one, they run on the local stand-in, which does no work.
     match config.factory_agent_id {
@@ -132,12 +141,12 @@ async fn run() -> Result<(), rootcause::Report> {
                 config.internal_api_key.as_ref(),
             )
             .map_err(|error| rootcause::report!("{error:?}"))?;
-            let agent = SessionAgent::new(sessions, repo, bot_id);
-            serve(parts, BuiltInSteps::new(agent)).await
+            let agent = SessionAgent::new(sessions, repo.clone(), bot_id);
+            serve(parts, BuiltInSteps::new(agent, pull_requests)).await
         }
         None => {
             tracing::warn!("FACTORY_AGENT_ID is unset: agent steps run on the local stand-in");
-            serve(parts, BuiltInSteps::new(LocalAgent)).await
+            serve(parts, BuiltInSteps::new(LocalAgent, pull_requests)).await
         }
     }
 }
@@ -148,6 +157,7 @@ struct Parts {
     repo: PgRunRepository,
     usage: PgSessionUsageReader,
     users: AuthUserDirectory,
+    github: GithubPullRequests,
     tasks: DocumentTaskDirectory<EntityAccessServiceImpl<PgAccessRepository>>,
     client: Client,
     authorization_state: MacroAuthorizationState<Authorization>,
@@ -161,7 +171,7 @@ type Authorization = MacroAuthorizationServiceImpl<MacroAuthJwtValidator>;
 /// signal or until either stops.
 async fn serve<A: StepAgent + Clone>(
     parts: Parts,
-    steps: BuiltInSteps<A>,
+    steps: BuiltInSteps<A, GithubPullRequests, PgRunRepository>,
 ) -> Result<(), rootcause::Report> {
     let runtime = Runtime::from_current_tokio(Default::default())?;
     let worker = factory_engine::inbound::temporal::worker(
@@ -177,6 +187,7 @@ async fn serve<A: StepAgent + Clone>(
         steps,
         parts.users,
         parts.tasks,
+        parts.github,
     ));
     let api = factory_router(FactoryRouterState::new(
         service,

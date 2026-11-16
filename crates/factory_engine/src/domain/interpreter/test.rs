@@ -44,11 +44,22 @@ fn the_reply_flow_runs_one_step_and_succeeds() {
     assert_eq!(end, Ok(RunOutcome::Success));
 }
 
+// A Gate's answer is the outcome its entry routes, so `approve` and `revise`
+// stand for a person's answer to the plan and the merge question below.
+
 #[test]
-fn a_clean_review_goes_straight_to_merge() {
+fn a_passing_review_goes_through_ci_to_the_merge_question() {
     let (steps, end) = walk(
         &flow(CODE_FLOW),
-        &["done", "done", "clean", "published", "green", "merged"],
+        &[
+            "approve",
+            "done",
+            "pass",
+            "published",
+            "green",
+            "approve",
+            "merged",
+        ],
     );
 
     assert_eq!(
@@ -59,6 +70,7 @@ fn a_clean_review_goes_straight_to_merge() {
             "review#1",
             "publish#1",
             "ci#1",
+            "merge-gate#1",
             "merge#1"
         ]
     );
@@ -87,23 +99,25 @@ fn an_outcome_without_a_transition_goes_to_the_entry_below() {
 }
 
 #[test]
-fn blockers_loop_through_fix_until_the_review_runs_out_of_visits() {
+fn changes_loop_through_fix_until_the_review_runs_out_of_visits() {
     let (steps, end) = walk(
         &flow(CODE_FLOW),
         &[
+            "approve",
             "done",
+            "changes",
             "done",
-            "blockers",
+            "changes",
             "done",
-            "blockers",
+            "changes",
             "done",
             "published",
             "green",
         ],
     );
 
-    // The third review is past max_visits: on_exhausted holds the pull
-    // request, so publish and CI run, and merge is skipped for a person.
+    // The fourth review is past max_visits: on_exhausted holds the pull
+    // request, so publish and CI run, and no person is asked to merge it.
     assert_eq!(
         steps,
         [
@@ -113,6 +127,8 @@ fn blockers_loop_through_fix_until_the_review_runs_out_of_visits() {
             "fix#1",
             "review#2",
             "fix#2",
+            "review#3",
+            "fix#3",
             "publish#1",
             "ci#1"
         ]
@@ -125,39 +141,46 @@ fn a_transition_sets_the_facts_later_conditions_read() {
     let code = flow(CODE_FLOW);
     let interpreter = Interpreter::new(&code);
     let mut state = interpreter.start();
-    let panel_ran = FactName::try_from("panel_ran".to_string()).expect("valid");
-    assert!(!state.fact(&panel_ran));
+    let held = FactName::try_from("held".to_string()).expect("valid");
+    assert!(!state.fact(&held));
 
-    for outcome in ["done", "done", "clean"] {
+    for outcome in [
+        "approve", "done", "changes", "done", "changes", "done", "changes", "done",
+    ] {
         interpreter.next_step(&mut state).expect("a step runs");
         let outcome = Outcome::try_from(outcome.to_string()).expect("valid");
         interpreter.record(&mut state, &outcome).expect("a way on");
     }
+    let NextStep::Run { entry, .. } = interpreter.next_step(&mut state).expect("next") else {
+        panic!("the run ended after the last fix");
+    };
 
-    assert!(state.fact(&panel_ran));
+    assert_eq!(entry.id.as_str(), "publish");
+    assert!(state.fact(&held));
 }
 
 #[test]
-fn a_ci_fix_after_a_review_resets_the_reviews_visits() {
+fn red_ci_is_fixed_reviewed_again_and_goes_green() {
     let (steps, end) = walk(
         &flow(CODE_FLOW),
         &[
+            "approve",
             "done",
+            "changes",
             "done",
-            "blockers",
-            "done",
-            "clean",
+            "pass",
             "published",
             "red",
             "done",
-            "clean",
+            "pass",
             "published",
             "green",
+            "approve",
             "merged",
         ],
     );
 
-    // The review had used both visits; the reset lets it run from #1 again.
+    // The review had used two visits; the reset lets it run from #1 again.
     assert_eq!(
         steps,
         [
@@ -172,6 +195,7 @@ fn a_ci_fix_after_a_review_resets_the_reviews_visits() {
             "review#1",
             "publish#2",
             "ci#2",
+            "merge-gate#1",
             "merge#1"
         ]
     );
@@ -179,17 +203,41 @@ fn a_ci_fix_after_a_review_resets_the_reviews_visits() {
 }
 
 #[test]
-fn a_ci_fix_before_any_review_goes_back_to_publish() {
+fn ci_that_stays_red_after_three_fixes_is_left_for_a_person() {
+    let mut outcomes = vec!["approve", "done", "pass", "published", "red"];
+    for _ in 0..3 {
+        outcomes.extend(["done", "pass", "published", "red"]);
+    }
+
+    let (steps, end) = walk(&flow(CODE_FLOW), &outcomes);
+
+    assert_eq!(
+        steps
+            .iter()
+            .filter(|step| step.starts_with("ci-fix#"))
+            .count(),
+        3
+    );
+    assert_eq!(steps.last().map(String::as_str), Some("ci#4"));
+    assert_eq!(end, Ok(RunOutcome::Manual));
+}
+
+#[test]
+fn a_person_sending_the_merge_back_has_the_change_fixed_and_asked_again() {
     let (steps, end) = walk(
         &flow(CODE_FLOW),
         &[
+            "approve",
             "done",
-            "unchanged",
-            "published",
-            "red",
-            "done",
+            "pass",
             "published",
             "green",
+            "revise",
+            "done",
+            "pass",
+            "published",
+            "green",
+            "approve",
             "merged",
         ],
     );
@@ -199,15 +247,55 @@ fn a_ci_fix_before_any_review_goes_back_to_publish() {
         [
             "plan#1",
             "write#1",
+            "review#1",
             "publish#1",
             "ci#1",
-            "ci-fix#1",
+            "merge-gate#1",
+            "fix#1",
+            "review#2",
             "publish#2",
             "ci#2",
+            "merge-gate#2",
             "merge#1"
         ]
     );
     assert_eq!(end, Ok(RunOutcome::Success));
+}
+
+#[test]
+fn a_head_that_moved_before_the_merge_goes_back_to_ci() {
+    let (steps, end) = walk(
+        &flow(CODE_FLOW),
+        &[
+            "approve",
+            "done",
+            "pass",
+            "published",
+            "green",
+            "approve",
+            "changed",
+            "green",
+            "approve",
+            "merged",
+        ],
+    );
+
+    assert_eq!(
+        steps[5..],
+        ["merge-gate#1", "merge#1", "ci#2", "merge-gate#2", "merge#2"]
+    );
+    assert_eq!(end, Ok(RunOutcome::Success));
+}
+
+#[test]
+fn nothing_to_write_or_a_refused_pull_request_is_left_for_a_person() {
+    let (unchanged, unchanged_end) = walk(&flow(CODE_FLOW), &["approve", "unchanged"]);
+    let (refused, refused_end) = walk(&flow(CODE_FLOW), &["approve", "done", "pass", "refused"]);
+
+    assert_eq!(unchanged, ["plan#1", "write#1"]);
+    assert_eq!(unchanged_end, Ok(RunOutcome::Manual));
+    assert_eq!(refused.last().map(String::as_str), Some("publish#1"));
+    assert_eq!(refused_end, Ok(RunOutcome::Manual));
 }
 
 #[test]
@@ -229,7 +317,7 @@ fn an_exhausted_entry_without_on_exhausted_ends_the_run_blocked() {
 
 #[test]
 fn a_failed_step_the_flow_does_not_route_ends_the_run_failed() {
-    let (steps, end) = walk(&flow(CODE_FLOW), &["done", "failed"]);
+    let (steps, end) = walk(&flow(CODE_FLOW), &["approve", "failed"]);
 
     assert_eq!(steps, ["plan#1", "write#1"]);
     assert_eq!(end, Ok(RunOutcome::Failed));

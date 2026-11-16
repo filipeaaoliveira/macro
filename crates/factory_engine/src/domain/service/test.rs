@@ -9,7 +9,7 @@ use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
 use super::{FactoryServiceImpl, StepServiceImpl};
-use crate::domain::fakes::FakeRepo;
+use crate::domain::fakes::{FakeGithub, FakeRepo};
 use crate::domain::flow::StepName;
 use crate::domain::gate::AnswerGate;
 use crate::domain::models::{
@@ -83,6 +83,8 @@ struct FakeExecutor {
     output: String,
     failure: Option<WorkFailure>,
     given: Arc<Mutex<Vec<Vec<u16>>>>,
+    /// Whether it serves every Step, not only `reply`.
+    serves_all: bool,
 }
 
 impl Default for FakeExecutor {
@@ -91,6 +93,7 @@ impl Default for FakeExecutor {
             output: "Replied".to_string(),
             failure: None,
             given: Arc::default(),
+            serves_all: false,
         }
     }
 }
@@ -112,7 +115,7 @@ impl StepExecutor for FakeExecutor {
     type Err = WorkFailure;
 
     fn serves(&self, step: &StepName) -> bool {
-        step.as_str() == "reply"
+        self.serves_all || step.as_str() == "reply"
     }
 
     async fn run(&self, _step: &StepName, input: StepInput<'_>) -> Result<StepReport, WorkFailure> {
@@ -167,24 +170,44 @@ fn reply_step(run_id: RunId, seq: u16) -> StepRequest {
     }
 }
 
-/// The Run API over `repo` and `workflows`.
+/// The Run API over `repo` and `workflows`, serving `reply` only.
 fn service(
     repo: &FakeRepo,
     workflows: &FakeWorkflows,
-) -> FactoryServiceImpl<FakeRepo, FakeWorkflows, FakeExecutor, FakeRepo, FakeRepo> {
+) -> FactoryServiceImpl<FakeRepo, FakeWorkflows, FakeExecutor, FakeRepo, FakeRepo, FakeGithub> {
     FactoryServiceImpl::new(
         repo.clone(),
         workflows.clone(),
         FakeExecutor::default(),
         repo.clone(),
         repo.clone(),
+        FakeGithub::default(),
+    )
+}
+
+/// The Run API over `repo`, `workflows` and `github`, serving every Step.
+fn code_service(
+    repo: &FakeRepo,
+    workflows: &FakeWorkflows,
+    github: &FakeGithub,
+) -> FactoryServiceImpl<FakeRepo, FakeWorkflows, FakeExecutor, FakeRepo, FakeRepo, FakeGithub> {
+    FactoryServiceImpl::new(
+        repo.clone(),
+        workflows.clone(),
+        FakeExecutor {
+            serves_all: true,
+            ..FakeExecutor::default()
+        },
+        repo.clone(),
+        repo.clone(),
+        github.clone(),
     )
 }
 
 /// A Run of Julia's, kept with no task.
 async fn julia_s_run(repo: &FakeRepo) -> RunId {
     match repo
-        .insert_run(RunId::generate(), "plan", "Plan", &julia(), None)
+        .insert_run(RunId::generate(), "plan", "Plan", &julia(), None, None)
         .await
         .expect("insert")
     {
@@ -205,6 +228,7 @@ async fn creating_a_run_records_it_for_its_owner_and_starts_its_workflow() {
             "reply".to_string(),
             "Summarise the release notes".to_string(),
             None,
+            None,
         )
         .await
         .expect("create");
@@ -220,6 +244,81 @@ async fn creating_a_run_records_it_for_its_owner_and_starts_its_workflow() {
     assert_eq!(read.run, created.run);
 }
 
+/// A `code` Run works on the repository it names, from the branch that
+/// repository's GitHub says is its default.
+#[tokio::test]
+async fn a_code_run_keeps_its_repository_and_its_base_branch() {
+    let repo = FakeRepo::default();
+    let workflows = FakeWorkflows::default();
+
+    let created = code_service(&repo, &workflows, &FakeGithub::default())
+        .create_run(
+            julia(),
+            "code".to_string(),
+            "Collapse repeated dashes".to_string(),
+            None,
+            Some("https://github.com/macro/app".to_string()),
+        )
+        .await
+        .expect("create");
+
+    let repository = created.run.repository.expect("kept");
+    assert_eq!(repository.url, "https://github.com/macro/app");
+    assert_eq!(repository.base_branch, "main");
+    assert_eq!(workflows.started.lock().expect("started").len(), 1);
+}
+
+/// A Flow that works on a repository needs one its owner reaches with their
+/// GitHub account, and the others take none; nothing is kept otherwise.
+#[tokio::test]
+async fn a_run_s_repository_must_fit_its_flow_and_be_reachable() {
+    let repo = FakeRepo::default();
+    let workflows = FakeWorkflows::default();
+    let unreachable = FakeGithub::default();
+    unreachable.state().unreachable = true;
+    let create = |flow: &str, repo_url: Option<&str>, github: &FakeGithub| {
+        let service = code_service(&repo, &workflows, github);
+        let flow = flow.to_string();
+        let repo_url = repo_url.map(str::to_string);
+        async move {
+            service
+                .create_run(
+                    julia(),
+                    flow,
+                    "Collapse repeated dashes".to_string(),
+                    None,
+                    repo_url,
+                )
+                .await
+        }
+    };
+
+    let none = create("code", None, &FakeGithub::default()).await;
+    let unused = create(
+        "reply",
+        Some("https://github.com/macro/app"),
+        &FakeGithub::default(),
+    )
+    .await;
+    let invalid = create(
+        "code",
+        Some("https://github.com/macro/app/tree/main"),
+        &FakeGithub::default(),
+    )
+    .await;
+    let out_of_reach = create("code", Some("https://github.com/macro/app"), &unreachable).await;
+
+    assert!(matches!(none, Err(FactoryError::RepositoryRequired)));
+    assert!(matches!(unused, Err(FactoryError::RepositoryNotUsed)));
+    assert!(matches!(invalid, Err(FactoryError::InvalidRepository)));
+    assert!(matches!(
+        out_of_reach,
+        Err(FactoryError::UnreachableRepository)
+    ));
+    assert!(repo.runs.lock().expect("runs").is_empty());
+    assert!(workflows.started.lock().expect("started").is_empty());
+}
+
 #[tokio::test]
 async fn a_run_whose_workflow_does_not_start_is_not_kept() {
     let repo = FakeRepo::default();
@@ -229,7 +328,13 @@ async fn a_run_whose_workflow_does_not_start_is_not_kept() {
     };
 
     let refused = service(&repo, &workflows)
-        .create_run(julia(), "reply".to_string(), "Summarise".to_string(), None)
+        .create_run(
+            julia(),
+            "reply".to_string(),
+            "Summarise".to_string(),
+            None,
+            None,
+        )
         .await;
 
     assert!(matches!(refused, Err(FactoryError::Internal(_))));
@@ -248,7 +353,13 @@ async fn a_run_whose_workflow_started_despite_a_failed_start_is_kept() {
     };
 
     let refused = service(&repo, &workflows)
-        .create_run(julia(), "reply".to_string(), "Summarise".to_string(), None)
+        .create_run(
+            julia(),
+            "reply".to_string(),
+            "Summarise".to_string(),
+            None,
+            None,
+        )
         .await;
 
     assert!(refused.is_err());
@@ -266,6 +377,7 @@ async fn a_flow_with_a_step_no_worker_serves_is_refused_before_anything_is_kept(
             julia(),
             "plan".to_string(),
             "Plan the migration".to_string(),
+            None,
             None,
         )
         .await;
@@ -286,6 +398,7 @@ async fn a_flow_no_built_in_flow_is_named_for_is_refused_before_anything_is_kept
             "deploy".to_string(),
             "Deploy the release".to_string(),
             None,
+            None,
         )
         .await;
 
@@ -297,7 +410,7 @@ async fn a_flow_no_built_in_flow_is_named_for_is_refused_before_anything_is_kept
 #[tokio::test]
 async fn an_empty_request_is_refused() {
     let refused = service(&FakeRepo::default(), &FakeWorkflows::default())
-        .create_run(julia(), "reply".to_string(), "  ".to_string(), None)
+        .create_run(julia(), "reply".to_string(), "  ".to_string(), None, None)
         .await;
 
     assert!(matches!(refused, Err(FactoryError::EmptyRequest)));
@@ -312,6 +425,7 @@ async fn a_run_for_a_user_with_no_account_is_refused() {
             nobody(),
             "reply".to_string(),
             "Fix the login bug".to_string(),
+            None,
             None,
         )
         .await;
@@ -457,6 +571,7 @@ async fn a_run_created_for_a_task_keeps_it() {
             "reply".to_string(),
             "Fix the login bug".to_string(),
             Some(task_id),
+            None,
         )
         .await
         .expect("create");
@@ -473,7 +588,13 @@ async fn a_run_for_a_document_that_is_not_a_task_or_is_missing_is_refused() {
     let service = service(&repo, &workflows);
 
     let not_a_task = service
-        .create_run(julia(), "reply".to_string(), "Fix".to_string(), Some(note))
+        .create_run(
+            julia(),
+            "reply".to_string(),
+            "Fix".to_string(),
+            Some(note),
+            None,
+        )
         .await;
     let missing = service
         .create_run(
@@ -481,6 +602,7 @@ async fn a_run_for_a_document_that_is_not_a_task_or_is_missing_is_refused() {
             "reply".to_string(),
             "Fix".to_string(),
             Some(Uuid::now_v7()),
+            None,
         )
         .await;
 
@@ -873,6 +995,7 @@ async fn a_task_s_list_holds_its_owner_s_fifty_newest_runs() {
                 &format!("Run {n}"),
                 &julia(),
                 Some(task_id),
+                None,
             )
             .await
             .expect("insert")

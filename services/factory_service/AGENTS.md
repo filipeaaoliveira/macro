@@ -42,6 +42,8 @@ worker that walks each Run's Flow, in one process.
   `POST /runs/<id>/cancel` cancels a Run. Add
   `"taskId": "<task document id>"` to link a Run to a task, or
   `PUT /runs/<id>/task` later.
+  A `code` Run also takes
+  `"repoUrl": "https://github.com/<owner>/<name>"`.
 
 ## Gotchas
 
@@ -55,6 +57,14 @@ worker that walks each Run's Flow, in one process.
   `POST /internal/get_existing_users`, so it requires the auth service's fix
   that serves that route as POST: before it, the route answered only GET,
   and every Run was refused as having no account.
+- The `code` Flow acts on GitHub as each Run's owner, with the token of the
+  GitHub account they linked in Settings, which the authentication service's
+  `GET /internal/github_access_token` gives. Locally, linking needs a real
+  GitHub OAuth app in the stack's env file (`GITHUB_CLIENT_ID`,
+  `GITHUB_CLIENT_SECRET`, `docs/development/running-locally.md`): with the
+  `local-` stubs no account links, and every `code` Run is refused as having
+  an unreachable repository. The agent pushes the Run's branch with its
+  runtime's own git credentials.
 
 - Open for deploying: the service reaches the harness's routine sessions at
   `AgentHarnessServiceUrl`, which outside the local stack is the public

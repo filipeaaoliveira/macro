@@ -121,6 +121,12 @@ pub struct CreateRunRequest {
     /// The Macro task the Run works on: its task document's id.
     #[serde(default)]
     pub task_id: Option<Uuid>,
+    /// The GitHub repository the Run works on, as its
+    /// `https://github.com/owner/name` URL: required by a Flow that works
+    /// on one, such as `code`, and refused by the others. The caller's
+    /// linked GitHub account must reach it.
+    #[serde(default)]
+    pub repo_url: Option<String>,
 }
 
 /// Request body for linking a Run to a task.
@@ -244,7 +250,7 @@ where
     let actor = caller.authorization.user.macro_user_id;
     let created = state
         .service
-        .create_run(actor, body.flow, body.request, body.task_id)
+        .create_run(actor, body.flow, body.request, body.task_id, body.repo_url)
         .await?;
     Ok((StatusCode::CREATED, Json(created)))
 }
@@ -494,6 +500,10 @@ impl FactoryError {
             | FactoryError::NotATask
             | FactoryError::UnknownUser
             | FactoryError::UnknownFlow
+            | FactoryError::RepositoryRequired
+            | FactoryError::RepositoryNotUsed
+            | FactoryError::InvalidRepository
+            | FactoryError::UnreachableRepository
             | FactoryError::AnswerNotOffered { .. }
             | FactoryError::NotAStepSession
             | FactoryError::OutcomeNotOffered { .. }

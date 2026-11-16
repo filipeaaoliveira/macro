@@ -1,21 +1,37 @@
-//! The Steps the factory knows: `reply` acknowledges the Run's request, and
-//! `plan` and `write` hand it to an agent.
+//! The Steps the factory knows: `reply` acknowledges the Run's request;
+//! `plan`, `write`, `review`, `fix` and `ci_fix` hand it to an agent; and
+//! `publish`, `ci`, `ready_to_merge` and `merge` take the Run's branch to a
+//! merged pull request on GitHub ([`PullRequestSteps`]).
 
 #[cfg(test)]
 mod test;
 
-use factory_records::domain::models::{Outcome, Step, StepKey};
+use factory_records::domain::models::{Outcome, Repository, Step, StepKey};
+use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::flow::StepName;
-use crate::domain::models::{AgentTask, StepInput, StepReport};
-use crate::domain::ports::{Retryable, StepAgent, StepExecutor};
+use crate::domain::models::{AgentTask, StepInput, StepReport, run_branch};
+use crate::domain::ports::{PullRequests, Retryable, StepAgent, StepExecutor};
+use crate::domain::pull_request_steps::{PullRequestStepError, PullRequestSteps};
 
 /// What the agent is told for a `plan` Step.
 const PLAN_INSTRUCTIONS: &str = include_str!("built_in_steps/plan.md");
 
 /// What the agent is told for a `write` Step.
 const WRITE_INSTRUCTIONS: &str = include_str!("built_in_steps/write.md");
+
+/// What the agent is told for a `review` Step.
+const REVIEW_INSTRUCTIONS: &str = include_str!("built_in_steps/review.md");
+
+/// What the agent is told for a `fix` Step.
+const FIX_INSTRUCTIONS: &str = include_str!("built_in_steps/fix.md");
+
+/// What the agent is told for a `ci_fix` Step.
+const CI_FIX_INSTRUCTIONS: &str = include_str!("built_in_steps/ci_fix.md");
+
+/// Where an agent works when the Run works on a repository.
+const REPOSITORY_INSTRUCTIONS: &str = include_str!("built_in_steps/repository.md");
 
 /// One of the Steps [`BuiltInSteps`] does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,6 +42,20 @@ enum BuiltInStep {
     Plan,
     /// An agent writes the change its plan describes.
     Write,
+    /// An agent reviews the change on the Run's branch.
+    Review,
+    /// An agent changes what a review or a person asked of the change.
+    Fix,
+    /// An agent fixes what made the pull request's checks fail.
+    CiFix,
+    /// The Run's branch is proposed as a pull request.
+    Publish,
+    /// The pull request's checks are waited for.
+    Ci,
+    /// A person is shown the commit whose checks passed, to merge.
+    ReadyToMerge,
+    /// The commit a person agreed to is merged.
+    Merge,
 }
 
 impl BuiltInStep {
@@ -34,7 +64,22 @@ impl BuiltInStep {
             "reply" => Some(Self::Reply),
             "plan" => Some(Self::Plan),
             "write" => Some(Self::Write),
+            "review" => Some(Self::Review),
+            "fix" => Some(Self::Fix),
+            "ci_fix" => Some(Self::CiFix),
+            "publish" => Some(Self::Publish),
+            "ci" => Some(Self::Ci),
+            "ready_to_merge" => Some(Self::ReadyToMerge),
+            "merge" => Some(Self::Merge),
             _ => None,
+        }
+    }
+
+    /// Whether an agent does it, in a session to stop or let go of.
+    fn agent_step(self) -> bool {
+        match self {
+            Self::Plan | Self::Write | Self::Review | Self::Fix | Self::CiFix => true,
+            Self::Reply | Self::Publish | Self::Ci | Self::ReadyToMerge | Self::Merge => false,
         }
     }
 }
@@ -45,6 +90,9 @@ pub enum BuiltInStepError {
     /// No built-in Step has this name.
     #[error("no built-in step is named {0}")]
     UnknownStep(StepName),
+    /// The Step works on the Run's repository, and the Run has none.
+    #[error("step {0} works on the run's repository, and the run has none")]
+    NoRepository(StepName),
     /// The agent could not do the Step.
     #[error("the agent failed: {report:?}")]
     Agent {
@@ -61,6 +109,9 @@ pub enum BuiltInStepError {
         /// The outcome the agent handed back.
         outcome: Outcome,
     },
+    /// A pull request Step could not be done.
+    #[error(transparent)]
+    PullRequest(#[from] PullRequestStepError),
 }
 
 impl BuiltInStepError {
@@ -76,25 +127,41 @@ impl Retryable for BuiltInStepError {
     fn retryable(&self) -> bool {
         match self {
             BuiltInStepError::Agent { retryable, .. } => *retryable,
-            BuiltInStepError::UnknownStep(_) | BuiltInStepError::UnexpectedOutcome { .. } => false,
+            BuiltInStepError::PullRequest(error) => error.retryable(),
+            BuiltInStepError::UnknownStep(_)
+            | BuiltInStepError::NoRepository(_)
+            | BuiltInStepError::UnexpectedOutcome { .. } => false,
         }
     }
 }
 
-/// The built-in Steps, over the agent that does `plan` and `write`.
-#[derive(Debug, Clone, Copy)]
-pub struct BuiltInSteps<A> {
-    agent: A,
+fn outcomes(names: &[&str]) -> Vec<Outcome> {
+    names
+        .iter()
+        .map(|name| Outcome::try_from((*name).to_string()).unwrap_or_else(|_| Outcome::failed()))
+        .collect()
 }
 
-impl<A: StepAgent> BuiltInSteps<A> {
+/// The built-in Steps, over the agent that does the agent Steps and the
+/// pull request Steps.
+#[derive(Debug, Clone)]
+pub struct BuiltInSteps<A, G, R> {
+    agent: A,
+    pull_requests: PullRequestSteps<G, R>,
+}
+
+impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
     /// The built-in Steps, with `agent` doing the agent Steps.
-    pub fn new(agent: A) -> Self {
-        Self { agent }
+    pub fn new(agent: A, pull_requests: PullRequestSteps<G, R>) -> Self {
+        Self {
+            agent,
+            pull_requests,
+        }
     }
 
     /// Hand `step` to the agent with `instructions`, and check it ends with
-    /// one of `outcomes`.
+    /// one of `outcomes`. When the Run works on a repository, the agent's
+    /// session works in it, on the Run's branch.
     async fn ask_agent(
         &self,
         step: &StepName,
@@ -108,6 +175,7 @@ impl<A: StepAgent> BuiltInSteps<A> {
             step: step.clone(),
             prompt: prompt(instructions, &outcomes, input),
             outcomes: outcomes.clone(),
+            repo_url: input.repository.map(|repository| repository.url.clone()),
         };
         let answer = self
             .agent
@@ -126,9 +194,24 @@ impl<A: StepAgent> BuiltInSteps<A> {
             output: answer.text,
         })
     }
+
+    /// [`Self::ask_agent`] for a Step that only makes sense on the Run's
+    /// repository.
+    async fn ask_agent_in_repository(
+        &self,
+        step: &StepName,
+        instructions: &str,
+        outcomes: Vec<Outcome>,
+        input: StepInput<'_>,
+    ) -> Result<StepReport, BuiltInStepError> {
+        if input.repository.is_none() {
+            return Err(BuiltInStepError::NoRepository(step.clone()));
+        }
+        self.ask_agent(step, instructions, outcomes, input).await
+    }
 }
 
-impl<A: StepAgent> StepExecutor for BuiltInSteps<A> {
+impl<A: StepAgent, G: PullRequests, R: RunRepository> StepExecutor for BuiltInSteps<A, G, R> {
     type Err = BuiltInStepError;
 
     fn serves(&self, step: &StepName) -> bool {
@@ -156,6 +239,24 @@ impl<A: StepAgent> StepExecutor for BuiltInSteps<A> {
                 self.ask_agent(step, WRITE_INSTRUCTIONS, outcomes, input)
                     .await
             }
+            BuiltInStep::Review => {
+                let outcomes = outcomes(&["pass", "changes"]);
+                self.ask_agent_in_repository(step, REVIEW_INSTRUCTIONS, outcomes, input)
+                    .await
+            }
+            BuiltInStep::Fix => {
+                self.ask_agent_in_repository(step, FIX_INSTRUCTIONS, vec![Outcome::done()], input)
+                    .await
+            }
+            BuiltInStep::CiFix => {
+                let outcomes = vec![Outcome::done()];
+                self.ask_agent_in_repository(step, CI_FIX_INSTRUCTIONS, outcomes, input)
+                    .await
+            }
+            BuiltInStep::Publish => Ok(self.pull_requests.publish(input).await?),
+            BuiltInStep::Ci => Ok(self.pull_requests.ci(input).await?),
+            BuiltInStep::ReadyToMerge => Ok(self.pull_requests.ready_to_merge(input).await?),
+            BuiltInStep::Merge => Ok(self.pull_requests.merge(input).await?),
         }
     }
 
@@ -166,13 +267,14 @@ impl<A: StepAgent> StepExecutor for BuiltInSteps<A> {
         owner: &MacroUserIdStr<'static>,
     ) -> Result<(), BuiltInStepError> {
         match BuiltInStep::named(step) {
-            Some(BuiltInStep::Plan | BuiltInStep::Write) => self
+            Some(built_in) if built_in.agent_step() => self
                 .agent
                 .stop(key, owner)
                 .await
                 .map_err(BuiltInStepError::agent),
-            // A reply is done before anything could stop it.
-            Some(BuiltInStep::Reply) | None => Ok(()),
+            // A reply is done before anything could stop it, and a pull
+            // request Step holds nothing: a cancelled one is dropped.
+            Some(_) | None => Ok(()),
         }
     }
 
@@ -183,13 +285,13 @@ impl<A: StepAgent> StepExecutor for BuiltInSteps<A> {
         owner: &MacroUserIdStr<'static>,
     ) -> Result<(), BuiltInStepError> {
         match BuiltInStep::named(step) {
-            Some(BuiltInStep::Plan | BuiltInStep::Write) => self
+            Some(built_in) if built_in.agent_step() => self
                 .agent
                 .release(key, owner)
                 .await
                 .map_err(BuiltInStepError::agent),
-            // A reply holds nothing.
-            Some(BuiltInStep::Reply) | None => Ok(()),
+            // Only an agent Step holds a session.
+            Some(_) | None => Ok(()),
         }
     }
 }
@@ -198,18 +300,35 @@ impl<A: StepAgent> StepExecutor for BuiltInSteps<A> {
 const HISTORY_BUDGET: usize = 48 * 1024;
 
 /// The agent's prompt: the Step's instructions, the outcomes it may end
-/// with, the Run's request, then the Run's earlier Steps ([`history`]).
+/// with, where it works when the Run works on a repository ([`workplace`]),
+/// the Run's request, then the Run's earlier Steps ([`history`]).
 fn prompt(instructions: &str, outcomes: &[Outcome], input: StepInput<'_>) -> String {
     let outcomes = outcomes
         .iter()
         .map(|outcome| format!("`{outcome}`"))
         .collect::<Vec<_>>()
         .join(", ");
+    let workplace = input
+        .repository
+        .map(|repository| workplace(repository, &run_branch(input.key.run_id)))
+        .unwrap_or_default();
     format!(
-        "{instructions}\nEnd the step with one of these outcomes: {outcomes}.\n\n\
+        "{instructions}\nEnd the step with one of these outcomes: {outcomes}.\n{workplace}\n\
          ## Request\n\n{}\n{}",
         input.request,
         history(input.earlier)
+    )
+}
+
+/// Where the agent works: a checkout of the Run's repository, on the Run's
+/// branch `branch`.
+fn workplace(repository: &Repository, branch: &str) -> String {
+    format!(
+        "\n{}",
+        REPOSITORY_INSTRUCTIONS
+            .replace("{branch}", branch)
+            .replace("{base}", &repository.base_branch)
+            .replace("{repository}", &repository.url)
     )
 }
 

@@ -1,19 +1,22 @@
 //! In-memory stand-ins for the factory's records, for the domain's tests.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use agent_session::domain::session_task::TaskDocumentId;
 use chrono::Utc;
 use factory_records::domain::models::{
-    ClaimedSession, EntryId, Gate, HandBack, Outcome, Run, RunEnd, RunId, RunInsert, RunOutcome,
-    SessionStep, Step, StepEnd, StepKey, StepSession, StoppingSession, TaskLink,
+    ClaimedSession, EntryId, Gate, HandBack, Outcome, Repository, Run, RunEnd, RunId, RunInsert,
+    RunOutcome, SessionStep, Step, StepEnd, StepKey, StepSession, StoppingSession, TaskLink,
 };
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
-use crate::domain::ports::{Retryable, TaskAccess, TaskDirectory, UserDirectory};
+use crate::domain::models::{
+    Check, CodeRepository, Merging, OpenPullRequest, Opening, PullRequest, PullRequestState,
+};
+use crate::domain::ports::{PullRequests, Retryable, TaskAccess, TaskDirectory, UserDirectory};
 
 /// The session an agent Step claimed, and what it handed back.
 #[derive(Clone)]
@@ -53,6 +56,10 @@ pub(crate) struct FakeRepo {
     pub(crate) documents: Arc<Mutex<BTreeSet<Uuid>>>,
     /// The task documents a user cannot see: their id and the task's.
     pub(crate) hidden: Arc<Mutex<BTreeSet<(String, Uuid)>>>,
+    /// The commit each Run last asked a person to merge.
+    pub(crate) merge_heads: Arc<Mutex<BTreeMap<RunId, String>>>,
+    /// Told each time a Gate opens.
+    pub(crate) gate_opened: Arc<tokio::sync::Notify>,
 }
 
 /// Everyone has an account but `macro|nobody@example.com`.
@@ -112,6 +119,7 @@ impl RunRepository for FakeRepo {
         request: &str,
         user_id: &MacroUserIdStr<'static>,
         task_id: Option<Uuid>,
+        repository: Option<&Repository>,
     ) -> Result<RunInsert, FakeError> {
         if let Some(task_id) = task_id
             && !self.tasks.lock().expect("tasks").contains(&task_id)
@@ -124,6 +132,7 @@ impl RunRepository for FakeRepo {
             user_id: user_id.clone(),
             created_at: Utc::now(),
             task_id,
+            repository: repository.cloned(),
             end: None,
         };
         self.runs.lock().expect("runs").insert(id, run.clone());
@@ -141,6 +150,23 @@ impl RunRepository for FakeRepo {
             }
             None => Ok(TaskLink::NoSuchRun),
         }
+    }
+
+    async fn set_merge_head(&self, id: RunId, sha: &str) -> Result<(), FakeError> {
+        self.merge_heads
+            .lock()
+            .expect("merge heads")
+            .insert(id, sha.to_string());
+        Ok(())
+    }
+
+    async fn merge_head(&self, id: RunId) -> Result<Option<String>, FakeError> {
+        Ok(self
+            .merge_heads
+            .lock()
+            .expect("merge heads")
+            .get(&id)
+            .cloned())
     }
 
     async fn delete_run(&self, id: RunId) -> Result<(), FakeError> {
@@ -246,6 +272,7 @@ impl RunRepository for FakeRepo {
                 answer: None,
             });
         });
+        self.gate_opened.notify_one();
         Ok(())
     }
 
@@ -461,5 +488,156 @@ impl RunRepository for FakeRepo {
             }
         }
         Ok(())
+    }
+}
+
+/// What [`FakeGithub`] holds: one repository, and the pull request a Run's
+/// branch opens in it.
+#[derive(Default)]
+pub(crate) struct FakeGithubState {
+    /// Whether the Run's owner cannot reach the repository.
+    pub(crate) unreachable: bool,
+    /// The pull request from the Run's branch, once opened.
+    pub(crate) pull_request: Option<PullRequest>,
+    /// The checks each read of the open pull request shows next, in order;
+    /// the last one stays once the others were read.
+    pub(crate) checks: VecDeque<Vec<Check>>,
+    /// How many times the pull request was looked for.
+    pub(crate) reads: usize,
+    /// How many times a pull request was opened.
+    pub(crate) opened: usize,
+    /// GitHub's reason to refuse opening one, if it does.
+    pub(crate) open_refusal: Option<String>,
+    /// The head commits merges were asked for, in order.
+    pub(crate) merges: Vec<String>,
+    /// GitHub's reason to refuse a merge, if it does.
+    pub(crate) merge_refusal: Option<String>,
+}
+
+/// GitHub in memory, for one Run's branch: opening its pull request makes
+/// it listed, open, at [`FakeGithub::HEAD`], and merging it merges it.
+#[derive(Clone, Default)]
+pub(crate) struct FakeGithub {
+    pub(crate) state: Arc<Mutex<FakeGithubState>>,
+    /// Told each time the pull request is looked for.
+    pub(crate) read: Arc<tokio::sync::Notify>,
+}
+
+impl FakeGithub {
+    /// The commit an opened pull request's head is at.
+    pub(crate) const HEAD: &str = "1111111111111111111111111111111111111111";
+
+    pub(crate) fn state(&self) -> std::sync::MutexGuard<'_, FakeGithubState> {
+        self.state.lock().expect("github")
+    }
+
+    /// GitHub with the Run's pull request open at [`Self::HEAD`], showing
+    /// `checks`.
+    pub(crate) fn with_open_pull_request(checks: Vec<Check>) -> Self {
+        let github = Self::default();
+        github.state().pull_request = Some(PullRequest {
+            number: 7,
+            url: "https://github.com/macro/app/pull/7".to_string(),
+            state: PullRequestState::Open,
+            head_sha: Some(Self::HEAD.to_string()),
+            checks: Some(checks),
+        });
+        github
+    }
+}
+
+/// A completed check named `name` that concluded `conclusion`, or one still
+/// running when `conclusion` is none.
+pub(crate) fn check(name: &str, conclusion: Option<&str>) -> Check {
+    Check {
+        name: name.to_string(),
+        status: if conclusion.is_some() {
+            "completed"
+        } else {
+            "in_progress"
+        }
+        .to_string(),
+        conclusion: conclusion.map(str::to_string),
+        url: Some(format!("https://github.com/macro/app/runs/{name}")),
+    }
+}
+
+impl PullRequests for FakeGithub {
+    type Err = FakeError;
+
+    async fn default_branch(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+    ) -> Result<Option<String>, FakeError> {
+        Ok((!self.state().unreachable).then(|| "main".to_string()))
+    }
+
+    async fn find(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        _branch: &str,
+    ) -> Result<Option<PullRequest>, FakeError> {
+        let found = {
+            let mut state = self.state();
+            state.reads += 1;
+            if state.pull_request.is_some() {
+                let next = if state.checks.len() > 1 {
+                    state.checks.pop_front()
+                } else {
+                    state.checks.front().cloned()
+                };
+                if let (Some(pull_request), Some(checks)) = (state.pull_request.as_mut(), next) {
+                    pull_request.checks = Some(checks);
+                }
+            }
+            state.pull_request.clone()
+        };
+        self.read.notify_one();
+        Ok(found)
+    }
+
+    async fn open(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        _pull_request: &OpenPullRequest,
+    ) -> Result<Opening, FakeError> {
+        let mut state = self.state();
+        if let Some(why) = state.open_refusal.clone() {
+            return Ok(Opening::Refused(why));
+        }
+        state.opened += 1;
+        state.pull_request = Some(PullRequest {
+            number: 7,
+            url: format!("{}/pull/7", repository.url()),
+            state: PullRequestState::Open,
+            head_sha: Some(Self::HEAD.to_string()),
+            checks: Some(Vec::new()),
+        });
+        Ok(Opening::Opened)
+    }
+
+    async fn merge(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        _number: u64,
+        head_sha: &str,
+    ) -> Result<Merging, FakeError> {
+        let mut state = self.state();
+        state.merges.push(head_sha.to_string());
+        if let Some(why) = state.merge_refusal.clone() {
+            return Ok(Merging::Refused(why));
+        }
+        let Some(pull_request) = state.pull_request.as_mut() else {
+            return Ok(Merging::Refused("Not Found".to_string()));
+        };
+        if pull_request.head_sha.as_deref() != Some(head_sha) {
+            return Ok(Merging::HeadChanged);
+        }
+        pull_request.state = PullRequestState::Merged;
+        Ok(Merging::Merged)
     }
 }

@@ -8,8 +8,9 @@ use uuid::Uuid;
 use crate::domain::flow::StepName;
 use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening};
 use crate::domain::models::{
-    AgentAnswer, AgentTask, FactoryError, FlowSummary, RunDetail, RunFinish, RunStart, StepEnding,
-    StepError, StepInput, StepReport, StepRequest, StepStart,
+    AgentAnswer, AgentTask, CodeRepository, FactoryError, FlowSummary, Merging, OpenPullRequest,
+    Opening, PullRequest, RunDetail, RunFinish, RunStart, StepEnding, StepError, StepInput,
+    StepReport, StepRequest, StepStart,
 };
 
 /// What a Run's workflow did with an answer it was sent.
@@ -131,6 +132,48 @@ pub trait StepAgent: Send + Sync + 'static {
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 }
 
+/// Pull requests on GitHub, read and changed as a Run's owner, with the
+/// GitHub account they connected to Macro.
+pub trait PullRequests: Send + Sync + 'static {
+    /// The error type returned when GitHub cannot be asked.
+    type Err: std::error::Error + Retryable + Send + Sync + 'static;
+
+    /// The branch `repository` checks out by default, as `owner` sees it;
+    /// none when they cannot reach the repository, have connected no GitHub
+    /// account, or the repository has no branch yet.
+    fn default_branch(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+    ) -> impl Future<Output = Result<Option<String>, Self::Err>> + Send;
+
+    /// The newest pull request from `branch` of `repository`, open or not.
+    fn find(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        branch: &str,
+    ) -> impl Future<Output = Result<Option<PullRequest>, Self::Err>> + Send;
+
+    /// Ask GitHub to open `pull_request` in `repository`.
+    fn open(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        pull_request: &OpenPullRequest,
+    ) -> impl Future<Output = Result<Opening, Self::Err>> + Send;
+
+    /// Ask GitHub to merge pull request `number` of `repository` while its
+    /// head is the commit `head_sha`.
+    fn merge(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        number: u64,
+        head_sha: &str,
+    ) -> impl Future<Output = Result<Merging, Self::Err>> + Send;
+}
+
 /// The people Macro knows.
 pub trait UserDirectory: Send + Sync + 'static {
     /// The error type returned when the directory cannot be read.
@@ -177,13 +220,16 @@ pub trait FactoryService: Send + Sync + 'static {
 
     /// Record `actor`'s new Run of the built-in Flow named `flow` for
     /// `request`, working on the task document `task_id` if one is given,
-    /// and start it. The actor must have an account and see the task.
+    /// and on the GitHub repository `repo_url` if the Flow works on one,
+    /// and start it. The actor must have an account, see the task, and
+    /// reach the repository with their GitHub account.
     fn create_run(
         &self,
         actor: MacroUserIdStr<'static>,
         flow: String,
         request: String,
         task_id: Option<Uuid>,
+        repo_url: Option<String>,
     ) -> impl Future<Output = Result<RunDetail, FactoryError>> + Send;
 
     /// `actor`'s Run and the Steps it took. Reading a Run whose workflow

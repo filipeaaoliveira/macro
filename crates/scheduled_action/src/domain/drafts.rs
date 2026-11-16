@@ -645,6 +645,7 @@ impl<Code: RoutineCode, Sessions: RoutineSessions> RoutineDrafts<Code, Sessions>
             .prepare(PrepareRoutineSession {
                 billing: Default::default(),
                 instructions: brief.instructions,
+                repo_url: None,
                 selection: ValidateRoutineSession {
                     owner: action.owner.clone(),
                     bot_id: action.bot_id,

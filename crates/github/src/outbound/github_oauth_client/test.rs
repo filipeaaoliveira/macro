@@ -109,7 +109,7 @@ async fn merge_pull_request_sends_method_and_reports_merge() {
     let client = GithubOauthImpl::with_api_base_url(server.base_url.clone());
 
     let outcome = client
-        .merge_pull_request("token", "macro", "app", 7, GithubMergeMethod::Squash)
+        .merge_pull_request("token", "macro", "app", 7, GithubMergeMethod::Squash, None)
         .await
         .unwrap();
 
@@ -131,6 +131,185 @@ async fn merge_pull_request_sends_method_and_reports_merge() {
 }
 
 #[tokio::test]
+async fn merge_pull_request_names_the_head_it_merges() {
+    let server = MockServer::start(MockResponse {
+        status: "409 Conflict",
+        body: r#"{"message":"Head branch was modified. Review and try the merge again."}"#
+            .to_string(),
+    });
+    let client = GithubOauthImpl::with_api_base_url(server.base_url.clone());
+
+    let outcome = client
+        .merge_pull_request(
+            "token",
+            "macro",
+            "app",
+            7,
+            GithubMergeMethod::Squash,
+            Some("6dcb09b".to_string()),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        outcome,
+        GithubMergeOutcome::Rejected {
+            rejection: GithubMergeRejection::HeadChanged,
+            message: "Head branch was modified. Review and try the merge again.".to_string(),
+        }
+    );
+    assert!(
+        server
+            .finish()
+            .ends_with(r#"{"merge_method":"squash","sha":"6dcb09b"}"#)
+    );
+}
+
+#[tokio::test]
+async fn get_repository_reads_its_default_branch() {
+    let server = MockServer::start(MockResponse {
+        status: "200 OK",
+        body: serde_json::json!({
+            "id": 42,
+            "name": "app",
+            "owner": { "login": "macro" },
+            "html_url": "https://github.com/macro/app",
+            "default_branch": "trunk",
+            "private": true
+        })
+        .to_string(),
+    });
+    let client = GithubOauthImpl::with_api_base_url(server.base_url.clone());
+
+    let repository = client
+        .get_repository("token", "macro", "app")
+        .await
+        .unwrap()
+        .expect("the user sees it");
+
+    assert_eq!(repository.default_branch.as_deref(), Some("trunk"));
+    assert!(server.finish().starts_with("GET /repos/macro/app HTTP/1.1"));
+}
+
+#[tokio::test]
+async fn get_repository_the_user_cannot_see_is_none() {
+    let server = MockServer::start(MockResponse {
+        status: "404 Not Found",
+        body: r#"{"message":"Not Found"}"#.to_string(),
+    });
+    let client = GithubOauthImpl::with_api_base_url(server.base_url.clone());
+
+    let repository = client
+        .get_repository("token", "macro", "app")
+        .await
+        .unwrap();
+
+    assert_eq!(repository, None);
+    server.finish();
+}
+
+#[tokio::test]
+async fn find_pull_request_by_head_asks_for_the_newest_of_the_branch() {
+    let server = MockServer::start(MockResponse {
+        status: "200 OK",
+        body: r#"[{"number":12}]"#.to_string(),
+    });
+    let client = GithubOauthImpl::with_api_base_url(server.base_url.clone());
+
+    let number = client
+        .find_pull_request_by_head("token", "macro", "app", "factory/run")
+        .await
+        .unwrap();
+
+    assert_eq!(number, Some(12));
+    let request = server.finish();
+    assert!(request.starts_with(
+        "GET /repos/macro/app/pulls?head=macro%3Afactory%2Frun&state=all&sort=created&direction=desc&per_page=1 HTTP/1.1"
+    ));
+}
+
+#[tokio::test]
+async fn find_pull_request_by_head_with_none_is_none() {
+    let server = MockServer::start(MockResponse {
+        status: "200 OK",
+        body: "[]".to_string(),
+    });
+    let client = GithubOauthImpl::with_api_base_url(server.base_url.clone());
+
+    let number = client
+        .find_pull_request_by_head("token", "macro", "app", "factory/run")
+        .await
+        .unwrap();
+
+    assert_eq!(number, None);
+    server.finish();
+}
+
+#[tokio::test]
+async fn open_pull_request_reports_its_number() {
+    let server = MockServer::start(MockResponse {
+        status: "201 Created",
+        body: r#"{"number":13}"#.to_string(),
+    });
+    let client = GithubOauthImpl::with_api_base_url(server.base_url.clone());
+
+    let outcome = client
+        .open_pull_request(
+            "token",
+            "macro",
+            "app",
+            &GithubOpenPullRequest {
+                head: "factory/run".to_string(),
+                base: "main".to_string(),
+                title: "Collapse repeated dashes".to_string(),
+                body: "Why".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(outcome, GithubOpenPullRequestOutcome::Opened(13));
+    let request = server.finish();
+    assert!(request.starts_with("POST /repos/macro/app/pulls HTTP/1.1"));
+    assert!(request.ends_with(
+        r#"{"title":"Collapse repeated dashes","body":"Why","head":"factory/run","base":"main"}"#
+    ));
+}
+
+#[tokio::test]
+async fn open_pull_request_reports_github_s_reason_for_declining() {
+    let server = MockServer::start(MockResponse {
+        status: "422 Unprocessable Entity",
+        body: r#"{"message":"Validation Failed","errors":[{"resource":"PullRequest","code":"custom","message":"A pull request already exists for macro:factory/run."}]}"#
+            .to_string(),
+    });
+    let client = GithubOauthImpl::with_api_base_url(server.base_url.clone());
+
+    let outcome = client
+        .open_pull_request(
+            "token",
+            "macro",
+            "app",
+            &GithubOpenPullRequest {
+                head: "factory/run".to_string(),
+                base: "main".to_string(),
+                title: "Collapse repeated dashes".to_string(),
+                body: "Why".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        outcome,
+        GithubOpenPullRequestOutcome::Rejected(
+            "A pull request already exists for macro:factory/run.".to_string()
+        )
+    );
+    server.finish();
+}
+
+#[tokio::test]
 async fn merge_pull_request_reports_not_mergeable_with_github_message() {
     let server = MockServer::start(MockResponse {
         status: "405 Method Not Allowed",
@@ -143,7 +322,7 @@ async fn merge_pull_request_reports_not_mergeable_with_github_message() {
     let client = GithubOauthImpl::with_api_base_url(server.base_url.clone());
 
     let outcome = client
-        .merge_pull_request("token", "macro", "app", 7, GithubMergeMethod::Merge)
+        .merge_pull_request("token", "macro", "app", 7, GithubMergeMethod::Merge, None)
         .await
         .unwrap();
 
@@ -172,7 +351,7 @@ async fn merge_pull_request_maps_head_change_and_access_statuses() {
         let client = GithubOauthImpl::with_api_base_url(server.base_url.clone());
 
         let outcome = client
-            .merge_pull_request("token", "macro", "app", 7, GithubMergeMethod::Merge)
+            .merge_pull_request("token", "macro", "app", 7, GithubMergeMethod::Merge, None)
             .await
             .unwrap();
 
@@ -197,7 +376,7 @@ async fn merge_pull_request_treats_a_failing_github_as_unavailable() {
     let client = GithubOauthImpl::with_api_base_url(server.base_url.clone());
 
     let error = client
-        .merge_pull_request("token", "macro", "app", 7, GithubMergeMethod::Merge)
+        .merge_pull_request("token", "macro", "app", 7, GithubMergeMethod::Merge, None)
         .await
         .unwrap_err();
 
@@ -304,7 +483,7 @@ async fn a_secondary_rate_limit_without_headers_is_throttling() {
     assert_eq!(upstream_failure(error), throttled);
 
     let error = client
-        .merge_pull_request("token", "macro", "app", 7, GithubMergeMethod::Merge)
+        .merge_pull_request("token", "macro", "app", 7, GithubMergeMethod::Merge, None)
         .await
         .unwrap_err();
     assert_eq!(upstream_failure(error), throttled);
@@ -363,7 +542,7 @@ async fn merge_pull_request_does_not_read_a_rate_limit_as_a_refusal() {
     let client = GithubOauthImpl::with_api_base_url(server.uri());
 
     let error = client
-        .merge_pull_request("token", "macro", "app", 7, GithubMergeMethod::Merge)
+        .merge_pull_request("token", "macro", "app", 7, GithubMergeMethod::Merge, None)
         .await
         .unwrap_err();
 

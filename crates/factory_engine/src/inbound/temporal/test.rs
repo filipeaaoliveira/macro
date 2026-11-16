@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use factory_records::domain::models::{Outcome, RunId, RunInsert, RunOutcome, StepKey};
+use factory_records::domain::models::{Outcome, Repository, RunId, RunInsert, RunOutcome, StepKey};
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
 use serde_json::json;
@@ -24,12 +24,16 @@ use tokio::sync::Notify;
 use uuid::Uuid;
 
 use super::worker_on;
+use crate::domain::built_in_flows::BuiltInFlow;
 use crate::domain::built_in_steps::BuiltInSteps;
-use crate::domain::fakes::FakeRepo;
+use crate::domain::fakes::{FakeGithub, FakeRepo, check};
 use crate::domain::flow::Flow;
-use crate::domain::models::{AgentAnswer, AgentTask, RunStart};
-use crate::domain::ports::{Retryable, StepAgent};
+use crate::domain::gate::AnswerGate;
+use crate::domain::models::{AgentAnswer, AgentTask, PullRequestState, RunStart};
+use crate::domain::ports::{AnswerDelivery, Retryable, RunWorkflows, StepAgent};
+use crate::domain::pull_request_steps::PullRequestSteps;
 use crate::domain::service::StepServiceImpl;
+use crate::outbound::temporal_run_workflows::TemporalRunWorkflows;
 use crate::temporal::FlowWorkflowDefinition;
 
 /// How long a test waits on Temporal before it fails.
@@ -130,6 +134,17 @@ impl StepAgent for Agent {
     }
 }
 
+/// The built-in Steps over `agent`, with no pull request on GitHub.
+fn steps_of<A: StepAgent + Clone>(
+    agent: &A,
+    repo: &FakeRepo,
+) -> BuiltInSteps<A, FakeGithub, FakeRepo> {
+    BuiltInSteps::new(
+        agent.clone(),
+        PullRequestSteps::new(FakeGithub::default(), repo.clone()),
+    )
+}
+
 /// A client of the Temporal at `TEMPORAL_ADDRESS`, the stack's by default.
 async fn client() -> Client {
     let address = macro_env_var::maybe_read_env("TEMPORAL_ADDRESS")
@@ -153,6 +168,7 @@ async fn plan_run(repo: &FakeRepo) -> RunStart {
             "plan",
             "Add a dark mode toggle",
             &julia,
+            None,
             None,
         )
         .await
@@ -223,7 +239,7 @@ where
         &task_queue,
         &runtime,
         client.clone(),
-        StepServiceImpl::new(repo.clone(), BuiltInSteps::new(agent.clone())),
+        StepServiceImpl::new(repo.clone(), steps_of(agent, &repo)),
     )
     .expect("worker");
 
@@ -398,7 +414,7 @@ async fn a_step_whose_worker_shuts_down_goes_on_at_once_on_the_next() {
     let run_id = start.run_id;
     let task_queue = format!("factory-test-{}", Uuid::now_v7());
     let runtime = Runtime::from_current_tokio(Default::default()).expect("runtime");
-    let steps = || StepServiceImpl::new(repo.clone(), BuiltInSteps::new(agent.clone()));
+    let steps = || StepServiceImpl::new(repo.clone(), steps_of(&agent, &repo));
     let handle = client
         .start_workflow(
             FlowWorkflowDefinition,
@@ -448,4 +464,380 @@ async fn a_step_whose_worker_shuts_down_goes_on_at_once_on_the_next() {
     assert!(tasks.iter().all(|task| *task == tasks[0]));
     assert_eq!(agent.stops.load(Ordering::SeqCst), 0);
     assert_eq!(agent.releases.load(Ordering::SeqCst), 1);
+}
+
+/// The agent of a `code` Run: it ends each Step it is asked for `done`, but
+/// a review with the next of `reviews` (`pass` once they run out), and a CI
+/// fix by pushing a commit whose checks pass. It says when it is asked for a
+/// Step, and keeps the Steps it was asked for, by name.
+#[derive(Clone)]
+struct CodeAgent {
+    github: FakeGithub,
+    reviews: Arc<Mutex<Vec<&'static str>>>,
+    steps: Arc<Mutex<Vec<String>>>,
+    asked: Arc<Notify>,
+}
+
+/// The commit a CI fix pushes.
+const FIXED_HEAD: &str = "2222222222222222222222222222222222222222";
+
+impl CodeAgent {
+    fn new(github: &FakeGithub) -> Self {
+        Self {
+            github: github.clone(),
+            reviews: Arc::default(),
+            steps: Arc::default(),
+            asked: Arc::default(),
+        }
+    }
+
+    fn steps(&self) -> Vec<String> {
+        self.steps.lock().expect("steps").clone()
+    }
+}
+
+impl StepAgent for CodeAgent {
+    type Err = AgentFailed;
+
+    async fn answer(&self, task: AgentTask) -> Result<AgentAnswer, AgentFailed> {
+        let step = task.step.as_str().to_string();
+        self.steps.lock().expect("steps").push(step.clone());
+        self.asked.notify_one();
+        let outcome = match step.as_str() {
+            "review" => {
+                let mut reviews = self.reviews.lock().expect("reviews");
+                if reviews.is_empty() {
+                    "pass"
+                } else {
+                    reviews.remove(0)
+                }
+            }
+            "ci_fix" => {
+                let mut github = self.github.state();
+                if let Some(pull_request) = github.pull_request.as_mut() {
+                    pull_request.head_sha = Some(FIXED_HEAD.to_string());
+                }
+                github.checks = [vec![check("test", Some("success"))]].into();
+                "done"
+            }
+            _ => "done",
+        };
+        Ok(AgentAnswer {
+            outcome: Outcome::try_from(outcome.to_string()).expect("valid"),
+            text: format!("The {step}"),
+        })
+    }
+
+    async fn stop(
+        &self,
+        _key: StepKey,
+        _owner: &MacroUserIdStr<'static>,
+    ) -> Result<(), AgentFailed> {
+        Ok(())
+    }
+
+    async fn release(
+        &self,
+        _key: StepKey,
+        _owner: &MacroUserIdStr<'static>,
+    ) -> Result<(), AgentFailed> {
+        Ok(())
+    }
+}
+
+/// What a test driving a `code` Run is handed: Temporal, the Run, and its
+/// records.
+struct CodeRun {
+    client: Client,
+    run_id: RunId,
+    repo: FakeRepo,
+}
+
+impl CodeRun {
+    /// Wait for the Run's next Gate to open, and return its Step's place.
+    async fn next_gate(&self) -> u16 {
+        tokio::time::timeout(PATIENCE, self.repo.gate_opened.notified())
+            .await
+            .expect("a gate opens");
+        self.repo
+            .list_steps(self.run_id)
+            .await
+            .expect("read")
+            .iter()
+            .filter(|step| step.gate.is_some())
+            .map(|step| step.seq)
+            .max()
+            .expect("an open gate")
+    }
+
+    /// Give the Gate of the Step `seq` the answer `answer`, as Julia. The
+    /// Gate is recorded just before the workflow waits on it, and an answer
+    /// that lands in between is refused, as the API would refuse it: the
+    /// answer is sent again, a few times at most.
+    async fn answer(&self, seq: u16, answer: &str) {
+        let workflows = TemporalRunWorkflows::new(self.client.clone());
+        let answer = AnswerGate {
+            seq,
+            answer: Outcome::try_from(answer.to_string()).expect("valid"),
+            note: None,
+            user_id: julia(),
+        };
+        let mut delivery = AnswerDelivery::Refused("not sent".to_string());
+        for _ in 0..50 {
+            delivery = workflows
+                .answer(self.run_id, &answer)
+                .await
+                .expect("answer");
+            if delivery == AnswerDelivery::Taken {
+                break;
+            }
+        }
+        assert_eq!(delivery, AnswerDelivery::Taken);
+    }
+
+    /// Wait for the Run's next Gate, and give it `answer`.
+    async fn answer_next_gate(&self, answer: &str) {
+        let seq = self.next_gate().await;
+        self.answer(seq, answer).await;
+    }
+
+    async fn cancel(&self) {
+        self.client
+            .get_workflow_handle::<FlowWorkflowDefinition>(self.run_id.to_string())
+            .cancel(WorkflowCancelOptions::builder().build())
+            .await
+            .expect("cancel");
+    }
+}
+
+fn julia() -> MacroUserIdStr<'static> {
+    MacroUserIdStr::try_from("macro|julia@example.com".to_string()).expect("valid")
+}
+
+/// Walk a Run of the built-in `code` Flow on a repository, with `agent` and
+/// `github`, running `drive` on the started workflow; return how it ended.
+async fn walk_code<F>(
+    agent: &CodeAgent,
+    github: &FakeGithub,
+    drive: impl FnOnce(CodeRun) -> F,
+) -> Result<RunOutcome, WorkflowGetResultError>
+where
+    F: Future<Output = ()>,
+{
+    let client = client().await;
+    let repo = FakeRepo::default();
+    let repository = Repository {
+        url: "https://github.com/macro/app".to_string(),
+        base_branch: "main".to_string(),
+    };
+    let RunInsert::Inserted(run) = repo
+        .insert_run(
+            RunId::generate(),
+            "code",
+            "Collapse repeated dashes in slugs",
+            &julia(),
+            None,
+            Some(&repository),
+        )
+        .await
+        .expect("insert")
+    else {
+        panic!("a run with no task is kept");
+    };
+    let flow = BuiltInFlow::named("code")
+        .expect("built in")
+        .read(|_| true)
+        .expect("valid flow");
+    let start = RunStart {
+        run_id: run.id,
+        flow,
+    };
+    let task_queue = format!("factory-test-{}", Uuid::now_v7());
+    let runtime = Runtime::from_current_tokio(Default::default()).expect("runtime");
+    let steps = BuiltInSteps::new(
+        agent.clone(),
+        PullRequestSteps::new(github.clone(), repo.clone()),
+    );
+    let worker = worker_on(
+        &task_queue,
+        &runtime,
+        client.clone(),
+        StepServiceImpl::new(repo.clone(), steps),
+    )
+    .expect("worker");
+
+    let done = Arc::new(Notify::new());
+    let walked = async {
+        let handle = client
+            .start_workflow(
+                FlowWorkflowDefinition,
+                start,
+                WorkflowStartOptions::new(task_queue.clone(), run.id.to_string()).build(),
+            )
+            .await
+            .expect("start");
+        drive(CodeRun {
+            client: client.clone(),
+            run_id: run.id,
+            repo: repo.clone(),
+        })
+        .await;
+        let ended = tokio::time::timeout(
+            PATIENCE,
+            handle.get_result(WorkflowGetResultOptions::default()),
+        )
+        .await
+        .expect("the workflow ends");
+        done.notify_one();
+        ended
+    };
+    let (worked, ended) = tokio::join!(worker.run_until(done.notified()), walked);
+    worked.expect("the worker ran");
+    ended
+}
+
+/// A `code` Run opens one pull request and merges it only once a person
+/// approves the commit whose checks passed.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "Temporal doesn't exist in CI"]
+async fn a_code_run_merges_its_pull_request_once_a_person_approves() {
+    let github = FakeGithub::default();
+    github.state().checks = [vec![check("test", Some("success"))]].into();
+    let agent = CodeAgent::new(&github);
+
+    let ended = walk_code(&agent, &github, |run| {
+        let github = github.clone();
+        async move {
+            run.answer_next_gate("approve").await;
+            let merge_question = run.next_gate().await;
+            // The person is asked; nothing merged yet.
+            assert!(github.state().merges.is_empty());
+            run.answer(merge_question, "approve").await;
+        }
+    })
+    .await;
+
+    assert!(matches!(ended, Ok(RunOutcome::Success)), "{ended:?}");
+    assert_eq!(agent.steps(), ["plan", "write", "review"]);
+    let github = github.state();
+    assert_eq!(github.opened, 1);
+    assert_eq!(github.merges, [FakeGithub::HEAD]);
+    assert_eq!(
+        github
+            .pull_request
+            .as_ref()
+            .map(|pull_request| pull_request.state),
+        Some(PullRequestState::Merged)
+    );
+}
+
+/// CI that fails is fixed by an agent, reviewed again, and merges green, on
+/// the commit the fix pushed.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "Temporal doesn't exist in CI"]
+async fn red_ci_is_fixed_and_the_fixed_commit_merges() {
+    let github = FakeGithub::default();
+    github.state().checks = [vec![check("test", Some("failure"))]].into();
+    let agent = CodeAgent::new(&github);
+
+    let ended = walk_code(&agent, &github, |run| async move {
+        run.answer_next_gate("approve").await;
+        run.answer_next_gate("approve").await;
+    })
+    .await;
+
+    assert!(matches!(ended, Ok(RunOutcome::Success)), "{ended:?}");
+    assert_eq!(
+        agent.steps(),
+        ["plan", "write", "review", "ci_fix", "review"]
+    );
+    let github = github.state();
+    assert_eq!(github.opened, 1);
+    assert_eq!(github.merges, [FIXED_HEAD]);
+}
+
+/// A person who sends the merge back has the change fixed and is asked
+/// again; cancelling then ends the Run with nothing merged.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "Temporal doesn't exist in CI"]
+async fn revising_or_cancelling_at_the_merge_question_merges_nothing() {
+    let github = FakeGithub::default();
+    github.state().checks = [vec![check("test", Some("success"))]].into();
+    let agent = CodeAgent::new(&github);
+
+    let ended = walk_code(&agent, &github, |run| async move {
+        run.answer_next_gate("approve").await;
+        run.answer_next_gate("revise").await;
+        run.next_gate().await;
+        run.cancel().await;
+    })
+    .await;
+
+    assert!(
+        matches!(ended, Err(WorkflowGetResultError::Cancelled { .. })),
+        "{ended:?}"
+    );
+    assert_eq!(agent.steps(), ["plan", "write", "review", "fix", "review"]);
+    let github = github.state();
+    assert!(github.merges.is_empty());
+    assert_eq!(github.opened, 1);
+}
+
+/// Reviews that keep asking for changes stop after three rounds: the pull
+/// request is opened and checked, then left for a person, never merged.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "Temporal doesn't exist in CI"]
+async fn a_review_that_keeps_asking_for_changes_leaves_the_pull_request_for_a_person() {
+    let github = FakeGithub::default();
+    github.state().checks = [vec![check("test", Some("success"))]].into();
+    let agent = CodeAgent::new(&github);
+    *agent.reviews.lock().expect("reviews") = vec!["changes", "changes", "changes"];
+
+    let ended = walk_code(&agent, &github, |run| async move {
+        run.answer_next_gate("approve").await;
+    })
+    .await;
+
+    assert!(matches!(ended, Ok(RunOutcome::Manual)), "{ended:?}");
+    assert_eq!(
+        agent.steps(),
+        [
+            "plan", "write", "review", "fix", "review", "fix", "review", "fix"
+        ]
+    );
+    let github = github.state();
+    assert_eq!(github.opened, 1);
+    assert!(github.merges.is_empty());
+}
+
+/// Cancelling a Run while CI waits on checks that never finish stops the
+/// wait within seconds and merges nothing.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "Temporal doesn't exist in CI"]
+async fn cancelling_while_ci_waits_ends_the_run_with_nothing_merged() {
+    let github = FakeGithub::default();
+    github.state().checks = [vec![check("test", None)]].into();
+    let agent = CodeAgent::new(&github);
+
+    let ended = walk_code(&agent, &github, |run| {
+        let github = github.clone();
+        async move {
+            run.answer_next_gate("approve").await;
+            // Publish looks the pull request up twice; CI's first look is
+            // the third.
+            while github.state().reads < 3 {
+                tokio::time::timeout(PATIENCE, github.read.notified())
+                    .await
+                    .expect("the pull request is read");
+            }
+            run.cancel().await;
+        }
+    })
+    .await;
+
+    assert!(
+        matches!(ended, Err(WorkflowGetResultError::Cancelled { .. })),
+        "{ended:?}"
+    );
+    assert!(github.state().merges.is_empty());
 }

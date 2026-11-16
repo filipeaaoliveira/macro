@@ -1,6 +1,8 @@
 use super::{BUILT_IN_FLOWS, BuiltInFlow};
 use crate::domain::built_in_steps::BuiltInSteps;
+use crate::domain::fakes::{FakeGithub, FakeRepo};
 use crate::domain::ports::StepExecutor;
+use crate::domain::pull_request_steps::PullRequestSteps;
 use crate::outbound::local_agent::LocalAgent;
 
 /// Each file in `flows/` holds together and says what it does, whichever
@@ -20,18 +22,32 @@ fn every_built_in_flow_reads_and_describes_itself() {
     }
 }
 
-/// The built-in Steps serve `plan` and `reply`; `code` names Steps no
-/// worker serves yet.
+/// The built-in Steps serve every built-in Flow, `code` included.
 #[test]
-fn the_built_in_steps_run_the_plan_and_reply_flows_but_not_code() {
-    let steps = BuiltInSteps::new(LocalAgent);
+fn the_built_in_steps_run_every_built_in_flow() {
+    let steps = BuiltInSteps::new(
+        LocalAgent,
+        PullRequestSteps::new(FakeGithub::default(), FakeRepo::default()),
+    );
     let runnable: Vec<&str> = BUILT_IN_FLOWS
         .into_iter()
         .filter(|flow| flow.read(|step| steps.serves(step)).is_ok())
         .map(|flow| flow.name)
         .collect();
 
-    assert_eq!(runnable, ["plan", "reply"]);
+    assert_eq!(runnable, ["code", "plan", "reply"]);
+}
+
+/// Only `code` works on a repository.
+#[test]
+fn only_the_code_flow_works_on_a_repository() {
+    let on_repository: Vec<&str> = BUILT_IN_FLOWS
+        .into_iter()
+        .filter(|flow| flow.read(|_| true).is_ok_and(|read| read.repository))
+        .map(|flow| flow.name)
+        .collect();
+
+    assert_eq!(on_repository, ["code"]);
 }
 
 #[test]

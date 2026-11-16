@@ -20,7 +20,7 @@ the Gates they asked people in MacroDB, and defines the names Flows use
 
 - Owns: the `factory_run`, `factory_step` and `factory_gate` tables
   (`crates/macro_db_client/migrations/20261116083957_factory.sql`,
-  `20261116213000_factory_run_flow.sql`).
+  `20261116211728_factory_run_repository.sql`).
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
 
 ## Boundaries
@@ -63,6 +63,10 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   index, and every later read on the Runs' ids.
 - A Run's or Step's end columns are all null or all set (`factory_*_end`
   checks); the row mappings refuse anything else.
+- A Run that works on code keeps its repository and base branch together
+  (`factory_run_repository` check), set once when it is kept. `set_merge_head`
+  replaces the commit the Run asks a person to merge each time it asks; the
+  merge reads it back, so it never merges another.
 
 ## Related
 

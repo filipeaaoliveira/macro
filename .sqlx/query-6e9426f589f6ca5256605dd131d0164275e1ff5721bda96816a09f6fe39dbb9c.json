@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT id, request, user_id, created_at, task_id, outcome, ended_at\n            FROM factory_run\n            WHERE task_id = $1 AND user_id = $2\n            ORDER BY created_at DESC, id DESC\n            LIMIT $3\n            ",
+  "query": "\n            SELECT\n                id, request, user_id, created_at, task_id, repo_url, base_branch, outcome, ended_at\n            FROM factory_run\n            WHERE id = $1\n            ",
   "describe": {
     "columns": [
       {
@@ -30,20 +30,28 @@
       },
       {
         "ordinal": 5,
-        "name": "outcome",
+        "name": "repo_url",
         "type_info": "Text"
       },
       {
         "ordinal": 6,
+        "name": "base_branch",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "outcome",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
         "name": "ended_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Text",
-        "Text",
-        "Int8"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -53,8 +61,10 @@
       false,
       true,
       true,
+      true,
+      true,
       true
     ]
   },
-  "hash": "c91169cc1d03cf1a7390636a2a793c3074bd9d70fc4edcd1a74db468ae94146e"
+  "hash": "6e9426f589f6ca5256605dd131d0164275e1ff5721bda96816a09f6fe39dbb9c"
 }

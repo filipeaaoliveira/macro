@@ -21,10 +21,11 @@ use uuid::Uuid;
 
 use super::{FactoryRouterState, factory_router};
 use crate::domain::built_in_steps::BuiltInSteps;
-use crate::domain::fakes::FakeRepo;
+use crate::domain::fakes::{FakeGithub, FakeRepo};
 use crate::domain::gate::AnswerGate;
 use crate::domain::models::{FactoryError, FlowSummary, RunDetail, RunStart};
 use crate::domain::ports::{AnswerDelivery, FactoryService, RunWorkflows, RunWorkflowsError};
+use crate::domain::pull_request_steps::PullRequestSteps;
 use crate::domain::service::FactoryServiceImpl;
 use crate::outbound::local_agent::LocalAgent;
 
@@ -169,6 +170,7 @@ impl FactoryService for FakeService {
         _flow: String,
         _request: String,
         _task_id: Option<Uuid>,
+        _repo_url: Option<String>,
     ) -> Result<RunDetail, FactoryError> {
         Err(self.refusing(&actor))
     }
@@ -264,12 +266,17 @@ impl RunWorkflows for AcceptingWorkflows {
 
 /// The Run API over the records in `repo`, as the service serves it.
 fn records_router(repo: &FakeRepo) -> Router {
+    let github = FakeGithub::default();
     let service = FactoryServiceImpl::new(
         repo.clone(),
         AcceptingWorkflows,
-        BuiltInSteps::new(LocalAgent),
+        BuiltInSteps::new(
+            LocalAgent,
+            PullRequestSteps::new(github.clone(), repo.clone()),
+        ),
         repo.clone(),
         repo.clone(),
+        github,
     );
     factory_router(FactoryRouterState::new(Arc::new(service), authorization()))
 }
@@ -278,7 +285,14 @@ fn records_router(repo: &FakeRepo) -> Router {
 async fn alice_s_run(repo: &FakeRepo) -> RunId {
     let alice = MacroUserIdStr::try_from(ALICE.to_string()).expect("valid");
     match repo
-        .insert_run(RunId::generate(), "plan", "Plan the export", &alice, None)
+        .insert_run(
+            RunId::generate(),
+            "plan",
+            "Plan the export",
+            &alice,
+            None,
+            None,
+        )
         .await
         .expect("insert")
     {
@@ -508,8 +522,8 @@ async fn a_run_is_not_linked_to_a_task_its_owner_cannot_see() {
     assert_eq!(hidden.status(), StatusCode::BAD_REQUEST);
 }
 
-/// The Flows a person can start, with what each does; the `code` Flow names
-/// Steps no worker serves yet, so it is not offered.
+/// The Flows a person can start, with what each does: every built-in one,
+/// as the worker serves all their Steps.
 #[tokio::test]
 async fn a_signed_in_user_lists_the_flows_the_worker_runs() {
     let router = records_router(&FakeRepo::default());
@@ -542,12 +556,12 @@ async fn a_signed_in_user_lists_the_flows_the_worker_runs() {
         .iter()
         .map(|flow| flow["name"].as_str().expect("name"))
         .collect();
-    assert_eq!(names, ["plan", "reply"]);
+    assert_eq!(names, ["code", "plan", "reply"]);
     assert!(
         flows[0]["description"]
             .as_str()
             .expect("description")
-            .starts_with("Plans the change")
+            .starts_with("Takes a task to a merged pull request")
     );
     assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
 }
@@ -576,6 +590,34 @@ async fn a_signed_in_user_starts_a_run_of_a_flow_by_its_name() {
     assert_eq!(created["run"]["taskId"], task.to_string());
     assert_eq!(created["steps"], serde_json::json!([]));
     assert_eq!(repo.runs.lock().expect("runs").len(), 1);
+}
+
+/// A `code` Run starts on the repository its request names, and reads it
+/// back with the branch it starts from.
+#[tokio::test]
+async fn a_code_run_starts_on_the_repository_it_names() {
+    let repo = FakeRepo::default();
+
+    let response = records_router(&repo)
+        .oneshot(call(
+            "POST",
+            "/runs",
+            Caller::User("alice"),
+            serde_json::json!({
+                "flow": "code",
+                "request": "Collapse repeated dashes",
+                "repoUrl": "https://github.com/macro/app"
+            }),
+        ))
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let created = body(response).await;
+    assert_eq!(
+        created["run"]["repository"],
+        serde_json::json!({ "url": "https://github.com/macro/app", "baseBranch": "main" })
+    );
 }
 
 /// Only a built-in Flow starts: a whole definition, or a name no Flow has,

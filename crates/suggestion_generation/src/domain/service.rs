@@ -1137,6 +1137,7 @@ where
                 // Its turns are metered but never billed.
                 billing: SessionBilling::NonBillable,
                 instructions: None,
+                repo_url: None,
             })
             .await?;
         self.sessions

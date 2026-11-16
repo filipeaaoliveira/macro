@@ -21,6 +21,7 @@ entity_access = { path = "../entity_access", default-features = false, features 
 factory_records = { path = "../factory_records" }
 # The activities macro expands to paths in this crate.
 futures = { workspace = true }
+github = { path = "../github", default-features = false, features = ["link", "outbound"] }
 macro_authorization = { path = "../macro_authorization", default-features = false, features = ["axum"] }
 macro_user_id = { path = "../macro_user_id", features = ["schema"] }
 model-error-response = { path = "../model-error-response" }

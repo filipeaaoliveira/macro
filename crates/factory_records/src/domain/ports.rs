@@ -6,8 +6,8 @@ use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
 use crate::domain::models::{
-    ClaimedSession, EntryId, HandBack, Outcome, Run, RunId, RunInsert, RunOutcome, SessionStep,
-    Step, StepKey, StepSession, StoppingSession, TaskLink,
+    ClaimedSession, EntryId, HandBack, Outcome, Repository, Run, RunId, RunInsert, RunOutcome,
+    SessionStep, Step, StepKey, StepSession, StoppingSession, TaskLink,
 };
 
 /// Where Runs and their Steps are kept.
@@ -20,8 +20,8 @@ pub trait RunRepository: Send + Sync + 'static {
     type Err: std::error::Error + Send + Sync + 'static;
 
     /// Keep a new Run of `user_id` that has not started yet, of the built-in
-    /// Flow named `flow`, working on the task document `task_id` if one is
-    /// given, in one write.
+    /// Flow named `flow`, working on the task document `task_id` and in
+    /// `repository` if they are given, in one write.
     fn insert_run(
         &self,
         id: RunId,
@@ -29,6 +29,7 @@ pub trait RunRepository: Send + Sync + 'static {
         request: &str,
         user_id: &MacroUserIdStr<'static>,
         task_id: Option<Uuid>,
+        repository: Option<&Repository>,
     ) -> impl Future<Output = Result<RunInsert, Self::Err>> + Send;
 
     /// Link the Run to the task document `task_id`, replacing any task it
@@ -178,6 +179,21 @@ pub trait RunRepository: Send + Sync + 'static {
         &self,
         key: StepKey,
     ) -> impl Future<Output = Result<Option<HandBack>, Self::Err>> + Send;
+
+    /// Keep `sha` as the commit the Run asks a person to merge into its
+    /// repository, replacing the one kept before: only that commit merges
+    /// once they agree. Keeping it again changes nothing.
+    fn set_merge_head(
+        &self,
+        id: RunId,
+        sha: &str,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// The commit the Run last asked a person to merge, if any.
+    fn merge_head(
+        &self,
+        id: RunId,
+    ) -> impl Future<Output = Result<Option<String>, Self::Err>> + Send;
 
     /// Record how the Run ended. A Run that already ended keeps its end. A
     /// cancelled Run's Steps that were still open end `cancelled`.
