@@ -310,13 +310,16 @@ pub trait TaskDirectory: Send + Sync + 'static {
 }
 
 /// Whether a follow-up task is there.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FollowUpMade {
     /// The task is there: made now, or by an earlier attempt.
     Made,
-    /// Document storage refused it, as when the owner may not add to the
-    /// project: asking again would be refused too.
+    /// Document storage refused it, as when the request does not read:
+    /// asking again would be refused too.
     Refused,
+    /// Document storage made it under another id: asking again would make
+    /// another, so the round stops.
+    OtherId(String),
 }
 
 /// A finding outside the diff a review round reviewed, as a task of its

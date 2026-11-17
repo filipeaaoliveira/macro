@@ -11,6 +11,9 @@ use macro_user_id::user_id::MacroUserIdStr;
 
 use uuid::Uuid;
 
+#[cfg(test)]
+mod test;
+
 use crate::domain::ports::{FollowUpMade, FollowUpTask, TaskAccess, TaskDirectory};
 
 /// Whether a person may see a document comes from entity access, and
@@ -100,6 +103,19 @@ impl<A: EntityAccessService> TaskDirectory for DocumentTaskDirectory<A> {
         follow_up: &FollowUpTask,
         task_id: Uuid,
     ) -> Result<FollowUpMade, Self::Err> {
+        self.make_follow_up(user_id, of, follow_up, task_id).await
+    }
+}
+
+impl<A> DocumentTaskDirectory<A> {
+    /// [`TaskDirectory::create_follow_up`], which needs no access check.
+    async fn make_follow_up(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        of: Option<Uuid>,
+        follow_up: &FollowUpTask,
+        task_id: Uuid,
+    ) -> Result<FollowUpMade, DocumentTaskDirectoryErr> {
         // An earlier attempt may have made it: its id says so.
         if self.made(task_id).await? {
             return Ok(FollowUpMade::Made);
@@ -130,7 +146,10 @@ impl<A: EntityAccessService> TaskDirectory for DocumentTaskDirectory<A> {
             .create_task_for_user(&task, user_id.as_ref())
             .await
         {
-            Ok(_) => Ok(FollowUpMade::Made),
+            // A task made under another id would be made again on every
+            // retry: that is a fault to stop at, never to try again.
+            Ok(made) if made == task_id.to_string() => Ok(FollowUpMade::Made),
+            Ok(made) => Ok(FollowUpMade::OtherId(made)),
             // A refusal may be the conflict of an attempt that made it
             // meanwhile.
             Err(CreateTaskError::Refused(_)) if self.made(task_id).await? => Ok(FollowUpMade::Made),
@@ -138,9 +157,7 @@ impl<A: EntityAccessService> TaskDirectory for DocumentTaskDirectory<A> {
             Err(error) => Err(error.into()),
         }
     }
-}
 
-impl<A> DocumentTaskDirectory<A> {
     /// Whether the task `task_id` is there.
     async fn made(&self, task_id: Uuid) -> Result<bool, DocumentTaskDirectoryErr> {
         let document = self

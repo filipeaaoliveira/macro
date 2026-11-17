@@ -268,8 +268,11 @@ follow-up task and holds nothing. The task is made as the Run's owner, not
 shared, in the project of the Run's task (document storage's `POST
 /documents/create_task`, with the internal key and the owner as the acting
 user), with an id kept on the finding before it is asked for, so a retry
-finds it rather than making a second; an outage fails the close, which is
-tried again, and a refusal leaves the follow-up with no task. A diff GitHub
+finds it rather than making a second; an outage (or an unaccepted key or
+user, a timeout or throttling) fails the close, which is tried again for at
+most two hours, then the round fails; a refusal leaves the follow-up with no
+task; and a task made under another id stops the round for good, since every
+retry would make another. A diff GitHub
 cannot list in full makes every finding a Blocker. The round ends `changes`
 with a Blocker, `pass` without, and `failed` when a reviewer's work failed or
 a reviewer's Step ended with no answer read (a worker without review panels
@@ -277,9 +280,15 @@ ran it). A round that cannot open, as when the Run's branch is gone, is
 recorded as failed with why (`failure`) and runs no Step. The round's
 outcome is what the Flow routes; a last round (its visit at the entry's
 `max_visits`) that still finds Blockers routes `unresolved`, which `code`
-ends `manual` rather than run a fix no round would review. The next `fix` is
+ends `manual` rather than run a fix no round would review; a panel with
+`max_visits` must route `unresolved` (`FlowError::NoUnresolvedRoute`). A
+round that fails routes `failed`, which `code` ends `manual` too. The next `fix` is
 given the round's Blockers in a block marked as reviewers' findings, as
-data: headings escaped, cut to `BRIEF_BUDGET`. In `code`, the review panel
+data: no `<` or `>`, code fence or heading line (ATX or setext) left in it,
+paths included, cut to `BRIEF_BUDGET`. Reviewers' outputs reach every later
+Step's history fenced the same way. A finding's path must be a plain path:
+no control character, backtick or angle bracket. An answer that never read
+is not carried to the next round. In `code`, the review panel
 runs at most `max_visits` rounds (three, or `FACTORY_REVIEW_ROUNDS`, which
 the service writes into the Flow a Run starts with). Rounds and their
 findings show on the Run (`reviewRounds` in the Run API).
@@ -405,8 +414,8 @@ part only.
   reviewer's Step a worker without review panels ran anyway records no
   answer, and its round fails.
 - A follow-up task is made with an id document storage takes only from an
-  internal caller (`CreateTaskRequest.document_id`), so deploy document
-  storage before a factory that sends it.
+  internal caller, and only a UUIDv7 (`CreateTaskRequest.document_id`), so
+  deploy document storage before a factory that sends it.
 - A Gate opens only for a Step that ends `done`; any other outcome routes as
   usual, so a failed plan is never put to a person.
 - Renaming or removing an Agent while its Steps run fails their retries

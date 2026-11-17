@@ -13,7 +13,7 @@ use temporalio_sdk::workflows::join_all;
 use temporalio_sdk::{ActivityCloseTimeouts, ActivityOptions, WorkflowContext};
 
 use super::{
-    CLOSE_ROUND_TIMEOUT, FAILED_STEP_OUTPUT, FlowWorkflow, OPEN_ROUND_TIMEOUT,
+    CLOSE_ROUND_TIMEOUT, CLOSE_ROUND_TOTAL, FAILED_STEP_OUTPUT, FlowWorkflow, OPEN_ROUND_TIMEOUT,
     STEP_HEARTBEAT_TIMEOUT, is_cancelled, stop,
 };
 use crate::domain::flow::Entry;
@@ -250,11 +250,15 @@ impl RoundWork for TemporalRound<'_> {
     }
 
     async fn close(&self, closing: ReviewRoundClosing) -> Result<Outcome, Self::Failure> {
-        let options = ActivityOptions::with_close_timeouts(ActivityCloseTimeouts::StartToClose(
-            CLOSE_ROUND_TIMEOUT,
-        ))
-        .heartbeat_timeout(STEP_HEARTBEAT_TIMEOUT)
-        .build();
+        // Bounded across its attempts, so an outage that never passes ends
+        // the round failed, for a person, rather than hold the Run.
+        let options =
+            ActivityOptions::with_close_timeouts(ActivityCloseTimeouts::ScheduleAndStartToClose {
+                schedule_to_close: CLOSE_ROUND_TOTAL,
+                start_to_close: CLOSE_ROUND_TIMEOUT,
+            })
+            .heartbeat_timeout(STEP_HEARTBEAT_TIMEOUT)
+            .build();
         self.ctx
             .execute_activity(FactoryActivities::close_review_round, closing, options)
             .await

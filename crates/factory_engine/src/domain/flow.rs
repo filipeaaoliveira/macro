@@ -255,6 +255,10 @@ pub enum FlowError {
     /// A review panel's entry also names a single Role, or a Gate.
     #[error("entry {0} names reviewers, and a role or a gate beside them")]
     ReviewersAndRole(EntryId),
+    /// A review panel bounded in rounds says nowhere for its last round's
+    /// unresolved Blockers to go.
+    #[error("entry {0} bounds its review rounds and routes no `unresolved`")]
+    NoUnresolvedRoute(EntryId),
     /// A review panel names one Role twice.
     #[error("entry {entry} names reviewer {role} twice")]
     DuplicateReviewer {
@@ -370,6 +374,14 @@ fn check_reviewers(entry: &Entry) -> Result<(), FlowError> {
     }
     if entry.role.is_some() || entry.gate.is_some() {
         return Err(FlowError::ReviewersAndRole(entry.id.clone()));
+    }
+
+    // A last round that still finds Blockers routes `unresolved`: a panel
+    // bounded in rounds says where that goes.
+    let unresolved = Outcome::try_from("unresolved".to_string())
+        .map_err(|error| FlowError::Unreadable(error.to_string()))?;
+    if entry.max_visits.is_some() && !entry.on.contains_key(&unresolved) {
+        return Err(FlowError::NoUnresolvedRoute(entry.id.clone()));
     }
 
     let mut named = BTreeSet::new();

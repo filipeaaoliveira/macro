@@ -74,6 +74,10 @@ const OPEN_ROUND_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 /// and makes a task of each follow-up, heartbeating as it goes.
 const CLOSE_ROUND_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
+/// How long closing a review round may take in all, across its attempts:
+/// past it the round fails, and the Flow routes `failed`.
+const CLOSE_ROUND_TOTAL: Duration = Duration::from_secs(2 * 60 * 60);
+
 /// How long one attempt to stop a Step's agent may take: past the agent's
 /// own watch of its stopped session, and the session's delete.
 const STOP_TIMEOUT: Duration = Duration::from_secs(3 * 60);

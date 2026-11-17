@@ -26,7 +26,9 @@ pub struct RunStart {
 
 /// One Step for a worker to run. A field it does not know is refused, so a
 /// worker never runs a Step it would misread: a worker older than a field
-/// fails the activity, and a newer one picks it up.
+/// fails the activity, and a newer one picks it up. Fields are therefore
+/// only ever added, with a default, never removed or renamed: Runs in
+/// flight carry them in their histories.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StepRequest {

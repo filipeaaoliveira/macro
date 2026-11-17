@@ -33,13 +33,15 @@ impl Retryable for AgentFailed {
 impl AgentFailure for AgentFailed {}
 
 /// Hands back `first` when asked for its review, and `again` when asked
-/// once more, keeping each prompt and later prompt.
+/// once more, keeping each prompt and later prompt; fails the first
+/// `turns_failing` later prompts, as a lost attempt would.
 #[derive(Clone)]
 struct Reviewer {
     first: (&'static str, String),
     again: (&'static str, String),
     tasks: Arc<Mutex<Vec<AgentTask>>>,
     turns: Arc<Mutex<Vec<AgentTurn>>>,
+    turns_failing: Arc<Mutex<usize>>,
 }
 
 impl Reviewer {
@@ -49,6 +51,7 @@ impl Reviewer {
             again: (again.0, again.1.to_string()),
             tasks: Arc::default(),
             turns: Arc::default(),
+            turns_failing: Arc::default(),
         }
     }
 }
@@ -70,6 +73,11 @@ impl StepAgent for Reviewer {
 
     async fn follow_up(&self, turn: AgentTurn) -> Result<AgentAnswer, AgentFailed> {
         self.turns.lock().expect("turns").push(turn);
+        let mut failing = self.turns_failing.lock().expect("failing");
+        if *failing > 0 {
+            *failing -= 1;
+            return Err(AgentFailed);
+        }
         Ok(answer(&self.again))
     }
 
@@ -330,4 +338,24 @@ async fn an_answer_that_never_reads_is_one_blocker_on_the_whole_change() {
     assert_eq!(found.len(), 1);
     assert_eq!(found[0].path, WHOLE_CHANGE);
     assert!(found[0].blocks_anywhere);
+}
+
+/// A retry of a Step whose re-ask was lost asks again in the same prompt,
+/// so the session takes it as the one it already has.
+#[tokio::test]
+async fn a_retried_re_ask_asks_in_the_same_prompt() {
+    let repo = FakeRepo::default();
+    let (run_id, round) = second_round(&repo, &[], true).await;
+    let reviewer = Reviewer::answering(("pass", "Looks good to me."), ("pass", PASSES));
+    *reviewer.turns_failing.lock().expect("failing") = 1;
+    let steps = steps(&reviewer, &repo);
+
+    let lost = steps.run(&review(), reviewing(run_id, &round)).await;
+    let retried = steps.run(&review(), reviewing(run_id, &round)).await;
+
+    assert!(lost.is_err());
+    assert_eq!(retried.expect("retried").outcome.as_str(), "pass");
+    let turns = reviewer.turns.lock().expect("turns").clone();
+    assert_eq!(turns.len(), 2);
+    assert_eq!(turns[0].action_id, turns[1].action_id);
 }

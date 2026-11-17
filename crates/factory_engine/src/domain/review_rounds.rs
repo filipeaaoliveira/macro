@@ -14,7 +14,7 @@ mod test;
 
 use answer::place;
 pub use answer::{ReviewerAnswer, ReviewerAnswerError, WHOLE_CHANGE};
-pub use brief::{BRIEF_BUDGET, blockers_brief, carried_blockers, findings_block};
+pub use brief::{BRIEF_BUDGET, blockers_brief, carried_blockers, fenced_review, findings_block};
 
 use factory_records::domain::models::StepKey;
 use factory_records::domain::models::{Outcome, RunId};
@@ -495,6 +495,11 @@ where
                         .link_follow_up(key, finding.place, task_id)
                         .await
                         .map_err(internal)?;
+                }
+                FollowUpMade::OtherId(made) => {
+                    return Err(StepError::Final(rootcause::report!(
+                        "document storage made follow-up {task_id} as {made}"
+                    )));
                 }
                 FollowUpMade::Refused => {
                     tracing::warn!(

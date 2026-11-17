@@ -160,7 +160,13 @@ fn finding(blocker: WrittenBlocker, carried: usize) -> Option<Finding> {
     let problem = blocker.problem.trim().to_string();
     let why = blocker.why.trim().to_string();
     let fits = |text: &str, max: usize| !text.is_empty() && text.len() <= max;
-    if !fits(&path, MAX_FINDING_PATH_BYTES)
+    // A path names a file: no control character, and nothing that would
+    // quote or tag the briefs it is written into.
+    let plain_path = !path
+        .chars()
+        .any(|c| c.is_control() || matches!(c, '`' | '<' | '>'));
+    if !plain_path
+        || !fits(&path, MAX_FINDING_PATH_BYTES)
         || !fits(&problem, MAX_FINDING_TEXT_BYTES)
         || !fits(&why, MAX_FINDING_TEXT_BYTES)
     {
@@ -212,7 +218,7 @@ pub(super) fn place(path: &str, lines: Option<Lines>) -> String {
 
 /// One finding, for a person or an agent to read.
 fn describe(finding: &Finding) -> String {
-    let again = if finding.blocks_anywhere {
+    let again = if finding.blocks_anywhere && finding.path != WHOLE_CHANGE {
         " (still there from the round before)"
     } else {
         ""

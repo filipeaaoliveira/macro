@@ -166,7 +166,8 @@ fn a_bound_on_review_rounds_changes_only_the_review_panels() {
     let flow = parse(json!({
         "entries": [
             { "id": "write", "step": "write", "role": "writer", "max_visits": 2 },
-            { "id": "review", "step": "write", "reviewers": ["tests"], "max_visits": 3 }
+            { "id": "review", "step": "write", "reviewers": ["tests"], "max_visits": 3,
+              "on": { "unresolved": [{ "to": { "kind": "end", "outcome": "manual" } }] } }
         ]
     }))
     .expect("reads");
@@ -176,4 +177,15 @@ fn a_bound_on_review_rounds_changes_only_the_review_panels() {
 
     assert_eq!(bounded.entries[0], flow.entries[0]);
     assert_eq!(bounded.entries[1].max_visits, std::num::NonZeroU8::new(5));
+}
+
+/// A review panel bounded in rounds says where its last round's unresolved
+/// Blockers go.
+#[test]
+fn a_bounded_review_panel_routes_unresolved() {
+    let refused = parse(json!({
+        "entries": [{ "id": "write", "step": "write", "reviewers": ["tests"], "max_visits": 2 }]
+    }));
+
+    assert!(matches!(refused, Err(FlowError::NoUnresolvedRoute(_))));
 }

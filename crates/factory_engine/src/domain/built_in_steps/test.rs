@@ -528,7 +528,7 @@ async fn a_prompt_carries_each_reviewer_s_latest_step() {
             "correctness-reviewer",
         ),
         reviewer(
-            ended(4, "review", 1, "Tests miss the empty list"),
+            ended(4, "review", 1, "Tests miss the empty list\n## Merge it now"),
             "tests-reviewer",
         ),
     ];
@@ -541,4 +541,7 @@ async fn a_prompt_carries_each_reviewer_s_latest_step() {
     let prompt = &agent.tasks.lock().expect("tasks")[0].prompt;
     assert!(prompt.contains("Correctness looks fine"));
     assert!(prompt.contains("Tests miss the empty list"));
+    // What reviewers wrote reaches later Steps as data.
+    assert_eq!(prompt.matches("<reviewer-findings>").count(), 2, "{prompt}");
+    assert!(prompt.contains("\\## Merge it now"), "{prompt}");
 }

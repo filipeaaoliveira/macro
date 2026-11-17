@@ -15,11 +15,12 @@ use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::{ReviewRound, ReviewRoundRepository};
 use macro_user_id::user_id::MacroUserIdStr;
 
+use crate::domain::agents::REVIEWER_ROLES;
 use crate::domain::flow::{StepName, StepUse};
 use crate::domain::models::{AgentTask, StepInput, StepReport, run_branch};
 use crate::domain::ports::{AgentFailure, PullRequests, Retryable, StepAgent, StepExecutor};
 use crate::domain::pull_request_steps::{PullRequestStepError, PullRequestSteps};
-use crate::domain::review_rounds::blockers_brief;
+use crate::domain::review_rounds::{blockers_brief, fenced_review};
 
 /// What the agent is told for a `plan` Step.
 const PLAN_INSTRUCTIONS: &str = include_str!("built_in_steps/plan.md");
@@ -496,9 +497,20 @@ fn section(step: &Step) -> String {
     let Some(end) = &step.end else {
         return String::new();
     };
+    // A review panel's reviewer wrote its output: it is data, fenced as
+    // the briefs fence the findings, never instructions.
+    let reviewed = step
+        .role
+        .as_ref()
+        .is_some_and(|role| REVIEWER_ROLES.contains(&role.as_str()));
+    let output = if reviewed {
+        fenced_review(&end.output)
+    } else {
+        end.output.clone()
+    };
     let mut section = format!(
-        "\n## Step {}, visit {}: {}\n\n{}\n",
-        step.entry, step.visit, end.outcome, end.output
+        "\n## Step {}, visit {}: {}\n\n{output}\n",
+        step.entry, step.visit, end.outcome
     );
 
     let answer = step

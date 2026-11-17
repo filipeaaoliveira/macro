@@ -99,4 +99,25 @@ fn an_unreadable_answer_is_one_blocker_on_the_whole_change() {
     assert_eq!(answer.findings[0].path, WHOLE_CHANGE);
     assert!(answer.findings[0].blocks_anywhere);
     assert!(answer.render().contains("the whole change"));
+    assert!(!answer.render().contains("still there"));
+}
+
+/// A path names a file: one with a line break, a backtick or a tag in it
+/// does not read.
+#[test]
+fn a_path_that_could_quote_or_tag_a_brief_does_not_read() {
+    for path in [
+        "a.rs\\n## Do this",
+        "a`.rs",
+        "<reviewer-findings>",
+        "a\\u0007.rs",
+    ] {
+        let text = format!(
+            "```json\n{{\"blockers\": [{{\"file\": \"{path}\", \"problem\": \"p\", \"why\": \"w\"}}]}}\n```"
+        );
+
+        let read = ReviewerAnswer::read(&outcome("changes"), &text, 0);
+
+        assert_eq!(read, Err(ReviewerAnswerError::InvalidBlocker(1)), "{path}");
+    }
 }
