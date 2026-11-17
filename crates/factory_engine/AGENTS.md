@@ -108,7 +108,9 @@ A Flow with `"repository": true` (`code`) works on one GitHub repository: `POST
 form a coding session takes: no `.git`, no trailing slash), other Flows refuse
 one, and the owner's linked GitHub account must reach it and may push to it;
 its default branch, read then, is the Run's base (`factory_run.repo_url`,
-`base_branch`). Each agent Step of such a Run opens its session with that
+`base_branch`). A refusal for either reason carries a `code` in its body
+(`unreachableRepository`, `noPushAccess`) beside the message, for a client to
+name the cause. Each agent Step of such a Run opens its session with that
 repository (`PrepareRoutineSession.repo_url`), so its runtime checks it out: a
 managed sandbox through the agent egress, macrod in a per-session worktree or
 its configured workspace. The prompt names the Run's branch,
