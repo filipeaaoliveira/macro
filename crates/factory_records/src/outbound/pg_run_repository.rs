@@ -2,6 +2,7 @@
 
 mod check_rounds;
 mod insights;
+mod main_hold;
 #[cfg(test)]
 mod test;
 
@@ -95,6 +96,12 @@ pub enum PgRunRepositoryErr {
     /// has reasons for.
     #[error("a stored step's passed over agents and their reasons do not pair up")]
     PartialPassedOver,
+    /// A stored hold has only part of its start, head and failed checks.
+    #[error("a stored main hold has only part of its start, head and failed checks")]
+    PartialHold,
+    /// A pull request number does not fit its column or its type.
+    #[error("a pull request number is out of range")]
+    NumberOutOfRange,
 }
 
 struct RunRow {

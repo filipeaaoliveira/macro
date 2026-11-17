@@ -1,0 +1,42 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT m.run_id, m.pull_request_number, m.pull_request_url, m.merged_at\n            FROM factory_merge m\n            WHERE m.repo_url = $1\n              AND m.base_branch = $2\n              AND m.merged_at > COALESCE(\n                  (\n                      SELECT h.last_green_at\n                      FROM factory_main_hold h\n                      WHERE h.repo_url = $1 AND h.base_branch = $2\n                  ),\n                  '-infinity'::timestamptz\n              )\n            ORDER BY m.merged_at DESC\n            LIMIT $3\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "run_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "pull_request_number",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "pull_request_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "merged_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "e0b3fce9518fd0fc68cc59bdec979b3dca45e1eb63151f9d216020b0c90956e0"
+}

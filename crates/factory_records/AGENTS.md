@@ -15,16 +15,20 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `factory_gate` queries.
 - `src/domain/insights.rs` and `src/outbound/pg_run_repository/insights.rs`:
   `RunInsightsRepository`, the reads behind Run insights.
+- `src/domain/main_hold.rs` and `src/outbound/pg_run_repository/main_hold.rs`:
+  `MainHoldRepository`, the merges Runs made and the Main Holds on the base
+  branches they merge to.
 
 ## Scope
 
-- Owns: the `factory_run`, `factory_step`, `factory_gate` and
-  `factory_check_round` tables
+- Owns: the `factory_run`, `factory_step`, `factory_gate`,
+  `factory_check_round`, `factory_merge` and `factory_main_hold` tables
   (`crates/macro_db_client/migrations/20261116083957_factory.sql`,
   `20261117093000_factory_check_round.sql`,
   `20261117104713_factory_step_agent.sql`,
   `20261117120425_factory_step_bot.sql`,
-  `20261117170000_factory_turn_place.sql`).
+  `20261117170000_factory_turn_place.sql`,
+  `20261117183000_factory_main_hold.sql`).
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
 
 ## Boundaries
@@ -100,6 +104,20 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   (`factory_run_repository` check), set once when it is kept. `set_merge_head`
   replaces the commit the Run asks a person to merge each time it asks; the
   merge reads it back, so it never merges another.
+
+- `factory_merge` keeps one row per Run that merged (`record_merge`, safe
+  to repeat), with the base it merged into and the time on the worker's
+  clock. `factory_main_hold` keeps one row per base branch: when its checks
+  last passed (`last_green_at`, also on the workers' clock, so the two
+  compare) and, while they fail, the hold (`held_since`, `head_sha`,
+  `failed`). `hold_main` keeps a hold's start; `clear_main_hold` ends it and
+  its red period. `suspect_merges` reads a base's merges since it was last
+  green through `factory_merge_base_idx`, newest first up to its limit, and
+  returns them oldest first. A red period files one task: `claim_hold_task`
+  claims it for the hold's start once, `release_hold_task` gives a claim
+  back when filing failed, and `record_hold_task` keeps the task's id. A
+  claim whose filing never finished, as when the worker died between the
+  two, files no task for that period.
 
 ## Related
 

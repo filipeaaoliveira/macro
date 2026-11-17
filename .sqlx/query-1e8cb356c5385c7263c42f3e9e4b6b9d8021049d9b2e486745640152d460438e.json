@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO factory_merge\n                (run_id, repo_url, base_branch, pull_request_number, pull_request_url, merged_at)\n            SELECT id, repo_url, base_branch, $2, $3, $4\n            FROM factory_run\n            WHERE id = $1 AND repo_url IS NOT NULL AND base_branch IS NOT NULL\n            ON CONFLICT (run_id) DO NOTHING\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1e8cb356c5385c7263c42f3e9e4b6b9d8021049d9b2e486745640152d460438e"
+}
