@@ -232,9 +232,10 @@ function CheckRoundNote(props: { round: CheckRound; stepEnded: boolean }) {
   // agent, which is known only once its report ends the round.
   const who = () => {
     if (props.round.verified) {
-      return t('factoryRuns.checksVerified', {
-        commit: props.round.checkedCommit?.slice(0, 7) ?? '',
-      });
+      const commit = props.round.checkedCommit;
+      return commit
+        ? t('factoryRuns.checksVerifiedOn', { commit: commit.slice(0, 7) })
+        : t('factoryRuns.checksVerified');
     }
     if (props.round.end) return t('factoryRuns.checksReported');
     return undefined;
