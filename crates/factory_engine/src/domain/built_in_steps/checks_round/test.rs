@@ -2,10 +2,12 @@ use std::collections::VecDeque;
 use std::sync::{Arc, LazyLock, Mutex};
 
 use factory_records::domain::models::{
-    CheckRound, CheckRoundOutcome, EntryId, MAX_OUTPUT_BYTES, Outcome, Repository, RunId, StepKey,
+    CheckRound, CheckRoundOutcome, EntryId, HandBack, MAX_OUTPUT_BYTES, Outcome, Repository, RunId,
+    StepKey, StepSession,
 };
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
+use uuid::Uuid;
 
 use super::super::BuiltInSteps;
 use crate::domain::checks::CHECKS_FILE;
@@ -61,7 +63,14 @@ impl StepAgent for ScriptedAgent {
     type Err = SessionFailed;
 
     async fn answer(&self, task: AgentTask) -> Result<AgentAnswer, SessionFailed> {
+        let key = task.key;
         self.tasks.lock().expect("tasks").push(task);
+        if self.work == "slow" {
+            if let Some(repo) = &self.ages {
+                age(repo, key);
+            }
+            return Err(SessionFailed);
+        }
         Ok(AgentAnswer {
             outcome: outcome(self.work),
             text: self.work_text.clone(),
@@ -445,12 +454,24 @@ async fn rounds_out_of_time_end_the_step_red() {
     assert!(
         report
             .output
-            .contains("before the step's time ran out, with 0 of their rounds ended: web.")
+            .contains("before the step's time ran out, with 1 of their rounds ended: web.")
     );
     assert!(report.output.contains("Wrote the toggle"));
     let turn = &slow.turns()[0];
     let left = turn.answer_by - chrono::Utc::now();
     assert!(left > chrono::TimeDelta::minutes(100) && left <= chrono::TimeDelta::minutes(105));
+    // The open round ends failed, so it never reads as running.
+    let key = turn.key;
+    let rounds = repo.check_rounds(key).await.expect("rounds");
+    let end = rounds[0].end.as_ref().expect("the round ended");
+    assert_eq!(end.outcome, CheckRoundOutcome::Failed);
+    assert!(
+        end.report
+            .contains("time ran out before the agent reported")
+    );
+    // The work was waited for until the same time.
+    let task_by = slow.tasks.lock().expect("tasks")[0].answer_by;
+    assert_eq!(task_by, Some(turn.answer_by));
 
     // A retry past the time asks nothing more.
     let input = input();
@@ -510,4 +531,95 @@ async fn an_unreadable_checks_file_ends_the_step_red() {
     assert!(report.output.contains("asks for 0 rounds"));
     assert_eq!(nothing.outcome, Outcome::unchanged());
     assert!(agent.turns().is_empty() && unchanged.turns().is_empty());
+}
+
+/// Work still going when the Step's time runs out ends the Step `red`,
+/// saying the checks did not run, rather than failed.
+#[tokio::test]
+async fn work_out_of_time_ends_the_step_red() {
+    let github = github(Some(CHECKS), Some(&["apps/web/index.ts"]));
+    let repo = FakeRepo::default();
+    let mut slow = ScriptedAgent::new("slow", Vec::new());
+    slow.ages = Some(repo.clone());
+
+    let report = run(&slow, &github, &repo, "write", input())
+        .await
+        .expect("write");
+
+    assert_eq!(report.outcome, outcome("red"));
+    assert!(
+        report
+            .output
+            .contains("did not end before the step's time ran out")
+    );
+}
+
+/// A retry past the Step's time takes what the agent handed back for the
+/// open round before it ends the Step.
+#[tokio::test]
+async fn a_retry_past_its_time_reads_the_open_round_s_hand_back() {
+    let github = github(Some(CHECKS), Some(&["apps/web/index.ts"]));
+    let repo = FakeRepo::default();
+    let input = input();
+    let first = ScriptedAgent::new("done", vec![Err(SessionFailed)]);
+    let _ = run(&first, &github, &repo, "write", input).await;
+    // The agent handed back for the round's prompt after the attempt gave
+    // up, and the Step's time ran out.
+    let session = StepSession {
+        session_id: Uuid::now_v7(),
+        action_id: Uuid::now_v7(),
+    };
+    repo.claim_session(input.key, session, &[Outcome::done()])
+        .await
+        .expect("claim");
+    let round = &rounds(&repo, input).await[0];
+    repo.begin_turn(
+        input.key,
+        round.check_action_id,
+        &[outcome("passed"), outcome("failed")],
+    )
+    .await
+    .expect("turn");
+    let passed = HandBack {
+        outcome: outcome("passed"),
+        output: "web: exit 0".to_string(),
+    };
+    repo.hand_back(session.session_id, &passed)
+        .await
+        .expect("hand back");
+    age(&repo, input.key);
+    let retry = ScriptedAgent::new("done", Vec::new());
+
+    let report = run(&retry, &github, &repo, "write", input)
+        .await
+        .expect("write");
+
+    assert_eq!(report.outcome, Outcome::done());
+    assert!(report.output.contains("passed in round 1: web."));
+    assert!(retry.turns().is_empty());
+}
+
+/// A red Step's report takes at most half of its output, so the agent's
+/// work stays after it.
+#[tokio::test]
+async fn a_long_report_leaves_room_for_the_work() {
+    let long: &'static str = Box::leak("x".repeat(MAX_OUTPUT_BYTES).into_boxed_str());
+    let agent = ScriptedAgent::new(
+        "done",
+        vec![
+            Ok(("failed", long)),
+            Ok(("done", "Tried a fix")),
+            Ok(("failed", long)),
+        ],
+    );
+    let github = github(Some(CHECKS), Some(&["apps/web/index.ts"]));
+
+    let report = run(&agent, &github, &FakeRepo::default(), "write", input())
+        .await
+        .expect("write");
+
+    assert_eq!(report.outcome, outcome("red"));
+    assert!(report.output.len() <= MAX_OUTPUT_BYTES);
+    assert!(report.output.contains("Wrote the toggle"));
+    assert!(report.output.contains("After round 1 failed: Tried a fix"));
 }

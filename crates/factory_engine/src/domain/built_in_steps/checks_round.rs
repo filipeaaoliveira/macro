@@ -12,12 +12,18 @@
 //! The checks file is read from the Run's base branch, which the agent does
 //! not push to, once: the first round keeps it, with the checks it runs, and
 //! every later round goes by that record. A later round runs the checks the
-//! first one ran, and any others the branch's changes now reach.
+//! first one ran, and any others the branch's changes now reach; a check
+//! that a later round reached only through the changes is dropped again
+//! once they no longer reach it, as the first round's checks are the ones
+//! the Step answers for.
 //!
-//! All rounds run in the Step's one activity, whose retries end two hours
-//! after it was first scheduled; the rounds stop short of that
-//! ([`ROUNDS_END_BY`]) and end the Step [`RED`], saying why, rather than let
-//! the Step fail.
+//! The agent's work and all rounds run in the Step's one activity, whose
+//! retries end two hours after it was first scheduled. Waiting for the work
+//! and the rounds stops short of that ([`ROUNDS_END_BY`] after the Step
+//! started), and the Step ends [`RED`], saying why, rather than fail; a
+//! round still open then ends failed. Each wait is also bounded by its
+//! attempt (`SESSION_DEADLINE` from when the wait began): a later prompt's
+//! wait that ends there is retried and goes on with the same turn.
 
 #[cfg(test)]
 mod test;
@@ -52,6 +58,9 @@ pub(super) const RED: &str = "red";
 /// hours its activity's retries have (the workflow's `STEP_TOTAL`), so the
 /// Step ends with what the rounds found.
 pub(crate) const ROUNDS_END_BY: Duration = Duration::from_secs(105 * 60);
+
+/// What a Step whose agent was still at work when its time ran out says.
+const WORK_OUT_OF_TIME: &str = "The agent's work did not end before the step's time ran out, so the repository's checks did not run.";
 
 /// What ends an output cut to fit what a Step keeps.
 const CUT_MARK: &str = "\n\n(The rest is left out: a step's output holds 64 KiB.)";
@@ -107,11 +116,25 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
     ) -> Result<StepReport, BuiltInStepError> {
         let repo = self.pull_requests.records();
         let rounds = repo.check_rounds(input.key).await.map_err(records)?;
+        let end_by = self.rounds_end_by(input).await?;
 
         // No round recorded: the agent's work is still to do, or a retry
-        // finds its hand back in the session's history.
+        // finds its hand back in the session's history. The work is
+        // waited for until the Step's time too, so a Step whose agent is
+        // still at work then ends `red`, not failed.
         if rounds.is_empty() {
-            let work = self.ask_agent(step, instructions, outcomes, input).await?;
+            let asked = self
+                .ask_agent_by(step, instructions, outcomes, input, Some(end_by))
+                .await;
+            if let Err(BuiltInStepError::Agent { .. }) = &asked
+                && Utc::now() >= self.rounds_end_by(input).await?
+            {
+                return Ok(StepReport {
+                    outcome: red(),
+                    output: WORK_OUT_OF_TIME.to_string(),
+                });
+            }
+            let work = asked?;
             if work.outcome != Outcome::done() {
                 return Ok(work);
             }
@@ -120,7 +143,6 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
             }
         }
 
-        let end_by = self.rounds_end_by(input).await?;
         loop {
             let rounds = repo.check_rounds(input.key).await.map_err(records)?;
             let latest = match next(&rounds) {
@@ -135,7 +157,7 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
                 return Ok(red_report(&rounds, Red::NeverPassed));
             }
             if Utc::now() >= end_by {
-                return Ok(red_report(&rounds, Red::OutOfTime));
+                return self.out_of_time(input).await;
             }
 
             let asked = if failed_last {
@@ -149,11 +171,44 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
             if let Err(BuiltInStepError::Agent { .. }) = &asked
                 && Utc::now() >= self.rounds_end_by(input).await?
             {
-                let rounds = repo.check_rounds(input.key).await.map_err(records)?;
-                return Ok(red_report(&rounds, Red::OutOfTime));
+                return self.out_of_time(input).await;
             }
             asked?;
         }
+    }
+
+    /// End a Step whose time ran out: a round still open takes what the
+    /// agent handed back for it, if it did, and otherwise ends failed, so it
+    /// never reads as running; then the Step ends with what the rounds found.
+    async fn out_of_time(&self, input: StepInput<'_>) -> Result<StepReport, BuiltInStepError> {
+        let repo = self.pull_requests.records();
+        let rounds = repo.check_rounds(input.key).await.map_err(records)?;
+        if let Some(open) = rounds.last().filter(|round| round.end.is_none()) {
+            // A new prompt clears the hand back, and only a round of checks
+            // offers `passed` and `failed`: one of them is this round's.
+            let handed = repo.handed_back(input.key).await.map_err(records)?;
+            let (outcome, report) = match handed {
+                Some(handed) if handed.outcome == passed() => {
+                    (CheckRoundOutcome::Passed, handed.output)
+                }
+                Some(handed) if handed.outcome == failed() => {
+                    (CheckRoundOutcome::Failed, handed.output)
+                }
+                _ => (
+                    CheckRoundOutcome::Failed,
+                    "The step's time ran out before the agent reported these checks.".to_string(),
+                ),
+            };
+            repo.end_check_round(input.key, open.round, outcome, &report)
+                .await
+                .map_err(records)?;
+        }
+
+        let rounds = repo.check_rounds(input.key).await.map_err(records)?;
+        Ok(match next(&rounds) {
+            Next::Passed => passed_report(&rounds),
+            _ => red_report(&rounds, Red::OutOfTime),
+        })
     }
 
     /// When the Step's rounds must end: [`ROUNDS_END_BY`] after the Step
@@ -379,6 +434,9 @@ fn red_report(rounds: &[CheckRound], why: Red) -> StepReport {
             "The repository's checks did not pass before the step's time ran out, with {ended} of their rounds ended: {checks}."
         ),
     };
+    // The report takes at most half of what the output holds, so some of
+    // the agent's work is kept after it.
+    let report = cut(report, MAX_OUTPUT_BYTES / 2);
     StepReport {
         outcome: red(),
         output: fit(&summary, &format!("{report}\n\n{}", work(rounds))),

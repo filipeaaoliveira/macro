@@ -163,7 +163,8 @@ read from the Run's recorded base, never the Run's branch, which the agent
 pushes: the first round keeps it, with the checks and commands it runs, and
 every later round and retry goes by that record. A later round runs the
 first round's checks and any others the branch's changes now reach (every
-check when GitHub lists only part of the changes). The checks run where the
+check when GitHub lists only part of the changes); a check only a later
+round reached is dropped again once the changes no longer reach it. The checks run where the
 agent works, by the agent: the engine can only prompt the session, so a
 round is a later prompt of the Step's session (`StepAgent::follow_up`, the
 routine sessions' `follow_up`) that asks it to run them verbatim, change
@@ -172,10 +173,14 @@ back to the same session in another prompt with the report, and the next
 round checks the fix. Each round, with its prompts' ids, is recorded before
 it is asked (`factory_check_round`), so a retried Step goes on with its
 round; a new prompt clears the session's hand back and offers its own
-outcomes (`begin_turn`), and a stop watches it. All rounds run in the Step's
-one activity: they stop `ROUNDS_END_BY` (105 minutes) after the Step
-started, short of its two hours, and a later prompt's wait ends then too
-(or at the attempt's own deadline, which a retry goes on from). The Step
+outcomes (`begin_turn`), and a stop watches it. The agent's work and all
+rounds run in the Step's one activity: waiting for them stops
+`ROUNDS_END_BY` (105 minutes) after the Step started, short of its two
+hours, and the Step ends `red` saying so, with a round still open ended
+failed (or with the agent's hand back for it, if it gave one). Each wait is
+also bounded by `SESSION_DEADLINE` (29 minutes) from when it began: the
+first work's ends the Step failed, as for any agent Step, and a later
+prompt's is retried and goes on with the same turn. The Step
 ends `done` once a round passes, the agent's own outcome when its work
 changed nothing or no check applies, and `red` when the last round failed,
 the rounds ran out of time, or the file does not read; the `code` Flow ends
