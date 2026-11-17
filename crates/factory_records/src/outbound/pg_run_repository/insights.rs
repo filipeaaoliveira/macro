@@ -136,12 +136,19 @@ impl RunInsightsRepository for PgRunRepository {
         // not finish its work, so its time is left out. A Run visits an entry
         // more than once when the Flow loops back to it, or a reset starts it
         // over; `visit` restarts at a reset, so visits are counted rather
-        // than read.
+        // than read. A Step whose agent asked the Run's owner a question is
+        // not a visit of its own: the Step that goes on with the answer is
+        // the same visit. Its Gate, which the owner answers in words, is
+        // left out of the Gates' counts and waits.
         let entries = sqlx::query!(
             r#"
             WITH steps AS (
                 SELECT s.run_id, s.entry, s.outcome, s.started_at, s.ended_at,
-                       g.opened_at, g.answered_at
+                       s.outcome IS DISTINCT FROM 'question' AS visit,
+                       CASE WHEN s.outcome = 'question' THEN NULL ELSE g.opened_at END
+                           AS opened_at,
+                       CASE WHEN s.outcome = 'question' THEN NULL ELSE g.answered_at END
+                           AS answered_at
                 FROM factory_step s
                 LEFT JOIN factory_gate g ON g.run_id = s.run_id AND g.seq = s.seq
                 WHERE s.run_id = ANY($1)
@@ -173,7 +180,8 @@ impl RunInsightsRepository for PgRunRepository {
                 GROUP BY entry
             ),
             visits AS (
-                SELECT entry, count(*) AS visits, bool_or(outcome = 'failed') AS failed
+                SELECT entry, count(*) FILTER (WHERE visit) AS visits,
+                       bool_or(outcome = 'failed') AS failed
                 FROM steps
                 GROUP BY entry, run_id
             ),
@@ -226,14 +234,16 @@ impl RunInsightsRepository for PgRunRepository {
         .collect::<Result<Vec<_>, PgRunRepositoryErr>>()?;
 
         // The Runs' Steps, with their Gates, are read once by primary key;
-        // both counts come from that one read.
+        // both counts come from that one read. An agent's question, and the
+        // answer a question Gate takes, are no outcome or answer the Flow
+        // routes, so neither is counted.
         let counts = sqlx::query!(
             r#"
             WITH steps AS MATERIALIZED (
                 SELECT s.entry, s.outcome, g.answer
                 FROM factory_step s
                 LEFT JOIN factory_gate g ON g.run_id = s.run_id AND g.seq = s.seq
-                WHERE s.run_id = ANY($1)
+                WHERE s.run_id = ANY($1) AND s.outcome IS DISTINCT FROM 'question'
             )
             SELECT entry AS "entry!", 'outcome' AS "kind!", outcome AS "value!", count(*) AS "count!"
             FROM steps
@@ -284,7 +294,7 @@ impl RunInsightsRepository for PgRunRepository {
                         entry,
                         run_id,
                         coalesce(bool_or(outcome = 'failed'), false) AS failed,
-                        count(*) AS visits
+                        count(*) FILTER (WHERE outcome IS DISTINCT FROM 'question') AS visits
                     FROM factory_step
                     WHERE run_id = ANY($1)
                     GROUP BY entry, run_id
