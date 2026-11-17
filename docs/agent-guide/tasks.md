@@ -1381,11 +1381,13 @@ A Run opens in a dialog on desktop and in a sheet on touch (after the side
 panel's sheet closes). Its Steps scroll: each with its outcome, its time
 (`5m`), the Role and Agent an agent Step used (`Planner · primary`, with a line
 for each Agent that could not start, and why) and its output as markdown, the
-output a waiting Gate asks about open. While the base branch a code Run
-merges to is red (a Main Hold: its required checks fail), the latest Step
-shows a **Main hold** note with the failing checks, and says when a task
-lists the merges since they last passed; the Run merges nothing until they
-pass, even once its merge is approved. On desktop the Gate card (its question,
+output a waiting Gate asks about open. While a code Run is at its merge and
+its base branch is red (a Main Hold: its required checks fail), the latest
+Step shows a **Main hold** note with the failing checks, and links the task
+that lists the merges since they last passed once it is filed; the Run
+merges nothing until they pass, even once its merge is approved, and asks
+again if they still fail after its wait. When the checks the base requires
+couldn't be read, the note says its merge doesn't wait on them. On desktop the Gate card (its question,
 a note field and one button per answer, the Flow's first answer primary) is
 pinned below them, the question and note scrolling inside past a few lines. On
 touch the pinned chrome between the handle and the Steps holds only the note

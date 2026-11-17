@@ -88,6 +88,7 @@ export function RunSteps(props: {
   steps: RunStep[];
   /** The hold on the Run's base branch, shown on its latest Step. */
   mainHold?: MainHold;
+  baseChecksUnread?: boolean;
   baseBranch?: string;
   status: RunStatus;
   time: (value: string) => string;
@@ -106,6 +107,7 @@ export function RunSteps(props: {
         <RunTimeline
           steps={props.steps}
           mainHold={props.mainHold}
+          baseChecksUnread={props.baseChecksUnread}
           baseBranch={props.baseBranch}
           time={props.time}
           outputOpen={(step) =>

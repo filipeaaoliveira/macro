@@ -64,7 +64,9 @@ export default {
   mainHold: 'Main hold',
   mainHoldBody:
     'Checks fail on {{branch}}, so this run won’t merge until they pass again.',
-  mainHoldTask: 'A task lists the merges since they last passed.',
+  mainHoldTask: 'See the merges since they last passed',
+  baseChecksUnread:
+    'Couldn’t read which checks {{branch}} requires, so this run’s merge doesn’t wait on them.',
   cancelRun: 'Cancel run',
   cancelTitle: 'Cancel this run?',
   cancelBody:

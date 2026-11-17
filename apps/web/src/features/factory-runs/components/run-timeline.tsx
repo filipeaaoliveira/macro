@@ -6,6 +6,7 @@ import { Badge, Button, Card, cn } from '@ui';
 import { CollapseTransition } from '@ui/components/CollapseTransition';
 import { createSignal, For, type JSX, Show } from 'solid-js';
 import { flowWordLabel, flowWordText } from '../core/flow-words';
+import { buildSimpleEntityUrl } from '@core/util/url';
 import type { CheckRound, MainHold, RunStep } from '../core/run';
 
 function stepLabel(step: Pick<RunStep, 'entry' | 'visit'>): string {
@@ -24,6 +25,8 @@ export function RunTimeline(props: {
   steps: RunStep[];
   /** The hold on the Run's base branch, shown on its latest Step. */
   mainHold?: MainHold;
+  /** Whether the base's required checks couldn't be read, likewise. */
+  baseChecksUnread?: boolean;
   baseBranch?: string;
   /** Whether a Step's output starts open, e.g. the plan a Gate asks about. */
   outputOpen: (step: RunStep) => boolean;
@@ -40,6 +43,9 @@ export function RunTimeline(props: {
             mainHold={
               index() === props.steps.length - 1 ? props.mainHold : undefined
             }
+            baseChecksUnread={
+              index() === props.steps.length - 1 && props.baseChecksUnread
+            }
             baseBranch={props.baseBranch}
             defaultOpen={props.outputOpen(step)}
             time={props.time}
@@ -55,6 +61,7 @@ function TimelineStep(props: {
   first: boolean;
   latest: boolean;
   mainHold?: MainHold;
+  baseChecksUnread?: boolean;
   baseBranch?: string;
   defaultOpen: boolean;
   time: (value: string) => string;
@@ -191,6 +198,13 @@ function TimelineStep(props: {
           <MainHoldNote hold={hold()} baseBranch={props.baseBranch ?? ''} />
         )}
       </Show>
+      <Show when={props.baseChecksUnread}>
+        <StepNote>
+          {t('factoryRuns.baseChecksUnread', {
+            branch: props.baseBranch ?? '',
+          })}
+        </StepNote>
+      </Show>
       <Show when={details()}>
         <CollapseTransition open={open()}>
           <Card variant="filled" offset={1} class="mt-1 mb-3 px-3 py-2.5">
@@ -276,9 +290,14 @@ function MainHoldNote(props: { hold: MainHold; baseBranch: string }) {
         {props.hold.failed}
       </span>
       <Show when={props.hold.taskId}>
-        <span class="block text-ink-muted">
-          {t('factoryRuns.mainHoldTask')}
-        </span>
+        {(taskId) => (
+          <a
+            class="block text-ink-muted underline"
+            href={buildSimpleEntityUrl({ type: 'task', id: taskId() })}
+          >
+            {t('factoryRuns.mainHoldTask')}
+          </a>
+        )}
       </Show>
     </StepNote>
   );

@@ -105,8 +105,13 @@ export type Run = {
   repository?: RunRepository;
   end?: { outcome: RunOutcome; endedAt: string };
   steps: RunStep[];
-  /** While the Run goes and its base branch is red. */
+  /** While the Run is at its merge and its base branch is red. */
   mainHold?: MainHold;
+  /**
+   * While the Run is at its merge: the checks its base branch requires
+   * couldn't be read, so nothing holds the merge on them.
+   */
+  baseChecksUnread?: boolean;
 };
 
 /** A Flow a person can start a Run of. */

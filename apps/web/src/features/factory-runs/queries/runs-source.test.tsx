@@ -21,6 +21,7 @@ vi.mock('@service-factory/client', () => ({
 }));
 
 const ended: RunDetail = {
+  baseChecksUnread: false,
   run: {
     id: 'run-1',
     request: 'Rename the column',
