@@ -593,3 +593,25 @@ async fn a_long_request_is_cut_to_fit_the_description_keeping_the_task() {
     assert!(body.contains("(The rest of the request is left out.)"));
     assert!(body.contains("\n\nTask: MACRO-"));
 }
+
+/// A token that may not read Actions runs is named in CI's output, so the
+/// Run's owner knows a waiting run was seen only through an empty suite.
+#[tokio::test(start_paused = true)]
+async fn ci_says_when_actions_runs_could_not_be_read() {
+    let github = FakeGithub::with_open_pull_request(HeadChecks {
+        actions_unread: true,
+        ..ci(Some("success"))
+    });
+
+    let report = steps(&github, &FakeRepo::default())
+        .ci(input(RunId::generate()))
+        .await
+        .expect("ci");
+
+    assert_eq!(outcome(&report), "green");
+    assert!(
+        report
+            .output
+            .contains("may not read this repository's Actions runs")
+    );
+}

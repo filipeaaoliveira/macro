@@ -252,13 +252,14 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
         } else {
             Vec::new()
         };
-        // A GitHub Actions run that has not started checking, as one a
-        // concurrency group holds or one whose suite GitHub has not made yet,
-        // shows only in the head's workflow runs. A list read only in part
-        // may hide one, so it holds too. A token that may not read Actions
-        // cannot tell: it holds only while an Actions suite sits empty, so a
-        // repository the App may not read Actions in is not stalled.
+        // A GitHub Actions run not finished, as one a concurrency group
+        // holds or one whose suite GitHub has not made yet, shows only in the
+        // head's workflow runs; runs not all read may hide one, so they hold
+        // too. A token that may not read Actions cannot tell: it holds only
+        // while an Actions suite sits empty, so a repository the App may not
+        // read Actions in is not stalled.
         let mut held_apps = Vec::new();
+        let mut actions_unread = false;
         match self
             .github
             .list_workflow_runs(&token, owner_name, name, sha)
@@ -275,6 +276,7 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
                     %error,
                     "the github token may not read actions runs; an empty actions suite is held"
                 );
+                actions_unread = true;
                 let actions_empty = suites
                     .iter()
                     .any(|suite| suite.app == ACTIONS_APP && suite.check_runs == 0);
@@ -292,6 +294,7 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
                 runs,
                 truncated,
                 held_apps,
+                actions_unread,
             },
         )))
     }

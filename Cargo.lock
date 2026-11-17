@@ -8409,6 +8409,7 @@ dependencies = [
  "upstream_error",
  "utoipa",
  "uuid",
+ "wiremock",
  "workspace-hack",
 ]
 

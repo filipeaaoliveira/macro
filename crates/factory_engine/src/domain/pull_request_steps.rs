@@ -34,6 +34,11 @@ const CI_POLL: Duration = Duration::from_secs(20);
 /// The longest pull request title the Steps write.
 const MAX_TITLE_CHARS: usize = 72;
 
+/// What `ci` tells the Run's owner when their token may not read GitHub
+/// Actions runs.
+const ACTIONS_UNREAD_NOTE: &str = "\n\nThe GitHub account linked to Macro may not read this repository's \
+     Actions runs, so a run that waits was seen only through an empty Actions suite.";
+
 /// The most characters GitHub keeps in a pull request's description.
 const MAX_BODY_CHARS: usize = 65_536;
 
@@ -146,9 +151,9 @@ fn required_passed(check: &RequiredCheck, checks: &HeadChecks) -> bool {
 /// - or [`EMPTY_SUITE_GRACE`] passed since GitHub made it: an app that checks
 ///   nothing on the commit never fills it.
 ///
-/// Short of the owner's rule, an app with a run on the head that has not
-/// started checking, as a GitHub Actions run a concurrency group holds, holds
-/// CI until it times out, whether or not its suite exists yet.
+/// Short of the owner's rule, an app with a run on the head not finished, or
+/// runs not all read, as a GitHub Actions run a concurrency group holds,
+/// holds CI until it times out, whether or not its suite exists yet.
 /// Lists longer than were read, or nothing reported, wait. A merged pull
 /// request is green.
 fn verdict(
@@ -212,8 +217,8 @@ fn verdict(
                 .is_none_or(|created_at| now - created_at < EMPTY_SUITE_GRACE)
         })
         .collect();
-    // A run that has not started checking holds CI, whether or not its app
-    // made a suite for it yet.
+    // A run not finished, or runs not all read, hold CI, whether or not the
+    // app made a suite for them yet.
     if !required_met && !checks.held_apps.is_empty() {
         return Verdict::Pending;
     }
@@ -435,11 +440,19 @@ impl<G: PullRequests, R: RunRepository> PullRequestSteps<G, R> {
         let deadline = started + CI_WAIT;
         // The head and the checks the last read saw all pass, if it did.
         let mut last_green: Option<(String, Vec<String>)> = None;
+        // Whether a read could not see the head's Actions runs.
+        let mut actions_unread = false;
         loop {
             let (pull_request, checks) = self
                 .find_with_checks(&input, &repository, required.as_ref())
                 .await?;
             let head = pull_request.head_sha.clone();
+            actions_unread |= checks.actions_unread;
+            let note = if actions_unread {
+                ACTIONS_UNREAD_NOTE
+            } else {
+                ""
+            };
             let elapsed = chrono::TimeDelta::from_std(started.elapsed()).unwrap_or_default();
             match verdict(
                 &pull_request,
@@ -457,7 +470,10 @@ impl<G: PullRequests, R: RunRepository> PullRequestSteps<G, R> {
                             .map_err(PullRequestStepError::records)?;
                         return Ok(report(
                             "green",
-                            format!("{}\n\nEvery check passed on {head}.", named(&pull_request)),
+                            format!(
+                                "{}\n\nEvery check passed on {head}.{note}",
+                                named(&pull_request)
+                            ),
                         ));
                     }
                     last_green = Some(seen);
@@ -485,7 +501,7 @@ impl<G: PullRequests, R: RunRepository> PullRequestSteps<G, R> {
                 return Ok(report(
                     "timeout",
                     format!(
-                        "{}\n\nIts checks on {head} did not finish within {} minutes.",
+                        "{}\n\nIts checks on {head} did not finish within {} minutes.{note}",
                         named(&pull_request),
                         CI_WAIT.as_secs() / 60
                     ),

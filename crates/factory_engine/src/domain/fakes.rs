@@ -607,6 +607,7 @@ pub(crate) fn ci(conclusion: Option<&str>) -> HeadChecks {
         }],
         truncated: false,
         held_apps: Vec::new(),
+        actions_unread: false,
     }
 }
 

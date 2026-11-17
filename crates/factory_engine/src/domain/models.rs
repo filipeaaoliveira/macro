@@ -187,10 +187,13 @@ pub struct HeadChecks {
     /// Whether a list was longer than was read, so these are not all its
     /// checks.
     pub truncated: bool,
-    /// The apps, by slug, with a run on the head that has not started
-    /// checking, as a GitHub Actions run a concurrency group holds: their
-    /// empty suites are runs still to come.
+    /// The apps, by slug, that hold CI on the head: a run not finished, or
+    /// runs not all read, as a GitHub Actions run a concurrency group holds,
+    /// whose suite may be empty or not made yet.
     pub held_apps: Vec<String>,
+    /// Whether the owner's token may not read GitHub Actions runs, so a run
+    /// that waits shows only through an empty Actions suite.
+    pub actions_unread: bool,
 }
 
 /// The checks a pull request's base requires, as far as they could be read.

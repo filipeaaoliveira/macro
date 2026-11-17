@@ -1,6 +1,9 @@
 //! What GitHub says of the checks on a commit, and the checks a branch
 //! requires.
 
+#[cfg(test)]
+mod test;
+
 /// A check suite on a commit: one per app that checks it, such as a CI.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GithubCheckSuite {

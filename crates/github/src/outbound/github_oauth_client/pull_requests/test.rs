@@ -1,9 +1,9 @@
 use super::super::GithubOauthImpl;
+use super::super::test::{MockResponse, MockServer};
 use crate::domain::models::{
     GithubError, GithubOpenPullRequest, GithubOpenPullRequestOutcome, GithubRepositoryAccess,
     GithubRequiredCheck, GithubRequiredChecks, GithubWorkflowRunStatus,
 };
-use crate::test_support::{MockResponse, MockServer};
 
 fn answering(status: &'static str, body: &str) -> (MockServer, GithubOauthImpl) {
     let server = MockServer::start(MockResponse {
