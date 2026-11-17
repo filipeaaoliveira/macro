@@ -981,7 +981,7 @@
       "FlowSummary": {
         "type": "object",
         "description": "A Flow a person can start a Run of.",
-        "required": ["name", "description"],
+        "required": ["name", "description", "repository"],
         "properties": {
           "description": {
             "type": "string",
@@ -990,6 +990,10 @@
           "name": {
             "type": "string",
             "description": "Its name, which a Run of it is started with."
+          },
+          "repository": {
+            "type": "boolean",
+            "description": "Whether a Run of it works on a GitHub repository, which starting it\nmust name."
           }
         }
       },
