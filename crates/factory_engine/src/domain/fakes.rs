@@ -131,6 +131,8 @@ pub(crate) struct FakeRepo {
     pub(crate) projects: Arc<Mutex<BTreeSet<Uuid>>>,
     /// The Project each task is in.
     pub(crate) task_projects: Arc<Mutex<BTreeMap<Uuid, Uuid>>>,
+    /// Whether reading a task's Project fails, as an outage would.
+    pub(crate) project_reads_fail: Arc<Mutex<bool>>,
     /// The Projects a person may not edit: their id and the Project's.
     pub(crate) uneditable_projects: Arc<Mutex<BTreeSet<(String, Uuid)>>>,
     /// The merges Runs made and the holds on their bases.
@@ -189,6 +191,9 @@ impl TaskDirectory for FakeRepo {
         _user_id: &MacroUserIdStr<'static>,
         task_id: Uuid,
     ) -> Result<Option<Uuid>, FakeError> {
+        if *self.project_reads_fail.lock().expect("fail") {
+            return Err(FakeError);
+        }
         Ok(self
             .task_projects
             .lock()
@@ -556,11 +561,10 @@ impl RunRepository for FakeRepo {
         key: StepKey,
         answer: &Outcome,
         rule: StandingRule,
-    ) -> Result<(), FakeError> {
-        self.with_step(key, |step| {
-            if let Some(gate) = step.gate.as_mut()
-                && gate.answer.is_none()
-            {
+    ) -> Result<Option<GateAnswer>, FakeError> {
+        let kept = self.with_step(key, |step| {
+            let gate = step.gate.as_mut()?;
+            if gate.answer.is_none() {
                 gate.answer = Some(GateAnswer {
                     answer: answer.clone(),
                     note: None,
@@ -570,12 +574,13 @@ impl RunRepository for FakeRepo {
                     answered_at: Utc::now(),
                 });
             }
+            gate.answer.clone()
         });
         self.rule_answers
             .lock()
             .expect("rule answers")
             .push((key, answer.clone(), rule));
-        Ok(())
+        Ok(kept.flatten())
     }
 
     async fn claim_session(

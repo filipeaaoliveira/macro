@@ -9,7 +9,7 @@ use serde_json::json;
 use tower::ServiceExt as _;
 use uuid::Uuid;
 
-use super::{ALICE, Caller, body, call, records_router};
+use super::{ALICE, Caller, ROBOT, body, call, records_router};
 use crate::domain::fakes::FakeRepo;
 
 const PATH: &str = "/settings/standing-rules";
@@ -321,4 +321,66 @@ async fn a_new_run_keeps_its_project_s_or_its_team_s_rules() {
             .count(),
         1
     );
+}
+
+/// A Project that cannot be read when a Run starts leaves it its team's
+/// rules: the Run is not refused.
+#[tokio::test]
+async fn a_run_whose_project_cannot_be_read_keeps_its_team_s_rules() {
+    let repo = FakeRepo::default();
+    let team_id = alice_s_team(&repo);
+    let task = Uuid::now_v7();
+    repo.tasks.lock().expect("tasks").insert(task);
+    repo.team_rules
+        .lock()
+        .expect("rules")
+        .insert(team_id, PLAN_ONLY);
+    *repo.project_reads_fail.lock().expect("fail") = true;
+
+    let response = records_router(&repo)
+        .oneshot(call(
+            "POST",
+            "/runs",
+            Caller::User("alice"),
+            json!({ "flow": "plan", "request": "Plan it", "taskId": task }),
+        ))
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+    assert_eq!(
+        body(response).await["run"]["standingRules"]["source"],
+        "team"
+    );
+}
+
+/// An agent's account reads its team's rules, and may never change them,
+/// whatever its role on the team.
+#[tokio::test]
+async fn an_agent_s_account_may_not_change_the_rules() {
+    let repo = FakeRepo::default();
+    repo.agent_accounts
+        .lock()
+        .expect("agent accounts")
+        .insert(ROBOT.to_string());
+    repo.teams.lock().expect("teams").insert(
+        ROBOT.to_string(),
+        TeamMembership {
+            team_id: Uuid::now_v7(),
+            admin: true,
+        },
+    );
+
+    let read = records_router(&repo)
+        .oneshot(call(
+            "GET",
+            PATH,
+            Caller::User("robot"),
+            serde_json::Value::Null,
+        ))
+        .await
+        .expect("response");
+
+    assert_eq!(read.status(), StatusCode::OK);
+    assert_eq!(body(read).await["canEdit"], false);
 }

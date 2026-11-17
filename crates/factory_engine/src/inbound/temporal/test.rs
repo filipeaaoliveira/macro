@@ -773,6 +773,7 @@ where
         &FakeRepo::default(),
         RunRules::DEFAULT,
         None,
+        None,
         drive,
     )
     .await
@@ -786,6 +787,7 @@ async fn walk_code_with<F>(
     repo: &FakeRepo,
     rules: RunRules,
     rounds: Option<std::num::NonZeroU8>,
+    flow: Option<Flow>,
     drive: impl FnOnce(CodeRun) -> F,
 ) -> Result<RunOutcome, WorkflowGetResultError>
 where
@@ -815,10 +817,12 @@ where
     else {
         panic!("a run with no task is kept");
     };
-    let mut flow = BuiltInFlow::named("code")
-        .expect("built in")
-        .read(|_| Some(crate::domain::flow::StepUse::Work))
-        .expect("valid flow");
+    let mut flow = flow.unwrap_or_else(|| {
+        BuiltInFlow::named("code")
+            .expect("built in")
+            .read(|_| Some(crate::domain::flow::StepUse::Work))
+            .expect("valid flow")
+    });
     if let Some(rounds) = rounds {
         flow.bound_review_rounds(rounds);
     }
@@ -990,10 +994,21 @@ async fn a_review_that_keeps_finding_blockers_ends_the_run_for_a_person() {
     let agent = CodeAgent::new(&github);
     // One reviewer of each round of three finds a Blocker.
     *agent.reviews.lock().expect("reviews") = [["changes", "pass", "pass"]; 3].concat();
+    let repo = FakeRepo::default();
 
-    let ended = walk_code(&agent, &github, |run| async move {
-        run.answer_next_gate("approve").await;
-    })
+    // The real Flow's three rounds: the default rules fix the first two
+    // rounds' Blockers, and the third round's end the Run.
+    let ended = walk_code_with(
+        &agent,
+        &github,
+        &repo,
+        RunRules::DEFAULT,
+        None,
+        None,
+        |run| async move {
+            run.answer_next_gate("approve").await;
+        },
+    )
     .await;
 
     assert!(matches!(ended, Ok(RunOutcome::Manual)), "{ended:?}");
@@ -1001,6 +1016,17 @@ async fn a_review_that_keeps_finding_blockers_ends_the_run_for_a_person() {
     assert_eq!(steps.iter().filter(|step| *step == "review").count(), 9);
     // The last round's Blockers end the Run: no fix runs after it.
     assert_eq!(steps.iter().filter(|step| *step == "fix").count(), 2);
+    let ruled: Vec<StandingRule> = repo
+        .rule_answers
+        .lock()
+        .expect("answers")
+        .iter()
+        .map(|(_, _, rule)| *rule)
+        .collect();
+    assert_eq!(
+        ruled,
+        [StandingRule::FixBlockers, StandingRule::FixBlockers]
+    );
     let github = github.state();
     assert_eq!(github.opened, 0);
     assert!(github.merges.is_empty());
@@ -1027,7 +1053,7 @@ async fn a_run_whose_rules_decide_every_gate_merges_with_no_person_asked() {
         project_id: None,
     };
 
-    let ended = walk_code_with(&agent, &github, &repo, rules, None, |_| async {}).await;
+    let ended = walk_code_with(&agent, &github, &repo, rules, None, None, |_| async {}).await;
 
     assert!(matches!(ended, Ok(RunOutcome::Success)), "{ended:?}");
     assert_eq!(github.state().merges, [FakeGithub::HEAD]);
@@ -1049,6 +1075,57 @@ async fn a_run_whose_rules_decide_every_gate_merges_with_no_person_asked() {
     assert!(repo.approvals.lock().expect("approvals").is_empty());
 }
 
+/// A Gate whose Flow names no kind is never answered by a rule, even on a
+/// plan entry of a Run whose rules decide every kind: a person answers it.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "Temporal doesn't exist in CI"]
+async fn a_gate_of_no_kind_waits_for_a_person_whatever_the_rules() {
+    let github = FakeGithub::default();
+    let agent = CodeAgent::new(&github);
+    let repo = FakeRepo::default();
+    let rules = RunRules {
+        definition: OrchestratorDefinition {
+            plan: true,
+            blockers: true,
+            merge: true,
+        },
+        source: RulesSource::Team,
+        project_id: None,
+    };
+    let flow = Flow::parse(
+        json!({
+            "entries": [{
+                "id": "plan",
+                "step": "plan",
+                "role": "planner",
+                "gate": { "question": "Approve?", "answers": ["approve", "revise"] },
+                "on": {
+                    "approve": [{ "to": { "kind": "end", "outcome": "success" } }],
+                    "revise": [{ "to": { "kind": "end", "outcome": "manual" } }]
+                }
+            }]
+        }),
+        |_| Some(crate::domain::flow::StepUse::Work),
+    )
+    .expect("valid flow");
+
+    let ended = walk_code_with(
+        &agent,
+        &github,
+        &repo,
+        rules,
+        None,
+        Some(flow),
+        |run| async move {
+            run.answer_next_gate("revise").await;
+        },
+    )
+    .await;
+
+    assert!(matches!(ended, Ok(RunOutcome::Manual)), "{ended:?}");
+    assert!(repo.rule_answers.lock().expect("answers").is_empty());
+}
+
 /// Review Blockers go to a fix on their own twice in a row; when the third
 /// round still finds some, a person is asked, and stopping ends the Run
 /// for them.
@@ -1067,6 +1144,7 @@ async fn blockers_after_two_rule_fixes_wait_for_a_person() {
         &repo,
         RunRules::DEFAULT,
         std::num::NonZeroU8::new(5),
+        None,
         |run| async move {
             run.answer_next_gate("approve").await;
             // The two fixes need no one; the third round's Blockers do.

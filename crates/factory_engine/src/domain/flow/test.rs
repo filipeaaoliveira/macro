@@ -197,6 +197,25 @@ fn a_review_panel_s_gate_opens_on_the_outcome_it_names() {
     assert!(written["gate"].get("after").is_none());
 }
 
+/// A review panel's Gate opens after an outcome a round ends with; one
+/// after `done` would never open.
+#[test]
+fn a_review_panel_s_gate_opens_after_a_round_s_outcome() {
+    let refused = parse(json!({
+        "entries": [{
+            "id": "review",
+            "step": "write",
+            "reviewers": ["tests"],
+            "gate": { "question": "Fix?", "answers": ["fix", "stop"], "after": "done" }
+        }]
+    }));
+
+    assert!(matches!(
+        refused,
+        Err(FlowError::GateAfterNoRoundOutcome(_))
+    ));
+}
+
 /// A deployment's bound on review rounds replaces the `max_visits` of each
 /// review panel, and changes nothing else.
 #[test]

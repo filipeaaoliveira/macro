@@ -185,11 +185,19 @@ where
             return Ok(RunRules::DEFAULT);
         };
         if let Some(task_id) = task_id {
-            let project = self
-                .tasks
-                .task_project(user_id, task_id)
-                .await
-                .map_err(internal)?;
+            // A Project that cannot be read now leaves the Run the team's
+            // rules, rather than refusing the Run.
+            let project = match self.tasks.task_project(user_id, task_id).await {
+                Ok(project) => project,
+                Err(error) => {
+                    tracing::warn!(
+                        ?error,
+                        %task_id,
+                        "the run task's project could not be read: the run takes its team's standing rules"
+                    );
+                    None
+                }
+            };
             if let Some(project_id) = project
                 && let Some(definition) = self
                     .repo
@@ -731,6 +739,8 @@ where
         actor: &MacroUserIdStr<'static>,
     ) -> Result<StandingRulesSettings, FactoryError> {
         let team = self.repo.team_of(actor).await.map_err(internal)?;
+        // An agent's account never changes them, whatever its team role.
+        let agent = self.repo.is_agent_account(actor).await.map_err(internal)?;
         let (own, projects) = match team {
             Some(team) => (
                 self.repo.team_rules(team.team_id).await.map_err(internal)?,
@@ -746,7 +756,7 @@ where
             definition: own.unwrap_or(OrchestratorDefinition::DEFAULT),
             projects,
             team_id: team.map(|team| team.team_id),
-            can_edit: team.is_some_and(|team| team.admin),
+            can_edit: !agent && team.is_some_and(|team| team.admin),
         })
     }
 
@@ -1041,6 +1051,7 @@ where
         let facts = GateFacts {
             kind: ruling.kind,
             fix_rounds: ruling.fix_rounds,
+            fix_limit: ruling.fix_limit,
             tampered: run
                 .control_files
                 .as_ref()
@@ -1050,12 +1061,24 @@ where
         let Some(ruled) = rule_answer(Some(rules.definition), &facts, &ruling.answers) else {
             return Ok(None);
         };
-        self.repo
+        // The Gate keeps its first answer: what it keeps is what the Run
+        // routes, read back after the write.
+        let kept = self
+            .repo
             .answer_gate_by_rule(key, &ruled.answer, ruled.rule)
             .await
-            .map_err(internal)?;
-        tracing::info!(rule = %ruled.rule, answer = %ruled.answer, "a standing rule answered a gate");
-        Ok(Some(ruled))
+            .map_err(internal)?
+            .ok_or_else(|| StepError::Internal(rootcause::report!("the gate is not recorded")))?;
+        let Some(rule) = kept.rule else {
+            return Err(StepError::Final(rootcause::report!(
+                "a person answered the gate before the run took answers"
+            )));
+        };
+        tracing::info!(%rule, answer = %kept.answer, "a standing rule answered a gate");
+        Ok(Some(RuleAnswer {
+            rule,
+            answer: kept.answer,
+        }))
     }
 
     #[tracing::instrument(err, skip_all, fields(run_id = %finish.run_id, outcome = %finish.outcome))]

@@ -8,6 +8,7 @@
       "max_visits": 3,
       "on_exhausted": [{ "to": { "kind": "end", "outcome": "manual" } }],
       "gate": {
+        "kind": "plan",
         "question": "Approve this plan, or send it back with a note on what to change?",
         "answers": ["approve", "revise"]
       },

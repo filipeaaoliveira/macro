@@ -16,7 +16,7 @@ use crate::domain::fakes::FakeRepo;
 use crate::domain::gate::GateRuling;
 use crate::domain::ports::StepService;
 use crate::domain::service::StepServiceImpl;
-use crate::domain::standing_rules::RuleAnswer;
+use crate::domain::standing_rules::{MAX_RULE_FIX_ROUNDS, RuleAnswer};
 
 fn outcome(name: &str) -> Outcome {
     Outcome::try_from(name.to_string()).expect("valid")
@@ -80,6 +80,7 @@ fn merge_ruling(key: StepKey) -> GateRuling {
         key,
         kind: GateKind::Merge,
         fix_rounds: 0,
+        fix_limit: 0,
         answers: vec![outcome("approve"), outcome("revise")],
     }
 }
@@ -201,6 +202,7 @@ async fn blockers_after_two_rule_fixes_wait_for_a_person() {
         key,
         kind: GateKind::Blockers,
         fix_rounds,
+        fix_limit: MAX_RULE_FIX_ROUNDS,
         answers: vec![outcome("fix"), outcome("stop")],
     };
 
@@ -220,6 +222,96 @@ async fn blockers_after_two_rule_fixes_wait_for_a_person() {
     let third = run_with(&repo, RunRules::DEFAULT).await;
     let ruled = steps(&repo)
         .rule_gate(ruling(third, 2))
+        .await
+        .expect("rule");
+    assert_eq!(ruled, None);
+}
+
+/// A fix approves no Control Files: a Tampered Run's Blockers still go to
+/// one, while its merge waits for a person.
+#[tokio::test]
+async fn a_tampered_run_s_blockers_go_to_a_fix_and_its_merge_to_a_person() {
+    let repo = FakeRepo::default();
+    let key = run_with(&repo, team_rules(EVERY_RULE)).await;
+    repo.set_control_file_changes(
+        key.run_id,
+        Some(&ControlFileChanges {
+            tampered: vec!["package.json".to_string()],
+            named: Vec::new(),
+            unlisted: false,
+        }),
+    )
+    .await
+    .expect("keep");
+    let blockers = GateRuling {
+        key,
+        kind: GateKind::Blockers,
+        fix_rounds: 0,
+        fix_limit: MAX_RULE_FIX_ROUNDS,
+        answers: vec![outcome("fix"), outcome("stop")],
+    };
+
+    assert_eq!(
+        steps(&repo).rule_gate(blockers).await.expect("rule"),
+        Some(RuleAnswer {
+            rule: StandingRule::FixBlockers,
+            answer: outcome("fix"),
+        })
+    );
+    let merge = run_with(&repo, team_rules(EVERY_RULE)).await;
+    repo.set_control_file_changes(
+        merge.run_id,
+        Some(&ControlFileChanges {
+            tampered: Vec::new(),
+            named: Vec::new(),
+            unlisted: true,
+        }),
+    )
+    .await
+    .expect("keep");
+    assert_eq!(
+        steps(&repo)
+            .rule_gate(merge_ruling(merge))
+            .await
+            .expect("rule"),
+        None
+    );
+}
+
+/// The Gate keeps its first answer, read back after the rule's write: a
+/// Gate a person answered first is never taken as ruled.
+#[tokio::test]
+async fn a_gate_a_person_answered_first_is_not_taken_as_ruled() {
+    let repo = FakeRepo::default();
+    let key = run_with(&repo, team_rules(EVERY_RULE)).await;
+    // The person's answer lands between the rule's read and its write.
+    repo.steps
+        .lock()
+        .expect("steps")
+        .iter_mut()
+        .filter(|(run, step)| *run == key.run_id && step.seq == key.seq)
+        .for_each(|(_, step)| {
+            if let Some(gate) = step.gate.as_mut() {
+                gate.answer = Some(factory_records::domain::models::GateAnswer {
+                    answer: outcome("revise"),
+                    note: None,
+                    user_id: Some(julia()),
+                    rule: None,
+                    approved_control_files: None,
+                    answered_at: Utc::now(),
+                });
+            }
+        });
+    let kept = repo
+        .answer_gate_by_rule(key, &outcome("approve"), StandingRule::MergeWhenGreen)
+        .await
+        .expect("write")
+        .expect("recorded");
+    assert_eq!(kept.answer, outcome("revise"));
+
+    // Read through the service, the Gate is a person's, not a rule's.
+    let ruled = steps(&repo)
+        .rule_gate(merge_ruling(key))
         .await
         .expect("rule");
     assert_eq!(ruled, None);

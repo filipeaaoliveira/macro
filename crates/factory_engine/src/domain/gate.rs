@@ -66,6 +66,9 @@ pub struct GateRuling {
     /// For a review panel's Gate, the fix rounds in a row its Blockers went
     /// to since the panel's visits last started; nought for others.
     pub fix_rounds: u16,
+    /// For a review panel's Gate, the fix rounds in a row its rule may
+    /// send; nought for others.
+    pub fix_limit: u16,
     /// The answers it offers.
     pub answers: Vec<Outcome>,
 }

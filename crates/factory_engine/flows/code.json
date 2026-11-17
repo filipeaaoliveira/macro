@@ -16,6 +16,7 @@
 				}
 			],
 			"gate": {
+				"kind": "plan",
 				"question": "Approve this plan, or send it back with a note on what to change?",
 				"answers": ["approve", "revise"]
 			},
@@ -83,6 +84,7 @@
 				}
 			],
 			"gate": {
+				"kind": "blockers",
 				"after": "changes",
 				"question": "The reviewers found blockers. Send them to be fixed and reviewed again, or stop and leave the branch to you?",
 				"answers": ["fix", "stop"]
@@ -255,6 +257,7 @@
 				}
 			],
 			"gate": {
+				"kind": "merge",
 				"question": "Merge this pull request, or send it back with a note on what to change?",
 				"answers": ["approve", "revise"]
 			},

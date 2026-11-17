@@ -55,7 +55,7 @@ use crate::domain::gate::{
 };
 use crate::domain::interpreter::{Interpreter, NextStep};
 use crate::domain::models::{RunFinish, RunStart, StepEnding, StepReport, StepRequest, StepStart};
-use crate::domain::standing_rules::gate_kind;
+use crate::domain::standing_rules::rule_fix_limit;
 use crate::inbound::temporal::activities::FactoryActivities;
 use crate::temporal::{ANSWER_GATE_UPDATE, FLOW_WORKFLOW};
 use review_round::{Panel, Round, TemporalRound, review_round};
@@ -189,8 +189,9 @@ impl FlowWorkflow {
                                 // The rounds before this one each sent their
                                 // Blockers to a fix.
                                 let asking = Asking {
-                                    kind: Some(GateKind::Blockers),
+                                    kind: gate.kind,
                                     fix_rounds: visit.saturating_sub(1),
+                                    fix_limit: rule_fix_limit(entry.max_visits),
                                 };
                                 match ask(ctx, key, gate, asking).await {
                                     Ok(answer) => answer,
@@ -298,8 +299,9 @@ impl FlowWorkflow {
             let outcome = match &entry.gate {
                 Some(gate) if reported == gate.opened_by() => {
                     let asking = Asking {
-                        kind: gate_kind(entry),
+                        kind: gate.kind,
                         fix_rounds: 0,
+                        fix_limit: 0,
                     };
                     match ask(ctx, key, gate, asking).await {
                         Ok(answer) => answer,
@@ -395,6 +397,9 @@ struct Asking {
     /// For a review panel's Gate, the fix rounds in a row its Blockers
     /// went to.
     fix_rounds: u16,
+    /// For a review panel's Gate, the fix rounds in a row its rule may
+    /// send.
+    fix_limit: u16,
 }
 
 /// Open the Gate of the Step `key`, ask the Run's Standing Rules about it,
@@ -429,6 +434,7 @@ async fn ask(
             key,
             kind,
             fix_rounds: asking.fix_rounds,
+            fix_limit: asking.fix_limit,
             answers: gate.answers.clone(),
         };
         let ruled = ctx
