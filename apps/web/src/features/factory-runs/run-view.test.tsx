@@ -677,6 +677,127 @@ describe('RunView', () => {
     });
   });
 
+  it('shows a held, Tampered merge with its review and verified checks', async () => {
+    const answerGate = vi.fn(async () => DONE);
+    const { setRun } = mount({ answerGate });
+    const mergeGate = {
+      seq: 6,
+      entry: 'merge-gate',
+      visit: 1,
+      startedAt: '2026-11-16T11:00:00Z',
+      end: {
+        outcome: 'done',
+        output: 'Every check passed.',
+        endedAt: '2026-11-16T11:01:00Z',
+      },
+      gate: {
+        question: 'Merge this pull request?',
+        answers: ['approve', 'revise'],
+        openedAt: '2026-11-16T11:01:00Z',
+      },
+    };
+    setRun({
+      ...waitingRun,
+      repository: {
+        url: 'https://github.com/macro/app',
+        baseBranch: 'main',
+      },
+      controlFiles: {
+        tampered: ['.github/workflows/ci.yml'],
+        named: [],
+        unlisted: false,
+      },
+      mainHold: {
+        since: '2026-11-16T10:30:00Z',
+        headSha: '2222222222222222222222222222222222222222',
+        failed: '- test (failure)',
+        taskId: 'task-9',
+      },
+      steps: [
+        {
+          seq: 2,
+          entry: 'write',
+          visit: 1,
+          startedAt: '2026-11-16T10:00:00Z',
+          end: {
+            outcome: 'done',
+            output: 'Wrote it.',
+            endedAt: '2026-11-16T10:20:00Z',
+          },
+          checks: [
+            {
+              round: 1,
+              checks: ['web'],
+              startedAt: '2026-11-16T10:10:00Z',
+              verified: true,
+              checkedCommit: '0123456789abcdef0123456789abcdef01234567',
+              results: [{ name: 'web', exitCode: 0 }],
+              end: {
+                outcome: 'passed',
+                report: 'web passed',
+                endedAt: '2026-11-16T10:15:00Z',
+              },
+            },
+          ],
+        },
+        {
+          seq: 3,
+          entry: 'review',
+          visit: 1,
+          startedAt: '2026-11-16T10:20:00Z',
+          role: 'correctness-reviewer',
+          end: {
+            outcome: 'pass',
+            output: 'Nothing blocks.',
+            endedAt: '2026-11-16T10:25:00Z',
+          },
+        },
+        mergeGate,
+      ],
+      reviewRounds: [
+        {
+          round: 1,
+          seq: 3,
+          reviewers: 1,
+          headSha: '0123456789',
+          diffBase: 'main',
+          fixDiff: false,
+          startedAt: '2026-11-16T10:20:00Z',
+          end: { outcome: 'pass', endedAt: '2026-11-16T10:25:00Z' },
+          findings: [],
+        },
+      ],
+    });
+
+    expect(await screen.findByText('Review round 1')).toBeTruthy();
+    expect(screen.getByText('Run on pushed commit 0123456')).toBeTruthy();
+    expect(screen.getByText('Main hold')).toBeTruthy();
+    expect(screen.getByText('- test (failure)')).toBeTruthy();
+    expect(
+      screen
+        .getByText('See the merges since they last passed')
+        .closest('a')
+        ?.getAttribute('href')
+    ).toMatch(/\/app\/task\/task-9$/);
+    expect(screen.getByText('.github/workflows/ci.yml')).toBeTruthy();
+
+    const approve = screen.getByRole('button', { name: 'Approve' });
+    expect(approve.hasAttribute('disabled')).toBe(true);
+    fireEvent.click(
+      screen.getByRole('checkbox', { name: 'I approve these changes' })
+    );
+    await waitFor(() => expect(approve.hasAttribute('disabled')).toBe(false));
+    fireEvent.click(approve);
+
+    expect(answerGate).toHaveBeenCalledWith({
+      runId: 'run-1',
+      step: mergeGate,
+      answer: 'approve',
+      note: undefined,
+      approvedControlFiles: ['.github/workflows/ci.yml'],
+    });
+  });
+
   it('approves a Run that changed only named Control Files without asking', async () => {
     const answerGate = vi.fn(async () => DONE);
     const { setRun } = mount({ answerGate });
