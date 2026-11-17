@@ -757,8 +757,8 @@ impl RunRepository for PgRunRepository {
         key: StepKey,
         answer: &Outcome,
         rule: StandingRule,
-    ) -> Result<(), Self::Err> {
-        sqlx::query!(
+    ) -> Result<Option<GateAnswer>, Self::Err> {
+        let updated = sqlx::query!(
             r#"
             UPDATE factory_gate
             SET answer = $3, rule = $4, answered_at = now()
@@ -770,8 +770,50 @@ impl RunRepository for PgRunRepository {
             rule.as_ref(),
         )
         .execute(&self.pool)
+        .await?
+        .rows_affected();
+        if updated == 0 {
+            tracing::info!("the gate had an answer, or is not recorded: reading what it keeps");
+        }
+
+        // What the Gate keeps is read back, whichever answer that is.
+        let stored = sqlx::query!(
+            r#"
+            SELECT answer, note, user_id, rule, approved_control_files, answered_at
+            FROM factory_gate
+            WHERE run_id = $1 AND seq = $2
+            "#,
+            key.run_id.as_uuid(),
+            i32::from(key.seq),
+        )
+        .fetch_optional(&self.pool)
         .await?;
-        Ok(())
+        let Some(stored) = stored else {
+            return Ok(None);
+        };
+        let (Some(answer), Some(answered_at)) = (stored.answer, stored.answered_at) else {
+            return Err(PgRunRepositoryErr::PartialGate);
+        };
+        Ok(Some(GateAnswer {
+            answer: Outcome::try_from(answer)?,
+            note: stored.note,
+            user_id: stored
+                .user_id
+                .map(|id| {
+                    MacroUserIdStr::try_from(id.clone())
+                        .map_err(|_| PgRunRepositoryErr::InvalidUserId(id))
+                })
+                .transpose()?,
+            rule: stored
+                .rule
+                .map(|rule| {
+                    rule.parse::<StandingRule>()
+                        .map_err(|_| PgRunRepositoryErr::UnknownStandingRules(vec![rule]))
+                })
+                .transpose()?,
+            approved_control_files: stored.approved_control_files,
+            answered_at,
+        }))
     }
 
     #[tracing::instrument(err, skip(self, note, user_id), fields(answer = %answer))]

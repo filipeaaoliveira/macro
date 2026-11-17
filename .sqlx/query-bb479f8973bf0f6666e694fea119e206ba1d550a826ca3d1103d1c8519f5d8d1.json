@@ -1,0 +1,53 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT answer, note, user_id, rule, approved_control_files, answered_at\n            FROM factory_gate\n            WHERE run_id = $1 AND seq = $2\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "answer",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "note",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "user_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "rule",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "approved_control_files",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 5,
+        "name": "answered_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "bb479f8973bf0f6666e694fea119e206ba1d550a826ca3d1103d1c8519f5d8d1"
+}

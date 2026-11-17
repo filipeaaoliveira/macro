@@ -208,26 +208,43 @@ async fn a_rule_answers_a_gate_once(pool: PgPool) {
         .expect("open");
     }
 
-    repo.answer_gate_by_rule(
-        key(run_id, 1),
-        &outcome("approve"),
-        StandingRule::ApprovePlan,
-    )
-    .await
-    .expect("rule answer");
+    let kept = repo
+        .answer_gate_by_rule(
+            key(run_id, 1),
+            &outcome("approve"),
+            StandingRule::ApprovePlan,
+        )
+        .await
+        .expect("rule answer")
+        .expect("the gate is recorded");
+    assert_eq!(kept.rule, Some(StandingRule::ApprovePlan));
     repo.answer_gate(key(run_id, 1), &outcome("revise"), None, &julia(), None)
         .await
         .expect("a person's answer after it");
     repo.answer_gate(key(run_id, 2), &outcome("revise"), None, &julia(), None)
         .await
         .expect("a person's answer");
-    repo.answer_gate_by_rule(
-        key(run_id, 2),
-        &outcome("approve"),
-        StandingRule::ApprovePlan,
-    )
-    .await
-    .expect("a rule answer after it");
+    // The person's answer stays, and is what the rule reads back.
+    let kept = repo
+        .answer_gate_by_rule(
+            key(run_id, 2),
+            &outcome("approve"),
+            StandingRule::ApprovePlan,
+        )
+        .await
+        .expect("a rule answer after it")
+        .expect("the gate is recorded");
+    assert_eq!(kept.answer, outcome("revise"));
+    assert_eq!(kept.rule, None);
+    let none = repo
+        .answer_gate_by_rule(
+            key(run_id, 9),
+            &outcome("approve"),
+            StandingRule::ApprovePlan,
+        )
+        .await
+        .expect("no gate");
+    assert_eq!(none, None);
 
     let steps = repo.list_steps(run_id).await.expect("steps");
     let ruled = steps[0].gate.as_ref().and_then(|gate| gate.answer.as_ref());
