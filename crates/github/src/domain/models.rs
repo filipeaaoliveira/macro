@@ -28,9 +28,10 @@ pub use github_pull_requests::domain::models::{
     GithubPullRequestReviewState, GithubPullRequestState, GithubPullRequestStatus,
     GithubPullRequestUpdateRejection, GithubPullRequestUser, GithubRepositoryAccess,
     GithubRepositoryMergeSettings, GithubRequiredCheck, GithubRequiredChecks, GithubStateOutcome,
-    GithubWorkflowRun, MergeGithubPullRequestRequest, MergeGithubPullRequestResponse,
-    SetGithubPullRequestDraftRequest, SetGithubPullRequestDraftResponse,
-    SetGithubPullRequestStateRequest, SetGithubPullRequestStateResponse, latest_reviews,
+    GithubWorkflowRun, GithubWorkflowRunStatus, MergeGithubPullRequestRequest,
+    MergeGithubPullRequestResponse, SetGithubPullRequestDraftRequest,
+    SetGithubPullRequestDraftResponse, SetGithubPullRequestStateRequest,
+    SetGithubPullRequestStateResponse, latest_reviews,
 };
 pub use installation_state::{
     InstallationState, InstallationStateError, sign_installation_state, verify_installation_state,

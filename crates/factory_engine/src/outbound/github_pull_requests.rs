@@ -24,9 +24,6 @@ use crate::domain::ports::{PullRequests, Retryable};
 /// GitHub Actions' app, whose workflow runs say whether a run still waits.
 const ACTIONS_APP: &str = "github-actions";
 
-/// The workflow run statuses of a run that has not finished.
-const WAITING_RUN: [&str; 5] = ["queued", "pending", "waiting", "requested", "in_progress"];
-
 /// Why GitHub could not be asked as the Run's owner.
 #[derive(Debug, thiserror::Error)]
 pub enum GithubPullRequestsErr {
@@ -255,25 +252,37 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
         } else {
             Vec::new()
         };
-        // An empty Actions suite may be a run a concurrency group holds:
-        // its workflow runs say whether one still waits to start.
-        let actions_empty = suites
-            .iter()
-            .any(|suite| suite.app == ACTIONS_APP && suite.check_runs == 0);
+        // A GitHub Actions run that has not started checking, as one a
+        // concurrency group holds or one whose suite GitHub has not made yet,
+        // shows only in the head's workflow runs. A list read only in part
+        // may hide one, so it holds too. A token that may not read Actions
+        // cannot tell: it holds only while an Actions suite sits empty, so a
+        // repository the App may not read Actions in is not stalled.
         let mut held_apps = Vec::new();
-        if actions_empty {
-            let runs = self
-                .github
-                .list_workflow_runs(&token, owner_name, name, sha)
-                .await?;
-            truncated |= !runs.complete;
-            if runs
-                .items
-                .iter()
-                .any(|run| WAITING_RUN.contains(&run.status.as_str()))
-            {
-                held_apps.push(ACTIONS_APP.to_string());
+        match self
+            .github
+            .list_workflow_runs(&token, owner_name, name, sha)
+            .await
+        {
+            Ok(runs) => {
+                let waiting = runs.items.iter().any(|run| run.status.is_waiting());
+                if waiting || !runs.complete {
+                    held_apps.push(ACTIONS_APP.to_string());
+                }
             }
+            Err(error @ (GithubError::Forbidden | GithubError::RepositoryUnavailable)) => {
+                tracing::warn!(
+                    %error,
+                    "the github token may not read actions runs; an empty actions suite is held"
+                );
+                let actions_empty = suites
+                    .iter()
+                    .any(|suite| suite.app == ACTIONS_APP && suite.check_runs == 0);
+                if actions_empty {
+                    held_apps.push(ACTIONS_APP.to_string());
+                }
+            }
+            Err(error) => return Err(error.into()),
         }
         Ok(Some((
             pull_request,

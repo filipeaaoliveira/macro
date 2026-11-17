@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use github::domain::models::GithubError;
 use github::outbound::github_oauth_client::GithubOauthImpl;
+use github::test_support::{MockResponse, MockServer};
 use macro_user_id::user_id::MacroUserIdStr;
 use upstream_error::{UpstreamError, UpstreamFailure};
 
@@ -109,4 +110,97 @@ async fn a_linked_token_is_read_on_each_call() {
     }
 
     assert_eq!(tokens.reads.load(Ordering::SeqCst), 3);
+}
+
+/// GitHub answering one CI read of a head: the pull request, its suites
+/// (`suites`, as GitHub's JSON list), no statuses, and its workflow runs
+/// (`runs`, a status line and body).
+fn ci_read(suites: &str, runs: (&'static str, String)) -> MockServer {
+    MockServer::start_many(vec![
+        MockResponse {
+            status: "200 OK",
+            body: r#"[{"number":7,"html_url":"https://github.com/macro/app/pull/7","state":"open","merged_at":null,"head":{"sha":"abc123"}}]"#.to_string(),
+        },
+        MockResponse {
+            status: "200 OK",
+            body: format!(r#"{{"total_count":1,"check_suites":{suites}}}"#),
+        },
+        MockResponse {
+            status: "200 OK",
+            body: r#"{"state":"pending","statuses":[]}"#.to_string(),
+        },
+        MockResponse {
+            status: runs.0,
+            body: runs.1,
+        },
+    ])
+}
+
+const EMPTY_ACTIONS_SUITE: &str = r#"[{"id":1,"status":"queued","conclusion":null,"latest_check_runs_count":0,"app":{"slug":"github-actions"}}]"#;
+
+/// The held apps one CI read of `server` finds.
+async fn held_apps(server: &MockServer) -> Vec<String> {
+    let github = GithubPullRequests::with_client(
+        Tokens {
+            linked: Some("token"),
+            ..Tokens::default()
+        },
+        GithubOauthImpl::with_api_base_url(server.base_url.clone()),
+    );
+    let (_, checks) = github
+        .find_with_checks(&julia(), &repository(), "factory/run", false)
+        .await
+        .expect("read")
+        .expect("a pull request");
+    checks.held_apps
+}
+
+/// An Actions run still pending holds CI as GitHub Actions'; runs that all
+/// completed hold nothing.
+#[tokio::test]
+async fn a_pending_actions_run_holds_and_completed_ones_do_not() {
+    let pending = ci_read(
+        EMPTY_ACTIONS_SUITE,
+        (
+            "200 OK",
+            r#"{"total_count":2,"workflow_runs":[{"status":"completed"},{"status":"pending"}]}"#
+                .to_string(),
+        ),
+    );
+    let held = held_apps(&pending).await;
+    let requests = pending.finish_all();
+    let completed = ci_read(
+        EMPTY_ACTIONS_SUITE,
+        (
+            "200 OK",
+            r#"{"total_count":1,"workflow_runs":[{"status":"completed"}]}"#.to_string(),
+        ),
+    );
+    let not_held = held_apps(&completed).await;
+    completed.finish_all();
+
+    assert_eq!(held, ["github-actions"]);
+    assert!(not_held.is_empty());
+    assert!(requests[3].starts_with("GET /repos/macro/app/actions/runs?head_sha=abc123&"));
+}
+
+/// A token that may not read Actions cannot tell whether a run waits: an
+/// empty Actions suite is then held, and a head with none is not stalled.
+#[tokio::test]
+async fn a_refused_actions_read_holds_only_an_empty_actions_suite() {
+    let refused = || {
+        (
+            "403 Forbidden",
+            r#"{"message":"Resource not accessible by integration"}"#.to_string(),
+        )
+    };
+    let empty = ci_read(EMPTY_ACTIONS_SUITE, refused());
+    let held = held_apps(&empty).await;
+    empty.finish_all();
+    let none = ci_read("[]", refused());
+    let not_held = held_apps(&none).await;
+    none.finish_all();
+
+    assert_eq!(held, ["github-actions"]);
+    assert!(not_held.is_empty());
 }

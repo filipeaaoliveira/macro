@@ -21,6 +21,7 @@ use crate::domain::models::{
     GithubCheckRun, GithubCheckSuite, GithubCommitStatus, GithubError, GithubListing,
     GithubOpenPullRequest, GithubOpenPullRequestOutcome, GithubPullRequestHead,
     GithubRepositoryAccess, GithubRequiredCheck, GithubRequiredChecks, GithubWorkflowRun,
+    GithubWorkflowRunStatus,
 };
 
 #[cfg(test)]
@@ -512,7 +513,9 @@ impl GithubOauthImpl {
                 .items
                 .into_iter()
                 .map(|run| GithubWorkflowRun {
-                    status: run.status.unwrap_or_else(|| "queued".to_string()),
+                    status: GithubWorkflowRunStatus::from_github(
+                        run.status.as_deref().unwrap_or("queued"),
+                    ),
                 })
                 .collect(),
         })

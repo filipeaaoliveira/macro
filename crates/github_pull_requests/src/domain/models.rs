@@ -4,6 +4,7 @@
 mod test;
 
 mod changes;
+mod checks;
 mod diff;
 mod index;
 mod key;
@@ -18,6 +19,10 @@ pub use changes::{
     GithubPullRequestChangesError, GithubPullRequestChangeset, changeset_id, changeset_patch_key,
     github_key_of,
 };
+pub use checks::{
+    GithubCheckRun, GithubCheckSuite, GithubCommitStatus, GithubListing, GithubRequiredCheck,
+    GithubRequiredChecks, GithubWorkflowRun, GithubWorkflowRunStatus,
+};
 pub use diff::{
     ChangesetRange, GitRef, GithubPullRequestDiff, GithubPullRequestDiffError, PullRequestRef,
     RepositorySlug,
@@ -26,9 +31,8 @@ pub use index::{PullRequestIndexOutcome, PullRequestIndexRecord, PullRequestInde
 pub use key::GithubKey;
 pub use pull_request::{
     EnrichGithubPullRequestsProxyRequest, EnrichGithubPullRequestsResponse,
-    EnrichedGithubPullRequest, GITHUB_PULL_REQUEST_FOREIGN_ENTITY_SOURCE, GithubCheckRun,
-    GithubCheckSuite, GithubCommitStatus, GithubListing, GithubMergeMethod, GithubMergeOutcome,
-    GithubMergeRejection, GithubOpenPullRequest, GithubOpenPullRequestOutcome,
+    EnrichedGithubPullRequest, GITHUB_PULL_REQUEST_FOREIGN_ENTITY_SOURCE, GithubMergeMethod,
+    GithubMergeOutcome, GithubMergeRejection, GithubOpenPullRequest, GithubOpenPullRequestOutcome,
     GithubPullRequestCheckRun, GithubPullRequestComment, GithubPullRequestDetails,
     GithubPullRequestHead, GithubPullRequestLabel, GithubPullRequestMerge,
     GithubPullRequestMergeability, GithubPullRequestMergeabilityEntry,
@@ -36,8 +40,7 @@ pub use pull_request::{
     GithubPullRequestNumber, GithubPullRequestRef, GithubPullRequestReview,
     GithubPullRequestReviewDecision, GithubPullRequestReviewState, GithubPullRequestStatus,
     GithubPullRequestUser, GithubRepositoryAccess, GithubRepositoryMergeSettings,
-    GithubRequiredCheck, GithubRequiredChecks, GithubWorkflowRun, MergeGithubPullRequestRequest,
-    MergeGithubPullRequestResponse, latest_reviews,
+    MergeGithubPullRequestRequest, MergeGithubPullRequestResponse, latest_reviews,
 };
 pub use update::{
     GithubDraftOutcome, GithubPullRequestState, GithubPullRequestUpdateRejection,

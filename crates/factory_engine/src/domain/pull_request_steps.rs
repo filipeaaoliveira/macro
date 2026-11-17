@@ -143,12 +143,12 @@ fn required_passed(check: &RequiredCheck, checks: &HeadChecks) -> bool {
 /// - the required checks were read in full, name at least one check, and all
 ///   passed: the owner's rule is then met, and another app's empty suite does
 ///   not matter;
-/// - or its app has no run waiting on the head, and [`EMPTY_SUITE_GRACE`]
-///   passed since GitHub made it: an app that checks nothing on the commit
-///   never fills it.
+/// - or [`EMPTY_SUITE_GRACE`] passed since GitHub made it: an app that checks
+///   nothing on the commit never fills it.
 ///
-/// An empty suite of an app with a run waiting on the head, as a GitHub
-/// Actions run a concurrency group holds, is waited for until CI times out.
+/// Short of the owner's rule, an app with a run on the head that has not
+/// started checking, as a GitHub Actions run a concurrency group holds, holds
+/// CI until it times out, whether or not its suite exists yet.
 /// Lists longer than were read, or nothing reported, wait. A merged pull
 /// request is green.
 fn verdict(
@@ -207,14 +207,16 @@ fn verdict(
             if required_met {
                 return false;
             }
-            if checks.held_apps.contains(&suite.app) {
-                return true;
-            }
             suite
                 .created_at
                 .is_none_or(|created_at| now - created_at < EMPTY_SUITE_GRACE)
         })
         .collect();
+    // A run that has not started checking holds CI, whether or not its app
+    // made a suite for it yet.
+    if !required_met && !checks.held_apps.is_empty() {
+        return Verdict::Pending;
+    }
     let finished = counted
         .iter()
         .all(|suite| suite.state == CheckState::Passed)

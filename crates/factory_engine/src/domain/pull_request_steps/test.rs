@@ -225,7 +225,7 @@ fn required(name: &str, app_id: Option<u64>) -> RequiredCheck {
     }
 }
 
-/// An empty suite of an app that runs no CI on the base holds CI back
+/// An empty suite of an app with no run waiting on the head holds CI back
 /// within its grace, as one that adds its runs late, and is let go once the
 /// grace ends, within the same Step.
 #[tokio::test(start_paused = true)]
@@ -264,6 +264,23 @@ async fn a_held_run_s_empty_suite_is_waited_for_until_ci_times_out() {
     });
     held.held_apps = vec!["held-ci".to_string()];
     let github = FakeGithub::with_open_pull_request(held);
+
+    let report = steps(&github, &FakeRepo::default())
+        .ci(input(RunId::generate()))
+        .await
+        .expect("ci");
+
+    assert_eq!(outcome(&report), "timeout");
+}
+
+/// An Actions run that has not started checking holds CI though every suite
+/// reported passed, as one whose suite GitHub has not made yet.
+#[tokio::test(start_paused = true)]
+async fn a_held_run_with_no_suite_yet_holds_ci() {
+    let github = FakeGithub::with_open_pull_request(HeadChecks {
+        held_apps: vec!["github-actions".to_string()],
+        ..ci(Some("success"))
+    });
 
     let report = steps(&github, &FakeRepo::default())
         .ci(input(RunId::generate()))

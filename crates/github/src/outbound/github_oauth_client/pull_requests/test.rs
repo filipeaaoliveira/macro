@@ -1,9 +1,9 @@
 use super::super::GithubOauthImpl;
-use super::super::test::{MockResponse, MockServer};
 use crate::domain::models::{
     GithubError, GithubOpenPullRequest, GithubOpenPullRequestOutcome, GithubRepositoryAccess,
-    GithubRequiredCheck, GithubRequiredChecks,
+    GithubRequiredCheck, GithubRequiredChecks, GithubWorkflowRunStatus,
 };
+use crate::test_support::{MockResponse, MockServer};
 
 fn answering(status: &'static str, body: &str) -> (MockServer, GithubOauthImpl) {
     let server = MockServer::start(MockResponse {
@@ -455,8 +455,14 @@ async fn workflow_runs_are_read_for_the_head_commit() {
         .unwrap();
 
     assert!(runs.complete);
-    let statuses: Vec<&str> = runs.items.iter().map(|run| run.status.as_str()).collect();
-    assert_eq!(statuses, ["pending", "completed"]);
+    let statuses: Vec<GithubWorkflowRunStatus> = runs.items.iter().map(|run| run.status).collect();
+    assert_eq!(
+        statuses,
+        [
+            GithubWorkflowRunStatus::Waiting,
+            GithubWorkflowRunStatus::Completed
+        ]
+    );
     assert!(
         server
             .finish()
