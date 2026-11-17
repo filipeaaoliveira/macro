@@ -1,12 +1,14 @@
 use agent_session::domain::routines::RoutineActionStatus;
-use factory_records::domain::models::{HandBack, Outcome, Role, StepSession};
+use factory_records::domain::models::{HandBack, Outcome, PassedOver, Role, StepSession};
 use factory_records::domain::ports::RunRepository;
 use uuid::Uuid;
 
-use super::{BACKUP, FakeSessions, PRIMARY, agent, julia, name, no_quota, plan_task, the_plan};
+use super::{
+    BACKUP, FakeSessions, PRIMARY, agent, julia, name, no_quota, plan_task, recorded, the_plan,
+};
 use crate::domain::fakes::FakeRepo;
 use crate::domain::models::{AgentTask, AgentTurn};
-use crate::domain::ports::{Retryable, StepAgent};
+use crate::domain::ports::{AgentFailure, Retryable, StepAgent};
 use crate::domain::session_agent::SessionAgentError;
 
 fn outcome(name: &str) -> Outcome {
@@ -210,4 +212,149 @@ async fn the_work_waits_no_longer_than_its_step_allows() {
 
     assert!(matches!(answer, Err(SessionAgentError::TooSlow(_))));
     assert!(started.elapsed() < std::time::Duration::from_secs(60));
+}
+
+/// A checks round's prompt to `role`'s Agent, under a new id.
+fn checks_turn(key: factory_records::domain::models::StepKey) -> AgentTurn {
+    AgentTurn {
+        key,
+        owner: julia(),
+        role: planner(),
+        action_id: Uuid::now_v7(),
+        prompt: "Run the checks".to_string(),
+        outcomes: vec![outcome("passed"), outcome("failed")],
+        answer_by: chrono::Utc::now() + chrono::TimeDelta::hours(1),
+    }
+}
+
+/// A later prompt refused for lack of quota is not handed to another
+/// Agent: the work stays in its session, and the error says the quota ran
+/// out, which the Step's checks end on rather than retry.
+#[tokio::test]
+async fn a_later_prompt_refused_for_lack_of_quota_stays_with_its_agent() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded)
+        .following_up(&[no_quota()]);
+    let task = plan_task(&repo).await;
+    let key = task.key;
+    let agent = agent(&sessions, &repo);
+    agent.answer(task).await.expect("answer");
+    let before = repo
+        .claimed_session(key)
+        .await
+        .expect("read")
+        .expect("claimed");
+
+    let refused = agent.follow_up(checks_turn(key)).await;
+
+    let Err(error) = refused else {
+        panic!("a refused prompt is not an answer");
+    };
+    assert!(matches!(error, SessionAgentError::NoQuota(_)));
+    assert!(error.out_of_quota());
+    assert!(!error.retryable());
+    let after = repo
+        .claimed_session(key)
+        .await
+        .expect("read")
+        .expect("claimed");
+    assert_eq!(after, before);
+    let passed_over: Vec<PassedOver> = recorded(&repo, key).2;
+    assert!(passed_over.is_empty());
+    assert_eq!(sessions.prepared_calls.lock().expect("prepared").len(), 1);
+}
+
+/// An attempt still waiting on the work's prompt when another attempt took
+/// the Step on to a round of checks never reads the round's answer as the
+/// work's, nor a round's prompt the next one's: it fails, and a retry goes
+/// on from where the Step is.
+#[tokio::test]
+async fn a_prompt_the_step_went_on_from_never_reads_a_later_answer() {
+    let repo = FakeRepo::default();
+    let mut sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
+    sessions.follow_up_handed = Some(HandBack {
+        outcome: outcome("passed"),
+        output: "web: exit 0".to_string(),
+    });
+    let task = plan_task(&repo).await;
+    let key = task.key;
+    let agent = agent(&sessions, &repo);
+    agent.answer(task.clone()).await.expect("answer");
+    let checks = checks_turn(key);
+    agent.follow_up(checks.clone()).await.expect("checks");
+
+    let stale_work = agent.answer(task).await;
+    agent.follow_up(checks_turn(key)).await.expect("next round");
+    let stale_round = agent.follow_up(checks).await;
+
+    for stale in [stale_work, stale_round] {
+        let Err(error) = stale else {
+            panic!("a prompt the step went on from has no answer of its own");
+        };
+        assert!(matches!(error, SessionAgentError::Superseded));
+        assert!(error.retryable());
+    }
+}
+
+/// Once a later prompt is recorded the Agent at work is never passed over,
+/// and a later prompt named for a session the Step does not work in is not
+/// recorded.
+#[tokio::test]
+async fn a_later_prompt_keeps_the_step_in_its_session() {
+    let repo = FakeRepo::default();
+    let key = plan_task(&repo).await.key;
+    let session = StepSession {
+        session_id: Uuid::now_v7(),
+        action_id: Uuid::now_v7(),
+        agent: Some(name("primary")),
+        bot: Some(PRIMARY.as_uuid()),
+    };
+    repo.claim_session(key, session.clone(), &planner(), &[Outcome::done()])
+        .await
+        .expect("claim");
+    let offered = [outcome("passed"), outcome("failed")];
+
+    let elsewhere = repo
+        .begin_turn(key, Uuid::now_v7(), Uuid::now_v7(), &offered)
+        .await
+        .expect("turn elsewhere");
+    let passed_before = repo
+        .stopping_session(key, std::time::Duration::from_secs(3600))
+        .await
+        .expect("read")
+        .expect("claimed");
+    let began = repo
+        .begin_turn(key, session.session_id, Uuid::now_v7(), &offered)
+        .await
+        .expect("turn");
+    let backup = StepSession {
+        session_id: Uuid::now_v7(),
+        action_id: Uuid::now_v7(),
+        agent: Some(name("backup")),
+        bot: Some(BACKUP.as_uuid()),
+    };
+    let passed = repo
+        .pass_session(
+            key,
+            session.session_id,
+            &planner(),
+            &PassedOver {
+                agent: name("primary"),
+                reason: "ai_allowance_exhausted".to_string(),
+            },
+            Some(&backup),
+        )
+        .await
+        .expect("pass");
+
+    assert!(!elsewhere);
+    assert_eq!(passed_before.session.action_id, session.action_id);
+    assert!(began);
+    assert!(!passed);
+    let claimed = repo
+        .claimed_session(key)
+        .await
+        .expect("read")
+        .expect("claimed");
+    assert_eq!(claimed, session);
 }

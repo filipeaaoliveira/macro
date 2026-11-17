@@ -15,7 +15,7 @@ use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::flow::{StepName, StepUse};
 use crate::domain::models::{AgentTask, StepInput, StepReport, run_branch};
-use crate::domain::ports::{PullRequests, Retryable, StepAgent, StepExecutor};
+use crate::domain::ports::{AgentFailure, PullRequests, Retryable, StepAgent, StepExecutor};
 use crate::domain::pull_request_steps::{PullRequestStepError, PullRequestSteps};
 
 /// What the agent is told for a `plan` Step.
@@ -114,6 +114,8 @@ pub enum BuiltInStepError {
         report: rootcause::Report,
         /// Whether asking the agent again may succeed.
         retryable: bool,
+        /// Whether the agent's quota ran out.
+        out_of_quota: bool,
     },
     /// The agent ended the Step with an outcome the Step does not have.
     #[error("the agent ended step {step} with {outcome}, which it does not end with")]
@@ -129,9 +131,10 @@ pub enum BuiltInStepError {
 }
 
 impl BuiltInStepError {
-    fn agent(error: impl std::error::Error + Retryable + Send + Sync + 'static) -> Self {
+    fn agent(error: impl std::error::Error + AgentFailure + Send + Sync + 'static) -> Self {
         BuiltInStepError::Agent {
             retryable: error.retryable(),
+            out_of_quota: error.out_of_quota(),
             report: rootcause::Report::new(error).into_dynamic(),
         }
     }

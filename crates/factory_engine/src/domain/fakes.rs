@@ -7,8 +7,8 @@ use agent_session::domain::session_task::TaskDocumentId;
 use chrono::Utc;
 use factory_records::domain::models::{
     CheckRound, CheckRoundEnd, CheckRoundOutcome, CheckRoundStart, ClaimedSession, EntryId, Gate,
-    HandBack, Outcome, PassedOver, Repository, Role, Run, RunEnd, RunId, RunInsert, RunOutcome,
-    SessionStep, Step, StepEnd, StepKey, StepSession, StoppingSession, TaskLink,
+    HandBack, HandedBack, Outcome, PassedOver, Repository, Role, Run, RunEnd, RunId, RunInsert,
+    RunOutcome, SessionStep, Step, StepEnd, StepKey, StepSession, StoppingSession, TaskLink,
 };
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
@@ -532,12 +532,18 @@ impl RunRepository for FakeRepo {
         Ok(kept)
     }
 
-    async fn handed_back(&self, key: StepKey) -> Result<Option<HandBack>, FakeError> {
+    async fn handed_back(&self, key: StepKey, action_id: Uuid) -> Result<HandedBack, FakeError> {
         let sessions = self.sessions.lock().expect("sessions");
-        Ok(sessions
-            .iter()
-            .find(|claimed| claimed.key == key)
-            .and_then(|claimed| claimed.handed.clone()))
+        let Some(claimed) = sessions.iter().find(|claimed| claimed.key == key) else {
+            return Ok(HandedBack::Nothing);
+        };
+        if claimed.turn.unwrap_or(claimed.session.action_id) != action_id {
+            return Ok(HandedBack::Superseded);
+        }
+        Ok(claimed
+            .handed
+            .clone()
+            .map_or(HandedBack::Nothing, HandedBack::Handed))
     }
 
     async fn begin_turn(
@@ -546,19 +552,24 @@ impl RunRepository for FakeRepo {
         session_id: Uuid,
         action_id: Uuid,
         offered: &[Outcome],
-    ) -> Result<(), FakeError> {
+    ) -> Result<bool, FakeError> {
         let ended = self.step_ended(key);
         let mut sessions = self.sessions.lock().expect("sessions");
-        if let Some(claimed) = sessions.iter_mut().find(|claimed| claimed.key == key)
-            && claimed.session.session_id == session_id
-            && !ended
-            && claimed.turn != Some(action_id)
+        let Some(claimed) = sessions.iter_mut().find(|claimed| claimed.key == key) else {
+            return Ok(false);
+        };
+        if claimed.session.session_id != session_id
+            || ended
+            || claimed.turn.is_some_and(|turn| turn > action_id)
         {
+            return Ok(false);
+        }
+        if claimed.turn != Some(action_id) {
             claimed.turn = Some(action_id);
             claimed.offered = offered.to_vec();
             claimed.handed = None;
         }
-        Ok(())
+        Ok(true)
     }
 
     async fn check_rounds(&self, key: StepKey) -> Result<Vec<CheckRound>, FakeError> {

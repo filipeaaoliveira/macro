@@ -578,6 +578,19 @@ pub struct SessionStep {
     pub ended: bool,
 }
 
+/// What the agent of a Step handed back for one prompt of its session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HandedBack {
+    /// The agent handed this back for the prompt.
+    Handed(HandBack),
+    /// Nothing yet: the prompt is the Step's latest, and the agent handed
+    /// nothing back for it.
+    Nothing,
+    /// The Step went on to a later prompt of its session, whose hand back
+    /// is not the prompt's; or it works in another session now.
+    Superseded,
+}
+
 /// What an agent handed back for its Step.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HandBack {

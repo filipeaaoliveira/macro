@@ -19,7 +19,9 @@ use agent_session::domain::routines::{
 };
 use ai_billing::DenyReason;
 use bot_id::BotId;
-use factory_records::domain::models::{AgentName, Outcome, PassedOver, Role, StepKey, StepSession};
+use factory_records::domain::models::{
+    AgentName, HandedBack, Outcome, PassedOver, Role, StepKey, StepSession,
+};
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
 use trigger_context::TriggerOrigin;
@@ -27,7 +29,7 @@ use uuid::Uuid;
 
 use crate::domain::agents::{Agent, AgentDefinition};
 use crate::domain::models::{AgentAnswer, AgentTask, AgentTurn};
-use crate::domain::ports::{Retryable, StepAgent};
+use crate::domain::ports::{AgentFailure, Retryable, StepAgent};
 
 /// What the agent is told about handing its result back.
 const HAND_BACK: &str = include_str!("session_agent/hand_back.md");
@@ -75,10 +77,12 @@ pub enum SessionAgentError {
     /// The session could not be opened, prompted or read.
     #[error("the agent session failed: {0}")]
     Session(#[from] RoutineSessionError),
-    /// The Agent could not start: its owner's quota for it is used up. The
-    /// next Agent of the Step's Role takes the Step; this fails it only when
-    /// no Agent is left.
-    #[error("the agent could not start for lack of quota: {}", .0.code())]
+    /// The Agent's owner's quota for it is used up. Refused the Step's first
+    /// prompt, the Agent could not start, and the next Agent of the Step's
+    /// Role takes the Step; this fails it only when no Agent is left.
+    /// Refused a later prompt, the Agent's work stays in its session, so no
+    /// other Agent takes over: the Step's checks end there.
+    #[error("the agent's quota ran out: {}", .0.code())]
     NoQuota(DenyReason),
     /// The agent definition lists no Agent for the Step's Role.
     #[error("no agent fills role {0}")]
@@ -111,6 +115,11 @@ pub enum SessionAgentError {
     /// The session's turn ended with nothing handed back.
     #[error("the agent's turn ended without handing back a result")]
     NothingHandedBack,
+    /// Another attempt took the Step on to a later prompt while this one
+    /// waited on its own, or before this one sent it: its hand back is not
+    /// the prompt's, and a retry goes on from where the Step is now.
+    #[error("the step went on to a later prompt of its session")]
+    Superseded,
     /// A later prompt's turn was still going when the wait for it ended:
     /// this attempt's time, or the time its Step gave it. A retry waits on
     /// the same turn.
@@ -139,6 +148,7 @@ impl Retryable for SessionAgentError {
         match self {
             SessionAgentError::Records(_)
             | SessionAgentError::Overdue
+            | SessionAgentError::Superseded
             | SessionAgentError::NotOpened
             | SessionAgentError::MayStillOpen => true,
             SessionAgentError::Session(error) => error.is_transient(),
@@ -152,6 +162,12 @@ impl Retryable for SessionAgentError {
             | SessionAgentError::Released
             | SessionAgentError::TooSlow(_) => false,
         }
+    }
+}
+
+impl AgentFailure for SessionAgentError {
+    fn out_of_quota(&self) -> bool {
+        matches!(self, SessionAgentError::NoQuota(_))
     }
 }
 
@@ -241,6 +257,28 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
         }
         self.still_holds(key, current.session_id).await?;
         Ok(Some(current))
+    }
+
+    /// What the agent handed back for the prompt `action_id` of the Step
+    /// `key`, once its turn ended: never a later prompt's answer.
+    async fn handed_back(
+        &self,
+        key: StepKey,
+        action_id: Uuid,
+    ) -> Result<AgentAnswer, SessionAgentError> {
+        match self
+            .repo
+            .handed_back(key, action_id)
+            .await
+            .map_err(Self::records)?
+        {
+            HandedBack::Handed(handed) => Ok(AgentAnswer {
+                outcome: handed.outcome,
+                text: handed.output,
+            }),
+            HandedBack::Nothing => Err(SessionAgentError::NothingHandedBack),
+            HandedBack::Superseded => Err(SessionAgentError::Superseded),
+        }
     }
 
     fn records(error: impl std::error::Error + Send + Sync + 'static) -> SessionAgentError {
@@ -608,16 +646,7 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
 
         // The session stays until the Step's end is recorded: a retry of an
         // attempt whose answer Temporal lost goes on in it.
-        let handed = self
-            .repo
-            .handed_back(task.key)
-            .await
-            .map_err(Self::records)?
-            .ok_or(SessionAgentError::NothingHandedBack)?;
-        Ok(AgentAnswer {
-            outcome: handed.outcome,
-            text: handed.output,
-        })
+        self.handed_back(task.key, action.action_id.as_uuid()).await
     }
 
     #[tracing::instrument(err, skip_all, fields(run_id = %turn.key.run_id, seq = turn.key.seq))]
@@ -644,10 +673,17 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
         // records it again, which keeps what was handed back since. Both
         // hold only while the Step works in this session.
         self.still_holds(turn.key, session.session_id).await?;
-        self.repo
+        let began = self
+            .repo
             .begin_turn(turn.key, session.session_id, turn.action_id, &turn.outcomes)
             .await
             .map_err(Self::records)?;
+        // Left alone: the Step let go of this session, or another attempt
+        // took it on to a later prompt, which a retry goes on from.
+        if !began {
+            self.still_holds(turn.key, session.session_id).await?;
+            return Err(SessionAgentError::Superseded);
+        }
         let prompted = self
             .sessions
             .follow_up(PromptRoutineSession {
@@ -662,16 +698,7 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
             finished => finished?,
         }
 
-        let handed = self
-            .repo
-            .handed_back(turn.key)
-            .await
-            .map_err(Self::records)?
-            .ok_or(SessionAgentError::NothingHandedBack)?;
-        Ok(AgentAnswer {
-            outcome: handed.outcome,
-            text: handed.output,
-        })
+        self.handed_back(turn.key, turn.action_id).await
     }
 
     #[tracing::instrument(err, skip_all, fields(run_id = %key.run_id, seq = key.seq))]

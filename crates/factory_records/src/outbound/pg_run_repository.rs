@@ -14,9 +14,9 @@ use uuid::Uuid;
 
 use crate::domain::models::{
     AgentName, CheckRound, CheckRoundOutcome, CheckRoundStart, ClaimedSession, EntryId, Gate,
-    GateAnswer, HandBack, InvalidName, Outcome, PassedOver, Repository, Role, Run, RunEnd, RunId,
-    RunInsert, RunOutcome, SessionStep, Step, StepEnd, StepKey, StepSession, StoppingSession,
-    TaskLink,
+    GateAnswer, HandBack, HandedBack, InvalidName, Outcome, PassedOver, Repository, Role, Run,
+    RunEnd, RunId, RunInsert, RunOutcome, SessionStep, Step, StepEnd, StepKey, StepSession,
+    StoppingSession, TaskLink,
 };
 use crate::domain::ports::RunRepository;
 
@@ -927,25 +927,36 @@ impl RunRepository for PgRunRepository {
     }
 
     #[tracing::instrument(err, skip(self))]
-    async fn handed_back(&self, key: StepKey) -> Result<Option<HandBack>, Self::Err> {
+    async fn handed_back(&self, key: StepKey, action_id: Uuid) -> Result<HandedBack, Self::Err> {
+        // The hand back kept is the latest prompt's: the first prompt's
+        // until a later one is recorded.
         let row = sqlx::query!(
             r#"
-            SELECT handed_outcome AS "outcome!", handed_output AS "output!"
+            SELECT
+                COALESCE(turn_action_id, action_id) = $3 AS "latest!",
+                handed_outcome,
+                handed_output
             FROM factory_step
-            WHERE run_id = $1 AND seq = $2 AND handed_at IS NOT NULL
+            WHERE run_id = $1 AND seq = $2 AND session_id IS NOT NULL
             "#,
             key.run_id.as_uuid(),
             i32::from(key.seq),
+            action_id,
         )
         .fetch_optional(&self.pool)
         .await?;
-        row.map(|row| {
-            Ok(HandBack {
-                outcome: Outcome::try_from(row.outcome)?,
-                output: row.output,
-            })
-        })
-        .transpose()
+        match row {
+            Some(row) if !row.latest => Ok(HandedBack::Superseded),
+            Some(row) => match (row.handed_outcome, row.handed_output) {
+                (Some(outcome), Some(output)) => Ok(HandedBack::Handed(HandBack {
+                    outcome: Outcome::try_from(outcome)?,
+                    output,
+                })),
+                _ => Ok(HandedBack::Nothing),
+            },
+            // A Step with no session has no prompt yet.
+            None => Ok(HandedBack::Nothing),
+        }
     }
 
     #[tracing::instrument(err, skip(self, offered))]
@@ -955,7 +966,7 @@ impl RunRepository for PgRunRepository {
         session_id: Uuid,
         action_id: Uuid,
         offered: &[Outcome],
-    ) -> Result<(), Self::Err> {
+    ) -> Result<bool, Self::Err> {
         self.record_turn(key, session_id, action_id, offered).await
     }
 

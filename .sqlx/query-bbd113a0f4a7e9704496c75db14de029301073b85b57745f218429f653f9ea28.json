@@ -1,0 +1,36 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                COALESCE(turn_action_id, action_id) = $3 AS \"latest!\",\n                handed_outcome,\n                handed_output\n            FROM factory_step\n            WHERE run_id = $1 AND seq = $2 AND session_id IS NOT NULL\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "latest!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 1,
+        "name": "handed_outcome",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "handed_output",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      true,
+      true
+    ]
+  },
+  "hash": "bbd113a0f4a7e9704496c75db14de029301073b85b57745f218429f653f9ea28"
+}

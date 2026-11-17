@@ -5,8 +5,8 @@ use uuid::Uuid;
 
 use super::super::PgRunRepository;
 use crate::domain::models::{
-    AgentName, CheckRoundOutcome, CheckRoundStart, EntryId, HandBack, Outcome, PassedOver, Role,
-    RunId, RunInsert, StepKey, StepSession,
+    AgentName, CheckRoundOutcome, CheckRoundStart, EntryId, HandBack, HandedBack, Outcome,
+    PassedOver, Role, RunId, RunInsert, StepKey, StepSession,
 };
 use crate::domain::ports::RunRepository;
 
@@ -66,13 +66,16 @@ async fn a_later_prompt_offers_its_own_outcomes_and_clears_the_hand_back_once(po
     repo.hand_back(session.session_id, &written)
         .await
         .expect("hand back");
+    // A prompt made before the checks', as a stale attempt sends.
+    let older = Uuid::now_v7();
     let checks = Uuid::now_v7();
     let offered = [outcome("passed"), outcome("failed")];
 
-    repo.begin_turn(key, session.session_id, checks, &offered)
+    let began = repo
+        .begin_turn(key, session.session_id, checks, &offered)
         .await
         .expect("turn");
-    let cleared = repo.handed_back(key).await.expect("read");
+    let cleared = repo.handed_back(key, checks).await.expect("read");
     let passed = HandBack {
         outcome: outcome("passed"),
         output: "web passed".to_string(),
@@ -80,12 +83,31 @@ async fn a_later_prompt_offers_its_own_outcomes_and_clears_the_hand_back_once(po
     repo.hand_back(session.session_id, &passed)
         .await
         .expect("hand back");
-    repo.begin_turn(key, session.session_id, checks, &offered)
+    let again = repo
+        .begin_turn(key, session.session_id, checks, &offered)
         .await
         .expect("turn again");
 
-    assert_eq!(cleared, None);
-    assert_eq!(repo.handed_back(key).await.expect("read"), Some(passed));
+    let rewound = repo
+        .begin_turn(key, session.session_id, older, &offered)
+        .await
+        .expect("an older turn");
+
+    assert!(began && again);
+    assert!(!rewound);
+    assert_eq!(cleared, HandedBack::Nothing);
+    assert_eq!(
+        repo.handed_back(key, checks).await.expect("read"),
+        HandedBack::Handed(passed)
+    );
+    // The work's prompt reads as gone on from, never with the checks'
+    // answer.
+    assert_eq!(
+        repo.handed_back(key, session.action_id)
+            .await
+            .expect("read"),
+        HandedBack::Superseded
+    );
     let step = repo
         .session_step(session.session_id)
         .await
@@ -114,7 +136,8 @@ async fn a_later_prompt_stays_in_the_session_the_step_works_in(pool: PgPool) {
     let (key, session) = writing(&repo).await;
     let offered = [outcome("passed"), outcome("failed")];
 
-    repo.begin_turn(key, Uuid::now_v7(), Uuid::now_v7(), &offered)
+    let elsewhere_began = repo
+        .begin_turn(key, Uuid::now_v7(), Uuid::now_v7(), &offered)
         .await
         .expect("turn in another session");
     let elsewhere = repo
@@ -146,6 +169,7 @@ async fn a_later_prompt_stays_in_the_session_the_step_works_in(pool: PgPool) {
         .await
         .expect("pass");
 
+    assert!(!elsewhere_began);
     assert_eq!(elsewhere.session.action_id, session.action_id);
     assert!(!passed);
     let claimed = repo

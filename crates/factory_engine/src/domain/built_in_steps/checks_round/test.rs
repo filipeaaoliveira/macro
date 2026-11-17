@@ -14,16 +14,32 @@ use crate::domain::checks::CHECKS_FILE;
 use crate::domain::fakes::{FakeGithub, FakeRepo};
 use crate::domain::flow::StepName;
 use crate::domain::models::{AgentAnswer, AgentTask, AgentTurn, StepInput, StepReport};
-use crate::domain::ports::{Retryable, StepAgent, StepExecutor};
+use crate::domain::ports::{AgentFailure, Retryable, StepAgent, StepExecutor};
 use crate::domain::pull_request_steps::PullRequestSteps;
 
 #[derive(Debug, thiserror::Error)]
 #[error("the agent's session failed")]
-struct SessionFailed;
+struct SessionFailed {
+    out_of_quota: bool,
+}
+
+/// A failure a retry may get past.
+const FAILED: SessionFailed = SessionFailed {
+    out_of_quota: false,
+};
+
+/// The agent's quota ran out: asking again does not help.
+const NO_QUOTA: SessionFailed = SessionFailed { out_of_quota: true };
 
 impl Retryable for SessionFailed {
     fn retryable(&self) -> bool {
-        true
+        !self.out_of_quota
+    }
+}
+
+impl AgentFailure for SessionFailed {
+    fn out_of_quota(&self) -> bool {
+        self.out_of_quota
     }
 }
 
@@ -69,7 +85,7 @@ impl StepAgent for ScriptedAgent {
             if let Some(repo) = &self.ages {
                 age(repo, key);
             }
-            return Err(SessionFailed);
+            return Err(FAILED);
         }
         Ok(AgentAnswer {
             outcome: outcome(self.work),
@@ -333,10 +349,7 @@ async fn a_retried_step_goes_on_with_its_round() {
     let github = github(Some(CHECKS), Some(&["apps/web/index.ts"]));
     let repo = FakeRepo::default();
     let input = input();
-    let first = ScriptedAgent::new(
-        "done",
-        vec![Ok(("failed", "web: exit 1")), Err(SessionFailed)],
-    );
+    let first = ScriptedAgent::new("done", vec![Ok(("failed", "web: exit 1")), Err(FAILED)]);
     let failed = run(&first, &github, &repo, "write", input).await;
     let retry = ScriptedAgent::new(
         "done",
@@ -353,6 +366,55 @@ async fn a_retried_step_goes_on_with_its_round() {
     let sent_back = first.turns()[1].action_id;
     assert_eq!(retry.turns()[0].action_id, sent_back);
     assert_eq!(rounds(&repo, input).await.len(), 2);
+}
+
+/// An agent whose quota runs out on a round's prompt cannot go on, and no
+/// other Agent takes over its session: the open round ends failed, saying
+/// so, and the Step ends `red`, not failed.
+#[tokio::test]
+async fn a_quota_that_runs_out_during_the_checks_ends_the_step_red() {
+    let github = github(Some(CHECKS), Some(&["apps/web/index.ts"]));
+    let repo = FakeRepo::default();
+    let input = input();
+    let agent = ScriptedAgent::new("done", vec![Err(NO_QUOTA)]);
+
+    let report = run(&agent, &github, &repo, "write", input)
+        .await
+        .expect("write");
+
+    assert_eq!(report.outcome, outcome("red"));
+    assert!(
+        report
+            .output
+            .starts_with("The agent's quota ran out during the repository's checks")
+    );
+    assert!(report.output.contains("Wrote the toggle"));
+    let rounds = rounds(&repo, input).await;
+    assert_eq!(rounds.len(), 1);
+    let end = rounds[0].end.as_ref().expect("ended");
+    assert_eq!(end.outcome, CheckRoundOutcome::Failed);
+    assert_eq!(
+        end.report,
+        "The agent's quota ran out during the checks, so it could not run them."
+    );
+}
+
+/// A quota that runs out on the fix of a failed round ends the Step `red`
+/// with that round's report.
+#[tokio::test]
+async fn a_quota_that_runs_out_on_a_fix_ends_the_step_red() {
+    let github = github(Some(CHECKS), Some(&["apps/web/index.ts"]));
+    let repo = FakeRepo::default();
+    let input = input();
+    let agent = ScriptedAgent::new("done", vec![Ok(("failed", "web: exit 1")), Err(NO_QUOTA)]);
+
+    let report = run(&agent, &github, &repo, "write", input)
+        .await
+        .expect("write");
+
+    assert_eq!(report.outcome, outcome("red"));
+    assert!(report.output.contains("web: exit 1"));
+    assert_eq!(rounds(&repo, input).await.len(), 1);
 }
 
 /// Every check runs when GitHub cannot list the branch's changes; a branch
@@ -411,10 +473,7 @@ async fn later_rounds_go_by_what_the_first_round_read() {
     let github = github(Some(CHECKS), Some(&["apps/web/index.ts"]));
     let repo = FakeRepo::default();
     let input = input();
-    let first = ScriptedAgent::new(
-        "done",
-        vec![Ok(("failed", "web: exit 1")), Err(SessionFailed)],
-    );
+    let first = ScriptedAgent::new("done", vec![Ok(("failed", "web: exit 1")), Err(FAILED)]);
     let _ = run(&first, &github, &repo, "write", input).await;
     // Since then the base allows more rounds and declares no checks, and
     // the fix reverted the change that ran `web`.
@@ -449,7 +508,7 @@ async fn later_rounds_go_by_what_the_first_round_read() {
 async fn rounds_out_of_time_end_the_step_red() {
     let github = github(Some(CHECKS), Some(&["apps/web/index.ts"]));
     let repo = FakeRepo::default();
-    let mut slow = ScriptedAgent::new("done", vec![Err(SessionFailed)]);
+    let mut slow = ScriptedAgent::new("done", vec![Err(FAILED)]);
     slow.ages = Some(repo.clone());
 
     let report = run(&slow, &github, &repo, "write", input())
@@ -481,10 +540,7 @@ async fn rounds_out_of_time_end_the_step_red() {
 
     // A retry past the time asks nothing more.
     let input = input();
-    let failing = ScriptedAgent::new(
-        "done",
-        vec![Ok(("failed", "web: exit 1")), Err(SessionFailed)],
-    );
+    let failing = ScriptedAgent::new("done", vec![Ok(("failed", "web: exit 1")), Err(FAILED)]);
     let _ = run(&failing, &github, &repo, "write", input).await;
     age(&repo, input.key);
     let retry = ScriptedAgent::new("done", Vec::new());
@@ -567,7 +623,7 @@ async fn a_retry_past_its_time_reads_the_open_round_s_hand_back() {
     let github = github(Some(CHECKS), Some(&["apps/web/index.ts"]));
     let repo = FakeRepo::default();
     let input = input();
-    let first = ScriptedAgent::new("done", vec![Err(SessionFailed)]);
+    let first = ScriptedAgent::new("done", vec![Err(FAILED)]);
     let _ = run(&first, &github, &repo, "write", input).await;
     // The agent handed back for the round's prompt after the attempt gave
     // up, and the Step's time ran out.

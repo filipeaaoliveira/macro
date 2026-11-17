@@ -10,7 +10,7 @@ use super::{BuiltInStepError, BuiltInSteps};
 use crate::domain::fakes::{FakeGithub, FakeRepo};
 use crate::domain::flow::{Flow, StepName, StepUse};
 use crate::domain::models::{AgentAnswer, AgentTask, AgentTurn, StepInput};
-use crate::domain::ports::{Retryable, StepAgent, StepExecutor};
+use crate::domain::ports::{AgentFailure, Retryable, StepAgent, StepExecutor};
 use crate::domain::pull_request_steps::PullRequestSteps;
 
 #[derive(Debug, thiserror::Error)]
@@ -22,6 +22,8 @@ impl Retryable for FakeError {
         true
     }
 }
+
+impl AgentFailure for FakeError {}
 
 /// Keeps every task it is given and ends each with `outcome`.
 #[derive(Clone)]

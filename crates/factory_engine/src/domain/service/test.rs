@@ -2,7 +2,8 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use factory_records::domain::models::{
-    AgentName, EntryId, HandBack, Outcome, Role, RunId, RunInsert, RunOutcome, StepKey, StepSession,
+    AgentName, EntryId, HandBack, HandedBack, Outcome, Role, RunId, RunInsert, RunOutcome, StepKey,
+    StepSession,
 };
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
@@ -759,8 +760,14 @@ async fn the_owner_s_session_hands_back_an_offered_outcome() {
         .await
         .expect("hand back");
 
-    let handed = repo.handed_back(key).await.expect("read");
-    assert_eq!(handed, Some(handing_back(Outcome::done())));
+    let first_prompt = repo
+        .claimed_session(key)
+        .await
+        .expect("read")
+        .expect("claimed")
+        .action_id;
+    let handed = repo.handed_back(key, first_prompt).await.expect("read");
+    assert_eq!(handed, HandedBack::Handed(handing_back(Outcome::done())));
 }
 
 #[tokio::test]

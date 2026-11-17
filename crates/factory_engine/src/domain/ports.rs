@@ -67,6 +67,16 @@ pub trait Retryable {
     fn retryable(&self) -> bool;
 }
 
+/// How an agent's failure bears on a Step that goes on after the agent's
+/// work, as one that runs the repository's checks does.
+pub trait AgentFailure: Retryable {
+    /// Whether the agent could not go on because its owner's quota for it
+    /// ran out.
+    fn out_of_quota(&self) -> bool {
+        false
+    }
+}
+
 /// Does the work of a Flow's Steps.
 pub trait StepExecutor: Send + Sync + 'static {
     /// The error type returned when a Step's work fails.
@@ -109,7 +119,7 @@ pub trait StepExecutor: Send + Sync + 'static {
 /// ends with one of the task's outcomes.
 pub trait StepAgent: Send + Sync + 'static {
     /// The error type returned when the agent cannot do the task.
-    type Err: std::error::Error + Retryable + Send + Sync + 'static;
+    type Err: std::error::Error + AgentFailure + Send + Sync + 'static;
 
     /// Do `task` and hand back how it ended. A Temporal retry may ask again
     /// for the same Step: the agent goes on with it, never starts it twice.

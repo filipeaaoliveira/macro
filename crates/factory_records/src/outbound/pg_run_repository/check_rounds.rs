@@ -124,16 +124,31 @@ impl PgRunRepository {
         session_id: Uuid,
         action_id: Uuid,
         offered: &[Outcome],
-    ) -> Result<(), PgRunRepositoryErr> {
+    ) -> Result<bool, PgRunRepositoryErr> {
         let offered: Vec<String> = offered.iter().map(|o| o.as_str().to_owned()).collect();
-        sqlx::query!(
+        // Prompts' ids are UUIDv7s made in order, so a prompt older than the
+        // one recorded, which a stale attempt sends, never takes the Step
+        // back to it. Recorded now, or by an earlier attempt: the outer read
+        // sees the Step as it was before the update.
+        let recorded = sqlx::query_scalar!(
             r#"
-            UPDATE factory_step
-            SET turn_action_id = $4, offered = $5,
-                handed_outcome = NULL, handed_output = NULL, handed_at = NULL
-            WHERE run_id = $1 AND seq = $2
-                AND session_id = $3 AND ended_at IS NULL
-                AND turn_action_id IS DISTINCT FROM $4
+            WITH turned AS (
+                UPDATE factory_step
+                SET turn_action_id = $4, offered = $5,
+                    handed_outcome = NULL, handed_output = NULL, handed_at = NULL
+                WHERE run_id = $1 AND seq = $2
+                    AND session_id = $3 AND ended_at IS NULL
+                    AND (turn_action_id IS NULL OR turn_action_id < $4)
+                RETURNING 1
+            )
+            SELECT EXISTS (SELECT 1 FROM turned)
+                OR EXISTS (
+                    SELECT 1
+                    FROM factory_step
+                    WHERE run_id = $1 AND seq = $2
+                        AND session_id = $3 AND ended_at IS NULL
+                        AND turn_action_id = $4
+                ) AS "recorded!"
             "#,
             key.run_id.as_uuid(),
             i32::from(key.seq),
@@ -141,9 +156,9 @@ impl PgRunRepository {
             action_id,
             &offered,
         )
-        .execute(&self.pool)
+        .fetch_one(&self.pool)
         .await?;
-        Ok(())
+        Ok(recorded)
     }
 
     pub(super) async fn insert_check_round(

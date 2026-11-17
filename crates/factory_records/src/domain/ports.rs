@@ -6,9 +6,9 @@ use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
 use crate::domain::models::{
-    CheckRound, CheckRoundOutcome, CheckRoundStart, ClaimedSession, EntryId, HandBack, Outcome,
-    PassedOver, Repository, Role, Run, RunId, RunInsert, RunOutcome, SessionStep, Step, StepKey,
-    StepSession, StoppingSession, TaskLink,
+    CheckRound, CheckRoundOutcome, CheckRoundStart, ClaimedSession, EntryId, HandBack, HandedBack,
+    Outcome, PassedOver, Repository, Role, Run, RunId, RunInsert, RunOutcome, SessionStep, Step,
+    StepKey, StepSession, StoppingSession, TaskLink,
 };
 
 /// Where Runs and their Steps are kept.
@@ -203,25 +203,31 @@ pub trait RunRepository: Send + Sync + 'static {
         hand_back: &HandBack,
     ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
 
-    /// What the agent handed back for the Step `key`, if it did.
+    /// What the agent handed back for the prompt `action_id` of the Step
+    /// `key`'s session, the first or a later one: only the latest prompt's
+    /// hand back is kept, so a prompt the Step went on from reads as
+    /// [`HandedBack::Superseded`], never with a later prompt's answer.
     fn handed_back(
         &self,
         key: StepKey,
-    ) -> impl Future<Output = Result<Option<HandBack>, Self::Err>> + Send;
+        action_id: Uuid,
+    ) -> impl Future<Output = Result<HandedBack, Self::Err>> + Send;
 
     /// Record that the agent of the Step `key` works on a later prompt of
     /// its session `session_id`, `action_id`, and may hand back one of
     /// `offered`: the hand back of the prompt before is cleared, and a stop
     /// reads this prompt's progress. Recording the same prompt again changes
-    /// nothing, so its hand back stays. A Step that ended, or works in no
-    /// session or another one, is left alone.
+    /// nothing, so its hand back stays. A Step that ended, works in no
+    /// session or another one, or went on to a later prompt (prompts' ids
+    /// are UUIDv7s, made in order) is left alone. Whether the Step works on
+    /// the prompt now: false when it was left alone.
     fn begin_turn(
         &self,
         key: StepKey,
         session_id: Uuid,
         action_id: Uuid,
         offered: &[Outcome],
-    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+    ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
 
     /// The rounds of checks the Step `key` ran, in order.
     fn check_rounds(

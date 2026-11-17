@@ -52,6 +52,9 @@ struct FakeSessions {
     ending: RoutineActionStatus,
     prepares: Arc<Mutex<VecDeque<Reply>>>,
     prompts: Arc<Mutex<VecDeque<Reply>>>,
+    /// How each later prompt is answered, in order; it works once these run
+    /// out.
+    follow_ups: Arc<Mutex<VecDeque<Reply>>>,
     open: Arc<Mutex<bool>>,
     prompted: Arc<Mutex<bool>>,
     prepared_calls: Arc<Mutex<Vec<PrepareRoutineSession>>>,
@@ -90,6 +93,7 @@ impl FakeSessions {
             ending,
             prepares: Arc::default(),
             prompts: Arc::default(),
+            follow_ups: Arc::default(),
             open: Arc::default(),
             prompted: Arc::default(),
             prepared_calls: Arc::default(),
@@ -116,6 +120,11 @@ impl FakeSessions {
 
     fn prompting(self, replies: &[Reply]) -> Self {
         self.prompts.lock().expect("prompts").extend(replies);
+        self
+    }
+
+    fn following_up(self, replies: &[Reply]) -> Self {
+        self.follow_ups.lock().expect("follow-ups").extend(replies);
         self
     }
 
@@ -261,6 +270,15 @@ impl RoutineSessions for FakeSessions {
         };
         if again {
             return Err(RoutineSessionError::Conflict);
+        }
+        let reply = self
+            .follow_ups
+            .lock()
+            .expect("follow-ups")
+            .pop_front()
+            .unwrap_or(WORKS);
+        if let Some(error) = reply.error {
+            return Err(error);
         }
         if let Some(handed) = &self.follow_up_handed {
             self.repo

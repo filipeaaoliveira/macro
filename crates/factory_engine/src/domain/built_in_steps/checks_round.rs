@@ -32,7 +32,7 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use factory_records::domain::models::{
-    CheckRound, CheckRoundOutcome, CheckRoundStart, MAX_OUTPUT_BYTES, Outcome, Role,
+    CheckRound, CheckRoundOutcome, CheckRoundStart, HandedBack, MAX_OUTPUT_BYTES, Outcome, Role,
 };
 use factory_records::domain::ports::RunRepository;
 use uuid::Uuid;
@@ -61,6 +61,10 @@ pub(crate) const ROUNDS_END_BY: Duration = Duration::from_secs(105 * 60);
 
 /// What a Step whose agent was still at work when its time ran out says.
 const WORK_OUT_OF_TIME: &str = "The agent's work did not end before the step's time ran out, so the repository's checks did not run.";
+
+/// What a round the agent could not run for lack of quota reports.
+const QUOTA_RAN_OUT: &str =
+    "The agent's quota ran out during the checks, so it could not run them.";
 
 /// What ends an output cut to fit what a Step keeps.
 const CUT_MARK: &str = "\n\n(The rest is left out: a step's output holds 64 KiB.)";
@@ -102,6 +106,7 @@ fn lost(why: &str) -> BuiltInStepError {
     BuiltInStepError::Agent {
         report: rootcause::report!("{why}").into_dynamic(),
         retryable: false,
+        out_of_quota: false,
     }
 }
 
@@ -162,7 +167,7 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
                 return Ok(red_report(&rounds, Red::NeverPassed));
             }
             if Utc::now() >= end_by {
-                return self.out_of_time(input).await;
+                return self.end_red(input, Red::OutOfTime).await;
             }
 
             let asked = if failed_last {
@@ -171,37 +176,57 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
             } else {
                 self.run_round(step, input, latest, end_by).await
             };
-            // An agent still at work when the rounds' time is up ends the
-            // Step with what the rounds found, rather than a failure.
+            // An agent whose quota ran out cannot go on, and no other Agent
+            // takes over its session: the Step ends with what the rounds
+            // found, as does one still at work when the rounds' time is up,
+            // rather than a failure.
+            if let Err(BuiltInStepError::Agent {
+                out_of_quota: true, ..
+            }) = &asked
+            {
+                return self.end_red(input, Red::QuotaRanOut).await;
+            }
             if let Err(BuiltInStepError::Agent { .. }) = &asked
                 && Utc::now() >= self.rounds_end_by(input).await?
             {
-                return self.out_of_time(input).await;
+                return self.end_red(input, Red::OutOfTime).await;
             }
             asked?;
         }
     }
 
-    /// End a Step whose time ran out: a round still open takes what the
-    /// agent handed back for it, if it did, and otherwise ends failed, so it
-    /// never reads as running; then the Step ends with what the rounds found.
-    async fn out_of_time(&self, input: StepInput<'_>) -> Result<StepReport, BuiltInStepError> {
+    /// End a Step whose rounds cannot go on, `why`: a round still open takes
+    /// what the agent handed back for its prompt, if it did, and otherwise
+    /// ends failed, so it never reads as running; then the Step ends with
+    /// what the rounds found.
+    async fn end_red(
+        &self,
+        input: StepInput<'_>,
+        why: Red,
+    ) -> Result<StepReport, BuiltInStepError> {
         let repo = self.pull_requests.records();
         let rounds = repo.check_rounds(input.key).await.map_err(records)?;
         if let Some(open) = rounds.last().filter(|round| round.end.is_none()) {
-            // A new prompt clears the hand back, and only a round of checks
-            // offers `passed` and `failed`: one of them is this round's.
-            let handed = repo.handed_back(input.key).await.map_err(records)?;
+            let handed = repo
+                .handed_back(input.key, open.check_action_id)
+                .await
+                .map_err(records)?;
             let (outcome, report) = match handed {
-                Some(handed) if handed.outcome == passed() => {
+                HandedBack::Handed(handed) if handed.outcome == passed() => {
                     (CheckRoundOutcome::Passed, handed.output)
                 }
-                Some(handed) if handed.outcome == failed() => {
+                HandedBack::Handed(handed) if handed.outcome == failed() => {
                     (CheckRoundOutcome::Failed, handed.output)
                 }
                 _ => (
                     CheckRoundOutcome::Failed,
-                    "The step's time ran out before the agent reported these checks.".to_string(),
+                    match why {
+                        Red::QuotaRanOut => QUOTA_RAN_OUT,
+                        Red::OutOfTime | Red::NeverPassed => {
+                            "The step's time ran out before the agent reported these checks."
+                        }
+                    }
+                    .to_string(),
                 ),
             };
             repo.end_check_round(input.key, open.round, outcome, &report)
@@ -212,7 +237,7 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
         let rounds = repo.check_rounds(input.key).await.map_err(records)?;
         Ok(match next(&rounds) {
             Next::Passed => passed_report(&rounds),
-            _ => red_report(&rounds, Red::OutOfTime),
+            _ => red_report(&rounds, why),
         })
     }
 
@@ -418,6 +443,8 @@ enum Red {
     NeverPassed,
     /// The Step's time for rounds ran out first.
     OutOfTime,
+    /// The agent's quota ran out first.
+    QuotaRanOut,
 }
 
 /// How a Step whose checks did not pass ends: [`RED`], saying why, with the
@@ -439,6 +466,9 @@ fn red_report(rounds: &[CheckRound], why: Red) -> StepReport {
         }
         Red::OutOfTime => format!(
             "The repository's checks did not pass before the step's time ran out, with {ended} of their rounds ended: {checks}."
+        ),
+        Red::QuotaRanOut => format!(
+            "The agent's quota ran out during the repository's checks, with {ended} of their rounds ended: {checks}."
         ),
     };
     // The report takes at most half of what the output holds, so some of

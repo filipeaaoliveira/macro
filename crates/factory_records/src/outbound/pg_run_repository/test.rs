@@ -5,8 +5,8 @@ use uuid::Uuid;
 
 use super::PgRunRepository;
 use crate::domain::models::{
-    AgentName, ClaimedSession, EntryId, HandBack, Outcome, PassedOver, Repository, Role, Run,
-    RunId, RunInsert, RunOutcome, StepKey, StepSession, TaskLink,
+    AgentName, ClaimedSession, EntryId, HandBack, HandedBack, Outcome, PassedOver, Repository,
+    Role, Run, RunId, RunInsert, RunOutcome, StepKey, StepSession, TaskLink,
 };
 use crate::domain::ports::RunRepository;
 
@@ -845,6 +845,7 @@ async fn the_latest_hand_back_counts_until_the_step_ends(pool: PgPool) {
         .await
         .expect("claim");
     let session_id = claimed.session.session_id;
+    let first_prompt = claimed.session.action_id;
     let unchanged = HandBack {
         outcome: outcome("unchanged"),
         output: "Nothing to do".to_string(),
@@ -854,7 +855,12 @@ async fn the_latest_hand_back_counts_until_the_step_ends(pool: PgPool) {
         output: "Committed the toggle".to_string(),
     };
 
-    assert_eq!(repo.handed_back(key(id, 1)).await.expect("read"), None);
+    assert_eq!(
+        repo.handed_back(key(id, 1), first_prompt)
+            .await
+            .expect("read"),
+        HandedBack::Nothing
+    );
     let first = repo
         .hand_back(session_id, &unchanged)
         .await
@@ -873,8 +879,10 @@ async fn the_latest_hand_back_counts_until_the_step_ends(pool: PgPool) {
 
     assert_eq!((first, second, late), (true, true, false));
     assert_eq!(
-        repo.handed_back(key(id, 1)).await.expect("read"),
-        Some(committed)
+        repo.handed_back(key(id, 1), first_prompt)
+            .await
+            .expect("read"),
+        HandedBack::Handed(committed)
     );
 }
 

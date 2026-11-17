@@ -32,7 +32,7 @@ use crate::domain::fakes::{FakeGithub, FakeRepo, ci};
 use crate::domain::flow::Flow;
 use crate::domain::gate::AnswerGate;
 use crate::domain::models::{AgentAnswer, AgentTask, AgentTurn, PullRequestState, RunStart};
-use crate::domain::ports::{AnswerDelivery, Retryable, RunWorkflows, StepAgent};
+use crate::domain::ports::{AgentFailure, AnswerDelivery, Retryable, RunWorkflows, StepAgent};
 use crate::domain::pull_request_steps::PullRequestSteps;
 use crate::domain::service::StepServiceImpl;
 use crate::outbound::temporal_run_workflows::TemporalRunWorkflows;
@@ -64,6 +64,8 @@ impl Retryable for AgentFailed {
         false
     }
 }
+
+impl AgentFailure for AgentFailed {}
 
 /// An agent that does `work`, says when a task reaches it, and counts the
 /// times it was asked, stopped and let go, and the Steps it was asked for.

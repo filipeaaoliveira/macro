@@ -59,10 +59,14 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   turn ends (`handed_back`).
   A later prompt of the session (`begin_turn`) records its action in
   `turn_action_id`, replaces `offered` and clears the hand back, once, and
-  only while the Step works in the session it names: the same prompt again
-  keeps what was handed back. `pass_session` leaves a Step that took a later
-  prompt alone, so its checks rounds stay in the session that did the work.
-  `stopping_session` reads the latest prompt's action.
+  only while the Step works in the session it names and took no later
+  prompt (prompts' ids are UUIDv7s, made in order): the same prompt again
+  keeps what was handed back, and an older one is not recorded. It says
+  whether the Step works on the prompt. `handed_back` names the prompt it
+  reads for, and one the Step went on from reads as `Superseded`, never
+  with a later prompt's answer. `pass_session` leaves a Step that took a
+  later prompt alone, so its checks rounds stay in the session that did the
+  work. `stopping_session` reads the latest prompt's action.
 - A Step's rounds of checks (`factory_check_round`,
   `src/outbound/pg_run_repository/check_rounds.rs`) keep their first
   record, end and fix prompt, so a retried Step goes on with its round.
