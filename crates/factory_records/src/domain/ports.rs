@@ -6,8 +6,8 @@ use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
 use crate::domain::models::{
-    ClaimedSession, EntryId, HandBack, Outcome, Repository, Run, RunId, RunInsert, RunOutcome,
-    SessionStep, Step, StepKey, StepSession, StoppingSession, TaskLink,
+    ClaimedSession, EntryId, HandBack, Outcome, Repository, Role, Run, RunId, RunInsert,
+    RunOutcome, SessionStep, Step, StepKey, StepSession, StoppingSession, TaskLink,
 };
 
 /// Where Runs and their Steps are kept.
@@ -102,15 +102,29 @@ pub trait RunRepository: Send + Sync + 'static {
         user_id: &MacroUserIdStr<'static>,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
-    /// Record that the Step `key` works in `session`, offering its agent
-    /// `offered`, unless an earlier attempt of the Step already recorded a
-    /// session: then that one is returned and kept.
+    /// Record that the Step `key` works in `session` for `role`, offering its
+    /// agent `offered`, unless an earlier attempt of the Step already
+    /// recorded a session: then that one is returned and kept.
     fn claim_session(
         &self,
         key: StepKey,
         session: StepSession,
+        role: &Role,
         offered: &[Outcome],
     ) -> impl Future<Output = Result<ClaimedSession, Self::Err>> + Send;
+
+    /// Hand the Step `key` from the session `from`, whose Agent could not
+    /// start it for `reason`, to `to`, a session of the next Agent of its
+    /// Role, and record that `from`'s Agent was passed over. Only while the
+    /// Step works in `from` and still holds it (see [`Self::holds_session`]):
+    /// whether it was handed on. Handing it on again changes nothing.
+    fn pass_session(
+        &self,
+        key: StepKey,
+        from: &StepSession,
+        to: &StepSession,
+        reason: &str,
+    ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
 
     /// The session the Step `key` works in, if it claimed one.
     fn claimed_session(

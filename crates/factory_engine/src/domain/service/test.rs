@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use factory_records::domain::models::{
-    EntryId, HandBack, Outcome, RunId, RunInsert, RunOutcome, StepKey, StepSession,
+    AgentName, EntryId, HandBack, Outcome, Role, RunId, RunInsert, RunOutcome, StepKey, StepSession,
 };
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
@@ -729,11 +729,14 @@ async fn step_in_a_session(repo: &FakeRepo) -> (StepKey, Uuid) {
     let session = StepSession {
         session_id: Uuid::now_v7(),
         action_id: Uuid::now_v7(),
+        agent: AgentName::try_from("claude".to_string()).expect("valid"),
     };
-    repo.claim_session(key, session, &[Outcome::done()])
+    let session_id = session.session_id;
+    let planner = Role::try_from("planner".to_string()).expect("valid");
+    repo.claim_session(key, session, &planner, &[Outcome::done()])
         .await
         .expect("claim");
-    (key, session.session_id)
+    (key, session_id)
 }
 
 fn handing_back(outcome: Outcome) -> HandBack {

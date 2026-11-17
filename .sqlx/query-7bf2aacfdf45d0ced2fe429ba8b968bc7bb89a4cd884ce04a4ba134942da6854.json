@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE factory_step s\n            SET session_id = $4, action_id = $5, agent = $6,\n                passed_over = array_append(s.passed_over, s.agent),\n                pass_reasons = array_append(s.pass_reasons, $7),\n                prepared_at = NULL, opened_at = NULL\n            FROM factory_run r\n            WHERE r.id = s.run_id AND s.run_id = $1 AND s.seq = $2 AND s.session_id = $3\n                AND s.session_released_at IS NULL AND s.handed_at IS NULL\n                AND s.ended_at IS NULL AND r.ended_at IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7bf2aacfdf45d0ced2fe429ba8b968bc7bb89a4cd884ce04a4ba134942da6854"
+}

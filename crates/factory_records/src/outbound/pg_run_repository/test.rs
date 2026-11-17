@@ -5,8 +5,8 @@ use uuid::Uuid;
 
 use super::PgRunRepository;
 use crate::domain::models::{
-    ClaimedSession, EntryId, HandBack, Outcome, Repository, Run, RunId, RunInsert, RunOutcome,
-    StepKey, StepSession, TaskLink,
+    AgentName, ClaimedSession, EntryId, HandBack, Outcome, PassedOver, Repository, Role, Run,
+    RunId, RunInsert, RunOutcome, StepKey, StepSession, TaskLink,
 };
 use crate::domain::ports::RunRepository;
 
@@ -463,10 +463,24 @@ async fn deleting_its_task_unlinks_a_run_and_keeps_it(pool: PgPool) {
     assert_eq!(run.task_id, None);
 }
 
+fn agent(name: &str) -> AgentName {
+    AgentName::try_from(name.to_string()).expect("valid agent")
+}
+
+fn planner() -> Role {
+    Role::try_from("planner".to_string()).expect("valid role")
+}
+
+/// A new session of the `claude` Agent.
 fn session() -> StepSession {
+    session_of("claude")
+}
+
+fn session_of(name: &str) -> StepSession {
     StepSession {
         session_id: Uuid::now_v7(),
         action_id: Uuid::now_v7(),
+        agent: agent(name),
     }
 }
 
@@ -485,31 +499,31 @@ async fn a_retried_step_keeps_the_session_its_first_attempt_claimed(pool: PgPool
     let first = session();
 
     let claimed = repo
-        .claim_session(key(id, 1), first, &offered)
+        .claim_session(key(id, 1), first.clone(), &planner(), &offered)
         .await
         .expect("claim");
     let retried = repo
-        .claim_session(key(id, 1), session(), &offered)
+        .claim_session(key(id, 1), session(), &planner(), &offered)
         .await
         .expect("claim again");
 
     assert_eq!(
         claimed,
         ClaimedSession {
-            session: first,
+            session: first.clone(),
             new: true
         }
     );
     assert_eq!(
         retried,
         ClaimedSession {
-            session: first,
+            session: first.clone(),
             new: false
         }
     );
     assert_eq!(
         repo.claimed_session(key(id, 1)).await.expect("read"),
-        Some(first)
+        Some(first.clone())
     );
     let step = repo
         .session_step(first.session_id)
@@ -519,6 +533,126 @@ async fn a_retried_step_keeps_the_session_its_first_attempt_claimed(pool: PgPool
     assert_eq!((step.key, step.owner), (key(id, 1), julia()));
     assert_eq!(step.offered, offered);
     assert!(!step.ended);
+}
+
+/// A Step whose Agent could not start goes on in a session of the next
+/// Agent, and keeps its Role, the Agent that took it, and the one passed
+/// over with why. Only the session the Step works in is handed on, once.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "fixtures", scripts("people"))
+)]
+async fn a_step_handed_to_the_next_agent_keeps_who_was_passed_over_and_why(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let id = RunId::generate();
+    insert(&repo, id, "Plan the dark mode toggle").await;
+    repo.start_step(key(id, 1), &entry("plan"), 1)
+        .await
+        .expect("start");
+    let first = repo
+        .claim_session(key(id, 1), session(), &planner(), &[outcome("done")])
+        .await
+        .expect("claim")
+        .session;
+    repo.record_prepare(key(id, 1)).await.expect("prepare");
+    let next = session_of("codex");
+
+    let passed = repo
+        .pass_session(key(id, 1), &first, &next, "ai_allowance_exhausted")
+        .await
+        .expect("pass");
+    let passed_again = repo
+        .pass_session(
+            key(id, 1),
+            &first,
+            &session_of("gemini"),
+            "ai_allowance_exhausted",
+        )
+        .await
+        .expect("pass again");
+
+    assert!(passed);
+    assert!(
+        !passed_again,
+        "the step no longer works in the first session"
+    );
+    assert_eq!(
+        repo.claimed_session(key(id, 1)).await.expect("read"),
+        Some(next.clone())
+    );
+    let stopping = repo
+        .stopping_session(key(id, 1), std::time::Duration::from_secs(3600))
+        .await
+        .expect("read")
+        .expect("claimed");
+    assert!(
+        !stopping.opened && !stopping.may_still_open,
+        "the next session was not asked to open yet"
+    );
+    let step = repo
+        .session_step(next.session_id)
+        .await
+        .expect("read")
+        .expect("the next session has the step");
+    assert_eq!(step.offered, [outcome("done")]);
+    let steps = repo.list_steps(id).await.expect("list");
+    assert_eq!(steps[0].role, Some(planner()));
+    assert_eq!(steps[0].agent, Some(agent("codex")));
+    assert_eq!(
+        steps[0].passed_over,
+        [PassedOver {
+            agent: agent("claude"),
+            reason: "ai_allowance_exhausted".to_string(),
+        }]
+    );
+}
+
+/// A Step that let go of its session, or ended, is handed to no other
+/// Agent: a stop may be deleting the session it works in.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "fixtures", scripts("people"))
+)]
+async fn a_step_that_let_go_of_its_session_is_handed_to_no_one(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let id = RunId::generate();
+    insert(&repo, id, "Plan the dark mode toggle").await;
+    let mut claimed = Vec::new();
+    for seq in [1, 2] {
+        repo.start_step(key(id, seq), &entry("plan"), 1)
+            .await
+            .expect("start");
+        let session = repo
+            .claim_session(key(id, seq), session(), &planner(), &[outcome("done")])
+            .await
+            .expect("claim")
+            .session;
+        claimed.push(session);
+    }
+    repo.release_session(key(id, 1)).await.expect("release");
+    repo.end_step(key(id, 2), &outcome("failed"), "No agent")
+        .await
+        .expect("end");
+
+    for (seq, from) in [1, 2].into_iter().zip(&claimed) {
+        let passed = repo
+            .pass_session(
+                key(id, seq),
+                from,
+                &session_of("codex"),
+                "ai_allowance_exhausted",
+            )
+            .await
+            .expect("pass");
+        assert!(!passed, "step {seq}");
+        assert_eq!(
+            repo.claimed_session(key(id, seq))
+                .await
+                .expect("read")
+                .as_ref(),
+            Some(from)
+        );
+    }
 }
 
 #[sqlx::test(
@@ -536,6 +670,7 @@ async fn the_latest_hand_back_counts_until_the_step_ends(pool: PgPool) {
         .claim_session(
             key(id, 1),
             session(),
+            &planner(),
             &[outcome("done"), outcome("unchanged")],
         )
         .await
@@ -591,7 +726,7 @@ async fn a_step_holds_its_session_until_it_lets_go_or_ends(pool: PgPool) {
         repo.start_step(step, &entry("plan"), 1)
             .await
             .expect("start");
-        repo.claim_session(step, session(), &[outcome("done")])
+        repo.claim_session(step, session(), &planner(), &[outcome("done")])
             .await
             .expect("claim");
     }
@@ -632,7 +767,7 @@ async fn a_session_a_step_claimed_is_a_step_session(pool: PgPool) {
         .await
         .expect("start");
     let claimed = repo
-        .claim_session(key(id, 1), session(), &[outcome("done")])
+        .claim_session(key(id, 1), session(), &planner(), &[outcome("done")])
         .await
         .expect("claim")
         .session
@@ -661,7 +796,7 @@ async fn a_stop_sees_what_the_attempts_recorded_of_a_session(pool: PgPool) {
         .await
         .expect("start");
     let claimed = repo
-        .claim_session(key(id, 1), session(), &[outcome("done")])
+        .claim_session(key(id, 1), session(), &planner(), &[outcome("done")])
         .await
         .expect("claim")
         .session;
@@ -726,7 +861,7 @@ async fn a_forgotten_prepare_is_not_in_flight_and_an_ended_step_sends_none(pool:
         repo.start_step(key(id, seq), &entry("plan"), 1)
             .await
             .expect("start");
-        repo.claim_session(key(id, seq), session(), &[outcome("done")])
+        repo.claim_session(key(id, seq), session(), &planner(), &[outcome("done")])
             .await
             .expect("claim");
         repo.record_prepare(key(id, seq))
@@ -782,7 +917,7 @@ async fn an_old_attempt_never_forgets_a_newer_attempt_s_prepare(pool: PgPool) {
     repo.start_step(key(id, 1), &entry("plan"), 1)
         .await
         .expect("start");
-    repo.claim_session(key(id, 1), session(), &[outcome("done")])
+    repo.claim_session(key(id, 1), session(), &planner(), &[outcome("done")])
         .await
         .expect("claim");
     let old = repo

@@ -12,9 +12,9 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::domain::models::{
-    ClaimedSession, EntryId, Gate, GateAnswer, HandBack, InvalidName, Outcome, Repository, Run,
-    RunEnd, RunId, RunInsert, RunOutcome, SessionStep, Step, StepEnd, StepKey, StepSession,
-    StoppingSession, TaskLink,
+    AgentName, ClaimedSession, EntryId, Gate, GateAnswer, HandBack, InvalidName, Outcome,
+    PassedOver, Repository, Role, Run, RunEnd, RunId, RunInsert, RunOutcome, SessionStep, Step,
+    StepEnd, StepKey, StepSession, StoppingSession, TaskLink,
 };
 use crate::domain::ports::RunRepository;
 
@@ -85,6 +85,10 @@ pub enum PgRunRepositoryErr {
     /// A stored user id does not read as one.
     #[error("stored user id {0:?} does not read as one")]
     InvalidUserId(String),
+    /// A stored Step has passed over a different number of Agents than it
+    /// has reasons for.
+    #[error("a stored step's passed over agents and their reasons do not pair up")]
+    PartialPassedOver,
 }
 
 struct RunRow {
@@ -150,6 +154,10 @@ struct StepRow {
     note: Option<String>,
     user_id: Option<String>,
     answered_at: Option<DateTime<Utc>>,
+    role: Option<String>,
+    agent: Option<String>,
+    passed_over: Vec<String>,
+    pass_reasons: Vec<String>,
 }
 
 impl StepRow {
@@ -208,6 +216,20 @@ impl TryFrom<StepRow> for Step {
             (None, None, None) => None,
             _ => return Err(PgRunRepositoryErr::PartialEnd),
         };
+        if row.passed_over.len() != row.pass_reasons.len() {
+            return Err(PgRunRepositoryErr::PartialPassedOver);
+        }
+        let passed_over = row
+            .passed_over
+            .into_iter()
+            .zip(row.pass_reasons)
+            .map(|(agent, reason)| {
+                Ok(PassedOver {
+                    agent: AgentName::try_from(agent)?,
+                    reason,
+                })
+            })
+            .collect::<Result<_, InvalidName>>()?;
         Ok(Step {
             seq: number(row.seq)?,
             entry: EntryId::try_from(row.entry)?,
@@ -215,6 +237,9 @@ impl TryFrom<StepRow> for Step {
             started_at: row.started_at,
             end,
             gate,
+            role: row.role.map(Role::try_from).transpose()?,
+            agent: row.agent.map(AgentName::try_from).transpose()?,
+            passed_over,
         })
     }
 }
@@ -348,7 +373,11 @@ impl RunRepository for PgRunRepository {
                 g.answer,
                 g.note,
                 g.user_id,
-                g.answered_at
+                g.answered_at,
+                s.role,
+                s.agent,
+                s.passed_over,
+                s.pass_reasons
             FROM factory_step s
             LEFT JOIN factory_gate g ON g.run_id = s.run_id AND g.seq = s.seq
             WHERE s.run_id = $1
@@ -419,7 +448,11 @@ impl RunRepository for PgRunRepository {
                 g.answer,
                 g.note,
                 g.user_id,
-                g.answered_at
+                g.answered_at,
+                s.role,
+                s.agent,
+                s.passed_over,
+                s.pass_reasons
             FROM factory_step s
             LEFT JOIN factory_gate g ON g.run_id = s.run_id AND g.seq = s.seq
             WHERE s.run_id = ANY($1)
@@ -557,6 +590,7 @@ impl RunRepository for PgRunRepository {
         &self,
         key: StepKey,
         session: StepSession,
+        role: &Role,
         offered: &[Outcome],
     ) -> Result<ClaimedSession, Self::Err> {
         let offered: Vec<String> = offered.iter().map(|o| o.as_str().to_owned()).collect();
@@ -564,7 +598,7 @@ impl RunRepository for PgRunRepository {
         let claimed = sqlx::query!(
             r#"
             UPDATE factory_step
-            SET session_id = $3, action_id = $4, offered = $5
+            SET session_id = $3, action_id = $4, offered = $5, role = $6, agent = $7
             WHERE run_id = $1 AND seq = $2 AND session_id IS NULL
             "#,
             key.run_id.as_uuid(),
@@ -572,6 +606,8 @@ impl RunRepository for PgRunRepository {
             session.session_id,
             session.action_id,
             &offered,
+            role.as_str(),
+            session.agent.as_str(),
         )
         .execute(&self.pool)
         .await?;
@@ -589,11 +625,46 @@ impl RunRepository for PgRunRepository {
         })
     }
 
+    #[tracing::instrument(err, skip(self, from, to))]
+    async fn pass_session(
+        &self,
+        key: StepKey,
+        from: &StepSession,
+        to: &StepSession,
+        reason: &str,
+    ) -> Result<bool, Self::Err> {
+        // The new session has not been asked to open, nor seen open, and the
+        // agent handed nothing back in the one it leaves.
+        let passed = sqlx::query!(
+            r#"
+            UPDATE factory_step s
+            SET session_id = $4, action_id = $5, agent = $6,
+                passed_over = array_append(s.passed_over, s.agent),
+                pass_reasons = array_append(s.pass_reasons, $7),
+                prepared_at = NULL, opened_at = NULL
+            FROM factory_run r
+            WHERE r.id = s.run_id AND s.run_id = $1 AND s.seq = $2 AND s.session_id = $3
+                AND s.session_released_at IS NULL AND s.handed_at IS NULL
+                AND s.ended_at IS NULL AND r.ended_at IS NULL
+            "#,
+            key.run_id.as_uuid(),
+            i32::from(key.seq),
+            from.session_id,
+            to.session_id,
+            to.action_id,
+            to.agent.as_str(),
+            reason,
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(passed.rows_affected() == 1)
+    }
+
     #[tracing::instrument(err, skip(self))]
     async fn claimed_session(&self, key: StepKey) -> Result<Option<StepSession>, Self::Err> {
         let row = sqlx::query!(
             r#"
-            SELECT session_id AS "session_id!", action_id AS "action_id!"
+            SELECT session_id AS "session_id!", action_id AS "action_id!", agent AS "agent!"
             FROM factory_step
             WHERE run_id = $1 AND seq = $2 AND session_id IS NOT NULL
             "#,
@@ -602,10 +673,14 @@ impl RunRepository for PgRunRepository {
         )
         .fetch_optional(&self.pool)
         .await?;
-        Ok(row.map(|row| StepSession {
-            session_id: row.session_id,
-            action_id: row.action_id,
-        }))
+        row.map(|row| {
+            Ok(StepSession {
+                session_id: row.session_id,
+                action_id: row.action_id,
+                agent: AgentName::try_from(row.agent)?,
+            })
+        })
+        .transpose()
     }
 
     #[tracing::instrument(err, skip(self))]
@@ -680,6 +755,7 @@ impl RunRepository for PgRunRepository {
             SELECT
                 session_id AS "session_id!",
                 action_id AS "action_id!",
+                agent AS "agent!",
                 opened_at IS NOT NULL AS "opened!",
                 COALESCE(prepared_at > now() - make_interval(secs => $3), false)
                     AS "may_still_open!"
@@ -692,14 +768,18 @@ impl RunRepository for PgRunRepository {
         )
         .fetch_optional(&self.pool)
         .await?;
-        Ok(row.map(|row| StoppingSession {
-            session: StepSession {
-                session_id: row.session_id,
-                action_id: row.action_id,
-            },
-            opened: row.opened,
-            may_still_open: row.may_still_open,
-        }))
+        row.map(|row| {
+            Ok(StoppingSession {
+                session: StepSession {
+                    session_id: row.session_id,
+                    action_id: row.action_id,
+                    agent: AgentName::try_from(row.agent)?,
+                },
+                opened: row.opened,
+                may_still_open: row.may_still_open,
+            })
+        })
+        .transpose()
     }
 
     #[tracing::instrument(err, skip(self))]

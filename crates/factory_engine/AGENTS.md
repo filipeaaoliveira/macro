@@ -86,9 +86,21 @@ hand an agent a prompt built from the Step's instructions
 produced; and `publish`, `ci`, `ready_to_merge` and `merge`, which take the
 Run's branch to a merged pull request (`src/domain/pull_request_steps.rs`). The
 agent is the `StepAgent` port.
-`SessionAgent` (`src/domain/session_agent.rs`) does the Step in a Macro agent
-session of the configured agent, owned by the Run's owner, through the routine
-sessions capability (`agent_harness_service_client`). The Step claims its
+Each entry an agent does names the Role it fills (`"role": "planner"`), and
+the factory's agent definition (`src/domain/agents.rs`, `FACTORY_AGENTS`)
+lists the Agents that fill each Role, in order: an Agent is a Macro agent
+(`bot`), whose harness runs its sessions, with an optional model and
+instructions. `SessionAgent` (`src/domain/session_agent.rs`) does the Step in
+a Macro agent session of the Role's first Agent, owned by the Run's owner,
+through the routine sessions capability (`agent_harness_service_client`). The
+Step records its Role and the Agent whose session it works in. An Agent the
+harness refuses for lack of quota (`RoutineSessionError::Admission` with
+`AiAdmissionError::Denied`, on prepare or on prompt: a definitive refusal
+before any work starts) hands the Step to the next Agent of its Role, in a
+new session, and the Step records the Agent passed over with the refusal's
+code (`passed_over`, `pass_reasons`); a session that opened is deleted
+first. Only that refusal passes the Step on; when no Agent is left, the Step
+fails for good. The Step claims its
 session in `factory_step` first, so a retried Step goes on in the same session
 and does not start the work over: it always asks, and the session refuses a
 prompt it already has with a conflict. That guard is a check of the session's
@@ -207,7 +219,10 @@ part only.
 - Add a built-in Flow: a file in `flows/` with a `description`, and an entry
   in `BUILT_IN_FLOWS` (`src/domain/built_in_flows.rs`).
 - Add a built-in Step: `src/domain/built_in_steps.rs` (`BuiltInStep`, `named`
-  and `run`); an agent Step also gets its instructions in `built_in_steps/`.
+  and `run`); an agent Step also gets its instructions in `built_in_steps/`,
+  and each entry that runs it names a Role.
+- Add a Role: name it on the entries that need it; every deployment's agent
+  definition must then fill it, or the service does not start.
 - Add a Flow keyword: `src/domain/flow.rs` (field and check) →
   `src/domain/interpreter.rs` → `src/domain/interpreter/test.rs`.
 
@@ -253,5 +268,11 @@ part only.
   (`ctx.patched`) or worker versioning.
 - A Gate opens only for a Step that ends `done`; any other outcome routes as
   usual, so a failed plan is never put to a person.
+- A Step's session is stopped and deleted as the Agent recorded on it, found
+  by name in the agent definition: renaming or removing an Agent while its
+  Steps run leaves their sessions for nothing to stop.
+- A subscription that runs out mid-turn (a turn that fails with the
+  provider's usage limit) is not a refusal to start: it fails the Step as any
+  failed turn does, and no other Agent takes it.
 - `#[activities]` takes no generic type, so `FactoryActivities` holds the Step
   service as a trait object.

@@ -228,6 +228,9 @@ async fn a_write_is_given_the_plan_an_earlier_step_produced() {
         entry: EntryId::try_from("plan".to_string()).expect("valid"),
         visit: 1,
         started_at: Utc::now(),
+        role: None,
+        agent: None,
+        passed_over: Vec::new(),
         end: Some(StepEnd {
             outcome: Outcome::done(),
             output: "Add a toggle to the settings page".to_string(),
@@ -282,6 +285,9 @@ async fn a_plan_reads_what_a_person_answered_the_last_one() {
         entry: EntryId::try_from("plan".to_string()).expect("valid"),
         visit: 1,
         started_at: Utc::now(),
+        role: None,
+        agent: None,
+        passed_over: Vec::new(),
         end: Some(StepEnd {
             outcome: Outcome::done(),
             output: "Rebuild the index".to_string(),
@@ -317,6 +323,9 @@ fn ended(seq: u16, entry: &str, visit: u16, output: &str) -> Step {
         entry: EntryId::try_from(entry.to_string()).expect("valid"),
         visit,
         started_at: Utc::now(),
+        role: None,
+        agent: None,
+        passed_over: Vec::new(),
         end: Some(StepEnd {
             outcome: Outcome::done(),
             output: output.to_string(),

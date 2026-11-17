@@ -19,7 +19,8 @@ the Gates they asked people in MacroDB, and defines the names Flows use
 ## Scope
 
 - Owns: the `factory_run`, `factory_step` and `factory_gate` tables
-  (`crates/macro_db_client/migrations/20261116083957_factory.sql`).
+  (`crates/macro_db_client/migrations/20261116083957_factory.sql`,
+  `20261117104713_factory_step_agent.sql`).
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
 
 ## Boundaries
@@ -41,9 +42,13 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `visit` is only the entry's count, which a reset restarts, so never key on
   it.
 - `factory_run.user_id` is the Run's owner and goes with their account.
-- An agent Step records its session (`session_id`, `action_id`, `offered`)
-  once, in `claim_session`; the agent's latest hand back is kept on the Step
-  while it runs (`hand_back`), and read when its turn ends (`handed_back`).
+- An agent Step records its session (`session_id`, `action_id`, `offered`),
+  its Role and the Agent the session is of once, in `claim_session`;
+  `pass_session` replaces the session and Agent when the Agent could not
+  start, appending it to `passed_over` with its reason (`pass_reasons`), and
+  only while the Step still holds the session it replaces. The agent's latest
+  hand back is kept on the Step while it runs (`hand_back`), and read when its
+  turn ends (`handed_back`).
 - `factory_run.task_id` references `"Document"` and is cleared when the task
   document is deleted; `link_task` reports a missing task or Run instead of
   failing. `list_task_runs` reads one owner's Runs on a task newest first

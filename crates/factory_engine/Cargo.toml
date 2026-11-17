@@ -7,7 +7,9 @@ version = "0.1.0"
 [dependencies]
 agent_correlation = { path = "../agent_correlation" }
 agent_runtime_protocol = { path = "../agent_runtime_protocol", default-features = false }
-agent_session = { path = "../agent_session", default-features = false }
+# `admission` names the refusal of an agent whose owner's quota is used up.
+agent_session = { path = "../agent_session", default-features = false, features = ["admission"] }
+ai_billing = { path = "../ai_billing" }
 ai_usage = { path = "../ai_usage" }
 async-trait = { workspace = true }
 authentication_service_client = { path = "../authentication_service_client" }

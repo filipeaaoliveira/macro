@@ -12,7 +12,8 @@ worker that walks each Run's Flow, in one process.
 - `src/config.rs`: `DATABASE_URL`, `INTERNAL_API_KEY`, `TEMPORAL_ADDRESS`,
   `DOCUMENT_STORAGE_SERVICE_AUTH_KEY` (reading the tasks Runs work on),
   `AUTHENTICATION_SERVICE_SECRET_KEY` (telling which accounts exist),
-  `FACTORY_AGENT_ID` (optional: the agent doing agent Steps).
+  `FACTORY_AGENTS` (optional: the agent definition, the Agents doing agent
+  Steps).
 
 ## Scope
 
@@ -47,9 +48,13 @@ worker that walks each Run's Flow, in one process.
 
 ## Gotchas
 
-- `FACTORY_AGENT_ID` names the agent (a bot id) whose sessions do the agent
-  Steps, as each Run's owner; the owner must be allowed to use it. Unset, the
-  agent Steps run on `LocalAgent`, which does no work. Locally, set it in the
+- `FACTORY_AGENTS` is the factory's agent definition, as JSON: `agents`
+  names each Agent (`bot`, the agent whose sessions it runs in, which the
+  Run's owner must be allowed to use; an optional `model` and
+  `instructions`), and `roles` lists, for each Role, the Agents that fill it
+  in order (`factory_engine`'s `domain/agents.rs`). The service refuses to
+  start when a Role a built-in Flow names has no Agent. Unset, the agent
+  Steps run on `LocalAgent`, which does no work. Locally, set it in the
   `--env-file` the stack is started with
   (`docs/development/running-locally.md`). A macrod agent's sessions need
   its machine connected, and routine apps are refused for it.

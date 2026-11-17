@@ -18,6 +18,7 @@ use config::Config;
 use document_storage_service_client::DocumentStorageServiceClient;
 use entity_access::domain::service::EntityAccessServiceImpl;
 use entity_access::outbound::PgAccessRepository;
+use factory_engine::domain::built_in_flows::built_in_roles;
 use factory_engine::domain::built_in_steps::BuiltInSteps;
 use factory_engine::domain::insights::InsightsServiceImpl;
 use factory_engine::domain::ports::StepAgent;
@@ -132,20 +133,22 @@ async fn run() -> Result<(), rootcause::Report> {
 
     let pull_requests = PullRequestSteps::new(github, repo.clone());
 
-    // The agent Steps run as the Run's owner in sessions of the configured
-    // agent. Without one, they run on the local stand-in, which does no work.
-    match config.factory_agent_id {
-        Some(bot_id) => {
+    // The agent Steps run as the Run's owner in sessions of the Agents each
+    // Role takes, which must fill every Role a built-in Flow names. Without
+    // them, they run on the local stand-in, which does no work.
+    match config.factory_agents {
+        Some(agents) => {
+            agents.fills(&built_in_roles()?)?;
             let sessions = AgentSessionClient::new(
                 AgentHarnessServiceUrl::new()?.as_ref(),
                 config.internal_api_key.as_ref(),
             )
             .map_err(|error| rootcause::report!("{error:?}"))?;
-            let agent = SessionAgent::new(sessions, repo.clone(), bot_id);
+            let agent = SessionAgent::new(sessions, repo.clone(), agents);
             serve(parts, BuiltInSteps::new(agent, pull_requests)).await
         }
         None => {
-            tracing::warn!("FACTORY_AGENT_ID is unset: agent steps run on the local stand-in");
+            tracing::warn!("FACTORY_AGENTS is unset: agent steps run on the local stand-in");
             serve(parts, BuiltInSteps::new(LocalAgent, pull_requests)).await
         }
     }
