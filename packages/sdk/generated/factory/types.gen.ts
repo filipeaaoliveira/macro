@@ -416,6 +416,11 @@ export type Repository = {
 };
 
 /**
+ * Why a base branch's required checks decide nothing.
+ */
+export type RequiredChecksState = 'unread' | 'none';
+
+/**
  * A job in a Flow, such as `planner`, `writer`, `reviewer` or `fixer`. An
  * entry whose Step an agent does names the Role, and the factory's agent
  * definition lists the Agents that may fill it.
@@ -455,12 +460,7 @@ export type Run = {
  * A Run and the Steps it took.
  */
 export type RunDetail = {
-    /**
-     * Whether the checks the base branch requires could not be read, or
-     * name none, while the Run is at its merge: nothing holds the merge
-     * on them.
-     */
-    baseChecksUnread: boolean;
+    baseRequiredChecks?: null | RequiredChecksState;
     mainHold?: null | MainHold;
     /**
      * The Run.

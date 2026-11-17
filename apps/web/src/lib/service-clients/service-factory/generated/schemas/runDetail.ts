@@ -6,6 +6,7 @@
  */
 
 import type { Run } from './run';
+import type { RunDetailBaseRequiredChecks } from './runDetailBaseRequiredChecks';
 import type { RunDetailMainHold } from './runDetailMainHold';
 import type { Step } from './step';
 
@@ -13,10 +14,7 @@ import type { Step } from './step';
  * A Run and the Steps it took.
  */
 export interface RunDetail {
-  /** Whether the checks the base branch requires could not be read, or
-name none, while the Run is at its merge: nothing holds the merge
-on them. */
-  baseChecksUnread: boolean;
+  baseRequiredChecks?: RunDetailBaseRequiredChecks;
   mainHold?: RunDetailMainHold;
   /** The Run. */
   run: Run;
