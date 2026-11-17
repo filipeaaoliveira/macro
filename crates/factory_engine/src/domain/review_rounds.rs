@@ -7,6 +7,9 @@
 //! outside it becomes a follow-up task, in the project of the Run's task,
 //! and holds nothing. Reviewers that report one problem (the same file, at
 //! lines that meet) make one follow-up task, which names each of them. A
+//! problem a follow-up task of an earlier round of the Run is about (its
+//! file again, at lines that meet) makes no second task: its findings are
+//! linked to that task, which a comment tells it was reported again. A
 //! round is numbered among all the Run's rounds; a reset of its entry
 //! counts its visits, for the round limit, from 1 again.
 
@@ -138,6 +141,10 @@ pub fn in_diff(path: &str, lines: Option<Lines>, files: &[ChangedFile]) -> bool 
     }
 }
 
+/// The passage of a follow-up task a comment on it quotes: its first
+/// sentence says it once.
+const FOLLOW_UP_QUOTE: &str = "outside the changes it reviewed";
+
 /// The reviewer that found `finding`, for a person.
 fn reviewer(finding: &ReviewFinding) -> String {
     finding
@@ -156,21 +163,10 @@ fn follow_up(run_id: RunId, round: &ReviewRound, same: &[&ReviewFinding]) -> Fol
         .and_then(|finding| finding.problem.lines().next())
         .unwrap_or_default();
     let name: String = first_line.chars().take(120).collect();
-    let mut reviewers: Vec<String> = Vec::new();
-    for finding in same {
-        let reviewer = reviewer(finding);
-        if !reviewers.contains(&reviewer) {
-            reviewers.push(reviewer);
-        }
-    }
-    let found_by = match reviewers.split_last() {
-        Some((last, [])) => last.clone(),
-        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
-        None => "a reviewer".to_string(),
-    };
     let intro = format!(
-        "{found_by} found this in review round {} of factory run {run_id}, outside the \
-         changes it reviewed, so it did not hold the pull request.",
+        "{} found this in review round {} of factory run {run_id}, {FOLLOW_UP_QUOTE}, \
+         so it did not hold the pull request.",
+        found_by(same),
         round.round
     );
     let report = |finding: &ReviewFinding| {
@@ -201,10 +197,51 @@ fn follow_up(run_id: RunId, round: &ReviewRound, same: &[&ReviewFinding]) -> Fol
     }
 }
 
+/// The reviewers that found `same`, each once, the first named first, for
+/// a person.
+fn found_by(same: &[&ReviewFinding]) -> String {
+    let mut reviewers: Vec<String> = Vec::new();
+    for finding in same {
+        let reviewer = reviewer(finding);
+        if !reviewers.contains(&reviewer) {
+            reviewers.push(reviewer);
+        }
+    }
+    match reviewers.split_last() {
+        Some((last, [])) => last.clone(),
+        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
+        None => "a reviewer".to_string(),
+    }
+}
+
+/// The comment that tells a follow-up task its problem was reported again,
+/// in `round`, as the findings `same`.
+fn reported_again(round: &ReviewRound, same: &[&ReviewFinding]) -> String {
+    let mut places: Vec<String> = Vec::new();
+    for finding in same {
+        let place = place(&finding.path, finding.lines);
+        if !places.contains(&place) {
+            places.push(place);
+        }
+    }
+    format!(
+        "Reported again in review round {} by {}, at {}.",
+        round.round,
+        found_by(same),
+        places.join(", ")
+    )
+}
+
 /// Whether the findings `a` and `b` report one problem: two reviewers
 /// point at the same file, at lines that meet (a finding that names no
 /// lines is about the whole file).
 fn same_problem(a: &ReviewFinding, b: &ReviewFinding) -> bool {
+    a.seq != b.seq && same_place(a, b)
+}
+
+/// Whether the findings `a` and `b` point at the same file, at lines that
+/// meet: a finding that names no lines is about the whole file.
+fn same_place(a: &ReviewFinding, b: &ReviewFinding) -> bool {
     let path = |finding: &ReviewFinding| {
         finding
             .path
@@ -216,7 +253,7 @@ fn same_problem(a: &ReviewFinding, b: &ReviewFinding) -> bool {
         (Some(a), Some(b)) => a.start <= b.end && b.start <= a.end,
         _ => true,
     };
-    a.seq != b.seq && path(a) == path(b) && lines_meet
+    path(a) == path(b) && lines_meet
 }
 
 /// The follow-ups of a round, grouped by problem: each finding joins the
@@ -538,7 +575,8 @@ where
     /// Make a task of each problem among the follow-ups of `round` that has
     /// none: findings of several reviewers about one problem become one
     /// task, which names each of them, and each finding stays recorded,
-    /// linked to it. Each task is made with an id kept on its findings
+    /// linked to it. A problem a task of an earlier round of the Run is
+    /// about joins that task instead (see `join_follow_up`). Each task is made with an id kept on its findings
     /// before it is asked for, so a retry finds the task rather than making
     /// a second. A follow-up document storage refuses stays on the round as
     /// one, with no task; one it could not answer fails the close, which is
@@ -552,6 +590,15 @@ where
             .findings
             .iter()
             .filter(|finding| finding.kind == Some(FindingKind::FollowUp));
+        // The tasks earlier rounds of the Run made, by the findings each
+        // is about, a revise's rounds among them.
+        let rounds = self.repo.review_rounds(run.id).await.map_err(internal)?;
+        let made_before: Vec<(&ReviewFinding, Uuid)> = rounds
+            .iter()
+            .filter(|earlier| earlier.seq < round.seq)
+            .flat_map(|earlier| &earlier.findings)
+            .filter_map(|finding| Some((finding, finding.follow_up_task_id?)))
+            .collect();
         for same in same_problems(follow_ups) {
             if same
                 .iter()
@@ -560,11 +607,17 @@ where
                 continue;
             }
             // The problem's task id: the one an earlier attempt kept on one
-            // of its findings, else a new one, kept on each of them. A
-            // finding that kept another id goes in a task of its own.
+            // of its findings, else that of an earlier round's task about
+            // it, else a new one, kept on each of them. A finding that kept
+            // another id goes in a task of its own.
+            let earlier = made_before
+                .iter()
+                .find(|(made, _)| same.iter().any(|finding| same_place(made, finding)))
+                .map(|(_, task_id)| *task_id);
             let candidate = same
                 .iter()
                 .find_map(|finding| finding.follow_up_task_id.or(finding.follow_up_key))
+                .or(earlier)
                 .unwrap_or_else(Uuid::now_v7);
             let mut tasks: Vec<(Uuid, Vec<&ReviewFinding>)> = Vec::new();
             for finding in &same {
@@ -586,8 +639,58 @@ where
                 }
             }
             for (task_id, findings) in tasks {
-                self.make_follow_up(run, round, task_id, &findings).await?;
+                if made_before.iter().any(|(_, made)| *made == task_id) {
+                    self.join_follow_up(run, round, task_id, &findings).await?;
+                } else {
+                    self.make_follow_up(run, round, task_id, &findings).await?;
+                }
             }
+        }
+        Ok(())
+    }
+
+    /// Link the follow-ups `same`, one problem an earlier round's task
+    /// `task_id` is about, to that task, then tell it in a comment as the
+    /// Run's owner that the problem was reported again. The links come
+    /// first, so a retry, which skips a problem whose findings are all
+    /// linked, never comments twice; the comment is a courtesy, so one
+    /// document storage does not take is let go.
+    async fn join_follow_up(
+        &self,
+        run: &factory_records::domain::models::Run,
+        round: &ReviewRound,
+        task_id: Uuid,
+        same: &[&ReviewFinding],
+    ) -> Result<(), StepError> {
+        let new: Vec<&ReviewFinding> = same
+            .iter()
+            .copied()
+            .filter(|finding| finding.follow_up_task_id.is_none())
+            .collect();
+        if new.is_empty() {
+            return Ok(());
+        }
+        for finding in &new {
+            let key = StepKey {
+                run_id: run.id,
+                seq: finding.seq,
+            };
+            self.repo
+                .link_follow_up(key, finding.place, task_id)
+                .await
+                .map_err(internal)?;
+        }
+        let note = reported_again(round, &new);
+        if let Err(error) = self
+            .tasks
+            .comment_on_follow_up(&run.user_id, task_id, FOLLOW_UP_QUOTE, &note)
+            .await
+        {
+            tracing::warn!(
+                ?error,
+                %task_id,
+                "the follow-up task was not told its problem was reported again"
+            );
         }
         Ok(())
     }

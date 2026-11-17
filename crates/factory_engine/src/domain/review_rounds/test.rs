@@ -887,3 +887,261 @@ async fn reviewers_reporting_one_problem_make_one_follow_up_task() {
         made[2].task.markdown
     );
 }
+
+/// Open the round at `seq`, the Run's `round`th visit of its entry, start
+/// its reviewers of `roles`, record what each found, and close it.
+async fn review(
+    rounds: &ReviewRoundsImpl<FakeRepo, FakeGithub, FakeRepo>,
+    repo: &FakeRepo,
+    run_id: RunId,
+    (seq, visit): (u16, u16),
+    found: &[(&str, Vec<Finding>)],
+) -> Result<Outcome, StepError> {
+    rounds
+        .open_round(opening(run_id, seq, visit))
+        .await
+        .expect("open");
+    let roles: Vec<&str> = found.iter().map(|(role, _)| *role).collect();
+    start_reviewers(repo, run_id, seq, &roles).await;
+    for (offset, (_, findings)) in (0..).zip(found) {
+        let key = StepKey {
+            run_id,
+            seq: seq + offset,
+        };
+        repo.record_findings(key, seq, findings)
+            .await
+            .expect("record");
+    }
+    rounds.close_round(closing(run_id, seq)).await
+}
+
+/// The task each follow-up of the Run is linked to, by its Step and place.
+async fn linked(repo: &FakeRepo, run_id: RunId) -> Vec<(u16, u16, Option<Uuid>)> {
+    repo.review_rounds(run_id)
+        .await
+        .expect("rounds")
+        .iter()
+        .flat_map(|round| &round.findings)
+        .map(|found| (found.seq, found.place, found.follow_up_task_id))
+        .collect()
+}
+
+/// A problem outside the diff that later rounds report again makes no
+/// second task: its findings are linked to the first, which a comment of
+/// the owner's tells, once a round, who reported it again and where. A
+/// finding elsewhere in the same file makes a task of its own.
+#[tokio::test]
+async fn a_problem_reported_again_in_a_later_round_joins_its_follow_up_task() {
+    let repo = FakeRepo::default();
+    let github = FakeGithub::default();
+    let run_id = code_run(&repo).await;
+    github.state().branch_heads = [
+        Some("aaa".to_string()),
+        Some("bbb".to_string()),
+        Some("ccc".to_string()),
+    ]
+    .into();
+    for (base, head) in [("main", "aaa"), ("aaa", "bbb"), ("bbb", "ccc")] {
+        github
+            .state()
+            .diffs
+            .insert((base.to_string(), head.to_string()), Vec::new());
+    }
+    let rounds = rounds(&repo, &github);
+
+    let first = review(
+        &rounds,
+        &repo,
+        run_id,
+        (3, 1),
+        &[(
+            "correctness-reviewer",
+            vec![finding("src/text.js", Some((6, 15)))],
+        )],
+    )
+    .await;
+    assert_eq!(first.expect("first"), outcome("pass"));
+    let second = review(
+        &rounds,
+        &repo,
+        run_id,
+        (6, 2),
+        &[
+            (
+                "correctness-reviewer",
+                vec![finding("src/text.js", Some((40, 41)))],
+            ),
+            (
+                "scope-reviewer",
+                vec![finding("./src/text.js", Some((14, 20)))],
+            ),
+        ],
+    )
+    .await;
+    assert_eq!(second.expect("second"), outcome("pass"));
+    let third = review(
+        &rounds,
+        &repo,
+        run_id,
+        (9, 3),
+        &[
+            ("correctness-reviewer", vec![finding("src/text.js", None)]),
+            ("scope-reviewer", vec![finding("src/text.js", Some((8, 8)))]),
+        ],
+    )
+    .await;
+    assert_eq!(third.expect("third"), outcome("pass"));
+
+    let made = repo.follow_ups.lock().expect("follow ups").clone();
+    assert_eq!(made.len(), 2, "{made:#?}");
+    let task = |index: usize| Some(made[index].id);
+    assert_eq!(
+        linked(&repo, run_id).await,
+        [
+            (3, 1, task(0)),
+            (6, 1, task(1)),
+            (7, 1, task(0)),
+            (9, 1, task(0)),
+            (10, 1, task(0)),
+        ]
+    );
+    let comments = repo.follow_up_comments.lock().expect("comments").clone();
+    let read: Vec<_> = comments
+        .iter()
+        .map(|comment| {
+            (
+                comment.owner.as_str(),
+                comment.task_id,
+                comment.text.as_str(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        read,
+        [
+            (
+                "macro|julia@example.com",
+                made[0].id,
+                "Reported again in review round 2 by the scope-reviewer, at `./src/text.js` \
+                 lines 14-20."
+            ),
+            (
+                "macro|julia@example.com",
+                made[0].id,
+                "Reported again in review round 3 by the correctness-reviewer and the \
+                 scope-reviewer, at `src/text.js`, `src/text.js` line 8."
+            ),
+        ]
+    );
+}
+
+/// A round after a revise reset its entry is still the Run's: a problem a
+/// round before the revise made a task of joins that task.
+#[tokio::test]
+async fn a_problem_reported_again_after_a_revise_joins_its_follow_up_task() {
+    let repo = FakeRepo::default();
+    let github = FakeGithub::default();
+    let run_id = code_run(&repo).await;
+    github.state().branch_heads = [Some("aaa".to_string()), Some("bbb".to_string())].into();
+    for (base, head) in [("main", "aaa"), ("main", "bbb")] {
+        github
+            .state()
+            .diffs
+            .insert((base.to_string(), head.to_string()), Vec::new());
+    }
+    let rounds = rounds(&repo, &github);
+
+    review(
+        &rounds,
+        &repo,
+        run_id,
+        (3, 1),
+        &[("correctness-reviewer", vec![finding("docs/old.md", None)])],
+    )
+    .await
+    .expect("before the revise");
+    review(
+        &rounds,
+        &repo,
+        run_id,
+        (10, 1),
+        &[("tests-reviewer", vec![finding("docs/old.md", Some((3, 4)))])],
+    )
+    .await
+    .expect("after the revise");
+
+    let made = repo.follow_ups.lock().expect("follow ups").clone();
+    assert_eq!(made.len(), 1, "{made:#?}");
+    assert_eq!(
+        linked(&repo, run_id).await,
+        [(3, 1, Some(made[0].id)), (10, 1, Some(made[0].id))]
+    );
+    let comments = repo.follow_up_comments.lock().expect("comments").clone();
+    assert_eq!(comments.len(), 1, "{comments:#?}");
+    assert_eq!(
+        comments[0].text,
+        "Reported again in review round 2 by the tests-reviewer, at `docs/old.md` lines 3-4."
+    );
+}
+
+/// A close that fails after a problem reported again joined its task, as
+/// when another follow-up's task cannot be made yet, is tried again: the
+/// retry makes the new task once and comments on the joined one no more.
+#[tokio::test]
+async fn a_retried_close_comments_on_a_joined_follow_up_task_once() {
+    let repo = FakeRepo::default();
+    let github = FakeGithub::default();
+    let run_id = code_run(&repo).await;
+    github.state().branch_heads = [Some("aaa".to_string()), Some("bbb".to_string())].into();
+    for (base, head) in [("main", "aaa"), ("aaa", "bbb")] {
+        github
+            .state()
+            .diffs
+            .insert((base.to_string(), head.to_string()), Vec::new());
+    }
+    let rounds = rounds(&repo, &github);
+    review(
+        &rounds,
+        &repo,
+        run_id,
+        (3, 1),
+        &[(
+            "correctness-reviewer",
+            vec![finding("src/text.js", Some((6, 15)))],
+        )],
+    )
+    .await
+    .expect("first");
+
+    *repo.follow_ups_fail.lock().expect("fail") = 1;
+    let failed = review(
+        &rounds,
+        &repo,
+        run_id,
+        (6, 2),
+        &[(
+            "correctness-reviewer",
+            vec![
+                finding("src/text.js", Some((10, 10))),
+                finding("src/other.js", Some((1, 2))),
+            ],
+        )],
+    )
+    .await;
+    assert!(matches!(failed, Err(StepError::Internal(_))), "{failed:?}");
+    let retried = rounds.close_round(closing(run_id, 6)).await.expect("retry");
+    assert_eq!(retried, outcome("pass"));
+
+    let made = repo.follow_ups.lock().expect("follow ups").clone();
+    assert_eq!(made.len(), 2, "{made:#?}");
+    assert_eq!(
+        linked(&repo, run_id).await,
+        [
+            (3, 1, Some(made[0].id)),
+            (6, 1, Some(made[0].id)),
+            (6, 2, Some(made[1].id)),
+        ]
+    );
+    let comments = repo.follow_up_comments.lock().expect("comments").clone();
+    assert_eq!(comments.len(), 1, "{comments:#?}");
+}

@@ -313,7 +313,13 @@ anywhere, or whose file and lines meet a hunk of the diff under review
 follow-up task and holds nothing. Reviewers that report one problem (the
 same file, at lines that meet; a finding with no lines covers its file) make
 one task, which names each of them with what each reported; each finding
-stays recorded and is linked to it. The task is made as the Run's owner, not
+stays recorded and is linked to it. A problem a task of an earlier round of
+the Run is about (its file again, at lines that meet), a revise's rounds
+among them, makes no second task: its findings are linked to that task, then
+the owner comments on it (`POST /documents/{id}/comments/text`, quoting the
+task's first sentence) that it was reported again, in which round, by whom
+and where. The links come first, so a retry never comments twice; a comment
+document storage does not take is let go. The task is made as the Run's owner, not
 shared, in the project of the Run's task: the initiative its Project
 property names, read and set as a Main Hold's task does
 (`outbound/task_project.rs`; document storage's `POST
