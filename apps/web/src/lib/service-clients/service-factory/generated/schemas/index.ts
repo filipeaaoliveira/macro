@@ -41,6 +41,7 @@ export * from './gateAnswerProperty';
 export * from './gateAnswerUserId';
 export * from './gateInsight';
 export * from './gateInsightWait';
+export * from './gateKind';
 export * from './getFactoryInsightsParams';
 export * from './handBackRequest';
 export * from './insightDay';

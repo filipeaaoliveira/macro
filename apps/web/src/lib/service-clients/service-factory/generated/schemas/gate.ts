@@ -5,6 +5,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { GateAnswerProperty } from './gateAnswerProperty';
+import type { GateKind } from './gateKind';
 import type { Outcome } from './outcome';
 
 /**
@@ -14,6 +15,8 @@ export interface Gate {
   answer?: GateAnswerProperty;
   /** The answers it offers, in the Flow's order. */
   answers: Outcome[];
+  /** Who asks it: the Flow, or the Step's agent. */
+  kind: GateKind;
   /** When the Run started waiting. */
   openedAt: string;
   /** The question. */

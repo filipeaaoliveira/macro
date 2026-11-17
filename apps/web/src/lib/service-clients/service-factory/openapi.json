@@ -1294,7 +1294,7 @@
       "Gate": {
         "type": "object",
         "description": "A question a Step's end puts to a person. The Run waits for the answer.",
-        "required": ["question", "answers", "openedAt"],
+        "required": ["kind", "question", "answers", "openedAt"],
         "properties": {
           "answer": {
             "oneOf": [
@@ -1313,6 +1313,10 @@
               "$ref": "#/components/schemas/Outcome"
             },
             "description": "The answers it offers, in the Flow's order."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/GateKind",
+            "description": "Who asks it: the Flow, or the Step's agent."
           },
           "openedAt": {
             "type": "string",
@@ -1399,6 +1403,11 @@
             ]
           }
         }
+      },
+      "GateKind": {
+        "type": "string",
+        "description": "Who asks a Gate's question, which says how it is answered.",
+        "enum": ["flow", "question"]
       },
       "HandBackRequest": {
         "type": "object",

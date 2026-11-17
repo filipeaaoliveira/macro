@@ -320,6 +320,10 @@ export type Gate = {
      */
     answers: Array<Outcome>;
     /**
+     * Who asks it: the Flow, or the Step's agent.
+     */
+    kind: GateKind;
+    /**
      * When the Run started waiting.
      */
     openedAt: string;
@@ -372,6 +376,11 @@ export type GateInsight = {
     opened: number;
     wait?: null | DurationStats;
 };
+
+/**
+ * Who asks a Gate's question, which says how it is answered.
+ */
+export type GateKind = 'flow' | 'question';
 
 /**
  * Request body for handing back an agent Step's result.
