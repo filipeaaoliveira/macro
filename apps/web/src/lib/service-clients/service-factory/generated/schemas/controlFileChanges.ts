@@ -19,7 +19,7 @@ approval: empty when `unlisted`. */
 in GitHub's order: empty when `unlisted`. */
   tampered: string[];
   /** GitHub could not list all of the branch's changes, or they were more
-than [`Self::MAX_FILES`], so which Control Files it changed is not
-known. */
+than a Run keeps (300 a list), so which Control Files it changed is
+not known. */
   unlisted: boolean;
 }

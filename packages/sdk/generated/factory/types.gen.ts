@@ -93,8 +93,8 @@ export type ControlFileChanges = {
     tampered: Array<string>;
     /**
      * GitHub could not list all of the branch's changes, or they were more
-     * than [`Self::MAX_FILES`], so which Control Files it changed is not
-     * known.
+     * than a Run keeps (300 a list), so which Control Files it changed is
+     * not known.
      */
     unlisted: boolean;
 };
@@ -470,8 +470,9 @@ export type Run = {
      */
     createdAt: string;
     /**
-     * Whether its owner created it in their own signed-in session: only
-     * then does its request ask for the Control Files it names.
+     * Whether its owner created it in their own signed-in session, from an
+     * account that is not an agent's: only then does its request ask for
+     * the Control Files it names.
      */
     createdInPerson: boolean;
     end?: null | RunEnd;

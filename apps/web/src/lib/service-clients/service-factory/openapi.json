@@ -1013,7 +1013,7 @@
           },
           "unlisted": {
             "type": "boolean",
-            "description": "GitHub could not list all of the branch's changes, or they were more\nthan [`Self::MAX_FILES`], so which Control Files it changed is not\nknown."
+            "description": "GitHub could not list all of the branch's changes, or they were more\nthan a Run keeps (300 a list), so which Control Files it changed is\nnot known."
           }
         }
       },
@@ -1534,7 +1534,7 @@
           },
           "createdInPerson": {
             "type": "boolean",
-            "description": "Whether its owner created it in their own signed-in session: only\nthen does its request ask for the Control Files it names."
+            "description": "Whether its owner created it in their own signed-in session, from an\naccount that is not an agent's: only then does its request ask for\nthe Control Files it names."
           },
           "end": {
             "oneOf": [

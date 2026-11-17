@@ -19,8 +19,9 @@ export interface Run {
   controlFiles?: RunControlFiles;
   /** When the Run was created. */
   createdAt: string;
-  /** Whether its owner created it in their own signed-in session: only
-then does its request ask for the Control Files it names. */
+  /** Whether its owner created it in their own signed-in session, from an
+account that is not an agent's: only then does its request ask for
+the Control Files it names. */
   createdInPerson: boolean;
   end?: RunEndProperty;
   /** The Run's id, also its Temporal workflow id. */
