@@ -311,13 +311,15 @@ every Step ended, the workflow closes the round
 anywhere, or whose file and lines meet a hunk of the diff under review
 (GitHub's compare, as the owner), is a Blocker; one outside it becomes a
 follow-up task and holds nothing. The task is made as the Run's owner, not
-shared, in the project of the Run's task (document storage's `POST
+shared, in the project of the Run's task: the initiative its Project
+property names, read and set as a Main Hold's task does
+(`outbound/task_project.rs`; document storage's `POST
 /documents/create_task`, with the internal key and the owner as the acting
 user), with an id kept on the finding before it is asked for, so a retry
 finds it rather than making a second; an outage (or an unaccepted key or
 user, a timeout or throttling) fails the close, which is tried again for at
 most two hours, then the round fails; a refusal, or a project the owner
-may not add to as entity access reads it before asking, leaves the
+may not edit as entity access reads it before asking, leaves the
 follow-up with no task; and a task made under another id stops the round for good, since every
 retry would make another. A diff GitHub
 cannot list in full makes every finding a Blocker. The round ends `changes`

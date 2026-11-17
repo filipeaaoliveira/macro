@@ -4,11 +4,12 @@ use document_storage_service_client::DocumentStorageServiceClient;
 use macro_user_id::user_id::MacroUserIdStr;
 use serde_json::json;
 use uuid::Uuid;
-use wiremock::matchers::{method, path};
+use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::DocumentTaskDirectory;
 use crate::domain::ports::{FollowUpMade, FollowUpTask};
+use crate::outbound::task_project::fixture::{PROJECT, task_properties};
 
 fn julia() -> MacroUserIdStr<'static> {
     MacroUserIdStr::try_from("macro|julia@example.com".to_string()).expect("valid")
@@ -121,14 +122,16 @@ async fn a_task_made_under_another_id_is_told_apart() {
     assert_eq!(elsewhere, FollowUpMade::OtherId(other.to_string()));
 }
 
-/// A follow-up of a task in a project the owner may no longer add to is
-/// refused without asking document storage, which would answer 401, as
-/// for a key it does not accept; one they may add to goes in the project.
+/// A follow-up goes in the project its task's Project property names, as
+/// a Main Hold's task does, though the task is in no folder of a project.
+/// One in a project the owner may no longer add to is refused without
+/// asking document storage, which would answer 401, as for a key it does
+/// not accept; one they may add to is made with the task's Project.
 #[tokio::test]
-async fn a_project_the_owner_may_not_add_to_refuses_the_follow_up() {
+async fn a_follow_up_goes_in_the_project_its_task_s_project_property_names() {
     let id = Uuid::now_v7();
     let of = Uuid::now_v7();
-    let project = Uuid::now_v7();
+    let project = Uuid::now_v7().to_string();
 
     for may in [false, true] {
         let server = MockServer::start().await;
@@ -143,9 +146,20 @@ async fn a_project_the_owner_may_not_add_to_refuses_the_follow_up() {
                 "documentId": of.to_string(),
                 "documentName": "Add dark mode",
                 "owner": "macro|julia@example.com",
-                "projectId": project.to_string(),
                 "deletedAt": null
             })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!("/properties/entities/DOCUMENT/{of}")))
+            .and(header(
+                "x-document-storage-service-user-id",
+                "macro|julia@example.com",
+            ))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(task_properties(&of.to_string(), &project)),
+            )
             .mount(&server)
             .await;
         Mock::given(method("POST"))
@@ -169,7 +183,11 @@ async fn a_project_the_owner_may_not_add_to_refuses_the_follow_up() {
             .await
             .expect("answered");
 
-        assert_eq!(*asked.lock().expect("asked"), [project], "may add: {may}");
+        assert_eq!(
+            *asked.lock().expect("asked"),
+            std::slice::from_ref(&project),
+            "may add: {may}"
+        );
         let posts: Vec<serde_json::Value> = server
             .received_requests()
             .await
@@ -181,7 +199,17 @@ async fn a_project_the_owner_may_not_add_to_refuses_the_follow_up() {
         if may {
             assert_eq!(outcome, FollowUpMade::Made);
             assert_eq!(posts.len(), 1);
-            assert_eq!(posts[0]["projectId"], json!(project.to_string()));
+            assert_eq!(posts[0]["projectId"], json!(null));
+            assert_eq!(
+                posts[0]["propertyValues"],
+                json!([{
+                    "propertyId": PROJECT,
+                    "value": {
+                        "type": "entity_reference",
+                        "reference": { "entity_id": project, "entity_type": "INITIATIVE" }
+                    }
+                }])
+            );
         } else {
             assert_eq!(outcome, FollowUpMade::Refused);
             assert!(posts.is_empty(), "nothing asked for");

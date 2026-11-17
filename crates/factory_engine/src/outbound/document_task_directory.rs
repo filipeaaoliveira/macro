@@ -15,6 +15,7 @@ use uuid::Uuid;
 mod test;
 
 use crate::domain::ports::{FollowUpMade, FollowUpTask, TaskAccess, TaskDirectory};
+use crate::outbound::task_project::{initiative_of, project_property};
 
 /// Whether a person may see a document comes from entity access, and
 /// whether it is a task from the document storage service, which owns
@@ -104,23 +105,24 @@ impl<A: EntityAccessService> TaskDirectory for DocumentTaskDirectory<A> {
         task_id: Uuid,
     ) -> Result<FollowUpMade, Self::Err> {
         let access = &self.access;
-        self.make_follow_up(user_id, of, follow_up, task_id, async |project| {
-            may_add_to(access, user_id, project).await
+        self.make_follow_up(user_id, of, follow_up, task_id, async |initiative| {
+            may_add_to(access, user_id, initiative).await
         })
         .await
     }
 }
 
-/// Whether `user_id` may add a task to `project`, as document storage's
-/// project check decides: at least edit access. A project they cannot
-/// reach, or one that is gone, is a no; only a failed check is an error.
+/// Whether `user_id` may add a task to the project `initiative` (what a
+/// task's Project property names), as document storage decides for a
+/// project: at least edit access. One they cannot reach, or one that is
+/// gone, is a no; only a failed check is an error.
 async fn may_add_to(
     access: &impl EntityAccessService,
     user_id: &MacroUserIdStr<'static>,
-    project: Uuid,
+    initiative: String,
 ) -> Result<bool, DocumentTaskDirectoryErr> {
     let level = access
-        .get_access_level(Some(user_id), &project.to_string(), EntityType::Project)
+        .get_access_level(Some(user_id), &initiative, EntityType::Initiative)
         .await;
     match level {
         Ok(level) => Ok(matches!(
@@ -139,7 +141,7 @@ async fn may_add_to(
 
 impl<A> DocumentTaskDirectory<A> {
     /// [`TaskDirectory::create_follow_up`], with `may_add` saying whether the
-    /// owner may add a task to the project it goes in. One they may not add
+    /// owner may add a task to the project (an initiative) it goes in. One they may not add
     /// to is refused before it is asked for: document storage answers that
     /// with the same 401 as a key it does not accept, which is worth trying
     /// again.
@@ -149,38 +151,35 @@ impl<A> DocumentTaskDirectory<A> {
         of: Option<Uuid>,
         follow_up: &FollowUpTask,
         task_id: Uuid,
-        may_add: impl AsyncFnOnce(Uuid) -> Result<bool, DocumentTaskDirectoryErr>,
+        may_add: impl AsyncFnOnce(String) -> Result<bool, DocumentTaskDirectoryErr>,
     ) -> Result<FollowUpMade, DocumentTaskDirectoryErr> {
         // An earlier attempt may have made it: its id says so.
         if self.made(task_id).await? {
             return Ok(FollowUpMade::Made);
         }
 
-        // A follow-up goes in the project of the task it follows up; the
-        // owner must still be able to add to it, as when they make a task.
-        // It is the owner's own, unshared, until they share it.
-        let project_id = match of {
-            Some(of) => self
-                .documents
-                .get_document_basic(&of.to_string())
+        // A follow-up goes in the project of the task it follows up, as
+        // its Project property names it and a Main Hold's task reads it;
+        // the owner must still be able to add to it, as when they make a
+        // task. It is the owner's own, unshared, until they share it.
+        let initiative = match of {
+            Some(of) => initiative_of(&self.documents, user_id, of)
                 .await
-                .map_err(documents)?
-                .and_then(|document| document.project_id)
-                .and_then(|project| Uuid::parse_str(&project).ok()),
+                .map_err(DocumentTaskDirectoryErr::Documents)?,
             None => None,
         };
-        if let Some(project) = project_id
-            && !may_add(project).await?
+        if let Some(initiative) = &initiative
+            && !may_add(initiative.clone()).await?
         {
             return Ok(FollowUpMade::Refused);
         }
         let task = NewTask {
             task_name: follow_up.name.clone(),
             markdown: follow_up.markdown.clone(),
-            project_id,
+            project_id: None,
             share_with_team: false,
             document_id: Some(task_id),
-            property_values: Vec::new(),
+            property_values: initiative.map(project_property).into_iter().collect(),
         };
         match self
             .documents
