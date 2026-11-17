@@ -2,6 +2,7 @@
 
 mod check_rounds;
 mod insights;
+mod review_rounds;
 #[cfg(test)]
 mod test;
 
@@ -69,6 +70,14 @@ pub enum PgRunRepositoryErr {
     /// know.
     #[error("unknown check round outcome {0:?}")]
     UnknownCheckRoundOutcome(String),
+    /// A stored review round's outcome, or a finding's kind, is not one
+    /// this code knows.
+    #[error("unknown review round outcome or finding kind {0:?}")]
+    UnknownReviewWord(String),
+    /// A stored finding has a first line but no last, or the other way
+    /// round.
+    #[error("a stored finding has only one end of its lines")]
+    PartialLines,
     /// A stored visit or place does not fit its number.
     #[error("visit or place {0} is out of range")]
     OutOfRange(i32),

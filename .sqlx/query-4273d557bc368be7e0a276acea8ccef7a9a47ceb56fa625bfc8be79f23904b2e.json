@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE factory_review_finding\n            SET follow_up_task_id = $4\n            WHERE run_id = $1\n              AND seq = $2\n              AND place = $3\n              AND kind = 'follow_up'\n              AND follow_up_task_id IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Int4",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4273d557bc368be7e0a276acea8ccef7a9a47ceb56fa625bfc8be79f23904b2e"
+}

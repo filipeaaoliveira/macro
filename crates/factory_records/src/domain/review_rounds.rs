@@ -1,0 +1,265 @@
+//! A Run's review rounds: a panel of reviewers reviews the Run's change at
+//! once, each in a Step of its own, and hands back the Blockers it found,
+//! with where they are and why. The round records the commit it reviews and
+//! where the diff under review starts, and once it ends, which findings were
+//! Blockers in that diff and which became follow-up tasks.
+
+use std::collections::BTreeMap;
+
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use crate::domain::models::{Role, RunId, StepKey};
+
+/// The most findings one reviewer hands back in a round.
+pub const MAX_FINDINGS: usize = 50;
+
+/// The most bytes a finding's path may hold (the
+/// `factory_review_finding.path` check).
+pub const MAX_FINDING_PATH_BYTES: usize = 1_024;
+
+/// The most bytes a finding's problem, or why it matters, may hold (the
+/// `factory_review_finding` checks).
+pub const MAX_FINDING_TEXT_BYTES: usize = 4_096;
+
+/// The lines of a file a finding is about, from 1, both included.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Lines {
+    /// The first line.
+    pub start: u32,
+    /// The last line; the first, for one line.
+    pub end: u32,
+}
+
+/// What a reviewer found: where it is, what is wrong, and why it matters.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Finding {
+    /// The file, from the repository's root.
+    pub path: String,
+    /// The lines it is about; none for the whole file.
+    pub lines: Option<Lines>,
+    /// What is wrong.
+    pub problem: String,
+    /// Why it must change.
+    pub why: String,
+}
+
+/// What a finding turned out to be once its round ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FindingKind {
+    /// In the diff under review: the fix must change it before the pull
+    /// request goes on.
+    Blocker,
+    /// Outside the diff under review: a follow-up task of its own, which
+    /// does not hold the pull request.
+    FollowUp,
+}
+
+impl FindingKind {
+    /// The word the kind is kept as.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Blocker => "blocker",
+            Self::FollowUp => "follow_up",
+        }
+    }
+}
+
+/// A finding as its round keeps it.
+#[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewFinding {
+    /// The reviewer's Step: its place among the Run's Steps.
+    pub seq: u16,
+    /// Its place among what the reviewer handed back, from 1.
+    pub place: u16,
+    /// The Role of the reviewer that found it.
+    pub role: Option<Role>,
+    /// The file, from the repository's root.
+    pub path: String,
+    /// The lines it is about; none for the whole file.
+    pub lines: Option<Lines>,
+    /// What is wrong.
+    pub problem: String,
+    /// Why it must change.
+    pub why: String,
+    /// What it turned out to be; none while its round reviews.
+    pub kind: Option<FindingKind>,
+    /// The follow-up task it became, when it is a follow-up and the task
+    /// was made: its task document's id.
+    pub follow_up_task_id: Option<Uuid>,
+}
+
+/// How a review round ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewRoundOutcome {
+    /// No Blocker in the diff under review.
+    Pass,
+    /// One or more Blockers, for the fix.
+    Changes,
+    /// A reviewer's work failed.
+    Failed,
+}
+
+impl ReviewRoundOutcome {
+    /// The word the outcome is kept as, which is also the outcome the Flow
+    /// routes.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pass => "pass",
+            Self::Changes => "changes",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+/// A review round that has ended.
+#[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewRoundEnd {
+    /// How it ended.
+    pub outcome: ReviewRoundOutcome,
+    /// When.
+    pub ended_at: DateTime<Utc>,
+}
+
+/// One round of a Run's review panel.
+#[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewRound {
+    /// Which round of its entry, from 1; a reset counts from 1 again.
+    pub round: u16,
+    /// The place of its first Step among the Run's Steps; its reviewers'
+    /// Steps take this place and the ones after it.
+    pub seq: u16,
+    /// How many reviewers it has, each in a Step of its own.
+    pub reviewers: u16,
+    /// The commit of the Run's branch it reviews.
+    pub head_sha: String,
+    /// Where the diff under review starts: the Run's base branch, or the
+    /// commit the round before reviewed.
+    pub diff_base: String,
+    /// Whether it reviews the fix diff, the changes made since the round
+    /// before, rather than the Run's whole change.
+    pub fix_diff: bool,
+    /// When it started.
+    pub started_at: DateTime<Utc>,
+    /// How and when it ended; none while it reviews.
+    pub end: Option<ReviewRoundEnd>,
+    /// What its reviewers found, by Step and place.
+    pub findings: Vec<ReviewFinding>,
+}
+
+impl ReviewRound {
+    /// The places of its reviewers' Steps.
+    pub fn step_seqs(&self) -> std::ops::Range<u16> {
+        self.seq..self.seq.saturating_add(self.reviewers)
+    }
+
+    /// Its findings that turned out Blockers.
+    pub fn blockers(&self) -> impl Iterator<Item = &ReviewFinding> {
+        self.findings
+            .iter()
+            .filter(|finding| finding.kind == Some(FindingKind::Blocker))
+    }
+}
+
+/// A review round to record, before its reviewers start.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReviewRoundStart {
+    /// The place of its first Step.
+    pub seq: u16,
+    /// Which round of its entry, from 1.
+    pub round: u16,
+    /// How many reviewers it has.
+    pub reviewers: u16,
+    /// The commit it reviews.
+    pub head_sha: String,
+    /// Where the diff under review starts.
+    pub diff_base: String,
+    /// Whether it reviews the fix diff.
+    pub fix_diff: bool,
+}
+
+/// What a finding turned out to be, for [`ReviewRoundRepository::classify_findings`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FindingClass {
+    /// The reviewer's Step.
+    pub seq: u16,
+    /// The finding's place.
+    pub place: u16,
+    /// What it is.
+    pub kind: FindingKind,
+}
+
+/// Where a Run's review rounds are kept. A round's workflow repeats its
+/// writes when Temporal retries them, so each is safe to repeat: the first
+/// record, classification, task and end stay.
+pub trait ReviewRoundRepository: Send + Sync + 'static {
+    /// The error type returned by repository operations.
+    type Err: std::error::Error + Send + Sync + 'static;
+
+    /// Record that the Run `run_id` starts the review round `start`, and
+    /// return the round as recorded: recording it again keeps the first
+    /// record.
+    fn start_review_round(
+        &self,
+        run_id: RunId,
+        start: &ReviewRoundStart,
+    ) -> impl Future<Output = Result<ReviewRound, Self::Err>> + Send;
+
+    /// The Run's review rounds, in order, each with its findings.
+    fn review_rounds(
+        &self,
+        run_id: RunId,
+    ) -> impl Future<Output = Result<Vec<ReviewRound>, Self::Err>> + Send;
+
+    /// The review rounds of the Runs `ids`, each Run's in order. A Run with
+    /// no round has no entry.
+    fn runs_review_rounds(
+        &self,
+        ids: &[RunId],
+    ) -> impl Future<Output = Result<BTreeMap<RunId, Vec<ReviewRound>>, Self::Err>> + Send;
+
+    /// Record what the reviewer of the Step `key`, in the round that starts
+    /// at `round_seq`, found, replacing what an earlier attempt of the Step
+    /// recorded, while the Step has not ended. Whether it was recorded:
+    /// false once the Step ended.
+    fn record_findings(
+        &self,
+        key: StepKey,
+        round_seq: u16,
+        findings: &[Finding],
+    ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
+
+    /// Record what the findings of the Run's round `round_seq` turned out
+    /// to be. A finding already classified keeps its first kind.
+    fn classify_findings(
+        &self,
+        run_id: RunId,
+        round_seq: u16,
+        classes: &[FindingClass],
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// Record that the follow-up at `place` of the Step `key` became the
+    /// task `task_id`. A follow-up that already has its task keeps it.
+    fn link_follow_up(
+        &self,
+        key: StepKey,
+        place: u16,
+        task_id: Uuid,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// Record how the Run's round `seq` ended. A round that already ended
+    /// keeps its first end. The round as recorded.
+    fn end_review_round(
+        &self,
+        run_id: RunId,
+        seq: u16,
+        outcome: ReviewRoundOutcome,
+    ) -> impl Future<Output = Result<Option<ReviewRound>, Self::Err>> + Send;
+}

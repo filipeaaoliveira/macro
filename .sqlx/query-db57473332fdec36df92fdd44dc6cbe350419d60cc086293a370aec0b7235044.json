@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                run_id, seq, round, reviewers, head_sha, diff_base, fix_diff, started_at,\n                outcome, ended_at\n            FROM factory_review_round\n            WHERE run_id = ANY($1)\n            ORDER BY run_id, seq\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "run_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "seq",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "round",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "reviewers",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "head_sha",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "diff_base",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "fix_diff",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 7,
+        "name": "started_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "outcome",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "ended_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "db57473332fdec36df92fdd44dc6cbe350419d60cc086293a370aec0b7235044"
+}
