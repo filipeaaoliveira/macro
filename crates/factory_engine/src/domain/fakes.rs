@@ -144,6 +144,9 @@ pub(crate) struct FakeRepo {
     pub(crate) follow_ups_refused: Arc<Mutex<bool>>,
     /// The comments made on follow-up tasks, in order.
     pub(crate) follow_up_comments: Arc<Mutex<Vec<FollowUpComment>>>,
+    /// The calls that fail as an outage would, by name: how many calls of
+    /// it pass first, then how many fail.
+    pub(crate) failing: Arc<Mutex<BTreeMap<&'static str, (usize, usize)>>>,
     /// The prompt each reviewer's Step was asked again in.
     pub(crate) reasks: Arc<Mutex<Vec<(StepKey, Uuid)>>>,
 }
@@ -198,7 +201,7 @@ impl TaskDirectory for FakeRepo {
             let failing = *fails > 0;
             *fails = fails.saturating_sub(1);
             failing
-        };
+        } || self.fails("create_follow_up");
         if !fails || *self.follow_ups_made_anyway.lock().expect("anyway") {
             self.tasks.lock().expect("tasks").insert(task_id);
             self.follow_ups
@@ -226,6 +229,9 @@ impl TaskDirectory for FakeRepo {
         quote: &str,
         text: &str,
     ) -> Result<(), FakeError> {
+        if self.fails("comment_on_follow_up") {
+            return Err(FakeError);
+        }
         let quoted_once = self
             .follow_ups
             .lock()
@@ -248,6 +254,30 @@ impl TaskDirectory for FakeRepo {
 }
 
 impl FakeRepo {
+    /// Fail the call `name` once, after `passing` calls of it pass.
+    pub(crate) fn fail_once_after(&self, name: &'static str, passing: usize) {
+        self.failing
+            .lock()
+            .expect("failing")
+            .insert(name, (passing, 1));
+    }
+
+    /// Whether this call of `name` fails, as `fail_once_after` set.
+    pub(crate) fn fails(&self, name: &'static str) -> bool {
+        let mut failing = self.failing.lock().expect("failing");
+        match failing.get_mut(name) {
+            Some((passing, _)) if *passing > 0 => {
+                *passing -= 1;
+                false
+            }
+            Some((_, failures)) if *failures > 0 => {
+                *failures -= 1;
+                true
+            }
+            _ => false,
+        }
+    }
+
     fn with_step<T>(&self, key: StepKey, change: impl FnOnce(&mut Step) -> T) -> Option<T> {
         let mut steps = self.steps.lock().expect("steps");
         steps

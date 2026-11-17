@@ -168,6 +168,7 @@ impl ReviewRoundRepository for FakeRepo {
                 kind: None,
                 follow_up_task_id: None,
                 follow_up_key: None,
+                follow_up_commented: false,
             })
             .collect();
         self.with_round(key.run_id, round_seq, |round| {
@@ -205,6 +206,9 @@ impl ReviewRoundRepository for FakeRepo {
         place: u16,
         candidate: Uuid,
     ) -> Result<Option<Uuid>, FakeError> {
+        if self.fails("follow_up_key") {
+            return Err(FakeError);
+        }
         let mut rounds = self.review_rounds.lock().expect("rounds");
         let found = rounds
             .iter_mut()
@@ -243,6 +247,9 @@ impl ReviewRoundRepository for FakeRepo {
         place: u16,
         task_id: Uuid,
     ) -> Result<(), FakeError> {
+        if self.fails("link_follow_up") {
+            return Err(FakeError);
+        }
         let mut rounds = self.review_rounds.lock().expect("rounds");
         let found = rounds
             .iter_mut()
@@ -254,6 +261,25 @@ impl ReviewRoundRepository for FakeRepo {
         {
             finding.follow_up_task_id.get_or_insert(task_id);
         }
+        Ok(())
+    }
+
+    async fn mark_follow_up_commented(
+        &self,
+        run_id: RunId,
+        round_seq: u16,
+        task_id: Uuid,
+    ) -> Result<(), FakeError> {
+        if self.fails("mark_follow_up_commented") {
+            return Err(FakeError);
+        }
+        self.with_round(run_id, round_seq, |round| {
+            for finding in &mut round.findings {
+                if finding.follow_up_task_id == Some(task_id) {
+                    finding.follow_up_commented = true;
+                }
+            }
+        });
         Ok(())
     }
 

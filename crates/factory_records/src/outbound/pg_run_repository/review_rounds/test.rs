@@ -124,7 +124,8 @@ async fn a_round_keeps_its_first_record_and_the_findings_its_step_ended_with(poo
 }
 
 /// A finding keeps its first kind and its first task, and a round its
-/// first end; a Blocker never gets a task.
+/// first end; a Blocker never gets a task. A comment on a follow-up task
+/// is marked on the round's findings linked to it, and on no other.
 #[sqlx::test(
     migrator = "MACRO_DB_MIGRATIONS",
     fixtures(path = "../fixtures", scripts("people", "tasks"))
@@ -168,6 +169,19 @@ async fn a_finding_keeps_its_first_kind_and_task_and_a_round_its_first_end(pool:
     repo.link_follow_up(key, 2, task).await.expect("link");
     repo.link_follow_up(key, 2, other).await.expect("relink");
     repo.link_follow_up(key, 1, other).await.expect("blocker");
+    let commented =
+        |round_seq: u16, task_id: Uuid| repo.mark_follow_up_commented(id, round_seq, task_id);
+    commented(3, other).await.expect("another task");
+    commented(6, task).await.expect("another round");
+    let before = repo.review_rounds(id).await.expect("rounds").remove(0);
+    assert!(
+        before
+            .findings
+            .iter()
+            .all(|found| !found.follow_up_commented)
+    );
+    commented(3, task).await.expect("commented");
+    commented(3, task).await.expect("again");
 
     let ended = repo
         .end_review_round(id, 3, ReviewRoundOutcome::Changes)
@@ -188,13 +202,20 @@ async fn a_finding_keeps_its_first_kind_and_task_and_a_round_its_first_end(pool:
     let kinds: Vec<_> = again
         .findings
         .iter()
-        .map(|found| (found.place, found.kind, found.follow_up_task_id))
+        .map(|found| {
+            (
+                found.place,
+                found.kind,
+                found.follow_up_task_id,
+                found.follow_up_commented,
+            )
+        })
         .collect();
     assert_eq!(
         kinds,
         [
-            (1, Some(FindingKind::Blocker), None),
-            (2, Some(FindingKind::FollowUp), Some(task)),
+            (1, Some(FindingKind::Blocker), None, false),
+            (2, Some(FindingKind::FollowUp), Some(task), true),
         ]
     );
     assert_eq!(again.blockers().count(), 1);
