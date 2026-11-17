@@ -116,6 +116,8 @@ fn plan_request() -> StepRequest {
         role: Some(Role::try_from("planner".to_string()).expect("valid")),
         visit: 1,
         round: None,
+        may_ask: false,
+        resumes: None,
     }
 }
 

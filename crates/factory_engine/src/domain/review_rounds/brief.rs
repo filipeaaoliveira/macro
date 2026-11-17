@@ -105,7 +105,7 @@ pub fn fenced_review(output: &str) -> String {
 /// no tag in any case or spacing (no `<` or `>` is left), opens no code
 /// block, and no line of it reads as a heading, an ATX one (`#`) or the
 /// underline of a setext one (`===`, `---`).
-fn escape(text: &str) -> String {
+pub(crate) fn escape(text: &str) -> String {
     text.replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace("```", "\\`\\`\\`")

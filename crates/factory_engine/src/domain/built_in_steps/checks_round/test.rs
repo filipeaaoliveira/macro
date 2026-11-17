@@ -290,6 +290,9 @@ fn input() -> StepInput<'static> {
         repository: Some(&REPOSITORY),
         earlier: &[],
         review: None,
+        reviewer: false,
+        may_ask: false,
+        resumes: None,
     }
 }
 

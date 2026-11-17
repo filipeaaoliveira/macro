@@ -205,6 +205,13 @@ pub struct Flow {
     pub facts: BTreeMap<FactName, bool>,
     /// The entries, in order. A Run starts at the first.
     pub entries: Vec<Entry>,
+    /// How many questions an agent Step may put to the Run's owner, each
+    /// ending the Step on a question Gate the same Role goes on from with
+    /// the answer; the next question after them ends the Run `manual`, for
+    /// a person. None for a Flow whose agents ask nothing, as every Run
+    /// started before questions has: their workflows replay as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub questions: Option<u8>,
 }
 
 /// What is wrong with a Flow definition.
@@ -290,6 +297,12 @@ impl Flow {
             .map_err(|error| FlowError::Unreadable(error.to_string()))?;
         flow.check(serves)?;
         Ok(flow)
+    }
+
+    /// Let its agent Steps ask the Run's owner up to `questions` questions
+    /// each.
+    pub fn allow_questions(&mut self, questions: u8) {
+        self.questions = Some(questions);
     }
 
     /// Bound each review panel to `rounds` rounds, in place of the

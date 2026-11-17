@@ -565,6 +565,8 @@ impl FactoryError {
             | FactoryError::NotAStepSession
             | FactoryError::OutcomeNotOffered { .. }
             | FactoryError::HandBackTooLarge { .. }
+            | FactoryError::QuestionSize { .. }
+            | FactoryError::AnswerMissing
             | FactoryError::ControlFilesNotApproved
             | FactoryError::InvalidControlFiles(_) => StatusCode::BAD_REQUEST,
             FactoryError::NotTheOwner | FactoryError::NotAPerson | FactoryError::NotATeamAdmin => {

@@ -518,6 +518,8 @@ async fn a_step_reads_its_round_or_the_latest_that_ended() {
         role: Some(role("fixer")),
         visit: 1,
         round: None,
+        may_ask: false,
+        resumes: None,
     };
     steps.start_step(fix.clone()).await.expect("start");
     steps.run_step(fix.clone()).await.expect("run");

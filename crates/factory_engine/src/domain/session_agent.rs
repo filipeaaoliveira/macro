@@ -551,6 +551,66 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
     }
 }
 
+impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
+    /// Do the Step `task`, which goes on from the question of the Step at
+    /// `asked`, in that Step's session: the agent has the Step's
+    /// instructions and its work so far there. The Step claims the session
+    /// under a prompt of its own, so a retry goes on with that prompt, and
+    /// the session's hand back reaches this Step, the one that runs. No
+    /// other Agent takes it over, whatever the session answers: the work is
+    /// in this one.
+    async fn go_on(
+        &self,
+        task: &AgentTask,
+        asked: u16,
+        deadline: tokio::time::Instant,
+    ) -> Result<AgentAnswer, SessionAgentError> {
+        let asking = StepKey {
+            run_id: task.key.run_id,
+            seq: asked,
+        };
+        let asked_in = self
+            .repo
+            .claimed_session(asking)
+            .await
+            .map_err(Self::records)?
+            .ok_or(SessionAgentError::NoSession)?;
+        let session = self
+            .repo
+            .claim_session(
+                task.key,
+                StepSession {
+                    action_id: Uuid::now_v7(),
+                    ..asked_in
+                },
+                &task.role,
+                &task.outcomes,
+            )
+            .await
+            .map_err(Self::records)?
+            .session;
+        self.still_holds(task.key, session.session_id).await?;
+        // The session opened for the asking Step, so a stop of this one
+        // deletes it rather than write it off.
+        self.repo
+            .record_open(task.key, session.session_id)
+            .await
+            .map_err(Self::records)?;
+        let action = Self::action(&task.owner, &session, self.bot(&session, &task.role)?);
+        let prompted = self
+            .sessions
+            .follow_up(PromptRoutineSession {
+                action: action.clone(),
+                prompt: prompt(&task.prompt, &task.outcomes),
+                context: None,
+            })
+            .await;
+        self.prompt_once(&action, prompted).await?;
+        self.finished(&action, deadline).await?;
+        self.handed_back(task.key, action.action_id.as_uuid()).await
+    }
+}
+
 impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
     type Err = SessionAgentError;
 
@@ -562,6 +622,9 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
             until(answer_by).min(SESSION_DEADLINE)
         });
         let deadline = tokio::time::Instant::now() + left;
+        if let Some(asked) = task.resumes {
+            return self.go_on(&task, asked, deadline).await;
+        }
         let agents = self.agents.for_role(&task.role);
         let first = agents
             .first()

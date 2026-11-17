@@ -91,6 +91,9 @@ fn input(run_id: RunId) -> StepInput<'static> {
         created_in_person: false,
         control_file_patterns: None,
         review: None,
+        reviewer: false,
+        may_ask: false,
+        resumes: None,
     }
 }
 

@@ -2,14 +2,14 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use factory_records::domain::models::{
-    AgentName, EntryId, HandBack, HandedBack, NewRun, Outcome, Role, RunId, RunInsert, RunOutcome,
-    StepKey, StepSession,
+    AgentName, EntryId, HandBack, HandedBack, MAX_QUESTION_BYTES, NewRun, Outcome, Role, RunId,
+    RunInsert, RunOutcome, StepKey, StepSession,
 };
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
-use super::{FactoryServiceImpl, StepServiceImpl};
+use super::{DEFAULT_QUESTIONS, FactoryServiceImpl, StepServiceImpl};
 use crate::domain::fakes::{FakeGithub, FakeRepo};
 use crate::domain::flow::{StepName, StepUse};
 use crate::domain::gate::AnswerGate;
@@ -174,6 +174,8 @@ fn reply_step(run_id: RunId, seq: u16) -> StepRequest {
         role: None,
         visit: 1,
         round: None,
+        may_ask: false,
+        resumes: None,
     }
 }
 
@@ -1075,4 +1077,136 @@ async fn a_task_s_list_holds_its_owner_s_fifty_newest_runs() {
     let listed: Vec<RunId> = listed.iter().map(|detail| detail.run.id).collect();
     let newest: Vec<RunId> = started.iter().rev().take(50).copied().collect();
     assert_eq!(listed, newest);
+}
+
+/// An agent's question is put to a person on a Gate, which keeps what fits
+/// on one: an empty question, or one too long to keep, is refused, so the
+/// agent hears it must ask again.
+#[tokio::test]
+async fn a_question_must_fit_a_gate() {
+    let repo = FakeRepo::default();
+    let run_id = julia_s_run(&repo).await;
+    let key = StepKey { run_id, seq: 1 };
+    let entry = EntryId::try_from("plan".to_string()).expect("valid");
+    repo.start_step(key, &entry, 1).await.expect("start");
+    let session = StepSession {
+        session_id: Uuid::now_v7(),
+        action_id: Uuid::now_v7(),
+        agent: None,
+        bot: None,
+    };
+    let session_id = session.session_id;
+    let planner = Role::try_from("planner".to_string()).expect("valid");
+    repo.claim_session(
+        key,
+        session,
+        &planner,
+        &[Outcome::done(), Outcome::question()],
+    )
+    .await
+    .expect("claim");
+    let service = service(&repo, &FakeWorkflows::default());
+    let asking = |output: String| HandBack {
+        outcome: Outcome::question(),
+        output,
+    };
+
+    let empty = service
+        .hand_back(session_id, julia(), asking("  \n".to_string()))
+        .await;
+    let long = service
+        .hand_back(
+            session_id,
+            julia(),
+            asking("?".repeat(MAX_QUESTION_BYTES + 1)),
+        )
+        .await;
+    service
+        .hand_back(session_id, julia(), asking("CSV or JSON?".to_string()))
+        .await
+        .expect("a question that fits");
+
+    assert!(matches!(empty, Err(FactoryError::QuestionSize { .. })));
+    assert!(matches!(long, Err(FactoryError::QuestionSize { .. })));
+}
+
+/// An agent's question is answered in the owner's own words: an answer to
+/// a question Gate with no note never reaches the workflow.
+#[tokio::test]
+async fn a_question_is_answered_in_words() {
+    let repo = FakeRepo::default();
+    let workflows = FakeWorkflows::default();
+    let run_id = julia_s_run(&repo).await;
+    let key = StepKey { run_id, seq: 1 };
+    let entry = EntryId::try_from("plan".to_string()).expect("valid");
+    repo.start_step(key, &entry, 1).await.expect("start");
+    repo.end_step(key, &Outcome::question(), "CSV or JSON?")
+        .await
+        .expect("end");
+    repo.open_gate(key, "CSV or JSON?", &[Outcome::answer()])
+        .await
+        .expect("open");
+    let service = service(&repo, &workflows);
+
+    let blank = service
+        .answer_gate(
+            julia(),
+            run_id,
+            1,
+            Outcome::answer(),
+            Some(" ".to_string()),
+            None,
+        )
+        .await;
+    let none = service
+        .answer_gate(julia(), run_id, 1, Outcome::answer(), None, None)
+        .await;
+    service
+        .answer_gate(
+            julia(),
+            run_id,
+            1,
+            Outcome::answer(),
+            Some("CSV".to_string()),
+            None,
+        )
+        .await
+        .expect("answer");
+
+    assert!(matches!(blank, Err(FactoryError::AnswerMissing)));
+    assert!(matches!(none, Err(FactoryError::AnswerMissing)));
+    let answers = workflows.answers.lock().expect("answers").clone();
+    assert_eq!(answers.len(), 1);
+    assert_eq!(answers[0].note.as_deref(), Some("CSV"));
+}
+
+/// A Run started now lets its agents ask the service's questions, kept in
+/// the Flow it starts with.
+#[tokio::test]
+async fn a_run_s_flow_keeps_how_many_questions_its_agents_may_ask() {
+    let repo = FakeRepo::default();
+    let workflows = FakeWorkflows::default();
+
+    for (questions, expected) in [(None, DEFAULT_QUESTIONS), (Some(0), 0)] {
+        let service = match questions {
+            Some(questions) => service(&repo, &workflows).with_questions(questions),
+            None => service(&repo, &workflows),
+        };
+        service
+            .create_run(
+                julia(),
+                "reply".to_string(),
+                "Summarise the release notes".to_string(),
+                None,
+                None,
+                true,
+            )
+            .await
+            .expect("create");
+        let started = workflows.started.lock().expect("started").clone();
+        assert_eq!(
+            started.last().expect("started").flow.questions,
+            Some(expected)
+        );
+    }
 }

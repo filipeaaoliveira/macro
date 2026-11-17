@@ -23,6 +23,7 @@ use crate::domain::ports::{
     AgentFailure, MainWatches, PullRequests, Retryable, StepAgent, StepExecutor,
 };
 use crate::domain::pull_request_steps::{PullRequestStepError, PullRequestSteps};
+use crate::domain::questions::{ASK_INSTRUCTIONS, answers_brief, going_on_prompt};
 use crate::domain::review_rounds::{blockers_brief, fenced_review};
 
 /// What the agent is told for a `plan` Step.
@@ -155,6 +156,10 @@ pub enum BuiltInStepError {
     /// A pull request Step could not be done.
     #[error(transparent)]
     PullRequest(#[from] PullRequestStepError),
+    /// The Step goes on from a question its Run's records show no answer
+    /// to.
+    #[error("step {0}'s question has no answer to go on with")]
+    Unanswered(u16),
 }
 
 impl BuiltInStepError {
@@ -175,7 +180,8 @@ impl Retryable for BuiltInStepError {
             BuiltInStepError::UnknownStep(_)
             | BuiltInStepError::NotAnAgentStep(_)
             | BuiltInStepError::NoRepository(_)
-            | BuiltInStepError::UnexpectedOutcome { .. } => false,
+            | BuiltInStepError::UnexpectedOutcome { .. }
+            | BuiltInStepError::Unanswered(_) => false,
         }
     }
 }
@@ -235,16 +241,30 @@ where
         input: StepInput<'_>,
         answer_by: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<StepReport, BuiltInStepError> {
+        let mut outcomes = outcomes;
+        if input.may_ask {
+            outcomes.push(Outcome::question());
+        }
+        // A Step that goes on from its agent's question prompts the session
+        // the agent asked in with the owner's answer: the agent has the
+        // Step's instructions and its work so far there.
+        let prompt = match input.resumes {
+            Some(asked) => {
+                going_on_prompt(input.earlier, asked).ok_or(BuiltInStepError::Unanswered(asked))?
+            }
+            None => prompt(instructions, &outcomes, input),
+        };
         let task = AgentTask {
             key: input.key,
             owner: input.owner.clone(),
             step: step.clone(),
             role: agent_role(step, input.role)
                 .ok_or_else(|| BuiltInStepError::NotAnAgentStep(step.clone()))?,
-            prompt: prompt(instructions, &outcomes, input),
+            prompt,
             outcomes: outcomes.clone(),
             repo_url: input.repository.map(|repository| repository.url.clone()),
             answer_by,
+            resumes: input.resumes,
         };
         let answer = self
             .agent
@@ -325,7 +345,7 @@ where
                 }
             }
             BuiltInStep::Review => match input.review {
-                Some(round) if in_round(round, input.key.seq) => {
+                Some(round) if input.reviewer || in_round(round, input.key.seq) => {
                     self.review_in_round(step, round, input).await
                 }
                 _ => {
@@ -418,22 +438,26 @@ fn fix_instructions(review: Option<&ReviewRound>) -> String {
 const HISTORY_BUDGET: usize = 48 * 1024;
 
 /// The agent's prompt: the Step's instructions, the outcomes it may end
-/// with, where it works when the Run works on a repository ([`workplace`]),
-/// the Run's request, then the Run's earlier Steps ([`history`]).
+/// with, how to ask the Run's owner when it may, where it works when the
+/// Run works on a repository ([`workplace`]), the Run's request, the
+/// questions the owner answered ([`answers_brief`]), then the Run's earlier
+/// Steps ([`history`]).
 fn prompt(instructions: &str, outcomes: &[Outcome], input: StepInput<'_>) -> String {
     let outcomes = outcomes
         .iter()
         .map(|outcome| format!("`{outcome}`"))
         .collect::<Vec<_>>()
         .join(", ");
+    let ask = if input.may_ask { ASK_INSTRUCTIONS } else { "" };
     let workplace = input
         .repository
         .map(|repository| workplace(repository, &run_branch(input.key.run_id)))
         .unwrap_or_default();
     format!(
-        "{instructions}\nEnd the step with one of these outcomes: {outcomes}.\n{workplace}\n\
-         ## Request\n\n{}\n{}",
+        "{instructions}\nEnd the step with one of these outcomes: {outcomes}.\n{ask}{workplace}\n\
+         ## Request\n\n{}\n{}{}",
         input.request,
+        answers_brief(input.earlier),
         history(input.earlier)
     )
 }

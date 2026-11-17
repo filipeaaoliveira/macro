@@ -28,6 +28,7 @@ use crate::domain::models::AgentTask;
 use crate::domain::ports::{Retryable, StepAgent};
 
 mod follow_up;
+mod going_on;
 mod run_check;
 
 /// What happens to one call: it works, or fails with this error. A call
@@ -411,6 +412,7 @@ async fn plan_task(repo: &FakeRepo) -> AgentTask {
         outcomes: vec![Outcome::done()],
         repo_url: None,
         answer_by: None,
+        resumes: None,
     }
 }
 

@@ -49,6 +49,15 @@ pub struct StepRequest {
     /// first Step; none for a Step of no review panel.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub round: Option<u16>,
+    /// Whether its agent may ask the Run's owner a question, ending the
+    /// Step `question`: its Flow lets agents ask.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub may_ask: bool,
+    /// The Step whose agent asked the question this Step goes on from, by
+    /// its place: this Step works in that Step's session, with the owner's
+    /// answer. None for a Step that starts its work.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resumes: Option<u16>,
 }
 
 impl StepRequest {
@@ -62,6 +71,8 @@ impl StepRequest {
             role: entry.role.clone(),
             visit,
             round: None,
+            may_ask: false,
+            resumes: None,
         }
     }
 
@@ -76,6 +87,25 @@ impl StepRequest {
             role: Some(role.clone()),
             visit,
             round: Some(round),
+            may_ask: false,
+            resumes: None,
+        }
+    }
+
+    /// This Step, letting its agent ask the Run's owner a question when
+    /// `may_ask`.
+    pub fn asking(mut self, may_ask: bool) -> Self {
+        self.may_ask = may_ask;
+        self
+    }
+
+    /// The Step `key` that goes on from this one's question, as the same
+    /// visit of its entry, in its session.
+    pub fn going_on(&self, key: StepKey) -> Self {
+        Self {
+            key,
+            resumes: Some(self.key.seq),
+            ..self.clone()
         }
     }
 }
@@ -116,6 +146,13 @@ pub struct StepInput<'a> {
     /// For a reviewer's Step, the review round it reviews in; for any
     /// other, the Run's latest review round that ended before it.
     pub review: Option<&'a ReviewRound>,
+    /// Whether it is a reviewer's Step of a review panel.
+    pub reviewer: bool,
+    /// Whether its agent may ask the Run's owner a question.
+    pub may_ask: bool,
+    /// The Step whose question it goes on from, by its place: its agent
+    /// goes on in that Step's session, with the owner's answer.
+    pub resumes: Option<u16>,
 }
 
 /// What an agent is asked to do for one Step.
@@ -139,6 +176,10 @@ pub struct AgentTask {
     /// When to stop waiting for the agent's answer, at the latest, when the
     /// Step sets a time of its own; the attempt's own deadline holds too.
     pub answer_by: Option<DateTime<Utc>>,
+    /// The Step whose question this one goes on from, by its place: the
+    /// agent is prompted in that Step's session, which it goes on in, not
+    /// a new one. None for a Step that starts its work.
+    pub resumes: Option<u16>,
 }
 
 /// A later prompt an agent is asked to work on, in the session it did its
@@ -611,6 +652,15 @@ pub enum FactoryError {
         /// The outcomes the Step offers.
         offered: Vec<String>,
     },
+    /// A question is empty, or larger than a Gate's question keeps.
+    #[error("a question must not be empty, and must be at most {max} bytes")]
+    QuestionSize {
+        /// The most bytes a question may hold.
+        max: usize,
+    },
+    /// An answer to an agent's question carries no words in its note.
+    #[error("an agent's question is answered in the note: it must not be empty")]
+    AnswerMissing,
     /// A hand back is larger than a Step's output keeps.
     #[error("what is handed back must be at most {max} bytes")]
     HandBackTooLarge {
