@@ -4,7 +4,7 @@
  * factory_engine
  * OpenAPI spec version: 0.1.0
  */
-
+import type { CheckRound } from './checkRound';
 import type { EntryId } from './entryId';
 import type { StepEndProperty } from './stepEndProperty';
 import type { StepGate } from './stepGate';
@@ -13,6 +13,9 @@ import type { StepGate } from './stepGate';
  * One visit of one of a Run's entries.
  */
 export interface Step {
+  /** The rounds of the repository's checks it ran, in order: none for a
+Step that runs no checks. */
+  checks: CheckRound[];
   end?: StepEndProperty;
   /** The entry the Step visits. */
   entry: EntryId;

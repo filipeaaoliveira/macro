@@ -19,6 +19,50 @@ export type AnswerGateRequest = {
 };
 
 /**
+ * One round of the repository's checks a Step ran on its agent's work, in
+ * the agent's session.
+ */
+export type CheckRound = {
+    /**
+     * The names of the checks it runs, in the repository's order.
+     */
+    checks: Array<string>;
+    end?: null | CheckRoundEnd;
+    /**
+     * Which round, from 1.
+     */
+    round: number;
+    /**
+     * When it started.
+     */
+    startedAt: string;
+};
+
+/**
+ * A round of checks that has ended.
+ */
+export type CheckRoundEnd = {
+    /**
+     * When the round ended.
+     */
+    endedAt: string;
+    /**
+     * How the checks went.
+     */
+    outcome: CheckRoundOutcome;
+    /**
+     * What the agent reported of each check, for a person and for the
+     * agent's fix to read.
+     */
+    report: string;
+};
+
+/**
+ * How a round of a Step's checks ended.
+ */
+export type CheckRoundOutcome = 'passed' | 'failed';
+
+/**
  * Request body for creating a Run.
  */
 export type CreateRunRequest = {
@@ -476,6 +520,11 @@ export type RunTokens = {
  * One visit of one of a Run's entries.
  */
 export type Step = {
+    /**
+     * The rounds of the repository's checks it ran, in order: none for a
+     * Step that runs no checks.
+     */
+    checks: Array<CheckRound>;
     end?: null | StepEnd;
     /**
      * The entry the Step visits.

@@ -7,6 +7,10 @@
 
 export * from './answerGateRequest';
 export * from './answerGateRequestNote';
+export * from './checkRound';
+export * from './checkRoundEnd';
+export * from './checkRoundEndProperty';
+export * from './checkRoundOutcome';
 export * from './createRunRequest';
 export * from './createRunRequestRepoUrl';
 export * from './createRunRequestTaskId';
