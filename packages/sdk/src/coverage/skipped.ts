@@ -115,7 +115,6 @@ export const authExcluded = [
   'passwordLogin',
   'passwordlessCallback',
   'passwordlessLogin',
-  'patchTeam',
   'patchTeamCrmSettings',
   'patchTeamMemberPlan',
   'patchUserGroup',
@@ -227,7 +226,6 @@ export const cognitionExcluded = [
   'updatePipedreamMcpConnection',
   'updateToolCall',
   'updateToolResponse',
-  'upsertAiProjection',
 ] as const satisfies readonly (keyof CognitionSdk)[];
 
 export const cognitionBacklog =
@@ -436,9 +434,12 @@ export const storageExcluded = [
   'meetingLeave',
   'meetingParticipants',
   'mentionPreviews',
-  // The v1 vault requires a normal human session and item access.
-  // Agent SDK credentials cannot access it.
+  // The v1 vault, and the human review of agent access requests, require a
+  // normal human session and item access. Agent SDK credentials cannot access it.
   'passwordsActivity',
+  'passwordsAgentAccessRequests',
+  'passwordsAgentResolveRequest',
+  'passwordsAgentRevoke',
   'passwordsCopy',
   'passwordsCopyUsername',
   'passwordsCreate',
@@ -447,7 +448,9 @@ export const storageExcluded = [
   'passwordsFolders',
   'passwordsGrants',
   'passwordsHistory',
+  'passwordsImportBatch',
   'passwordsList',
+  'passwordsMatch',
   'passwordsMoveFolder',
   'passwordsPatch',
   'passwordsRemove',
@@ -494,6 +497,7 @@ export const storageExcluded = [
 export const storageBacklog = [
   // CRM privacy settings use the generated client.
   'getCrmEmailPrivacy',
+  'listCrmExcludedEmailThreads',
   'updateCrmEmailPrivacy',
 ] as const satisfies readonly (keyof StorageSdk)[];
 

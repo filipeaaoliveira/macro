@@ -51,6 +51,7 @@ import {
   ROUTINES_ROUTE_ID,
 } from '@app/features/routines/routine-navigation';
 import { bookingLinksSearch } from '@app/features/scheduling/booking-links-search';
+import { forYouSearch } from '@app/features/suggestions/for-you-search';
 import {
   defineRoute,
   type Entry,
@@ -583,6 +584,13 @@ export const recentRoute = defineRoute({
   claim: () => ({ namespace: 'component', id: 'recent' }),
 });
 
+export const forYouRoute = defineRoute({
+  id: 'view-for-you',
+  path: 'for-you',
+  search: [forYouSearch.namespace],
+  claim: () => ({ namespace: 'component', id: 'for-you' }),
+});
+
 export const passwordsRoute = defineRoute({
   id: 'view-passwords',
   path: 'passwords',
@@ -1002,7 +1010,6 @@ const debugComponentIds = [
         'user-icon',
         'dynamic-ui',
         'agent-ui',
-        'agent-replay',
         'agent-progress',
         'agent-changes-ui',
         'diff-view-ui',
@@ -1012,7 +1019,6 @@ const debugComponentIds = [
   ...(DEV_MODE_ENV
     ? [
         'document-where-playground',
-        'projection-playground',
         'md-parse',
         'md-builder',
         'collab-surface-demo',

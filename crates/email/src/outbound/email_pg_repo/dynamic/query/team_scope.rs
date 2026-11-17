@@ -80,6 +80,8 @@ impl TeamReadTuning {
 enum Stream {
     /// The threads the address indexes list for the record, sorted.
     Superset,
+    /// A superset the initial capped probe found small enough for indexed lookups.
+    SparseSuperset,
     /// Each inbox's newest threads, merged, up to a window.
     Inboxes,
 }
@@ -87,7 +89,8 @@ enum Stream {
 /// `crm_email_thread_allowed` for thread `t`, set-based: the
 /// `contributing`, `team_blocked` and `personal_blocked` CTEs hold its
 /// mailbox conditions and blocklists once per page instead of once per
-/// participant of every thread. A participant
+/// participant of every thread. The separate thread-exclusion veto is an
+/// indexed lookup for each candidate or competing copy. A participant
 /// domain is blocked when it, or what follows any of its dots, equals a
 /// blocked domain, which is the function's `right(…) = '.' || domain` test.
 /// `IS TRUE` keeps the membership test a hashed subplan.
@@ -95,6 +98,7 @@ const ALLOWED: &str = r#"
                   AND EXISTS (
                       SELECT 1 FROM contributing cb
                       WHERE cb.link_id = t.link_id
+                        AND NOT crm_email_thread_excluded(cb.team_id, cb.macro_id, cb.link_id, t.id)
                         AND EXISTS (
                             SELECT 1 FROM email_messages pm
                             WHERE pm.thread_id = t.id AND NOT pm.is_draft
@@ -226,6 +230,8 @@ impl<'a> TeamRead<'a> {
                 .fetch_one(&mut *connection)
                 .await?;
             span.record("superset_rows", superset_rows);
+            #[cfg(test)]
+            test::pause_after_probe(superset_rows).await;
             self.read(connection, deadline, superset_rows).await?
         };
         span.record("stream", stream);
@@ -241,7 +247,9 @@ impl<'a> TeamRead<'a> {
         superset_rows: i64,
     ) -> Result<(&'static str, Vec<ThreadPreviewCursorDbRow>), sqlx::Error> {
         if superset_rows <= self.tuning.superset_limit {
-            let rows = self.page(connection, deadline, Stream::Superset).await?;
+            let rows = self
+                .page(connection, deadline, Stream::SparseSuperset)
+                .await?;
             return Ok(("superset", rows));
         }
         let rows = self.page(connection, deadline, Stream::Inboxes).await?;
@@ -274,7 +282,8 @@ impl<'a> TeamRead<'a> {
         let mut builder = QueryBuilder::new("");
         let AddressSuperset {
             contact_ctes,
-            branches,
+            indexed_branches: branches,
+            ..
         } = self.superset.clone();
         let mut separator = "WITH ";
         for (name, body) in contact_ctes {
@@ -326,13 +335,15 @@ impl<'a> TeamRead<'a> {
         self.push_stream(&mut builder, stream, sort_ts_field);
         // The checks run per streamed thread, in order: `OFFSET 0` keeps the
         // planner from turning them into a join over the whole stream, and
-        // the ORDER BY, already the stream's, keeps it from sorting.
+        // the ORDER BY, already the stream's, keeps it from sorting. They
+        // read only the thread's id and inbox, which the stream already
+        // holds, so no thread is fetched again.
         builder.push(
             r#"
                 ) AS stream
                 WHERE EXISTS (
-                    SELECT 1 FROM email_threads t
-                    WHERE t.id = stream.id"#,
+                    SELECT 1 FROM (SELECT stream.id, stream.link_id) AS t
+                    WHERE TRUE"#,
         );
         self.push_checks(&mut builder);
         // A better copy is any copy in the inboxes that passes the same
@@ -341,6 +352,9 @@ impl<'a> TeamRead<'a> {
         // inbox's contacts; a message naming another inbox's contact would
         // let a copy the superset misses hide this one
         // (docs/CRM_EMAIL_PRIVACY.md).
+        // Fetch each copy by primary key before dedupe or privacy checks.
+        // Stale statistics can otherwise rescan the mailbox and repeat
+        // root-message lookups for each returned row.
         builder.push(
             r#"
                     OFFSET 0
@@ -361,7 +375,9 @@ impl<'a> TeamRead<'a> {
                     SELECT CASE WHEN ranked.dedupe_key ~ {UUID_TEXT}
                                 THEN ranked.dedupe_key::uuid END
                 ) AS copy
-                JOIN email_threads t ON t.id = copy.id
+                CROSS JOIN LATERAL (
+                    SELECT * FROM email_threads WHERE id = copy.id OFFSET 0
+                ) AS t
                 WHERE t.id <> ranked.id AND t.link_id = ANY("#
         ));
         builder.push_bind(self.inboxes.clone());
@@ -402,7 +418,7 @@ impl<'a> TeamRead<'a> {
         builder.push(
             r#"
         WITH contributing AS MATERIALIZED (
-            SELECT l.id AS link_id, l.macro_id
+            SELECT consent.team_id, l.id AS link_id, l.macro_id
             FROM email_links l
             JOIN crm_email_consent consent
               ON consent.team_id = "#,
@@ -447,11 +463,17 @@ impl<'a> TeamRead<'a> {
             r#" AND b.user_id IN (SELECT macro_id FROM contributing)
         )"#,
         );
-        if stream == Stream::Superset {
+        if matches!(stream, Stream::Superset | Stream::SparseSuperset) {
             let AddressSuperset {
                 contact_ctes,
                 branches,
+                indexed_branches,
             } = self.superset.clone();
+            let branches = if stream == Stream::SparseSuperset {
+                indexed_branches
+            } else {
+                branches
+            };
             for (name, body) in contact_ctes {
                 builder.push(format!(",\n        {name} AS MATERIALIZED (\n            "));
                 body.push_into(builder, &self.params.user_id);
@@ -470,11 +492,17 @@ impl<'a> TeamRead<'a> {
         sort_ts_field: &str,
     ) {
         match stream {
-            Stream::Superset => {
+            Stream::Superset | Stream::SparseSuperset => {
+                // Each superset thread by its id: as a semi-join the planner
+                // hashes the superset against every thread of the inboxes,
+                // which reads all of them before the sort.
                 self.push_stream_select(builder, sort_ts_field);
-                builder.push("t.link_id = ANY(");
+                builder.push(
+                    "t.id = ANY(ARRAY(SELECT thread_id FROM matching_threads)) \
+                     AND t.link_id = ANY(",
+                );
                 builder.push_bind(self.inboxes.clone());
-                builder.push(") AND t.id IN (SELECT thread_id FROM matching_threads)");
+                builder.push(")");
                 self.push_stream_filters(builder, sort_ts_field);
                 builder.push(
                     r#"

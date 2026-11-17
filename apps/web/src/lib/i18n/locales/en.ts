@@ -1,5 +1,6 @@
 import accountManager from './en/account-manager';
 import agentAutoArchive from './en/agent-auto-archive';
+import agentControls from './en/agent-controls';
 import agentNavigation from './en/agent-navigation';
 import agentSetup from './en/agent-setup';
 import agentWork from './en/agent-work';
@@ -21,6 +22,7 @@ import entityActions from './en/entity-actions';
 import entityIcons from './en/entity-icons';
 import factoryInsights from './en/factory-insights';
 import factoryRuns from './en/factory-runs';
+import importJobs from './en/import-jobs';
 import localRuntime from './en/local-runtime';
 import markdownEditor from './en/markdown-editor';
 import mobile from './en/mobile';
@@ -37,6 +39,7 @@ import settingsMobileApp from './en/settings-mobile-app';
 import settingsNav from './en/settings-nav';
 import splitMenu from './en/split-menu';
 import subRoutines from './en/sub-routines';
+import suggestions from './en/suggestions';
 import tabs from './en/tabs';
 import teamAgents from './en/team-agents';
 import tutorials from './en/tutorials';
@@ -49,6 +52,7 @@ import viewMenus from './en/view-menus';
 export default {
   agentAutoArchive,
   appearance,
+  agentControls,
   agentNavigation,
   accountManager,
   agentSetup,
@@ -70,6 +74,8 @@ export default {
   entityIcons,
   factoryInsights,
   factoryRuns,
+  importJobs,
+  suggestions,
   localRuntime,
   markdownEditor,
   mobile,

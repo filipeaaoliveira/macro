@@ -59,6 +59,7 @@ import {
   FactoryInsightsRouteView,
   FoldersRouteView,
   FormRespondRoutePage,
+  ForYouRouteView,
   HomeEntityDetailRouteView,
   MailRouteView,
   MeetingRouter,
@@ -142,6 +143,7 @@ import {
   factoryInsightsRoute,
   foldersRoute,
   formRespondRoute,
+  forYouRoute,
   homeCalendarRoute,
   homeChannelRoute,
   homeDocumentRoute,
@@ -374,6 +376,7 @@ export function appRouteElements(): JSX.Element {
           />
         </Route>
         <Route definition={recentRoute} component={RecentRouteView} />
+        <Route definition={forYouRoute} component={ForYouRouteView} />
         <Route definition={activityRoute} component={ActivityRouteView} />
         <Route definition={passwordsRoute} component={PasswordsRouteView} />
         <Route

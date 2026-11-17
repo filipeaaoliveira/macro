@@ -29,7 +29,7 @@ import type { DateValue } from '@core/util/date';
 import { openExternalUrl } from '@core/util/url';
 import { useSplitNavigationHandler } from '@core/util/useSplitNavigationHandler';
 import { buildTaskProjectDefaultProperty } from '@entity/extractors-property';
-import { useNotificationsForEntity } from '@notifications';
+import { useOpenEntityNotifications } from '@notifications';
 import {
   getBuiltinPropertyIds,
   getDefaultPinnedProperties,
@@ -271,7 +271,7 @@ function StatsSectionContent() {
 
 function NotificationsSectionConditional(props: { entity: Entity }) {
   const notificationSource = useGlobalNotificationSource();
-  const notifications = useNotificationsForEntity(
+  const notifications = useOpenEntityNotifications(
     notificationSource,
     props.entity
   );
@@ -290,10 +290,7 @@ function NotificationsSectionConditional(props: { entity: Entity }) {
         order={40}
       >
         <div class="text-xs">
-          <Notifications
-            entity={props.entity}
-            notificationSource={notificationSource}
-          />
+          <Notifications notifications={notifications()} />
         </div>
       </SidePanel.Section>
     </Show>

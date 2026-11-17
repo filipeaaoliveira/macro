@@ -1,11 +1,17 @@
 use super::*;
 use crate::outbound::email_pg_repo::dynamic::resolve::{ResolvedFilters, resolve_filters};
 use chrono::{TimeZone, Utc};
-use item_filters::ast::email::Email;
+use item_filters::NotificationState;
+use item_filters::ast::date::DateLiteral;
+use item_filters::ast::email::{AttachmentKind, Email, SubjectQuery};
+use item_filters::ast::properties::{PropertiesLiteral, PropertyMatchValue};
 use macro_user_id::cowlike::CowLike;
 use macro_user_id::email::EmailStr;
-use models_pagination::SimpleSortMethod;
+use models_pagination::{Query, SimpleSortMethod};
 use sqlx::Execute;
+use std::cell::RefCell;
+use std::sync::Arc;
+use tokio::sync::oneshot;
 
 const TEAM: Uuid = Uuid::from_u128(0xf1);
 const OWN: Uuid = Uuid::from_u128(1);
@@ -13,6 +19,7 @@ const TEAMMATE: Uuid = Uuid::from_u128(2);
 const NOT_CONTRIBUTING: Uuid = Uuid::from_u128(3);
 /// The team of the `email_crm_team_read` fixture.
 const GAMMA: &str = "e0000003-0000-0000-0000-000000000003";
+const GAMMA_CALLER: &str = "macro|u0@gamma.test";
 /// The fixture's other team, whose member u9 consents.
 const DELTA: &str = "e0000004-0000-0000-0000-000000000004";
 
@@ -162,7 +169,7 @@ fn thread_terms_and_cursor_are_stream_conditions() {
         .next()
         .and_then(|head| head.rsplit("FROM email_threads t").next())
         .unwrap();
-    assert!(stream.contains("t.id IN (SELECT thread_id FROM matching_threads)"));
+    assert!(stream.contains("t.id = ANY(ARRAY(SELECT thread_id FROM matching_threads))"));
     assert!(stream.contains("t.is_signal"));
     assert!(stream.contains("t.link_id = $"));
     assert!(stream.contains("(COALESCE(t.latest_non_spam_message_ts, t.updated_at), t.id) < ($"));
@@ -253,6 +260,68 @@ fn record_without_contacts_in_the_inboxes_has_no_superset() {
     assert!(read.superset.branches.is_empty());
 }
 
+/// The record's addresses AND `term`.
+fn record_and(term: Expr<EmailLiteral>) -> Expr<EmailLiteral> {
+    Expr::And(Box::new(any_direction("example.test")), Box::new(term))
+}
+
+/// The page's checks (`push_checks`) see a streamed thread as its id and
+/// inbox alone, so they may read no other column of `t`. The pages of both
+/// streams, for each kind of thread and message term a team read takes
+/// beside the record, plain, negated and in a mixed OR, must plan.
+#[sqlx::test(migrator = "macro_db_migrator::MACRO_DB_MIGRATIONS")]
+async fn checks_read_only_the_threads_id_and_inbox(pool: sqlx::PgPool) -> anyhow::Result<()> {
+    let date = Utc.with_ymd_and_hms(2026, 1, 2, 3, 4, 5).unwrap();
+    let subject = || SubjectQuery::try_from("quarterly".to_owned());
+    let terms = [
+        EmailLiteral::Importance(true),
+        EmailLiteral::Read(false),
+        EmailLiteral::InboxVisible(true),
+        EmailLiteral::CalendarOnly(true),
+        EmailLiteral::Attachment(AttachmentKind::Pdf),
+        EmailLiteral::Subject(subject()?),
+        EmailLiteral::ThreadId(Uuid::from_u128(0xa1)),
+        EmailLiteral::ProjectId("project".to_owned()),
+        EmailLiteral::NotificationState(NotificationState::Unseen),
+        EmailLiteral::CreatedAt(DateLiteral::GreaterThan(date)),
+        EmailLiteral::UpdatedAt(DateLiteral::LessThanOrEqual(date)),
+        EmailLiteral::Property(PropertiesLiteral {
+            property_definition_id: Uuid::from_u128(0xa2),
+            entity_type: None,
+            value: PropertyMatchValue::SelectOption(Uuid::from_u128(0xa3)),
+        }),
+        EmailLiteral::Owner(OWN),
+    ];
+    let mut filters = vec![
+        any_direction("example.test"),
+        signal_and_me(OWN),
+        record_and(Expr::Or(
+            Box::new(Expr::Literal(EmailLiteral::Subject(subject()?))),
+            Box::new(Expr::Literal(EmailLiteral::Read(true))),
+        )),
+    ];
+    for term in terms {
+        filters.push(record_and(Expr::Literal(term.clone())));
+        filters.push(record_and(Expr::Not(Box::new(Expr::Literal(term)))));
+    }
+
+    let view = all_mail();
+    for sort in [SimpleSortMethod::UpdatedAt, SimpleSortMethod::CreatedAt] {
+        for filter in &filters {
+            let read = team_read(&view, filter, params(sort))
+                .ok_or_else(|| anyhow::anyhow!("no team read for {sort:?} {filter:?}"))?;
+            for stream in [Stream::Superset, Stream::Inboxes] {
+                read.build_page(stream)
+                    .build()
+                    .fetch_all(&pool)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{sort:?} {filter:?}: {e}"))?;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Link `i` of the `email_crm_team_read` fixture.
 fn gamma_link(i: u128) -> Uuid {
     Uuid::from_u128(0xf000_0000_0000_0000_0000_0000_0000_0000 | i)
@@ -286,7 +355,8 @@ async fn verdicts(pool: &sqlx::PgPool, team: Uuid) -> anyhow::Result<(i64, i64, 
     builder.push_bind(team);
     builder.push(", t.id) AS allowed, (TRUE");
     builder.push(ALLOWED);
-    builder.push(") AS inline FROM email_threads t) AS verdict");
+    // The page runs the rule over a thread's id and inbox alone.
+    builder.push(") AS inline FROM (SELECT id, link_id FROM email_threads) AS t) AS verdict");
     Ok(builder.build_query_as().fetch_one(pool).await?)
 }
 
@@ -467,6 +537,31 @@ async fn allowed_restates_the_privacy_function(pool: sqlx::PgPool) -> anyhow::Re
         "both verdicts occur: {allowed} of {total}"
     );
 
+    let excluded = sqlx::query_scalar!(
+        r#"
+        INSERT INTO crm_email_thread_exclusions (team_id, user_id, link_id, thread_id)
+        SELECT $1, l.macro_id, l.id, t.id
+        FROM email_threads t JOIN email_links l ON l.id = t.link_id
+        WHERE t.provider_id = 'ph:blocked-draft'
+        RETURNING thread_id
+        "#,
+        team,
+    )
+    .fetch_one(&pool)
+    .await?;
+    let (after_exclusion, differ, total) = verdicts(&pool, team).await?;
+    assert_eq!(after_exclusion, allowed - 1);
+    assert_eq!(differ, 0, "{differ} of {total} threads get another verdict");
+
+    sqlx::query!(
+        "DELETE FROM crm_email_thread_exclusions WHERE team_id = $1 AND thread_id = $2",
+        team,
+        excluded,
+    )
+    .execute(&pool)
+    .await?;
+    assert_eq!(verdicts(&pool, team).await?, (allowed, 0, total));
+
     // Delta reads only its own inbox, less what its blocklist and hidden
     // company cut.
     let (allowed, differ, total) = verdicts(&pool, Uuid::parse_str(DELTA)?).await?;
@@ -484,5 +579,184 @@ async fn allowed_restates_the_privacy_function(pool: sqlx::PgPool) -> anyhow::Re
         allowed > 100 && allowed < delta_threads,
         "Delta allows most of its inbox's threads: {allowed} of {delta_threads}"
     );
+    Ok(())
+}
+
+struct ProbePause {
+    reached: oneshot::Sender<i64>,
+    resume: oneshot::Receiver<()>,
+}
+
+tokio::task_local! {
+    static PROBE_PAUSE: RefCell<Option<ProbePause>>;
+}
+
+/// Pause only the request scoped by a concurrency test, after its real probe.
+pub(super) async fn pause_after_probe(rows: i64) {
+    let Ok(Some(pause)) = PROBE_PAUSE.try_with(|slot| slot.borrow_mut().take()) else {
+        return;
+    };
+    let _ = pause.reached.send(rows);
+    let _ = pause.resume.await;
+}
+
+async fn sparse_page(pool: &sqlx::PgPool) -> anyhow::Result<Vec<ThreadPreviewCursorDbRow>> {
+    let query = Query::new(
+        None,
+        SimpleSortMethod::UpdatedAt,
+        Arc::new(any_direction("sparse.test")),
+    );
+    Ok(super::super::dynamic_email_thread_cursor_with(
+        pool,
+        &[gamma_link(0)],
+        100,
+        &all_mail(),
+        query,
+        GAMMA_CALLER,
+        Some(Uuid::parse_str(GAMMA)?),
+        Some(TeamReadTuning::DEFAULT),
+    )
+    .await?)
+}
+
+#[sqlx::test(
+    migrator = "macro_db_migrator::MACRO_DB_MIGRATIONS",
+    fixtures(path = "../../../../../../fixtures", scripts("email_crm_team_read"))
+)]
+async fn a_mid_request_import_cannot_outgrow_the_sparse_probe(
+    pool: sqlx::PgPool,
+) -> anyhow::Result<()> {
+    let expected = sparse_page(&pool).await?;
+    assert!(!expected.is_empty() && expected.len() < 100);
+    let (reached, counted) = oneshot::channel();
+    let (resume, resumed) = oneshot::channel();
+    let request = PROBE_PAUSE.scope(
+        RefCell::new(Some(ProbePause {
+            reached,
+            resume: resumed,
+        })),
+        sparse_page(&pool),
+    );
+    let import = async {
+        let count = counted.await?;
+        assert!(count > 0 && count <= TeamReadTuning::DEFAULT.superset_limit);
+        // A second connection commits more recipient hits than the sparse cap.
+        let written = sqlx::query_file!(
+            "src/outbound/email_pg_repo/dynamic/query/team_scope/test/import_after_probe.sql",
+            gamma_link(0),
+        )
+        .execute(&pool)
+        .await?;
+        assert_eq!(written.rows_affected(), 5001);
+        let _ = resume.send(());
+        anyhow::Ok(())
+    };
+    let (actual, imported) = tokio::join!(request, import);
+    imported?;
+    assert_eq!(
+        actual?.iter().map(|row| row.id).collect::<Vec<_>>(),
+        expected.iter().map(|row| row.id).collect::<Vec<_>>()
+    );
+
+    let next = sparse_page(&pool).await?;
+    assert_eq!(next.len(), 100);
+    assert!(next.iter().all(|row| {
+        row.provider_id
+            .as_deref()
+            .is_some_and(|id| id.starts_with("snapshot-import-"))
+    }));
+    Ok(())
+}
+
+#[sqlx::test(
+    migrator = "macro_db_migrator::MACRO_DB_MIGRATIONS",
+    fixtures(path = "../../../../../../fixtures", scripts("email_crm_team_read"))
+)]
+async fn a_mid_request_withdrawal_applies_to_the_next_request(
+    pool: sqlx::PgPool,
+) -> anyhow::Result<()> {
+    let expected = sparse_page(&pool).await?;
+    assert!(expected.iter().any(|row| row.link_id == gamma_link(0)));
+    let (reached, counted) = oneshot::channel();
+    let (resume, resumed) = oneshot::channel();
+    let request = PROBE_PAUSE.scope(
+        RefCell::new(Some(ProbePause {
+            reached,
+            resume: resumed,
+        })),
+        sparse_page(&pool),
+    );
+    let withdraw = async {
+        assert!(counted.await? > 0);
+        sqlx::query!(
+            "UPDATE crm_email_consent SET enabled = false WHERE team_id = $1 AND user_id = $2",
+            Uuid::parse_str(GAMMA)?,
+            GAMMA_CALLER,
+        )
+        .execute(&pool)
+        .await?;
+        let _ = resume.send(());
+        anyhow::Ok(())
+    };
+    let (actual, withdrawn) = tokio::join!(request, withdraw);
+    withdrawn?;
+    assert_eq!(
+        actual?.iter().map(|row| row.id).collect::<Vec<_>>(),
+        expected.iter().map(|row| row.id).collect::<Vec<_>>()
+    );
+    let next = sparse_page(&pool).await?;
+    assert!(next.iter().all(|row| row.link_id != gamma_link(0)));
+    assert!(!next.is_empty(), "other contributors stay visible");
+    Ok(())
+}
+
+#[sqlx::test(
+    migrator = "macro_db_migrator::MACRO_DB_MIGRATIONS",
+    fixtures(path = "../../../../../../fixtures", scripts("email_crm_team_read"))
+)]
+async fn a_mid_request_exclusion_applies_to_the_next_request(
+    pool: sqlx::PgPool,
+) -> anyhow::Result<()> {
+    let expected = sparse_page(&pool).await?;
+    let thread = expected
+        .iter()
+        .find(|row| row.link_id == gamma_link(0))
+        .expect("fixture has a matching thread in the caller's inbox")
+        .id;
+    let (reached, counted) = oneshot::channel();
+    let (resume, resumed) = oneshot::channel();
+    let request = PROBE_PAUSE.scope(
+        RefCell::new(Some(ProbePause {
+            reached,
+            resume: resumed,
+        })),
+        sparse_page(&pool),
+    );
+    let exclude = async {
+        assert!(counted.await? > 0);
+        sqlx::query!(
+            r#"
+            INSERT INTO crm_email_thread_exclusions (team_id, user_id, link_id, thread_id)
+            VALUES ($1, $2, $3, $4)
+            "#,
+            Uuid::parse_str(GAMMA)?,
+            GAMMA_CALLER,
+            gamma_link(0),
+            thread,
+        )
+        .execute(&pool)
+        .await?;
+        let _ = resume.send(());
+        anyhow::Ok(())
+    };
+    let (actual, excluded) = tokio::join!(request, exclude);
+    excluded?;
+    assert_eq!(
+        actual?.iter().map(|row| row.id).collect::<Vec<_>>(),
+        expected.iter().map(|row| row.id).collect::<Vec<_>>()
+    );
+    let next = sparse_page(&pool).await?;
+    assert!(next.iter().all(|row| row.id != thread));
+    assert!(!next.is_empty(), "other threads stay visible");
     Ok(())
 }
