@@ -31,15 +31,7 @@ fn commands(agent: &ScriptedAgent) -> Vec<String> {
         .lock()
         .expect("commands")
         .iter()
-        .map(|command| {
-            command
-                .command
-                .command
-                .lines()
-                .last()
-                .unwrap_or_default()
-                .to_string()
-        })
+        .map(|command| super::run_of(&command.command.command))
         .collect()
 }
 
@@ -103,8 +95,15 @@ async fn checks_the_factory_runs_decide_the_round() {
     let sent = agent.commands.lock().expect("commands").clone();
     assert_eq!(sent.len(), 1);
     assert_eq!(sent[0].command.cwd, ".");
-    assert!(sent[0].command.command.ends_with("\nbun run check"));
-    assert_eq!(sent[0].command.timeout_secs, 1200);
+    assert_eq!(super::run_of(&sent[0].command.command), "bun run check");
+    // Its ten minutes, and the round lock's wait on top.
+    assert_eq!(sent[0].command.timeout_secs, 600 + 80);
+    assert!(
+        sent[0]
+            .command
+            .command
+            .contains("timeout --kill-after=10 600 bash")
+    );
     assert_eq!(sent[0].role.as_str(), "writer");
     let rounds = rounds(&repo, input).await;
     assert!(rounds[0].verified);
@@ -369,9 +368,8 @@ async fn a_round_short_of_a_check_s_timeout_ends_the_step_red() {
     let github = github(Some(CHECKS), Some(&["apps/web/src/main.ts"]));
     let repo = FakeRepo::default();
     let input = input();
-    // Fifteen minutes of the Step's rounds are left, short of the check's
-    // twenty.
-    started_ago(&repo, input.key, 90).await;
+    // Five minutes of the Step's rounds are left, short of the check's ten.
+    started_ago(&repo, input.key, 100).await;
 
     let report = run_in_session(&agent, &github, &repo, input)
         .await
@@ -406,7 +404,7 @@ async fn a_short_check_runs_with_less_time_left() {
 
     assert_eq!(report.outcome, Outcome::done());
     let sent = agent.commands.lock().expect("commands").clone();
-    assert_eq!(sent[0].command.timeout_secs, 300);
+    assert_eq!(sent[0].command.timeout_secs, 300 + 80);
 }
 
 /// The worktree is set up before the round's checks, on the machine, and
@@ -531,4 +529,40 @@ fn a_check_s_output_is_kept_within_its_record() {
     assert!(kept.ends_with("[31mé\"the end\""));
     assert!(!kept.chars().any(|c| c.is_control()));
     assert!(kept.starts_with('é') || kept.starts_with('"'));
+}
+
+/// A Step whose checks the factory ran before never leaves a later round to
+/// the agent, even when its session runs no command now: the round is
+/// retried, and the agent is never asked to run the checks.
+#[tokio::test]
+async fn a_step_verified_before_never_falls_back_to_the_agent() {
+    let github = github(Some(CHECKS), Some(&["apps/web/src/main.ts"]));
+    let repo = FakeRepo::default();
+    let input = input();
+    let first = verifying(vec![ran(1, "web: 2 failed")], vec![Err(FAILED)]);
+    let failed = run_in_session(&first, &github, &repo, input).await;
+    let reporter = ScriptedAgent::new(
+        "done",
+        vec![
+            Ok(("done", "Fixed it")),
+            Ok(("passed", "Everything passes.")),
+        ],
+    );
+
+    let retried = run_in_session(&reporter, &github, &repo, input).await;
+
+    assert!(failed.is_err());
+    assert!(matches!(
+        retried,
+        Err(super::super::super::BuiltInStepError::Agent {
+            retryable: true,
+            ..
+        })
+    ));
+    let turns = reporter.turns();
+    assert_eq!(turns.len(), 1);
+    assert_eq!(turns[0].outcomes, [Outcome::done()]);
+    let rounds = rounds(&repo, input).await;
+    assert_eq!(rounds.len(), 2);
+    assert!(rounds[1].end.is_none());
 }

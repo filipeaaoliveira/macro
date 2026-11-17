@@ -143,14 +143,14 @@ fn a_file_over_what_a_round_keeps_does_not_read() {
     );
 }
 
-/// A check takes the timeout it declares, or 20 minutes.
+/// A check takes the timeout it declares, or 10 minutes.
 #[test]
-fn a_check_s_timeout_defaults_to_twenty_minutes() {
+fn a_check_s_timeout_defaults_to_ten_minutes() {
     let checks = RepositoryChecks::parse(
         r#"{"checks":[{"name":"web","run":"x","timeout":90},{"name":"lint","run":"y"}]}"#,
     )
     .expect("reads");
 
     let timeouts: Vec<u64> = checks.checks.iter().map(|check| check.timeout).collect();
-    assert_eq!(timeouts, [90, 1200]);
+    assert_eq!(timeouts, [90, 600]);
 }

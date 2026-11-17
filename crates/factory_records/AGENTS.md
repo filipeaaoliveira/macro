@@ -26,7 +26,8 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261117120425_factory_step_bot.sql`,
   `20261117170000_factory_turn_place.sql`,
   `20261117180000_factory_check_round_verified.sql`,
-  `20261117190000_factory_check_round_commit.sql`).
+  `20261117190000_factory_check_round_commit.sql`,
+  `20261117200000_factory_check_round_commit_check.sql`).
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
 
 ## Boundaries

@@ -75,6 +75,17 @@ struct ScriptedAgent {
     machine: Arc<Mutex<Vec<String>>>,
 }
 
+/// The check a check's command runs: its last line is `timeout … bash
+/// --noprofile --norc -c '<run>' 9>&-`.
+fn run_of(command: &str) -> String {
+    let last = command.lines().last().unwrap_or_default();
+    let quoted = last
+        .split_once(" -c ")
+        .map_or("", |(_, rest)| rest)
+        .trim_end_matches(" 9>&-");
+    quoted.trim_matches('\'').replace(r"'\''", "'")
+}
+
 /// The head commit of the Run's branch on GitHub.
 const HEAD: &str = "1111111111111111111111111111111111111111";
 
@@ -171,7 +182,7 @@ impl StepAgent for ScriptedAgent {
                 stderr: String::new(),
             }));
         }
-        let run = line.lines().last().unwrap_or_default().to_string();
+        let run = run_of(&line);
         self.machine
             .lock()
             .expect("machine")

@@ -15,8 +15,8 @@
 //! A check runs `run` from the repository's root. One with `paths` runs only
 //! when the branch changed a file at one of them, or under one when it is a
 //! folder; one without runs every time. `timeout` is how many seconds a
-//! check the factory runs itself may take, from 1 to 1200 (20 minutes, the
-//! default); a Step starts it only with that much time left. `rounds` is how
+//! check the factory runs itself may take, from 1 to 1200 (20 minutes), 600
+//! when left out; a Step starts it only with that much time left. `rounds` is how
 //! many times a Step runs the checks at most, 3 when left out.
 
 #[cfg(test)]
@@ -39,8 +39,11 @@ const MAX_CHECKS: usize = 64;
 /// The longest command a check runs, in bytes.
 const MAX_RUN_BYTES: usize = 4096;
 
-/// The longest, and the default, time a check may take, in seconds.
+/// The longest time a check may take, in seconds.
 pub const MAX_CHECK_TIMEOUT_SECS: u64 = 20 * 60;
+
+/// The time a check may take when the file does not say, in seconds.
+pub const DEFAULT_CHECK_TIMEOUT_SECS: u64 = 10 * 60;
 
 /// The largest checks file read, in bytes: what a round's record keeps.
 const MAX_FILE_BYTES: usize = 64 * 1024;
@@ -63,7 +66,7 @@ pub struct RepositoryCheck {
 }
 
 fn default_timeout() -> u64 {
-    MAX_CHECK_TIMEOUT_SECS
+    DEFAULT_CHECK_TIMEOUT_SECS
 }
 
 impl RepositoryCheck {

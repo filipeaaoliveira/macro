@@ -5,10 +5,15 @@
 //! The checks never run in the agent's own checkout, so nothing the agent
 //! left there (uncommitted work, a commit it did not push, a changed git
 //! hook) is what they check. Git runs from an absolute path where the
-//! machine has one, without system or global configuration, hooks or a
-//! filesystem monitor. Each check holds a lock on the worktree for its run,
-//! waiting a bounded time for a run still going (a retry's), never around a
-//! read of the repository.
+//! machine has one, without system or global configuration (a fetch alone
+//! keeps the global one, for its credentials), hooks, a filesystem monitor,
+//! replace objects or a sparse checkout, and the worktree is checked to
+//! hold the commit as it is, with no entry git is told to skip. Worktrees
+//! live in a directory of the machine user's own, `0700`, where those a
+//! round left behind for four hours are removed. Each check holds the
+//! worktree's lock for its run, waiting a bounded time for a run still
+//! going (a retry's) before its own timeout starts, never around a read of
+//! the repository.
 
 #[cfg(test)]
 mod test;
@@ -18,8 +23,12 @@ use std::time::Duration;
 use uuid::Uuid;
 
 /// How long a check waits for the worktree's lock before it gives the run
-/// up to a retry, in seconds.
+/// up to a retry, in seconds: on top of the check's own timeout.
 pub(super) const LOCK_WAIT_SECS: u64 = 60;
+
+/// What a check's session command may take beyond the check's own timeout:
+/// the lock's wait, `timeout`'s ten seconds before it kills, and a margin.
+pub(super) const RUN_MARGIN: Duration = Duration::from_secs(LOCK_WAIT_SECS + 20);
 
 /// The exit status a check's run takes when another run holds the lock.
 pub(super) const LOCK_BUSY_STATUS: i32 = 75;
@@ -41,44 +50,63 @@ pub(super) const PREPARE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 /// How long removing the worktree may take.
 pub(super) const REMOVE_TIMEOUT: Duration = Duration::from_secs(2 * 60);
 
-/// Where a round's worktree lives on the agent's machine: outside its
-/// checkout, named by the round.
-pub(super) fn worktree_path(check_action_id: Uuid) -> String {
-    format!("/tmp/macro-check-{check_action_id}")
-}
+/// Where a round's worktree lives, in the shell: the machine user's own
+/// cache, outside the agent's checkout, named by the round.
+const BASE: &str = "base=\"${XDG_CACHE_HOME:-$HOME/.cache}/macro-check\"\n";
 
 /// Git, found once by absolute path where the machine has one (else on its
-/// `PATH`), as the `g` function: no system or global configuration, no
-/// hooks, no filesystem monitor.
-const GIT: &str = "export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0
+/// `PATH`): `g` reads no system or global configuration and runs no hook,
+/// filesystem monitor, replace object or sparse checkout; `fetch_commit`
+/// keeps the global configuration, where the machine's credentials are,
+/// and runs no hook either.
+const GIT: &str = "export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 GIT_NO_REPLACE_OBJECTS=1
 git_bin=
 for candidate in /usr/bin/git /run/current-system/sw/bin/git /nix/var/nix/profiles/default/bin/git; do
   if [ -x \"$candidate\" ]; then git_bin=$candidate; break; fi
 done
 if [ -z \"$git_bin\" ]; then git_bin=$(command -v git) || { echo 'macro-check: git is missing' >&2; exit 1; }; fi
-g() { \"$git_bin\" -c core.fsmonitor= -c core.hooksPath=/dev/null \"$@\"; }
+g() { \"$git_bin\" -c core.fsmonitor= -c core.hooksPath=/dev/null -c core.sparseCheckout=false -c extensions.worktreeConfig=false -c 'safe.directory=*' \"$@\"; }
+fetch_commit() { env -u GIT_CONFIG_GLOBAL \"$git_bin\" -c core.fsmonitor= -c core.hooksPath=/dev/null -c 'safe.directory=*' fetch --quiet \"$@\" origin \"$commit\"; }
 ";
 
-/// Set the worktree at `path` up at `commit`, from the checkout the command
-/// runs in: fetch the commit when the repository lacks it, and keep a
-/// worktree an earlier attempt left at the same commit.
-pub(super) fn prepare_command(path: &str, commit: &str) -> String {
+/// Set the round `round`'s worktree up at `commit`, from the checkout the
+/// command runs in: remove worktrees left behind for four hours, fetch the
+/// commit when the repository lacks it (only its own depth in a shallow
+/// clone), keep a worktree an earlier attempt left at the same commit
+/// (reset to it), and replace one at another commit.
+pub(super) fn prepare_command(round: Uuid, commit: &str) -> String {
     format!(
-        "{GIT}commit={commit}
-worktree={path}
+        "{GIT}{BASE}commit={commit}
+worktree=\"$base/{round}\"
+mkdir -p \"$base\" && chmod 700 \"$base\" || exit 1
+find \"$base\" -mindepth 1 -maxdepth 1 -mmin +240 | while IFS= read -r old; do
+  g worktree remove --force \"$old\" 2>/dev/null || rm -rf \"$old\"
+done
+g worktree prune
 if ! g cat-file -e \"$commit^{{commit}}\" 2>/dev/null; then
-  g fetch --quiet origin \"$commit\" || {{ echo \"macro-check: could not fetch $commit\" >&2; exit 1; }}
+  if [ \"$(g rev-parse --is-shallow-repository)\" = true ]; then
+    fetch_commit --depth=1 || {{ echo \"macro-check: could not fetch $commit\" >&2; exit 1; }}
+  else
+    fetch_commit || {{ echo \"macro-check: could not fetch $commit\" >&2; exit 1; }}
+  fi
 fi
-if [ -d \"$worktree\" ] && [ \"$(g -C \"$worktree\" rev-parse HEAD 2>/dev/null)\" != \"$commit\" ]; then
+if [ -d \"$worktree\" ] && [ \"$(g -C \"$worktree\" rev-parse HEAD 2>/dev/null)\" = \"$commit\" ]; then
+  g -C \"$worktree\" reset --hard -q \"$commit\" || exit 1
+elif [ -e \"$worktree\" ]; then
   g worktree remove --force \"$worktree\" 2>/dev/null || rm -rf \"$worktree\"
+  g worktree prune
 fi
 if [ ! -d \"$worktree\" ]; then
-  g worktree prune
   g worktree add --quiet --detach \"$worktree\" \"$commit\" || exit 1
 fi
 [ \"$(g -C \"$worktree\" rev-parse HEAD)\" = \"$commit\" ] || {{ echo \"macro-check: the worktree is not at $commit\" >&2; exit 1; }}
+g -C \"$worktree\" diff --quiet \"$commit\" -- || {{ echo \"macro-check: the worktree differs from $commit\" >&2; exit 1; }}
+if g -C \"$worktree\" ls-files -v | grep -qE '^([a-z]|S) '; then
+  echo 'macro-check: the worktree has entries git is told to skip' >&2
+  exit 1
+fi
 echo \"{READY} $commit\"",
-        path = shell_quote(path),
+        commit = shell_quote(commit),
     )
 }
 
@@ -89,13 +117,21 @@ pub(super) fn prepared(stdout: &str, commit: &str) -> bool {
         .any(|line| line.trim() == format!("{READY} {commit}"))
 }
 
-/// Run one check, `run`, in the worktree at `path`, holding its lock: with
-/// `flock` where the machine has it, else with a directory, which a run
-/// that died does not hold. A run that waits `lock_wait_secs` for another
-/// gives up with [`LOCK_BUSY_STATUS`] and [`LOCK_BUSY`].
-pub(super) fn check_command(path: &str, run: &str, lock_wait_secs: u64) -> String {
+/// Run one check, `run`, in the round `round`'s worktree for at most
+/// `timeout_secs`, holding the worktree's lock: with `flock` where the
+/// machine has it, else with a directory, which a run that died does not
+/// hold. The lock is waited for at most `lock_wait_secs` before the check's
+/// timeout starts; a run that waits that long gives up with
+/// [`LOCK_BUSY_STATUS`] and [`LOCK_BUSY`]. The check does not inherit the
+/// lock, so nothing it leaves running holds it.
+pub(super) fn check_command(
+    round: Uuid,
+    run: &str,
+    timeout_secs: u64,
+    lock_wait_secs: u64,
+) -> String {
     format!(
-        "worktree={path}
+        "{BASE}worktree=\"$base/{round}\"
 lock=\"$worktree.lock\"
 if command -v flock >/dev/null 2>&1; then
   exec 9>\"$lock\" && flock -w {lock_wait_secs} 9 || {{ echo '{LOCK_BUSY}' >&2; exit {LOCK_BUSY_STATUS}; }}
@@ -104,7 +140,11 @@ else
   waited=0
   until mkdir \"$lock.d\" 2>/dev/null; do
     holder=$(cat \"$lock.d/pid\" 2>/dev/null)
-    if [ -n \"$holder\" ] && ! kill -0 \"$holder\" 2>/dev/null; then rm -rf \"$lock.d\"; continue; fi
+    if [ -n \"$holder\" ] && ! kill -0 \"$holder\" 2>/dev/null; then
+      stale=\"$lock.d.stale.$$\"
+      mv \"$lock.d\" \"$stale\" 2>/dev/null && rm -rf \"$stale\"
+      continue
+    fi
     waited=$((waited + 1))
     if [ \"$waited\" -ge {lock_wait_secs} ]; then echo '{LOCK_BUSY}' >&2; exit {LOCK_BUSY_STATUS}; fi
     sleep 1
@@ -113,21 +153,29 @@ else
   trap 'rm -rf \"$lock.d\"' EXIT
 fi
 cd \"$worktree\" || exit 1
-{run}",
-        path = shell_quote(path),
+timeout --kill-after=10 {timeout_secs} bash --noprofile --norc -c {run} 9>&-",
+        run = shell_quote(run),
     )
 }
 
-/// Remove the worktree at `path`, and its lock, from the checkout the
+/// Remove the round `round`'s worktree, and its lock, from the checkout the
 /// command runs in.
-pub(super) fn remove_command(path: &str) -> String {
+pub(super) fn remove_command(round: Uuid) -> String {
     format!(
-        "{GIT}worktree={path}
+        "{GIT}{BASE}worktree=\"$base/{round}\"
 g worktree remove --force \"$worktree\" 2>/dev/null || rm -rf \"$worktree\"
 g worktree prune
-rm -rf \"$worktree.lock\" \"$worktree.lock.d\"",
-        path = shell_quote(path),
+rm -rf \"$worktree.lock\" \"$worktree.lock.d\""
     )
+}
+
+/// Whether `commit` names a commit as GitHub gives it: 40 or 64 lowercase
+/// hex digits.
+pub(super) fn is_commit(commit: &str) -> bool {
+    matches!(commit.len(), 40 | 64)
+        && commit
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
 }
 
 /// `text` as one single-quoted shell word.

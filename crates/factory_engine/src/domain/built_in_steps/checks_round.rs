@@ -48,7 +48,7 @@ use uuid::Uuid;
 
 use super::{BuiltInStepError, BuiltInSteps, agent_role, cut};
 use crate::domain::checks::{
-    CHECKS_FILE, MAX_CHECK_TIMEOUT_SECS, RepositoryCheck, RepositoryChecks,
+    CHECKS_FILE, DEFAULT_CHECK_TIMEOUT_SECS, RepositoryCheck, RepositoryChecks,
 };
 use crate::domain::flow::StepName;
 use crate::domain::models::{AgentCommand, AgentTurn, StepInput, StepReport};
@@ -72,7 +72,7 @@ pub(crate) const ROUNDS_END_BY: Duration = Duration::from_secs(105 * 60);
 
 /// How long one check the engine runs may take when the checks file says
 /// nothing: past it, the check is stopped, and fails.
-const CHECK_TIMEOUT: Duration = Duration::from_secs(MAX_CHECK_TIMEOUT_SECS);
+const CHECK_TIMEOUT: Duration = Duration::from_secs(DEFAULT_CHECK_TIMEOUT_SECS);
 
 /// How long one attempt of the Step runs checks, from its start: short of
 /// its activity's 30 minutes, as a CI wait is. The checks still to run then
@@ -212,7 +212,8 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
                     .await
                     .map(|()| Ran::Ended)
             } else {
-                self.run_round(step, input, latest, end_by, checks_until)
+                let verified_before = rounds.iter().any(|round| round.verified);
+                self.run_round(step, input, latest, end_by, checks_until, verified_before)
                     .await
             };
             // An agent whose quota ran out cannot go on, and no other Agent
@@ -402,6 +403,7 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
         round: &CheckRound,
         answer_by: DateTime<Utc>,
         checks_until: Instant,
+        verified_before: bool,
     ) -> Result<Ran, BuiltInStepError> {
         let asked = !round.verified
             && !matches!(
@@ -419,6 +421,15 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
             {
                 Verify::Ended => return Ok(Ran::Ended),
                 Verify::OutOfTime => return Ok(Ran::OutOfTime),
+                // A Step whose checks the factory ran before never leaves
+                // them to the agent: its session ran commands, and one that
+                // no longer does is retried until the rounds' time is up.
+                Verify::Unsupported if verified_before => {
+                    return Err(retry(
+                        "the agent's session ran this step's checks before and runs no command now"
+                            .to_string(),
+                    ));
+                }
                 Verify::Unsupported => {}
             }
         }
@@ -486,13 +497,13 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
             Some(commit) => commit.clone(),
             None => self.pushed_commit(input).await?,
         };
-        let path = worktree::worktree_path(round.check_action_id);
+        let round_id = round.check_action_id;
 
         let set_up = self
             .in_checkout(
                 input,
                 &role,
-                worktree::prepare_command(&path, &commit),
+                worktree::prepare_command(round_id, &commit),
                 worktree::PREPARE_TIMEOUT,
             )
             .await?;
@@ -515,15 +526,18 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
                 .iter()
                 .find(|check| &check.name == name)
                 .map_or(CHECK_TIMEOUT, |check| Duration::from_secs(check.timeout));
-            if until(answer_by) < timeout {
+            // The check's run may wait for the round's lock before its own
+            // timeout starts.
+            let run_for = timeout + worktree::RUN_MARGIN;
+            if until(answer_by) < run_for {
                 let (outcome, report) = verified_end(round, &results);
                 repo.end_check_round(input.key, round.round, outcome, &report)
                     .await
                     .map_err(records)?;
-                self.remove_worktree(input, &role, &path).await;
+                self.remove_worktree(input, &role, round_id).await;
                 return Ok(Verify::OutOfTime);
             }
-            if checks_until.saturating_duration_since(Instant::now()) < timeout {
+            if checks_until.saturating_duration_since(Instant::now()) < run_for {
                 return Err(retry(format!(
                     "this attempt has no time left for check {name}"
                 )));
@@ -533,8 +547,13 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
                 .in_checkout(
                     input,
                     &role,
-                    worktree::check_command(&path, run, worktree::LOCK_WAIT_SECS),
-                    timeout,
+                    worktree::check_command(
+                        round_id,
+                        run,
+                        timeout.as_secs(),
+                        worktree::LOCK_WAIT_SECS,
+                    ),
+                    run_for,
                 )
                 .await?;
             let Some(output) = ran else {
@@ -572,7 +591,7 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
         repo.end_check_round(input.key, round.round, outcome, &report)
             .await
             .map_err(records)?;
-        self.remove_worktree(input, &role, &path).await;
+        self.remove_worktree(input, &role, round_id).await;
         Ok(Verify::Ended)
     }
 
@@ -580,14 +599,22 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
     /// moment when it is not there yet; a branch still missing then fails
     /// the attempt for a retry.
     async fn pushed_commit(&self, input: StepInput<'_>) -> Result<String, BuiltInStepError> {
-        if let Some(head) = self.pull_requests.branch_head(&input).await? {
-            return Ok(head);
+        let head = match self.pull_requests.branch_head(&input).await? {
+            Some(head) => head,
+            None => {
+                tokio::time::sleep(BRANCH_HEAD_LAG).await;
+                self.pull_requests
+                    .branch_head(&input)
+                    .await?
+                    .ok_or_else(|| retry("the run's branch is not on GitHub".to_string()))?
+            }
+        };
+        if !worktree::is_commit(&head) {
+            return Err(retry(format!(
+                "GitHub gave the run's branch a head that is no commit: {head:?}"
+            )));
         }
-        tokio::time::sleep(BRANCH_HEAD_LAG).await;
-        self.pull_requests
-            .branch_head(&input)
-            .await?
-            .ok_or_else(|| retry("the run's branch is not on GitHub".to_string()))
+        Ok(head)
     }
 
     /// What a session that runs no command means for a round: with no
@@ -625,12 +652,12 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
 
     /// Remove a round's worktree. A removal that fails leaves it in the
     /// machine's temporary files, which is logged and changes nothing else.
-    async fn remove_worktree(&self, input: StepInput<'_>, role: &Role, path: &str) {
+    async fn remove_worktree(&self, input: StepInput<'_>, role: &Role, round: Uuid) {
         let removed = self
             .in_checkout(
                 input,
                 role,
-                worktree::remove_command(path),
+                worktree::remove_command(round),
                 worktree::REMOVE_TIMEOUT,
             )
             .await;

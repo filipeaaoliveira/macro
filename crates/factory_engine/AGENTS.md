@@ -183,7 +183,7 @@ On a repository, `write` and `fix` then run the repository's own checks
 in `.macro/checks.json` on its base branch (`src/domain/checks.rs`): each a
 `name`, a `run` command from the repository's root, and optional `paths`
 (files or folders from the root, no patterns) whose change makes it run,
-and an optional `timeout` (seconds, 1 to 1200, default 1200);
+and an optional `timeout` (seconds, 1 to 1200, default 600);
 `rounds` (1 to 10, default 3) is how many times a Step runs them. The file is
 read from the Run's recorded base, never the Run's branch, which the agent
 pushes: the first round keeps it, with the checks and commands it runs, and
@@ -194,30 +194,44 @@ round reached is dropped again once the changes no longer reach it. Where the ag
 session runs on a machine Macro reaches, the engine runs each check itself
 (`StepAgent::run_check`, the routine sessions' `exec`), on the Run branch's
 head as GitHub has it (`PullRequests::branch_head`, read again once after
-2 s when missing), in a worktree it sets up beside the agent's checkout
-(`checks_round/worktree.rs`: `git worktree add --detach` under `/tmp`,
-fetching the commit when the repository lacks it), and removes after the
-round. Git runs by absolute path where the machine has one, without system
-or global configuration, hooks or filesystem monitor. Each check holds the
-round's lock (`flock -w 60`, else a `mkdir` lock, which a run logs and
-reports) and runs with `bash --noprofile --norc` for its `timeout` from the
-checks file (20 minutes at most and by default); its exit code decides. The
+2 s when missing, and checked to be a commit id), in a worktree it sets up
+from the agent's checkout (`checks_round/worktree.rs`: `git worktree add
+--detach` in `${XDG_CACHE_HOME:-$HOME/.cache}/macro-check/<round>`, a
+`0700` directory of the machine user's own), and removes after the round.
+Setting it up removes worktrees left there over four hours, fetches the
+commit only when the repository lacks it (at depth 1 in a shallow clone,
+with the machine's global git configuration, where its credentials are),
+keeps a worktree an earlier attempt left at the commit (reset to it) and
+replaces one at another, then checks the worktree is the commit as it is,
+with no entry git is told to skip. Git otherwise runs by absolute path where
+the machine has one, without system or global configuration, hooks,
+filesystem monitor, replace objects or sparse checkout, so Git LFS files
+are checked as their pointer files. Each check waits at most 60 s for the
+round's lock (`flock -w`, else a `mkdir` lock taken over from a holder that
+died, which the run logs and reports), then runs with `bash --noprofile
+--norc` under its own `timeout` from the checks file (600 s by default,
+1200 at most), without the lock's descriptor; its exit code decides. The
 round is `verified`, keeps the commit it checked (`checked_commit`) and each
 check's exit code and the end of its output (`results`, 4 KiB once escaped
 as JSON) as it ends, so a retry runs only the checks still to run. A check
-starts only with its whole timeout left: short in the attempt (25 of its 30
-minutes, `ATTEMPT_CHECKS_FOR`), the attempt fails for its retry; short in
-the Step's rounds, the round and the Step end `red` at once. A worktree that
-cannot be set up, a branch GitHub does not have, and a run that found the
-lock held fail the attempt for a retry and record nothing. Nothing the agent
-hands back decides a verified round, and nothing it leaves in its own
-checkout reaches the checks. What remains in the agent's hands: the machine
-and its toolchain (`BASH_ENV`, which a sandbox's dev shell needs, the
-compilers, git where it is not at a fixed path), so a verified round says
-the checks passed there on the pushed commit, and CI on that commit stays
-the gate before a merge. Machines: Daytona, local Docker and Namespace
-sandboxes and Macro computers run the checks; a paired machine of someone's
-own, a computer whose macrod keeps no worktree for the session, Cursor and
+starts only with its timeout and the lock's wait left: short in the attempt
+(25 of its 30 minutes, `ATTEMPT_CHECKS_FOR`), the attempt fails for its
+retry; short in the Step's rounds, the round and the Step end `red` at once.
+A worktree that cannot be set up, a branch GitHub does not have, and a run
+that found the lock held fail the attempt for a retry and record nothing. A
+Step whose checks the factory ran before never leaves a later round to the
+agent: a session that runs no command then is retried until the rounds'
+time is up. Nothing the agent hands back decides a verified round, and
+nothing it leaves in its own checkout reaches the checks. What remains in
+the agent's hands: the machine and its toolchain (`BASH_ENV`, which a
+sandbox's dev shell needs, the compilers, git where it is not at a fixed
+path), so a verified round says the checks passed there on the pushed
+commit, and CI on that commit stays the gate before a merge. Machines:
+Daytona, local Docker and Namespace sandboxes run the checks, and so do
+Macro computers for a session macrod gave a worktree of its own (as it
+reported when the session opened; a worktree gone since is an error, which
+is retried); a paired machine of someone's own, a computer session in a
+workspace macrod shares, Cursor and
 Codex do not. Elsewhere (those, or a harness from before
 the `exec` route, which answers 404: `run_check` answers none) the agent runs
 them: a round is a later prompt of the Step's session
