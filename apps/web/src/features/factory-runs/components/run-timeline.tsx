@@ -379,7 +379,11 @@ function FindingNote(props: { finding: ReviewFinding }) {
       </span>
       <span class="block text-ink-muted">{props.finding.problem}</span>
       <span class="block text-ink-muted">{props.finding.why}</span>
-      <Show when={props.finding.blocksAnywhere}>
+      <Show
+        when={
+          props.finding.blocksAnywhere && props.finding.path !== WHOLE_CHANGE
+        }
+      >
         <span class="block text-ink-muted">
           {t('factoryRuns.findingFoundAgain')}
         </span>
