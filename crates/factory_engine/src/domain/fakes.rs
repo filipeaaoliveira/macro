@@ -87,6 +87,14 @@ pub(crate) struct FollowUpMade {
     pub(crate) id: Uuid,
 }
 
+/// A comment on a follow-up task, by its author.
+#[derive(Debug, Clone)]
+pub(crate) struct FollowUpComment {
+    pub(crate) owner: String,
+    pub(crate) task_id: Uuid,
+    pub(crate) text: String,
+}
+
 /// Runs, Steps and sessions in memory, with the same first-write-wins rules
 /// as the Postgres repository.
 #[derive(Clone, Default)]
@@ -134,6 +142,8 @@ pub(crate) struct FakeRepo {
     pub(crate) follow_ups_made_anyway: Arc<Mutex<bool>>,
     /// Whether document storage refuses follow-up tasks.
     pub(crate) follow_ups_refused: Arc<Mutex<bool>>,
+    /// The comments made on follow-up tasks, in order.
+    pub(crate) follow_up_comments: Arc<Mutex<Vec<FollowUpComment>>>,
     /// The prompt each reviewer's Step was asked again in.
     pub(crate) reasks: Arc<Mutex<Vec<(StepKey, Uuid)>>>,
 }
@@ -205,6 +215,35 @@ impl TaskDirectory for FakeRepo {
             return Err(FakeError);
         }
         Ok(Made::Made)
+    }
+
+    /// A comment quotes a passage the follow-up task says once, as
+    /// document storage anchors it.
+    async fn comment_on_follow_up(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        task_id: Uuid,
+        quote: &str,
+        text: &str,
+    ) -> Result<(), FakeError> {
+        let quoted_once = self
+            .follow_ups
+            .lock()
+            .expect("follow ups")
+            .iter()
+            .any(|made| made.id == task_id && made.task.markdown.matches(quote).count() == 1);
+        if !quoted_once {
+            return Err(FakeError);
+        }
+        self.follow_up_comments
+            .lock()
+            .expect("comments")
+            .push(FollowUpComment {
+                owner: user_id.as_ref().to_string(),
+                task_id,
+                text: text.to_string(),
+            });
+        Ok(())
     }
 }
 
