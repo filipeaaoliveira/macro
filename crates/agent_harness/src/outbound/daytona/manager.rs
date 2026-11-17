@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 use agent_runtime_protocol::domain::ports::Transport;
 use agent_runtime_protocol::domain::schema::v0::{ToRuntimeMessage, ToServerMessage};
 use agent_session::domain::model::AgentSessionId;
+use agent_session::domain::session_command::{SessionCommand, SessionCommandOutput};
 use futures::{StreamExt as _, stream};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
@@ -23,6 +24,9 @@ use crate::domain::sandbox::{
 use crate::outbound::managed_containers::ManagedContainers;
 use crate::outbound::provision::{self, SESSION_LABEL};
 use crate::outbound::sidecar::SidecarTransport;
+
+#[cfg(test)]
+mod test;
 
 const LOG_FETCH_TIMEOUT: Duration = Duration::from_secs(15);
 const EXEC_TIMEOUT: Duration = Duration::from_secs(15);
@@ -507,6 +511,62 @@ impl ContainerManager for DaytonaContainerManager {
                 Err(error)
             }
         }
+    }
+
+    /// Runs in the session's sandbox, started first if it stopped. The
+    /// command counts as activity for as long as it runs, so the idle
+    /// reaper never stops the sandbox under it. A sandbox this replica holds
+    /// no session in is tracked only while the command runs: another
+    /// replica may hold it, and Daytona's own auto-stop stops one nobody
+    /// does.
+    #[tracing::instrument(err, skip(self, command))]
+    async fn exec(
+        &self,
+        session: AgentSessionId,
+        command: SessionCommand,
+    ) -> Result<SessionCommandOutput> {
+        let Some(id) = self
+            .client
+            .find_by_label(SESSION_LABEL, &session.to_string())
+            .await
+            .map_err(unavailable)?
+            .map(DaytonaSandboxId::new)
+        else {
+            return Err(HarnessError::Container(format!(
+                "session {session} has no sandbox to run a command in"
+            )));
+        };
+
+        self.managed
+            .containers
+            .begin_command(&id, session, Instant::now());
+        let ran = async {
+            self.client.start(id.as_str()).await.map_err(unavailable)?;
+            self.client
+                .wait_for_started(id.as_str(), provision::ENSURE_TIMEOUT)
+                .await
+                .map_err(unavailable)?;
+            self.client
+                .execute(
+                    id.as_str(),
+                    &provision::session_command(&command),
+                    command.timeout() + provision::EXEC_MARGIN,
+                )
+                .await
+                .map_err(unavailable)
+        }
+        .await;
+        self.managed.containers.end_command(&id, Instant::now());
+
+        // A command's code is its verdict: one Daytona did not give is not
+        // a pass.
+        let (Some(exit_code), output) = ran? else {
+            return Err(HarnessError::Container(format!(
+                "sandbox {} gave no exit code for the command",
+                id.as_str()
+            )));
+        };
+        Ok(SessionCommandOutput::new(exit_code, output.as_bytes(), b""))
     }
 
     #[tracing::instrument(err, skip(self))]

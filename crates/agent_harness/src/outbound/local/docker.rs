@@ -80,17 +80,27 @@ impl Docker {
         command: &str,
         timeout: Duration,
     ) -> Result<(i32, String), LocalError> {
+        let output = self.exec_output(container, command, timeout).await?;
+        let mut combined = String::from_utf8_lossy(&output.stdout).into_owned();
+        combined.push_str(&String::from_utf8_lossy(&output.stderr));
+        Ok((output.status.code().unwrap_or(-1), combined))
+    }
+
+    /// Run one command inside a container, returning its exit status and
+    /// its two streams apart.
+    pub async fn exec_output(
+        &self,
+        container: &ContainerRef,
+        command: &str,
+        timeout: Duration,
+    ) -> Result<std::process::Output, LocalError> {
         let args = exec_args(&container.name, command);
-        let output = tokio::time::timeout(timeout, self.output(&args))
+        tokio::time::timeout(timeout, self.output(&args))
             .await
             .map_err(|_| LocalError::ExecTimeout {
                 container: container.name.clone(),
                 seconds: timeout.as_secs(),
-            })??;
-
-        let mut combined = String::from_utf8_lossy(&output.stdout).into_owned();
-        combined.push_str(&String::from_utf8_lossy(&output.stderr));
-        Ok((output.status.code().unwrap_or(-1), combined))
+            })?
     }
 
     /// The container carrying `value` for `label`, if one exists.
@@ -203,14 +213,18 @@ fn run_args(spec: &RunSpec) -> Vec<String> {
 
 /// `docker exec` running one shell command.
 ///
-/// A login shell, matching the Daytona provider: the image puts its baked nix
-/// dev shell on `PATH` through `BASH_ENV`, which a non-login shell would skip.
+/// A shell that reads no profile or rc file, as the Daytona provider runs:
+/// the agent can change those, and a check must not run what it put there.
+/// The image's baked nix dev shell reaches `PATH` through `BASH_ENV`, which
+/// a non-interactive shell reads all the same.
 fn exec_args(name: &str, command: &str) -> Vec<String> {
     vec![
         "exec".to_owned(),
         name.to_owned(),
         "bash".to_owned(),
-        "-lc".to_owned(),
+        "--noprofile".to_owned(),
+        "--norc".to_owned(),
+        "-c".to_owned(),
         command.to_owned(),
     ]
 }

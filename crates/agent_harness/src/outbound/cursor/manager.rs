@@ -733,6 +733,18 @@ where
         Ok(None)
     }
 
+    /// Cursor's agent works in Cursor's cloud, in a checkout Macro cannot
+    /// reach.
+    async fn exec(
+        &self,
+        session: AgentSessionId,
+        _command: agent_session::domain::session_command::SessionCommand,
+    ) -> Result<agent_session::domain::session_command::SessionCommandOutput> {
+        Err(HarnessError::Session(
+            agent_session::domain::error::AgentSessionError::CommandUnsupported(session),
+        ))
+    }
+
     async fn teardown(&self, session: AgentSessionId) -> Result<()> {
         // Archive, never delete: the agent and its work belong to the Cursor
         // account's owner, and archiving is reversible on cursor.com while

@@ -3,6 +3,8 @@ use std::sync::Arc;
 use agent_runtime_protocol::domain::ports::Transport;
 use agent_runtime_protocol::domain::schema::v0::{ToRuntimeMessage, ToServerMessage};
 use agent_session::domain::model::{AgentSessionId, SandboxSize};
+use agent_session::domain::session_command::{SessionCommand, SessionCommandOutput};
+use dashmap::DashMap;
 use tracing::Instrument as _;
 
 use super::client::NamespaceClient;
@@ -15,11 +17,18 @@ use crate::domain::sandbox::{SandboxResizeEffect, create_only_resize_effect, res
 use crate::outbound::provision;
 use crate::outbound::sidecar::SidecarTransport;
 
+#[cfg(test)]
+mod test;
+
 /// Hands out Namespace instances.
 pub struct NamespaceContainerManager {
     client: NamespaceClient,
     image_ref: super::types::ImageRef,
     lifetime: std::time::Duration,
+    /// The instance of each session this process spawned, which is the
+    /// only lookup from a session to its instance there is yet: a command
+    /// reaches the replica that holds the session, which spawned it.
+    instances: DashMap<AgentSessionId, Arc<Instance>>,
 }
 
 impl NamespaceContainerManager {
@@ -36,6 +45,7 @@ impl NamespaceContainerManager {
             client: NamespaceClient::new(api_url, token),
             image_ref,
             lifetime,
+            instances: DashMap::new(),
         }
     }
 
@@ -59,10 +69,13 @@ impl NamespaceContainerManager {
             .instrument(tracing::info_span!("agent.container.ensure_ready"))
             .await
             .map_err(unavailable)?;
-        if output.exit_code != 0 {
+        // The readiness recipe reads an answer without a code as a pass, as
+        // it always has.
+        let exit_code = output.exit_code.unwrap_or(0);
+        if exit_code != 0 {
             return Err(unavailable(NamespaceError::ReadinessRecipe {
                 instance_id: instance.id.to_string(),
-                exit_code: output.exit_code,
+                exit_code,
                 stdout: output.stdout,
                 stderr: output.stderr,
             }));
@@ -120,9 +133,13 @@ impl ContainerManager for NamespaceContainerManager {
         let instance_id = instance.id.clone();
 
         match self.bring_up(instance).await {
-            Ok(container) => Ok(agent_session::domain::connection::RuntimeAttachment::solo(
-                container,
-            )),
+            Ok(container) => {
+                self.instances
+                    .insert(command.session_id, Arc::clone(&container.instance));
+                Ok(agent_session::domain::connection::RuntimeAttachment::solo(
+                    container,
+                ))
+            }
             Err(error) => {
                 if let Err(destroy_error) = self.client.destroy_instance(&instance_id).await {
                     tracing::error!(
@@ -160,10 +177,62 @@ impl ContainerManager for NamespaceContainerManager {
         todo!("recovering a Namespace instance's session token is not implemented yet")
     }
 
-    async fn teardown(&self, _session: AgentSessionId) -> Result<()> {
-        // Tearing down needs the instance id for a session, which is the same
-        // lookup `resume` is waiting on.
-        todo!("tearing down Namespace instances is not implemented yet")
+    /// Runs in the instance this process spawned for the session; one it
+    /// did not spawn is not known here.
+    #[tracing::instrument(err, skip(self, command))]
+    async fn exec(
+        &self,
+        session: AgentSessionId,
+        command: SessionCommand,
+    ) -> Result<SessionCommandOutput> {
+        let instance = self
+            .instances
+            .get(&session)
+            .map(|entry| Arc::clone(entry.value()))
+            .ok_or_else(|| {
+                HarnessError::Container(format!(
+                    "session {session} has no instance spawned here to run a command in"
+                ))
+            })?;
+        let script = command.script(provision::CHECKOUT);
+        let argv = ["bash", "-c", script.as_str()];
+        let run = self.client.run_command(&instance, &argv);
+        let output = tokio::time::timeout(command.timeout() + provision::EXEC_MARGIN, run)
+            .await
+            .map_err(|_| {
+                HarnessError::Container(format!(
+                    "instance {} did not answer the command in time",
+                    instance.id
+                ))
+            })?
+            .map_err(unavailable)?;
+        // A command's code is its verdict: one Namespace did not give is
+        // not a pass.
+        let exit_code = output.exit_code.ok_or_else(|| {
+            HarnessError::Container(format!(
+                "instance {} gave no exit code for the command",
+                instance.id
+            ))
+        })?;
+        Ok(SessionCommandOutput::new(
+            exit_code,
+            output.stdout.as_bytes(),
+            output.stderr.as_bytes(),
+        ))
+    }
+
+    /// Destroys the instance this process spawned for the session. One it
+    /// did not spawn needs the lookup `resume` is waiting on.
+    async fn teardown(&self, session: AgentSessionId) -> Result<()> {
+        let Some((_, instance)) = self.instances.remove(&session) else {
+            return Err(HarnessError::Container(format!(
+                "session {session} has no instance spawned here to tear down"
+            )));
+        };
+        self.client
+            .destroy_instance(&instance.id)
+            .await
+            .map_err(unavailable)
     }
 }
 

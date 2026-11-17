@@ -6,7 +6,8 @@ use crate::model_providers::{MacrodModels, ModelProbeEvent};
 
 use agent_harness::domain::service::ForwardedCommands;
 use agent_harness::outbound::forward::{
-    COMMAND_CHANNEL, RuntimeCommandRequest, RuntimeCommandTarget,
+    COMMAND_CHANNEL, RunCommandReply, RuntimeCommandRequest, RuntimeCommandTarget,
+    RuntimeRunCommandRequest,
 };
 use agent_session::domain::model::ReplicaId;
 use futures::StreamExt as _;
@@ -23,6 +24,7 @@ mod test;
 enum RuntimeBusEvent {
     Models(ModelProbeEvent),
     Command(Box<RuntimeCommandRequest>),
+    RunCommand(Box<RuntimeRunCommandRequest>),
 }
 
 pub(crate) async fn consume_runtime_commands<Harness>(
@@ -70,6 +72,16 @@ where
         };
         let request = match event {
             RuntimeBusEvent::Command(request) => *request,
+            RuntimeBusEvent::RunCommand(request) => {
+                if request.replica() == replica.as_uuid() {
+                    tokio::spawn(run_command(
+                        redis.clone(),
+                        Arc::clone(&harness_service),
+                        *request,
+                    ));
+                }
+                continue;
+            }
             RuntimeBusEvent::Models(event) => {
                 let models = models.clone();
                 probes.spawn(async move {
@@ -139,4 +151,44 @@ where
         );
     }
     anyhow::bail!("runtime command Redis subscription ended")
+}
+
+/// Run a command another replica forwarded for a session this one holds,
+/// and publish how it ended on the request's reply channel. An answer
+/// nobody waits for any more is dropped by Redis.
+async fn run_command<Harness: ForwardedCommands>(
+    redis: redis::Client,
+    harness_service: Arc<Harness>,
+    request: RuntimeRunCommandRequest,
+) {
+    let span = request.processing_span();
+    async move {
+        let session = request.session();
+        let result = harness_service
+            .run_forwarded_command(session, request.command().clone())
+            .await;
+        if let Err(error) = &result {
+            tracing::warn!(error = ?error, %session, "forwarded session command failed");
+        }
+        let reply = match serde_json::to_string(&RunCommandReply::of(&result)) {
+            Ok(reply) => reply,
+            Err(error) => {
+                tracing::error!(error = ?error, %session, "could not encode a session command's answer");
+                return;
+            }
+        };
+        let published = match redis.get_multiplexed_async_connection().await {
+            Ok(mut connection) => {
+                connection
+                    .publish::<_, _, ()>(request.reply_channel(), reply)
+                    .await
+            }
+            Err(error) => Err(error),
+        };
+        if let Err(error) = published {
+            tracing::error!(error = ?error, %session, "could not answer a forwarded session command");
+        }
+    }
+    .instrument(span)
+    .await;
 }

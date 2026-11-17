@@ -4,10 +4,12 @@ use std::sync::{Arc, Mutex};
 use agent_session::domain::error::AiAdmissionError;
 use agent_session::domain::model::SessionVisibility;
 use agent_session::domain::routines::{
-    PrepareRoutineSession, PreparedRoutineSession, PromptRoutineSession, RoutineActionStatus,
-    RoutineFailureReason, RoutinePendingReason, RoutinePromptAccepted, RoutineSessionAction,
-    RoutineSessionError, RoutineSessions, ValidateRoutineSession, ValidatedRoutineSession,
+    ExecRoutineSession, PrepareRoutineSession, PreparedRoutineSession, PromptRoutineSession,
+    RoutineActionStatus, RoutineFailureReason, RoutinePendingReason, RoutinePromptAccepted,
+    RoutineSessionAction, RoutineSessionError, RoutineSessions, ValidateRoutineSession,
+    ValidatedRoutineSession,
 };
+use agent_session::domain::session_command::SessionCommandOutput;
 use ai_billing::DenyReason;
 use bot_id::BotId;
 use factory_records::domain::models::{
@@ -26,6 +28,7 @@ use crate::domain::models::AgentTask;
 use crate::domain::ports::{Retryable, StepAgent};
 
 mod follow_up;
+mod run_check;
 
 /// What happens to one call: it works, or fails with this error. A call
 /// that fails ambiguously may still take effect (`lands`).
@@ -84,6 +87,10 @@ struct FakeSessions {
     /// What the agent hands back for a follow-up, once it lands.
     follow_up_handed: Option<HandBack>,
     follow_up_calls: Arc<Mutex<Vec<PromptRoutineSession>>>,
+    /// How a command run in the session ends: none for a runtime that runs
+    /// no command.
+    command_output: Option<SessionCommandOutput>,
+    exec_calls: Arc<Mutex<Vec<ExecRoutineSession>>>,
 }
 
 impl FakeSessions {
@@ -111,6 +118,8 @@ impl FakeSessions {
             ignored_stops: 0,
             follow_up_handed: None,
             follow_up_calls: Arc::default(),
+            command_output: None,
+            exec_calls: Arc::default(),
         }
     }
 
@@ -291,6 +300,16 @@ impl RoutineSessions for FakeSessions {
             action_id,
             queued: false,
         })
+    }
+
+    async fn exec(
+        &self,
+        command: ExecRoutineSession,
+    ) -> Result<SessionCommandOutput, RoutineSessionError> {
+        self.exec_calls.lock().expect("execs").push(command);
+        self.command_output
+            .clone()
+            .ok_or(RoutineSessionError::CommandUnsupported)
     }
 
     async fn status(

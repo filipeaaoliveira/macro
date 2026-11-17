@@ -87,6 +87,10 @@ export default {
   findingLines: '{{path}}, lines {{start}}–{{end}}',
   findingWholeChange: 'The whole change',
   findingFoundAgain: 'Still there from the round before',
+  checksVerified: 'Run on the pushed commit',
+  checksVerifiedOn: 'Run on pushed commit {{commit}}',
+  checksReported: 'Reported by the agent',
+  checkExited: '{{check}} exited {{code}}',
   cancelRun: 'Cancel run',
   cancelTitle: 'Cancel this run?',
   cancelBody:

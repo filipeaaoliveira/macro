@@ -56,6 +56,20 @@ pub(super) trait ErasedForwarder: Send + Sync + 'static {
         command: HarnessCommand,
         target: crate::domain::ports::CommandTarget,
     ) -> std::pin::Pin<Box<dyn Future<Output = Result<CommandOutcome>> + Send + 'a>>;
+
+    fn run_command<'a>(
+        &'a self,
+        session: AgentSessionId,
+        command: agent_session::domain::session_command::SessionCommand,
+        replica: agent_session::domain::model::ReplicaId,
+    ) -> std::pin::Pin<
+        Box<
+            dyn Future<
+                    Output = Result<agent_session::domain::session_command::SessionCommandOutput>,
+                > + Send
+                + 'a,
+        >,
+    >;
 }
 
 impl<F: CommandForwarder> ErasedForwarder for F {
@@ -66,6 +80,24 @@ impl<F: CommandForwarder> ErasedForwarder for F {
         target: crate::domain::ports::CommandTarget,
     ) -> std::pin::Pin<Box<dyn Future<Output = Result<CommandOutcome>> + Send + 'a>> {
         Box::pin(CommandForwarder::forward(self, session, command, target))
+    }
+
+    fn run_command<'a>(
+        &'a self,
+        session: AgentSessionId,
+        command: agent_session::domain::session_command::SessionCommand,
+        replica: agent_session::domain::model::ReplicaId,
+    ) -> std::pin::Pin<
+        Box<
+            dyn Future<
+                    Output = Result<agent_session::domain::session_command::SessionCommandOutput>,
+                > + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(CommandForwarder::run_command(
+            self, session, command, replica,
+        ))
     }
 }
 

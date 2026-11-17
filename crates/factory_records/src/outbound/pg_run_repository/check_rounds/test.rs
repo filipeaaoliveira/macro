@@ -5,8 +5,8 @@ use uuid::Uuid;
 
 use super::super::PgRunRepository;
 use crate::domain::models::{
-    AgentName, CheckRoundOutcome, CheckRoundStart, EntryId, HandBack, HandedBack, NewRun, Outcome,
-    PassedOver, Role, RunId, RunInsert, StepKey, StepSession,
+    AgentName, CheckResult, CheckRoundOutcome, CheckRoundStart, EntryId, HandBack, HandedBack,
+    NewRun, Outcome, PassedOver, Role, RunId, RunInsert, StepKey, StepSession,
 };
 use crate::domain::ports::RunRepository;
 
@@ -362,5 +362,95 @@ async fn a_round_the_quota_ended_is_kept_as_ended_by_it(pool: PgPool) {
             (true, CheckRoundOutcome::Failed, "web: exit 1"),
             (true, CheckRoundOutcome::Failed, "The quota ran out."),
         ]
+    );
+}
+
+/// A round the engine runs keeps each check's exit code and output as it
+/// runs, once per check, and the commit of its first run, and says it is
+/// verified; one the agent reported
+/// says it is not, with no results. An ended round takes no more.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn a_verified_round_keeps_each_checks_run(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let (key, _) = writing(&repo).await;
+    for round in [1, 2] {
+        repo.start_check_round(
+            key,
+            &CheckRoundStart {
+                round,
+                work_output: "Wrote the toggle".to_string(),
+                checks: vec!["web".to_string(), "lint".to_string()],
+                commands: vec!["bun test".to_string(), "just check".to_string()],
+                declared: "{}".to_string(),
+                check_action_id: Uuid::now_v7(),
+            },
+        )
+        .await
+        .expect("start");
+    }
+    let web = CheckResult {
+        name: "web".to_string(),
+        exit_code: 0,
+        output: "12 passed".to_string(),
+    };
+    let lint = CheckResult {
+        name: "lint".to_string(),
+        exit_code: 1,
+        output: "error: unused import".to_string(),
+    };
+
+    repo.end_check_round(key, 1, CheckRoundOutcome::Failed, "lint failed")
+        .await
+        .expect("end reported");
+    let pushed = "1111111111111111111111111111111111111111";
+    let later = "2222222222222222222222222222222222222222";
+    repo.record_check_result(key, 2, pushed, &web)
+        .await
+        .expect("web");
+    // A retry runs it again: the first run stays.
+    repo.record_check_result(
+        key,
+        2,
+        later,
+        &CheckResult {
+            exit_code: 1,
+            ..web.clone()
+        },
+    )
+    .await
+    .expect("web again");
+    repo.record_check_result(key, 2, later, &lint)
+        .await
+        .expect("lint");
+    repo.end_check_round(key, 2, CheckRoundOutcome::Failed, "lint exited 1")
+        .await
+        .expect("end verified");
+    repo.record_check_result(
+        key,
+        2,
+        later,
+        &CheckResult {
+            name: "late".to_string(),
+            exit_code: 0,
+            output: String::new(),
+        },
+    )
+    .await
+    .expect("after the end");
+
+    let rounds = repo.check_rounds(key).await.expect("rounds");
+    assert!(!rounds[0].verified);
+    assert!(rounds[0].results.is_empty());
+    assert_eq!(rounds[0].checked_commit, None);
+    assert!(rounds[1].verified);
+    // The commit the round's first run was on stays its commit.
+    assert_eq!(rounds[1].checked_commit.as_deref(), Some(pushed));
+    assert_eq!(rounds[1].results, [web, lint]);
+    assert_eq!(
+        rounds[1].end.as_ref().expect("ended").report,
+        "lint exited 1"
     );
 }

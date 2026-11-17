@@ -58,6 +58,10 @@ pub enum AgentSessionError {
     Handshake(String),
     #[error("agent session {0} is no longer connected")]
     Disconnected(AgentSessionId),
+    /// The session's runtime runs no command beside its agent: a paired
+    /// machine, a cloud agent or the in-process agent.
+    #[error("agent session {0} runs no command beside its agent")]
+    CommandUnsupported(AgentSessionId),
     /// A session cannot be opened because the bot's externally run runtime
     /// is not in a state to serve it. Says what the operator has to fix.
     #[error("{0}")]

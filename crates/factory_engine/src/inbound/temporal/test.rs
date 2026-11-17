@@ -130,6 +130,14 @@ impl StepAgent for Agent {
         Err(AgentFailed)
     }
 
+    async fn run_check(
+        &self,
+        _command: crate::domain::models::AgentCommand,
+    ) -> Result<Option<agent_session::domain::session_command::SessionCommandOutput>, AgentFailed>
+    {
+        Ok(None)
+    }
+
     async fn stop(
         &self,
         _key: StepKey,
@@ -620,6 +628,14 @@ impl StepAgent for CodeAgent {
     /// Its repository declares no checks, so no Step asks.
     async fn follow_up(&self, _turn: AgentTurn) -> Result<AgentAnswer, AgentFailed> {
         Err(AgentFailed)
+    }
+
+    async fn run_check(
+        &self,
+        _command: crate::domain::models::AgentCommand,
+    ) -> Result<Option<agent_session::domain::session_command::SessionCommandOutput>, AgentFailed>
+    {
+        Ok(None)
     }
 
     async fn stop(

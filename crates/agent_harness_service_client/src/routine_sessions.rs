@@ -4,10 +4,11 @@
 use std::time::Duration;
 
 use agent_session::domain::routines::{
-    PrepareRoutineSession, PreparedRoutineSession, PromptRoutineSession, RoutineActionStatus,
-    RoutineActivity, RoutinePromptAccepted, RoutineSessionAction, RoutineSessionError,
-    RoutineSessions, ValidateRoutineSession, ValidatedRoutineSession,
+    ExecRoutineSession, PrepareRoutineSession, PreparedRoutineSession, PromptRoutineSession,
+    RoutineActionStatus, RoutineActivity, RoutinePromptAccepted, RoutineSessionAction,
+    RoutineSessionError, RoutineSessions, ValidateRoutineSession, ValidatedRoutineSession,
 };
+use agent_session::domain::session_command::{MAX_COMMAND_TIMEOUT, SessionCommandOutput};
 use anyhow::{Context, Result};
 use macro_authorization::INTERNAL_API_KEY_HEADER;
 use reqwest::{Client, Response, StatusCode, Url, header::HeaderValue};
@@ -17,6 +18,9 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(5);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
+/// How long a command's answer may take: past the harness's own bound on
+/// the route, the command's longest timeout and a margin.
+const EXEC_TIMEOUT: Duration = MAX_COMMAND_TIMEOUT.saturating_add(Duration::from_secs(90));
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Operation {
@@ -24,6 +28,7 @@ enum Operation {
     Prepare,
     Prompt,
     FollowUp,
+    Exec,
     Status,
     Cancel,
     Delete,
@@ -37,6 +42,7 @@ impl Operation {
             Self::Prepare => "internal/routine-sessions/prepare",
             Self::Prompt => "internal/routine-sessions/prompt",
             Self::FollowUp => "internal/routine-sessions/follow-up",
+            Self::Exec => "internal/routine-sessions/exec",
             Self::Status => "internal/routine-sessions/status",
             Self::Cancel => "internal/routine-sessions/cancel",
             Self::Delete => "internal/routine-sessions/delete",
@@ -47,6 +53,7 @@ impl Operation {
     fn timeout(self) -> Duration {
         match self {
             Self::Status | Self::Cancel | Self::Delete | Self::Activity => SNAPSHOT_TIMEOUT,
+            Self::Exec => EXEC_TIMEOUT,
             _ => REQUEST_TIMEOUT,
         }
     }
@@ -160,6 +167,15 @@ impl AgentSessionClient {
                 RoutineSessionError::InvalidCommand
             }
             _ if operation.prompts() => RoutineSessionError::PromptDeliveryUnknown,
+            // A harness from before commands ran in sessions has no such
+            // route: its sessions run none, so the caller falls back.
+            StatusCode::NOT_FOUND | StatusCode::NOT_IMPLEMENTED if operation == Operation::Exec => {
+                tracing::warn!(
+                    %status,
+                    "the harness has no exec route; reading it as a runtime that runs no command"
+                );
+                RoutineSessionError::CommandUnsupported
+            }
             StatusCode::CONFLICT => RoutineSessionError::Conflict,
             StatusCode::NOT_FOUND
             | StatusCode::TOO_MANY_REQUESTS
@@ -231,6 +247,13 @@ impl RoutineSessions for AgentSessionClient {
         command: PromptRoutineSession,
     ) -> Result<RoutinePromptAccepted, RoutineSessionError> {
         self.command(Operation::FollowUp, &command).await
+    }
+
+    async fn exec(
+        &self,
+        command: ExecRoutineSession,
+    ) -> Result<SessionCommandOutput, RoutineSessionError> {
+        self.command(Operation::Exec, &command).await
     }
 
     async fn status(

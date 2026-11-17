@@ -109,10 +109,16 @@ const INITIAL_RUNS: Run[] = [
             round: 1,
             checks: ['web', 'lint'],
             startedAt: at(36),
+            verified: true,
+            checkedCommit: '9f2c41d7b6a0e3c58d1f4a2b7e6c9d0a1b2c3d4e',
+            results: [
+              { name: 'web', exitCode: 1 },
+              { name: 'lint', exitCode: 0 },
+            ],
             end: {
               outcome: 'failed',
               report:
-                '- `web`: `bun run check`, exit 1: `EmptyState` has no `title` prop.\n- `lint`: `just check`, exit 0',
+                "The factory ran these checks on the commit you pushed, from the repository's root, and they failed:\n\n### `web`: `bun run check` exited with status 1\n\n```\n`EmptyState` has no `title` prop.\n```",
               endedAt: at(34),
             },
           },
@@ -120,6 +126,8 @@ const INITIAL_RUNS: Run[] = [
             round: 2,
             checks: ['web', 'lint'],
             startedAt: at(32),
+            verified: false,
+            results: [],
             end: {
               outcome: 'passed',
               report:

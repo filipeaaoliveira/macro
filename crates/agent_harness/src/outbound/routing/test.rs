@@ -8,6 +8,7 @@ use agent_session::domain::model::{
     AgentSession, CreateAgentSessionParams, DEFAULT_AGENT_SESSION_NAME, SandboxSize, SessionBot,
     SessionStatus, ThreadSession,
 };
+use agent_session::domain::session_command::{SessionCommand, SessionCommandOutput};
 use bot_id::BotId;
 use macro_user_id::user_id::MacroUserIdStr;
 use std::sync::{Arc, Mutex};
@@ -89,6 +90,19 @@ impl ContainerManager for TaggedManager {
     async fn session_token(&self, _session: AgentSessionId) -> Result<Option<String>> {
         self.record("session_token");
         Ok(None)
+    }
+
+    async fn exec(
+        &self,
+        _session: AgentSessionId,
+        command: SessionCommand,
+    ) -> Result<SessionCommandOutput> {
+        self.record("exec");
+        Ok(SessionCommandOutput::new(
+            0,
+            command.command.as_bytes(),
+            b"",
+        ))
     }
 
     async fn teardown(&self, _session: AgentSessionId) -> Result<()> {
@@ -528,4 +542,96 @@ async fn external_teardown_is_a_no_op_and_resume_still_refuses() {
     assert!(sandbox.calls().is_empty());
     assert!(cursor.calls().is_empty());
     assert!(codex.calls().is_empty());
+}
+
+/// A Macro computer that runs every command it is handed, saying for which
+/// bot and session.
+struct RecordingMachines(Arc<Mutex<Vec<(BotId, AgentSessionId)>>>);
+
+impl MachineCommands for RecordingMachines {
+    fn exec(
+        &self,
+        bot: BotId,
+        session: AgentSessionId,
+        _workspace: &str,
+        _command: SessionCommand,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<SessionCommandOutput>> + Send + '_>,
+    > {
+        self.0
+            .lock()
+            .expect("machines poisoned")
+            .push((bot, session));
+        Box::pin(async { Ok(SessionCommandOutput::new(1, b"failed", b"")) })
+    }
+}
+
+fn check() -> SessionCommand {
+    SessionCommand {
+        cwd: ".".into(),
+        command: "just check".into(),
+        timeout_secs: 60,
+    }
+}
+
+#[tokio::test]
+async fn a_command_runs_where_the_sessions_bot_is_served() {
+    let sandbox = TaggedManager::new("sandbox");
+    let cursor = TaggedManager::new("cursor");
+    let session = AgentSessionId::new();
+
+    RoutedContainerManager::new(
+        sandbox.clone(),
+        cursor.clone(),
+        TaggedManager::new("codex"),
+        FixedBotSessions(bot_id::MACRO_CODER_BOT_ID, "opencode"),
+    )
+    .exec(session, check())
+    .await
+    .expect("exec");
+    RoutedContainerManager::new(
+        sandbox.clone(),
+        cursor.clone(),
+        TaggedManager::new("codex"),
+        FixedBotSessions(bot_id::CURSOR_BOT_ID, "cursor"),
+    )
+    .exec(session, check())
+    .await
+    .expect("exec");
+
+    assert_eq!(sandbox.calls(), ["sandbox:exec"]);
+    assert_eq!(cursor.calls(), ["cursor:exec"]);
+}
+
+/// A paired machine runs no command unless the deployment can reach it as
+/// a Macro computer.
+#[tokio::test]
+async fn an_external_sessions_command_runs_only_on_a_macro_computer() {
+    let sandbox = TaggedManager::new("sandbox");
+    let router = RoutedContainerManager::new(
+        sandbox.clone(),
+        TaggedManager::new("cursor"),
+        TaggedManager::new("codex"),
+        FixedBotSessions(BotId::TEST_A, harness_id::MACROD_HARNESS_SLUG),
+    );
+    let session = AgentSessionId::new();
+
+    let refused = router.clone().exec(session, check()).await.unwrap_err();
+    assert!(
+        matches!(
+            refused,
+            HarnessError::Session(AgentSessionError::CommandUnsupported(id)) if id == session
+        ),
+        "{refused:?}"
+    );
+
+    let machines = Arc::new(Mutex::new(Vec::new()));
+    let output = router
+        .with_machines(Arc::new(RecordingMachines(machines.clone())))
+        .exec(session, check())
+        .await
+        .expect("exec");
+    assert_eq!(output.exit_code, 1);
+    assert_eq!(*machines.lock().unwrap(), [(BotId::TEST_A, session)]);
+    assert!(sandbox.calls().is_empty());
 }

@@ -263,7 +263,7 @@ impl NamespaceClient {
         Ok(CommandOutput {
             stdout: decode_stream(response.stdout.as_deref(), "stdout")?,
             stderr: decode_stream(response.stderr.as_deref(), "stderr")?,
-            exit_code: response.exit_code.unwrap_or_default(),
+            exit_code: response.exit_code,
         })
     }
 

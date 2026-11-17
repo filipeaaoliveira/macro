@@ -15,10 +15,10 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::domain::models::{
-    AgentName, CheckRound, CheckRoundOutcome, CheckRoundStart, ClaimedSession, ControlFileChanges,
-    EntryId, Gate, GateAnswer, HandBack, HandedBack, InvalidName, NewRun, Outcome, PassedOver,
-    Repository, Role, Run, RunEnd, RunId, RunInsert, RunOutcome, SessionStep, Step, StepEnd,
-    StepKey, StepSession, StoppingSession, TaskLink, TeamMembership,
+    AgentName, CheckResult, CheckRound, CheckRoundOutcome, CheckRoundStart, ClaimedSession,
+    ControlFileChanges, EntryId, Gate, GateAnswer, HandBack, HandedBack, InvalidName, NewRun,
+    Outcome, PassedOver, Repository, Role, Run, RunEnd, RunId, RunInsert, RunOutcome, SessionStep,
+    Step, StepEnd, StepKey, StepSession, StoppingSession, TaskLink, TeamMembership,
 };
 use crate::domain::ports::RunRepository;
 
@@ -85,6 +85,10 @@ pub enum PgRunRepositoryErr {
     /// A stored Run or Step has only part of its end.
     #[error("a stored end has an outcome but no time, or the other way round")]
     PartialEnd,
+    /// A verified round's results do not read as each check's name, exit
+    /// code and output.
+    #[error("a round's check results do not read")]
+    UnreadableCheckResults,
     /// A stored Run has a repository but no base branch, or the other way
     /// round.
     #[error("a stored run has a repository but no base branch, or the other way round")]
@@ -1148,6 +1152,17 @@ impl RunRepository for PgRunRepository {
         report: &str,
     ) -> Result<(), Self::Err> {
         self.finish_check_round(key, round, outcome, report).await
+    }
+
+    #[tracing::instrument(err, skip(self, result), fields(check = %result.name))]
+    async fn record_check_result(
+        &self,
+        key: StepKey,
+        round: u8,
+        commit: &str,
+        result: &CheckResult,
+    ) -> Result<(), Self::Err> {
+        self.add_check_result(key, round, commit, result).await
     }
 
     #[tracing::instrument(err, skip(self, report))]

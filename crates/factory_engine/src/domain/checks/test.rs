@@ -65,6 +65,14 @@ fn a_file_that_breaks_the_rules_says_why() {
             "duplicate",
         ),
         (r#"{"checks":[{"name":"web","run":"  "}]}"#, "run"),
+        (
+            r#"{"checks":[{"name":"web","run":"x","timeout":0}]}"#,
+            "timeout",
+        ),
+        (
+            r#"{"checks":[{"name":"web","run":"x","timeout":1201}]}"#,
+            "timeout",
+        ),
     ];
 
     for (text, expected) in cases {
@@ -76,6 +84,7 @@ fn a_file_that_breaks_the_rules_says_why() {
             ChecksFileError::Name(_) => "name",
             ChecksFileError::DuplicateName(_) => "duplicate",
             ChecksFileError::Run(_) => "run",
+            ChecksFileError::Timeout(_) => "timeout",
             ChecksFileError::Path { .. } => "path",
             ChecksFileError::TooLarge => "too large",
         };
@@ -132,4 +141,16 @@ fn a_file_over_what_a_round_keeps_does_not_read() {
         RepositoryChecks::parse(&text),
         Err(ChecksFileError::TooLarge)
     );
+}
+
+/// A check takes the timeout it declares, or 10 minutes.
+#[test]
+fn a_check_s_timeout_defaults_to_ten_minutes() {
+    let checks = RepositoryChecks::parse(
+        r#"{"checks":[{"name":"web","run":"x","timeout":90},{"name":"lint","run":"y"}]}"#,
+    )
+    .expect("reads");
+
+    let timeouts: Vec<u64> = checks.checks.iter().map(|check| check.timeout).collect();
+    assert_eq!(timeouts, [90, 600]);
 }

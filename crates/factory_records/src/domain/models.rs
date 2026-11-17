@@ -549,12 +549,29 @@ impl CheckRoundOutcome {
 pub struct CheckRoundEnd {
     /// How the checks went.
     pub outcome: CheckRoundOutcome,
-    /// What the agent reported of each check, for a person and for the
-    /// agent's fix to read.
+    /// What each check did, for a person and for the agent's fix to read:
+    /// the agent's report, or, for a verified round, the checks that failed
+    /// with the end of their output.
     pub report: String,
     /// When the round ended.
     pub ended_at: DateTime<Utc>,
 }
+
+/// How one check of a verified round ran.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckResult {
+    /// The check's name.
+    pub name: String,
+    /// Its exit code: 0 when it passed.
+    pub exit_code: i32,
+    /// The end of what it printed, both streams, at most 4 KiB.
+    pub output: String,
+}
+
+/// The most of a check's output a verified round keeps, once escaped as
+/// JSON.
+pub const MAX_CHECK_RESULT_OUTPUT_BYTES: usize = 4096;
 
 /// One round of the repository's checks a Step ran on its agent's work, in
 /// the agent's session.
@@ -569,6 +586,16 @@ pub struct CheckRound {
     pub started_at: DateTime<Utc>,
     /// How and when it ended; none while the checks run.
     pub end: Option<CheckRoundEnd>,
+    /// Whether the engine runs the checks itself, on the pushed commit in a
+    /// worktree of its own, reading each one's exit code; otherwise the
+    /// agent runs them and reports how they went.
+    pub verified: bool,
+    /// How each check of a verified round ran so far, in the round's
+    /// order; none for a round the agent reports.
+    pub results: Vec<CheckResult>,
+    /// The commit a verified round's checks run on: the head of the Run's
+    /// branch on GitHub when its first check ran.
+    pub checked_commit: Option<String>,
     /// What the agent handed back for the work the round checks.
     #[serde(skip)]
     pub work_output: String,

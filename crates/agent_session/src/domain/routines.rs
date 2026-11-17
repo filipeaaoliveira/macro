@@ -5,6 +5,8 @@ mod service;
 mod status;
 
 pub use models::*;
+
+use crate::domain::session_command::SessionCommandOutput;
 pub use service::RoutineSessionsService;
 
 /// The only session operations available to routine execution.
@@ -43,6 +45,20 @@ pub trait RoutineSessions: Send + Sync + 'static {
     ) -> impl Future<Output = Result<RoutinePromptAccepted, RoutineSessionError>> + Send {
         let _ = command;
         async { Err(RoutineSessionError::OperationFailed) }
+    }
+
+    /// Run a command in the session's checkout, beside its agent, and hand
+    /// back its exit code and the end of its output. Only the session's
+    /// owner, through the persona that runs it, may. A runtime that runs no
+    /// command (a paired machine, a cloud agent, the in-process agent)
+    /// answers [`RoutineSessionError::CommandUnsupported`]. The command runs
+    /// again when sent again: send only commands that are safe to repeat.
+    fn exec(
+        &self,
+        command: ExecRoutineSession,
+    ) -> impl Future<Output = Result<SessionCommandOutput, RoutineSessionError>> + Send {
+        let _ = command;
+        async { Err(RoutineSessionError::CommandUnsupported) }
     }
 
     /// Read the progress of the prompt the action id names (the first one,

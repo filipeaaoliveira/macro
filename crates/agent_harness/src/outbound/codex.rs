@@ -165,6 +165,16 @@ impl<
     async fn session_token(&self, _session: AgentSessionId) -> Result<Option<String>> {
         Ok(None)
     }
+    /// Codex works in OpenAI's cloud, in a checkout Macro cannot reach.
+    async fn exec(
+        &self,
+        session: AgentSessionId,
+        _command: agent_session::domain::session_command::SessionCommand,
+    ) -> Result<agent_session::domain::session_command::SessionCommandOutput> {
+        Err(HarnessError::Session(
+            agent_session::domain::error::AgentSessionError::CommandUnsupported(session),
+        ))
+    }
     async fn teardown(&self, session: AgentSessionId) -> Result<()> {
         let Some(external) = ExternalSessionRepo::get(&self.sessions, session).await? else {
             return Ok(());

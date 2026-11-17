@@ -20,6 +20,14 @@ pub(crate) struct ManagedContainers<Id> {
     /// which only ever sees `Id` - can ask whether the harness has a
     /// command in flight for it.
     sessions: DashMap<Id, AgentSessionId>,
+    /// How many commands run in each container now, beside its agent: a
+    /// reaper leaves a container with one alone, however long it has been
+    /// since its agent's last activity.
+    commands: DashMap<Id, usize>,
+    /// Containers tracked here only for the commands running in them: this
+    /// replica holds no session in them, so it stops tracking them once the
+    /// commands end, and never reaps a container another replica may hold.
+    command_only: DashMap<Id, ()>,
 }
 
 impl<Id> ManagedContainers<Id>
@@ -30,10 +38,13 @@ where
         Self {
             entries: DashMap::new(),
             sessions: DashMap::new(),
+            commands: DashMap::new(),
+            command_only: DashMap::new(),
         }
     }
 
     pub(crate) fn register(&self, id: Id, session: AgentSessionId) {
+        self.command_only.remove(&id);
         self.entries.insert(id.clone(), ContainerState::Pending);
         self.sessions.insert(id, session);
     }
@@ -61,6 +72,42 @@ where
         }
     }
 
+    /// Count a command that starts running in `id`, the container of
+    /// `session`, now. One this manager does not track (its session is
+    /// attached to no transport here) is tracked only while its commands
+    /// run.
+    pub(crate) fn begin_command(&self, id: &Id, session: AgentSessionId, now: Instant) {
+        *self.commands.entry(id.clone()).or_insert(0) += 1;
+        if let dashmap::mapref::entry::Entry::Vacant(vacant) = self.entries.entry(id.clone()) {
+            vacant.insert(ContainerState::Active { last_activity: now });
+            self.command_only.insert(id.clone(), ());
+            self.sessions.entry(id.clone()).or_insert(session);
+        }
+    }
+
+    /// Count a command in `id` as ended now: the container's idle time
+    /// starts again from its end, and one tracked only for its commands is
+    /// no longer tracked once the last ends.
+    pub(crate) fn end_command(&self, id: &Id, now: Instant) {
+        let ended = self
+            .commands
+            .remove_if_mut(id, |_, running| {
+                *running = running.saturating_sub(1);
+                *running == 0
+            })
+            .is_some();
+        if ended && self.command_only.remove(id).is_some() {
+            self.entries.remove(id);
+            self.sessions.remove(id);
+            return;
+        }
+        self.record_activity(id, now);
+    }
+
+    fn runs_command(&self, id: &Id) -> bool {
+        self.commands.contains_key(id)
+    }
+
     pub(crate) fn remove(&self, id: &Id) -> bool {
         self.sessions.remove(id);
         self.entries.remove(id).is_some()
@@ -86,6 +133,7 @@ where
             .filter_map(|entry| match entry.value() {
                 ContainerState::Active { last_activity }
                     if now.saturating_duration_since(*last_activity) >= max_idle
+                        && !self.runs_command(entry.key())
                         && !skip(entry.key()) =>
                 {
                     Some(entry.key().clone())
@@ -100,6 +148,7 @@ where
             };
             if let ContainerState::Active { last_activity } = *state
                 && now.saturating_duration_since(last_activity) >= max_idle
+                && !self.runs_command(&id)
                 && !skip(&id)
             {
                 *state = ContainerState::Stopping { last_activity };

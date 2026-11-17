@@ -25,8 +25,9 @@ export type Gate = {
 };
 
 /**
- * One round of the repository's checks a Step had its agent run: which
- * checks, and how they went (`passed` or `failed`, with the agent's report).
+ * One round of the repository's checks a Step ran on its agent's work:
+ * which checks, who ran them, and how they went (`passed` or `failed`, with
+ * a report).
  */
 export type CheckRound = {
   /** Which round, from 1. */
@@ -34,12 +35,31 @@ export type CheckRound = {
   /** The checks' names, in the repository's order. */
   checks: string[];
   startedAt: string;
+  /**
+   * Whether the factory ran the checks itself, on the pushed commit, and
+   * read their exit codes; otherwise the agent ran them and reported how
+   * they went.
+   */
+  verified: boolean;
+  /** The exit code of each check a verified round ran so far. */
+  results: CheckResult[];
+  /** The commit a verified round's checks ran on: the pushed branch's head. */
+  checkedCommit?: string;
   end?: {
     outcome: 'passed' | 'failed';
-    /** What the agent reported of each check, as markdown. */
+    /**
+     * What each check did, as markdown: the agent's report, or the checks
+     * that failed, with the end of their output.
+     */
     report: string;
     endedAt: string;
   };
+};
+
+/** How one check of a verified round ran. */
+export type CheckResult = {
+  name: string;
+  exitCode: number;
 };
 
 /** One visit of one of a Flow's entries. */

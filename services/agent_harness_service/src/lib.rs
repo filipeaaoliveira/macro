@@ -1585,6 +1585,17 @@ pub async fn run() -> anyhow::Result<()> {
         .with_turns(conversation_turns.clone()),
     );
     let session_actors = sessions.clone();
+    // External sessions run commands on the Macro computer their agent
+    // works on, when this deployment drives a fleet.
+    let containers = match &computer_operator {
+        Some(operator) => {
+            containers.with_machines(Arc::new(computers::commands::ComputerCommands::new(
+                PgHarnessBindings::new(pool.clone()),
+                computers::commands::OperatorGuests(Arc::clone(operator)),
+            )))
+        }
+        None => containers,
+    };
     let harness = Arc::new(
         AgentHarnessService::new(
             Some(conversations_service.clone()),

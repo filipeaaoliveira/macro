@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, LazyLock, Mutex};
 
+use agent_session::domain::session_command::SessionCommandOutput;
 use factory_records::domain::models::{
     AgentName, CheckRound, CheckRoundOutcome, EntryId, HandBack, MAX_OUTPUT_BYTES, Outcome,
     Repository, Role, RunId, StepKey, StepSession,
@@ -13,11 +14,15 @@ use super::super::BuiltInSteps;
 use crate::domain::checks::CHECKS_FILE;
 use crate::domain::fakes::{FakeGithub, FakeRepo, FakeWatches};
 use crate::domain::flow::StepName;
-use crate::domain::models::{AgentAnswer, AgentTask, AgentTurn, StepInput, StepReport};
+use crate::domain::models::{
+    AgentAnswer, AgentCommand, AgentTask, AgentTurn, StepInput, StepReport,
+};
 use crate::domain::ports::{AgentFailure, Retryable, StepAgent, StepExecutor};
 use crate::domain::pull_request_steps::PullRequestSteps;
 
-#[derive(Debug, thiserror::Error)]
+mod verified;
+
+#[derive(Debug, Clone, thiserror::Error)]
 #[error("the agent's session failed")]
 struct SessionFailed {
     out_of_quota: bool,
@@ -58,7 +63,34 @@ struct ScriptedAgent {
     ages: Option<FakeRepo>,
     tasks: Arc<Mutex<Vec<AgentTask>>>,
     turns: Arc<Mutex<Vec<AgentTurn>>>,
+    /// How each command run in the session's checkout ends, in order: none
+    /// for a runtime that runs no command, as a paired machine's.
+    checkout: Option<Arc<Mutex<VecDeque<Ran>>>>,
+    commands: Arc<Mutex<Vec<AgentCommand>>>,
+    /// What setting a round's worktree up answers: by default, that it is
+    /// at the branch's [`HEAD`].
+    set_up: Option<Ran>,
+    /// What the machine ran, in order: `set up`, `check <its command>` and
+    /// `remove`.
+    machine: Arc<Mutex<Vec<String>>>,
 }
+
+/// The check a check's command runs: its last line is `timeout … bash
+/// --noprofile --norc -c '<run>' 9>&-`.
+fn run_of(command: &str) -> String {
+    let last = command.lines().last().unwrap_or_default();
+    let quoted = last
+        .split_once(" -c ")
+        .map_or("", |(_, rest)| rest)
+        .trim_end_matches(" 9>&-");
+    quoted.trim_matches('\'').replace(r"'\''", "'")
+}
+
+/// The head commit of the Run's branch on GitHub.
+const HEAD: &str = "1111111111111111111111111111111111111111";
+
+/// How a command run in the checkout ended, or the session failing.
+type Ran = Result<SessionCommandOutput, SessionFailed>;
 
 impl ScriptedAgent {
     fn new(work: &'static str, later: Vec<Scripted>) -> Self {
@@ -112,6 +144,62 @@ impl StepAgent for ScriptedAgent {
             outcome: outcome(ended),
             text: text.to_string(),
         })
+    }
+
+    async fn run_check(
+        &self,
+        command: AgentCommand,
+    ) -> Result<Option<SessionCommandOutput>, SessionFailed> {
+        let Some(checkout) = &self.checkout else {
+            return Ok(None);
+        };
+        let line = command.command.command.clone();
+        if line.contains("g worktree add") {
+            self.machine
+                .lock()
+                .expect("machine")
+                .push("set up".to_string());
+            return self
+                .set_up
+                .clone()
+                .unwrap_or_else(|| {
+                    Ok(SessionCommandOutput {
+                        exit_code: 0,
+                        stdout: format!("macro-check: worktree at {HEAD}\n"),
+                        stderr: String::new(),
+                    })
+                })
+                .map(Some);
+        }
+        if line.contains("g worktree remove") {
+            self.machine
+                .lock()
+                .expect("machine")
+                .push("remove".to_string());
+            return Ok(Some(SessionCommandOutput {
+                exit_code: 0,
+                stdout: String::new(),
+                stderr: String::new(),
+            }));
+        }
+        let run = run_of(&line);
+        self.machine
+            .lock()
+            .expect("machine")
+            .push(format!("check {run}"));
+        let key = command.key;
+        self.commands.lock().expect("commands").push(command);
+        let ran = checkout
+            .lock()
+            .expect("checkout")
+            .pop_front()
+            .expect("a scripted run");
+        if ran.is_err()
+            && let Some(repo) = &self.ages
+        {
+            age(repo, key);
+        }
+        ran.map(Some)
     }
 
     async fn stop(
@@ -174,6 +262,7 @@ fn github(checks: Option<&str>, changed: Option<&[&str]>) -> FakeGithub {
     }
     github.state().changed =
         changed.map(|paths| paths.iter().map(|path| path.to_string()).collect());
+    github.state().head = Some(HEAD.to_string());
     github
 }
 

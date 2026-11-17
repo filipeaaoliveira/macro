@@ -434,6 +434,19 @@ where
             .map_err(PullRequestStepError::github)
     }
 
+    /// The commit at the head of the Run's branch on GitHub; none when it
+    /// is not there.
+    pub(crate) async fn branch_head(
+        &self,
+        input: &StepInput<'_>,
+    ) -> Result<Option<String>, PullRequestStepError> {
+        let (repository, _) = Self::repository(input)?;
+        self.github
+            .branch_head(input.owner, &repository, &run_branch(input.key.run_id))
+            .await
+            .map_err(PullRequestStepError::github)
+    }
+
     /// The paths the Run's branch changed against its base; none when
     /// GitHub cannot list them all.
     pub(crate) async fn branch_changes(

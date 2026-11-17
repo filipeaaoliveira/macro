@@ -4,7 +4,8 @@
 //! so explicit owner/action identity is not placed in URLs). Successful cancel
 //! returns 204; other successes return the domain result. Errors carry only a
 //! closed `code`. Prepare, prompt and follow-up must not be replayed after
-//! ambiguous errors.
+//! ambiguous errors. Exec runs a command again when sent again, and may
+//! take as long as the command's timeout to answer.
 
 use std::{sync::Arc, time::Duration};
 
@@ -22,13 +23,17 @@ use macro_authorization::{
 use serde::Serialize;
 
 use crate::domain::routines::{
-    PrepareRoutineSession, PreparedRoutineSession, PromptRoutineSession, RoutineActionStatus,
-    RoutineActivity, RoutinePromptAccepted, RoutineSessionAction, RoutineSessionError,
-    RoutineSessions, ValidateRoutineSession, ValidatedRoutineSession,
+    ExecRoutineSession, PrepareRoutineSession, PreparedRoutineSession, PromptRoutineSession,
+    RoutineActionStatus, RoutineActivity, RoutinePromptAccepted, RoutineSessionAction,
+    RoutineSessionError, RoutineSessions, ValidateRoutineSession, ValidatedRoutineSession,
 };
+use crate::domain::session_command::{MAX_COMMAND_TIMEOUT, SessionCommandOutput};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const STATUS_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long a command may take to answer: its own longest timeout, and a
+/// margin to reach its sandbox or computer.
+const EXEC_TIMEOUT: Duration = MAX_COMMAND_TIMEOUT.saturating_add(Duration::from_secs(60));
 const MAX_COMMAND_BYTES: usize = 1024 * 1024;
 
 /// Independent state for the scheduler-facing capability; no public control access.
@@ -75,6 +80,7 @@ pub fn routine_sessions_router<Service: RoutineSessions, Auth: MacroAuthorizatio
             .route("/prepare", post(prepare::<Service, Auth>))
             .route("/prompt", post(prompt::<Service, Auth>))
             .route("/follow-up", post(follow_up::<Service, Auth>))
+            .route("/exec", post(exec::<Service, Auth>))
             .route("/status", post(status::<Service, Auth>))
             .route("/cancel", post(cancel::<Service, Auth>))
             .route("/delete", post(delete::<Service, Auth>))
@@ -119,6 +125,7 @@ impl IntoResponse for ApiError {
             RoutineSessionError::Forbidden => StatusCode::FORBIDDEN,
             RoutineSessionError::PersonaUnavailable => StatusCode::NOT_FOUND,
             RoutineSessionError::RuntimeUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+            RoutineSessionError::CommandUnsupported => StatusCode::NOT_IMPLEMENTED,
             RoutineSessionError::SessionMismatch
             | RoutineSessionError::ModelMismatch
             | RoutineSessionError::Conflict
@@ -135,6 +142,8 @@ async fn bound_request(request: Request, next: Next) -> Response {
     let is_prompt = path.ends_with("/prompt") || path.ends_with("/follow-up");
     let timeout = if path.ends_with("/status") || path.ends_with("/activity") {
         STATUS_TIMEOUT
+    } else if path.ends_with("/exec") {
+        EXEC_TIMEOUT
     } else {
         REQUEST_TIMEOUT
     };
@@ -194,6 +203,14 @@ async fn follow_up<Service: RoutineSessions, Auth: MacroAuthorizationService>(
     command: Result<Json<PromptRoutineSession>, JsonRejection>,
 ) -> Result<Json<RoutinePromptAccepted>, ApiError> {
     Ok(Json(state.service.follow_up(command?.0).await?))
+}
+
+async fn exec<Service: RoutineSessions, Auth: MacroAuthorizationService>(
+    State(state): State<RoutineSessionsState<Service, Auth>>,
+    _internal: MacroAuthorizationExtractor<Auth, InternalOnly>,
+    command: Result<Json<ExecRoutineSession>, JsonRejection>,
+) -> Result<Json<SessionCommandOutput>, ApiError> {
+    Ok(Json(state.service.exec(command?.0).await?))
 }
 
 async fn status<Service: RoutineSessions, Auth: MacroAuthorizationService>(

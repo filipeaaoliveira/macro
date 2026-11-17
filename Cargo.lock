@@ -855,6 +855,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tracing",
  "trigger_context",
  "workspace-hack",
 ]

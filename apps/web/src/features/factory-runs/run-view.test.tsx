@@ -127,6 +127,8 @@ describe('RunView', () => {
               round: 1,
               checks: ['web'],
               startedAt: '2026-11-16T09:30:00Z',
+              verified: false,
+              results: [],
             },
           ],
         },
@@ -209,6 +211,65 @@ describe('RunView', () => {
     const task = screen.getByText('Follow-up task').closest('a');
     expect(task?.getAttribute('href')).toMatch(/\/app\/task\/task-2$/);
     expect(screen.getByText('Loading has no test')).toBeTruthy();
+  });
+
+  it('says who ran each round, and the exit code of each check that failed', async () => {
+    const { setRun } = mount({});
+    setRun({
+      ...waitingRun,
+      steps: [
+        {
+          seq: 1,
+          entry: 'write',
+          visit: 1,
+          startedAt: '2026-11-16T09:00:00Z',
+          checks: [
+            {
+              round: 1,
+              checks: ['web', 'lint'],
+              startedAt: '2026-11-16T09:30:00Z',
+              verified: true,
+              checkedCommit: '0123456789abcdef0123456789abcdef01234567',
+              results: [
+                { name: 'web', exitCode: 0 },
+                { name: 'lint', exitCode: 2 },
+              ],
+              end: {
+                outcome: 'failed',
+                report: 'lint failed',
+                endedAt: '2026-11-16T09:40:00Z',
+              },
+            },
+            {
+              round: 2,
+              checks: ['web', 'lint'],
+              startedAt: '2026-11-16T09:50:00Z',
+              verified: false,
+              results: [],
+              end: {
+                outcome: 'passed',
+                report: 'web and lint passed',
+                endedAt: '2026-11-16T10:00:00Z',
+              },
+            },
+            {
+              round: 3,
+              checks: ['web'],
+              startedAt: '2026-11-16T10:10:00Z',
+              verified: false,
+              results: [],
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(await screen.findByText('Checks, round 1')).toBeTruthy();
+    expect(screen.getByText('Run on pushed commit 0123456')).toBeTruthy();
+    expect(screen.getByText('web, lint exited 2')).toBeTruthy();
+    // Only the ended round the agent reported says so; the open one runs.
+    expect(screen.getAllByText('Reported by the agent')).toHaveLength(1);
+    expect(screen.getByText('Checks running…')).toBeTruthy();
   });
 
   it('answers the open Gate once, with the note', async () => {

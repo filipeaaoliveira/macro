@@ -39,6 +39,7 @@ use crate::config::{ComputerFleetConfig, Config};
 pub(crate) mod agent_enrollment;
 pub(crate) mod claude;
 pub(crate) mod claude_expiry;
+pub(crate) mod commands;
 pub(crate) mod default_agent;
 pub mod harnessd;
 mod presence;

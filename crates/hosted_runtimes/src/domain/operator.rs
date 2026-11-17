@@ -635,7 +635,7 @@ where
     }
 
     /// The computer `harness_id` runs on, if any.
-    async fn computer_of(
+    pub async fn computer_of(
         &self,
         harness_id: HarnessId,
     ) -> Result<Option<ComputerId>, ComputerError> {

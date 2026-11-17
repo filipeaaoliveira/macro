@@ -10,10 +10,10 @@ use std::sync::{Arc, Mutex};
 use agent_session::domain::session_task::TaskDocumentId;
 use chrono::Utc;
 use factory_records::domain::models::{
-    CheckRound, CheckRoundEnd, CheckRoundOutcome, CheckRoundStart, ClaimedSession,
-    ControlFileChanges, EntryId, Gate, HandBack, HandedBack, NewRun, Outcome, PassedOver, Role,
-    Run, RunEnd, RunId, RunInsert, RunOutcome, SessionStep, Step, StepEnd, StepKey, StepSession,
-    StoppingSession, TaskLink, TeamMembership,
+    CheckResult, CheckRound, CheckRoundEnd, CheckRoundOutcome, CheckRoundStart, ClaimedSession,
+    ControlFileChanges, EntryId, Gate, HandBack, HandedBack, NewRun, Outcome, PassedOver,
+    Repository, Role, Run, RunEnd, RunId, RunInsert, RunOutcome, SessionStep, Step, StepEnd,
+    StepKey, StepSession, StoppingSession, TaskLink, TeamMembership,
 };
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
@@ -794,6 +794,9 @@ impl RunRepository for FakeRepo {
                     check_action_id: start.check_action_id,
                     fix_action_id: None,
                     quota_ran_out: false,
+                    verified: false,
+                    results: Vec::new(),
+                    checked_commit: None,
                 },
             ));
         }
@@ -817,6 +820,28 @@ impl RunRepository for FakeRepo {
                 report: report.to_string(),
                 ended_at: Utc::now(),
             });
+        }
+        Ok(())
+    }
+
+    async fn record_check_result(
+        &self,
+        key: StepKey,
+        round: u8,
+        commit: &str,
+        result: &CheckResult,
+    ) -> Result<(), FakeError> {
+        let mut rounds = self.check_rounds.lock().expect("rounds");
+        if let Some((_, kept)) = rounds
+            .iter_mut()
+            .find(|(step, kept)| *step == key && kept.round == round)
+            && kept.end.is_none()
+            && !kept.results.iter().any(|run| run.name == result.name)
+        {
+            kept.verified = true;
+            kept.checked_commit
+                .get_or_insert_with(|| commit.to_string());
+            kept.results.push(result.clone());
         }
         Ok(())
     }
@@ -937,6 +962,8 @@ pub(crate) struct FakeGithubState {
     /// The files each diff changed, by its base and head; a diff not here
     /// cannot be listed in full.
     pub(crate) diffs: BTreeMap<(String, String), Vec<ChangedFile>>,
+    /// The head commit of the Run's branch; none before it is pushed.
+    pub(crate) head: Option<String>,
 }
 
 /// GitHub in memory, for one Run's branch: opening its pull request makes
@@ -1139,6 +1166,9 @@ impl PullRequests for FakeGithub {
         _branch: &str,
     ) -> Result<Option<String>, FakeGithubError> {
         let mut state = self.state();
+        if state.branch_heads.is_empty() {
+            return Ok(state.head.clone());
+        }
         let head = if state.branch_heads.len() > 1 {
             state.branch_heads.pop_front()
         } else {

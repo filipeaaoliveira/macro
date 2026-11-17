@@ -13,9 +13,9 @@ use agent_runtime_protocol::domain::action::AgentActionId;
 use agent_session::domain::error::AiAdmissionError;
 use agent_session::domain::model::{AgentSessionId, SessionSource, SessionVisibility};
 use agent_session::domain::routines::{
-    PrepareRoutineSession, PromptRoutineSession, RoutineActionStatus, RoutineFailureReason,
-    RoutinePendingReason, RoutinePromptAccepted, RoutineSessionAction, RoutineSessionError,
-    RoutineSessions, ValidateRoutineSession,
+    ExecRoutineSession, PrepareRoutineSession, PromptRoutineSession, RoutineActionStatus,
+    RoutineFailureReason, RoutinePendingReason, RoutinePromptAccepted, RoutineSessionAction,
+    RoutineSessionError, RoutineSessions, ValidateRoutineSession,
 };
 use ai_billing::DenyReason;
 use bot_id::BotId;
@@ -28,7 +28,9 @@ use trigger_context::TriggerOrigin;
 use uuid::Uuid;
 
 use crate::domain::agents::{Agent, AgentDefinition};
-use crate::domain::models::{AgentAnswer, AgentTask, AgentTurn};
+use agent_session::domain::session_command::SessionCommandOutput;
+
+use crate::domain::models::{AgentAnswer, AgentCommand, AgentTask, AgentTurn};
 use crate::domain::ports::{AgentFailure, Retryable, StepAgent};
 
 /// What the agent is told about handing its result back.
@@ -710,6 +712,39 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
         }
 
         self.handed_back(turn.key, turn.action_id).await
+    }
+
+    /// Runs in the session the Step works in now, through its bot, while
+    /// the Step still holds it. The command is named by an id of its own,
+    /// which no prompt takes.
+    #[tracing::instrument(err, skip_all, fields(run_id = %command.key.run_id, seq = command.key.seq))]
+    async fn run_check(
+        &self,
+        command: AgentCommand,
+    ) -> Result<Option<SessionCommandOutput>, SessionAgentError> {
+        let session = self
+            .repo
+            .claimed_session(command.key)
+            .await
+            .map_err(Self::records)?
+            .ok_or(SessionAgentError::NoSession)?;
+        self.still_holds(command.key, session.session_id).await?;
+        let action = RoutineSessionAction {
+            action_id: AgentActionId::from_uuid(Uuid::now_v7()),
+            ..Self::action(&command.owner, &session, self.bot(&session, &command.role)?)
+        };
+        match self
+            .sessions
+            .exec(ExecRoutineSession {
+                action,
+                command: command.command,
+            })
+            .await
+        {
+            Ok(output) => Ok(Some(output)),
+            Err(RoutineSessionError::CommandUnsupported) => Ok(None),
+            Err(error) => Err(error.into()),
+        }
     }
 
     #[tracing::instrument(err, skip_all, fields(run_id = %key.run_id, seq = key.seq))]

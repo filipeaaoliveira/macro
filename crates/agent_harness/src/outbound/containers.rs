@@ -12,6 +12,7 @@
 use agent_runtime_protocol::domain::ports::Transport;
 use agent_runtime_protocol::domain::schema::v0::{ToRuntimeMessage, ToServerMessage};
 use agent_session::domain::model::{AgentSessionId, SandboxSize};
+use agent_session::domain::session_command::{SessionCommand, SessionCommandOutput};
 
 use crate::domain::error::Result;
 use crate::domain::model::SpawnContainer;
@@ -102,6 +103,17 @@ impl ContainerManager for HarnessContainers {
         match self {
             Self::Daytona(manager) => manager.session_token(session).await,
             Self::Local(manager) => manager.session_token(session).await,
+        }
+    }
+
+    async fn exec(
+        &self,
+        session: AgentSessionId,
+        command: SessionCommand,
+    ) -> Result<SessionCommandOutput> {
+        match self {
+            Self::Daytona(manager) => manager.exec(session, command).await,
+            Self::Local(manager) => manager.exec(session, command).await,
         }
     }
 

@@ -901,7 +901,8 @@ impl IntoResponse for ScheduledActionApiError {
                 RoutineSessionError::PromptDeliveryUnknown => {
                     (StatusCode::SERVICE_UNAVAILABLE, session.to_string())
                 }
-                RoutineSessionError::SessionMismatch => (
+                // A routine runs no command in its session.
+                RoutineSessionError::SessionMismatch | RoutineSessionError::CommandUnsupported => (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "internal server error".to_owned(),
                 ),

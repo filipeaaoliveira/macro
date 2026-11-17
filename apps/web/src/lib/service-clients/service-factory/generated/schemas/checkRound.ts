@@ -4,6 +4,9 @@
  * factory_engine
  * OpenAPI spec version: 0.1.0
  */
+
+import type { CheckResult } from './checkResult';
+import type { CheckRoundCheckedCommit } from './checkRoundCheckedCommit';
 import type { CheckRoundEndProperty } from './checkRoundEndProperty';
 
 /**
@@ -11,9 +14,15 @@ import type { CheckRoundEndProperty } from './checkRoundEndProperty';
 the agent's session.
  */
 export interface CheckRound {
+  /** The commit a verified round's checks run on: the head of the Run's
+branch on GitHub when its first check ran. */
+  checkedCommit?: CheckRoundCheckedCommit;
   /** The names of the checks it runs, in the repository's order. */
   checks: string[];
   end?: CheckRoundEndProperty;
+  /** How each check of a verified round ran so far, in the round's
+order; none for a round the agent reports. */
+  results: CheckResult[];
   /**
    * Which round, from 1.
    * @minimum 0
@@ -21,4 +30,8 @@ export interface CheckRound {
   round: number;
   /** When it started. */
   startedAt: string;
+  /** Whether the engine runs the checks itself, on the pushed commit in a
+worktree of its own, reading each one's exit code; otherwise the
+agent runs them and reports how they went. */
+  verified: boolean;
 }

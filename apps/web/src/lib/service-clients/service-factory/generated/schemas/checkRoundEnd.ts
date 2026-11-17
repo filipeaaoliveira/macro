@@ -14,7 +14,8 @@ export interface CheckRoundEnd {
   endedAt: string;
   /** How the checks went. */
   outcome: CheckRoundOutcome;
-  /** What the agent reported of each check, for a person and for the
-agent's fix to read. */
+  /** What each check did, for a person and for the agent's fix to read:
+the agent's report, or, for a verified round, the checks that failed
+with the end of their output. */
   report: string;
 }
