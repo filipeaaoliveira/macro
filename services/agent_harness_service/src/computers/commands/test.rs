@@ -169,30 +169,15 @@ async fn only_the_end_of_a_long_output_is_kept() {
     assert!(output.stdout.ends_with("the end"));
 }
 
-/// A session on a computer whose checkout is not where macrod keeps it
-/// fails, so a retry looks again: it never falls back to the agent's
-/// report.
+/// A paired machine of someone's own, an unbound bot, and a computer
+/// without the session's worktree run nothing, and say so.
 #[tokio::test]
-async fn a_session_on_a_computer_without_its_checkout_fails() {
-    let commands = ComputerCommands::new(
-        Bound(Some(harness())),
-        Guest::new(Some(computer()), false, Vec::new(), 0),
-    );
-
-    let error = commands
-        .exec(BotId::TEST_A, session(), check())
-        .await
-        .unwrap_err();
-
-    assert!(matches!(error, HarnessError::Container(_)), "{error:?}");
-    assert_eq!(commands.guests.ran.lock().unwrap().len(), 1);
-}
-
-/// A paired machine of someone's own, and an unbound bot, run nothing, and
-/// say so.
-#[tokio::test]
-async fn a_session_on_no_computer_runs_nothing() {
+async fn a_session_without_a_checkout_on_a_computer_runs_nothing() {
     for (bound, guest) in [
+        (
+            Bound(Some(harness())),
+            Guest::new(Some(computer()), false, Vec::new(), 0),
+        ),
         (
             Bound(None),
             Guest::new(Some(computer()), true, Vec::new(), 0),
@@ -216,6 +201,14 @@ async fn a_session_on_no_computer_runs_nothing() {
             ),
             "{refused:?}"
         );
-        assert!(commands.guests.ran.lock().unwrap().is_empty());
+        assert!(
+            commands
+                .guests
+                .ran
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|argv| argv[0] == "test")
+        );
     }
 }

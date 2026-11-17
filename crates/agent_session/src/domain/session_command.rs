@@ -76,13 +76,13 @@ impl SessionCommand {
 
     /// The shell script that runs it from `checkout`, the checkout's
     /// absolute path, under its timeout: `timeout` stops it with `TERM`,
-    /// then `KILL` ten seconds later, and exits 124 (or 137).
+    /// then `KILL` ten seconds later, and exits 124 (or 137). Nothing runs
+    /// when the directory is not there: the script exits 1.
     ///
-    /// The command runs in a shell that reads no profile or rc file, which
-    /// the agent could have changed. It holds a lock in the checkout's git
-    /// directory while it runs (`flock`, where the machine has it), so a
-    /// retried run of the same check waits for one still running, within
-    /// the same timeout.
+    /// The command runs in a shell that reads no profile or rc file. It
+    /// still reads `BASH_ENV`, which is how a sandbox's dev shell puts its
+    /// toolchain on `PATH`: the machine and its toolchain are the agent's
+    /// to change either way.
     ///
     /// Each part is quoted for the shell, so the script is safe to hand to
     /// `bash -c` as it is.
@@ -92,20 +92,14 @@ impl SessionCommand {
         } else {
             format!("{}/{}", checkout.trim_end_matches('/'), self.cwd)
         };
-        let run = format!("bash --noprofile --norc -c {}", shell_quote(&self.command));
-        let timeout = format!("timeout --kill-after=10 {}", self.timeout_secs);
         format!(
-            "cd {} && git_dir=$(git rev-parse --absolute-git-dir 2>/dev/null); \
-             if [ -n \"$git_dir\" ] && command -v flock >/dev/null 2>&1; \
-             then exec {timeout} flock \"$git_dir/{LOCK_FILE}\" {run}; fi; \
-             exec {timeout} {run}",
+            "cd {} || exit 1; exec timeout --kill-after=10 {} bash --noprofile --norc -c {}",
             shell_quote(&directory),
+            self.timeout_secs,
+            shell_quote(&self.command),
         )
     }
 }
-
-/// The lock a command holds in its checkout's git directory while it runs.
-const LOCK_FILE: &str = "macro-check.lock";
 
 /// How a command ended.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -5,10 +5,11 @@
 //! A computer's macrod checks each session out in a Herdr worktree of its
 //! own, under the guest user's `~/.macrod/herdr/<harness>/worktrees/<session>`.
 //! A session whose bot's harness is no computer's runs nothing, as on a
-//! paired machine of someone's own. Once the session is known to be on a
-//! computer, a checkout that is not there is an error, never "runs
-//! nothing": the agent could otherwise move its checkout to have its own
-//! report decide the checks.
+//! paired machine of someone's own. So does one on a computer whose macrod
+//! keeps no worktree there (sessions in a shared workspace), with a
+//! warning. The checkout only locates the repository: the software factory
+//! runs its checks in a worktree of its own, at the pushed commit, so the
+//! agent gains nothing by moving its checkout.
 
 #[cfg(test)]
 mod test;
@@ -134,9 +135,12 @@ impl<Bindings: HarnessBindings, Machines: Guests> MachineCommands
                 .run(computer, &["test", "-d", &checkout], FIND_CHECKOUT_TIMEOUT)
                 .await?;
             if found.exit_code != 0 {
-                return Err(HarnessError::Container(format!(
-                    "session {session}'s checkout is not on computer {computer}"
-                )));
+                tracing::warn!(
+                    %session,
+                    %computer,
+                    "a session on a Macro computer has no checkout where macrod keeps one; its commands run nowhere"
+                );
+                return Err(unsupported());
             }
 
             // The guest streams stdout alone, so stderr joins it.

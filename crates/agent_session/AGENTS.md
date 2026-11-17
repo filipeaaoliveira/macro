@@ -192,9 +192,8 @@ skips the turn before any model call; unset or unreadable, summaries run.
   code and the end of its output; a runtime with no checkout Macro reaches
   answers `command_unsupported`. The route waits up to the command's
   30-minute limit. `SessionCommand::script` runs it with `bash --noprofile
-  --norc` (nothing the agent put in a profile runs), under `timeout`, holding
-  `flock` on the checkout's git directory where the machine has it, so a
-  retried run waits for one still running.
+  --norc` (still reading `BASH_ENV`, a sandbox's toolchain) under `timeout`,
+  and runs nothing when its directory is missing.
 - A background session (`AgentSession::is_background`, `SessionPurpose::Background`)
   is work the owner asked for that runs out of sight: source `user`, origin
   `requested` by the owner, `hidden`, opened from no message. A routine

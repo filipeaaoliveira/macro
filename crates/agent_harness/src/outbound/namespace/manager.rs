@@ -225,7 +225,9 @@ impl ContainerManager for NamespaceContainerManager {
     /// did not spawn needs the lookup `resume` is waiting on.
     async fn teardown(&self, session: AgentSessionId) -> Result<()> {
         let Some((_, instance)) = self.instances.remove(&session) else {
-            todo!("tearing down Namespace instances spawned elsewhere is not implemented yet")
+            return Err(HarnessError::Container(format!(
+                "session {session} has no instance spawned here to tear down"
+            )));
         };
         self.client
             .destroy_instance(&instance.id)

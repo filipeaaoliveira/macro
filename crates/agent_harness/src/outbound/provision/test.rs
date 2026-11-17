@@ -24,7 +24,7 @@ fn a_session_command_runs_in_the_checkout() {
 
     let line = super::session_command(&command);
 
-    assert!(line.starts_with(r"bash -c 'cd '\''/workspace'\'' && "));
+    assert!(line.starts_with(r"bash -c 'cd '\''/workspace'\'' || exit 1; "));
     assert!(line.contains("timeout --kill-after=10 60"));
     assert!(line.ends_with(r"bash --noprofile --norc -c '\''just check'\'''"));
 }

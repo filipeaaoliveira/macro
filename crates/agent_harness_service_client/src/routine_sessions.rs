@@ -170,6 +170,10 @@ impl AgentSessionClient {
             // A harness from before commands ran in sessions has no such
             // route: its sessions run none, so the caller falls back.
             StatusCode::NOT_FOUND | StatusCode::NOT_IMPLEMENTED if operation == Operation::Exec => {
+                tracing::warn!(
+                    %status,
+                    "the harness has no exec route; reading it as a runtime that runs no command"
+                );
                 RoutineSessionError::CommandUnsupported
             }
             StatusCode::CONFLICT => RoutineSessionError::Conflict,

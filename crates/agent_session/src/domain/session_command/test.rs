@@ -42,19 +42,33 @@ fn a_command_needs_a_line_and_a_bounded_timeout() {
 fn the_script_runs_the_quoted_command_in_its_directory_under_its_timeout() {
     assert_eq!(
         command("apps/web", "echo 'it''s' && exit 3", 90).script("/workspace"),
-        concat!(
-            r#"cd '/workspace/apps/web' && git_dir=$(git rev-parse --absolute-git-dir 2>/dev/null); "#,
-            r#"if [ -n "$git_dir" ] && command -v flock >/dev/null 2>&1; "#,
-            r#"then exec timeout --kill-after=10 90 flock "$git_dir/macro-check.lock" "#,
-            r#"bash --noprofile --norc -c 'echo '\''it'\'''\''s'\'' && exit 3'; fi; "#,
-            r#"exec timeout --kill-after=10 90 bash --noprofile --norc -c 'echo '\''it'\'''\''s'\'' && exit 3'"#,
-        )
+        r"cd '/workspace/apps/web' || exit 1; exec timeout --kill-after=10 90 bash --noprofile --norc -c 'echo '\''it'\'''\''s'\'' && exit 3'"
     );
     assert!(
         command(".", "ls", 5)
             .script("/workspace/")
-            .starts_with("cd '/workspace/' && ")
+            .starts_with("cd '/workspace/' || exit 1; ")
     );
+}
+
+/// Run by bash for real: a directory that is not there runs nothing.
+#[test]
+fn nothing_runs_where_the_directory_is_missing() {
+    let checkout = std::env::temp_dir().join(format!("session-command-{}", std::process::id()));
+    std::fs::create_dir_all(&checkout).unwrap();
+    let marker = checkout.join("ran");
+    let script = command("missing", &format!("touch '{}'", marker.display()), 5)
+        .script(checkout.to_str().unwrap());
+
+    let status = std::process::Command::new("bash")
+        .args(["-c", &script])
+        .status()
+        .unwrap();
+    let ran = marker.exists();
+    std::fs::remove_dir_all(&checkout).unwrap();
+
+    assert_eq!(status.code(), Some(1));
+    assert!(!ran);
 }
 
 /// A cut never splits a character: the kept end starts on a boundary.
