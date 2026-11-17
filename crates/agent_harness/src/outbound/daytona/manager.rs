@@ -515,8 +515,10 @@ impl ContainerManager for DaytonaContainerManager {
 
     /// Runs in the session's sandbox, started first if it stopped. The
     /// command counts as activity for as long as it runs, so the idle
-    /// reaper never stops the sandbox under it; a sandbox this replica does
-    /// not track is tracked from then on, and stopped once it idles.
+    /// reaper never stops the sandbox under it. A sandbox this replica holds
+    /// no session in is tracked only while the command runs: another
+    /// replica may hold it, and Daytona's own auto-stop stops one nobody
+    /// does.
     #[tracing::instrument(err, skip(self, command))]
     async fn exec(
         &self,
@@ -556,7 +558,14 @@ impl ContainerManager for DaytonaContainerManager {
         .await;
         self.managed.containers.end_command(&id, Instant::now());
 
-        let (exit_code, output) = ran?;
+        // A command's code is its verdict: one Daytona did not give is not
+        // a pass.
+        let (Some(exit_code), output) = ran? else {
+            return Err(HarnessError::Container(format!(
+                "sandbox {} gave no exit code for the command",
+                id.as_str()
+            )));
+        };
         Ok(SessionCommandOutput::new(exit_code, output.as_bytes(), b""))
     }
 

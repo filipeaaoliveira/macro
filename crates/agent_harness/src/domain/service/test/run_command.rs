@@ -61,7 +61,7 @@ async fn a_command_for_a_peer_held_session_runs_on_the_peer() {
         HarnessDefaultCodingAgents,
         SessionDefaults {
             bot_id: BotId::TEST_A,
-            model: "claude".to_owned(),
+            model: "large-model".to_owned(),
             harness: "opencode".to_owned(),
             repo_url: SessionRepository::parse("https://github.com/macro-inc/macro"),
         },

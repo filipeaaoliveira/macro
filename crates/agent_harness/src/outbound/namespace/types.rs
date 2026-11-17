@@ -54,8 +54,8 @@ pub struct CommandOutput {
     pub stdout: String,
     /// Standard error.
     pub stderr: String,
-    /// Process exit status.
-    pub exit_code: i32,
+    /// Process exit status, when Namespace gave one.
+    pub exit_code: Option<i32>,
 }
 
 /// Container-specific values supplied to Namespace instance creation.

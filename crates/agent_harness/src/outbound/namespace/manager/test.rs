@@ -30,9 +30,8 @@ fn encoded(text: &str) -> String {
     base64::engine::general_purpose::STANDARD.encode(text)
 }
 
-#[tokio::test]
-async fn a_command_runs_in_the_instance_spawned_for_the_session() {
-    let server = MockServer::start().await;
+/// Namespace answers the command's run with `exit_code`, or with none.
+async fn answering(server: &MockServer, exit_code: Option<i32>) -> NamespaceContainerManager {
     Mock::given(method("POST"))
         .and(path(
             "/namespace.cloud.compute.v1beta.CommandService/RunCommandSync",
@@ -45,12 +44,12 @@ async fn a_command_runs_in_the_instance_spawned_for_the_session() {
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "stdout": encoded("1 failed"),
             "stderr": encoded("error: test failed"),
-            "exitCode": 101,
+            "exitCode": exit_code,
         })))
         .expect(1)
-        .mount(&server)
+        .mount(server)
         .await;
-    let manager = manager(&server);
+    let manager = manager(server);
     manager.instances.insert(
         session(),
         Arc::new(Instance {
@@ -59,6 +58,13 @@ async fn a_command_runs_in_the_instance_spawned_for_the_session() {
             command_endpoint: server.uri(),
         }),
     );
+    manager
+}
+
+#[tokio::test]
+async fn a_command_runs_in_the_instance_spawned_for_the_session() {
+    let server = MockServer::start().await;
+    let manager = answering(&server, Some(101)).await;
 
     let output = manager.exec(session(), check()).await.unwrap();
 
@@ -72,6 +78,17 @@ async fn a_command_runs_in_the_instance_spawned_for_the_session() {
     );
 }
 
+/// A run Namespace gave no exit code for is not a pass.
+#[tokio::test]
+async fn a_command_without_an_exit_code_fails() {
+    let server = MockServer::start().await;
+    let manager = answering(&server, None).await;
+
+    let error = manager.exec(session(), check()).await.unwrap_err();
+
+    assert!(matches!(error, HarnessError::Container(_)), "{error:?}");
+}
+
 #[tokio::test]
 async fn a_session_this_process_did_not_spawn_runs_nothing() {
     let server = MockServer::start().await;
@@ -79,4 +96,35 @@ async fn a_session_this_process_did_not_spawn_runs_nothing() {
     let error = manager(&server).exec(session(), check()).await.unwrap_err();
 
     assert!(matches!(error, HarnessError::Container(_)), "{error:?}");
+}
+
+/// Tearing a session down destroys its instance and forgets it: no
+/// command runs there afterwards.
+#[tokio::test]
+async fn teardown_forgets_the_session_s_instance() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(
+            "/namespace.cloud.compute.v1beta.ComputeService/DestroyInstance",
+        ))
+        .and(body_partial_json(
+            serde_json::json!({ "instanceId": "instance-1" }),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let manager = manager(&server);
+    manager.instances.insert(
+        session(),
+        Arc::new(Instance {
+            id: InstanceId::new("instance-1".into()),
+            url: String::new(),
+            command_endpoint: server.uri(),
+        }),
+    );
+
+    manager.teardown(session()).await.unwrap();
+
+    assert!(manager.instances.is_empty());
 }

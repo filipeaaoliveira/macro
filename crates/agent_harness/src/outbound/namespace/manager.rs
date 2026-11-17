@@ -69,10 +69,13 @@ impl NamespaceContainerManager {
             .instrument(tracing::info_span!("agent.container.ensure_ready"))
             .await
             .map_err(unavailable)?;
-        if output.exit_code != 0 {
+        // The readiness recipe reads an answer without a code as a pass, as
+        // it always has.
+        let exit_code = output.exit_code.unwrap_or(0);
+        if exit_code != 0 {
             return Err(unavailable(NamespaceError::ReadinessRecipe {
                 instance_id: instance.id.to_string(),
-                exit_code: output.exit_code,
+                exit_code,
                 stdout: output.stdout,
                 stderr: output.stderr,
             }));
@@ -203,17 +206,31 @@ impl ContainerManager for NamespaceContainerManager {
                 ))
             })?
             .map_err(unavailable)?;
+        // A command's code is its verdict: one Namespace did not give is
+        // not a pass.
+        let exit_code = output.exit_code.ok_or_else(|| {
+            HarnessError::Container(format!(
+                "instance {} gave no exit code for the command",
+                instance.id
+            ))
+        })?;
         Ok(SessionCommandOutput::new(
-            output.exit_code,
+            exit_code,
             output.stdout.as_bytes(),
             output.stderr.as_bytes(),
         ))
     }
 
-    async fn teardown(&self, _session: AgentSessionId) -> Result<()> {
-        // Tearing down needs the instance id for a session, which is the same
-        // lookup `resume` is waiting on.
-        todo!("tearing down Namespace instances is not implemented yet")
+    /// Destroys the instance this process spawned for the session. One it
+    /// did not spawn needs the lookup `resume` is waiting on.
+    async fn teardown(&self, session: AgentSessionId) -> Result<()> {
+        let Some((_, instance)) = self.instances.remove(&session) else {
+            todo!("tearing down Namespace instances spawned elsewhere is not implemented yet")
+        };
+        self.client
+            .destroy_instance(&instance.id)
+            .await
+            .map_err(unavailable)
     }
 }
 

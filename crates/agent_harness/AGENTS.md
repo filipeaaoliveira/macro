@@ -176,7 +176,10 @@ A paired machine, Cursor, Codex and the in-process agent answer
 the replica that holds the session, or, when a peer does, is forwarded there
 over the command bus (`CommandForwarder::run_command`), which waits on a reply
 channel of its own for the command's end. Daytona keeps a sandbox running a
-command from its idle reaper (`ManagedContainers::begin_command`).
+command from its idle reaper (`ManagedContainers::begin_command`), and stops
+tracking a sandbox it held no session in once the command ends. A command
+whose provider gives no exit code fails: only the readiness recipe reads a
+missing code as a pass.
 
 `RuntimeRegistry::computer_control` forwards typed computer commands to the
 local live connection, returning `None` when another replica owns it. The

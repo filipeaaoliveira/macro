@@ -380,9 +380,11 @@ impl DaytonaClient {
     /// Execute one command in a sandbox, failing on a non-zero exit.
     #[tracing::instrument(name = "daytona.command.execute", err, skip(self, command))]
     pub async fn exec(&self, sandbox_id: &str, command: &str, timeout: Duration) -> Result<String> {
+        // An answer without a code is a command that ended normally, as
+        // the readiness recipe has always read it.
         match self.execute(sandbox_id, command, timeout).await? {
-            (0, output) => Ok(output),
-            (code, output) => Err(DaytonaError::Command {
+            (None | Some(0), output) => Ok(output),
+            (Some(code), output) => Err(DaytonaError::Command {
                 code,
                 sandbox_id: sandbox_id.to_owned(),
                 command: command.to_owned(),
@@ -391,15 +393,16 @@ impl DaytonaClient {
         }
     }
 
-    /// Execute one command in a sandbox, and hand back its exit code with
-    /// its output, both streams together, whatever the code.
+    /// Execute one command in a sandbox, and hand back its exit code, if
+    /// Daytona gave one, with its output, both streams together, whatever
+    /// the code.
     #[tracing::instrument(name = "daytona.command.run", err, skip(self, command))]
     pub async fn execute(
         &self,
         sandbox_id: &str,
         command: &str,
         timeout: Duration,
-    ) -> Result<(i32, String)> {
+    ) -> Result<(Option<i32>, String)> {
         let toolbox: ToolboxProxyUrlDto = self
             .json(
                 self.http.get(format!(
@@ -422,9 +425,7 @@ impl DaytonaClient {
                 "execute command",
             )
             .await?;
-        // An answer without a code is a command that ended normally, as
-        // the readiness recipe has always read it.
-        Ok((response.exit_code.unwrap_or(0), response.result))
+        Ok((response.exit_code, response.result))
     }
 
     /// Resolve the externally reachable URL for a sandbox port.
