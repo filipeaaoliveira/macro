@@ -87,8 +87,10 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   Step; `start_review_round` keeps its first record. `record_findings`
   replaces a reviewer Step's findings only while the Step has not ended,
   under the Step's row lock, so they are the ones its end goes with.
-  `classify_findings`, `link_follow_up` and `end_review_round` keep their
-  first write. `follow_up_task_id` references `"Document"` and is cleared
+  `classify_findings`, `link_follow_up`, `follow_up_key`, `reask_action`,
+  `fail_review_round` and `end_review_round` keep their first write. A
+  round that could not open has no commit and a `failure`; a reviewer's
+  answer that was read is in `factory_reviewer_answer`. `follow_up_task_id` references `"Document"` and is cleared
   when the task is deleted.
 - `factory_run.task_id` references `"Document"` and is cleared when the task
   document is deleted; `link_task` reports a missing task or Run instead of

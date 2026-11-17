@@ -82,14 +82,14 @@ impl<T: StepService> DynStepService for T {
 /// The review service as a trait object, as [`DynStepService`] is.
 #[async_trait::async_trait]
 trait DynReviewService: Send + Sync {
-    async fn open_round(&self, opening: ReviewRoundOpening) -> Result<(), StepError>;
+    async fn open_round(&self, opening: ReviewRoundOpening) -> Result<bool, StepError>;
 
     async fn close_round(&self, closing: ReviewRoundClosing) -> Result<Outcome, StepError>;
 }
 
 #[async_trait::async_trait]
 impl<T: ReviewService> DynReviewService for T {
-    async fn open_round(&self, opening: ReviewRoundOpening) -> Result<(), StepError> {
+    async fn open_round(&self, opening: ReviewRoundOpening) -> Result<bool, StepError> {
         ReviewService::open_round(self, opening).await
     }
 
@@ -270,19 +270,20 @@ impl FactoryActivities {
         self: Arc<Self>,
         _ctx: ActivityContext,
         opening: ReviewRoundOpening,
-    ) -> Result<(), ActivityError> {
+    ) -> Result<bool, ActivityError> {
         self.reviews.open_round(opening).await.map_err(failure)
     }
 
     /// End a review round once its reviewers' Steps ended, and say how it
     /// ended: its Blockers told from its follow-ups, which become tasks.
+    /// It heartbeats while it goes, however many tasks it makes.
     #[activity(name = "factory_close_review_round")]
     pub async fn close_review_round(
         self: Arc<Self>,
-        _ctx: ActivityContext,
+        ctx: ActivityContext,
         closing: ReviewRoundClosing,
     ) -> Result<Outcome, ActivityError> {
-        self.reviews.close_round(closing).await.map_err(failure)
+        beating(&ctx, self.reviews.close_round(closing)).await
     }
 
     /// Record how a Run ended.

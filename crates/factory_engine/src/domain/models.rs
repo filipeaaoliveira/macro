@@ -24,8 +24,11 @@ pub struct RunStart {
     pub flow: Flow,
 }
 
-/// One Step for a worker to run.
+/// One Step for a worker to run. A field it does not know is refused, so a
+/// worker never runs a Step it would misread: a worker older than a field
+/// fails the activity, and a newer one picks it up.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct StepRequest {
     /// The Step: its Run and its place in it.
     pub key: StepKey,

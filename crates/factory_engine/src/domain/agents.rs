@@ -181,8 +181,13 @@ impl AgentDefinition {
 
     /// Fails unless every Role the built-in Flows name has its Agents: the
     /// service checks it before it serves a Run.
+    /// `reviewer` stays required beside them: a Run started before the
+    /// `code` Flow had a review panel reviews with it until it ends.
     pub fn fills_built_in_flows(&self) -> Result<(), AgentDefinitionError> {
-        self.fills(&built_in_roles()?)
+        self.fills(&built_in_roles()?)?;
+        let reviewer = Role::try_from(REVIEWER.to_string())
+            .map_err(|error| FlowError::Unreadable(error.to_string()))?;
+        self.fills([&reviewer])
     }
 
     /// Fails unless every Role in `roles` has its Agents.

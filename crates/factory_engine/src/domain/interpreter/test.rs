@@ -477,3 +477,80 @@ fn a_flow_that_loops_forever_ends_blocked_at_the_most_steps() {
         Some(&factory_records::domain::models::MAX_STEPS)
     );
 }
+
+/// The `code` Flow as Runs started before the review panel carry it: one
+/// `reviewer`, and a `held` fact once its reviews run out.
+const SINGLE_REVIEWER_CODE_FLOW: &str = include_str!("single_reviewer_code.json");
+
+/// A Run started on the single-reviewer `code` Flow keeps walking it as it
+/// did: it still reads, names no review panel, so the workflow takes the
+/// single Step's path for every entry, and the Flow and its Steps' requests
+/// serialize as they did, so their histories replay.
+#[test]
+fn a_run_on_the_single_reviewer_code_flow_walks_it_as_before() {
+    let old = flow(SINGLE_REVIEWER_CODE_FLOW);
+    assert!(old.entries.iter().all(|entry| entry.reviewers.is_empty()));
+
+    let (steps, end) = walk(
+        &old,
+        &[
+            "approve",
+            "done",
+            "changes",
+            "done",
+            "changes",
+            "done",
+            "changes",
+            "done",
+            "published",
+            "green",
+        ],
+    );
+    assert_eq!(
+        steps,
+        [
+            "plan#1",
+            "write#1",
+            "review#1",
+            "fix#1",
+            "review#2",
+            "fix#2",
+            "review#3",
+            "fix#3",
+            "publish#1",
+            "ci#1"
+        ]
+    );
+    assert_eq!(end, Ok(RunOutcome::Manual));
+
+    // One place per Step, as before the panel.
+    let interpreter = Interpreter::new(&old);
+    let mut state = interpreter.start();
+    let mut places = Vec::new();
+    for outcome in ["approve", "done", "changes"] {
+        let NextStep::Run { seq, entry, visit } = interpreter.next_step(&mut state).expect("next")
+        else {
+            panic!("the run ended early");
+        };
+        places.push(seq);
+        let request = crate::domain::models::StepRequest::of(
+            factory_records::domain::models::StepKey {
+                run_id: factory_records::domain::models::RunId::generate(),
+                seq,
+            },
+            entry,
+            visit,
+        );
+        let written = serde_json::to_value(&request).expect("serializes");
+        assert!(written.get("round").is_none(), "{written}");
+        let outcome = Outcome::try_from(outcome.to_string()).expect("valid");
+        interpreter.record(&mut state, &outcome).expect("a way on");
+    }
+    assert_eq!(places, [1, 2, 3]);
+
+    let written = serde_json::to_value(&old).expect("serializes");
+    let read: Flow = serde_json::from_value(written.clone()).expect("reads back");
+    assert_eq!(read, old);
+    let entries = written["entries"].as_array().expect("entries");
+    assert!(entries.iter().all(|entry| entry.get("reviewers").is_none()));
+}

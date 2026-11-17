@@ -60,6 +60,7 @@ pub(crate) struct FollowUpMade {
     pub(crate) owner: String,
     pub(crate) of: Option<Uuid>,
     pub(crate) task: FollowUpTask,
+    pub(crate) id: Uuid,
 }
 
 /// Runs, Steps and sessions in memory, with the same first-write-wins rules
@@ -88,8 +89,16 @@ pub(crate) struct FakeRepo {
     /// The follow-up tasks made, by their owner and the task each follows
     /// up, in order.
     pub(crate) follow_ups: Arc<Mutex<Vec<FollowUpMade>>>,
-    /// Whether making a follow-up task fails.
-    pub(crate) follow_ups_fail: Arc<Mutex<bool>>,
+    /// How many of the next follow-up tasks fail as an outage would, made
+    /// or not as `follow_ups_made_anyway` says.
+    pub(crate) follow_ups_fail: Arc<Mutex<usize>>,
+    /// Whether a follow-up task that fails is made all the same, as when
+    /// its answer is lost.
+    pub(crate) follow_ups_made_anyway: Arc<Mutex<bool>>,
+    /// Whether document storage refuses follow-up tasks.
+    pub(crate) follow_ups_refused: Arc<Mutex<bool>>,
+    /// The prompt each reviewer's Step was asked again in.
+    pub(crate) reasks: Arc<Mutex<Vec<(StepKey, Uuid)>>>,
 }
 
 /// Everyone has an account but `macro|nobody@example.com`.
@@ -128,21 +137,37 @@ impl TaskDirectory for FakeRepo {
         user_id: &MacroUserIdStr<'static>,
         of: Option<Uuid>,
         follow_up: &FollowUpTask,
-    ) -> Result<Uuid, FakeError> {
-        if *self.follow_ups_fail.lock().expect("fail") {
+        task_id: Uuid,
+    ) -> Result<crate::domain::ports::FollowUpMade, FakeError> {
+        use crate::domain::ports::FollowUpMade as Made;
+        if self.tasks.lock().expect("tasks").contains(&task_id) {
+            return Ok(Made::Made);
+        }
+        if *self.follow_ups_refused.lock().expect("refused") {
+            return Ok(Made::Refused);
+        }
+        let fails = {
+            let mut fails = self.follow_ups_fail.lock().expect("fail");
+            let failing = *fails > 0;
+            *fails = fails.saturating_sub(1);
+            failing
+        };
+        if !fails || *self.follow_ups_made_anyway.lock().expect("anyway") {
+            self.tasks.lock().expect("tasks").insert(task_id);
+            self.follow_ups
+                .lock()
+                .expect("follow ups")
+                .push(FollowUpMade {
+                    owner: user_id.as_ref().to_string(),
+                    of,
+                    task: follow_up.clone(),
+                    id: task_id,
+                });
+        }
+        if fails {
             return Err(FakeError);
         }
-        let task = Uuid::now_v7();
-        self.tasks.lock().expect("tasks").insert(task);
-        self.follow_ups
-            .lock()
-            .expect("follow ups")
-            .push(FollowUpMade {
-                owner: user_id.as_ref().to_string(),
-                of,
-                task: follow_up.clone(),
-            });
-        Ok(task)
+        Ok(Made::Made)
     }
 }
 

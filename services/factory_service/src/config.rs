@@ -1,5 +1,8 @@
 //! Startup configuration.
 
+#[cfg(test)]
+mod test;
+
 use std::num::NonZeroU8;
 
 use database_env_vars::DatabaseUrl;

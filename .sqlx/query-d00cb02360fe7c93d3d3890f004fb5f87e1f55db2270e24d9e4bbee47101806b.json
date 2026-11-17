@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                f.run_id, f.round_seq, f.seq, f.place, s.role, f.path, f.start_line, f.end_line,\n                f.problem, f.why, f.kind, f.follow_up_task_id\n            FROM factory_review_finding f\n            JOIN factory_step s ON s.run_id = f.run_id AND s.seq = f.seq\n            WHERE f.run_id = ANY($1)\n            ORDER BY f.run_id, f.round_seq, f.seq, f.place\n            ",
+  "query": "\n            SELECT\n                f.run_id, f.round_seq, f.seq, f.place, s.role, f.path, f.start_line, f.end_line,\n                f.problem, f.why, f.blocks_anywhere, f.kind, f.follow_up_task_id, f.follow_up_key\n            FROM factory_review_finding f\n            JOIN factory_step s ON s.run_id = f.run_id AND s.seq = f.seq\n            WHERE f.run_id = ANY($1)\n            ORDER BY f.run_id, f.round_seq, f.seq, f.place\n            ",
   "describe": {
     "columns": [
       {
@@ -55,13 +55,23 @@
       },
       {
         "ordinal": 10,
+        "name": "blocks_anywhere",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 11,
         "name": "kind",
         "type_info": "Text"
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "follow_up_task_id",
         "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "follow_up_key",
+        "type_info": "Uuid"
       }
     ],
     "parameters": {
@@ -80,9 +90,11 @@
       true,
       false,
       false,
+      false,
+      true,
       true,
       true
     ]
   },
-  "hash": "f92178a37f5220922486159be62442c532e2950e486b798bdca32529441b7144"
+  "hash": "d00cb02360fe7c93d3d3890f004fb5f87e1f55db2270e24d9e4bbee47101806b"
 }

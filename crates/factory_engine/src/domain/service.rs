@@ -27,7 +27,6 @@ use crate::domain::ports::{
     AnswerDelivery, FactoryService, PullRequests, Retryable, RunWorkflows, RunWorkflowsError,
     StepExecutor, StepService, TaskAccess, TaskDirectory, UserDirectory,
 };
-use crate::domain::review_rounds::ReviewerAnswer;
 
 fn internal(error: impl std::error::Error + Send + Sync + 'static) -> rootcause::Report {
     rootcause::Report::new(error).into_dynamic()
@@ -527,31 +526,6 @@ where
         Self { repo, executor }
     }
 
-    /// A reviewer's `report`, once what it found in the round that starts
-    /// at `round` is recorded: its output is its summary and its Blockers.
-    /// A hand back that does not read fails the Step for good.
-    async fn reviewed(
-        &self,
-        request: &StepRequest,
-        round: u16,
-        report: StepReport,
-    ) -> Result<StepReport, StepError> {
-        let answer = ReviewerAnswer::read(&report.outcome, &report.output)
-            .map_err(|error| StepError::Final(internal(error)))?;
-        let recorded = self
-            .repo
-            .record_findings(request.key, round, &answer.findings)
-            .await
-            .map_err(internal)?;
-        if !recorded {
-            return Err(StepError::RunEnded);
-        }
-        Ok(StepReport {
-            outcome: report.outcome,
-            output: answer.render(),
-        })
-    }
-
     async fn run_of(&self, request: &StepRequest) -> Result<Run, StepError> {
         self.repo
             .get_run(request.key.run_id)
@@ -627,10 +601,6 @@ where
                     StepError::Internal(report)
                 }
             })?;
-        let report = match request.round {
-            Some(round) => self.reviewed(&request, round, report).await?,
-            None => report,
-        };
         if report.output.len() > MAX_OUTPUT_BYTES {
             return Err(StepError::OutputTooLarge {
                 max: MAX_OUTPUT_BYTES,

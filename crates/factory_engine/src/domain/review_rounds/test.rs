@@ -10,10 +10,7 @@ use factory_records::domain::review_rounds::{
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
-use super::{
-    ChangedFile, ReviewRoundClosing, ReviewRoundOpening, ReviewRoundsImpl, ReviewerAnswer,
-    ReviewerAnswerError, in_diff,
-};
+use super::{ChangedFile, ReviewRoundClosing, ReviewRoundOpening, ReviewRoundsImpl, in_diff};
 use crate::domain::fakes::{FakeGithub, FakeRepo};
 use crate::domain::flow::{StepName, StepUse};
 use crate::domain::models::{StepError, StepInput, StepReport, StepRequest};
@@ -79,6 +76,7 @@ fn finding(path: &str, lines: Option<(u32, u32)>) -> Finding {
         lines: lines.map(|(start, end)| Lines { start, end }),
         problem: format!("{path} drops the error"),
         why: "A failed save looks like a saved one".to_string(),
+        blocks_anywhere: false,
     }
 }
 
@@ -96,6 +94,7 @@ fn closing(run_id: RunId, seq: u16) -> ReviewRoundClosing {
         run_id,
         seq,
         failed: false,
+        last: false,
     }
 }
 
@@ -125,58 +124,6 @@ fn a_finding_is_in_the_diff_when_its_lines_meet_a_hunk_of_its_file() {
     assert!(!in_diff("src/load.rs", lines(12, 12), &files));
     // A file with no hunks counts as changed throughout, under either name.
     assert!(in_diff("old.png", lines(1, 1), &files));
-}
-
-#[test]
-fn a_reviewer_hands_back_its_blockers_in_a_json_block() {
-    let text = "Checked the save path.\n\n```json\n{\"blockers\": [\
-        {\"file\": \"./src/save.rs\", \"startLine\": 12, \"problem\": \"Drops the error\", \"why\": \"Saves look done\"},\
-        {\"file\": \"README.md\", \"problem\": \"Out of date\", \"why\": \"It names the old flag\"}\
-    ]}\n```\n";
-
-    let answer = ReviewerAnswer::read(&outcome("changes"), text).expect("reads");
-
-    assert_eq!(answer.summary, "Checked the save path.");
-    assert_eq!(answer.findings[0].path, "src/save.rs");
-    assert_eq!(answer.findings[0].lines, Some(Lines { start: 12, end: 12 }));
-    assert_eq!(answer.findings[1].lines, None);
-    let rendered = answer.render();
-    assert!(rendered.starts_with("Checked the save path.\n\n### Blockers\n"));
-    assert!(
-        rendered.contains("1. `src/save.rs` line 12: Drops the error\n   Why: Saves look done")
-    );
-}
-
-#[test]
-fn a_hand_back_whose_blockers_do_not_read_or_fit_its_outcome_is_refused() {
-    let none = "```json\n{\"blockers\": []}\n```";
-    let one =
-        "```json\n{\"blockers\": [{\"file\": \"a.rs\", \"problem\": \"p\", \"why\": \"w\"}]}\n```";
-    let backwards = "```json\n{\"blockers\": [{\"file\": \"a.rs\", \"startLine\": 9, \"endLine\": 3, \"problem\": \"p\", \"why\": \"w\"}]}\n```";
-    let no_why =
-        "```json\n{\"blockers\": [{\"file\": \"a.rs\", \"problem\": \"p\", \"why\": \" \"}]}\n```";
-
-    assert!(ReviewerAnswer::read(&outcome("pass"), none).is_ok());
-    assert_eq!(
-        ReviewerAnswer::read(&outcome("pass"), one),
-        Err(ReviewerAnswerError::OutcomeAndBlockers)
-    );
-    assert_eq!(
-        ReviewerAnswer::read(&outcome("changes"), none),
-        Err(ReviewerAnswerError::OutcomeAndBlockers)
-    );
-    assert!(matches!(
-        ReviewerAnswer::read(&outcome("changes"), "Looks wrong to me."),
-        Err(ReviewerAnswerError::NoBlockers(_))
-    ));
-    assert_eq!(
-        ReviewerAnswer::read(&outcome("changes"), backwards),
-        Err(ReviewerAnswerError::InvalidBlocker(1))
-    );
-    assert_eq!(
-        ReviewerAnswer::read(&outcome("changes"), no_why),
-        Err(ReviewerAnswerError::InvalidBlocker(1))
-    );
 }
 
 /// The first round reviews the Run's whole change against its base; the
@@ -209,8 +156,8 @@ async fn a_later_round_reviews_the_fix_diff() {
         .map(|round| {
             (
                 round.round,
-                round.head_sha.as_str(),
-                round.diff_base.as_str(),
+                round.head_sha.as_deref().unwrap_or_default(),
+                round.diff_base.as_deref().unwrap_or_default(),
                 round.fix_diff,
             )
         })
@@ -239,13 +186,35 @@ async fn a_fix_that_changed_nothing_has_the_whole_change_reviewed_again() {
         .expect("second");
     let recorded = repo.review_rounds(run_id).await.expect("rounds");
     assert_eq!(
-        (recorded[1].diff_base.as_str(), recorded[1].fix_diff),
-        ("main", false)
+        (recorded[1].diff_base.as_deref(), recorded[1].fix_diff),
+        (Some("main"), false)
     );
+}
 
+/// A round that cannot open, as when the Run's branch is gone, says why on
+/// the Run and ends failed, and a retried opening says the same.
+#[tokio::test]
+async fn a_round_that_cannot_open_says_why() {
+    let repo = FakeRepo::default();
+    let github = FakeGithub::default();
+    let run_id = code_run(&repo).await;
     github.state().branch_heads = [None].into();
-    let gone = rounds.open_round(opening(run_id, 9, 3)).await;
-    assert!(matches!(gone, Err(StepError::Final(_))), "{gone:?}");
+    let rounds = rounds(&repo, &github);
+
+    let opened = rounds.open_round(opening(run_id, 3, 1)).await;
+    let again = rounds.open_round(opening(run_id, 3, 1)).await;
+
+    assert!(matches!(opened, Ok(false)), "{opened:?}");
+    assert!(matches!(again, Ok(false)), "{again:?}");
+    let round = repo.review_rounds(run_id).await.expect("rounds").remove(0);
+    assert_eq!(
+        round.failure.as_deref(),
+        Some("The run's branch is not on GitHub.")
+    );
+    assert_eq!(
+        round.end.map(|end| end.outcome),
+        Some(ReviewRoundOutcome::Failed)
+    );
 }
 
 /// A finding in the diff the round reviewed blocks, and one outside it
@@ -336,7 +305,7 @@ async fn a_round_whose_findings_are_all_follow_ups_passes() {
             None,
         )],
     );
-    *repo.follow_ups_fail.lock().expect("fail") = true;
+    *repo.follow_ups_refused.lock().expect("refused") = true;
     let rounds = rounds(&repo, &github);
     rounds
         .open_round(opening(run_id, 3, 1))
@@ -460,11 +429,10 @@ impl crate::domain::ports::Retryable for StepFailure {
     }
 }
 
-/// A reviewer's Step reads its round, records its Blockers on it, and ends
-/// with them written out; one whose hand back does not read fails for
-/// good. A Step after the round reads it once it ended, for its Blockers.
+/// A reviewer's Step reads the round it reviews in, and a Step after the
+/// round reads it once it ended, for its Blockers.
 #[tokio::test]
-async fn a_reviewer_s_blockers_are_recorded_on_its_round() {
+async fn a_step_reads_its_round_or_the_latest_that_ended() {
     let repo = FakeRepo::default();
     let github = FakeGithub::default();
     let run_id = code_run(&repo).await;
@@ -488,33 +456,12 @@ async fn a_reviewer_s_blockers_are_recorded_on_its_round() {
     };
     let key = StepKey { run_id, seq: 3 };
     let request = StepRequest::reviewer(key, &entry, 1, &role("correctness-reviewer"), 3);
-    let reviewer = Reviewer {
-        text: "Read it.\n```json\n{\"blockers\": [{\"file\": \"src/save.rs\", \"startLine\": 2, \"endLine\": 4, \"problem\": \"Drops the error\", \"why\": \"Saves look done\"}]}\n```".to_string(),
-        ..Reviewer::default()
-    };
+    let reviewer = Reviewer::default();
     let steps = StepServiceImpl::new(repo.clone(), reviewer.clone());
     steps.start_step(request.clone()).await.expect("start");
+    steps.run_step(request).await.expect("run");
+    repo.record_findings(key, 3, &[]).await.expect("record");
 
-    let report = steps.run_step(request.clone()).await.expect("run");
-
-    assert_eq!(report.outcome, outcome("changes"));
-    assert!(report.output.contains("### Blockers"));
-    assert!(!report.output.contains("```json"));
-    let round = repo.review_rounds(run_id).await.expect("rounds").remove(0);
-    assert_eq!(round.findings.len(), 1);
-    assert_eq!(round.findings[0].lines, Some(Lines { start: 2, end: 4 }));
-
-    let garbled = Reviewer {
-        text: "No blocks here.".to_string(),
-        ..Reviewer::default()
-    };
-    let failed = StepServiceImpl::new(repo.clone(), garbled)
-        .run_step(request)
-        .await;
-    assert!(matches!(failed, Err(StepError::Final(_))), "{failed:?}");
-
-    // The fix after the round reads it once it ended.
-    rounds.close_round(closing(run_id, 3)).await.expect("close");
     let fix = StepRequest {
         key: StepKey { run_id, seq: 4 },
         entry: EntryId::try_from("fix".to_string()).expect("entry"),
@@ -524,8 +471,14 @@ async fn a_reviewer_s_blockers_are_recorded_on_its_round() {
         round: None,
     };
     steps.start_step(fix.clone()).await.expect("start");
-    steps.run_step(fix).await.ok();
-    assert_eq!(*reviewer.read.lock().expect("read"), [Some(3), Some(3)]);
+    steps.run_step(fix.clone()).await.expect("run");
+    rounds.close_round(closing(run_id, 3)).await.expect("close");
+    steps.run_step(fix).await.expect("run again");
+
+    assert_eq!(
+        *reviewer.read.lock().expect("read"),
+        [Some(3), None, Some(3)]
+    );
 }
 
 /// Workflows that are always there: the Runs here are read, never started.
@@ -539,7 +492,10 @@ impl crate::domain::ports::RunWorkflows for Started {
         Ok(())
     }
 
-    async fn exists(&self, _run_id: RunId) -> Result<bool, crate::domain::ports::RunWorkflowsError> {
+    async fn exists(
+        &self,
+        _run_id: RunId,
+    ) -> Result<bool, crate::domain::ports::RunWorkflowsError> {
         Ok(true)
     }
 
@@ -551,7 +507,10 @@ impl crate::domain::ports::RunWorkflows for Started {
         Ok(crate::domain::ports::AnswerDelivery::Taken)
     }
 
-    async fn cancel(&self, _run_id: RunId) -> Result<bool, crate::domain::ports::RunWorkflowsError> {
+    async fn cancel(
+        &self,
+        _run_id: RunId,
+    ) -> Result<bool, crate::domain::ports::RunWorkflowsError> {
         Ok(true)
     }
 }
@@ -569,9 +528,13 @@ async fn a_run_shows_its_review_rounds_and_their_findings() {
         .await
         .expect("open");
     start_reviewers(&repo, run_id, 3, &["tests-reviewer"]).await;
-    repo.record_findings(StepKey { run_id, seq: 3 }, 3, &[finding("src/save.rs", None)])
-        .await
-        .expect("record");
+    repo.record_findings(
+        StepKey { run_id, seq: 3 },
+        3,
+        &[finding("src/save.rs", None)],
+    )
+    .await
+    .expect("record");
     let service = crate::domain::service::FactoryServiceImpl::new(
         repo.clone(),
         Started,
@@ -595,4 +558,189 @@ async fn a_run_shows_its_review_rounds_and_their_findings() {
         Some(role("tests-reviewer"))
     );
     assert_eq!(listed[0].review_rounds, read.review_rounds);
+}
+
+/// A finding that blocks wherever it is.
+fn found_again(path: &str) -> Finding {
+    Finding {
+        blocks_anywhere: true,
+        ..finding(path, Some((5, 5)))
+    }
+}
+
+/// Round 1 finds A, B and C in the change; the fix addresses A only, so
+/// its diff touches only A's file. Round 2's reviewers check the Blockers
+/// of round 1 again and find B and C still there, outside the fix diff:
+/// they still block, and the round goes to the fix again. A new finding
+/// outside the fix diff is a follow-up as before.
+#[tokio::test]
+async fn blockers_a_partial_fix_left_still_block_the_next_round() {
+    let repo = FakeRepo::default();
+    let github = FakeGithub::default();
+    let run_id = code_run(&repo).await;
+    github.state().branch_heads = [Some("aaa".to_string()), Some("bbb".to_string())].into();
+    github.state().diffs.insert(
+        ("main".to_string(), "aaa".to_string()),
+        ["a.rs", "b.rs", "c.rs"]
+            .map(|path| ChangedFile::from_patch(path.to_string(), None, None))
+            .to_vec(),
+    );
+    github.state().diffs.insert(
+        ("aaa".to_string(), "bbb".to_string()),
+        vec![ChangedFile::from_patch("a.rs".to_string(), None, None)],
+    );
+    let rounds = rounds(&repo, &github);
+    rounds
+        .open_round(opening(run_id, 3, 1))
+        .await
+        .expect("open");
+    start_reviewers(&repo, run_id, 3, &["correctness-reviewer"]).await;
+    let found = ["a.rs", "b.rs", "c.rs"].map(|path| finding(path, Some((5, 5))));
+    repo.record_findings(StepKey { run_id, seq: 3 }, 3, &found)
+        .await
+        .expect("record");
+    assert_eq!(
+        rounds.close_round(closing(run_id, 3)).await.expect("close"),
+        outcome("changes")
+    );
+
+    rounds
+        .open_round(opening(run_id, 5, 2))
+        .await
+        .expect("open");
+    start_reviewers(&repo, run_id, 5, &["correctness-reviewer"]).await;
+    let all = repo.review_rounds(run_id).await.expect("rounds");
+    let carried: Vec<&str> = super::carried_blockers(&all, &all[1])
+        .iter()
+        .map(|finding| finding.path.as_str())
+        .collect();
+    assert_eq!(carried, ["a.rs", "b.rs", "c.rs"]);
+    let again = [
+        found_again("b.rs"),
+        found_again("c.rs"),
+        finding("d.rs", None),
+    ];
+    repo.record_findings(StepKey { run_id, seq: 5 }, 5, &again)
+        .await
+        .expect("record");
+
+    let routed = rounds.close_round(closing(run_id, 5)).await.expect("close");
+
+    assert_eq!(routed, outcome("changes"));
+    let round = repo.review_rounds(run_id).await.expect("rounds").remove(1);
+    let kinds: Vec<_> = round
+        .findings
+        .iter()
+        .map(|finding| (finding.path.as_str(), finding.kind))
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            ("b.rs", Some(FindingKind::Blocker)),
+            ("c.rs", Some(FindingKind::Blocker)),
+            ("d.rs", Some(FindingKind::FollowUp)),
+        ]
+    );
+}
+
+/// The last round that still finds Blockers ends the Run for a person
+/// (`unresolved`) rather than go to a fix no round would review.
+#[tokio::test]
+async fn the_last_round_s_blockers_are_left_unresolved() {
+    let repo = FakeRepo::default();
+    let github = FakeGithub::default();
+    let run_id = code_run(&repo).await;
+    github.state().branch_heads = [Some("aaa".to_string())].into();
+    let rounds = rounds(&repo, &github);
+    rounds
+        .open_round(opening(run_id, 3, 1))
+        .await
+        .expect("open");
+    start_reviewers(&repo, run_id, 3, &["tests-reviewer"]).await;
+    repo.record_findings(StepKey { run_id, seq: 3 }, 3, &[finding("a.rs", None)])
+        .await
+        .expect("record");
+    let last = ReviewRoundClosing {
+        last: true,
+        ..closing(run_id, 3)
+    };
+
+    assert_eq!(
+        rounds.close_round(last).await.expect("close"),
+        outcome(super::UNRESOLVED)
+    );
+    let round = repo.review_rounds(run_id).await.expect("rounds").remove(0);
+    assert_eq!(
+        round.end.map(|end| end.outcome),
+        Some(ReviewRoundOutcome::Changes)
+    );
+}
+
+/// A reviewer's Step that ended with no answer read, as one a worker
+/// without review panels ran, reviewed nothing: the round fails rather
+/// than pass on it.
+#[tokio::test]
+async fn a_reviewer_that_ended_with_no_answer_read_fails_the_round() {
+    let repo = FakeRepo::default();
+    let github = FakeGithub::default();
+    let run_id = code_run(&repo).await;
+    github.state().branch_heads = [Some("aaa".to_string())].into();
+    let rounds = rounds(&repo, &github);
+    rounds
+        .open_round(opening(run_id, 3, 1))
+        .await
+        .expect("open");
+    start_reviewers(&repo, run_id, 3, &["tests-reviewer", "scope-reviewer"]).await;
+    repo.record_findings(StepKey { run_id, seq: 3 }, 3, &[])
+        .await
+        .expect("record");
+    for seq in [3, 4] {
+        repo.end_step(StepKey { run_id, seq }, &outcome("pass"), "Looks fine")
+            .await
+            .expect("end");
+    }
+
+    let routed = rounds.close_round(closing(run_id, 3)).await.expect("close");
+
+    assert_eq!(routed, Outcome::failed());
+}
+
+/// A follow-up task whose making fails as an outage would fails the close,
+/// for Temporal to try again; one made though its answer was lost is found
+/// by its id on the retry, not made twice.
+#[tokio::test]
+async fn a_retried_close_makes_each_follow_up_task_once() {
+    let repo = FakeRepo::default();
+    let github = FakeGithub::default();
+    let run_id = code_run(&repo).await;
+    github.state().branch_heads = [Some("aaa".to_string())].into();
+    github
+        .state()
+        .diffs
+        .insert(("main".to_string(), "aaa".to_string()), Vec::new());
+    let rounds = rounds(&repo, &github);
+    rounds
+        .open_round(opening(run_id, 3, 1))
+        .await
+        .expect("open");
+    start_reviewers(&repo, run_id, 3, &["tests-reviewer"]).await;
+    repo.record_findings(
+        StepKey { run_id, seq: 3 },
+        3,
+        &[finding("docs/old.md", None)],
+    )
+    .await
+    .expect("record");
+    *repo.follow_ups_fail.lock().expect("fail") = 1;
+    *repo.follow_ups_made_anyway.lock().expect("anyway") = true;
+
+    let failed = rounds.close_round(closing(run_id, 3)).await;
+    assert!(matches!(failed, Err(StepError::Internal(_))), "{failed:?}");
+    let retried = rounds.close_round(closing(run_id, 3)).await.expect("retry");
+
+    assert_eq!(retried, outcome("pass"));
+    let made = repo.follow_ups.lock().expect("follow ups").clone();
+    assert_eq!(made.len(), 1);
+    let round = repo.review_rounds(run_id).await.expect("rounds").remove(0);
+    assert_eq!(round.findings[0].follow_up_task_id, Some(made[0].id));
 }

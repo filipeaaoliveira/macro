@@ -44,6 +44,9 @@ pub struct Finding {
     pub problem: String,
     /// Why it must change.
     pub why: String,
+    /// Whether it blocks wherever it is: a Blocker of the round before
+    /// found again, or a reviewer's answer that never read.
+    pub blocks_anywhere: bool,
 }
 
 /// What a finding turned out to be once its round ended.
@@ -86,11 +89,18 @@ pub struct ReviewFinding {
     pub problem: String,
     /// Why it must change.
     pub why: String,
+    /// Whether it blocks wherever it is: a Blocker of the round before
+    /// found again, or a reviewer's answer that never read.
+    pub blocks_anywhere: bool,
     /// What it turned out to be; none while its round reviews.
     pub kind: Option<FindingKind>,
     /// The follow-up task it became, when it is a follow-up and the task
     /// was made: its task document's id.
     pub follow_up_task_id: Option<Uuid>,
+    /// The id its follow-up task is made with, kept before it is asked
+    /// for, so a retry finds the task rather than making a second one.
+    #[serde(skip)]
+    pub follow_up_key: Option<Uuid>,
 }
 
 /// How a review round ended.
@@ -138,20 +148,29 @@ pub struct ReviewRound {
     pub seq: u16,
     /// How many reviewers it has, each in a Step of its own.
     pub reviewers: u16,
-    /// The commit of the Run's branch it reviews.
-    pub head_sha: String,
+    /// The commit of the Run's branch it reviews; none for a round that
+    /// could not open.
+    pub head_sha: Option<String>,
     /// Where the diff under review starts: the Run's base branch, or the
-    /// commit the round before reviewed.
-    pub diff_base: String,
+    /// commit the round before reviewed; none for a round that could not
+    /// open.
+    pub diff_base: Option<String>,
     /// Whether it reviews the fix diff, the changes made since the round
     /// before, rather than the Run's whole change.
     pub fix_diff: bool,
     /// When it started.
     pub started_at: DateTime<Utc>,
+    /// Why it could not open, as when the Run's branch is gone: it then
+    /// ran no reviewer and ended failed.
+    pub failure: Option<String>,
     /// How and when it ended; none while it reviews.
     pub end: Option<ReviewRoundEnd>,
     /// What its reviewers found, by Step and place.
     pub findings: Vec<ReviewFinding>,
+    /// The reviewers' Steps whose answers were read, so their findings are
+    /// recorded, in order.
+    #[serde(skip)]
+    pub answered: Vec<u16>,
 }
 
 impl ReviewRound {
@@ -185,6 +204,22 @@ pub struct ReviewRoundStart {
     pub fix_diff: bool,
 }
 
+/// A review round that could not open, to record as ended failed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReviewRoundFailure {
+    /// The place of its first Step.
+    pub seq: u16,
+    /// Which round of its entry, from 1.
+    pub round: u16,
+    /// How many reviewers it would have had.
+    pub reviewers: u16,
+    /// Why it could not open, for a person.
+    pub failure: String,
+}
+
+/// The most bytes [`ReviewRoundFailure::failure`] keeps.
+pub const MAX_FAILURE_BYTES: usize = 4_096;
+
 /// What a finding turned out to be, for [`ReviewRoundRepository::classify_findings`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FindingClass {
@@ -212,6 +247,14 @@ pub trait ReviewRoundRepository: Send + Sync + 'static {
         start: &ReviewRoundStart,
     ) -> impl Future<Output = Result<ReviewRound, Self::Err>> + Send;
 
+    /// Record that the Run `run_id`'s review round `failure` could not open:
+    /// it ends failed, with why. Recording it again keeps the first record.
+    fn fail_review_round(
+        &self,
+        run_id: RunId,
+        failure: &ReviewRoundFailure,
+    ) -> impl Future<Output = Result<ReviewRound, Self::Err>> + Send;
+
     /// The Run's review rounds, in order, each with its findings.
     fn review_rounds(
         &self,
@@ -226,15 +269,35 @@ pub trait ReviewRoundRepository: Send + Sync + 'static {
     ) -> impl Future<Output = Result<BTreeMap<RunId, Vec<ReviewRound>>, Self::Err>> + Send;
 
     /// Record what the reviewer of the Step `key`, in the round that starts
-    /// at `round_seq`, found, replacing what an earlier attempt of the Step
-    /// recorded, while the Step has not ended. Whether it was recorded:
-    /// false once the Step ended.
+    /// at `round_seq`, found, and that its answer was read, replacing what
+    /// an earlier attempt of the Step recorded, while the Step has not
+    /// ended. Whether it was recorded: false once the Step ended.
     fn record_findings(
         &self,
         key: StepKey,
         round_seq: u16,
         findings: &[Finding],
     ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
+
+    /// The prompt in which the reviewer of the Step `key`, in the round
+    /// that starts at `round_seq`, is asked once more for an answer that
+    /// reads: `candidate`, unless an earlier attempt kept one.
+    fn reask_action(
+        &self,
+        key: StepKey,
+        round_seq: u16,
+        candidate: Uuid,
+    ) -> impl Future<Output = Result<Uuid, Self::Err>> + Send;
+
+    /// The id the follow-up at `place` of the Step `key` is made with:
+    /// `candidate`, unless an earlier attempt kept one. None when the
+    /// finding is not a follow-up.
+    fn follow_up_key(
+        &self,
+        key: StepKey,
+        place: u16,
+        candidate: Uuid,
+    ) -> impl Future<Output = Result<Option<Uuid>, Self::Err>> + Send;
 
     /// Record what the findings of the Run's round `round_seq` turned out
     /// to be. A finding already classified keeps its first kind.

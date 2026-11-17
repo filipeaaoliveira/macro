@@ -7,8 +7,8 @@ use super::super::PgRunRepository;
 use crate::domain::models::{EntryId, Outcome, RunId, RunInsert, StepKey};
 use crate::domain::ports::RunRepository;
 use crate::domain::review_rounds::{
-    Finding, FindingClass, FindingKind, Lines, ReviewRoundOutcome, ReviewRoundRepository,
-    ReviewRoundStart,
+    Finding, FindingClass, FindingKind, Lines, ReviewRoundFailure, ReviewRoundOutcome,
+    ReviewRoundRepository, ReviewRoundStart,
 };
 
 /// A new Run of Julia's, with the round that starts at Step 3 recorded and
@@ -52,6 +52,7 @@ fn finding(path: &str, lines: Option<(u32, u32)>) -> Finding {
         lines: lines.map(|(start, end)| Lines { start, end }),
         problem: format!("{path} is wrong"),
         why: "It breaks the build".to_string(),
+        blocks_anywhere: false,
     }
 }
 
@@ -70,7 +71,7 @@ async fn a_round_keeps_its_first_record_and_the_findings_its_step_ended_with(poo
         ..first_round()
     };
     let round = repo.start_review_round(id, &again).await.expect("again");
-    assert_eq!(round.head_sha, "abc123");
+    assert_eq!(round.head_sha.as_deref(), Some("abc123"));
     assert_eq!(round.step_seqs(), 3..5);
 
     let key = StepKey { run_id: id, seq: 3 };
@@ -90,6 +91,10 @@ async fn a_round_keeps_its_first_record_and_the_findings_its_step_ended_with(poo
     )
     .await
     .expect("end");
+    assert_eq!(
+        repo.review_rounds(id).await.expect("rounds")[0].answered,
+        [3]
+    );
     let late = [finding("src/d.rs", None)];
     assert!(!repo.record_findings(key, 3, &late).await.expect("late"));
 
@@ -186,4 +191,84 @@ async fn a_finding_keeps_its_first_kind_and_task_and_a_round_its_first_end(pool:
 
     let listed = repo.runs_review_rounds(&[id]).await.expect("listed");
     assert_eq!(listed.get(&id), Some(&vec![again]));
+}
+
+/// A round that could not open ends failed with why, and keeps its first
+/// record. A reviewer's re-ask prompt and a follow-up's task id keep the
+/// first an attempt recorded; a Blocker has no task id.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn a_failed_opening_a_re_ask_and_a_follow_up_key_keep_their_first_record(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let id = reviewing(&repo).await;
+    let failure = ReviewRoundFailure {
+        seq: 6,
+        round: 2,
+        reviewers: 2,
+        failure: "The run's branch is not on GitHub".to_string(),
+    };
+    let failed = repo.fail_review_round(id, &failure).await.expect("fail");
+    let again = ReviewRoundFailure {
+        failure: "Another reason".to_string(),
+        ..failure
+    };
+    repo.fail_review_round(id, &again).await.expect("again");
+    let rounds = repo.review_rounds(id).await.expect("rounds");
+    assert_eq!(rounds[1], failed);
+    assert_eq!(failed.head_sha, None);
+    assert_eq!(
+        failed.failure.as_deref(),
+        Some("The run's branch is not on GitHub")
+    );
+    assert_eq!(
+        failed.end.map(|end| end.outcome),
+        Some(ReviewRoundOutcome::Failed)
+    );
+
+    let key = StepKey { run_id: id, seq: 3 };
+    let first = Uuid::now_v7();
+    assert_eq!(repo.reask_action(key, 3, first).await.expect("ask"), first);
+    assert_eq!(
+        repo.reask_action(key, 3, Uuid::now_v7())
+            .await
+            .expect("again"),
+        first
+    );
+
+    let found = [finding("src/a.rs", None), finding("docs/b.md", None)];
+    repo.record_findings(key, 3, &found).await.expect("record");
+    let classes = [
+        FindingClass {
+            seq: 3,
+            place: 1,
+            kind: FindingKind::Blocker,
+        },
+        FindingClass {
+            seq: 3,
+            place: 2,
+            kind: FindingKind::FollowUp,
+        },
+    ];
+    repo.classify_findings(id, 3, &classes)
+        .await
+        .expect("classify");
+    let task = Uuid::now_v7();
+    assert_eq!(
+        repo.follow_up_key(key, 2, task).await.expect("key"),
+        Some(task)
+    );
+    assert_eq!(
+        repo.follow_up_key(key, 2, Uuid::now_v7())
+            .await
+            .expect("again"),
+        Some(task)
+    );
+    assert_eq!(
+        repo.follow_up_key(key, 1, Uuid::now_v7())
+            .await
+            .expect("blocker"),
+        None
+    );
 }

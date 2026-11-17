@@ -11,7 +11,7 @@ use macro_user_id::user_id::MacroUserIdStr;
 
 use uuid::Uuid;
 
-use crate::domain::ports::{FollowUpTask, TaskAccess, TaskDirectory};
+use crate::domain::ports::{FollowUpMade, FollowUpTask, TaskAccess, TaskDirectory};
 
 /// Whether a person may see a document comes from entity access, and
 /// whether it is a task from the document storage service, which owns
@@ -41,9 +41,6 @@ pub enum DocumentTaskDirectoryErr {
     /// The task could not be made.
     #[error("the task could not be made: {0}")]
     Create(#[from] CreateTaskError),
-    /// The task made has an id that is not a UUID.
-    #[error("the task made has id {0:?}, which is not a UUID")]
-    TaskId(String),
 }
 
 impl<A: EntityAccessService> TaskDirectory for DocumentTaskDirectory<A> {
@@ -101,17 +98,22 @@ impl<A: EntityAccessService> TaskDirectory for DocumentTaskDirectory<A> {
         user_id: &MacroUserIdStr<'static>,
         of: Option<Uuid>,
         follow_up: &FollowUpTask,
-    ) -> Result<Uuid, Self::Err> {
+        task_id: Uuid,
+    ) -> Result<FollowUpMade, Self::Err> {
+        // An earlier attempt may have made it: its id says so.
+        if self.made(task_id).await? {
+            return Ok(FollowUpMade::Made);
+        }
+
         // A follow-up goes in the project of the task it follows up; the
         // owner must still be able to add to it, as when they make a task.
+        // It is the owner's own, unshared, until they share it.
         let project_id = match of {
             Some(of) => self
                 .documents
                 .get_document_basic(&of.to_string())
                 .await
-                .map_err(|error| {
-                    DocumentTaskDirectoryErr::Documents(rootcause::report!("{error:#}"))
-                })?
+                .map_err(documents)?
                 .and_then(|document| document.project_id)
                 .and_then(|project| Uuid::parse_str(&project).ok()),
             None => None,
@@ -120,12 +122,36 @@ impl<A: EntityAccessService> TaskDirectory for DocumentTaskDirectory<A> {
             task_name: follow_up.name.clone(),
             markdown: follow_up.markdown.clone(),
             project_id,
-            share_with_team: true,
+            share_with_team: false,
+            document_id: Some(task_id),
         };
-        let made = self
+        match self
             .documents
             .create_task_for_user(&task, user_id.as_ref())
-            .await?;
-        Uuid::parse_str(&made).map_err(|_| DocumentTaskDirectoryErr::TaskId(made))
+            .await
+        {
+            Ok(_) => Ok(FollowUpMade::Made),
+            // A refusal may be the conflict of an attempt that made it
+            // meanwhile.
+            Err(CreateTaskError::Refused(_)) if self.made(task_id).await? => Ok(FollowUpMade::Made),
+            Err(CreateTaskError::Refused(_)) => Ok(FollowUpMade::Refused),
+            Err(error) => Err(error.into()),
+        }
     }
+}
+
+impl<A> DocumentTaskDirectory<A> {
+    /// Whether the task `task_id` is there.
+    async fn made(&self, task_id: Uuid) -> Result<bool, DocumentTaskDirectoryErr> {
+        let document = self
+            .documents
+            .get_document_basic(&task_id.to_string())
+            .await
+            .map_err(documents)?;
+        Ok(document.is_some_and(|document| document.deleted_at.is_none()))
+    }
+}
+
+fn documents(error: impl std::fmt::Display) -> DocumentTaskDirectoryErr {
+    DocumentTaskDirectoryErr::Documents(rootcause::report!("{error:#}"))
 }

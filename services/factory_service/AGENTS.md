@@ -59,7 +59,8 @@ worker that walks each Run's Flow, in one process.
   `tests-reviewer`: each the definition does not list takes `reviewer`'s
   Agents, so a definition written for one reviewer keeps working, and lists
   one to give it Agents of its own. Without either, the service refuses to
-  start and names both. For example, with a
+  start and names both. `reviewer` stays required: Runs started before the
+  review panel review with it until they end. For example, with a
   backup for planning when the first Agent's quota runs out:
 
   ```json
@@ -92,9 +93,11 @@ worker that walks each Run's Flow, in one process.
 - A review round makes each finding outside the diff it reviewed a task of
   the Run's owner, in the project of the Run's task, through document
   storage's `POST /documents/create_task` with `DOCUMENT_STORAGE_SERVICE_AUTH_KEY`
-  and the owner as the acting user: the owner must be able to add tasks to
-  that project. A task it refuses is not made; its finding stays on the
-  round as a follow-up.
+  in the standard internal headers and the owner as the acting user, and an
+  id it picks, so a retry finds the task: the owner must be able to add
+  tasks to that project, and document storage must take the id (deploy it
+  first). A task it refuses is not made; its finding stays on the round as
+  a follow-up.
 - The service tells which accounts exist with the authentication service's
   `POST /internal/get_existing_users`, so it requires the auth service's fix
   that serves that route as POST: before it, the route answered only GET,

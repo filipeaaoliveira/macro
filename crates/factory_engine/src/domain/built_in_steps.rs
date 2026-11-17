@@ -6,12 +6,13 @@
 //! the repository declares, in rounds (`checks_round`).
 
 mod checks_round;
+mod review_panel;
 #[cfg(test)]
 mod test;
 
 use factory_records::domain::models::{Outcome, Repository, Role, Step, StepKey};
 use factory_records::domain::ports::RunRepository;
-use factory_records::domain::review_rounds::ReviewRound;
+use factory_records::domain::review_rounds::{ReviewRound, ReviewRoundRepository};
 use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::flow::{StepName, StepUse};
@@ -269,7 +270,12 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
     }
 }
 
-impl<A: StepAgent, G: PullRequests, R: RunRepository> StepExecutor for BuiltInSteps<A, G, R> {
+impl<A, G, R> StepExecutor for BuiltInSteps<A, G, R>
+where
+    A: StepAgent,
+    G: PullRequests,
+    R: RunRepository + ReviewRoundRepository,
+{
     type Err = BuiltInStepError;
 
     fn serves(&self, step: &StepName) -> Option<StepUse> {
@@ -307,17 +313,16 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> StepExecutor for BuiltInSt
                         .await
                 }
             }
-            BuiltInStep::Review => {
-                let outcomes = outcomes(&["pass", "changes"]);
-                let instructions = match input.review {
-                    Some(round) if input.role.is_some() && in_round(round, input.key.seq) => {
-                        panel_instructions(round, input.role)
-                    }
-                    _ => REVIEW_INSTRUCTIONS.to_string(),
-                };
-                self.ask_agent_in_repository(step, &instructions, outcomes, input)
-                    .await
-            }
+            BuiltInStep::Review => match input.review {
+                Some(round) if in_round(round, input.key.seq) => {
+                    self.review_in_round(step, round, input).await
+                }
+                _ => {
+                    let outcomes = outcomes(&["pass", "changes"]);
+                    self.ask_agent_in_repository(step, REVIEW_INSTRUCTIONS, outcomes, input)
+                        .await
+                }
+            },
             BuiltInStep::Fix => {
                 if input.repository.is_none() {
                     return Err(BuiltInStepError::NoRepository(step.clone()));
@@ -388,46 +393,12 @@ fn in_round(round: &ReviewRound, seq: u16) -> bool {
     round.step_seqs().contains(&seq)
 }
 
-/// What a reviewer of `round` filling `role` is told: what its Role looks
-/// at, the commit it reviews, and the diff under review, the Run's whole
-/// change or the fix diff.
-fn panel_instructions(round: &ReviewRound, role: Option<&Role>) -> String {
-    let focus = REVIEW_FOCUS
-        .iter()
-        .find(|(name, _)| role.is_some_and(|role| role.as_str() == *name))
-        .map_or("", |(_, focus)| focus.trim());
-    let (base, scope) = if round.fix_diff {
-        (
-            round.diff_base.clone(),
-            format!(
-                "the changes the fix made since review round {} reviewed `{}`",
-                round.round.saturating_sub(1),
-                round.diff_base
-            ),
-        )
-    } else {
-        (
-            format!("origin/{}", round.diff_base),
-            "the run's whole change against its base".to_string(),
-        )
-    };
-    REVIEW_PANEL_INSTRUCTIONS
-        .replace("{focus}", focus)
-        .replace("{head}", &round.head_sha)
-        .replace("{base}", &base)
-        .replace("{scope}", &scope)
-}
-
 /// What the fix is told: with the Blockers of the latest review round when
 /// it found some.
 fn fix_instructions(review: Option<&ReviewRound>) -> String {
     let blockers = review.filter(|round| round.blockers().next().is_some());
     match blockers {
-        Some(round) => format!(
-            "{FIX_INSTRUCTIONS}\n## Blockers of review round {}\n{}\n",
-            round.round,
-            blockers_brief(round)
-        ),
+        Some(round) => format!("{FIX_INSTRUCTIONS}\n{}", blockers_brief(round)),
         None => FIX_INSTRUCTIONS.to_string(),
     }
 }

@@ -98,6 +98,14 @@
 							"entry": "fix"
 						}
 					}
+				],
+				"unresolved": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
 				]
 			}
 		},

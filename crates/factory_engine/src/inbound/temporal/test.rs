@@ -886,7 +886,8 @@ async fn a_review_that_keeps_finding_blockers_ends_the_run_for_a_person() {
     assert!(matches!(ended, Ok(RunOutcome::Manual)), "{ended:?}");
     let steps = agent.steps();
     assert_eq!(steps.iter().filter(|step| *step == "review").count(), 9);
-    assert_eq!(steps.iter().filter(|step| *step == "fix").count(), 3);
+    // The last round's Blockers end the Run: no fix runs after it.
+    assert_eq!(steps.iter().filter(|step| *step == "fix").count(), 2);
     let github = github.state();
     assert_eq!(github.opened, 0);
     assert!(github.merges.is_empty());

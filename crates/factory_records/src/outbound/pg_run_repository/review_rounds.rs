@@ -13,7 +13,7 @@ use super::{PgRunRepository, PgRunRepositoryErr, number};
 use crate::domain::models::{Role, RunId, StepKey};
 use crate::domain::review_rounds::{
     Finding, FindingClass, FindingKind, Lines, ReviewFinding, ReviewRound, ReviewRoundEnd,
-    ReviewRoundOutcome, ReviewRoundRepository, ReviewRoundStart,
+    ReviewRoundFailure, ReviewRoundOutcome, ReviewRoundRepository, ReviewRoundStart,
 };
 
 struct RoundRow {
@@ -21,9 +21,10 @@ struct RoundRow {
     seq: i32,
     round: i32,
     reviewers: i32,
-    head_sha: String,
-    diff_base: String,
+    head_sha: Option<String>,
+    diff_base: Option<String>,
     fix_diff: bool,
+    failure: Option<String>,
     started_at: DateTime<Utc>,
     outcome: Option<String>,
     ended_at: Option<DateTime<Utc>>,
@@ -53,9 +54,11 @@ impl TryFrom<RoundRow> for ReviewRound {
             head_sha: row.head_sha,
             diff_base: row.diff_base,
             fix_diff: row.fix_diff,
+            failure: row.failure,
             started_at: row.started_at,
             end,
             findings: Vec::new(),
+            answered: Vec::new(),
         })
     }
 }
@@ -71,8 +74,10 @@ struct FindingRow {
     end_line: Option<i32>,
     problem: String,
     why: String,
+    blocks_anywhere: bool,
     kind: Option<String>,
     follow_up_task_id: Option<String>,
+    follow_up_key: Option<Uuid>,
 }
 
 fn line(stored: i32) -> Result<u32, PgRunRepositoryErr> {
@@ -109,11 +114,13 @@ impl TryFrom<FindingRow> for ReviewFinding {
             lines,
             problem: row.problem,
             why: row.why,
+            blocks_anywhere: row.blocks_anywhere,
             kind,
             follow_up_task_id: row
                 .follow_up_task_id
                 .map(|id| Uuid::parse_str(&id).map_err(|_| PgRunRepositoryErr::InvalidTaskId(id)))
                 .transpose()?,
+            follow_up_key: row.follow_up_key,
         })
     }
 }
@@ -128,8 +135,8 @@ impl PgRunRepository {
             RoundRow,
             r#"
             SELECT
-                run_id, seq, round, reviewers, head_sha, diff_base, fix_diff, started_at,
-                outcome, ended_at
+                run_id, seq, round, reviewers, head_sha, diff_base, fix_diff, failure,
+                started_at, outcome, ended_at
             FROM factory_review_round
             WHERE run_id = ANY($1)
             ORDER BY run_id, seq
@@ -143,7 +150,7 @@ impl PgRunRepository {
             r#"
             SELECT
                 f.run_id, f.round_seq, f.seq, f.place, s.role, f.path, f.start_line, f.end_line,
-                f.problem, f.why, f.kind, f.follow_up_task_id
+                f.problem, f.why, f.blocks_anywhere, f.kind, f.follow_up_task_id, f.follow_up_key
             FROM factory_review_finding f
             JOIN factory_step s ON s.run_id = f.run_id AND s.seq = f.seq
             WHERE f.run_id = ANY($1)
@@ -153,6 +160,22 @@ impl PgRunRepository {
         )
         .fetch_all(&self.pool)
         .await?;
+        let answers = sqlx::query!(
+            r#"
+            SELECT run_id, round_seq, seq
+            FROM factory_reviewer_answer
+            WHERE run_id = ANY($1) AND read_at IS NOT NULL
+            ORDER BY run_id, round_seq, seq
+            "#,
+            ids,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        let mut answered: BTreeMap<(RunId, u16), Vec<u16>> = BTreeMap::new();
+        for answer in answers {
+            let round = (RunId::from_uuid(answer.run_id), number(answer.round_seq)?);
+            answered.entry(round).or_default().push(number(answer.seq)?);
+        }
 
         let mut found: BTreeMap<(RunId, u16), Vec<ReviewFinding>> = BTreeMap::new();
         for row in findings {
@@ -168,6 +191,7 @@ impl PgRunRepository {
             let run_id = RunId::from_uuid(row.run_id);
             let mut round = ReviewRound::try_from(row)?;
             round.findings = found.remove(&(run_id, round.seq)).unwrap_or_default();
+            round.answered = answered.remove(&(run_id, round.seq)).unwrap_or_default();
             rounds.entry(run_id).or_default().push(round);
         }
         Ok(rounds)
@@ -212,6 +236,33 @@ impl ReviewRoundRepository for PgRunRepository {
         .await?;
 
         self.round_at(run_id, start.seq)
+            .await?
+            .ok_or(PgRunRepositoryErr::NoSuchStep)
+    }
+
+    #[tracing::instrument(err, skip(self, failure), fields(seq = failure.seq, round = failure.round))]
+    async fn fail_review_round(
+        &self,
+        run_id: RunId,
+        failure: &ReviewRoundFailure,
+    ) -> Result<ReviewRound, Self::Err> {
+        sqlx::query!(
+            r#"
+            INSERT INTO factory_review_round
+                (run_id, seq, round, reviewers, fix_diff, failure, outcome, ended_at)
+            VALUES ($1, $2, $3, $4, false, $5, 'failed', now())
+            ON CONFLICT (run_id, seq) DO NOTHING
+            "#,
+            run_id.as_uuid(),
+            i32::from(failure.seq),
+            i32::from(failure.round),
+            i32::from(failure.reviewers),
+            failure.failure,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        self.round_at(run_id, failure.seq)
             .await?
             .ok_or(PgRunRepositoryErr::NoSuchStep)
     }
@@ -271,6 +322,7 @@ impl ReviewRoundRepository for PgRunRepository {
         let mut ends = Vec::with_capacity(findings.len());
         let mut problems = Vec::with_capacity(findings.len());
         let mut whys = Vec::with_capacity(findings.len());
+        let mut anywhere = Vec::with_capacity(findings.len());
         for (place, finding) in (1_i32..).zip(findings) {
             let (start, end) = match finding.lines {
                 Some(lines) => (
@@ -285,14 +337,19 @@ impl ReviewRoundRepository for PgRunRepository {
             ends.push(end);
             problems.push(finding.problem.clone());
             whys.push(finding.why.clone());
+            anywhere.push(finding.blocks_anywhere);
         }
         sqlx::query!(
             r#"
             INSERT INTO factory_review_finding
-                (run_id, seq, place, round_seq, path, start_line, end_line, problem, why)
-            SELECT $1, $2, f.place, $3, f.path, f.start_line, f.end_line, f.problem, f.why
-            FROM UNNEST($4::int[], $5::text[], $6::int[], $7::int[], $8::text[], $9::text[])
-                AS f(place, path, start_line, end_line, problem, why)
+                (run_id, seq, place, round_seq, path, start_line, end_line, problem, why,
+                 blocks_anywhere)
+            SELECT
+                $1, $2, f.place, $3, f.path, f.start_line, f.end_line, f.problem, f.why,
+                f.blocks_anywhere
+            FROM UNNEST(
+                $4::int[], $5::text[], $6::int[], $7::int[], $8::text[], $9::text[], $10::bool[]
+            ) AS f(place, path, start_line, end_line, problem, why, blocks_anywhere)
             "#,
             key.run_id.as_uuid(),
             i32::from(key.seq),
@@ -303,11 +360,73 @@ impl ReviewRoundRepository for PgRunRepository {
             &ends as &[Option<i32>],
             &problems,
             &whys,
+            &anywhere,
+        )
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query!(
+            r#"
+            INSERT INTO factory_reviewer_answer (run_id, seq, round_seq, read_at)
+            VALUES ($1, $2, $3, now())
+            ON CONFLICT (run_id, seq) DO UPDATE SET read_at = now()
+            "#,
+            key.run_id.as_uuid(),
+            i32::from(key.seq),
+            i32::from(round_seq),
         )
         .execute(&mut *transaction)
         .await?;
         transaction.commit().await?;
         Ok(true)
+    }
+
+    #[tracing::instrument(err, skip(self), fields(run_id = %key.run_id, seq = key.seq))]
+    async fn reask_action(
+        &self,
+        key: StepKey,
+        round_seq: u16,
+        candidate: Uuid,
+    ) -> Result<Uuid, Self::Err> {
+        let kept = sqlx::query_scalar!(
+            r#"
+            INSERT INTO factory_reviewer_answer (run_id, seq, round_seq, reask_action_id)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (run_id, seq) DO UPDATE
+            SET reask_action_id = COALESCE(factory_reviewer_answer.reask_action_id, $4)
+            RETURNING reask_action_id AS "reask_action_id!"
+            "#,
+            key.run_id.as_uuid(),
+            i32::from(key.seq),
+            i32::from(round_seq),
+            candidate,
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(kept)
+    }
+
+    #[tracing::instrument(err, skip(self), fields(run_id = %key.run_id, seq = key.seq))]
+    async fn follow_up_key(
+        &self,
+        key: StepKey,
+        place: u16,
+        candidate: Uuid,
+    ) -> Result<Option<Uuid>, Self::Err> {
+        let kept = sqlx::query_scalar!(
+            r#"
+            UPDATE factory_review_finding
+            SET follow_up_key = COALESCE(follow_up_key, $4)
+            WHERE run_id = $1 AND seq = $2 AND place = $3 AND kind = 'follow_up'
+            RETURNING follow_up_key AS "follow_up_key!"
+            "#,
+            key.run_id.as_uuid(),
+            i32::from(key.seq),
+            i32::from(place),
+            candidate,
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(kept)
     }
 
     #[tracing::instrument(err, skip(self, classes), fields(classes = classes.len()))]

@@ -199,3 +199,27 @@ fn the_review_panel_roles_default_to_the_reviewer() {
     let message = refused.expect_err("refused").to_string();
     assert!(message.contains("scope-reviewer") && message.contains("`reviewer`"));
 }
+
+/// Runs started on the single-reviewer `code` Flow review with `reviewer`
+/// until they end, so a definition that fills only the panel's Roles is
+/// refused.
+#[test]
+fn the_reviewer_stays_required_for_runs_in_flight() {
+    let definition = read(json!({
+        "agents": { "primary": { "bot": "00000000-0000-0000-0000-00000000c1a0" } },
+        "roles": {
+            "planner": ["primary"],
+            "writer": ["primary"],
+            "correctness-reviewer": ["primary"],
+            "scope-reviewer": ["primary"],
+            "tests-reviewer": ["primary"],
+            "fixer": ["primary"]
+        }
+    }))
+    .expect("a definition");
+
+    assert_eq!(
+        definition.fills_built_in_flows(),
+        Err(AgentDefinitionError::UnfilledRole(role("reviewer")))
+    );
+}

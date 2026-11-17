@@ -51,3 +51,21 @@ fn a_step_request_carries_the_role_its_entry_names() {
     assert_eq!(request.step.as_str(), "write");
     assert_eq!((request.key, request.visit), (key, 2));
 }
+
+/// A Step request with a field the worker does not know is refused rather
+/// than run without it; one with the fields Runs have always sent reads.
+#[test]
+fn a_step_request_refuses_a_field_it_does_not_know() {
+    let sent = serde_json::json!({
+        "key": { "run_id": "0195f7a0-0000-7000-8000-000000000001", "seq": 3 },
+        "entry": "review",
+        "step": "review",
+        "role": "reviewer",
+        "visit": 1
+    });
+    let mut newer = sent.clone();
+    newer["panel"] = serde_json::json!(true);
+
+    assert!(serde_json::from_value::<super::StepRequest>(sent).is_ok());
+    assert!(serde_json::from_value::<super::StepRequest>(newer).is_err());
+}

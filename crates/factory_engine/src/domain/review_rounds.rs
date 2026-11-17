@@ -7,24 +7,34 @@
 //! outside it becomes a follow-up task, in the project of the Run's task,
 //! and holds nothing.
 
+mod answer;
+mod brief;
 #[cfg(test)]
 mod test;
 
-use factory_records::domain::models::{MAX_OUTPUT_BYTES, Outcome, RunId};
+use answer::place;
+pub use answer::{ReviewerAnswer, ReviewerAnswerError, WHOLE_CHANGE};
+pub use brief::{BRIEF_BUDGET, blockers_brief, carried_blockers, findings_block};
+
+use factory_records::domain::models::StepKey;
+use factory_records::domain::models::{Outcome, RunId};
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::{
-    Finding, FindingClass, FindingKind, Lines, MAX_FINDING_PATH_BYTES, MAX_FINDING_TEXT_BYTES,
-    MAX_FINDINGS, ReviewFinding, ReviewRound, ReviewRoundOutcome, ReviewRoundRepository,
-    ReviewRoundStart,
+    FindingClass, FindingKind, Lines, ReviewFinding, ReviewRound, ReviewRoundFailure,
+    ReviewRoundOutcome, ReviewRoundRepository, ReviewRoundStart,
 };
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::domain::models::{CodeRepository, StepError, run_branch};
-use crate::domain::ports::{FollowUpTask, PullRequests, Retryable, ReviewService, TaskDirectory};
+use crate::domain::ports::{
+    FollowUpMade, FollowUpTask, PullRequests, Retryable, ReviewService, TaskDirectory,
+};
 
 /// A review round for a Run's workflow to open, before its reviewers'
 /// Steps start.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ReviewRoundOpening {
     /// The Run.
     pub run_id: RunId,
@@ -39,6 +49,7 @@ pub struct ReviewRoundOpening {
 /// A review round for a Run's workflow to close, once its reviewers'
 /// Steps ended.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ReviewRoundClosing {
     /// The Run.
     pub run_id: RunId,
@@ -46,7 +57,15 @@ pub struct ReviewRoundClosing {
     pub seq: u16,
     /// Whether a reviewer's work failed for good.
     pub failed: bool,
+    /// Whether it is the last round its entry runs: Blockers it still
+    /// finds end the Run for a person rather than go to a fix no round
+    /// would review.
+    #[serde(default)]
+    pub last: bool,
 }
+
+/// The outcome of a last round that still found Blockers.
+pub const UNRESOLVED: &str = "unresolved";
 
 /// A file a diff changed, and the lines of it the diff's hunks cover.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -114,198 +133,6 @@ pub fn in_diff(path: &str, lines: Option<Lines>, files: &[ChangedFile]) -> bool 
             .any(|hunk| hunk.start <= lines.end && lines.start <= hunk.end),
         _ => true,
     }
-}
-
-/// What a reviewer handed back: what it says of the change, and the
-/// Blockers it found.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ReviewerAnswer {
-    /// Its text, without the Blockers' block.
-    pub summary: String,
-    /// Its Blockers, in the order it gave them.
-    pub findings: Vec<Finding>,
-}
-
-/// Why a reviewer's hand back does not read.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum ReviewerAnswerError {
-    /// It has no `json` block, or the block is not a list of Blockers.
-    #[error("the reviewer's text has no json block listing its blockers: {0}")]
-    NoBlockers(String),
-    /// A Blocker has no file, problem or why, one too long, or lines that
-    /// do not read.
-    #[error("blocker {0} needs a file, a problem and why, each short enough, and lines from 1")]
-    InvalidBlocker(usize),
-    /// It lists more Blockers than a round keeps.
-    #[error("a reviewer lists at most {MAX_FINDINGS} blockers")]
-    TooManyBlockers,
-    /// It passes the change and lists Blockers, or asks for changes and
-    /// lists none.
-    #[error("a reviewer that passes lists no blocker, and one that asks for changes lists some")]
-    OutcomeAndBlockers,
-}
-
-/// A Blocker as the reviewer writes it.
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct WrittenBlocker {
-    file: String,
-    #[serde(default)]
-    start_line: Option<u32>,
-    #[serde(default)]
-    end_line: Option<u32>,
-    problem: String,
-    why: String,
-}
-
-/// The block a reviewer ends its text with.
-#[derive(Deserialize)]
-struct WrittenBlockers {
-    blockers: Vec<WrittenBlocker>,
-}
-
-impl ReviewerAnswer {
-    /// Read what a reviewer handed back with `outcome`: `text` ends with a
-    /// fenced `json` block, `{"blockers": [...]}`, which `pass` leaves
-    /// empty and `changes` does not.
-    pub fn read(outcome: &Outcome, text: &str) -> Result<Self, ReviewerAnswerError> {
-        let (summary, block) = json_block(text)
-            .ok_or_else(|| ReviewerAnswerError::NoBlockers("no fenced json block".to_string()))?;
-        let written: WrittenBlockers = serde_json::from_str(block)
-            .map_err(|error| ReviewerAnswerError::NoBlockers(error.to_string()))?;
-        if written.blockers.len() > MAX_FINDINGS {
-            return Err(ReviewerAnswerError::TooManyBlockers);
-        }
-
-        let mut findings = Vec::with_capacity(written.blockers.len());
-        for (index, blocker) in written.blockers.into_iter().enumerate() {
-            findings.push(finding(blocker).ok_or(ReviewerAnswerError::InvalidBlocker(index + 1))?);
-        }
-        let passes = outcome.as_str() == ReviewRoundOutcome::Pass.as_str();
-        if passes != findings.is_empty() {
-            return Err(ReviewerAnswerError::OutcomeAndBlockers);
-        }
-        Ok(Self { summary, findings })
-    }
-
-    /// The answer for a person and the Run's later Steps to read: its
-    /// summary, then its Blockers, cut to what a Step's output keeps.
-    pub fn render(&self) -> String {
-        let mut text = self.summary.clone();
-        if !self.findings.is_empty() {
-            text.push_str("\n\n### Blockers\n");
-            for (index, finding) in self.findings.iter().enumerate() {
-                text.push_str(&format!("\n{}. {}", index + 1, describe(finding)));
-            }
-            text.push('\n');
-        }
-        cut_to_output(text)
-    }
-}
-
-/// `text` without its last fenced `json` block, trimmed, and the block.
-fn json_block(text: &str) -> Option<(String, &str)> {
-    let open = text.rfind("```json")?;
-    let body_start = open + "```json".len();
-    let close = body_start + text[body_start..].find("```")?;
-    let summary = format!("{}{}", &text[..open], &text[close + 3..]);
-    Some((summary.trim().to_string(), text[body_start..close].trim()))
-}
-
-/// A written Blocker as a finding, if it holds together: a file, a problem
-/// and why, each within its bound, and lines from 1, the last not before
-/// the first. A first line alone is that one line.
-fn finding(blocker: WrittenBlocker) -> Option<Finding> {
-    let path = blocker.file.trim();
-    let path = path
-        .trim_start_matches("./")
-        .trim_start_matches('/')
-        .to_string();
-    let problem = blocker.problem.trim().to_string();
-    let why = blocker.why.trim().to_string();
-    let fits = |text: &str, max: usize| !text.is_empty() && text.len() <= max;
-    if !fits(&path, MAX_FINDING_PATH_BYTES)
-        || !fits(&problem, MAX_FINDING_TEXT_BYTES)
-        || !fits(&why, MAX_FINDING_TEXT_BYTES)
-    {
-        return None;
-    }
-
-    let lines = match (blocker.start_line, blocker.end_line) {
-        (None, None) => None,
-        (Some(start), end) => {
-            let end = end.unwrap_or(start);
-            let readable = start >= 1 && end >= start && i32::try_from(end).is_ok();
-            if !readable {
-                return None;
-            }
-            Some(Lines { start, end })
-        }
-        (None, Some(_)) => return None,
-    };
-    Some(Finding {
-        path,
-        lines,
-        problem,
-        why,
-    })
-}
-
-/// Where a finding is: its file, and its lines when it names some.
-fn place(path: &str, lines: Option<Lines>) -> String {
-    match lines {
-        Some(Lines { start, end }) if start == end => format!("`{path}` line {start}"),
-        Some(Lines { start, end }) => format!("`{path}` lines {start}-{end}"),
-        None => format!("`{path}`"),
-    }
-}
-
-/// One finding, for a person or an agent to read.
-fn describe(finding: &Finding) -> String {
-    format!(
-        "{}: {}\n   Why: {}",
-        place(&finding.path, finding.lines),
-        finding.problem,
-        finding.why
-    )
-}
-
-/// What ends a Step's output cut to fit.
-const CUT_NOTE: &str = "\n\n(The rest is left out: the review round lists every blocker.)\n";
-
-/// `text`, cut to what a Step's output keeps.
-fn cut_to_output(mut text: String) -> String {
-    if text.len() <= MAX_OUTPUT_BYTES {
-        return text;
-    }
-    let mut end = MAX_OUTPUT_BYTES - CUT_NOTE.len();
-    while !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    text.truncate(end);
-    text.push_str(CUT_NOTE);
-    text
-}
-
-/// The Blockers of `round`, for the fix to read: each with where it is,
-/// what is wrong and why, and the Role of the reviewer that found it.
-pub fn blockers_brief(round: &ReviewRound) -> String {
-    let mut brief = String::new();
-    for (index, blocker) in round.blockers().enumerate() {
-        let role = blocker
-            .role
-            .as_ref()
-            .map(|role| format!(" (found by the {role})"))
-            .unwrap_or_default();
-        brief.push_str(&format!(
-            "\n{}. {}: {}{role}\n   Why: {}",
-            index + 1,
-            place(&blocker.path, blocker.lines),
-            blocker.problem,
-            blocker.why
-        ));
-    }
-    brief
 }
 
 /// The follow-up task a finding outside the diff under review becomes.
@@ -402,7 +229,12 @@ where
     ) -> Result<(), StepError> {
         let files = match self
             .github
-            .changed_files(owner, repository, &round.diff_base, &round.head_sha)
+            .changed_files(
+                owner,
+                repository,
+                round.diff_base.as_deref().unwrap_or_default(),
+                round.head_sha.as_deref().unwrap_or_default(),
+            )
             .await
         {
             Ok(files) => files,
@@ -421,9 +253,12 @@ where
             .iter()
             .filter(|finding| finding.kind.is_none())
             .map(|finding| {
-                let inside = files
-                    .as_deref()
-                    .is_none_or(|files| in_diff(&finding.path, finding.lines, files));
+                // A Blocker found again, or an answer that never read,
+                // blocks wherever it is.
+                let inside = finding.blocks_anywhere
+                    || files
+                        .as_deref()
+                        .is_none_or(|files| in_diff(&finding.path, finding.lines, files));
                 FindingClass {
                     seq: finding.seq,
                     place: finding.place,
@@ -450,7 +285,7 @@ where
     T: TaskDirectory,
 {
     #[tracing::instrument(err, skip_all, fields(run_id = %opening.run_id, seq = opening.seq, round = opening.round))]
-    async fn open_round(&self, opening: ReviewRoundOpening) -> Result<(), StepError> {
+    async fn open_round(&self, opening: ReviewRoundOpening) -> Result<bool, StepError> {
         let run_id = opening.run_id;
         let run = self
             .repo
@@ -462,37 +297,45 @@ where
             return Err(StepError::RunEnded);
         }
         let rounds = self.repo.review_rounds(run_id).await.map_err(internal)?;
-        // A retried opening keeps the commit the first one recorded.
-        if rounds.iter().any(|round| round.seq == opening.seq) {
-            return Ok(());
+        // A retried opening keeps what the first one recorded.
+        if let Some(recorded) = rounds.iter().find(|round| round.seq == opening.seq) {
+            return Ok(recorded.failure.is_none());
         }
 
-        let repository = run.repository.as_ref().ok_or_else(|| {
-            StepError::Final(rootcause::report!(
-                "a review round needs the run's repository"
-            ))
-        })?;
-        let code = CodeRepository::parse(&repository.url).ok_or_else(|| {
-            StepError::Final(rootcause::report!("the run's repository URL does not read"))
-        })?;
-        let head = self
-            .github
-            .branch_head(&run.user_id, &code, &run_branch(run_id))
-            .await
-            .map_err(github_failure)?
-            .ok_or_else(|| {
-                StepError::Final(rootcause::report!("the run's branch is not on GitHub"))
-            })?;
+        let head = match self.head(&run, run_id).await? {
+            Ok(head) => head,
+            // A round that cannot open says why, on the Run, and fails.
+            Err(why) => {
+                let failure = ReviewRoundFailure {
+                    seq: opening.seq,
+                    round: opening.round,
+                    reviewers: opening.reviewers,
+                    failure: why.to_string(),
+                };
+                self.repo
+                    .fail_review_round(run_id, &failure)
+                    .await
+                    .map_err(internal)?;
+                return Ok(false);
+            }
+        };
 
         // A later round reviews the fix diff: what changed since the round
         // before it. A fix that changed nothing has the whole change
-        // reviewed again, so the Blockers it left are found again.
-        let before = rounds.iter().rev().find(|round| round.seq < opening.seq);
+        // reviewed again.
+        let before = rounds
+            .iter()
+            .rev()
+            .find(|round| round.seq < opening.seq)
+            .and_then(|round| round.head_sha.as_deref());
+        let base_branch = run
+            .repository
+            .as_ref()
+            .map(|repository| repository.base_branch.clone())
+            .unwrap_or_default();
         let (diff_base, fix_diff) = match before {
-            Some(before) if opening.round > 1 && before.head_sha != head => {
-                (before.head_sha.clone(), true)
-            }
-            _ => (repository.base_branch.clone(), false),
+            Some(before) if opening.round > 1 && before != head => (before.to_string(), true),
+            _ => (base_branch, false),
         };
         let start = ReviewRoundStart {
             seq: opening.seq,
@@ -506,20 +349,79 @@ where
             .start_review_round(run_id, &start)
             .await
             .map_err(internal)?;
-        Ok(())
+        Ok(true)
     }
 
     #[tracing::instrument(err, skip_all, fields(run_id = %closing.run_id, seq = closing.seq))]
     async fn close_round(&self, closing: ReviewRoundClosing) -> Result<Outcome, StepError> {
+        let ended = self.closed(&closing).await?;
+        // The last round's Blockers end the Run for a person: no round
+        // would review a fix of them.
+        if closing.last && ended == ReviewRoundOutcome::Changes {
+            return Outcome::try_from(UNRESOLVED.to_string())
+                .map_err(|error| StepError::Final(internal(error)));
+        }
+        outcome(ended)
+    }
+}
+
+impl<R, G, T> ReviewRoundsImpl<R, G, T>
+where
+    R: RunRepository + ReviewRoundRepository,
+    G: PullRequests,
+    T: TaskDirectory,
+{
+    /// The commit of `run`'s branch on GitHub, or why a round cannot be
+    /// opened on it.
+    async fn head(
+        &self,
+        run: &factory_records::domain::models::Run,
+        run_id: RunId,
+    ) -> Result<Result<String, &'static str>, StepError> {
+        let Some(repository) = run.repository.as_ref() else {
+            return Ok(Err("The run works on no repository."));
+        };
+        let Some(code) = CodeRepository::parse(&repository.url) else {
+            return Ok(Err("The run's repository URL does not read."));
+        };
+        let head = self
+            .github
+            .branch_head(&run.user_id, &code, &run_branch(run_id))
+            .await;
+        match head {
+            Ok(Some(head)) => Ok(Ok(head)),
+            Ok(None) => Ok(Err("The run's branch is not on GitHub.")),
+            Err(error) if error.retryable() => Err(github_failure(error)),
+            Err(_) => Ok(Err(
+                "GitHub refused to show the run's branch to the run's owner.",
+            )),
+        }
+    }
+
+    /// End the round `closing` names, and return how it ended: the first
+    /// end, when a retry finds one.
+    async fn closed(&self, closing: &ReviewRoundClosing) -> Result<ReviewRoundOutcome, StepError> {
         let run_id = closing.run_id;
         let round = self.round(run_id, closing.seq).await?;
         if let Some(end) = &round.end {
-            return outcome(end.outcome);
+            return Ok(end.outcome);
         }
-        if closing.failed {
-            self.end(run_id, round.seq, ReviewRoundOutcome::Failed)
-                .await?;
-            return outcome(ReviewRoundOutcome::Failed);
+
+        // A reviewer whose Step ended with no answer read, as one a worker
+        // without review panels ran, reviewed nothing: the round fails.
+        let steps = self.repo.list_steps(run_id).await.map_err(internal)?;
+        let unanswered = steps.iter().any(|step| {
+            round.step_seqs().contains(&step.seq)
+                && step
+                    .end
+                    .as_ref()
+                    .is_some_and(|end| end.outcome != Outcome::failed())
+                && !round.answered.contains(&step.seq)
+        });
+        if closing.failed || unanswered {
+            return self
+                .end(run_id, round.seq, ReviewRoundOutcome::Failed)
+                .await;
         }
 
         let run = self
@@ -542,41 +444,7 @@ where
             self.classify(run_id, &round, &run.user_id, &code).await?;
             round = self.round(run_id, closing.seq).await?;
         }
-
-        // A follow-up that could not become a task stays on the round as
-        // one: it never holds the pull request.
-        let waiting = round
-            .findings
-            .iter()
-            .filter(|finding| finding.kind == Some(FindingKind::FollowUp))
-            .filter(|finding| finding.follow_up_task_id.is_none());
-        for finding in waiting {
-            let task = follow_up(run_id, &round, finding);
-            let made = self
-                .tasks
-                .create_follow_up(&run.user_id, run.task_id, &task)
-                .await;
-            match made {
-                Ok(task_id) => {
-                    let key = factory_records::domain::models::StepKey {
-                        run_id,
-                        seq: finding.seq,
-                    };
-                    self.repo
-                        .link_follow_up(key, finding.place, task_id)
-                        .await
-                        .map_err(internal)?;
-                }
-                Err(error) => {
-                    tracing::warn!(
-                        ?error,
-                        seq = finding.seq,
-                        place = finding.place,
-                        "a follow-up task was not made"
-                    );
-                }
-            }
-        }
+        self.make_follow_ups(&run, &round).await?;
 
         let ended = if round.blockers().next().is_some() {
             ReviewRoundOutcome::Changes
@@ -584,6 +452,60 @@ where
             ReviewRoundOutcome::Pass
         };
         self.end(run_id, round.seq, ended).await
+    }
+
+    /// Make a task of each follow-up of `round` that has none. Each task is
+    /// made with an id kept before it is asked for, so a retry finds the
+    /// task rather than making a second. A follow-up document storage
+    /// refuses stays on the round as one, with no task; one it could not
+    /// answer fails the close, which is tried again. Either way it never
+    /// holds the pull request.
+    async fn make_follow_ups(
+        &self,
+        run: &factory_records::domain::models::Run,
+        round: &ReviewRound,
+    ) -> Result<(), StepError> {
+        let waiting = round
+            .findings
+            .iter()
+            .filter(|finding| finding.kind == Some(FindingKind::FollowUp))
+            .filter(|finding| finding.follow_up_task_id.is_none());
+        for finding in waiting {
+            let key = StepKey {
+                run_id: run.id,
+                seq: finding.seq,
+            };
+            let Some(task_id) = self
+                .repo
+                .follow_up_key(key, finding.place, Uuid::now_v7())
+                .await
+                .map_err(internal)?
+            else {
+                continue;
+            };
+            let task = follow_up(run.id, round, finding);
+            let made = self
+                .tasks
+                .create_follow_up(&run.user_id, run.task_id, &task, task_id)
+                .await
+                .map_err(|error| StepError::Internal(internal(error)))?;
+            match made {
+                FollowUpMade::Made => {
+                    self.repo
+                        .link_follow_up(key, finding.place, task_id)
+                        .await
+                        .map_err(internal)?;
+                }
+                FollowUpMade::Refused => {
+                    tracing::warn!(
+                        seq = finding.seq,
+                        place = finding.place,
+                        "document storage refused a follow-up task"
+                    );
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -598,16 +520,15 @@ where
         run_id: RunId,
         seq: u16,
         ended: ReviewRoundOutcome,
-    ) -> Result<Outcome, StepError> {
+    ) -> Result<ReviewRoundOutcome, StepError> {
         let round = self
             .repo
             .end_review_round(run_id, seq, ended)
             .await
             .map_err(internal)?;
-        let recorded = round
+        Ok(round
             .and_then(|round| round.end)
-            .map_or(ended, |end| end.outcome);
-        outcome(recorded)
+            .map_or(ended, |end| end.outcome))
     }
 }
 

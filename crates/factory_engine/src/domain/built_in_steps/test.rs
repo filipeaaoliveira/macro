@@ -451,87 +451,32 @@ fn round(seq: u16, head: &str, diff_base: &str, fix_diff: bool) -> ReviewRound {
         lines: Some(Lines { start: 3, end: 5 }),
         problem: format!("{path} skips the empty case"),
         why: "An empty list panics".to_string(),
+        blocks_anywhere: false,
         kind: Some(kind),
         follow_up_task_id: None,
+        follow_up_key: None,
     };
     ReviewRound {
         round: 2,
         seq,
         reviewers: 2,
-        head_sha: head.to_string(),
-        diff_base: diff_base.to_string(),
+        head_sha: Some(head.to_string()),
+        diff_base: Some(diff_base.to_string()),
         fix_diff,
+        failure: None,
         started_at: Utc::now(),
         end: None,
         findings: vec![
             finding(1, FindingKind::Blocker, "src/list.rs"),
             finding(2, FindingKind::FollowUp, "src/other.rs"),
         ],
+        answered: Vec::new(),
     }
 }
 
-/// A reviewer of a panel is told what its Role looks at, the commit it
-/// reviews, and the diff under review: here the fix diff, from the commit
-/// the round before reviewed. It hands its Blockers back in a json block.
-#[tokio::test]
-async fn a_panel_reviewer_is_told_its_focus_and_the_fix_diff() {
-    let agent = FakeAgent::ending_with("pass");
-    let steps = BuiltInSteps::new(agent.clone(), pull_requests());
-    let repository = Repository {
-        url: "https://github.com/macro/app".to_string(),
-        base_branch: "trunk".to_string(),
-    };
-    let reviewer = Role::try_from("correctness-reviewer".to_string()).expect("valid");
-    let fix_round = round(2, "bbb", "aaa", true);
-    let mut reviewing = input(&[]);
-    reviewing.repository = Some(&repository);
-    reviewing.role = Some(&reviewer);
-    reviewing.review = Some(&fix_round);
-
-    steps.run(&step("review"), reviewing).await.expect("review");
-
-    let tasks = agent.tasks.lock().expect("tasks");
-    let prompt = &tasks[0].prompt;
-    assert_eq!(tasks[0].role, reviewer);
-    assert!(prompt.contains("Review commit `bbb`"), "{prompt}");
-    assert!(prompt.contains("`git diff aaa...bbb`"), "{prompt}");
-    assert!(
-        prompt.contains("since review round 1 reviewed `aaa`"),
-        "{prompt}"
-    );
-    assert!(
-        prompt.contains("You review the change's correctness"),
-        "{prompt}"
-    );
-    assert!(prompt.contains("```json"), "{prompt}");
-}
-
-/// The first round reviews the Run's whole change against its base.
-#[tokio::test]
-async fn a_first_round_reviews_the_whole_change() {
-    let agent = FakeAgent::ending_with("pass");
-    let steps = BuiltInSteps::new(agent.clone(), pull_requests());
-    let repository = Repository {
-        url: "https://github.com/macro/app".to_string(),
-        base_branch: "trunk".to_string(),
-    };
-    let reviewer = Role::try_from("tests-reviewer".to_string()).expect("valid");
-    let first = round(1, "aaa", "trunk", false);
-    let mut reviewing = input(&[]);
-    reviewing.repository = Some(&repository);
-    reviewing.role = Some(&reviewer);
-    reviewing.review = Some(&first);
-
-    steps.run(&step("review"), reviewing).await.expect("review");
-
-    let prompt = &agent.tasks.lock().expect("tasks")[0].prompt;
-    assert!(prompt.contains("`git diff origin/trunk...aaa`"), "{prompt}");
-    assert!(prompt.contains("the run's whole change"), "{prompt}");
-    assert!(prompt.contains("You review the change's tests"), "{prompt}");
-}
-
 /// The fix is given the Blockers of the latest round, with where each is,
-/// what is wrong and why, and not its follow-ups.
+/// what is wrong and why, and not its follow-ups, inside a block marked as
+/// the reviewers' findings.
 #[tokio::test]
 async fn a_fix_is_given_the_blockers_of_the_latest_round() {
     let agent = FakeAgent::ending_with("done");
@@ -561,6 +506,10 @@ async fn a_fix_is_given_the_blockers_of_the_latest_round() {
     );
     assert!(prompt.contains("Why: An empty list panics"), "{prompt}");
     assert!(!prompt.contains("src/other.rs"), "{prompt}");
+    let open = prompt.find("<reviewer-findings>").expect("opened");
+    let blocker = prompt.find("src/list.rs").expect("the blocker");
+    let close = prompt.find("</reviewer-findings>").expect("closed");
+    assert!(open < blocker && blocker < close, "{prompt}");
 }
 
 /// Each reviewer of a round says what it checked: a later Step reads them
