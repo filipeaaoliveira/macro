@@ -41,6 +41,7 @@ export default {
   showOutput: 'Show output for {{step}}',
   checksRound: 'Checks, round {{round}}',
   checksRunning: 'Checks running…',
+  checksUnfinished: 'Didn’t finish',
   cancelRun: 'Cancel run',
   cancelTitle: 'Cancel this run?',
   cancelBody:

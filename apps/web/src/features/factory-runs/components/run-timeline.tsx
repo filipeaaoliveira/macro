@@ -146,7 +146,11 @@ function TimelineStep(props: {
           </StepNote>
         )}
       </Show>
-      <For each={rounds()}>{(round) => <CheckRoundNote round={round} />}</For>
+      <For each={rounds()}>
+        {(round) => (
+          <CheckRoundNote round={round} stepEnded={Boolean(props.step.end)} />
+        )}
+      </For>
       <Show when={details()}>
         <CollapseTransition open={open()}>
           <Card variant="filled" offset={1} class="mt-1 mb-3 px-3 py-2.5">
@@ -184,15 +188,24 @@ function StepMarkdown(props: { markdown: string }) {
   );
 }
 
-/** A round of checks: which it ran, and how they went. */
-function CheckRoundNote(props: { round: CheckRound }) {
+/**
+ * A round of checks: which it ran, and how they went. A round with no end
+ * runs only while its Step does.
+ */
+function CheckRoundNote(props: { round: CheckRound; stepEnded: boolean }) {
   return (
     <StepNote>
       <span class="flex min-w-0 items-center gap-2">
         {t('factoryRuns.checksRound', { round: props.round.round })}
         <Show
           when={props.round.end}
-          fallback={<span>{t('factoryRuns.checksRunning')}</span>}
+          fallback={
+            <span>
+              {props.stepEnded
+                ? t('factoryRuns.checksUnfinished')
+                : t('factoryRuns.checksRunning')}
+            </span>
+          }
         >
           {(end) => (
             <Badge variant="outline" size="xs">
