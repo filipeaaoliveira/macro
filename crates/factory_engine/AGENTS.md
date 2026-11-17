@@ -114,25 +114,32 @@ a repository out of reach (404) fail the Step for good; throttling, 5xx and
 transport failures are tried again. Each Step reads before it writes, so a
 retry or a Run sent back finds what it did: `publish` finds the branch's pull
 request or opens it, and a refusal because another attempt opened it reads as
-published; `ci` reads the pull request's head, its check suites and its
-commit statuses every 20 s, with one token per read and every page of each
-list, heartbeating. It ends `red` as soon as a suite, run or status fails,
-naming them. It ends `green` when every suite passed, every status succeeded,
-and every check the base branch requires (branch protection and rulesets,
-read once per Step) appeared and passed as a check run or status, on two reads
-in a row that saw the same checks; a suite that holds no run is waited for
-until 5 minutes after GitHub made it, then let go, as an app that checks
-nothing on the commit never fills it. If the owner may not read the required
-checks, only that grace rule holds. After 25 minutes, within one Step attempt,
-it ends `timeout`. The head `ci` calls green is kept
-(`factory_run.merge_head_sha`); `ready_to_merge` ends `changed` unless the
-pull request's head is still that commit and its checks still pass, and
-otherwise ends `done`, so its Gate asks the owner whether to merge; `merge`
-merges only that commit, naming it to GitHub, and a merged pull request reads
-as merged. A head that moved goes back to `ci`, and a person's `revise` goes to
-`fix` with the review's visits reset. The merge question is asked at most
-three times, counting every ask, also one after a push moved the head; then
-the Run ends for a person. The pull
+published; `ci` reads the pull request's head, its check suites, commit statuses and,
+when required checks are named, its check runs, every 20 s, with one token per
+read and every page of each list, heartbeating. Once per Step it reads the
+checks the base requires (branch protection and rulesets, joined from what can
+be read) and the apps whose suites on the base's head hold runs (its CIs). Its
+guarantees:
+- It ends `red` as soon as a suite, run or status fails, naming them.
+- It ends `green` only on two reads in a row that saw the same checks, each
+  with every suite that holds a run passed and every status succeeded, and
+  every required check appeared and passed: as a run of the app the rule names,
+  or, when it names none, any app's run or a status of that name.
+- Once every required check passed, empty suites no longer hold it back.
+- Short of that, an empty suite holds it back while the app runs CI on the
+  base (as a run a concurrency group holds), up to the 25-minute wait; another
+  app's empty suite only until 5 minutes after GitHub made it.
+- A list longer than the 10 pages read, or no check reported, keeps it waiting.
+- After 25 minutes, within one Step attempt, it ends `timeout`.
+
+The head `ci` calls green is kept (`factory_run.merge_head_sha`);
+`ready_to_merge` ends `changed` unless the pull request's head is still that
+commit and its checks still pass, and otherwise ends `done`, so its Gate asks
+the owner whether to merge; `merge` merges only that commit, naming it to
+GitHub, and a merged pull request reads as merged. A head that moved goes back
+to `ci`, and a person's `revise` goes to `fix` with the review's visits reset.
+The merge-gate entry runs at most three times, including visits that end
+`changed` without asking; then the Run ends for a person. The pull
 request's description names the Run's task as `MACRO-{short id}`, so GitHub's
 webhook links them, and is cut to GitHub's 65,536 characters in its request
 part only.

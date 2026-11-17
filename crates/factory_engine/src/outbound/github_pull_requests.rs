@@ -16,7 +16,7 @@ use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::models::{
     Check, CheckState, CheckSuite, CodeRepository, CommitStatus, HeadChecks, Merging,
-    OpenPullRequest, Opening, PullRequest, PullRequestState, RepositoryAccess,
+    OpenPullRequest, Opening, PullRequest, PullRequestState, RepositoryAccess, RequiredCheck,
 };
 use crate::domain::ports::{PullRequests, Retryable};
 
@@ -81,11 +81,15 @@ pub struct GithubPullRequests<T> {
 impl<T: OwnerTokens> GithubPullRequests<T> {
     /// Pull requests on GitHub, with tokens from `tokens`.
     pub fn new(tokens: T) -> Self {
-        Self::with_client(tokens, GithubOauthImpl::default())
+        Self {
+            tokens,
+            github: GithubOauthImpl::default(),
+        }
     }
 
     /// Pull requests on the GitHub `github` reaches, with tokens from
-    /// `tokens`.
+    /// `tokens`: a stand-in's, in tests.
+    #[cfg(test)]
     pub fn with_client(tokens: T, github: GithubOauthImpl) -> Self {
         Self { tokens, github }
     }
@@ -190,10 +194,17 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
             repository.name(),
             pull_request.head_sha.as_str(),
         );
-        let suites: Vec<CheckSuite> = self
+        let suites = self
             .github
             .list_check_suites(&token, owner_name, name, sha)
-            .await?
+            .await?;
+        let statuses = self
+            .github
+            .list_commit_statuses(&token, owner_name, name, sha)
+            .await?;
+        let mut truncated = !suites.complete || !statuses.complete;
+        let suites: Vec<CheckSuite> = suites
+            .items
             .into_iter()
             .map(|suite| CheckSuite {
                 id: suite.id,
@@ -203,10 +214,8 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
                 created_at: suite.created_at,
             })
             .collect();
-        let statuses = self
-            .github
-            .list_commit_statuses(&token, owner_name, name, sha)
-            .await?
+        let statuses = statuses
+            .items
             .into_iter()
             .map(|status| CommitStatus {
                 context: status.context,
@@ -221,14 +230,18 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
             .iter()
             .any(|suite| matches!(suite.state, CheckState::Failed(_)));
         let runs = if all_runs || suite_failed {
-            self.github
+            let runs = self
+                .github
                 .list_check_runs(&token, owner_name, name, sha)
-                .await?
+                .await?;
+            truncated |= !runs.complete;
+            runs.items
                 .into_iter()
                 .map(|run| Check {
                     name: run.name,
                     state: CheckState::of_check(&run.status, run.conclusion.as_deref()),
-                    url: run.url,
+                    url: run.html_url,
+                    app_id: run.app_id,
                 })
                 .filter(|run| all_runs || matches!(run.state, CheckState::Failed(_)))
                 .collect()
@@ -241,6 +254,7 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
                 suites,
                 statuses,
                 runs,
+                truncated,
             },
         )))
     }
@@ -251,12 +265,49 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
         owner: &MacroUserIdStr<'static>,
         repository: &CodeRepository,
         base: &str,
-    ) -> Result<Option<Vec<String>>, GithubPullRequestsErr> {
+    ) -> Result<Option<Vec<RequiredCheck>>, GithubPullRequestsErr> {
         let token = self.token(owner).await?;
-        Ok(self
+        let required = self
             .github
             .get_required_checks(&token, repository.owner(), repository.name(), base)
-            .await?)
+            .await?;
+        Ok(required.map(|required| {
+            required
+                .into_iter()
+                .map(|check| RequiredCheck {
+                    name: check.context,
+                    app_id: check.app_id,
+                })
+                .collect()
+        }))
+    }
+
+    #[tracing::instrument(err, skip(self, owner))]
+    async fn apps_with_runs(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        base: &str,
+    ) -> Result<Vec<String>, GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        let suites = self
+            .github
+            .list_check_suites(
+                &token,
+                repository.owner(),
+                repository.name(),
+                &urlencoding::encode(base),
+            )
+            .await?;
+        let mut apps: Vec<String> = suites
+            .items
+            .into_iter()
+            .filter(|suite| suite.check_runs > 0)
+            .map(|suite| suite.app)
+            .collect();
+        apps.sort();
+        apps.dedup();
+        Ok(apps)
     }
 
     #[tracing::instrument(err, skip(self, owner, pull_request), fields(branch = %pull_request.branch))]

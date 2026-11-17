@@ -8407,6 +8407,7 @@ dependencies = [
  "tracing",
  "trigger_context",
  "upstream_error",
+ "urlencoding",
  "utoipa",
  "uuid",
  "workspace-hack",

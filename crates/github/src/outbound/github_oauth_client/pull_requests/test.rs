@@ -2,6 +2,7 @@ use super::super::GithubOauthImpl;
 use super::super::test::{MockResponse, MockServer};
 use crate::domain::models::{
     GithubError, GithubOpenPullRequest, GithubOpenPullRequestOutcome, GithubRepositoryAccess,
+    GithubRequiredCheck,
 };
 
 fn answering(status: &'static str, body: &str) -> (MockServer, GithubOauthImpl) {
@@ -148,7 +149,8 @@ async fn check_suites_and_statuses_read_what_ci_waits_on() {
     let suites = client
         .list_check_suites("token", "macro", "app", "abc")
         .await
-        .unwrap();
+        .unwrap()
+        .items;
     let suites_request = suites_server.finish();
     let (statuses_server, client) = answering(
         "200 OK",
@@ -157,7 +159,8 @@ async fn check_suites_and_statuses_read_what_ci_waits_on() {
     let statuses = client
         .list_commit_statuses("token", "macro", "app", "abc")
         .await
-        .unwrap();
+        .unwrap()
+        .items;
     let statuses_request = statuses_server.finish();
 
     assert_eq!(suites.len(), 2);
@@ -277,7 +280,8 @@ async fn every_page_of_check_suites_is_read() {
         .await
         .unwrap();
 
-    assert_eq!(suites.len(), 101);
+    assert_eq!(suites.items.len(), 101);
+    assert!(suites.complete);
     let requests = server.finish_all();
     assert!(
         requests[1]
@@ -285,52 +289,140 @@ async fn every_page_of_check_suites_is_read() {
     );
 }
 
+/// A commit with more checks than the reader reads is not taken as all
+/// there is.
+#[tokio::test]
+async fn a_list_longer_than_the_pages_read_is_incomplete() {
+    let full: Vec<_> = (1..=100)
+        .map(|id| serde_json::json!({ "id": id, "status": "completed", "latest_check_runs_count": 1 }))
+        .collect();
+    let page = serde_json::json!({ "total_count": 2000, "check_suites": full }).to_string();
+    let server = MockServer::start_many(
+        (0..10)
+            .map(|_| MockResponse {
+                status: "200 OK",
+                body: page.clone(),
+            })
+            .collect(),
+    );
+    let client = GithubOauthImpl::with_api_base_url(server.base_url.clone());
+
+    let suites = client
+        .list_check_suites("token", "macro", "app", "abc")
+        .await
+        .unwrap();
+
+    assert_eq!(suites.items.len(), 1000);
+    assert!(!suites.complete);
+    server.finish_all();
+}
+
+fn required(context: &str, app_id: Option<u64>) -> GithubRequiredCheck {
+    GithubRequiredCheck {
+        context: context.to_string(),
+        app_id,
+    }
+}
+
 /// The required checks are the branch protection's and the rulesets',
-/// once each.
+/// once each, each with the app it must come from when the rule names one.
 #[tokio::test]
 async fn required_checks_join_branch_protection_and_rulesets() {
     let server = MockServer::start_many(vec![
         MockResponse {
             status: "200 OK",
-            body: r#"{"name":"main","protected":true,"protection":{"required_status_checks":{"contexts":["test"],"checks":[{"context":"test","app_id":15368}]}}}"#.to_string(),
+            body: r#"{"name":"main","protected":true,"protection":{"required_status_checks":{"contexts":["test","docs"],"checks":[{"context":"test","app_id":15368},{"context":"docs","app_id":null}]}}}"#.to_string(),
         },
         MockResponse {
             status: "200 OK",
-            body: r#"[{"type":"pull_request"},{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"lint"}]}}]"#.to_string(),
+            body: r#"[{"type":"pull_request"},{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"lint","integration_id":42}]}}]"#.to_string(),
         },
     ]);
     let client = GithubOauthImpl::with_api_base_url(server.base_url.clone());
 
-    let required = client
+    let checks = client
+        .get_required_checks("token", "macro", "app", "release/1.0")
+        .await
+        .unwrap();
+
+    assert_eq!(
+        checks,
+        Some(vec![
+            required("docs", None),
+            required("lint", Some(42)),
+            required("test", Some(15368)),
+        ])
+    );
+    let requests = server.finish_all();
+    assert!(requests[0].starts_with("GET /repos/macro/app/branches/release%2F1.0 "));
+    assert!(
+        requests[1]
+            .starts_with("GET /repos/macro/app/rules/branches/release%2F1.0?per_page=100&page=1 ")
+    );
+}
+
+/// The branch's protection still names its checks when its rulesets cannot
+/// be read.
+#[tokio::test]
+async fn required_checks_keep_what_can_be_read() {
+    let server = MockServer::start_many(vec![
+        MockResponse {
+            status: "200 OK",
+            body: r#"{"name":"main","protected":true,"protection":{"required_status_checks":{"contexts":["test"],"checks":[]}}}"#.to_string(),
+        },
+        MockResponse {
+            status: "403 Forbidden",
+            body: r#"{"message":"Resource not accessible by integration"}"#.to_string(),
+        },
+    ]);
+    let client = GithubOauthImpl::with_api_base_url(server.base_url.clone());
+
+    let checks = client
         .get_required_checks("token", "macro", "app", "main")
         .await
         .unwrap();
 
-    assert_eq!(required, Some(vec!["lint".to_string(), "test".to_string()]));
+    assert_eq!(checks, Some(vec![required("test", None)]));
     server.finish_all();
 }
 
-/// A user who may not read the branch's rules cannot be told which checks
-/// are required.
+/// A protected branch whose protection is not shown, and a branch whose
+/// protection and rules both are refused, require checks no one can name.
 #[tokio::test]
-async fn required_checks_the_user_may_not_read_are_unknown() {
-    let server = MockServer::start_many(vec![
+async fn required_checks_no_one_can_name_are_unknown() {
+    let hidden = MockServer::start_many(vec![
         MockResponse {
             status: "200 OK",
             body: r#"{"name":"main","protected":true}"#.to_string(),
         },
         MockResponse {
-            status: "404 Not Found",
-            body: r#"{"message":"Not Found"}"#.to_string(),
+            status: "200 OK",
+            body: "[]".to_string(),
         },
     ]);
-    let client = GithubOauthImpl::with_api_base_url(server.base_url.clone());
-
-    let required = client
+    let client = GithubOauthImpl::with_api_base_url(hidden.base_url.clone());
+    let protected = client
         .get_required_checks("token", "macro", "app", "main")
         .await
         .unwrap();
+    hidden.finish_all();
+    let refused = MockServer::start_many(vec![
+        MockResponse {
+            status: "404 Not Found",
+            body: r#"{"message":"Not Found"}"#.to_string(),
+        },
+        MockResponse {
+            status: "403 Forbidden",
+            body: r#"{"message":"Resource not accessible"}"#.to_string(),
+        },
+    ]);
+    let client = GithubOauthImpl::with_api_base_url(refused.base_url.clone());
+    let unread = client
+        .get_required_checks("token", "macro", "app", "main")
+        .await
+        .unwrap();
+    refused.finish_all();
 
-    assert_eq!(required, None);
-    server.finish_all();
+    assert_eq!(protected, None);
+    assert_eq!(unread, None);
 }

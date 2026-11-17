@@ -9,8 +9,8 @@ use crate::domain::flow::StepName;
 use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening};
 use crate::domain::models::{
     AgentAnswer, AgentTask, CodeRepository, FactoryError, FlowSummary, HeadChecks, Merging,
-    OpenPullRequest, Opening, PullRequest, RepositoryAccess, RunDetail, RunFinish, RunStart,
-    StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
+    OpenPullRequest, Opening, PullRequest, RepositoryAccess, RequiredCheck, RunDetail, RunFinish,
+    RunStart, StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
 };
 
 /// What a Run's workflow did with an answer it was sent.
@@ -166,15 +166,25 @@ pub trait PullRequests: Send + Sync + 'static {
         all_runs: bool,
     ) -> impl Future<Output = Result<Option<(PullRequest, HeadChecks)>, Self::Err>> + Send;
 
-    /// The checks a pull request to `base` must pass before it merges, by
-    /// name, from its branch protection and rulesets; none when `owner` may
-    /// not read them.
+    /// The checks a pull request to `base` must pass before it merges, from
+    /// its branch protection and rulesets; none when `owner` cannot tell
+    /// which checks they are.
     fn required_checks(
         &self,
         owner: &MacroUserIdStr<'static>,
         repository: &CodeRepository,
         base: &str,
-    ) -> impl Future<Output = Result<Option<Vec<String>>, Self::Err>> + Send;
+    ) -> impl Future<Output = Result<Option<Vec<RequiredCheck>>, Self::Err>> + Send;
+
+    /// The apps, by slug, whose check suites on the head of `base` hold
+    /// runs: the CIs that run on this repository, whose empty suite on a
+    /// pull request means a run still to come.
+    fn apps_with_runs(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        base: &str,
+    ) -> impl Future<Output = Result<Vec<String>, Self::Err>> + Send;
 
     /// Ask GitHub to open `pull_request` in `repository`.
     fn open(

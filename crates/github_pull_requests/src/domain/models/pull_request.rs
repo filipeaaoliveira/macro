@@ -838,6 +838,42 @@ pub struct GithubCheckSuite {
     pub created_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
+/// One page or more of a list GitHub pages, and whether it was read to
+/// its end: a list longer than a reader reads is not all there is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GithubListing<T> {
+    /// What was read.
+    pub items: Vec<T>,
+    /// Whether that is the whole list.
+    pub complete: bool,
+}
+
+/// A check run on a commit, with the app that runs it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GithubCheckRun {
+    /// Its name.
+    pub name: String,
+    /// GitHub's status: `queued`, `in_progress` or `completed`.
+    pub status: String,
+    /// How it concluded, once completed.
+    pub conclusion: Option<String>,
+    /// Its page.
+    pub html_url: Option<String>,
+    /// GitHub's id of the app that runs it.
+    pub app_id: Option<u64>,
+}
+
+/// A check a branch requires to pass before a pull request to it merges:
+/// by name, and from one app when the rule names one.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct GithubRequiredCheck {
+    /// The check run's name, or the commit status's context.
+    pub context: String,
+    /// The app whose check run it must be; none when any app's run, or a
+    /// commit status, will do.
+    pub app_id: Option<u64>,
+}
+
 /// The latest commit status of one context on a commit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GithubCommitStatus {

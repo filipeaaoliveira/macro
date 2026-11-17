@@ -184,6 +184,19 @@ pub struct HeadChecks {
     /// Its check runs: every one when they were read to find required
     /// checks by name, else only those that failed, read to name them.
     pub runs: Vec<Check>,
+    /// Whether a list was longer than was read, so these are not all its
+    /// checks.
+    pub truncated: bool,
+}
+
+/// A check a pull request's base requires before it merges.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequiredCheck {
+    /// The check run's name, or the commit status's context.
+    pub name: String,
+    /// The app whose check run it must be; none when any app's run, or a
+    /// commit status, will do.
+    pub app_id: Option<u64>,
 }
 
 /// Where one check stands. GitHub's states map onto it in one place
@@ -262,6 +275,8 @@ pub struct Check {
     pub state: CheckState,
     /// Its page, when GitHub gives one.
     pub url: Option<String>,
+    /// GitHub's id of the app that runs it.
+    pub app_id: Option<u64>,
 }
 
 /// A pull request to open.

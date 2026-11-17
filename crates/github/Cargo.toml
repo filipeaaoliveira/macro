@@ -5,6 +5,8 @@ publish = false
 version = "0.1.0"
 
 [features]
+# A GitHub stand-in's API for the client, for other crates' tests.
+test-utils = []
 axum = [
   "dep:axum",
   "dep:entity_access",

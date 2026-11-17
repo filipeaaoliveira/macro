@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 use crate::domain::models::{
     Check, CheckState, CheckSuite, CodeRepository, HeadChecks, Merging, OpenPullRequest, Opening,
-    PullRequest, PullRequestState, RepositoryAccess,
+    PullRequest, PullRequestState, RepositoryAccess, RequiredCheck,
 };
 use crate::domain::ports::{PullRequests, Retryable, TaskAccess, TaskDirectory, UserDirectory};
 
@@ -499,8 +499,10 @@ pub(crate) struct FakeGithubState {
     pub(crate) unreachable: bool,
     /// Whether the Run's owner may only read the repository.
     pub(crate) read_only: bool,
-    /// The checks the base branch requires, when the owner may read them.
-    pub(crate) required: Option<Vec<String>>,
+    /// The checks the base branch requires, when they can be named.
+    pub(crate) required: Option<Vec<RequiredCheck>>,
+    /// The apps whose CI runs on the base branch.
+    pub(crate) ci_apps: Vec<String>,
     /// The pull request from the Run's branch, once opened.
     pub(crate) pull_request: Option<PullRequest>,
     /// The checks each read of the open pull request's head shows next, in
@@ -532,6 +534,9 @@ pub(crate) struct FakeGithub {
 impl FakeGithub {
     /// The commit an opened pull request's head is at.
     pub(crate) const HEAD: &str = "1111111111111111111111111111111111111111";
+
+    /// GitHub's id of the CI app whose runs [`ci`] makes.
+    pub(crate) const ACTIONS: u64 = 15368;
 
     pub(crate) fn state(&self) -> std::sync::MutexGuard<'_, FakeGithubState> {
         self.state.lock().expect("github")
@@ -600,7 +605,9 @@ pub(crate) fn ci(conclusion: Option<&str>) -> HeadChecks {
             name: "test".to_string(),
             state,
             url: Some("https://github.com/macro/app/runs/test".to_string()),
+            app_id: Some(FakeGithub::ACTIONS),
         }],
+        truncated: false,
     }
 }
 
@@ -643,8 +650,17 @@ impl PullRequests for FakeGithub {
         _owner: &MacroUserIdStr<'static>,
         _repository: &CodeRepository,
         _base: &str,
-    ) -> Result<Option<Vec<String>>, FakeError> {
+    ) -> Result<Option<Vec<RequiredCheck>>, FakeError> {
         Ok(self.state().required.clone())
+    }
+
+    async fn apps_with_runs(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        _base: &str,
+    ) -> Result<Vec<String>, FakeError> {
+        Ok(self.state().ci_apps.clone())
     }
 
     async fn open(

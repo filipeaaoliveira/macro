@@ -18,9 +18,9 @@ use super::{
     transport_error, unexpected,
 };
 use crate::domain::models::{
-    GithubCheckSuite, GithubCommitStatus, GithubError, GithubOpenPullRequest,
-    GithubOpenPullRequestOutcome, GithubPullRequestCheckRun, GithubPullRequestHead,
-    GithubRepositoryAccess,
+    GithubCheckRun, GithubCheckSuite, GithubCommitStatus, GithubError, GithubListing,
+    GithubOpenPullRequest, GithubOpenPullRequestOutcome, GithubPullRequestHead,
+    GithubRepositoryAccess, GithubRequiredCheck,
 };
 
 #[cfg(test)]
@@ -108,6 +108,8 @@ struct StatusResponse {
 #[derive(serde::Deserialize)]
 struct BranchResponse {
     #[serde(default)]
+    protected: bool,
+    #[serde(default)]
     protection: Option<BranchProtection>,
 }
 
@@ -125,17 +127,32 @@ struct RequiredStatusChecks {
     checks: Vec<RequiredCheck>,
 }
 
+/// A required check: branch protection names its app `app_id`, a
+/// ruleset `integration_id`.
 #[derive(serde::Deserialize)]
 struct RequiredCheck {
     context: String,
+    #[serde(default)]
+    app_id: Option<u64>,
+    #[serde(default)]
+    integration_id: Option<u64>,
 }
 
 #[derive(serde::Deserialize)]
 struct BranchRule {
     #[serde(rename = "type")]
-    kind: String,
+    kind: BranchRuleKind,
     #[serde(default)]
     parameters: Option<BranchRuleParameters>,
+}
+
+/// The kinds of branch rule this reads; any other is left alone.
+#[derive(serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum BranchRuleKind {
+    RequiredStatusChecks,
+    #[serde(other)]
+    Other,
 }
 
 #[derive(serde::Deserialize)]
@@ -151,11 +168,16 @@ struct CheckRunsResponse {
 
 #[derive(serde::Deserialize)]
 struct CheckRunResponse {
-    id: u64,
     name: String,
     status: String,
     conclusion: Option<String>,
     html_url: Option<String>,
+    app: Option<CheckRunApp>,
+}
+
+#[derive(serde::Deserialize)]
+struct CheckRunApp {
+    id: u64,
 }
 
 impl GithubOauthImpl {
@@ -194,14 +216,15 @@ impl GithubOauthImpl {
 
     /// Every page of the list at `path`, each read as `T` and its items
     /// taken out by `items`, up to [`MAX_PAGES`]: a page shorter than a full
-    /// one is the last.
+    /// one is the last. A list still full at its last page read is not
+    /// complete.
     async fn read_pages<T: DeserializeOwned, I>(
         &self,
         access_token: &str,
         path: &str,
         context: &str,
         items: impl Fn(T) -> Vec<I>,
-    ) -> Result<Vec<I>, GithubError> {
+    ) -> Result<GithubListing<I>, GithubError> {
         let page_size = PAGE_SIZE.to_string();
         let mut all = Vec::new();
         for page in 1..=MAX_PAGES {
@@ -218,16 +241,25 @@ impl GithubOauthImpl {
             let last = read.len() < PAGE_SIZE;
             all.extend(read);
             if last {
-                break;
+                return Ok(GithubListing {
+                    items: all,
+                    complete: true,
+                });
             }
         }
-        Ok(all)
+        // A full last page: there may be more than was read.
+        Ok(GithubListing {
+            items: all,
+            complete: false,
+        })
     }
 
     /// The checks a pull request to `branch` must pass before it merges:
-    /// the branch protection's and the rulesets' required status checks, by
-    /// name. `None` when the user may not read them, so a caller cannot tell
-    /// which checks are required.
+    /// the branch protection's and the rulesets' required status checks,
+    /// each with the app it must come from when the rule names one. What can
+    /// be read is joined; `None` when neither the branch nor its rules can be
+    /// read, or the branch is protected but its protection is not shown, so a
+    /// caller cannot tell which checks are required.
     #[tracing::instrument(skip(self, access_token), err)]
     pub async fn get_required_checks(
         &self,
@@ -235,7 +267,8 @@ impl GithubOauthImpl {
         owner: &str,
         repo: &str,
         branch: &str,
-    ) -> Result<Option<Vec<String>>, GithubError> {
+    ) -> Result<Option<Vec<GithubRequiredCheck>>, GithubError> {
+        let branch = urlencoding::encode(branch);
         let branch_read: Result<BranchResponse, GithubError> = self
             .read(
                 access_token,
@@ -244,42 +277,82 @@ impl GithubOauthImpl {
                 "failed to read branch",
             )
             .await;
-        let rules_read: Result<Vec<BranchRule>, GithubError> = self
-            .read(
+        let rules_read = self
+            .read_pages(
                 access_token,
                 &format!("/repos/{owner}/{repo}/rules/branches/{branch}"),
-                &[("per_page", "100")],
                 "failed to read branch rules",
+                |page: Vec<BranchRule>| page,
             )
             .await;
-        let (branch_read, rules) = match (branch_read, rules_read) {
-            (Ok(branch_read), Ok(rules)) => (branch_read, rules),
-            (Err(GithubError::Forbidden | GithubError::RepositoryUnavailable), _)
-            | (_, Err(GithubError::Forbidden | GithubError::RepositoryUnavailable)) => {
-                return Ok(None);
-            }
-            (Err(error), _) | (_, Err(error)) => return Err(error),
+
+        // A refusal leaves that source unread; any other failure is the
+        // caller's to retry.
+        let unread = |error: &GithubError| {
+            matches!(
+                error,
+                GithubError::Forbidden | GithubError::RepositoryUnavailable
+            )
+        };
+        let branch_read = match branch_read {
+            Ok(read) => Some(read),
+            Err(error) if unread(&error) => None,
+            Err(error) => return Err(error),
+        };
+        let rules = match rules_read {
+            Ok(rules) if rules.complete => Some(rules.items),
+            Ok(_) => None,
+            Err(error) if unread(&error) => None,
+            Err(error) => return Err(error),
         };
 
         let mut required = Vec::new();
-        if let Some(checks) = branch_read
-            .protection
-            .and_then(|protection| protection.required_status_checks)
-        {
-            required.extend(checks.contexts);
-            required.extend(checks.checks.into_iter().map(|check| check.context));
-        }
-        for rule in rules {
-            if rule.kind == "required_status_checks"
-                && let Some(parameters) = rule.parameters
-            {
-                required.extend(
-                    parameters
-                        .required_status_checks
-                        .into_iter()
-                        .map(|check| check.context),
-                );
+        match &branch_read {
+            // A protected branch whose protection is not shown requires
+            // checks no one here can name.
+            Some(read) if read.protected && read.protection.is_none() => return Ok(None),
+            Some(read) => {
+                let checks = read
+                    .protection
+                    .as_ref()
+                    .and_then(|protection| protection.required_status_checks.as_ref());
+                if let Some(checks) = checks {
+                    // `checks` names each context with its app; `contexts`
+                    // is the older form, any app's.
+                    required.extend(checks.checks.iter().map(|check| GithubRequiredCheck {
+                        context: check.context.clone(),
+                        app_id: check.app_id,
+                    }));
+                    required.extend(
+                        checks
+                            .contexts
+                            .iter()
+                            .filter(|context| {
+                                !checks.checks.iter().any(|check| &check.context == *context)
+                            })
+                            .map(|context| GithubRequiredCheck {
+                                context: context.clone(),
+                                app_id: None,
+                            }),
+                    );
+                }
             }
+            None => {}
+        }
+        for rule in rules.iter().flatten() {
+            if rule.kind == BranchRuleKind::RequiredStatusChecks
+                && let Some(parameters) = &rule.parameters
+            {
+                required.extend(parameters.required_status_checks.iter().map(|check| {
+                    GithubRequiredCheck {
+                        context: check.context.clone(),
+                        app_id: check.integration_id,
+                    }
+                }));
+            }
+        }
+        if branch_read.is_none() && rules.is_none() {
+            return Ok(None);
         }
         required.sort();
         required.dedup();
@@ -363,7 +436,7 @@ impl GithubOauthImpl {
         owner: &str,
         repo: &str,
         sha: &str,
-    ) -> Result<Vec<GithubCheckSuite>, GithubError> {
+    ) -> Result<GithubListing<GithubCheckSuite>, GithubError> {
         let suites = self
             .read_pages(
                 access_token,
@@ -372,20 +445,24 @@ impl GithubOauthImpl {
                 |page: CheckSuitesResponse| page.check_suites,
             )
             .await?;
-        Ok(suites
-            .into_iter()
-            .map(|suite| GithubCheckSuite {
-                id: suite.id,
-                app: suite
-                    .app
-                    .and_then(|app| app.slug)
-                    .unwrap_or_else(|| "unknown".to_string()),
-                status: suite.status.unwrap_or_else(|| "queued".to_string()),
-                conclusion: suite.conclusion,
-                check_runs: suite.latest_check_runs_count,
-                created_at: suite.created_at,
-            })
-            .collect())
+        Ok(GithubListing {
+            complete: suites.complete,
+            items: suites
+                .items
+                .into_iter()
+                .map(|suite| GithubCheckSuite {
+                    id: suite.id,
+                    app: suite
+                        .app
+                        .and_then(|app| app.slug)
+                        .unwrap_or_else(|| "unknown".to_string()),
+                    status: suite.status.unwrap_or_else(|| "queued".to_string()),
+                    conclusion: suite.conclusion,
+                    check_runs: suite.latest_check_runs_count,
+                    created_at: suite.created_at,
+                })
+                .collect(),
+        })
     }
 
     /// The latest commit status of each context on the commit `sha`.
@@ -396,7 +473,7 @@ impl GithubOauthImpl {
         owner: &str,
         repo: &str,
         sha: &str,
-    ) -> Result<Vec<GithubCommitStatus>, GithubError> {
+    ) -> Result<GithubListing<GithubCommitStatus>, GithubError> {
         let statuses = self
             .read_pages(
                 access_token,
@@ -405,14 +482,18 @@ impl GithubOauthImpl {
                 |page: CombinedStatusResponse| page.statuses,
             )
             .await?;
-        Ok(statuses
-            .into_iter()
-            .map(|status| GithubCommitStatus {
-                context: status.context,
-                state: status.state,
-                target_url: status.target_url,
-            })
-            .collect())
+        Ok(GithubListing {
+            complete: statuses.complete,
+            items: statuses
+                .items
+                .into_iter()
+                .map(|status| GithubCommitStatus {
+                    context: status.context,
+                    state: status.state,
+                    target_url: status.target_url,
+                })
+                .collect(),
+        })
     }
 
     /// The check runs on the commit `sha`.
@@ -423,7 +504,7 @@ impl GithubOauthImpl {
         owner: &str,
         repo: &str,
         sha: &str,
-    ) -> Result<Vec<GithubPullRequestCheckRun>, GithubError> {
+    ) -> Result<GithubListing<GithubCheckRun>, GithubError> {
         let runs = self
             .read_pages(
                 access_token,
@@ -432,18 +513,20 @@ impl GithubOauthImpl {
                 |page: CheckRunsResponse| page.check_runs,
             )
             .await?;
-        Ok(runs
-            .into_iter()
-            .map(|run| GithubPullRequestCheckRun {
-                id: run.id,
-                name: run.name,
-                status: run.status,
-                conclusion: run.conclusion,
-                url: run.html_url,
-                started_at: None,
-                completed_at: None,
-            })
-            .collect())
+        Ok(GithubListing {
+            complete: runs.complete,
+            items: runs
+                .items
+                .into_iter()
+                .map(|run| GithubCheckRun {
+                    name: run.name,
+                    status: run.status,
+                    conclusion: run.conclusion,
+                    html_url: run.html_url,
+                    app_id: run.app.map(|app| app.id),
+                })
+                .collect(),
+        })
     }
 
     /// Opens a pull request as the user. GitHub declining it is a

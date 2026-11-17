@@ -26,16 +26,17 @@ pub use index::{PullRequestIndexOutcome, PullRequestIndexRecord, PullRequestInde
 pub use key::GithubKey;
 pub use pull_request::{
     EnrichGithubPullRequestsProxyRequest, EnrichGithubPullRequestsResponse,
-    EnrichedGithubPullRequest, GITHUB_PULL_REQUEST_FOREIGN_ENTITY_SOURCE, GithubCheckSuite,
-    GithubCommitStatus, GithubMergeMethod, GithubMergeOutcome, GithubMergeRejection,
-    GithubOpenPullRequest, GithubOpenPullRequestOutcome, GithubPullRequestCheckRun,
-    GithubPullRequestComment, GithubPullRequestDetails, GithubPullRequestHead,
-    GithubPullRequestLabel, GithubPullRequestMerge, GithubPullRequestMergeability,
-    GithubPullRequestMergeabilityEntry, GithubPullRequestMergeabilityRequest,
-    GithubPullRequestMergeabilityResponse, GithubPullRequestNumber, GithubPullRequestRef,
-    GithubPullRequestReview, GithubPullRequestReviewDecision, GithubPullRequestReviewState,
-    GithubPullRequestStatus, GithubPullRequestUser, GithubRepositoryAccess,
-    GithubRepositoryMergeSettings, MergeGithubPullRequestRequest, MergeGithubPullRequestResponse,
+    EnrichedGithubPullRequest, GITHUB_PULL_REQUEST_FOREIGN_ENTITY_SOURCE, GithubCheckRun,
+    GithubCheckSuite, GithubCommitStatus, GithubListing, GithubMergeMethod, GithubMergeOutcome,
+    GithubMergeRejection, GithubOpenPullRequest, GithubOpenPullRequestOutcome,
+    GithubPullRequestCheckRun, GithubPullRequestComment, GithubPullRequestDetails,
+    GithubPullRequestHead, GithubPullRequestLabel, GithubPullRequestMerge,
+    GithubPullRequestMergeability, GithubPullRequestMergeabilityEntry,
+    GithubPullRequestMergeabilityRequest, GithubPullRequestMergeabilityResponse,
+    GithubPullRequestNumber, GithubPullRequestRef, GithubPullRequestReview,
+    GithubPullRequestReviewDecision, GithubPullRequestReviewState, GithubPullRequestStatus,
+    GithubPullRequestUser, GithubRepositoryAccess, GithubRepositoryMergeSettings,
+    GithubRequiredCheck, MergeGithubPullRequestRequest, MergeGithubPullRequestResponse,
     latest_reviews,
 };
 pub use update::{
