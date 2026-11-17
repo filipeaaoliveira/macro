@@ -24,6 +24,8 @@ export type StartRunInput = {
   taskId: string;
   flow: string;
   request: string;
+  /** The repository a Flow that works on one works on, by its URL. */
+  repoUrl?: string;
 };
 
 export type AnswerGateInput = {
@@ -40,6 +42,11 @@ export type RunsContext = {
   /** One Run; kept current until it ends. */
   run: (runId: Accessor<string>) => RunsSource<Run>;
   flows: () => RunsSource<Flow[]>;
+  /**
+   * The URLs of the GitHub repositories the person can start a Run on, read
+   * while `enabled`.
+   */
+  repositories: (enabled: Accessor<boolean>) => RunsSource<string[]>;
   startRun: (input: StartRunInput) => Promise<RunActionResult<Run>>;
   answerGate: (input: AnswerGateInput) => Promise<RunActionResult>;
   cancelRun: (runId: string) => Promise<RunActionResult>;

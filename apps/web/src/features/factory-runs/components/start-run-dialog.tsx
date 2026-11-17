@@ -13,35 +13,60 @@ import {
 } from 'solid-js';
 import { flowWordLabel } from '../core/flow-words';
 import type { Flow } from '../core/run';
+import { RepositoryField } from './repository-field';
+
+/** What a Run is started with. */
+export type StartRunChoice = {
+  flow: string;
+  request: string;
+  /** The repository's URL, for a Flow that works on one. */
+  repoUrl?: string;
+};
 
 /**
- * Starts a Run on a task: what it should do, and which Flow takes it there.
- * Stays open with the error when starting fails.
+ * Starts a Run on a task: what it should do, which Flow takes it there, and
+ * the repository it works on when the Flow works on one. Stays open with the
+ * error when starting fails.
  */
 export function StartRunDialog(props: {
   flows: Flow[] | undefined;
   flowsState: 'pending' | 'error' | 'ready';
   onRetryFlows: () => void;
+  /** The URLs of the repositories a Run can work on. */
+  repositories: string[] | undefined;
+  repositoriesState: 'pending' | 'error' | 'ready';
+  onRetryRepositories: () => void;
   onOpenChange: (open: boolean) => void;
   /** Resolves true once the Run started. */
-  onStart: (flow: string, request: string) => Promise<boolean>;
+  onStart: (choice: StartRunChoice) => Promise<boolean>;
 }) {
   const [request, setRequest] = createSignal('');
   const [chosenFlow, setChosenFlow] = createSignal<string>();
+  const [repoUrl, setRepoUrl] = createSignal<string>();
   const [pending, setPending] = createSignal(false);
   const [failed, setFailed] = createSignal(false);
-  const flow = () => chosenFlow() ?? props.flows?.[0]?.name;
+  const flow = () =>
+    props.flows?.find((option) => option.name === chosenFlow()) ??
+    props.flows?.[0];
+  const needsRepository = () => flow()?.repository ?? false;
   const canSubmit = () =>
-    !pending() && request().trim().length > 0 && flow() !== undefined;
+    !pending() &&
+    request().trim().length > 0 &&
+    flow() !== undefined &&
+    (!needsRepository() || repoUrl() !== undefined);
 
   const submit = async (event: SubmitEvent) => {
     event.preventDefault();
-    const name = flow();
+    const name = flow()?.name;
     if (!canSubmit() || !name) return;
 
     setPending(true);
     setFailed(false);
-    const started = await props.onStart(name, request().trim());
+    const started = await props.onStart({
+      flow: name,
+      request: request().trim(),
+      repoUrl: needsRepository() ? repoUrl() : undefined,
+    });
     setPending(false);
     if (started) props.onOpenChange(false);
     else setFailed(true);
@@ -107,7 +132,7 @@ export function StartRunDialog(props: {
                 {(flows) => (
                   <RadioGroup
                     variant="cards"
-                    value={flow()}
+                    value={flow()?.name}
                     onChange={setChosenFlow}
                     disabled={pending()}
                     class="grid-cols-1"
@@ -135,6 +160,16 @@ export function StartRunDialog(props: {
                 )}
               </Match>
             </Switch>
+            <Show when={needsRepository()}>
+              <RepositoryField
+                repositories={props.repositories}
+                state={props.repositoriesState}
+                onRetry={props.onRetryRepositories}
+                value={repoUrl()}
+                onChange={setRepoUrl}
+                disabled={pending()}
+              />
+            </Show>
             <Show when={failed()}>
               <p role="alert" class="text-sm text-failure">
                 {t('factoryRuns.startFailed')}

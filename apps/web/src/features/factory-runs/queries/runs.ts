@@ -1,5 +1,6 @@
 import { fireAndForget } from '@core/util/fireAndForget';
 import { type ResultError, throwOnErr } from '@core/util/result';
+import { useAgentRepositoriesQuery } from '@queries/agent-repositories/repositories';
 import { factoryClient } from '@service-factory/client';
 import type { RunDetail } from '@service-factory/generated/schemas';
 import {
@@ -42,6 +43,7 @@ function toRun(detail: RunDetail): Run {
     request: run.request,
     createdAt: run.createdAt,
     taskId: run.taskId ?? undefined,
+    repository: run.repository ?? undefined,
     end: run.end ?? undefined,
     steps: detail.steps.map((step) => ({
       seq: step.seq,
@@ -164,6 +166,17 @@ export function createAppRunsContext(client: QueryClient): RunsContext {
       toSource(useQuery(() => runOptions(runId()))),
 
     flows: () => toSource(useQuery(() => flowsOptions())),
+
+    repositories: (enabled: Accessor<boolean>) => {
+      // The repositories a coding session can be given: each agent Step of
+      // a Run that works on a repository is one.
+      const source = toSource(useAgentRepositoriesQuery(enabled));
+      return {
+        ...source,
+        data: () =>
+          source.data()?.repositories.map((repository) => repository.url),
+      };
+    },
 
     async startRun(input) {
       const result = await factoryClient.startRun(input);

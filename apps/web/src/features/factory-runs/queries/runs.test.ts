@@ -90,6 +90,31 @@ describe('createAppRunsContext', () => {
     );
   });
 
+  it('starts a Run on the repository it names and keeps it on the Run', async () => {
+    const repository = {
+      url: 'https://github.com/macro-inc/app',
+      baseBranch: 'main',
+    };
+    vi.mocked(factoryClient.startRun).mockResolvedValue(
+      ok({ ...started, run: { ...started.run, repository } })
+    );
+
+    const result = await createAppRunsContext(new QueryClient()).startRun({
+      taskId: 'task-1',
+      flow: 'code',
+      request: 'Add a due date column',
+      repoUrl: 'https://github.com/macro-inc/app',
+    });
+
+    expect(factoryClient.startRun).toHaveBeenCalledWith({
+      taskId: 'task-1',
+      flow: 'code',
+      request: 'Add a due date column',
+      repoUrl: 'https://github.com/macro-inc/app',
+    });
+    expect(result.ok && result.value.repository).toEqual(repository);
+  });
+
   it('tells a refused answer apart from a failed one', async () => {
     const context = createAppRunsContext(new QueryClient());
     const input = {

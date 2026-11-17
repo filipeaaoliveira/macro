@@ -109,17 +109,28 @@ function mount(
               {
                 name: 'plan',
                 description: 'Plans the change, then writes it.',
+                repository: false,
               },
               {
                 name: 'code',
                 description: 'Takes a task to a merged pull request.',
+                repository: true,
               },
               {
                 name: 'reply',
                 description: 'Answers the request.',
+                repository: false,
               },
             ],
       retry: options.flowsRetry ?? vi.fn(),
+    }),
+    repositories: () => ({
+      state: () => 'ready',
+      data: () => [
+        'https://github.com/macro-inc/app',
+        'https://github.com/macro-inc/docs',
+      ],
+      retry: vi.fn(),
     }),
     startRun:
       options.startRun ??
@@ -184,14 +195,35 @@ describe('TaskRunsSection', () => {
     expect(screen.queryByRole('button', { name: 'Start run' })).toBeNull();
   });
 
-  it('doesn’t offer a Flow that needs a repository', async () => {
-    mount([running]);
+  it('starts a Run of a Flow that works on a repository on the one chosen', async () => {
+    const { context } = mount([running]);
 
     fireEvent.click(screen.getByRole('button', { name: 'New run' }));
-    await screen.findByRole('radiogroup', { name: 'Flow' });
-    expect(screen.getByRole('radio', { name: /Plan/ })).toBeTruthy();
-    expect(screen.getByRole('radio', { name: /Reply/ })).toBeTruthy();
-    expect(screen.queryByRole('radio', { name: /Code/ })).toBeNull();
+    const start = await screen.findByRole('button', { name: 'Start run' });
+    fireEvent.input(screen.getByLabelText('Request'), {
+      target: { value: 'Add a due date column' },
+    });
+    expect(screen.queryByRole('combobox', { name: 'Repository' })).toBeNull();
+    fireEvent.click(screen.getByRole('radio', { name: /Code/ }));
+    // It doesn't start until a repository is chosen.
+    expect(start.hasAttribute('disabled')).toBe(true);
+
+    const repository = screen.getByRole('combobox', { name: 'Repository' });
+    fireEvent.input(repository, { target: { value: 'docs' } });
+    fireEvent.click(
+      await screen.findByRole('option', { name: 'macro-inc/docs' })
+    );
+    expect(start.hasAttribute('disabled')).toBe(false);
+    fireEvent.click(start);
+
+    await waitFor(() =>
+      expect(context.startRun).toHaveBeenCalledWith({
+        taskId: 'task-1',
+        flow: 'code',
+        request: 'Add a due date column',
+        repoUrl: 'https://github.com/macro-inc/docs',
+      })
+    );
   });
 
   it('retries a list that couldn’t be loaded', () => {

@@ -1,3 +1,4 @@
+import { repositoryLabel } from '@app/features/agents-view/core/repository';
 import { t } from '@app/lib/i18n';
 import { Button } from '@ui';
 import { createSignal, createUniqueId, Show } from 'solid-js';
@@ -11,8 +12,8 @@ import { RunStatusDot, runStatusLabel } from './run-status';
 import { RunTimeline } from './run-timeline';
 
 /**
- * Where the Run is, when it started and ended, and what its request says
- * past the title. The status line takes focus when the control a person
+ * Where the Run is, when it started and ended, the repository it works on,
+ * and what its request says past the title. The status line takes focus when the control a person
  * used goes away (an answered Gate, a cancelled Run).
  */
 export function RunSummary(props: {
@@ -49,6 +50,21 @@ export function RunSummary(props: {
           )}
         </Show>
       </p>
+      <Show when={props.run.repository}>
+        {(repository) => (
+          <section class="flex flex-col gap-1.5">
+            <h3 class="text-xs font-medium text-ink-muted">
+              {t('factoryRuns.repository')}
+            </h3>
+            <p class="text-sm leading-5 [overflow-wrap:anywhere]">
+              {t('factoryRuns.repositoryFrom', {
+                repository: repositoryLabel(repository().url),
+                branch: repository().baseBranch,
+              })}
+            </p>
+          </section>
+        )}
+      </Show>
       <Show when={runRequestBody(props.run)}>
         {(body) => (
           <section class="flex flex-col gap-1.5">

@@ -40,12 +40,21 @@ export type RunStep = {
   gate?: Gate;
 };
 
+/** The GitHub repository a Run works on. */
+export type RunRepository = {
+  /** Its `https://github.com/owner/name` URL. */
+  url: string;
+  /** The branch the Run's work starts from and proposes its change to. */
+  baseBranch: string;
+};
+
 /** One Run of a Flow, with the Steps it took in the order they started. */
 export type Run = {
   id: string;
   request: string;
   createdAt: string;
   taskId?: string;
+  repository?: RunRepository;
   end?: { outcome: RunOutcome; endedAt: string };
   steps: RunStep[];
 };
@@ -54,18 +63,9 @@ export type Run = {
 export type Flow = {
   name: string;
   description: string;
+  /** A Run of it works on a GitHub repository, which starting it names. */
+  repository: boolean;
 };
-
-/**
- * Flows whose Runs work on a repository. Starting one needs a repository,
- * which the New run dialog doesn't ask for yet, so it isn't offered.
- */
-const REPOSITORY_FLOWS = new Set(['code']);
-
-/** The Flows the New run dialog offers: those that need no repository. */
-export function startableFlows(flows: Flow[]): Flow[] {
-  return flows.filter((flow) => !REPOSITORY_FLOWS.has(flow.name));
-}
 
 /** Where a Run is now. */
 export type RunStatus =

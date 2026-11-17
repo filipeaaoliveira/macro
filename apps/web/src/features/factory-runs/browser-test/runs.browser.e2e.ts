@@ -79,15 +79,19 @@ test('answers a Gate, starts a Run and cancels one', async ({
   await page.getByRole('button', { name: 'New run' }).click();
   const start = page.getByRole('dialog', { name: 'New run' });
   await start.getByLabel('Request').fill('Show overdue tasks in red');
-  // Code needs a repository, which the dialog doesn't ask for yet.
-  await expect(start.getByText('Code', { exact: true })).toHaveCount(0);
-  await start.getByText('Reply', { exact: true }).click();
+  // Code works on a repository: the dialog asks for one before it starts.
+  await expect(start.getByLabel('Repository')).toHaveCount(0);
+  await start.getByText('Code', { exact: true }).click();
+  await expect(start.getByRole('button', { name: 'Start run' })).toBeDisabled();
+  await start.getByLabel('Repository').fill('docs');
+  await page.getByRole('option', { name: 'macro-inc/docs' }).click();
   await shoot(page, 'start-run', testInfo.project.name);
   await start.getByRole('button', { name: 'Start run' }).click();
   const started = page.getByRole('dialog', {
     name: 'Show overdue tasks in red',
   });
   await expect(started).toBeVisible();
+  await expect(started.getByText('macro-inc/docs, from main')).toBeVisible();
   await expect(start).toBeHidden();
   // Focus moves into the Run that opened, not back to New run.
   await expect

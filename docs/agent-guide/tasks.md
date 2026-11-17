@@ -1368,7 +1368,11 @@ With `enable-factory-runs` on (off by default; set
 panel has a **Runs** section: each Run of the software factory on the task,
 newest first, with a dot for where it is (running, needs input, done, failed or
 cancelled), the Step it is on, and when it started. **New run** asks for a
-request and a Flow, starts the Run and opens it.
+request and a Flow, starts the Run and opens it. A Flow that works on a
+repository (Code) also asks for one: a searchable **Repository** field of the
+repositories Macro's GitHub App reaches for the person, the same listing the
+agent composer offers. The Run shows its repository and base branch under
+its status.
 
 A Run opens in a dialog on desktop and in a sheet on touch (after the side
 panel's sheet closes). Its Steps scroll: each with its outcome, its time

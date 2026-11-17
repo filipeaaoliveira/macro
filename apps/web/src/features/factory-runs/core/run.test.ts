@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { type Run, type RunStep, runStatus, startableFlows } from './run';
+import { type Run, type RunStep, runStatus } from './run';
 
 const plan: RunStep = {
   seq: 1,
@@ -80,20 +80,5 @@ describe('runStatus', () => {
       outcome: 'cancelled',
       endedAt: '2026-11-16T09:05:00Z',
     });
-  });
-});
-
-describe('startableFlows', () => {
-  it('leaves out Flows that need a repository', () => {
-    const flows = [
-      { name: 'plan', description: 'Plans, then writes.' },
-      { name: 'code', description: 'Takes it to a merged pull request.' },
-      { name: 'reply', description: 'Replies in one Step.' },
-    ];
-
-    expect(startableFlows(flows).map((flow) => flow.name)).toEqual([
-      'plan',
-      'reply',
-    ]);
   });
 });

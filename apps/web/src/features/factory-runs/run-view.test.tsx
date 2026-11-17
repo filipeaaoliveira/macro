@@ -83,6 +83,11 @@ function mount(options: {
       retry: options.retry ?? vi.fn(),
     }),
     flows: () => ({ state: () => 'ready', data: () => [], retry: vi.fn() }),
+    repositories: () => ({
+      state: () => 'ready',
+      data: () => [],
+      retry: vi.fn(),
+    }),
     startRun: vi.fn(),
     answerGate: options.answerGate ?? vi.fn(async () => DONE),
     cancelRun: options.cancelRun ?? vi.fn(async () => DONE),

@@ -151,6 +151,11 @@ function mount(options: {
       retry: vi.fn(),
     }),
     flows: () => ({ state: () => 'ready', data: () => [], retry: vi.fn() }),
+    repositories: () => ({
+      state: () => 'ready',
+      data: () => [],
+      retry: vi.fn(),
+    }),
     startRun: vi.fn(),
     answerGate: vi.fn(),
     cancelRun: vi.fn(),
