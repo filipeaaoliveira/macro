@@ -4,13 +4,18 @@
  * factory_engine
  * OpenAPI spec version: 0.1.0
  */
+
 import type { Run } from './run';
+import type { RunDetailBaseRequiredChecks } from './runDetailBaseRequiredChecks';
+import type { RunDetailMainHold } from './runDetailMainHold';
 import type { Step } from './step';
 
 /**
  * A Run and the Steps it took.
  */
 export interface RunDetail {
+  baseRequiredChecks?: RunDetailBaseRequiredChecks;
+  mainHold?: RunDetailMainHold;
   /** The Run. */
   run: Run;
   /** Its Steps, in the order they started. */

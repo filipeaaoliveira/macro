@@ -15,16 +15,21 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `factory_gate` queries.
 - `src/domain/insights.rs` and `src/outbound/pg_run_repository/insights.rs`:
   `RunInsightsRepository`, the reads behind Run insights.
+- `src/domain/main_hold.rs` and `src/outbound/pg_run_repository/main_hold.rs`:
+  `MainHoldRepository`, the merges Runs made and the Main Holds on the base
+  branches they merge to.
 
 ## Scope
 
 - Owns: the `factory_run`, `factory_step`, `factory_gate`,
-  `factory_check_round` and `factory_team_settings` tables
+  `factory_check_round`, `factory_team_settings`, `factory_merge` and
+  `factory_main_hold` tables
   (`crates/macro_db_client/migrations/20261116083957_factory.sql`,
   `20261117093000_factory_check_round.sql`,
   `20261117104713_factory_step_agent.sql`,
   `20261117120425_factory_step_bot.sql`,
   `20261117170000_factory_turn_place.sql`,
+  `20261117183000_factory_main_hold.sql`,
   `20261117183117_factory_control_files.sql`).
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
 
@@ -117,6 +122,25 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   person's team and role from `team_user`, as other features' records do:
   a person is on at most one team, and an agent's account
   (`"User"."isAgent"`, which `is_agent_account` reads) is never an admin.
+
+- `factory_merge` keeps one row per Run that merged (`record_merge`, safe
+  to repeat), with the base it merged into and the time on the worker's
+  clock; `recent_merges` reads a base's newest. `factory_main_hold` keeps
+  one row per base branch: when its checks last passed (`last_green_at`),
+  why its required checks decide nothing (`required_checks`: `unread` or
+  `none`, set by `mark_required`, which drops any hold), and, while they
+  fail, the hold (`held_since`, `head_sha`, `failed`). All its times are the reads'
+  starts on the workers' clock, so they compare with the merges'.
+  `hold_main` keeps a hold's start; `clear_main_hold` ends it and its red
+  period, unless the hold started at or after the green read did.
+  `suspect_merges` reads a base's merges since it was last green through
+  `factory_merge_base_idx`, newest first up to its limit, and returns them
+  oldest first. A red period files one task: `claim_hold_task` claims it for
+  the hold's start once, at the worker's time, or again once a claim never
+  filed is older than `TASK_CLAIM_STALE_AFTER`; `release_hold_task` gives
+  a claim back when filing failed, and `record_hold_task` keeps the task's
+  id and when it was filed (`task_filed_at`), which a deleted task document
+  leaves set, so it is not filed again.
 
 ## Related
 

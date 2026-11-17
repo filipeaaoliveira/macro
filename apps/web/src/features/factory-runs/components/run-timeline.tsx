@@ -1,12 +1,18 @@
 import { t } from '@app/lib/i18n';
 import { StaticMarkdown } from '@core/component/LexicalMarkdown/component/core/StaticMarkdown';
 import { channelTheme } from '@core/component/LexicalMarkdown/theme';
+import { buildSimpleEntityUrl } from '@core/util/url';
 import CaretDownIcon from '@icon/system/regular/caret-down.svg';
 import { Badge, Button, Card, cn } from '@ui';
 import { CollapseTransition } from '@ui/components/CollapseTransition';
 import { createSignal, For, type JSX, Show } from 'solid-js';
 import { flowWordLabel, flowWordText } from '../core/flow-words';
-import type { CheckRound, RunStep } from '../core/run';
+import type {
+  BaseRequiredChecks,
+  CheckRound,
+  MainHold,
+  RunStep,
+} from '../core/run';
 
 function stepLabel(step: Pick<RunStep, 'entry' | 'visit'>): string {
   const entry = flowWordLabel(step.entry);
@@ -22,6 +28,11 @@ function stepLabel(step: Pick<RunStep, 'entry' | 'visit'>): string {
  */
 export function RunTimeline(props: {
   steps: RunStep[];
+  /** The hold on the Run's base branch, shown on its latest Step. */
+  mainHold?: MainHold;
+  /** Why the base's required checks hold nothing, likewise. */
+  baseRequiredChecks?: BaseRequiredChecks;
+  baseBranch?: string;
   /** Whether a Step's output starts open, e.g. the plan a Gate asks about. */
   outputOpen: (step: RunStep) => boolean;
   time: (value: string) => string;
@@ -34,6 +45,15 @@ export function RunTimeline(props: {
             step={step}
             first={index() === 0}
             latest={index() === props.steps.length - 1}
+            mainHold={
+              index() === props.steps.length - 1 ? props.mainHold : undefined
+            }
+            baseRequiredChecks={
+              index() === props.steps.length - 1
+                ? props.baseRequiredChecks
+                : undefined
+            }
+            baseBranch={props.baseBranch}
             defaultOpen={props.outputOpen(step)}
             time={props.time}
           />
@@ -47,6 +67,9 @@ function TimelineStep(props: {
   step: RunStep;
   first: boolean;
   latest: boolean;
+  mainHold?: MainHold;
+  baseRequiredChecks?: BaseRequiredChecks;
+  baseBranch?: string;
   defaultOpen: boolean;
   time: (value: string) => string;
 }) {
@@ -177,6 +200,24 @@ function TimelineStep(props: {
           <CheckRoundNote round={round} stepEnded={Boolean(props.step.end)} />
         )}
       </For>
+      <Show when={props.mainHold}>
+        {(hold) => (
+          <MainHoldNote hold={hold()} baseBranch={props.baseBranch ?? ''} />
+        )}
+      </Show>
+      <Show when={props.baseRequiredChecks}>
+        {(why) => (
+          <StepNote>
+            {why() === 'none'
+              ? t('factoryRuns.baseChecksNone', {
+                  branch: props.baseBranch ?? '',
+                })
+              : t('factoryRuns.baseChecksUnread', {
+                  branch: props.baseBranch ?? '',
+                })}
+          </StepNote>
+        )}
+      </Show>
       <Show when={details()}>
         <CollapseTransition open={open()}>
           <Card variant="filled" offset={1} class="mt-1 mb-3 px-3 py-2.5">
@@ -241,6 +282,36 @@ function CheckRoundNote(props: { round: CheckRound; stepEnded: boolean }) {
         </Show>
       </span>
       <span class="block text-ink-muted">{props.round.checks.join(', ')}</span>
+    </StepNote>
+  );
+}
+
+/**
+ * The Run's base branch is red: the Run merges nothing until its checks
+ * pass, even once its merge is approved.
+ */
+function MainHoldNote(props: { hold: MainHold; baseBranch: string }) {
+  return (
+    <StepNote>
+      <span class="flex min-w-0 items-center gap-2">
+        <Badge variant="outline" size="xs">
+          {t('factoryRuns.mainHold')}
+        </Badge>
+        {t('factoryRuns.mainHoldBody', { branch: props.baseBranch })}
+      </span>
+      <span class="block whitespace-pre-wrap text-ink-muted">
+        {props.hold.failed}
+      </span>
+      <Show when={props.hold.taskId}>
+        {(taskId) => (
+          <a
+            class="block text-ink-muted underline"
+            href={buildSimpleEntityUrl({ type: 'task', id: taskId() })}
+          >
+            {t('factoryRuns.mainHoldTask')}
+          </a>
+        )}
+      </Show>
     </StepNote>
   );
 }

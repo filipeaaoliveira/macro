@@ -1,6 +1,6 @@
 use super::{BUILT_IN_FLOWS, BuiltInFlow, built_in_roles};
 use crate::domain::built_in_steps::BuiltInSteps;
-use crate::domain::fakes::{FakeGithub, FakeRepo};
+use crate::domain::fakes::{FakeGithub, FakeRepo, FakeWatches};
 use crate::domain::ports::StepExecutor;
 use crate::domain::pull_request_steps::PullRequestSteps;
 use crate::outbound::local_agent::LocalAgent;
@@ -27,7 +27,11 @@ fn every_built_in_flow_reads_and_describes_itself() {
 fn the_built_in_steps_run_every_built_in_flow() {
     let steps = BuiltInSteps::new(
         LocalAgent,
-        PullRequestSteps::new(FakeGithub::default(), FakeRepo::default()),
+        PullRequestSteps::new(
+            FakeGithub::default(),
+            FakeRepo::default(),
+            FakeWatches::default(),
+        ),
     );
     let runnable: Vec<&str> = BUILT_IN_FLOWS
         .into_iter()

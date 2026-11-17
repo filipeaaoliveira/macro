@@ -1,0 +1,53 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT held_since, head_sha, failed, task_claimed_at, task_id, required_checks\n            FROM factory_main_hold\n            WHERE repo_url = $1 AND base_branch = $2\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "held_since",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 1,
+        "name": "head_sha",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "failed",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "task_claimed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "task_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "required_checks",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "f1b277ab1fc83e80965ebd47e157de702f0a06daa6026cc78444fa9f4d673dda"
+}

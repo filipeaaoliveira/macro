@@ -21,6 +21,7 @@ use entity_access::outbound::PgAccessRepository;
 use factory_engine::domain::agents::AgentDefinition;
 use factory_engine::domain::built_in_steps::BuiltInSteps;
 use factory_engine::domain::insights::InsightsServiceImpl;
+use factory_engine::domain::main_hold::MainWatchServiceImpl;
 use factory_engine::domain::ports::StepAgent;
 use factory_engine::domain::pull_request_steps::PullRequestSteps;
 use factory_engine::domain::service::{FactoryServiceImpl, StepServiceImpl};
@@ -28,9 +29,11 @@ use factory_engine::domain::session_agent::SessionAgent;
 use factory_engine::inbound::http::{ApiDoc, FactoryRouterState, factory_router};
 use factory_engine::inbound::insights::{InsightsApiDoc, InsightsRouterState, insights_router};
 use factory_engine::outbound::auth_user_directory::AuthUserDirectory;
+use factory_engine::outbound::document_hold_tasks::DocumentHoldTasks;
 use factory_engine::outbound::document_task_directory::DocumentTaskDirectory;
 use factory_engine::outbound::github_pull_requests::GithubPullRequests;
 use factory_engine::outbound::local_agent::LocalAgent;
+use factory_engine::outbound::temporal_main_watches::TemporalMainWatches;
 use factory_engine::outbound::temporal_run_workflows::TemporalRunWorkflows;
 use factory_records::outbound::pg_run_repository::PgRunRepository;
 use macro_auth::middleware::decode_jwt::JwtValidationArgs;
@@ -113,6 +116,10 @@ async fn run() -> Result<(), rootcause::Report> {
         AuthServiceUrl::new()?.to_string(),
     );
     let github = GithubPullRequests::new(auth.clone());
+    let documents = DocumentStorageServiceClient::new(
+        config.document_storage_service_auth_key.clone(),
+        DocumentStorageServiceUrl::new()?.to_string(),
+    );
     let parts = Parts {
         port: config.port,
         repo: repo.clone(),
@@ -121,17 +128,19 @@ async fn run() -> Result<(), rootcause::Report> {
         github: github.clone(),
         tasks: DocumentTaskDirectory::new(
             EntityAccessServiceImpl::new(PgAccessRepository::new(db.clone())),
-            DocumentStorageServiceClient::new(
-                config.document_storage_service_auth_key.clone(),
-                DocumentStorageServiceUrl::new()?.to_string(),
-            ),
+            documents.clone(),
         ),
+        hold_tasks: DocumentHoldTasks::new(documents),
         client,
         authorization_state,
         correlation: CorrelationState::new(db, jwt_args),
     };
 
-    let pull_requests = PullRequestSteps::new(github, repo.clone());
+    let pull_requests = PullRequestSteps::new(
+        github,
+        repo.clone(),
+        TemporalMainWatches::new(parts.client.clone()),
+    );
 
     // The agent Steps run as the Run's owner in sessions of the Agents each
     // Role takes, which must fill every Role a built-in Flow names. Without
@@ -163,6 +172,7 @@ struct Parts {
     users: AuthUserDirectory,
     github: GithubPullRequests<AuthServiceClient>,
     tasks: DocumentTaskDirectory<EntityAccessServiceImpl<PgAccessRepository>>,
+    hold_tasks: DocumentHoldTasks,
     client: Client,
     authorization_state: MacroAuthorizationState<Authorization>,
     correlation: CorrelationState,
@@ -175,13 +185,19 @@ type Authorization = MacroAuthorizationServiceImpl<MacroAuthJwtValidator>;
 /// signal or until either stops.
 async fn serve<A: StepAgent + Clone>(
     parts: Parts,
-    steps: BuiltInSteps<A, GithubPullRequests<AuthServiceClient>, PgRunRepository>,
+    steps: BuiltInSteps<
+        A,
+        GithubPullRequests<AuthServiceClient>,
+        PgRunRepository,
+        TemporalMainWatches,
+    >,
 ) -> Result<(), rootcause::Report> {
     let runtime = Runtime::from_current_tokio(Default::default())?;
     let worker = factory_engine::inbound::temporal::worker(
         &runtime,
         parts.client.clone(),
         StepServiceImpl::new(parts.repo.clone(), steps.clone()),
+        MainWatchServiceImpl::new(parts.repo.clone(), parts.github.clone(), parts.hold_tasks),
     )?;
 
     let insights = Arc::new(InsightsServiceImpl::new(parts.repo.clone(), parts.usage));

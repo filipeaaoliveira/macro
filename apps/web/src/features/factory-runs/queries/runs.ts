@@ -80,6 +80,15 @@ function toRun(detail: RunDetail): Run {
         end: round.end ?? undefined,
       })),
     })),
+    mainHold: detail.mainHold
+      ? {
+          since: detail.mainHold.since,
+          headSha: detail.mainHold.headSha,
+          failed: detail.mainHold.failed,
+          taskId: detail.mainHold.taskId ?? undefined,
+        }
+      : undefined,
+    baseRequiredChecks: detail.baseRequiredChecks ?? undefined,
   };
 }
 

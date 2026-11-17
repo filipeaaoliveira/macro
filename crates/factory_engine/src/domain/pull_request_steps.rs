@@ -13,6 +13,9 @@
 //! `merge` merges a Tampered Run only when the answer that agreed to it
 //! approved those files; otherwise it sends the Run back through `ci` to
 //! the merge Gate, which shows them.
+//!
+//! While a Main Hold holds the Run's base, `merge` merges nothing: it waits
+//! for the hold to clear, then ends `held`, which goes back to the merge Gate.
 
 #[cfg(test)]
 mod test;
@@ -20,18 +23,20 @@ mod test;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
+use factory_records::domain::main_hold::{MainHold, MainHoldRepository};
 use factory_records::domain::models::{ControlFileChanges, Outcome, Repository};
 use factory_records::domain::ports::RunRepository;
 use github::domain::models::MacroTaskId;
 
 use crate::domain::checks::CHECKS_FILE;
 use crate::domain::control_files::{ControlFiles, ControlFilesError};
+use crate::domain::main_hold::{MainWatch, held_note};
 use crate::domain::models::{
     CheckState, CheckSuite, CodeRepository, HeadChecks, Merging, OpenPullRequest, Opening,
     PullRequest, PullRequestState, RequiredCheck, RequiredChecks, StepInput, StepReport,
     run_branch,
 };
-use crate::domain::ports::{PullRequests, Retryable};
+use crate::domain::ports::{MainWatches, PullRequests, Retryable};
 
 /// How long `ci` waits for a pull request's checks to finish: short of a
 /// Step attempt's 30 minutes, so the Step ends `timeout` rather than failing.
@@ -39,6 +44,13 @@ pub const CI_WAIT: Duration = Duration::from_secs(25 * 60);
 
 /// How long `ci` waits between two reads of the checks.
 const CI_POLL: Duration = Duration::from_secs(20);
+
+/// How long `merge` waits for a Main Hold on its base to clear: short of a
+/// Step attempt's 30 minutes, so the Step ends `held` rather than failing.
+pub const HOLD_WAIT: Duration = Duration::from_secs(25 * 60);
+
+/// How long `merge` waits between two reads of its base's hold.
+const HOLD_POLL: Duration = Duration::from_secs(30);
 
 /// The longest pull request title the Steps write.
 const MAX_TITLE_CHARS: usize = 72;
@@ -54,7 +66,7 @@ const MAX_BODY_CHARS: usize = 65_536;
 /// How long a check suite that holds no run, of an app with no run waiting
 /// on the head, is waited for: one that adds its runs after it made the suite
 /// fills it within this; an app that checks nothing never does.
-const EMPTY_SUITE_GRACE: chrono::TimeDelta = chrono::TimeDelta::minutes(5);
+pub(crate) const EMPTY_SUITE_GRACE: chrono::TimeDelta = chrono::TimeDelta::minutes(5);
 
 /// Why a pull request Step could not be done.
 #[derive(Debug, thiserror::Error)]
@@ -88,6 +100,14 @@ pub enum PullRequestStepError {
     /// The Run's owner keeps a Control File pattern that does not read.
     #[error(transparent)]
     ControlFiles(#[from] ControlFilesError),
+    /// The watch of the Run's base branch could not be started.
+    #[error("the watch of the base branch failed: {report:?}")]
+    Watch {
+        /// Why.
+        report: rootcause::Report,
+        /// Whether starting it again may succeed.
+        retryable: bool,
+    },
 }
 
 impl PullRequestStepError {
@@ -103,6 +123,13 @@ impl PullRequestStepError {
     pub(crate) fn records(error: impl std::error::Error + Send + Sync + 'static) -> Self {
         Self::Records(rootcause::Report::new(error).into_dynamic())
     }
+
+    fn watch(error: impl std::error::Error + Retryable + Send + Sync + 'static) -> Self {
+        Self::Watch {
+            retryable: error.retryable(),
+            report: rootcause::Report::new(error).into_dynamic(),
+        }
+    }
 }
 
 impl Retryable for PullRequestStepError {
@@ -111,7 +138,7 @@ impl Retryable for PullRequestStepError {
     fn retryable(&self) -> bool {
         match self {
             Self::NotListed | Self::Records(_) => true,
-            Self::Github { retryable, .. } => *retryable,
+            Self::Github { retryable, .. } | Self::Watch { retryable, .. } => *retryable,
             Self::NoRepository
             | Self::InvalidRepository(_)
             | Self::NoPullRequest
@@ -123,7 +150,7 @@ impl Retryable for PullRequestStepError {
 
 /// What a pull request's checks on its head say.
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Verdict {
+pub(crate) enum Verdict {
     /// A check has not finished, a required one has not appeared, a list
     /// was longer than was read, or none was reported yet.
     Pending,
@@ -139,7 +166,7 @@ enum Verdict {
 
 /// Whether `check` appeared on the head and passed: as a run of the app it
 /// names, or, when it names none, as any app's run or a commit status.
-fn required_passed(check: &RequiredCheck, checks: &HeadChecks) -> bool {
+pub(crate) fn required_passed(check: &RequiredCheck, checks: &HeadChecks) -> bool {
     let run = checks.runs.iter().any(|run| {
         run.name == check.name
             && run.state == CheckState::Passed
@@ -178,11 +205,19 @@ fn verdict(
     now: DateTime<Utc>,
 ) -> Verdict {
     match pull_request.state {
-        PullRequestState::Merged => return Verdict::Green(Vec::new()),
-        PullRequestState::Closed => return Verdict::Closed,
-        PullRequestState::Open => {}
+        PullRequestState::Merged => Verdict::Green(Vec::new()),
+        PullRequestState::Closed => Verdict::Closed,
+        PullRequestState::Open => checks_verdict(checks, required, now),
     }
+}
 
+/// What the checks on a commit say at `now`, given the checks its base
+/// `required`, as [`verdict`] reads an open pull request's head.
+fn checks_verdict(
+    checks: &HeadChecks,
+    required: Option<&RequiredChecks>,
+    now: DateTime<Utc>,
+) -> Verdict {
     // A failure anywhere is red at once; the failed runs name what failed
     // in a suite.
     let mut failed = Vec::new();
@@ -356,17 +391,29 @@ fn body(input: &StepInput<'_>) -> String {
 }
 
 /// The pull request Steps, on GitHub through `github`, keeping the commit a
-/// person is asked to merge in the Run's records.
+/// person is asked to merge and the merges they make in the Run's records,
+/// and starting the watch of the base branch a Run merges to.
 #[derive(Debug, Clone)]
-pub struct PullRequestSteps<G, R> {
+pub struct PullRequestSteps<G, R, M> {
     github: G,
     repo: R,
+    watches: M,
 }
 
-impl<G: PullRequests, R: RunRepository> PullRequestSteps<G, R> {
-    /// The Steps, over `github` and the Run records `repo`.
-    pub fn new(github: G, repo: R) -> Self {
-        Self { github, repo }
+impl<G, R, M> PullRequestSteps<G, R, M>
+where
+    G: PullRequests,
+    R: RunRepository + MainHoldRepository,
+    M: MainWatches,
+{
+    /// The Steps, over `github`, the Run records `repo` and the base
+    /// branches' `watches`.
+    pub fn new(github: G, repo: R, watches: M) -> Self {
+        Self {
+            github,
+            repo,
+            watches,
+        }
     }
 
     /// The Run's records.
@@ -722,6 +769,70 @@ impl<G: PullRequests, R: RunRepository> PullRequestSteps<G, R> {
         ))
     }
 
+    /// Wait while the Main Hold on the Run's base `recorded` lasts, up to
+    /// [`HOLD_WAIT`]: none once it clears, or the hold still set then. A
+    /// held base has its watch started, as the Run's owner, in case none
+    /// runs: the watch is what clears it.
+    async fn wait_out_hold(
+        &self,
+        input: &StepInput<'_>,
+        recorded: &Repository,
+    ) -> Result<Option<MainHold>, PullRequestStepError> {
+        let deadline = tokio::time::Instant::now() + HOLD_WAIT;
+        let mut watched = false;
+        loop {
+            let Some(hold) = self
+                .repo
+                .main_hold(recorded)
+                .await
+                .map_err(PullRequestStepError::records)?
+            else {
+                return Ok(None);
+            };
+            if !watched {
+                self.watches
+                    .watch(&MainWatch::of(input.key.run_id, recorded))
+                    .await
+                    .map_err(PullRequestStepError::watch)?;
+                watched = true;
+            }
+            if tokio::time::Instant::now() + HOLD_POLL > deadline {
+                return Ok(Some(hold));
+            }
+            tokio::time::sleep(HOLD_POLL).await;
+        }
+    }
+
+    /// Record that the Run merged `pull_request` into its base `recorded`,
+    /// and watch the base's checks, which the merge may break. The pull
+    /// request is merged either way: a watch that does not start is logged,
+    /// never the Step's failure, and the next merge or held merge to the
+    /// base starts it.
+    async fn merged(
+        &self,
+        input: &StepInput<'_>,
+        recorded: &Repository,
+        pull_request: &PullRequest,
+    ) -> Result<(), PullRequestStepError> {
+        self.repo
+            .record_merge(
+                input.key.run_id,
+                pull_request.number,
+                &pull_request.url,
+                Utc::now(),
+            )
+            .await
+            .map_err(PullRequestStepError::records)?;
+        let watched = self
+            .watches
+            .watch(&MainWatch::of(input.key.run_id, recorded))
+            .await;
+        if let Err(error) = watched {
+            tracing::warn!(?error, "the merged base's watch did not start");
+        }
+        Ok(())
+    }
+
     /// Merge the commit a person agreed to merge: `merged`, also when it
     /// already was; `changed` when the pull request's head moved since, so
     /// its checks run again; `refused` with GitHub's reason; or `closed`.
@@ -731,6 +842,11 @@ impl<G: PullRequests, R: RunRepository> PullRequestSteps<G, R> {
     /// the Run goes back through `ci` to the merge Gate, which shows the
     /// files. That route is in every `code` Flow a Run carries, so Runs in
     /// flight take it too, as a Run that agreed before its files were read.
+    ///
+    /// While the base's required checks fail, a Main Hold, it waits for
+    /// them to pass, and ends `held` if they still fail after
+    /// [`HOLD_WAIT`], which the `code` Flow sends back to its merge Gate.
+    /// A merge is recorded, and the base's checks watched.
     pub async fn merge(&self, input: StepInput<'_>) -> Result<StepReport, PullRequestStepError> {
         let (repository, recorded) = Self::repository(&input)?;
         let head = self
@@ -747,7 +863,10 @@ impl<G: PullRequests, R: RunRepository> PullRequestSteps<G, R> {
         // A retry whose merge GitHub took, though its answer was lost, finds
         // the pull request merged.
         match pull_request.state {
-            PullRequestState::Merged => return self.merged_outside(&input, &pull_request).await,
+            PullRequestState::Merged => {
+                self.merged(&input, recorded, &pull_request).await?;
+                return self.merged_outside(&input, &pull_request).await;
+            }
             PullRequestState::Closed => {
                 return Ok(report(
                     "closed",
@@ -781,11 +900,25 @@ impl<G: PullRequests, R: RunRepository> PullRequestSteps<G, R> {
             }
         }
 
+        if let Some(hold) = self.wait_out_hold(&input, recorded).await? {
+            return Ok(report(
+                "held",
+                format!(
+                    "{}\n\n{}",
+                    named(&pull_request),
+                    held_note(&recorded.base_branch, &hold)
+                ),
+            ));
+        }
+
         let merging = self
             .github
             .merge(input.owner, &repository, pull_request.number, &head)
             .await
             .map_err(PullRequestStepError::github)?;
+        if merging == Merging::Merged {
+            self.merged(&input, recorded, &pull_request).await?;
+        }
         Ok(match merging {
             Merging::Merged => report(
                 "merged",

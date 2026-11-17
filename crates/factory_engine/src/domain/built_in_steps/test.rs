@@ -7,7 +7,7 @@ use factory_records::domain::models::{
 use macro_user_id::user_id::MacroUserIdStr;
 
 use super::{BuiltInStepError, BuiltInSteps};
-use crate::domain::fakes::{FakeGithub, FakeRepo};
+use crate::domain::fakes::{FakeGithub, FakeRepo, FakeWatches};
 use crate::domain::flow::{Flow, StepName, StepUse};
 use crate::domain::models::{AgentAnswer, AgentTask, AgentTurn, StepInput};
 use crate::domain::ports::{AgentFailure, Retryable, StepAgent, StepExecutor};
@@ -75,8 +75,12 @@ impl StepAgent for FakeAgent {
     }
 }
 
-fn pull_requests() -> PullRequestSteps<FakeGithub, FakeRepo> {
-    PullRequestSteps::new(FakeGithub::default(), FakeRepo::default())
+fn pull_requests() -> PullRequestSteps<FakeGithub, FakeRepo, FakeWatches> {
+    PullRequestSteps::new(
+        FakeGithub::default(),
+        FakeRepo::default(),
+        FakeWatches::default(),
+    )
 }
 
 fn step(name: &str) -> StepName {

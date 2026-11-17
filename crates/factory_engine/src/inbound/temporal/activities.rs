@@ -93,7 +93,7 @@ impl FactoryActivities {
 
 /// A Step error as Temporal sees it: retried unless the same Step would fail
 /// the same way again.
-fn failure(error: StepError) -> ActivityError {
+pub(super) fn failure(error: StepError) -> ActivityError {
     match error {
         StepError::OutputTooLarge { .. }
         | StepError::NoSuchRun

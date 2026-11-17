@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 use crate::domain::flow::{StepName, StepUse};
 use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening};
+use crate::domain::main_hold::{HoldTask, MainLook, MainWatch};
 use crate::domain::models::{
     AgentAnswer, AgentTask, AgentTurn, CodeRepository, ControlFilesSettings, FactoryError,
     FlowSummary, HeadChecks, Merging, OpenPullRequest, Opening, PullRequest, RepositoryAccess,
@@ -191,6 +192,19 @@ pub trait PullRequests: Send + Sync + 'static {
         all_runs: bool,
     ) -> impl Future<Output = Result<Option<(PullRequest, HeadChecks)>, Self::Err>> + Send;
 
+    /// The commit at the head of `branch` of `repository`, with the checks
+    /// on it, read with one token: what a watch of a base branch reads on
+    /// each look. None when `owner` reaches no such branch. All its check
+    /// runs are read when `all_runs`; otherwise only those of a failed
+    /// suite.
+    fn branch_checks(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        branch: &str,
+        all_runs: bool,
+    ) -> impl Future<Output = Result<Option<(String, HeadChecks)>, Self::Err>> + Send;
+
     /// The checks a pull request to `base` must pass before it merges, from
     /// its branch protection and rulesets, as far as they could be read;
     /// none when `owner` cannot tell which checks they are.
@@ -238,6 +252,53 @@ pub trait PullRequests: Send + Sync + 'static {
         number: u64,
         head_sha: &str,
     ) -> impl Future<Output = Result<Merging, Self::Err>> + Send;
+}
+
+/// Asks the watch of a base branch's checks, which sets and clears its
+/// Main Hold, to look again.
+pub trait MainWatches: Send + Sync + 'static {
+    /// The error type returned when the watch cannot be asked.
+    type Err: std::error::Error + Retryable + Send + Sync + 'static;
+
+    /// Ask the watch of `watch`'s base branch to look again, as the owner
+    /// of `watch`'s Run among others, starting it when none runs. A watch
+    /// about to end looks again instead.
+    fn watch(&self, watch: &MainWatch) -> impl Future<Output = Result<(), Self::Err>> + Send;
+}
+
+/// Files the task that names the merges a red base branch may come from.
+pub trait HoldTasks: Send + Sync + 'static {
+    /// The error type returned when the task cannot be filed.
+    type Err: std::error::Error + Send + Sync + 'static;
+
+    /// File `task` as `owner`, in the initiative of the task document
+    /// `beside` when it has one, and return the new task document's id.
+    fn file(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        beside: Option<Uuid>,
+        task: &HoldTask,
+    ) -> impl Future<Output = Result<Uuid, Self::Err>> + Send;
+
+    /// Comment `text` on the passage `quote` of the task document
+    /// `task_id`, as `owner`.
+    fn comment(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        task_id: Uuid,
+        quote: &str,
+        text: &str,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+}
+
+/// Inbound service port: what the watch of a base branch asks its worker
+/// to do.
+pub trait MainWatchService: Send + Sync + 'static {
+    /// Look at the checks on the head of `watch`'s base branch once: hold
+    /// the base when its required checks fail, filing the task with the
+    /// suspect merges once per red period, and clear the hold when they
+    /// pass. GitHub that cannot be read leaves the base as it was.
+    fn look(&self, watch: MainWatch) -> impl Future<Output = Result<MainLook, StepError>> + Send;
 }
 
 /// The people Macro knows.
@@ -365,6 +426,16 @@ pub trait FactoryService: Send + Sync + 'static {
         user_id: MacroUserIdStr<'static>,
         hand_back: HandBack,
     ) -> impl Future<Output = Result<(), FactoryError>> + Send;
+
+    /// Clear the Main Hold on the branch `base_branch` of the repository
+    /// `repo_url`, for an operator: a hold no look can clear, as when no
+    /// owner reaches the repository any more. A later red look holds the
+    /// base again. Whether a hold was set.
+    fn clear_main_hold(
+        &self,
+        repo_url: &str,
+        base_branch: &str,
+    ) -> impl Future<Output = Result<bool, FactoryError>> + Send;
 
     /// Cancel `actor`'s Run. Cancelling a Run that ended cancelled changes
     /// nothing.

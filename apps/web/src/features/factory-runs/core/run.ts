@@ -100,6 +100,24 @@ export function isTampered(changes: ControlFileChanges): boolean {
   return changes.unlisted || changes.tampered.length > 0;
 }
 
+/**
+ * The base branch a Run merges to is red: its required checks fail, so no
+ * Run merges to it until they pass again.
+ */
+export type MainHold = {
+  /** When the base was first seen red. */
+  since: string;
+  /** The head commit the checks fail on. */
+  headSha: string;
+  /** The failing checks, one line each. */
+  failed: string;
+  /** The task that names the merges since the base was last green. */
+  taskId?: string;
+};
+
+/** Why a base branch's required checks hold no merge. */
+export type BaseRequiredChecks = 'unread' | 'none';
+
 /** One Run of a Flow, with the Steps it took in the order they started. */
 export type Run = {
   id: string;
@@ -111,6 +129,13 @@ export type Run = {
   controlFiles?: ControlFileChanges;
   end?: { outcome: RunOutcome; endedAt: string };
   steps: RunStep[];
+  /** While the Run is at its merge and its base branch is red. */
+  mainHold?: MainHold;
+  /**
+   * While the Run is at its merge, why its base branch's required checks
+   * hold nothing: they couldn't be read, or the branch requires none.
+   */
+  baseRequiredChecks?: BaseRequiredChecks;
 };
 
 /** A Flow a person can start a Run of. */

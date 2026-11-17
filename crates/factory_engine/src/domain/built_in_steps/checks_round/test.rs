@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use super::super::BuiltInSteps;
 use crate::domain::checks::CHECKS_FILE;
-use crate::domain::fakes::{FakeGithub, FakeRepo};
+use crate::domain::fakes::{FakeGithub, FakeRepo, FakeWatches};
 use crate::domain::flow::StepName;
 use crate::domain::models::{AgentAnswer, AgentTask, AgentTurn, StepInput, StepReport};
 use crate::domain::ports::{AgentFailure, Retryable, StepAgent, StepExecutor};
@@ -212,7 +212,7 @@ async fn run(
 ) -> Result<StepReport, super::BuiltInStepError> {
     let steps = BuiltInSteps::new(
         agent.clone(),
-        PullRequestSteps::new(github.clone(), repo.clone()),
+        PullRequestSteps::new(github.clone(), repo.clone(), FakeWatches::default()),
     );
     let entry = EntryId::try_from(step.to_string()).expect("valid");
     repo.start_step(input.key, &entry, 1).await.expect("start");

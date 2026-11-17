@@ -10,7 +10,7 @@ use uuid::Uuid;
 use super::{CI_WAIT, PullRequestStepError, PullRequestSteps};
 
 mod control_files;
-use crate::domain::fakes::{FakeGithub, FakeRepo, ci, suite};
+use crate::domain::fakes::{FakeGithub, FakeRepo, FakeWatches, ci, suite};
 use crate::domain::models::{
     Check, CheckState, CheckSuite, CommitStatus, HeadChecks, PullRequestState, RequiredCheck,
     RequiredChecks, StepInput, StepReport,
@@ -39,8 +39,11 @@ fn input(run_id: RunId) -> StepInput<'static> {
     }
 }
 
-fn steps(github: &FakeGithub, repo: &FakeRepo) -> PullRequestSteps<FakeGithub, FakeRepo> {
-    PullRequestSteps::new(github.clone(), repo.clone())
+fn steps(
+    github: &FakeGithub,
+    repo: &FakeRepo,
+) -> PullRequestSteps<FakeGithub, FakeRepo, FakeWatches> {
+    PullRequestSteps::new(github.clone(), repo.clone(), FakeWatches::default())
 }
 
 fn outcome(report: &StepReport) -> &str {

@@ -374,6 +374,31 @@ export type LinkTaskRequest = {
 export type MacroUserIdStr = string;
 
 /**
+ * A hold on a base branch whose required checks failed. It lasts until the
+ * checks on the base's head pass again.
+ */
+export type MainHold = {
+    /**
+     * The checks that failed, one line each, with their pages.
+     */
+    failed: string;
+    /**
+     * The base's head commit, as the checks were last seen failing on it.
+     */
+    headSha: string;
+    /**
+     * When the base was first seen red, in this red period.
+     */
+    since: string;
+    /**
+     * The task filed with the merges made since the base was last green:
+     * its task document's id, once it is filed. None before then, or once
+     * the task document is deleted.
+     */
+    taskId?: string | null;
+};
+
+/**
  * A name a Flow gives (an outcome, a Gate's answer) and how often it came.
  */
 export type NamedCount = {
@@ -454,6 +479,11 @@ export type Repository = {
 };
 
 /**
+ * Why a base branch's required checks decide nothing.
+ */
+export type RequiredChecksState = 'unread' | 'none';
+
+/**
  * A job in a Flow, such as `planner`, `writer`, `reviewer` or `fixer`. An
  * entry whose Step an agent does names the Role, and the factory's agent
  * definition lists the Agents that may fill it.
@@ -500,6 +530,8 @@ export type Run = {
  * A Run and the Steps it took.
  */
 export type RunDetail = {
+    baseRequiredChecks?: null | RequiredChecksState;
+    mainHold?: null | MainHold;
     /**
      * The Run.
      */

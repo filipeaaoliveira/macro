@@ -1,6 +1,7 @@
 //! Axum router for the Run API.
 
 mod control_files;
+mod main_hold;
 #[cfg(test)]
 mod test;
 
@@ -84,6 +85,9 @@ impl<S, Auth> FromRef<FactoryRouterState<S, Auth>> for MacroAuthorizationState<A
 /// - `GET /settings/control-files` — the Control File patterns the caller's
 ///   Runs are checked against.
 /// - `PUT /settings/control-files` — set them, or go back to the default.
+/// - `POST /internal/main-holds/clear` — an internal caller, for an
+///   operator, clears a base branch's Main Hold; not in the OpenAPI
+///   document.
 pub fn factory_router<S, Auth, T>(state: FactoryRouterState<S, Auth>) -> Router<T>
 where
     S: FactoryService,
@@ -109,6 +113,10 @@ where
             "/settings/control-files",
             get(control_files::get_control_files_handler::<S, Auth>)
                 .put(control_files::set_control_files_handler::<S, Auth>),
+        )
+        .route(
+            "/internal/main-holds/clear",
+            post(main_hold::clear_main_hold_handler::<S, Auth>),
         )
         .with_state(state)
 }

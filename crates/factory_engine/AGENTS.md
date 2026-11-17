@@ -290,7 +290,60 @@ whose Gate approved before its files were read, takes it too, and nothing
 in the workflow or the interpreter changed. A pull request merged outside
 the Run is not compared again, since GitHub's comparison of a merged head
 with its base lists nothing: the Steps keep, and name, the Control Files
-last read. Nothing but a person's answer approves them. The pull
+last read. Nothing but a person's answer approves them.
+
+A Main Hold stops merges while a base branch is red (`src/domain/main_hold.rs`).
+`merge` records each merge it makes or finds (`factory_merge`) and signals the
+watch of its base to look again (`factory_look_again`, signal-with-start): one
+`MainWatchWorkflow` per repository and branch
+(`src/inbound/temporal/main_watch.rs`, workflow id
+`factory-main-watch:{repo url}:{branch}`), so a merge that lands while a watch
+ends is still looked at; the signal names the Run, as whose owner the watch
+reads too. A watch that does not start is logged, never the merged Step's
+failure. Each look (`factory_look_at_main`) reads GitHub as the owners of the
+base's 10 latest merges, newest first, then of the Run that last signalled,
+passing to the next when GitHub refuses one (a link that no longer works,
+access lost); it looks at once and then every 3 minutes. Only the checks
+the base requires decide: one that failed, with no run or status of it that
+passed, is red; all passed is green, so a re-run that passes clears it; one
+not finished keeps it pending. A required check with no run or status on
+the head at all, as one that runs only on pull requests, does not apply once
+every other check on the head finished, something was reported, no suite
+made in the last 5 minutes is still empty, and `REQUIRED_GRACE` (20
+minutes) passed since the base's latest merge: a fresh head whose runs
+GitHub has not made yet, or a status a CI outside GitHub posts late, keeps
+it pending. A green look counts for a head at or after the latest merge
+because the merge is recorded only once GitHub merged it, and a merge
+recorded after the look's read began keeps the watch going. Required
+checks no owner can read keep a hold a red look set, and otherwise hold
+nothing: the base is marked `unread`. A base that requires no checks, as
+read in full, holds nothing: a hold is lifted, its task gets a comment
+saying why, and the base is marked `none`. Runs at their merge show
+either (`baseRequiredChecks`). GitHub that cannot be read leaves the base as
+it was. An operator clears a hold no look can clear with `POST
+/internal/main-holds/clear` (`{"repoUrl", "baseBranch"}`, the internal key
+only, not in the OpenAPI document); a later red look holds it again.
+A red look holds the base (`factory_main_hold`) and files one task per red
+period, as that Run's owner, in the initiative of that Run's task (its
+Project property), naming the factory merges to the base since its checks
+last passed, oldest first, with their pull requests
+(`outbound/document_hold_tasks.rs`, through the document storage service).
+The task is claimed before it is filed, so a retry or a second look files
+none; a filing that fails gives the claim back, a claim never filed is
+taken again after 15 minutes, and a task filed then deleted is not filed
+again in the same red period. A green look clears the hold, unless its
+read started before the hold's red one. The watch never ends while the base
+is held or a look fails; with nothing held it ends on a green or unread
+look, unless a merge landed after the look's read or signalled during it,
+and, while checks still run, once the base's latest merge is 6 hours old.
+It continues as new every 200 looks. While the base is held, a Run at its
+merge (an entry that runs `ready_to_merge` or `merge`) shows the hold
+(`mainHold` in the Run API), and `merge`, even once its Gate was approved,
+merges nothing: it signals the watch, waits for the hold to clear for up to
+`HOLD_WAIT` (25 minutes), then ends `held`, which the `code` Flow sends back
+to its merge Gate (the Gate's visits start over), so the person is asked
+again with the hold shown. A Run in flight on an older `code` Flow, which
+routes no `held`, fails there instead. The pull
 request's description names the Run's task as `MACRO-{short id}`, so GitHub's
 webhook links them, and is cut to GitHub's 65,536 characters in its request
 part only.
@@ -313,6 +366,8 @@ part only.
   the checks rounds of `write` and `fix`, and the checks file they read.
 - `src/domain/control_files.rs`: Control Files, the default patterns, and
   what makes a Run Tampered.
+- `src/domain/main_hold.rs` and `src/inbound/temporal/main_watch.rs`: the
+  Main Hold, its looks at a base branch and the watch that makes them.
 - `flows/`: the built-in Flows, each named for its file
   (`src/domain/built_in_flows.rs`). `GET /flows` lists those whose Steps the
   worker serves, with their `description` and whether they work on a
@@ -322,8 +377,10 @@ part only.
 
 - Owns: the Flow format, its interpreter, Gates, the workflow and its
   activities, the Run API's router, the built-in Flows (`flows/`) and Steps,
-  the `StepAgent` port with its local stand-in, and the `PullRequests` port
-  with its GitHub adapter.
+  the `StepAgent` port with its local stand-in, the `PullRequests` port
+  with its GitHub adapter, and the Main Hold: its watch workflow, the
+  `MainWatches` port with its Temporal adapter, and the `HoldTasks` port
+  with its document storage adapter.
 - Not here: the Run, Step and Gate tables → `crates/factory_records`; the process
   that hosts the API and the worker → `services/factory_service`.
 
@@ -334,6 +391,7 @@ part only.
   `agent_correlation`, `macro_authorization`, `macro_user_id`,
   `entity_access` (ports), `document_storage_service_client`,
   `authentication_service_client` (accounts and linked GitHub tokens),
+  `models_properties` and `system_properties` (a task's Project property),
   `github` (the user-token client), the Temporal Rust SDK.
 - Used by: `services/factory_service`.
 
@@ -388,8 +446,12 @@ part only.
   factory's retries; it is not meant for upstream on its own.
 - The workflow must stay deterministic: everything it decides comes from the
   interpreter and the activities' results, never a clock, a random number or I/O.
-- Renaming `TASK_QUEUE`, `FLOW_WORKFLOW`, `ANSWER_GATE_UPDATE` or an
-  activity's `name` strands the Runs in flight on the old name.
+- Renaming `TASK_QUEUE`, `FLOW_WORKFLOW`, `ANSWER_GATE_UPDATE`,
+  `MAIN_WATCH_WORKFLOW` or an activity's `name` strands the Runs and watches
+  in flight on the old name.
+- A watch whose owner's GitHub link stops working keeps the hold and goes
+  on looking; the next merge to the base, or a held `merge`, makes its
+  owner the one the watch reads as.
 - Changing what the workflow or the interpreter decides breaks the replay of
   Runs already running: gate the change with Temporal patching
   (`ctx.patched`) or worker versioning.

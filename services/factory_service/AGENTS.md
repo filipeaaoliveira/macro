@@ -10,7 +10,8 @@ worker that walks each Run's Flow, in one process.
 - `src/main.rs`: composition root — config, MacroDB pool, Temporal client and
   worker, router, shutdown.
 - `src/config.rs`: `DATABASE_URL`, `INTERNAL_API_KEY`, `TEMPORAL_ADDRESS`,
-  `DOCUMENT_STORAGE_SERVICE_AUTH_KEY` (reading the tasks Runs work on),
+  `DOCUMENT_STORAGE_SERVICE_AUTH_KEY` (reading the tasks Runs work on, and
+  filing a Main Hold's task as the Run's owner),
   `AUTHENTICATION_SERVICE_SECRET_KEY` (telling which accounts exist),
   `FACTORY_AGENTS` (optional: the agent definition, the Agents doing agent
   Steps).
@@ -114,3 +115,14 @@ worker that walks each Run's Flow, in one process.
   serves it at `/factory`, where the web app reaches it.
 - The API and the worker stop together: when either stops, the process
   shuts the other down and exits.
+- The worker also runs the watches of the base branches Runs merge to
+  (`factory_main_watch`), on the same task queue. A Main Hold's task is
+  filed through the document storage service's `POST /documents/create_task`,
+  read through `GET /properties/entities/DOCUMENT/{id}` and commented on
+  through `POST /documents/{id}/comments/text`, as the Run's owner with the
+  internal key, so the service needs that service's public routes reachable
+  at `DocumentStorageServiceUrl`.
+- An operator clears a Main Hold no look can clear: `POST
+  http://localhost:8113/internal/main-holds/clear` with the
+  `x-internal-auth-key` header and `{"repoUrl":
+  "https://github.com/<owner>/<name>", "baseBranch": "main"}`.

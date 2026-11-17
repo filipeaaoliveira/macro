@@ -1,5 +1,9 @@
 //! In-memory stand-ins for the factory's records, for the domain's tests.
 
+mod main_hold;
+
+pub(crate) use main_hold::{FakeHoldTasks, FakeMain, FakeWatches};
+
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Arc, Mutex};
 
@@ -42,6 +46,22 @@ pub(crate) struct FakeSession {
 #[error("fake failure")]
 pub(crate) struct FakeError;
 
+/// What [`FakeGithub`] fails with: GitHub down, worth trying again, or a
+/// refusal of the owner, which is not.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum FakeGithubError {
+    #[error("github is down")]
+    Down,
+    #[error("github refused the owner")]
+    Refused,
+}
+
+impl Retryable for FakeGithubError {
+    fn retryable(&self) -> bool {
+        matches!(self, Self::Down)
+    }
+}
+
 /// A fake's failure is the transport's: worth trying again.
 impl Retryable for FakeError {
     fn retryable(&self) -> bool {
@@ -83,6 +103,8 @@ pub(crate) struct FakeRepo {
     pub(crate) teams: Arc<Mutex<BTreeMap<String, TeamMembership>>>,
     /// The Control File patterns each team set.
     pub(crate) control_files: Arc<Mutex<BTreeMap<Uuid, Vec<String>>>>,
+    /// The merges Runs made and the holds on their bases.
+    pub(crate) main: Arc<Mutex<FakeMain>>,
 }
 
 /// Everyone has an account but `macro|nobody@example.com`.
@@ -831,6 +853,15 @@ pub(crate) struct FakeGithubState {
     pub(crate) changed: Option<Vec<String>>,
     /// The branches or commits whose changes were asked for, in order.
     pub(crate) compared: Vec<String>,
+    /// The base branch's head commit and the checks on it; none when the
+    /// owner reaches no such branch.
+    pub(crate) base: Option<(String, HeadChecks)>,
+    /// Whether reads of the base branch fail, as GitHub down does.
+    pub(crate) base_unreadable: bool,
+    /// The owners GitHub refuses, as when their link no longer works.
+    pub(crate) refused_owners: BTreeSet<String>,
+    /// When set, each read of the base branch waits to be let go.
+    pub(crate) base_gate: Option<Arc<tokio::sync::Semaphore>>,
 }
 
 /// GitHub in memory, for one Run's branch: opening its pull request makes
@@ -840,6 +871,8 @@ pub(crate) struct FakeGithub {
     pub(crate) state: Arc<Mutex<FakeGithubState>>,
     /// Told each time the pull request is looked for.
     pub(crate) read: Arc<tokio::sync::Notify>,
+    /// Told each time the base branch's checks are read.
+    pub(crate) base_read: Arc<tokio::sync::Notify>,
 }
 
 impl FakeGithub {
@@ -925,13 +958,13 @@ pub(crate) fn ci(conclusion: Option<&str>) -> HeadChecks {
 }
 
 impl PullRequests for FakeGithub {
-    type Err = FakeError;
+    type Err = FakeGithubError;
 
     async fn repository_access(
         &self,
         _owner: &MacroUserIdStr<'static>,
         _repository: &CodeRepository,
-    ) -> Result<Option<RepositoryAccess>, FakeError> {
+    ) -> Result<Option<RepositoryAccess>, FakeGithubError> {
         let state = self.state();
         Ok((!state.unreachable).then(|| RepositoryAccess {
             default_branch: "main".to_string(),
@@ -944,7 +977,7 @@ impl PullRequests for FakeGithub {
         _owner: &MacroUserIdStr<'static>,
         _repository: &CodeRepository,
         _branch: &str,
-    ) -> Result<Option<PullRequest>, FakeError> {
+    ) -> Result<Option<PullRequest>, FakeGithubError> {
         Ok(self.read().map(|(pull_request, _)| pull_request))
     }
 
@@ -954,17 +987,43 @@ impl PullRequests for FakeGithub {
         _repository: &CodeRepository,
         _branch: &str,
         _all_runs: bool,
-    ) -> Result<Option<(PullRequest, HeadChecks)>, FakeError> {
+    ) -> Result<Option<(PullRequest, HeadChecks)>, FakeGithubError> {
         Ok(self.read())
+    }
+
+    async fn branch_checks(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        _branch: &str,
+        _all_runs: bool,
+    ) -> Result<Option<(String, HeadChecks)>, FakeGithubError> {
+        let gate = self.state().base_gate.clone();
+        self.base_read.notify_one();
+        if let Some(gate) = gate {
+            gate.acquire().await.expect("gate").forget();
+        }
+        let state = self.state();
+        if state.base_unreadable {
+            return Err(FakeGithubError::Down);
+        }
+        Ok(state.base.clone())
     }
 
     async fn required_checks(
         &self,
-        _owner: &MacroUserIdStr<'static>,
+        owner: &MacroUserIdStr<'static>,
         _repository: &CodeRepository,
         _base: &str,
-    ) -> Result<Option<RequiredChecks>, FakeError> {
-        Ok(self.state().required.clone())
+    ) -> Result<Option<RequiredChecks>, FakeGithubError> {
+        let state = self.state();
+        if state.base_unreadable {
+            return Err(FakeGithubError::Down);
+        }
+        if state.refused_owners.contains(owner.as_ref()) {
+            return Err(FakeGithubError::Refused);
+        }
+        Ok(state.required.clone())
     }
 
     async fn file_text(
@@ -973,7 +1032,7 @@ impl PullRequests for FakeGithub {
         _repository: &CodeRepository,
         branch: &str,
         path: &str,
-    ) -> Result<Option<String>, FakeError> {
+    ) -> Result<Option<String>, FakeGithubError> {
         let file = (branch.to_string(), path.to_string());
         Ok(self.state().files.get(&file).cloned())
     }
@@ -984,7 +1043,7 @@ impl PullRequests for FakeGithub {
         _repository: &CodeRepository,
         _base: &str,
         branch: &str,
-    ) -> Result<Option<Vec<String>>, FakeError> {
+    ) -> Result<Option<Vec<String>>, FakeGithubError> {
         let mut state = self.state();
         state.compared.push(branch.to_string());
         // Once merged, the base holds the head: GitHub lists no change.
@@ -1003,7 +1062,7 @@ impl PullRequests for FakeGithub {
         _owner: &MacroUserIdStr<'static>,
         repository: &CodeRepository,
         pull_request: &OpenPullRequest,
-    ) -> Result<Opening, FakeError> {
+    ) -> Result<Opening, FakeGithubError> {
         let mut state = self.state();
         if let Some(why) = state.open_refusal.clone() {
             return Ok(Opening::Refused(why));
@@ -1025,7 +1084,7 @@ impl PullRequests for FakeGithub {
         _repository: &CodeRepository,
         _number: u64,
         head_sha: &str,
-    ) -> Result<Merging, FakeError> {
+    ) -> Result<Merging, FakeGithubError> {
         let mut state = self.state();
         state.merges.push(head_sha.to_string());
         if let Some(why) = state.merge_refusal.clone() {

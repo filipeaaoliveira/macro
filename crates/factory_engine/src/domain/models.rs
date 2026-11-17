@@ -4,6 +4,7 @@
 mod test;
 
 use chrono::{DateTime, Utc};
+use factory_records::domain::main_hold::{MainHold, RequiredChecksState};
 use factory_records::domain::models::{
     EntryId, Outcome, Repository, Role, Run, RunId, RunOutcome, Step, StepKey,
 };
@@ -433,6 +434,14 @@ pub struct RunDetail {
     pub run: Run,
     /// Its Steps, in the order they started.
     pub steps: Vec<Step>,
+    /// The Main Hold on the base branch the Run merges to, while the Run
+    /// is at its merge and the base's required checks fail: the Run does
+    /// not merge until it clears, even once its merge Gate is approved.
+    pub main_hold: Option<MainHold>,
+    /// Why the checks the base branch requires decide nothing, while the
+    /// Run is at its merge: they could not be read, or the base requires
+    /// none. Nothing holds the merge on them.
+    pub base_required_checks: Option<RequiredChecksState>,
 }
 
 /// The Control File patterns a person's Runs are checked against: their

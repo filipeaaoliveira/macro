@@ -4,8 +4,9 @@ use axum::Router;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode};
 use bot_id::BotId;
+use factory_records::domain::main_hold::{MainHoldRepository, RequiredChecksState};
 use factory_records::domain::models::{
-    EntryId, HandBack, NewRun, Outcome, RunId, RunInsert, StepKey,
+    EntryId, HandBack, NewRun, Outcome, Repository, RunId, RunInsert, RunOutcome, StepKey,
 };
 use factory_records::domain::ports::RunRepository;
 use macro_authorization::{
@@ -23,7 +24,7 @@ use uuid::Uuid;
 
 use super::{FactoryRouterState, factory_router};
 use crate::domain::built_in_steps::BuiltInSteps;
-use crate::domain::fakes::{FakeGithub, FakeRepo};
+use crate::domain::fakes::{FakeGithub, FakeRepo, FakeWatches};
 use crate::domain::gate::AnswerGate;
 use crate::domain::models::{ControlFilesSettings, FactoryError, FlowSummary, RunDetail, RunStart};
 use crate::domain::ports::{AnswerDelivery, FactoryService, RunWorkflows, RunWorkflowsError};
@@ -257,6 +258,14 @@ impl FactoryService for FakeService {
     ) -> Result<(), FactoryError> {
         Err(self.refusing(actor))
     }
+
+    async fn clear_main_hold(
+        &self,
+        _repo_url: &str,
+        _base_branch: &str,
+    ) -> Result<bool, FactoryError> {
+        Ok(false)
+    }
 }
 
 fn router(answer: fn() -> FactoryError) -> (Router, Arc<FakeService>) {
@@ -306,7 +315,7 @@ fn github_router(repo: &FakeRepo, github: FakeGithub) -> Router {
         AcceptingWorkflows,
         BuiltInSteps::new(
             LocalAgent,
-            PullRequestSteps::new(github.clone(), repo.clone()),
+            PullRequestSteps::new(github.clone(), repo.clone(), FakeWatches::default()),
         ),
         repo.clone(),
         repo.clone(),
@@ -930,4 +939,133 @@ async fn a_user_api_key_acts_for_its_owner() {
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
     assert_eq!(*service.actors.lock().expect("actors"), [ALICE]);
+}
+
+/// A Run at its merge on a held base shows the hold, which its merge waits
+/// on; one that ended, is not at its merge yet, or works on another base
+/// shows none. A base whose required checks could not be read says so.
+#[tokio::test]
+async fn a_run_at_its_merge_on_a_held_base_shows_the_main_hold() {
+    let repo = FakeRepo::default();
+    let alice = MacroUserIdStr::try_from(ALICE.to_string()).expect("valid");
+    let main = Repository {
+        url: "https://github.com/macro/app".to_string(),
+        base_branch: "main".to_string(),
+    };
+    let release = Repository {
+        base_branch: "release".to_string(),
+        ..main.clone()
+    };
+    let mut runs = Vec::new();
+    for (base, entry) in [
+        (&main, "merge-gate"),
+        (&main, "merge-gate"),
+        (&release, "merge"),
+        (&main, "ci"),
+    ] {
+        let run_id = RunId::generate();
+        repo.insert_run(run_id, "code", "Add dark mode", &alice, None, Some(base))
+            .await
+            .expect("insert");
+        let entry = EntryId::try_from(entry.to_string()).expect("entry");
+        repo.start_step(StepKey { run_id, seq: 1 }, &entry, 1)
+            .await
+            .expect("start");
+        runs.push(run_id);
+    }
+    repo.end_run(runs[1], RunOutcome::Manual)
+        .await
+        .expect("end");
+    repo.hold_main(
+        &main,
+        "2222222222222222222222222222222222222222",
+        "- test (failure): https://ci/1",
+        chrono::Utc::now(),
+    )
+    .await
+    .expect("hold");
+    repo.mark_required(&release, RequiredChecksState::Unread)
+        .await
+        .expect("unread");
+
+    let read = |run_id: RunId| {
+        let router = records_router(&repo);
+        async move {
+            let response = router
+                .oneshot(call(
+                    "GET",
+                    &format!("/runs/{run_id}"),
+                    Caller::User("alice"),
+                    serde_json::Value::Null,
+                ))
+                .await
+                .expect("response");
+            assert_eq!(response.status(), StatusCode::OK);
+            body(response).await
+        }
+    };
+
+    let held = read(runs[0]).await;
+    assert_eq!(
+        held["mainHold"]["headSha"],
+        "2222222222222222222222222222222222222222"
+    );
+    assert_eq!(held["mainHold"]["failed"], "- test (failure): https://ci/1");
+    assert!(held["mainHold"]["since"].is_string());
+    assert!(held["mainHold"]["taskId"].is_null());
+    assert!(held["mainHold"].get("taskClaimed").is_none());
+    assert!(held["baseRequiredChecks"].is_null());
+    assert!(read(runs[1]).await["mainHold"].is_null());
+    let unread = read(runs[2]).await;
+    assert!(unread["mainHold"].is_null());
+    assert_eq!(unread["baseRequiredChecks"], "unread");
+    assert!(read(runs[3]).await["mainHold"].is_null());
+}
+
+/// Only an internal caller clears a Main Hold: a person, even the owner of
+/// Runs on the base, is refused.
+#[tokio::test]
+async fn only_an_internal_caller_clears_a_main_hold() {
+    let repo = FakeRepo::default();
+    let main = Repository {
+        url: "https://github.com/macro/app".to_string(),
+        base_branch: "main".to_string(),
+    };
+    repo.hold_main(
+        &main,
+        "2222222222222222222222222222222222222222",
+        "- test (failure)",
+        chrono::Utc::now() - chrono::TimeDelta::minutes(1),
+    )
+    .await
+    .expect("hold");
+    let clear = serde_json::json!({
+        "repoUrl": "https://github.com/macro/app",
+        "baseBranch": "main",
+    });
+
+    let refused = records_router(&repo)
+        .oneshot(call(
+            "POST",
+            "/internal/main-holds/clear",
+            Caller::User("alice"),
+            clear.clone(),
+        ))
+        .await
+        .expect("response");
+    assert!(refused.status().is_client_error(), "{}", refused.status());
+    assert!(repo.main_hold(&main).await.expect("read").is_some());
+
+    let cleared = records_router(&repo)
+        .oneshot(call(
+            "POST",
+            "/internal/main-holds/clear",
+            Caller::Internal(None),
+            clear,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(cleared.status(), StatusCode::OK);
+    assert_eq!(body(cleared).await["held"], true);
+    assert_eq!(repo.main_hold(&main).await.expect("read"), None);
 }

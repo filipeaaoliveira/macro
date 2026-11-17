@@ -4,11 +4,14 @@
 #[cfg(test)]
 mod test;
 
+use std::collections::BTreeMap;
+
 use agent_session::domain::session_task::TaskDocumentId;
 use chrono::Utc;
+use factory_records::domain::main_hold::{BaseState, MainHoldRepository};
 use factory_records::domain::models::{
     HandBack, MAX_NOTE_BYTES, MAX_OUTPUT_BYTES, MAX_REQUEST_BYTES, NewRun, Outcome, Repository,
-    Run, RunId, RunInsert, RunOutcome, TaskLink, TeamMembership,
+    Run, RunId, RunInsert, RunOutcome, Step, TaskLink, TeamMembership,
 };
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
@@ -65,7 +68,7 @@ pub struct FactoryServiceImpl<R, W, E, U, T, G> {
 
 impl<R, W, E, U, T, G> FactoryServiceImpl<R, W, E, U, T, G>
 where
-    R: RunRepository,
+    R: RunRepository + MainHoldRepository,
     W: RunWorkflows,
     E: StepExecutor,
     U: UserDirectory,
@@ -184,6 +187,57 @@ where
             .ok_or(FactoryError::NotFound)
     }
 
+    /// Whether `steps`' latest Step is at a merge: its entry runs
+    /// `ready_to_merge` or `merge` in a built-in Flow.
+    fn at_merge(&self, steps: &[Step]) -> bool {
+        let Some(latest) = steps.last() else {
+            return false;
+        };
+        BUILT_IN_FLOWS
+            .into_iter()
+            .filter_map(|flow| flow.read(|step| self.executor.serves(step)).ok())
+            .flat_map(|flow| flow.entries)
+            .any(|entry| {
+                entry.id == latest.entry
+                    && matches!(entry.step.as_str(), "ready_to_merge" | "merge")
+            })
+    }
+
+    /// What the Run shows of the base branch it merges to: nothing unless
+    /// it goes and is at its merge, so only a Run about to merge shows a
+    /// hold. `known` keeps what was read of each base, for a list of Runs.
+    async fn base_shown(
+        &self,
+        run: &Run,
+        steps: &[Step],
+        known: &mut BTreeMap<(String, String), BaseState>,
+    ) -> Result<BaseState, FactoryError> {
+        let Some(repository) = run.repository.as_ref() else {
+            return Ok(BaseState::default());
+        };
+        if run.end.is_some() || !self.at_merge(steps) {
+            return Ok(BaseState::default());
+        }
+        let base = (repository.url.clone(), repository.base_branch.clone());
+        if let Some(state) = known.get(&base) {
+            return Ok(state.clone());
+        }
+        let state = self.repo.base_state(repository).await.map_err(internal)?;
+        known.insert(base, state.clone());
+        Ok(state)
+    }
+
+    /// `run` with its Steps, as the Run API shows it.
+    async fn detail(&self, run: Run, steps: Vec<Step>) -> Result<RunDetail, FactoryError> {
+        let base = self.base_shown(&run, &steps, &mut BTreeMap::new()).await?;
+        Ok(RunDetail {
+            run,
+            steps,
+            main_hold: base.hold,
+            base_required_checks: base.required,
+        })
+    }
+
     /// Remove a Run whose workflow did not start, unless it did after all:
     /// a start that failed after the server took it leaves a workflow
     /// behind, which needs its Run.
@@ -207,7 +261,7 @@ where
 
 impl<R, W, E, U, T, G> FactoryService for FactoryServiceImpl<R, W, E, U, T, G>
 where
-    R: RunRepository,
+    R: RunRepository + MainHoldRepository,
     W: RunWorkflows,
     E: StepExecutor,
     U: UserDirectory,
@@ -308,10 +362,7 @@ where
             return Err(error.into());
         }
 
-        Ok(RunDetail {
-            run,
-            steps: Vec::new(),
-        })
+        self.detail(run, Vec::new()).await
     }
 
     #[tracing::instrument(skip(self, actor))]
@@ -339,7 +390,7 @@ where
                 .map_err(internal)?;
             run = self.owned_run(actor, id).await?;
         }
-        Ok(RunDetail { run, steps })
+        self.detail(run, steps).await
     }
 
     #[tracing::instrument(skip(self, actor))]
@@ -369,13 +420,45 @@ where
             .map_err(internal)?;
         let ids: Vec<RunId> = runs.iter().map(|run| run.id).collect();
         let mut steps = self.repo.list_runs_steps(&ids).await.map_err(internal)?;
-        Ok(runs
-            .into_iter()
-            .map(|run| {
-                let steps = steps.remove(&run.id).unwrap_or_default();
-                RunDetail { run, steps }
-            })
-            .collect())
+        // Runs on one base share what was read of it.
+        let mut known = BTreeMap::new();
+        let mut details = Vec::with_capacity(runs.len());
+        for run in runs {
+            let steps = steps.remove(&run.id).unwrap_or_default();
+            let base = self.base_shown(&run, &steps, &mut known).await?;
+            details.push(RunDetail {
+                run,
+                steps,
+                main_hold: base.hold,
+                base_required_checks: base.required,
+            });
+        }
+        Ok(details)
+    }
+
+    #[tracing::instrument(skip(self))]
+    async fn clear_main_hold(
+        &self,
+        repo_url: &str,
+        base_branch: &str,
+    ) -> Result<bool, FactoryError> {
+        let repository = CodeRepository::parse(repo_url).ok_or(FactoryError::InvalidRepository)?;
+        let base = Repository {
+            url: repository.url(),
+            base_branch: base_branch.to_string(),
+        };
+        let held = self
+            .repo
+            .main_hold(&base)
+            .await
+            .map_err(internal)?
+            .is_some();
+        self.repo
+            .clear_main_hold(&base, Utc::now())
+            .await
+            .map_err(internal)?;
+        tracing::info!(held, "an operator cleared a main hold");
+        Ok(held)
     }
 
     #[tracing::instrument(skip(self, actor))]

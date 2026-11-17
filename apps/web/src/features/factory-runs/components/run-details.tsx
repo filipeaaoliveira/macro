@@ -3,6 +3,8 @@ import { t } from '@app/lib/i18n';
 import { Button } from '@ui';
 import { createSignal, createUniqueId, Show } from 'solid-js';
 import {
+  type BaseRequiredChecks,
+  type MainHold,
   type Run,
   type RunStatus,
   type RunStep,
@@ -85,6 +87,10 @@ export function RunSummary(props: {
 /** The Run's Steps, the output a waiting Gate asks about open. */
 export function RunSteps(props: {
   steps: RunStep[];
+  /** The hold on the Run's base branch, shown on its latest Step. */
+  mainHold?: MainHold;
+  baseRequiredChecks?: BaseRequiredChecks;
+  baseBranch?: string;
   status: RunStatus;
   time: (value: string) => string;
 }) {
@@ -101,6 +107,9 @@ export function RunSteps(props: {
       >
         <RunTimeline
           steps={props.steps}
+          mainHold={props.mainHold}
+          baseRequiredChecks={props.baseRequiredChecks}
+          baseBranch={props.baseBranch}
           time={props.time}
           outputOpen={(step) =>
             props.status.kind === 'waiting' &&

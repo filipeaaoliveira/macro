@@ -24,6 +24,16 @@ struct ContentResponse {
 }
 
 #[derive(serde::Deserialize)]
+struct BranchHeadResponse {
+    commit: BranchCommit,
+}
+
+#[derive(serde::Deserialize)]
+struct BranchCommit {
+    sha: String,
+}
+
+#[derive(serde::Deserialize)]
 struct CompareResponse {
     #[serde(default)]
     files: Option<Vec<CompareFile>>,
@@ -37,6 +47,32 @@ struct CompareFile {
 }
 
 impl GithubOauthImpl {
+    /// The commit at the head of `branch`; `None` when the user reaches no
+    /// such branch, as when it or its repository is gone.
+    #[tracing::instrument(skip(self, access_token), err)]
+    pub async fn get_branch_head(
+        &self,
+        access_token: &str,
+        owner: &str,
+        repo: &str,
+        branch: &str,
+    ) -> Result<Option<String>, GithubError> {
+        let branch = urlencoding::encode(branch);
+        let read: Result<BranchHeadResponse, GithubError> = self
+            .read(
+                access_token,
+                &format!("/repos/{owner}/{repo}/branches/{branch}"),
+                &[],
+                "failed to read a branch",
+            )
+            .await;
+        match read {
+            Ok(branch) => Ok(Some(branch.commit.sha)),
+            Err(GithubError::RepositoryUnavailable) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
     /// The text of the file at `path` on `branch`; `None` when the branch
     /// holds no file there (a folder there is not one). A branch or
     /// repository the user cannot reach is
