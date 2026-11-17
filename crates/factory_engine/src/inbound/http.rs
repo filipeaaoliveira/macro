@@ -227,7 +227,7 @@ where
     request_body = CreateRunRequest,
     responses(
         (status = 201, body = RunDetail),
-        (status = 400, body = ErrorResponse),
+        (status = 400, body = RunErrorResponse),
         (status = 401, body = ErrorResponse),
         (status = 403, body = ErrorResponse),
         (status = 500, body = ErrorResponse),
@@ -520,11 +520,47 @@ impl FactoryError {
     }
 }
 
+/// Why a request was refused, where a client acts on the cause.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum RunErrorCode {
+    /// The caller's linked GitHub account cannot reach the repository, or
+    /// none is linked, or the repository has no branch yet.
+    UnreachableRepository,
+    /// The caller's linked GitHub account may read the repository but not
+    /// push to it.
+    NoPushAccess,
+}
+
+/// What a refused or failed request answers: a message, and for a refusal
+/// a client acts on, its code.
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RunErrorResponse {
+    /// What went wrong, in words.
+    pub message: String,
+    /// Why it was refused, when a client acts on the cause.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<RunErrorCode>,
+}
+
+impl FactoryError {
+    /// The code a client acts on, if this error has one.
+    fn code(&self) -> Option<RunErrorCode> {
+        match self {
+            FactoryError::UnreachableRepository => Some(RunErrorCode::UnreachableRepository),
+            FactoryError::NoPushAccess => Some(RunErrorCode::NoPushAccess),
+            _ => None,
+        }
+    }
+}
+
 impl IntoResponse for FactoryError {
     fn into_response(self) -> axum::response::Response {
         // Every error is logged once, here; the handlers' spans do not log
         // it again.
         let status_code = self.status();
+        let code = self.code();
         let message = match self {
             FactoryError::Upstream(upstream) => {
                 tracing::warn!(error = %upstream, "the factory's workflow service failed");
@@ -537,13 +573,7 @@ impl IntoResponse for FactoryError {
             error => error.to_string(),
         };
 
-        (
-            status_code,
-            Json(ErrorResponse {
-                message: message.into(),
-            }),
-        )
-            .into_response()
+        (status_code, Json(RunErrorResponse { message, code })).into_response()
     }
 }
 
@@ -581,6 +611,8 @@ impl IntoResponse for FactoryError {
         Outcome,
         RunId,
         ErrorResponse,
+        RunErrorResponse,
+        RunErrorCode,
     )),
     tags((name = "factory", description = "Runs of the software factory's Flows")),
 )]

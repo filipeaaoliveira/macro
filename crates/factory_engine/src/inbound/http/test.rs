@@ -267,7 +267,11 @@ impl RunWorkflows for AcceptingWorkflows {
 
 /// The Run API over the records in `repo`, as the service serves it.
 fn records_router(repo: &FakeRepo) -> Router {
-    let github = FakeGithub::default();
+    github_router(repo, FakeGithub::default())
+}
+
+/// The Run API over `repo`, acting on GitHub through `github`.
+fn github_router(repo: &FakeRepo, github: FakeGithub) -> Router {
     let service = FactoryServiceImpl::new(
         repo.clone(),
         AcceptingWorkflows,
@@ -626,6 +630,44 @@ async fn a_code_run_starts_on_the_repository_it_names() {
         created["run"]["repository"],
         serde_json::json!({ "url": "https://github.com/macro/app", "baseBranch": "main" })
     );
+}
+
+/// A `code` Run refused because the caller's GitHub account cannot reach
+/// the repository, or cannot push to it, says which, for the client to
+/// name the cause; other refusals carry no code.
+#[tokio::test]
+async fn a_refused_repository_says_why() {
+    let start = |github: FakeGithub, flow: &str| {
+        let repo = FakeRepo::default();
+        let request = serde_json::json!({
+            "flow": flow,
+            "request": "Collapse repeated dashes",
+            "repoUrl": "https://github.com/macro/app"
+        });
+        async move {
+            let response = github_router(&repo, github)
+                .oneshot(call("POST", "/runs", Caller::User("alice"), request))
+                .await
+                .expect("response");
+            (response.status(), body(response).await)
+        }
+    };
+    let unreachable = FakeGithub::default();
+    unreachable.state().unreachable = true;
+    let read_only = FakeGithub::default();
+    read_only.state().read_only = true;
+
+    let (unreachable_status, unreachable) = start(unreachable, "code").await;
+    let (read_only_status, read_only) = start(read_only, "code").await;
+    let (not_used_status, not_used) = start(FakeGithub::default(), "reply").await;
+
+    assert_eq!(unreachable_status, StatusCode::BAD_REQUEST);
+    assert_eq!(unreachable["code"], "unreachableRepository");
+    assert_eq!(read_only_status, StatusCode::BAD_REQUEST);
+    assert_eq!(read_only["code"], "noPushAccess");
+    assert_eq!(not_used_status, StatusCode::BAD_REQUEST);
+    assert_eq!(not_used.get("code"), None);
+    assert!(not_used["message"].is_string());
 }
 
 /// Only a built-in Flow starts: a whole definition, or a name no Flow has,
