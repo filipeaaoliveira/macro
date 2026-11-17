@@ -143,3 +143,34 @@ async fn a_comparison_github_cut_short_is_unknown() {
     assert_eq!(paths, None);
     server.finish();
 }
+
+/// A branch's head is the commit GitHub names for it; a branch the user
+/// reaches none of is none.
+#[tokio::test]
+async fn a_branch_s_head_is_its_commit_or_none() {
+    let (server, client) = answering(
+        "200 OK",
+        r#"{"name":"release/1.0","commit":{"sha":"2222222222222222222222222222222222222222"}}"#,
+    );
+    let head = client
+        .get_branch_head("token", "macro", "app", "release/1.0")
+        .await
+        .unwrap();
+    assert_eq!(
+        head.as_deref(),
+        Some("2222222222222222222222222222222222222222")
+    );
+    let request = server.finish();
+    assert!(
+        request.starts_with("GET /repos/macro/app/branches/release%2F1.0 HTTP/1.1"),
+        "{request}"
+    );
+
+    let (gone, client) = answering("404 Not Found", r#"{"message":"Branch not found"}"#);
+    let head = client
+        .get_branch_head("token", "macro", "app", "main")
+        .await
+        .unwrap();
+    assert_eq!(head, None);
+    gone.finish();
+}
