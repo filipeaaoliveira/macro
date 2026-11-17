@@ -101,6 +101,10 @@ pub struct ReviewFinding {
     /// for, so a retry finds the task rather than making a second one.
     #[serde(skip)]
     pub follow_up_key: Option<Uuid>,
+    /// Whether the owner commented on its follow-up task, one an earlier
+    /// round made, that its round reported the problem again.
+    #[serde(skip)]
+    pub follow_up_commented: bool,
 }
 
 /// How a review round ended.
@@ -331,6 +335,16 @@ pub trait ReviewRoundRepository: Send + Sync + 'static {
         &self,
         key: StepKey,
         place: u16,
+        task_id: Uuid,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// Record that the owner commented on the follow-up task `task_id`
+    /// that the Run's round `round_seq` reported its problem again: on each
+    /// of the round's findings linked to it.
+    fn mark_follow_up_commented(
+        &self,
+        run_id: RunId,
+        round_seq: u16,
         task_id: Uuid,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 

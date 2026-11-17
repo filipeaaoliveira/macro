@@ -80,6 +80,7 @@ struct FindingRow {
     kind: Option<String>,
     follow_up_task_id: Option<String>,
     follow_up_key: Option<Uuid>,
+    follow_up_commented: bool,
 }
 
 fn line(stored: i32) -> Result<u32, PgRunRepositoryErr> {
@@ -123,6 +124,7 @@ impl TryFrom<FindingRow> for ReviewFinding {
                 .map(|id| Uuid::parse_str(&id).map_err(|_| PgRunRepositoryErr::InvalidTaskId(id)))
                 .transpose()?,
             follow_up_key: row.follow_up_key,
+            follow_up_commented: row.follow_up_commented,
         })
     }
 }
@@ -152,7 +154,8 @@ impl PgRunRepository {
             r#"
             SELECT
                 f.run_id, f.round_seq, f.seq, f.place, s.role, f.path, f.start_line, f.end_line,
-                f.problem, f.why, f.blocks_anywhere, f.kind, f.follow_up_task_id, f.follow_up_key
+                f.problem, f.why, f.blocks_anywhere, f.kind, f.follow_up_task_id, f.follow_up_key,
+                f.follow_up_commented
             FROM factory_review_finding f
             JOIN factory_step s ON s.run_id = f.run_id AND s.seq = f.seq
             WHERE f.run_id = ANY($1)
@@ -489,6 +492,28 @@ impl ReviewRoundRepository for PgRunRepository {
             key.run_id.as_uuid(),
             i32::from(key.seq),
             i32::from(place),
+            task_id.to_string(),
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    #[tracing::instrument(err, skip(self), fields(run_id = %run_id, round_seq))]
+    async fn mark_follow_up_commented(
+        &self,
+        run_id: RunId,
+        round_seq: u16,
+        task_id: Uuid,
+    ) -> Result<(), Self::Err> {
+        sqlx::query!(
+            r#"
+            UPDATE factory_review_finding
+            SET follow_up_commented = true
+            WHERE run_id = $1 AND round_seq = $2 AND follow_up_task_id = $3
+            "#,
+            run_id.as_uuid(),
+            i32::from(round_seq),
             task_id.to_string(),
         )
         .execute(&self.pool)

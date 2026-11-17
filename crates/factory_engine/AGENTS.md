@@ -313,7 +313,23 @@ anywhere, or whose file and lines meet a hunk of the diff under review
 follow-up task and holds nothing. Reviewers that report one problem (the
 same file, at lines that meet; a finding with no lines covers its file) make
 one task, which names each of them with what each reported; each finding
-stays recorded and is linked to it. The task is made as the Run's owner, not
+stays recorded and is linked to it. A problem a task of an earlier round
+of the Run is about (its file again, at lines that meet), a revise's rounds
+among them, makes no second task while the task is still there for the
+owner (`task_access`): the oldest such task wins. Its findings are linked
+to it, and a finding linked to a task widens what the task is about for
+later rounds. Then the owner comments on the task, once a round
+(`POST /documents/{id}/comments/text`, quoting the task's `factory run
+{id}`), that the problem was reported again, in which round, by whom and
+where, and the comment is marked on the round's findings
+(`follow_up_commented`). The links come before the comment and the mark
+after it, so a retried close makes a missing comment and never a second
+one, unless the mark itself fails to be kept. A comment that fails is
+logged at error level and holds nothing; it is made again only when the
+close is tried again for another reason. Joined problems are linked and
+commented on before new tasks are made. A task that is gone, or a
+follow-up document storage refused, is not joined: the problem makes a
+task of its own. The task is made as the Run's owner, not
 shared, in the project of the Run's task: the initiative its Project
 property names, read and set as a Main Hold's task does
 (`outbound/task_project.rs`; document storage's `POST

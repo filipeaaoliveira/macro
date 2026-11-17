@@ -39,7 +39,8 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261117184500_factory_review_round.sql`,
   `20261117190000_factory_check_round_commit.sql`,
   `20261117200000_factory_check_round_commit_check.sql`,
-  `20261117210000_factory_main_hold_task_key.sql`).
+  `20261117210000_factory_main_hold_task_key.sql`,
+  `20261117220000_factory_follow_up_commented.sql`).
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
 
 ## Boundaries
@@ -104,8 +105,10 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `classify_findings`, `link_follow_up`, `follow_up_key`, `reask_action`,
   `fail_review_round` and `end_review_round` keep their first write. A
   round that could not open has no commit and a `failure`; a reviewer's
-  answer that was read is in `factory_reviewer_answer`. `follow_up_task_id` references `"Document"` and is cleared
-  when the task is deleted.
+  answer that was read is in `factory_reviewer_answer`. `follow_up_task_id`
+  references `"Document"` and is cleared when the task is deleted.
+  `mark_follow_up_commented` sets `follow_up_commented` on a round's
+  findings linked to a task, and repeating it changes nothing.
 - `factory_run.task_id` references `"Document"` and is cleared when the task
   document is deleted; `link_task` reports a missing task or Run instead of
   failing. `list_task_runs` reads one owner's Runs on a task newest first

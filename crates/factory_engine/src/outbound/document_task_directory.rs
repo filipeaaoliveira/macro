@@ -115,6 +115,20 @@ impl<A: EntityAccessService> TaskDirectory for DocumentTaskDirectory<A> {
         })
         .await
     }
+
+    #[tracing::instrument(err, skip(self, user_id, text))]
+    async fn comment_on_follow_up(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        task_id: Uuid,
+        quote: &str,
+        text: &str,
+    ) -> Result<(), Self::Err> {
+        self.documents
+            .comment_on_text(&task_id.to_string(), user_id.as_ref(), quote, text)
+            .await
+            .map_err(documents)
+    }
 }
 
 /// Whether `user_id` may add a task to the project `initiative` (what a

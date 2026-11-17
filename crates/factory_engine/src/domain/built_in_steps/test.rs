@@ -469,6 +469,7 @@ fn round(seq: u16, head: &str, diff_base: &str, fix_diff: bool) -> ReviewRound {
         kind: Some(kind),
         follow_up_task_id: None,
         follow_up_key: None,
+        follow_up_commented: false,
     };
     ReviewRound {
         round: 2,

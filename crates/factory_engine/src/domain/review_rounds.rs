@@ -7,6 +7,9 @@
 //! outside it becomes a follow-up task, in the project of the Run's task,
 //! and holds nothing. Reviewers that report one problem (the same file, at
 //! lines that meet) make one follow-up task, which names each of them. A
+//! problem a follow-up task of an earlier round of the Run is about (its
+//! file again, at lines that meet) makes no second task: its findings are
+//! linked to that task, which a comment tells it was reported again. A
 //! round is numbered among all the Run's rounds; a reset of its entry
 //! counts its visits, for the round limit, from 1 again.
 
@@ -19,6 +22,9 @@ use answer::place;
 pub use answer::{ReviewerAnswer, ReviewerAnswerError, WHOLE_CHANGE};
 pub use brief::{BRIEF_BUDGET, blockers_brief, carried_blockers, fenced_review, findings_block};
 
+use std::collections::BTreeMap;
+
+use agent_session::domain::session_task::TaskDocumentId;
 use factory_records::domain::models::StepKey;
 use factory_records::domain::models::{Outcome, RunId};
 use factory_records::domain::ports::RunRepository;
@@ -31,7 +37,7 @@ use uuid::Uuid;
 
 use crate::domain::models::{CodeRepository, StepError, run_branch};
 use crate::domain::ports::{
-    FollowUpMade, FollowUpTask, PullRequests, Retryable, ReviewService, TaskDirectory,
+    FollowUpMade, FollowUpTask, PullRequests, Retryable, ReviewService, TaskAccess, TaskDirectory,
 };
 
 /// A review round for a Run's workflow to open, before its reviewers'
@@ -138,6 +144,26 @@ pub fn in_diff(path: &str, lines: Option<Lines>, files: &[ChangedFile]) -> bool 
     }
 }
 
+/// The passage of a follow-up task of `run_id` that a comment on it
+/// quotes: its first sentence names the Run, a passage no reviewer's
+/// finding is likely to say, and tasks made before comments did too.
+fn follow_up_quote(run_id: RunId) -> String {
+    format!("factory run {run_id}")
+}
+
+/// Add `findings` to the problem of `task_id` among `problems`, or as a
+/// new one.
+fn add<'a>(
+    problems: &mut Vec<(Uuid, Vec<&'a ReviewFinding>)>,
+    task_id: Uuid,
+    findings: &[&'a ReviewFinding],
+) {
+    match problems.iter_mut().find(|(id, _)| *id == task_id) {
+        Some((_, known)) => known.extend_from_slice(findings),
+        None => problems.push((task_id, findings.to_vec())),
+    }
+}
+
 /// The reviewer that found `finding`, for a person.
 fn reviewer(finding: &ReviewFinding) -> String {
     finding
@@ -156,22 +182,12 @@ fn follow_up(run_id: RunId, round: &ReviewRound, same: &[&ReviewFinding]) -> Fol
         .and_then(|finding| finding.problem.lines().next())
         .unwrap_or_default();
     let name: String = first_line.chars().take(120).collect();
-    let mut reviewers: Vec<String> = Vec::new();
-    for finding in same {
-        let reviewer = reviewer(finding);
-        if !reviewers.contains(&reviewer) {
-            reviewers.push(reviewer);
-        }
-    }
-    let found_by = match reviewers.split_last() {
-        Some((last, [])) => last.clone(),
-        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
-        None => "a reviewer".to_string(),
-    };
     let intro = format!(
-        "{found_by} found this in review round {} of factory run {run_id}, outside the \
-         changes it reviewed, so it did not hold the pull request.",
-        round.round
+        "{} found this in review round {} of {}, outside the changes it reviewed, so \
+         it did not hold the pull request.",
+        found_by(same),
+        round.round,
+        follow_up_quote(run_id)
     );
     let report = |finding: &ReviewFinding| {
         format!(
@@ -201,22 +217,65 @@ fn follow_up(run_id: RunId, round: &ReviewRound, same: &[&ReviewFinding]) -> Fol
     }
 }
 
+/// The reviewers that found `same`, each once, the first named first, for
+/// a person.
+fn found_by(same: &[&ReviewFinding]) -> String {
+    let mut reviewers: Vec<String> = Vec::new();
+    for finding in same {
+        let reviewer = reviewer(finding);
+        if !reviewers.contains(&reviewer) {
+            reviewers.push(reviewer);
+        }
+    }
+    match reviewers.split_last() {
+        Some((last, [])) => last.clone(),
+        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
+        None => "a reviewer".to_string(),
+    }
+}
+
+/// The comment that tells a follow-up task its problem was reported again,
+/// in `round`, as the findings `same`.
+fn reported_again(round: &ReviewRound, same: &[&ReviewFinding]) -> String {
+    let mut places: Vec<String> = Vec::new();
+    for finding in same {
+        let place = place(&normalised(&finding.path), finding.lines);
+        if !places.contains(&place) {
+            places.push(place);
+        }
+    }
+    format!(
+        "Reported again in review round {} by {}, at {}.",
+        round.round,
+        found_by(same),
+        places.join(", ")
+    )
+}
+
 /// Whether the findings `a` and `b` report one problem: two reviewers
 /// point at the same file, at lines that meet (a finding that names no
 /// lines is about the whole file).
 fn same_problem(a: &ReviewFinding, b: &ReviewFinding) -> bool {
-    let path = |finding: &ReviewFinding| {
-        finding
-            .path
-            .trim_start_matches("./")
-            .trim_start_matches('/')
-            .to_string()
-    };
+    a.seq != b.seq && same_place(a, b)
+}
+
+/// `path` from the repository's root, as a reviewer may also write it
+/// with a leading `./` or `/`.
+fn normalised(path: &str) -> String {
+    path.trim_start_matches("./")
+        .trim_start_matches('/')
+        .to_string()
+}
+
+/// Whether the findings `a` and `b` point at the same file, at lines that
+/// meet: a finding that names no lines is about the whole file.
+fn same_place(a: &ReviewFinding, b: &ReviewFinding) -> bool {
+    let path = |finding: &ReviewFinding| normalised(&finding.path);
     let lines_meet = match (a.lines, b.lines) {
         (Some(a), Some(b)) => a.start <= b.end && b.start <= a.end,
         _ => true,
     };
-    a.seq != b.seq && path(a) == path(b) && lines_meet
+    path(a) == path(b) && lines_meet
 }
 
 /// The follow-ups of a round, grouped by problem: each finding joins the
@@ -543,6 +602,14 @@ where
     /// a second. A follow-up document storage refuses stays on the round as
     /// one, with no task; one it could not answer fails the close, which is
     /// tried again. Either way it never holds the pull request.
+    ///
+    /// A problem a task of an earlier round of the Run is about, one still
+    /// there for the owner, makes no task: it joins that task (see
+    /// `join_follow_up`). When several such tasks are about it, the oldest
+    /// wins. A finding linked to a task widens what the task is about for
+    /// the rounds after, as its own lines do. Joined problems are linked
+    /// and commented on before new tasks are made, so a close a new task
+    /// fails is tried again with the comment made.
     async fn make_follow_ups(
         &self,
         run: &factory_records::domain::models::Run,
@@ -552,19 +619,53 @@ where
             .findings
             .iter()
             .filter(|finding| finding.kind == Some(FindingKind::FollowUp));
+        // The tasks earlier rounds of the Run made, a revise's rounds among
+        // them, oldest first, by each finding linked to them.
+        let rounds = self.repo.review_rounds(run.id).await.map_err(internal)?;
+        let made_before: Vec<(&ReviewFinding, Uuid)> = rounds
+            .iter()
+            .filter(|earlier| earlier.seq < round.seq)
+            .flat_map(|earlier| &earlier.findings)
+            .filter_map(|finding| Some((finding, finding.follow_up_task_id?)))
+            .collect();
+        let made_earlier = |task_id: Uuid| made_before.iter().any(|(_, made)| *made == task_id);
+        let mut there: BTreeMap<Uuid, bool> = BTreeMap::new();
+        let mut joins: Vec<(Uuid, Vec<&ReviewFinding>)> = Vec::new();
+        let mut new_tasks: Vec<(Uuid, Vec<&ReviewFinding>)> = Vec::new();
         for same in same_problems(follow_ups) {
             if same
                 .iter()
                 .all(|finding| finding.follow_up_task_id.is_some())
             {
+                // An earlier attempt linked them: a task they joined still
+                // gets its comment, when that attempt did not make it.
+                for finding in same {
+                    if let Some(task_id) = finding.follow_up_task_id
+                        && made_earlier(task_id)
+                    {
+                        add(&mut joins, task_id, &[finding]);
+                    }
+                }
                 continue;
             }
             // The problem's task id: the one an earlier attempt kept on one
-            // of its findings, else a new one, kept on each of them. A
-            // finding that kept another id goes in a task of its own.
+            // of its findings, else that of the oldest task of an earlier
+            // round about it that is still there, else a new one, kept on
+            // each of them. A finding that kept another id goes in a task
+            // of its own.
+            let mut earlier = None;
+            for (made, task_id) in &made_before {
+                if same.iter().any(|finding| same_place(made, finding))
+                    && self.still_there(run, *task_id, &mut there).await?
+                {
+                    earlier = Some(*task_id);
+                    break;
+                }
+            }
             let candidate = same
                 .iter()
                 .find_map(|finding| finding.follow_up_task_id.or(finding.follow_up_key))
+                .or(earlier)
                 .unwrap_or_else(Uuid::now_v7);
             let mut tasks: Vec<(Uuid, Vec<&ReviewFinding>)> = Vec::new();
             for finding in &same {
@@ -580,14 +681,102 @@ where
                 else {
                     continue;
                 };
-                match tasks.iter_mut().find(|(id, _)| *id == task_id) {
-                    Some((_, findings)) => findings.push(finding),
-                    None => tasks.push((task_id, vec![finding])),
-                }
+                add(&mut tasks, task_id, &[finding]);
             }
             for (task_id, findings) in tasks {
-                self.make_follow_up(run, round, task_id, &findings).await?;
+                if !made_earlier(task_id) {
+                    new_tasks.push((task_id, findings));
+                } else if self.still_there(run, task_id, &mut there).await? {
+                    add(&mut joins, task_id, &findings);
+                } else {
+                    // An earlier attempt chose the task, which is gone
+                    // since: the id is kept, so no other task can be made.
+                    tracing::warn!(
+                        %task_id,
+                        findings = findings.len(),
+                        "the follow-up task a problem joined is gone"
+                    );
+                }
             }
+        }
+        for (task_id, findings) in &joins {
+            self.join_follow_up(run, round, *task_id, findings).await?;
+        }
+        for (task_id, findings) in new_tasks {
+            self.make_follow_up(run, round, task_id, &findings).await?;
+        }
+        Ok(())
+    }
+
+    /// Whether the task `task_id` is still there for `run`'s owner: not
+    /// deleted, and theirs to see. `there` keeps each answer.
+    async fn still_there(
+        &self,
+        run: &factory_records::domain::models::Run,
+        task_id: Uuid,
+        there: &mut BTreeMap<Uuid, bool>,
+    ) -> Result<bool, StepError> {
+        if let Some(known) = there.get(&task_id) {
+            return Ok(*known);
+        }
+        let task = TaskDocumentId::from_stored(task_id.to_string());
+        let access = self
+            .tasks
+            .task_access(&run.user_id, &task)
+            .await
+            .map_err(|error| StepError::Internal(internal(error)))?;
+        let visible = access == TaskAccess::Visible;
+        there.insert(task_id, visible);
+        Ok(visible)
+    }
+
+    /// Link the follow-ups `same` of `round`, the problem an earlier round's
+    /// task `task_id` is about, to that task, then comment on it as the
+    /// Run's owner, once a round, that the problem was reported again, by
+    /// whom and where. The links come first, and the comment is marked on
+    /// them once it is made: a retried close makes a comment that is
+    /// missing and never a second one. A comment that fails is logged; it
+    /// is made again only when the close is tried again for another reason.
+    async fn join_follow_up(
+        &self,
+        run: &factory_records::domain::models::Run,
+        round: &ReviewRound,
+        task_id: Uuid,
+        same: &[&ReviewFinding],
+    ) -> Result<(), StepError> {
+        for finding in same {
+            if finding.follow_up_task_id.is_some() {
+                continue;
+            }
+            let key = StepKey {
+                run_id: run.id,
+                seq: finding.seq,
+            };
+            self.repo
+                .link_follow_up(key, finding.place, task_id)
+                .await
+                .map_err(internal)?;
+        }
+        if same.iter().any(|finding| finding.follow_up_commented) {
+            return Ok(());
+        }
+        let quote = follow_up_quote(run.id);
+        let note = reported_again(round, same);
+        match self
+            .tasks
+            .comment_on_follow_up(&run.user_id, task_id, &quote, &note)
+            .await
+        {
+            Ok(()) => self
+                .repo
+                .mark_follow_up_commented(run.id, round.seq, task_id)
+                .await
+                .map_err(internal)?,
+            Err(error) => tracing::error!(
+                ?error,
+                %task_id,
+                "the follow-up task was not told its problem was reported again"
+            ),
         }
         Ok(())
     }

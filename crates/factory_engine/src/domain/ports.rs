@@ -383,6 +383,16 @@ pub trait TaskDirectory: Send + Sync + 'static {
         follow_up: &FollowUpTask,
         task_id: Uuid,
     ) -> impl Future<Output = Result<FollowUpMade, Self::Err>> + Send;
+
+    /// Comment `text` on the passage `quote` of the follow-up task
+    /// `task_id`, as `user_id`, its owner.
+    fn comment_on_follow_up(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        task_id: Uuid,
+        quote: &str,
+        text: &str,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 }
 
 /// Whether a follow-up task is there.

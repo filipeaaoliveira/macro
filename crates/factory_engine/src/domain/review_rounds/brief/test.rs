@@ -19,6 +19,7 @@ fn finding(place: u16, problem: &str) -> ReviewFinding {
         kind: Some(FindingKind::Blocker),
         follow_up_task_id: None,
         follow_up_key: None,
+        follow_up_commented: false,
     }
 }
 
