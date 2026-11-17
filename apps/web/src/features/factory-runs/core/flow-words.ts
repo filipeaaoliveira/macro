@@ -1,5 +1,5 @@
 /** Words Flows use that people write in capitals. */
-const ACRONYMS = new Set(['ci', 'pr']);
+const ACRONYMS = new Set(['ai', 'ci', 'pr']);
 
 /**
  * A Flow's own word (an entry such as `ci-fix`, an outcome such as

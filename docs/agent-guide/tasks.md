@@ -1372,14 +1372,14 @@ request and a Flow, starts the Run and opens it.
 
 A Run opens in a dialog on desktop and in a sheet on touch (after the side
 panel's sheet closes). Its Steps scroll: each with its outcome, its time
-(`5m`), the Role and Agent an agent Step used (`Planner · claude`, with a
-line for each Agent passed over for lack of quota) and its output as
-markdown, the output a waiting Gate asks about open. On desktop the Gate card (its question, a note field and one button
-per answer, the Flow's first answer primary) is pinned below them, the
-question and note scrolling inside past a few lines. On touch the pinned
-chrome between the handle and the Steps holds only the note and the
-answers, and the question opens the scrolling content. **Cancel run** is
-pinned on both and confirms in place. Phone sheets have no close button.
+(`5m`), the Role and Agent an agent Step used (`Planner · primary`, with a line
+for each Agent that could not start, and why) and its output as markdown, the
+output a waiting Gate asks about open. On desktop the Gate card (its question,
+a note field and one button per answer, the Flow's first answer primary) is
+pinned below them, the question and note scrolling inside past a few lines. On
+touch the pinned chrome between the handle and the Steps holds only the note
+and the answers, and the question opens the scrolling content. **Cancel run**
+is pinned on both and confirms in place. Phone sheets have no close button.
 When an answer or a cancel takes the focused control away, focus moves to
 the Run's status line; that includes an answer refused because someone
 else answered first. An answer that fails gives focus back to its button,

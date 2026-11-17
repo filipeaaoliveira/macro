@@ -272,15 +272,31 @@ describe('RunView', () => {
         {
           ...first,
           role: 'planner',
-          agent: 'codex',
-          passedOver: [{ agent: 'claude', reason: 'ai_allowance_exhausted' }],
+          agent: 'backup',
+          passedOver: [{ agent: 'primary', reason: 'ai_allowance_exhausted' }],
+        },
+        {
+          ...first,
+          seq: 2,
+          visit: 2,
+          role: 'planner',
+          agent: 'backup',
+          passedOver: [
+            { agent: 'primary', reason: 'ai_allowance_exhausted' },
+            { agent: 'backup', reason: 'ai_overage_limit_reached' },
+          ],
         },
       ],
     });
 
-    expect(await screen.findByText('Planner · codex')).toBeTruthy();
+    expect(await screen.findByText('Planner · backup')).toBeTruthy();
     expect(
-      screen.getByText('claude had no quota left, so the next agent took over')
+      screen.getAllByText('primary couldn’t start: AI allowance exhausted')
+    ).toHaveLength(2);
+    // When the last Agent couldn't start either, none took the Step.
+    expect(screen.getByText('Planner · no agent could start')).toBeTruthy();
+    expect(
+      screen.getByText('backup couldn’t start: AI overage limit reached')
     ).toBeTruthy();
   });
 
