@@ -20,6 +20,7 @@ mod test;
 
 use answer::place;
 pub use answer::{ReviewerAnswer, ReviewerAnswerError, WHOLE_CHANGE};
+pub(crate) use brief::escape;
 pub use brief::{BRIEF_BUDGET, blockers_brief, carried_blockers, fenced_review, findings_block};
 
 use std::collections::BTreeMap;
@@ -548,14 +549,15 @@ where
         }
 
         // A reviewer whose Step ended with no answer read, as one a worker
-        // without review panels ran, reviewed nothing: the round fails.
+        // without review panels ran, reviewed nothing: the round fails. One
+        // that asked the Run's owner a question went on with the answer in
+        // a Step of its own, whose findings the round records.
         let steps = self.repo.list_steps(run_id).await.map_err(internal)?;
         let unanswered = steps.iter().any(|step| {
             round.step_seqs().contains(&step.seq)
-                && step
-                    .end
-                    .as_ref()
-                    .is_some_and(|end| end.outcome != Outcome::failed())
+                && step.end.as_ref().is_some_and(|end| {
+                    end.outcome != Outcome::failed() && end.outcome != Outcome::question()
+                })
                 && !round.answered.contains(&step.seq)
         });
         if closing.failed || unanswered {

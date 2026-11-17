@@ -44,6 +44,7 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261117190000_factory_check_round_commit.sql`,
   `20261117200000_factory_check_round_commit_check.sql`,
   `20261117210000_factory_main_hold_task_key.sql`,
+  `20261117215724_factory_step_shared_session.sql`,
   `20261117220000_factory_follow_up_commented.sql`,
   `20261117221000_factory_standing_rules.sql`).
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
@@ -92,6 +93,12 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   with a later prompt's answer. `pass_session` leaves a Step that took a
   later prompt alone, so its checks rounds stay in the session that did the
   work. `stopping_session` reads the latest prompt's action.
+- A Step that goes on after its agent's question claims the asking Step's
+  session, so a session can have several Steps, one after another: at most
+  one of them running (`factory_step_running_session_idx`), and the asking
+  Step ended before the next claims it. `session_step` and `hand_back`
+  reach the running one. A Gate opened for a Step that ended `question` is
+  an agent's question (`GateKind::Question`), read from the Step's outcome.
 - A Step's rounds of checks (`factory_check_round`,
   `src/outbound/pg_run_repository/check_rounds.rs`) keep their first
   record, end and fix prompt, so a retried Step goes on with its round.

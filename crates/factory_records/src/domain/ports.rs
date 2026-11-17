@@ -198,7 +198,10 @@ pub trait RunRepository: Send + Sync + 'static {
         session_id: Uuid,
     ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
 
-    /// The Step that works in the agent session `session_id`, if any.
+    /// The Step that works in the agent session `session_id`, if any: the
+    /// one that has not ended, else the latest. A Step that goes on after
+    /// its agent's question works in the asking Step's session, so a
+    /// session can have several Steps, at most one of them running.
     fn session_step(
         &self,
         session_id: Uuid,

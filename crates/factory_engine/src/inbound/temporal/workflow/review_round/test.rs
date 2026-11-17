@@ -2,15 +2,18 @@
 //! activity as the test scripts it and keeps what it was asked.
 
 use std::cell::RefCell;
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::num::NonZeroU8;
 
 use factory_records::domain::models::{EntryId, Outcome, Role, RunId, RunOutcome};
 
-use super::{Panel, Round, RoundWork, review_round};
+use super::{Panel, Round, review_round};
 use crate::domain::flow::{Entry, StepName};
+use crate::domain::gate::GateOpening;
 use crate::domain::models::{StepEnding, StepReport, StepRequest, StepStart};
 use crate::domain::review_rounds::{ReviewRoundClosing, ReviewRoundOpening};
+use crate::inbound::temporal::workflow::{Asking, Questions};
+use crate::inbound::temporal::workflow::work::Work;
 
 /// An activity that failed.
 #[derive(Debug, PartialEq, Eq)]
@@ -24,6 +27,9 @@ struct Script {
     /// What each reviewer's work comes to, by its place in the entry.
     worked: Vec<Result<(), Failed>>,
     cancelled: bool,
+    /// What the Step at a place ends with, when not `pass`: `question` for
+    /// a reviewer that asks the Run's owner.
+    ends: BTreeMap<u16, &'static str>,
     closed: Option<Outcome>,
     asked: RefCell<Vec<String>>,
     closings: RefCell<Vec<ReviewRoundClosing>>,
@@ -39,7 +45,7 @@ impl Script {
     }
 }
 
-impl RoundWork for Script {
+impl Work for Script {
     type Failure = Failed;
 
     fn cancelled(&self) -> bool {
@@ -64,16 +70,32 @@ impl RoundWork for Script {
             .unwrap_or(StepStart::Started))
     }
 
+    async fn run(&self, request: &StepRequest) -> Result<StepReport, Failed> {
+        self.run_all(std::slice::from_ref(request))
+            .await
+            .pop()
+            .unwrap_or(Err(Failed))
+    }
+
     async fn run_all(&self, requests: &[StepRequest]) -> Vec<Result<StepReport, Failed>> {
         let seqs: Vec<String> = requests.iter().map(|r| r.key.seq.to_string()).collect();
         self.note(format!("run {}", seqs.join(",")));
-        (0..requests.len())
-            .map(|index| match self.worked.get(index) {
-                Some(Err(_)) => Err(Failed),
-                _ => Ok(StepReport {
-                    outcome: Outcome::try_from("pass".to_string()).expect("valid"),
-                    output: "Checked it.".to_string(),
-                }),
+        requests
+            .iter()
+            .enumerate()
+            .map(|(index, request)| {
+                let ends = self.ends.get(&request.key.seq).copied();
+                match (self.worked.get(index), ends) {
+                    (Some(Err(_)), _) | (_, Some("fail")) => Err(Failed),
+                    (_, Some("question")) => Ok(StepReport {
+                        outcome: Outcome::question(),
+                        output: format!("Question of step {}?", request.key.seq),
+                    }),
+                    _ => Ok(StepReport {
+                        outcome: Outcome::try_from("pass".to_string()).expect("valid"),
+                        output: "Checked it.".to_string(),
+                    }),
+                }
             })
             .collect()
     }
@@ -90,6 +112,11 @@ impl RoundWork for Script {
 
     async fn stop(&self, request: &StepRequest) {
         self.note(format!("stop {}", request.key.seq));
+    }
+
+    async fn ask(&self, opening: GateOpening, _rule: Option<Asking>) -> Result<Outcome, Failed> {
+        self.note(format!("ask {} {}", opening.key.seq, opening.question));
+        Ok(Outcome::answer())
     }
 
     async fn close(&self, closing: ReviewRoundClosing) -> Result<Outcome, Failed> {
@@ -128,9 +155,19 @@ async fn walk(script: &Script, visit: u16) -> (Result<Round, Failed>, Vec<u16>) 
         entry: &entry,
         visit,
         seq: 3,
+        questions: Questions {
+            may_ask: true,
+            most: 2,
+        },
     };
     let mut held = Vec::new();
-    let round = review_round(script, &panel, &mut held).await;
+    let mut next = 6;
+    let mut resume = || {
+        let seq = next;
+        next += 1;
+        Some(seq)
+    };
+    let round = review_round(script, &panel, &mut held, &mut resume).await;
     (round, held.iter().map(|request| request.key.seq).collect())
 }
 
@@ -257,4 +294,175 @@ async fn the_last_round_says_so_when_it_closes() {
     walk(&script, 3).await.0.expect("walked");
 
     assert!(script.closings.borrow()[0].last);
+}
+
+/// A reviewer that asks the Run's owner a question ends its Step and keeps
+/// its session; the others end and let go as usual. Once every reviewer
+/// ended, the question goes to the owner, the reviewer goes on with the
+/// answer at the next place, in the asking Step's session, and the round
+/// closes on every reviewer's result, not as failed.
+#[tokio::test]
+async fn a_reviewer_s_question_waits_for_the_answer_and_the_round_goes_on() {
+    let script = Script {
+        ends: [(4, "question")].into(),
+        ..Script::default()
+    };
+
+    let (round, held) = walk(&script, 1).await;
+
+    assert_eq!(
+        round,
+        Ok(Round::Routed(
+            Outcome::try_from("pass".to_string()).expect("valid")
+        ))
+    );
+    assert!(held.is_empty());
+    assert_eq!(
+        script.asked(),
+        [
+            "open 3",
+            "start 3",
+            "start 4",
+            "start 5",
+            "run 3,4,5",
+            "end 3 pass",
+            "release 3",
+            "end 4 question",
+            "end 5 pass",
+            "release 5",
+            "ask 4 Question of step 4?",
+            "start 6",
+            "run 6",
+            "end 6 pass",
+            "release 6",
+            "close 3"
+        ]
+    );
+    assert!(!script.closings.borrow()[0].failed);
+}
+
+/// A reviewer that asks again goes on again, each time at the next place;
+/// one question past its Step's questions closes the round as failed and
+/// ends the Run for a person, its session still held, for the workflow to
+/// stop.
+#[tokio::test]
+async fn a_reviewer_asking_past_its_questions_ends_the_run_for_a_person() {
+    let script = Script {
+        ends: [(3, "question"), (6, "question"), (7, "question")].into(),
+        ..Script::default()
+    };
+
+    let (round, held) = walk(&script, 1).await;
+
+    assert_eq!(round, Ok(Round::Ended(RunOutcome::Manual)));
+    assert_eq!(held, [3, 6, 7]);
+    let asked = script.asked();
+    let after_work: Vec<&str> = asked
+        .iter()
+        .skip_while(|asked| !asked.starts_with("ask"))
+        .map(String::as_str)
+        .collect();
+    assert_eq!(
+        after_work,
+        [
+            "ask 3 Question of step 3?",
+            "start 6",
+            "run 6",
+            "end 6 question",
+            "ask 6 Question of step 6?",
+            "start 7",
+            "run 7",
+            "end 7 question",
+            "close 3"
+        ]
+    );
+    assert!(script.closings.borrow()[0].failed);
+}
+
+/// A Run whose reviewers may not ask (its Flow predates questions) never
+/// takes the question's path: a Step that somehow ends `question` reads as
+/// any other review and lets go of its session.
+#[tokio::test]
+async fn reviewers_of_a_flow_without_questions_never_ask() {
+    let script = Script {
+        ends: [(4, "question")].into(),
+        ..Script::default()
+    };
+    let entry = panel_entry(3);
+    let panel = Panel {
+        run_id: RunId::generate(),
+        entry: &entry,
+        visit: 1,
+        seq: 3,
+        questions: Questions {
+            may_ask: false,
+            most: 0,
+        },
+    };
+    let mut held = Vec::new();
+
+    review_round(&script, &panel, &mut held, &mut || Some(6))
+        .await
+        .expect("walked");
+
+    let asked = script.asked();
+    assert!(asked.contains(&"release 4".to_string()));
+    assert!(!asked.iter().any(|asked| asked.starts_with("ask")));
+}
+
+/// A reviewer that goes on from its question and fails, before or after
+/// it claimed the asking Step's session, has both its own agent and the
+/// asking Step's stopped, and the round fails.
+#[tokio::test]
+async fn a_failed_reviewer_going_on_stops_the_asking_step_too() {
+    let script = Script {
+        ends: [(3, "question"), (6, "fail")].into(),
+        ..Script::default()
+    };
+
+    let (round, held) = walk(&script, 1).await;
+
+    assert_eq!(
+        round,
+        Ok(Round::Routed(
+            Outcome::try_from("pass".to_string()).expect("valid")
+        ))
+    );
+    assert!(held.is_empty());
+    let asked = script.asked();
+    let after_work: Vec<&str> = asked
+        .iter()
+        .skip_while(|asked| !asked.starts_with("ask"))
+        .map(String::as_str)
+        .collect();
+    assert_eq!(
+        after_work,
+        [
+            "ask 3 Question of step 3?",
+            "start 6",
+            "run 6",
+            "end 6 failed",
+            "stop 6",
+            "stop 3",
+            "close 3"
+        ]
+    );
+    assert!(script.closings.borrow()[0].failed);
+}
+
+/// A Run cancelled while a reviewer goes on from its question holds the
+/// asking Step as well as the one going on, so both are stopped with the
+/// Run, whether or not the session was claimed yet.
+#[tokio::test]
+async fn a_round_cancelled_while_a_reviewer_goes_on_holds_the_asking_step() {
+    let script = Script {
+        ends: [(3, "question"), (6, "fail")].into(),
+        cancelled: true,
+        ..Script::default()
+    };
+
+    let (round, held) = walk(&script, 1).await;
+
+    assert_eq!(round, Ok(Round::Ended(RunOutcome::Cancelled)));
+    assert_eq!(held, [3, 6]);
 }

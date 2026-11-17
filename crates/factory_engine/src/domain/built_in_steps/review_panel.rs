@@ -51,6 +51,12 @@ where
         let report = self
             .ask_agent_in_repository(step, &instructions, review_outcomes(), input)
             .await?;
+        // A reviewer that asks the Run's owner reviewed nothing yet: its
+        // round waits for the answer, and its Role goes on with it in a
+        // Step of its own, whose findings the round records.
+        if report.outcome == Outcome::question() {
+            return Ok(report);
+        }
 
         let (outcome, answer) =
             match ReviewerAnswer::read(&report.outcome, &report.output, carried.len()) {

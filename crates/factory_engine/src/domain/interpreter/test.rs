@@ -610,3 +610,57 @@ fn an_unresolved_or_failed_review_is_left_for_a_person() {
         assert_eq!(end, Ok(RunOutcome::Manual), "{outcome}");
     }
 }
+
+/// A Step that goes on after its agent's question takes the next place as
+/// the same visit of the entry, which then routes the outcome it ends
+/// with; a Run that took its most Steps has none left and ends `blocked`.
+#[test]
+fn a_step_going_on_after_a_question_takes_the_next_place_as_the_same_visit() {
+    let flow = flow(REPLY_FLOW);
+    let interpreter = Interpreter::new(&flow);
+    let mut state = interpreter.start();
+    let NextStep::Run { seq, visit, .. } = interpreter.next_step(&mut state).expect("next") else {
+        panic!("the reply flow runs a step");
+    };
+    assert_eq!((seq, visit), (1, 1));
+
+    assert_eq!(interpreter.resume(&mut state), Ok(Some(2)));
+    assert_eq!(interpreter.resume(&mut state), Ok(Some(3)));
+    interpreter
+        .record(&mut state, &Outcome::done())
+        .expect("record");
+    assert_eq!(
+        interpreter.next_step(&mut state),
+        Ok(NextStep::End(RunOutcome::Success))
+    );
+    assert_eq!(interpreter.resume(&mut state), Err(InterpreterError::Ended));
+
+    let mut full = interpreter.start();
+    interpreter.next_step(&mut full).expect("next");
+    for _ in 1..factory_records::domain::models::MAX_STEPS {
+        interpreter.resume(&mut full).expect("resume");
+    }
+    assert_eq!(interpreter.resume(&mut full), Ok(None));
+    assert_eq!(
+        interpreter.next_step(&mut full),
+        Ok(NextStep::End(RunOutcome::Blocked))
+    );
+}
+
+/// A Flow whose agents may ask questions says how many; one written before
+/// questions reads with none, and writes no `questions`, so the input of a
+/// Run in flight serializes as it did.
+#[test]
+fn a_flow_without_questions_reads_and_writes_as_before() {
+    let old = flow(SINGLE_REVIEWER_CODE_FLOW);
+    assert_eq!(old.questions, None);
+    let written = serde_json::to_value(&old).expect("serializes");
+    assert!(written.get("questions").is_none());
+
+    let mut asking = old.clone();
+    asking.allow_questions(2);
+    let written = serde_json::to_value(&asking).expect("serializes");
+    assert_eq!(written["questions"], 2);
+    let read: Flow = serde_json::from_value(written).expect("reads back");
+    assert_eq!(read.questions, Some(2));
+}

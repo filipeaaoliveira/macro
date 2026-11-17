@@ -16,15 +16,23 @@
 //! its Flow in its input, so Runs started on a Flow without one replay as
 //! before.
 //!
-//! Once a Gate is recorded, and before a person may answer it, the worker
-//! asks the Run's Standing Rules about it (`factory_rule_gate`): a Rule
-//! Answer comes back as the activity's result, so a replay reads it from
-//! the history and walks the same way. That activity is behind the
+//! Once a Flow's Gate is recorded, and before a person may answer it, the
+//! worker asks the Run's Standing Rules about it (`factory_rule_gate`): a
+//! Rule Answer comes back as the activity's result, so a replay reads it
+//! from the history and walks the same way. That activity is behind the
 //! [`STANDING_RULES_PATCH`] marker: a Run whose history opened a Gate
 //! before it replays without asking, and a Gate a Run opens on a newer
 //! worker asks. A review panel's Gate (`after` a round's outcome) asks once
 //! the round ends with that outcome; only a Flow that has one takes that
-//! path, so Runs on a Flow without one replay as before.
+//! path, so Runs on a Flow without one replay as before. A question Gate
+//! is never put to the rules: only the Run's owner answers an agent.
+//!
+//! A Step whose agent asks the Run's owner a question (only one whose Flow
+//! says how many, `questions`) keeps its session; the workflow opens a
+//! question Gate, waits for the answer, and has the same Role go on in a
+//! Step of its own, at the next place, in that session. One question past
+//! the Step's ends the Run `manual`. A Flow without `questions`, as every
+//! Run started before them carries, never takes that path.
 //!
 //! Cancelling the workflow cancels the running Step, whose activity drops
 //! its work before the cancellation completes, or the wait for an answer.
@@ -35,6 +43,8 @@
 //! recorded.
 
 mod review_round;
+mod step;
+mod work;
 
 use std::time::Duration;
 
@@ -49,16 +59,18 @@ use temporalio_sdk::{
 
 use factory_records::domain::standing_rules::GateKind;
 
-use crate::domain::flow::GateDefinition;
+use crate::domain::flow::Flow;
 use crate::domain::gate::{
     AnswerGate, GateAnswered, GateOpening, GateRuling, OpenGate, check_answer,
 };
 use crate::domain::interpreter::{Interpreter, NextStep};
-use crate::domain::models::{RunFinish, RunStart, StepEnding, StepReport, StepRequest, StepStart};
-use crate::domain::standing_rules::rule_fix_limit;
+use crate::domain::models::{RunFinish, RunStart, StepReport, StepRequest};
+use crate::domain::questions::gate_question;
 use crate::inbound::temporal::activities::FactoryActivities;
 use crate::temporal::{ANSWER_GATE_UPDATE, FLOW_WORKFLOW};
-use review_round::{Panel, Round, TemporalRound, review_round};
+use review_round::{Panel, Round, review_round};
+use step::walk_step;
+use work::TemporalWork;
 
 /// What a Step whose work failed for good shows its owner.
 const FAILED_STEP_OUTPUT: &str = "The step's work failed. The factory service's logs say why.";
@@ -141,9 +153,15 @@ impl FlowWorkflow {
         // A Flow that cannot go on still records the Run's end, then fails
         // the workflow with why, for Temporal to show.
         let mut stopped = None;
-        // The Step whose agent may still hold what its work used: from its
-        // work's start until the agent is stopped or let go.
+        // The Steps whose agents may still hold what their work used: from
+        // a Step's work's start until its agent is stopped or let go, and
+        // the Steps it goes on from, whose session it works in.
         let mut held: Vec<StepRequest> = Vec::new();
+        // Whether agents may ask the Run's owner questions, and how many
+        // each Step's work may ask. A Flow without them, as every Run
+        // started before them carries, never takes their path, so its
+        // history replays as before.
+        let questions = Questions::of(&start.flow);
         let outcome = loop {
             let next = match interpreter.next_step(&mut state) {
                 Ok(next) => next,
@@ -156,164 +174,42 @@ impl FlowWorkflow {
                 NextStep::End(outcome) => break outcome,
                 NextStep::Run { entry, visit, seq } => (entry, visit, seq),
             };
+            let temporal = TemporalWork {
+                ctx,
+                work_options: &work_options,
+                record_options: &record_options,
+            };
+            let mut resume = || interpreter.resume(&mut state).ok().flatten();
 
             // A review panel runs its reviewers' Steps at once, as one
-            // review round, whose outcome the Flow routes.
-            if !entry.reviewers.is_empty() {
+            // review round, whose outcome the Flow routes; any other entry
+            // runs one Step, and the Steps that go on from its agent's
+            // questions.
+            let walked = if entry.reviewers.is_empty() {
+                let key = StepKey {
+                    run_id: start.run_id,
+                    seq,
+                };
+                let request = questions.offer(StepRequest::of(key, entry, visit), 0);
+                walk_step(&temporal, entry, request, questions, &mut held, &mut resume).await?
+            } else {
                 let panel = Panel {
                     run_id: start.run_id,
                     entry,
                     visit,
                     seq,
+                    questions,
                 };
-                let temporal = TemporalRound {
-                    ctx,
-                    work_options: &work_options,
-                    record_options: &record_options,
-                };
-                let round = review_round(&temporal, &panel, &mut held).await?;
-                match round {
-                    Round::Routed(outcome) => {
-                        // A Gate on the panel asks about the round's
-                        // outcome it names, on the round's last Step: the
-                        // one a Run's latest Step is while it waits.
-                        let outcome = match &entry.gate {
-                            Some(gate) if outcome == gate.opened_by() => {
-                                let reviewers = u16::try_from(entry.reviewers.len())
-                                    .unwrap_or(u16::MAX)
-                                    .max(1);
-                                let key = StepKey {
-                                    run_id: start.run_id,
-                                    seq: seq.saturating_add(reviewers - 1),
-                                };
-                                // The rounds before this one each sent their
-                                // Blockers to a fix.
-                                let asking = Asking {
-                                    kind: gate.kind,
-                                    fix_rounds: visit.saturating_sub(1),
-                                    fix_limit: rule_fix_limit(entry.max_visits),
-                                };
-                                match ask(ctx, key, gate, asking).await {
-                                    Ok(answer) => answer,
-                                    Err(_) if is_cancelled(ctx) => break RunOutcome::Cancelled,
-                                    Err(termination) => return Err(termination),
-                                }
-                            }
-                            _ => outcome,
-                        };
-                        if let Err(error) = interpreter.record(&mut state, &outcome) {
-                            stopped = Some(error);
-                            break RunOutcome::Failed;
-                        }
-                        continue;
-                    }
-                    Round::Ended(outcome) => break outcome,
-                }
-            }
-
-            let key = StepKey {
-                run_id: start.run_id,
-                seq,
+                review_round(&temporal, &panel, &mut held, &mut resume).await?
             };
-            let request = StepRequest::of(key, entry, visit);
-            let started = ctx
-                .execute_activity(
-                    FactoryActivities::start_step,
-                    request.clone(),
-                    record_options.clone(),
-                )
-                .await;
-            match started {
-                Ok(StepStart::Started) => {}
-                // The Run ended before this workflow started, cancelled or
-                // swept: the workflow ends as the Run did.
-                Ok(StepStart::RunEnded(outcome)) => break outcome,
-                Err(_) if is_cancelled(ctx) => break RunOutcome::Cancelled,
-                Err(error) => return Err(error.into()),
-            }
-
-            // A Step that still fails for good ends `failed`, with
-            // why as its output; the Flow may route it like any other
-            // outcome. A Step stopped by cancelling the Run ends the Run.
-            held = vec![request.clone()];
-            let worked = ctx
-                .execute_activity(
-                    FactoryActivities::run_step,
-                    request.clone(),
-                    work_options.clone(),
-                )
-                .await;
-            let (report, failed) = match worked {
-                Ok(report) => (report, false),
-                Err(_) if is_cancelled(ctx) => break RunOutcome::Cancelled,
-                // The owner reads the output; why the work failed is
-                // internal detail, which the worker logged.
-                Err(_) => (
-                    StepReport {
-                        outcome: Outcome::failed(),
-                        output: FAILED_STEP_OUTPUT.to_string(),
-                    },
-                    true,
-                ),
-            };
-            let reported = report.outcome.clone();
-            let ended = ctx
-                .execute_activity(
-                    FactoryActivities::end_step,
-                    StepEnding { key, report },
-                    record_options.clone(),
-                )
-                .await;
-            if ended.is_err() {
-                if is_cancelled(ctx) {
-                    break RunOutcome::Cancelled;
-                }
-                ended?;
-            }
-
-            // Work that failed for good has its agent stopped once the Step's
-            // end is recorded, so the Step reads as failed meanwhile, and an
-            // entry that fixes or retries it never runs beside it. Otherwise
-            // no attempt of the Step's work comes once its end is recorded,
-            // so its agent lets go of the Step's session.
-            if failed {
-                held.clear();
-                stop(ctx, &request).await;
-            } else if !std::mem::take(&mut held).is_empty() {
-                let released = ctx
-                    .execute_activity(
-                        FactoryActivities::release_step,
-                        request.clone(),
-                        record_options.clone(),
-                    )
-                    .await;
-                if released.is_err() {
-                    if is_cancelled(ctx) {
-                        held = vec![request.clone()];
-                        break RunOutcome::Cancelled;
-                    }
-                    released?;
-                }
-            }
-
-            let outcome = match &entry.gate {
-                Some(gate) if reported == gate.opened_by() => {
-                    let asking = Asking {
-                        kind: gate.kind,
-                        fix_rounds: 0,
-                        fix_limit: 0,
-                    };
-                    match ask(ctx, key, gate, asking).await {
-                        Ok(answer) => answer,
-                        Err(_) if is_cancelled(ctx) => break RunOutcome::Cancelled,
-                        Err(termination) => return Err(termination),
+            match walked {
+                Round::Routed(outcome) => {
+                    if let Err(error) = interpreter.record(&mut state, &outcome) {
+                        stopped = Some(error);
+                        break RunOutcome::Failed;
                     }
                 }
-                _ => reported,
-            };
-            if let Err(error) = interpreter.record(&mut state, &outcome) {
-                stopped = Some(error);
-                break RunOutcome::Failed;
+                Round::Ended(outcome) => break outcome,
             }
         };
 
@@ -332,12 +228,12 @@ impl FlowWorkflow {
         )
         .await?;
 
-        // A cancelled Run's Step may still have its agent at work. The Run
-        // reads as cancelled first: stopping an agent may take a while.
-        if outcome == RunOutcome::Cancelled {
-            for request in &held {
-                stop(ctx, request).await;
-            }
+        // A cancelled Run's Step may still have its agent at work, and a
+        // Run that ended at an agent's question still holds its session.
+        // The Run reads as ended first: stopping an agent may take a while.
+        // Any other end holds no Step.
+        for request in &held {
+            stop(ctx, request).await;
         }
 
         match (outcome, stopped) {
@@ -390,33 +286,32 @@ fn is_cancelled(ctx: &WorkflowContext<FlowWorkflow>) -> bool {
     ctx.cancellation_token().is_cancelled()
 }
 
-/// What a Gate's Standing Rule reads of where the Run is.
-struct Asking {
-    /// The Gate's kind; none for a Gate no rule decides.
-    kind: Option<GateKind>,
+/// What a Flow's Gate's Standing Rule reads of where the Run is. A
+/// question Gate has none: no rule answers it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Asking {
+    /// The Gate's kind, from its Flow; none for a Gate no rule decides.
+    pub(super) kind: Option<GateKind>,
     /// For a review panel's Gate, the fix rounds in a row its Blockers
     /// went to.
-    fix_rounds: u16,
+    pub(super) fix_rounds: u16,
     /// For a review panel's Gate, the fix rounds in a row its rule may
     /// send.
-    fix_limit: u16,
+    pub(super) fix_limit: u16,
 }
 
-/// Open the Gate of the Step `key`, ask the Run's Standing Rules about it,
-/// and return their Rule Answer, or else wait for a person's answer, record
-/// it, and return it as the entry's outcome.
+/// Open the Gate `opening`; for a Flow's Gate (`rule`), ask the Run's
+/// Standing Rules about it and return their Rule Answer; otherwise, or
+/// when no rule answers, wait for a person's answer, record it, and return
+/// it. Either way the answer is the outcome the Run goes on with.
 async fn ask(
-    ctx: &mut WorkflowContext<FlowWorkflow>,
-    key: StepKey,
-    gate: &GateDefinition,
-    asking: Asking,
+    ctx: &WorkflowContext<FlowWorkflow>,
+    opening: GateOpening,
+    rule: Option<Asking>,
 ) -> WorkflowResult<Outcome> {
     let record_options = ActivityOptions::start_to_close_timeout(RECORD_TIMEOUT);
-    let opening = GateOpening {
-        key,
-        question: gate.question.clone(),
-        answers: gate.answers.clone(),
-    };
+    let key = opening.key;
+    let answers = opening.answers.clone();
     ctx.execute_activity(
         FactoryActivities::open_gate,
         opening,
@@ -427,7 +322,9 @@ async fn ask(
     // The rules are asked before a person may answer, so the two never
     // race: the worker records a Rule Answer itself. A Run whose history
     // opened this Gate before the marker existed replays without asking.
-    if ctx.patched(STANDING_RULES_PATCH)
+    // A question Gate never reaches the marker or the rules.
+    if let Some(asking) = rule
+        && ctx.patched(STANDING_RULES_PATCH)
         && let Some(kind) = asking.kind
     {
         let ruling = GateRuling {
@@ -435,7 +332,7 @@ async fn ask(
             kind,
             fix_rounds: asking.fix_rounds,
             fix_limit: asking.fix_limit,
-            answers: gate.answers.clone(),
+            answers: answers.clone(),
         };
         let ruled = ctx
             .execute_activity(FactoryActivities::rule_gate, ruling, record_options.clone())
@@ -450,7 +347,7 @@ async fn ask(
     ctx.state_mut(|workflow| {
         workflow.open = Some(OpenGate {
             seq: key.seq,
-            answers: gate.answers.clone(),
+            answers,
         });
         workflow.answer = None;
     });
@@ -480,4 +377,69 @@ async fn ask(
     )
     .await?;
     Ok(outcome)
+}
+
+/// Whether a Run's agents may ask its owner questions, and how many each
+/// Step's work may ask, as its Flow says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Questions {
+    /// Whether agents may ask.
+    pub(super) may_ask: bool,
+    /// How many questions each Step's work may ask; the next one ends the
+    /// Run for a person.
+    pub(super) most: u8,
+}
+
+impl Questions {
+    /// The questions `flow` lets its agents ask: none when it sets none,
+    /// or zero.
+    pub(super) fn of(flow: &Flow) -> Self {
+        let most = flow.questions.unwrap_or(0);
+        Self {
+            may_ask: most > 0,
+            most,
+        }
+    }
+
+    /// `request`, whose work asked `asked` questions so far, offering its
+    /// agent the questions left, when agents may ask.
+    pub(super) fn offer(self, request: StepRequest, asked: u8) -> StepRequest {
+        if !self.may_ask {
+            return request;
+        }
+        StepRequest {
+            may_ask: true,
+            questions_left: self.most.saturating_sub(asked),
+            ..request
+        }
+    }
+
+    /// The question the Step `request` ended with, `report`, when it asked
+    /// one: only a Step that may ask does.
+    pub(super) fn asked(self, request: &StepRequest, report: &StepReport) -> Option<Question> {
+        (self.may_ask && request.may_ask && report.outcome == Outcome::question()).then(|| {
+            Question {
+                text: gate_question(&report.output),
+            }
+        })
+    }
+}
+
+/// A question a Step's agent asked the Run's owner.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct Question {
+    /// The question, as its Gate keeps it.
+    text: String,
+}
+
+impl Question {
+    /// The question Gate of the Step `key` that asks it, whose one answer
+    /// carries the owner's words in its note.
+    pub(super) fn opening(self, key: StepKey) -> GateOpening {
+        GateOpening {
+            key,
+            question: self.text,
+            answers: vec![Outcome::answer()],
+        }
+    }
 }

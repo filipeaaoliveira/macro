@@ -11,9 +11,11 @@ fn secrets(extra: &str) -> String {
 }
 
 /// `FACTORY_REVIEW_ROUNDS` bounds the review panel's rounds; unset leaves
-/// the Flow's own bound, and zero rounds is refused.
+/// the Flow's own bound, and zero rounds is refused. `FACTORY_QUESTIONS`
+/// bounds each agent Step's questions, zero included; unset leaves the
+/// engine's default.
 #[test]
-fn the_review_rounds_are_read_and_zero_is_refused() {
+fn the_review_rounds_and_questions_are_read() {
     let read = |extra: &str| {
         // SAFETY: this is the only test in the binary that sets the
         // environment, and it reads it back before another can.
@@ -21,7 +23,7 @@ fn the_review_rounds_are_read_and_zero_is_refused() {
         macro_config::ConfigLoader::load::<Config>()
     };
 
-    let bounded = read(r#","FACTORY_REVIEW_ROUNDS":"5""#).expect("reads");
+    let bounded = read(r#","FACTORY_REVIEW_ROUNDS":"5","FACTORY_QUESTIONS":"0""#).expect("reads");
     let unset = read("").expect("reads");
     let zero = read(r#","FACTORY_REVIEW_ROUNDS":"0""#);
 
@@ -30,5 +32,7 @@ fn the_review_rounds_are_read_and_zero_is_refused() {
         Some(5)
     );
     assert_eq!(unset.factory_review_rounds, None);
+    assert_eq!(bounded.factory_questions, Some(0));
+    assert_eq!(unset.factory_questions, None);
     assert!(zero.is_err());
 }

@@ -10,7 +10,7 @@ import {
   GateNote,
   GateQuestion,
 } from '../../components/gate-card';
-import { runTitle } from '../../core/run';
+import { gateAsker, runTitle } from '../../core/run';
 import { createFocusRescue } from '../../primitives/focus-rescue';
 import type { RunController } from '../../primitives/run-controller';
 import {
@@ -95,6 +95,10 @@ export function MobileRunSheet(props: {
                           note={props.controller.note()}
                           onNoteChange={props.controller.setNote}
                           locked={props.controller.gateLocked()}
+                          answers={
+                            gateAsker(waiting().step, waiting().gate) !==
+                            undefined
+                          }
                         />
                         <div class="flex flex-wrap items-center justify-end gap-2">
                           <GateAnswers
@@ -137,6 +141,7 @@ export function MobileRunSheet(props: {
                             <GateQuestion
                               id={questionId}
                               question={waiting().gate.question}
+                              asker={gateAsker(waiting().step, waiting().gate)}
                             />
                           </Card>
                         )}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { type Run, type RunStep, runStatus } from './run';
+import { gateAsker, type Run, type RunStep, runStatus } from './run';
 
 const plan: RunStep = {
   seq: 1,
@@ -12,6 +12,7 @@ const plan: RunStep = {
     endedAt: '2026-11-16T09:01:00Z',
   },
   gate: {
+    kind: 'flow',
     question: 'Approve this plan?',
     answers: ['approve', 'revise'],
     openedAt: '2026-11-16T09:01:00Z',
@@ -45,6 +46,7 @@ describe('runStatus', () => {
     const answered: RunStep = {
       ...plan,
       gate: {
+        kind: 'flow',
         question: 'Approve this plan?',
         answers: ['approve', 'revise'],
         openedAt: '2026-11-16T09:01:00Z',
@@ -80,5 +82,15 @@ describe('runStatus', () => {
       outcome: 'cancelled',
       endedAt: '2026-11-16T09:05:00Z',
     });
+  });
+});
+
+describe('gateAsker', () => {
+  it('names the Role of the agent that asks, and no one for a Flow’s Gate', () => {
+    expect(gateAsker({ role: 'planner' }, { kind: 'question' })).toBe(
+      'planner'
+    );
+    expect(gateAsker({}, { kind: 'question' })).toBe('agent');
+    expect(gateAsker({ role: 'planner' }, { kind: 'flow' })).toBeUndefined();
   });
 });

@@ -17,9 +17,9 @@ use uuid::Uuid;
 
 use crate::domain::models::{
     AgentName, CheckResult, CheckRound, CheckRoundOutcome, CheckRoundStart, ClaimedSession,
-    ControlFileChanges, EntryId, Gate, GateAnswer, HandBack, HandedBack, InvalidName, NewRun,
-    Outcome, PassedOver, Repository, Role, Run, RunEnd, RunId, RunInsert, RunOutcome, SessionStep,
-    Step, StepEnd, StepKey, StepSession, StoppingSession, TaskLink, TeamMembership,
+    ControlFileChanges, EntryId, Gate, GateAnswer, GateKind, HandBack, HandedBack, InvalidName,
+    NewRun, Outcome, PassedOver, Repository, Role, Run, RunEnd, RunId, RunInsert, RunOutcome,
+    SessionStep, Step, StepEnd, StepKey, StepSession, StoppingSession, TaskLink, TeamMembership,
 };
 use crate::domain::ports::RunRepository;
 use crate::domain::standing_rules::{OrchestratorDefinition, RulesSource, RunRules, StandingRule};
@@ -44,7 +44,7 @@ impl PgRunRepository {
 
     /// Whether a factory Step works, or worked, in the agent session
     /// `session`. Other services ask it to tell a Step's session apart; the
-    /// unique index on `session_id` serves it.
+    /// index on `session_id` serves it.
     #[tracing::instrument(err, skip(self))]
     pub async fn is_step_session(&self, session: Uuid) -> Result<bool, PgRunRepositoryErr> {
         let is_step_session = sqlx::query_scalar!(
@@ -269,6 +269,13 @@ impl StepRow {
 
         match (self.question.take(), self.answers.take(), self.opened_at) {
             (Some(question), Some(answers), Some(opened_at)) => Ok(Some(Gate {
+                kind: GateKind::of(
+                    self.outcome
+                        .clone()
+                        .map(Outcome::try_from)
+                        .transpose()?
+                        .as_ref(),
+                ),
                 question,
                 answers: answers
                     .into_iter()
@@ -1151,6 +1158,8 @@ impl RunRepository for PgRunRepository {
             FROM factory_step s
             JOIN factory_run r ON r.id = s.run_id
             WHERE s.session_id = $1
+            ORDER BY s.ended_at IS NULL DESC, s.seq DESC
+            LIMIT 1
             "#,
             session_id,
         )

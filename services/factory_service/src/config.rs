@@ -46,6 +46,10 @@ pub struct Config {
     /// for a person (`FACTORY_REVIEW_ROUNDS`); the Flow's own bound, three
     /// for `code`, when unset.
     pub factory_review_rounds: Option<NonZeroU8>,
+    /// The most questions each agent Step of a Run may ask the Run's owner
+    /// (`FACTORY_QUESTIONS`): the next one ends the Run for a person. Two
+    /// when unset; zero offers agents no question.
+    pub factory_questions: Option<u8>,
     /// The retired `FACTORY_AGENT_ID`, read only to refuse it: set without
     /// `FACTORY_AGENTS`, the service does not start, and its error names
     /// `FACTORY_AGENTS`.

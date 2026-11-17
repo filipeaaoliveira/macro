@@ -376,6 +376,7 @@ describe('createAppRunsContext', () => {
               endedAt: '2026-11-16T09:01:00Z',
             },
             gate: {
+              kind: 'flow',
               question: 'Approve this plan?',
               answers: ['approve'],
               openedAt: '2026-11-16T09:01:00Z',

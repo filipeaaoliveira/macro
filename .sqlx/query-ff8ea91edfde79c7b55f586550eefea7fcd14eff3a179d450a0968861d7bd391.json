@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT entry AS \"entry!\", run_id AS \"run_id!\", failed AS \"failed!\", visits AS \"visits!\"\n            FROM (\n                SELECT\n                    t.entry,\n                    t.run_id,\n                    t.failed,\n                    t.visits,\n                    row_number() OVER (PARTITION BY t.entry ORDER BY r.place) AS rank\n                FROM (\n                    SELECT\n                        entry,\n                        run_id,\n                        coalesce(bool_or(outcome = 'failed'), false) AS failed,\n                        count(*) FILTER (WHERE outcome IS DISTINCT FROM 'question') AS visits\n                    FROM factory_step\n                    WHERE run_id = ANY($1)\n                    GROUP BY entry, run_id\n                ) t\n                JOIN unnest($1::uuid[]) WITH ORDINALITY AS r(id, place) ON r.id = t.run_id\n                WHERE t.failed OR t.visits > 1\n            ) ranked\n            WHERE rank <= $2\n            ORDER BY entry, rank\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "entry!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "run_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "failed!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "visits!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "ff8ea91edfde79c7b55f586550eefea7fcd14eff3a179d450a0968861d7bd391"
+}

@@ -6,6 +6,7 @@
 //! test runs its own worker on a task queue of its own, so the stack's
 //! factory worker never takes its work.
 
+mod questions;
 mod replay;
 mod review_panel;
 
@@ -558,6 +559,7 @@ fn reviewed(review: &str) -> (&'static str, String) {
         )
     };
     match review {
+        "question" => ("question", "Should slugs keep a trailing dash?".to_string()),
         "changes" => ("changes", blocker("src/slug.rs")),
         "outside" => ("changes", blocker("README.md")),
         _ => (
@@ -692,16 +694,25 @@ impl CodeRun {
     /// and waits on it, and an answer that lands in between is refused, as
     /// the API would refuse it: the answer is sent again for a few seconds.
     async fn answer(&self, seq: u16, answer: &str) {
-        assert!(self.try_answer(seq, answer).await, "the answer was taken");
+        self.answer_with(seq, answer, None).await;
     }
 
-    /// [`Self::answer`], or false once a Standing Rule answered the Gate.
-    async fn try_answer(&self, seq: u16, answer: &str) -> bool {
+    /// [`Self::answer`], with `note`.
+    async fn answer_with(&self, seq: u16, answer: &str, note: Option<&str>) {
+        assert!(
+            self.try_answer(seq, answer, note).await,
+            "the answer was taken"
+        );
+    }
+
+    /// [`Self::answer_with`], or false once a Standing Rule answered the
+    /// Gate.
+    async fn try_answer(&self, seq: u16, answer: &str, note: Option<&str>) -> bool {
         let workflows = TemporalRunWorkflows::new(self.client.clone());
         let answer = AnswerGate {
             seq,
             answer: Outcome::try_from(answer.to_string()).expect("valid"),
-            note: None,
+            note: note.map(str::to_string),
             user_id: julia(),
             approved_control_files: None,
         };
@@ -738,7 +749,7 @@ impl CodeRun {
     async fn answer_next_gate(&self, answer: &str) {
         loop {
             let seq = self.next_gate().await;
-            if self.try_answer(seq, answer).await {
+            if self.try_answer(seq, answer, None).await {
                 return;
             }
         }
@@ -767,27 +778,56 @@ async fn walk_code<F>(
 where
     F: Future<Output = ()>,
 {
-    walk_code_with(
-        agent,
-        github,
-        &FakeRepo::default(),
-        RunRules::DEFAULT,
-        None,
-        None,
-        drive,
-    )
-    .await
+    walk_code_asking(agent, github, None, drive).await
 }
 
-/// [`walk_code`] a Run kept in `repo` with the Standing Rules `rules`,
-/// its review panel bounded to `rounds` rounds when given.
+/// [`walk_code`], its agents asking the Run's owner up to `questions`
+/// questions a Step when the Flow lets them.
+async fn walk_code_asking<F>(
+    agent: &CodeAgent,
+    github: &FakeGithub,
+    questions: Option<u8>,
+    drive: impl FnOnce(CodeRun) -> F,
+) -> Result<RunOutcome, WorkflowGetResultError>
+where
+    F: Future<Output = ()>,
+{
+    let walk = CodeWalk {
+        questions,
+        ..CodeWalk::default()
+    };
+    walk_code_with(agent, github, &FakeRepo::default(), walk, drive).await
+}
+
+/// How [`walk_code_with`] sets up a Run of the `code` Flow.
+struct CodeWalk {
+    /// The Run's Standing Rules.
+    rules: RunRules,
+    /// The review panel's rounds, when bounded.
+    rounds: Option<std::num::NonZeroU8>,
+    /// The Flow, in place of the built-in `code`.
+    flow: Option<Flow>,
+    /// The questions each Step's agent may ask, when the Flow lets them.
+    questions: Option<u8>,
+}
+
+impl Default for CodeWalk {
+    fn default() -> Self {
+        Self {
+            rules: RunRules::DEFAULT,
+            rounds: None,
+            flow: None,
+            questions: None,
+        }
+    }
+}
+
+/// [`walk_code`] a Run kept in `repo`, set up as `walk` says.
 async fn walk_code_with<F>(
     agent: &CodeAgent,
     github: &FakeGithub,
     repo: &FakeRepo,
-    rules: RunRules,
-    rounds: Option<std::num::NonZeroU8>,
-    flow: Option<Flow>,
+    walk: CodeWalk,
     drive: impl FnOnce(CodeRun) -> F,
 ) -> Result<RunOutcome, WorkflowGetResultError>
 where
@@ -810,21 +850,24 @@ where
             created_in_person: false,
             control_file_patterns: &[],
             control_files_team_id: None,
-            standing_rules: rules,
+            standing_rules: walk.rules,
         })
         .await
         .expect("insert")
     else {
         panic!("a run with no task is kept");
     };
-    let mut flow = flow.unwrap_or_else(|| {
+    let mut flow = walk.flow.unwrap_or_else(|| {
         BuiltInFlow::named("code")
             .expect("built in")
             .read(|_| Some(crate::domain::flow::StepUse::Work))
             .expect("valid flow")
     });
-    if let Some(rounds) = rounds {
+    if let Some(rounds) = walk.rounds {
         flow.bound_review_rounds(rounds);
+    }
+    if let Some(questions) = walk.questions {
+        flow.allow_questions(questions);
     }
     // The Run's branch is at the pull request's head, and its change is to
     // `src/slug.rs`.
@@ -1002,9 +1045,7 @@ async fn a_review_that_keeps_finding_blockers_ends_the_run_for_a_person() {
         &agent,
         &github,
         &repo,
-        RunRules::DEFAULT,
-        None,
-        None,
+        CodeWalk::default(),
         |run| async move {
             run.answer_next_gate("approve").await;
         },
@@ -1053,7 +1094,17 @@ async fn a_run_whose_rules_decide_every_gate_merges_with_no_person_asked() {
         project_id: None,
     };
 
-    let ended = walk_code_with(&agent, &github, &repo, rules, None, None, |_| async {}).await;
+    let ended = walk_code_with(
+        &agent,
+        &github,
+        &repo,
+        CodeWalk {
+            rules,
+            ..CodeWalk::default()
+        },
+        |_| async {},
+    )
+    .await;
 
     assert!(matches!(ended, Ok(RunOutcome::Success)), "{ended:?}");
     assert_eq!(github.state().merges, [FakeGithub::HEAD]);
@@ -1113,9 +1164,11 @@ async fn a_gate_of_no_kind_waits_for_a_person_whatever_the_rules() {
         &agent,
         &github,
         &repo,
-        rules,
-        None,
-        Some(flow),
+        CodeWalk {
+            rules,
+            flow: Some(flow),
+            ..CodeWalk::default()
+        },
         |run| async move {
             run.answer_next_gate("revise").await;
         },
@@ -1142,9 +1195,10 @@ async fn blockers_after_two_rule_fixes_wait_for_a_person() {
         &agent,
         &github,
         &repo,
-        RunRules::DEFAULT,
-        std::num::NonZeroU8::new(5),
-        None,
+        CodeWalk {
+            rounds: std::num::NonZeroU8::new(5),
+            ..CodeWalk::default()
+        },
         |run| async move {
             run.answer_next_gate("approve").await;
             // The two fixes need no one; the third round's Blockers do.

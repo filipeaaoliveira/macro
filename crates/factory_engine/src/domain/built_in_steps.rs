@@ -23,7 +23,10 @@ use crate::domain::ports::{
     AgentFailure, MainWatches, PullRequests, Retryable, StepAgent, StepExecutor,
 };
 use crate::domain::pull_request_steps::{PullRequestStepError, PullRequestSteps};
-use crate::domain::review_rounds::{blockers_brief, fenced_review};
+use crate::domain::questions::{
+    SESSION_LOST_NOTE, answers_brief, ask_instructions, going_on_prompt,
+};
+use crate::domain::review_rounds::{blockers_brief, escape, fenced_review};
 
 /// What the agent is told for a `plan` Step.
 const PLAN_INSTRUCTIONS: &str = include_str!("built_in_steps/plan.md");
@@ -155,6 +158,10 @@ pub enum BuiltInStepError {
     /// A pull request Step could not be done.
     #[error(transparent)]
     PullRequest(#[from] PullRequestStepError),
+    /// The Step goes on from a question its Run's records show no answer
+    /// to.
+    #[error("step {0}'s question has no answer to go on with")]
+    Unanswered(u16),
 }
 
 impl BuiltInStepError {
@@ -175,7 +182,8 @@ impl Retryable for BuiltInStepError {
             BuiltInStepError::UnknownStep(_)
             | BuiltInStepError::NotAnAgentStep(_)
             | BuiltInStepError::NoRepository(_)
-            | BuiltInStepError::UnexpectedOutcome { .. } => false,
+            | BuiltInStepError::UnexpectedOutcome { .. }
+            | BuiltInStepError::Unanswered(_) => false,
         }
     }
 }
@@ -235,16 +243,39 @@ where
         input: StepInput<'_>,
         answer_by: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<StepReport, BuiltInStepError> {
+        let mut outcomes = outcomes;
+        if input.may_ask {
+            outcomes.push(Outcome::question());
+        }
+        // A Step that goes on from its agent's question prompts the session
+        // the agent asked in with the owner's answer: the agent has the
+        // Step's instructions and its work so far there.
+        let asked_prompt = match input.resumes {
+            Some(asked) => going_on_prompt(input.earlier, asked, input.questions_left)
+                .ok_or(BuiltInStepError::Unanswered(asked))?,
+            None => prompt(instructions, &outcomes, input),
+        };
         let task = AgentTask {
             key: input.key,
             owner: input.owner.clone(),
             step: step.clone(),
             role: agent_role(step, input.role)
                 .ok_or_else(|| BuiltInStepError::NotAnAgentStep(step.clone()))?,
-            prompt: prompt(instructions, &outcomes, input),
+            prompt: asked_prompt,
             outcomes: outcomes.clone(),
             repo_url: input.repository.map(|repository| repository.url.clone()),
             answer_by,
+            resumes: input.resumes,
+            // Should the asking Step's session be gone, a new one is told
+            // the whole Step, the owner's answers in it, and that its
+            // earlier session's work may be lost.
+            afresh: input.resumes.map(|_| {
+                format!(
+                    "{}{}",
+                    prompt(instructions, &outcomes, input),
+                    SESSION_LOST_NOTE
+                )
+            }),
         };
         let answer = self
             .agent
@@ -325,7 +356,7 @@ where
                 }
             }
             BuiltInStep::Review => match input.review {
-                Some(round) if in_round(round, input.key.seq) => {
+                Some(round) if input.reviewer || in_round(round, input.key.seq) => {
                     self.review_in_round(step, round, input).await
                 }
                 _ => {
@@ -418,22 +449,30 @@ fn fix_instructions(review: Option<&ReviewRound>) -> String {
 const HISTORY_BUDGET: usize = 48 * 1024;
 
 /// The agent's prompt: the Step's instructions, the outcomes it may end
-/// with, where it works when the Run works on a repository ([`workplace`]),
-/// the Run's request, then the Run's earlier Steps ([`history`]).
+/// with, how to ask the Run's owner when it may, where it works when the
+/// Run works on a repository ([`workplace`]), the Run's request, the
+/// questions the owner answered ([`answers_brief`]), then the Run's earlier
+/// Steps ([`history`]).
 fn prompt(instructions: &str, outcomes: &[Outcome], input: StepInput<'_>) -> String {
     let outcomes = outcomes
         .iter()
         .map(|outcome| format!("`{outcome}`"))
         .collect::<Vec<_>>()
         .join(", ");
+    let ask = if input.may_ask {
+        ask_instructions(input.questions_left)
+    } else {
+        String::new()
+    };
     let workplace = input
         .repository
         .map(|repository| workplace(repository, &run_branch(input.key.run_id)))
         .unwrap_or_default();
     format!(
-        "{instructions}\nEnd the step with one of these outcomes: {outcomes}.\n{workplace}\n\
-         ## Request\n\n{}\n{}",
+        "{instructions}\nEnd the step with one of these outcomes: {outcomes}.\n{ask}{workplace}\n\
+         ## Request\n\n{}\n{}{}",
         input.request,
+        answers_brief(input.earlier),
         history(input.earlier)
     )
 }
@@ -527,10 +566,17 @@ fn section(step: &Step) -> String {
         .gate
         .as_ref()
         .and_then(|gate| gate.answer.as_ref().map(|answer| (&gate.question, answer)));
+    // An agent may have asked the question, and the note is a person's
+    // words: both are escaped, as findings are, so neither reads as a
+    // heading or opens a block.
     if let Some((question, answer)) = answer {
-        let note = answer.note.as_deref().unwrap_or("(no note)");
+        let note = answer
+            .note
+            .as_deref()
+            .map_or("(no note)".to_string(), escape);
         section.push_str(&format!(
-            "\nA person was asked \"{question}\" and answered `{}`: {note}\n",
+            "\nA person was asked \"{}\" and answered `{}`: {note}\n",
+            escape(question),
             answer.answer
         ));
     }

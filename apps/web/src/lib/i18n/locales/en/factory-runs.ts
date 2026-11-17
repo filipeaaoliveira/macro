@@ -113,6 +113,13 @@ export default {
   ruleApprovePlan: 'Approve plans',
   ruleFixBlockers: 'Fix review blockers',
   ruleMergeWhenGreen: 'Merge when CI is green',
+  // An agent's question to the Run's owner.
+  questionTitle: 'The {{role}} has a question',
+  questionWaiting:
+    'The run waits for your answer, then the agent goes on with it.',
+  answerLabel: 'Your answer',
+  answerPlaceholder: 'Write your answer',
+  questionAnswered: 'Answered:',
   // Control Files a Run changed that its request doesn't name.
   controlFilesTitle: 'Control files changed',
   controlFilesChanged:

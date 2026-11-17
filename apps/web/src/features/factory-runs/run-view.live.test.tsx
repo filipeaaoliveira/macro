@@ -72,6 +72,7 @@ const waiting: RunDetail = {
         endedAt: '2026-11-16T09:01:00Z',
       },
       gate: {
+        kind: 'flow',
         question: 'Approve this plan?',
         answers: ['approve', 'revise'],
         openedAt: '2026-11-16T09:01:00Z',

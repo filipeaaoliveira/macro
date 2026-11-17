@@ -11,8 +11,8 @@ use agent_session::domain::session_task::TaskDocumentId;
 use chrono::Utc;
 use factory_records::domain::main_hold::{BaseState, MainHoldRepository};
 use factory_records::domain::models::{
-    HandBack, MAX_NOTE_BYTES, MAX_OUTPUT_BYTES, MAX_REQUEST_BYTES, NewRun, Outcome, Repository,
-    Run, RunId, RunInsert, RunOutcome, Step, TaskLink, TeamMembership,
+    HandBack, MAX_NOTE_BYTES, MAX_OUTPUT_BYTES, MAX_QUESTION_BYTES, MAX_REQUEST_BYTES, NewRun,
+    Outcome, Repository, Run, RunId, RunInsert, RunOutcome, Step, TaskLink, TeamMembership,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::{ReviewRound, ReviewRoundRepository};
@@ -73,6 +73,7 @@ pub struct FactoryServiceImpl<R, W, E, U, T, G> {
     tasks: T,
     github: G,
     review_rounds: Option<NonZeroU8>,
+    questions: u8,
 }
 
 impl<R, W, E, U, T, G> FactoryServiceImpl<R, W, E, U, T, G>
@@ -94,7 +95,16 @@ where
             tasks,
             github,
             review_rounds: None,
+            questions: DEFAULT_QUESTIONS,
         }
+    }
+
+    /// Let each agent Step of the Runs it starts ask the Run's owner up to
+    /// `questions` questions, in place of [`DEFAULT_QUESTIONS`]. The bound
+    /// is kept in the Flow each Run starts with, as the review rounds'.
+    pub fn with_questions(mut self, questions: u8) -> Self {
+        self.questions = questions;
+        self
     }
 
     /// Bound each review panel of the Runs it starts to `rounds` rounds,
@@ -391,6 +401,7 @@ where
         if let Some(rounds) = self.review_rounds {
             flow.bound_review_rounds(rounds);
         }
+        flow.allow_questions(self.questions);
         if request.trim().is_empty() {
             return Err(FactoryError::EmptyRequest);
         }
@@ -619,6 +630,12 @@ where
                 offered: gate.answers.iter().map(|a| a.as_str().to_owned()).collect(),
             });
         }
+        // An agent's question is answered in the owner's own words: the
+        // agent goes on with them.
+        let blank = note.as_deref().is_none_or(|note| note.trim().is_empty());
+        if gate.is_some_and(|gate| gate.kind.answered_only_by_a_person()) && blank {
+            return Err(FactoryError::AnswerMissing);
+        }
 
         // A Tampered Run merges only once its owner approves the Control
         // Files its branch changed unasked: approving its Gate must list the
@@ -686,6 +703,16 @@ where
         if !step.offered.contains(&hand_back.outcome) {
             return Err(FactoryError::OutcomeNotOffered {
                 offered: step.offered.iter().map(|o| o.as_str().to_owned()).collect(),
+            });
+        }
+        // A question is put to a person on a Gate, which keeps what fits
+        // on one: the agent hears now that it must be shorter.
+        let question = hand_back.output.trim();
+        if hand_back.outcome == Outcome::question()
+            && (question.is_empty() || question.len() > MAX_QUESTION_BYTES)
+        {
+            return Err(FactoryError::QuestionSize {
+                max: MAX_QUESTION_BYTES,
             });
         }
         // The Step can end between the read above and this write: a hand
@@ -845,6 +872,10 @@ where
     }
 }
 
+/// How many questions an agent Step may ask the Run's owner, unless the
+/// service is told otherwise: the next one ends the Run for a person.
+pub const DEFAULT_QUESTIONS: u8 = 2;
+
 /// What a Run's worker does for its workflow: run Steps, and record Steps,
 /// Gates and the Run's end, each on its own.
 #[derive(Debug, Clone)]
@@ -926,6 +957,10 @@ where
             repository: run.repository.as_ref(),
             earlier: &earlier,
             review,
+            reviewer: request.round.is_some(),
+            may_ask: request.may_ask,
+            questions_left: request.questions_left,
+            resumes: request.resumes,
         };
         let report = self
             .executor

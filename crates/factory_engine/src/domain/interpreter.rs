@@ -158,6 +158,22 @@ impl<'a> Interpreter<'a> {
         Err(InterpreterError::NoStepToRun)
     }
 
+    /// The place of a Step that goes on with the entry the Run is at, as
+    /// the same visit: after an agent's question, its Role goes on with the
+    /// answer in a Step of its own. The Step counts against the Run's most
+    /// Steps: none once the Run took them all, and the Run ends `blocked`.
+    pub fn resume(&self, state: &mut RunState) -> Result<Option<u16>, InterpreterError> {
+        if !matches!(state.position, Position::Entry(_)) {
+            return Err(InterpreterError::Ended);
+        }
+        if state.steps >= MAX_STEPS {
+            state.position = Position::End(RunOutcome::Blocked);
+            return Ok(None);
+        }
+        state.steps += 1;
+        Ok(Some(state.steps))
+    }
+
     /// Take the Run where `outcome`, of the Step it just ran, leads: the first
     /// transition for it whose conditions hold, else the entry's `next`. A
     /// failed Step the Flow does not route ends the Run failed.

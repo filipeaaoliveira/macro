@@ -29,6 +29,7 @@ use crate::domain::models::AgentTask;
 use crate::domain::ports::{Retryable, StepAgent};
 
 mod follow_up;
+mod going_on;
 mod run_check;
 
 /// What happens to one call: it works, or fails with this error. A call
@@ -92,6 +93,11 @@ struct FakeSessions {
     /// no command.
     command_output: Option<SessionCommandOutput>,
     exec_calls: Arc<Mutex<Vec<ExecRoutineSession>>>,
+    /// A follow-up lands, but the session's runtime then stays
+    /// disconnected, as one the harness could not restore, until the
+    /// session is deleted.
+    follow_up_loses: bool,
+    lost: Arc<Mutex<bool>>,
 }
 
 impl FakeSessions {
@@ -121,6 +127,8 @@ impl FakeSessions {
             follow_up_calls: Arc::default(),
             command_output: None,
             exec_calls: Arc::default(),
+            follow_up_loses: false,
+            lost: Arc::default(),
         }
     }
 
@@ -291,6 +299,13 @@ impl RoutineSessions for FakeSessions {
         if let Some(error) = reply.error {
             return Err(error);
         }
+        if self.follow_up_loses {
+            *self.lost.lock().expect("lost") = true;
+            return Ok(RoutinePromptAccepted {
+                action_id,
+                queued: false,
+            });
+        }
         if let Some(handed) = &self.follow_up_handed {
             self.repo
                 .hand_back(session_id, handed)
@@ -328,7 +343,11 @@ impl RoutineSessions for FakeSessions {
             return Err(RoutineSessionError::OperationFailed);
         }
         let stops = self.cancelled.lock().expect("cancelled").len();
-        if stops > self.ignored_stops {
+        if *self.lost.lock().expect("lost") {
+            Ok(RoutineActionStatus::Pending(
+                RoutinePendingReason::Disconnected,
+            ))
+        } else if stops > self.ignored_stops {
             Ok(RoutineActionStatus::Failed(RoutineFailureReason::Cancelled))
         } else if *self.prompted.lock().expect("prompted") {
             Ok(self.ending)
@@ -370,6 +389,7 @@ impl RoutineSessions for FakeSessions {
         }
         *open = false;
         *self.prompted.lock().expect("prompted") = false;
+        *self.lost.lock().expect("lost") = false;
         Ok(())
     }
 }
@@ -413,6 +433,8 @@ async fn plan_task(repo: &FakeRepo) -> AgentTask {
         outcomes: vec![Outcome::done()],
         repo_url: None,
         answer_by: None,
+        resumes: None,
+        afresh: None,
     }
 }
 

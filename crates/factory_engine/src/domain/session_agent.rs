@@ -57,6 +57,15 @@ const PREPARE_LANDS_WITHIN: Duration = Duration::from_secs(5 * 60);
 /// session.
 const PROMPT_SETTLE: Duration = Duration::from_secs(60);
 
+/// How long a session resumed after its Step's question may show its
+/// runtime disconnected before it counts as lost: past the harness's start
+/// of a stopped sandbox and its restore of the session.
+const RESUME_SETTLE: Duration = Duration::from_secs(5 * 60);
+
+/// Why a Step that went on from its question left the asking Step's
+/// session, as its passed-over Agent records it.
+pub const SESSION_LOST: &str = "session_lost";
+
 /// How long a stopped Step's session is watched, to stop it again if a
 /// prompt still on its way started it.
 const STOP_WATCH: Duration = Duration::from_secs(60);
@@ -127,6 +136,10 @@ pub enum SessionAgentError {
     /// the same turn.
     #[error("the agent's turn on a later prompt was still going when the wait ended")]
     Overdue,
+    /// The session a Step went on in after its question could not be
+    /// resumed: its runtime stayed disconnected.
+    #[error("the agent session could not be resumed")]
+    SessionLost,
     /// The session worked past the Step's deadline.
     #[error("the agent did not finish within {0:?}")]
     TooSlow(Duration),
@@ -167,6 +180,7 @@ impl Retryable for SessionAgentError {
             | SessionAgentError::NoSession
             | SessionAgentError::PromptUnsettled
             | SessionAgentError::Released
+            | SessionAgentError::SessionLost
             | SessionAgentError::TooSlow(_) => false,
         }
     }
@@ -551,43 +565,215 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
     }
 }
 
-impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
-    type Err = SessionAgentError;
-
-    #[tracing::instrument(err, skip_all, fields(run_id = %task.key.run_id, seq = task.key.seq, step = %task.step, role = %task.role))]
-    async fn answer(&self, task: AgentTask) -> Result<AgentAnswer, SessionAgentError> {
-        // Opening and prompting count against the deadline too: the sooner
-        // of SESSION_DEADLINE from this call and the time the Step gave.
-        let left = task.answer_by.map_or(SESSION_DEADLINE, |answer_by| {
-            until(answer_by).min(SESSION_DEADLINE)
-        });
-        let deadline = tokio::time::Instant::now() + left;
-        let agents = self.agents.for_role(&task.role);
-        let first = agents
-            .first()
-            .ok_or_else(|| SessionAgentError::UnfilledRole(task.role.clone()))?;
-        // A retried Step goes on in the session its first attempt claimed,
-        // or the one a later Agent took over, so the work is never started
-        // twice.
-        let mut session = self
+impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
+    /// Do the Step `task`, which goes on from the question of the Step at
+    /// `asked`, in that Step's session: the agent has the Step's
+    /// instructions and its work so far there. The Step claims the session
+    /// under a prompt of its own, so a retry goes on with that prompt, and
+    /// the session's hand back reaches this Step, the one that runs. No
+    /// other Agent takes it over, whatever the session answers: the work is
+    /// in this one.
+    ///
+    /// The harness may have let the session go while the Run waited on its
+    /// owner: it stops an idle sandbox, then restores the session on the
+    /// next prompt. A session that cannot be resumed ([`Self::lost`]) is
+    /// deleted, and the Step goes on in a new session of its Role's first
+    /// Agent, prompted with the whole Step afresh (`AgentTask::afresh`),
+    /// the owner's answers in it.
+    async fn go_on(
+        &self,
+        task: &AgentTask,
+        asked: u16,
+        deadline: tokio::time::Instant,
+    ) -> Result<AgentAnswer, SessionAgentError> {
+        let asking = StepKey {
+            run_id: task.key.run_id,
+            seq: asked,
+        };
+        let asked_in = self
+            .repo
+            .claimed_session(asking)
+            .await
+            .map_err(Self::records)?
+            .ok_or(SessionAgentError::NoSession)?;
+        let session = self
             .repo
             .claim_session(
                 task.key,
-                self.new_session(first)?,
+                StepSession {
+                    action_id: Uuid::now_v7(),
+                    ..asked_in.clone()
+                },
                 &task.role,
                 &task.outcomes,
             )
             .await
             .map_err(Self::records)?
             .session;
+        // An earlier attempt found the session lost and went on afresh.
+        if session.session_id != asked_in.session_id {
+            return self.afresh(task, session, deadline).await;
+        }
 
+        let resumed = self.resume(task, &session, deadline).await;
+        match resumed {
+            Err(error) if lost(&error) && task.afresh.is_some() => {
+                tracing::warn!(
+                    ?error,
+                    "a factory step's agent session could not be resumed after its question: the step goes on afresh"
+                );
+            }
+            resumed => return resumed,
+        }
+
+        // The lost session is deleted first, so a prompt of it that lands
+        // late never works beside the new one.
+        let action = Self::action(&task.owner, &session, self.bot(&session, &task.role)?);
+        self.delete(&action).await;
+        let agent = self.agent_name(&session, &task.role)?;
+        let first = self
+            .agents
+            .for_role(&task.role)
+            .first()
+            .cloned()
+            .ok_or_else(|| SessionAgentError::UnfilledRole(task.role.clone()))?;
+        let fresh = self.new_session(&first)?;
+        let passed = PassedOver {
+            agent,
+            reason: SESSION_LOST.to_string(),
+        };
+        let recorded = self
+            .repo
+            .pass_session(
+                task.key,
+                session.session_id,
+                &task.role,
+                &passed,
+                Some(&fresh),
+            )
+            .await
+            .map_err(Self::records)?;
+        let session = if recorded {
+            fresh
+        } else {
+            // Another attempt went on afresh already: go on in its session.
+            match self.moved_on(task.key, &session).await? {
+                Some(current) => current,
+                None => return Err(SessionAgentError::Released),
+            }
+        };
+        self.afresh(task, session, deadline).await
+    }
+
+    /// Prompt the asking Step's `session`, which the Step `task` claimed,
+    /// with the owner's answer, and wait for the turn to end.
+    async fn resume(
+        &self,
+        task: &AgentTask,
+        session: &StepSession,
+        deadline: tokio::time::Instant,
+    ) -> Result<AgentAnswer, SessionAgentError> {
+        self.still_holds(task.key, session.session_id).await?;
+        // The session opened for the asking Step, so a stop of this one
+        // deletes it rather than write it off.
+        self.repo
+            .record_open(task.key, session.session_id)
+            .await
+            .map_err(Self::records)?;
+        let action = Self::action(&task.owner, session, self.bot(session, &task.role)?);
+        let prompted = self
+            .sessions
+            .follow_up(PromptRoutineSession {
+                action: action.clone(),
+                prompt: prompt(&task.prompt, &task.outcomes),
+                context: None,
+            })
+            .await;
+        self.prompt_once(&action, prompted).await?;
+        self.finished_or_lost(&action, deadline).await?;
+        self.handed_back(task.key, action.action_id.as_uuid()).await
+    }
+
+    /// Do the Step `task` afresh in `session`, a new session it claimed in
+    /// place of the one it could not resume, prompted with the whole Step.
+    async fn afresh(
+        &self,
+        task: &AgentTask,
+        session: StepSession,
+        deadline: tokio::time::Instant,
+    ) -> Result<AgentAnswer, SessionAgentError> {
+        let prompt = task.afresh.clone().ok_or(SessionAgentError::NoSession)?;
+        let task = AgentTask {
+            prompt,
+            resumes: None,
+            afresh: None,
+            ..task.clone()
+        };
+        self.answer_in(&task, session, deadline).await
+    }
+
+    /// [`Self::finished`], for a session resumed after a wait: one that
+    /// shows its runtime disconnected for [`RESUME_SETTLE`] in a row is lost.
+    async fn finished_or_lost(
+        &self,
+        action: &RoutineSessionAction,
+        deadline: tokio::time::Instant,
+    ) -> Result<(), SessionAgentError> {
+        let mut wait = FIRST_LOOK;
+        let mut failed_reads = 0;
+        let mut disconnected_since: Option<tokio::time::Instant> = None;
+        loop {
+            match self.sessions.status(action.clone()).await {
+                Ok(RoutineActionStatus::Succeeded) => return Ok(()),
+                Ok(RoutineActionStatus::Failed(reason)) => {
+                    return Err(SessionAgentError::TurnFailed(reason));
+                }
+                Ok(RoutineActionStatus::Pending(RoutinePendingReason::Disconnected)) => {
+                    failed_reads = 0;
+                    let since = *disconnected_since.get_or_insert_with(tokio::time::Instant::now);
+                    if since.elapsed() >= RESUME_SETTLE {
+                        return Err(SessionAgentError::SessionLost);
+                    }
+                }
+                Ok(RoutineActionStatus::Pending(_)) => {
+                    failed_reads = 0;
+                    disconnected_since = None;
+                }
+                Err(error) => {
+                    failed_reads += 1;
+                    if failed_reads >= MAX_FAILED_READS {
+                        return Err(error.into());
+                    }
+                }
+            }
+
+            if tokio::time::Instant::now() >= deadline {
+                return Err(SessionAgentError::TooSlow(SESSION_DEADLINE));
+            }
+            tokio::time::sleep(wait).await;
+            wait = (wait * 2).min(LONGEST_WAIT);
+        }
+    }
+
+    /// Do the Step `task` in `session`, the one it claimed: open it and
+    /// prompt it as its Agent, handing the Step to the next Agent of its
+    /// Role while one cannot start for lack of quota, and wait for the
+    /// hand back.
+    async fn answer_in(
+        &self,
+        task: &AgentTask,
+        session: StepSession,
+        deadline: tokio::time::Instant,
+    ) -> Result<AgentAnswer, SessionAgentError> {
+        let agents = self.agents.for_role(&task.role);
+        let mut session = session;
         // An Agent that cannot start for lack of quota hands the Step to the
         // next Agent of its Role, in a session of its own, until one starts
         // or none is left; the Step records each Agent passed over, the last
         // one too.
         let action = loop {
             let agent = self.agent_name(&session, &task.role)?;
-            let reason = match self.start(&task, &session, &agent).await {
+            let reason = match self.start(task, &session, &agent).await {
                 Ok(action) => break action,
                 Err(SessionAgentError::NoQuota(reason)) => reason,
                 // An overlapping attempt handed the Step on while this one
@@ -654,6 +840,44 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
         // The session stays until the Step's end is recorded: a retry of an
         // attempt whose answer Temporal lost goes on in it.
         self.handed_back(task.key, action.action_id.as_uuid()).await
+    }
+}
+
+impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
+    type Err = SessionAgentError;
+
+    #[tracing::instrument(err, skip_all, fields(run_id = %task.key.run_id, seq = task.key.seq, step = %task.step, role = %task.role))]
+    async fn answer(&self, task: AgentTask) -> Result<AgentAnswer, SessionAgentError> {
+        // Opening and prompting count against the deadline too: the sooner
+        // of SESSION_DEADLINE from this call and the time the Step gave.
+        let left = task.answer_by.map_or(SESSION_DEADLINE, |answer_by| {
+            until(answer_by).min(SESSION_DEADLINE)
+        });
+        let deadline = tokio::time::Instant::now() + left;
+        if let Some(asked) = task.resumes {
+            return self.go_on(&task, asked, deadline).await;
+        }
+        let first = self
+            .agents
+            .for_role(&task.role)
+            .first()
+            .ok_or_else(|| SessionAgentError::UnfilledRole(task.role.clone()))?;
+        // A retried Step goes on in the session its first attempt claimed,
+        // or the one a later Agent took over, so the work is never started
+        // twice.
+        let session = self
+            .repo
+            .claim_session(
+                task.key,
+                self.new_session(first)?,
+                &task.role,
+                &task.outcomes,
+            )
+            .await
+            .map_err(Self::records)?
+            .session;
+
+        self.answer_in(&task, session, deadline).await
     }
 
     #[tracing::instrument(err, skip_all, fields(run_id = %turn.key.run_id, seq = turn.key.seq))]
@@ -847,6 +1071,18 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
         }
         Ok(())
     }
+}
+
+/// Whether a session a Step went on in after its question is lost: its
+/// runtime stayed disconnected, it never showed the prompt, or it holds no
+/// history to go on from.
+fn lost(error: &SessionAgentError) -> bool {
+    matches!(
+        error,
+        SessionAgentError::SessionLost
+            | SessionAgentError::PromptUnsettled
+            | SessionAgentError::Session(RoutineSessionError::InvalidCommand)
+    )
 }
 
 /// What a session's refusal means for the Step: an Agent out of quota

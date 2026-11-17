@@ -210,6 +210,10 @@ fn reviewing<'a>(run_id: RunId, round: &'a ReviewRound) -> StepInput<'a> {
         repository: Some(&REPOSITORY),
         earlier: &[],
         review: Some(round),
+        reviewer: true,
+        may_ask: false,
+        questions_left: 0,
+        resumes: None,
         created_in_person: false,
         control_file_patterns: None,
     }

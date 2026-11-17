@@ -56,6 +56,7 @@ function toRun(detail: RunDetail): Run {
       end: step.end ?? undefined,
       gate: step.gate
         ? {
+            kind: step.gate.kind,
             question: step.gate.question,
             answers: step.gate.answers,
             openedAt: step.gate.openedAt,

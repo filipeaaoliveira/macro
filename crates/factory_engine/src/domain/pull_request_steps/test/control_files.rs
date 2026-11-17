@@ -4,7 +4,7 @@
 
 use chrono::Utc;
 use factory_records::domain::models::{
-    ControlFileChanges, EntryId, Gate, GateAnswer, NewRun, Outcome, RunId, Step, StepEnd,
+    ControlFileChanges, EntryId, Gate, GateAnswer, GateKind, NewRun, Outcome, RunId, Step, StepEnd,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::standing_rules::RunRules;
@@ -51,6 +51,7 @@ fn merge_gate(seq: u16, approved: Option<&[&str]>) -> Step {
             ended_at: Utc::now(),
         }),
         gate: Some(Gate {
+            kind: GateKind::Flow,
             question: "Merge?".to_string(),
             answers: vec![approve.clone()],
             opened_at: Utc::now(),

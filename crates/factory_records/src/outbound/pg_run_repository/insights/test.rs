@@ -420,3 +420,101 @@ async fn a_step_a_cancelled_run_stopped_takes_no_time(pool: PgPool) {
         })
     );
 }
+
+/// A Step whose agent asked the Run's owner a question, and the Step that
+/// went on with the answer, are one visit of their entry: no revisit, no
+/// trouble. The question, its Gate and the answer it took are left out of
+/// the entry's outcomes, answers and Gates.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn a_question_and_the_step_going_on_from_it_are_one_visit(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let julia = user("macro|julia@example.com");
+    let id = RunId::generate();
+    let RunInsert::Inserted(_) = repo
+        .insert_run(NewRun {
+            id,
+            flow: "plan",
+            request: "Plan the export",
+            user_id: &julia,
+            task_id: None,
+            repository: None,
+            created_in_person: false,
+            control_file_patterns: &[],
+            control_files_team_id: None,
+        })
+        .await
+        .expect("insert")
+    else {
+        panic!("a run with no task is kept");
+    };
+    let key = |seq| crate::domain::models::StepKey { run_id: id, seq };
+    let outcome = |name: &str| {
+        crate::domain::models::Outcome::try_from(name.to_string()).expect("valid outcome")
+    };
+    for seq in [1, 2] {
+        repo.start_step(key(seq), &entry("plan"), 1)
+            .await
+            .expect("start");
+    }
+    repo.end_step(key(1), &outcome("question"), "CSV or JSON?")
+        .await
+        .expect("end");
+    repo.open_gate(key(1), "CSV or JSON?", &[outcome("answer")])
+        .await
+        .expect("open");
+    repo.answer_gate(key(1), &outcome("answer"), Some("CSV"), &julia, None)
+        .await
+        .expect("answer");
+    repo.end_step(key(2), &outcome("done"), "The plan")
+        .await
+        .expect("end");
+    repo.open_gate(key(2), "Approve?", &[outcome("approve")])
+        .await
+        .expect("open");
+    repo.answer_gate(key(2), &outcome("approve"), None, &julia, None)
+        .await
+        .expect("answer");
+
+    let records = repo
+        .read_insights(&InsightsScope {
+            user_id: julia,
+            from: at("2000-01-01T00:00:00Z"),
+            to: at("2100-01-01T00:00:00Z"),
+            flow: None,
+            cap: 1000,
+        })
+        .await
+        .expect("read");
+
+    let plan = records
+        .entries
+        .iter()
+        .find(|summary| summary.entry == entry("plan"))
+        .expect("plan");
+    assert_eq!(
+        (
+            plan.steps,
+            plan.runs,
+            plan.revisited_runs,
+            plan.troubled_runs
+        ),
+        (2, 1, 0, 0)
+    );
+    assert_eq!((plan.gates_opened, plan.gates_answered), (1, 1));
+    let counted: Vec<(EntryCountKind, &str)> = records
+        .counts
+        .iter()
+        .map(|count| (count.kind, count.value.as_str()))
+        .collect();
+    assert_eq!(
+        counted,
+        [
+            (EntryCountKind::Answer, "approve"),
+            (EntryCountKind::Outcome, "done")
+        ]
+    );
+    assert!(records.trouble.is_empty());
+}
