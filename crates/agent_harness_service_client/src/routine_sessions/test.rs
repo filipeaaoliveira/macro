@@ -1,6 +1,7 @@
 use super::*;
 use agent_runtime_protocol::domain::action::AgentActionId;
 use agent_session::domain::model::{AgentSessionId, SessionSource, SessionVisibility};
+use agent_session::domain::session_command::SessionCommand;
 use bot_id::BotId;
 use macro_user_id::user_id::MacroUserIdStr;
 use macro_uuid::{Uuid, generate_uuid_v7};
@@ -330,6 +331,54 @@ async fn a_follow_up_is_sent_once_to_its_route() {
             .starts_with("POST /internal/routine-sessions/follow-up HTTP/1.1")
     );
     assert_eq!(requests[0].body["prompt"], "run the checks");
+}
+
+/// A command goes to its own route with its owner's identity, its end comes
+/// back as the harness answered it, and a runtime that runs no command says
+/// so, typed.
+#[tokio::test]
+async fn a_command_is_sent_to_its_route_and_its_end_read_back() {
+    let server = server(vec![
+        Reply::json(
+            200,
+            json!({"exit_code": 101, "stdout": "1 failed", "stderr": "error"}),
+        ),
+        Reply::json(501, json!({"code": "command_unsupported"})),
+    ])
+    .await;
+    let client = AgentSessionClient::new(&server.url, KEY).unwrap();
+    let command = ExecRoutineSession {
+        action: identity(),
+        command: SessionCommand {
+            cwd: ".".into(),
+            command: "just check".into(),
+            timeout_secs: 600,
+        },
+    };
+
+    let output = client.exec(command.clone()).await.unwrap();
+    let unsupported = client.exec(command).await.unwrap_err();
+
+    assert_eq!(
+        output,
+        SessionCommandOutput {
+            exit_code: 101,
+            stdout: "1 failed".into(),
+            stderr: "error".into(),
+        }
+    );
+    assert_eq!(unsupported, RoutineSessionError::CommandUnsupported);
+    let requests = server.requests.lock().unwrap();
+    assert!(
+        requests[0]
+            .head
+            .starts_with("POST /internal/routine-sessions/exec HTTP/1.1")
+    );
+    assert_eq!(requests[0].body["command"]["command"], "just check");
+    assert_eq!(
+        requests[0].body["action"]["owner"],
+        identity().owner.as_ref()
+    );
 }
 
 /// A harness nothing listens for refuses the connection, and never got the

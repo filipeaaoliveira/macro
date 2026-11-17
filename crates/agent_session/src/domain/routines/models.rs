@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::domain::model::{
     AgentMcpServer, AgentSessionId, SessionBilling, SessionSource, SessionVisibility,
 };
+use crate::domain::session_command::SessionCommand;
 
 /// A persona selected by a routine's validated user owner.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -102,6 +103,17 @@ pub struct PromptRoutineSession {
     /// What made the routine fire, rendered ahead of the prompt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<trigger_context::TriggerContext>,
+}
+
+/// A command to run in a session's checkout, beside its agent, and how
+/// it ended ([`super::RoutineSessions::exec`]).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecRoutineSession {
+    /// Owner, persona and session, checked as for a prompt; the action id
+    /// names the command in the caller's records and logs.
+    pub action: RoutineSessionAction,
+    /// What to run.
+    pub command: SessionCommand,
 }
 
 /// Prompt admission is not completion.
@@ -207,6 +219,10 @@ pub enum RoutineSessionError {
     /// Session already exists or has accepted a first prompt.
     #[error("routine session has already been used")]
     Conflict,
+    /// The session's runtime runs no command beside its agent: a paired
+    /// machine, a cloud agent or the in-process agent.
+    #[error("the session's runtime runs no command beside its agent")]
+    CommandUnsupported,
     /// Prompt admission failed and may already have taken effect. Never replay it.
     #[error("prompt delivery is uncertain; do not retry")]
     PromptDeliveryUnknown,
@@ -235,6 +251,7 @@ impl RoutineSessionError {
             | Self::SessionMismatch
             | Self::ModelMismatch
             | Self::Conflict
+            | Self::CommandUnsupported
             | Self::PromptDeliveryUnknown => false,
         }
     }

@@ -28,6 +28,8 @@ mod sandbox_size;
 pub mod search;
 pub mod service;
 pub mod session;
+/// One command run in a session's checkout, beside its agent.
+pub mod session_command;
 /// The task a session works on, and linking its pull request to it.
 pub mod session_task;
 /// Session link, channel, and team sharing.

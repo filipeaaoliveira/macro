@@ -1385,6 +1385,21 @@ pub trait AgentSessionNotificationRecipient: Send + Sync + 'static {
         }
     }
 
+    /// Run `command` in the session's checkout, beside its agent, on the
+    /// replica that holds the session, and say how it ended. A runtime that
+    /// runs no command answers [`AgentSessionError::CommandUnsupported`].
+    /// The caller has authorized the session; nothing here checks who asks.
+    fn run_command(
+        &self,
+        id: AgentSessionId,
+        command: super::session_command::SessionCommand,
+    ) -> impl Future<Output = Result<super::session_command::SessionCommandOutput>> + Send {
+        async move {
+            let _ = command;
+            Err(AgentSessionError::CommandUnsupported(id))
+        }
+    }
+
     /// Release and delete every session owned by a user before account deletion.
     /// Internal account lifecycle only; shared sessions owned by others are untouched.
     fn delete_user_sessions(

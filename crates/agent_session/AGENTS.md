@@ -186,6 +186,12 @@ skips the turn before any model call; unset or unreadable, summaries run.
   sends a later prompt to a session that took its first, under its own
   action id, which `status` then reads (the software factory's checks
   rounds). A prompt the session already holds under that id is a conflict.
+  `exec` runs one command in the session's checkout, beside its agent, for
+  its owner (`domain/session_command.rs`), through the harness
+  (`AgentSessionNotificationRecipient::run_command`), and answers its exit
+  code and the end of its output; a runtime with no checkout Macro reaches
+  answers `command_unsupported`. The route waits up to the command's
+  30-minute limit.
 - A background session (`AgentSession::is_background`, `SessionPurpose::Background`)
   is work the owner asked for that runs out of sight: source `user`, origin
   `requested` by the owner, `hidden`, opened from no message. A routine

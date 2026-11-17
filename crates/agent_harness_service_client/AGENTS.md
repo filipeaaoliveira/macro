@@ -38,5 +38,7 @@ sessions through `agent_harness_service`'s internal routes. It implements the
   recovery to the caller.
 - A connection the harness refused is not ambiguous: nothing reached it, so
   every command answers `RuntimeUnavailable`, which a caller may send again.
+- `exec` waits as long as the command may run (30 minutes) and a margin: a
+  command runs again when sent again.
   Only a direct connection is refused; through a gateway, a harness that is
   down answers 502 or 503, and a prompt stays `PromptDeliveryUnknown`.

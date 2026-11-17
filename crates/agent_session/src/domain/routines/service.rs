@@ -13,6 +13,7 @@ use crate::domain::ports::{
     SelectedPersona, SessionOpener, persona_for_owner,
 };
 use crate::domain::service::AgentSessionService;
+use crate::domain::session_command::SessionCommandOutput;
 
 /// Domain orchestration using the same provisioning and controls as interactive sessions.
 #[derive(Clone)]
@@ -362,6 +363,20 @@ where
         })
     }
 
+    async fn exec(
+        &self,
+        command: ExecRoutineSession,
+    ) -> Result<SessionCommandOutput, RoutineSessionError> {
+        self.owned_session(&command.action).await?;
+        if command.command.validate().is_err() {
+            return Err(RoutineSessionError::InvalidCommand);
+        }
+        self.controls
+            .run_command(command.action.session_id, command.command)
+            .await
+            .map_err(session_error)
+    }
+
     async fn status(
         &self,
         command: RoutineSessionAction,
@@ -495,6 +510,7 @@ fn session_error(error: AgentSessionError) -> RoutineSessionError {
         | AgentSessionError::UnknownOwner
         | AgentSessionError::OwnerNotUser(_) => RoutineSessionError::Forbidden,
         AgentSessionError::SessionIdTaken(_) => RoutineSessionError::Conflict,
+        AgentSessionError::CommandUnsupported(_) => RoutineSessionError::CommandUnsupported,
         AgentSessionError::TeamAgentComputer => RoutineSessionError::TeamAgentComputer,
         AgentSessionError::RuntimeUnavailable(_) | AgentSessionError::Disconnected(_) => {
             RoutineSessionError::RuntimeUnavailable

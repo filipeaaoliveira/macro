@@ -19,11 +19,12 @@ use uuid::Uuid;
 
 const OWNER: &str = "macro|owner@example.com";
 const INTERNAL_KEY: &str = "routine-test-internal";
-const OPERATIONS: [&str; 8] = [
+const OPERATIONS: [&str; 9] = [
     "validate",
     "prepare",
     "prompt",
     "follow-up",
+    "exec",
     "status",
     "cancel",
     "delete",
@@ -161,6 +162,18 @@ impl RoutineSessions for ServiceSpy {
         })
     }
 
+    async fn exec(
+        &self,
+        command: ExecRoutineSession,
+    ) -> Result<SessionCommandOutput, RoutineSessionError> {
+        self.record("exec", command)?;
+        Ok(SessionCommandOutput {
+            exit_code: 1,
+            stdout: "1 failed".into(),
+            stderr: String::new(),
+        })
+    }
+
     async fn status(
         &self,
         command: RoutineSessionAction,
@@ -223,6 +236,10 @@ fn command(operation: &str) -> Value {
         "prompt" | "follow-up" => {
             json!({ "action": action, "prompt": "private routine instructions" })
         }
+        "exec" => json!({
+            "action": action,
+            "command": { "cwd": ".", "command": "just check", "timeout_secs": 600 },
+        }),
         _ => action,
     }
 }
@@ -298,6 +315,11 @@ async fn forwards_explicit_owner_and_complete_command_without_rewriting() {
                 body(response).await,
                 json!({ "state": "pending", "reason": "permission" })
             );
+        } else if operation == "exec" {
+            assert_eq!(
+                body(response).await,
+                json!({ "exit_code": 1, "stdout": "1 failed", "stderr": "" })
+            );
         }
     }
 }
@@ -310,7 +332,7 @@ async fn owner_is_required_and_validated_in_every_command() {
             let mut command = command(operation);
             let identity = match operation {
                 "prepare" => &mut command["selection"],
-                "prompt" | "follow-up" => &mut command["action"],
+                "prompt" | "follow-up" | "exec" => &mut command["action"],
                 _ => &mut command,
             }
             .as_object_mut()
@@ -360,6 +382,10 @@ async fn domain_denials_are_preserved_as_content_free_error_codes() {
         (RoutineSessionError::SessionMismatch, StatusCode::CONFLICT),
         (RoutineSessionError::ModelMismatch, StatusCode::CONFLICT),
         (RoutineSessionError::Conflict, StatusCode::CONFLICT),
+        (
+            RoutineSessionError::CommandUnsupported,
+            StatusCode::NOT_IMPLEMENTED,
+        ),
         (
             RoutineSessionError::PromptDeliveryUnknown,
             StatusCode::BAD_GATEWAY,

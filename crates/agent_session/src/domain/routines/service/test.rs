@@ -8,6 +8,7 @@ use crate::domain::ports::{
     NoOpTurnObserver, NoopLifecyclePublisher, OpenExternalAgentSession, QueuedControl,
 };
 use crate::domain::service::AgentSessionServiceImpl;
+use crate::domain::session_command::SessionCommand;
 use crate::testing::{InMemoryAgentSessionRepo, test_agent_session};
 use agent_fold::domain::service::FoldedMessageService;
 use agent_runtime_protocol::domain::schema::v0::ToRuntimeMessage;
@@ -109,6 +110,10 @@ impl ExternalSessionRequester for Openings {
 #[derive(Clone, Default)]
 struct Controls {
     events: Arc<Mutex<Vec<ControlEvent>>>,
+    /// The commands run, and what a command answers: none for a runtime
+    /// that runs no command.
+    commands: Arc<Mutex<Vec<(AgentSessionId, SessionCommand)>>>,
+    command_output: Arc<Mutex<Option<SessionCommandOutput>>>,
     fail: Arc<Mutex<bool>>,
     queued: Arc<Mutex<Vec<QueuedControl>>>,
 }
@@ -131,6 +136,18 @@ impl AgentSessionNotificationRecipient for Controls {
     }
     async fn queued_controls(&self, _: AgentSessionId) -> SessionResult<Vec<QueuedControl>> {
         Ok(self.queued.lock().unwrap().clone())
+    }
+    async fn run_command(
+        &self,
+        id: AgentSessionId,
+        command: SessionCommand,
+    ) -> SessionResult<SessionCommandOutput> {
+        self.commands.lock().unwrap().push((id, command));
+        self.command_output
+            .lock()
+            .unwrap()
+            .clone()
+            .ok_or(AgentSessionError::CommandUnsupported(id))
     }
     async fn delete_user_sessions(&self, _: MacroUserIdStr<'static>) -> SessionResult<()> {
         panic!("not a routine capability")
@@ -719,6 +736,100 @@ async fn a_follow_up_the_session_already_holds_is_refused() {
         assert_eq!(refused, RoutineSessionError::Conflict);
     }
     assert!(fx.controls.events.lock().unwrap().is_empty());
+}
+
+fn check_command() -> SessionCommand {
+    SessionCommand {
+        cwd: ".".into(),
+        command: "just check".into(),
+        timeout_secs: 600,
+    }
+}
+
+#[tokio::test]
+async fn a_command_runs_in_the_owners_session_and_hands_back_how_it_ended() {
+    let fx = Fixture::new(true);
+    let ended = SessionCommandOutput {
+        exit_code: 2,
+        stdout: "1 test failed".into(),
+        stderr: "error: test failed".into(),
+    };
+    *fx.controls.command_output.lock().unwrap() = Some(ended.clone());
+
+    let output = fx
+        .service
+        .exec(ExecRoutineSession {
+            action: fx.action(),
+            command: check_command(),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(output, ended);
+    assert_eq!(
+        *fx.controls.commands.lock().unwrap(),
+        vec![(fx.session.id, check_command())]
+    );
+}
+
+#[tokio::test]
+async fn a_command_is_refused_to_anyone_but_the_sessions_owner() {
+    let fx = Fixture::new(true);
+    *fx.controls.command_output.lock().unwrap() = Some(SessionCommandOutput {
+        exit_code: 0,
+        stdout: String::new(),
+        stderr: String::new(),
+    });
+    let mut action = fx.action();
+    action.owner = other_owner();
+
+    let refused = fx
+        .service
+        .exec(ExecRoutineSession {
+            action,
+            command: check_command(),
+        })
+        .await
+        .unwrap_err();
+
+    assert_eq!(refused, RoutineSessionError::Forbidden);
+    assert!(fx.controls.commands.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_runtime_that_runs_no_command_says_so() {
+    let fx = Fixture::new(true);
+
+    let refused = fx
+        .service
+        .exec(ExecRoutineSession {
+            action: fx.action(),
+            command: check_command(),
+        })
+        .await
+        .unwrap_err();
+
+    assert_eq!(refused, RoutineSessionError::CommandUnsupported);
+}
+
+#[tokio::test]
+async fn a_command_that_leaves_the_checkout_never_runs() {
+    let fx = Fixture::new(true);
+
+    let refused = fx
+        .service
+        .exec(ExecRoutineSession {
+            action: fx.action(),
+            command: SessionCommand {
+                cwd: "../other".into(),
+                ..check_command()
+            },
+        })
+        .await
+        .unwrap_err();
+
+    assert_eq!(refused, RoutineSessionError::InvalidCommand);
+    assert!(fx.controls.commands.lock().unwrap().is_empty());
 }
 
 #[test]
