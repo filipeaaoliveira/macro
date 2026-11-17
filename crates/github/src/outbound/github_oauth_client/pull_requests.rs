@@ -198,7 +198,7 @@ struct CheckRunApp {
 
 impl GithubOauthImpl {
     /// GET `path` of the REST API as the user, read as `T`.
-    async fn read<T: DeserializeOwned>(
+    pub(super) async fn read<T: DeserializeOwned>(
         &self,
         access_token: &str,
         path: &str,
