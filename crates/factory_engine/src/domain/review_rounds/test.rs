@@ -929,7 +929,9 @@ async fn linked(repo: &FakeRepo, run_id: RunId) -> Vec<(u16, u16, Option<Uuid>)>
 /// A problem outside the diff that later rounds report again makes no
 /// second task: its findings are linked to the first, which a comment of
 /// the owner's tells, once a round, who reported it again and where. A
-/// finding elsewhere in the same file makes a task of its own.
+/// finding elsewhere in the same file makes a task of its own. A finding
+/// about the whole file meets both tasks, the newer one last linked: the
+/// oldest wins.
 #[tokio::test]
 async fn a_problem_reported_again_in_a_later_round_joins_its_follow_up_task() {
     let repo = FakeRepo::default();
@@ -968,12 +970,12 @@ async fn a_problem_reported_again_in_a_later_round_joins_its_follow_up_task() {
         (6, 2),
         &[
             (
-                "correctness-reviewer",
-                vec![finding("src/text.js", Some((40, 41)))],
-            ),
-            (
                 "scope-reviewer",
                 vec![finding("./src/text.js", Some((14, 20)))],
+            ),
+            (
+                "correctness-reviewer",
+                vec![finding("src/text.js", Some((40, 41)))],
             ),
         ],
     )
@@ -999,8 +1001,8 @@ async fn a_problem_reported_again_in_a_later_round_joins_its_follow_up_task() {
         linked(&repo, run_id).await,
         [
             (3, 1, task(0)),
-            (6, 1, task(1)),
-            (7, 1, task(0)),
+            (6, 1, task(0)),
+            (7, 1, task(1)),
             (9, 1, task(0)),
             (10, 1, task(0)),
         ]
@@ -1022,7 +1024,7 @@ async fn a_problem_reported_again_in_a_later_round_joins_its_follow_up_task() {
             (
                 "macro|julia@example.com",
                 made[0].id,
-                "Reported again in review round 2 by the scope-reviewer, at `./src/text.js` \
+                "Reported again in review round 2 by the scope-reviewer, at `src/text.js` \
                  lines 14-20."
             ),
             (
@@ -1051,12 +1053,17 @@ async fn a_problem_reported_again_after_a_revise_joins_its_follow_up_task() {
     }
     let rounds = rounds(&repo, &github);
 
+    // A reviewer may write what the task's own text says.
+    let echoing = Finding {
+        problem: "docs/old.md is outside the changes it reviewed, yet stale".to_string(),
+        ..finding("docs/old.md", None)
+    };
     review(
         &rounds,
         &repo,
         run_id,
         (3, 1),
-        &[("correctness-reviewer", vec![finding("docs/old.md", None)])],
+        &[("correctness-reviewer", vec![echoing])],
     )
     .await
     .expect("before the revise");
@@ -1144,4 +1151,255 @@ async fn a_retried_close_comments_on_a_joined_follow_up_task_once() {
     );
     let comments = repo.follow_up_comments.lock().expect("comments").clone();
     assert_eq!(comments.len(), 1, "{comments:#?}");
+}
+
+/// A Run whose rounds at Steps 3 and 6 review `main..aaa` and `aaa..bbb`,
+/// and whose first round made one follow-up task, on `src/text.js` lines
+/// 6-15: the rounds, and the task's id.
+async fn reported_once(
+    repo: &FakeRepo,
+    github: &FakeGithub,
+) -> (
+    ReviewRoundsImpl<FakeRepo, FakeGithub, FakeRepo>,
+    RunId,
+    Uuid,
+) {
+    let run_id = code_run(repo).await;
+    github.state().branch_heads = [Some("aaa".to_string()), Some("bbb".to_string())].into();
+    for (base, head) in [("main", "aaa"), ("aaa", "bbb")] {
+        github
+            .state()
+            .diffs
+            .insert((base.to_string(), head.to_string()), Vec::new());
+    }
+    let rounds = rounds(repo, github);
+    review(
+        &rounds,
+        repo,
+        run_id,
+        (3, 1),
+        &[(
+            "correctness-reviewer",
+            vec![finding("src/text.js", Some((6, 15)))],
+        )],
+    )
+    .await
+    .expect("first");
+    let made = repo.follow_ups.lock().expect("follow ups")[0].id;
+    (rounds, run_id, made)
+}
+
+/// A task the owner deleted since is not joined: the problem reported again
+/// makes a task of its own.
+#[tokio::test]
+async fn a_problem_whose_task_is_gone_makes_a_new_follow_up_task() {
+    let repo = FakeRepo::default();
+    let github = FakeGithub::default();
+    let (rounds, run_id, gone) = reported_once(&repo, &github).await;
+    repo.tasks.lock().expect("tasks").remove(&gone);
+
+    review(
+        &rounds,
+        &repo,
+        run_id,
+        (6, 2),
+        &[("scope-reviewer", vec![finding("src/text.js", Some((7, 7)))])],
+    )
+    .await
+    .expect("second");
+
+    let made = repo.follow_ups.lock().expect("follow ups").clone();
+    assert_eq!(made.len(), 2, "{made:#?}");
+    assert_eq!(
+        linked(&repo, run_id).await,
+        [(3, 1, Some(gone)), (6, 1, Some(made[1].id))]
+    );
+    assert!(repo.follow_up_comments.lock().expect("comments").is_empty());
+}
+
+/// A follow-up document storage refused has no task to join: the problem
+/// reported again makes one.
+#[tokio::test]
+async fn a_problem_whose_task_was_refused_makes_a_follow_up_task_later() {
+    let repo = FakeRepo::default();
+    let github = FakeGithub::default();
+    *repo.follow_ups_refused.lock().expect("refused") = true;
+    let run_id = code_run(&repo).await;
+    github.state().branch_heads = [Some("aaa".to_string()), Some("bbb".to_string())].into();
+    for (base, head) in [("main", "aaa"), ("aaa", "bbb")] {
+        github
+            .state()
+            .diffs
+            .insert((base.to_string(), head.to_string()), Vec::new());
+    }
+    let rounds = rounds(&repo, &github);
+    review(
+        &rounds,
+        &repo,
+        run_id,
+        (3, 1),
+        &[(
+            "correctness-reviewer",
+            vec![finding("src/text.js", Some((6, 15)))],
+        )],
+    )
+    .await
+    .expect("refused");
+    *repo.follow_ups_refused.lock().expect("refused") = false;
+
+    review(
+        &rounds,
+        &repo,
+        run_id,
+        (6, 2),
+        &[("scope-reviewer", vec![finding("src/text.js", Some((7, 7)))])],
+    )
+    .await
+    .expect("second");
+
+    let made = repo.follow_ups.lock().expect("follow ups").clone();
+    assert_eq!(made.len(), 1, "{made:#?}");
+    assert_eq!(
+        linked(&repo, run_id).await,
+        [(3, 1, None), (6, 1, Some(made[0].id))]
+    );
+    assert!(repo.follow_up_comments.lock().expect("comments").is_empty());
+}
+
+/// Every finding of a round that joins one task, across its problems, is
+/// linked before the task is commented on, once, naming them all: a link
+/// that fails fails the close with no comment made, and the retry makes
+/// the one comment.
+#[tokio::test]
+async fn a_round_links_what_joined_a_task_then_comments_on_it_once() {
+    let repo = FakeRepo::default();
+    let github = FakeGithub::default();
+    let (rounds, run_id, task) = reported_once(&repo, &github).await;
+    repo.fail_once_after("link_follow_up", 1);
+
+    // Two findings of one reviewer that meet are two problems, as within a
+    // round, and line 12 meets neither: three problems, all the earlier
+    // task's.
+    let failed = review(
+        &rounds,
+        &repo,
+        run_id,
+        (6, 2),
+        &[
+            (
+                "correctness-reviewer",
+                vec![
+                    finding("src/text.js", Some((7, 8))),
+                    finding("src/text.js", Some((9, 9))),
+                ],
+            ),
+            (
+                "scope-reviewer",
+                vec![finding("/src/text.js", Some((12, 12)))],
+            ),
+        ],
+    )
+    .await;
+    assert!(matches!(failed, Err(StepError::Internal(_))), "{failed:?}");
+    assert!(repo.follow_up_comments.lock().expect("comments").is_empty());
+    let retried = rounds.close_round(closing(run_id, 6)).await.expect("retry");
+    assert_eq!(retried, outcome("pass"));
+
+    assert_eq!(repo.follow_ups.lock().expect("follow ups").len(), 1);
+    assert_eq!(
+        linked(&repo, run_id).await,
+        [
+            (3, 1, Some(task)),
+            (6, 1, Some(task)),
+            (6, 2, Some(task)),
+            (7, 1, Some(task)),
+        ]
+    );
+    let comments = repo.follow_up_comments.lock().expect("comments").clone();
+    let read: Vec<_> = comments
+        .iter()
+        .map(|comment| (comment.task_id, comment.text.as_str()))
+        .collect();
+    assert_eq!(
+        read,
+        [(
+            task,
+            "Reported again in review round 2 by the correctness-reviewer and the \
+             scope-reviewer, at `src/text.js` lines 7-8, `src/text.js` line 9, \
+             `src/text.js` line 12."
+        )]
+    );
+}
+
+/// A comment that fails is logged and holds nothing; a close tried again
+/// for another reason, as a new task that could not be made yet, makes it.
+#[tokio::test]
+async fn a_comment_that_failed_is_made_when_the_close_is_tried_again() {
+    let repo = FakeRepo::default();
+    let github = FakeGithub::default();
+    let (rounds, run_id, task) = reported_once(&repo, &github).await;
+    repo.fail_once_after("comment_on_follow_up", 0);
+    *repo.follow_ups_fail.lock().expect("fail") = 1;
+
+    let failed = review(
+        &rounds,
+        &repo,
+        run_id,
+        (6, 2),
+        &[(
+            "scope-reviewer",
+            vec![
+                finding("src/text.js", Some((7, 7))),
+                finding("src/other.js", None),
+            ],
+        )],
+    )
+    .await;
+    assert!(matches!(failed, Err(StepError::Internal(_))), "{failed:?}");
+    assert!(repo.follow_up_comments.lock().expect("comments").is_empty());
+    let retried = rounds.close_round(closing(run_id, 6)).await.expect("retry");
+    assert_eq!(retried, outcome("pass"));
+
+    let comments = repo.follow_up_comments.lock().expect("comments").clone();
+    assert_eq!(comments.len(), 1, "{comments:#?}");
+    assert_eq!(comments[0].task_id, task);
+    assert_eq!(repo.follow_ups.lock().expect("follow ups").len(), 2);
+}
+
+/// A close tried again after it made one of its round's tasks does not
+/// take that task for an earlier round's: it is not commented on.
+#[tokio::test]
+async fn a_retried_close_does_not_join_a_task_its_own_round_made() {
+    let repo = FakeRepo::default();
+    let github = FakeGithub::default();
+    let run_id = code_run(&repo).await;
+    github.state().branch_heads = [Some("aaa".to_string())].into();
+    github
+        .state()
+        .diffs
+        .insert(("main".to_string(), "aaa".to_string()), Vec::new());
+    let rounds = rounds(&repo, &github);
+    repo.fail_once_after("create_follow_up", 1);
+
+    let failed = review(
+        &rounds,
+        &repo,
+        run_id,
+        (3, 1),
+        &[(
+            "correctness-reviewer",
+            vec![
+                finding("src/text.js", Some((1, 5))),
+                finding("src/text.js", Some((3, 4))),
+            ],
+        )],
+    )
+    .await;
+    assert!(matches!(failed, Err(StepError::Internal(_))), "{failed:?}");
+    let retried = rounds.close_round(closing(run_id, 3)).await.expect("retry");
+    assert_eq!(retried, outcome("pass"));
+
+    let made = repo.follow_ups.lock().expect("follow ups").clone();
+    assert_eq!(made.len(), 2, "{made:#?}");
+    assert!(repo.follow_up_comments.lock().expect("comments").is_empty());
 }
