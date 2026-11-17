@@ -1,12 +1,12 @@
 use agent_session::domain::routines::RoutineActionStatus;
-use factory_records::domain::models::{HandBack, Outcome};
+use factory_records::domain::models::{HandBack, Outcome, StepSession};
 use factory_records::domain::ports::RunRepository;
 use uuid::Uuid;
 
 use super::{FakeSessions, agent, julia, plan_task, the_plan};
 use crate::domain::fakes::FakeRepo;
 use crate::domain::models::AgentTurn;
-use crate::domain::ports::StepAgent;
+use crate::domain::ports::{Retryable, StepAgent};
 use crate::domain::session_agent::SessionAgentError;
 
 fn outcome(name: &str) -> Outcome {
@@ -40,6 +40,7 @@ async fn a_later_prompt_goes_on_in_the_step_s_session() {
         action_id: Uuid::now_v7(),
         prompt: "Run the checks".to_string(),
         outcomes: vec![outcome("passed"), outcome("failed")],
+        answer_by: chrono::Utc::now() + chrono::TimeDelta::hours(1),
     };
 
     let answer = agent.follow_up(turn.clone()).await.expect("follow up");
@@ -77,6 +78,7 @@ async fn a_later_prompt_needs_its_own_hand_back_and_a_session() {
         action_id: Uuid::now_v7(),
         prompt: "Run the checks".to_string(),
         outcomes: vec![outcome("passed"), outcome("failed")],
+        answer_by: chrono::Utc::now() + chrono::TimeDelta::hours(1),
     };
 
     let before_work = agent.follow_up(turn.clone()).await;
@@ -85,4 +87,46 @@ async fn a_later_prompt_needs_its_own_hand_back_and_a_session() {
 
     assert!(matches!(before_work, Err(SessionAgentError::NoSession)));
     assert!(matches!(silent, Err(SessionAgentError::NothingHandedBack)));
+}
+
+/// A later prompt whose turn is still going when the Step's time for it is
+/// up ends the wait, as a failure a retry goes on from: the turn is not
+/// prompted again.
+#[tokio::test]
+async fn a_later_prompt_waits_no_longer_than_its_step_allows() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(
+        &repo,
+        Some(the_plan()),
+        RoutineActionStatus::Pending(
+            agent_session::domain::routines::RoutinePendingReason::Running,
+        ),
+    );
+    let key = plan_task(&repo).await.key;
+    let session = StepSession {
+        session_id: Uuid::now_v7(),
+        action_id: Uuid::now_v7(),
+    };
+    repo.claim_session(key, session, &[Outcome::done()])
+        .await
+        .expect("claim");
+    *sessions.open.lock().expect("open") = true;
+    *sessions.prompted.lock().expect("prompted") = true;
+    let agent = agent(&sessions, &repo);
+    let turn = AgentTurn {
+        key,
+        owner: julia(),
+        action_id: Uuid::now_v7(),
+        prompt: "Run the checks".to_string(),
+        outcomes: vec![outcome("passed"), outcome("failed")],
+        answer_by: chrono::Utc::now(),
+    };
+
+    let overdue = agent.follow_up(turn).await;
+
+    let Err(error) = overdue else {
+        panic!("a turn still going is not an answer");
+    };
+    assert!(matches!(error, SessionAgentError::Overdue));
+    assert!(error.retryable());
 }

@@ -531,6 +531,8 @@ impl RunRepository for FakeRepo {
                 CheckRound {
                     round: start.round,
                     checks: start.checks.clone(),
+                    commands: start.commands.clone(),
+                    declared: start.declared.clone(),
                     started_at: Utc::now(),
                     end: None,
                     work_output: start.work_output.clone(),
@@ -634,8 +636,8 @@ pub(crate) struct FakeGithubState {
     pub(crate) merges: Vec<String>,
     /// GitHub's reason to refuse a merge, if it does.
     pub(crate) merge_refusal: Option<String>,
-    /// The text of each file on the Run's branch, by path.
-    pub(crate) files: BTreeMap<String, String>,
+    /// The text of each file, by its branch and path.
+    pub(crate) files: BTreeMap<(String, String), String>,
     /// The paths the Run's branch changed against its base; none when
     /// GitHub cannot list them all.
     pub(crate) changed: Option<Vec<String>>,
@@ -779,10 +781,11 @@ impl PullRequests for FakeGithub {
         &self,
         _owner: &MacroUserIdStr<'static>,
         _repository: &CodeRepository,
-        _branch: &str,
+        branch: &str,
         path: &str,
     ) -> Result<Option<String>, FakeError> {
-        Ok(self.state().files.get(path).cloned())
+        let file = (branch.to_string(), path.to_string());
+        Ok(self.state().files.get(&file).cloned())
     }
 
     async fn changed_paths(

@@ -155,26 +155,34 @@ while an Actions suite sits empty. Its guarantees:
 
 On a repository, `write` and `fix` then run the repository's own checks
 (`src/domain/built_in_steps/checks_round.rs`). The repository declares them
-in `.macro/checks.json` on the Run's branch (`src/domain/checks.rs`): each a
+in `.macro/checks.json` on its base branch (`src/domain/checks.rs`): each a
 `name`, a `run` command from the repository's root, and optional `paths`
-(files or folders) whose change makes it run; `rounds` (1 to 10, default 3)
-is how many times a Step runs them. The Step reads the file and the paths
-the branch changed against its base from GitHub (every check runs when
-GitHub lists only part of them). The checks run where the agent works, by
-the agent: the engine can only prompt the session, so a round is a later
-prompt of the Step's session (`StepAgent::follow_up`, the routine sessions'
-`follow_up`) that asks it to run them verbatim, change nothing, and hand back
-`passed` or `failed` with a report. A failure goes back to the same session
-in another prompt with the report, and the next round checks the fix. Each
-round, with its prompts' ids, is recorded before it is asked
-(`factory_check_round`), so a retried Step goes on with its round; a new
-prompt clears the session's hand back and offers its own outcomes
-(`begin_turn`), and a stop watches it. The Step ends `done` once a round
-passes, the agent's own outcome when its work changed nothing or no check
-applies, and `red` when the last round failed or the file does not read; the
-`code` Flow ends such a Run `manual`. The rounds show on the Step
-(`checks` in the Run API). A Step's rounds share its attempts' 30 minutes
-each and its two hours of retries.
+(files or folders from the root, no patterns) whose change makes it run;
+`rounds` (1 to 10, default 3) is how many times a Step runs them. The file is
+read from the Run's recorded base, never the Run's branch, which the agent
+pushes: the first round keeps it, with the checks and commands it runs, and
+every later round and retry goes by that record. A later round runs the
+first round's checks and any others the branch's changes now reach (every
+check when GitHub lists only part of the changes). The checks run where the
+agent works, by the agent: the engine can only prompt the session, so a
+round is a later prompt of the Step's session (`StepAgent::follow_up`, the
+routine sessions' `follow_up`) that asks it to run them verbatim, change
+nothing, and hand back `passed` or `failed` with a report. A failure goes
+back to the same session in another prompt with the report, and the next
+round checks the fix. Each round, with its prompts' ids, is recorded before
+it is asked (`factory_check_round`), so a retried Step goes on with its
+round; a new prompt clears the session's hand back and offers its own
+outcomes (`begin_turn`), and a stop watches it. All rounds run in the Step's
+one activity: they stop `ROUNDS_END_BY` (105 minutes) after the Step
+started, short of its two hours, and a later prompt's wait ends then too
+(or at the attempt's own deadline, which a retry goes on from). The Step
+ends `done` once a round passes, the agent's own outcome when its work
+changed nothing or no check applies, and `red` when the last round failed,
+the rounds ran out of time, or the file does not read; the `code` Flow ends
+such a Run `manual`. Its output says which, then the last report and the
+agent's work, cut to the 64 KiB a Step keeps. The rounds show on the Step
+(`checks` in the Run API). `LocalAgent` answers a round of checks `failed`:
+no check ran.
 
 The head `ci` calls green is kept (`factory_run.merge_head_sha`);
 `ready_to_merge` ends `changed` unless the pull request's head is still that

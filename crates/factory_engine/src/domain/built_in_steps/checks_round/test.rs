@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::sync::{Arc, LazyLock, Mutex};
 
 use factory_records::domain::models::{
-    CheckRound, CheckRoundOutcome, Outcome, Repository, RunId, StepKey,
+    CheckRound, CheckRoundOutcome, EntryId, MAX_OUTPUT_BYTES, Outcome, Repository, RunId, StepKey,
 };
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
@@ -28,12 +28,16 @@ impl Retryable for SessionFailed {
 /// A later prompt's outcome and text, or the session failing.
 type Scripted = Result<(&'static str, &'static str), SessionFailed>;
 
-/// Ends its first prompt with `work`, and each later prompt with the next
-/// of `later`, keeping every task and later prompt it is given.
+/// Ends its first prompt with `work`, handing back `work_text`, and each
+/// later prompt with the next of `later`, keeping every task and later
+/// prompt it is given. When `ages` is set, a later prompt that fails takes
+/// its Step past its time for rounds, as one that worked too long would.
 #[derive(Clone, Default)]
 struct ScriptedAgent {
     work: &'static str,
+    work_text: String,
     later: Arc<Mutex<VecDeque<Scripted>>>,
+    ages: Option<FakeRepo>,
     tasks: Arc<Mutex<Vec<AgentTask>>>,
     turns: Arc<Mutex<Vec<AgentTurn>>>,
 }
@@ -42,6 +46,7 @@ impl ScriptedAgent {
     fn new(work: &'static str, later: Vec<Scripted>) -> Self {
         Self {
             work,
+            work_text: "Wrote the toggle".to_string(),
             later: Arc::new(Mutex::new(later.into())),
             ..Self::default()
         }
@@ -59,18 +64,25 @@ impl StepAgent for ScriptedAgent {
         self.tasks.lock().expect("tasks").push(task);
         Ok(AgentAnswer {
             outcome: outcome(self.work),
-            text: "Wrote the toggle".to_string(),
+            text: self.work_text.clone(),
         })
     }
 
     async fn follow_up(&self, turn: AgentTurn) -> Result<AgentAnswer, SessionFailed> {
+        let key = turn.key;
         self.turns.lock().expect("turns").push(turn);
-        let (ended, text) = self
+        let scripted = self
             .later
             .lock()
             .expect("later")
             .pop_front()
-            .expect("a scripted answer")?;
+            .expect("a scripted answer");
+        if scripted.is_err()
+            && let Some(repo) = &self.ages
+        {
+            age(repo, key);
+        }
+        let (ended, text) = scripted?;
         Ok(AgentAnswer {
             outcome: outcome(ended),
             text: text.to_string(),
@@ -98,6 +110,17 @@ fn outcome(name: &str) -> Outcome {
     Outcome::try_from(name.to_string()).expect("valid")
 }
 
+/// Take the Step `key` back to two hours before now: past its time for
+/// rounds.
+fn age(repo: &FakeRepo, key: StepKey) {
+    let mut steps = repo.steps.lock().expect("steps");
+    for (run, step) in steps.iter_mut() {
+        if *run == key.run_id && step.seq == key.seq {
+            step.started_at = chrono::Utc::now() - chrono::TimeDelta::hours(2);
+        }
+    }
+}
+
 static JULIA: LazyLock<MacroUserIdStr<'static>> = LazyLock::new(|| {
     MacroUserIdStr::try_from("macro|julia@example.com".to_string()).expect("valid")
 });
@@ -115,19 +138,24 @@ const CHECKS: &str = r#"{
     ]
 }"#;
 
-/// A Run's repository on GitHub, its branch declaring `checks` (none when
-/// absent) and changing `changed` (unknown when absent).
+/// A Run's repository on GitHub, its base declaring `checks` (none when
+/// absent) and its branch changing `changed` (unknown when absent).
 fn github(checks: Option<&str>, changed: Option<&[&str]>) -> FakeGithub {
     let github = FakeGithub::default();
     if let Some(checks) = checks {
-        github
-            .state()
-            .files
-            .insert(CHECKS_FILE.to_string(), checks.to_string());
+        declare(&github, "main", checks);
     }
     github.state().changed =
         changed.map(|paths| paths.iter().map(|path| path.to_string()).collect());
     github
+}
+
+/// Have `branch` declare `checks`.
+fn declare(github: &FakeGithub, branch: &str, checks: &str) {
+    github.state().files.insert(
+        (branch.to_string(), CHECKS_FILE.to_string()),
+        checks.to_string(),
+    );
 }
 
 /// A Step of a new Run on [`REPOSITORY`].
@@ -156,6 +184,8 @@ async fn run(
         agent.clone(),
         PullRequestSteps::new(github.clone(), repo.clone()),
     );
+    let entry = EntryId::try_from(step.to_string()).expect("valid");
+    repo.start_step(input.key, &entry, 1).await.expect("start");
     let step = StepName::try_from(step.to_string()).expect("valid");
     steps.run(&step, input).await
 }
@@ -178,8 +208,12 @@ async fn checks_that_pass_end_the_step_done() {
         .expect("write");
 
     assert_eq!(report.outcome, Outcome::done());
-    assert!(report.output.starts_with("Wrote the toggle"));
-    assert!(report.output.contains("passed in round 1: web."));
+    assert!(
+        report
+            .output
+            .starts_with("The repository's checks passed in round 1: web.")
+    );
+    assert!(report.output.contains("Wrote the toggle"));
     let turns = agent.turns();
     assert_eq!(turns.len(), 1);
     assert!(turns[0].prompt.contains("`web`: `bun run check`"));
@@ -189,6 +223,7 @@ async fn checks_that_pass_end_the_step_done() {
     assert_eq!(rounds.len(), 1);
     assert_eq!(rounds[0].check_action_id, turns[0].action_id);
     assert_eq!(rounds[0].checks, ["web"]);
+    assert_eq!(rounds[0].commands, ["bun run check"]);
     let end = rounds[0].end.as_ref().expect("ended");
     assert_eq!(
         (end.outcome, end.report.as_str()),
@@ -217,8 +252,18 @@ async fn a_failure_goes_back_to_the_agent_and_the_next_round_checks_its_fix() {
         .expect("fix");
 
     assert_eq!(report.outcome, Outcome::done());
-    assert!(report.output.starts_with("Fixed the toggle's saving"));
-    assert!(report.output.contains("passed in round 2: rust."));
+    assert!(
+        report
+            .output
+            .starts_with("The repository's checks passed in round 2: rust.")
+    );
+    // The Step keeps the agent's work, and what its fix did.
+    assert!(report.output.contains("Wrote the toggle"));
+    assert!(
+        report
+            .output
+            .contains("After round 1 failed: Fixed the toggle's saving")
+    );
     let turns = agent.turns();
     assert_eq!(turns.len(), 3);
     assert!(turns[1].prompt.contains("test toggle_saves failed"));
@@ -257,7 +302,11 @@ async fn checks_that_never_pass_end_the_step_red() {
         .expect("write");
 
     assert_eq!(report.outcome, outcome("red"));
-    assert!(report.output.contains("still fail after 2 rounds: web."));
+    assert!(
+        report
+            .output
+            .contains("still fail in round 2, their last: web.")
+    );
     assert!(report.output.contains("web: exit 1 again"));
     assert_eq!(agent.turns().len(), 3);
 }
@@ -321,6 +370,125 @@ async fn which_checks_a_branch_runs() {
         assert_eq!(report.output, "Wrote the toggle");
         assert!(agent.turns().is_empty());
     }
+}
+
+/// The checks file is read from the Run's base, which the agent does not
+/// push to: one its branch adds, or changes, counts for nothing.
+#[tokio::test]
+async fn the_branch_cannot_declare_or_change_its_checks() {
+    let agent = ScriptedAgent::new("done", Vec::new());
+    let github = github(None, Some(&["apps/web/index.ts"]));
+    let input = input();
+    declare(&github, &format!("factory/{}", input.key.run_id), CHECKS);
+
+    let report = run(&agent, &github, &FakeRepo::default(), "write", input)
+        .await
+        .expect("write");
+
+    assert_eq!(report.output, "Wrote the toggle");
+    assert!(agent.turns().is_empty());
+}
+
+/// Later rounds go by the checks file the first round read, and run the
+/// checks it ran, whatever the base or the branch's changes say since.
+#[tokio::test]
+async fn later_rounds_go_by_what_the_first_round_read() {
+    let github = github(Some(CHECKS), Some(&["apps/web/index.ts"]));
+    let repo = FakeRepo::default();
+    let input = input();
+    let first = ScriptedAgent::new(
+        "done",
+        vec![Ok(("failed", "web: exit 1")), Err(SessionFailed)],
+    );
+    let _ = run(&first, &github, &repo, "write", input).await;
+    // Since then the base allows more rounds and declares no checks, and
+    // the fix reverted the change that ran `web`.
+    declare(&github, "main", r#"{"rounds": 10, "checks": []}"#);
+    github.state().changed = Some(vec!["README.md".to_string()]);
+    let retry = ScriptedAgent::new(
+        "done",
+        vec![Ok(("done", "Reverted it")), Ok(("failed", "web: exit 1"))],
+    );
+
+    let report = run(&retry, &github, &repo, "write", input)
+        .await
+        .expect("write");
+
+    let rounds = rounds(&repo, input).await;
+    assert_eq!(rounds.len(), 2);
+    assert_eq!(rounds[1].checks, ["web"]);
+    assert_eq!(rounds[1].commands, ["bun run check"]);
+    // Two rounds, as the first round's file said: the Step ends there.
+    assert_eq!(report.outcome, outcome("red"));
+    assert!(
+        report
+            .output
+            .contains("still fail in round 2, their last: web.")
+    );
+}
+
+/// Rounds stop short of the Step's time and end it `red`, saying so: before
+/// asking anything more, and when an agent is still at work as time runs
+/// out.
+#[tokio::test]
+async fn rounds_out_of_time_end_the_step_red() {
+    let github = github(Some(CHECKS), Some(&["apps/web/index.ts"]));
+    let repo = FakeRepo::default();
+    let mut slow = ScriptedAgent::new("done", vec![Err(SessionFailed)]);
+    slow.ages = Some(repo.clone());
+
+    let report = run(&slow, &github, &repo, "write", input())
+        .await
+        .expect("write");
+
+    assert_eq!(report.outcome, outcome("red"));
+    assert!(
+        report
+            .output
+            .contains("before the step's time ran out, with 0 of their rounds ended: web.")
+    );
+    assert!(report.output.contains("Wrote the toggle"));
+    let turn = &slow.turns()[0];
+    let left = turn.answer_by - chrono::Utc::now();
+    assert!(left > chrono::TimeDelta::minutes(100) && left <= chrono::TimeDelta::minutes(105));
+
+    // A retry past the time asks nothing more.
+    let input = input();
+    let failing = ScriptedAgent::new(
+        "done",
+        vec![Ok(("failed", "web: exit 1")), Err(SessionFailed)],
+    );
+    let _ = run(&failing, &github, &repo, "write", input).await;
+    age(&repo, input.key);
+    let retry = ScriptedAgent::new("done", Vec::new());
+    let report = run(&retry, &github, &repo, "write", input)
+        .await
+        .expect("write");
+    assert_eq!(report.outcome, outcome("red"));
+    assert!(report.output.contains("with 1 of their rounds ended: web."));
+    assert!(report.output.contains("web: exit 1"));
+    assert!(retry.turns().is_empty());
+}
+
+/// An output past what a Step keeps is cut, with a mark, keeping what the
+/// checks said first.
+#[tokio::test]
+async fn an_output_too_long_for_a_step_is_cut() {
+    let mut agent = ScriptedAgent::new("done", vec![Ok(("passed", "web: exit 0"))]);
+    agent.work_text = "é".repeat(MAX_OUTPUT_BYTES);
+    let github = github(Some(CHECKS), Some(&["apps/web/index.ts"]));
+
+    let report = run(&agent, &github, &FakeRepo::default(), "write", input())
+        .await
+        .expect("write");
+
+    assert!(report.output.len() <= MAX_OUTPUT_BYTES);
+    assert!(
+        report
+            .output
+            .starts_with("The repository's checks passed in round 1: web.")
+    );
+    assert!(report.output.ends_with("a step's output holds 64 KiB.)"));
 }
 
 /// A checks file that does not read ends the Step `red`, saying why; work

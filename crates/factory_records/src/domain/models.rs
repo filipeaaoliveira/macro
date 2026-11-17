@@ -400,6 +400,13 @@ pub struct CheckRound {
     /// What the agent handed back for the work the round checks.
     #[serde(skip)]
     pub work_output: String,
+    /// The command of each check, at its name's place in `checks`.
+    #[serde(skip)]
+    pub commands: Vec<String>,
+    /// The repository's checks file as the Step's first round read it,
+    /// which every round goes by.
+    #[serde(skip)]
+    pub declared: String,
     /// The prompt that asks the agent to run the checks.
     #[serde(skip)]
     pub check_action_id: Uuid,
@@ -418,6 +425,10 @@ pub struct CheckRoundStart {
     pub work_output: String,
     /// The names of the checks it runs; at least one.
     pub checks: Vec<String>,
+    /// The command of each check, at its name's place in `checks`.
+    pub commands: Vec<String>,
+    /// The repository's checks file as the Step's first round read it.
+    pub declared: String,
     /// The prompt, a UUIDv7, that asks the agent to run them.
     pub check_action_id: Uuid,
 }

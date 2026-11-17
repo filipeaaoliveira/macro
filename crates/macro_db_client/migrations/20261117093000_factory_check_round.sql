@@ -27,8 +27,14 @@ CREATE TABLE factory_check_round (
     seq integer NOT NULL,
     round integer NOT NULL CHECK (round BETWEEN 1 AND 10),
     work_output text NOT NULL CHECK (octet_length(work_output) <= 65536),
-    -- The names of the checks the round runs, in the repository's order.
+    -- The checks the round runs, in the repository's order: their names,
+    -- and the command of each at the same place.
     checks text[] NOT NULL CHECK (cardinality(checks) >= 1),
+    commands text[] NOT NULL,
+    -- The repository's checks file as the first round read it from the
+    -- run's base branch: every round goes by it, so the agent's branch
+    -- cannot change which checks run or how many rounds there are.
+    declared text NOT NULL CHECK (octet_length(declared) <= 65536),
     -- The prompt that asks the agent to run them.
     check_action_id uuid NOT NULL,
     started_at timestamptz NOT NULL DEFAULT now(),
@@ -41,6 +47,7 @@ CREATE TABLE factory_check_round (
     CONSTRAINT factory_check_round_end CHECK (
         (outcome IS NULL) = (ended_at IS NULL) AND (report IS NULL) = (ended_at IS NULL)
     ),
+    CONSTRAINT factory_check_round_commands CHECK (cardinality(commands) = cardinality(checks)),
     CONSTRAINT factory_check_round_fix CHECK (fix_action_id IS NULL OR outcome = 'failed'),
     PRIMARY KEY (run_id, seq, round),
     FOREIGN KEY (run_id, seq) REFERENCES factory_step (run_id, seq) ON DELETE CASCADE

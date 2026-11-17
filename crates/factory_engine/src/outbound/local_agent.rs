@@ -38,13 +38,19 @@ impl StepAgent for LocalAgent {
         })
     }
 
+    /// Ends a later prompt with `failed` when it offers it, as a round of
+    /// checks does, since no check ran; with its first outcome otherwise.
     #[tracing::instrument(err, skip_all, fields(run_id = %turn.key.run_id, seq = turn.key.seq))]
     async fn follow_up(&self, turn: AgentTurn) -> Result<AgentAnswer, NoOutcome> {
-        let outcome = turn.outcomes.first().cloned().ok_or(NoOutcome)?;
+        let failed = turn
+            .outcomes
+            .iter()
+            .find(|outcome| outcome.as_str() == "failed");
+        let outcome = failed.or(turn.outcomes.first()).cloned().ok_or(NoOutcome)?;
         Ok(AgentAnswer {
             outcome,
             text: format!(
-                "No agent ran this prompt: the local agent stands in for one. It was asked:\n\n{}",
+                "No agent ran this prompt, so nothing it asks for ran: the local agent stands in for one. It was asked:\n\n{}",
                 turn.prompt
             ),
         })

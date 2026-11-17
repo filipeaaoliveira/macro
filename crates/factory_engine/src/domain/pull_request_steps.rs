@@ -17,7 +17,7 @@ use factory_records::domain::models::{Outcome, Repository};
 use factory_records::domain::ports::RunRepository;
 use github::domain::models::MacroTaskId;
 
-use crate::domain::checks::{CHECKS_FILE, ChecksFileError, RepositoryCheck, RepositoryChecks};
+use crate::domain::checks::CHECKS_FILE;
 use crate::domain::models::{
     CheckState, CheckSuite, CodeRepository, HeadChecks, Merging, OpenPullRequest, Opening,
     PullRequest, PullRequestState, RequiredCheck, RequiredChecks, StepInput, StepReport,
@@ -107,16 +107,6 @@ impl Retryable for PullRequestStepError {
             | Self::NoMergeHead => false,
         }
     }
-}
-
-/// The checks a Run's branch runs, of those its repository declares.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BranchChecks {
-    /// How many times a Step runs them at most.
-    pub rounds: u8,
-    /// Those the branch's changes run, in order; none when its changes run
-    /// none of them.
-    pub checks: Vec<RepositoryCheck>,
 }
 
 /// What a pull request's checks on its head say.
@@ -336,42 +326,31 @@ impl<G: PullRequests, R: RunRepository> PullRequestSteps<G, R> {
         &self.repo
     }
 
-    /// The checks the Run's branch declares in [`CHECKS_FILE`], and those of
-    /// them its changes against the base run: every one when GitHub cannot
-    /// list the changes. None when the branch declares no checks.
-    pub(crate) async fn branch_checks(
+    /// The text of [`CHECKS_FILE`] on the Run's base branch, which the
+    /// agent's branch cannot change; none when the base declares no checks.
+    pub(crate) async fn declared_checks(
         &self,
         input: &StepInput<'_>,
-    ) -> Result<Option<Result<BranchChecks, ChecksFileError>>, PullRequestStepError> {
+    ) -> Result<Option<String>, PullRequestStepError> {
+        let (repository, recorded) = Self::repository(input)?;
+        self.github
+            .file_text(input.owner, &repository, &recorded.base_branch, CHECKS_FILE)
+            .await
+            .map_err(PullRequestStepError::github)
+    }
+
+    /// The paths the Run's branch changed against its base; none when
+    /// GitHub cannot list them all.
+    pub(crate) async fn branch_changes(
+        &self,
+        input: &StepInput<'_>,
+    ) -> Result<Option<Vec<String>>, PullRequestStepError> {
         let (repository, recorded) = Self::repository(input)?;
         let branch = run_branch(input.key.run_id);
-        let text = self
-            .github
-            .file_text(input.owner, &repository, &branch, CHECKS_FILE)
-            .await
-            .map_err(PullRequestStepError::github)?;
-        let Some(text) = text else {
-            return Ok(None);
-        };
-        let declared = match RepositoryChecks::parse(&text) {
-            Ok(declared) => declared,
-            Err(error) => return Ok(Some(Err(error))),
-        };
-
-        let changed = self
-            .github
+        self.github
             .changed_paths(input.owner, &repository, &recorded.base_branch, &branch)
             .await
-            .map_err(PullRequestStepError::github)?;
-        let checks = declared
-            .for_changes(changed.as_deref())
-            .into_iter()
-            .cloned()
-            .collect();
-        Ok(Some(Ok(BranchChecks {
-            rounds: declared.rounds,
-            checks,
-        })))
+            .map_err(PullRequestStepError::github)
     }
 
     /// The repository the Run works on, and its record.

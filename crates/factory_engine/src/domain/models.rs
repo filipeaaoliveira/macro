@@ -96,6 +96,9 @@ pub struct AgentTurn {
     pub prompt: String,
     /// The outcomes the agent may end the prompt with.
     pub outcomes: Vec<Outcome>,
+    /// When to stop waiting for the agent's answer, at the latest: the
+    /// Step's own time for its rounds.
+    pub answer_by: DateTime<Utc>,
 }
 
 /// A GitHub repository, named by its owner and name: the two segments of

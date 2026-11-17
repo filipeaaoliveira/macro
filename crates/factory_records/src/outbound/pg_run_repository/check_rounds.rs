@@ -20,6 +20,8 @@ struct CheckRoundRow {
     round: i32,
     work_output: String,
     checks: Vec<String>,
+    commands: Vec<String>,
+    declared: String,
     check_action_id: Uuid,
     started_at: DateTime<Utc>,
     outcome: Option<String>,
@@ -49,6 +51,8 @@ impl TryFrom<CheckRoundRow> for CheckRound {
             round: u8::try_from(row.round)
                 .map_err(|_| PgRunRepositoryErr::OutOfRange(row.round))?,
             checks: row.checks,
+            commands: row.commands,
+            declared: row.declared,
             started_at: row.started_at,
             end,
             work_output: row.work_output,
@@ -68,7 +72,8 @@ impl PgRunRepository {
             CheckRoundRow,
             r#"
             SELECT
-                run_id, seq, round, work_output, checks, check_action_id, started_at,
+                run_id, seq, round, work_output, checks, commands, declared, check_action_id,
+                started_at,
                 outcome, report, ended_at, fix_action_id
             FROM factory_check_round
             WHERE run_id = ANY($1)
@@ -98,7 +103,8 @@ impl PgRunRepository {
             CheckRoundRow,
             r#"
             SELECT
-                run_id, seq, round, work_output, checks, check_action_id, started_at,
+                run_id, seq, round, work_output, checks, commands, declared, check_action_id,
+                started_at,
                 outcome, report, ended_at, fix_action_id
             FROM factory_check_round
             WHERE run_id = $1 AND seq = $2
@@ -146,8 +152,8 @@ impl PgRunRepository {
         sqlx::query!(
             r#"
             INSERT INTO factory_check_round
-                (run_id, seq, round, work_output, checks, check_action_id)
-            VALUES ($1, $2, $3, $4, $5, $6)
+                (run_id, seq, round, work_output, checks, commands, declared, check_action_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             ON CONFLICT (run_id, seq, round) DO NOTHING
             "#,
             key.run_id.as_uuid(),
@@ -155,6 +161,8 @@ impl PgRunRepository {
             i32::from(start.round),
             start.work_output,
             &start.checks,
+            &start.commands,
+            start.declared,
             start.check_action_id,
         )
         .execute(&self.pool)

@@ -95,6 +95,11 @@ pub enum SessionAgentError {
     /// The session's turn ended with nothing handed back.
     #[error("the agent's turn ended without handing back a result")]
     NothingHandedBack,
+    /// A later prompt's turn was still going when the wait for it ended:
+    /// this attempt's time, or the time its Step gave it. A retry waits on
+    /// the same turn.
+    #[error("the agent's turn on a later prompt was still going when the wait ended")]
+    Overdue,
     /// The session worked past the Step's deadline.
     #[error("the agent did not finish within {0:?}")]
     TooSlow(Duration),
@@ -115,6 +120,7 @@ impl Retryable for SessionAgentError {
     fn retryable(&self) -> bool {
         match self {
             SessionAgentError::Records(_)
+            | SessionAgentError::Overdue
             | SessionAgentError::NotOpened
             | SessionAgentError::MayStillOpen => true,
             SessionAgentError::Session(error) => error.is_transient(),
@@ -296,7 +302,8 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
         }
     }
 
-    /// Wait for the first prompt's turn to end, until `deadline`.
+    /// Wait for the turn of the prompt `action` names to end, until
+    /// `deadline`.
     async fn finished(
         &self,
         action: &RoutineSessionAction,
@@ -418,7 +425,11 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
 
     #[tracing::instrument(err, skip_all, fields(run_id = %turn.key.run_id, seq = turn.key.seq))]
     async fn follow_up(&self, turn: AgentTurn) -> Result<AgentAnswer, SessionAgentError> {
-        let deadline = tokio::time::Instant::now() + SESSION_DEADLINE;
+        // The sooner of this attempt's own deadline and the Step's.
+        let left = (turn.answer_by - chrono::Utc::now())
+            .to_std()
+            .unwrap_or(Duration::ZERO);
+        let deadline = tokio::time::Instant::now() + left.min(SESSION_DEADLINE);
         let session = self
             .repo
             .claimed_session(turn.key)
@@ -447,7 +458,10 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
             })
             .await;
         self.prompt_once(&action, prompted).await?;
-        self.finished(&action, deadline).await?;
+        match self.finished(&action, deadline).await {
+            Err(SessionAgentError::TooSlow(_)) => return Err(SessionAgentError::Overdue),
+            finished => finished?,
+        }
 
         let handed = self
             .repo

@@ -37,6 +37,9 @@ const MAX_CHECKS: usize = 64;
 /// The longest command a check runs, in bytes.
 const MAX_RUN_BYTES: usize = 4096;
 
+/// The largest checks file read, in bytes: what a round's record keeps.
+const MAX_FILE_BYTES: usize = 64 * 1024;
+
 /// One check: a command run from the repository's root.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -102,6 +105,20 @@ pub enum ChecksFileError {
     /// Two checks share a name.
     #[error("{CHECKS_FILE} names two checks {0}")]
     DuplicateName(String),
+    /// A check names a path that is empty, not from the repository's root,
+    /// or a pattern.
+    #[error(
+        "{CHECKS_FILE} gives check {check} the path {path:?}; a path is a file or folder from the repository's root, with no ., .. or pattern"
+    )]
+    Path {
+        /// The check.
+        check: String,
+        /// The path.
+        path: String,
+    },
+    /// The file is larger than a round keeps.
+    #[error("{CHECKS_FILE} is over {MAX_FILE_BYTES} bytes")]
+    TooLarge,
     /// A check's command is blank or too long.
     #[error("{CHECKS_FILE} gives check {0} a blank command or one over {MAX_RUN_BYTES} bytes")]
     Run(String),
@@ -110,6 +127,9 @@ pub enum ChecksFileError {
 impl RepositoryChecks {
     /// Read the checks from the text of the repository's checks file.
     pub fn parse(text: &str) -> Result<Self, ChecksFileError> {
+        if text.len() > MAX_FILE_BYTES {
+            return Err(ChecksFileError::TooLarge);
+        }
         let checks: Self = serde_json::from_str(text)
             .map_err(|error| ChecksFileError::Unreadable(error.to_string()))?;
         if checks.rounds == 0 || checks.rounds > MAX_CHECK_ROUNDS {
@@ -134,16 +154,43 @@ impl RepositoryChecks {
             if check.run.trim().is_empty() || check.run.len() > MAX_RUN_BYTES {
                 return Err(ChecksFileError::Run(check.name.clone()));
             }
+            if let Some(path) = check.paths.iter().find(|path| !valid_path(path)) {
+                return Err(ChecksFileError::Path {
+                    check: check.name.clone(),
+                    path: path.clone(),
+                });
+            }
         }
         Ok(checks)
     }
 
     /// The checks a branch that changed `changed` runs, in order: every
-    /// check when the changed paths are not known.
-    pub fn for_changes(&self, changed: Option<&[String]>) -> Vec<&RepositoryCheck> {
+    /// check when the changed paths are not known, and those named in
+    /// `kept` whatever changed.
+    pub fn for_changes(
+        &self,
+        changed: Option<&[String]>,
+        kept: &[String],
+    ) -> Vec<&RepositoryCheck> {
         self.checks
             .iter()
-            .filter(|check| changed.is_none_or(|changed| check.applies_to(changed)))
+            .filter(|check| {
+                kept.contains(&check.name)
+                    || changed.is_none_or(|changed| check.applies_to(changed))
+            })
             .collect()
     }
+}
+
+/// Whether `path` names a file or folder from the repository's root: not
+/// empty, not absolute, no `.` or `..` part, and no pattern, which the
+/// checks don't match.
+fn valid_path(path: &str) -> bool {
+    let path = path.strip_suffix('/').unwrap_or(path);
+    !path.is_empty()
+        && !path.starts_with('/')
+        && !path.contains(['*', '?', '[', ']', '{', '}', '!', '\\'])
+        && path
+            .split('/')
+            .all(|part| !part.is_empty() && part != "." && part != "..")
 }

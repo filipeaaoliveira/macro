@@ -103,6 +103,8 @@ async fn a_round_keeps_its_first_record_end_and_fix(pool: PgPool) {
         round: 1,
         work_output: "Wrote the toggle".to_string(),
         checks: vec!["web".to_string(), "rust".to_string()],
+        commands: vec!["bun run check".to_string(), "cargo test".to_string()],
+        declared: r#"{"checks":[]}"#.to_string(),
         check_action_id: Uuid::now_v7(),
     };
     let fix = Uuid::now_v7();
@@ -146,6 +148,8 @@ async fn a_round_keeps_its_first_record_end_and_fix(pool: PgPool) {
     assert_eq!(round.work_output, "Wrote the toggle");
     assert_eq!(round.check_action_id, first.check_action_id);
     assert_eq!(round.checks, ["web", "rust"]);
+    assert_eq!(round.commands, ["bun run check", "cargo test"]);
+    assert_eq!(round.declared, r#"{"checks":[]}"#);
     assert_eq!(round.fix_action_id, Some(fix));
     let end = round.end.as_ref().expect("the round ended");
     assert_eq!(end.outcome, CheckRoundOutcome::Failed);

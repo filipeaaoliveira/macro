@@ -12,7 +12,7 @@ fn names(checks: &RepositoryChecks, changed: Option<&[&str]>) -> Vec<String> {
     let changed: Option<Vec<String>> =
         changed.map(|paths| paths.iter().map(|path| path.to_string()).collect());
     checks
-        .for_changes(changed.as_deref())
+        .for_changes(changed.as_deref(), &[])
         .into_iter()
         .map(|check| check.name.clone())
         .collect()
@@ -76,7 +76,60 @@ fn a_file_that_breaks_the_rules_says_why() {
             ChecksFileError::Name(_) => "name",
             ChecksFileError::DuplicateName(_) => "duplicate",
             ChecksFileError::Run(_) => "run",
+            ChecksFileError::Path { .. } => "path",
+            ChecksFileError::TooLarge => "too large",
         };
         assert_eq!(kind, expected, "{text}");
     }
+}
+
+#[test]
+fn a_path_is_a_file_or_folder_from_the_root() {
+    for path in [
+        "",
+        ".",
+        "./apps",
+        "/apps",
+        "apps/../crates",
+        "apps//web",
+        "apps/*",
+        "*.rs",
+        "apps/{web,ui}",
+        "src/[ab]",
+    ] {
+        let text = format!(r#"{{"checks":[{{"name":"web","run":"x","paths":[{path:?}]}}]}}"#);
+        let error = RepositoryChecks::parse(&text).expect_err(path);
+        assert!(
+            matches!(error, ChecksFileError::Path { .. }),
+            "{path}: {error}"
+        );
+    }
+    for path in ["apps/web", "apps/web/", "Cargo.lock", ".github/workflows"] {
+        let text = format!(r#"{{"checks":[{{"name":"web","run":"x","paths":[{path:?}]}}]}}"#);
+        RepositoryChecks::parse(&text).expect(path);
+    }
+}
+
+#[test]
+fn a_kept_check_runs_whatever_changed() {
+    let checks = RepositoryChecks::parse(CHECKS).expect("parse");
+    let changed = vec!["README.md".to_string()];
+
+    let kept: Vec<&str> = checks
+        .for_changes(Some(&changed), &["rust".to_string()])
+        .into_iter()
+        .map(|check| check.name.as_str())
+        .collect();
+
+    assert_eq!(kept, ["rust", "lint"]);
+}
+
+#[test]
+fn a_file_over_what_a_round_keeps_does_not_read() {
+    let text = format!(r#"{{"checks":[],"x":"{}"}}"#, "a".repeat(64 * 1024));
+
+    assert_eq!(
+        RepositoryChecks::parse(&text),
+        Err(ChecksFileError::TooLarge)
+    );
 }
