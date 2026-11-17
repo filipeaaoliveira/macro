@@ -4,7 +4,7 @@ use serde_json::json;
 use wiremock::matchers::{body_json, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use super::{NewTask, NewTaskProperty};
+use super::{CreateTaskError, NewTask, NewTaskProperty};
 use crate::DocumentStorageServiceClient;
 
 /// A task is created as the acting user, with its properties, and its
@@ -25,6 +25,8 @@ async fn a_task_is_created_as_the_acting_user() {
         .and(body_json(json!({
             "taskName": "main is red",
             "markdown": "Checks fail.",
+            "projectId": null,
+            "shareWithTeam": true,
             "propertyValues": [{
                 "propertyId": "00000001-0000-0000-0000-000000000014",
                 "value": {
@@ -46,6 +48,8 @@ async fn a_task_is_created_as_the_acting_user() {
     let task = NewTask {
         task_name: "main is red".to_string(),
         markdown: "Checks fail.".to_string(),
+        project_id: None,
+        share_with_team: true,
         property_values: vec![NewTaskProperty {
             property_id: "00000001-0000-0000-0000-000000000014".to_string(),
             value: SetPropertyValue::EntityReference {
@@ -54,13 +58,13 @@ async fn a_task_is_created_as_the_acting_user() {
         }],
     };
     let created = DocumentStorageServiceClient::new("internal-key".into(), server.uri())
-        .create_task(&task, "macro|user@example.com")
+        .create_task_for_user(&task, "macro|user@example.com")
         .await
         .expect("created");
     assert_eq!(created, "task-1");
 }
 
-/// A refusal is an error, never a task.
+/// A refusal is its own error, never a task.
 #[tokio::test]
 async fn a_refused_task_is_an_error() {
     let server = MockServer::start().await;
@@ -72,10 +76,40 @@ async fn a_refused_task_is_an_error() {
     let task = NewTask {
         task_name: "main is red".to_string(),
         markdown: String::new(),
+        project_id: None,
+        share_with_team: true,
         property_values: Vec::new(),
     };
     let created = DocumentStorageServiceClient::new("internal-key".into(), server.uri())
-        .create_task(&task, "macro|user@example.com")
+        .create_task_for_user(&task, "macro|user@example.com")
         .await;
-    assert!(created.is_err());
+    assert!(
+        matches!(created, Err(CreateTaskError::Refused(status)) if status == 403),
+        "{created:?}"
+    );
+}
+
+/// A failing document storage is worth trying again.
+#[tokio::test]
+async fn a_failing_document_storage_is_unavailable() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/documents/create_task"))
+        .respond_with(ResponseTemplate::new(503))
+        .mount(&server)
+        .await;
+    let task = NewTask {
+        task_name: "main is red".to_string(),
+        markdown: String::new(),
+        project_id: None,
+        share_with_team: true,
+        property_values: Vec::new(),
+    };
+    let created = DocumentStorageServiceClient::new("internal-key".into(), server.uri())
+        .create_task_for_user(&task, "macro|user@example.com")
+        .await;
+    assert!(
+        matches!(created, Err(CreateTaskError::Unavailable(_))),
+        "{created:?}"
+    );
 }

@@ -85,18 +85,21 @@ impl HoldTasks for DocumentHoldTasks {
             })
             .into_iter()
             .collect();
+        // Shared with the owner's team, as the tasks people make are.
         let created = self
             .documents
-            .create_task(
+            .create_task_for_user(
                 &NewTask {
                     task_name: task.title.clone(),
                     markdown: task.markdown.clone(),
+                    project_id: None,
+                    share_with_team: true,
                     property_values,
                 },
                 owner.as_ref(),
             )
             .await
-            .map_err(|error| DocumentHoldTasksErr(rootcause::report!("{error:#}")))?;
+            .map_err(|error| DocumentHoldTasksErr(rootcause::report!("{error}")))?;
         Uuid::parse_str(&created).map_err(|_| {
             DocumentHoldTasksErr(rootcause::report!("the new task's id {created} is no UUID"))
         })

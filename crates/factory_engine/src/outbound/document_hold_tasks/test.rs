@@ -87,6 +87,7 @@ async fn the_task_is_filed_in_the_initiative_of_the_run_s_task() {
         .and(body_partial_json(json!({
             "taskName": "main is red in macro/app",
             "markdown": "Checks fail.",
+            "shareWithTeam": true,
             "propertyValues": [{
                 "propertyId": PROJECT,
                 "value": {
