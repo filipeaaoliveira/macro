@@ -1,6 +1,7 @@
 import { t } from '@app/lib/i18n';
 import { StaticMarkdown } from '@core/component/LexicalMarkdown/component/core/StaticMarkdown';
 import { channelTheme } from '@core/component/LexicalMarkdown/theme';
+import { buildSimpleEntityUrl } from '@core/util/url';
 import CaretDownIcon from '@icon/system/regular/caret-down.svg';
 import { Badge, Button, Card, cn } from '@ui';
 import { CollapseTransition } from '@ui/components/CollapseTransition';
@@ -14,6 +15,7 @@ import {
   type ReviewRound,
   type RunStep,
   roundStartingAt,
+  WHOLE_CHANGE,
 } from '../core/run';
 
 function stepLabel(step: Pick<RunStep, 'entry' | 'visit'>): string {
@@ -287,16 +289,29 @@ function ReviewRoundNote(props: { round: ReviewRound }) {
         </Show>
       </span>
       <span class="block text-ink-muted">
-        {props.round.fixDiff
-          ? t('factoryRuns.reviewRoundFixDiff', {
-              commit: props.round.diffBase.slice(0, 7),
-            })
-          : t('factoryRuns.reviewRoundWhole')}
-        <Show when={props.round.end}>
-          {' · '}
-          {t('factoryRuns.reviewBlockers', { count: counts().blockers })}
-          {' · '}
-          {t('factoryRuns.reviewFollowUps', { count: counts().followUps })}
+        <Show
+          when={props.round.failure}
+          fallback={
+            <>
+              {props.round.fixDiff
+                ? t('factoryRuns.reviewRoundFixDiff', {
+                    commit: (props.round.diffBase ?? '').slice(0, 7),
+                  })
+                : t('factoryRuns.reviewRoundWhole')}
+              <Show when={props.round.end}>
+                {' · '}
+                {t('factoryRuns.reviewBlockers', { count: counts().blockers })}
+                {' · '}
+                {t('factoryRuns.reviewFollowUps', {
+                  count: counts().followUps,
+                })}
+              </Show>
+            </>
+          }
+        >
+          {(failure) =>
+            t('factoryRuns.reviewRoundNotOpened', { failure: failure() })
+          }
         </Show>
       </span>
     </StepNote>
@@ -305,6 +320,7 @@ function ReviewRoundNote(props: { round: ReviewRound }) {
 
 /** Where a finding is: its file, and its lines when it names some. */
 function findingPlace(finding: ReviewFinding): string {
+  if (finding.path === WHOLE_CHANGE) return t('factoryRuns.findingWholeChange');
   const lines = finding.lines;
   if (!lines) return finding.path;
   if (lines.start === lines.end) {
@@ -330,19 +346,44 @@ function findingKind(finding: ReviewFinding): string {
   return t('factoryRuns.findingFound');
 }
 
-/** One finding of a reviewer: what it is, where, and what is wrong. */
+/**
+ * One finding of a reviewer: what it is (a follow-up's badge opens its
+ * task), where, what is wrong and why.
+ */
 function FindingNote(props: { finding: ReviewFinding }) {
   return (
     <StepNote>
       <span class="flex min-w-0 items-center gap-2">
-        <Badge variant="outline" size="xs">
-          {findingKind(props.finding)}
-        </Badge>
+        <Show
+          when={props.finding.followUpTaskId}
+          fallback={
+            <Badge variant="outline" size="xs">
+              {findingKind(props.finding)}
+            </Badge>
+          }
+        >
+          {(taskId) => (
+            <a
+              href={buildSimpleEntityUrl({ type: 'task', id: taskId() })}
+              class="shrink-0"
+            >
+              <Badge variant="outline" size="xs">
+                {findingKind(props.finding)}
+              </Badge>
+            </a>
+          )}
+        </Show>
         <span class="min-w-0 truncate font-mono">
           {findingPlace(props.finding)}
         </span>
       </span>
       <span class="block text-ink-muted">{props.finding.problem}</span>
+      <span class="block text-ink-muted">{props.finding.why}</span>
+      <Show when={props.finding.blocksAnywhere}>
+        <span class="block text-ink-muted">
+          {t('factoryRuns.findingFoundAgain')}
+        </span>
+      </Show>
     </StepNote>
   );
 }

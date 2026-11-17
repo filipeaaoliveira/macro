@@ -56,6 +56,7 @@ const started: RunDetail = {
       headSha: 'abc123',
       diffBase: 'main',
       fixDiff: false,
+      failure: null,
       startedAt: '2026-11-16T09:01:00Z',
       end: null,
       findings: [
@@ -67,6 +68,7 @@ const started: RunDetail = {
           lines: null,
           problem: 'Names the old flag',
           why: 'People follow it',
+          blocksAnywhere: false,
           kind: null,
           followUpTaskId: null,
         },
@@ -135,6 +137,7 @@ describe('createAppRunsContext', () => {
           headSha: 'abc123',
           diffBase: 'main',
           fixDiff: false,
+          failure: undefined,
           startedAt: '2026-11-16T09:01:00Z',
           end: undefined,
           findings: [
@@ -146,6 +149,7 @@ describe('createAppRunsContext', () => {
               lines: undefined,
               problem: 'Names the old flag',
               why: 'People follow it',
+              blocksAnywhere: false,
               kind: undefined,
               followUpTaskId: undefined,
             },

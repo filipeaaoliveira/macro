@@ -65,6 +65,7 @@ export default {
   reviewRoundWhole: 'Reviews the whole change',
   reviewRoundFixDiff: 'Reviews the fix since {{commit}}',
   reviewRoundReviewing: 'Reviewing…',
+  reviewRoundNotOpened: 'Couldn’t start: {{failure}}',
   reviewBlockers: { one: '{{count}} blocker', other: '{{count}} blockers' },
   reviewFollowUps: {
     one: '{{count}} follow-up',
@@ -76,6 +77,8 @@ export default {
   findingFound: 'Found',
   findingLine: '{{path}}, line {{line}}',
   findingLines: '{{path}}, lines {{start}}–{{end}}',
+  findingWholeChange: 'The whole change',
+  findingFoundAgain: 'Still there from the round before',
   cancelRun: 'Cancel run',
   cancelTitle: 'Cancel this run?',
   cancelBody:

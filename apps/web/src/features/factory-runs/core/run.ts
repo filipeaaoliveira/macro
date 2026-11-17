@@ -81,6 +81,9 @@ export type ReviewFinding = {
   lines?: { start: number; end: number };
   problem: string;
   why: string;
+  /** A blocker of the round before found again, or an answer that never
+   * read: it blocks wherever it is. */
+  blocksAnywhere: boolean;
   /** Unset while its round reviews. */
   kind?: 'blocker' | 'follow_up';
   /** The task a follow-up became, when it was made. */
@@ -97,10 +100,13 @@ export type ReviewRound = {
   /** The place of its first Step. */
   seq: number;
   reviewers: number;
-  headSha: string;
+  /** Unset for a round that could not open. */
+  headSha?: string;
   /** Where the diff under review starts: a branch, or a commit. */
-  diffBase: string;
+  diffBase?: string;
   fixDiff: boolean;
+  /** Why the round could not open, when it could not. */
+  failure?: string;
   startedAt: string;
   end?: { outcome: 'pass' | 'changes' | 'failed'; endedAt: string };
   findings: ReviewFinding[];
@@ -181,6 +187,9 @@ export function runRequestBody(run: Run): string {
   const [, ...rest] = run.request.trim().split('\n');
   return rest.join('\n').trim();
 }
+
+/** The path of a finding about the whole change rather than one file. */
+export const WHOLE_CHANGE = '.';
 
 /** The review round whose first Step is at `seq`, if one starts there. */
 export function roundStartingAt(

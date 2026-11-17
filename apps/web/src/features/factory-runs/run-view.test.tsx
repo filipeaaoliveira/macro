@@ -177,6 +177,7 @@ describe('RunView', () => {
               lines: { start: 12, end: 14 },
               problem: 'The save drops its error',
               why: 'A failed save looks saved',
+              blocksAnywhere: false,
               kind: 'blocker',
             },
             {
@@ -186,6 +187,7 @@ describe('RunView', () => {
               path: 'src/load.rs',
               problem: 'Loading has no test',
               why: 'A broken load would pass',
+              blocksAnywhere: false,
               kind: 'follow_up',
               followUpTaskId: 'task-2',
             },
@@ -203,7 +205,9 @@ describe('RunView', () => {
     expect(screen.getByText('src/save.rs, lines 12–14')).toBeTruthy();
     expect(screen.getByText('The save drops its error')).toBeTruthy();
     expect(screen.getByText('Blocker')).toBeTruthy();
-    expect(screen.getByText('Follow-up task')).toBeTruthy();
+    expect(screen.getByText('A failed save looks saved')).toBeTruthy();
+    const task = screen.getByText('Follow-up task').closest('a');
+    expect(task?.getAttribute('href')).toMatch(/\/app\/task\/task-2$/);
     expect(screen.getByText('Loading has no test')).toBeTruthy();
   });
 
