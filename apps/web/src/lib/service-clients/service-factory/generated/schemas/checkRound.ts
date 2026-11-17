@@ -26,7 +26,8 @@ order; none for a round the agent reports. */
   round: number;
   /** When it started. */
   startedAt: string;
-  /** Whether the engine runs the checks itself, reading each one's exit
-code; otherwise the agent runs them and reports how they went. */
+  /** Whether the engine runs the checks itself, on the pushed commit,
+reading each one's exit code; otherwise the agent runs them and
+reports how they went. */
   verified: boolean;
 }

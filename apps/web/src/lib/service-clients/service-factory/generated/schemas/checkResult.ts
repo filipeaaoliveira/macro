@@ -13,6 +13,6 @@ export interface CheckResult {
   exitCode: number;
   /** The check's name. */
   name: string;
-  /** The end of what it printed, at most [`MAX_CHECK_RESULT_OUTPUT_BYTES`]. */
+  /** The end of what it printed, both streams, at most 4 KiB. */
   output: string;
 }

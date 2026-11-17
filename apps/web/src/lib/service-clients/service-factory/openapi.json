@@ -824,7 +824,7 @@
           },
           "output": {
             "type": "string",
-            "description": "The end of what it printed, at most [`MAX_CHECK_RESULT_OUTPUT_BYTES`]."
+            "description": "The end of what it printed, both streams, at most 4 KiB."
           }
         }
       },
@@ -871,7 +871,7 @@
           },
           "verified": {
             "type": "boolean",
-            "description": "Whether the engine runs the checks itself, reading each one's exit\ncode; otherwise the agent runs them and reports how they went."
+            "description": "Whether the engine runs the checks itself, on the pushed commit,\nreading each one's exit code; otherwise the agent runs them and\nreports how they went."
           }
         }
       },

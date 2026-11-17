@@ -37,7 +37,7 @@ export type CheckResult = {
      */
     name: string;
     /**
-     * The end of what it printed, at most [`MAX_CHECK_RESULT_OUTPUT_BYTES`].
+     * The end of what it printed, both streams, at most 4 KiB.
      */
     output: string;
 };
@@ -66,8 +66,9 @@ export type CheckRound = {
      */
     startedAt: string;
     /**
-     * Whether the engine runs the checks itself, reading each one's exit
-     * code; otherwise the agent runs them and reports how they went.
+     * Whether the engine runs the checks itself, on the pushed commit,
+     * reading each one's exit code; otherwise the agent runs them and
+     * reports how they went.
      */
     verified: boolean;
 };
