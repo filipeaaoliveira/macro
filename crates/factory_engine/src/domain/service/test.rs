@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use super::{FactoryServiceImpl, StepServiceImpl};
 use crate::domain::fakes::{FakeGithub, FakeRepo};
-use crate::domain::flow::StepName;
+use crate::domain::flow::{StepName, StepUse};
 use crate::domain::gate::AnswerGate;
 use crate::domain::models::{
     FactoryError, RunFinish, RunStart, StepEnding, StepError, StepInput, StepReport, StepRequest,
@@ -114,8 +114,8 @@ impl Retryable for WorkFailure {
 impl StepExecutor for FakeExecutor {
     type Err = WorkFailure;
 
-    fn serves(&self, step: &StepName) -> bool {
-        self.serves_all || step.as_str() == "reply"
+    fn serves(&self, step: &StepName) -> Option<StepUse> {
+        (self.serves_all || step.as_str() == "reply").then_some(StepUse::Work)
     }
 
     async fn run(&self, _step: &StepName, input: StepInput<'_>) -> Result<StepReport, WorkFailure> {
@@ -133,6 +133,7 @@ impl StepExecutor for FakeExecutor {
     async fn stop(
         &self,
         _step: &StepName,
+        _role: Option<&Role>,
         _key: StepKey,
         _owner: &MacroUserIdStr<'static>,
     ) -> Result<(), WorkFailure> {
@@ -142,6 +143,7 @@ impl StepExecutor for FakeExecutor {
     async fn release(
         &self,
         _step: &StepName,
+        _role: Option<&Role>,
         _key: StepKey,
         _owner: &MacroUserIdStr<'static>,
     ) -> Result<(), WorkFailure> {
@@ -729,7 +731,7 @@ async fn step_in_a_session(repo: &FakeRepo) -> (StepKey, Uuid) {
     let session = StepSession {
         session_id: Uuid::now_v7(),
         action_id: Uuid::now_v7(),
-        agent: AgentName::try_from("claude".to_string()).expect("valid"),
+        agent: Some(AgentName::try_from("primary".to_string()).expect("valid")),
     };
     let session_id = session.session_id;
     let planner = Role::try_from("planner".to_string()).expect("valid");

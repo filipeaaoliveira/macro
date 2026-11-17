@@ -1,6 +1,6 @@
 //! A [`StepAgent`] for a machine where no agent can run.
 
-use factory_records::domain::models::StepKey;
+use factory_records::domain::models::{Role, StepKey};
 use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::models::{AgentAnswer, AgentTask};
@@ -38,13 +38,19 @@ impl StepAgent for LocalAgent {
         })
     }
 
-    async fn stop(&self, _key: StepKey, _owner: &MacroUserIdStr<'static>) -> Result<(), NoOutcome> {
+    async fn stop(
+        &self,
+        _key: StepKey,
+        _role: &Role,
+        _owner: &MacroUserIdStr<'static>,
+    ) -> Result<(), NoOutcome> {
         Ok(())
     }
 
     async fn release(
         &self,
         _key: StepKey,
+        _role: &Role,
         _owner: &MacroUserIdStr<'static>,
     ) -> Result<(), NoOutcome> {
         Ok(())

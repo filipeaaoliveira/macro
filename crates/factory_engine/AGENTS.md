@@ -86,8 +86,12 @@ hand an agent a prompt built from the Step's instructions
 produced; and `publish`, `ci`, `ready_to_merge` and `merge`, which take the
 Run's branch to a merged pull request (`src/domain/pull_request_steps.rs`). The
 agent is the `StepAgent` port.
-Each entry an agent does names the Role it fills (`"role": "planner"`), and
-the factory's agent definition (`src/domain/agents.rs`, `FACTORY_AGENTS`)
+Each entry an agent does names the Role it fills (`"role": "planner"`): a
+Flow that leaves one out does not read (`FlowError::NoRole`). A Run started
+before Flows named Roles carries a Flow without them, and its agent Steps
+fill the Role their built-in Step implies (`plan` a planner, `write` a
+writer, `review` a reviewer, `fix` and `ci_fix` a fixer). The factory's
+agent definition (`src/domain/agents.rs`, `FACTORY_AGENTS`)
 lists the Agents that fill each Role, in order: an Agent is a Macro agent
 (`bot`), whose harness runs its sessions, with an optional model and
 instructions. `SessionAgent` (`src/domain/session_agent.rs`) does the Step in
@@ -100,7 +104,10 @@ before any work starts) hands the Step to the next Agent of its Role, in a
 new session, and the Step records the Agent passed over with the refusal's
 code (`passed_over`, `pass_reasons`); a session that opened is deleted
 first. Only that refusal passes the Step on; when no Agent is left, the Step
-fails for good. The Step claims its
+records the last one passed over too and fails for good. An attempt
+prepares, opens and prompts only the session the Step works in now, so an
+overlapping attempt never prompts a session handed on. A session claimed
+before Steps recorded their Agent is of the first Agent of its Role. The Step claims its
 session in `factory_step` first, so a retried Step goes on in the same session
 and does not start the work over: it always asks, and the session refuses a
 prompt it already has with a conflict. That guard is a check of the session's

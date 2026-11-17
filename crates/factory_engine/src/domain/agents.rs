@@ -12,6 +12,9 @@ use bot_id::BotId;
 use factory_records::domain::models::{AgentName, Role};
 use serde::Deserialize;
 
+use crate::domain::built_in_flows::built_in_roles;
+use crate::domain::flow::FlowError;
+
 /// An Agent: whose sessions it runs in, on which model, told what.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -68,6 +71,9 @@ pub enum AgentDefinitionError {
     /// A Flow names a Role the definition does not fill.
     #[error("a flow names role {0}, which the agent definition does not fill")]
     UnfilledRole(Role),
+    /// A built-in Flow does not read.
+    #[error(transparent)]
+    Flow(#[from] FlowError),
 }
 
 impl TryFrom<AgentDefinitionFields> for AgentDefinition {
@@ -114,8 +120,13 @@ impl AgentDefinition {
         self.agents.get(name)
     }
 
-    /// Fails unless every Role in `roles` has its Agents, as the Roles the
-    /// built-in Flows name must.
+    /// Fails unless every Role the built-in Flows name has its Agents: the
+    /// service checks it before it serves a Run.
+    pub fn fills_built_in_flows(&self) -> Result<(), AgentDefinitionError> {
+        self.fills(&built_in_roles()?)
+    }
+
+    /// Fails unless every Role in `roles` has its Agents.
     pub fn fills<'a>(
         &self,
         roles: impl IntoIterator<Item = &'a Role>,

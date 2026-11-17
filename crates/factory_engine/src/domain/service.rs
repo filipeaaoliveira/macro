@@ -574,7 +574,12 @@ where
     async fn stop_step(&self, request: StepRequest) -> Result<(), StepError> {
         let run = self.run_of(&request).await?;
         self.executor
-            .stop(&request.step, request.key, &run.user_id)
+            .stop(
+                &request.step,
+                request.role.as_ref(),
+                request.key,
+                &run.user_id,
+            )
             .await
             .map_err(internal)?;
         Ok(())
@@ -584,7 +589,12 @@ where
     async fn release_step(&self, request: StepRequest) -> Result<(), StepError> {
         let run = self.run_of(&request).await?;
         self.executor
-            .release(&request.step, request.key, &run.user_id)
+            .release(
+                &request.step,
+                request.role.as_ref(),
+                request.key,
+                &run.user_id,
+            )
             .await
             .map_err(internal)?;
         Ok(())

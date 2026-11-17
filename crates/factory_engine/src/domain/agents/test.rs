@@ -19,33 +19,33 @@ fn read(definition: serde_json::Value) -> Result<AgentDefinition, String> {
 fn a_role_takes_its_agents_in_the_order_the_definition_lists_them() {
     let definition = read(json!({
         "agents": {
-            "claude": {
+            "primary": {
                 "bot": "00000000-0000-0000-0000-00000000c1a0",
-                "model": "claude-opus",
+                "model": "large-model",
                 "instructions": "Work in small commits."
             },
-            "codex": { "bot": "00000000-0000-0000-0000-00000000c0de" }
+            "backup": { "bot": "00000000-0000-0000-0000-00000000c0de" }
         },
         "roles": {
-            "planner": ["codex", "claude"],
-            "reviewer": ["claude"]
+            "planner": ["backup", "primary"],
+            "reviewer": ["primary"]
         }
     }))
     .expect("a definition");
 
     assert_eq!(
         definition.for_role(&role("planner")),
-        [agent("codex"), agent("claude")]
+        [agent("backup"), agent("primary")]
     );
     assert_eq!(definition.for_role(&role("writer")), []);
-    let claude = definition.agent(&agent("claude")).expect("claude");
-    assert_eq!(claude.model.as_deref(), Some("claude-opus"));
+    let primary = definition.agent(&agent("primary")).expect("primary");
+    assert_eq!(primary.model.as_deref(), Some("large-model"));
     assert_eq!(
-        claude.instructions.as_deref(),
+        primary.instructions.as_deref(),
         Some("Work in small commits.")
     );
     assert_eq!(
-        definition.agent(&agent("codex")).expect("codex").model,
+        definition.agent(&agent("backup")).expect("backup").model,
         None
     );
     assert_eq!(
@@ -60,16 +60,16 @@ fn a_role_takes_its_agents_in_the_order_the_definition_lists_them() {
 
 #[test]
 fn a_definition_whose_roles_do_not_hold_together_is_refused() {
-    let agents = json!({ "claude": { "bot": "00000000-0000-0000-0000-00000000c1a0" } });
+    let agents = json!({ "primary": { "bot": "00000000-0000-0000-0000-00000000c1a0" } });
     let refused = [
         (json!({ "planner": [] }), "role planner lists no agent"),
         (
-            json!({ "planner": ["codex"] }),
-            "role planner lists agent codex, which the definition does not have",
+            json!({ "planner": ["backup"] }),
+            "role planner lists agent backup, which the definition does not have",
         ),
         (
-            json!({ "planner": ["claude", "claude"] }),
-            "role planner lists agent claude twice",
+            json!({ "planner": ["primary", "primary"] }),
+            "role planner lists agent primary twice",
         ),
     ];
 
@@ -78,4 +78,34 @@ fn a_definition_whose_roles_do_not_hold_together_is_refused() {
         assert!(error.contains(why), "{error}");
     }
     assert!(read(json!({ "agents": agents, "roles": {}, "flows": {} })).is_err());
+}
+
+/// The service starts only with a definition that fills every Role the
+/// built-in Flows name.
+#[test]
+fn a_definition_must_fill_every_role_of_the_built_in_flows() {
+    let definition = |roles: serde_json::Value| {
+        read(json!({
+            "agents": { "primary": { "bot": "00000000-0000-0000-0000-00000000c1a0" } },
+            "roles": roles
+        }))
+        .expect("a definition")
+    };
+    let full = definition(json!({
+        "planner": ["primary"],
+        "writer": ["primary"],
+        "reviewer": ["primary"],
+        "fixer": ["primary"]
+    }));
+    let no_fixer = definition(json!({
+        "planner": ["primary"],
+        "writer": ["primary"],
+        "reviewer": ["primary"]
+    }));
+
+    assert_eq!(full.fills_built_in_flows(), Ok(()));
+    assert_eq!(
+        no_fixer.fills_built_in_flows(),
+        Err(AgentDefinitionError::UnfilledRole(role("fixer")))
+    );
 }

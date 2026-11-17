@@ -307,7 +307,7 @@ impl RunRepository for FakeRepo {
         }
         self.with_step(key, |step| {
             step.role = Some(role.clone());
-            step.agent = Some(session.agent.clone());
+            step.agent = session.agent.clone();
         });
         sessions.push(FakeSession {
             key,
@@ -324,28 +324,33 @@ impl RunRepository for FakeRepo {
     async fn pass_session(
         &self,
         key: StepKey,
-        from: &StepSession,
-        to: &StepSession,
-        reason: &str,
+        from: Uuid,
+        role: &Role,
+        passed: &PassedOver,
+        to: Option<&StepSession>,
     ) -> Result<bool, FakeError> {
-        if !self.holds_session(key).await? {
+        if !self.holds_session(key, from).await? {
             return Ok(false);
         }
         let mut sessions = self.sessions.lock().expect("sessions");
-        let Some(claimed) = sessions.iter_mut().find(|claimed| {
-            claimed.key == key && claimed.session == *from && claimed.handed.is_none()
-        }) else {
+        let Some(claimed) = sessions
+            .iter_mut()
+            .find(|claimed| claimed.key == key && claimed.handed.is_none())
+        else {
             return Ok(false);
         };
-        claimed.session = to.clone();
-        claimed.prepared_at = None;
-        claimed.opened = false;
+        if let Some(to) = to {
+            claimed.session = to.clone();
+            claimed.prepared_at = None;
+            claimed.opened = false;
+        }
         self.with_step(key, |step| {
-            step.agent = Some(to.agent.clone());
-            step.passed_over.push(PassedOver {
-                agent: from.agent.clone(),
-                reason: reason.to_string(),
-            });
+            step.role.get_or_insert_with(|| role.clone());
+            if let Some(agent) = to.and_then(|to| to.agent.clone()) {
+                step.agent = Some(agent);
+            }
+            step.agent.get_or_insert_with(|| passed.agent.clone());
+            step.passed_over.push(passed.clone());
         });
         Ok(true)
     }
@@ -369,6 +374,7 @@ impl RunRepository for FakeRepo {
     async fn record_prepare(
         &self,
         key: StepKey,
+        session_id: Uuid,
     ) -> Result<Option<chrono::DateTime<Utc>>, FakeError> {
         let run_ended = self
             .runs
@@ -380,9 +386,9 @@ impl RunRepository for FakeRepo {
             return Ok(None);
         }
         let mut sessions = self.sessions.lock().expect("sessions");
-        let claimed = sessions
-            .iter_mut()
-            .find(|claimed| claimed.key == key && !claimed.released);
+        let claimed = sessions.iter_mut().find(|claimed| {
+            claimed.key == key && claimed.session.session_id == session_id && !claimed.released
+        });
         Ok(claimed.map(|claimed| {
             let now = Utc::now();
             claimed.prepared_at = Some(now);
@@ -404,9 +410,12 @@ impl RunRepository for FakeRepo {
         Ok(())
     }
 
-    async fn record_open(&self, key: StepKey) -> Result<(), FakeError> {
+    async fn record_open(&self, key: StepKey, session_id: Uuid) -> Result<(), FakeError> {
         let mut sessions = self.sessions.lock().expect("sessions");
-        if let Some(claimed) = sessions.iter_mut().find(|claimed| claimed.key == key) {
+        if let Some(claimed) = sessions
+            .iter_mut()
+            .find(|claimed| claimed.key == key && claimed.session.session_id == session_id)
+        {
             claimed.opened = true;
         }
         Ok(())
@@ -431,13 +440,15 @@ impl RunRepository for FakeRepo {
             }))
     }
 
-    async fn holds_session(&self, key: StepKey) -> Result<bool, FakeError> {
+    async fn holds_session(&self, key: StepKey, session_id: Uuid) -> Result<bool, FakeError> {
         let held = self
             .sessions
             .lock()
             .expect("sessions")
             .iter()
-            .any(|claimed| claimed.key == key && !claimed.released);
+            .any(|claimed| {
+                claimed.key == key && claimed.session.session_id == session_id && !claimed.released
+            });
         let run_ended = self
             .runs
             .lock()

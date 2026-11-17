@@ -6,8 +6,8 @@ use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
 use crate::domain::models::{
-    ClaimedSession, EntryId, HandBack, Outcome, Repository, Role, Run, RunId, RunInsert,
-    RunOutcome, SessionStep, Step, StepKey, StepSession, StoppingSession, TaskLink,
+    ClaimedSession, EntryId, HandBack, Outcome, PassedOver, Repository, Role, Run, RunId,
+    RunInsert, RunOutcome, SessionStep, Step, StepKey, StepSession, StoppingSession, TaskLink,
 };
 
 /// Where Runs and their Steps are kept.
@@ -113,17 +113,18 @@ pub trait RunRepository: Send + Sync + 'static {
         offered: &[Outcome],
     ) -> impl Future<Output = Result<ClaimedSession, Self::Err>> + Send;
 
-    /// Hand the Step `key` from the session `from`, whose Agent could not
-    /// start it for `reason`, to `to`, a session of the next Agent of its
-    /// Role, and record that `from`'s Agent was passed over. Only while the
-    /// Step works in `from` and still holds it (see [`Self::holds_session`]):
-    /// whether it was handed on. Handing it on again changes nothing.
+    /// Record that `passed`'s Agent, whose session `from` the Step `key` of
+    /// `role` works in, could not start it, and hand the Step to `to`, a
+    /// session of the next Agent of its Role, if there is one; with none,
+    /// the Step keeps `from`. Only while the Step works in `from` and still
+    /// holds it (see [`Self::holds_session`]): whether it was recorded.
     fn pass_session(
         &self,
         key: StepKey,
-        from: &StepSession,
-        to: &StepSession,
-        reason: &str,
+        from: Uuid,
+        role: &Role,
+        passed: &PassedOver,
+        to: Option<&StepSession>,
     ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
 
     /// The session the Step `key` works in, if it claimed one.
@@ -133,13 +134,14 @@ pub trait RunRepository: Send + Sync + 'static {
     ) -> impl Future<Output = Result<Option<StepSession>, Self::Err>> + Send;
 
     /// Record that an attempt of the Step `key` is about to ask for its
-    /// session to be opened, at the database's time. False once the Step
-    /// let go of the session, or it or its Run ended: no prepare may be sent
-    /// then. The time recorded, for [`Self::forget_prepare`]; `None` when no
-    /// prepare may be sent.
+    /// session `session_id` to be opened, at the database's time. None once
+    /// the Step let go of the session, works in another one, or it or its
+    /// Run ended: no prepare may be sent then. The time recorded, for
+    /// [`Self::forget_prepare`].
     fn record_prepare(
         &self,
         key: StepKey,
+        session_id: Uuid,
     ) -> impl Future<Output = Result<Option<chrono::DateTime<chrono::Utc>>, Self::Err>> + Send;
 
     /// Record that the prepare of the Step `key`'s session recorded at
@@ -152,8 +154,13 @@ pub trait RunRepository: Send + Sync + 'static {
         prepared_at: chrono::DateTime<chrono::Utc>,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
-    /// Record that an attempt of the Step `key` saw its session open.
-    fn record_open(&self, key: StepKey) -> impl Future<Output = Result<(), Self::Err>> + Send;
+    /// Record that an attempt of the Step `key` saw its session `session_id`
+    /// open, while the Step works in it.
+    fn record_open(
+        &self,
+        key: StepKey,
+        session_id: Uuid,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// The session the Step `key` claimed, as a stop sees it: whether it
     /// opened, and whether a prepare sent less than `lands_within` ago may
@@ -168,10 +175,16 @@ pub trait RunRepository: Send + Sync + 'static {
     /// good, or is done with it. Recording it again changes nothing.
     fn release_session(&self, key: StepKey) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
-    /// Whether the Step `key` still holds the session it claimed: neither the
-    /// Step nor its Run ended, and the session was not let go. An attempt of
-    /// the Step opens or prompts its session only while it does.
-    fn holds_session(&self, key: StepKey) -> impl Future<Output = Result<bool, Self::Err>> + Send;
+    /// Whether the Step `key` still holds the session `session_id`: it works
+    /// in it, neither the Step nor its Run ended, and the session was not
+    /// let go. An attempt of the Step opens or prompts a session only while
+    /// the Step holds it, so one handed on to another Agent is never opened
+    /// or prompted again.
+    fn holds_session(
+        &self,
+        key: StepKey,
+        session_id: Uuid,
+    ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
 
     /// The Step that works in the agent session `session_id`, if any.
     fn session_step(

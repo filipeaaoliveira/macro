@@ -8,7 +8,7 @@ use macro_user_id::user_id::MacroUserIdStr;
 
 use super::{BuiltInStepError, BuiltInSteps};
 use crate::domain::fakes::{FakeGithub, FakeRepo};
-use crate::domain::flow::{Flow, StepName};
+use crate::domain::flow::{Flow, StepName, StepUse};
 use crate::domain::models::{AgentAnswer, AgentTask, StepInput};
 use crate::domain::ports::{Retryable, StepAgent, StepExecutor};
 use crate::domain::pull_request_steps::PullRequestSteps;
@@ -42,13 +42,19 @@ impl FakeAgent {
 impl StepAgent for FakeAgent {
     type Err = FakeError;
 
-    async fn stop(&self, _key: StepKey, _owner: &MacroUserIdStr<'static>) -> Result<(), FakeError> {
+    async fn stop(
+        &self,
+        _key: StepKey,
+        _role: &Role,
+        _owner: &MacroUserIdStr<'static>,
+    ) -> Result<(), FakeError> {
         Ok(())
     }
 
     async fn release(
         &self,
         _key: StepKey,
+        _role: &Role,
         _owner: &MacroUserIdStr<'static>,
     ) -> Result<(), FakeError> {
         Ok(())
@@ -109,31 +115,34 @@ fn the_code_flow_s_steps_are_served() {
         "ready_to_merge",
         "merge",
     ] {
-        assert!(steps.serves(&step(name)), "{name}");
+        assert!(steps.serves(&step(name)).is_some(), "{name}");
     }
-    assert!(!steps.serves(&step("deploy")));
+    assert!(steps.serves(&step("deploy")).is_none());
 }
 
-/// An agent Step goes to an Agent of the Role its entry names; one whose
-/// entry names none fails for good, as no Agent is meant for it.
+/// An agent Step goes to an Agent of the Role its entry names. A Run whose
+/// Flow named no Roles, as one started before they were, goes on with the
+/// Role its built-in Step implies.
 #[tokio::test]
-async fn an_agent_step_asks_for_the_role_its_entry_names() {
+async fn an_agent_step_asks_for_the_role_its_entry_names_or_its_step_implies() {
     let agent = FakeAgent::ending_with("done");
     let steps = BuiltInSteps::new(agent.clone(), pull_requests());
     let mut no_role = input(&[]);
     no_role.role = None;
 
     steps.run(&step("write"), input(&[])).await.expect("write");
-    let refused = steps
-        .run(&step("write"), no_role)
-        .await
-        .expect_err("no role");
+    steps.run(&step("plan"), no_role).await.expect("plan");
 
-    let tasks = agent.tasks.lock().expect("tasks");
-    assert_eq!(tasks.len(), 1);
-    assert_eq!(tasks[0].role.as_str(), "writer");
-    assert!(matches!(refused, BuiltInStepError::NoRole(_)));
-    assert!(!refused.retryable());
+    let roles: Vec<String> = agent
+        .tasks
+        .lock()
+        .expect("tasks")
+        .iter()
+        .map(|task| task.role.to_string())
+        .collect();
+    assert_eq!(roles, ["writer", "planner"]);
+    assert_eq!(steps.serves(&step("plan")), Some(StepUse::Agent));
+    assert_eq!(steps.serves(&step("ci")), Some(StepUse::Work));
 }
 
 /// An agent Step of a Run that works on a repository works in its own

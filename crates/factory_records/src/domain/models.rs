@@ -445,8 +445,9 @@ pub struct StepSession {
     pub session_id: Uuid,
     /// Its first prompt's action.
     pub action_id: Uuid,
-    /// The Agent the session is of.
-    pub agent: AgentName,
+    /// The Agent the session is of; none for a session claimed before
+    /// Steps recorded their Agent, which is of the first Agent of its Role.
+    pub agent: Option<AgentName>,
 }
 
 /// A Step's session as `RunRepository::claim_session` left it.

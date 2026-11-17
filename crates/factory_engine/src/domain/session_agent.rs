@@ -18,7 +18,7 @@ use agent_session::domain::routines::{
     ValidateRoutineSession,
 };
 use ai_billing::DenyReason;
-use factory_records::domain::models::{AgentName, Outcome, Role, StepKey, StepSession};
+use factory_records::domain::models::{AgentName, Outcome, PassedOver, Role, StepKey, StepSession};
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
 use trigger_context::TriggerOrigin;
@@ -164,6 +164,25 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
         }
     }
 
+    /// The name of the Agent whose session `session` of a Step of `role`
+    /// is: the one recorded, else, for a session claimed before Steps
+    /// recorded their Agent, the first Agent of the Role.
+    fn agent_name(
+        &self,
+        session: &StepSession,
+        role: &Role,
+    ) -> Result<AgentName, SessionAgentError> {
+        match &session.agent {
+            Some(agent) => Ok(agent.clone()),
+            None => self
+                .agents
+                .for_role(role)
+                .first()
+                .cloned()
+                .ok_or_else(|| SessionAgentError::UnfilledRole(role.clone())),
+        }
+    }
+
     /// The Agent named `name`.
     fn agent(&self, name: &AgentName) -> Result<&Agent, SessionAgentError> {
         self.agents
@@ -175,15 +194,16 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
         SessionAgentError::Records(rootcause::Report::new(error).into_dynamic())
     }
 
-    /// The first prompt of `owner`'s session `session`.
+    /// The first prompt of `owner`'s session `session`, of `agent`.
     fn action(
         &self,
         owner: &MacroUserIdStr<'static>,
         session: &StepSession,
+        agent: &AgentName,
     ) -> Result<RoutineSessionAction, SessionAgentError> {
         Ok(RoutineSessionAction {
             owner: owner.clone(),
-            bot_id: self.agent(&session.agent)?.bot,
+            bot_id: self.agent(agent)?.bot,
             session_id: AgentSessionId::new_from_uuid(session.session_id),
             action_id: AgentActionId::from_uuid(session.action_id),
         })
@@ -311,9 +331,14 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
         }
     }
 
-    /// Fails unless the Step `key` still holds its session.
-    async fn still_holds(&self, key: StepKey) -> Result<(), SessionAgentError> {
-        if self.repo.holds_session(key).await.map_err(Self::records)? {
+    /// Fails unless the Step `key` still holds the session `session_id`.
+    async fn still_holds(&self, key: StepKey, session_id: Uuid) -> Result<(), SessionAgentError> {
+        let holds = self
+            .repo
+            .holds_session(key, session_id)
+            .await
+            .map_err(Self::records)?;
+        if holds {
             Ok(())
         } else {
             Err(SessionAgentError::Released)
@@ -371,14 +396,16 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
         &self,
         task: &AgentTask,
         session: &StepSession,
+        agent_name: &AgentName,
     ) -> Result<RoutineSessionAction, SessionAgentError> {
-        let agent = self.agent(&session.agent)?;
-        let action = self.action(&task.owner, session)?;
+        let agent = self.agent(agent_name)?;
+        let action = self.action(&task.owner, session, agent_name)?;
 
         // A deleted session is gone: preparing it again would open a fresh
         // one under its id, and prompting it would start the work over. An
         // attempt Temporal gave up on may still run here after the Step let
-        // go of its session, so it checks before each.
+        // go of its session, or handed it to another Agent, so it checks
+        // before each that the Step still works in this session.
         //
         // The prepare is recorded at the database's time before it is sent,
         // so a stop can tell a session that may still open from one that
@@ -386,7 +413,7 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
         // whose Run ended, sends no prepare.
         let Some(prepared_at) = self
             .repo
-            .record_prepare(task.key)
+            .record_prepare(task.key, session.session_id)
             .await
             .map_err(Self::records)?
         else {
@@ -404,13 +431,13 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
         }
         // The session just opened is this attempt's to delete when the Step
         // let go of it meanwhile: nothing else will.
-        if let Err(released) = self.still_holds(task.key).await {
+        if let Err(released) = self.still_holds(task.key, session.session_id).await {
             self.delete(&action).await;
             return Err(released);
         }
         // A session that opened is never written off by a stop.
         self.repo
-            .record_open(task.key)
+            .record_open(task.key, session.session_id)
             .await
             .map_err(Self::records)?;
         if let Err(error) = self.prompt_once(task, &action).await {
@@ -449,31 +476,41 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
 
         // An Agent that cannot start for lack of quota hands the Step to the
         // next Agent of its Role, in a session of its own, until one starts
-        // or none is left.
+        // or none is left; the Step records each Agent passed over, the last
+        // one too.
         let action = loop {
-            let reason = match self.start(&task, &session).await {
+            let agent = self.agent_name(&session, &task.role)?;
+            let reason = match self.start(&task, &session, &agent).await {
                 Ok(action) => break action,
                 Err(SessionAgentError::NoQuota(reason)) => reason,
                 Err(error) => return Err(error),
             };
-            let next = agents
+            let to = agents
                 .iter()
-                .skip_while(|agent| **agent != session.agent)
-                .nth(1);
-            let Some(next) = next else {
-                return Err(SessionAgentError::NoQuota(reason));
+                .skip_while(|listed| **listed != agent)
+                .nth(1)
+                .map(new_session);
+            let passed = PassedOver {
+                agent: agent.clone(),
+                reason: reason.code().to_string(),
             };
-
-            let to = new_session(next);
-            let passed = self
+            let recorded = self
                 .repo
-                .pass_session(task.key, &session, &to, reason.code())
+                .pass_session(
+                    task.key,
+                    session.session_id,
+                    &task.role,
+                    &passed,
+                    to.as_ref(),
+                )
                 .await
                 .map_err(Self::records)?;
-            if passed {
+            let Some(to) = to else {
+                return Err(SessionAgentError::NoQuota(reason));
+            };
+            if recorded {
                 tracing::info!(
-                    from = %session.agent,
-                    to = %to.agent,
+                    from = %agent,
                     reason = reason.code(),
                     "a factory step's agent could not start: the next agent takes it"
                 );
@@ -482,15 +519,16 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
             }
 
             // Another attempt handed the Step on already, or it let go of
-            // its session: go on in the session it works in now, if any.
-            self.still_holds(task.key).await?;
+            // its session: go on in the session it works in now, while it
+            // holds it.
             let current = self
                 .repo
                 .claimed_session(task.key)
                 .await
                 .map_err(Self::records)?
                 .ok_or(SessionAgentError::Released)?;
-            if current == session {
+            self.still_holds(task.key, current.session_id).await?;
+            if current.session_id == session.session_id {
                 return Err(SessionAgentError::NoQuota(reason));
             }
             session = current;
@@ -515,6 +553,7 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
     async fn stop(
         &self,
         key: StepKey,
+        role: &Role,
         owner: &MacroUserIdStr<'static>,
     ) -> Result<(), SessionAgentError> {
         // Recorded first, so no attempt prepares or opens the session again
@@ -545,7 +584,8 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
         // whose prepare is still in flight, or a harness that fails a while,
         // answers neither the stop nor a read, yet may open or work on, so
         // the watch rides that out.
-        let action = self.action(owner, &stopping.session)?;
+        let agent = self.agent_name(&stopping.session, role)?;
+        let action = self.action(owner, &stopping.session, &agent)?;
         self.cancel(&action).await;
         let mut seen = false;
         let deadline = tokio::time::Instant::now() + STOP_WATCH;
@@ -592,6 +632,7 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
     async fn release(
         &self,
         key: StepKey,
+        role: &Role,
         owner: &MacroUserIdStr<'static>,
     ) -> Result<(), SessionAgentError> {
         let claimed = self
@@ -604,7 +645,8 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
                 .release_session(key)
                 .await
                 .map_err(Self::records)?;
-            self.delete(&self.action(owner, &session)?).await;
+            let agent = self.agent_name(&session, role)?;
+            self.delete(&self.action(owner, &session, &agent)?).await;
         }
         Ok(())
     }
@@ -615,7 +657,7 @@ fn new_session(agent: &AgentName) -> StepSession {
     StepSession {
         session_id: Uuid::now_v7(),
         action_id: Uuid::now_v7(),
-        agent: agent.clone(),
+        agent: Some(agent.clone()),
     }
 }
 

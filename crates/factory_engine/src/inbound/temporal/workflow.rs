@@ -121,13 +121,7 @@ impl FlowWorkflow {
                 run_id: start.run_id,
                 seq,
             };
-            let request = StepRequest {
-                key,
-                entry: entry.id.clone(),
-                step: entry.step.clone(),
-                role: entry.role.clone(),
-                visit,
-            };
+            let request = StepRequest::of(key, entry, visit);
             let started = ctx
                 .execute_activity(
                     FactoryActivities::start_step,

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT session_id AS \"session_id!\", action_id AS \"action_id!\", agent AS \"agent!\"\n            FROM factory_step\n            WHERE run_id = $1 AND seq = $2 AND session_id IS NOT NULL\n            ",
+  "query": "\n            SELECT session_id AS \"session_id!\", action_id AS \"action_id!\", agent\n            FROM factory_step\n            WHERE run_id = $1 AND seq = $2 AND session_id IS NOT NULL\n            ",
   "describe": {
     "columns": [
       {
@@ -15,7 +15,7 @@
       },
       {
         "ordinal": 2,
-        "name": "agent!",
+        "name": "agent",
         "type_info": "Text"
       }
     ],
@@ -31,5 +31,5 @@
       true
     ]
   },
-  "hash": "830e4397c56f1d333cd9a565d9d5a57000bc5118771f139f0e572626a46e6e42"
+  "hash": "d57ccb81b90bf1c42545e55df0c833c4c407bb3a39d757cd4c5a03f0b3cbc475"
 }

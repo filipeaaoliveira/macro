@@ -6,11 +6,11 @@
 #[cfg(test)]
 mod test;
 
-use factory_records::domain::models::{Outcome, Repository, Step, StepKey};
+use factory_records::domain::models::{Outcome, Repository, Role, Step, StepKey};
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
 
-use crate::domain::flow::StepName;
+use crate::domain::flow::{StepName, StepUse};
 use crate::domain::models::{AgentTask, StepInput, StepReport, run_branch};
 use crate::domain::ports::{PullRequests, Retryable, StepAgent, StepExecutor};
 use crate::domain::pull_request_steps::{PullRequestStepError, PullRequestSteps};
@@ -75,12 +75,20 @@ impl BuiltInStep {
         }
     }
 
-    /// Whether an agent does it, in a session to stop or let go of.
-    fn agent_step(self) -> bool {
-        match self {
-            Self::Plan | Self::Write | Self::Review | Self::Fix | Self::CiFix => true,
-            Self::Reply | Self::Publish | Self::Ci | Self::ReadyToMerge | Self::Merge => false,
-        }
+    /// The Role an agent fills to do it, when an agent does it, in a
+    /// session to stop or let go of. A Run started before its Flow named
+    /// Roles goes on with these.
+    fn agent_role(self) -> Option<Role> {
+        let role = match self {
+            Self::Plan => "planner",
+            Self::Write => "writer",
+            Self::Review => "reviewer",
+            Self::Fix | Self::CiFix => "fixer",
+            Self::Reply | Self::Publish | Self::Ci | Self::ReadyToMerge | Self::Merge => {
+                return None;
+            }
+        };
+        Role::try_from(role.to_string()).ok()
     }
 }
 
@@ -93,9 +101,6 @@ pub enum BuiltInStepError {
     /// The Step works on the Run's repository, and the Run has none.
     #[error("step {0} works on the run's repository, and the run has none")]
     NoRepository(StepName),
-    /// An agent does the Step, and its entry names no Role for it to fill.
-    #[error("an agent does step {0}, and its entry names no role")]
-    NoRole(StepName),
     /// The agent could not do the Step.
     #[error("the agent failed: {report:?}")]
     Agent {
@@ -133,7 +138,6 @@ impl Retryable for BuiltInStepError {
             BuiltInStepError::PullRequest(error) => error.retryable(),
             BuiltInStepError::UnknownStep(_)
             | BuiltInStepError::NoRepository(_)
-            | BuiltInStepError::NoRole(_)
             | BuiltInStepError::UnexpectedOutcome { .. } => false,
         }
     }
@@ -163,10 +167,10 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
         }
     }
 
-    /// Hand `step` to an agent of the Role its entry names, with
-    /// `instructions`, and check it ends with one of `outcomes`. When the
-    /// Run works on a repository, the agent's session works in it, on the
-    /// Run's branch.
+    /// Hand `step` to an agent of the Role its entry names, else of `role`,
+    /// with `instructions`, and check it ends with one of `outcomes`. When
+    /// the Run works on a repository, the agent's session works in it, on
+    /// the Run's branch.
     async fn ask_agent(
         &self,
         step: &StepName,
@@ -174,14 +178,12 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
         outcomes: Vec<Outcome>,
         input: StepInput<'_>,
     ) -> Result<StepReport, BuiltInStepError> {
-        let role = input
-            .role
-            .ok_or_else(|| BuiltInStepError::NoRole(step.clone()))?;
         let task = AgentTask {
             key: input.key,
             owner: input.owner.clone(),
             step: step.clone(),
-            role: role.clone(),
+            role: agent_role(step, input.role)
+                .ok_or_else(|| BuiltInStepError::UnknownStep(step.clone()))?,
             prompt: prompt(instructions, &outcomes, input),
             outcomes: outcomes.clone(),
             repo_url: input.repository.map(|repository| repository.url.clone()),
@@ -223,8 +225,13 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
 impl<A: StepAgent, G: PullRequests, R: RunRepository> StepExecutor for BuiltInSteps<A, G, R> {
     type Err = BuiltInStepError;
 
-    fn serves(&self, step: &StepName) -> bool {
-        BuiltInStep::named(step).is_some()
+    fn serves(&self, step: &StepName) -> Option<StepUse> {
+        let built_in = BuiltInStep::named(step)?;
+        if built_in.agent_role().is_some() {
+            Some(StepUse::Agent)
+        } else {
+            Some(StepUse::Work)
+        }
     }
 
     async fn run(
@@ -272,37 +279,46 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> StepExecutor for BuiltInSt
     async fn stop(
         &self,
         step: &StepName,
+        role: Option<&Role>,
         key: StepKey,
         owner: &MacroUserIdStr<'static>,
     ) -> Result<(), BuiltInStepError> {
-        match BuiltInStep::named(step) {
-            Some(built_in) if built_in.agent_step() => self
+        match agent_role(step, role) {
+            Some(role) => self
                 .agent
-                .stop(key, owner)
+                .stop(key, &role, owner)
                 .await
                 .map_err(BuiltInStepError::agent),
             // A reply is done before anything could stop it, and a pull
             // request Step holds nothing: a cancelled one is dropped.
-            Some(_) | None => Ok(()),
+            None => Ok(()),
         }
     }
 
     async fn release(
         &self,
         step: &StepName,
+        role: Option<&Role>,
         key: StepKey,
         owner: &MacroUserIdStr<'static>,
     ) -> Result<(), BuiltInStepError> {
-        match BuiltInStep::named(step) {
-            Some(built_in) if built_in.agent_step() => self
+        match agent_role(step, role) {
+            Some(role) => self
                 .agent
-                .release(key, owner)
+                .release(key, &role, owner)
                 .await
                 .map_err(BuiltInStepError::agent),
             // Only an agent Step holds a session.
-            Some(_) | None => Ok(()),
+            None => Ok(()),
         }
     }
+}
+
+/// The Role an agent fills to do `step`: the one its entry names, else the
+/// one the built-in Step implies. None when no agent does it.
+fn agent_role(step: &StepName, named: Option<&Role>) -> Option<Role> {
+    let implied = BuiltInStep::named(step)?.agent_role()?;
+    Some(named.cloned().unwrap_or(implied))
 }
 
 /// The most bytes of the Run's earlier Steps a prompt carries.

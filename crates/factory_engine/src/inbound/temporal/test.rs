@@ -10,7 +10,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use factory_records::domain::models::{Outcome, Repository, RunId, RunInsert, RunOutcome, StepKey};
+use factory_records::domain::models::{
+    Outcome, Repository, Role, RunId, RunInsert, RunOutcome, StepKey,
+};
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
 use serde_json::json;
@@ -114,6 +116,7 @@ impl StepAgent for Agent {
     async fn stop(
         &self,
         _key: StepKey,
+        _role: &Role,
         _owner: &MacroUserIdStr<'static>,
     ) -> Result<(), AgentFailed> {
         self.stops.fetch_add(1, Ordering::SeqCst);
@@ -127,6 +130,7 @@ impl StepAgent for Agent {
     async fn release(
         &self,
         _key: StepKey,
+        _role: &Role,
         _owner: &MacroUserIdStr<'static>,
     ) -> Result<(), AgentFailed> {
         self.releases.fetch_add(1, Ordering::SeqCst);
@@ -185,7 +189,7 @@ async fn plan_run(repo: &FakeRepo) -> RunStart {
                 "on": { "done": [{ "to": { "kind": "end", "outcome": "success" } }] }
             }]
         }),
-        |_| true,
+        |_| Some(crate::domain::flow::StepUse::Work),
     )
     .expect("valid flow");
     RunStart {
@@ -532,6 +536,7 @@ impl StepAgent for CodeAgent {
     async fn stop(
         &self,
         _key: StepKey,
+        _role: &Role,
         _owner: &MacroUserIdStr<'static>,
     ) -> Result<(), AgentFailed> {
         Ok(())
@@ -540,6 +545,7 @@ impl StepAgent for CodeAgent {
     async fn release(
         &self,
         _key: StepKey,
+        _role: &Role,
         _owner: &MacroUserIdStr<'static>,
     ) -> Result<(), AgentFailed> {
         Ok(())
@@ -647,7 +653,7 @@ where
     };
     let flow = BuiltInFlow::named("code")
         .expect("built in")
-        .read(|_| true)
+        .read(|_| Some(crate::domain::flow::StepUse::Work))
         .expect("valid flow");
     let start = RunStart {
         run_id: run.id,

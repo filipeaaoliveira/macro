@@ -607,7 +607,7 @@ impl RunRepository for PgRunRepository {
             session.action_id,
             &offered,
             role.as_str(),
-            session.agent.as_str(),
+            session.agent.as_ref().map(AgentName::as_str),
         )
         .execute(&self.pool)
         .await?;
@@ -629,19 +629,28 @@ impl RunRepository for PgRunRepository {
     async fn pass_session(
         &self,
         key: StepKey,
-        from: &StepSession,
-        to: &StepSession,
-        reason: &str,
+        from: Uuid,
+        role: &Role,
+        passed: &PassedOver,
+        to: Option<&StepSession>,
     ) -> Result<bool, Self::Err> {
-        // The new session has not been asked to open, nor seen open, and the
-        // agent handed nothing back in the one it leaves.
-        let passed = sqlx::query!(
+        // A new session has not been asked to open, nor seen open, and the
+        // agent handed nothing back in the one it leaves. With no next
+        // session the Step keeps its own, and only the pass is recorded. A
+        // session claimed before Steps recorded their Role and Agent gets
+        // both, so they pair up with the Agents passed over.
+        let to_agent = to.and_then(|to| to.agent.as_ref()).map(AgentName::as_str);
+        let recorded = sqlx::query!(
             r#"
             UPDATE factory_step s
-            SET session_id = $4, action_id = $5, agent = $6,
-                passed_over = array_append(s.passed_over, s.agent),
-                pass_reasons = array_append(s.pass_reasons, $7),
-                prepared_at = NULL, opened_at = NULL
+            SET session_id = COALESCE($4, s.session_id),
+                action_id = COALESCE($5, s.action_id),
+                role = COALESCE(s.role, $6),
+                agent = COALESCE($7, s.agent, $8),
+                passed_over = array_append(s.passed_over, $8),
+                pass_reasons = array_append(s.pass_reasons, $9),
+                prepared_at = CASE WHEN $4::uuid IS NULL THEN s.prepared_at END,
+                opened_at = CASE WHEN $4::uuid IS NULL THEN s.opened_at END
             FROM factory_run r
             WHERE r.id = s.run_id AND s.run_id = $1 AND s.seq = $2 AND s.session_id = $3
                 AND s.session_released_at IS NULL AND s.handed_at IS NULL
@@ -649,22 +658,24 @@ impl RunRepository for PgRunRepository {
             "#,
             key.run_id.as_uuid(),
             i32::from(key.seq),
-            from.session_id,
-            to.session_id,
-            to.action_id,
-            to.agent.as_str(),
-            reason,
+            from,
+            to.map(|to| to.session_id),
+            to.map(|to| to.action_id),
+            role.as_str(),
+            to_agent,
+            passed.agent.as_str(),
+            passed.reason,
         )
         .execute(&self.pool)
         .await?;
-        Ok(passed.rows_affected() == 1)
+        Ok(recorded.rows_affected() == 1)
     }
 
     #[tracing::instrument(err, skip(self))]
     async fn claimed_session(&self, key: StepKey) -> Result<Option<StepSession>, Self::Err> {
         let row = sqlx::query!(
             r#"
-            SELECT session_id AS "session_id!", action_id AS "action_id!", agent AS "agent!"
+            SELECT session_id AS "session_id!", action_id AS "action_id!", agent
             FROM factory_step
             WHERE run_id = $1 AND seq = $2 AND session_id IS NOT NULL
             "#,
@@ -677,7 +688,7 @@ impl RunRepository for PgRunRepository {
             Ok(StepSession {
                 session_id: row.session_id,
                 action_id: row.action_id,
-                agent: AgentName::try_from(row.agent)?,
+                agent: row.agent.map(AgentName::try_from).transpose()?,
             })
         })
         .transpose()
@@ -687,6 +698,7 @@ impl RunRepository for PgRunRepository {
     async fn record_prepare(
         &self,
         key: StepKey,
+        session_id: Uuid,
     ) -> Result<Option<chrono::DateTime<chrono::Utc>>, Self::Err> {
         let prepared_at = sqlx::query_scalar!(
             r#"
@@ -694,12 +706,13 @@ impl RunRepository for PgRunRepository {
             SET prepared_at = now()
             FROM factory_run r
             WHERE r.id = s.run_id AND s.run_id = $1 AND s.seq = $2
-                AND s.session_id IS NOT NULL AND s.session_released_at IS NULL
+                AND s.session_id = $3 AND s.session_released_at IS NULL
                 AND s.ended_at IS NULL AND r.ended_at IS NULL
             RETURNING s.prepared_at AS "prepared_at!"
             "#,
             key.run_id.as_uuid(),
             i32::from(key.seq),
+            session_id,
         )
         .fetch_optional(&self.pool)
         .await?;
@@ -728,16 +741,17 @@ impl RunRepository for PgRunRepository {
     }
 
     #[tracing::instrument(err, skip(self))]
-    async fn record_open(&self, key: StepKey) -> Result<(), Self::Err> {
+    async fn record_open(&self, key: StepKey, session_id: Uuid) -> Result<(), Self::Err> {
         sqlx::query!(
             r#"
             UPDATE factory_step
             SET opened_at = now()
             WHERE run_id = $1 AND seq = $2
-                AND session_id IS NOT NULL AND opened_at IS NULL
+                AND session_id = $3 AND opened_at IS NULL
             "#,
             key.run_id.as_uuid(),
             i32::from(key.seq),
+            session_id,
         )
         .execute(&self.pool)
         .await?;
@@ -755,7 +769,7 @@ impl RunRepository for PgRunRepository {
             SELECT
                 session_id AS "session_id!",
                 action_id AS "action_id!",
-                agent AS "agent!",
+                agent,
                 opened_at IS NOT NULL AS "opened!",
                 COALESCE(prepared_at > now() - make_interval(secs => $3), false)
                     AS "may_still_open!"
@@ -773,7 +787,7 @@ impl RunRepository for PgRunRepository {
                 session: StepSession {
                     session_id: row.session_id,
                     action_id: row.action_id,
-                    agent: AgentName::try_from(row.agent)?,
+                    agent: row.agent.map(AgentName::try_from).transpose()?,
                 },
                 opened: row.opened,
                 may_still_open: row.may_still_open,
@@ -800,7 +814,7 @@ impl RunRepository for PgRunRepository {
     }
 
     #[tracing::instrument(err, skip(self))]
-    async fn holds_session(&self, key: StepKey) -> Result<bool, Self::Err> {
+    async fn holds_session(&self, key: StepKey, session_id: Uuid) -> Result<bool, Self::Err> {
         let holds = sqlx::query_scalar!(
             r#"
             SELECT EXISTS (
@@ -808,7 +822,7 @@ impl RunRepository for PgRunRepository {
                 FROM factory_step s
                 JOIN factory_run r ON r.id = s.run_id
                 WHERE s.run_id = $1 AND s.seq = $2
-                    AND s.session_id IS NOT NULL
+                    AND s.session_id = $3
                     AND s.session_released_at IS NULL
                     AND s.ended_at IS NULL
                     AND r.ended_at IS NULL
@@ -816,6 +830,7 @@ impl RunRepository for PgRunRepository {
             "#,
             key.run_id.as_uuid(),
             i32::from(key.seq),
+            session_id,
         )
         .fetch_one(&self.pool)
         .await?;

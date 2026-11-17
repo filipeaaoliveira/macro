@@ -11,7 +11,7 @@ use macro_user_id::user_id::MacroUserIdStr;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::domain::flow::{Flow, FlowError, StepName};
+use crate::domain::flow::{Entry, Flow, FlowError, StepName};
 
 /// What a Run's workflow starts with. The Run's request stays in its
 /// records, so a Run's history carries ids, not its text.
@@ -37,6 +37,20 @@ pub struct StepRequest {
     pub role: Option<Role>,
     /// Which visit of the entry it is, from 1.
     pub visit: u16,
+}
+
+impl StepRequest {
+    /// The `visit` of `entry`, as the Step `key`: the work its entry names,
+    /// and the Role it names for an agent to fill.
+    pub fn of(key: StepKey, entry: &Entry, visit: u16) -> Self {
+        Self {
+            key,
+            entry: entry.id.clone(),
+            step: entry.step.clone(),
+            role: entry.role.clone(),
+            visit,
+        }
+    }
 }
 
 /// How a Step ended, for its workflow to record.
