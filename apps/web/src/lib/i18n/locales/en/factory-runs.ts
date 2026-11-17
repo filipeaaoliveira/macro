@@ -109,6 +109,10 @@ export default {
   answerConflict: 'This question was already answered',
   answerConflictDescription: 'The run has moved on and now shows where it is',
   answered: 'Answered: {{answer}}',
+  answeredByRule: 'Answered by the standing rule “{{rule}}”: {{answer}}',
+  ruleApprovePlan: 'Approve plans',
+  ruleFixBlockers: 'Fix review blockers',
+  ruleMergeWhenGreen: 'Merge when CI is green',
   // Control Files a Run changed that its request doesn't name.
   controlFilesTitle: 'Control files changed',
   controlFilesChanged:
@@ -134,4 +138,27 @@ export default {
     'An empty list checks no file: a run may then change its tests or CI unseen.',
   controlFilesSaved: 'Control files saved',
   controlFilesSaveFailed: 'Couldn’t save the control files',
+  // A team's Standing Rules, in team settings.
+  standingRulesLoading: 'Loading standing rules…',
+  standingRulesLoadFailed: 'Standing rules couldn’t be loaded',
+  standingRulesDefault: 'These are Macro’s default rules.',
+  standingRulesOwn: 'These are your team’s own rules.',
+  standingRulesHowTo:
+    'A run keeps the rules it started with. A gate no rule answers waits for a person.',
+  standingRulesAdminsOnly: 'Only team admins can change them.',
+  standingRulesApprovePlanHint: 'Approve a run’s plan without asking.',
+  standingRulesFixBlockersHint:
+    'Send the blockers reviewers find to be fixed, at most twice in a row; blockers found after that wait for a person.',
+  standingRulesMergeWhenGreenHint:
+    'Merge once CI passes and the base branch isn’t held.',
+  standingRulesAlwaysPerson:
+    'A run that changes control files its request doesn’t name always waits for a person.',
+  standingRulesProjects: {
+    one: '{{count}} project has rules of its own, which replace these for runs on its tasks.',
+    other:
+      '{{count}} projects have rules of their own, which replace these for runs on their tasks.',
+  },
+  standingRulesUseDefault: 'Use default',
+  standingRulesSaved: 'Standing rules saved',
+  standingRulesSaveFailed: 'Couldn’t save the standing rules',
 };

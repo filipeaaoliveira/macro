@@ -1,4 +1,7 @@
-import { TeamControlFiles } from '@app/features/factory-runs/factory-runs';
+import {
+  TeamControlFiles,
+  TeamStandingRules,
+} from '@app/features/factory-runs/factory-runs';
 import { ShowFeatureFlag } from '@app/lib/analytics/posthog';
 import { toast } from '@core/component/Toast/Toast';
 import {
@@ -416,14 +419,24 @@ export function TeamGeneral(props: { team: TeamSummary }) {
           </SettingsCard>
         </SettingsSection>
         <ShowFeatureFlag flag={enableFactoryRuns}>
-          <SettingsSection
-            title="Control files"
-            description="Files that decide whether a repository's checks pass, such as tests, lint configuration and CI workflows. A factory run that changes one unasked merges only once a person approves it."
-          >
-            <SettingsCard>
-              <TeamControlFiles />
-            </SettingsCard>
-          </SettingsSection>
+          <>
+            <SettingsSection
+              title="Control files"
+              description="Files that decide whether a repository's checks pass, such as tests, lint configuration and CI workflows. A factory run that changes one unasked merges only once a person approves it."
+            >
+              <SettingsCard>
+                <TeamControlFiles />
+              </SettingsCard>
+            </SettingsSection>
+            <SettingsSection
+              title="Standing rules"
+              description="Which questions a factory run answers on its own instead of waiting for a person."
+            >
+              <SettingsCard>
+                <TeamStandingRules />
+              </SettingsCard>
+            </SettingsSection>
+          </>
         </ShowFeatureFlag>
       </SettingsPage>
 

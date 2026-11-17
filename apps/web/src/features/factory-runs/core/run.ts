@@ -6,10 +6,15 @@ export type RunOutcome =
   | 'failed'
   | 'cancelled';
 
-/** A person's answer to a Gate. */
+/** A Standing Rule: an answer the factory gives a kind of Gate on its own. */
+export type StandingRule = 'approve_plan' | 'fix_blockers' | 'merge_when_green';
+
+/** The answer to a Gate: a person's, or a Standing Rule's (a Rule Answer). */
 export type GateAnswer = {
   answer: string;
   note?: string;
+  /** The Standing Rule that answered, for a Rule Answer. */
+  rule?: StandingRule;
   /** The Run's Tampered files the answer approved. */
   approvedControlFiles?: string[];
   answeredAt: string;

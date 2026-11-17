@@ -20,6 +20,7 @@ import {
   roundStartingAt,
   WHOLE_CHANGE,
 } from '../core/run';
+import { RULE_NAMES } from '../core/standing-rules';
 
 function stepLabel(step: Pick<RunStep, 'entry' | 'visit'>): string {
   const entry = flowWordLabel(step.entry);
@@ -197,9 +198,19 @@ function TimelineStep(props: {
       <Show when={answer()}>
         {(answer) => (
           <StepNote>
-            {t('factoryRuns.answered', {
-              answer: flowWordLabel(answer().answer),
-            })}
+            <Show
+              when={answer().rule}
+              fallback={t('factoryRuns.answered', {
+                answer: flowWordLabel(answer().answer),
+              })}
+            >
+              {(rule) =>
+                t('factoryRuns.answeredByRule', {
+                  answer: flowWordLabel(answer().answer),
+                  rule: t(RULE_NAMES[rule()]),
+                })
+              }
+            </Show>
             <Show when={answer().note}>
               {(note) => (
                 <span class="block whitespace-pre-wrap text-ink-muted">

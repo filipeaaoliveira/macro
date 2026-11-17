@@ -106,6 +106,41 @@ afterEach(() => {
 });
 
 describe('RunView', () => {
+  it('shows a Rule Answer with the standing rule that gave it, and asks no one', async () => {
+    const { setRun } = mount({});
+    const [first] = waitingRun.steps;
+    if (!first?.gate) throw new Error('No first Gate');
+    setRun({
+      ...waitingRun,
+      steps: [
+        {
+          ...first,
+          gate: {
+            ...first.gate,
+            answer: {
+              answer: 'approve',
+              rule: 'approve_plan',
+              answeredAt: '2026-11-16T09:01:00Z',
+            },
+          },
+        },
+        {
+          seq: 2,
+          entry: 'write',
+          visit: 1,
+          startedAt: '2026-11-16T09:01:00Z',
+        },
+      ],
+    });
+
+    expect(
+      await screen.findByText(
+        'Answered by the standing rule “Approve plans”: Approve'
+      )
+    ).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull();
+  });
+
   it('shows a round of checks left open by an ended Step as unfinished', async () => {
     const { setRun } = mount({});
     setRun({

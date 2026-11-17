@@ -13,6 +13,7 @@ import { RunInsightsView } from './insights-view';
 import { createAppInsightsContext } from './queries/insights';
 import { createAppRunsContext } from './queries/runs';
 import { ControlFilesSettings } from './views/control-files-settings';
+import { StandingRulesSettings } from './views/standing-rules-settings';
 import { TaskRunsSection } from './views/task-runs-section';
 
 /**
@@ -59,6 +60,14 @@ export function TaskRuns(props: { taskId: string; order: number }) {
  */
 export function TeamControlFiles() {
   return <ControlFilesSettings />;
+}
+
+/**
+ * The team's Standing Rules, as the body of a team settings section: which
+ * kinds of Gate the factory answers on its own.
+ */
+export function TeamStandingRules() {
+  return <StandingRulesSettings />;
 }
 
 /** How the person's Runs went, as a page of its own. */
