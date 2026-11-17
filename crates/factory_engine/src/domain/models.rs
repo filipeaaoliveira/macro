@@ -4,7 +4,7 @@
 mod test;
 
 use chrono::{DateTime, Utc};
-use factory_records::domain::main_hold::MainHold;
+use factory_records::domain::main_hold::{MainHold, RequiredChecksState};
 use factory_records::domain::models::{
     EntryId, Outcome, Repository, Role, Run, RunId, RunOutcome, Step, StepKey,
 };
@@ -431,10 +431,10 @@ pub struct RunDetail {
     /// is at its merge and the base's required checks fail: the Run does
     /// not merge until it clears, even once its merge Gate is approved.
     pub main_hold: Option<MainHold>,
-    /// Whether the checks the base branch requires could not be read, or
-    /// name none, while the Run is at its merge: nothing holds the merge
-    /// on them.
-    pub base_checks_unread: bool,
+    /// Why the checks the base branch requires decide nothing, while the
+    /// Run is at its merge: they could not be read, or the base requires
+    /// none. Nothing holds the merge on them.
+    pub base_required_checks: Option<RequiredChecksState>,
 }
 
 /// A Flow a person can start a Run of.

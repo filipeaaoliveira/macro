@@ -197,7 +197,7 @@ where
             run,
             steps,
             main_hold: base.hold,
-            base_checks_unread: base.required_unread,
+            base_required_checks: base.required,
         })
     }
 
@@ -379,10 +379,35 @@ where
                 run,
                 steps,
                 main_hold: base.hold,
-                base_checks_unread: base.required_unread,
+                base_required_checks: base.required,
             });
         }
         Ok(details)
+    }
+
+    #[tracing::instrument(skip(self))]
+    async fn clear_main_hold(
+        &self,
+        repo_url: &str,
+        base_branch: &str,
+    ) -> Result<bool, FactoryError> {
+        let repository = CodeRepository::parse(repo_url).ok_or(FactoryError::InvalidRepository)?;
+        let base = Repository {
+            url: repository.url(),
+            base_branch: base_branch.to_string(),
+        };
+        let held = self
+            .repo
+            .main_hold(&base)
+            .await
+            .map_err(internal)?
+            .is_some();
+        self.repo
+            .clear_main_hold(&base, Utc::now())
+            .await
+            .map_err(internal)?;
+        tracing::info!(held, "an operator cleared a main hold");
+        Ok(held)
     }
 
     #[tracing::instrument(skip(self, actor))]

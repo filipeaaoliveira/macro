@@ -1,5 +1,6 @@
 //! Axum router for the Run API.
 
+mod main_hold;
 #[cfg(test)]
 mod test;
 
@@ -79,6 +80,9 @@ impl<S, Auth> FromRef<FactoryRouterState<S, Auth>> for MacroAuthorizationState<A
 /// - `POST /runs/{id}/cancel` — cancel a Run.
 /// - `PUT /runs/{id}/task` — link a Run to the Macro task it works on.
 /// - `POST /hand-backs` — an agent Step's session hands back its result.
+/// - `POST /internal/main-holds/clear` — an internal caller, for an
+///   operator, clears a base branch's Main Hold; not in the OpenAPI
+///   document.
 pub fn factory_router<S, Auth, T>(state: FactoryRouterState<S, Auth>) -> Router<T>
 where
     S: FactoryService,
@@ -100,6 +104,10 @@ where
         .route("/runs/{id}/cancel", post(cancel_run_handler::<S, Auth>))
         .route("/runs/{id}/task", put(link_task_handler::<S, Auth>))
         .route("/hand-backs", post(hand_back_handler::<S, Auth>))
+        .route(
+            "/internal/main-holds/clear",
+            post(main_hold::clear_main_hold_handler::<S, Auth>),
+        )
         .with_state(state)
 }
 

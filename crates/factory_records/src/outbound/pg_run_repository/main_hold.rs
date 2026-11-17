@@ -9,7 +9,8 @@ use uuid::Uuid;
 
 use super::{PgRunRepository, PgRunRepositoryErr};
 use crate::domain::main_hold::{
-    BaseState, FactoryMerge, MainHold, MainHoldRepository, TASK_CLAIM_STALE_AFTER,
+    BaseState, FactoryMerge, MainHold, MainHoldRepository, RequiredChecksState,
+    TASK_CLAIM_STALE_AFTER,
 };
 use crate::domain::models::{Repository, RunId};
 
@@ -96,7 +97,7 @@ impl MainHoldRepository for PgRunRepository {
     async fn base_state(&self, base: &Repository) -> Result<BaseState, Self::Err> {
         let row = sqlx::query!(
             r#"
-            SELECT held_since, head_sha, failed, task_claimed_at, task_id, required_unread
+            SELECT held_since, head_sha, failed, task_claimed_at, task_id, required_checks
             FROM factory_main_hold
             WHERE repo_url = $1 AND base_branch = $2
             "#,
@@ -116,7 +117,13 @@ impl MainHoldRepository for PgRunRepository {
                 task_claimed_at: row.task_claimed_at,
                 task_id: row.task_id,
             })?,
-            required_unread: row.required_unread,
+            required: row
+                .required_checks
+                .map(|name| {
+                    RequiredChecksState::named(&name)
+                        .ok_or(PgRunRepositoryErr::UnknownRequiredChecks(name))
+                })
+                .transpose()?,
         })
     }
 
@@ -137,7 +144,7 @@ impl MainHoldRepository for PgRunRepository {
             SET held_since = COALESCE(factory_main_hold.held_since, EXCLUDED.held_since),
                 head_sha = EXCLUDED.head_sha,
                 failed = EXCLUDED.failed,
-                required_unread = false
+                required_checks = NULL
             RETURNING held_since, head_sha, failed, task_claimed_at, task_id
             "#,
             base.url,
@@ -152,21 +159,27 @@ impl MainHoldRepository for PgRunRepository {
     }
 
     #[tracing::instrument(err, skip(self))]
-    async fn mark_required_unread(&self, base: &Repository) -> Result<(), Self::Err> {
+    async fn mark_required(
+        &self,
+        base: &Repository,
+        why: RequiredChecksState,
+    ) -> Result<(), Self::Err> {
         sqlx::query!(
             r#"
-            INSERT INTO factory_main_hold (repo_url, base_branch, required_unread)
-            VALUES ($1, $2, true)
+            INSERT INTO factory_main_hold (repo_url, base_branch, required_checks)
+            VALUES ($1, $2, $3)
             ON CONFLICT (repo_url, base_branch) DO UPDATE
-            SET required_unread = true,
+            SET required_checks = EXCLUDED.required_checks,
                 held_since = NULL,
                 head_sha = NULL,
                 failed = NULL,
                 task_claimed_at = NULL,
+                task_filed_at = NULL,
                 task_id = NULL
             "#,
             base.url,
             base.base_branch,
+            why.name(),
         )
         .execute(&self.pool)
         .await?;
@@ -187,11 +200,12 @@ impl MainHoldRepository for PgRunRepository {
             VALUES ($1, $2, $3)
             ON CONFLICT (repo_url, base_branch) DO UPDATE
             SET last_green_at = GREATEST(factory_main_hold.last_green_at, EXCLUDED.last_green_at),
-                required_unread = false,
+                required_checks = NULL,
                 held_since = NULL,
                 head_sha = NULL,
                 failed = NULL,
                 task_claimed_at = NULL,
+                task_filed_at = NULL,
                 task_id = NULL
             WHERE factory_main_hold.held_since IS NULL
                OR factory_main_hold.held_since < EXCLUDED.last_green_at
@@ -254,30 +268,37 @@ impl MainHoldRepository for PgRunRepository {
     }
 
     #[tracing::instrument(err, skip(self))]
-    async fn latest_merge(&self, base: &Repository) -> Result<Option<FactoryMerge>, Self::Err> {
-        let row = sqlx::query!(
+    async fn recent_merges(
+        &self,
+        base: &Repository,
+        limit: u16,
+    ) -> Result<Vec<FactoryMerge>, Self::Err> {
+        // `factory_merge_base_idx` walks the base's merges newest first.
+        let rows = sqlx::query!(
             r#"
             SELECT run_id, pull_request_number, pull_request_url, merged_at
             FROM factory_merge
             WHERE repo_url = $1 AND base_branch = $2
             ORDER BY merged_at DESC
-            LIMIT 1
+            LIMIT $3
             "#,
             base.url,
             base.base_branch,
+            i64::from(limit),
         )
-        .fetch_optional(&self.pool)
+        .fetch_all(&self.pool)
         .await?;
-        row.map(|row| {
-            Ok(FactoryMerge {
-                run_id: RunId::from_uuid(row.run_id),
-                number: u64::try_from(row.pull_request_number)
-                    .map_err(|_| PgRunRepositoryErr::NumberOutOfRange)?,
-                url: row.pull_request_url,
-                merged_at: row.merged_at,
+        rows.into_iter()
+            .map(|row| {
+                Ok(FactoryMerge {
+                    run_id: RunId::from_uuid(row.run_id),
+                    number: u64::try_from(row.pull_request_number)
+                        .map_err(|_| PgRunRepositoryErr::NumberOutOfRange)?,
+                    url: row.pull_request_url,
+                    merged_at: row.merged_at,
+                })
             })
-        })
-        .transpose()
+            .collect()
     }
 
     #[tracing::instrument(err, skip(self))]
@@ -285,23 +306,22 @@ impl MainHoldRepository for PgRunRepository {
         &self,
         base: &Repository,
         since: DateTime<Utc>,
+        now: DateTime<Utc>,
     ) -> Result<bool, Self::Err> {
         let claimed = sqlx::query!(
             r#"
             UPDATE factory_main_hold
-            SET task_claimed_at = now()
+            SET task_claimed_at = $4
             WHERE repo_url = $1 AND base_branch = $2
               AND held_since = $3
-              AND (
-                  task_claimed_at IS NULL
-                  OR (task_id IS NULL AND task_claimed_at < now() - $4::interval)
-              )
+              AND task_filed_at IS NULL
+              AND (task_claimed_at IS NULL OR task_claimed_at < $5)
             "#,
             base.url,
             base.base_branch,
             since,
-            sqlx::postgres::types::PgInterval::try_from(TASK_CLAIM_STALE_AFTER)
-                .map_err(|_| PgRunRepositoryErr::NumberOutOfRange)?,
+            now,
+            now - TASK_CLAIM_STALE_AFTER,
         )
         .execute(&self.pool)
         .await?;
@@ -319,7 +339,7 @@ impl MainHoldRepository for PgRunRepository {
             UPDATE factory_main_hold
             SET task_claimed_at = NULL
             WHERE repo_url = $1 AND base_branch = $2
-              AND held_since = $3 AND task_id IS NULL
+              AND held_since = $3 AND task_filed_at IS NULL
             "#,
             base.url,
             base.base_branch,
@@ -340,7 +360,7 @@ impl MainHoldRepository for PgRunRepository {
         sqlx::query!(
             r#"
             UPDATE factory_main_hold
-            SET task_id = $4
+            SET task_id = $4, task_filed_at = now()
             WHERE repo_url = $1 AND base_branch = $2
               AND held_since = $3 AND task_claimed_at IS NOT NULL
             "#,

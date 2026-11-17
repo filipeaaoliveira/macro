@@ -55,7 +55,7 @@ const MAX_BODY_CHARS: usize = 65_536;
 /// How long a check suite that holds no run, of an app with no run waiting
 /// on the head, is waited for: one that adds its runs after it made the suite
 /// fills it within this; an app that checks nothing never does.
-const EMPTY_SUITE_GRACE: chrono::TimeDelta = chrono::TimeDelta::minutes(5);
+pub(crate) const EMPTY_SUITE_GRACE: chrono::TimeDelta = chrono::TimeDelta::minutes(5);
 
 /// Why a pull request Step could not be done.
 #[derive(Debug, thiserror::Error)]

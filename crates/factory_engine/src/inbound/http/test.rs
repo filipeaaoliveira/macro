@@ -4,7 +4,7 @@ use axum::Router;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode};
 use bot_id::BotId;
-use factory_records::domain::main_hold::MainHoldRepository;
+use factory_records::domain::main_hold::{MainHoldRepository, RequiredChecksState};
 use factory_records::domain::models::{
     EntryId, HandBack, Outcome, Repository, RunId, RunInsert, RunOutcome, StepKey,
 };
@@ -230,6 +230,14 @@ impl FactoryService for FakeService {
         _id: RunId,
     ) -> Result<(), FactoryError> {
         Err(self.refusing(actor))
+    }
+
+    async fn clear_main_hold(
+        &self,
+        _repo_url: &str,
+        _base_branch: &str,
+    ) -> Result<bool, FactoryError> {
+        Ok(false)
     }
 }
 
@@ -946,7 +954,9 @@ async fn a_run_at_its_merge_on_a_held_base_shows_the_main_hold() {
     )
     .await
     .expect("hold");
-    repo.mark_required_unread(&release).await.expect("unread");
+    repo.mark_required(&release, RequiredChecksState::Unread)
+        .await
+        .expect("unread");
 
     let read = |run_id: RunId| {
         let router = records_router(&repo);
@@ -974,10 +984,58 @@ async fn a_run_at_its_merge_on_a_held_base_shows_the_main_hold() {
     assert!(held["mainHold"]["since"].is_string());
     assert!(held["mainHold"]["taskId"].is_null());
     assert!(held["mainHold"].get("taskClaimed").is_none());
-    assert_eq!(held["baseChecksUnread"], false);
+    assert!(held["baseRequiredChecks"].is_null());
     assert!(read(runs[1]).await["mainHold"].is_null());
     let unread = read(runs[2]).await;
     assert!(unread["mainHold"].is_null());
-    assert_eq!(unread["baseChecksUnread"], true);
+    assert_eq!(unread["baseRequiredChecks"], "unread");
     assert!(read(runs[3]).await["mainHold"].is_null());
+}
+
+/// Only an internal caller clears a Main Hold: a person, even the owner of
+/// Runs on the base, is refused.
+#[tokio::test]
+async fn only_an_internal_caller_clears_a_main_hold() {
+    let repo = FakeRepo::default();
+    let main = Repository {
+        url: "https://github.com/macro/app".to_string(),
+        base_branch: "main".to_string(),
+    };
+    repo.hold_main(
+        &main,
+        "2222222222222222222222222222222222222222",
+        "- test (failure)",
+        chrono::Utc::now() - chrono::TimeDelta::minutes(1),
+    )
+    .await
+    .expect("hold");
+    let clear = serde_json::json!({
+        "repoUrl": "https://github.com/macro/app",
+        "baseBranch": "main",
+    });
+
+    let refused = records_router(&repo)
+        .oneshot(call(
+            "POST",
+            "/internal/main-holds/clear",
+            Caller::User("alice"),
+            clear.clone(),
+        ))
+        .await
+        .expect("response");
+    assert!(refused.status().is_client_error(), "{}", refused.status());
+    assert!(repo.main_hold(&main).await.expect("read").is_some());
+
+    let cleared = records_router(&repo)
+        .oneshot(call(
+            "POST",
+            "/internal/main-holds/clear",
+            Caller::Internal(None),
+            clear,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(cleared.status(), StatusCode::OK);
+    assert_eq!(body(cleared).await["held"], true);
+    assert_eq!(repo.main_hold(&main).await.expect("read"), None);
 }

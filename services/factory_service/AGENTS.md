@@ -112,7 +112,12 @@ worker that walks each Run's Flow, in one process.
   shuts the other down and exits.
 - The worker also runs the watches of the base branches Runs merge to
   (`factory_main_watch`), on the same task queue. A Main Hold's task is
-  filed through the document storage service's `POST /documents/create_task`
-  and read through `GET /properties/entities/DOCUMENT/{id}`, as the Run's
-  owner with the internal key, so the service needs that service's public
-  routes reachable at `DocumentStorageServiceUrl`.
+  filed through the document storage service's `POST /documents/create_task`,
+  read through `GET /properties/entities/DOCUMENT/{id}` and commented on
+  through `POST /documents/{id}/comments/text`, as the Run's owner with the
+  internal key, so the service needs that service's public routes reachable
+  at `DocumentStorageServiceUrl`.
+- An operator clears a Main Hold no look can clear: `POST
+  http://localhost:8113/internal/main-holds/clear` with the
+  `x-internal-auth-key` header and `{"repoUrl":
+  "https://github.com/<owner>/<name>", "baseBranch": "main"}`.

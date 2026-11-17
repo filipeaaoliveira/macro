@@ -244,25 +244,40 @@ watch of its base to look again (`factory_look_again`, signal-with-start): one
 `MainWatchWorkflow` per repository and branch
 (`src/inbound/temporal/main_watch.rs`, workflow id
 `factory-main-watch:{repo url}:{branch}`), so a merge that lands while a watch
-ends is still looked at. A watch that does not start is logged, never the
-merged Step's failure. Each look (`factory_look_at_main`) reads GitHub as the
-owner of the Run that merged to the base last, else of the Run that started
-the watch; it looks at once and then every 3 minutes. Only the checks the
-base requires decide: one that failed, with no run or status of it that
+ends is still looked at; the signal names the Run, as whose owner the watch
+reads too. A watch that does not start is logged, never the merged Step's
+failure. Each look (`factory_look_at_main`) reads GitHub as the owners of the
+base's 10 latest merges, newest first, then of the Run that last signalled,
+passing to the next when GitHub refuses one (a link that no longer works,
+access lost); it looks at once and then every 3 minutes. Only the checks
+the base requires decide: one that failed, with no run or status of it that
 passed, is red; all passed is green, so a re-run that passes clears it; one
 not finished keeps it pending. A required check with no run or status on
 the head at all, as one that runs only on pull requests, does not apply once
-every other check on the head finished. Required checks that cannot be read,
-or name none, hold nothing: the base is marked unread and its Runs say so
-(`baseChecksUnread`). GitHub that cannot be read leaves the base as it was.
+every other check on the head finished, something was reported, no suite
+made in the last 5 minutes is still empty, and `REQUIRED_GRACE` (20
+minutes) passed since the base's latest merge: a fresh head whose runs
+GitHub has not made yet, or a status a CI outside GitHub posts late, keeps
+it pending. A green look counts for a head at or after the latest merge
+because the merge is recorded only once GitHub merged it, and a merge
+recorded after the look's read began keeps the watch going. Required
+checks no owner can read keep a hold a red look set, and otherwise hold
+nothing: the base is marked `unread`. A base that requires no checks, as
+read in full, holds nothing: a hold is lifted, its task gets a comment
+saying why, and the base is marked `none`. Runs at their merge show
+either (`baseRequiredChecks`). GitHub that cannot be read leaves the base as
+it was. An operator clears a hold no look can clear with `POST
+/internal/main-holds/clear` (`{"repoUrl", "baseBranch"}`, the internal key
+only, not in the OpenAPI document); a later red look holds it again.
 A red look holds the base (`factory_main_hold`) and files one task per red
 period, as that Run's owner, in the initiative of that Run's task (its
 Project property), naming the factory merges to the base since its checks
 last passed, oldest first, with their pull requests
 (`outbound/document_hold_tasks.rs`, through the document storage service).
 The task is claimed before it is filed, so a retry or a second look files
-none; a filing that fails gives the claim back, and a claim with no task
-after 15 minutes is taken again. A green look clears the hold, unless its
+none; a filing that fails gives the claim back, a claim never filed is
+taken again after 15 minutes, and a task filed then deleted is not filed
+again in the same red period. A green look clears the hold, unless its
 read started before the hold's red one. The watch never ends while the base
 is held or a look fails; with nothing held it ends on a green or unread
 look, unless a merge landed after the look's read or signalled during it,

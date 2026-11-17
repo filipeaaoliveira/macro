@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT run_id, pull_request_number, pull_request_url, merged_at\n            FROM factory_merge\n            WHERE repo_url = $1 AND base_branch = $2\n            ORDER BY merged_at DESC\n            LIMIT 1\n            ",
+  "query": "\n            SELECT run_id, pull_request_number, pull_request_url, merged_at\n            FROM factory_merge\n            WHERE repo_url = $1 AND base_branch = $2\n            ORDER BY merged_at DESC\n            LIMIT $3\n            ",
   "describe": {
     "columns": [
       {
@@ -27,7 +27,8 @@
     "parameters": {
       "Left": [
         "Text",
-        "Text"
+        "Text",
+        "Int8"
       ]
     },
     "nullable": [
@@ -37,5 +38,5 @@
       false
     ]
   },
-  "hash": "3745a717a653589a0b6b5143c8d1dab227cd035c49a9b80810b0f4dec59c6cab"
+  "hash": "28da5e337f8a10bbdaf855ba5006e3adaf1afb1cf135c34dcadb70c508c71a43"
 }

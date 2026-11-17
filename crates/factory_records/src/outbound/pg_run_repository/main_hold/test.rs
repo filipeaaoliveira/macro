@@ -5,7 +5,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use super::super::PgRunRepository;
-use crate::domain::main_hold::MainHoldRepository;
+use crate::domain::main_hold::{MainHoldRepository, RequiredChecksState};
 use crate::domain::models::{Repository, RunId, RunInsert};
 use crate::domain::ports::RunRepository;
 
@@ -96,13 +96,13 @@ async fn a_red_period_claims_its_task_once(pool: PgPool) {
     assert!(!hold.task_claimed);
 
     assert!(
-        repo.claim_hold_task(&base, hold.since)
+        repo.claim_hold_task(&base, hold.since, Utc::now())
             .await
             .expect("claim")
     );
     assert!(
         !repo
-            .claim_hold_task(&base, hold.since)
+            .claim_hold_task(&base, hold.since, Utc::now())
             .await
             .expect("claim again")
     );
@@ -110,7 +110,7 @@ async fn a_red_period_claims_its_task_once(pool: PgPool) {
         .await
         .expect("release");
     assert!(
-        repo.claim_hold_task(&base, hold.since)
+        repo.claim_hold_task(&base, hold.since, Utc::now())
             .await
             .expect("claim after release")
     );
@@ -128,7 +128,7 @@ async fn a_red_period_claims_its_task_once(pool: PgPool) {
     assert!(held.task_claimed);
     assert!(
         !repo
-            .claim_hold_task(&base, hold.since)
+            .claim_hold_task(&base, hold.since, Utc::now())
             .await
             .expect("claim filed")
     );
@@ -137,7 +137,7 @@ async fn a_red_period_claims_its_task_once(pool: PgPool) {
     let earlier = hold.since - TimeDelta::seconds(1);
     assert!(
         !repo
-            .claim_hold_task(&base, earlier)
+            .claim_hold_task(&base, earlier, Utc::now())
             .await
             .expect("claim stale")
     );
@@ -151,7 +151,7 @@ async fn a_red_period_claims_its_task_once(pool: PgPool) {
         .expect("hold");
     assert_eq!(next.task_id, None);
     assert!(
-        repo.claim_hold_task(&base, next.since)
+        repo.claim_hold_task(&base, next.since, Utc::now())
             .await
             .expect("claim next")
     );
@@ -256,32 +256,69 @@ async fn a_green_read_older_than_the_hold_clears_nothing(pool: PgPool) {
     fixtures(path = "../fixtures", scripts("people"))
 )]
 async fn a_stale_claim_with_no_task_is_claimed_again(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let base = main_of_app();
+    let hold = repo
+        .hold_main(&base, RED_HEAD, "- test (failure)", a_minute_ago())
+        .await
+        .expect("hold");
+    let now = Utc::now();
+    assert!(
+        repo.claim_hold_task(&base, hold.since, now)
+            .await
+            .expect("claim")
+    );
+    let soon = now + TimeDelta::minutes(14);
+    assert!(
+        !repo
+            .claim_hold_task(&base, hold.since, soon)
+            .await
+            .expect("fresh")
+    );
+    let later = now + TimeDelta::minutes(16);
+    assert!(
+        repo.claim_hold_task(&base, hold.since, later)
+            .await
+            .expect("stale")
+    );
+}
+
+/// A task filed and deleted since is not filed again in the same red
+/// period, however old its claim.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "tasks"))
+)]
+async fn a_deleted_task_is_not_filed_again(pool: PgPool) {
     let repo = PgRunRepository::new(pool.clone());
     let base = main_of_app();
     let hold = repo
         .hold_main(&base, RED_HEAD, "- test (failure)", a_minute_ago())
         .await
         .expect("hold");
+    let now = Utc::now();
     assert!(
-        repo.claim_hold_task(&base, hold.since)
+        repo.claim_hold_task(&base, hold.since, now)
             .await
             .expect("claim")
     );
-    assert!(
-        !repo
-            .claim_hold_task(&base, hold.since)
-            .await
-            .expect("fresh")
-    );
+    let task = Uuid::parse_str(TASK).expect("uuid");
+    repo.record_hold_task(&base, hold.since, task)
+        .await
+        .expect("record");
 
-    sqlx::query!("UPDATE factory_main_hold SET task_claimed_at = now() - interval '16 minutes'")
+    sqlx::query!(r#"DELETE FROM "Document" WHERE id = $1"#, TASK)
         .execute(&pool)
         .await
-        .expect("age the claim");
+        .expect("delete the task");
+    let held = repo.main_hold(&base).await.expect("read").expect("held");
+    assert_eq!(held.task_id, None);
+    let much_later = now + TimeDelta::hours(1);
     assert!(
-        repo.claim_hold_task(&base, hold.since)
+        !repo
+            .claim_hold_task(&base, hold.since, much_later)
             .await
-            .expect("stale")
+            .expect("claim again")
     );
 }
 
@@ -298,28 +335,36 @@ async fn unread_required_checks_hold_nothing(pool: PgPool) {
         .await
         .expect("hold");
 
-    repo.mark_required_unread(&base).await.expect("unread");
+    repo.mark_required(&base, RequiredChecksState::Unread)
+        .await
+        .expect("unread");
     let state = repo.base_state(&base).await.expect("read");
     assert_eq!(state.hold, None);
-    assert!(state.required_unread);
+    assert_eq!(state.required, Some(RequiredChecksState::Unread));
 
     repo.hold_main(&base, RED_HEAD, "- test (failure)", Utc::now())
         .await
         .expect("hold");
     let state = repo.base_state(&base).await.expect("read");
     assert!(state.hold.is_some());
-    assert!(!state.required_unread);
+    assert_eq!(state.required, None);
+
+    repo.mark_required(&base, RequiredChecksState::None)
+        .await
+        .expect("none");
+    let state = repo.base_state(&base).await.expect("read");
+    assert_eq!(state.required, Some(RequiredChecksState::None));
 }
 
-/// The latest merge is the base's newest, none before any.
+/// A base's recent merges are its newest first, none before any.
 #[sqlx::test(
     migrator = "MACRO_DB_MIGRATIONS",
     fixtures(path = "../fixtures", scripts("people"))
 )]
-async fn the_latest_merge_is_the_base_s_newest(pool: PgPool) {
+async fn a_base_s_recent_merges_are_newest_first(pool: PgPool) {
     let repo = PgRunRepository::new(pool);
     let base = main_of_app();
-    assert_eq!(repo.latest_merge(&base).await.expect("read"), None);
+    assert!(repo.recent_merges(&base, 5).await.expect("read").is_empty());
 
     let older = code_run(&repo, Some(&base)).await;
     let newer = code_run(&repo, Some(&base)).await;
@@ -334,6 +379,8 @@ async fn the_latest_merge_is_the_base_s_newest(pool: PgPool) {
     )
     .await
     .expect("merge");
-    let latest = repo.latest_merge(&base).await.expect("read").expect("one");
-    assert_eq!(latest.run_id, newer);
+    let recent = repo.recent_merges(&base, 5).await.expect("read");
+    let runs: Vec<RunId> = recent.iter().map(|merge| merge.run_id).collect();
+    assert_eq!(runs, vec![newer, older]);
+    assert_eq!(repo.recent_merges(&base, 1).await.expect("read").len(), 1);
 }

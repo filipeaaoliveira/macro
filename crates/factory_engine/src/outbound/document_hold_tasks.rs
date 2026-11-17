@@ -4,11 +4,12 @@
 mod test;
 
 use document_storage_service_client::DocumentStorageServiceClient;
-use document_storage_service_client::task::{NewTask, NewTaskProperty};
+use document_storage_service_client::task::{
+    NewTask, NewTaskProperty, NewTaskPropertyValue, TaskEntityReference,
+};
 use macro_user_id::user_id::MacroUserIdStr;
-use models_properties::api::requests::SetPropertyValue;
+use models_properties::EntityType;
 use models_properties::api::responses::PropertyValue;
-use models_properties::{EntityReference, EntityType};
 use system_properties::SystemPropertyKey;
 use uuid::Uuid;
 
@@ -79,8 +80,11 @@ impl HoldTasks for DocumentHoldTasks {
         let property_values = initiative
             .map(|initiative| NewTaskProperty {
                 property_id: SystemPropertyKey::PROJECT_UUID.to_string(),
-                value: SetPropertyValue::EntityReference {
-                    reference: EntityReference::new(initiative, EntityType::Initiative),
+                value: NewTaskPropertyValue::EntityReference {
+                    reference: TaskEntityReference {
+                        entity_id: initiative,
+                        entity_type: EntityType::Initiative,
+                    },
                 },
             })
             .into_iter()
@@ -90,11 +94,8 @@ impl HoldTasks for DocumentHoldTasks {
             .documents
             .create_task_for_user(
                 &NewTask {
-                    task_name: task.title.clone(),
-                    markdown: task.markdown.clone(),
-                    project_id: None,
-                    share_with_team: true,
                     property_values,
+                    ..NewTask::new(task.title.clone(), task.markdown.clone())
                 },
                 owner.as_ref(),
             )
@@ -103,5 +104,19 @@ impl HoldTasks for DocumentHoldTasks {
         Uuid::parse_str(&created).map_err(|_| {
             DocumentHoldTasksErr(rootcause::report!("the new task's id {created} is no UUID"))
         })
+    }
+
+    #[tracing::instrument(err, skip(self, owner, text))]
+    async fn comment(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        task_id: Uuid,
+        quote: &str,
+        text: &str,
+    ) -> Result<(), DocumentHoldTasksErr> {
+        self.documents
+            .comment_on_text(&task_id.to_string(), owner.as_ref(), quote, text)
+            .await
+            .map_err(|error| DocumentHoldTasksErr(rootcause::report!("{error:#}")))
     }
 }

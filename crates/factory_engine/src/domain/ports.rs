@@ -259,8 +259,9 @@ pub trait MainWatches: Send + Sync + 'static {
     /// The error type returned when the watch cannot be asked.
     type Err: std::error::Error + Retryable + Send + Sync + 'static;
 
-    /// Ask the watch of `watch`'s base branch to look again, starting it
-    /// when none runs. A watch about to end looks again instead.
+    /// Ask the watch of `watch`'s base branch to look again, as the owner
+    /// of `watch`'s Run among others, starting it when none runs. A watch
+    /// about to end looks again instead.
     fn watch(&self, watch: &MainWatch) -> impl Future<Output = Result<(), Self::Err>> + Send;
 }
 
@@ -277,6 +278,16 @@ pub trait HoldTasks: Send + Sync + 'static {
         beside: Option<Uuid>,
         task: &HoldTask,
     ) -> impl Future<Output = Result<Uuid, Self::Err>> + Send;
+
+    /// Comment `text` on the passage `quote` of the task document
+    /// `task_id`, as `owner`.
+    fn comment(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        task_id: Uuid,
+        quote: &str,
+        text: &str,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 }
 
 /// Inbound service port: what the watch of a base branch asks its worker
@@ -394,6 +405,16 @@ pub trait FactoryService: Send + Sync + 'static {
         user_id: MacroUserIdStr<'static>,
         hand_back: HandBack,
     ) -> impl Future<Output = Result<(), FactoryError>> + Send;
+
+    /// Clear the Main Hold on the branch `base_branch` of the repository
+    /// `repo_url`, for an operator: a hold no look can clear, as when no
+    /// owner reaches the repository any more. A later red look holds the
+    /// base again. Whether a hold was set.
+    fn clear_main_hold(
+        &self,
+        repo_url: &str,
+        base_branch: &str,
+    ) -> impl Future<Output = Result<bool, FactoryError>> + Send;
 
     /// Cancel `actor`'s Run. Cancelling a Run that ended cancelled changes
     /// nothing.

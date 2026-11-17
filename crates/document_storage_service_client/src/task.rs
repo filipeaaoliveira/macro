@@ -4,7 +4,7 @@
 mod test;
 
 use anyhow::Result;
-use models_properties::api::requests::SetPropertyValue;
+use models_properties::EntityType;
 use models_properties::api::responses::EntityPropertiesResponse;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
@@ -14,7 +14,7 @@ use crate::constants::MACRO_INTERNAL_USER_ID_HEADER_KEY;
 
 /// A task to make: its name, its markdown, the project it goes in, and
 /// the properties it starts with.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NewTask {
     /// The task's name.
@@ -25,18 +25,56 @@ pub struct NewTask {
     pub project_id: Option<uuid::Uuid>,
     /// Whether it is shared with the user's team, as tasks people make are.
     pub share_with_team: bool,
-    /// The properties it starts with.
+    /// The properties it starts with; none by default.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub property_values: Vec<NewTaskProperty>,
 }
 
-/// A property a new task starts with.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+impl NewTask {
+    /// A task named `task_name` with `markdown`, shared with the user's
+    /// team, in no project and with no properties.
+    pub fn new(task_name: impl Into<String>, markdown: impl Into<String>) -> Self {
+        Self {
+            task_name: task_name.into(),
+            markdown: markdown.into(),
+            project_id: None,
+            share_with_team: true,
+            property_values: Vec::new(),
+        }
+    }
+}
+
+/// A property a new task starts with: the subset of the properties API's
+/// `PropertyInput` this client sets, as `POST /documents/create_task`
+/// reads it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NewTaskProperty {
     /// The property definition's id.
     pub property_id: String,
     /// Its value.
-    pub value: SetPropertyValue,
+    pub value: NewTaskPropertyValue,
+}
+
+/// A new task's property value, as the properties API's `SetPropertyValue`
+/// writes it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "type")]
+pub enum NewTaskPropertyValue {
+    /// A reference to one entity, such as the initiative a task is in.
+    EntityReference {
+        /// The entity.
+        reference: TaskEntityReference,
+    },
+}
+
+/// An entity a new task's property refers to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TaskEntityReference {
+    /// The entity's id.
+    pub entity_id: String,
+    /// Its type.
+    pub entity_type: EntityType,
 }
 
 #[derive(Deserialize)]
@@ -120,5 +158,28 @@ impl DocumentStorageServiceClient {
 
         let created: CreatedTask = res.json().await.map_err(unavailable)?;
         Ok(created.document_id)
+    }
+
+    /// Comment `content` on the passage `quote` of the document
+    /// `document_id`, as `user_id`.
+    #[tracing::instrument(skip(self, content), err)]
+    pub async fn comment_on_text(
+        &self,
+        document_id: &str,
+        user_id: &str,
+        quote: &str,
+        content: &str,
+    ) -> Result<()> {
+        self.client
+            .post(format!(
+                "{}/documents/{document_id}/comments/text",
+                self.url
+            ))
+            .header(MACRO_INTERNAL_USER_ID_HEADER_KEY, user_id)
+            .json(&serde_json::json!({ "content": content, "quote": quote }))
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(())
     }
 }

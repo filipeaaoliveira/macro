@@ -5,7 +5,7 @@
 //! types.
 //! Renaming any of them strands the Runs in flight.
 
-use factory_records::domain::models::RunOutcome;
+use factory_records::domain::models::{RunId, RunOutcome};
 use temporalio_common::{
     HasWorkflowDefinition, SignalDefinition, UpdateDefinition, WorkflowDefinition,
 };
@@ -81,7 +81,7 @@ pub struct LookAgainSignal;
 
 impl SignalDefinition for LookAgainSignal {
     type Workflow = MainWatchWorkflowDefinition;
-    type Input = ();
+    type Input = RunId;
 
     fn name(&self) -> &str {
         LOOK_AGAIN_SIGNAL

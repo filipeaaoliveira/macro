@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE factory_main_hold\n            SET task_claimed_at = NULL\n            WHERE repo_url = $1 AND base_branch = $2\n              AND held_since = $3 AND task_filed_at IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6cd093b0f7a0488d5e81fe0fb1edeb8ebb4c8c44f458f53133faa8d52312939f"
+}

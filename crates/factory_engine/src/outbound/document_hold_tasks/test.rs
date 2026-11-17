@@ -127,7 +127,7 @@ async fn a_hidden_run_task_files_the_task_in_no_initiative() {
         .await;
     Mock::given(method("POST"))
         .and(path("/documents/create_task"))
-        .and(body_partial_json(json!({ "propertyValues": [] })))
+        .and(body_partial_json(json!({ "shareWithTeam": true })))
         .respond_with(created())
         .expect(1)
         .mount(&server)
@@ -145,4 +145,12 @@ async fn a_hidden_run_task_files_the_task_in_no_initiative() {
         )
         .await;
     assert!(filed.is_ok(), "{filed:?}");
+    let requests = server.received_requests().await.expect("recorded");
+    let created: serde_json::Value = requests
+        .iter()
+        .find(|request| request.url.path() == "/documents/create_task")
+        .expect("created")
+        .body_json()
+        .expect("json");
+    assert!(created.get("propertyValues").is_none(), "{created}");
 }

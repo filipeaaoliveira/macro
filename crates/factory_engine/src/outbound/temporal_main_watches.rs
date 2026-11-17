@@ -59,7 +59,7 @@ impl MainWatches for TemporalMainWatches {
                 MainWatchWorkflowDefinition,
                 watch.clone(),
                 LookAgainSignal,
-                (),
+                watch.run_id,
                 options,
             )
             .await;

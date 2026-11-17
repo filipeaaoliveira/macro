@@ -45,6 +45,22 @@ pub(crate) struct FakeSession {
 #[error("fake failure")]
 pub(crate) struct FakeError;
 
+/// What [`FakeGithub`] fails with: GitHub down, worth trying again, or a
+/// refusal of the owner, which is not.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum FakeGithubError {
+    #[error("github is down")]
+    Down,
+    #[error("github refused the owner")]
+    Refused,
+}
+
+impl Retryable for FakeGithubError {
+    fn retryable(&self) -> bool {
+        matches!(self, Self::Down)
+    }
+}
+
 /// A fake's failure is the transport's: worth trying again.
 impl Retryable for FakeError {
     fn retryable(&self) -> bool {
@@ -738,6 +754,10 @@ pub(crate) struct FakeGithubState {
     pub(crate) base: Option<(String, HeadChecks)>,
     /// Whether reads of the base branch fail, as GitHub down does.
     pub(crate) base_unreadable: bool,
+    /// The owners GitHub refuses, as when their link no longer works.
+    pub(crate) refused_owners: BTreeSet<String>,
+    /// When set, each read of the base branch waits to be let go.
+    pub(crate) base_gate: Option<Arc<tokio::sync::Semaphore>>,
 }
 
 /// GitHub in memory, for one Run's branch: opening its pull request makes
@@ -834,13 +854,13 @@ pub(crate) fn ci(conclusion: Option<&str>) -> HeadChecks {
 }
 
 impl PullRequests for FakeGithub {
-    type Err = FakeError;
+    type Err = FakeGithubError;
 
     async fn repository_access(
         &self,
         _owner: &MacroUserIdStr<'static>,
         _repository: &CodeRepository,
-    ) -> Result<Option<RepositoryAccess>, FakeError> {
+    ) -> Result<Option<RepositoryAccess>, FakeGithubError> {
         let state = self.state();
         Ok((!state.unreachable).then(|| RepositoryAccess {
             default_branch: "main".to_string(),
@@ -853,7 +873,7 @@ impl PullRequests for FakeGithub {
         _owner: &MacroUserIdStr<'static>,
         _repository: &CodeRepository,
         _branch: &str,
-    ) -> Result<Option<PullRequest>, FakeError> {
+    ) -> Result<Option<PullRequest>, FakeGithubError> {
         Ok(self.read().map(|(pull_request, _)| pull_request))
     }
 
@@ -863,7 +883,7 @@ impl PullRequests for FakeGithub {
         _repository: &CodeRepository,
         _branch: &str,
         _all_runs: bool,
-    ) -> Result<Option<(PullRequest, HeadChecks)>, FakeError> {
+    ) -> Result<Option<(PullRequest, HeadChecks)>, FakeGithubError> {
         Ok(self.read())
     }
 
@@ -873,27 +893,31 @@ impl PullRequests for FakeGithub {
         _repository: &CodeRepository,
         _branch: &str,
         _all_runs: bool,
-    ) -> Result<Option<(String, HeadChecks)>, FakeError> {
-        let read = {
-            let state = self.state();
-            if state.base_unreadable {
-                return Err(FakeError);
-            }
-            state.base.clone()
-        };
+    ) -> Result<Option<(String, HeadChecks)>, FakeGithubError> {
+        let gate = self.state().base_gate.clone();
         self.base_read.notify_one();
-        Ok(read)
+        if let Some(gate) = gate {
+            gate.acquire().await.expect("gate").forget();
+        }
+        let state = self.state();
+        if state.base_unreadable {
+            return Err(FakeGithubError::Down);
+        }
+        Ok(state.base.clone())
     }
 
     async fn required_checks(
         &self,
-        _owner: &MacroUserIdStr<'static>,
+        owner: &MacroUserIdStr<'static>,
         _repository: &CodeRepository,
         _base: &str,
-    ) -> Result<Option<RequiredChecks>, FakeError> {
+    ) -> Result<Option<RequiredChecks>, FakeGithubError> {
         let state = self.state();
         if state.base_unreadable {
-            return Err(FakeError);
+            return Err(FakeGithubError::Down);
+        }
+        if state.refused_owners.contains(owner.as_ref()) {
+            return Err(FakeGithubError::Refused);
         }
         Ok(state.required.clone())
     }
@@ -904,7 +928,7 @@ impl PullRequests for FakeGithub {
         _repository: &CodeRepository,
         branch: &str,
         path: &str,
-    ) -> Result<Option<String>, FakeError> {
+    ) -> Result<Option<String>, FakeGithubError> {
         let file = (branch.to_string(), path.to_string());
         Ok(self.state().files.get(&file).cloned())
     }
@@ -915,7 +939,7 @@ impl PullRequests for FakeGithub {
         _repository: &CodeRepository,
         _base: &str,
         _branch: &str,
-    ) -> Result<Option<Vec<String>>, FakeError> {
+    ) -> Result<Option<Vec<String>>, FakeGithubError> {
         Ok(self.state().changed.clone())
     }
 
@@ -924,7 +948,7 @@ impl PullRequests for FakeGithub {
         _owner: &MacroUserIdStr<'static>,
         repository: &CodeRepository,
         pull_request: &OpenPullRequest,
-    ) -> Result<Opening, FakeError> {
+    ) -> Result<Opening, FakeGithubError> {
         let mut state = self.state();
         if let Some(why) = state.open_refusal.clone() {
             return Ok(Opening::Refused(why));
@@ -946,7 +970,7 @@ impl PullRequests for FakeGithub {
         _repository: &CodeRepository,
         _number: u64,
         head_sha: &str,
-    ) -> Result<Merging, FakeError> {
+    ) -> Result<Merging, FakeGithubError> {
         let mut state = self.state();
         state.merges.push(head_sha.to_string());
         if let Some(why) = state.merge_refusal.clone() {

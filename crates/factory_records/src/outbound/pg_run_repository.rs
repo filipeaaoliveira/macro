@@ -99,6 +99,9 @@ pub enum PgRunRepositoryErr {
     /// A stored hold has only part of its start, head and failed checks.
     #[error("a stored main hold has only part of its start, head and failed checks")]
     PartialHold,
+    /// A stored required checks state is not one this code knows.
+    #[error("unknown required checks state {0:?}")]
+    UnknownRequiredChecks(String),
     /// A pull request number does not fit its column or its type.
     #[error("a pull request number is out of range")]
     NumberOutOfRange,

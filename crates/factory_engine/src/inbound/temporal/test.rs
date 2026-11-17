@@ -1078,3 +1078,43 @@ async fn an_unheld_watch_ends_hours_after_the_latest_merge() {
     .await;
     assert_eq!(repo.main_hold(&repository).await.expect("read"), None);
 }
+
+/// A merge's signal that arrives while the watch's last look reads the base
+/// makes it look again before it ends, so the merge is looked at.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "Temporal doesn't exist in CI"]
+async fn a_signal_during_the_last_look_makes_the_watch_look_again() {
+    let repo = FakeRepo::default();
+    let github = FakeGithub::default();
+    github.state().required = Some(RequiredChecks {
+        checks: vec![RequiredCheck {
+            name: "test".to_string(),
+            app_id: None,
+        }],
+        complete: true,
+    });
+    github.state().base = Some((
+        "2222222222222222222222222222222222222222".to_string(),
+        ci(Some("success")),
+    ));
+    let gate = Arc::new(tokio::sync::Semaphore::new(0));
+    github.state().base_gate = Some(gate.clone());
+    let tasks = FakeHoldTasks::default();
+    let (watch, _) = watching(&repo).await;
+
+    with_watch_worker(&repo, &github, &tasks, async |client, watches| {
+        watches.watch(&watch).await.expect("start");
+        // The first look reads the base, which would end the watch green.
+        tokio::time::timeout(PATIENCE, github.base_read.notified())
+            .await
+            .expect("the watch looks");
+        watches.watch(&watch).await.expect("signal");
+        gate.add_permits(1);
+        tokio::time::timeout(PATIENCE, github.base_read.notified())
+            .await
+            .expect("the watch looks again");
+        gate.add_permits(1);
+        watch_end(&client, &watch).await;
+    })
+    .await;
+}

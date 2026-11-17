@@ -25,6 +25,8 @@ use temporalio_sdk::{
     WorkflowContext, WorkflowResult, WorkflowTermination,
 };
 
+use factory_records::domain::models::RunId;
+
 use crate::domain::main_hold::{MainLook, MainWatch};
 use crate::domain::models::StepError;
 use crate::domain::ports::MainWatchService;
@@ -57,13 +59,16 @@ const LOOK_TOTAL: Duration = Duration::from_secs(10 * 60);
 pub struct MainWatchWorkflow {
     /// Whether a merge asked for a look since the last one started.
     again: bool,
+    /// The Run that last asked for a look, as a held merge does: as its
+    /// owner, among others, the watch reads GitHub.
+    asked_by: Option<RunId>,
 }
 
 #[workflow_methods]
 impl MainWatchWorkflow {
     /// Watch `watch`'s base until a look says the watch may end.
     #[run(name = MAIN_WATCH_WORKFLOW)]
-    pub async fn run(ctx: &mut WorkflowContext<Self>, watch: MainWatch) -> WorkflowResult<()> {
+    pub async fn run(ctx: &mut WorkflowContext<Self>, mut watch: MainWatch) -> WorkflowResult<()> {
         let options =
             ActivityOptions::with_close_timeouts(ActivityCloseTimeouts::ScheduleAndStartToClose {
                 schedule_to_close: LOOK_TOTAL,
@@ -73,7 +78,13 @@ impl MainWatchWorkflow {
         let mut looks = 0;
         loop {
             // A look asked for from here on is one this look may not cover.
-            ctx.state_mut(|workflow| workflow.again = false);
+            let asked_by = ctx.state_mut(|workflow| {
+                workflow.again = false;
+                workflow.asked_by.take()
+            });
+            if let Some(run_id) = asked_by {
+                watch.run_id = run_id;
+            }
             let looked = ctx
                 .execute_activity(
                     MainWatchActivities::look_at_main,
@@ -107,10 +118,12 @@ impl MainWatchWorkflow {
         }
     }
 
-    /// Ask the watch to look again: a merge to its base landed.
+    /// Ask the watch to look again, for the Run `run_id`: a merge to its
+    /// base landed, or waits on its hold.
     #[signal(name = LOOK_AGAIN_SIGNAL)]
-    pub fn look_again(&mut self, _ctx: &mut SyncWorkflowContext<Self>, _input: ()) {
+    pub fn look_again(&mut self, _ctx: &mut SyncWorkflowContext<Self>, run_id: RunId) {
         self.again = true;
+        self.asked_by = Some(run_id);
     }
 }
 

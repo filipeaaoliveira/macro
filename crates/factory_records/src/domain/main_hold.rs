@@ -29,18 +29,46 @@ pub struct MainHold {
     pub task_claimed: bool,
 }
 
+/// Why a base branch's required checks decide nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum RequiredChecksState {
+    /// Which checks the base requires could not be read.
+    Unread,
+    /// The base requires no checks: nothing holds a merge to it.
+    None,
+}
+
+impl RequiredChecksState {
+    /// The state a stored name names.
+    pub fn named(name: &str) -> Option<Self> {
+        match name {
+            "unread" => Some(Self::Unread),
+            "none" => Some(Self::None),
+            _ => None,
+        }
+    }
+
+    /// Its stored name.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Unread => "unread",
+            Self::None => "none",
+        }
+    }
+}
+
 /// What the factory last saw of a base branch: its hold while its checks
-/// fail, and whether the checks it requires could not be read.
+/// fail, and why its required checks decide nothing, when they do not.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BaseState {
     /// The hold, while its required checks fail.
     pub hold: Option<MainHold>,
-    /// Whether the last look could not read which checks the base requires,
-    /// so it neither holds nor clears on them.
-    pub required_unread: bool,
+    /// Why the last look's required checks decided nothing, if they did not.
+    pub required: Option<RequiredChecksState>,
 }
 
-/// How long a claim of a hold's task may go without the task's id before
+/// How long a claim of a hold's task may go without being filed before
 /// another look may claim it again: past a look's own timeout, so only a
 /// look that died between the claim and the filing is overtaken.
 pub const TASK_CLAIM_STALE_AFTER: chrono::TimeDelta = chrono::TimeDelta::minutes(15);
@@ -101,11 +129,12 @@ pub trait MainHoldRepository: Send + Sync + 'static {
         seen_at: DateTime<Utc>,
     ) -> impl Future<Output = Result<MainHold, Self::Err>> + Send;
 
-    /// Record that the checks `base` requires could not be read, or name
-    /// none: nothing tells whether it is red, so it is not held.
-    fn mark_required_unread(
+    /// Record that the checks `base` requires decide nothing, for `why`,
+    /// and drop any hold on it: the caller keeps a hold that still stands.
+    fn mark_required(
         &self,
         base: &Repository,
+        why: RequiredChecksState,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// Record that `base`'s checks passed on a read that started at
@@ -125,24 +154,29 @@ pub trait MainHoldRepository: Send + Sync + 'static {
         limit: u16,
     ) -> impl Future<Output = Result<Vec<FactoryMerge>, Self::Err>> + Send;
 
-    /// The newest pull request a Run merged into `base`, if any.
-    fn latest_merge(
+    /// The newest pull requests Runs merged into `base`, newest first: at
+    /// most `limit`.
+    fn recent_merges(
         &self,
         base: &Repository,
-    ) -> impl Future<Output = Result<Option<FactoryMerge>, Self::Err>> + Send;
+        limit: u16,
+    ) -> impl Future<Output = Result<Vec<FactoryMerge>, Self::Err>> + Send;
 
     /// Claim the filing of the task of the hold on `base` that started at
-    /// `since`: whether this call claimed it. No other claim of the same red
-    /// period succeeds, unless this one is released, or is older than
-    /// [`TASK_CLAIM_STALE_AFTER`] with no task recorded.
+    /// `since`, at `now` on the worker's clock: whether this call claimed
+    /// it. No other claim of the same red period succeeds, unless this one
+    /// is released, or is older than [`TASK_CLAIM_STALE_AFTER`] and its
+    /// task was never filed. A task filed and deleted since is not filed
+    /// again.
     fn claim_hold_task(
         &self,
         base: &Repository,
         since: DateTime<Utc>,
+        now: DateTime<Utc>,
     ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
 
     /// Release a claim whose task could not be filed, so the next look files
-    /// it.
+    /// it; a claim whose task was filed is kept.
     fn release_hold_task(
         &self,
         base: &Repository,
@@ -150,7 +184,8 @@ pub trait MainHoldRepository: Send + Sync + 'static {
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// Record the task document `task_id` filed for the hold on `base` that
-    /// started at `since`, while that hold lasts.
+    /// started at `since`, while that hold lasts: the red period's task is
+    /// filed from then on.
     fn record_hold_task(
         &self,
         base: &Repository,
