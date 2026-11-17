@@ -1,6 +1,6 @@
 use std::sync::LazyLock;
 
-use chrono::{TimeDelta, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use factory_records::domain::main_hold::MainHoldRepository;
 use factory_records::domain::models::{Repository, RunId, StepKey};
 use factory_records::domain::ports::RunRepository;
@@ -21,6 +21,9 @@ static JULIA: LazyLock<MacroUserIdStr<'static>> = LazyLock::new(|| {
     MacroUserIdStr::try_from("macro|julia@example.com".to_string()).expect("valid")
 });
 
+static BOB: LazyLock<MacroUserIdStr<'static>> =
+    LazyLock::new(|| MacroUserIdStr::try_from("macro|bob@example.com".to_string()).expect("valid"));
+
 static REPOSITORY: LazyLock<Repository> = LazyLock::new(|| Repository {
     url: "https://github.com/macro/app".to_string(),
     base_branch: "main".to_string(),
@@ -30,21 +33,30 @@ fn run_task() -> Uuid {
     Uuid::parse_str("00000000-0000-7000-8000-000000000101").expect("valid")
 }
 
-/// A `code` Run of Julia's on the repository, working on her task.
-async fn code_run(repo: &FakeRepo) -> RunId {
+fn a_minute_ago() -> DateTime<Utc> {
+    Utc::now() - TimeDelta::minutes(1)
+}
+
+/// A `code` Run of `owner`'s on the repository, working on a task.
+async fn run_of(repo: &FakeRepo, owner: &MacroUserIdStr<'static>) -> RunId {
     repo.tasks.lock().expect("tasks").insert(run_task());
     let run_id = RunId::generate();
     repo.insert_run(
         run_id,
         "code",
         "Add dark mode",
-        &JULIA,
+        owner,
         Some(run_task()),
         Some(&REPOSITORY),
     )
     .await
     .expect("insert");
     run_id
+}
+
+/// A `code` Run of Julia's on the repository, working on her task.
+async fn code_run(repo: &FakeRepo) -> RunId {
+    run_of(repo, &JULIA).await
 }
 
 fn input(run_id: RunId) -> StepInput<'static> {
@@ -59,22 +71,33 @@ fn input(run_id: RunId) -> StepInput<'static> {
     }
 }
 
-/// The base's checks, of which `test` is required: one run of it,
-/// concluded `conclusion`, or running when none.
+/// The base's checks: the CI suite with its one run, `test`, concluded
+/// `conclusion`, or running when none.
 fn base_checks(conclusion: Option<&str>) -> HeadChecks {
     let mut checks = ci(conclusion);
     checks.runs[0].url = Some("https://github.com/macro/app/actions/runs/1".to_string());
     checks
 }
 
-fn requiring_test(github: &FakeGithub) {
+fn requiring(github: &FakeGithub, names: &[&str]) {
     github.state().required = Some(RequiredChecks {
-        checks: vec![RequiredCheck {
-            name: "test".to_string(),
-            app_id: Some(FakeGithub::ACTIONS),
-        }],
+        checks: names
+            .iter()
+            .map(|name| RequiredCheck {
+                name: (*name).to_string(),
+                app_id: Some(FakeGithub::ACTIONS),
+            })
+            .collect(),
         complete: true,
     });
+}
+
+fn requiring_test(github: &FakeGithub) {
+    requiring(github, &["test"]);
+}
+
+fn base_at(github: &FakeGithub, checks: HeadChecks) {
+    github.state().base = Some((RED_HEAD.to_string(), checks));
 }
 
 fn looks(
@@ -85,60 +108,58 @@ fn looks(
     MainWatchServiceImpl::new(repo.clone(), github.clone(), tasks.clone())
 }
 
+async fn look(
+    repo: &FakeRepo,
+    github: &FakeGithub,
+    tasks: &FakeHoldTasks,
+    watch: &MainWatch,
+) -> MainLook {
+    looks(repo, github, tasks)
+        .look(watch.clone())
+        .await
+        .expect("look")
+}
+
 /// A red base is held, and files one task naming the factory merges since
-/// it was last green, oldest first, with their pull requests, beside the
-/// watch's Run's task; a second red look files none. A green look, as a
-/// re-run that passes on the same head, clears the hold.
+/// it was last green, oldest first, with their pull requests; a second red
+/// look files none. A green look, as a re-run that passes on the same
+/// head, clears the hold, and the next red period files its own task.
 #[tokio::test]
 async fn a_red_base_is_held_once_and_a_green_rerun_clears_it() {
     let repo = FakeRepo::default();
     let github = FakeGithub::default();
     requiring_test(&github);
     let tasks = FakeHoldTasks::default();
-    let watcher = code_run(&repo).await;
-    let watch = MainWatch::of(watcher, &REPOSITORY);
+    let watch = MainWatch::of(code_run(&repo).await, &REPOSITORY);
 
     // A merge before the base was last green is no suspect.
     let before = code_run(&repo).await;
-    repo.record_merge(before, 1, "https://github.com/macro/app/pull/1", Utc::now())
-        .await
-        .expect("merge");
-    github.state().base = Some((RED_HEAD.to_string(), base_checks(Some("success"))));
-    let green = looks(&repo, &github, &tasks)
-        .look(watch.clone())
-        .await
-        .expect("look");
-    assert_eq!(
-        green,
-        MainLook {
-            state: MainState::Green,
-            held: false
-        }
-    );
+    repo.record_merge(
+        before,
+        1,
+        "https://github.com/macro/app/pull/1",
+        a_minute_ago(),
+    )
+    .await
+    .expect("merge");
+    base_at(&github, base_checks(Some("success")));
+    let green = look(&repo, &github, &tasks, &watch).await;
+    assert_eq!((green.state, green.held), (MainState::Green, false));
 
     let first = code_run(&repo).await;
     let second = code_run(&repo).await;
-    let later = Utc::now() + TimeDelta::seconds(1);
-    repo.record_merge(second, 3, "https://github.com/macro/app/pull/3", later)
-        .await
-        .expect("merge");
     repo.record_merge(first, 2, "https://github.com/macro/app/pull/2", Utc::now())
         .await
         .expect("merge");
+    repo.record_merge(second, 3, "https://github.com/macro/app/pull/3", Utc::now())
+        .await
+        .expect("merge");
 
-    github.state().base = Some((RED_HEAD.to_string(), base_checks(Some("failure"))));
+    base_at(&github, base_checks(Some("failure")));
     for _ in 0..2 {
-        let red = looks(&repo, &github, &tasks)
-            .look(watch.clone())
-            .await
-            .expect("look");
-        assert_eq!(
-            red,
-            MainLook {
-                state: MainState::Red,
-                held: true
-            }
-        );
+        let red = look(&repo, &github, &tasks, &watch).await;
+        assert_eq!((red.state, red.held), (MainState::Red, true));
+        assert!(!red.ends_watch());
     }
     let hold = repo
         .main_hold(&REPOSITORY)
@@ -167,21 +188,34 @@ async fn a_red_base_is_held_once_and_a_green_rerun_clears_it() {
     assert!(!task.markdown.contains("pull/1)"), "{}", task.markdown);
 
     // The failed run is re-run on the same head, and passes.
-    github.state().base = Some((RED_HEAD.to_string(), base_checks(Some("success"))));
-    let cleared = looks(&repo, &github, &tasks)
-        .look(watch.clone())
-        .await
-        .expect("look");
+    base_at(&github, base_checks(Some("success")));
+    let cleared = look(&repo, &github, &tasks, &watch).await;
     assert_eq!(cleared.state, MainState::Green);
+    assert!(cleared.ends_watch());
     assert_eq!(repo.main_hold(&REPOSITORY).await.expect("read"), None);
 
-    // The next red period files its own task.
-    github.state().base = Some((RED_HEAD.to_string(), base_checks(Some("failure"))));
-    looks(&repo, &github, &tasks)
-        .look(watch)
-        .await
-        .expect("look");
+    base_at(&github, base_checks(Some("failure")));
+    look(&repo, &github, &tasks, &watch).await;
     assert_eq!(tasks.filed().len(), 2);
+}
+
+/// GitHub reads as the owner of the Run that merged to the base last, and
+/// files the hold's task as them, not as the Run that started the watch.
+#[tokio::test]
+async fn the_latest_merge_s_owner_reads_github_and_files_the_task() {
+    let repo = FakeRepo::default();
+    let github = FakeGithub::default();
+    requiring_test(&github);
+    let tasks = FakeHoldTasks::default();
+    let watch = MainWatch::of(code_run(&repo).await, &REPOSITORY);
+    let bobs = run_of(&repo, &BOB).await;
+    repo.record_merge(bobs, 4, "https://github.com/macro/app/pull/4", Utc::now())
+        .await
+        .expect("merge");
+
+    base_at(&github, base_checks(Some("failure")));
+    look(&repo, &github, &tasks, &watch).await;
+    assert_eq!(tasks.filed()[0].0, "macro|bob@example.com");
 }
 
 /// A task that could not be filed is filed by the next look, once.
@@ -190,7 +224,7 @@ async fn a_task_that_could_not_be_filed_is_filed_by_the_next_look() {
     let repo = FakeRepo::default();
     let github = FakeGithub::default();
     requiring_test(&github);
-    github.state().base = Some((RED_HEAD.to_string(), base_checks(Some("failure"))));
+    base_at(&github, base_checks(Some("failure")));
     let tasks = FakeHoldTasks::default();
     let watch = MainWatch::of(code_run(&repo).await, &REPOSITORY);
 
@@ -207,10 +241,7 @@ async fn a_task_that_could_not_be_filed_is_filed_by_the_next_look() {
 
     *tasks.failing.lock().expect("failing") = false;
     for _ in 0..2 {
-        looks(&repo, &github, &tasks)
-            .look(watch.clone())
-            .await
-            .expect("look");
+        look(&repo, &github, &tasks, &watch).await;
     }
     assert_eq!(tasks.filed().len(), 1);
 }
@@ -225,18 +256,9 @@ async fn a_required_check_that_runs_keeps_the_base_as_it_was() {
     let tasks = FakeHoldTasks::default();
     let watch = MainWatch::of(code_run(&repo).await, &REPOSITORY);
 
-    github.state().base = Some((RED_HEAD.to_string(), base_checks(None)));
-    let pending = looks(&repo, &github, &tasks)
-        .look(watch.clone())
-        .await
-        .expect("look");
-    assert_eq!(
-        pending,
-        MainLook {
-            state: MainState::Pending,
-            held: false
-        }
-    );
+    base_at(&github, base_checks(None));
+    let pending = look(&repo, &github, &tasks, &watch).await;
+    assert_eq!((pending.state, pending.held), (MainState::Pending, false));
 
     // A check that is not required fails: the required one decides.
     let mut checks = base_checks(Some("success"));
@@ -246,35 +268,190 @@ async fn a_required_check_that_runs_keeps_the_base_as_it_was() {
         url: None,
         app_id: Some(FakeGithub::ACTIONS),
     });
-    github.state().base = Some((RED_HEAD.to_string(), checks));
-    let green = looks(&repo, &github, &tasks)
-        .look(watch.clone())
-        .await
-        .expect("look");
+    base_at(&github, checks);
+    let green = look(&repo, &github, &tasks, &watch).await;
     assert_eq!(green.state, MainState::Green);
 
-    github.state().base = Some((RED_HEAD.to_string(), base_checks(Some("failure"))));
-    looks(&repo, &github, &tasks)
-        .look(watch.clone())
+    base_at(&github, base_checks(Some("failure")));
+    look(&repo, &github, &tasks, &watch).await;
+    base_at(&github, base_checks(None));
+    let still = look(&repo, &github, &tasks, &watch).await;
+    assert_eq!((still.state, still.held), (MainState::Pending, true));
+}
+
+/// A required check that never runs on the base, as one that runs only on
+/// pull requests, does not apply once the head's other checks finished:
+/// the base is green, and a hold clears. Until then it is pending.
+#[tokio::test]
+async fn a_required_check_that_never_runs_on_the_base_does_not_apply() {
+    let repo = FakeRepo::default();
+    let github = FakeGithub::default();
+    requiring(&github, &["test", "cla"]);
+    let tasks = FakeHoldTasks::default();
+    let watch = MainWatch::of(code_run(&repo).await, &REPOSITORY);
+    repo.hold_main(&REPOSITORY, RED_HEAD, "- test (failure)", a_minute_ago())
         .await
-        .expect("look");
-    github.state().base = Some((RED_HEAD.to_string(), base_checks(None)));
-    let still = looks(&repo, &github, &tasks)
-        .look(watch)
+        .expect("hold");
+
+    let mut running = base_checks(Some("success"));
+    running.runs.push(Check {
+        name: "build".to_string(),
+        state: CheckState::Waiting,
+        url: None,
+        app_id: Some(FakeGithub::ACTIONS),
+    });
+    base_at(&github, running);
+    let pending = look(&repo, &github, &tasks, &watch).await;
+    assert_eq!((pending.state, pending.held), (MainState::Pending, true));
+
+    base_at(&github, base_checks(Some("success")));
+    let green = look(&repo, &github, &tasks, &watch).await;
+    assert_eq!((green.state, green.held), (MainState::Green, false));
+    assert_eq!(repo.main_hold(&REPOSITORY).await.expect("read"), None);
+}
+
+/// Required checks that cannot be read, or name none, hold nothing: a hold
+/// clears, the base says its checks were unread, and the watch may end.
+#[tokio::test]
+async fn unread_required_checks_hold_nothing() {
+    let repo = FakeRepo::default();
+    let github = FakeGithub::default();
+    let tasks = FakeHoldTasks::default();
+    let watch = MainWatch::of(code_run(&repo).await, &REPOSITORY);
+    repo.hold_main(&REPOSITORY, RED_HEAD, "- test (failure)", a_minute_ago())
         .await
-        .expect("look");
-    assert_eq!(
-        still,
-        MainLook {
-            state: MainState::Pending,
-            held: true
-        }
-    );
+        .expect("hold");
+    base_at(&github, base_checks(Some("failure")));
+
+    for required in [None, Some(Vec::new())] {
+        github.state().required = required.map(|checks| RequiredChecks {
+            checks,
+            complete: true,
+        });
+        let unread = look(&repo, &github, &tasks, &watch).await;
+        assert_eq!((unread.state, unread.held), (MainState::Unread, false));
+        assert!(unread.ends_watch());
+        let state = repo.base_state(&REPOSITORY).await.expect("read");
+        assert_eq!(state.hold, None);
+        assert!(state.required_unread);
+    }
+    assert!(tasks.filed().is_empty());
+}
+
+/// GitHub that cannot be read decides nothing: a held base stays held, and
+/// the watch goes on.
+#[tokio::test]
+async fn a_look_that_cannot_read_github_keeps_the_hold() {
+    let repo = FakeRepo::default();
+    let github = FakeGithub::default();
+    requiring_test(&github);
+    let tasks = FakeHoldTasks::default();
+    let watch = MainWatch::of(code_run(&repo).await, &REPOSITORY);
+    repo.hold_main(&REPOSITORY, RED_HEAD, "- test (failure)", a_minute_ago())
+        .await
+        .expect("hold");
+    github.state().base_unreadable = true;
+
+    let unseen = look(&repo, &github, &tasks, &watch).await;
+    assert_eq!((unseen.state, unseen.held), (MainState::Pending, true));
+    assert!(!unseen.ends_watch());
+    assert!(repo.main_hold(&REPOSITORY).await.expect("read").is_some());
+}
+
+/// A green look does not end the watch when a merge landed after its read
+/// began: the head it saw may not hold that merge.
+#[tokio::test]
+async fn a_merge_after_the_read_keeps_the_watch_going() {
+    let repo = FakeRepo::default();
+    let github = FakeGithub::default();
+    requiring_test(&github);
+    let tasks = FakeHoldTasks::default();
+    let watch = MainWatch::of(code_run(&repo).await, &REPOSITORY);
+    let merging = code_run(&repo).await;
+    repo.record_merge(
+        merging,
+        5,
+        "https://github.com/macro/app/pull/5",
+        Utc::now() + TimeDelta::minutes(1),
+    )
+    .await
+    .expect("merge");
+    base_at(&github, base_checks(Some("success")));
+
+    let later = look(&repo, &github, &tasks, &watch).await;
+    assert_eq!(later.state, MainState::Pending);
+    assert!(!later.ends_watch());
+}
+
+/// While checks run with nothing held, the watch goes on until the base's
+/// latest merge is hours old; a held base is never idle.
+#[tokio::test]
+async fn an_unheld_watch_idles_hours_after_the_latest_merge() {
+    let repo = FakeRepo::default();
+    let github = FakeGithub::default();
+    requiring_test(&github);
+    let tasks = FakeHoldTasks::default();
+    let watch = MainWatch::of(code_run(&repo).await, &REPOSITORY);
+    base_at(&github, base_checks(None));
+
+    let old = code_run(&repo).await;
+    repo.record_merge(
+        old,
+        6,
+        "https://github.com/macro/app/pull/6",
+        Utc::now() - TimeDelta::hours(7),
+    )
+    .await
+    .expect("merge");
+    let idle = look(&repo, &github, &tasks, &watch).await;
+    assert!(idle.idle);
+    assert!(idle.ends_watch());
+
+    let recent = code_run(&repo).await;
+    repo.record_merge(
+        recent,
+        7,
+        "https://github.com/macro/app/pull/7",
+        a_minute_ago(),
+    )
+    .await
+    .expect("merge");
+    let busy = look(&repo, &github, &tasks, &watch).await;
+    assert!(!busy.idle);
+    assert!(!busy.ends_watch());
+
+    let held = MainLook {
+        state: MainState::Pending,
+        held: true,
+        idle: true,
+    };
+    assert!(!held.ends_watch());
+}
+
+/// A watch that does not start after a merge leaves the Step merged.
+#[tokio::test]
+async fn a_watch_that_does_not_start_leaves_the_merge_merged() {
+    let repo = FakeRepo::default();
+    let github = FakeGithub::with_open_pull_request(ci(Some("success")));
+    let watches = FakeWatches::default();
+    *watches.failing.lock().expect("failing") = true;
+    let run_id = code_run(&repo).await;
+    repo.set_merge_head(run_id, FakeGithub::HEAD)
+        .await
+        .expect("keep");
+
+    let report = PullRequestSteps::new(github.clone(), repo.clone(), watches)
+        .merge(input(run_id))
+        .await
+        .expect("merge");
+    assert_eq!(report.outcome.as_str(), "merged");
+    assert_eq!(github.state().merges, [FakeGithub::HEAD]);
+    assert_eq!(repo.main().merges.len(), 1);
 }
 
 /// While the base is held, an approved merge merges nothing: it waits, has
-/// the base watched, and ends `held` for a person when the hold outlasts
-/// its wait.
+/// the base watched, and ends `held` when the hold outlasts its wait, which
+/// the `code` Flow sends back to its merge Gate.
 #[tokio::test(start_paused = true)]
 async fn a_held_base_merges_nothing_even_once_approved() {
     let repo = FakeRepo::default();
@@ -284,9 +461,14 @@ async fn a_held_base_merges_nothing_even_once_approved() {
     repo.set_merge_head(run_id, FakeGithub::HEAD)
         .await
         .expect("keep");
-    repo.hold_main(&REPOSITORY, RED_HEAD, "- test (failure): https://ci/1")
-        .await
-        .expect("hold");
+    repo.hold_main(
+        &REPOSITORY,
+        RED_HEAD,
+        "- test (failure): https://ci/1",
+        a_minute_ago(),
+    )
+    .await
+    .expect("hold");
 
     let started = tokio::time::Instant::now();
     let report = PullRequestSteps::new(github.clone(), repo.clone(), watches.clone())
@@ -324,7 +506,7 @@ async fn a_merge_waits_out_a_hold_that_clears() {
     repo.set_merge_head(run_id, FakeGithub::HEAD)
         .await
         .expect("keep");
-    repo.hold_main(&REPOSITORY, RED_HEAD, "- test (failure)")
+    repo.hold_main(&REPOSITORY, RED_HEAD, "- test (failure)", a_minute_ago())
         .await
         .expect("hold");
 

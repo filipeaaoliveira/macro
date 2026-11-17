@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO factory_main_hold (repo_url, base_branch, last_green_at)\n            VALUES ($1, $2, $3)\n            ON CONFLICT (repo_url, base_branch) DO UPDATE\n            SET last_green_at = GREATEST(factory_main_hold.last_green_at, EXCLUDED.last_green_at),\n                required_unread = false,\n                held_since = NULL,\n                head_sha = NULL,\n                failed = NULL,\n                task_claimed_at = NULL,\n                task_id = NULL\n            WHERE factory_main_hold.held_since IS NULL\n               OR factory_main_hold.held_since < EXCLUDED.last_green_at\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "422772c7901238b0b5126a986f7fee81d6b13fbb3ae11a6731548ef257e4b6e6"
+}

@@ -1,5 +1,5 @@
 {
-	"description": "Takes a task to a merged pull request in a GitHub repository: plans the change and asks a person to approve the plan, writes it on the run's branch and runs the repository's own checks on it, has it reviewed and fixed, opens a pull request, waits for its checks and fixes what fails, then asks a person whether to merge the commit that passed, and merges it once the base branch's required checks pass. A review that still finds changes after three rounds leaves the pull request for a person, and checks that still fail after their last round leave the branch for one, as does a base branch whose checks still fail after the merge waited for them.",
+	"description": "Takes a task to a merged pull request in a GitHub repository: plans the change and asks a person to approve the plan, writes it on the run's branch and runs the repository's own checks on it, has it reviewed and fixed, opens a pull request, waits for its checks and fixes what fails, then asks a person whether to merge the commit that passed, and merges it once the base branch's required checks pass. A review that still finds changes after three rounds leaves the pull request for a person, and checks that still fail after their last round leave the branch for one. A merge waits while the base branch's required checks fail, and asks again if they still fail after its wait.",
 	"repository": true,
 	"facts": {
 		"held": false
@@ -322,9 +322,10 @@
 				"held": [
 					{
 						"to": {
-							"kind": "end",
-							"outcome": "manual"
-						}
+							"kind": "entry",
+							"entry": "merge-gate"
+						},
+						"reset": ["merge-gate"]
 					}
 				],
 				"closed": [

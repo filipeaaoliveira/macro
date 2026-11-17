@@ -29,6 +29,22 @@ pub struct MainHold {
     pub task_claimed: bool,
 }
 
+/// What the factory last saw of a base branch: its hold while its checks
+/// fail, and whether the checks it requires could not be read.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BaseState {
+    /// The hold, while its required checks fail.
+    pub hold: Option<MainHold>,
+    /// Whether the last look could not read which checks the base requires,
+    /// so it neither holds nor clears on them.
+    pub required_unread: bool,
+}
+
+/// How long a claim of a hold's task may go without the task's id before
+/// another look may claim it again: past a look's own timeout, so only a
+/// look that died between the claim and the filing is overtaken.
+pub const TASK_CLAIM_STALE_AFTER: chrono::TimeDelta = chrono::TimeDelta::minutes(15);
+
 /// A pull request a Run merged.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FactoryMerge {
@@ -67,18 +83,34 @@ pub trait MainHoldRepository: Send + Sync + 'static {
         base: &Repository,
     ) -> impl Future<Output = Result<Option<MainHold>, Self::Err>> + Send;
 
-    /// Hold `base`, whose checks failed on `head_sha`: the failing checks
-    /// `failed` replace the ones last seen, and a hold already set keeps its
-    /// start and its task.
+    /// What was last seen of `base`: its hold, and whether its required
+    /// checks could not be read.
+    fn base_state(
+        &self,
+        base: &Repository,
+    ) -> impl Future<Output = Result<BaseState, Self::Err>> + Send;
+
+    /// Hold `base`, whose checks failed on `head_sha` on a read that
+    /// started at `seen_at`: the failing checks `failed` replace the ones
+    /// last seen, and a hold already set keeps its start and its task.
     fn hold_main(
         &self,
         base: &Repository,
         head_sha: &str,
         failed: &str,
+        seen_at: DateTime<Utc>,
     ) -> impl Future<Output = Result<MainHold, Self::Err>> + Send;
 
+    /// Record that the checks `base` requires could not be read, or name
+    /// none: nothing tells whether it is red, so it is not held.
+    fn mark_required_unread(
+        &self,
+        base: &Repository,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
     /// Record that `base`'s checks passed on a read that started at
-    /// `seen_at`, which ends any hold on it and its red period.
+    /// `seen_at`, which ends any hold on it and its red period, unless the
+    /// hold started at or after `seen_at`: a later red read stands.
     fn clear_main_hold(
         &self,
         base: &Repository,
@@ -93,9 +125,16 @@ pub trait MainHoldRepository: Send + Sync + 'static {
         limit: u16,
     ) -> impl Future<Output = Result<Vec<FactoryMerge>, Self::Err>> + Send;
 
+    /// The newest pull request a Run merged into `base`, if any.
+    fn latest_merge(
+        &self,
+        base: &Repository,
+    ) -> impl Future<Output = Result<Option<FactoryMerge>, Self::Err>> + Send;
+
     /// Claim the filing of the task of the hold on `base` that started at
     /// `since`: whether this call claimed it. No other claim of the same red
-    /// period succeeds, unless this one is released.
+    /// period succeeds, unless this one is released, or is older than
+    /// [`TASK_CLAIM_STALE_AFTER`] with no task recorded.
     fn claim_hold_task(
         &self,
         base: &Repository,

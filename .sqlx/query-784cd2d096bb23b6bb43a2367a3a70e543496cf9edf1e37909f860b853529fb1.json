@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE factory_main_hold\n            SET task_claimed_at = now()\n            WHERE repo_url = $1 AND base_branch = $2\n              AND held_since = $3\n              AND (\n                  task_claimed_at IS NULL\n                  OR (task_id IS NULL AND task_claimed_at < now() - $4::interval)\n              )\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Timestamptz",
+        "Interval"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "784cd2d096bb23b6bb43a2367a3a70e543496cf9edf1e37909f860b853529fb1"
+}

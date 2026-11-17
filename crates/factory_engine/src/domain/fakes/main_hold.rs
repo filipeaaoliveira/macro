@@ -5,7 +5,9 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
-use factory_records::domain::main_hold::{FactoryMerge, MainHold, MainHoldRepository};
+use factory_records::domain::main_hold::{
+    BaseState, FactoryMerge, MainHold, MainHoldRepository, TASK_CLAIM_STALE_AFTER,
+};
 use factory_records::domain::models::{Repository, RunId};
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
@@ -23,6 +25,10 @@ pub(crate) struct FakeMain {
     pub(crate) last_green: BTreeMap<(String, String), DateTime<Utc>>,
     /// The hold on each base that is held.
     pub(crate) holds: BTreeMap<(String, String), MainHold>,
+    /// When each claimed hold's task was claimed.
+    pub(crate) claimed_at: BTreeMap<(String, String), DateTime<Utc>>,
+    /// The bases whose required checks could not be read.
+    pub(crate) unread: std::collections::BTreeSet<(String, String)>,
 }
 
 fn key(base: &Repository) -> (String, String) {
@@ -74,15 +80,43 @@ impl MainHoldRepository for FakeRepo {
         Ok(self.main().holds.get(&key(base)).cloned())
     }
 
+    async fn base_state(&self, base: &Repository) -> Result<BaseState, FakeError> {
+        let main = self.main();
+        Ok(BaseState {
+            hold: main.holds.get(&key(base)).cloned(),
+            required_unread: main.unread.contains(&key(base)),
+        })
+    }
+
+    async fn mark_required_unread(&self, base: &Repository) -> Result<(), FakeError> {
+        let mut main = self.main();
+        main.holds.remove(&key(base));
+        main.claimed_at.remove(&key(base));
+        main.unread.insert(key(base));
+        Ok(())
+    }
+
+    async fn latest_merge(&self, base: &Repository) -> Result<Option<FactoryMerge>, FakeError> {
+        Ok(self
+            .main()
+            .merges
+            .iter()
+            .filter(|(merged_to, _)| *merged_to == key(base))
+            .map(|(_, merge)| merge.clone())
+            .max_by_key(|merge| merge.merged_at))
+    }
+
     async fn hold_main(
         &self,
         base: &Repository,
         head_sha: &str,
         failed: &str,
+        seen_at: DateTime<Utc>,
     ) -> Result<MainHold, FakeError> {
         let mut main = self.main();
+        main.unread.remove(&key(base));
         let hold = main.holds.entry(key(base)).or_insert_with(|| MainHold {
-            since: Utc::now(),
+            since: seen_at,
             head_sha: String::new(),
             failed: String::new(),
             task_id: None,
@@ -99,7 +133,16 @@ impl MainHoldRepository for FakeRepo {
         seen_at: DateTime<Utc>,
     ) -> Result<(), FakeError> {
         let mut main = self.main();
+        if main
+            .holds
+            .get(&key(base))
+            .is_some_and(|hold| hold.since >= seen_at)
+        {
+            return Ok(());
+        }
         main.holds.remove(&key(base));
+        main.claimed_at.remove(&key(base));
+        main.unread.remove(&key(base));
         let last = main.last_green.entry(key(base)).or_insert(seen_at);
         *last = (*last).max(seen_at);
         Ok(())
@@ -131,13 +174,24 @@ impl MainHoldRepository for FakeRepo {
         since: DateTime<Utc>,
     ) -> Result<bool, FakeError> {
         let mut main = self.main();
-        match main.holds.get_mut(&key(base)) {
-            Some(hold) if hold.since == since && !hold.task_claimed => {
+        let stale = main
+            .claimed_at
+            .get(&key(base))
+            .is_some_and(|claimed| Utc::now() - *claimed > TASK_CLAIM_STALE_AFTER);
+        let claimed = match main.holds.get_mut(&key(base)) {
+            Some(hold)
+                if hold.since == since
+                    && (!hold.task_claimed || (stale && hold.task_id.is_none())) =>
+            {
                 hold.task_claimed = true;
-                Ok(true)
+                true
             }
-            _ => Ok(false),
+            _ => false,
+        };
+        if claimed {
+            main.claimed_at.insert(key(base), Utc::now());
         }
+        Ok(claimed)
     }
 
     async fn release_hold_task(
@@ -172,10 +226,11 @@ impl MainHoldRepository for FakeRepo {
     }
 }
 
-/// The watches started, in order.
+/// The watches asked for, in order; asking fails while `failing` is set.
 #[derive(Clone, Default)]
 pub(crate) struct FakeWatches {
     pub(crate) started: Arc<Mutex<Vec<MainWatch>>>,
+    pub(crate) failing: Arc<Mutex<bool>>,
 }
 
 impl FakeWatches {
@@ -188,6 +243,9 @@ impl MainWatches for FakeWatches {
     type Err = FakeError;
 
     async fn watch(&self, watch: &MainWatch) -> Result<(), FakeError> {
+        if *self.failing.lock().expect("failing") {
+            return Err(FakeError);
+        }
         self.started.lock().expect("watches").push(watch.clone());
         Ok(())
     }

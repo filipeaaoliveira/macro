@@ -23,14 +23,16 @@ CREATE INDEX factory_merge_base_idx
     ON factory_merge (repo_url, base_branch, merged_at DESC);
 
 -- What the factory last saw of a base branch it merged to: when its
--- required checks last passed, and, while they fail, the hold: since when,
--- on which head, which checks, and the task filed with the suspect merges.
--- The task is claimed before it is filed, so one red period files one task;
--- deleting the task document keeps the claim. A green base clears the hold.
+-- required checks last passed, whether they could not be read, and, while
+-- they fail, the hold: since when, on which head, which checks, and the task
+-- filed with the suspect merges. The task is claimed before it is filed, so
+-- one red period files one task; deleting the task document keeps the
+-- claim. A green base clears the hold. Times are on the workers' clock.
 CREATE TABLE factory_main_hold (
     repo_url text NOT NULL CHECK (repo_url ~ '^https://github\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$'),
     base_branch text NOT NULL CHECK (octet_length(base_branch) BETWEEN 1 AND 255),
     last_green_at timestamptz,
+    required_unread boolean NOT NULL DEFAULT false,
     held_since timestamptz,
     head_sha text CHECK (head_sha ~ '^[0-9a-f]{40}$'),
     failed text CHECK (octet_length(failed) <= 65536),
@@ -44,7 +46,8 @@ CREATE TABLE factory_main_hold (
     CONSTRAINT factory_main_hold_task CHECK (
         (task_claimed_at IS NULL OR held_since IS NOT NULL)
         AND (task_id IS NULL OR task_claimed_at IS NOT NULL)
-    )
+    ),
+    CONSTRAINT factory_main_hold_unread CHECK (NOT required_unread OR held_since IS NULL)
 );
 
 -- A deleted task document clears its hold's task_id through this index.

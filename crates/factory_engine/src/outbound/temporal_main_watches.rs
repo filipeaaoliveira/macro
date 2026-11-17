@@ -6,11 +6,12 @@ use temporalio_client::{Client, WorkflowIdConflictPolicy, WorkflowStartOptions};
 use crate::domain::main_hold::MainWatch;
 use crate::domain::ports::{MainWatches, Retryable, RunWorkflowsError};
 use crate::outbound::temporal_run_workflows::{from_status, other};
-use crate::temporal::{MainWatchWorkflowDefinition, TASK_QUEUE};
+use crate::temporal::{LookAgainSignal, MainWatchWorkflowDefinition, TASK_QUEUE};
 
-/// Starts the watch of a base branch on the factory's task queue, one per
-/// base: its workflow id names the base, and a start while one runs uses
-/// the running one.
+/// Signals the watch of a base branch to look again, on the factory's task
+/// queue, starting it when none runs: one watch per base, whose workflow id
+/// names it. Signal-with-start reaches a watch that is about to end, so a
+/// merge is always looked at.
 #[derive(Clone)]
 pub struct TemporalMainWatches {
     client: Client,
@@ -54,7 +55,13 @@ impl MainWatches for TemporalMainWatches {
             .build();
         let started = self
             .client
-            .start_workflow(MainWatchWorkflowDefinition, watch.clone(), options)
+            .signal_with_start_workflow(
+                MainWatchWorkflowDefinition,
+                watch.clone(),
+                LookAgainSignal,
+                (),
+                options,
+            )
             .await;
         match started {
             Ok(_) | Err(WorkflowStartError::AlreadyStarted { .. }) => Ok(()),

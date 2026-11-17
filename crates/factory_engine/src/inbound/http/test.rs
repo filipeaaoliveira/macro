@@ -903,10 +903,11 @@ async fn a_user_api_key_acts_for_its_owner() {
     assert_eq!(*service.actors.lock().expect("actors"), [ALICE]);
 }
 
-/// A Run that goes on a held base shows the hold, which its merge waits
-/// on; one that ended, or works on another base, shows none.
+/// A Run at its merge on a held base shows the hold, which its merge waits
+/// on; one that ended, is not at its merge yet, or works on another base
+/// shows none. A base whose required checks could not be read says so.
 #[tokio::test]
-async fn a_run_on_a_held_base_shows_the_main_hold() {
+async fn a_run_at_its_merge_on_a_held_base_shows_the_main_hold() {
     let repo = FakeRepo::default();
     let alice = MacroUserIdStr::try_from(ALICE.to_string()).expect("valid");
     let main = Repository {
@@ -918,11 +919,20 @@ async fn a_run_on_a_held_base_shows_the_main_hold() {
         ..main.clone()
     };
     let mut runs = Vec::new();
-    for base in [&main, &main, &release] {
+    for (base, entry) in [
+        (&main, "merge-gate"),
+        (&main, "merge-gate"),
+        (&release, "merge"),
+        (&main, "ci"),
+    ] {
         let run_id = RunId::generate();
         repo.insert_run(run_id, "code", "Add dark mode", &alice, None, Some(base))
             .await
             .expect("insert");
+        let entry = EntryId::try_from(entry.to_string()).expect("entry");
+        repo.start_step(StepKey { run_id, seq: 1 }, &entry, 1)
+            .await
+            .expect("start");
         runs.push(run_id);
     }
     repo.end_run(runs[1], RunOutcome::Manual)
@@ -932,9 +942,11 @@ async fn a_run_on_a_held_base_shows_the_main_hold() {
         &main,
         "2222222222222222222222222222222222222222",
         "- test (failure): https://ci/1",
+        chrono::Utc::now(),
     )
     .await
     .expect("hold");
+    repo.mark_required_unread(&release).await.expect("unread");
 
     let read = |run_id: RunId| {
         let router = records_router(&repo);
@@ -962,6 +974,10 @@ async fn a_run_on_a_held_base_shows_the_main_hold() {
     assert!(held["mainHold"]["since"].is_string());
     assert!(held["mainHold"]["taskId"].is_null());
     assert!(held["mainHold"].get("taskClaimed").is_none());
+    assert_eq!(held["baseChecksUnread"], false);
     assert!(read(runs[1]).await["mainHold"].is_null());
-    assert!(read(runs[2]).await["mainHold"].is_null());
+    let unread = read(runs[2]).await;
+    assert!(unread["mainHold"].is_null());
+    assert_eq!(unread["baseChecksUnread"], true);
+    assert!(read(runs[3]).await["mainHold"].is_null());
 }

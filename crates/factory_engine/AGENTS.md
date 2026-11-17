@@ -239,32 +239,42 @@ The merge-gate entry runs at most three times, including visits that end
 `changed` without asking; then the Run ends for a person.
 
 A Main Hold stops merges while a base branch is red (`src/domain/main_hold.rs`).
-`merge` records each merge it makes or finds (`factory_merge`) and starts the
-watch of its base: one `MainWatchWorkflow` per repository and branch
+`merge` records each merge it makes or finds (`factory_merge`) and signals the
+watch of its base to look again (`factory_look_again`, signal-with-start): one
+`MainWatchWorkflow` per repository and branch
 (`src/inbound/temporal/main_watch.rs`, workflow id
-`factory-main-watch:{repo url}:{branch}`, started with the running one kept),
-which reads GitHub as the owner of the Run that started it. It looks at the
-checks on the base's head at once and then every 3 minutes
-(`factory_look_at_main`). The checks the base requires decide: a required
-check that failed, with no run or status of it that passed, is red; all
-passed is green, so a re-run that passes clears it; one not finished or not
-appeared is pending. A base that requires none is read as a pull request's
-head is. A red look holds the base (`factory_main_hold`) and files one task
-per red period, as the watch's Run's owner, in the initiative of that Run's
-task (its Project property), naming the factory merges to the base since
-its checks last passed, oldest first, with their pull requests
+`factory-main-watch:{repo url}:{branch}`), so a merge that lands while a watch
+ends is still looked at. A watch that does not start is logged, never the
+merged Step's failure. Each look (`factory_look_at_main`) reads GitHub as the
+owner of the Run that merged to the base last, else of the Run that started
+the watch; it looks at once and then every 3 minutes. Only the checks the
+base requires decide: one that failed, with no run or status of it that
+passed, is red; all passed is green, so a re-run that passes clears it; one
+not finished keeps it pending. A required check with no run or status on
+the head at all, as one that runs only on pull requests, does not apply once
+every other check on the head finished. Required checks that cannot be read,
+or name none, hold nothing: the base is marked unread and its Runs say so
+(`baseChecksUnread`). GitHub that cannot be read leaves the base as it was.
+A red look holds the base (`factory_main_hold`) and files one task per red
+period, as that Run's owner, in the initiative of that Run's task (its
+Project property), naming the factory merges to the base since its checks
+last passed, oldest first, with their pull requests
 (`outbound/document_hold_tasks.rs`, through the document storage service).
 The task is claimed before it is filed, so a retry or a second look files
-none, and a filing that fails gives the claim back. A green look clears the
-hold and ends the watch; one that holds nothing ends it after 20 looks in a
-row of checks not finished or looks that failed; a held base is watched until
-it is green, across continue-as-new. While the base is held, every Run on it
-shows the hold (`mainHold` in the Run API), and `merge`, even once its Gate
-was approved, merges nothing: it starts the watch in case none runs, waits
-for the hold to clear for up to `HOLD_WAIT` (25 minutes), then ends `held`,
-which the `code` Flow ends `manual` for a person, who merges by hand once the
-base is green or starts a new Run. A Run in flight on an older `code` Flow,
-which routes no `held`, fails there instead. The pull
+none; a filing that fails gives the claim back, and a claim with no task
+after 15 minutes is taken again. A green look clears the hold, unless its
+read started before the hold's red one. The watch never ends while the base
+is held or a look fails; with nothing held it ends on a green or unread
+look, unless a merge landed after the look's read or signalled during it,
+and, while checks still run, once the base's latest merge is 6 hours old.
+It continues as new every 200 looks. While the base is held, a Run at its
+merge (an entry that runs `ready_to_merge` or `merge`) shows the hold
+(`mainHold` in the Run API), and `merge`, even once its Gate was approved,
+merges nothing: it signals the watch, waits for the hold to clear for up to
+`HOLD_WAIT` (25 minutes), then ends `held`, which the `code` Flow sends back
+to its merge Gate (the Gate's visits start over), so the person is asked
+again with the hold shown. A Run in flight on an older `code` Flow, which
+routes no `held`, fails there instead. The pull
 request's description names the Run's task as `MACRO-{short id}`, so GitHub's
 webhook links them, and is cut to GitHub's 65,536 characters in its request
 part only.
@@ -366,12 +376,9 @@ part only.
 - Renaming `TASK_QUEUE`, `FLOW_WORKFLOW`, `ANSWER_GATE_UPDATE`,
   `MAIN_WATCH_WORKFLOW` or an activity's `name` strands the Runs and watches
   in flight on the old name.
-- A watch whose owner's GitHub link stops working gives up after its 20
-  looks; a held base is then watched again only when a `merge` finds it
-  held and starts a watch as its own Run's owner. Until then the hold stays.
-- A red period whose task claim was taken but whose filing never finished,
-  as when the worker died between the two, files no task; the hold still
-  shows in the Run API.
+- A watch whose owner's GitHub link stops working keeps the hold and goes
+  on looking; the next merge to the base, or a held `merge`, makes its
+  owner the one the watch reads as.
 - Changing what the workflow or the interpreter decides breaks the replay of
   Runs already running: gate the change with Temporal patching
   (`ctx.patched`) or worker versioning.

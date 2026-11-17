@@ -33,7 +33,9 @@ use crate::domain::fakes::{FakeGithub, FakeHoldTasks, FakeRepo, FakeWatches, ci}
 use crate::domain::flow::Flow;
 use crate::domain::gate::AnswerGate;
 use crate::domain::main_hold::{MainWatch, MainWatchServiceImpl};
-use crate::domain::models::{AgentAnswer, AgentTask, AgentTurn, PullRequestState, RunStart};
+use crate::domain::models::{
+    AgentAnswer, AgentTask, AgentTurn, PullRequestState, RequiredCheck, RequiredChecks, RunStart,
+};
 use crate::domain::ports::{
     AgentFailure, AnswerDelivery, MainWatches, Retryable, RunWorkflows, StepAgent,
 };
@@ -921,20 +923,9 @@ async fn a_head_that_moves_before_the_merge_goes_back_to_ci() {
     assert_eq!(github.opened, 1);
 }
 
-/// The watch of a red base holds it and files its task once, a second
-/// start uses the watch that runs, and the watch ends once the base's
-/// checks pass, clearing the hold.
-#[tokio::test(flavor = "multi_thread")]
-#[ignore = "Temporal doesn't exist in CI"]
-async fn a_base_s_watch_holds_it_while_red_and_ends_once_green() {
-    let client = client().await;
-    let repo = FakeRepo::default();
-    let github = FakeGithub::default();
-    github.state().base = Some((
-        "2222222222222222222222222222222222222222".to_string(),
-        ci(Some("failure")),
-    ));
-    let tasks = FakeHoldTasks::default();
+/// A watch over `repo` and `github`, on a task queue of its own, and the
+/// base of a new Run of Julia's it watches.
+async fn watching(repo: &FakeRepo) -> (MainWatch, Repository) {
     let julia = MacroUserIdStr::try_from("macro|julia@example.com".to_string()).expect("valid");
     let repository = Repository {
         url: format!("https://github.com/macro/app-{}", Uuid::now_v7().simple()),
@@ -951,27 +942,88 @@ async fn a_base_s_watch_holds_it_while_red_and_ends_once_green() {
     )
     .await
     .expect("insert");
-    let watch = MainWatch::of(run_id, &repository);
+    (MainWatch::of(run_id, &repository), repository)
+}
 
+/// Run a worker for the watch over `repo`, `github` and `tasks` until
+/// `drive` returns, and return what it returned.
+async fn with_watch_worker<T>(
+    repo: &FakeRepo,
+    github: &FakeGithub,
+    tasks: &FakeHoldTasks,
+    drive: impl AsyncFnOnce(Client, TemporalMainWatches) -> T,
+) -> T {
+    let client = client().await;
     let task_queue = format!("factory-test-{}", Uuid::now_v7());
     let runtime = Runtime::from_current_tokio(Default::default()).expect("runtime");
     let worker = worker_on(
         &task_queue,
         &runtime,
         client.clone(),
-        StepServiceImpl::new(repo.clone(), steps_of(&Agent::doing(Work::Works), &repo)),
+        StepServiceImpl::new(repo.clone(), steps_of(&Agent::doing(Work::Works), repo)),
         MainWatchServiceImpl::new(repo.clone(), github.clone(), tasks.clone()),
     )
     .expect("worker");
     let watches = TemporalMainWatches::on(client.clone(), &task_queue);
-
     let done = Notify::new();
-    let watched = async {
+    let driven = async {
+        let driven = drive(client, watches).await;
+        done.notify_one();
+        driven
+    };
+    let (worked, driven) = tokio::join!(worker.run_until(done.notified()), driven);
+    worked.expect("the worker ran");
+    driven
+}
+
+/// The watch's end, once it ends.
+async fn watch_end(client: &Client, watch: &MainWatch) {
+    tokio::time::timeout(
+        PATIENCE,
+        client
+            .get_workflow_handle::<MainWatchWorkflowDefinition>(watch.workflow_id())
+            .get_result(WorkflowGetResultOptions::default()),
+    )
+    .await
+    .expect("the watch ends")
+    .expect("the watch ended well");
+}
+
+/// The watch of a red base holds it and files its task once, and a second
+/// merge's signal reaches the watch that runs. Held, it looks past the
+/// looks one run takes, continuing as new, and ends once the base's checks
+/// pass, clearing the hold.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "Temporal doesn't exist in CI"]
+async fn a_base_s_watch_holds_it_while_red_and_ends_once_green() {
+    let repo = FakeRepo::default();
+    let github = FakeGithub::default();
+    github.state().required = Some(RequiredChecks {
+        checks: vec![RequiredCheck {
+            name: "test".to_string(),
+            app_id: None,
+        }],
+        complete: true,
+    });
+    github.state().base = Some((
+        "2222222222222222222222222222222222222222".to_string(),
+        ci(Some("failure")),
+    ));
+    let tasks = FakeHoldTasks::default();
+    let (watch, repository) = watching(&repo).await;
+
+    with_watch_worker(&repo, &github, &tasks, async |client, watches| {
         watches.watch(&watch).await.expect("start");
         tokio::time::timeout(PATIENCE, tasks.filing.notified())
             .await
             .expect("the task is filed");
-        watches.watch(&watch).await.expect("start again");
+        watches.watch(&watch).await.expect("signal");
+        // Past the three looks one run takes in the tests.
+        for _ in 0..5 {
+            tokio::time::timeout(PATIENCE, github.base_read.notified())
+                .await
+                .expect("the watch looks again");
+        }
         assert!(
             repo.main_hold(&repository)
                 .await
@@ -983,20 +1035,46 @@ async fn a_base_s_watch_holds_it_while_red_and_ends_once_green() {
             "2222222222222222222222222222222222222222".to_string(),
             ci(Some("success")),
         ));
-        let ended = tokio::time::timeout(
-            PATIENCE,
-            client
-                .get_workflow_handle::<MainWatchWorkflowDefinition>(watch.workflow_id())
-                .get_result(WorkflowGetResultOptions::default()),
-        )
-        .await
-        .expect("the watch ends");
-        done.notify_one();
-        ended
-    };
-    let (worked, ended) = tokio::join!(worker.run_until(done.notified()), watched);
-    worked.expect("the worker ran");
-    ended.expect("the watch ended well");
+        watch_end(&client, &watch).await;
+    })
+    .await;
     assert_eq!(repo.main_hold(&repository).await.expect("read"), None);
     assert_eq!(tasks.filed().len(), 1);
+}
+
+/// A watch with nothing held, whose base's checks never finish, ends once
+/// the base's latest merge is hours old.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "Temporal doesn't exist in CI"]
+async fn an_unheld_watch_ends_hours_after_the_latest_merge() {
+    let repo = FakeRepo::default();
+    let github = FakeGithub::default();
+    github.state().required = Some(RequiredChecks {
+        checks: vec![RequiredCheck {
+            name: "test".to_string(),
+            app_id: None,
+        }],
+        complete: true,
+    });
+    github.state().base = Some((
+        "2222222222222222222222222222222222222222".to_string(),
+        ci(None),
+    ));
+    let tasks = FakeHoldTasks::default();
+    let (watch, repository) = watching(&repo).await;
+    repo.record_merge(
+        watch.run_id,
+        3,
+        "https://github.com/macro/app/pull/3",
+        chrono::Utc::now() - chrono::TimeDelta::hours(7),
+    )
+    .await
+    .expect("merge");
+
+    with_watch_worker(&repo, &github, &tasks, async |client, watches| {
+        watches.watch(&watch).await.expect("start");
+        watch_end(&client, &watch).await;
+    })
+    .await;
+    assert_eq!(repo.main_hold(&repository).await.expect("read"), None);
 }

@@ -6,7 +6,9 @@
 //! Renaming any of them strands the Runs in flight.
 
 use factory_records::domain::models::RunOutcome;
-use temporalio_common::{HasWorkflowDefinition, UpdateDefinition, WorkflowDefinition};
+use temporalio_common::{
+    HasWorkflowDefinition, SignalDefinition, UpdateDefinition, WorkflowDefinition,
+};
 
 use crate::domain::gate::AnswerGate;
 use crate::domain::main_hold::MainWatch;
@@ -23,6 +25,9 @@ pub const ANSWER_GATE_UPDATE: &str = "factory_answer_gate";
 
 /// The workflow that watches a base branch Runs merge to.
 pub const MAIN_WATCH_WORKFLOW: &str = "factory_main_watch";
+
+/// The signal that asks a base branch's watch to look again.
+pub const LOOK_AGAIN_SIGNAL: &str = "factory_look_again";
 
 /// The workflow that walks a Run's Flow, as its starter sees it.
 pub struct FlowWorkflowDefinition;
@@ -68,4 +73,17 @@ impl WorkflowDefinition for MainWatchWorkflowDefinition {
 
 impl HasWorkflowDefinition for MainWatchWorkflowDefinition {
     type Run = Self;
+}
+
+/// The signal that asks a base branch's watch to look again, as its sender
+/// sees it.
+pub struct LookAgainSignal;
+
+impl SignalDefinition for LookAgainSignal {
+    type Workflow = MainWatchWorkflowDefinition;
+    type Input = ();
+
+    fn name(&self) -> &str {
+        LOOK_AGAIN_SIGNAL
+    }
 }

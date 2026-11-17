@@ -198,7 +198,7 @@ fn verdict(
 
 /// What the checks on a commit say at `now`, given the checks its base
 /// `required`, as [`verdict`] reads an open pull request's head.
-pub(crate) fn checks_verdict(
+fn checks_verdict(
     checks: &HeadChecks,
     required: Option<&RequiredChecks>,
     now: DateTime<Utc>,
@@ -682,7 +682,10 @@ where
     }
 
     /// Record that the Run merged `pull_request` into its base `recorded`,
-    /// and watch the base's checks, which the merge may break.
+    /// and watch the base's checks, which the merge may break. The pull
+    /// request is merged either way: a watch that does not start is logged,
+    /// never the Step's failure, and the next merge or held merge to the
+    /// base starts it.
     async fn merged(
         &self,
         input: &StepInput<'_>,
@@ -698,10 +701,14 @@ where
             )
             .await
             .map_err(PullRequestStepError::records)?;
-        self.watches
+        let watched = self
+            .watches
             .watch(&MainWatch::of(input.key.run_id, recorded))
-            .await
-            .map_err(PullRequestStepError::watch)
+            .await;
+        if let Err(error) = watched {
+            tracing::warn!(?error, "the merged base's watch did not start");
+        }
+        Ok(())
     }
 
     /// Merge the commit a person agreed to merge: `merged`, also when it
@@ -709,7 +716,8 @@ where
     /// its checks run again; `refused` with GitHub's reason; or `closed`.
     /// While the base's required checks fail, a Main Hold, it waits for
     /// them to pass, and ends `held` if they still fail after
-    /// [`HOLD_WAIT`]. A merge is recorded, and the base's checks watched.
+    /// [`HOLD_WAIT`], which the `code` Flow sends back to its merge Gate.
+    /// A merge is recorded, and the base's checks watched.
     pub async fn merge(&self, input: StepInput<'_>) -> Result<StepReport, PullRequestStepError> {
         let (repository, recorded) = Self::repository(&input)?;
         let head = self

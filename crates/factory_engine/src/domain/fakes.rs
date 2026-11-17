@@ -736,6 +736,8 @@ pub(crate) struct FakeGithubState {
     /// The base branch's head commit and the checks on it; none when the
     /// owner reaches no such branch.
     pub(crate) base: Option<(String, HeadChecks)>,
+    /// Whether reads of the base branch fail, as GitHub down does.
+    pub(crate) base_unreadable: bool,
 }
 
 /// GitHub in memory, for one Run's branch: opening its pull request makes
@@ -745,6 +747,8 @@ pub(crate) struct FakeGithub {
     pub(crate) state: Arc<Mutex<FakeGithubState>>,
     /// Told each time the pull request is looked for.
     pub(crate) read: Arc<tokio::sync::Notify>,
+    /// Told each time the base branch's checks are read.
+    pub(crate) base_read: Arc<tokio::sync::Notify>,
 }
 
 impl FakeGithub {
@@ -870,7 +874,15 @@ impl PullRequests for FakeGithub {
         _branch: &str,
         _all_runs: bool,
     ) -> Result<Option<(String, HeadChecks)>, FakeError> {
-        Ok(self.state().base.clone())
+        let read = {
+            let state = self.state();
+            if state.base_unreadable {
+                return Err(FakeError);
+            }
+            state.base.clone()
+        };
+        self.base_read.notify_one();
+        Ok(read)
     }
 
     async fn required_checks(
@@ -879,7 +891,11 @@ impl PullRequests for FakeGithub {
         _repository: &CodeRepository,
         _base: &str,
     ) -> Result<Option<RequiredChecks>, FakeError> {
-        Ok(self.state().required.clone())
+        let state = self.state();
+        if state.base_unreadable {
+            return Err(FakeError);
+        }
+        Ok(state.required.clone())
     }
 
     async fn file_text(

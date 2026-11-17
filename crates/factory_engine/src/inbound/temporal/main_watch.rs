@@ -1,14 +1,19 @@
 //! `MainWatchWorkflow`: the watch of a base branch Runs merge to, one per
 //! base, which sets and clears its Main Hold.
 //!
-//! A merge starts it, and so does a `merge` that finds its base held, when
-//! none runs. It looks at the checks on the base's head at once, then every
+//! Each merge signals it to look again (`factory_look_again`), starting it
+//! when none runs, and so does a `merge` that finds its base held. It looks
+//! at the checks the base requires on its head at once, then every
 //! [`LOOK_EVERY`]: a red look holds the base and files the task with the
-//! suspect merges, once per red period, and a green look clears the hold
-//! and ends the watch. While nothing holds the base and its checks have not
-//! finished, it gives up after [`UNHELD_LOOKS`] looks; a held base is
-//! watched until it is green, across continue-as-new. Each look is one
-//! activity: what the watch decides comes only from their results.
+//! suspect merges, once per red period, and a green look clears the hold.
+//! It ends only when a look says it may ([`MainLook::ends_watch`]): never
+//! while the base is held or a look fails, and, while checks run with
+//! nothing held, once the base's latest merge is hours old. A signal that
+//! arrives during the last look makes it look again rather than end; one
+//! that arrives as it ends fails that end, so Temporal replays the watch
+//! with the signal. It continues as new every [`LOOKS_PER_RUN`] looks. Each
+//! look is one activity: what the watch decides comes only from their
+//! results and the signals.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -16,15 +21,15 @@ use std::time::Duration;
 use temporalio_macros::{activities, workflow, workflow_methods};
 use temporalio_sdk::activities::{ActivityContext, ActivityError};
 use temporalio_sdk::{
-    ActivityCloseTimeouts, ActivityOptions, ContinueAsNewOptions, WorkflowContext, WorkflowResult,
-    WorkflowTermination,
+    ActivityCloseTimeouts, ActivityOptions, ContinueAsNewOptions, SyncWorkflowContext,
+    WorkflowContext, WorkflowResult, WorkflowTermination,
 };
 
-use crate::domain::main_hold::{MainLook, MainState, MainWatch};
+use crate::domain::main_hold::{MainLook, MainWatch};
 use crate::domain::models::StepError;
 use crate::domain::ports::MainWatchService;
 use crate::inbound::temporal::activities::failure;
-use crate::temporal::MAIN_WATCH_WORKFLOW;
+use crate::temporal::{LOOK_AGAIN_SIGNAL, MAIN_WATCH_WORKFLOW};
 
 /// How long the watch waits between two looks; a second in the tests, which
 /// run it on a real Temporal.
@@ -33,9 +38,12 @@ const LOOK_EVERY: Duration = Duration::from_secs(3 * 60);
 #[cfg(test)]
 const LOOK_EVERY: Duration = Duration::from_secs(1);
 
-/// How many looks in a row that hold nothing the watch takes before it
-/// ends: about an hour of checks that do not finish, or of looks that fail.
-const UNHELD_LOOKS: u32 = 20;
+/// How many looks one run of the watch takes before it continues as new,
+/// which keeps its history short; three in the tests.
+#[cfg(not(test))]
+const LOOKS_PER_RUN: u32 = 200;
+#[cfg(test)]
+const LOOKS_PER_RUN: u32 = 3;
 
 /// How long one look may take.
 const LOOK_TIMEOUT: Duration = Duration::from_secs(2 * 60);
@@ -46,12 +54,14 @@ const LOOK_TOTAL: Duration = Duration::from_secs(10 * 60);
 /// The watch of one base branch.
 #[workflow]
 #[derive(Default)]
-pub struct MainWatchWorkflow;
+pub struct MainWatchWorkflow {
+    /// Whether a merge asked for a look since the last one started.
+    again: bool,
+}
 
 #[workflow_methods]
 impl MainWatchWorkflow {
-    /// Watch `watch`'s base until its checks pass, or until it holds
-    /// nothing for [`UNHELD_LOOKS`] looks.
+    /// Watch `watch`'s base until a look says the watch may end.
     #[run(name = MAIN_WATCH_WORKFLOW)]
     pub async fn run(ctx: &mut WorkflowContext<Self>, watch: MainWatch) -> WorkflowResult<()> {
         let options =
@@ -60,8 +70,10 @@ impl MainWatchWorkflow {
                 start_to_close: LOOK_TIMEOUT,
             })
             .build();
-        let mut unheld = 0;
+        let mut looks = 0;
         loop {
+            // A look asked for from here on is one this look may not cover.
+            ctx.state_mut(|workflow| workflow.again = false);
             let looked = ctx
                 .execute_activity(
                     MainWatchActivities::look_at_main,
@@ -72,34 +84,33 @@ impl MainWatchWorkflow {
             if ctx.cancellation_token().is_cancelled() {
                 return Err(WorkflowTermination::cancelled());
             }
-            match looked {
-                Ok(MainLook {
-                    state: MainState::Green | MainState::Gone,
-                    ..
-                }) => return Ok(()),
-                Ok(MainLook { held: true, .. }) => unheld = 0,
-                // Checks that do not finish, or a look that failed, as with
-                // an owner whose GitHub link no longer works: a held base
-                // is looked at again later, when a held merge restarts the
-                // watch as its own owner.
-                Ok(MainLook { held: false, .. }) | Err(_) => {
-                    unheld += 1;
-                    if unheld >= UNHELD_LOOKS {
-                        return Ok(());
-                    }
+            looks += 1;
+
+            // A look that failed decides nothing: the base may be held.
+            let may_end = looked.as_ref().is_ok_and(MainLook::ends_watch);
+            if may_end {
+                if !ctx.state(|workflow| workflow.again) {
+                    return Ok(());
                 }
+                continue;
             }
 
             let _ = ctx.timer(LOOK_EVERY).await;
             if ctx.cancellation_token().is_cancelled() {
                 return Err(WorkflowTermination::cancelled());
             }
-            if ctx.continue_as_new_suggested() {
+            if looks >= LOOKS_PER_RUN || ctx.continue_as_new_suggested() {
                 return ctx
                     .continue_as_new(watch, ContinueAsNewOptions::default())
                     .map(|never| match never {});
             }
         }
+    }
+
+    /// Ask the watch to look again: a merge to its base landed.
+    #[signal(name = LOOK_AGAIN_SIGNAL)]
+    pub fn look_again(&mut self, _ctx: &mut SyncWorkflowContext<Self>, _input: ()) {
+        self.again = true;
     }
 }
 

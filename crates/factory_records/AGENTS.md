@@ -107,17 +107,20 @@ the Gates they asked people in MacroDB, and defines the names Flows use
 
 - `factory_merge` keeps one row per Run that merged (`record_merge`, safe
   to repeat), with the base it merged into and the time on the worker's
-  clock. `factory_main_hold` keeps one row per base branch: when its checks
-  last passed (`last_green_at`, also on the workers' clock, so the two
-  compare) and, while they fail, the hold (`held_since`, `head_sha`,
-  `failed`). `hold_main` keeps a hold's start; `clear_main_hold` ends it and
-  its red period. `suspect_merges` reads a base's merges since it was last
-  green through `factory_merge_base_idx`, newest first up to its limit, and
-  returns them oldest first. A red period files one task: `claim_hold_task`
-  claims it for the hold's start once, `release_hold_task` gives a claim
-  back when filing failed, and `record_hold_task` keeps the task's id. A
-  claim whose filing never finished, as when the worker died between the
-  two, files no task for that period.
+  clock; `latest_merge` reads a base's newest. `factory_main_hold` keeps one
+  row per base branch: when its checks last passed (`last_green_at`),
+  whether its required checks could not be read (`required_unread`, set by
+  `mark_required_unread`, which drops any hold), and, while they fail, the
+  hold (`held_since`, `head_sha`, `failed`). All its times are the reads'
+  starts on the workers' clock, so they compare with the merges'.
+  `hold_main` keeps a hold's start; `clear_main_hold` ends it and its red
+  period, unless the hold started at or after the green read did.
+  `suspect_merges` reads a base's merges since it was last green through
+  `factory_merge_base_idx`, newest first up to its limit, and returns them
+  oldest first. A red period files one task: `claim_hold_task` claims it for
+  the hold's start once, or again once a claim with no task is older than
+  `TASK_CLAIM_STALE_AFTER`; `release_hold_task` gives a claim back when
+  filing failed, and `record_hold_task` keeps the task's id.
 
 ## Related
 

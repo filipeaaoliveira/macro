@@ -8,7 +8,9 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use super::{PgRunRepository, PgRunRepositoryErr};
-use crate::domain::main_hold::{FactoryMerge, MainHold, MainHoldRepository};
+use crate::domain::main_hold::{
+    BaseState, FactoryMerge, MainHold, MainHoldRepository, TASK_CLAIM_STALE_AFTER,
+};
 use crate::domain::models::{Repository, RunId};
 
 struct HoldRow {
@@ -90,32 +92,85 @@ impl MainHoldRepository for PgRunRepository {
         }
     }
 
+    #[tracing::instrument(err, skip(self))]
+    async fn base_state(&self, base: &Repository) -> Result<BaseState, Self::Err> {
+        let row = sqlx::query!(
+            r#"
+            SELECT held_since, head_sha, failed, task_claimed_at, task_id, required_unread
+            FROM factory_main_hold
+            WHERE repo_url = $1 AND base_branch = $2
+            "#,
+            base.url,
+            base.base_branch,
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some(row) = row else {
+            return Ok(BaseState::default());
+        };
+        Ok(BaseState {
+            hold: hold(HoldRow {
+                held_since: row.held_since,
+                head_sha: row.head_sha,
+                failed: row.failed,
+                task_claimed_at: row.task_claimed_at,
+                task_id: row.task_id,
+            })?,
+            required_unread: row.required_unread,
+        })
+    }
+
     #[tracing::instrument(err, skip(self, failed))]
     async fn hold_main(
         &self,
         base: &Repository,
         head_sha: &str,
         failed: &str,
+        seen_at: DateTime<Utc>,
     ) -> Result<MainHold, Self::Err> {
         let row = sqlx::query_as!(
             HoldRow,
             r#"
             INSERT INTO factory_main_hold (repo_url, base_branch, held_since, head_sha, failed)
-            VALUES ($1, $2, now(), $3, $4)
+            VALUES ($1, $2, $5, $3, $4)
             ON CONFLICT (repo_url, base_branch) DO UPDATE
             SET held_since = COALESCE(factory_main_hold.held_since, EXCLUDED.held_since),
                 head_sha = EXCLUDED.head_sha,
-                failed = EXCLUDED.failed
+                failed = EXCLUDED.failed,
+                required_unread = false
             RETURNING held_since, head_sha, failed, task_claimed_at, task_id
             "#,
             base.url,
             base.base_branch,
             head_sha,
             failed,
+            seen_at,
         )
         .fetch_one(&self.pool)
         .await?;
         hold(row)?.ok_or(PgRunRepositoryErr::PartialHold)
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn mark_required_unread(&self, base: &Repository) -> Result<(), Self::Err> {
+        sqlx::query!(
+            r#"
+            INSERT INTO factory_main_hold (repo_url, base_branch, required_unread)
+            VALUES ($1, $2, true)
+            ON CONFLICT (repo_url, base_branch) DO UPDATE
+            SET required_unread = true,
+                held_since = NULL,
+                head_sha = NULL,
+                failed = NULL,
+                task_claimed_at = NULL,
+                task_id = NULL
+            "#,
+            base.url,
+            base.base_branch,
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     #[tracing::instrument(err, skip(self))]
@@ -124,18 +179,22 @@ impl MainHoldRepository for PgRunRepository {
         base: &Repository,
         seen_at: DateTime<Utc>,
     ) -> Result<(), Self::Err> {
-        // A read that started before the last green one leaves its time.
+        // A read that started before the last green one leaves its time,
+        // and one that started before the hold's red read clears nothing.
         sqlx::query!(
             r#"
             INSERT INTO factory_main_hold (repo_url, base_branch, last_green_at)
             VALUES ($1, $2, $3)
             ON CONFLICT (repo_url, base_branch) DO UPDATE
             SET last_green_at = GREATEST(factory_main_hold.last_green_at, EXCLUDED.last_green_at),
+                required_unread = false,
                 held_since = NULL,
                 head_sha = NULL,
                 failed = NULL,
                 task_claimed_at = NULL,
                 task_id = NULL
+            WHERE factory_main_hold.held_since IS NULL
+               OR factory_main_hold.held_since < EXCLUDED.last_green_at
             "#,
             base.url,
             base.base_branch,
@@ -195,6 +254,33 @@ impl MainHoldRepository for PgRunRepository {
     }
 
     #[tracing::instrument(err, skip(self))]
+    async fn latest_merge(&self, base: &Repository) -> Result<Option<FactoryMerge>, Self::Err> {
+        let row = sqlx::query!(
+            r#"
+            SELECT run_id, pull_request_number, pull_request_url, merged_at
+            FROM factory_merge
+            WHERE repo_url = $1 AND base_branch = $2
+            ORDER BY merged_at DESC
+            LIMIT 1
+            "#,
+            base.url,
+            base.base_branch,
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        row.map(|row| {
+            Ok(FactoryMerge {
+                run_id: RunId::from_uuid(row.run_id),
+                number: u64::try_from(row.pull_request_number)
+                    .map_err(|_| PgRunRepositoryErr::NumberOutOfRange)?,
+                url: row.pull_request_url,
+                merged_at: row.merged_at,
+            })
+        })
+        .transpose()
+    }
+
+    #[tracing::instrument(err, skip(self))]
     async fn claim_hold_task(
         &self,
         base: &Repository,
@@ -205,11 +291,17 @@ impl MainHoldRepository for PgRunRepository {
             UPDATE factory_main_hold
             SET task_claimed_at = now()
             WHERE repo_url = $1 AND base_branch = $2
-              AND held_since = $3 AND task_claimed_at IS NULL
+              AND held_since = $3
+              AND (
+                  task_claimed_at IS NULL
+                  OR (task_id IS NULL AND task_claimed_at < now() - $4::interval)
+              )
             "#,
             base.url,
             base.base_branch,
             since,
+            sqlx::postgres::types::PgInterval::try_from(TASK_CLAIM_STALE_AFTER)
+                .map_err(|_| PgRunRepositoryErr::NumberOutOfRange)?,
         )
         .execute(&self.pool)
         .await?;

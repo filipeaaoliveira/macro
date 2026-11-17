@@ -428,9 +428,13 @@ pub struct RunDetail {
     /// Its Steps, in the order they started.
     pub steps: Vec<Step>,
     /// The Main Hold on the base branch the Run merges to, while the Run
-    /// goes and the base's required checks fail: the Run does not merge
-    /// until it clears, even once its merge Gate is approved.
+    /// is at its merge and the base's required checks fail: the Run does
+    /// not merge until it clears, even once its merge Gate is approved.
     pub main_hold: Option<MainHold>,
+    /// Whether the checks the base branch requires could not be read, or
+    /// name none, while the Run is at its merge: nothing holds the merge
+    /// on them.
+    pub base_checks_unread: bool,
 }
 
 /// A Flow a person can start a Run of.

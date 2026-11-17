@@ -253,14 +253,14 @@ pub trait PullRequests: Send + Sync + 'static {
     ) -> impl Future<Output = Result<Merging, Self::Err>> + Send;
 }
 
-/// Starts the watch of a base branch's checks that sets and clears its
-/// Main Hold.
+/// Asks the watch of a base branch's checks, which sets and clears its
+/// Main Hold, to look again.
 pub trait MainWatches: Send + Sync + 'static {
-    /// The error type returned when the watch cannot be started.
+    /// The error type returned when the watch cannot be asked.
     type Err: std::error::Error + Retryable + Send + Sync + 'static;
 
-    /// Watch `watch`'s base branch, unless a watch of it already runs, which
-    /// goes on as it was.
+    /// Ask the watch of `watch`'s base branch to look again, starting it
+    /// when none runs. A watch about to end looks again instead.
     fn watch(&self, watch: &MainWatch) -> impl Future<Output = Result<(), Self::Err>> + Send;
 }
 
@@ -283,8 +283,9 @@ pub trait HoldTasks: Send + Sync + 'static {
 /// to do.
 pub trait MainWatchService: Send + Sync + 'static {
     /// Look at the checks on the head of `watch`'s base branch once: hold
-    /// the base when they fail, filing the task with the suspect merges once
-    /// per red period, and clear the hold when they pass.
+    /// the base when its required checks fail, filing the task with the
+    /// suspect merges once per red period, and clear the hold when they
+    /// pass. GitHub that cannot be read leaves the base as it was.
     fn look(&self, watch: MainWatch) -> impl Future<Output = Result<MainLook, StepError>> + Send;
 }
 

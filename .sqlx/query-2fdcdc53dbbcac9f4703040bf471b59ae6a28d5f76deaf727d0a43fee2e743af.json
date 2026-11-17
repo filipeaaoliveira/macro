@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            INSERT INTO factory_main_hold (repo_url, base_branch, held_since, head_sha, failed)\n            VALUES ($1, $2, now(), $3, $4)\n            ON CONFLICT (repo_url, base_branch) DO UPDATE\n            SET held_since = COALESCE(factory_main_hold.held_since, EXCLUDED.held_since),\n                head_sha = EXCLUDED.head_sha,\n                failed = EXCLUDED.failed\n            RETURNING held_since, head_sha, failed, task_claimed_at, task_id\n            ",
+  "query": "\n            INSERT INTO factory_main_hold (repo_url, base_branch, held_since, head_sha, failed)\n            VALUES ($1, $2, $5, $3, $4)\n            ON CONFLICT (repo_url, base_branch) DO UPDATE\n            SET held_since = COALESCE(factory_main_hold.held_since, EXCLUDED.held_since),\n                head_sha = EXCLUDED.head_sha,\n                failed = EXCLUDED.failed,\n                required_unread = false\n            RETURNING held_since, head_sha, failed, task_claimed_at, task_id\n            ",
   "describe": {
     "columns": [
       {
@@ -34,7 +34,8 @@
         "Text",
         "Text",
         "Text",
-        "Text"
+        "Text",
+        "Timestamptz"
       ]
     },
     "nullable": [
@@ -45,5 +46,5 @@
       true
     ]
   },
-  "hash": "e3bb81df15006375e493c7e28129adc65a5c234248ca582f37c4d570d013589a"
+  "hash": "2fdcdc53dbbcac9f4703040bf471b59ae6a28d5f76deaf727d0a43fee2e743af"
 }

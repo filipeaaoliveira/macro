@@ -1,4 +1,4 @@
-use chrono::{TimeDelta, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use macro_db_migrator::MACRO_DB_MIGRATIONS;
 use macro_user_id::user_id::MacroUserIdStr;
 use sqlx::PgPool;
@@ -11,6 +11,10 @@ use crate::domain::ports::RunRepository;
 
 const RED_HEAD: &str = "2222222222222222222222222222222222222222";
 const TASK: &str = "00000000-0000-7000-8000-000000000101";
+
+fn a_minute_ago() -> DateTime<Utc> {
+    Utc::now() - TimeDelta::minutes(1)
+}
 
 fn main_of_app() -> Repository {
     Repository {
@@ -45,7 +49,7 @@ async fn a_red_base_is_held_until_a_green_look_clears_it(pool: PgPool) {
     assert_eq!(repo.main_hold(&base).await.expect("read"), None);
 
     let first = repo
-        .hold_main(&base, RED_HEAD, "- test (failure)")
+        .hold_main(&base, RED_HEAD, "- test (failure)", a_minute_ago())
         .await
         .expect("hold");
     let again = repo
@@ -53,6 +57,7 @@ async fn a_red_base_is_held_until_a_green_look_clears_it(pool: PgPool) {
             &base,
             "3333333333333333333333333333333333333333",
             "- lint (failure)",
+            Utc::now(),
         )
         .await
         .expect("hold again");
@@ -85,7 +90,7 @@ async fn a_red_period_claims_its_task_once(pool: PgPool) {
     let repo = PgRunRepository::new(pool);
     let base = main_of_app();
     let hold = repo
-        .hold_main(&base, RED_HEAD, "- test (failure)")
+        .hold_main(&base, RED_HEAD, "- test (failure)", a_minute_ago())
         .await
         .expect("hold");
     assert!(!hold.task_claimed);
@@ -141,7 +146,7 @@ async fn a_red_period_claims_its_task_once(pool: PgPool) {
         .await
         .expect("clear");
     let next = repo
-        .hold_main(&base, RED_HEAD, "- test (failure)")
+        .hold_main(&base, RED_HEAD, "- test (failure)", a_minute_ago())
         .await
         .expect("hold");
     assert_eq!(next.task_id, None);
@@ -216,4 +221,119 @@ async fn the_suspects_are_the_merges_since_the_base_was_last_green(pool: PgPool)
     let newest = repo.suspect_merges(&base, 2).await.expect("suspects");
     let numbers: Vec<u64> = newest.iter().map(|merge| merge.number).collect();
     assert_eq!(numbers, vec![3, 4]);
+}
+
+/// A green read that started before the hold's red one clears nothing; one
+/// that started after it clears the hold.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn a_green_read_older_than_the_hold_clears_nothing(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let base = main_of_app();
+    let red_at = a_minute_ago();
+    repo.hold_main(&base, RED_HEAD, "- test (failure)", red_at)
+        .await
+        .expect("hold");
+
+    repo.clear_main_hold(&base, red_at - TimeDelta::seconds(1))
+        .await
+        .expect("stale green");
+    assert!(repo.main_hold(&base).await.expect("read").is_some());
+
+    repo.clear_main_hold(&base, Utc::now())
+        .await
+        .expect("green");
+    assert_eq!(repo.main_hold(&base).await.expect("read"), None);
+}
+
+/// A claim that never got its task is overtaken once it is stale, so a
+/// look that died between the claim and the filing does not skip the red
+/// period; a fresh claim is not.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn a_stale_claim_with_no_task_is_claimed_again(pool: PgPool) {
+    let repo = PgRunRepository::new(pool.clone());
+    let base = main_of_app();
+    let hold = repo
+        .hold_main(&base, RED_HEAD, "- test (failure)", a_minute_ago())
+        .await
+        .expect("hold");
+    assert!(
+        repo.claim_hold_task(&base, hold.since)
+            .await
+            .expect("claim")
+    );
+    assert!(
+        !repo
+            .claim_hold_task(&base, hold.since)
+            .await
+            .expect("fresh")
+    );
+
+    sqlx::query!("UPDATE factory_main_hold SET task_claimed_at = now() - interval '16 minutes'")
+        .execute(&pool)
+        .await
+        .expect("age the claim");
+    assert!(
+        repo.claim_hold_task(&base, hold.since)
+            .await
+            .expect("stale")
+    );
+}
+
+/// Required checks that could not be read leave the base unheld and say
+/// so; a later red or green read forgets it.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn unread_required_checks_hold_nothing(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let base = main_of_app();
+    repo.hold_main(&base, RED_HEAD, "- test (failure)", a_minute_ago())
+        .await
+        .expect("hold");
+
+    repo.mark_required_unread(&base).await.expect("unread");
+    let state = repo.base_state(&base).await.expect("read");
+    assert_eq!(state.hold, None);
+    assert!(state.required_unread);
+
+    repo.hold_main(&base, RED_HEAD, "- test (failure)", Utc::now())
+        .await
+        .expect("hold");
+    let state = repo.base_state(&base).await.expect("read");
+    assert!(state.hold.is_some());
+    assert!(!state.required_unread);
+}
+
+/// The latest merge is the base's newest, none before any.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn the_latest_merge_is_the_base_s_newest(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let base = main_of_app();
+    assert_eq!(repo.latest_merge(&base).await.expect("read"), None);
+
+    let older = code_run(&repo, Some(&base)).await;
+    let newer = code_run(&repo, Some(&base)).await;
+    repo.record_merge(newer, 2, "https://github.com/macro/app/pull/2", Utc::now())
+        .await
+        .expect("merge");
+    repo.record_merge(
+        older,
+        1,
+        "https://github.com/macro/app/pull/1",
+        a_minute_ago(),
+    )
+    .await
+    .expect("merge");
+    let latest = repo.latest_merge(&base).await.expect("read").expect("one");
+    assert_eq!(latest.run_id, newer);
 }
