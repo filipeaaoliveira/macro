@@ -676,6 +676,24 @@ async fn a_follow_up_goes_on_in_the_session_under_its_own_id() {
 }
 
 #[tokio::test]
+async fn a_follow_up_needs_a_session_that_took_its_first_prompt() {
+    let fx = Fixture::new(true);
+
+    let refused = fx
+        .service
+        .follow_up(PromptRoutineSession {
+            action: fx.action(),
+            prompt: "run the checks".into(),
+            context: None,
+        })
+        .await
+        .unwrap_err();
+
+    assert_eq!(refused, RoutineSessionError::InvalidCommand);
+    assert!(fx.controls.events.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn a_follow_up_the_session_already_holds_is_refused() {
     let fx = Fixture::new(true);
     let taken = fx.action();

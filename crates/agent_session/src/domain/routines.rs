@@ -32,7 +32,8 @@ pub trait RoutineSessions: Send + Sync + 'static {
     ) -> impl Future<Output = Result<RoutinePromptAccepted, RoutineSessionError>> + Send;
 
     /// Submit a later prompt once, under its own action id, to a session
-    /// that took its first prompt: the opener goes on in the same session.
+    /// that took its first prompt (one that took none is an invalid
+    /// command): the opener goes on in the same session.
     /// The id names the prompt for [`Self::status`], and a prompt the
     /// session already holds under it is refused with a conflict. Never
     /// replay it after an ambiguous failure, as for the first prompt.

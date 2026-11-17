@@ -314,10 +314,20 @@ where
         for row in log.entries {
             let _ = fold.push(row.entry);
         }
-        let in_history = fold.inner().messages().iter().any(|message| {
-            matches!(message.author, Author::User { .. })
-                && message.request_id == Some(action.action_id)
-        });
+        let prompts: Vec<_> = fold
+            .inner()
+            .messages()
+            .iter()
+            .filter(|message| matches!(message.author, Author::User { .. }))
+            .collect();
+        // A follow-up goes on from a first prompt; a session with none takes
+        // its first through `prompt`, under that prompt's guard.
+        if prompts.is_empty() {
+            return Err(RoutineSessionError::InvalidCommand);
+        }
+        let in_history = prompts
+            .iter()
+            .any(|message| message.request_id == Some(action.action_id));
         let queued = self
             .controls
             .queued_controls(action.session_id)
