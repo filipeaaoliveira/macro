@@ -78,6 +78,9 @@ pub struct StepInput<'a> {
     /// Whether the Run's owner created it in their own signed-in session:
     /// only then does its request ask for the Control Files it names.
     pub created_in_person: bool,
+    /// The Control File patterns the Run keeps from its creation; none for
+    /// a Run created before Runs kept them, which the default checks.
+    pub control_file_patterns: Option<&'a [String]>,
     /// The Macro task the Run works on: its task document's id.
     pub task_id: Option<Uuid>,
     /// The repository the Run works on, if it works on one.

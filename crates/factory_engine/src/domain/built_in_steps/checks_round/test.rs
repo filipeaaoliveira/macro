@@ -196,6 +196,7 @@ fn input() -> StepInput<'static> {
         owner: &JULIA,
         request: "Add a dark mode toggle",
         created_in_person: true,
+        control_file_patterns: None,
         task_id: None,
         repository: Some(&REPOSITORY),
         earlier: &[],

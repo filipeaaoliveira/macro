@@ -269,3 +269,103 @@ async fn only_a_team_admin_sets_patterns_that_read() {
     ));
     assert!(repo.control_files.lock().expect("patterns").is_empty());
 }
+
+/// A Run keeps the patterns its owner's team had when it was created, and
+/// the team they came from: a change to the team's list later does not
+/// change it. A Run whose owner's team set none keeps the default.
+#[tokio::test]
+async fn a_run_keeps_the_patterns_it_was_created_with() {
+    let repo = FakeRepo::default();
+    let service = service(&repo, &FakeWorkflows::default());
+    let team_id = Uuid::now_v7();
+    repo.teams.lock().expect("teams").insert(
+        julia().to_string(),
+        TeamMembership {
+            team_id,
+            admin: true,
+        },
+    );
+    let create = || {
+        service.create_run(
+            julia(),
+            "reply".to_string(),
+            "Fix the login bug".to_string(),
+            None,
+            None,
+            true,
+        )
+    };
+
+    let with_default = create().await.expect("create");
+    repo.set_team_control_files(team_id, Some(&files(&["ci/**"])))
+        .await
+        .expect("set");
+    let with_own = create().await.expect("create");
+    repo.set_team_control_files(team_id, Some(&files(&["Makefile"])))
+        .await
+        .expect("change");
+
+    let read = |id| {
+        repo.runs
+            .lock()
+            .expect("runs")
+            .get(&id)
+            .map(|run| (run.control_file_patterns.clone(), run.control_files_team_id))
+            .expect("kept")
+    };
+    assert_eq!(
+        read(with_default.run.id),
+        (Some(ControlFiles::default_patterns()), None)
+    );
+    assert_eq!(
+        read(with_own.run.id),
+        (Some(files(&["ci/**"])), Some(team_id))
+    );
+}
+
+/// An agent's account signs in as a person does, yet creates no Run in
+/// person, answers no Gate and sets no team's patterns, though it
+/// administers the team.
+#[tokio::test]
+async fn an_agent_account_is_never_in_person() {
+    let repo = FakeRepo::default();
+    let workflows = FakeWorkflows::default();
+    let service = service(&repo, &workflows);
+    repo.agent_accounts
+        .lock()
+        .expect("agent accounts")
+        .insert(julia().to_string());
+    repo.teams.lock().expect("teams").insert(
+        julia().to_string(),
+        TeamMembership {
+            team_id: Uuid::now_v7(),
+            admin: true,
+        },
+    );
+    let run_id = julia_s_run(&repo).await;
+
+    let created = service
+        .create_run(
+            julia(),
+            "reply".to_string(),
+            "Fix ci.yml".to_string(),
+            None,
+            None,
+            true,
+        )
+        .await
+        .expect("create");
+    let answered = service
+        .answer_gate(julia(), run_id, 1, approve(), None, None)
+        .await;
+    let set = service
+        .set_control_files(julia(), Some(files(&["ci/**"])))
+        .await;
+    let read = service.control_files(&julia()).await.expect("read");
+
+    assert!(!created.run.created_in_person);
+    assert!(matches!(answered, Err(FactoryError::NotAPerson)));
+    assert!(matches!(set, Err(FactoryError::NotAPerson)));
+    assert!(!read.can_edit);
+    assert!(workflows.answers.lock().expect("answers").is_empty());
+}

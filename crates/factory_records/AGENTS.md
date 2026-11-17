@@ -85,8 +85,9 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `WHERE` and `ORDER BY` on that index's columns.
 - `answer_gate` runs after the workflow took the answer, so it must not fail on
   an account deleted since: it records the answer with no author instead.
-  The crate never reads `"User"`; who has an account is the authentication
-  service's to say (`factory_engine`'s `UserDirectory`).
+  Who has an account is the authentication service's to say
+  (`factory_engine`'s `UserDirectory`); the crate reads `"User"` only for
+  whether an account is an agent's.
 - `factory_run.flow` is the built-in Flow's name, which `insert_run` keeps;
   it is null only for Runs recorded before it was.
 - `read_insights` reads one person's newest Runs in a period through
@@ -105,14 +106,17 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `control_files_unlisted` keep the Control Files the Run's branch last
   changed (`Run::control_files`), replaced by each
   `set_control_file_changes`; both lists null when it changed none.
-  `created_in_person` is set once, by `insert_run`.
+  `created_in_person`, `control_file_patterns` and `control_files_team_id`
+  are set once, by `insert_run` (`NewRun`); the team id is a record, not a
+  reference.
   `factory_gate.approved_control_files` keeps the files an answer approved,
   written with the answer by `answer_gate`, and only with one.
 - `factory_team_settings` keeps a team's own Control File patterns
   (`team_control_files`, `set_team_control_files`); no row means the
   factory's default applies, and it goes with the team. `team_of` reads a
   person's team and role from `team_user`, as other features' records do:
-  a person is on at most one team.
+  a person is on at most one team, and an agent's account
+  (`"User"."isAgent"`, which `is_agent_account` reads) is never an admin.
 
 ## Related
 

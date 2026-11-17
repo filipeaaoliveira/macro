@@ -46,6 +46,8 @@ async fn insert(repo: &PgRunRepository, id: RunId, request: &str) -> Run {
             task_id: None,
             repository: None,
             created_in_person: false,
+            control_file_patterns: &[],
+            control_files_team_id: None,
         })
         .await
         .expect("insert")
@@ -350,6 +352,8 @@ async fn a_run_keeps_its_repository_and_the_commit_it_asks_to_merge(pool: PgPool
             task_id: None,
             repository: Some(&repository),
             created_in_person: false,
+            control_file_patterns: &[],
+            control_files_team_id: None,
         })
         .await
         .expect("insert");
@@ -392,6 +396,8 @@ async fn a_run_is_kept_with_its_task_in_one_write(pool: PgPool) {
             task_id: Some(task(LOGIN_TASK)),
             repository: None,
             created_in_person: false,
+            control_file_patterns: &[],
+            control_files_team_id: None,
         })
         .await
         .expect("insert");
@@ -404,6 +410,8 @@ async fn a_run_is_kept_with_its_task_in_one_write(pool: PgPool) {
             task_id: Some(Uuid::now_v7()),
             repository: None,
             created_in_person: false,
+            control_file_patterns: &[],
+            control_files_team_id: None,
         })
         .await
         .expect("insert for a missing task");
@@ -1171,6 +1179,8 @@ async fn insert_on_task(
             task_id: Some(task(task_id)),
             repository: None,
             created_in_person: false,
+            control_file_patterns: &[],
+            control_files_team_id: None,
         })
         .await
         .expect("insert")

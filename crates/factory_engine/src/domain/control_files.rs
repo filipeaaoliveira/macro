@@ -19,7 +19,9 @@
 //! against each changed path from the repository's root, ignoring case:
 //! `*` stays within one folder, `**` spans any number of them, and
 //! `**/name` also matches `name` at the root. [`DEFAULT_CONTROL_FILES`] is
-//! the list a team has until its admins set their own.
+//! the list a team has until its admins set their own. A Run keeps the
+//! list its owner's team had when it was created, so a change to the
+//! team's list later does not change a Run under way.
 //!
 //! A path says nothing of what a change does inside a file, so a check
 //! weakened in ordinary source, such as a lint suppression, an ignored
@@ -52,7 +54,13 @@ pub const DEFAULT_CONTROL_FILES: &[&str] = &[
     "**/justfile",
     "**/Makefile",
     "**/GNUmakefile",
-    "Cargo.toml",
+    "**/Cargo.toml",
+    "**/build.rs",
+    "rust-toolchain*",
+    "scripts/**",
+    ".npmrc",
+    "pnpm-workspace.yaml",
+    "turbo.json",
     // Test and lint configuration.
     ".config/**",
     "**/biome*.json*",
@@ -61,6 +69,7 @@ pub const DEFAULT_CONTROL_FILES: &[&str] = &[
     "**/tsconfig*.json",
     "**/vite.config.*",
     "**/vitest.config.*",
+    "**/vitest.workspace.*",
     "**/jest.config.*",
     "**/playwright.config.*",
     "**/clippy.toml",
@@ -81,6 +90,7 @@ pub const DEFAULT_CONTROL_FILES: &[&str] = &[
     "**/*.spec.*",
     "**/test.rs",
     "**/tests.rs",
+    "**/*_test.rs",
     "**/*_test.go",
     "**/test_*.py",
     "**/snapshots/**",

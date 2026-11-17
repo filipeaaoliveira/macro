@@ -310,9 +310,18 @@ pub struct Run {
     /// The GitHub repository the Run works on; none for a Run that works on
     /// no code.
     pub repository: Option<Repository>,
-    /// Whether its owner created it in their own signed-in session: only
-    /// then does its request ask for the Control Files it names.
+    /// Whether its owner created it in their own signed-in session, from an
+    /// account that is not an agent's: only then does its request ask for
+    /// the Control Files it names.
     pub created_in_person: bool,
+    /// The Control File patterns it is checked against, as its owner's team
+    /// had them when it was created; none for a Run created before Runs
+    /// kept them, which the factory's default checks.
+    #[serde(skip)]
+    pub control_file_patterns: Option<Vec<String>>,
+    /// The team those patterns came from; none when they are the default.
+    #[serde(skip)]
+    pub control_files_team_id: Option<Uuid>,
     /// The Control Files its branch changed, as the pull request Steps last
     /// read them. None when it changed none.
     pub control_files: Option<ControlFileChanges>,
@@ -334,8 +343,8 @@ pub struct ControlFileChanges {
     /// approval: empty when `unlisted`.
     pub named: Vec<String>,
     /// GitHub could not list all of the branch's changes, or they were more
-    /// than [`Self::MAX_FILES`], so which Control Files it changed is not
-    /// known.
+    /// than a Run keeps (300 a list), so which Control Files it changed is
+    /// not known.
     pub unlisted: bool,
 }
 
@@ -365,7 +374,8 @@ impl ControlFileChanges {
 pub struct TeamMembership {
     /// The team.
     pub team_id: Uuid,
-    /// Whether they are its owner or one of its admins.
+    /// Whether they are its owner or one of its admins, from an account
+    /// that is not an agent's.
     pub admin: bool,
 }
 
@@ -397,6 +407,10 @@ pub struct NewRun<'a> {
     pub repository: Option<&'a Repository>,
     /// Whether its owner created it in their own signed-in session.
     pub created_in_person: bool,
+    /// The Control File patterns it is checked against.
+    pub control_file_patterns: &'a [String],
+    /// The team those patterns came from; none when they are the default.
+    pub control_files_team_id: Option<Uuid>,
 }
 
 /// What keeping a new Run came to.

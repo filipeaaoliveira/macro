@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT team_id, team_role IN ('admin', 'owner') AS \"admin!\"\n            FROM team_user\n            WHERE user_id = $1\n            LIMIT 1\n            ",
+  "query": "\n            SELECT tu.team_id, (tu.team_role IN ('admin', 'owner') AND NOT u.\"isAgent\") AS \"admin!\"\n            FROM team_user tu\n            JOIN \"User\" u ON u.id = tu.user_id\n            WHERE tu.user_id = $1\n            LIMIT 1\n            ",
   "describe": {
     "columns": [
       {
@@ -24,5 +24,5 @@
       null
     ]
   },
-  "hash": "c93d38697b1d89c6e1fa73c6925af319216968ac117c40c092af4571840dddfc"
+  "hash": "f496d93051234c36ccbf79c9e578d3e1c0378419a6ca936d56e37b2282a8cdc1"
 }

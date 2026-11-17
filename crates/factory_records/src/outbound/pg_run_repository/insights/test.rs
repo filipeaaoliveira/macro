@@ -289,6 +289,8 @@ async fn a_new_run_is_read_with_its_flow(pool: PgPool) {
             task_id: None,
             repository: None,
             created_in_person: false,
+            control_file_patterns: &[],
+            control_files_team_id: None,
         })
         .await
         .expect("insert")

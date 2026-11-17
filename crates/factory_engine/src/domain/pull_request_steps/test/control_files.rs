@@ -4,10 +4,9 @@
 
 use chrono::Utc;
 use factory_records::domain::models::{
-    ControlFileChanges, EntryId, Gate, GateAnswer, Outcome, RunId, Step, StepEnd, TeamMembership,
+    ControlFileChanges, EntryId, Gate, GateAnswer, NewRun, Outcome, RunId, Step, StepEnd,
 };
 use factory_records::domain::ports::RunRepository;
-use uuid::Uuid;
 
 use super::{JULIA, input, outcome, steps};
 use crate::domain::fakes::{FakeGithub, FakeRepo, ci};
@@ -175,31 +174,57 @@ async fn ready_to_merge_names_the_control_files_of_the_head() {
     assert_eq!(github.state().compared, [FakeGithub::HEAD]);
 }
 
-/// A pull request merged outside the Run still has its Control Files kept,
-/// whether `ready_to_merge` or `merge` finds it merged.
+/// A pull request merged outside the Run keeps the Control Files read
+/// while it was open: once merged, GitHub's comparison lists no change, so
+/// `publish`, `ready_to_merge` and `merge` name the kept files rather than
+/// read them again.
 #[tokio::test]
 async fn a_pull_request_merged_outside_the_run_keeps_its_control_files() {
-    for merging in [false, true] {
+    for step in ["publish", "ready_to_merge", "merge"] {
         let github = github_changing(Some(&["package.json"]));
-        if let Some(pull_request) = github.state().pull_request.as_mut() {
-            pull_request.state = PullRequestState::Merged;
-        }
         let repo = FakeRepo::default();
         let run_id = RunId::generate();
+        repo.insert_run(NewRun {
+            id: run_id,
+            flow: "code",
+            request: "Collapse repeated dashes in slugs",
+            user_id: &JULIA,
+            task_id: None,
+            repository: None,
+            created_in_person: true,
+            control_file_patterns: &[],
+            control_files_team_id: None,
+        })
+        .await
+        .expect("insert");
         repo.set_merge_head(run_id, FakeGithub::HEAD)
             .await
             .expect("keep");
+        steps(&github, &repo)
+            .publish(input(run_id))
+            .await
+            .expect("publish");
+        if let Some(pull_request) = github.state().pull_request.as_mut() {
+            pull_request.state = PullRequestState::Merged;
+        }
 
-        let report = if merging {
-            steps(&github, &repo).merge(input(run_id)).await
-        } else {
-            steps(&github, &repo).ready_to_merge(input(run_id)).await
+        let steps = steps(&github, &repo);
+        let report = match step {
+            "publish" => steps.publish(input(run_id)).await,
+            "ready_to_merge" => steps.ready_to_merge(input(run_id)).await,
+            _ => steps.merge(input(run_id)).await,
         }
         .expect("step");
 
-        assert_eq!(outcome(&report), "merged");
-        assert!(report.output.contains("- `package.json`"));
-        assert_eq!(kept(&repo, run_id), tampered(&["package.json"]));
+        assert!(
+            report.output.contains("- `package.json`"),
+            "{step} names it"
+        );
+        assert_eq!(
+            kept(&repo, run_id),
+            tampered(&["package.json"]),
+            "{step} keeps it"
+        );
     }
 }
 
@@ -295,15 +320,16 @@ async fn an_unlisted_branch_merges_only_on_an_approval_of_it() {
     }
 }
 
-/// The patterns of the owner's team replace the default: a file only the
-/// default names is not a Control File, and an empty list asks GitHub
-/// nothing. An owner on no team, or whose team set none, has the default.
+/// The patterns the Run keeps from its creation replace the default: a
+/// file only the default names is not a Control File, and an empty list asks
+/// GitHub nothing. A Run that keeps none is checked against the default.
 #[tokio::test]
-async fn the_patterns_of_the_owner_s_team_replace_the_default() {
+async fn the_patterns_the_run_keeps_replace_the_default() {
     let github = github_changing(Some(&["package.json", "ci/build.yml"]));
     let repo = FakeRepo::default();
     let run_id = RunId::generate();
-    let team_id = Uuid::now_v7();
+    let own = paths(&["ci/**"]);
+    let none: Vec<String> = Vec::new();
 
     steps(&github, &repo)
         .publish(input(run_id))
@@ -311,28 +337,19 @@ async fn the_patterns_of_the_owner_s_team_replace_the_default() {
         .expect("publish");
     assert_eq!(kept(&repo, run_id), tampered(&["package.json"]));
 
-    repo.teams.lock().expect("teams").insert(
-        JULIA.to_string(),
-        TeamMembership {
-            team_id,
-            admin: false,
-        },
-    );
-    repo.set_team_control_files(team_id, Some(&paths(&["ci/**"])))
-        .await
-        .expect("set");
+    let mut with_own = input(run_id);
+    with_own.control_file_patterns = Some(&own);
     steps(&github, &repo)
-        .publish(input(run_id))
+        .publish(with_own)
         .await
         .expect("publish");
     assert_eq!(kept(&repo, run_id), tampered(&["ci/build.yml"]));
 
-    repo.set_team_control_files(team_id, Some(&[]))
-        .await
-        .expect("set");
+    let mut with_none = input(run_id);
+    with_none.control_file_patterns = Some(&none);
     let compared = github.state().compared.len();
     steps(&github, &repo)
-        .publish(input(run_id))
+        .publish(with_none)
         .await
         .expect("publish");
     assert_eq!(kept(&repo, run_id), None);

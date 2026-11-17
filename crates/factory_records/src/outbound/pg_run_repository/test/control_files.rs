@@ -14,15 +14,18 @@ fn files(paths: &[&str]) -> Vec<String> {
     paths.iter().map(|path| (*path).to_string()).collect()
 }
 
-/// A Run keeps whether it was created in person.
+/// A Run keeps whether it was created in person, and the Control File
+/// patterns it was created with and the team they came from.
 #[sqlx::test(
     migrator = "MACRO_DB_MIGRATIONS",
     fixtures(path = "../fixtures", scripts("people"))
 )]
-async fn a_run_keeps_whether_it_was_created_in_person(pool: PgPool) {
+async fn a_run_keeps_how_it_was_created(pool: PgPool) {
     let repo = PgRunRepository::new(pool);
+    let patterns = files(&["ci/**", "Makefile"]);
+    let team_id = Uuid::now_v7();
 
-    for in_person in [true, false] {
+    for (in_person, team) in [(true, Some(team_id)), (false, None)] {
         let id = RunId::generate();
         let RunInsert::Inserted(inserted) = repo
             .insert_run(NewRun {
@@ -33,6 +36,8 @@ async fn a_run_keeps_whether_it_was_created_in_person(pool: PgPool) {
                 task_id: None,
                 repository: None,
                 created_in_person: in_person,
+                control_file_patterns: &patterns,
+                control_files_team_id: team,
             })
             .await
             .expect("insert")
@@ -43,6 +48,8 @@ async fn a_run_keeps_whether_it_was_created_in_person(pool: PgPool) {
 
         assert_eq!(inserted.created_in_person, in_person);
         assert_eq!(read.created_in_person, in_person);
+        assert_eq!(read.control_file_patterns.as_ref(), Some(&patterns));
+        assert_eq!(read.control_files_team_id, team);
     }
 }
 
@@ -168,6 +175,20 @@ async fn a_person_s_team_reads_with_whether_they_administer_it(pool: PgPool) {
         })
     );
     assert_eq!(repo.team_of(&nobody).await.expect("read"), None);
+
+    // An agent's account never administers the team, whatever its role.
+    let robot =
+        macro_user_id::user_id::MacroUserIdStr::try_from("macro|robot@example.com".to_string())
+            .expect("valid");
+    assert_eq!(
+        repo.team_of(&robot).await.expect("read"),
+        Some(TeamMembership {
+            team_id,
+            admin: false,
+        })
+    );
+    assert!(repo.is_agent_account(&robot).await.expect("read"));
+    assert!(!repo.is_agent_account(&julia()).await.expect("read"));
 }
 
 /// A team with no patterns of its own has none kept; its own replace the

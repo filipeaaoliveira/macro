@@ -18,9 +18,8 @@ use factory_records::domain::models::{
     RunOutcome, Step, StepEnd,
 };
 use macro_authorization::{
-    CODE_EXECUTION_HEADER, MacroAuthorizationExtractor, MacroAuthorizationService,
-    MacroAuthorizationState, UserOnly, UserOrInternal, UserOrInternalAuthorization,
-    UserOrInternalCaller,
+    MacroAuthorizationExtractor, MacroAuthorizationService, MacroAuthorizationState, UserOnly,
+    UserOrInternal, UserOrInternalAuthorization, UserOrInternalCaller, is_program_run,
 };
 use macro_user_id::user_id::MacroUserIdStr;
 use model_error_response::ErrorResponse;
@@ -410,11 +409,14 @@ fn in_person(
     Ok(authorization.user.macro_user_id)
 }
 
-/// Whether the caller is the person in their own signed-in session.
+/// Whether the caller is the person in their own signed-in session: not an
+/// internal caller, an API key or token, an agent's or a routine's program.
+/// An agent's account signs in as a person does; the service, which reads
+/// accounts, refuses it.
 fn is_in_person(authorization: &UserOrInternalAuthorization, headers: &HeaderMap) -> bool {
     authorization.caller == UserOrInternalCaller::User
         && authorization.user.is_human_session()
-        && !headers.contains_key(CODE_EXECUTION_HEADER)
+        && !is_program_run(authorization.user.attribution(), headers)
 }
 
 /// Cancel one of the caller's Runs. Its running Step or Gate stops, and

@@ -8,7 +8,7 @@ use agent_session::domain::session_task::TaskDocumentId;
 use chrono::Utc;
 use factory_records::domain::models::{
     HandBack, MAX_NOTE_BYTES, MAX_OUTPUT_BYTES, MAX_REQUEST_BYTES, NewRun, Outcome, Repository,
-    Run, RunId, RunInsert, RunOutcome, TaskLink,
+    Run, RunId, RunInsert, RunOutcome, TaskLink, TeamMembership,
 };
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
@@ -115,6 +115,38 @@ where
         } else {
             Err(FactoryError::UnknownUser)
         }
+    }
+
+    /// Fails when `user_id`'s account is an agent's: it signs in as a person
+    /// does, yet never acts as one in person.
+    async fn not_an_agent(&self, user_id: &MacroUserIdStr<'static>) -> Result<(), FactoryError> {
+        if self
+            .repo
+            .is_agent_account(user_id)
+            .await
+            .map_err(internal)?
+        {
+            return Err(FactoryError::NotAPerson);
+        }
+        Ok(())
+    }
+
+    /// The team `user_id` is on, and the Control File patterns it set; none
+    /// for either when it has none.
+    async fn team_control_files(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+    ) -> Result<(Option<TeamMembership>, Option<Vec<String>>), FactoryError> {
+        let team = self.repo.team_of(user_id).await.map_err(internal)?;
+        let own = match team {
+            Some(team) => self
+                .repo
+                .team_control_files(team.team_id)
+                .await
+                .map_err(internal)?,
+            None => None,
+        };
+        Ok((team, own))
     }
 
     /// Fails unless the task document `task_id` is a task `user_id` can see.
@@ -234,6 +266,16 @@ where
             None => None,
         };
 
+        // The Run keeps the Control File patterns it is checked against as
+        // its owner's team has them now, so a change to the team's list,
+        // whoever makes it, does not change a Run under way. An agent's
+        // account is never its owner in person.
+        let (team, own) = self.team_control_files(&actor).await?;
+        let control_files_team_id = team.filter(|_| own.is_some()).map(|team| team.team_id);
+        let control_file_patterns = own.unwrap_or_else(ControlFiles::default_patterns);
+        let created_in_person =
+            in_person && !self.repo.is_agent_account(&actor).await.map_err(internal)?;
+
         // The Run and its task are kept in one write, so a task deleted
         // since it was checked leaves nothing behind.
         let run_id = RunId::generate();
@@ -247,7 +289,9 @@ where
                 user_id: &actor,
                 task_id,
                 repository: repository.as_ref(),
-                created_in_person: in_person,
+                created_in_person,
+                control_file_patterns: &control_file_patterns,
+                control_files_team_id,
             })
             .await
             .map_err(internal)?
@@ -368,6 +412,7 @@ where
             });
         }
         self.known(&actor).await?;
+        self.not_an_agent(&actor).await?;
         let run = self.owned_run(&actor, id).await?;
         if run.end.is_some() {
             return Err(FactoryError::RunEnded);
@@ -475,15 +520,7 @@ where
         &self,
         actor: &MacroUserIdStr<'static>,
     ) -> Result<ControlFilesSettings, FactoryError> {
-        let team = self.repo.team_of(actor).await.map_err(internal)?;
-        let own = match team {
-            Some(team) => self
-                .repo
-                .team_control_files(team.team_id)
-                .await
-                .map_err(internal)?,
-            None => None,
-        };
+        let (team, own) = self.team_control_files(actor).await?;
         Ok(ControlFilesSettings {
             is_default: own.is_none(),
             patterns: own.unwrap_or_else(ControlFiles::default_patterns),
@@ -501,6 +538,7 @@ where
         if let Some(patterns) = &patterns {
             ControlFiles::parse(patterns)?;
         }
+        self.not_an_agent(&actor).await?;
         let team = self
             .repo
             .team_of(&actor)
@@ -626,6 +664,7 @@ where
             owner: &run.user_id,
             request: &run.request,
             created_in_person: run.created_in_person,
+            control_file_patterns: run.control_file_patterns.as_deref(),
             task_id: run.task_id,
             repository: run.repository.as_ref(),
             earlier: &earlier,

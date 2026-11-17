@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            INSERT INTO factory_run\n                (id, flow, request, user_id, task_id, repo_url, base_branch, created_in_person)\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n            RETURNING\n                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,\n                tampered_files, named_control_files, control_files_unlisted, outcome, ended_at\n            ",
+  "query": "\n            SELECT\n                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted, outcome, ended_at\n            FROM factory_run\n            WHERE id = $1\n            ",
   "describe": {
     "columns": [
       {
@@ -45,40 +45,43 @@
       },
       {
         "ordinal": 8,
-        "name": "tampered_files",
+        "name": "control_file_patterns",
         "type_info": "TextArray"
       },
       {
         "ordinal": 9,
+        "name": "control_files_team_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 10,
+        "name": "tampered_files",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 11,
         "name": "named_control_files",
         "type_info": "TextArray"
       },
       {
-        "ordinal": 10,
+        "ordinal": 12,
         "name": "control_files_unlisted",
         "type_info": "Bool"
       },
       {
-        "ordinal": 11,
+        "ordinal": 13,
         "name": "outcome",
         "type_info": "Text"
       },
       {
-        "ordinal": 12,
+        "ordinal": 14,
         "name": "ended_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Text",
-        "Text",
-        "Text",
-        "Text",
-        "Text",
-        "Text",
-        "Bool"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -92,10 +95,12 @@
       false,
       true,
       true,
+      true,
+      true,
       false,
       true,
       true
     ]
   },
-  "hash": "9e0459f98f47054c7b2e7eafe8745d3569db18443d6997f45be84490cb38cff7"
+  "hash": "a975d4ab53fc1562f11f760d78566e336657efc8369d5059b024bbb4d3508c8a"
 }

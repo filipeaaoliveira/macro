@@ -9,7 +9,7 @@ use macro_authorization::CODE_EXECUTION_HEADER;
 use tower::ServiceExt as _;
 use uuid::Uuid;
 
-use super::{ALICE, Caller, alice_s_run, body, call, records_router};
+use super::{ALICE, Caller, ROBOT, alice_s_run, body, call, records_router};
 use crate::domain::control_files::ControlFiles;
 use crate::domain::fakes::FakeRepo;
 
@@ -64,9 +64,18 @@ async fn only_the_admin_s_own_session_sets_the_team_s_control_files() {
         .headers_mut()
         .insert(CODE_EXECUTION_HEADER, "true".parse().expect("header"));
     let in_code_mode = send(in_code_mode).await;
+    let routine = send(call("PUT", PATH, Caller::User("routine"), patterns.clone())).await;
     let no_team = send(call("PUT", PATH, Caller::User("eve"), patterns.clone())).await;
 
-    for refused in [internal, api_key, sdk, agent, in_code_mode, no_team] {
+    for refused in [
+        internal,
+        api_key,
+        sdk,
+        agent,
+        routine,
+        in_code_mode,
+        no_team,
+    ] {
         assert_eq!(refused, StatusCode::FORBIDDEN);
     }
     assert!(repo.control_files.lock().expect("patterns").is_empty());
@@ -130,10 +139,15 @@ async fn the_control_files_read_as_the_team_s_or_the_default() {
 }
 
 /// A Run created in the owner's own session is kept as created in person;
-/// one an internal caller, or an agent working as them, created is not.
+/// one an internal caller, an API key or token, an agent or a routine
+/// working as them, or an agent's own account created is not.
 #[tokio::test]
 async fn a_run_is_created_in_person_only_from_the_owner_s_own_session() {
     let repo = FakeRepo::default();
+    repo.agent_accounts
+        .lock()
+        .expect("agent accounts")
+        .insert(ROBOT.to_string());
     let router = records_router(&repo);
     let create = serde_json::json!({ "flow": "reply", "request": "Fix ci.yml" });
     let mut in_code_mode = call("POST", "/runs", Caller::User("alice"), create.clone());
@@ -141,12 +155,14 @@ async fn a_run_is_created_in_person_only_from_the_owner_s_own_session() {
         .headers_mut()
         .insert(CODE_EXECUTION_HEADER, "true".parse().expect("header"));
 
-    for (request, expected) in [
+    let cases = [
         (
+            "alice",
             call("POST", "/runs", Caller::User("alice"), create.clone()),
             true,
         ),
         (
+            "internal",
             call(
                 "POST",
                 "/runs",
@@ -156,16 +172,84 @@ async fn a_run_is_created_in_person_only_from_the_owner_s_own_session() {
             false,
         ),
         (
+            "api key",
+            call("POST", "/runs", Caller::ApiKey("alice-key"), create.clone()),
+            false,
+        ),
+        (
+            "sdk",
+            call("POST", "/runs", Caller::User("sdk"), create.clone()),
+            false,
+        ),
+        (
+            "agent",
             call("POST", "/runs", Caller::User("agent"), create.clone()),
             false,
         ),
-        (in_code_mode, false),
-    ] {
+        (
+            "routine",
+            call("POST", "/runs", Caller::User("routine"), create.clone()),
+            false,
+        ),
+        (
+            "routine session",
+            call(
+                "POST",
+                "/runs",
+                Caller::User("routine-session"),
+                create.clone(),
+            ),
+            false,
+        ),
+        (
+            "agent account",
+            call("POST", "/runs", Caller::User("robot"), create.clone()),
+            false,
+        ),
+        ("code mode", in_code_mode, false),
+    ];
+    for (caller, request, expected) in cases {
         let response = router.clone().oneshot(request).await.expect("response");
 
-        assert_eq!(response.status(), StatusCode::CREATED);
-        assert_eq!(body(response).await["run"]["createdInPerson"], expected);
+        assert_eq!(response.status(), StatusCode::CREATED, "{caller}");
+        assert_eq!(
+            body(response).await["run"]["createdInPerson"],
+            expected,
+            "{caller}"
+        );
     }
+}
+
+/// An agent's account that administers a team signs in as a person does,
+/// yet sets nothing.
+#[tokio::test]
+async fn an_agent_account_sets_no_team_s_control_files() {
+    let repo = FakeRepo::default();
+    repo.agent_accounts
+        .lock()
+        .expect("agent accounts")
+        .insert(ROBOT.to_string());
+    repo.teams.lock().expect("teams").insert(
+        ROBOT.to_string(),
+        TeamMembership {
+            team_id: Uuid::now_v7(),
+            admin: true,
+        },
+    );
+    let router = records_router(&repo);
+
+    let refused = router
+        .oneshot(call(
+            "PUT",
+            PATH,
+            Caller::User("robot"),
+            serde_json::json!({ "patterns": [] }),
+        ))
+        .await
+        .expect("response");
+
+    assert_eq!(refused.status(), StatusCode::FORBIDDEN);
+    assert!(repo.control_files.lock().expect("patterns").is_empty());
 }
 
 /// A Tampered Run shows its files; approving its Gate without listing them

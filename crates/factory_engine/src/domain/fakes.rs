@@ -77,6 +77,8 @@ pub(crate) struct FakeRepo {
     pub(crate) control_file_changes: Arc<Mutex<BTreeMap<RunId, ControlFileChanges>>>,
     /// The answers recorded, by Gate, with the Control Files they approved.
     pub(crate) approvals: Arc<Mutex<Vec<Approval>>>,
+    /// The agents' accounts, by their id.
+    pub(crate) agent_accounts: Arc<Mutex<BTreeSet<String>>>,
     /// The team each person is on, by their id.
     pub(crate) teams: Arc<Mutex<BTreeMap<String, TeamMembership>>>,
     /// The Control File patterns each team set.
@@ -151,6 +153,8 @@ impl RunRepository for FakeRepo {
             task_id,
             repository,
             created_in_person,
+            control_file_patterns,
+            control_files_team_id,
             ..
         } = new;
         if let Some(task_id) = task_id
@@ -166,6 +170,8 @@ impl RunRepository for FakeRepo {
             task_id,
             repository: repository.cloned(),
             created_in_person,
+            control_file_patterns: Some(control_file_patterns.to_vec()),
+            control_files_team_id,
             control_files: None,
             end: None,
         };
@@ -240,16 +246,28 @@ impl RunRepository for FakeRepo {
         Ok(())
     }
 
+    async fn is_agent_account(&self, user_id: &MacroUserIdStr<'static>) -> Result<bool, FakeError> {
+        Ok(self
+            .agent_accounts
+            .lock()
+            .expect("agent accounts")
+            .contains(user_id.as_ref()))
+    }
+
     async fn team_of(
         &self,
         user_id: &MacroUserIdStr<'static>,
     ) -> Result<Option<TeamMembership>, FakeError> {
+        let agent = self.is_agent_account(user_id).await?;
         Ok(self
             .teams
             .lock()
             .expect("teams")
             .get(user_id.as_ref())
-            .copied())
+            .map(|team| TeamMembership {
+                admin: team.admin && !agent,
+                ..*team
+            }))
     }
 
     async fn team_control_files(&self, team_id: Uuid) -> Result<Option<Vec<String>>, FakeError> {
@@ -969,6 +987,14 @@ impl PullRequests for FakeGithub {
     ) -> Result<Option<Vec<String>>, FakeError> {
         let mut state = self.state();
         state.compared.push(branch.to_string());
+        // Once merged, the base holds the head: GitHub lists no change.
+        let merged = state
+            .pull_request
+            .as_ref()
+            .is_some_and(|pull_request| pull_request.state == PullRequestState::Merged);
+        if merged {
+            return Ok(Some(Vec::new()));
+        }
         Ok(state.changed.clone())
     }
 

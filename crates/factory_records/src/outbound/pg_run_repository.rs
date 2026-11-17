@@ -109,6 +109,8 @@ struct RunRow {
     repo_url: Option<String>,
     base_branch: Option<String>,
     created_in_person: bool,
+    control_file_patterns: Option<Vec<String>>,
+    control_files_team_id: Option<Uuid>,
     tampered_files: Option<Vec<String>>,
     named_control_files: Option<Vec<String>>,
     control_files_unlisted: bool,
@@ -147,6 +149,8 @@ impl TryFrom<RunRow> for Run {
                 .transpose()?,
             repository,
             created_in_person: row.created_in_person,
+            control_file_patterns: row.control_file_patterns,
+            control_files_team_id: row.control_files_team_id,
             control_files: match (row.tampered_files, row.named_control_files) {
                 (Some(tampered), Some(named)) => Some(ControlFileChanges {
                     tampered,
@@ -278,12 +282,14 @@ impl RunRepository for PgRunRepository {
         let inserted = sqlx::query_as!(
             RunRow,
             r#"
-            INSERT INTO factory_run
-                (id, flow, request, user_id, task_id, repo_url, base_branch, created_in_person)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            INSERT INTO factory_run (
+                id, flow, request, user_id, task_id, repo_url, base_branch, created_in_person,
+                control_file_patterns, control_files_team_id
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             RETURNING
                 id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,
-                tampered_files, named_control_files, control_files_unlisted, outcome, ended_at
+                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted, outcome, ended_at
             "#,
             run.id.as_uuid(),
             run.flow,
@@ -294,6 +300,8 @@ impl RunRepository for PgRunRepository {
             run.repository
                 .map(|repository| repository.base_branch.as_str()),
             run.created_in_person,
+            run.control_file_patterns,
+            run.control_files_team_id,
         )
         .fetch_one(&self.pool)
         .await;
@@ -361,6 +369,17 @@ impl RunRepository for PgRunRepository {
         Ok(())
     }
 
+    #[tracing::instrument(err, skip(self, user_id))]
+    async fn is_agent_account(&self, user_id: &MacroUserIdStr<'static>) -> Result<bool, Self::Err> {
+        let is_agent = sqlx::query_scalar!(
+            r#"SELECT "isAgent" FROM "User" WHERE id = $1"#,
+            user_id.as_ref(),
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(is_agent.unwrap_or(false))
+    }
+
     // A person is on at most one team (`team_user_user_id_unique`), and its
     // owner is on it as `owner`.
     #[tracing::instrument(err, skip(self, user_id))]
@@ -370,9 +389,10 @@ impl RunRepository for PgRunRepository {
     ) -> Result<Option<TeamMembership>, Self::Err> {
         let membership = sqlx::query!(
             r#"
-            SELECT team_id, team_role IN ('admin', 'owner') AS "admin!"
-            FROM team_user
-            WHERE user_id = $1
+            SELECT tu.team_id, (tu.team_role IN ('admin', 'owner') AND NOT u."isAgent") AS "admin!"
+            FROM team_user tu
+            JOIN "User" u ON u.id = tu.user_id
+            WHERE tu.user_id = $1
             LIMIT 1
             "#,
             user_id.as_ref(),
@@ -455,7 +475,7 @@ impl RunRepository for PgRunRepository {
             r#"
             SELECT
                 id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,
-                tampered_files, named_control_files, control_files_unlisted, outcome, ended_at
+                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted, outcome, ended_at
             FROM factory_run
             WHERE id = $1
             "#,
@@ -531,7 +551,7 @@ impl RunRepository for PgRunRepository {
             r#"
             SELECT
                 id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,
-                tampered_files, named_control_files, control_files_unlisted, outcome, ended_at
+                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted, outcome, ended_at
             FROM factory_run
             WHERE task_id = $1 AND user_id = $2
             ORDER BY created_at DESC, id DESC

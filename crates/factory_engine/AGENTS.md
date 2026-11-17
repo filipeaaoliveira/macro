@@ -251,14 +251,22 @@ the team of the Run's owner sets the team's own with
 with whether the caller may change them; a null list goes back to the
 default, an empty one checks nothing). Only that admin's own signed-in
 session sets them, as for a Gate: a shorter list lets an agent change more
-unseen. Team settings show them in a Control files section (behind
+unseen. A Run keeps the list, and the team it came from, as they were when
+it was created (`factory_run.control_file_patterns`,
+`control_files_team_id`), so a change to the team's list later, by anyone,
+does not change a Run under way; a Run created before Runs kept them is
+checked against the default. "In person" means the owner's own session
+(`is_in_person`: no internal caller, API key or token, agent or routine
+program, nor code mode) from an account that is not an agent's
+(`"User"."isAgent"`, which signs in with ordinary sessions): the service
+refuses an agent's account a Gate answer and a settings change, never keeps
+its Run as created in person, and never counts it as a team admin. Team settings show them in a Control files section (behind
 `enable-factory-runs`). A path says nothing of a change inside a file, so a
 check weakened in ordinary source (a lint suppression, an ignored test) is
 the review's to catch.
 
 `publish` (on the pull request's head), `ready_to_merge` and `merge` (on the
-commit to merge, and on the head of a pull request merged outside the Run)
-compare that commit with the base (`PullRequests::changed_paths`) and keep
+commit to merge) compare that commit with the base (`PullRequests::changed_paths`) and keep
 the Control Files it changed on the Run (`controlFiles` in the Run API):
 `named`, those the request asks for, and `tampered`, the others, which make
 the Run Tampered. The request asks for a file only by naming its path from
@@ -279,8 +287,10 @@ given while it was unlisted). Otherwise it ends `changed`, so the Run goes
 back through `ci` to the merge Gate, which shows the files: that route is
 in every `code` Flow a Run carries, so a Run in flight when this shipped,
 whose Gate approved before its files were read, takes it too, and nothing
-in the workflow or the interpreter changed. Nothing but a person's answer
-approves them. The pull
+in the workflow or the interpreter changed. A pull request merged outside
+the Run is not compared again, since GitHub's comparison of a merged head
+with its base lists nothing: the Steps keep, and name, the Control Files
+last read. Nothing but a person's answer approves them. The pull
 request's description names the Run's task as `MACRO-{short id}`, so GitHub's
 webhook links them, and is cut to GitHub's 65,536 characters in its request
 part only.

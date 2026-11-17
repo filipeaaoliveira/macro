@@ -291,8 +291,15 @@ pub trait RunRepository: Send + Sync + 'static {
         changes: Option<&ControlFileChanges>,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
-    /// The team `user_id` is on, and whether they administer it; none when
-    /// they are on no team.
+    /// Whether `user_id`'s account is an agent's (`"User"."isAgent"`): it
+    /// signs in as any person does, yet is never one in person.
+    fn is_agent_account(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+    ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
+
+    /// The team `user_id` is on, and whether they administer it (an agent's
+    /// account never does); none when they are on no team.
     fn team_of(
         &self,
         user_id: &MacroUserIdStr<'static>,

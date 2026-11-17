@@ -369,6 +369,8 @@ async fn plan_task(repo: &FakeRepo) -> AgentTask {
             task_id: None,
             repository: None,
             created_in_person: false,
+            control_file_patterns: &[],
+            control_files_team_id: None,
         })
         .await
         .expect("insert");

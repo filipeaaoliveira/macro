@@ -221,6 +221,8 @@ async fn julia_s_run(repo: &FakeRepo) -> RunId {
             task_id: None,
             repository: None,
             created_in_person: false,
+            control_file_patterns: &[],
+            control_files_team_id: None,
         })
         .await
         .expect("insert")
@@ -1053,6 +1055,8 @@ async fn a_task_s_list_holds_its_owner_s_fifty_newest_runs() {
                 task_id: Some(task_id),
                 repository: None,
                 created_in_person: false,
+                control_file_patterns: &[],
+                control_files_team_id: None,
             })
             .await
             .expect("insert")

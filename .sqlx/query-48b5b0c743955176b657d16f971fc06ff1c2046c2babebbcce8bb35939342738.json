@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,\n                tampered_files, named_control_files, control_files_unlisted, outcome, ended_at\n            FROM factory_run\n            WHERE id = $1\n            ",
+  "query": "\n            SELECT\n                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted, outcome, ended_at\n            FROM factory_run\n            WHERE task_id = $1 AND user_id = $2\n            ORDER BY created_at DESC, id DESC\n            LIMIT $3\n            ",
   "describe": {
     "columns": [
       {
@@ -45,33 +45,45 @@
       },
       {
         "ordinal": 8,
-        "name": "tampered_files",
+        "name": "control_file_patterns",
         "type_info": "TextArray"
       },
       {
         "ordinal": 9,
+        "name": "control_files_team_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 10,
+        "name": "tampered_files",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 11,
         "name": "named_control_files",
         "type_info": "TextArray"
       },
       {
-        "ordinal": 10,
+        "ordinal": 12,
         "name": "control_files_unlisted",
         "type_info": "Bool"
       },
       {
-        "ordinal": 11,
+        "ordinal": 13,
         "name": "outcome",
         "type_info": "Text"
       },
       {
-        "ordinal": 12,
+        "ordinal": 14,
         "name": "ended_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Text",
+        "Text",
+        "Int8"
       ]
     },
     "nullable": [
@@ -85,10 +97,12 @@
       false,
       true,
       true,
+      true,
+      true,
       false,
       true,
       true
     ]
   },
-  "hash": "8ea8cb262c2c03abe443582fd3a83737b0179bfc1a29eaae6c258439ec2cd732"
+  "hash": "48b5b0c743955176b657d16f971fc06ff1c2046c2babebbcce8bb35939342738"
 }

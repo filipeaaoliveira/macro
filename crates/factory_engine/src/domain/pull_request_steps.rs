@@ -402,8 +402,9 @@ impl<G: PullRequests, R: RunRepository> PullRequestSteps<G, R> {
     }
 
     /// The Control Files `head` changed against the Run's base, by the
-    /// patterns of the team of the Run's owner or the factory's default:
-    /// kept on the Run, replacing what was kept before.
+    /// patterns the Run keeps from its creation, or the factory's default
+    /// for a Run that keeps none: kept on the Run, replacing what was kept
+    /// before.
     async fn check_control_files(
         &self,
         input: &StepInput<'_>,
@@ -411,21 +412,10 @@ impl<G: PullRequests, R: RunRepository> PullRequestSteps<G, R> {
         recorded: &Repository,
         head: &str,
     ) -> Result<Option<ControlFileChanges>, PullRequestStepError> {
-        let team = self
-            .repo
-            .team_of(input.owner)
-            .await
-            .map_err(PullRequestStepError::records)?;
-        let own = match team {
-            Some(team) => self
-                .repo
-                .team_control_files(team.team_id)
-                .await
-                .map_err(PullRequestStepError::records)?,
-            None => None,
+        let control_files = match input.control_file_patterns {
+            Some(patterns) => ControlFiles::parse(patterns)?,
+            None => ControlFiles::parse(&ControlFiles::default_patterns())?,
         };
-        let patterns = own.unwrap_or_else(ControlFiles::default_patterns);
-        let control_files = ControlFiles::parse(&patterns)?;
 
         let changes = if control_files.is_empty() {
             None
@@ -442,6 +432,31 @@ impl<G: PullRequests, R: RunRepository> PullRequestSteps<G, R> {
             .await
             .map_err(PullRequestStepError::records)?;
         Ok(changes)
+    }
+
+    /// What a person reads of the Control Files the Run last kept. A pull
+    /// request merged outside the Run is not compared again: GitHub's
+    /// comparison of a merged head with its base lists nothing, which would
+    /// clear them.
+    async fn kept_note(&self, input: &StepInput<'_>) -> Result<String, PullRequestStepError> {
+        let kept = self
+            .repo
+            .get_run(input.key.run_id)
+            .await
+            .map_err(PullRequestStepError::records)?
+            .and_then(|run| run.control_files);
+        Ok(kept.as_ref().map(changes_note).unwrap_or_default())
+    }
+
+    /// A pull request merged outside the Run: `merged`, naming the Control
+    /// Files the Run last kept.
+    async fn merged_outside(
+        &self,
+        input: &StepInput<'_>,
+        pull_request: &PullRequest,
+    ) -> Result<StepReport, PullRequestStepError> {
+        let note = self.kept_note(input).await?;
+        Ok(report("merged", format!("{}{note}", named(pull_request))))
     }
 
     /// The repository the Run works on, and its record.
@@ -509,11 +524,15 @@ impl<G: PullRequests, R: RunRepository> PullRequestSteps<G, R> {
                 "closed",
                 format!("{}\n\nIt was closed without merging.", named(&pull_request)),
             ),
-            PullRequestState::Open | PullRequestState::Merged => {
+            PullRequestState::Open => {
                 let changes = self
                     .check_control_files(&input, &repository, recorded, &pull_request.head_sha)
                     .await?;
                 let note = changes.as_ref().map(changes_note).unwrap_or_default();
+                report("published", format!("{}{note}", named(&pull_request)))
+            }
+            PullRequestState::Merged => {
+                let note = self.kept_note(&input).await?;
                 report("published", format!("{}{note}", named(&pull_request)))
             }
         })
@@ -666,15 +685,7 @@ impl<G: PullRequests, R: RunRepository> PullRequestSteps<G, R> {
             .await?;
 
         match pull_request.state {
-            // Merged outside the Run: its Control Files are kept all the
-            // same, for a person to see what it changed.
-            PullRequestState::Merged => {
-                let changes = self
-                    .check_control_files(&input, &repository, recorded, &pull_request.head_sha)
-                    .await?;
-                let note = changes.as_ref().map(changes_note).unwrap_or_default();
-                return Ok(report("merged", format!("{}{note}", named(&pull_request))));
-            }
+            PullRequestState::Merged => return self.merged_outside(&input, &pull_request).await,
             PullRequestState::Closed => {
                 return Ok(report(
                     "closed",
@@ -736,13 +747,7 @@ impl<G: PullRequests, R: RunRepository> PullRequestSteps<G, R> {
         // A retry whose merge GitHub took, though its answer was lost, finds
         // the pull request merged.
         match pull_request.state {
-            PullRequestState::Merged => {
-                let changes = self
-                    .check_control_files(&input, &repository, recorded, &pull_request.head_sha)
-                    .await?;
-                let note = changes.as_ref().map(changes_note).unwrap_or_default();
-                return Ok(report("merged", format!("{}{note}", named(&pull_request))));
-            }
+            PullRequestState::Merged => return self.merged_outside(&input, &pull_request).await,
             PullRequestState::Closed => {
                 return Ok(report(
                     "closed",
@@ -766,8 +771,9 @@ impl<G: PullRequests, R: RunRepository> PullRequestSteps<G, R> {
                 return Ok(report(
                     "changed",
                     format!(
-                        "{}\n\nIt was not merged: no person approved the Control Files it changes, \
-                         so the merge Gate asks again.{}",
+                        "{}\n\nIt was not merged: no person approved the Control Files it changes. \
+                         The Run goes back to its checks, then to the merge Gate, unless that \
+                         Gate already asked its last time.{}",
                         named(&pull_request),
                         changes_note(changes)
                     ),
