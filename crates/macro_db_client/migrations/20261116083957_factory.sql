@@ -18,6 +18,14 @@ CREATE TABLE factory_run (
     flow text CHECK (flow ~ '^[a-z0-9_-]{1,64}$'),
     request text NOT NULL CHECK (octet_length(request) <= 65536),
     task_id text REFERENCES "Document" (id) ON DELETE SET NULL,
+    -- A Run that works on code works on one GitHub repository, from the
+    -- branch it had as default when the Run started. When it asks a person
+    -- to merge its pull request, it keeps the commit whose checks passed, so
+    -- only that commit merges once they agree. All three are null for a Run
+    -- that works on no repository.
+    repo_url text CHECK (repo_url ~ '^https://github\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$'),
+    base_branch text CHECK (octet_length(base_branch) BETWEEN 1 AND 255),
+    merge_head_sha text CHECK (merge_head_sha ~ '^[0-9a-f]{40}$'),
     created_at timestamptz NOT NULL DEFAULT now(),
     -- success: the Flow reached its end; manual: it ended for a person to
     -- take over; blocked: an entry ran out of visits with nowhere to go, or
@@ -26,7 +34,11 @@ CREATE TABLE factory_run (
     -- null while the Run goes.
     outcome text CHECK (outcome IN ('success', 'manual', 'blocked', 'failed', 'cancelled')),
     ended_at timestamptz,
-    CONSTRAINT factory_run_end CHECK ((outcome IS NULL) = (ended_at IS NULL))
+    CONSTRAINT factory_run_end CHECK ((outcome IS NULL) = (ended_at IS NULL)),
+    CONSTRAINT factory_run_repository CHECK (
+        (repo_url IS NULL) = (base_branch IS NULL)
+        AND (merge_head_sha IS NULL OR repo_url IS NOT NULL)
+    )
 );
 
 -- Insights read one person's Runs created in a time range, newest first, and
