@@ -20,7 +20,7 @@ use super::{
 use crate::domain::models::{
     GithubCheckRun, GithubCheckSuite, GithubCommitStatus, GithubError, GithubListing,
     GithubOpenPullRequest, GithubOpenPullRequestOutcome, GithubPullRequestHead,
-    GithubRepositoryAccess, GithubRequiredCheck,
+    GithubRepositoryAccess, GithubRequiredCheck, GithubRequiredChecks, GithubWorkflowRun,
 };
 
 #[cfg(test)]
@@ -133,9 +133,24 @@ struct RequiredStatusChecks {
 struct RequiredCheck {
     context: String,
     #[serde(default)]
-    app_id: Option<u64>,
+    app_id: Option<i64>,
     #[serde(default)]
-    integration_id: Option<u64>,
+    integration_id: Option<i64>,
+}
+
+/// An app id a required check names: GitHub writes -1 for "any source".
+fn named_app(app_id: Option<i64>) -> Option<u64> {
+    app_id.and_then(|app_id| u64::try_from(app_id).ok())
+}
+
+#[derive(serde::Deserialize)]
+struct WorkflowRunsResponse {
+    workflow_runs: Vec<WorkflowRunResponse>,
+}
+
+#[derive(serde::Deserialize)]
+struct WorkflowRunResponse {
+    status: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -257,9 +272,10 @@ impl GithubOauthImpl {
     /// The checks a pull request to `branch` must pass before it merges:
     /// the branch protection's and the rulesets' required status checks,
     /// each with the app it must come from when the rule names one. What can
-    /// be read is joined; `None` when neither the branch nor its rules can be
-    /// read, or the branch is protected but its protection is not shown, so a
-    /// caller cannot tell which checks are required.
+    /// be read is joined, and marked incomplete unless both sources were read
+    /// in full; `None` when neither the branch nor its rules can be read, or
+    /// the branch is protected but its protection is not shown, so a caller
+    /// cannot tell which checks are required.
     #[tracing::instrument(skip(self, access_token), err)]
     pub async fn get_required_checks(
         &self,
@@ -267,7 +283,7 @@ impl GithubOauthImpl {
         owner: &str,
         repo: &str,
         branch: &str,
-    ) -> Result<Option<Vec<GithubRequiredCheck>>, GithubError> {
+    ) -> Result<Option<GithubRequiredChecks>, GithubError> {
         let branch = urlencoding::encode(branch);
         let branch_read: Result<BranchResponse, GithubError> = self
             .read(
@@ -299,10 +315,11 @@ impl GithubOauthImpl {
             Err(error) if unread(&error) => None,
             Err(error) => return Err(error),
         };
-        let rules = match rules_read {
-            Ok(rules) if rules.complete => Some(rules.items),
-            Ok(_) => None,
-            Err(error) if unread(&error) => None,
+        // Rules read in part still name required checks; the set is then
+        // incomplete.
+        let (rules, rules_complete) = match rules_read {
+            Ok(rules) => (Some(rules.items), rules.complete),
+            Err(error) if unread(&error) => (None, false),
             Err(error) => return Err(error),
         };
 
@@ -321,7 +338,7 @@ impl GithubOauthImpl {
                     // is the older form, any app's.
                     required.extend(checks.checks.iter().map(|check| GithubRequiredCheck {
                         context: check.context.clone(),
-                        app_id: check.app_id,
+                        app_id: named_app(check.app_id),
                     }));
                     required.extend(
                         checks
@@ -346,7 +363,7 @@ impl GithubOauthImpl {
                 required.extend(parameters.required_status_checks.iter().map(|check| {
                     GithubRequiredCheck {
                         context: check.context.clone(),
-                        app_id: check.integration_id,
+                        app_id: named_app(check.integration_id),
                     }
                 }));
             }
@@ -356,7 +373,10 @@ impl GithubOauthImpl {
         }
         required.sort();
         required.dedup();
-        Ok(Some(required))
+        Ok(Some(GithubRequiredChecks {
+            checks: required,
+            complete: branch_read.is_some() && rules_complete,
+        }))
     }
 
     /// The repository's default branch, and whether the user may push to
@@ -460,6 +480,39 @@ impl GithubOauthImpl {
                     conclusion: suite.conclusion,
                     check_runs: suite.latest_check_runs_count,
                     created_at: suite.created_at,
+                })
+                .collect(),
+        })
+    }
+
+    /// The GitHub Actions workflow runs on the commit `sha`: a run that
+    /// waits, such as one a concurrency group holds, has no check run yet.
+    #[tracing::instrument(skip(self, access_token), err)]
+    pub async fn list_workflow_runs(
+        &self,
+        access_token: &str,
+        owner: &str,
+        repo: &str,
+        sha: &str,
+    ) -> Result<GithubListing<GithubWorkflowRun>, GithubError> {
+        let runs = self
+            .read_pages(
+                access_token,
+                &format!(
+                    "/repos/{owner}/{repo}/actions/runs?head_sha={}",
+                    urlencoding::encode(sha)
+                ),
+                "failed to list workflow runs",
+                |page: WorkflowRunsResponse| page.workflow_runs,
+            )
+            .await?;
+        Ok(GithubListing {
+            complete: runs.complete,
+            items: runs
+                .items
+                .into_iter()
+                .map(|run| GithubWorkflowRun {
+                    status: run.status.unwrap_or_else(|| "queued".to_string()),
                 })
                 .collect(),
         })

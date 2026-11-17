@@ -187,6 +187,20 @@ pub struct HeadChecks {
     /// Whether a list was longer than was read, so these are not all its
     /// checks.
     pub truncated: bool,
+    /// The apps, by slug, with a run on the head that has not started
+    /// checking, as a GitHub Actions run a concurrency group holds: their
+    /// empty suites are runs still to come.
+    pub held_apps: Vec<String>,
+}
+
+/// The checks a pull request's base requires, as far as they could be read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequiredChecks {
+    /// The checks the readable sources name.
+    pub checks: Vec<RequiredCheck>,
+    /// Whether every source was read in full; a partial set may leave
+    /// required checks out.
+    pub complete: bool,
 }
 
 /// A check a pull request's base requires before it merges.

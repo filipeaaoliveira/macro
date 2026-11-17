@@ -36,8 +36,8 @@ pub use pull_request::{
     GithubPullRequestNumber, GithubPullRequestRef, GithubPullRequestReview,
     GithubPullRequestReviewDecision, GithubPullRequestReviewState, GithubPullRequestStatus,
     GithubPullRequestUser, GithubRepositoryAccess, GithubRepositoryMergeSettings,
-    GithubRequiredCheck, MergeGithubPullRequestRequest, MergeGithubPullRequestResponse,
-    latest_reviews,
+    GithubRequiredCheck, GithubRequiredChecks, GithubWorkflowRun, MergeGithubPullRequestRequest,
+    MergeGithubPullRequestResponse, latest_reviews,
 };
 pub use update::{
     GithubDraftOutcome, GithubPullRequestState, GithubPullRequestUpdateRejection,

@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 use crate::domain::models::{
     Check, CheckState, CheckSuite, CodeRepository, HeadChecks, Merging, OpenPullRequest, Opening,
-    PullRequest, PullRequestState, RepositoryAccess, RequiredCheck,
+    PullRequest, PullRequestState, RepositoryAccess, RequiredChecks,
 };
 use crate::domain::ports::{PullRequests, Retryable, TaskAccess, TaskDirectory, UserDirectory};
 
@@ -500,9 +500,7 @@ pub(crate) struct FakeGithubState {
     /// Whether the Run's owner may only read the repository.
     pub(crate) read_only: bool,
     /// The checks the base branch requires, when they can be named.
-    pub(crate) required: Option<Vec<RequiredCheck>>,
-    /// The apps whose CI runs on the base branch.
-    pub(crate) ci_apps: Vec<String>,
+    pub(crate) required: Option<RequiredChecks>,
     /// The pull request from the Run's branch, once opened.
     pub(crate) pull_request: Option<PullRequest>,
     /// The checks each read of the open pull request's head shows next, in
@@ -608,6 +606,7 @@ pub(crate) fn ci(conclusion: Option<&str>) -> HeadChecks {
             app_id: Some(FakeGithub::ACTIONS),
         }],
         truncated: false,
+        held_apps: Vec::new(),
     }
 }
 
@@ -650,17 +649,8 @@ impl PullRequests for FakeGithub {
         _owner: &MacroUserIdStr<'static>,
         _repository: &CodeRepository,
         _base: &str,
-    ) -> Result<Option<Vec<RequiredCheck>>, FakeError> {
+    ) -> Result<Option<RequiredChecks>, FakeError> {
         Ok(self.state().required.clone())
-    }
-
-    async fn apps_with_runs(
-        &self,
-        _owner: &MacroUserIdStr<'static>,
-        _repository: &CodeRepository,
-        _base: &str,
-    ) -> Result<Vec<String>, FakeError> {
-        Ok(self.state().ci_apps.clone())
     }
 
     async fn open(

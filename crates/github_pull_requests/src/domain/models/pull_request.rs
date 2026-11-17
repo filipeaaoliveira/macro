@@ -874,6 +874,25 @@ pub struct GithubRequiredCheck {
     pub app_id: Option<u64>,
 }
 
+/// The checks a branch requires, as far as they could be read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GithubRequiredChecks {
+    /// The checks the readable sources name.
+    pub checks: Vec<GithubRequiredCheck>,
+    /// Whether every source was read in full: the branch's protection and
+    /// all of its rules. A partial set names checks that are required, but
+    /// may leave others out.
+    pub complete: bool,
+}
+
+/// A GitHub Actions workflow run on a commit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GithubWorkflowRun {
+    /// `queued`, `in_progress`, `waiting`, `requested`, `pending` or
+    /// `completed`.
+    pub status: String,
+}
+
 /// The latest commit status of one context on a commit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GithubCommitStatus {

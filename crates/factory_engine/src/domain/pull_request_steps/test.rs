@@ -11,7 +11,7 @@ use super::{CI_WAIT, PullRequestStepError, PullRequestSteps};
 use crate::domain::fakes::{FakeGithub, FakeRepo, ci, suite};
 use crate::domain::models::{
     Check, CheckState, CheckSuite, CommitStatus, HeadChecks, PullRequestState, RequiredCheck,
-    StepInput, StepReport,
+    RequiredChecks, StepInput, StepReport,
 };
 
 static JULIA: LazyLock<MacroUserIdStr<'static>> = LazyLock::new(|| {
@@ -236,7 +236,6 @@ async fn another_app_s_empty_suite_is_let_go_once_its_grace_ends() {
         ..suite(9, "another-app", None)
     });
     let github = FakeGithub::with_open_pull_request(early);
-    github.state().ci_apps = vec!["github-actions".to_string()];
     let started = tokio::time::Instant::now();
 
     let report = steps(&github, &FakeRepo::default())
@@ -253,18 +252,18 @@ async fn another_app_s_empty_suite_is_let_go_once_its_grace_ends() {
     assert!(waited < CI_WAIT);
 }
 
-/// With no required checks to go by, an empty suite of a CI that runs on
-/// the base, as a run a concurrency group holds back, is waited for past
-/// the grace, until CI times out.
+/// With no required checks to go by, the empty suite of an app with a run
+/// waiting on the head, as a GitHub Actions run a concurrency group holds,
+/// is waited for past the grace, until CI times out.
 #[tokio::test(start_paused = true)]
-async fn a_ci_s_empty_suite_is_waited_for_until_ci_times_out() {
+async fn a_held_run_s_empty_suite_is_waited_for_until_ci_times_out() {
     let mut held = ci(Some("success"));
     held.suites.push(CheckSuite {
         check_runs: 0,
         ..suite(9, "held-ci", None)
     });
+    held.held_apps = vec!["held-ci".to_string()];
     let github = FakeGithub::with_open_pull_request(held);
-    github.state().ci_apps = vec!["github-actions".to_string(), "held-ci".to_string()];
 
     let report = steps(&github, &FakeRepo::default())
         .ci(input(RunId::generate()))
@@ -274,20 +273,24 @@ async fn a_ci_s_empty_suite_is_waited_for_until_ci_times_out() {
     assert_eq!(outcome(&report), "timeout");
 }
 
-/// Once every check the base requires appeared and passed, other apps'
-/// empty suites, even a CI's, do not hold CI back: green on the next read.
+/// Once every check the base requires, read in full, appeared and passed,
+/// other apps' empty suites, even a held run's, do not hold CI back: green
+/// on the next read.
 #[tokio::test(start_paused = true)]
 async fn required_checks_that_passed_let_empty_suites_go() {
     let mut passed = ci(Some("success"));
-    for (id, app) in [(8, "entire"), (9, "held-ci")] {
+    for (id, app) in [(8, "other-app"), (9, "held-ci")] {
         passed.suites.push(CheckSuite {
             check_runs: 0,
             ..suite(id, app, None)
         });
     }
+    passed.held_apps = vec!["held-ci".to_string()];
     let github = FakeGithub::with_open_pull_request(passed);
-    github.state().ci_apps = vec!["held-ci".to_string()];
-    github.state().required = Some(vec![required("test", Some(FakeGithub::ACTIONS))]);
+    github.state().required = Some(RequiredChecks {
+        checks: vec![required("test", Some(FakeGithub::ACTIONS))],
+        complete: true,
+    });
     let started = tokio::time::Instant::now();
 
     let report = steps(&github, &FakeRepo::default())
@@ -299,13 +302,41 @@ async fn required_checks_that_passed_let_empty_suites_go() {
     assert!(started.elapsed() <= std::time::Duration::from_secs(20));
 }
 
+/// A required set read only in part must pass, but may leave a required
+/// check out, so another app's empty suite still holds CI for its grace.
+#[tokio::test(start_paused = true)]
+async fn a_partly_read_required_set_lets_no_empty_suite_go_early() {
+    let mut passed = ci(Some("success"));
+    passed.suites.push(CheckSuite {
+        check_runs: 0,
+        ..suite(8, "other-app", None)
+    });
+    let github = FakeGithub::with_open_pull_request(passed);
+    github.state().required = Some(RequiredChecks {
+        checks: vec![required("test", Some(FakeGithub::ACTIONS))],
+        complete: false,
+    });
+    let started = tokio::time::Instant::now();
+
+    let report = steps(&github, &FakeRepo::default())
+        .ci(input(RunId::generate()))
+        .await
+        .expect("ci");
+
+    assert_eq!(outcome(&report), "green");
+    assert!(started.elapsed() >= std::time::Duration::from_secs(5 * 60));
+}
+
 /// A required check is waited for while it has not appeared, while its run
 /// still runs, while only another app's run of that name passed, or while
 /// only a commit status of that name passed but the check names an app.
 #[tokio::test(start_paused = true)]
 async fn a_required_check_is_waited_for_until_its_own_run_passed() {
     let missing = FakeGithub::with_open_pull_request(ci(Some("success")));
-    missing.state().required = Some(vec![required("deploy", None)]);
+    missing.state().required = Some(RequiredChecks {
+        checks: vec![required("deploy", None)],
+        complete: true,
+    });
     let mut running_checks = ci(Some("success"));
     running_checks.runs.push(Check {
         name: "deploy".to_string(),
@@ -314,9 +345,15 @@ async fn a_required_check_is_waited_for_until_its_own_run_passed() {
         app_id: Some(FakeGithub::ACTIONS),
     });
     let running = FakeGithub::with_open_pull_request(running_checks);
-    running.state().required = Some(vec![required("deploy", None)]);
+    running.state().required = Some(RequiredChecks {
+        checks: vec![required("deploy", None)],
+        complete: true,
+    });
     let other_app = FakeGithub::with_open_pull_request(ci(Some("success")));
-    other_app.state().required = Some(vec![required("test", Some(42))]);
+    other_app.state().required = Some(RequiredChecks {
+        checks: vec![required("test", Some(42))],
+        complete: true,
+    });
     let status_only = FakeGithub::with_open_pull_request(HeadChecks {
         statuses: vec![CommitStatus {
             context: "deploy".to_string(),
@@ -325,7 +362,10 @@ async fn a_required_check_is_waited_for_until_its_own_run_passed() {
         }],
         ..ci(Some("success"))
     });
-    status_only.state().required = Some(vec![required("deploy", Some(42))]);
+    status_only.state().required = Some(RequiredChecks {
+        checks: vec![required("deploy", Some(42))],
+        complete: true,
+    });
 
     for github in [missing, running, other_app, status_only] {
         let report = steps(&github, &FakeRepo::default())
@@ -347,7 +387,10 @@ async fn a_required_check_with_no_app_passes_as_a_commit_status() {
         }],
         ..ci(Some("success"))
     });
-    github.state().required = Some(vec![required("deploy", None), required("test", None)]);
+    github.state().required = Some(RequiredChecks {
+        checks: vec![required("deploy", None), required("test", None)],
+        complete: true,
+    });
 
     let report = steps(&github, &FakeRepo::default())
         .ci(input(RunId::generate()))

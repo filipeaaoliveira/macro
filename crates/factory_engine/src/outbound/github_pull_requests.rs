@@ -17,8 +17,15 @@ use macro_user_id::user_id::MacroUserIdStr;
 use crate::domain::models::{
     Check, CheckState, CheckSuite, CodeRepository, CommitStatus, HeadChecks, Merging,
     OpenPullRequest, Opening, PullRequest, PullRequestState, RepositoryAccess, RequiredCheck,
+    RequiredChecks,
 };
 use crate::domain::ports::{PullRequests, Retryable};
+
+/// GitHub Actions' app, whose workflow runs say whether a run still waits.
+const ACTIONS_APP: &str = "github-actions";
+
+/// The workflow run statuses of a run that has not finished.
+const WAITING_RUN: [&str; 5] = ["queued", "pending", "waiting", "requested", "in_progress"];
 
 /// Why GitHub could not be asked as the Run's owner.
 #[derive(Debug, thiserror::Error)]
@@ -248,6 +255,26 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
         } else {
             Vec::new()
         };
+        // An empty Actions suite may be a run a concurrency group holds:
+        // its workflow runs say whether one still waits to start.
+        let actions_empty = suites
+            .iter()
+            .any(|suite| suite.app == ACTIONS_APP && suite.check_runs == 0);
+        let mut held_apps = Vec::new();
+        if actions_empty {
+            let runs = self
+                .github
+                .list_workflow_runs(&token, owner_name, name, sha)
+                .await?;
+            truncated |= !runs.complete;
+            if runs
+                .items
+                .iter()
+                .any(|run| WAITING_RUN.contains(&run.status.as_str()))
+            {
+                held_apps.push(ACTIONS_APP.to_string());
+            }
+        }
         Ok(Some((
             pull_request,
             HeadChecks {
@@ -255,6 +282,7 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
                 statuses,
                 runs,
                 truncated,
+                held_apps,
             },
         )))
     }
@@ -265,49 +293,23 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
         owner: &MacroUserIdStr<'static>,
         repository: &CodeRepository,
         base: &str,
-    ) -> Result<Option<Vec<RequiredCheck>>, GithubPullRequestsErr> {
+    ) -> Result<Option<RequiredChecks>, GithubPullRequestsErr> {
         let token = self.token(owner).await?;
         let required = self
             .github
             .get_required_checks(&token, repository.owner(), repository.name(), base)
             .await?;
-        Ok(required.map(|required| {
-            required
+        Ok(required.map(|required| RequiredChecks {
+            checks: required
+                .checks
                 .into_iter()
                 .map(|check| RequiredCheck {
                     name: check.context,
                     app_id: check.app_id,
                 })
-                .collect()
+                .collect(),
+            complete: required.complete,
         }))
-    }
-
-    #[tracing::instrument(err, skip(self, owner))]
-    async fn apps_with_runs(
-        &self,
-        owner: &MacroUserIdStr<'static>,
-        repository: &CodeRepository,
-        base: &str,
-    ) -> Result<Vec<String>, GithubPullRequestsErr> {
-        let token = self.token(owner).await?;
-        let suites = self
-            .github
-            .list_check_suites(
-                &token,
-                repository.owner(),
-                repository.name(),
-                &urlencoding::encode(base),
-            )
-            .await?;
-        let mut apps: Vec<String> = suites
-            .items
-            .into_iter()
-            .filter(|suite| suite.check_runs > 0)
-            .map(|suite| suite.app)
-            .collect();
-        apps.sort();
-        apps.dedup();
-        Ok(apps)
     }
 
     #[tracing::instrument(err, skip(self, owner, pull_request), fields(branch = %pull_request.branch))]

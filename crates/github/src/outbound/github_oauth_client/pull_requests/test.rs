@@ -2,7 +2,7 @@ use super::super::GithubOauthImpl;
 use super::super::test::{MockResponse, MockServer};
 use crate::domain::models::{
     GithubError, GithubOpenPullRequest, GithubOpenPullRequestOutcome, GithubRepositoryAccess,
-    GithubRequiredCheck,
+    GithubRequiredCheck, GithubRequiredChecks,
 };
 
 fn answering(status: &'static str, body: &str) -> (MockServer, GithubOauthImpl) {
@@ -325,7 +325,8 @@ fn required(context: &str, app_id: Option<u64>) -> GithubRequiredCheck {
 }
 
 /// The required checks are the branch protection's and the rulesets',
-/// once each, each with the app it must come from when the rule names one.
+/// once each, each with the app it must come from when the rule names one;
+/// GitHub's -1, any source, names none.
 #[tokio::test]
 async fn required_checks_join_branch_protection_and_rulesets() {
     let server = MockServer::start_many(vec![
@@ -335,7 +336,7 @@ async fn required_checks_join_branch_protection_and_rulesets() {
         },
         MockResponse {
             status: "200 OK",
-            body: r#"[{"type":"pull_request"},{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"lint","integration_id":42}]}}]"#.to_string(),
+            body: r#"[{"type":"pull_request"},{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"lint","integration_id":42},{"context":"deploy","integration_id":-1}]}}]"#.to_string(),
         },
     ]);
     let client = GithubOauthImpl::with_api_base_url(server.base_url.clone());
@@ -347,11 +348,15 @@ async fn required_checks_join_branch_protection_and_rulesets() {
 
     assert_eq!(
         checks,
-        Some(vec![
-            required("docs", None),
-            required("lint", Some(42)),
-            required("test", Some(15368)),
-        ])
+        Some(GithubRequiredChecks {
+            checks: vec![
+                required("deploy", None),
+                required("docs", None),
+                required("lint", Some(42)),
+                required("test", Some(15368)),
+            ],
+            complete: true,
+        })
     );
     let requests = server.finish_all();
     assert!(requests[0].starts_with("GET /repos/macro/app/branches/release%2F1.0 "));
@@ -362,7 +367,7 @@ async fn required_checks_join_branch_protection_and_rulesets() {
 }
 
 /// The branch's protection still names its checks when its rulesets cannot
-/// be read.
+/// be read, as a set that may leave some out.
 #[tokio::test]
 async fn required_checks_keep_what_can_be_read() {
     let server = MockServer::start_many(vec![
@@ -382,7 +387,13 @@ async fn required_checks_keep_what_can_be_read() {
         .await
         .unwrap();
 
-    assert_eq!(checks, Some(vec![required("test", None)]));
+    assert_eq!(
+        checks,
+        Some(GithubRequiredChecks {
+            checks: vec![required("test", None)],
+            complete: false,
+        })
+    );
     server.finish_all();
 }
 
@@ -425,4 +436,30 @@ async fn required_checks_no_one_can_name_are_unknown() {
 
     assert_eq!(protected, None);
     assert_eq!(unread, None);
+}
+
+/// A commit's Actions runs are read page by page for that commit, and keep
+/// their status, so a run a concurrency group holds is seen.
+#[tokio::test]
+async fn workflow_runs_are_read_for_the_head_commit() {
+    let server = MockServer::start(MockResponse {
+        status: "200 OK",
+        body: r#"{"total_count":2,"workflow_runs":[{"status":"pending"},{"status":"completed"}]}"#
+            .to_string(),
+    });
+    let client = GithubOauthImpl::with_api_base_url(server.base_url.clone());
+
+    let runs = client
+        .list_workflow_runs("token", "macro", "app", "abc123")
+        .await
+        .unwrap();
+
+    assert!(runs.complete);
+    let statuses: Vec<&str> = runs.items.iter().map(|run| run.status.as_str()).collect();
+    assert_eq!(statuses, ["pending", "completed"]);
+    assert!(
+        server
+            .finish()
+            .starts_with("GET /repos/macro/app/actions/runs?head_sha=abc123&per_page=100&page=1 ")
+    );
 }

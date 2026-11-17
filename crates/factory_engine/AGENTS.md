@@ -116,21 +116,29 @@ retry or a Run sent back finds what it did: `publish` finds the branch's pull
 request or opens it, and a refusal because another attempt opened it reads as
 published; `ci` reads the pull request's head, its check suites, commit statuses and,
 when required checks are named, its check runs, every 20 s, with one token per
-read and every page of each list, heartbeating. Once per Step it reads the
-checks the base requires (branch protection and rulesets, joined from what can
-be read) and the apps whose suites on the base's head hold runs (its CIs). Its
-guarantees:
+read and every page of each list, heartbeating; when GitHub Actions' suite is
+empty it also reads the head's workflow runs. Once per Step it reads the checks
+the base requires (branch protection and rulesets, joined from what can be
+read, and marked complete only when both were read in full). Its guarantees:
 - It ends `red` as soon as a suite, run or status fails, naming them.
 - It ends `green` only on two reads in a row that saw the same checks, each
   with every suite that holds a run passed and every status succeeded, and
-  every required check appeared and passed: as a run of the app the rule names,
-  or, when it names none, any app's run or a status of that name.
-- Once every required check passed, empty suites no longer hold it back.
-- Short of that, an empty suite holds it back while the app runs CI on the
-  base (as a run a concurrency group holds), up to the 25-minute wait; another
-  app's empty suite only until 5 minutes after GitHub made it.
+  every required check that could be named appeared and passed: as a run of
+  the app the rule names, or, when it names none (or GitHub's -1, any
+  source), any app's run or a status of that name.
+- Once a complete, non-empty required set all passed, empty suites no longer
+  hold it back. A set read only in part must pass, but drops no empty suite.
+- Short of that, an empty suite holds it back while its app has a run waiting
+  on the head (a GitHub Actions run `queued`, `pending`, `waiting`,
+  `requested` or `in_progress`, as one a concurrency group holds), up to the
+  25-minute wait; any other app's empty suite only until 5 minutes after
+  GitHub made it.
 - A list longer than the 10 pages read, or no check reported, keeps it waiting.
 - After 25 minutes, within one Step attempt, it ends `timeout`.
+- GitHub does not say which app posted a commit status, so a required check
+  that names an app is met only by that app's check run: one such app that
+  reports only by status (as some deploy previews do) keeps CI waiting until
+  it times out.
 
 The head `ci` calls green is kept (`factory_run.merge_head_sha`);
 `ready_to_merge` ends `changed` unless the pull request's head is still that

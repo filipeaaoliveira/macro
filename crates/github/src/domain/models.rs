@@ -27,8 +27,8 @@ pub use github_pull_requests::domain::models::{
     GithubPullRequestNumber, GithubPullRequestRef, GithubPullRequestReview,
     GithubPullRequestReviewState, GithubPullRequestState, GithubPullRequestStatus,
     GithubPullRequestUpdateRejection, GithubPullRequestUser, GithubRepositoryAccess,
-    GithubRepositoryMergeSettings, GithubRequiredCheck, GithubStateOutcome,
-    MergeGithubPullRequestRequest, MergeGithubPullRequestResponse,
+    GithubRepositoryMergeSettings, GithubRequiredCheck, GithubRequiredChecks, GithubStateOutcome,
+    GithubWorkflowRun, MergeGithubPullRequestRequest, MergeGithubPullRequestResponse,
     SetGithubPullRequestDraftRequest, SetGithubPullRequestDraftResponse,
     SetGithubPullRequestStateRequest, SetGithubPullRequestStateResponse, latest_reviews,
 };
