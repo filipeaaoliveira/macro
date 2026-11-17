@@ -213,14 +213,18 @@ fn run_args(spec: &RunSpec) -> Vec<String> {
 
 /// `docker exec` running one shell command.
 ///
-/// A login shell, matching the Daytona provider: the image puts its baked nix
-/// dev shell on `PATH` through `BASH_ENV`, which a non-login shell would skip.
+/// A shell that reads no profile or rc file, as the Daytona provider runs:
+/// the agent can change those, and a check must not run what it put there.
+/// The image's baked nix dev shell reaches `PATH` through `BASH_ENV`, which
+/// a non-interactive shell reads all the same.
 fn exec_args(name: &str, command: &str) -> Vec<String> {
     vec![
         "exec".to_owned(),
         name.to_owned(),
         "bash".to_owned(),
-        "-lc".to_owned(),
+        "--noprofile".to_owned(),
+        "--norc".to_owned(),
+        "-c".to_owned(),
         command.to_owned(),
     ]
 }

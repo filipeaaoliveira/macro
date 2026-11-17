@@ -49,12 +49,20 @@ fn a_sandbox_joins_the_compose_network_and_publishes_nothing() {
     assert!(!args.contains(&"--publish".to_owned()));
 }
 
-/// A login shell, so the image's baked nix dev shell is on `PATH`.
+/// A shell that reads no profile or rc file the agent could have changed.
 #[test]
-fn exec_runs_the_command_through_a_login_shell() {
+fn exec_runs_the_command_without_profile_or_rc_files() {
     assert_eq!(
         exec_args("macro-agent-abc", "echo hi"),
-        ["exec", "macro-agent-abc", "bash", "-lc", "echo hi"]
+        [
+            "exec",
+            "macro-agent-abc",
+            "bash",
+            "--noprofile",
+            "--norc",
+            "-c",
+            "echo hi"
+        ]
     );
 }
 

@@ -110,8 +110,9 @@ impl CommandForwarder for RedisCommandForwarder {
 }
 
 /// How much longer than a command's own timeout its forwarding replica
-/// waits for the answer: the provider's own margin, and the hops between.
-pub const RUN_COMMAND_MARGIN: std::time::Duration = std::time::Duration::from_secs(120);
+/// waits for the answer: past the provider's own margin (30 s), and short of
+/// what the routine sessions route waits (the longest timeout and 60 s).
+pub const RUN_COMMAND_MARGIN: std::time::Duration = std::time::Duration::from_secs(45);
 
 /// The prefix of the channel a command run's answer is published on, the
 /// request's id after it.

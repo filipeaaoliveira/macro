@@ -42,11 +42,35 @@ fn a_command_needs_a_line_and_a_bounded_timeout() {
 fn the_script_runs_the_quoted_command_in_its_directory_under_its_timeout() {
     assert_eq!(
         command("apps/web", "echo 'it''s' && exit 3", 90).script("/workspace"),
-        r"cd '/workspace/apps/web' && exec timeout --kill-after=10 90 bash -lc 'echo '\''it'\'''\''s'\'' && exit 3'"
+        concat!(
+            r#"cd '/workspace/apps/web' && git_dir=$(git rev-parse --absolute-git-dir 2>/dev/null); "#,
+            r#"if [ -n "$git_dir" ] && command -v flock >/dev/null 2>&1; "#,
+            r#"then exec timeout --kill-after=10 90 flock "$git_dir/macro-check.lock" "#,
+            r#"bash --noprofile --norc -c 'echo '\''it'\'''\''s'\'' && exit 3'; fi; "#,
+            r#"exec timeout --kill-after=10 90 bash --noprofile --norc -c 'echo '\''it'\'''\''s'\'' && exit 3'"#,
+        )
     );
-    assert_eq!(
-        command(".", "ls", 5).script("/workspace/"),
-        "cd '/workspace/' && exec timeout --kill-after=10 5 bash -lc 'ls'"
+    assert!(
+        command(".", "ls", 5)
+            .script("/workspace/")
+            .starts_with("cd '/workspace/' && ")
+    );
+}
+
+/// A cut never splits a character: the kept end starts on a boundary.
+#[test]
+fn output_is_cut_on_a_character_boundary() {
+    // Three-byte characters, so the cut falls inside one.
+    let long = "€".repeat(MAX_COMMAND_OUTPUT_BYTES);
+    let output = SessionCommandOutput::new(0, long.as_bytes(), b"");
+
+    assert!(output.stdout.len() <= MAX_COMMAND_OUTPUT_BYTES);
+    assert!(
+        output
+            .stdout
+            .trim_start_matches("(earlier output left out)\n")
+            .chars()
+            .all(|c| c == '€')
     );
 }
 

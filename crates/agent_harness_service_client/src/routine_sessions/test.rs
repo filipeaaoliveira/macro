@@ -381,6 +381,36 @@ async fn a_command_is_sent_to_its_route_and_its_end_read_back() {
     );
 }
 
+/// A harness from before commands ran in sessions has no `exec` route: its
+/// 404 (or a 501 with no domain code) reads as a runtime that runs no
+/// command, so the caller falls back to the agent's report.
+#[tokio::test]
+async fn a_harness_without_the_exec_route_runs_no_command() {
+    let server = server(vec![
+        Reply::json(404, json!("not found")),
+        Reply::json(501, json!("not implemented")),
+        Reply::json(404, json!({"code": "persona_unavailable"})),
+    ])
+    .await;
+    let client = AgentSessionClient::new(&server.url, KEY).unwrap();
+    let command = ExecRoutineSession {
+        action: identity(),
+        command: SessionCommand {
+            cwd: ".".into(),
+            command: "just check".into(),
+            timeout_secs: 600,
+        },
+    };
+
+    let missing = client.exec(command.clone()).await.unwrap_err();
+    let unimplemented = client.exec(command.clone()).await.unwrap_err();
+    let refused = client.exec(command).await.unwrap_err();
+
+    assert_eq!(missing, RoutineSessionError::CommandUnsupported);
+    assert_eq!(unimplemented, RoutineSessionError::CommandUnsupported);
+    assert_eq!(refused, RoutineSessionError::PersonaUnavailable);
+}
+
 /// A harness nothing listens for refuses the connection, and never got the
 /// prompt: that is a definite failure, safe to send again.
 #[tokio::test]

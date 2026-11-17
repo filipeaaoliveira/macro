@@ -167,6 +167,11 @@ impl AgentSessionClient {
                 RoutineSessionError::InvalidCommand
             }
             _ if operation.prompts() => RoutineSessionError::PromptDeliveryUnknown,
+            // A harness from before commands ran in sessions has no such
+            // route: its sessions run none, so the caller falls back.
+            StatusCode::NOT_FOUND | StatusCode::NOT_IMPLEMENTED if operation == Operation::Exec => {
+                RoutineSessionError::CommandUnsupported
+            }
             StatusCode::CONFLICT => RoutineSessionError::Conflict,
             StatusCode::NOT_FOUND
             | StatusCode::TOO_MANY_REQUESTS

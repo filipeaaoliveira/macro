@@ -78,6 +78,12 @@ impl SessionCommand {
     /// absolute path, under its timeout: `timeout` stops it with `TERM`,
     /// then `KILL` ten seconds later, and exits 124 (or 137).
     ///
+    /// The command runs in a shell that reads no profile or rc file, which
+    /// the agent could have changed. It holds a lock in the checkout's git
+    /// directory while it runs (`flock`, where the machine has it), so a
+    /// retried run of the same check waits for one still running, within
+    /// the same timeout.
+    ///
     /// Each part is quoted for the shell, so the script is safe to hand to
     /// `bash -c` as it is.
     pub fn script(&self, checkout: &str) -> String {
@@ -86,14 +92,20 @@ impl SessionCommand {
         } else {
             format!("{}/{}", checkout.trim_end_matches('/'), self.cwd)
         };
+        let run = format!("bash --noprofile --norc -c {}", shell_quote(&self.command));
+        let timeout = format!("timeout --kill-after=10 {}", self.timeout_secs);
         format!(
-            "cd {} && exec timeout --kill-after=10 {} bash -lc {}",
+            "cd {} && git_dir=$(git rev-parse --absolute-git-dir 2>/dev/null); \
+             if [ -n \"$git_dir\" ] && command -v flock >/dev/null 2>&1; \
+             then exec {timeout} flock \"$git_dir/{LOCK_FILE}\" {run}; fi; \
+             exec {timeout} {run}",
             shell_quote(&directory),
-            self.timeout_secs,
-            shell_quote(&self.command),
         )
     }
 }
+
+/// The lock a command holds in its checkout's git directory while it runs.
+const LOCK_FILE: &str = "macro-check.lock";
 
 /// How a command ended.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

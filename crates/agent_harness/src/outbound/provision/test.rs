@@ -22,10 +22,11 @@ fn a_session_command_runs_in_the_checkout() {
         timeout_secs: 60,
     };
 
-    assert_eq!(
-        super::session_command(&command),
-        r"bash -c 'cd '\''/workspace'\'' && exec timeout --kill-after=10 60 bash -lc '\''just check'\'''"
-    );
+    let line = super::session_command(&command);
+
+    assert!(line.starts_with(r"bash -c 'cd '\''/workspace'\'' && "));
+    assert!(line.contains("timeout --kill-after=10 60"));
+    assert!(line.ends_with(r"bash --noprofile --norc -c '\''just check'\'''"));
 }
 
 /// The sandbox holds no GitHub credential and is told no repository: it clones
