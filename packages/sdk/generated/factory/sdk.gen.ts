@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AnswerFactoryGateData, AnswerFactoryGateErrors, AnswerFactoryGateResponses, CancelFactoryRunData, CancelFactoryRunErrors, CancelFactoryRunResponses, CreateFactoryRunData, CreateFactoryRunErrors, CreateFactoryRunResponses, GetFactoryInsightsData, GetFactoryInsightsErrors, GetFactoryInsightsResponses, GetFactoryRunData, GetFactoryRunErrors, GetFactoryRunResponses, HandBackFactoryStepData, HandBackFactoryStepErrors, HandBackFactoryStepResponses, LinkFactoryRunTaskData, LinkFactoryRunTaskErrors, LinkFactoryRunTaskResponses, ListFactoryFlowsData, ListFactoryFlowsErrors, ListFactoryFlowsResponses, ListFactoryTaskRunsData, ListFactoryTaskRunsErrors, ListFactoryTaskRunsResponses } from './types.gen';
+import type { AnswerFactoryGateData, AnswerFactoryGateErrors, AnswerFactoryGateResponses, CancelFactoryRunData, CancelFactoryRunErrors, CancelFactoryRunResponses, CreateFactoryRunData, CreateFactoryRunErrors, CreateFactoryRunResponses, GetFactoryControlFilesData, GetFactoryControlFilesErrors, GetFactoryControlFilesResponses, GetFactoryInsightsData, GetFactoryInsightsErrors, GetFactoryInsightsResponses, GetFactoryRunData, GetFactoryRunErrors, GetFactoryRunResponses, HandBackFactoryStepData, HandBackFactoryStepErrors, HandBackFactoryStepResponses, LinkFactoryRunTaskData, LinkFactoryRunTaskErrors, LinkFactoryRunTaskResponses, ListFactoryFlowsData, ListFactoryFlowsErrors, ListFactoryFlowsResponses, ListFactoryTaskRunsData, ListFactoryTaskRunsErrors, ListFactoryTaskRunsResponses, SetFactoryControlFilesData, SetFactoryControlFilesErrors, SetFactoryControlFilesResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -145,6 +145,31 @@ export class Sdk extends HeyApiClient {
     public linkFactoryRunTask<ThrowOnError extends boolean = false>(options: Options<LinkFactoryRunTaskData, ThrowOnError>): RequestResult<LinkFactoryRunTaskResponses, LinkFactoryRunTaskErrors, ThrowOnError> {
         return (options.client ?? this.client).put<LinkFactoryRunTaskResponses, LinkFactoryRunTaskErrors, ThrowOnError>({
             url: '/runs/{id}/task',
+            ...options,
+            headers: {
+                'Content-Type': 'application/json',
+                ...options.headers
+            }
+        });
+    }
+
+    /**
+     * The Control File patterns the caller's Runs are checked against: their
+     * own, or the factory's default.
+     */
+    public getFactoryControlFiles<ThrowOnError extends boolean = false>(options?: Options<GetFactoryControlFilesData, ThrowOnError>): RequestResult<GetFactoryControlFilesResponses, GetFactoryControlFilesErrors, ThrowOnError> {
+        return (options?.client ?? this.client).get<GetFactoryControlFilesResponses, GetFactoryControlFilesErrors, ThrowOnError>({ url: '/settings/control-files', ...options });
+    }
+
+    /**
+     * Set the Control File patterns the caller's Runs are checked against, or
+     * go back to the factory's default. A shorter list lets a Run's agent
+     * change more files unseen, so only the person in their own signed-in
+     * session sets it (403 otherwise).
+     */
+    public setFactoryControlFiles<ThrowOnError extends boolean = false>(options: Options<SetFactoryControlFilesData, ThrowOnError>): RequestResult<SetFactoryControlFilesResponses, SetFactoryControlFilesErrors, ThrowOnError> {
+        return (options.client ?? this.client).put<SetFactoryControlFilesResponses, SetFactoryControlFilesErrors, ThrowOnError>({
+            url: '/settings/control-files',
             ...options,
             headers: {
                 'Content-Type': 'application/json',

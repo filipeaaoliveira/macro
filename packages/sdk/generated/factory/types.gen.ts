@@ -19,6 +19,12 @@ export type AnswerGateRequest = {
      */
     answer: Outcome;
     /**
+     * Whether the person approves the Control Files the Run's branch
+     * changed that its request does not name: required to approve a Gate
+     * of a Tampered Run.
+     */
+    approveControlFiles?: boolean;
+    /**
      * What the person adds, for the Run's later Steps to read.
      */
     note?: string | null;
@@ -67,6 +73,21 @@ export type CheckRoundEnd = {
  * How a round of a Step's checks ended.
  */
 export type CheckRoundOutcome = 'passed' | 'failed';
+
+/**
+ * The Control File patterns a person's Runs are checked against.
+ */
+export type ControlFilesSettings = {
+    /**
+     * Whether they are the factory's default: the person set none.
+     */
+    isDefault: boolean;
+    /**
+     * The glob patterns, matched against each changed path from the
+     * repository's root.
+     */
+    patterns: Array<string>;
+};
 
 /**
  * Request body for creating a Run.
@@ -245,6 +266,12 @@ export type GateAnswer = {
      */
     answeredAt: string;
     /**
+     * The Run's Tampered files the person approved with their answer: an
+     * empty list approves a Run whose changes GitHub could not list. None
+     * when the answer approved none.
+     */
+    approvedControlFiles?: Array<string> | null;
+    /**
      * What the person added, for the Run's later Steps to read.
      */
     note?: string | null;
@@ -415,6 +442,7 @@ export type Run = {
      * What the Run was asked to do.
      */
     request: string;
+    tampering?: null | Tampering;
     /**
      * The Macro task the Run works on: its task document's id. None when
      * the Run has no task, or its task was deleted.
@@ -457,7 +485,7 @@ export type RunEnd = {
 /**
  * Why a request was refused, where a client acts on the cause.
  */
-export type RunErrorCode = 'unreachableRepository' | 'noPushAccess';
+export type RunErrorCode = 'unreachableRepository' | 'noPushAccess' | 'controlFilesNotApproved';
 
 /**
  * What a refused or failed request answers: a message, and for a refusal
@@ -567,6 +595,19 @@ export type RunTokens = {
 };
 
 /**
+ * Request body for setting the Control File patterns.
+ */
+export type SetControlFilesRequest = {
+    /**
+     * The glob patterns, matched against each changed path from the
+     * repository's root: `*` stays within one folder, `**` spans any
+     * number. At most 200, each at most 256 bytes. Null goes back to the
+     * factory's default; an empty list checks no file.
+     */
+    patterns?: Array<string> | null;
+};
+
+/**
  * One visit of one of a Run's entries.
  */
 export type Step = {
@@ -618,6 +659,24 @@ export type StepEnd = {
      * What the Step produced, for a person to read.
      */
     output: string;
+};
+
+/**
+ * The Control Files a Run's branch changed that its request does not name:
+ * files that decide whether the repository's checks pass, such as its
+ * tests, lint configuration and CI workflows.
+ */
+export type Tampering = {
+    /**
+     * The files, from the repository's root, in GitHub's order: empty when
+     * `unlisted`.
+     */
+    files: Array<string>;
+    /**
+     * GitHub could not list all of the branch's changes, so which Control
+     * Files it changed is not known.
+     */
+    unlisted: boolean;
 };
 
 /**
@@ -920,6 +979,49 @@ export type LinkFactoryRunTaskResponses = {
 };
 
 export type LinkFactoryRunTaskResponse = LinkFactoryRunTaskResponses[keyof LinkFactoryRunTaskResponses];
+
+export type GetFactoryControlFilesData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/settings/control-files';
+};
+
+export type GetFactoryControlFilesErrors = {
+    401: ErrorResponse;
+    403: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type GetFactoryControlFilesError = GetFactoryControlFilesErrors[keyof GetFactoryControlFilesErrors];
+
+export type GetFactoryControlFilesResponses = {
+    200: ControlFilesSettings;
+};
+
+export type GetFactoryControlFilesResponse = GetFactoryControlFilesResponses[keyof GetFactoryControlFilesResponses];
+
+export type SetFactoryControlFilesData = {
+    body: SetControlFilesRequest;
+    path?: never;
+    query?: never;
+    url: '/settings/control-files';
+};
+
+export type SetFactoryControlFilesErrors = {
+    400: ErrorResponse;
+    401: ErrorResponse;
+    403: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type SetFactoryControlFilesError = SetFactoryControlFilesErrors[keyof SetFactoryControlFilesErrors];
+
+export type SetFactoryControlFilesResponses = {
+    200: ControlFilesSettings;
+};
+
+export type SetFactoryControlFilesResponse = SetFactoryControlFilesResponses[keyof SetFactoryControlFilesResponses];
 
 export type ListFactoryTaskRunsData = {
     body?: never;

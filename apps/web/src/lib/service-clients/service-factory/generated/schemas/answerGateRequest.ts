@@ -14,6 +14,10 @@ import type { Outcome } from './outcome';
 export interface AnswerGateRequest {
   /** The answer, one the Gate offers. */
   answer: Outcome;
+  /** Whether the person approves the Control Files the Run's branch
+changed that its request does not name: required to approve a Gate
+of a Tampered Run. */
+  approveControlFiles?: boolean;
   /** What the person adds, for the Run's later Steps to read. */
   note?: AnswerGateRequestNote;
 }

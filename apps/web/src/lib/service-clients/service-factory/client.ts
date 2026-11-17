@@ -30,12 +30,15 @@ const host = () => SERVER_HOSTS.factory;
 /** Why a Run wasn't started, when the service names the cause. */
 export type StartRunErrorCode = 'UNREACHABLE_REPOSITORY' | 'NO_PUSH_ACCESS';
 
-const START_RUN_ERROR_CODES: Record<RunErrorCode, StartRunErrorCode> = {
+/** The codes the service refuses a start with. */
+type StartRunRefusal = Exclude<RunErrorCode, 'controlFilesNotApproved'>;
+
+const START_RUN_ERROR_CODES: Record<StartRunRefusal, StartRunErrorCode> = {
   unreachableRepository: 'UNREACHABLE_REPOSITORY',
   noPushAccess: 'NO_PUSH_ACCESS',
 };
 
-function isRunErrorCode(code: unknown): code is RunErrorCode {
+function isRunErrorCode(code: unknown): code is StartRunRefusal {
   return typeof code === 'string' && Object.hasOwn(START_RUN_ERROR_CODES, code);
 }
 
@@ -120,7 +123,8 @@ export const factoryClient = {
    * Answers the Gate of the Run's Step `seq`; the service answers 202 with
    * no body. A Gate that was already answered, or that the Run no longer
    * waits on, fails `CONFLICT`; an agent answering for its owner fails
-   * `FORBIDDEN`.
+   * `FORBIDDEN`. Approving a Tampered Run without `approveControlFiles`
+   * fails `BAD_REQUEST`.
    */
   answerGate(runId: string, seq: number, answer: AnswerGateRequest) {
     return fetchWithToken<Record<string, never>>(

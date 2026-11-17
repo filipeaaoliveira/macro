@@ -9,6 +9,7 @@ import type { MacroUserIdStr } from './macroUserIdStr';
 import type { RunEndProperty } from './runEndProperty';
 import type { RunId } from './runId';
 import type { RunRepository } from './runRepository';
+import type { RunTampering } from './runTampering';
 import type { RunTaskId } from './runTaskId';
 
 /**
@@ -23,6 +24,7 @@ export interface Run {
   repository?: RunRepository;
   /** What the Run was asked to do. */
   request: string;
+  tampering?: RunTampering;
   /** The Macro task the Run works on: its task document's id. None when
 the Run has no task, or its task was deleted. */
   taskId?: RunTaskId;

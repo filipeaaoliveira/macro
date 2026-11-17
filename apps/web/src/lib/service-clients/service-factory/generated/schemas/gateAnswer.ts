@@ -5,6 +5,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
+import type { GateAnswerApprovedControlFiles } from './gateAnswerApprovedControlFiles';
 import type { GateAnswerNote } from './gateAnswerNote';
 import type { GateAnswerUserId } from './gateAnswerUserId';
 import type { Outcome } from './outcome';
@@ -17,6 +18,10 @@ export interface GateAnswer {
   answer: Outcome;
   /** When they answered. */
   answeredAt: string;
+  /** The Run's Tampered files the person approved with their answer: an
+empty list approves a Run whose changes GitHub could not list. None
+when the answer approved none. */
+  approvedControlFiles?: GateAnswerApprovedControlFiles;
   /** What the person added, for the Run's later Steps to read. */
   note?: GateAnswerNote;
   userId?: GateAnswerUserId;

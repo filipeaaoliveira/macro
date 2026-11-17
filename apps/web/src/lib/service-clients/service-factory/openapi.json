@@ -705,6 +705,122 @@
         }
       }
     },
+    "/settings/control-files": {
+      "get": {
+        "tags": ["factory"],
+        "summary": "The Control File patterns the caller's Runs are checked against: their\nown, or the factory's default.",
+        "operationId": "get_factory_control_files",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlFilesSettings"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": ["factory"],
+        "summary": "Set the Control File patterns the caller's Runs are checked against, or\ngo back to the factory's default. A shorter list lets a Run's agent\nchange more files unseen, so only the person in their own signed-in\nsession sets it (403 otherwise).",
+        "operationId": "set_factory_control_files",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetControlFilesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlFilesSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/tasks/{task_id}/runs": {
       "get": {
         "tags": ["factory"],
@@ -802,6 +918,10 @@
             "$ref": "#/components/schemas/Outcome",
             "description": "The answer, one the Gate offers."
           },
+          "approveControlFiles": {
+            "type": "boolean",
+            "description": "Whether the person approves the Control Files the Run's branch\nchanged that its request does not name: required to approve a Gate\nof a Tampered Run."
+          },
           "note": {
             "type": ["string", "null"],
             "description": "What the person adds, for the Run's later Steps to read."
@@ -868,6 +988,24 @@
         "type": "string",
         "description": "How a round of a Step's checks ended.",
         "enum": ["passed", "failed"]
+      },
+      "ControlFilesSettings": {
+        "type": "object",
+        "description": "The Control File patterns a person's Runs are checked against.",
+        "required": ["patterns", "isDefault"],
+        "properties": {
+          "isDefault": {
+            "type": "boolean",
+            "description": "Whether they are the factory's default: the person set none."
+          },
+          "patterns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The glob patterns, matched against each changed path from the\nrepository's root."
+          }
+        }
       },
       "CreateRunRequest": {
         "type": "object",
@@ -1124,6 +1262,13 @@
             "format": "date-time",
             "description": "When they answered."
           },
+          "approvedControlFiles": {
+            "type": ["array", "null"],
+            "items": {
+              "type": "string"
+            },
+            "description": "The Run's Tampered files the person approved with their answer: an\nempty list approves a Run whose changes GitHub could not list. None\nwhen the answer approved none."
+          },
           "note": {
             "type": ["string", "null"],
             "description": "What the person added, for the Run's later Steps to read."
@@ -1369,6 +1514,17 @@
             "type": "string",
             "description": "What the Run was asked to do."
           },
+          "tampering": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Tampering",
+                "description": "The Control Files its branch changed that its request does not name,\nas the pull request Steps last read them: the Run is Tampered, and\nmerges only once a person approves them. None when it changed none."
+              }
+            ]
+          },
           "taskId": {
             "type": ["string", "null"],
             "format": "uuid",
@@ -1417,7 +1573,11 @@
       "RunErrorCode": {
         "type": "string",
         "description": "Why a request was refused, where a client acts on the cause.",
-        "enum": ["unreachableRepository", "noPushAccess"]
+        "enum": [
+          "unreachableRepository",
+          "noPushAccess",
+          "controlFilesNotApproved"
+        ]
       },
       "RunErrorResponse": {
         "type": "object",
@@ -1583,6 +1743,19 @@
           }
         }
       },
+      "SetControlFilesRequest": {
+        "type": "object",
+        "description": "Request body for setting the Control File patterns.",
+        "properties": {
+          "patterns": {
+            "type": ["array", "null"],
+            "items": {
+              "type": "string"
+            },
+            "description": "The glob patterns, matched against each changed path from the\nrepository's root: `*` stays within one folder, `**` spans any\nnumber. At most 200, each at most 256 bytes. Null goes back to the\nfactory's default; an empty list checks no file."
+          }
+        }
+      },
       "Step": {
         "type": "object",
         "description": "One visit of one of a Run's entries.",
@@ -1693,6 +1866,24 @@
           "output": {
             "type": "string",
             "description": "What the Step produced, for a person to read."
+          }
+        }
+      },
+      "Tampering": {
+        "type": "object",
+        "description": "The Control Files a Run's branch changed that its request does not name:\nfiles that decide whether the repository's checks pass, such as its\ntests, lint configuration and CI workflows.",
+        "required": ["files", "unlisted"],
+        "properties": {
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The files, from the repository's root, in GitHub's order: empty when\n`unlisted`."
+          },
+          "unlisted": {
+            "type": "boolean",
+            "description": "GitHub could not list all of the branch's changes, so which Control\nFiles it changed is not known."
           }
         }
       },
