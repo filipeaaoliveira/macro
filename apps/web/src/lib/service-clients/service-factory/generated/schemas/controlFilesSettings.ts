@@ -4,14 +4,22 @@
  * factory_engine
  * OpenAPI spec version: 0.1.0
  */
+import type { ControlFilesSettingsTeamId } from './controlFilesSettingsTeamId';
 
 /**
- * The Control File patterns a person's Runs are checked against.
+ * The Control File patterns a person's Runs are checked against: their
+team's, or the factory's default.
  */
 export interface ControlFilesSettings {
-  /** Whether they are the factory's default: the person set none. */
+  /** Whether the person may change them: they administer the team. */
+  canEdit: boolean;
+  /** Whether they are the factory's default: the team set none, or the
+person is on no team. */
   isDefault: boolean;
   /** The glob patterns, matched against each changed path from the
-repository's root. */
+repository's root, ignoring case. */
   patterns: string[];
+  /** The team whose patterns they are; none when the person is on no
+team. */
+  teamId?: ControlFilesSettingsTeamId;
 }

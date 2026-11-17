@@ -708,7 +708,7 @@
     "/settings/control-files": {
       "get": {
         "tags": ["factory"],
-        "summary": "The Control File patterns the caller's Runs are checked against: their\nown, or the factory's default.",
+        "summary": "The Control File patterns the caller's Runs are checked against: their\nteam's, or the factory's default, and whether the caller may change\nthem.",
         "operationId": "get_factory_control_files",
         "responses": {
           "200": {
@@ -755,7 +755,7 @@
       },
       "put": {
         "tags": ["factory"],
-        "summary": "Set the Control File patterns the caller's Runs are checked against, or\ngo back to the factory's default. A shorter list lets a Run's agent\nchange more files unseen, so only the person in their own signed-in\nsession sets it (403 otherwise).",
+        "summary": "Set the Control File patterns the Runs of the caller's team are checked\nagainst, or go back to the factory's default. Only an admin or the owner\nof the team sets them, and a shorter list lets a Run's agent change more\nfiles unseen, so only in their own signed-in session (403 otherwise).",
         "operationId": "set_factory_control_files",
         "requestBody": {
           "content": {
@@ -918,9 +918,12 @@
             "$ref": "#/components/schemas/Outcome",
             "description": "The answer, one the Gate offers."
           },
-          "approveControlFiles": {
-            "type": "boolean",
-            "description": "Whether the person approves the Control Files the Run's branch\nchanged that its request does not name: required to approve a Gate\nof a Tampered Run."
+          "approvedControlFiles": {
+            "type": ["array", "null"],
+            "items": {
+              "type": "string"
+            },
+            "description": "The Control Files the Run's branch changed unasked that the person\nsaw and approves: required to approve a Gate of a Tampered Run, and\nmust be exactly its `controlFiles.tampered` (empty when `unlisted`)."
           },
           "note": {
             "type": ["string", "null"],
@@ -989,21 +992,55 @@
         "description": "How a round of a Step's checks ended.",
         "enum": ["passed", "failed"]
       },
+      "ControlFileChanges": {
+        "type": "object",
+        "description": "The Control Files a Run's branch changed: files that decide whether the\nrepository's checks pass, such as its tests, lint configuration and CI\nworkflows. The Run is Tampered when it changed one its request does not\nask for, and merges only once a person approves them.",
+        "required": ["tampered", "named", "unlisted"],
+        "properties": {
+          "named": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The files its request asks for by naming them, which need no\napproval: empty when `unlisted`."
+          },
+          "tampered": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The files its request does not ask for, from the repository's root,\nin GitHub's order: empty when `unlisted`."
+          },
+          "unlisted": {
+            "type": "boolean",
+            "description": "GitHub could not list all of the branch's changes, or they were more\nthan [`Self::MAX_FILES`], so which Control Files it changed is not\nknown."
+          }
+        }
+      },
       "ControlFilesSettings": {
         "type": "object",
-        "description": "The Control File patterns a person's Runs are checked against.",
-        "required": ["patterns", "isDefault"],
+        "description": "The Control File patterns a person's Runs are checked against: their\nteam's, or the factory's default.",
+        "required": ["patterns", "isDefault", "canEdit"],
         "properties": {
+          "canEdit": {
+            "type": "boolean",
+            "description": "Whether the person may change them: they administer the team."
+          },
           "isDefault": {
             "type": "boolean",
-            "description": "Whether they are the factory's default: the person set none."
+            "description": "Whether they are the factory's default: the team set none, or the\nperson is on no team."
           },
           "patterns": {
             "type": "array",
             "items": {
               "type": "string"
             },
-            "description": "The glob patterns, matched against each changed path from the\nrepository's root."
+            "description": "The glob patterns, matched against each changed path from the\nrepository's root, ignoring case."
+          },
+          "teamId": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "The team whose patterns they are; none when the person is on no\nteam."
           }
         }
       },
@@ -1477,12 +1514,27 @@
       "Run": {
         "type": "object",
         "description": "One Run of a Flow.",
-        "required": ["id", "request", "userId", "createdAt"],
+        "required": ["id", "request", "userId", "createdAt", "createdInPerson"],
         "properties": {
+          "controlFiles": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ControlFileChanges",
+                "description": "The Control Files its branch changed, as the pull request Steps last\nread them. None when it changed none."
+              }
+            ]
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time",
             "description": "When the Run was created."
+          },
+          "createdInPerson": {
+            "type": "boolean",
+            "description": "Whether its owner created it in their own signed-in session: only\nthen does its request ask for the Control Files it names."
           },
           "end": {
             "oneOf": [
@@ -1513,17 +1565,6 @@
           "request": {
             "type": "string",
             "description": "What the Run was asked to do."
-          },
-          "tampering": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/Tampering",
-                "description": "The Control Files its branch changed that its request does not name,\nas the pull request Steps last read them: the Run is Tampered, and\nmerges only once a person approves them. None when it changed none."
-              }
-            ]
           },
           "taskId": {
             "type": ["string", "null"],
@@ -1866,24 +1907,6 @@
           "output": {
             "type": "string",
             "description": "What the Step produced, for a person to read."
-          }
-        }
-      },
-      "Tampering": {
-        "type": "object",
-        "description": "The Control Files a Run's branch changed that its request does not name:\nfiles that decide whether the repository's checks pass, such as its\ntests, lint configuration and CI workflows.",
-        "required": ["files", "unlisted"],
-        "properties": {
-          "files": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "The files, from the repository's root, in GitHub's order: empty when\n`unlisted`."
-          },
-          "unlisted": {
-            "type": "boolean",
-            "description": "GitHub could not list all of the branch's changes, so which Control\nFiles it changed is not known."
           }
         }
       },

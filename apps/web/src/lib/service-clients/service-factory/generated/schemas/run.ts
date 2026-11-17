@@ -6,25 +6,28 @@
  */
 
 import type { MacroUserIdStr } from './macroUserIdStr';
+import type { RunControlFiles } from './runControlFiles';
 import type { RunEndProperty } from './runEndProperty';
 import type { RunId } from './runId';
 import type { RunRepository } from './runRepository';
-import type { RunTampering } from './runTampering';
 import type { RunTaskId } from './runTaskId';
 
 /**
  * One Run of a Flow.
  */
 export interface Run {
+  controlFiles?: RunControlFiles;
   /** When the Run was created. */
   createdAt: string;
+  /** Whether its owner created it in their own signed-in session: only
+then does its request ask for the Control Files it names. */
+  createdInPerson: boolean;
   end?: RunEndProperty;
   /** The Run's id, also its Temporal workflow id. */
   id: RunId;
   repository?: RunRepository;
   /** What the Run was asked to do. */
   request: string;
-  tampering?: RunTampering;
   /** The Macro task the Run works on: its task document's id. None when
 the Run has no task, or its task was deleted. */
   taskId?: RunTaskId;

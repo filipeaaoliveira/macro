@@ -19,11 +19,11 @@ export type AnswerGateRequest = {
      */
     answer: Outcome;
     /**
-     * Whether the person approves the Control Files the Run's branch
-     * changed that its request does not name: required to approve a Gate
-     * of a Tampered Run.
+     * The Control Files the Run's branch changed unasked that the person
+     * saw and approves: required to approve a Gate of a Tampered Run, and
+     * must be exactly its `controlFiles.tampered` (empty when `unlisted`).
      */
-    approveControlFiles?: boolean;
+    approvedControlFiles?: Array<string> | null;
     /**
      * What the person adds, for the Run's later Steps to read.
      */
@@ -75,18 +75,54 @@ export type CheckRoundEnd = {
 export type CheckRoundOutcome = 'passed' | 'failed';
 
 /**
- * The Control File patterns a person's Runs are checked against.
+ * The Control Files a Run's branch changed: files that decide whether the
+ * repository's checks pass, such as its tests, lint configuration and CI
+ * workflows. The Run is Tampered when it changed one its request does not
+ * ask for, and merges only once a person approves them.
+ */
+export type ControlFileChanges = {
+    /**
+     * The files its request asks for by naming them, which need no
+     * approval: empty when `unlisted`.
+     */
+    named: Array<string>;
+    /**
+     * The files its request does not ask for, from the repository's root,
+     * in GitHub's order: empty when `unlisted`.
+     */
+    tampered: Array<string>;
+    /**
+     * GitHub could not list all of the branch's changes, or they were more
+     * than [`Self::MAX_FILES`], so which Control Files it changed is not
+     * known.
+     */
+    unlisted: boolean;
+};
+
+/**
+ * The Control File patterns a person's Runs are checked against: their
+ * team's, or the factory's default.
  */
 export type ControlFilesSettings = {
     /**
-     * Whether they are the factory's default: the person set none.
+     * Whether the person may change them: they administer the team.
+     */
+    canEdit: boolean;
+    /**
+     * Whether they are the factory's default: the team set none, or the
+     * person is on no team.
      */
     isDefault: boolean;
     /**
      * The glob patterns, matched against each changed path from the
-     * repository's root.
+     * repository's root, ignoring case.
      */
     patterns: Array<string>;
+    /**
+     * The team whose patterns they are; none when the person is on no
+     * team.
+     */
+    teamId?: string | null;
 };
 
 /**
@@ -428,10 +464,16 @@ export type Role = string;
  * One Run of a Flow.
  */
 export type Run = {
+    controlFiles?: null | ControlFileChanges;
     /**
      * When the Run was created.
      */
     createdAt: string;
+    /**
+     * Whether its owner created it in their own signed-in session: only
+     * then does its request ask for the Control Files it names.
+     */
+    createdInPerson: boolean;
     end?: null | RunEnd;
     /**
      * The Run's id, also its Temporal workflow id.
@@ -442,7 +484,6 @@ export type Run = {
      * What the Run was asked to do.
      */
     request: string;
-    tampering?: null | Tampering;
     /**
      * The Macro task the Run works on: its task document's id. None when
      * the Run has no task, or its task was deleted.
@@ -659,24 +700,6 @@ export type StepEnd = {
      * What the Step produced, for a person to read.
      */
     output: string;
-};
-
-/**
- * The Control Files a Run's branch changed that its request does not name:
- * files that decide whether the repository's checks pass, such as its
- * tests, lint configuration and CI workflows.
- */
-export type Tampering = {
-    /**
-     * The files, from the repository's root, in GitHub's order: empty when
-     * `unlisted`.
-     */
-    files: Array<string>;
-    /**
-     * GitHub could not list all of the branch's changes, so which Control
-     * Files it changed is not known.
-     */
-    unlisted: boolean;
 };
 
 /**

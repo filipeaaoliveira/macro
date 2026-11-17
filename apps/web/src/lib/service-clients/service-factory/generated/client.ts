@@ -664,7 +664,8 @@ export const linkFactoryRunTask = async (
 
 /**
  * @summary The Control File patterns the caller's Runs are checked against: their
-own, or the factory's default.
+team's, or the factory's default, and whether the caller may change
+them.
  */
 export type getFactoryControlFilesResponse200 = {
   data: ControlFilesSettings;
@@ -727,10 +728,10 @@ export const getFactoryControlFiles = async (
 };
 
 /**
- * @summary Set the Control File patterns the caller's Runs are checked against, or
-go back to the factory's default. A shorter list lets a Run's agent
-change more files unseen, so only the person in their own signed-in
-session sets it (403 otherwise).
+ * @summary Set the Control File patterns the Runs of the caller's team are checked
+against, or go back to the factory's default. Only an admin or the owner
+of the team sets them, and a shorter list lets a Run's agent change more
+files unseen, so only in their own signed-in session (403 otherwise).
  */
 export type setFactoryControlFilesResponse200 = {
   data: ControlFilesSettings;
