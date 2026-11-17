@@ -122,10 +122,9 @@ impl RepositoryChecks {
         let mut names = BTreeSet::new();
         for check in &checks.checks {
             let name_valid = (1..=64).contains(&check.name.len())
-                && check
-                    .name
-                    .chars()
-                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '_' | '-'));
+                && check.name.chars().all(|c| {
+                    c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '_' | '-')
+                });
             if !name_valid {
                 return Err(ChecksFileError::Name(check.name.clone()));
             }

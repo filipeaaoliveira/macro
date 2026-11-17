@@ -306,10 +306,7 @@ async fn malformed_and_ambiguous_prompt_responses_never_replay() {
 async fn a_follow_up_is_sent_once_to_its_route() {
     let action = identity();
     let server = server(vec![
-        Reply::json(
-            200,
-            json!({"action_id": action.action_id, "queued": true}),
-        ),
+        Reply::json(200, json!({"action_id": action.action_id, "queued": true})),
         Reply::json(504, json!("gateway timeout")),
     ])
     .await;

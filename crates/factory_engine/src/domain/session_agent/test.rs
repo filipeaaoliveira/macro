@@ -215,9 +215,7 @@ impl RoutineSessions for FakeSessions {
         let session_id = command.action.session_id.as_uuid();
         let again = {
             let mut calls = self.follow_up_calls.lock().expect("follow-ups");
-            let again = calls
-                .iter()
-                .any(|sent| sent.action.action_id == action_id);
+            let again = calls.iter().any(|sent| sent.action.action_id == action_id);
             calls.push(command);
             again
         };

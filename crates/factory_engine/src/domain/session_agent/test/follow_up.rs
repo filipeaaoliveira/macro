@@ -20,8 +20,7 @@ fn outcome(name: &str) -> Outcome {
 #[tokio::test]
 async fn a_later_prompt_goes_on_in_the_step_s_session() {
     let repo = FakeRepo::default();
-    let mut sessions =
-        FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
+    let mut sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
     sessions.follow_up_handed = Some(HandBack {
         outcome: outcome("passed"),
         output: "web: exit 0".to_string(),
@@ -49,7 +48,7 @@ async fn a_later_prompt_goes_on_in_the_step_s_session() {
     assert_eq!(answer.outcome, outcome("passed"));
     assert_eq!(answer.text, "web: exit 0");
     assert_eq!(again, answer);
-    let calls = sessions.follow_up_calls.lock().expect("follow-ups");
+    let calls = sessions.follow_up_calls.lock().expect("follow-ups").clone();
     assert_eq!(calls.len(), 2);
     assert_eq!(calls[0].action.session_id.as_uuid(), claimed.session_id);
     assert_eq!(calls[0].action.action_id.as_uuid(), turn.action_id);

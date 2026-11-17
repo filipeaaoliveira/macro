@@ -17,12 +17,12 @@ use factory_records::domain::models::{Outcome, Repository};
 use factory_records::domain::ports::RunRepository;
 use github::domain::models::MacroTaskId;
 
+use crate::domain::checks::{CHECKS_FILE, ChecksFileError, RepositoryCheck, RepositoryChecks};
 use crate::domain::models::{
     CheckState, CheckSuite, CodeRepository, HeadChecks, Merging, OpenPullRequest, Opening,
     PullRequest, PullRequestState, RequiredCheck, RequiredChecks, StepInput, StepReport,
     run_branch,
 };
-use crate::domain::checks::{CHECKS_FILE, ChecksFileError, RepositoryCheck, RepositoryChecks};
 use crate::domain::ports::{PullRequests, Retryable};
 
 /// How long `ci` waits for a pull request's checks to finish: short of a

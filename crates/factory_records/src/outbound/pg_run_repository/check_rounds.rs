@@ -46,7 +46,8 @@ impl TryFrom<CheckRoundRow> for CheckRound {
             _ => return Err(PgRunRepositoryErr::PartialEnd),
         };
         Ok(CheckRound {
-            round: u8::try_from(row.round).map_err(|_| PgRunRepositoryErr::OutOfRange(row.round))?,
+            round: u8::try_from(row.round)
+                .map_err(|_| PgRunRepositoryErr::OutOfRange(row.round))?,
             checks: row.checks,
             started_at: row.started_at,
             end,
@@ -81,7 +82,10 @@ impl PgRunRepository {
         let mut rounds: BTreeMap<(RunId, u16), Vec<CheckRound>> = BTreeMap::new();
         for row in rows {
             let step = (RunId::from_uuid(row.run_id), super::number(row.seq)?);
-            rounds.entry(step).or_default().push(CheckRound::try_from(row)?);
+            rounds
+                .entry(step)
+                .or_default()
+                .push(CheckRound::try_from(row)?);
         }
         Ok(rounds)
     }

@@ -25,18 +25,21 @@ impl Retryable for SessionFailed {
     }
 }
 
+/// A later prompt's outcome and text, or the session failing.
+type Scripted = Result<(&'static str, &'static str), SessionFailed>;
+
 /// Ends its first prompt with `work`, and each later prompt with the next
 /// of `later`, keeping every task and later prompt it is given.
 #[derive(Clone, Default)]
 struct ScriptedAgent {
     work: &'static str,
-    later: Arc<Mutex<VecDeque<Result<(&'static str, &'static str), SessionFailed>>>>,
+    later: Arc<Mutex<VecDeque<Scripted>>>,
     tasks: Arc<Mutex<Vec<AgentTask>>>,
     turns: Arc<Mutex<Vec<AgentTurn>>>,
 }
 
 impl ScriptedAgent {
-    fn new(work: &'static str, later: Vec<Result<(&'static str, &'static str), SessionFailed>>) -> Self {
+    fn new(work: &'static str, later: Vec<Scripted>) -> Self {
         Self {
             work,
             later: Arc::new(Mutex::new(later.into())),
@@ -294,9 +297,15 @@ async fn a_retried_step_goes_on_with_its_round() {
 #[tokio::test]
 async fn which_checks_a_branch_runs() {
     let unknown = ScriptedAgent::new("done", vec![Ok(("passed", "both passed"))]);
-    run(&unknown, &github(Some(CHECKS), None), &FakeRepo::default(), "write", input())
-        .await
-        .expect("write");
+    run(
+        &unknown,
+        &github(Some(CHECKS), None),
+        &FakeRepo::default(),
+        "write",
+        input(),
+    )
+    .await
+    .expect("write");
     let prompt = &unknown.turns()[0].prompt;
     assert!(prompt.contains("bun run check") && prompt.contains("cargo test -p app"));
 

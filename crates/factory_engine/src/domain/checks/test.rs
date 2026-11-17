@@ -29,12 +29,18 @@ fn a_check_runs_when_the_branch_changed_a_path_it_names() {
     );
     assert_eq!(names(&checks, Some(&["Cargo.lock"])), ["rust", "lint"]);
     assert_eq!(
-        names(&checks, Some(&["packages/ui/button.tsx", "crates/app/lib.rs"])),
+        names(
+            &checks,
+            Some(&["packages/ui/button.tsx", "crates/app/lib.rs"])
+        ),
         ["web", "rust", "lint"]
     );
     // A folder's name is not a prefix of another folder's.
     assert_eq!(
-        names(&checks, Some(&["apps/website/index.ts", "crates/application/lib.rs"])),
+        names(
+            &checks,
+            Some(&["apps/website/index.ts", "crates/application/lib.rs"])
+        ),
         ["lint"]
     );
 }

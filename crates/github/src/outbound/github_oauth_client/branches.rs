@@ -70,8 +70,7 @@ impl GithubOauthImpl {
         }
 
         // GitHub gives a file's content in base64, wrapped over lines.
-        let (Some("base64"), Some(encoded)) = (content.encoding.as_deref(), content.content)
-        else {
+        let (Some("base64"), Some(encoded)) = (content.encoding.as_deref(), content.content) else {
             return Err(GithubError::Internal(anyhow::anyhow!(
                 "GitHub gave the file {path} with no base64 content"
             )));
