@@ -81,6 +81,21 @@ export type RunRepository = {
   baseBranch: string;
 };
 
+/**
+ * The base branch a Run merges to is red: its required checks fail, so no
+ * Run merges to it until they pass again.
+ */
+export type MainHold = {
+  /** When the base was first seen red. */
+  since: string;
+  /** The head commit the checks fail on. */
+  headSha: string;
+  /** The failing checks, one line each. */
+  failed: string;
+  /** The task that names the merges since the base was last green. */
+  taskId?: string;
+};
+
 /** One Run of a Flow, with the Steps it took in the order they started. */
 export type Run = {
   id: string;
@@ -90,6 +105,8 @@ export type Run = {
   repository?: RunRepository;
   end?: { outcome: RunOutcome; endedAt: string };
   steps: RunStep[];
+  /** While the Run goes and its base branch is red. */
+  mainHold?: MainHold;
 };
 
 /** A Flow a person can start a Run of. */

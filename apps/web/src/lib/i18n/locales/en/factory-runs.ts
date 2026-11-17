@@ -61,6 +61,10 @@ export default {
   checksRound: 'Checks, round {{round}}',
   checksRunning: 'Checks running…',
   checksUnfinished: 'Didn’t finish',
+  mainHold: 'Main hold',
+  mainHoldBody:
+    'Checks fail on {{branch}}, so this run won’t merge until they pass again.',
+  mainHoldTask: 'A task lists the merges since they last passed.',
   cancelRun: 'Cancel run',
   cancelTitle: 'Cancel this run?',
   cancelBody:

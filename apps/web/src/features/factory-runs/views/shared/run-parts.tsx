@@ -47,6 +47,8 @@ export function RunContent(props: {
           />
           <RunSteps
             steps={props.run.steps}
+            mainHold={props.run.mainHold}
+            baseBranch={props.run.repository?.baseBranch}
             status={status()}
             time={props.controller.stepTime}
           />
