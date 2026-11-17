@@ -39,6 +39,13 @@ fn questions_left(left: u8) -> String {
     }
 }
 
+/// What a new session is told when the session its Step asked in could not
+/// be resumed after the owner answered.
+pub const SESSION_LOST_NOTE: &str = "\n## Your earlier session is gone\n\nYou asked the run's \
+     owner a question earlier in this step, in a session that could not be resumed once they \
+     answered: this is a new one. The question and the owner's answer are above. Anything that \
+     session did and did not push is lost: check the run's branch before you go on.\n";
+
 /// The most bytes of questions and answers a brief carries.
 pub const QUESTIONS_BUDGET: usize = 16 * 1024;
 

@@ -23,7 +23,9 @@ use crate::domain::ports::{
     AgentFailure, MainWatches, PullRequests, Retryable, StepAgent, StepExecutor,
 };
 use crate::domain::pull_request_steps::{PullRequestStepError, PullRequestSteps};
-use crate::domain::questions::{answers_brief, ask_instructions, going_on_prompt};
+use crate::domain::questions::{
+    SESSION_LOST_NOTE, answers_brief, ask_instructions, going_on_prompt,
+};
 use crate::domain::review_rounds::{blockers_brief, escape, fenced_review};
 
 /// What the agent is told for a `plan` Step.
@@ -264,6 +266,16 @@ where
             repo_url: input.repository.map(|repository| repository.url.clone()),
             answer_by,
             resumes: input.resumes,
+            // Should the asking Step's session be gone, a new one is told
+            // the whole Step, the owner's answers in it, and that its
+            // earlier session's work may be lost.
+            afresh: input.resumes.map(|_| {
+                format!(
+                    "{}{}",
+                    prompt(instructions, &outcomes, input),
+                    SESSION_LOST_NOTE
+                )
+            }),
         };
         let answer = self
             .agent

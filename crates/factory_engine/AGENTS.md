@@ -51,8 +51,9 @@ them are refused (403).
 
 An agent may ask the Run's owner a question mid-Step (`src/domain/questions.rs`)
 when its Flow says how many (`questions`, which the service writes into the
-Flow a Run starts with: `FACTORY_QUESTIONS`, two by default). Its Step is
-offered `question` and told how to ask (`questions/ask.md`); handing it back,
+Flow a Run starts with: `FACTORY_QUESTIONS`, two by default; zero offers
+none). Its Step is offered `question` and told how to ask, and how many
+questions it has left (`questions/ask.md`); handing it back,
 with the question as its text (1 to 4096 bytes, else 400), ends the Step
 `question`, which keeps its session, and the workflow opens a question Gate
 (`GateKind::Question`, read from the Step's outcome: its one answer is
@@ -60,20 +61,36 @@ with the question as its text (1 to 4096 bytes, else 400), ends the Step
 400). The answer is never routed: the same Role goes on in a Step of its own,
 at the next place and the same visit (`Interpreter::resume`, counted against
 `MAX_STEPS`), which claims the asking Step's session under a prompt of its
-own and prompts it with the answer (`StepRequest::resumes`,
-`SessionAgent::go_on`); no other Agent takes it over. Every later agent
+own and prompts it with the answer and how many questions are left
+(`StepRequest::resumes`, `questions_left`, `SessionAgent::go_on`); no other
+Agent takes it over. The asking Steps stay held until the Step that goes on
+from them ends (`inbound/temporal/workflow/step.rs`): it claims their
+session only once its work starts, so a Run cancelled, or work that fails,
+before that still has the session stopped. While the Run waits on the
+owner the harness may let the session go: it releases an idle session from
+memory (`AGENT_SESSION_IDLE_TIMEOUT_SECS`, 15 minutes) and stops an idle
+Daytona sandbox (5 minutes), and the next prompt starts the sandbox and
+restores the session (`session/resume` or `session/load`). A session that
+cannot be restored (its runtime still disconnected 5 minutes after the
+prompt, `RESUME_SETTLE`; the prompt never shown; or no history to go on
+from) is lost: it is deleted, its Agent recorded passed over as
+`session_lost`, and the Step goes on in a new session of its Role's first
+Agent, prompted with the whole Step afresh, the owner's answers in it, and
+told that what the lost session did not push is gone. Every later agent
 Step's prompt carries the Run's answered questions in a block marked as the
 owner's answers, as data, escaped as reviewers' findings are
 (`answers_brief`). A Step's work asks at most the Flow's `questions`: the next
 question ends the Run `manual`, the question in the Step's output, and its
-session is stopped. A reviewer's question works the same way: once every
+session is stopped. Insights count a question and the Step that goes on
+from it as one visit, and leave the question, its Gate and the answer out
+of the entry's outcomes, answers and Gates. A reviewer's question works the same way: once every
 reviewer of the round ended, each question goes to the owner in the entry's
 order, the reviewer goes on with the answer (a Step outside the round's first
 places, its findings recorded on the round), and the round closes on every
 reviewer's result; a reviewer past its questions closes the round failed and
 ends the Run `manual`. Only the owner answers a question Gate, in person, as
 any Gate: whatever answers Gates for a person must leave it alone
-(`GateKind::answered_only_by_a_person`). A cancelled Run, or one that ends
+(`GateKind::answered_only_by_a_person`, which the answer path checks). A cancelled Run, or one that ends
 while a Step holds its session for a question, has that session stopped.
 
 People call the Run API with their own login (`UserOrInternal`), and internal

@@ -2,7 +2,7 @@ use agent_session::domain::routines::RoutineActionStatus;
 use factory_records::domain::models::{EntryId, HandBack, Outcome, StepKey};
 use factory_records::domain::ports::RunRepository;
 
-use super::{FakeSessions, agent, plan_task, the_plan};
+use super::{FakeSessions, agent, plan_task, recorded, the_plan};
 use crate::domain::fakes::FakeRepo;
 use crate::domain::models::AgentTask;
 use crate::domain::ports::{Retryable, StepAgent};
@@ -112,4 +112,75 @@ async fn a_step_going_on_from_a_step_with_no_session_fails_for_good() {
     assert!(matches!(error, SessionAgentError::NoSession));
     assert!(!error.retryable());
     assert_eq!(sessions.prepares(), 0);
+}
+
+/// A session the harness cannot resume once the owner answered (its
+/// runtime stays disconnected) is lost: it is deleted, the Step records
+/// its Agent passed over for it, and goes on in a new session of its
+/// Role's first Agent, prompted with the whole Step afresh. A retry goes
+/// on in that new session.
+#[tokio::test(start_paused = true)]
+async fn a_session_lost_while_waiting_goes_on_afresh_in_a_new_one() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_question()), RoutineActionStatus::Succeeded);
+    let (task, next) = asked(&repo, &sessions).await;
+    let asking = repo
+        .claimed_session(task.key)
+        .await
+        .expect("read")
+        .expect("claimed");
+    let mut losing = sessions.clone();
+    losing.follow_up_loses = true;
+    losing.handed = Some(the_plan());
+    let next = AgentTask {
+        afresh: Some("Plan the change, afresh".to_string()),
+        ..next
+    };
+    let agent = agent(&losing, &repo);
+
+    let answer = agent.answer(next.clone()).await.expect("go on afresh");
+    let again = agent.answer(next.clone()).await.expect("again");
+
+    assert_eq!(answer.outcome, Outcome::done());
+    assert_eq!(answer.text, the_plan().output);
+    assert_eq!(again, answer);
+    let deleted = losing.deleted.lock().expect("deleted").clone();
+    assert_eq!(deleted[0].session_id.as_uuid(), asking.session_id);
+    let fresh = repo
+        .claimed_session(next.key)
+        .await
+        .expect("read")
+        .expect("claimed");
+    assert_ne!(fresh.session_id, asking.session_id);
+    let prompts = losing.prompt_calls.lock().expect("prompts").clone();
+    let last = prompts.last().expect("a fresh prompt");
+    assert_eq!(last.action.session_id.as_uuid(), fresh.session_id);
+    assert!(last.prompt.starts_with("Plan the change, afresh"));
+    let (_, _, passed) = recorded(&repo, next.key);
+    assert_eq!(
+        passed
+            .iter()
+            .map(|passed| passed.reason.as_str())
+            .collect::<Vec<_>>(),
+        ["session_lost"]
+    );
+}
+
+/// A session lost with no whole prompt to go on afresh with fails the
+/// Step for good, saying the session is lost.
+#[tokio::test(start_paused = true)]
+async fn a_session_lost_with_nothing_to_go_on_afresh_with_fails_for_good() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_question()), RoutineActionStatus::Succeeded);
+    let (_, next) = asked(&repo, &sessions).await;
+    let mut losing = sessions.clone();
+    losing.follow_up_loses = true;
+
+    let failed = agent(&losing, &repo).answer(next).await;
+
+    let Err(error) = failed else {
+        panic!("the session is lost");
+    };
+    assert!(matches!(error, SessionAgentError::SessionLost));
+    assert!(!error.retryable());
 }

@@ -187,6 +187,10 @@ pub struct AgentTask {
     /// agent is prompted in that Step's session, which it goes on in, not
     /// a new one. None for a Step that starts its work.
     pub resumes: Option<u16>,
+    /// For a Step that goes on from a question, its whole prompt, the
+    /// owner's answers in it: what a new session is prompted with when the
+    /// asking Step's cannot be resumed.
+    pub afresh: Option<String>,
 }
 
 /// A later prompt an agent is asked to work on, in the session it did its
