@@ -1,5 +1,6 @@
 use super::super::GithubOauthImpl;
 use super::super::test::{MockResponse, MockServer};
+use crate::domain::models::GithubError;
 
 fn answering(status: &'static str, body: &str) -> (MockServer, GithubOauthImpl) {
     let server = MockServer::start(MockResponse {
@@ -33,15 +34,28 @@ async fn a_file_is_read_at_the_branch_s_head() {
     );
 }
 
+/// A missing file, on a branch the user reaches, is none, and so is a
+/// folder.
 #[tokio::test]
 async fn a_missing_file_or_a_folder_is_none() {
-    let (missing, client) = answering("404 Not Found", r#"{"message":"Not Found"}"#);
+    let missing = MockServer::start_many(vec![
+        MockResponse {
+            status: "404 Not Found",
+            body: r#"{"message":"Not Found"}"#.to_string(),
+        },
+        MockResponse {
+            status: "200 OK",
+            body: r#"{"name":"main"}"#.to_string(),
+        },
+    ]);
+    let client = GithubOauthImpl::with_api_base_url(missing.base_url.clone());
     let text = client
         .get_file_text("token", "macro", "app", "main", ".macro/checks.json")
         .await
         .unwrap();
     assert_eq!(text, None);
-    missing.finish();
+    let requests = missing.finish_all();
+    assert!(requests[1].starts_with("GET /repos/macro/app/branches/main HTTP/1.1"));
 
     let (folder, client) = answering("200 OK", r#"[{"type":"file","name":"checks.json"}]"#);
     let text = client
@@ -50,6 +64,36 @@ async fn a_missing_file_or_a_folder_is_none() {
         .unwrap();
     assert_eq!(text, None);
     folder.finish();
+}
+
+/// A branch or repository out of reach is not a missing file, and neither
+/// is an answer that does not read.
+#[tokio::test]
+async fn a_branch_out_of_reach_or_an_odd_answer_is_an_error() {
+    let unreachable = MockServer::start_many(vec![
+        MockResponse {
+            status: "404 Not Found",
+            body: r#"{"message":"Not Found"}"#.to_string(),
+        },
+        MockResponse {
+            status: "404 Not Found",
+            body: r#"{"message":"Branch not found"}"#.to_string(),
+        },
+    ]);
+    let client = GithubOauthImpl::with_api_base_url(unreachable.base_url.clone());
+    let error = client
+        .get_file_text("token", "macro", "app", "gone", ".macro/checks.json")
+        .await
+        .unwrap_err();
+    assert!(matches!(error, GithubError::RepositoryUnavailable));
+    unreachable.finish_all();
+
+    let (odd, client) = answering("200 OK", r#"{"unexpected":true}"#);
+    let read = client
+        .get_file_text("token", "macro", "app", "main", ".macro/checks.json")
+        .await;
+    assert!(read.is_err());
+    odd.finish();
 }
 
 #[tokio::test]

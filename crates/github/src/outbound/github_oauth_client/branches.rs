@@ -38,7 +38,9 @@ struct CompareFile {
 
 impl GithubOauthImpl {
     /// The text of the file at `path` on `branch`; `None` when the branch
-    /// holds no file there (a folder there is not one).
+    /// holds no file there (a folder there is not one). A branch or
+    /// repository the user cannot reach is
+    /// [`GithubError::RepositoryUnavailable`], never a missing file.
     #[tracing::instrument(skip(self, access_token), err)]
     pub async fn get_file_text(
         &self,
@@ -48,7 +50,6 @@ impl GithubOauthImpl {
         branch: &str,
         path: &str,
     ) -> Result<Option<String>, GithubError> {
-        // A folder answers with a list of its entries, which is no file.
         let read: Result<serde_json::Value, GithubError> = self
             .read(
                 access_token,
@@ -59,12 +60,33 @@ impl GithubOauthImpl {
             .await;
         let value = match read {
             Ok(value) => value,
-            Err(GithubError::RepositoryUnavailable) => return Ok(None),
+            // GitHub answers a missing file, a missing branch and a
+            // repository out of reach alike: the branch's own read tells
+            // them apart.
+            Err(GithubError::RepositoryUnavailable) => {
+                let _: serde_json::Value = self
+                    .read(
+                        access_token,
+                        &format!("/repos/{owner}/{repo}/branches/{branch}"),
+                        &[],
+                        "failed to read a branch",
+                    )
+                    .await?;
+                return Ok(None);
+            }
             Err(error) => return Err(error),
         };
-        let Ok(content) = serde_json::from_value::<ContentResponse>(value) else {
+
+        // A folder answers with a list of its entries, and a symlink or a
+        // submodule with another type: neither is a file.
+        if value.is_array() {
             return Ok(None);
-        };
+        }
+        let content: ContentResponse = serde_json::from_value(value).map_err(|error| {
+            GithubError::Internal(anyhow::anyhow!(
+                "GitHub's answer for the file {path} does not read: {error}"
+            ))
+        })?;
         if content.kind != "file" {
             return Ok(None);
         }
