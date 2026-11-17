@@ -53,6 +53,7 @@ const planning: RunDetail = {
       checks: [],
     },
   ],
+  reviewRounds: [],
 };
 
 const waiting: RunDetail = {

@@ -6,7 +6,15 @@ import { Badge, Button, Card, cn } from '@ui';
 import { CollapseTransition } from '@ui/components/CollapseTransition';
 import { createSignal, For, type JSX, Show } from 'solid-js';
 import { flowWordLabel, flowWordText } from '../core/flow-words';
-import type { CheckRound, RunStep } from '../core/run';
+import {
+  type CheckRound,
+  findingCounts,
+  findingsOf,
+  type ReviewFinding,
+  type ReviewRound,
+  type RunStep,
+  roundStartingAt,
+} from '../core/run';
 
 function stepLabel(step: Pick<RunStep, 'entry' | 'visit'>): string {
   const entry = flowWordLabel(step.entry);
@@ -16,12 +24,14 @@ function stepLabel(step: Pick<RunStep, 'entry' | 'visit'>): string {
 
 /**
  * A Run's Steps, oldest first, on a rail like an agent's activity timeline.
- * Each Step shows its outcome and the rounds of checks it ran; its output
- * (an agent's plan, a review) and the checks' reports open below it as
- * markdown.
+ * Each Step shows its outcome and the rounds of checks it ran; a review
+ * round shows on its first reviewer's Step, and each reviewer's findings on
+ * its own. A Step's output (an agent's plan, a review) and the checks'
+ * reports open below it as markdown.
  */
 export function RunTimeline(props: {
   steps: RunStep[];
+  reviewRounds?: ReviewRound[];
   /** Whether a Step's output starts open, e.g. the plan a Gate asks about. */
   outputOpen: (step: RunStep) => boolean;
   time: (value: string) => string;
@@ -32,6 +42,7 @@ export function RunTimeline(props: {
         {(step, index) => (
           <TimelineStep
             step={step}
+            reviewRounds={props.reviewRounds ?? []}
             first={index() === 0}
             latest={index() === props.steps.length - 1}
             defaultOpen={props.outputOpen(step)}
@@ -45,6 +56,7 @@ export function RunTimeline(props: {
 
 function TimelineStep(props: {
   step: RunStep;
+  reviewRounds: ReviewRound[];
   first: boolean;
   latest: boolean;
   defaultOpen: boolean;
@@ -59,6 +71,8 @@ function TimelineStep(props: {
   const rounds = () => props.step.checks ?? [];
   const reports = () => rounds().filter((round) => round.end?.report.trim());
   const details = () => output() !== '' || reports().length > 0;
+  const round = () => roundStartingAt(props.reviewRounds, props.step.seq);
+  const findings = () => findingsOf(props.reviewRounds, props.step.seq);
 
   return (
     // Rail and dot sit where the agent activity timeline puts them
@@ -177,6 +191,12 @@ function TimelineStep(props: {
           <CheckRoundNote round={round} stepEnded={Boolean(props.step.end)} />
         )}
       </For>
+      <Show when={round()}>
+        {(round) => <ReviewRoundNote round={round()} />}
+      </Show>
+      <For each={findings()}>
+        {(finding) => <FindingNote finding={finding} />}
+      </For>
       <Show when={details()}>
         <CollapseTransition open={open()}>
           <Card variant="filled" offset={1} class="mt-1 mb-3 px-3 py-2.5">
@@ -241,6 +261,88 @@ function CheckRoundNote(props: { round: CheckRound; stepEnded: boolean }) {
         </Show>
       </span>
       <span class="block text-ink-muted">{props.round.checks.join(', ')}</span>
+    </StepNote>
+  );
+}
+
+/**
+ * A review round: which, the diff it reviews, and once it ended, how, with
+ * how many of its findings block and how many became follow-ups.
+ */
+function ReviewRoundNote(props: { round: ReviewRound }) {
+  const counts = () => findingCounts(props.round);
+  return (
+    <StepNote>
+      <span class="flex min-w-0 items-center gap-2">
+        {t('factoryRuns.reviewRound', { round: props.round.round })}
+        <Show
+          when={props.round.end}
+          fallback={<span>{t('factoryRuns.reviewRoundReviewing')}</span>}
+        >
+          {(end) => (
+            <Badge variant="outline" size="xs">
+              {flowWordLabel(end().outcome)}
+            </Badge>
+          )}
+        </Show>
+      </span>
+      <span class="block text-ink-muted">
+        {props.round.fixDiff
+          ? t('factoryRuns.reviewRoundFixDiff', {
+              commit: props.round.diffBase.slice(0, 7),
+            })
+          : t('factoryRuns.reviewRoundWhole')}
+        <Show when={props.round.end}>
+          {' · '}
+          {t('factoryRuns.reviewBlockers', { count: counts().blockers })}
+          {' · '}
+          {t('factoryRuns.reviewFollowUps', { count: counts().followUps })}
+        </Show>
+      </span>
+    </StepNote>
+  );
+}
+
+/** Where a finding is: its file, and its lines when it names some. */
+function findingPlace(finding: ReviewFinding): string {
+  const lines = finding.lines;
+  if (!lines) return finding.path;
+  if (lines.start === lines.end) {
+    return t('factoryRuns.findingLine', {
+      path: finding.path,
+      line: lines.start,
+    });
+  }
+  return t('factoryRuns.findingLines', {
+    path: finding.path,
+    start: lines.start,
+    end: lines.end,
+  });
+}
+
+function findingKind(finding: ReviewFinding): string {
+  if (finding.kind === 'blocker') return t('factoryRuns.findingBlocker');
+  if (finding.kind === 'follow_up') {
+    return finding.followUpTaskId
+      ? t('factoryRuns.findingFollowUpTask')
+      : t('factoryRuns.findingFollowUp');
+  }
+  return t('factoryRuns.findingFound');
+}
+
+/** One finding of a reviewer: what it is, where, and what is wrong. */
+function FindingNote(props: { finding: ReviewFinding }) {
+  return (
+    <StepNote>
+      <span class="flex min-w-0 items-center gap-2">
+        <Badge variant="outline" size="xs">
+          {findingKind(props.finding)}
+        </Badge>
+        <span class="min-w-0 truncate font-mono">
+          {findingPlace(props.finding)}
+        </span>
+      </span>
+      <span class="block text-ink-muted">{props.finding.problem}</span>
     </StepNote>
   );
 }

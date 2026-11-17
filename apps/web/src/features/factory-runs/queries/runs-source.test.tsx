@@ -30,6 +30,7 @@ const ended: RunDetail = {
     end: { outcome: 'success', endedAt: '2026-11-16T09:10:00Z' },
   },
   steps: [],
+  reviewRounds: [],
 };
 
 afterEach(() => {

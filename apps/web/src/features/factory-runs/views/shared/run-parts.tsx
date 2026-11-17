@@ -47,6 +47,7 @@ export function RunContent(props: {
           />
           <RunSteps
             steps={props.run.steps}
+            reviewRounds={props.run.reviewRounds}
             status={status()}
             time={props.controller.stepTime}
           />

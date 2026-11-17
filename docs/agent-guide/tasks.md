@@ -1381,7 +1381,11 @@ A Run opens in a dialog on desktop and in a sheet on touch (after the side
 panel's sheet closes). Its Steps scroll: each with its outcome, its time
 (`5m`), the Role and Agent an agent Step used (`Planner · primary`, with a line
 for each Agent that could not start, and why) and its output as markdown, the
-output a waiting Gate asks about open. On desktop the Gate card (its question,
+output a waiting Gate asks about open. A review round shows on its first
+reviewer's Step (`Review round 2`, its outcome, whether it reviewed the whole
+change or the fix since a commit, and how many blockers and follow-ups it
+found), and each reviewer's findings on its own Step: Blocker, Follow-up or
+Follow-up task, the file and lines, and what is wrong. On desktop the Gate card (its question,
 a note field and one button per answer, the Flow's first answer primary) is
 pinned below them, the question and note scrolling inside past a few lines. On
 touch the pinned chrome between the handle and the Steps holds only the note
