@@ -371,7 +371,8 @@ where
 
     /// File the task of `hold` on `base`, once per red period: the claim
     /// comes first, so a second look or a retry files none, and a failed
-    /// filing gives it back for the next look.
+    /// filing gives it back for the next look, which files under the same
+    /// id, so a filing whose answer was lost is found, not made twice.
     async fn file_task(
         &self,
         run: &Run,
@@ -379,14 +380,14 @@ where
         repository: &CodeRepository,
         hold: &MainHold,
     ) -> Result<(), StepError> {
-        let claimed = self
+        let Some(task_key) = self
             .repo
             .claim_hold_task(base, hold.since, Utc::now())
             .await
-            .map_err(internal)?;
-        if !claimed {
+            .map_err(internal)?
+        else {
             return Ok(());
-        }
+        };
 
         let suspects = self
             .repo
@@ -394,7 +395,11 @@ where
             .await
             .map_err(internal)?;
         let task = hold_task(repository, &base.base_branch, hold, &suspects);
-        match self.tasks.file(&run.user_id, run.task_id, &task).await {
+        match self
+            .tasks
+            .file(&run.user_id, run.task_id, &task, task_key)
+            .await
+        {
             Ok(task_id) => self
                 .repo
                 .record_hold_task(base, hold.since, task_id)

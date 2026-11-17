@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO factory_main_hold (repo_url, base_branch, required_checks)\n            VALUES ($1, $2, $3)\n            ON CONFLICT (repo_url, base_branch) DO UPDATE\n            SET required_checks = EXCLUDED.required_checks,\n                held_since = NULL,\n                head_sha = NULL,\n                failed = NULL,\n                task_claimed_at = NULL,\n                task_filed_at = NULL,\n                task_id = NULL,\n                task_key = NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5e51394214dbbff59a8c0b1c6e956b158079812a7a327509cc57b8462a3f821d"
+}

@@ -14,6 +14,10 @@ const NEW_TASK: &str = "00000000-0000-7000-8000-000000000202";
 const INITIATIVE: &str = "00000000-0000-7000-8000-000000000303";
 const PROJECT: &str = "00000001-0000-0000-0000-000000000014";
 
+fn new_task() -> Uuid {
+    Uuid::parse_str(NEW_TASK).expect("uuid")
+}
+
 fn julia() -> MacroUserIdStr<'static> {
     MacroUserIdStr::try_from("macro|julia@example.com".to_string()).expect("user")
 }
@@ -111,6 +115,7 @@ async fn the_task_is_filed_in_the_initiative_of_the_run_s_task() {
             &julia(),
             Some(Uuid::parse_str(RUN_TASK).expect("uuid")),
             &task(),
+            new_task(),
         )
         .await
         .expect("filed");
@@ -143,6 +148,7 @@ async fn a_hidden_run_task_files_the_task_in_no_initiative() {
             &julia(),
             Some(Uuid::parse_str(RUN_TASK).expect("uuid")),
             &task(),
+            new_task(),
         )
         .await;
     assert!(filed.is_ok(), "{filed:?}");
@@ -154,7 +160,72 @@ async fn a_hidden_run_task_files_the_task_in_no_initiative() {
         .body_json()
         .expect("json");
     assert!(created.get("propertyValues").is_none(), "{created}");
-    // The hold's task takes the id document storage gives it; only a
-    // follow-up names its own.
-    assert!(created.get("documentId").is_none(), "{created}");
+    // It is made under the id its claim chose, so a retry finds it.
+    assert_eq!(created["documentId"], json!(NEW_TASK), "{created}");
+}
+
+/// The task document under the claimed id, as document storage reads it,
+/// deleted or not.
+fn basic(deleted: bool) -> ResponseTemplate {
+    ResponseTemplate::new(200).set_body_json(json!({
+        "documentId": NEW_TASK,
+        "documentName": "main is red in macro/app",
+        "owner": "macro|julia@example.com",
+        "deletedAt": if deleted { json!("2026-11-17T10:00:00Z") } else { json!(null) },
+    }))
+}
+
+/// A task a filing whose answer was lost made is found under its id, even
+/// deleted since, and not filed again; a refusal after which it is there is
+/// that filing's conflict, and it is found too.
+#[tokio::test]
+async fn a_task_filed_under_its_id_is_found_not_filed_again() {
+    for (before, after, posts) in [
+        (Some(false), None, 0),
+        (Some(true), None, 0),
+        (None, Some(false), 1),
+    ] {
+        let server = MockServer::start().await;
+        let read =
+            Mock::given(method("GET")).and(path(format!("/internal/documents/{NEW_TASK}/basic")));
+        match before {
+            Some(deleted) => read.respond_with(basic(deleted)).mount(&server).await,
+            None => {
+                read.respond_with(ResponseTemplate::new(404))
+                    .up_to_n_times(1)
+                    .with_priority(1)
+                    .mount(&server)
+                    .await;
+                if let Some(deleted) = after {
+                    Mock::given(method("GET"))
+                        .and(path(format!("/internal/documents/{NEW_TASK}/basic")))
+                        .respond_with(basic(deleted))
+                        .with_priority(2)
+                        .mount(&server)
+                        .await;
+                }
+            }
+        }
+        Mock::given(method("POST"))
+            .and(path("/documents/create_task"))
+            .respond_with(ResponseTemplate::new(409))
+            .mount(&server)
+            .await;
+
+        let tasks = DocumentHoldTasks::new(DocumentStorageServiceClient::new(
+            "internal-key".into(),
+            server.uri(),
+        ));
+        let filed = tasks.file(&julia(), None, &task(), new_task()).await;
+
+        assert_eq!(filed.expect("found"), new_task(), "{before:?} {after:?}");
+        let made = server
+            .received_requests()
+            .await
+            .expect("recorded")
+            .iter()
+            .filter(|request| request.method.as_str() == "POST")
+            .count();
+        assert_eq!(made, posts, "{before:?} {after:?}");
+    }
 }

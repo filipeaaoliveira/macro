@@ -304,12 +304,15 @@ pub trait HoldTasks: Send + Sync + 'static {
     type Err: std::error::Error + Send + Sync + 'static;
 
     /// File `task` as `owner`, in the initiative of the task document
-    /// `beside` when it has one, and return the new task document's id.
+    /// `beside` when it has one, under the id `task_id`, and return the task
+    /// document's id. A task already filed under `task_id`, as by a filing
+    /// whose answer was lost, is found, not filed again.
     fn file(
         &self,
         owner: &MacroUserIdStr<'static>,
         beside: Option<Uuid>,
         task: &HoldTask,
+        task_id: Uuid,
     ) -> impl Future<Output = Result<Uuid, Self::Err>> + Send;
 
     /// Comment `text` on the passage `quote` of the task document

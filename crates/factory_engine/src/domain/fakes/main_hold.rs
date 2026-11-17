@@ -32,6 +32,9 @@ pub(crate) struct FakeMain {
     pub(crate) required: BTreeMap<(String, String), RequiredChecksState>,
     /// The bases whose hold's task was filed in this red period.
     pub(crate) filed: std::collections::BTreeSet<(String, String)>,
+    /// The id each held base's task is filed with, chosen by its first
+    /// claim.
+    pub(crate) task_keys: BTreeMap<(String, String), Uuid>,
 }
 
 fn key(base: &Repository) -> (String, String) {
@@ -100,6 +103,7 @@ impl MainHoldRepository for FakeRepo {
         main.holds.remove(&key(base));
         main.claimed_at.remove(&key(base));
         main.filed.remove(&key(base));
+        main.task_keys.remove(&key(base));
         main.required.insert(key(base), why);
         Ok(())
     }
@@ -158,6 +162,7 @@ impl MainHoldRepository for FakeRepo {
         main.holds.remove(&key(base));
         main.claimed_at.remove(&key(base));
         main.filed.remove(&key(base));
+        main.task_keys.remove(&key(base));
         main.required.remove(&key(base));
         let last = main.last_green.entry(key(base)).or_insert(seen_at);
         *last = (*last).max(seen_at);
@@ -189,7 +194,7 @@ impl MainHoldRepository for FakeRepo {
         base: &Repository,
         since: DateTime<Utc>,
         now: DateTime<Utc>,
-    ) -> Result<bool, FakeError> {
+    ) -> Result<Option<Uuid>, FakeError> {
         let mut main = self.main();
         let stale = main
             .claimed_at
@@ -203,10 +208,13 @@ impl MainHoldRepository for FakeRepo {
             }
             _ => false,
         };
-        if claimed {
-            main.claimed_at.insert(key(base), now);
+        if !claimed {
+            return Ok(None);
         }
-        Ok(claimed)
+        main.claimed_at.insert(key(base), now);
+        Ok(Some(
+            *main.task_keys.entry(key(base)).or_insert_with(Uuid::now_v7),
+        ))
     }
 
     async fn release_hold_task(
@@ -282,6 +290,8 @@ pub(crate) type TaskComment = (String, Uuid, String, String);
 #[derive(Clone, Default)]
 pub(crate) struct FakeHoldTasks {
     pub(crate) filed: Arc<Mutex<Vec<FiledTask>>>,
+    /// The id each filing was asked for, in order, failed ones too.
+    pub(crate) ids: Arc<Mutex<Vec<Uuid>>>,
     pub(crate) failing: Arc<Mutex<bool>>,
     /// Told each time a task is filed.
     pub(crate) filing: Arc<tokio::sync::Notify>,
@@ -303,7 +313,9 @@ impl HoldTasks for FakeHoldTasks {
         owner: &MacroUserIdStr<'static>,
         beside: Option<Uuid>,
         task: &HoldTask,
+        task_id: Uuid,
     ) -> Result<Uuid, FakeError> {
+        self.ids.lock().expect("ids").push(task_id);
         if *self.failing.lock().expect("failing") {
             return Err(FakeError);
         }
@@ -312,7 +324,7 @@ impl HoldTasks for FakeHoldTasks {
             .expect("filed")
             .push((owner.as_ref().to_string(), beside, task.clone()));
         self.filing.notify_one();
-        Ok(Uuid::now_v7())
+        Ok(task_id)
     }
 
     async fn comment(

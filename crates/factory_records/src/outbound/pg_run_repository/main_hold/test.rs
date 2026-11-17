@@ -109,12 +109,14 @@ async fn a_red_period_claims_its_task_once(pool: PgPool) {
         repo.claim_hold_task(&base, hold.since, Utc::now())
             .await
             .expect("claim")
+            .is_some()
     );
     assert!(
         !repo
             .claim_hold_task(&base, hold.since, Utc::now())
             .await
             .expect("claim again")
+            .is_some()
     );
     repo.release_hold_task(&base, hold.since)
         .await
@@ -123,6 +125,7 @@ async fn a_red_period_claims_its_task_once(pool: PgPool) {
         repo.claim_hold_task(&base, hold.since, Utc::now())
             .await
             .expect("claim after release")
+            .is_some()
     );
 
     let task = Uuid::parse_str(TASK).expect("uuid");
@@ -141,6 +144,7 @@ async fn a_red_period_claims_its_task_once(pool: PgPool) {
             .claim_hold_task(&base, hold.since, Utc::now())
             .await
             .expect("claim filed")
+            .is_some()
     );
 
     // A claim for another period's start is not this one's.
@@ -150,6 +154,7 @@ async fn a_red_period_claims_its_task_once(pool: PgPool) {
             .claim_hold_task(&base, earlier, Utc::now())
             .await
             .expect("claim stale")
+            .is_some()
     );
 
     repo.clear_main_hold(&base, Utc::now())
@@ -164,6 +169,7 @@ async fn a_red_period_claims_its_task_once(pool: PgPool) {
         repo.claim_hold_task(&base, next.since, Utc::now())
             .await
             .expect("claim next")
+            .is_some()
     );
 }
 
@@ -277,6 +283,7 @@ async fn a_stale_claim_with_no_task_is_claimed_again(pool: PgPool) {
         repo.claim_hold_task(&base, hold.since, now)
             .await
             .expect("claim")
+            .is_some()
     );
     let soon = now + TimeDelta::minutes(14);
     assert!(
@@ -284,12 +291,14 @@ async fn a_stale_claim_with_no_task_is_claimed_again(pool: PgPool) {
             .claim_hold_task(&base, hold.since, soon)
             .await
             .expect("fresh")
+            .is_some()
     );
     let later = now + TimeDelta::minutes(16);
     assert!(
         repo.claim_hold_task(&base, hold.since, later)
             .await
             .expect("stale")
+            .is_some()
     );
 }
 
@@ -311,6 +320,7 @@ async fn a_deleted_task_is_not_filed_again(pool: PgPool) {
         repo.claim_hold_task(&base, hold.since, now)
             .await
             .expect("claim")
+            .is_some()
     );
     let task = Uuid::parse_str(TASK).expect("uuid");
     repo.record_hold_task(&base, hold.since, task)
@@ -329,6 +339,7 @@ async fn a_deleted_task_is_not_filed_again(pool: PgPool) {
             .claim_hold_task(&base, hold.since, much_later)
             .await
             .expect("claim again")
+            .is_some()
     );
 }
 
@@ -393,4 +404,57 @@ async fn a_base_s_recent_merges_are_newest_first(pool: PgPool) {
     let runs: Vec<RunId> = recent.iter().map(|merge| merge.run_id).collect();
     assert_eq!(runs, vec![newer, older]);
     assert_eq!(repo.recent_merges(&base, 1).await.expect("read").len(), 1);
+}
+
+/// A red period's task is filed under one id: the first claim chooses it,
+/// and a claim after a release or a stale claim keeps it, so a filing whose
+/// answer was lost is asked again under it. The next red period chooses its
+/// own.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn a_red_period_files_its_task_under_one_id(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let base = main_of_app();
+    let hold = repo
+        .hold_main(&base, RED_HEAD, "- test (failure)", a_minute_ago())
+        .await
+        .expect("hold");
+
+    let now = Utc::now();
+    let first = repo
+        .claim_hold_task(&base, hold.since, now)
+        .await
+        .expect("claim")
+        .expect("claimed");
+    repo.release_hold_task(&base, hold.since)
+        .await
+        .expect("release");
+    let again = repo
+        .claim_hold_task(&base, hold.since, now)
+        .await
+        .expect("claim after release")
+        .expect("claimed");
+    let stale = repo
+        .claim_hold_task(&base, hold.since, now + TimeDelta::minutes(16))
+        .await
+        .expect("claim stale")
+        .expect("claimed");
+    assert_eq!(again, first);
+    assert_eq!(stale, first);
+
+    repo.clear_main_hold(&base, Utc::now())
+        .await
+        .expect("clear");
+    let next = repo
+        .hold_main(&base, RED_HEAD, "- test (failure)", a_minute_ago())
+        .await
+        .expect("hold");
+    let next_id = repo
+        .claim_hold_task(&base, next.since, Utc::now())
+        .await
+        .expect("claim next")
+        .expect("claimed");
+    assert_ne!(next_id, first);
 }

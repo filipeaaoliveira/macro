@@ -275,6 +275,17 @@ async fn a_task_that_could_not_be_filed_is_filed_by_the_next_look() {
         look(&repo, &github, &tasks, &watch).await;
     }
     assert_eq!(tasks.filed().len(), 1);
+    // The next look files under the id the failed one asked for, so a
+    // filing whose answer was lost is found, not made twice.
+    let ids = tasks.ids.lock().expect("ids").clone();
+    assert_eq!(ids.len(), 2);
+    assert_eq!(ids[0], ids[1]);
+    let held = repo
+        .main_hold(&REPOSITORY)
+        .await
+        .expect("read")
+        .expect("held");
+    assert_eq!(held.task_id, Some(ids[0]));
 }
 
 /// A required check that has not finished holds nothing, and keeps a hold
@@ -852,5 +863,32 @@ async fn a_pull_request_merged_outside_is_recorded_and_names_its_control_files()
     assert_eq!(report.outcome.as_str(), "merged");
     assert!(report.output.contains("package.json"), "{}", report.output);
     assert_eq!(repo.main().merges.len(), 1);
+    assert_eq!(watches.started(), vec![MainWatch::of(run_id, &REPOSITORY)]);
+}
+
+/// A pull request merged outside the Run before its merge Gate, as while
+/// its checks ran, is recorded as the Run's merge and its base watched,
+/// as one the merge Step finds is.
+#[tokio::test]
+async fn a_pull_request_merged_before_the_merge_gate_is_recorded_and_watched() {
+    let repo = FakeRepo::default();
+    let github = open_pull_request();
+    github.state().pull_request.as_mut().expect("opened").state = PullRequestState::Merged;
+    let watches = FakeWatches::default();
+    let run_id = code_run(&repo).await;
+
+    let report = PullRequestSteps::new(github.clone(), repo.clone(), watches.clone())
+        .ready_to_merge(input(run_id))
+        .await
+        .expect("ready");
+
+    assert_eq!(report.outcome.as_str(), "merged");
+    assert!(
+        github.state().merges.is_empty(),
+        "nothing merged by the Run"
+    );
+    let merges = repo.main().merges.clone();
+    assert_eq!(merges.len(), 1);
+    assert_eq!(merges[0].1.number, 7);
     assert_eq!(watches.started(), vec![MainWatch::of(run_id, &REPOSITORY)]);
 }

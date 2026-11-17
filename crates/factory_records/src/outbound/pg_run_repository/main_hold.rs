@@ -175,7 +175,8 @@ impl MainHoldRepository for PgRunRepository {
                 failed = NULL,
                 task_claimed_at = NULL,
                 task_filed_at = NULL,
-                task_id = NULL
+                task_id = NULL,
+                task_key = NULL
             "#,
             base.url,
             base.base_branch,
@@ -206,7 +207,8 @@ impl MainHoldRepository for PgRunRepository {
                 failed = NULL,
                 task_claimed_at = NULL,
                 task_filed_at = NULL,
-                task_id = NULL
+                task_id = NULL,
+                task_key = NULL
             WHERE factory_main_hold.held_since IS NULL
                OR factory_main_hold.held_since < EXCLUDED.last_green_at
             "#,
@@ -307,25 +309,27 @@ impl MainHoldRepository for PgRunRepository {
         base: &Repository,
         since: DateTime<Utc>,
         now: DateTime<Utc>,
-    ) -> Result<bool, Self::Err> {
-        let claimed = sqlx::query!(
+    ) -> Result<Option<Uuid>, Self::Err> {
+        let claimed = sqlx::query_scalar!(
             r#"
             UPDATE factory_main_hold
-            SET task_claimed_at = $4
+            SET task_claimed_at = $4, task_key = COALESCE(task_key, $6)
             WHERE repo_url = $1 AND base_branch = $2
               AND held_since = $3
               AND task_filed_at IS NULL
               AND (task_claimed_at IS NULL OR task_claimed_at < $5)
+            RETURNING task_key AS "task_key!"
             "#,
             base.url,
             base.base_branch,
             since,
             now,
             now - TASK_CLAIM_STALE_AFTER,
+            Uuid::now_v7(),
         )
-        .execute(&self.pool)
+        .fetch_optional(&self.pool)
         .await?;
-        Ok(claimed.rows_affected() == 1)
+        Ok(claimed)
     }
 
     #[tracing::instrument(err, skip(self))]

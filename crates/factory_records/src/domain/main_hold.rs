@@ -163,8 +163,10 @@ pub trait MainHoldRepository: Send + Sync + 'static {
     ) -> impl Future<Output = Result<Vec<FactoryMerge>, Self::Err>> + Send;
 
     /// Claim the filing of the task of the hold on `base` that started at
-    /// `since`, at `now` on the worker's clock: whether this call claimed
-    /// it. No other claim of the same red period succeeds, unless this one
+    /// `since`, at `now` on the worker's clock: the id to file it with when
+    /// this call claimed it, none otherwise. The id is chosen by the first
+    /// claim of the hold and kept by every later one, so a filing whose
+    /// answer was lost is asked again under the same id. No other claim of the same red period succeeds, unless this one
     /// is released, or is older than [`TASK_CLAIM_STALE_AFTER`] and its
     /// task was never filed. A task filed and deleted since is not filed
     /// again.
@@ -173,7 +175,7 @@ pub trait MainHoldRepository: Send + Sync + 'static {
         base: &Repository,
         since: DateTime<Utc>,
         now: DateTime<Utc>,
-    ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
+    ) -> impl Future<Output = Result<Option<Uuid>, Self::Err>> + Send;
 
     /// Release a claim whose task could not be filed, so the next look files
     /// it; a claim whose task was filed is kept.

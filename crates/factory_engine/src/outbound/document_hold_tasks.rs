@@ -5,7 +5,7 @@ mod test;
 
 use document_storage_service_client::DocumentStorageServiceClient;
 use document_storage_service_client::task::{
-    NewTask, NewTaskProperty, NewTaskPropertyValue, TaskEntityReference,
+    CreateTaskError, NewTask, NewTaskProperty, NewTaskPropertyValue, TaskEntityReference,
 };
 use macro_user_id::user_id::MacroUserIdStr;
 use models_properties::EntityType;
@@ -27,6 +27,17 @@ impl DocumentHoldTasks {
     /// The tasks, through the document storage service.
     pub fn new(documents: DocumentStorageServiceClient) -> Self {
         Self { documents }
+    }
+
+    /// Whether a filing made the task document `task_id`, even one deleted
+    /// since: a deleted hold task is not filed again.
+    async fn made(&self, task_id: Uuid) -> Result<bool, DocumentHoldTasksErr> {
+        let document = self
+            .documents
+            .get_document_basic(&task_id.to_string())
+            .await
+            .map_err(|error| DocumentHoldTasksErr(rootcause::report!("{error:#}")))?;
+        Ok(document.is_some())
     }
 
     /// The initiative of the task document `task_id`, as `owner` sees it;
@@ -72,7 +83,12 @@ impl HoldTasks for DocumentHoldTasks {
         owner: &MacroUserIdStr<'static>,
         beside: Option<Uuid>,
         task: &HoldTask,
+        task_id: Uuid,
     ) -> Result<Uuid, DocumentHoldTasksErr> {
+        // An earlier filing may have made it: its id says so.
+        if self.made(task_id).await? {
+            return Ok(task_id);
+        }
         let initiative = match beside {
             Some(task_id) => self.initiative_of(owner, task_id).await?,
             None => None,
@@ -95,12 +111,21 @@ impl HoldTasks for DocumentHoldTasks {
             .create_task_for_user(
                 &NewTask {
                     property_values,
+                    document_id: Some(task_id),
                     ..NewTask::new(task.title.clone(), task.markdown.clone())
                 },
                 owner.as_ref(),
             )
-            .await
-            .map_err(|error| DocumentHoldTasksErr(rootcause::report!("{error}")))?;
+            .await;
+        let created = match created {
+            Ok(created) => created,
+            // A refusal may be the conflict of a filing that made it
+            // meanwhile.
+            Err(CreateTaskError::Refused(_)) if self.made(task_id).await? => {
+                return Ok(task_id);
+            }
+            Err(error) => return Err(DocumentHoldTasksErr(rootcause::report!("{error}"))),
+        };
         Uuid::parse_str(&created).map_err(|_| {
             DocumentHoldTasksErr(rootcause::report!("the new task's id {created} is no UUID"))
         })

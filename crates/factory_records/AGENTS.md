@@ -38,7 +38,8 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261117183117_factory_control_files.sql`,
   `20261117184500_factory_review_round.sql`,
   `20261117190000_factory_check_round_commit.sql`,
-  `20261117200000_factory_check_round_commit_check.sql`).
+  `20261117200000_factory_check_round_commit_check.sql`,
+  `20261117210000_factory_main_hold_task_key.sql`).
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
 
 ## Boundaries
@@ -159,7 +160,9 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `factory_merge_base_idx`, newest first up to its limit, and returns them
   oldest first. A red period files one task: `claim_hold_task` claims it for
   the hold's start once, at the worker's time, or again once a claim never
-  filed is older than `TASK_CLAIM_STALE_AFTER`; `release_hold_task` gives
+  filed is older than `TASK_CLAIM_STALE_AFTER`, and returns the id to file
+  it with (`task_key`, chosen by the first claim and kept until the hold
+  ends, `20261117210000_factory_main_hold_task_key.sql`); `release_hold_task` gives
   a claim back when filing failed, and `record_hold_task` keeps the task's
   id and when it was filed (`task_filed_at`), which a deleted task document
   leaves set, so it is not filed again.

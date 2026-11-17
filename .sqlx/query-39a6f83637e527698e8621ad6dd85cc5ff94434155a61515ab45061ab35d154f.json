@@ -1,0 +1,27 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE factory_main_hold\n            SET task_claimed_at = $4, task_key = COALESCE(task_key, $6)\n            WHERE repo_url = $1 AND base_branch = $2\n              AND held_since = $3\n              AND task_filed_at IS NULL\n              AND (task_claimed_at IS NULL OR task_claimed_at < $5)\n            RETURNING task_key AS \"task_key!\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "task_key!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Timestamptz",
+        "Timestamptz",
+        "Timestamptz",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "39a6f83637e527698e8621ad6dd85cc5ff94434155a61515ab45061ab35d154f"
+}
