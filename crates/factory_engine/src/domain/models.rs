@@ -11,6 +11,7 @@ use macro_user_id::user_id::MacroUserIdStr;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::domain::control_files::ControlFilesError;
 use crate::domain::flow::{Entry, Flow, FlowError, StepName};
 
 /// What a Run's workflow starts with. The Run's request stays in its
@@ -428,6 +429,17 @@ pub struct RunDetail {
     pub steps: Vec<Step>,
 }
 
+/// The Control File patterns a person's Runs are checked against.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ControlFilesSettings {
+    /// The glob patterns, matched against each changed path from the
+    /// repository's root.
+    pub patterns: Vec<String>,
+    /// Whether they are the factory's default: the person set none.
+    pub is_default: bool,
+}
+
 /// A Flow a person can start a Run of.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -492,6 +504,15 @@ pub enum FactoryError {
         /// The answers it offers.
         offered: Vec<String>,
     },
+    /// The Run is Tampered, and the answer approving its Gate does not
+    /// approve the Control Files its branch changed.
+    #[error(
+        "the run's branch changes control files its request does not name: approve them with approveControlFiles"
+    )]
+    ControlFilesNotApproved,
+    /// A list of Control File patterns does not hold together.
+    #[error(transparent)]
+    InvalidControlFiles(#[from] ControlFilesError),
     /// Temporal could not be reached or did not answer.
     #[error(transparent)]
     Upstream(#[from] upstream_error::UpstreamError),
@@ -505,9 +526,11 @@ pub enum FactoryError {
     #[error("only a factory step's agent session can hand back, from its code")]
     NotAStepSession,
     /// Someone other than the person in their own signed-in session
-    /// answered a Gate: an internal caller, an API key or token, or an
-    /// agent's program acting for them.
-    #[error("only the run's owner, signed in to Macro, can answer its gate")]
+    /// answered a Gate or set their Control File patterns: an internal
+    /// caller, an API key or token, or an agent's program acting for them.
+    #[error(
+        "only the person, signed in to Macro, can answer a run's gate or set its control files"
+    )]
     NotAPerson,
     /// A hand back came from someone other than the Run's owner.
     #[error("only the run's owner can hand back its step")]

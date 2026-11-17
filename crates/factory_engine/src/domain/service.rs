@@ -15,10 +15,11 @@ use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
 use crate::domain::built_in_flows::{BUILT_IN_FLOWS, BuiltInFlow};
+use crate::domain::control_files::ControlFiles;
 use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening};
 use crate::domain::models::{
-    CodeRepository, FactoryError, FlowSummary, RunDetail, RunFinish, RunStart, StepEnding,
-    StepError, StepInput, StepReport, StepRequest, StepStart,
+    CodeRepository, ControlFilesSettings, FactoryError, FlowSummary, RunDetail, RunFinish,
+    RunStart, StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
 };
 use crate::domain::ports::{
     AnswerDelivery, FactoryService, PullRequests, Retryable, RunWorkflows, RunWorkflowsError,
@@ -37,6 +38,10 @@ impl From<RunWorkflowsError> for FactoryError {
         }
     }
 }
+
+/// The answer that agrees to what a Gate asks, which on a Tampered Run
+/// approves the Control Files its branch changed.
+const APPROVE: &str = "approve";
 
 /// The most Runs a task's list holds: its owner's newest.
 pub const TASK_RUNS_LISTED: u16 = 50;
@@ -245,7 +250,7 @@ where
             .await
             .map_err(internal)?
         {
-            RunInsert::Inserted(run) => run,
+            RunInsert::Inserted(run) => *run,
             RunInsert::NoSuchTask => return Err(FactoryError::UnknownTask),
         };
 
@@ -352,6 +357,7 @@ where
         seq: u16,
         answer: Outcome,
         note: Option<String>,
+        approve_control_files: bool,
     ) -> Result<(), FactoryError> {
         let note_bytes = note.as_ref().map_or(0, String::len);
         if note_bytes > MAX_NOTE_BYTES {
@@ -380,11 +386,27 @@ where
             });
         }
 
+        // A Tampered Run merges only once its owner approves the Control
+        // Files its branch changed: approving its Gate must say so, and
+        // the answer keeps the files approved, which the merge checks. The
+        // pull request Steps keep them before the Gate opens, and nothing
+        // changes them while the Run waits.
+        let approved_control_files = match &run.tampering {
+            Some(tampering) if answer.as_str() == APPROVE => {
+                if !approve_control_files {
+                    return Err(FactoryError::ControlFilesNotApproved);
+                }
+                Some(tampering.files.clone())
+            }
+            _ => None,
+        };
+
         let answer = AnswerGate {
             seq,
             answer,
             note,
             user_id: actor,
+            approved_control_files,
         };
         match self.workflows.answer(id, &answer).await? {
             AnswerDelivery::Taken => Ok(()),
@@ -435,6 +457,42 @@ where
         } else {
             Err(FactoryError::StepEnded)
         }
+    }
+
+    #[tracing::instrument(skip(self, actor))]
+    async fn control_files(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+    ) -> Result<ControlFilesSettings, FactoryError> {
+        let own = self.repo.control_files(actor).await.map_err(internal)?;
+        Ok(match own {
+            Some(patterns) => ControlFilesSettings {
+                patterns,
+                is_default: false,
+            },
+            None => ControlFilesSettings {
+                patterns: ControlFiles::default_patterns(),
+                is_default: true,
+            },
+        })
+    }
+
+    #[tracing::instrument(skip(self, actor, patterns))]
+    async fn set_control_files(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        patterns: Option<Vec<String>>,
+    ) -> Result<ControlFilesSettings, FactoryError> {
+        if let Some(patterns) = &patterns {
+            ControlFiles::parse(patterns)?;
+        }
+        self.known(&actor).await?;
+
+        self.repo
+            .set_control_files(&actor, patterns.as_deref())
+            .await
+            .map_err(internal)?;
+        self.control_files(&actor).await
     }
 
     #[tracing::instrument(skip(self, actor))]
@@ -628,6 +686,7 @@ where
                 &answer.answer,
                 answer.note.as_deref(),
                 &answer.user_id,
+                answer.approved_control_files.as_deref(),
             )
             .await
             .map_err(internal)?;

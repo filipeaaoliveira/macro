@@ -45,6 +45,10 @@ worker that walks each Run's Flow, in one process.
   `PUT /runs/<id>/task` later.
   A `code` Run also takes
   `"repoUrl": "https://github.com/<owner>/<name>"`.
+  `GET /settings/control-files` reads the Control File patterns a person's
+  Runs are checked against; `PUT` with `{"patterns": [...]}` sets them, and
+  `{"patterns": null}` goes back to the default. `PUT` takes only a person's
+  own signed-in session, as a Gate's answer does.
 
 ## Gotchas
 

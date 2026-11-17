@@ -18,13 +18,14 @@ the Gates they asked people in MacroDB, and defines the names Flows use
 
 ## Scope
 
-- Owns: the `factory_run`, `factory_step`, `factory_gate` and
-  `factory_check_round` tables
+- Owns: the `factory_run`, `factory_step`, `factory_gate`,
+  `factory_check_round` and `factory_settings` tables
   (`crates/macro_db_client/migrations/20261116083957_factory.sql`,
   `20261117093000_factory_check_round.sql`,
   `20261117104713_factory_step_agent.sql`,
   `20261117120425_factory_step_bot.sql`,
-  `20261117170000_factory_turn_place.sql`).
+  `20261117170000_factory_turn_place.sql`,
+  `20261117183117_factory_control_files.sql`).
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
 
 ## Boundaries
@@ -100,6 +101,15 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   (`factory_run_repository` check), set once when it is kept. `set_merge_head`
   replaces the commit the Run asks a person to merge each time it asks; the
   merge reads it back, so it never merges another.
+- `factory_run.tampered_files` keeps the Control Files the Run's branch last
+  changed that its request does not name (`Run::tampering`), replaced by
+  each `set_tampering`; null when it changed none, and an empty array when
+  GitHub could not list the changes (`Tampering::unlisted`).
+  `factory_gate.approved_control_files` keeps the files an answer approved,
+  written with the answer by `answer_gate`, and only with one.
+- `factory_settings` keeps a person's own Control File patterns
+  (`control_files`, `set_control_files`); no row means the factory's
+  default applies, and it goes with their account.
 
 ## Related
 

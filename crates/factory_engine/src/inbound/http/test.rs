@@ -23,11 +23,13 @@ use super::{FactoryRouterState, factory_router};
 use crate::domain::built_in_steps::BuiltInSteps;
 use crate::domain::fakes::{FakeGithub, FakeRepo};
 use crate::domain::gate::AnswerGate;
-use crate::domain::models::{FactoryError, FlowSummary, RunDetail, RunStart};
+use crate::domain::models::{ControlFilesSettings, FactoryError, FlowSummary, RunDetail, RunStart};
 use crate::domain::ports::{AnswerDelivery, FactoryService, RunWorkflows, RunWorkflowsError};
 use crate::domain::pull_request_steps::PullRequestSteps;
 use crate::domain::service::FactoryServiceImpl;
 use crate::outbound::local_agent::LocalAgent;
+
+mod control_files;
 
 const KEY: &str = "test-internal-key";
 const ALICE: &str = "macro|alice@example.com";
@@ -208,7 +210,23 @@ impl FactoryService for FakeService {
         _seq: u16,
         _answer: Outcome,
         _note: Option<String>,
+        _approve_control_files: bool,
     ) -> Result<(), FactoryError> {
+        Err(self.refusing(&actor))
+    }
+
+    async fn control_files(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+    ) -> Result<ControlFilesSettings, FactoryError> {
+        Err(self.refusing(actor))
+    }
+
+    async fn set_control_files(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        _patterns: Option<Vec<String>>,
+    ) -> Result<ControlFilesSettings, FactoryError> {
         Err(self.refusing(&actor))
     }
 

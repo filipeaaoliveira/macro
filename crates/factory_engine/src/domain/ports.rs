@@ -8,9 +8,10 @@ use uuid::Uuid;
 use crate::domain::flow::{StepName, StepUse};
 use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening};
 use crate::domain::models::{
-    AgentAnswer, AgentTask, AgentTurn, CodeRepository, FactoryError, FlowSummary, HeadChecks,
-    Merging, OpenPullRequest, Opening, PullRequest, RepositoryAccess, RequiredChecks, RunDetail,
-    RunFinish, RunStart, StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
+    AgentAnswer, AgentTask, AgentTurn, CodeRepository, ControlFilesSettings, FactoryError,
+    FlowSummary, HeadChecks, Merging, OpenPullRequest, Opening, PullRequest, RepositoryAccess,
+    RequiredChecks, RunDetail, RunFinish, RunStart, StepEnding, StepError, StepInput, StepReport,
+    StepRequest, StepStart,
 };
 
 /// What a Run's workflow did with an answer it was sent.
@@ -326,7 +327,9 @@ pub trait FactoryService: Send + Sync + 'static {
         task_id: Uuid,
     ) -> impl Future<Output = Result<RunDetail, FactoryError>> + Send;
 
-    /// Give `actor`'s answer to the Gate the actor's Run waits on.
+    /// Give `actor`'s answer to the Gate the actor's Run waits on. Approving
+    /// a Gate of a Tampered Run needs `approve_control_files`: the actor
+    /// approves the Control Files the Run's branch changed.
     fn answer_gate(
         &self,
         actor: MacroUserIdStr<'static>,
@@ -334,7 +337,24 @@ pub trait FactoryService: Send + Sync + 'static {
         seq: u16,
         answer: Outcome,
         note: Option<String>,
+        approve_control_files: bool,
     ) -> impl Future<Output = Result<(), FactoryError>> + Send;
+
+    /// The Control File patterns `actor`'s Runs are checked against: their
+    /// own, or the factory's default.
+    fn control_files(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+    ) -> impl Future<Output = Result<ControlFilesSettings, FactoryError>> + Send;
+
+    /// Set the Control File patterns `actor`'s Runs are checked against;
+    /// none goes back to the factory's default. The actor must have an
+    /// account.
+    fn set_control_files(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        patterns: Option<Vec<String>>,
+    ) -> impl Future<Output = Result<ControlFilesSettings, FactoryError>> + Send;
 
     /// Keep what the agent working in the session `session_id`, acting as
     /// `user_id`, hands back for its Step, replacing an earlier hand back.

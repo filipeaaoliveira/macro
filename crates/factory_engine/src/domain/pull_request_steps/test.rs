@@ -8,6 +8,8 @@ use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
 use super::{CI_WAIT, PullRequestStepError, PullRequestSteps};
+
+mod control_files;
 use crate::domain::fakes::{FakeGithub, FakeRepo, ci, suite};
 use crate::domain::models::{
     Check, CheckState, CheckSuite, CommitStatus, HeadChecks, PullRequestState, RequiredCheck,
@@ -504,6 +506,8 @@ async fn ready_to_merge_sends_a_changed_head_back_to_ci() {
 #[tokio::test]
 async fn merging_again_finds_the_pull_request_merged() {
     let github = FakeGithub::with_open_pull_request(ci(Some("success")));
+    // A branch that changes no Control File.
+    github.state().changed = Some(Vec::new());
     let repo = FakeRepo::default();
     let run_id = RunId::generate();
     repo.set_merge_head(run_id, FakeGithub::HEAD)
@@ -529,6 +533,8 @@ async fn merging_again_finds_the_pull_request_merged() {
 #[tokio::test]
 async fn a_head_that_moved_since_the_person_agreed_is_not_merged() {
     let github = FakeGithub::with_open_pull_request(ci(Some("success")));
+    // A branch that changes no Control File.
+    github.state().changed = Some(Vec::new());
     let repo = FakeRepo::default();
     let run_id = RunId::generate();
     repo.set_merge_head(run_id, "2222222222222222222222222222222222222222")
@@ -555,6 +561,8 @@ async fn a_head_that_moved_since_the_person_agreed_is_not_merged() {
 #[tokio::test]
 async fn a_refused_merge_or_one_no_person_agreed_to_merges_nothing() {
     let github = FakeGithub::with_open_pull_request(ci(Some("success")));
+    // A branch that changes no Control File.
+    github.state().changed = Some(Vec::new());
     github.state().merge_refusal = Some("Required reviews are missing.".to_string());
     let repo = FakeRepo::default();
     let agreed = RunId::generate();

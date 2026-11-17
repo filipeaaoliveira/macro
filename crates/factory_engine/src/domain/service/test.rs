@@ -22,6 +22,8 @@ use crate::domain::ports::{
     StepService,
 };
 
+mod control_files;
+
 /// Keeps what it was sent. Refuses every answer when `refuse` is set; a
 /// start fails when `fail` is set, and leaves its workflow behind when
 /// `started_anyway` is set too.
@@ -452,7 +454,7 @@ async fn someone_else_s_run_reads_answers_and_cancels_as_missing() {
 
     let read = service.get_run(&teo(), run_id).await;
     let answered = service
-        .answer_gate(teo(), run_id, 1, Outcome::done(), None)
+        .answer_gate(teo(), run_id, 1, Outcome::done(), None, false)
         .await;
     let cancelled = service.cancel_run(&teo(), run_id).await;
     let linked = service.link_task(&teo(), run_id, Uuid::now_v7()).await;
@@ -478,6 +480,7 @@ async fn an_answer_is_sent_to_the_run_s_workflow_as_its_owner() {
             1,
             Outcome::done(),
             Some("Go ahead".to_string()),
+            false,
         )
         .await
         .expect("answer");
@@ -490,6 +493,7 @@ async fn an_answer_is_sent_to_the_run_s_workflow_as_its_owner() {
             answer: Outcome::done(),
             note: Some("Go ahead".to_string()),
             user_id: julia(),
+            approved_control_files: None,
         }]
     );
 }
@@ -504,7 +508,7 @@ async fn an_answer_the_workflow_refuses_is_a_conflict() {
     let run_id = julia_s_run(&repo).await;
 
     let refused = service(&repo, &workflows)
-        .answer_gate(julia(), run_id, 1, Outcome::done(), None)
+        .answer_gate(julia(), run_id, 1, Outcome::done(), None, false)
         .await;
 
     assert!(matches!(refused, Err(FactoryError::AnswerRefused(_))));
@@ -517,7 +521,7 @@ async fn an_answer_from_a_user_with_no_account_never_reaches_the_workflow() {
     let run_id = julia_s_run(&repo).await;
 
     let refused = service(&repo, &workflows)
-        .answer_gate(nobody(), run_id, 1, Outcome::done(), None)
+        .answer_gate(nobody(), run_id, 1, Outcome::done(), None, false)
         .await;
 
     assert!(matches!(refused, Err(FactoryError::UnknownUser)));
@@ -531,7 +535,14 @@ async fn a_note_larger_than_a_gate_keeps_is_refused() {
     let run_id = julia_s_run(&repo).await;
 
     let refused = service(&repo, &workflows)
-        .answer_gate(julia(), run_id, 1, Outcome::done(), Some("x".repeat(4_097)))
+        .answer_gate(
+            julia(),
+            run_id,
+            1,
+            Outcome::done(),
+            Some("x".repeat(4_097)),
+            false,
+        )
         .await;
 
     assert!(matches!(refused, Err(FactoryError::NoteTooLarge { .. })));
@@ -807,7 +818,7 @@ async fn an_answer_the_gate_does_not_offer_never_reaches_the_workflow() {
         .expect("open");
 
     let refused = service(&repo, &workflows)
-        .answer_gate(julia(), run_id, 1, Outcome::unchanged(), None)
+        .answer_gate(julia(), run_id, 1, Outcome::unchanged(), None, false)
         .await;
 
     assert!(matches!(

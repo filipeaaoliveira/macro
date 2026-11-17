@@ -236,7 +236,34 @@ the owner whether to merge; `merge` merges only that commit, naming it to
 GitHub, and a merged pull request reads as merged. A head that moved goes back
 to `ci`, and a person's `revise` goes to `fix` with the review's visits reset.
 The merge-gate entry runs at most three times, including visits that end
-`changed` without asking; then the Run ends for a person. The pull
+`changed` without asking; then the Run ends for a person.
+
+Control Files (`src/domain/control_files.rs`) are the files that decide
+whether a repository's checks pass: tests, test and lint configuration, CI
+workflows, package scripts, agent instructions (`AGENTS.md`, `CLAUDE.md`) and
+`.macro/checks.json`. They are glob patterns matched against each changed
+path from the root (`*` within a folder, `**` across folders, `**/name` also
+at the root); `DEFAULT_CONTROL_FILES` applies until the Run's owner sets
+their own with `PUT /settings/control-files` (`GET` reads them; a null list
+goes back to the default, an empty one checks nothing). Only the owner's own
+signed-in session sets them, as for a Gate: a shorter list lets an agent
+change more unseen. `publish` (on the pull request's head), `ready_to_merge`
+and `merge` (on the commit to merge) compare that commit with the base
+(`PullRequests::changed_paths`) and keep on the Run the Control Files it
+changed that the Run's request does not name (`factory_run.tampered_files`,
+`tampering` in the Run API): the Run is Tampered, and their outputs name the
+files. The request asks for a file only by naming its path from the root,
+whole (`.github/workflows/ci.yml`); a pattern, a folder or a bare file name
+asks for nothing, and a person approves those on the Gate instead. A
+comparison GitHub cuts short (300 files) is Tampered with no files,
+`unlisted`. Approving a Gate (`approve`) of a Tampered Run needs
+`approveControlFiles: true` in the answer (400 `controlFilesNotApproved`
+otherwise), which only the owner's own session can send; the answer keeps
+the files approved (`factory_gate.approved_control_files`). `merge` reads
+the commit's Control Files again, and refuses (`refused`, so the Run ends
+`manual`) unless the latest Gate answer before it approved every one; an
+unlisted commit needs an approval given while it was unlisted. Nothing but
+a person's answer approves them. The pull
 request's description names the Run's task as `MACRO-{short id}`, so GitHub's
 webhook links them, and is cut to GitHub's 65,536 characters in its request
 part only.
@@ -257,6 +284,8 @@ part only.
   `merge`, over the `PullRequests` port.
 - `src/domain/built_in_steps/checks_round.rs` and `src/domain/checks.rs`:
   the checks rounds of `write` and `fix`, and the checks file they read.
+- `src/domain/control_files.rs`: Control Files, the default patterns, and
+  what makes a Run Tampered.
 - `flows/`: the built-in Flows, each named for its file
   (`src/domain/built_in_flows.rs`). `GET /flows` lists those whose Steps the
   worker serves, with their `description` and whether they work on a
@@ -290,6 +319,8 @@ part only.
   and each entry that runs it names a Role.
 - Add a Role: name it on the entries that need it; every deployment's agent
   definition must then fill it, or the service does not start.
+- Change the default Control Files: `DEFAULT_CONTROL_FILES` in
+  `src/domain/control_files.rs`, and its test.
 - Add a field to the checks file: `src/domain/checks.rs` (field, check
   and test), and the prompt in `checks_round.rs` if the agent needs it.
 - Add a Flow keyword: `src/domain/flow.rs` (field and check) →

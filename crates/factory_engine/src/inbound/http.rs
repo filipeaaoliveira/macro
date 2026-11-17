@@ -1,5 +1,6 @@
 //! Axum router for the Run API.
 
+mod control_files;
 #[cfg(test)]
 mod test;
 
@@ -14,17 +15,19 @@ use axum::{
 };
 use factory_records::domain::models::{
     EntryId, Gate, GateAnswer, HandBack, Outcome, Run, RunEnd, RunId, RunOutcome, Step, StepEnd,
+    Tampering,
 };
 use macro_authorization::{
     CODE_EXECUTION_HEADER, MacroAuthorizationExtractor, MacroAuthorizationService,
-    MacroAuthorizationState, UserOnly, UserOrInternal, UserOrInternalCaller,
+    MacroAuthorizationState, UserOnly, UserOrInternal, UserOrInternalAuthorization,
+    UserOrInternalCaller,
 };
 use macro_user_id::user_id::MacroUserIdStr;
 use model_error_response::ErrorResponse;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::domain::models::{FactoryError, FlowSummary, RunDetail};
+use crate::domain::models::{ControlFilesSettings, FactoryError, FlowSummary, RunDetail};
 use crate::domain::ports::FactoryService;
 
 /// Router state for the Run API.
@@ -79,6 +82,9 @@ impl<S, Auth> FromRef<FactoryRouterState<S, Auth>> for MacroAuthorizationState<A
 /// - `POST /runs/{id}/cancel` — cancel a Run.
 /// - `PUT /runs/{id}/task` — link a Run to the Macro task it works on.
 /// - `POST /hand-backs` — an agent Step's session hands back its result.
+/// - `GET /settings/control-files` — the Control File patterns the caller's
+///   Runs are checked against.
+/// - `PUT /settings/control-files` — set them, or go back to the default.
 pub fn factory_router<S, Auth, T>(state: FactoryRouterState<S, Auth>) -> Router<T>
 where
     S: FactoryService,
@@ -100,6 +106,11 @@ where
         .route("/runs/{id}/cancel", post(cancel_run_handler::<S, Auth>))
         .route("/runs/{id}/task", put(link_task_handler::<S, Auth>))
         .route("/hand-backs", post(hand_back_handler::<S, Auth>))
+        .route(
+            "/settings/control-files",
+            get(control_files::get_control_files_handler::<S, Auth>)
+                .put(control_files::set_control_files_handler::<S, Auth>),
+        )
         .with_state(state)
 }
 
@@ -179,6 +190,11 @@ pub struct AnswerGateRequest {
     /// What the person adds, for the Run's later Steps to read.
     #[serde(default)]
     pub note: Option<String>,
+    /// Whether the person approves the Control Files the Run's branch
+    /// changed that its request does not name: required to approve a Gate
+    /// of a Tampered Run.
+    #[serde(default)]
+    pub approve_control_files: bool,
 }
 
 /// Request body for handing back an agent Step's result.
@@ -352,23 +368,37 @@ where
     S: FactoryService,
     Auth: MacroAuthorizationService,
 {
-    // Only the person in their own session answers: not an internal caller
-    // acting for them, nor an API key or token, nor an agent's program. An
-    // agent works as the Run's owner, so its code could otherwise approve
-    // the plan it wrote.
-    let authorization = caller.authorization;
+    // An agent works as the Run's owner, so its code could otherwise
+    // approve the plan it wrote, or the Control Files it changed.
+    let actor = in_person(caller.authorization, &headers)?;
+    state
+        .service
+        .answer_gate(
+            actor,
+            params.id,
+            params.seq,
+            body.answer,
+            body.note,
+            body.approve_control_files,
+        )
+        .await?;
+    Ok(StatusCode::ACCEPTED)
+}
+
+/// The caller, when they are the person in their own signed-in session:
+/// not an internal caller acting for them, nor an API key or token, nor an
+/// agent's program.
+fn in_person(
+    authorization: UserOrInternalAuthorization,
+    headers: &HeaderMap,
+) -> Result<MacroUserIdStr<'static>, FactoryError> {
     let in_person = authorization.caller == UserOrInternalCaller::User
         && authorization.user.is_human_session()
         && !headers.contains_key(CODE_EXECUTION_HEADER);
     if !in_person {
         return Err(FactoryError::NotAPerson);
     }
-    let actor = authorization.user.macro_user_id;
-    state
-        .service
-        .answer_gate(actor, params.id, params.seq, body.answer, body.note)
-        .await?;
-    Ok(StatusCode::ACCEPTED)
+    Ok(authorization.user.macro_user_id)
 }
 
 /// Cancel one of the caller's Runs. Its running Step or Gate stops, and
@@ -508,7 +538,9 @@ impl FactoryError {
             | FactoryError::AnswerNotOffered { .. }
             | FactoryError::NotAStepSession
             | FactoryError::OutcomeNotOffered { .. }
-            | FactoryError::HandBackTooLarge { .. } => StatusCode::BAD_REQUEST,
+            | FactoryError::HandBackTooLarge { .. }
+            | FactoryError::ControlFilesNotApproved
+            | FactoryError::InvalidControlFiles(_) => StatusCode::BAD_REQUEST,
             FactoryError::NotTheOwner | FactoryError::NotAPerson => StatusCode::FORBIDDEN,
             FactoryError::NotFound | FactoryError::TaskNotFound => StatusCode::NOT_FOUND,
             FactoryError::RunEnded | FactoryError::AnswerRefused(_) | FactoryError::StepEnded => {
@@ -530,6 +562,9 @@ pub enum RunErrorCode {
     /// The caller's linked GitHub account may read the repository but not
     /// push to it.
     NoPushAccess,
+    /// The Run is Tampered, and approving its Gate needs
+    /// `approveControlFiles`.
+    ControlFilesNotApproved,
 }
 
 /// What a refused or failed request answers: a message, and for a refusal
@@ -550,6 +585,7 @@ impl FactoryError {
         match self {
             FactoryError::UnreachableRepository => Some(RunErrorCode::UnreachableRepository),
             FactoryError::NoPushAccess => Some(RunErrorCode::NoPushAccess),
+            FactoryError::ControlFilesNotApproved => Some(RunErrorCode::ControlFilesNotApproved),
             _ => None,
         }
     }
@@ -588,7 +624,9 @@ impl IntoResponse for FactoryError {
         answer_gate_handler,
         cancel_run_handler,
         link_task_handler,
-        hand_back_handler
+        hand_back_handler,
+        control_files::get_control_files_handler,
+        control_files::set_control_files_handler
     ),
     components(schemas(
         FlowsResponse,
@@ -606,6 +644,9 @@ impl IntoResponse for FactoryError {
         StepEnd,
         Gate,
         GateAnswer,
+        Tampering,
+        ControlFilesSettings,
+        control_files::SetControlFilesRequest,
         MacroUserIdStr,
         EntryId,
         Outcome,

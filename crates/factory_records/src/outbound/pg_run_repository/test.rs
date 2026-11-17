@@ -10,6 +10,8 @@ use crate::domain::models::{
 };
 use crate::domain::ports::RunRepository;
 
+mod control_files;
+
 const LOGIN_TASK: &str = "00000000-0000-7000-8000-000000000101";
 const DARK_MODE_TASK: &str = "00000000-0000-7000-8000-000000000102";
 
@@ -40,7 +42,7 @@ async fn insert(repo: &PgRunRepository, id: RunId, request: &str) -> Run {
         .await
         .expect("insert")
     {
-        RunInsert::Inserted(run) => run,
+        RunInsert::Inserted(run) => *run,
         RunInsert::NoSuchTask => panic!("a run with no task has no task to miss"),
     }
 }
@@ -90,7 +92,7 @@ async fn a_reset_entry_keeps_every_visit_it_made(pool: PgPool) {
         repo.open_gate(key(id, seq), "Go on?", &[outcome("yes")])
             .await
             .expect("open");
-        repo.answer_gate(key(id, seq), &outcome("yes"), Some(output), &julia())
+        repo.answer_gate(key(id, seq), &outcome("yes"), Some(output), &julia(), None)
             .await
             .expect("answer");
         repo.end_step(key(id, seq), &outcome("done"), output)
@@ -266,10 +268,11 @@ async fn a_gate_waits_then_keeps_its_first_answer(pool: PgPool) {
         &outcome("revise"),
         Some("Keep the old index"),
         &julia(),
+        None,
     )
     .await
     .expect("answer");
-    repo.answer_gate(key(id, 1), &outcome("approve"), None, &julia())
+    repo.answer_gate(key(id, 1), &outcome("approve"), None, &julia(), None)
         .await
         .expect("answer again");
 
@@ -302,7 +305,7 @@ async fn an_answer_from_an_account_gone_since_records_no_one(pool: PgPool) {
     // The API refuses an unknown user, but an account can go between that
     // check and the workflow recording the answer.
     let gone = MacroUserIdStr::try_from("macro|gone@example.com".to_string()).expect("valid");
-    repo.answer_gate(key(id, 1), &outcome("approve"), None, &gone)
+    repo.answer_gate(key(id, 1), &outcome("approve"), None, &gone, None)
         .await
         .expect("answer");
 

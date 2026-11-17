@@ -8363,6 +8363,7 @@ dependencies = [
  "factory_records",
  "futures",
  "github",
+ "glob",
  "macro_authorization",
  "macro_env_var",
  "macro_user_id",

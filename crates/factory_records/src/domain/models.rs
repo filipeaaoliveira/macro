@@ -310,8 +310,42 @@ pub struct Run {
     /// The GitHub repository the Run works on; none for a Run that works on
     /// no code.
     pub repository: Option<Repository>,
+    /// The Control Files its branch changed that its request does not name,
+    /// as the pull request Steps last read them: the Run is Tampered, and
+    /// merges only once a person approves them. None when it changed none.
+    pub tampering: Option<Tampering>,
     /// How and when it ended; none while it runs.
     pub end: Option<RunEnd>,
+}
+
+/// The Control Files a Run's branch changed that its request does not name:
+/// files that decide whether the repository's checks pass, such as its
+/// tests, lint configuration and CI workflows.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Tampering {
+    /// The files, from the repository's root, in GitHub's order: empty when
+    /// `unlisted`.
+    pub files: Vec<String>,
+    /// GitHub could not list all of the branch's changes, so which Control
+    /// Files it changed is not known.
+    pub unlisted: bool,
+}
+
+impl Tampering {
+    /// The most files a Tampering names: GitHub lists at most 300 changes
+    /// of a comparison, and a longer list is `unlisted`.
+    pub const MAX_FILES: usize = 300;
+
+    /// Whether `approved`, the files a person approved, covers it: every
+    /// file it names, or, when it is `unlisted`, an approval given while it
+    /// was.
+    pub fn approved_by(&self, approved: &[String]) -> bool {
+        if self.unlisted {
+            return approved.is_empty();
+        }
+        self.files.iter().all(|file| approved.contains(file))
+    }
 }
 
 /// The GitHub repository a Run works on.
@@ -329,7 +363,7 @@ pub struct Repository {
 #[derive(Debug, Clone, PartialEq)]
 pub enum RunInsert {
     /// The Run is kept.
-    Inserted(Run),
+    Inserted(Box<Run>),
     /// No document has the task id the Run was to work on, so nothing was
     /// kept.
     NoSuchTask,
@@ -368,6 +402,10 @@ pub struct GateAnswer {
     pub note: Option<String>,
     /// Who answered; none once their account is gone.
     pub user_id: Option<MacroUserIdStr<'static>>,
+    /// The Run's Tampered files the person approved with their answer: an
+    /// empty list approves a Run whose changes GitHub could not list. None
+    /// when the answer approved none.
+    pub approved_control_files: Option<Vec<String>>,
     /// When they answered.
     pub answered_at: DateTime<Utc>,
 }

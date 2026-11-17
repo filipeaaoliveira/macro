@@ -8,7 +8,8 @@ use chrono::Utc;
 use factory_records::domain::models::{
     CheckRound, CheckRoundEnd, CheckRoundOutcome, CheckRoundStart, ClaimedSession, EntryId, Gate,
     HandBack, HandedBack, Outcome, PassedOver, Repository, Role, Run, RunEnd, RunId, RunInsert,
-    RunOutcome, SessionStep, Step, StepEnd, StepKey, StepSession, StoppingSession, TaskLink,
+    RunOutcome, SessionStep, Step, StepEnd, StepKey, StepSession, StoppingSession, Tampering,
+    TaskLink,
 };
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
@@ -48,6 +49,9 @@ impl Retryable for FakeError {
     }
 }
 
+/// An answer recorded for a Gate, with the Control Files it approved.
+pub(crate) type Approval = (StepKey, Outcome, Option<Vec<String>>);
+
 /// Runs, Steps and sessions in memory, with the same first-write-wins rules
 /// as the Postgres repository.
 #[derive(Clone, Default)]
@@ -68,6 +72,13 @@ pub(crate) struct FakeRepo {
     pub(crate) merge_heads: Arc<Mutex<BTreeMap<RunId, String>>>,
     /// Told each time a Gate opens.
     pub(crate) gate_opened: Arc<tokio::sync::Notify>,
+    /// The Control Files each Run's branch last changed that its request
+    /// does not name, also for Runs the fake does not keep.
+    pub(crate) tampering: Arc<Mutex<BTreeMap<RunId, Tampering>>>,
+    /// The answers recorded, by Gate, with the Control Files they approved.
+    pub(crate) approvals: Arc<Mutex<Vec<Approval>>>,
+    /// The Control File patterns each person set, by their id.
+    pub(crate) control_files: Arc<Mutex<BTreeMap<String, Vec<String>>>>,
 }
 
 /// Everyone has an account but `macro|nobody@example.com`.
@@ -151,10 +162,11 @@ impl RunRepository for FakeRepo {
             created_at: Utc::now(),
             task_id,
             repository: repository.cloned(),
+            tampering: None,
             end: None,
         };
         self.runs.lock().expect("runs").insert(id, run.clone());
-        Ok(RunInsert::Inserted(run))
+        Ok(RunInsert::Inserted(Box::new(run)))
     }
 
     async fn link_task(&self, id: RunId, task_id: Uuid) -> Result<TaskLink, FakeError> {
@@ -193,7 +205,52 @@ impl RunRepository for FakeRepo {
     }
 
     async fn get_run(&self, id: RunId) -> Result<Option<Run>, FakeError> {
-        Ok(self.runs.lock().expect("runs").get(&id).cloned())
+        let tampering = self.tampering.lock().expect("tampering").get(&id).cloned();
+        Ok(self
+            .runs
+            .lock()
+            .expect("runs")
+            .get(&id)
+            .cloned()
+            .map(|run| Run { tampering, ..run }))
+    }
+
+    async fn set_tampering(
+        &self,
+        id: RunId,
+        tampering: Option<&Tampering>,
+    ) -> Result<(), FakeError> {
+        let mut kept = self.tampering.lock().expect("tampering");
+        match tampering {
+            Some(tampering) => kept.insert(id, tampering.clone()),
+            None => kept.remove(&id),
+        };
+        Ok(())
+    }
+
+    async fn control_files(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+    ) -> Result<Option<Vec<String>>, FakeError> {
+        Ok(self
+            .control_files
+            .lock()
+            .expect("control files")
+            .get(user_id.as_ref())
+            .cloned())
+    }
+
+    async fn set_control_files(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        patterns: Option<&[String]>,
+    ) -> Result<(), FakeError> {
+        let mut kept = self.control_files.lock().expect("control files");
+        match patterns {
+            Some(patterns) => kept.insert(user_id.as_ref().to_string(), patterns.to_vec()),
+            None => kept.remove(user_id.as_ref()),
+        };
+        Ok(())
     }
 
     async fn list_steps(&self, id: RunId) -> Result<Vec<Step>, FakeError> {
@@ -307,11 +364,17 @@ impl RunRepository for FakeRepo {
 
     async fn answer_gate(
         &self,
-        _key: StepKey,
-        _answer: &Outcome,
+        key: StepKey,
+        answer: &Outcome,
         _note: Option<&str>,
         _user_id: &MacroUserIdStr<'static>,
+        approved_control_files: Option<&[String]>,
     ) -> Result<(), FakeError> {
+        self.approvals.lock().expect("approvals").push((
+            key,
+            answer.clone(),
+            approved_control_files.map(<[String]>::to_vec),
+        ));
         Ok(())
     }
 
@@ -727,6 +790,8 @@ pub(crate) struct FakeGithubState {
     /// The paths the Run's branch changed against its base; none when
     /// GitHub cannot list them all.
     pub(crate) changed: Option<Vec<String>>,
+    /// The branches or commits whose changes were asked for, in order.
+    pub(crate) compared: Vec<String>,
 }
 
 /// GitHub in memory, for one Run's branch: opening its pull request makes
@@ -879,9 +944,11 @@ impl PullRequests for FakeGithub {
         _owner: &MacroUserIdStr<'static>,
         _repository: &CodeRepository,
         _base: &str,
-        _branch: &str,
+        branch: &str,
     ) -> Result<Option<Vec<String>>, FakeError> {
-        Ok(self.state().changed.clone())
+        let mut state = self.state();
+        state.compared.push(branch.to_string());
+        Ok(state.changed.clone())
     }
 
     async fn open(

@@ -16,7 +16,7 @@ use crate::domain::models::{
     AgentName, CheckRound, CheckRoundOutcome, CheckRoundStart, ClaimedSession, EntryId, Gate,
     GateAnswer, HandBack, HandedBack, InvalidName, Outcome, PassedOver, Repository, Role, Run,
     RunEnd, RunId, RunInsert, RunOutcome, SessionStep, Step, StepEnd, StepKey, StepSession,
-    StoppingSession, TaskLink,
+    StoppingSession, Tampering, TaskLink,
 };
 use crate::domain::ports::RunRepository;
 
@@ -105,6 +105,7 @@ struct RunRow {
     task_id: Option<String>,
     repo_url: Option<String>,
     base_branch: Option<String>,
+    tampered_files: Option<Vec<String>>,
     outcome: Option<String>,
     ended_at: Option<DateTime<Utc>>,
 }
@@ -139,6 +140,11 @@ impl TryFrom<RunRow> for Run {
                 .map(|id| Uuid::parse_str(&id).map_err(|_| PgRunRepositoryErr::InvalidTaskId(id)))
                 .transpose()?,
             repository,
+            // An empty list keeps a Run whose changes GitHub could not list.
+            tampering: row.tampered_files.map(|files| Tampering {
+                unlisted: files.is_empty(),
+                files,
+            }),
             end,
         })
     }
@@ -159,6 +165,7 @@ struct StepRow {
     answer: Option<String>,
     note: Option<String>,
     user_id: Option<String>,
+    approved_control_files: Option<Vec<String>>,
     answered_at: Option<DateTime<Utc>>,
     role: Option<String>,
     agent: Option<String>,
@@ -181,6 +188,7 @@ impl StepRow {
                             .map_err(|_| PgRunRepositoryErr::InvalidUserId(id))
                     })
                     .transpose()?,
+                approved_control_files: self.approved_control_files.take(),
                 answered_at,
             }),
             (None, None) => None,
@@ -270,7 +278,8 @@ impl RunRepository for PgRunRepository {
             INSERT INTO factory_run (id, flow, request, user_id, task_id, repo_url, base_branch)
             VALUES ($1, $2, $3, $4, $5, $6, $7)
             RETURNING
-                id, request, user_id, created_at, task_id, repo_url, base_branch, outcome, ended_at
+                id, request, user_id, created_at, task_id, repo_url, base_branch, tampered_files,
+                outcome, ended_at
             "#,
             id.as_uuid(),
             flow,
@@ -284,7 +293,7 @@ impl RunRepository for PgRunRepository {
         .await;
 
         match inserted {
-            Ok(row) => Ok(RunInsert::Inserted(Run::try_from(row)?)),
+            Ok(row) => Ok(RunInsert::Inserted(Box::new(Run::try_from(row)?))),
             Err(sqlx::Error::Database(error)) if error.constraint() == Some(TASK_FOREIGN_KEY) => {
                 Ok(RunInsert::NoSuchTask)
             }
@@ -324,6 +333,77 @@ impl RunRepository for PgRunRepository {
         Ok(())
     }
 
+    #[tracing::instrument(err, skip(self, tampering))]
+    async fn set_tampering(
+        &self,
+        id: RunId,
+        tampering: Option<&Tampering>,
+    ) -> Result<(), Self::Err> {
+        // A Run whose changes GitHub could not list keeps an empty list.
+        let files: Option<&[String]> = tampering.map(|tampering| {
+            if tampering.unlisted {
+                &[][..]
+            } else {
+                tampering.files.as_slice()
+            }
+        });
+        sqlx::query!(
+            "UPDATE factory_run SET tampered_files = $2 WHERE id = $1",
+            id.as_uuid(),
+            files,
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    #[tracing::instrument(err, skip(self, user_id))]
+    async fn control_files(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+    ) -> Result<Option<Vec<String>>, Self::Err> {
+        let patterns = sqlx::query_scalar!(
+            "SELECT control_files FROM factory_settings WHERE user_id = $1",
+            user_id.as_ref(),
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(patterns)
+    }
+
+    #[tracing::instrument(err, skip(self, user_id, patterns))]
+    async fn set_control_files(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        patterns: Option<&[String]>,
+    ) -> Result<(), Self::Err> {
+        match patterns {
+            Some(patterns) => {
+                sqlx::query!(
+                    r#"
+                    INSERT INTO factory_settings (user_id, control_files)
+                    VALUES ($1, $2)
+                    ON CONFLICT (user_id)
+                    DO UPDATE SET control_files = EXCLUDED.control_files, updated_at = now()
+                    "#,
+                    user_id.as_ref(),
+                    patterns,
+                )
+                .execute(&self.pool)
+                .await?;
+            }
+            None => {
+                sqlx::query!(
+                    "DELETE FROM factory_settings WHERE user_id = $1",
+                    user_id.as_ref(),
+                )
+                .execute(&self.pool)
+                .await?;
+            }
+        }
+        Ok(())
+    }
+
     #[tracing::instrument(err, skip(self))]
     async fn merge_head(&self, id: RunId) -> Result<Option<String>, Self::Err> {
         let sha = sqlx::query_scalar!(
@@ -349,7 +429,8 @@ impl RunRepository for PgRunRepository {
             RunRow,
             r#"
             SELECT
-                id, request, user_id, created_at, task_id, repo_url, base_branch, outcome, ended_at
+                id, request, user_id, created_at, task_id, repo_url, base_branch, tampered_files,
+                outcome, ended_at
             FROM factory_run
             WHERE id = $1
             "#,
@@ -380,6 +461,7 @@ impl RunRepository for PgRunRepository {
                 g.answer,
                 g.note,
                 g.user_id,
+                g.approved_control_files,
                 g.answered_at,
                 s.role,
                 s.agent,
@@ -423,7 +505,8 @@ impl RunRepository for PgRunRepository {
             RunRow,
             r#"
             SELECT
-                id, request, user_id, created_at, task_id, repo_url, base_branch, outcome, ended_at
+                id, request, user_id, created_at, task_id, repo_url, base_branch, tampered_files,
+                outcome, ended_at
             FROM factory_run
             WHERE task_id = $1 AND user_id = $2
             ORDER BY created_at DESC, id DESC
@@ -463,6 +546,7 @@ impl RunRepository for PgRunRepository {
                 g.answer,
                 g.note,
                 g.user_id,
+                g.approved_control_files,
                 g.answered_at,
                 s.role,
                 s.agent,
@@ -561,6 +645,7 @@ impl RunRepository for PgRunRepository {
         answer: &Outcome,
         note: Option<&str>,
         user_id: &MacroUserIdStr<'static>,
+        approved_control_files: Option<&[String]>,
     ) -> Result<(), Self::Err> {
         // The answer is recorded once the Run's workflow took it, so an
         // account deleted since the API checked it must not stop it: the
@@ -568,7 +653,8 @@ impl RunRepository for PgRunRepository {
         let answered = sqlx::query!(
             r#"
             UPDATE factory_gate
-            SET answer = $3, note = $4, user_id = $5, answered_at = now()
+            SET answer = $3, note = $4, user_id = $5, approved_control_files = $6,
+                answered_at = now()
             WHERE run_id = $1 AND seq = $2 AND answer IS NULL
             "#,
             key.run_id.as_uuid(),
@@ -576,6 +662,7 @@ impl RunRepository for PgRunRepository {
             answer.as_str(),
             note,
             Some(user_id.as_ref()),
+            approved_control_files,
         )
         .execute(&self.pool)
         .await;
@@ -587,13 +674,15 @@ impl RunRepository for PgRunRepository {
                 sqlx::query!(
                     r#"
                     UPDATE factory_gate
-                    SET answer = $3, note = $4, user_id = NULL, answered_at = now()
+                    SET answer = $3, note = $4, user_id = NULL, approved_control_files = $5,
+                        answered_at = now()
                     WHERE run_id = $1 AND seq = $2 AND answer IS NULL
                     "#,
                     key.run_id.as_uuid(),
                     i32::from(key.seq),
                     answer.as_str(),
                     note,
+                    approved_control_files,
                 )
                 .execute(&self.pool)
                 .await?;

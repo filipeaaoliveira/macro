@@ -8,7 +8,7 @@ use uuid::Uuid;
 use crate::domain::models::{
     CheckRound, CheckRoundOutcome, CheckRoundStart, ClaimedSession, EntryId, HandBack, HandedBack,
     Outcome, PassedOver, Repository, Role, Run, RunId, RunInsert, RunOutcome, SessionStep, Step,
-    StepKey, StepSession, StoppingSession, TaskLink,
+    StepKey, StepSession, StoppingSession, Tampering, TaskLink,
 };
 
 /// Where Runs and their Steps are kept.
@@ -93,14 +93,16 @@ pub trait RunRepository: Send + Sync + 'static {
         answers: &[Outcome],
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
-    /// Record `user_id`'s answer to the Gate of the Step `key`. A Gate
-    /// already answered keeps its first answer.
+    /// Record `user_id`'s answer to the Gate of the Step `key`, with the
+    /// Tampered files it approved, if any. A Gate already answered keeps its
+    /// first answer.
     fn answer_gate(
         &self,
         key: StepKey,
         answer: &Outcome,
         note: Option<&str>,
         user_id: &MacroUserIdStr<'static>,
+        approved_control_files: Option<&[String]>,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// Record that the Step `key` works in `session` for `role`, offering its
@@ -284,6 +286,30 @@ pub trait RunRepository: Send + Sync + 'static {
         &self,
         id: RunId,
         sha: &str,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// Keep the Control Files the Run's branch changed that its request does
+    /// not name, as last read, replacing what was kept before: none clears
+    /// it. Keeping it again changes nothing.
+    fn set_tampering(
+        &self,
+        id: RunId,
+        tampering: Option<&Tampering>,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// The Control File patterns `user_id` set for their Runs; none when
+    /// they set none, so the factory's default applies.
+    fn control_files(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+    ) -> impl Future<Output = Result<Option<Vec<String>>, Self::Err>> + Send;
+
+    /// Set the Control File patterns of `user_id`'s Runs; none goes back to
+    /// the factory's default.
+    fn set_control_files(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        patterns: Option<&[String]>,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// The commit the Run last asked a person to merge, if any.

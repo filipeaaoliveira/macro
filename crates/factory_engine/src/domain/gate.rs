@@ -27,6 +27,11 @@ pub struct AnswerGate {
     pub note: Option<String>,
     /// Who answered.
     pub user_id: MacroUserIdStr<'static>,
+    /// The Run's Tampered files the person approved with the answer; none
+    /// when it approved none. Answers sent before Runs were checked for
+    /// Control Files carry none.
+    #[serde(default)]
+    pub approved_control_files: Option<Vec<String>>,
 }
 
 /// A Gate a Run's workflow opened, for its worker to record.

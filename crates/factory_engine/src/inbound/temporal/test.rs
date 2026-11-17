@@ -600,6 +600,7 @@ impl CodeRun {
             answer: Outcome::try_from(answer.to_string()).expect("valid"),
             note: None,
             user_id: julia(),
+            approved_control_files: None,
         };
         let mut delivery = AnswerDelivery::Refused("not sent".to_string());
         for _ in 0..50 {
