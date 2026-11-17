@@ -65,6 +65,22 @@ async function startRunError(
 }
 
 /**
+ * A refusal that says why in its body's `message`, else the status's error.
+ */
+async function refusal(
+  response: Response
+): Promise<ResultError<FetchWithTokenErrorCode>> {
+  const failure = statusError(response.status);
+  const body: unknown = await response.json().catch(() => undefined);
+  if (!body || typeof body !== 'object' || !('message' in body)) {
+    return failure;
+  }
+  const message =
+    typeof body.message === 'string' ? body.message : failure.message;
+  return { code: failure.code, message };
+}
+
+/**
  * The software factory's Runs, as the signed-in person sees them: their own
  * Runs only. The routes and shapes are the service's generated client's.
  */
@@ -149,12 +165,18 @@ export const factoryClient = {
 
   /**
    * Sets the team's Control File patterns; `null` goes back to the default.
-   * Someone who doesn't administer the team fails `FORBIDDEN`.
+   * Someone who doesn't administer the team fails `FORBIDDEN`; a pattern
+   * that doesn't read fails `BAD_REQUEST`. Either carries the service's
+   * message.
    */
   setControlFiles(patterns: string[] | null) {
     return fetchWithToken<ControlFilesSettings>(
       `${host()}${getSetFactoryControlFilesUrl()}`,
-      { method: 'PUT', body: JSON.stringify({ patterns }) }
+      {
+        method: 'PUT',
+        body: JSON.stringify({ patterns }),
+        errorResponseHandler: refusal,
+      }
     );
   },
 

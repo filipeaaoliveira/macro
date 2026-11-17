@@ -98,6 +98,9 @@ export default {
   controlFilesAdminsOnly: 'Only team admins can change them.',
   controlFilesUseDefault: 'Use default',
   controlFilesSave: 'Save',
+  controlFilesSaveEmpty: 'Save empty list',
+  controlFilesEmptyWarning:
+    'An empty list checks no file: a run may then change its tests or CI unseen.',
   controlFilesSaved: 'Control files saved',
   controlFilesSaveFailed: 'Couldn’t save the control files',
 };

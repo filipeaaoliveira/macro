@@ -1394,7 +1394,9 @@ is ticked; those it names under **Named by the request**, which need no
 approval. A branch GitHub couldn't list says so instead of naming files.
 With the flag on, team settings (**Team**) have a **Control files**
 section: the team's patterns, one a line, which admins edit, **Save** or
-reset with **Use default**, and other members only read. **Cancel run**
+reset with **Use default**, and other members only read. Saving an empty
+list asks again (**Save empty list**); a refused save shows the service's
+reason in a toast. A Run keeps the list it was created with. **Cancel run**
 is pinned on both and confirms in place. Phone sheets have no close button.
 When an answer or a cancel takes the focused control away, focus moves to
 the Run's status line; that includes an answer refused because someone

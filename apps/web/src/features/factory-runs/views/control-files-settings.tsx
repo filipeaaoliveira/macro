@@ -1,8 +1,9 @@
 import { t } from '@app/lib/i18n';
 import { toast } from '@core/component/Toast/Toast';
 import { fireAndForget } from '@core/util/fireAndForget';
+import { ThrownResultError } from '@core/util/result';
 import { Button, TextField } from '@ui';
-import { createSignal, Match, Switch } from 'solid-js';
+import { createSignal, Match, Show, Switch } from 'solid-js';
 import {
   useControlFilesQuery,
   useSetControlFilesMutation,
@@ -25,13 +26,33 @@ export function ControlFilesSettings() {
   const query = useControlFilesQuery();
   const mutation = useSetControlFilesMutation();
   const [draft, setDraft] = createSignal<string>();
+  // An empty list checks no file, so saving one asks twice.
+  const [confirmingEmpty, setConfirmingEmpty] = createSignal(false);
+
+  const edit = (text: string) => {
+    setDraft(text);
+    setConfirmingEmpty(false);
+  };
 
   const save = async (patterns: string[] | null) => {
+    if (patterns?.length === 0 && !confirmingEmpty()) {
+      setConfirmingEmpty(true);
+      return;
+    }
+    setConfirmingEmpty(false);
     try {
       await mutation.mutateAsync(patterns);
       setDraft(undefined);
       toast.success(t('factoryRuns.controlFilesSaved'));
-    } catch {
+    } catch (error) {
+      // A refusal says why: a pattern that doesn't read, or a team the
+      // person no longer administers.
+      if (error instanceof ThrownResultError) {
+        toast.alert(t('factoryRuns.controlFilesSaveFailed'), {
+          subtext: error.message,
+        });
+        return;
+      }
       toast.failure(t('factoryRuns.controlFilesSaveFailed'));
     }
   };
@@ -59,7 +80,7 @@ export function ControlFilesSettings() {
           const locked = () => !settings().canEdit || mutation.isPending;
           return (
             <div class="flex flex-col gap-2 p-3">
-              <TextField value={text()} onChange={setDraft} disabled={locked()}>
+              <TextField value={text()} onChange={edit} disabled={locked()}>
                 <TextField.Label class="text-sm">
                   {t('factoryRuns.controlFilesPatterns')}
                 </TextField.Label>
@@ -76,6 +97,11 @@ export function ControlFilesSettings() {
                   ? t('factoryRuns.controlFilesHowTo')
                   : t('factoryRuns.controlFilesAdminsOnly')}
               </p>
+              <Show when={confirmingEmpty()}>
+                <p class="text-xs text-failure" role="alert">
+                  {t('factoryRuns.controlFilesEmptyWarning')}
+                </p>
+              </Show>
               <Switch>
                 <Match when={settings().canEdit}>
                   <div class="flex justify-end gap-2">
@@ -95,7 +121,9 @@ export function ControlFilesSettings() {
                         fireAndForget(save(patternsOf(text())), 'factory-runs')
                       }
                     >
-                      {t('factoryRuns.controlFilesSave')}
+                      {confirmingEmpty()
+                        ? t('factoryRuns.controlFilesSaveEmpty')
+                        : t('factoryRuns.controlFilesSave')}
                     </Button>
                   </div>
                 </Match>
