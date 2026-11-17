@@ -216,8 +216,8 @@ function StepMarkdown(props: { markdown: string }) {
 
 /**
  * A round of checks: which it ran, who ran them, and how they went. A round
- * the factory verified names each check that failed with its exit code. A
- * round with no end runs only while its Step does.
+ * the factory ran on the pushed commit names each check that failed with its
+ * exit code. A round with no end runs only while its Step does.
  */
 function CheckRoundNote(props: { round: CheckRound; stepEnded: boolean }) {
   const checks = () =>
@@ -228,15 +228,19 @@ function CheckRoundNote(props: { round: CheckRound; stepEnded: boolean }) {
         : name;
     });
 
+  // Who ran the round's checks: the factory on the pushed commit, or the
+  // agent, which is known only once its report ends the round.
+  const who = () => {
+    if (props.round.verified) return t('factoryRuns.checksVerified');
+    if (props.round.end) return t('factoryRuns.checksReported');
+    return undefined;
+  };
+
   return (
     <StepNote>
       <span class="flex min-w-0 items-center gap-2">
         {t('factoryRuns.checksRound', { round: props.round.round })}
-        <span>
-          {props.round.verified
-            ? t('factoryRuns.checksVerified')
-            : t('factoryRuns.checksReported')}
-        </span>
+        <Show when={who()}>{(who) => <span>{who()}</span>}</Show>
         <Show
           when={props.round.end}
           fallback={

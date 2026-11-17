@@ -172,6 +172,18 @@ describe('RunView', () => {
               startedAt: '2026-11-16T09:50:00Z',
               verified: false,
               results: [],
+              end: {
+                outcome: 'passed',
+                report: 'web and lint passed',
+                endedAt: '2026-11-16T10:00:00Z',
+              },
+            },
+            {
+              round: 3,
+              checks: ['web'],
+              startedAt: '2026-11-16T10:10:00Z',
+              verified: false,
+              results: [],
             },
           ],
         },
@@ -179,10 +191,11 @@ describe('RunView', () => {
     });
 
     expect(await screen.findByText('Checks, round 1')).toBeTruthy();
-    expect(screen.getByText('Verified')).toBeTruthy();
+    expect(screen.getByText('Run on the pushed commit')).toBeTruthy();
     expect(screen.getByText('web, lint exited 2')).toBeTruthy();
-    expect(screen.getByText('Reported by the agent')).toBeTruthy();
-    expect(screen.getByText('web, lint')).toBeTruthy();
+    // Only the ended round the agent reported says so; the open one runs.
+    expect(screen.getAllByText('Reported by the agent')).toHaveLength(1);
+    expect(screen.getByText('Checks running…')).toBeTruthy();
   });
 
   it('answers the open Gate once, with the note', async () => {
