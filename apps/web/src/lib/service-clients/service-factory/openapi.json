@@ -808,6 +808,67 @@
           }
         }
       },
+      "CheckRound": {
+        "type": "object",
+        "description": "One round of the repository's checks a Step ran on its agent's work, in\nthe agent's session.",
+        "required": ["round", "checks", "startedAt"],
+        "properties": {
+          "checks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The names of the checks it runs, in the repository's order."
+          },
+          "end": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CheckRoundEnd",
+                "description": "How and when it ended; none while the checks run."
+              }
+            ]
+          },
+          "round": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Which round, from 1.",
+            "minimum": 0
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it started."
+          }
+        }
+      },
+      "CheckRoundEnd": {
+        "type": "object",
+        "description": "A round of checks that has ended.",
+        "required": ["outcome", "report", "endedAt"],
+        "properties": {
+          "endedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the round ended."
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/CheckRoundOutcome",
+            "description": "How the checks went."
+          },
+          "report": {
+            "type": "string",
+            "description": "What the agent reported of each check, for a person and for the\nagent's fix to read."
+          }
+        }
+      },
+      "CheckRoundOutcome": {
+        "type": "string",
+        "description": "How a round of a Step's checks ended.",
+        "enum": ["passed", "failed"]
+      },
       "CreateRunRequest": {
         "type": "object",
         "description": "Request body for creating a Run.",
@@ -1525,7 +1586,14 @@
       "Step": {
         "type": "object",
         "description": "One visit of one of a Run's entries.",
-        "required": ["seq", "entry", "visit", "startedAt", "passedOver"],
+        "required": [
+          "seq",
+          "entry",
+          "visit",
+          "startedAt",
+          "passedOver",
+          "checks"
+        ],
         "properties": {
           "agent": {
             "oneOf": [
@@ -1537,6 +1605,13 @@
                 "description": "The Agent that took the Step, from its Role's Agents."
               }
             ]
+          },
+          "checks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CheckRound"
+            },
+            "description": "The rounds of the repository's checks it ran, in order: none for a\nStep that runs no checks."
           },
           "end": {
             "oneOf": [

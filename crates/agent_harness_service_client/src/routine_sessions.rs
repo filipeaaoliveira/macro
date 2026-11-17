@@ -23,6 +23,7 @@ enum Operation {
     Validate,
     Prepare,
     Prompt,
+    FollowUp,
     Status,
     Cancel,
     Delete,
@@ -35,6 +36,7 @@ impl Operation {
             Self::Validate => "internal/routine-sessions/validate",
             Self::Prepare => "internal/routine-sessions/prepare",
             Self::Prompt => "internal/routine-sessions/prompt",
+            Self::FollowUp => "internal/routine-sessions/follow-up",
             Self::Status => "internal/routine-sessions/status",
             Self::Cancel => "internal/routine-sessions/cancel",
             Self::Delete => "internal/routine-sessions/delete",
@@ -49,8 +51,14 @@ impl Operation {
         }
     }
 
+    /// Whether it sends the session a prompt, whose delivery an ambiguous
+    /// answer leaves unknown.
+    fn prompts(self) -> bool {
+        matches!(self, Self::Prompt | Self::FollowUp)
+    }
+
     fn uncertain_error(self) -> RoutineSessionError {
-        if self == Self::Prompt {
+        if self.prompts() {
             RoutineSessionError::PromptDeliveryUnknown
         } else {
             RoutineSessionError::OperationFailed
@@ -151,7 +159,7 @@ impl AgentSessionClient {
             StatusCode::BAD_REQUEST | StatusCode::UNPROCESSABLE_ENTITY => {
                 RoutineSessionError::InvalidCommand
             }
-            _ if operation == Operation::Prompt => RoutineSessionError::PromptDeliveryUnknown,
+            _ if operation.prompts() => RoutineSessionError::PromptDeliveryUnknown,
             StatusCode::CONFLICT => RoutineSessionError::Conflict,
             StatusCode::NOT_FOUND
             | StatusCode::TOO_MANY_REQUESTS
@@ -216,6 +224,13 @@ impl RoutineSessions for AgentSessionClient {
         command: PromptRoutineSession,
     ) -> Result<RoutinePromptAccepted, RoutineSessionError> {
         self.command(Operation::Prompt, &command).await
+    }
+
+    async fn follow_up(
+        &self,
+        command: PromptRoutineSession,
+    ) -> Result<RoutinePromptAccepted, RoutineSessionError> {
+        self.command(Operation::FollowUp, &command).await
     }
 
     async fn status(

@@ -178,6 +178,46 @@ while an Actions suite sits empty. Its guarantees:
   reports only by status (as some deploy previews do) keeps CI waiting until
   it times out.
 
+On a repository, `write` and `fix` then run the repository's own checks
+(`src/domain/built_in_steps/checks_round.rs`). The repository declares them
+in `.macro/checks.json` on its base branch (`src/domain/checks.rs`): each a
+`name`, a `run` command from the repository's root, and optional `paths`
+(files or folders from the root, no patterns) whose change makes it run;
+`rounds` (1 to 10, default 3) is how many times a Step runs them. The file is
+read from the Run's recorded base, never the Run's branch, which the agent
+pushes: the first round keeps it, with the checks and commands it runs, and
+every later round and retry goes by that record. A later round runs the
+first round's checks and any others the branch's changes now reach (every
+check when GitHub lists only part of the changes); a check only a later
+round reached is dropped again once the changes no longer reach it. The checks run where the
+agent works, by the agent: the engine can only prompt the session, so a
+round is a later prompt of the Step's session (`StepAgent::follow_up`, the
+routine sessions' `follow_up`) that asks it to run them verbatim, change
+nothing, and hand back `passed` or `failed` with a report. A failure goes
+back to the same session in another prompt with the report, and the next
+round checks the fix. Each round, with its prompts' ids, is recorded before
+it is asked (`factory_check_round`), so a retried Step goes on with its
+round; a new prompt clears the session's hand back and offers its own
+outcomes (`begin_turn`), and a stop watches it. A later prompt goes to the
+session the Step works in now, of the Agent that took it after any passed
+over, run by the bot recorded with it; `begin_turn` records only for that
+session, and a Step that took a later prompt is never passed on, so every
+round stays in the session that did the work. The agent's work and all
+rounds run in the Step's one activity: waiting for them stops
+`ROUNDS_END_BY` (105 minutes) after the Step started, short of its two
+hours, and the Step ends `red` saying so, with a round still open ended
+failed (or with the agent's hand back for it, if it gave one). Each wait is
+also bounded by `SESSION_DEADLINE` (29 minutes) from when it began: the
+first work's ends the Step failed, as for any agent Step, and a later
+prompt's is retried and goes on with the same turn. The Step
+ends `done` once a round passes, the agent's own outcome when its work
+changed nothing or no check applies, and `red` when the last round failed,
+the rounds ran out of time, or the file does not read; the `code` Flow ends
+such a Run `manual`. Its output says which, then the last report and the
+agent's work, cut to the 64 KiB a Step keeps. The rounds show on the Step
+(`checks` in the Run API). `LocalAgent` answers a round of checks `failed`:
+no check ran.
+
 The head `ci` calls green is kept (`factory_run.merge_head_sha`);
 `ready_to_merge` ends `changed` unless the pull request's head is still that
 commit and its checks still pass, and otherwise ends `done`, so its Gate asks
@@ -204,6 +244,8 @@ part only.
 - `src/domain/session_agent.rs`: an agent Step in a Macro agent session.
 - `src/domain/pull_request_steps.rs`: `publish`, `ci`, `ready_to_merge` and
   `merge`, over the `PullRequests` port.
+- `src/domain/built_in_steps/checks_round.rs` and `src/domain/checks.rs`:
+  the checks rounds of `write` and `fix`, and the checks file they read.
 - `flows/`: the built-in Flows, each named for its file
   (`src/domain/built_in_flows.rs`). `GET /flows` lists those whose Steps the
   worker serves, with their `description` and whether they work on a
@@ -237,6 +279,8 @@ part only.
   and each entry that runs it names a Role.
 - Add a Role: name it on the entries that need it; every deployment's agent
   definition must then fill it, or the service does not start.
+- Add a field to the checks file: `src/domain/checks.rs` (field, check
+  and test), and the prompt in `checks_round.rs` if the agent needs it.
 - Add a Flow keyword: `src/domain/flow.rs` (field and check) →
   `src/domain/interpreter.rs` → `src/domain/interpreter/test.rs`.
 

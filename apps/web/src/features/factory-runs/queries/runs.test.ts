@@ -38,6 +38,14 @@ const started: RunDetail = {
       agent: 'primary',
       end: null,
       gate: null,
+      checks: [
+        {
+          round: 1,
+          checks: ['web'],
+          startedAt: '2026-11-16T09:00:02Z',
+          end: null,
+        },
+      ],
     },
   ],
 };
@@ -84,6 +92,14 @@ describe('createAppRunsContext', () => {
           passedOver: [{ agent: 'backup', reason: 'ai_allowance_exhausted' }],
           end: undefined,
           gate: undefined,
+          checks: [
+            {
+              round: 1,
+              checks: ['web'],
+              startedAt: '2026-11-16T09:00:02Z',
+              end: undefined,
+            },
+          ],
         },
       ],
     };
@@ -302,6 +318,7 @@ describe('createAppRunsContext', () => {
               openedAt: '2026-11-16T09:01:00Z',
               answer: null,
             },
+            checks: [],
           },
         ],
       };

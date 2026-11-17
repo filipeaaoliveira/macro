@@ -423,6 +423,94 @@ pub struct Step {
     /// The Agents before it that could not start the Step, in order, and
     /// why.
     pub passed_over: Vec<PassedOver>,
+    /// The rounds of the repository's checks it ran, in order: none for a
+    /// Step that runs no checks.
+    pub checks: Vec<CheckRound>,
+}
+
+/// The most rounds of checks a Step runs.
+pub const MAX_CHECK_ROUNDS: u8 = 10;
+
+/// How a round of a Step's checks ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CheckRoundOutcome {
+    /// Every check passed.
+    Passed,
+    /// A check failed, or could not run.
+    Failed,
+}
+
+impl CheckRoundOutcome {
+    /// The word the outcome is kept and handed back as.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Passed => "passed",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+/// A round of checks that has ended.
+#[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckRoundEnd {
+    /// How the checks went.
+    pub outcome: CheckRoundOutcome,
+    /// What the agent reported of each check, for a person and for the
+    /// agent's fix to read.
+    pub report: String,
+    /// When the round ended.
+    pub ended_at: DateTime<Utc>,
+}
+
+/// One round of the repository's checks a Step ran on its agent's work, in
+/// the agent's session.
+#[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckRound {
+    /// Which round, from 1.
+    pub round: u8,
+    /// The names of the checks it runs, in the repository's order.
+    pub checks: Vec<String>,
+    /// When it started.
+    pub started_at: DateTime<Utc>,
+    /// How and when it ended; none while the checks run.
+    pub end: Option<CheckRoundEnd>,
+    /// What the agent handed back for the work the round checks.
+    #[serde(skip)]
+    pub work_output: String,
+    /// The command of each check, at its name's place in `checks`.
+    #[serde(skip)]
+    pub commands: Vec<String>,
+    /// The repository's checks file as the Step's first round read it,
+    /// which every round goes by.
+    #[serde(skip)]
+    pub declared: String,
+    /// The prompt that asks the agent to run the checks.
+    #[serde(skip)]
+    pub check_action_id: Uuid,
+    /// The prompt that sent the round's failure back to the agent, once it
+    /// was sent.
+    #[serde(skip)]
+    pub fix_action_id: Option<Uuid>,
+}
+
+/// A round of checks to record, before the agent is asked to run them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckRoundStart {
+    /// Which round, from 1 to [`MAX_CHECK_ROUNDS`].
+    pub round: u8,
+    /// What the agent handed back for the work the round checks.
+    pub work_output: String,
+    /// The names of the checks it runs; at least one.
+    pub checks: Vec<String>,
+    /// The command of each check, at its name's place in `checks`.
+    pub commands: Vec<String>,
+    /// The repository's checks file as the Step's first round read it.
+    pub declared: String,
+    /// The prompt, a UUIDv7, that asks the agent to run them.
+    pub check_action_id: Uuid,
 }
 
 /// An Agent that could not start a Step, so the next Agent of its Role took
@@ -467,7 +555,8 @@ pub struct ClaimedSession {
 /// The session a Step claimed, as a stop sees it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoppingSession {
-    /// The session.
+    /// The session, with the action of its latest prompt: the first, or the
+    /// one [`crate::domain::ports::RunRepository::begin_turn`] recorded.
     pub session: StepSession,
     /// Whether an attempt saw it open.
     pub opened: bool,

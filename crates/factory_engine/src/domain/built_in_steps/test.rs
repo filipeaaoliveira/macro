@@ -9,7 +9,7 @@ use macro_user_id::user_id::MacroUserIdStr;
 use super::{BuiltInStepError, BuiltInSteps};
 use crate::domain::fakes::{FakeGithub, FakeRepo};
 use crate::domain::flow::{Flow, StepName, StepUse};
-use crate::domain::models::{AgentAnswer, AgentTask, StepInput};
+use crate::domain::models::{AgentAnswer, AgentTask, AgentTurn, StepInput};
 use crate::domain::ports::{Retryable, StepAgent, StepExecutor};
 use crate::domain::pull_request_steps::PullRequestSteps;
 
@@ -41,6 +41,10 @@ impl FakeAgent {
 
 impl StepAgent for FakeAgent {
     type Err = FakeError;
+
+    async fn follow_up(&self, _turn: AgentTurn) -> Result<AgentAnswer, FakeError> {
+        Err(FakeError)
+    }
 
     async fn stop(
         &self,
@@ -246,6 +250,7 @@ async fn a_write_is_given_the_plan_an_earlier_step_produced() {
             ended_at: Utc::now(),
         }),
         gate: None,
+        checks: Vec::new(),
     }];
 
     let report = steps
@@ -313,6 +318,7 @@ async fn a_plan_reads_what_a_person_answered_the_last_one() {
                 answered_at: Utc::now(),
             }),
         }),
+        checks: Vec::new(),
     }];
 
     steps
@@ -341,6 +347,7 @@ fn ended(seq: u16, entry: &str, visit: u16, output: &str) -> Step {
             ended_at: Utc::now(),
         }),
         gate: None,
+        checks: Vec::new(),
     }
 }
 

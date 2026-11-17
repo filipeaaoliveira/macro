@@ -2,7 +2,10 @@
 //! `plan`, `write`, `review`, `fix` and `ci_fix` hand it to an agent; and
 //! `publish`, `ci`, `ready_to_merge` and `merge` take the Run's branch to a
 //! merged pull request on GitHub ([`PullRequestSteps`]).
+//! On a repository, `write` and `fix` then have the agent run the checks
+//! the repository declares, in rounds (`checks_round`).
 
+mod checks_round;
 #[cfg(test)]
 mod test;
 
@@ -182,6 +185,20 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
         outcomes: Vec<Outcome>,
         input: StepInput<'_>,
     ) -> Result<StepReport, BuiltInStepError> {
+        self.ask_agent_by(step, instructions, outcomes, input, None)
+            .await
+    }
+
+    /// [`Self::ask_agent`], waiting for the answer until `answer_by` at the
+    /// latest.
+    async fn ask_agent_by(
+        &self,
+        step: &StepName,
+        instructions: &str,
+        outcomes: Vec<Outcome>,
+        input: StepInput<'_>,
+        answer_by: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<StepReport, BuiltInStepError> {
         let task = AgentTask {
             key: input.key,
             owner: input.owner.clone(),
@@ -191,6 +208,7 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
             prompt: prompt(instructions, &outcomes, input),
             outcomes: outcomes.clone(),
             repo_url: input.repository.map(|repository| repository.url.clone()),
+            answer_by,
         };
         let answer = self
             .agent
@@ -256,8 +274,13 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> StepExecutor for BuiltInSt
             }
             BuiltInStep::Write => {
                 let outcomes = vec![Outcome::done(), Outcome::unchanged()];
-                self.ask_agent(step, WRITE_INSTRUCTIONS, outcomes, input)
-                    .await
+                if input.repository.is_some() {
+                    self.work_and_check(step, WRITE_INSTRUCTIONS, outcomes, input)
+                        .await
+                } else {
+                    self.ask_agent(step, WRITE_INSTRUCTIONS, outcomes, input)
+                        .await
+                }
             }
             BuiltInStep::Review => {
                 let outcomes = outcomes(&["pass", "changes"]);
@@ -265,7 +288,10 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> StepExecutor for BuiltInSt
                     .await
             }
             BuiltInStep::Fix => {
-                self.ask_agent_in_repository(step, FIX_INSTRUCTIONS, vec![Outcome::done()], input)
+                if input.repository.is_none() {
+                    return Err(BuiltInStepError::NoRepository(step.clone()));
+                }
+                self.work_and_check(step, FIX_INSTRUCTIONS, vec![Outcome::done()], input)
                     .await
             }
             BuiltInStep::CiFix => {

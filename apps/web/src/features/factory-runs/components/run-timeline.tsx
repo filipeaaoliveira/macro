@@ -6,7 +6,7 @@ import { Badge, Button, Card, cn } from '@ui';
 import { CollapseTransition } from '@ui/components/CollapseTransition';
 import { createSignal, For, type JSX, Show } from 'solid-js';
 import { flowWordLabel, flowWordText } from '../core/flow-words';
-import type { RunStep } from '../core/run';
+import type { CheckRound, RunStep } from '../core/run';
 
 function stepLabel(step: Pick<RunStep, 'entry' | 'visit'>): string {
   const entry = flowWordLabel(step.entry);
@@ -16,8 +16,9 @@ function stepLabel(step: Pick<RunStep, 'entry' | 'visit'>): string {
 
 /**
  * A Run's Steps, oldest first, on a rail like an agent's activity timeline.
- * Each Step shows its outcome; its output (an agent's plan, a review) opens
- * below it as markdown.
+ * Each Step shows its outcome and the rounds of checks it ran; its output
+ * (an agent's plan, a review) and the checks' reports open below it as
+ * markdown.
  */
 export function RunTimeline(props: {
   steps: RunStep[];
@@ -55,6 +56,9 @@ function TimelineStep(props: {
   const open = () => toggled() ?? props.defaultOpen;
   const output = () => props.step.end?.output.trim() ?? '';
   const answer = () => props.step.gate?.answer;
+  const rounds = () => props.step.checks ?? [];
+  const reports = () => rounds().filter((round) => round.end?.report.trim());
+  const details = () => output() !== '' || reports().length > 0;
 
   return (
     // Rail and dot sit where the agent activity timeline puts them
@@ -101,7 +105,7 @@ function TimelineStep(props: {
           {props.time(props.step.end?.endedAt ?? props.step.startedAt)}
         </span>
         <Show
-          when={output()}
+          when={details()}
           fallback={
             // Keeps the time column in line with Steps that have output.
             <span aria-hidden="true" class="size-6 shrink-0 touch:size-9" />
@@ -168,22 +172,76 @@ function TimelineStep(props: {
           </StepNote>
         )}
       </Show>
-      <Show when={output()}>
+      <For each={rounds()}>
+        {(round) => (
+          <CheckRoundNote round={round} stepEnded={Boolean(props.step.end)} />
+        )}
+      </For>
+      <Show when={details()}>
         <CollapseTransition open={open()}>
           <Card variant="filled" offset={1} class="mt-1 mb-3 px-3 py-2.5">
-            {/* Agent prose as its messages render it, at the block's size. */}
-            <div class="chat-markdown-container max-w-full text-sm whitespace-pre-wrap wrap-break-word">
-              <StaticMarkdown
-                markdown={output()}
-                theme={channelTheme}
-                target="internal"
-                lazy={false}
-              />
-            </div>
+            <Show when={output()}>
+              <StepMarkdown markdown={output()} />
+            </Show>
+            <For each={reports()}>
+              {(round, index) => (
+                <div class={cn((output() || index() > 0) && 'mt-3')}>
+                  <p class="mb-1 text-xs font-medium text-ink-subtle">
+                    {t('factoryRuns.checksRound', { round: round.round })}
+                  </p>
+                  <StepMarkdown markdown={round.end?.report.trim() ?? ''} />
+                </div>
+              )}
+            </For>
           </Card>
         </CollapseTransition>
       </Show>
     </li>
+  );
+}
+
+/** Agent prose as its messages render it, at the block's size. */
+function StepMarkdown(props: { markdown: string }) {
+  return (
+    <div class="chat-markdown-container max-w-full text-sm whitespace-pre-wrap wrap-break-word">
+      <StaticMarkdown
+        markdown={props.markdown}
+        theme={channelTheme}
+        target="internal"
+        lazy={false}
+      />
+    </div>
+  );
+}
+
+/**
+ * A round of checks: which it ran, and how they went. A round with no end
+ * runs only while its Step does.
+ */
+function CheckRoundNote(props: { round: CheckRound; stepEnded: boolean }) {
+  return (
+    <StepNote>
+      <span class="flex min-w-0 items-center gap-2">
+        {t('factoryRuns.checksRound', { round: props.round.round })}
+        <Show
+          when={props.round.end}
+          fallback={
+            <span>
+              {props.stepEnded
+                ? t('factoryRuns.checksUnfinished')
+                : t('factoryRuns.checksRunning')}
+            </span>
+          }
+        >
+          {(end) => (
+            <Badge variant="outline" size="xs">
+              {flowWordLabel(end().outcome)}
+            </Badge>
+          )}
+        </Show>
+      </span>
+      <span class="block text-ink-muted">{props.round.checks.join(', ')}</span>
+    </StepNote>
   );
 }
 

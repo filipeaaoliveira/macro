@@ -100,6 +100,31 @@ pub struct AgentTask {
     /// The repository the agent works in, as its
     /// `https://github.com/owner/name` URL, if the Run works on one.
     pub repo_url: Option<String>,
+    /// When to stop waiting for the agent's answer, at the latest, when the
+    /// Step sets a time of its own; the attempt's own deadline holds too.
+    pub answer_by: Option<DateTime<Utc>>,
+}
+
+/// A later prompt an agent is asked to work on, in the session it did its
+/// Step's work in: a round of checks, or the fix of one that failed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentTurn {
+    /// The Step: its Run and its place in it.
+    pub key: StepKey,
+    /// The Run's owner, as whom the agent works.
+    pub owner: MacroUserIdStr<'static>,
+    /// The Role the agent fills, whose Agent's session the Step works in.
+    pub role: Role,
+    /// The prompt's id in the session, a UUIDv7 the Step recorded before
+    /// asking, so a retried Step asks under the same one.
+    pub action_id: Uuid,
+    /// What the agent is asked.
+    pub prompt: String,
+    /// The outcomes the agent may end the prompt with.
+    pub outcomes: Vec<Outcome>,
+    /// When to stop waiting for the agent's answer, at the latest: the
+    /// Step's own time for its rounds.
+    pub answer_by: DateTime<Utc>,
 }
 
 /// A GitHub repository, named by its owner and name: the two segments of

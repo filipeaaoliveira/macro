@@ -50,6 +50,7 @@ const planning: RunDetail = {
       passedOver: [],
       end: null,
       gate: null,
+      checks: [],
     },
   ],
 };
@@ -74,6 +75,7 @@ const waiting: RunDetail = {
         openedAt: '2026-11-16T09:01:00Z',
         answer: null,
       },
+      checks: [],
     },
   ],
 };

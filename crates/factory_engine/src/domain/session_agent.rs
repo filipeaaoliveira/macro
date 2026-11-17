@@ -14,8 +14,8 @@ use agent_session::domain::error::AiAdmissionError;
 use agent_session::domain::model::{AgentSessionId, SessionSource, SessionVisibility};
 use agent_session::domain::routines::{
     PrepareRoutineSession, PromptRoutineSession, RoutineActionStatus, RoutineFailureReason,
-    RoutinePendingReason, RoutineSessionAction, RoutineSessionError, RoutineSessions,
-    ValidateRoutineSession,
+    RoutinePendingReason, RoutinePromptAccepted, RoutineSessionAction, RoutineSessionError,
+    RoutineSessions, ValidateRoutineSession,
 };
 use ai_billing::DenyReason;
 use bot_id::BotId;
@@ -26,7 +26,7 @@ use trigger_context::TriggerOrigin;
 use uuid::Uuid;
 
 use crate::domain::agents::{Agent, AgentDefinition};
-use crate::domain::models::{AgentAnswer, AgentTask};
+use crate::domain::models::{AgentAnswer, AgentTask, AgentTurn};
 use crate::domain::ports::{Retryable, StepAgent};
 
 /// What the agent is told about handing its result back.
@@ -105,9 +105,17 @@ pub enum SessionAgentError {
     /// The session's turn ended unsuccessfully.
     #[error("the agent's turn ended unsuccessfully: {0:?}")]
     TurnFailed(RoutineFailureReason),
+    /// A later prompt was asked of a Step that claimed no session.
+    #[error("the step has no agent session to go on in")]
+    NoSession,
     /// The session's turn ended with nothing handed back.
     #[error("the agent's turn ended without handing back a result")]
     NothingHandedBack,
+    /// A later prompt's turn was still going when the wait for it ended:
+    /// this attempt's time, or the time its Step gave it. A retry waits on
+    /// the same turn.
+    #[error("the agent's turn on a later prompt was still going when the wait ended")]
+    Overdue,
     /// The session worked past the Step's deadline.
     #[error("the agent did not finish within {0:?}")]
     TooSlow(Duration),
@@ -130,6 +138,7 @@ impl Retryable for SessionAgentError {
     fn retryable(&self) -> bool {
         match self {
             SessionAgentError::Records(_)
+            | SessionAgentError::Overdue
             | SessionAgentError::NotOpened
             | SessionAgentError::MayStillOpen => true,
             SessionAgentError::Session(error) => error.is_transient(),
@@ -138,6 +147,7 @@ impl Retryable for SessionAgentError {
             | SessionAgentError::UnfilledRole(_)
             | SessionAgentError::UnknownAgent(_)
             | SessionAgentError::NothingHandedBack
+            | SessionAgentError::NoSession
             | SessionAgentError::PromptUnsettled
             | SessionAgentError::Released
             | SessionAgentError::TooSlow(_) => false,
@@ -314,17 +324,9 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
     /// over fails the Step for good.
     async fn prompt_once(
         &self,
-        task: &AgentTask,
         action: &RoutineSessionAction,
+        prompted: Result<RoutinePromptAccepted, RoutineSessionError>,
     ) -> Result<(), SessionAgentError> {
-        let prompted = self
-            .sessions
-            .prompt(PromptRoutineSession {
-                action: action.clone(),
-                prompt: prompt(task),
-                context: None,
-            })
-            .await;
         match prompted {
             Ok(_) | Err(RoutineSessionError::Conflict) => Ok(()),
             Err(RoutineSessionError::PromptDeliveryUnknown) => {
@@ -395,7 +397,8 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
         }
     }
 
-    /// Wait for the first prompt's turn to end, until `deadline`.
+    /// Wait for the turn of the prompt `action` names to end, until
+    /// `deadline`.
     async fn finished(
         &self,
         action: &RoutineSessionAction,
@@ -482,7 +485,15 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
             .record_open(task.key, session.session_id)
             .await
             .map_err(Self::records)?;
-        if let Err(error) = self.prompt_once(task, &action).await {
+        let prompted = self
+            .sessions
+            .prompt(PromptRoutineSession {
+                action: action.clone(),
+                prompt: prompt(&task.prompt, &task.outcomes),
+                context: None,
+            })
+            .await;
+        if let Err(error) = self.prompt_once(&action, prompted).await {
             // A refused prompt started no work: the session is no use to
             // the next Agent, and the Step stops pointing at it once handed
             // on, so it is deleted here.
@@ -500,8 +511,12 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
 
     #[tracing::instrument(err, skip_all, fields(run_id = %task.key.run_id, seq = task.key.seq, step = %task.step, role = %task.role))]
     async fn answer(&self, task: AgentTask) -> Result<AgentAnswer, SessionAgentError> {
-        // Opening and prompting count against the deadline too.
-        let deadline = tokio::time::Instant::now() + SESSION_DEADLINE;
+        // Opening and prompting count against the deadline too: the sooner
+        // of SESSION_DEADLINE from this call and the time the Step gave.
+        let left = task.answer_by.map_or(SESSION_DEADLINE, |answer_by| {
+            until(answer_by).min(SESSION_DEADLINE)
+        });
+        let deadline = tokio::time::Instant::now() + left;
         let agents = self.agents.for_role(&task.role);
         let first = agents
             .first()
@@ -596,6 +611,60 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
         let handed = self
             .repo
             .handed_back(task.key)
+            .await
+            .map_err(Self::records)?
+            .ok_or(SessionAgentError::NothingHandedBack)?;
+        Ok(AgentAnswer {
+            outcome: handed.outcome,
+            text: handed.output,
+        })
+    }
+
+    #[tracing::instrument(err, skip_all, fields(run_id = %turn.key.run_id, seq = turn.key.seq))]
+    async fn follow_up(&self, turn: AgentTurn) -> Result<AgentAnswer, SessionAgentError> {
+        // The sooner of SESSION_DEADLINE from this call and the time the
+        // Step gave. Past either, the wait ends as `Overdue`, which a retry
+        // goes on from, waiting on the same turn.
+        let deadline = tokio::time::Instant::now() + until(turn.answer_by).min(SESSION_DEADLINE);
+        let session = self
+            .repo
+            .claimed_session(turn.key)
+            .await
+            .map_err(Self::records)?
+            .ok_or(SessionAgentError::NoSession)?;
+        // The session the Step works in now, of the Agent that took it when
+        // others were passed over, and run by the bot recorded with it.
+        let action = RoutineSessionAction {
+            action_id: AgentActionId::from_uuid(turn.action_id),
+            ..Self::action(&turn.owner, &session, self.bot(&session, &turn.role)?)
+        };
+
+        // Recorded before the prompt is sent: the agent's hand back from now
+        // on is this prompt's, and a stop watches this prompt. A retry
+        // records it again, which keeps what was handed back since. Both
+        // hold only while the Step works in this session.
+        self.still_holds(turn.key, session.session_id).await?;
+        self.repo
+            .begin_turn(turn.key, session.session_id, turn.action_id, &turn.outcomes)
+            .await
+            .map_err(Self::records)?;
+        let prompted = self
+            .sessions
+            .follow_up(PromptRoutineSession {
+                action: action.clone(),
+                prompt: prompt(&turn.prompt, &turn.outcomes),
+                context: None,
+            })
+            .await;
+        self.prompt_once(&action, prompted).await?;
+        match self.finished(&action, deadline).await {
+            Err(SessionAgentError::TooSlow(_)) => return Err(SessionAgentError::Overdue),
+            finished => finished?,
+        }
+
+        let handed = self
+            .repo
+            .handed_back(turn.key)
             .await
             .map_err(Self::records)?
             .ok_or(SessionAgentError::NothingHandedBack)?;
@@ -718,17 +787,21 @@ fn refusal(error: RoutineSessionError) -> SessionAgentError {
     }
 }
 
-/// The task's prompt, then how to hand back one of its outcomes.
-fn prompt(task: &AgentTask) -> String {
-    let outcomes = task
-        .outcomes
+/// How long from now until `at`; nothing once it passed.
+fn until(at: chrono::DateTime<chrono::Utc>) -> Duration {
+    (at - chrono::Utc::now()).to_std().unwrap_or(Duration::ZERO)
+}
+
+/// `text`, then how to hand back one of `outcomes`.
+fn prompt(text: &str, outcomes: &[Outcome]) -> String {
+    let rendered = outcomes
         .iter()
         .map(|outcome| format!("`{outcome}`"))
         .collect::<Vec<_>>()
         .join(", ");
-    let first = task.outcomes.first().map_or("done", Outcome::as_str);
+    let first = outcomes.first().map_or("done", Outcome::as_str);
     let hand_back = HAND_BACK
-        .replace("OUTCOMES", &outcomes)
+        .replace("OUTCOMES", &rendered)
         .replace("OUTCOME", first);
-    format!("{}{hand_back}", task.prompt)
+    format!("{text}{hand_back}")
 }

@@ -32,8 +32,9 @@ sessions through `agent_harness_service`'s internal routes. It implements the
 
 ## Gotchas
 
-- Prepare and prompt are never replayed after an ambiguous failure: the
-  client maps them to `OperationFailed` and `PromptDeliveryUnknown` and leaves
+- Prepare, prompt and follow-up are never replayed after an ambiguous
+  failure: the client maps them to `OperationFailed` and
+  `PromptDeliveryUnknown` and leaves
   recovery to the caller.
 - A connection the harness refused is not ambiguous: nothing reached it, so
   every command answers `RuntimeUnavailable`, which a caller may send again.

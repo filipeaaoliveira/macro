@@ -58,6 +58,9 @@ export default {
   stepNoAgent: '{{role}} · no agent could start',
   passedOver: '{{agent}} couldn’t start: {{reason}}',
   showOutput: 'Show output for {{step}}',
+  checksRound: 'Checks, round {{round}}',
+  checksRunning: 'Checks running…',
+  checksUnfinished: 'Didn’t finish',
   cancelRun: 'Cancel run',
   cancelTitle: 'Cancel this run?',
   cancelBody:

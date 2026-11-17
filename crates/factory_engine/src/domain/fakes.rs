@@ -6,9 +6,9 @@ use std::sync::{Arc, Mutex};
 use agent_session::domain::session_task::TaskDocumentId;
 use chrono::Utc;
 use factory_records::domain::models::{
-    ClaimedSession, EntryId, Gate, HandBack, Outcome, PassedOver, Repository, Role, Run, RunEnd,
-    RunId, RunInsert, RunOutcome, SessionStep, Step, StepEnd, StepKey, StepSession,
-    StoppingSession, TaskLink,
+    CheckRound, CheckRoundEnd, CheckRoundOutcome, CheckRoundStart, ClaimedSession, EntryId, Gate,
+    HandBack, Outcome, PassedOver, Repository, Role, Run, RunEnd, RunId, RunInsert, RunOutcome,
+    SessionStep, Step, StepEnd, StepKey, StepSession, StoppingSession, TaskLink,
 };
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
@@ -27,6 +27,8 @@ pub(crate) struct FakeSession {
     pub(crate) session: StepSession,
     pub(crate) offered: Vec<Outcome>,
     pub(crate) handed: Option<HandBack>,
+    /// The later prompt the agent works on, once there is one.
+    pub(crate) turn: Option<Uuid>,
     pub(crate) released: bool,
     /// When an attempt last asked for the session to be opened.
     pub(crate) prepared_at: Option<chrono::DateTime<Utc>>,
@@ -52,6 +54,8 @@ pub(crate) struct FakeRepo {
     pub(crate) steps: Arc<Mutex<Vec<(RunId, Step)>>>,
     /// Each agent Step's session, what it offers, and its latest hand back.
     pub(crate) sessions: Arc<Mutex<Vec<FakeSession>>>,
+    /// Each Step's rounds of checks, in order.
+    pub(crate) check_rounds: Arc<Mutex<Vec<(StepKey, CheckRound)>>>,
     /// The task documents that exist.
     pub(crate) tasks: Arc<Mutex<BTreeSet<Uuid>>>,
     /// The documents that exist and are not tasks.
@@ -103,6 +107,16 @@ impl FakeRepo {
             .iter_mut()
             .find(|(run, step)| *run == key.run_id && step.seq == key.seq)
             .map(|(_, step)| change(step))
+    }
+
+    fn rounds_of(&self, key: StepKey) -> Vec<CheckRound> {
+        self.check_rounds
+            .lock()
+            .expect("rounds")
+            .iter()
+            .filter(|(step, _)| *step == key)
+            .map(|(_, round)| round.clone())
+            .collect()
     }
 
     fn step_ended(&self, key: StepKey) -> bool {
@@ -188,6 +202,13 @@ impl RunRepository for FakeRepo {
             .map(|(_, step)| step.clone())
             .collect();
         steps.sort_by_key(|step| step.seq);
+        for step in &mut steps {
+            let key = StepKey {
+                run_id: id,
+                seq: step.seq,
+            };
+            step.checks = self.rounds_of(key);
+        }
         Ok(steps)
     }
 
@@ -240,6 +261,7 @@ impl RunRepository for FakeRepo {
                 role: None,
                 agent: None,
                 passed_over: Vec::new(),
+                checks: Vec::new(),
             },
         ));
         Ok(())
@@ -314,6 +336,7 @@ impl RunRepository for FakeRepo {
             session: session.clone(),
             offered: offered.to_vec(),
             handed: None,
+            turn: None,
             released: false,
             prepared_at: None,
             opened: false,
@@ -333,10 +356,9 @@ impl RunRepository for FakeRepo {
             return Ok(false);
         }
         let mut sessions = self.sessions.lock().expect("sessions");
-        let Some(claimed) = sessions
-            .iter_mut()
-            .find(|claimed| claimed.key == key && claimed.handed.is_none())
-        else {
+        let Some(claimed) = sessions.iter_mut().find(|claimed| {
+            claimed.key == key && claimed.handed.is_none() && claimed.turn.is_none()
+        }) else {
             return Ok(false);
         };
         if let Some(to) = to {
@@ -432,7 +454,10 @@ impl RunRepository for FakeRepo {
             .iter()
             .find(|claimed| claimed.key == key)
             .map(|claimed| StoppingSession {
-                session: claimed.session.clone(),
+                session: StepSession {
+                    action_id: claimed.turn.unwrap_or(claimed.session.action_id),
+                    ..claimed.session.clone()
+                },
                 opened: claimed.opened,
                 may_still_open: claimed
                     .prepared_at
@@ -515,6 +540,98 @@ impl RunRepository for FakeRepo {
             .and_then(|claimed| claimed.handed.clone()))
     }
 
+    async fn begin_turn(
+        &self,
+        key: StepKey,
+        session_id: Uuid,
+        action_id: Uuid,
+        offered: &[Outcome],
+    ) -> Result<(), FakeError> {
+        let ended = self.step_ended(key);
+        let mut sessions = self.sessions.lock().expect("sessions");
+        if let Some(claimed) = sessions.iter_mut().find(|claimed| claimed.key == key)
+            && claimed.session.session_id == session_id
+            && !ended
+            && claimed.turn != Some(action_id)
+        {
+            claimed.turn = Some(action_id);
+            claimed.offered = offered.to_vec();
+            claimed.handed = None;
+        }
+        Ok(())
+    }
+
+    async fn check_rounds(&self, key: StepKey) -> Result<Vec<CheckRound>, FakeError> {
+        Ok(self.rounds_of(key))
+    }
+
+    async fn start_check_round(
+        &self,
+        key: StepKey,
+        start: &CheckRoundStart,
+    ) -> Result<(), FakeError> {
+        let mut rounds = self.check_rounds.lock().expect("rounds");
+        if !rounds
+            .iter()
+            .any(|(step, round)| *step == key && round.round == start.round)
+        {
+            rounds.push((
+                key,
+                CheckRound {
+                    round: start.round,
+                    checks: start.checks.clone(),
+                    commands: start.commands.clone(),
+                    declared: start.declared.clone(),
+                    started_at: Utc::now(),
+                    end: None,
+                    work_output: start.work_output.clone(),
+                    check_action_id: start.check_action_id,
+                    fix_action_id: None,
+                },
+            ));
+        }
+        Ok(())
+    }
+
+    async fn end_check_round(
+        &self,
+        key: StepKey,
+        round: u8,
+        outcome: CheckRoundOutcome,
+        report: &str,
+    ) -> Result<(), FakeError> {
+        let mut rounds = self.check_rounds.lock().expect("rounds");
+        if let Some((_, kept)) = rounds
+            .iter_mut()
+            .find(|(step, kept)| *step == key && kept.round == round)
+        {
+            kept.end.get_or_insert_with(|| CheckRoundEnd {
+                outcome,
+                report: report.to_string(),
+                ended_at: Utc::now(),
+            });
+        }
+        Ok(())
+    }
+
+    async fn send_back_check_round(
+        &self,
+        key: StepKey,
+        round: u8,
+        fix_action_id: Uuid,
+    ) -> Result<Option<Uuid>, FakeError> {
+        let mut rounds = self.check_rounds.lock().expect("rounds");
+        let failed = rounds.iter_mut().find(|(step, kept)| {
+            *step == key
+                && kept.round == round
+                && kept
+                    .end
+                    .as_ref()
+                    .is_some_and(|end| end.outcome == CheckRoundOutcome::Failed)
+        });
+        Ok(failed.map(|(_, kept)| *kept.fix_action_id.get_or_insert(fix_action_id)))
+    }
+
     async fn end_run(&self, id: RunId, outcome: RunOutcome) -> Result<(), FakeError> {
         if let Some(run) = self.runs.lock().expect("runs").get_mut(&id)
             && run.end.is_none()
@@ -568,6 +685,11 @@ pub(crate) struct FakeGithubState {
     pub(crate) merges: Vec<String>,
     /// GitHub's reason to refuse a merge, if it does.
     pub(crate) merge_refusal: Option<String>,
+    /// The text of each file, by its branch and path.
+    pub(crate) files: BTreeMap<(String, String), String>,
+    /// The paths the Run's branch changed against its base; none when
+    /// GitHub cannot list them all.
+    pub(crate) changed: Option<Vec<String>>,
 }
 
 /// GitHub in memory, for one Run's branch: opening its pull request makes
@@ -702,6 +824,27 @@ impl PullRequests for FakeGithub {
         _base: &str,
     ) -> Result<Option<RequiredChecks>, FakeError> {
         Ok(self.state().required.clone())
+    }
+
+    async fn file_text(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        branch: &str,
+        path: &str,
+    ) -> Result<Option<String>, FakeError> {
+        let file = (branch.to_string(), path.to_string());
+        Ok(self.state().files.get(&file).cloned())
+    }
+
+    async fn changed_paths(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        _base: &str,
+        _branch: &str,
+    ) -> Result<Option<Vec<String>>, FakeError> {
+        Ok(self.state().changed.clone())
     }
 
     async fn open(

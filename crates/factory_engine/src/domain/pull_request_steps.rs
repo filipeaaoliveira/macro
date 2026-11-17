@@ -17,6 +17,7 @@ use factory_records::domain::models::{Outcome, Repository};
 use factory_records::domain::ports::RunRepository;
 use github::domain::models::MacroTaskId;
 
+use crate::domain::checks::CHECKS_FILE;
 use crate::domain::models::{
     CheckState, CheckSuite, CodeRepository, HeadChecks, Merging, OpenPullRequest, Opening,
     PullRequest, PullRequestState, RequiredCheck, RequiredChecks, StepInput, StepReport,
@@ -79,14 +80,16 @@ pub enum PullRequestStepError {
 }
 
 impl PullRequestStepError {
-    fn github(error: impl std::error::Error + Retryable + Send + Sync + 'static) -> Self {
+    pub(crate) fn github(
+        error: impl std::error::Error + Retryable + Send + Sync + 'static,
+    ) -> Self {
         Self::Github {
             retryable: error.retryable(),
             report: rootcause::Report::new(error).into_dynamic(),
         }
     }
 
-    fn records(error: impl std::error::Error + Send + Sync + 'static) -> Self {
+    pub(crate) fn records(error: impl std::error::Error + Send + Sync + 'static) -> Self {
         Self::Records(rootcause::Report::new(error).into_dynamic())
     }
 }
@@ -316,6 +319,38 @@ impl<G: PullRequests, R: RunRepository> PullRequestSteps<G, R> {
     /// The Steps, over `github` and the Run records `repo`.
     pub fn new(github: G, repo: R) -> Self {
         Self { github, repo }
+    }
+
+    /// The Run's records.
+    pub(crate) fn records(&self) -> &R {
+        &self.repo
+    }
+
+    /// The text of [`CHECKS_FILE`] on the Run's base branch, which the
+    /// agent's branch cannot change; none when the base declares no checks.
+    pub(crate) async fn declared_checks(
+        &self,
+        input: &StepInput<'_>,
+    ) -> Result<Option<String>, PullRequestStepError> {
+        let (repository, recorded) = Self::repository(input)?;
+        self.github
+            .file_text(input.owner, &repository, &recorded.base_branch, CHECKS_FILE)
+            .await
+            .map_err(PullRequestStepError::github)
+    }
+
+    /// The paths the Run's branch changed against its base; none when
+    /// GitHub cannot list them all.
+    pub(crate) async fn branch_changes(
+        &self,
+        input: &StepInput<'_>,
+    ) -> Result<Option<Vec<String>>, PullRequestStepError> {
+        let (repository, recorded) = Self::repository(input)?;
+        let branch = run_branch(input.key.run_id);
+        self.github
+            .changed_paths(input.owner, &repository, &recorded.base_branch, &branch)
+            .await
+            .map_err(PullRequestStepError::github)
     }
 
     /// The repository the Run works on, and its record.

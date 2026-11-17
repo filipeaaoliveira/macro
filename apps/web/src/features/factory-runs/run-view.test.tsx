@@ -106,6 +106,38 @@ afterEach(() => {
 });
 
 describe('RunView', () => {
+  it('shows a round of checks left open by an ended Step as unfinished', async () => {
+    const { setRun } = mount({});
+    setRun({
+      ...waitingRun,
+      end: { outcome: 'manual', endedAt: '2026-11-16T11:00:00Z' },
+      steps: [
+        {
+          seq: 1,
+          entry: 'write',
+          visit: 1,
+          startedAt: '2026-11-16T09:00:00Z',
+          end: {
+            outcome: 'red',
+            output: 'The checks did not pass in time.',
+            endedAt: '2026-11-16T11:00:00Z',
+          },
+          checks: [
+            {
+              round: 1,
+              checks: ['web'],
+              startedAt: '2026-11-16T09:30:00Z',
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(await screen.findByText('Checks, round 1')).toBeTruthy();
+    expect(screen.getByText('Didn’t finish')).toBeTruthy();
+    expect(screen.queryByText('Checks running…')).toBeNull();
+  });
+
   it('answers the open Gate once, with the note', async () => {
     let finish!: (result: RunActionResult) => void;
     const answerGate = vi.fn(

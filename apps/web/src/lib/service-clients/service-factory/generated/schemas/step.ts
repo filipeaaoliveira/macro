@@ -5,6 +5,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
+import type { CheckRound } from './checkRound';
 import type { EntryId } from './entryId';
 import type { PassedOver } from './passedOver';
 import type { StepAgent } from './stepAgent';
@@ -17,6 +18,9 @@ import type { StepRole } from './stepRole';
  */
 export interface Step {
   agent?: StepAgent;
+  /** The rounds of the repository's checks it ran, in order: none for a
+Step that runs no checks. */
+  checks: CheckRound[];
   end?: StepEndProperty;
   /** The entry the Step visits. */
   entry: EntryId;

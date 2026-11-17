@@ -5,6 +5,12 @@ export type ClientOptions = {
 };
 
 /**
+ * The name the factory's agent definition gives an Agent: a harness, a
+ * model and its instructions.
+ */
+export type AgentName = string;
+
+/**
  * Request body for answering a Gate.
  */
 export type AnswerGateRequest = {
@@ -17,6 +23,50 @@ export type AnswerGateRequest = {
      */
     note?: string | null;
 };
+
+/**
+ * One round of the repository's checks a Step ran on its agent's work, in
+ * the agent's session.
+ */
+export type CheckRound = {
+    /**
+     * The names of the checks it runs, in the repository's order.
+     */
+    checks: Array<string>;
+    end?: null | CheckRoundEnd;
+    /**
+     * Which round, from 1.
+     */
+    round: number;
+    /**
+     * When it started.
+     */
+    startedAt: string;
+};
+
+/**
+ * A round of checks that has ended.
+ */
+export type CheckRoundEnd = {
+    /**
+     * When the round ended.
+     */
+    endedAt: string;
+    /**
+     * How the checks went.
+     */
+    outcome: CheckRoundOutcome;
+    /**
+     * What the agent reported of each check, for a person and for the
+     * agent's fix to read.
+     */
+    report: string;
+};
+
+/**
+ * How a round of a Step's checks ended.
+ */
+export type CheckRoundOutcome = 'passed' | 'failed';
 
 /**
  * Request body for creating a Run.
@@ -311,6 +361,21 @@ export type OutcomeCounts = {
 };
 
 /**
+ * An Agent that could not start a Step, so the next Agent of its Role took
+ * it.
+ */
+export type PassedOver = {
+    /**
+     * The Agent.
+     */
+    agent: AgentName;
+    /**
+     * Why it could not start, as a code such as `ai_allowance_exhausted`.
+     */
+    reason: string;
+};
+
+/**
  * The GitHub repository a Run works on.
  */
 export type Repository = {
@@ -324,6 +389,13 @@ export type Repository = {
      */
     url: string;
 };
+
+/**
+ * A job in a Flow, such as `planner`, `writer`, `reviewer` or `fixer`. An
+ * entry whose Step an agent does names the Role, and the factory's agent
+ * definition lists the Agents that may fill it.
+ */
+export type Role = string;
 
 /**
  * One Run of a Flow.
@@ -498,12 +570,24 @@ export type RunTokens = {
  * One visit of one of a Run's entries.
  */
 export type Step = {
+    agent?: null | AgentName;
+    /**
+     * The rounds of the repository's checks it ran, in order: none for a
+     * Step that runs no checks.
+     */
+    checks: Array<CheckRound>;
     end?: null | StepEnd;
     /**
      * The entry the Step visits.
      */
     entry: EntryId;
     gate?: null | Gate;
+    /**
+     * The Agents before it that could not start the Step, in order, and
+     * why.
+     */
+    passedOver: Array<PassedOver>;
+    role?: null | Role;
     /**
      * The Step's place among the Run's Steps, from 1.
      */

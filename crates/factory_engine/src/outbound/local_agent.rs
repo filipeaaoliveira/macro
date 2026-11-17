@@ -3,7 +3,7 @@
 use factory_records::domain::models::{Role, StepKey};
 use macro_user_id::user_id::MacroUserIdStr;
 
-use crate::domain::models::{AgentAnswer, AgentTask};
+use crate::domain::models::{AgentAnswer, AgentTask, AgentTurn};
 use crate::domain::ports::{Retryable, StepAgent};
 
 /// The task gave the agent no outcome to end with.
@@ -34,6 +34,24 @@ impl StepAgent for LocalAgent {
             text: format!(
                 "No agent ran this step: the local agent stands in for one. It was asked:\n\n{}",
                 task.prompt
+            ),
+        })
+    }
+
+    /// Ends a later prompt with `failed` when it offers it, as a round of
+    /// checks does, since no check ran; with its first outcome otherwise.
+    #[tracing::instrument(err, skip_all, fields(run_id = %turn.key.run_id, seq = turn.key.seq))]
+    async fn follow_up(&self, turn: AgentTurn) -> Result<AgentAnswer, NoOutcome> {
+        let failed = turn
+            .outcomes
+            .iter()
+            .find(|outcome| outcome.as_str() == "failed");
+        let outcome = failed.or(turn.outcomes.first()).cloned().ok_or(NoOutcome)?;
+        Ok(AgentAnswer {
+            outcome,
+            text: format!(
+                "No agent ran this prompt, so nothing it asks for ran: the local agent stands in for one. It was asked:\n\n{}",
+                turn.prompt
             ),
         })
     }

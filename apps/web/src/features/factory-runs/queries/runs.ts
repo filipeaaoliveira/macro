@@ -70,6 +70,12 @@ function toRun(detail: RunDetail): Run {
       role: step.role ?? undefined,
       agent: step.agent ?? undefined,
       passedOver: step.passedOver,
+      checks: step.checks.map((round) => ({
+        round: round.round,
+        checks: round.checks,
+        startedAt: round.startedAt,
+        end: round.end ?? undefined,
+      })),
     })),
   };
 }

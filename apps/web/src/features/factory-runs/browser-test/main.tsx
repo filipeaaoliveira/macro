@@ -104,6 +104,30 @@ const INITIAL_RUNS: Run[] = [
         visit: 1,
         startedAt: at(38),
         end: { outcome: 'done', output: 'Changed two files.', endedAt: at(30) },
+        checks: [
+          {
+            round: 1,
+            checks: ['web', 'lint'],
+            startedAt: at(36),
+            end: {
+              outcome: 'failed',
+              report:
+                '- `web`: `bun run check`, exit 1: `EmptyState` has no `title` prop.\n- `lint`: `just check`, exit 0',
+              endedAt: at(34),
+            },
+          },
+          {
+            round: 2,
+            checks: ['web', 'lint'],
+            startedAt: at(32),
+            end: {
+              outcome: 'passed',
+              report:
+                '- `web`: `bun run check`, exit 0\n- `lint`: `just check`, exit 0',
+              endedAt: at(31),
+            },
+          },
+        ],
       },
       { seq: 3, entry: 'review', visit: 1, startedAt: at(30) },
     ],

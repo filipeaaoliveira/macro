@@ -24,6 +24,8 @@ use crate::domain::flow::StepName;
 use crate::domain::models::AgentTask;
 use crate::domain::ports::{Retryable, StepAgent};
 
+mod follow_up;
+
 /// What happens to one call: it works, or fails with this error. A call
 /// that fails ambiguously may still take effect (`lands`).
 #[derive(Clone, Copy)]
@@ -75,6 +77,9 @@ struct FakeSessions {
     /// Stops the session ignores before its turn ends cancelled, as when a
     /// prompt on its way lands after the first stop.
     ignored_stops: usize,
+    /// What the agent hands back for a follow-up, once it lands.
+    follow_up_handed: Option<HandBack>,
+    follow_up_calls: Arc<Mutex<Vec<PromptRoutineSession>>>,
 }
 
 impl FakeSessions {
@@ -99,6 +104,8 @@ impl FakeSessions {
             cancelled: Arc::default(),
             deleted: Arc::default(),
             ignored_stops: 0,
+            follow_up_handed: None,
+            follow_up_calls: Arc::default(),
         }
     }
 
@@ -239,6 +246,34 @@ impl RoutineSessions for FakeSessions {
         }
     }
 
+    /// A follow-up lands once under its id; the same id again is refused.
+    async fn follow_up(
+        &self,
+        command: PromptRoutineSession,
+    ) -> Result<RoutinePromptAccepted, RoutineSessionError> {
+        let action_id = command.action.action_id;
+        let session_id = command.action.session_id.as_uuid();
+        let again = {
+            let mut calls = self.follow_up_calls.lock().expect("follow-ups");
+            let again = calls.iter().any(|sent| sent.action.action_id == action_id);
+            calls.push(command);
+            again
+        };
+        if again {
+            return Err(RoutineSessionError::Conflict);
+        }
+        if let Some(handed) = &self.follow_up_handed {
+            self.repo
+                .hand_back(session_id, handed)
+                .await
+                .expect("hand back");
+        }
+        Ok(RoutinePromptAccepted {
+            action_id,
+            queued: false,
+        })
+    }
+
     async fn status(
         &self,
         _command: RoutineSessionAction,
@@ -334,6 +369,7 @@ async fn plan_task(repo: &FakeRepo) -> AgentTask {
         prompt: "Plan the change".to_string(),
         outcomes: vec![Outcome::done()],
         repo_url: None,
+        answer_by: None,
     }
 }
 

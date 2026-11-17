@@ -627,6 +627,100 @@ async fn queued_prompt_prevents_second_submission() {
     assert!(fx.controls.events.lock().unwrap().is_empty());
 }
 
+/// Log `prompt` in the fixture's session as sent under `action`'s id.
+fn log_prompt(fx: &Fixture, action: &RoutineSessionAction, prompt: &str) {
+    let content: ToRuntimeMessage = AgentAction::prompt(prompt)
+        .to_runtime(
+            &agent_client_protocol::schema::v1::SessionId::new("s"),
+            action.action_id.to_request_id(),
+        )
+        .unwrap();
+    fx.repo.extend_log([crate::domain::model::AgentSessionLog {
+        agent_session_id: fx.session.id,
+        user_id: Some(action.owner.clone()),
+        content: crate::domain::model::Message::ToRuntime(content),
+        logged_at: None,
+    }]);
+}
+
+#[tokio::test]
+async fn a_follow_up_goes_on_in_the_session_under_its_own_id() {
+    let fx = Fixture::new(true);
+    let first = fx.action();
+    log_prompt(&fx, &first, "write the change");
+    // Another prompt waiting in the queue holds no follow-up back.
+    fx.controls.queued.lock().unwrap().push(QueuedControl {
+        action_id: AgentActionId::mint(),
+        action: AgentAction::prompt("something else"),
+        actor: Some(first.owner.clone()),
+        created_at: chrono::Utc::now(),
+    });
+    let later = fx.action();
+
+    let accepted = fx
+        .service
+        .follow_up(PromptRoutineSession {
+            action: later.clone(),
+            prompt: "run the checks".into(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(accepted.action_id, later.action_id);
+    let events = fx.controls.events.lock().unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].action, AgentAction::prompt("run the checks"));
+    assert_eq!(events[0].action_id, Some(later.action_id));
+    assert_eq!(events[0].actor, Some(later.owner));
+}
+
+#[tokio::test]
+async fn a_follow_up_needs_a_session_that_took_its_first_prompt() {
+    let fx = Fixture::new(true);
+
+    let refused = fx
+        .service
+        .follow_up(PromptRoutineSession {
+            action: fx.action(),
+            prompt: "run the checks".into(),
+            context: None,
+        })
+        .await
+        .unwrap_err();
+
+    assert_eq!(refused, RoutineSessionError::InvalidCommand);
+    assert!(fx.controls.events.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_follow_up_the_session_already_holds_is_refused() {
+    let fx = Fixture::new(true);
+    let taken = fx.action();
+    log_prompt(&fx, &taken, "run the checks");
+    let queued = fx.action();
+    fx.controls.queued.lock().unwrap().push(QueuedControl {
+        action_id: queued.action_id,
+        action: AgentAction::prompt("fix what failed"),
+        actor: Some(queued.owner.clone()),
+        created_at: chrono::Utc::now(),
+    });
+
+    for action in [taken, queued] {
+        let refused = fx
+            .service
+            .follow_up(PromptRoutineSession {
+                action,
+                prompt: "again".into(),
+                context: None,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(refused, RoutineSessionError::Conflict);
+    }
+    assert!(fx.controls.events.lock().unwrap().is_empty());
+}
+
 #[test]
 fn commands_reject_malformed_owner_and_ids_at_deserialization() {
     let fx = Fixture::new(true);

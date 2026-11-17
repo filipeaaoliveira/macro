@@ -3,6 +3,7 @@
 pub mod agents;
 pub mod built_in_flows;
 pub mod built_in_steps;
+pub mod checks;
 #[cfg(test)]
 pub(crate) mod fakes;
 pub mod flow;

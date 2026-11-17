@@ -1,5 +1,6 @@
 //! PostgreSQL implementation of the [`RunRepository`] port.
 
+mod check_rounds;
 mod insights;
 #[cfg(test)]
 mod test;
@@ -12,9 +13,10 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::domain::models::{
-    AgentName, ClaimedSession, EntryId, Gate, GateAnswer, HandBack, InvalidName, Outcome,
-    PassedOver, Repository, Role, Run, RunEnd, RunId, RunInsert, RunOutcome, SessionStep, Step,
-    StepEnd, StepKey, StepSession, StoppingSession, TaskLink,
+    AgentName, CheckRound, CheckRoundOutcome, CheckRoundStart, ClaimedSession, EntryId, Gate,
+    GateAnswer, HandBack, InvalidName, Outcome, PassedOver, Repository, Role, Run, RunEnd, RunId,
+    RunInsert, RunOutcome, SessionStep, Step, StepEnd, StepKey, StepSession, StoppingSession,
+    TaskLink,
 };
 use crate::domain::ports::RunRepository;
 
@@ -63,6 +65,10 @@ pub enum PgRunRepositoryErr {
     /// A stored Run outcome is not one this code knows.
     #[error("unknown run outcome {0:?}")]
     UnknownRunOutcome(String),
+    /// A stored round of checks ended with an outcome this code does not
+    /// know.
+    #[error("unknown check round outcome {0:?}")]
+    UnknownCheckRoundOutcome(String),
     /// A stored visit or place does not fit its number.
     #[error("visit or place {0} is out of range")]
     OutOfRange(i32),
@@ -240,6 +246,7 @@ impl TryFrom<StepRow> for Step {
             role: row.role.map(Role::try_from).transpose()?,
             agent: row.agent.map(AgentName::try_from).transpose()?,
             passed_over,
+            checks: Vec::new(),
         })
     }
 }
@@ -387,7 +394,15 @@ impl RunRepository for PgRunRepository {
         )
         .fetch_all(&self.pool)
         .await?;
-        rows.into_iter().map(Step::try_from).collect()
+        let mut rounds = self.runs_check_rounds(&[id.as_uuid()]).await?;
+
+        let mut steps = Vec::with_capacity(rows.len());
+        for row in rows {
+            let mut step = Step::try_from(row)?;
+            step.checks = rounds.remove(&(id, step.seq)).unwrap_or_default();
+            steps.push(step);
+        }
+        Ok(steps)
     }
 
     #[tracing::instrument(err, skip(self, user_id))]
@@ -462,11 +477,14 @@ impl RunRepository for PgRunRepository {
         )
         .fetch_all(&self.pool)
         .await?;
+        let mut rounds = self.runs_check_rounds(&ids).await?;
 
         let mut steps: BTreeMap<RunId, Vec<Step>> = BTreeMap::new();
         for row in rows {
             let run_id = RunId::from_uuid(row.run_id);
-            steps.entry(run_id).or_default().push(Step::try_from(row)?);
+            let mut step = Step::try_from(row)?;
+            step.checks = rounds.remove(&(run_id, step.seq)).unwrap_or_default();
+            steps.entry(run_id).or_default().push(step);
         }
         Ok(steps)
     }
@@ -642,7 +660,9 @@ impl RunRepository for PgRunRepository {
         // session claimed before Steps recorded their Role and Agent gets
         // both, so they pair up with the Agents passed over. With no next
         // session, an Agent already recorded last is not recorded again, as
-        // when overlapping attempts both find the Role exhausted.
+        // when overlapping attempts both find the Role exhausted. A Step
+        // that took a later prompt has an Agent at work, and its checks
+        // rounds go on in that session.
         let to_agent = to.and_then(|to| to.agent.as_ref()).map(AgentName::as_str);
         let recorded = sqlx::query!(
             r#"
@@ -659,6 +679,7 @@ impl RunRepository for PgRunRepository {
             FROM factory_run r
             WHERE r.id = s.run_id AND s.run_id = $1 AND s.seq = $2 AND s.session_id = $3
                 AND s.session_released_at IS NULL AND s.handed_at IS NULL
+                AND s.turn_action_id IS NULL
                 AND s.ended_at IS NULL AND r.ended_at IS NULL
                 AND (
                     $4::uuid IS NOT NULL
@@ -779,7 +800,7 @@ impl RunRepository for PgRunRepository {
             r#"
             SELECT
                 session_id AS "session_id!",
-                action_id AS "action_id!",
+                COALESCE(turn_action_id, action_id) AS "action_id!",
                 agent,
                 bot_id,
                 opened_at IS NOT NULL AS "opened!",
@@ -925,6 +946,52 @@ impl RunRepository for PgRunRepository {
             })
         })
         .transpose()
+    }
+
+    #[tracing::instrument(err, skip(self, offered))]
+    async fn begin_turn(
+        &self,
+        key: StepKey,
+        session_id: Uuid,
+        action_id: Uuid,
+        offered: &[Outcome],
+    ) -> Result<(), Self::Err> {
+        self.record_turn(key, session_id, action_id, offered).await
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn check_rounds(&self, key: StepKey) -> Result<Vec<CheckRound>, Self::Err> {
+        self.step_check_rounds(key).await
+    }
+
+    #[tracing::instrument(err, skip(self, start), fields(round = start.round))]
+    async fn start_check_round(
+        &self,
+        key: StepKey,
+        start: &CheckRoundStart,
+    ) -> Result<(), Self::Err> {
+        self.insert_check_round(key, start).await
+    }
+
+    #[tracing::instrument(err, skip(self, report))]
+    async fn end_check_round(
+        &self,
+        key: StepKey,
+        round: u8,
+        outcome: CheckRoundOutcome,
+        report: &str,
+    ) -> Result<(), Self::Err> {
+        self.finish_check_round(key, round, outcome, report).await
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn send_back_check_round(
+        &self,
+        key: StepKey,
+        round: u8,
+        fix_action_id: Uuid,
+    ) -> Result<Option<Uuid>, Self::Err> {
+        self.fix_check_round(key, round, fix_action_id).await
     }
 
     #[tracing::instrument(err, skip(self))]

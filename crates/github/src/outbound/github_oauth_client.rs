@@ -21,6 +21,7 @@ use crate::domain::{
     ports::GithubOauth,
 };
 
+mod branches;
 mod pull_requests;
 #[cfg(test)]
 mod test;

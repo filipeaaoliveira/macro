@@ -19,8 +19,15 @@ use uuid::Uuid;
 
 const OWNER: &str = "macro|owner@example.com";
 const INTERNAL_KEY: &str = "routine-test-internal";
-const OPERATIONS: [&str; 7] = [
-    "validate", "prepare", "prompt", "status", "cancel", "delete", "activity",
+const OPERATIONS: [&str; 8] = [
+    "validate",
+    "prepare",
+    "prompt",
+    "follow-up",
+    "status",
+    "cancel",
+    "delete",
+    "activity",
 ];
 
 #[derive(Clone)]
@@ -142,6 +149,18 @@ impl RoutineSessions for ServiceSpy {
         })
     }
 
+    async fn follow_up(
+        &self,
+        command: PromptRoutineSession,
+    ) -> Result<RoutinePromptAccepted, RoutineSessionError> {
+        let action_id = command.action.action_id;
+        self.record("follow-up", command)?;
+        Ok(RoutinePromptAccepted {
+            action_id,
+            queued: false,
+        })
+    }
+
     async fn status(
         &self,
         command: RoutineSessionAction,
@@ -201,7 +220,9 @@ fn command(operation: &str) -> Value {
             "selection": selection, "session_id": Uuid::now_v7(),
             "source": "routine", "visibility": "unlisted",
         }),
-        "prompt" => json!({ "action": action, "prompt": "private routine instructions" }),
+        "prompt" | "follow-up" => {
+            json!({ "action": action, "prompt": "private routine instructions" })
+        }
         _ => action,
     }
 }
@@ -289,7 +310,7 @@ async fn owner_is_required_and_validated_in_every_command() {
             let mut command = command(operation);
             let identity = match operation {
                 "prepare" => &mut command["selection"],
-                "prompt" => &mut command["action"],
+                "prompt" | "follow-up" => &mut command["action"],
                 _ => &mut command,
             }
             .as_object_mut()
