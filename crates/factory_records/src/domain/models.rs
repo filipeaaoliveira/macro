@@ -473,11 +473,12 @@ pub struct CheckResult {
     pub name: String,
     /// Its exit code: 0 when it passed.
     pub exit_code: i32,
-    /// The end of what it printed, at most [`MAX_CHECK_RESULT_OUTPUT_BYTES`].
+    /// The end of what it printed, both streams, at most 4 KiB.
     pub output: String,
 }
 
-/// The most of a check's output a verified round keeps.
+/// The most of a check's output a verified round keeps, once escaped as
+/// JSON.
 pub const MAX_CHECK_RESULT_OUTPUT_BYTES: usize = 4096;
 
 /// One round of the repository's checks a Step ran on its agent's work, in
@@ -493,8 +494,9 @@ pub struct CheckRound {
     pub started_at: DateTime<Utc>,
     /// How and when it ended; none while the checks run.
     pub end: Option<CheckRoundEnd>,
-    /// Whether the engine runs the checks itself, reading each one's exit
-    /// code; otherwise the agent runs them and reports how they went.
+    /// Whether the engine runs the checks itself, on the pushed commit,
+    /// reading each one's exit code; otherwise the agent runs them and
+    /// reports how they went.
     pub verified: bool,
     /// How each check of a verified round ran so far, in the round's
     /// order; none for a round the agent reports.

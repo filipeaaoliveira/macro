@@ -1,5 +1,5 @@
-//! Reads of what a branch holds as the user: a file at its head, and the
-//! paths it changed against another branch.
+//! Reads of what a branch holds as the user: its head commit, a file at its
+//! head, and the paths it changed against another branch.
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
@@ -36,7 +36,43 @@ struct CompareFile {
     previous_filename: Option<String>,
 }
 
+#[derive(serde::Deserialize)]
+struct BranchHeadResponse {
+    commit: BranchCommit,
+}
+
+#[derive(serde::Deserialize)]
+struct BranchCommit {
+    sha: String,
+}
+
 impl GithubOauthImpl {
+    /// The commit at the head of `branch`; `None` when the user reaches no
+    /// such branch.
+    #[tracing::instrument(skip(self, access_token), err)]
+    pub async fn get_branch_head(
+        &self,
+        access_token: &str,
+        owner: &str,
+        repo: &str,
+        branch: &str,
+    ) -> Result<Option<String>, GithubError> {
+        let encoded = urlencoding::encode(branch);
+        let read: Result<BranchHeadResponse, GithubError> = self
+            .read(
+                access_token,
+                &format!("/repos/{owner}/{repo}/branches/{encoded}"),
+                &[],
+                "failed to read a branch",
+            )
+            .await;
+        match read {
+            Ok(head) => Ok(Some(head.commit.sha)),
+            Err(GithubError::RepositoryUnavailable) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
     /// The text of the file at `path` on `branch`; `None` when the branch
     /// holds no file there (a folder there is not one). A branch or
     /// repository the user cannot reach is

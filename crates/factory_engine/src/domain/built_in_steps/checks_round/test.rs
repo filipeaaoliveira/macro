@@ -22,7 +22,7 @@ use crate::domain::pull_request_steps::PullRequestSteps;
 
 mod verified;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 #[error("the agent's session failed")]
 struct SessionFailed {
     out_of_quota: bool,
@@ -67,7 +67,13 @@ struct ScriptedAgent {
     /// for a runtime that runs no command, as a paired machine's.
     checkout: Option<Arc<Mutex<VecDeque<Ran>>>>,
     commands: Arc<Mutex<Vec<AgentCommand>>>,
+    /// What reading the checkout before a round answers: by default, no
+    /// uncommitted change and the branch's [`HEAD`].
+    checkout_read: Option<Ran>,
 }
+
+/// The head commit of the Run's branch, on GitHub and in the checkout.
+const HEAD: &str = "1111111111111111111111111111111111111111";
 
 /// How a command run in the checkout ended, or the session failing.
 type Ran = Result<SessionCommandOutput, SessionFailed>;
@@ -133,6 +139,19 @@ impl StepAgent for ScriptedAgent {
         let Some(checkout) = &self.checkout else {
             return Ok(None);
         };
+        if command.command.command == super::CHECKOUT_COMMAND {
+            return self
+                .checkout_read
+                .clone()
+                .unwrap_or_else(|| {
+                    Ok(SessionCommandOutput {
+                        exit_code: 0,
+                        stdout: format!("\n{HEAD}\n"),
+                        stderr: String::new(),
+                    })
+                })
+                .map(Some);
+        }
         let key = command.key;
         self.commands.lock().expect("commands").push(command);
         let ran = checkout
@@ -208,6 +227,7 @@ fn github(checks: Option<&str>, changed: Option<&[&str]>) -> FakeGithub {
     }
     github.state().changed =
         changed.map(|paths| paths.iter().map(|path| path.to_string()).collect());
+    github.state().head = Some(HEAD.to_string());
     github
 }
 

@@ -222,6 +222,15 @@ pub trait PullRequests: Send + Sync + 'static {
         path: &str,
     ) -> impl Future<Output = Result<Option<String>, Self::Err>> + Send;
 
+    /// The commit at the head of `branch` of `repository`; none when
+    /// `owner` reaches no such branch.
+    fn branch_head(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        branch: &str,
+    ) -> impl Future<Output = Result<Option<String>, Self::Err>> + Send;
+
     /// The paths `branch` of `repository` changed against its merge base
     /// with `base`; none when GitHub cannot list them all.
     fn changed_paths(

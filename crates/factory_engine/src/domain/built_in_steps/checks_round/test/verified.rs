@@ -1,6 +1,8 @@
 //! Rounds whose checks the engine runs itself, in the agent's checkout,
 //! reading each one's exit code.
 
+use factory_records::domain::models::MAX_CHECK_RESULT_OUTPUT_BYTES;
+
 use super::*;
 
 /// Both checks of [`CHECKS`] run: the branch changed both their paths.
@@ -333,4 +335,115 @@ async fn a_round_the_agent_was_asked_to_run_stays_the_agents() {
     assert!(commands(&retry).is_empty());
     assert_eq!(retry.turns()[0].action_id, open.check_action_id);
     assert!(!rounds(&repo, input).await[0].verified);
+}
+
+/// Reads the checkout as `stdout` says: its uncommitted changes, then the
+/// commit it is at.
+fn checkout_reading(stdout: &str) -> Option<Ran> {
+    Some(ran(0, stdout))
+}
+
+/// A checkout at another commit than the branch's head on GitHub is not
+/// what the checks would run on: the round fails saying so, no check runs,
+/// and the agent is asked to push.
+#[tokio::test]
+async fn a_checkout_off_the_pushed_commit_runs_no_check() {
+    let agent = ScriptedAgent {
+        checkout_read: checkout_reading("\n2222222222222222222222222222222222222222\n"),
+        ..verifying(Vec::new(), vec![Ok(("done", "Pushed it"))])
+    };
+    let github = github(Some(CHECKS), Some(&["apps/web/src/main.ts"]));
+    let repo = FakeRepo::default();
+    let input = input();
+
+    let report = run_in_session(&agent, &github, &repo, input)
+        .await
+        .expect("write");
+
+    assert_eq!(report.outcome, outcome("red"));
+    assert!(commands(&agent).is_empty());
+    let turns = agent.turns();
+    assert!(turns[0].prompt.contains(&format!(
+        "your checkout is at commit 2222222222222222222222222222222222222222, and the run's branch on GitHub at {HEAD}."
+    )));
+    assert!(turns[0].prompt.contains("push the run's branch"));
+    let rounds = rounds(&repo, input).await;
+    assert!(rounds[0].verified);
+    assert_eq!(rounds[0].results[0].name, "pushed commit");
+    assert_eq!(
+        rounds[0].end.as_ref().expect("ended").outcome,
+        CheckRoundOutcome::Failed
+    );
+}
+
+/// Uncommitted work in the checkout fails the round before any check runs.
+#[tokio::test]
+async fn uncommitted_work_runs_no_check() {
+    let agent = ScriptedAgent {
+        checkout_read: checkout_reading(&format!(" M src/lib.rs\n?? notes.txt\n{HEAD}\n")),
+        ..verifying(Vec::new(), vec![Ok(("done", "Committed it"))])
+    };
+    let github = github(Some(CHECKS), Some(&["apps/web/src/main.ts"]));
+    let repo = FakeRepo::default();
+
+    let report = run_in_session(&agent, &github, &repo, input())
+        .await
+        .expect("write");
+
+    assert_eq!(report.outcome, outcome("red"));
+    assert!(commands(&agent).is_empty());
+    let prompt = &agent.turns()[0].prompt;
+    assert!(prompt.contains("your checkout has changes that are not committed"));
+    assert!(prompt.contains(" M src/lib.rs\n?? notes.txt"));
+}
+
+/// A check starts only with its whole timeout left: with less, the attempt
+/// fails for its retry to run it, and nothing is recorded as a failure.
+#[tokio::test]
+async fn a_check_never_starts_short_of_its_timeout() {
+    let agent = verifying(vec![ran(0, "never run")], Vec::new());
+    let github = github(Some(CHECKS), Some(&["apps/web/src/main.ts"]));
+    let repo = FakeRepo::default();
+    let input = input();
+    let entry = EntryId::try_from("write".to_string()).expect("valid");
+    repo.start_step(input.key, &entry, 1).await.expect("start");
+    // Fifteen minutes of the Step's rounds are left.
+    {
+        let mut steps = repo.steps.lock().expect("steps");
+        for (run, step) in steps.iter_mut() {
+            if *run == input.key.run_id && step.seq == input.key.seq {
+                step.started_at = chrono::Utc::now() - chrono::TimeDelta::minutes(90);
+            }
+        }
+    }
+
+    let failed = run_in_session(&agent, &github, &repo, input).await;
+
+    assert!(matches!(
+        failed,
+        Err(super::super::super::BuiltInStepError::Agent {
+            retryable: true,
+            ..
+        })
+    ));
+    assert!(commands(&agent).is_empty());
+    let rounds = rounds(&repo, input).await;
+    assert!(rounds[0].results.is_empty());
+    assert!(rounds[0].end.is_none());
+}
+
+/// What a round keeps of a check's output fits its record once escaped as
+/// JSON, keeps its end, drops control characters, and never splits a
+/// character.
+#[test]
+fn a_check_s_output_is_kept_within_its_record() {
+    let noisy = format!("{}\u{0}\u{1b}[31mé\"the end\"", "é\"".repeat(4096));
+
+    let kept = super::super::kept_output(&noisy);
+
+    let escaped = serde_json::to_string(&kept).expect("json");
+    assert!(escaped.len() <= MAX_CHECK_RESULT_OUTPUT_BYTES + 2);
+    assert!(kept.ends_with("[31mé\"the end\""));
+    assert!(!kept.chars().any(|c| c.is_control()));
+    assert!(kept.starts_with('é') || kept.starts_with('"'));
 }

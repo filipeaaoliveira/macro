@@ -143,3 +143,32 @@ async fn a_comparison_github_cut_short_is_unknown() {
     assert_eq!(paths, None);
     server.finish();
 }
+
+/// A branch's head is the commit its read names, the branch's name encoded
+/// in the path; a branch the user reaches none of is none.
+#[tokio::test]
+async fn a_branch_head_is_its_commit() {
+    let (server, client) = answering(
+        "200 OK",
+        r#"{"name":"factory/run","commit":{"sha":"abc123"}}"#,
+    );
+
+    let head = client
+        .get_branch_head("token", "macro", "app", "factory/run")
+        .await
+        .unwrap();
+
+    assert_eq!(head.as_deref(), Some("abc123"));
+    let request = server.finish();
+    assert!(
+        request.starts_with("GET /repos/macro/app/branches/factory%2Frun HTTP/1.1"),
+        "{request}"
+    );
+
+    let (_missing, client) = answering("404 Not Found", r#"{"message":"Branch not found"}"#);
+    let head = client
+        .get_branch_head("token", "macro", "app", "factory/run")
+        .await
+        .unwrap();
+    assert_eq!(head, None);
+}

@@ -193,13 +193,20 @@ round reached is dropped again once the changes no longer reach it. The checks r
 agent's checkout. Where its session's runtime runs commands (a managed
 sandbox, a Macro computer), the engine runs each check there itself
 (`StepAgent::run_check`, the routine sessions' `exec`), beside the agent,
-from the repository's root, for at most `CHECK_TIMEOUT` (20 minutes), and
-its exit code decides: the round is `verified`, and each check's exit code
-and the end of its output (`results`) are recorded as it ends, so a retry
-runs only the checks still to run. An attempt runs checks for at most
-`ATTEMPT_CHECKS_FOR` (25 minutes) of its 30, and leaves the rest to its
-retry. Nothing the agent hands back decides a verified round. Elsewhere (a
-paired machine, a cloud agent: `run_check` answers none) the agent runs
+from the repository's root, in a shell that reads no profile or rc file and
+under a lock in the checkout's git directory, for at most `CHECK_TIMEOUT`
+(20 minutes), and its exit code decides: the round is `verified`, and each
+check's exit code and the end of its output (`results`, 4 KiB once escaped
+as JSON) are recorded as it ends, so a retry runs only the checks still to
+run. Before a round's first check the engine reads the checkout: unless it
+is at the Run branch's head on GitHub with nothing uncommitted, the round
+fails saying so (`pushed commit` in its results), no check runs, and the
+fix prompt asks the agent to commit and push. A check starts only with its
+whole `CHECK_TIMEOUT` left in the attempt (25 of its 30 minutes,
+`ATTEMPT_CHECKS_FOR`) and the Step's rounds; with less, the attempt fails
+and its retry runs it. Nothing the agent hands back decides a verified
+round. Elsewhere (a paired machine, a cloud agent, or a harness from before
+the `exec` route, which answers 404: `run_check` answers none) the agent runs
 them: a round is a later prompt of the Step's session
 (`StepAgent::follow_up`, the routine sessions' `follow_up`) that asks it to
 run them verbatim, change nothing, and hand back `passed` or `failed` with a
@@ -322,11 +329,11 @@ part only.
   wait on a timer instead.
 - Deploy `agent_harness_service` before `factory_service`: an older harness
   drops the routine session's `repo_url`, so a `code` Run's agents would work
-  outside its repository, and has no `exec` route, which fails a round's
-  checks instead of leaving them to the agent.
-- A verified check runs in the agent's checkout as the agent left it, not a
-  fresh clone of the pushed branch: work the agent did not commit is part of
-  what the check sees.
+  outside its repository. One without the `exec` route leaves rounds that
+  have not started their checks to the agent.
+- A verified check runs in the agent's checkout, checked to be the pushed
+  commit with nothing uncommitted only before the round's first check: a
+  check that changes the tree changes what later checks see.
 - The agent pushes the Run's branch with its runtime's own git credentials
   (the egress's GitHub App token in a managed sandbox, the operator's git on
   macrod), and the pull request Steps use the owner's linked account: both

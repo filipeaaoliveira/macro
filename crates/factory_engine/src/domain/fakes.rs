@@ -749,6 +749,8 @@ pub(crate) struct FakeGithubState {
     /// The paths the Run's branch changed against its base; none when
     /// GitHub cannot list them all.
     pub(crate) changed: Option<Vec<String>>,
+    /// The head commit of the Run's branch; none before it is pushed.
+    pub(crate) head: Option<String>,
 }
 
 /// GitHub in memory, for one Run's branch: opening its pull request makes
@@ -894,6 +896,15 @@ impl PullRequests for FakeGithub {
     ) -> Result<Option<String>, FakeError> {
         let file = (branch.to_string(), path.to_string());
         Ok(self.state().files.get(&file).cloned())
+    }
+
+    async fn branch_head(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        _branch: &str,
+    ) -> Result<Option<String>, FakeError> {
+        Ok(self.state().head.clone())
     }
 
     async fn changed_paths(
