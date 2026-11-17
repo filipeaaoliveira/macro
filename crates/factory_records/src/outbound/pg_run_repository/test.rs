@@ -5,8 +5,9 @@ use uuid::Uuid;
 
 use super::PgRunRepository;
 use crate::domain::models::{
-    AgentName, ClaimedSession, EntryId, HandBack, HandedBack, NewRun, Outcome, PassedOver,
-    Repository, Role, Run, RunId, RunInsert, RunOutcome, StepKey, StepSession, TaskLink,
+    AgentName, ClaimedSession, EntryId, GateKind, HandBack, HandedBack, NewRun, Outcome,
+    PassedOver, Repository, Role, Run, RunId, RunInsert, RunOutcome, StepKey, StepSession,
+    TaskLink,
 };
 use crate::domain::ports::RunRepository;
 
@@ -1266,4 +1267,79 @@ async fn the_steps_of_several_runs_come_back_by_run(pool: PgPool) {
         steps[&planned],
         repo.list_steps(planned).await.expect("steps")
     );
+}
+
+/// The Step that goes on after its agent's question works in the asking
+/// Step's session once that Step ended, never while it runs; the session's
+/// hand back reaches the running Step, and the asking Step's Gate reads as
+/// a question.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "fixtures", scripts("people"))
+)]
+async fn a_step_going_on_after_a_question_works_in_the_asking_step_s_session(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let id = RunId::generate();
+    insert(&repo, id, "Plan the export").await;
+    let offered = [outcome("done"), Outcome::question()];
+    for seq in [1, 2] {
+        repo.start_step(key(id, seq), &entry("plan"), 1)
+            .await
+            .expect("start");
+    }
+    let asking = repo
+        .claim_session(key(id, 1), session(), &planner(), &offered)
+        .await
+        .expect("claim")
+        .session;
+    let going_on = StepSession {
+        action_id: Uuid::now_v7(),
+        ..asking.clone()
+    };
+
+    // While the asking Step runs, no other Step takes its session.
+    repo.claim_session(key(id, 2), going_on.clone(), &planner(), &offered)
+        .await
+        .expect_err("a running step's session is its own");
+
+    repo.end_step(key(id, 1), &Outcome::question(), "CSV or JSON?")
+        .await
+        .expect("end");
+    repo.open_gate(key(id, 1), "CSV or JSON?", &[Outcome::answer()])
+        .await
+        .expect("open");
+    let claimed = repo
+        .claim_session(key(id, 2), going_on.clone(), &planner(), &offered)
+        .await
+        .expect("claim the asking step's session");
+    assert_eq!(claimed.session, going_on);
+
+    let step = repo
+        .session_step(asking.session_id)
+        .await
+        .expect("read")
+        .expect("the session has a step");
+    assert_eq!(step.key, key(id, 2));
+    assert!(!step.ended);
+    let hand_back = HandBack {
+        outcome: outcome("done"),
+        output: "The plan, in CSV".to_string(),
+    };
+    assert!(
+        repo.hand_back(asking.session_id, &hand_back)
+            .await
+            .expect("hand back")
+    );
+    assert_eq!(
+        repo.handed_back(key(id, 2), going_on.action_id)
+            .await
+            .expect("read"),
+        HandedBack::Handed(hand_back)
+    );
+    assert!(repo.is_step_session(asking.session_id).await.expect("read"));
+
+    let steps = repo.list_steps(id).await.expect("steps");
+    let gate = steps[0].gate.as_ref().expect("the question's gate");
+    assert_eq!(gate.kind, GateKind::Question);
+    assert!(gate.kind.answered_only_by_a_person());
 }

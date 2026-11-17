@@ -2,7 +2,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 
 use chrono::Utc;
 use factory_records::domain::models::{
-    EntryId, Gate, GateAnswer, Outcome, Repository, Role, RunId, Step, StepEnd, StepKey,
+    EntryId, Gate, GateAnswer, GateKind, Outcome, Repository, Role, RunId, Step, StepEnd, StepKey,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::{FindingKind, Lines, ReviewFinding, ReviewRound};
@@ -327,6 +327,7 @@ async fn a_plan_reads_what_a_person_answered_the_last_one() {
             ended_at: Utc::now(),
         }),
         gate: Some(Gate {
+            kind: GateKind::Flow,
             question: "Approve the plan?".to_string(),
             answers: vec![Outcome::done(), revise.clone()],
             opened_at: Utc::now(),

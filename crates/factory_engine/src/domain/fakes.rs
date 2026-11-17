@@ -11,9 +11,9 @@ use agent_session::domain::session_task::TaskDocumentId;
 use chrono::Utc;
 use factory_records::domain::models::{
     CheckResult, CheckRound, CheckRoundEnd, CheckRoundOutcome, CheckRoundStart, ClaimedSession,
-    ControlFileChanges, EntryId, Gate, HandBack, HandedBack, NewRun, Outcome, PassedOver, Role,
-    Run, RunEnd, RunId, RunInsert, RunOutcome, SessionStep, Step, StepEnd, StepKey, StepSession,
-    StoppingSession, TaskLink, TeamMembership,
+    ControlFileChanges, EntryId, Gate, GateAnswer, GateKind, HandBack, HandedBack, NewRun, Outcome,
+    PassedOver, Role, Run, RunEnd, RunId, RunInsert, RunOutcome, SessionStep, Step, StepEnd,
+    StepKey, StepSession, StoppingSession, TaskLink, TeamMembership,
 };
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
@@ -481,7 +481,9 @@ impl RunRepository for FakeRepo {
         answers: &[Outcome],
     ) -> Result<(), FakeError> {
         self.with_step(key, |step| {
+            let kind = GateKind::of(step.end.as_ref().map(|end| &end.outcome));
             step.gate.get_or_insert_with(|| Gate {
+                kind,
                 question: question.to_string(),
                 answers: answers.to_vec(),
                 opened_at: Utc::now(),
@@ -496,10 +498,23 @@ impl RunRepository for FakeRepo {
         &self,
         key: StepKey,
         answer: &Outcome,
-        _note: Option<&str>,
-        _user_id: &MacroUserIdStr<'static>,
+        note: Option<&str>,
+        user_id: &MacroUserIdStr<'static>,
         approved_control_files: Option<&[String]>,
     ) -> Result<(), FakeError> {
+        self.with_step(key, |step| {
+            if let Some(gate) = step.gate.as_mut()
+                && gate.answer.is_none()
+            {
+                gate.answer = Some(GateAnswer {
+                    answer: answer.clone(),
+                    note: note.map(str::to_string),
+                    user_id: Some(user_id.clone()),
+                    approved_control_files: approved_control_files.map(<[String]>::to_vec),
+                    answered_at: Utc::now(),
+                });
+            }
+        });
         self.approvals.lock().expect("approvals").push((
             key,
             answer.clone(),
@@ -685,6 +700,7 @@ impl RunRepository for FakeRepo {
             .lock()
             .expect("sessions")
             .iter()
+            .rev()
             .find(|claimed| claimed.session.session_id == session_id)
             .cloned();
         let Some(claimed) = claimed else {
@@ -711,6 +727,7 @@ impl RunRepository for FakeRepo {
             .lock()
             .expect("sessions")
             .iter()
+            .rev()
             .find(|claimed| claimed.session.session_id == session_id)
             .map(|claimed| claimed.key);
         let Some(key) = key else {

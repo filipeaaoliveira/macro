@@ -154,6 +154,20 @@ impl Outcome {
         Self("failed".to_string())
     }
 
+    /// The outcome of an agent Step that asks the Run's owner a question it
+    /// cannot go on without: the Step ends with the question as its output,
+    /// and a question Gate waits for the owner's answer. The Flow never
+    /// routes it: the Step's Role goes on with the answer.
+    pub fn question() -> Self {
+        Self("question".to_string())
+    }
+
+    /// The one answer a question Gate offers: the owner's words go in its
+    /// note.
+    pub fn answer() -> Self {
+        Self("answer".to_string())
+    }
+
     /// The outcome as written in the Flow.
     pub fn as_str(&self) -> &str {
         &self.0
@@ -464,10 +478,45 @@ pub struct GateAnswer {
     pub answered_at: DateTime<Utc>,
 }
 
+/// Who asks a Gate's question, which says how it is answered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GateKind {
+    /// The Flow asks it once its entry's Step ends `done`: a person picks
+    /// one of its answers, which the Flow routes.
+    #[default]
+    Flow,
+    /// An agent asked it, ending its Step `question`: the Run's owner
+    /// writes the answer (the note of its one answer, `answer`), and the
+    /// Step's Role goes on with it.
+    Question,
+}
+
+impl GateKind {
+    /// The kind of the Gate of a Step that ended with `outcome`: only an
+    /// agent's question ends a Step `question`.
+    pub fn of(outcome: Option<&Outcome>) -> Self {
+        if outcome.is_some_and(|outcome| *outcome == Outcome::question()) {
+            Self::Question
+        } else {
+            Self::Flow
+        }
+    }
+
+    /// Whether anything but a person may answer it. An agent's question is
+    /// never answered by anything but the Run's owner: whatever answers
+    /// Gates on a person's behalf must leave question Gates alone.
+    pub fn answered_only_by_a_person(self) -> bool {
+        matches!(self, Self::Question)
+    }
+}
+
 /// A question a Step's end puts to a person. The Run waits for the answer.
 #[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Gate {
+    /// Who asks it: the Flow, or the Step's agent.
+    pub kind: GateKind,
     /// The question.
     pub question: String,
     /// The answers it offers, in the Flow's order.

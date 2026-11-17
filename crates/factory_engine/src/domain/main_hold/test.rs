@@ -3,7 +3,7 @@ use std::sync::LazyLock;
 use chrono::{DateTime, TimeDelta, Utc};
 use factory_records::domain::main_hold::{MainHoldRepository, RequiredChecksState};
 use factory_records::domain::models::{
-    EntryId, Gate, GateAnswer, NewRun, Outcome, Repository, RunId, Step, StepEnd, StepKey,
+    EntryId, Gate, GateAnswer, GateKind, NewRun, Outcome, Repository, RunId, Step, StepEnd, StepKey,
 };
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
@@ -757,6 +757,7 @@ fn approved_merge_gate(approved: &[&str]) -> Step {
             ended_at: Utc::now(),
         }),
         gate: Some(Gate {
+            kind: GateKind::Flow,
             question: "Merge?".to_string(),
             answers: vec![approve.clone()],
             opened_at: Utc::now(),

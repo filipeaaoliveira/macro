@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                s.run_id,\n                s.seq,\n                r.user_id,\n                s.offered AS \"offered!\",\n                s.ended_at IS NOT NULL AS \"ended!\"\n            FROM factory_step s\n            JOIN factory_run r ON r.id = s.run_id\n            WHERE s.session_id = $1\n            ",
+  "query": "\n            SELECT\n                s.run_id,\n                s.seq,\n                r.user_id,\n                s.offered AS \"offered!\",\n                s.ended_at IS NOT NULL AS \"ended!\"\n            FROM factory_step s\n            JOIN factory_run r ON r.id = s.run_id\n            WHERE s.session_id = $1\n            ORDER BY s.ended_at IS NULL DESC, s.seq DESC\n            LIMIT 1\n            ",
   "describe": {
     "columns": [
       {
@@ -42,5 +42,5 @@
       null
     ]
   },
-  "hash": "9c0f265976617504529c0e2ee75e351575e3ded1ffc25386957348133951cf0f"
+  "hash": "14041989ff5ce8773933e3ec6ed3bfc924604aef29121dd29e7c04626835e2ea"
 }

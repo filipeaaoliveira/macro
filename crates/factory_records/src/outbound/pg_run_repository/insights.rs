@@ -312,10 +312,12 @@ impl RunInsightsRepository for PgRunRepository {
         .collect::<Result<Vec<_>, PgRunRepositoryErr>>()?;
 
         // Fenced, so the Runs' ids find their Steps by primary key, rather
-        // than every agent Step being walked through the session index.
+        // than every agent Step being walked through the session index. A
+        // Step that went on after its agent's question works in the asking
+        // Step's session, whose usage counts once.
         let sessions = sqlx::query!(
             r#"
-            SELECT run_id, entry, session_id AS "session_id!"
+            SELECT DISTINCT run_id, entry, session_id AS "session_id!"
             FROM (
                 SELECT run_id, entry, session_id
                 FROM factory_step
