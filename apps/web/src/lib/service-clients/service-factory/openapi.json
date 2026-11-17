@@ -1238,6 +1238,11 @@
           }
         }
       },
+      "FindingKind": {
+        "type": "string",
+        "description": "What a finding turned out to be once its round ended.",
+        "enum": ["blocker", "follow_up"]
+      },
       "FlowInsight": {
         "type": "object",
         "description": "The Runs of one Flow.",
@@ -1426,6 +1431,25 @@
           }
         }
       },
+      "Lines": {
+        "type": "object",
+        "description": "The lines of a file a finding is about, from 1, both included.",
+        "required": ["start", "end"],
+        "properties": {
+          "end": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The last line; the first, for one line.",
+            "minimum": 0
+          },
+          "start": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The first line.",
+            "minimum": 0
+          }
+        }
+      },
       "LinkTaskRequest": {
         "type": "object",
         "description": "Request body for linking a Run to a task.",
@@ -1572,6 +1596,178 @@
         "description": "Why a base branch's required checks decide nothing.",
         "enum": ["unread", "none"]
       },
+      "ReviewFinding": {
+        "type": "object",
+        "description": "A finding as its round keeps it.",
+        "required": [
+          "seq",
+          "place",
+          "path",
+          "problem",
+          "why",
+          "blocksAnywhere"
+        ],
+        "properties": {
+          "blocksAnywhere": {
+            "type": "boolean",
+            "description": "Whether it blocks wherever it is: a Blocker of the round before\nfound again, or a reviewer's answer that never read."
+          },
+          "followUpTaskId": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "The follow-up task it became, when it is a follow-up and the task\nwas made: its task document's id."
+          },
+          "kind": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/FindingKind",
+                "description": "What it turned out to be; none while its round reviews."
+              }
+            ]
+          },
+          "lines": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Lines",
+                "description": "The lines it is about; none for the whole file."
+              }
+            ]
+          },
+          "path": {
+            "type": "string",
+            "description": "The file, from the repository's root."
+          },
+          "place": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Its place among what the reviewer handed back, from 1.",
+            "minimum": 0
+          },
+          "problem": {
+            "type": "string",
+            "description": "What is wrong."
+          },
+          "role": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Role",
+                "description": "The Role of the reviewer that found it."
+              }
+            ]
+          },
+          "seq": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The reviewer's Step: its place among the Run's Steps.",
+            "minimum": 0
+          },
+          "why": {
+            "type": "string",
+            "description": "Why it must change."
+          }
+        }
+      },
+      "ReviewRound": {
+        "type": "object",
+        "description": "One round of a Run's review panel.",
+        "required": [
+          "round",
+          "seq",
+          "reviewers",
+          "fixDiff",
+          "startedAt",
+          "findings"
+        ],
+        "properties": {
+          "diffBase": {
+            "type": ["string", "null"],
+            "description": "Where the diff under review starts: the Run's base branch, or the\ncommit the round before reviewed; none for a round that could not\nopen."
+          },
+          "end": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ReviewRoundEnd",
+                "description": "How and when it ended; none while it reviews."
+              }
+            ]
+          },
+          "failure": {
+            "type": ["string", "null"],
+            "description": "Why it could not open, as when the Run's branch is gone: it then\nran no reviewer and ended failed."
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReviewFinding"
+            },
+            "description": "What its reviewers found, by Step and place."
+          },
+          "fixDiff": {
+            "type": "boolean",
+            "description": "Whether it reviews the fix diff, the changes made since the round\nbefore, rather than the Run's whole change."
+          },
+          "headSha": {
+            "type": ["string", "null"],
+            "description": "The commit of the Run's branch it reviews; none for a round that\ncould not open."
+          },
+          "reviewers": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many reviewers it has, each in a Step of its own.",
+            "minimum": 0
+          },
+          "round": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Which round of its entry, from 1; a reset counts from 1 again.",
+            "minimum": 0
+          },
+          "seq": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The place of its first Step among the Run's Steps; its reviewers'\nSteps take this place and the ones after it.",
+            "minimum": 0
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it started."
+          }
+        }
+      },
+      "ReviewRoundEnd": {
+        "type": "object",
+        "description": "A review round that has ended.",
+        "required": ["outcome", "endedAt"],
+        "properties": {
+          "endedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When."
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/ReviewRoundOutcome",
+            "description": "How it ended."
+          }
+        }
+      },
+      "ReviewRoundOutcome": {
+        "type": "string",
+        "description": "How a review round ended.",
+        "enum": ["pass", "changes", "failed"]
+      },
       "Role": {
         "type": "string",
         "description": "A job in a Flow, such as `planner`, `writer`, `reviewer` or `fixer`. An\nentry whose Step an agent does names the Role, and the factory's agent\ndefinition lists the Agents that may fill it."
@@ -1645,7 +1841,7 @@
       "RunDetail": {
         "type": "object",
         "description": "A Run and the Steps it took.",
-        "required": ["run", "steps"],
+        "required": ["run", "steps", "reviewRounds"],
         "properties": {
           "baseRequiredChecks": {
             "oneOf": [
@@ -1668,6 +1864,13 @@
                 "description": "The Main Hold on the base branch the Run merges to, while the Run\nis at its merge and the base's required checks fail: the Run does\nnot merge until it clears, even once its merge Gate is approved."
               }
             ]
+          },
+          "reviewRounds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReviewRound"
+            },
+            "description": "Its review rounds, in order, each with what its reviewers found."
           },
           "run": {
             "$ref": "#/components/schemas/Run",

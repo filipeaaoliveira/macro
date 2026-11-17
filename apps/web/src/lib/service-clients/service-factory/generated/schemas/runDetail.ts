@@ -5,6 +5,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
+import type { ReviewRound } from './reviewRound';
 import type { Run } from './run';
 import type { RunDetailBaseRequiredChecks } from './runDetailBaseRequiredChecks';
 import type { RunDetailMainHold } from './runDetailMainHold';
@@ -16,6 +17,8 @@ import type { Step } from './step';
 export interface RunDetail {
   baseRequiredChecks?: RunDetailBaseRequiredChecks;
   mainHold?: RunDetailMainHold;
+  /** Its review rounds, in order, each with what its reviewers found. */
+  reviewRounds: ReviewRound[];
   /** The Run. */
   run: Run;
   /** Its Steps, in the order they started. */
