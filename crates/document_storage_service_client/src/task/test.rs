@@ -10,30 +10,29 @@ fn follow_up() -> NewTask {
         task_name: "Follow-up: the cache never expires".to_string(),
         markdown: "Found in review.".to_string(),
         project_id: Some(uuid::Uuid::from_u128(0xF00)),
-        share_with_team: true,
+        share_with_team: false,
+        document_id: Some(uuid::Uuid::from_u128(0x101)),
     }
 }
 
-/// The task is made as the user, with the internal key, in the project
-/// named.
+/// The task is made as the user, with the internal key in the standard
+/// headers, in the project and with the id named.
 #[tokio::test]
 async fn a_task_is_made_as_the_user_in_its_project() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/documents/create_task"))
+        .and(header("x-internal-auth-key", "internal-key"))
         .and(header(
-            "x-document-storage-service-auth-key",
-            "internal-key",
-        ))
-        .and(header(
-            "x-document-storage-service-user-id",
+            "x-internal-macro-user-id",
             "macro|julia@example.com",
         ))
         .and(body_json(json!({
             "taskName": "Follow-up: the cache never expires",
             "markdown": "Found in review.",
             "projectId": "00000000-0000-0000-0000-000000000f00",
-            "shareWithTeam": true
+            "shareWithTeam": false,
+            "documentId": "00000000-0000-0000-0000-000000000101"
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "documentId": "00000000-0000-7000-8000-000000000101",

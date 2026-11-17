@@ -1,16 +1,17 @@
-//! Tasks made for a user by another service, as `POST
+//! Tasks a service makes as a user, in a project, as `POST
 //! /documents/create_task` makes them for the user themselves.
 
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 
 use super::DocumentStorageServiceClient;
-use crate::constants::MACRO_INTERNAL_USER_ID_HEADER_KEY;
+use crate::constants::{INTERNAL_API_KEY_HEADER, INTERNAL_MACRO_USER_ID_HEADER};
 
 #[cfg(test)]
 mod test;
 
-/// A task to make: its name, its markdown, and the project it goes in.
+/// A task to make: its name, its markdown, the project it goes in, and the
+/// id to make it with.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NewTask {
@@ -20,8 +21,11 @@ pub struct NewTask {
     pub markdown: String,
     /// The project it goes in; the user's own tasks when none.
     pub project_id: Option<uuid::Uuid>,
-    /// Whether it is shared with the user's team, as tasks people make are.
+    /// Whether it is shared with the user's team.
     pub share_with_team: bool,
+    /// The id to make it with, so a retry finds the task rather than
+    /// making a second one; one of document storage's when none.
+    pub document_id: Option<uuid::Uuid>,
 }
 
 #[derive(Deserialize)]
@@ -45,7 +49,8 @@ pub enum CreateTaskError {
 
 impl DocumentStorageServiceClient {
     /// Make `task` as `user_id`, who owns it, and return its document's
-    /// id.
+    /// id. A task made with a `document_id` that already exists is
+    /// refused, as a conflict.
     #[tracing::instrument(skip(self, task), err)]
     pub async fn create_task_for_user(
         &self,
@@ -56,10 +61,11 @@ impl DocumentStorageServiceClient {
             CreateTaskError::Unavailable(rootcause::Report::new(error).into_dynamic())
         };
         let res = self
-            .client
+            .external_client
             .post(format!("{}/documents/create_task", self.url))
             .json(task)
-            .header(MACRO_INTERNAL_USER_ID_HEADER_KEY, user_id)
+            .header(INTERNAL_API_KEY_HEADER, &self.internal_auth_key)
+            .header(INTERNAL_MACRO_USER_ID_HEADER, user_id)
             .send()
             .await
             .map_err(unavailable)?;
