@@ -84,14 +84,21 @@ export type RunRepository = {
 };
 
 /**
- * The Control Files a Run's branch changed that its request doesn't name:
- * files that decide whether its checks pass. `unlisted` when GitHub couldn't
- * list the branch's changes, so which ones is unknown.
+ * The Control Files a Run's branch changed: files that decide whether its
+ * checks pass. `tampered` are the ones its request doesn't ask for, `named`
+ * the ones it names. `unlisted` when GitHub couldn't list the branch's
+ * changes, so which ones is unknown.
  */
-export type Tampering = {
-  files: string[];
+export type ControlFileChanges = {
+  tampered: string[];
+  named: string[];
   unlisted: boolean;
 };
+
+/** Whether the Run merges only once a person approves its Control Files. */
+export function isTampered(changes: ControlFileChanges): boolean {
+  return changes.unlisted || changes.tampered.length > 0;
+}
 
 /** One Run of a Flow, with the Steps it took in the order they started. */
 export type Run = {
@@ -100,8 +107,8 @@ export type Run = {
   createdAt: string;
   taskId?: string;
   repository?: RunRepository;
-  /** Set while the Run is Tampered: it merges only once a person approves. */
-  tampering?: Tampering;
+  /** The Control Files its branch changed, if any. */
+  controlFiles?: ControlFileChanges;
   end?: { outcome: RunOutcome; endedAt: string };
   steps: RunStep[];
 };

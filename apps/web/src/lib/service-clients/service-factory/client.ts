@@ -9,13 +9,16 @@ import {
   getAnswerFactoryGateUrl,
   getCancelFactoryRunUrl,
   getCreateFactoryRunUrl,
+  getGetFactoryControlFilesUrl,
   getGetFactoryInsightsUrl,
   getGetFactoryRunUrl,
   getListFactoryFlowsUrl,
   getListFactoryTaskRunsUrl,
+  getSetFactoryControlFilesUrl,
 } from './generated/client';
 import type {
   AnswerGateRequest,
+  ControlFilesSettings,
   CreateRunRequest,
   FlowsResponse,
   GetFactoryInsightsParams,
@@ -123,14 +126,36 @@ export const factoryClient = {
    * Answers the Gate of the Run's Step `seq`; the service answers 202 with
    * no body. A Gate that was already answered, or that the Run no longer
    * waits on, fails `CONFLICT`; an agent answering for its owner fails
-   * `FORBIDDEN`. Approving a Tampered Run without `approveControlFiles`
-   * fails `BAD_REQUEST`.
+   * `FORBIDDEN`. Approving a Tampered Run without `approvedControlFiles`
+   * listing its Tampered files fails `BAD_REQUEST`.
    */
   answerGate(runId: string, seq: number, answer: AnswerGateRequest) {
     return fetchWithToken<Record<string, never>>(
       `${host()}${getAnswerFactoryGateUrl(encodeURIComponent(runId), seq)}`,
       { method: 'POST', body: JSON.stringify(answer) }
     ).then((result) => result.map(() => undefined));
+  },
+
+  /**
+   * The Control File patterns the person's Runs are checked against: their
+   * team's or the default, and whether the person may change them.
+   */
+  getControlFiles(signal?: AbortSignal) {
+    return fetchWithToken<ControlFilesSettings>(
+      `${host()}${getGetFactoryControlFilesUrl()}`,
+      { method: 'GET', signal }
+    );
+  },
+
+  /**
+   * Sets the team's Control File patterns; `null` goes back to the default.
+   * Someone who doesn't administer the team fails `FORBIDDEN`.
+   */
+  setControlFiles(patterns: string[] | null) {
+    return fetchWithToken<ControlFilesSettings>(
+      `${host()}${getSetFactoryControlFilesUrl()}`,
+      { method: 'PUT', body: JSON.stringify({ patterns }) }
+    );
   },
 
   /**

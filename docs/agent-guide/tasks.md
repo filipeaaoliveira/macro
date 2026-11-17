@@ -1386,11 +1386,15 @@ a note field and one button per answer, the Flow's first answer primary) is
 pinned below them, the question and note scrolling inside past a few lines. On
 touch the pinned chrome between the handle and the Steps holds only the note
 and the answers, and the question opens the scrolling content. A Run whose
-branch changed Control Files its request doesn't name (tests, lint and test
-configuration, CI workflows, package scripts, agent instructions) shows them
-on its Gate, above the note on touch, with an **I approve these changes**
-checkbox: **Approve** stays disabled until it is ticked. A branch GitHub
-couldn't list says so instead of naming files. **Cancel run**
+branch changed Control Files (tests, lint and test configuration, CI
+workflows, package scripts, agent instructions) shows them on its Gate,
+above the note on touch: those its request doesn't ask for with an **I
+approve these changes** checkbox, and **Approve** stays disabled until it
+is ticked; those it names under **Named by the request**, which need no
+approval. A branch GitHub couldn't list says so instead of naming files.
+With the flag on, team settings (**Team**) have a **Control files**
+section: the team's patterns, one a line, which admins edit, **Save** or
+reset with **Use default**, and other members only read. **Cancel run**
 is pinned on both and confirms in place. Phone sheets have no close button.
 When an answer or a cancel takes the focused control away, focus moves to
 the Run's status line; that includes an answer refused because someone

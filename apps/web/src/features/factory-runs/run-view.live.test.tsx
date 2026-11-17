@@ -39,6 +39,7 @@ const planning: RunDetail = {
     createdAt: '2026-11-16T09:00:00Z',
     taskId: 'task-1',
     userId: 'macro|owner@example.com',
+    createdInPerson: true,
     end: null,
   },
   steps: [

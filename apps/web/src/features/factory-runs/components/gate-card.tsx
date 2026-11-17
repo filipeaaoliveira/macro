@@ -9,7 +9,7 @@ import QuestionIcon from '@icon/system/regular/question.svg';
 import { Button, Checkbox, cn, Item, TextField, Card as UiCard } from '@ui';
 import { For, type JSX, Show } from 'solid-js';
 import { flowWordLabel } from '../core/flow-words';
-import type { Tampering } from '../core/run';
+import { type ControlFileChanges, isTampered } from '../core/run';
 
 /** The Gate's header and its question, in a block nested in the card. */
 export function GateQuestion(props: {
@@ -92,12 +92,13 @@ export function GateNote(props: {
 }
 
 /**
- * The Control Files a Tampered Run's branch changed, which its request
- * doesn't name, and the person's approval of them, which approving the Gate
- * needs. The file list scrolls past a few lines.
+ * The Control Files a Run's branch changed: those its request doesn't ask
+ * for, with the person's approval of them, which approving the Gate needs,
+ * and those the request names, which need none. Each list scrolls past a
+ * few lines.
  */
 export function GateControlFiles(props: {
-  tampering: Tampering;
+  changes: ControlFileChanges;
   approved: boolean;
   onApprovedChange: (approved: boolean) => void;
   locked: boolean;
@@ -109,30 +110,48 @@ export function GateControlFiles(props: {
       class="flex flex-col gap-2 px-3 py-2.5 text-sm leading-5"
     >
       <p class="font-medium">{t('factoryRuns.controlFilesTitle')}</p>
-      <Show
-        when={!props.tampering.unlisted}
-        fallback={
-          <p class="text-ink-muted">{t('factoryRuns.controlFilesUnlisted')}</p>
-        }
-      >
-        <p class="text-ink-muted">{t('factoryRuns.controlFilesChanged')}</p>
-        <ul
-          aria-label={t('factoryRuns.controlFilesTitle')}
-          class="max-h-24 overflow-y-auto font-mono text-xs [overflow-wrap:anywhere]"
-        >
-          <For each={props.tampering.files}>{(file) => <li>{file}</li>}</For>
-        </ul>
+      <Show when={props.changes.unlisted}>
+        <p class="text-ink-muted">{t('factoryRuns.controlFilesUnlisted')}</p>
       </Show>
-      <Checkbox
-        size="sm"
-        checked={props.approved}
-        onChange={props.onApprovedChange}
-        disabled={props.locked}
-      >
-        <Checkbox.Control />
-        <Checkbox.Label>{t('factoryRuns.approveControlFiles')}</Checkbox.Label>
-      </Checkbox>
+      <Show when={props.changes.tampered.length > 0}>
+        <p class="text-ink-muted">{t('factoryRuns.controlFilesChanged')}</p>
+        <ControlFileList
+          label={t('factoryRuns.controlFilesTitle')}
+          files={props.changes.tampered}
+        />
+      </Show>
+      <Show when={props.changes.named.length > 0}>
+        <p class="text-ink-muted">{t('factoryRuns.controlFilesNamed')}</p>
+        <ControlFileList
+          label={t('factoryRuns.controlFilesNamedLabel')}
+          files={props.changes.named}
+        />
+      </Show>
+      <Show when={isTampered(props.changes)}>
+        <Checkbox
+          size="sm"
+          checked={props.approved}
+          onChange={props.onApprovedChange}
+          disabled={props.locked}
+        >
+          <Checkbox.Control />
+          <Checkbox.Label>
+            {t('factoryRuns.approveControlFiles')}
+          </Checkbox.Label>
+        </Checkbox>
+      </Show>
     </UiCard>
+  );
+}
+
+function ControlFileList(props: { label: string; files: readonly string[] }) {
+  return (
+    <ul
+      aria-label={props.label}
+      class="max-h-24 overflow-y-auto font-mono text-xs [overflow-wrap:anywhere]"
+    >
+      <For each={props.files}>{(file) => <li>{file}</li>}</For>
+    </ul>
   );
 }
 
@@ -235,8 +254,8 @@ export function GateGroup(props: {
 export function GateCard(props: {
   question: string;
   answers: readonly string[];
-  /** The Control Files to approve, when the Run is Tampered. */
-  tampering?: Tampering;
+  /** The Control Files the Run's branch changed, if any. */
+  controlFiles?: ControlFileChanges;
   approveControlFiles: boolean;
   onApproveControlFilesChange: (approved: boolean) => void;
   held?: readonly string[];
@@ -250,11 +269,11 @@ export function GateCard(props: {
     <GateGroup>
       <Card width="wide">
         <GateQuestion question={props.question} capped />
-        <Show when={props.tampering}>
-          {(tampering) => (
+        <Show when={props.controlFiles}>
+          {(changes) => (
             <div class="px-3 pb-2">
               <GateControlFiles
-                tampering={tampering()}
+                changes={changes()}
                 approved={props.approveControlFiles}
                 onApprovedChange={props.onApproveControlFilesChange}
                 locked={props.locked}

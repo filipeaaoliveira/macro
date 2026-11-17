@@ -81,8 +81,23 @@ export default {
   // Control Files a Run changed that its request doesn't name.
   controlFilesTitle: 'Control files changed',
   controlFilesChanged:
-    'This branch changes files that decide whether its checks pass, and its request doesn’t name them. It merges only once you approve them.',
+    'This branch changes files that decide whether its checks pass, and its request doesn’t ask for them. It merges only once you approve them.',
+  controlFilesNamed: 'Named by the request:',
+  controlFilesNamedLabel: 'Control files named by the request',
   controlFilesUnlisted:
     'GitHub couldn’t list this branch’s changes, so it may change files that decide whether its checks pass. It merges only once you approve that.',
   approveControlFiles: 'I approve these changes',
+  // A team's Control Files, in team settings.
+  controlFilesPatterns: 'Control file patterns, one a line',
+  controlFilesLoading: 'Loading control files…',
+  controlFilesLoadFailed: 'Control files couldn’t be loaded',
+  controlFilesDefault: 'These are Macro’s default patterns.',
+  controlFilesOwn: 'These are your team’s own patterns.',
+  controlFilesHowTo:
+    'A run whose branch changes a matching file its request doesn’t name merges only once a person approves it. `*` stays in one folder, `**` spans folders, and case is ignored.',
+  controlFilesAdminsOnly: 'Only team admins can change them.',
+  controlFilesUseDefault: 'Use default',
+  controlFilesSave: 'Save',
+  controlFilesSaved: 'Control files saved',
+  controlFilesSaveFailed: 'Couldn’t save the control files',
 };

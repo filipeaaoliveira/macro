@@ -42,7 +42,7 @@ function RunGate(props: { controller: RunController }) {
         <GateCard
           question={waiting().gate.question}
           answers={waiting().gate.answers}
-          tampering={props.controller.tampering()}
+          controlFiles={props.controller.controlFiles()}
           approveControlFiles={props.controller.approveControlFiles()}
           onApproveControlFilesChange={props.controller.setApproveControlFiles}
           held={props.controller.heldAnswers()}

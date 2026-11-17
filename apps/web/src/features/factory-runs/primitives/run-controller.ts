@@ -5,7 +5,18 @@ import type {
   RunsContext,
   RunsSource,
 } from '../context/runs-context';
-import { APPROVE_ANSWER, type Run, type RunStep, runStatus } from '../core/run';
+import {
+  APPROVE_ANSWER,
+  isTampered,
+  type Run,
+  type RunStep,
+  runStatus,
+} from '../core/run';
+
+/** Whether `run` merges only once a person approves its Control Files. */
+function tampered(run: Run): boolean {
+  return run.controlFiles ? isTampered(run.controlFiles) : false;
+}
 
 /** How often Step times ("5m") move on. */
 const CLOCK_MS = 30_000;
@@ -68,8 +79,11 @@ export function createRunController(
       step: gate.step,
       answer: value,
       note: note().trim() || undefined,
-      // Only a Tampered Run's answer approves Control Files.
-      ...(run.tampering ? { approveControlFiles: approveControlFiles() } : {}),
+      // Only a Tampered Run's answer approves Control Files: the ones the
+      // person saw, which the service checks are still the Run's.
+      ...(tampered(run) && approveControlFiles()
+        ? { approvedControlFiles: run.controlFiles?.tampered }
+        : {}),
     });
     setAnswering(undefined);
     if (result.ok) {
@@ -109,7 +123,7 @@ export function createRunController(
     note,
     setNote,
     /** The Control Files the Run's branch changed unasked, while it waits. */
-    tampering: () => (waiting() ? source.data()?.tampering : undefined),
+    controlFiles: () => (waiting() ? source.data()?.controlFiles : undefined),
     approveControlFiles,
     setApproveControlFiles,
     /**
@@ -117,7 +131,8 @@ export function createRunController(
      * they ticked their approval of its files.
      */
     heldAnswers: (): string[] => {
-      const held = waiting() && source.data()?.tampering;
+      const run = source.data();
+      const held = waiting() && run && tampered(run);
       return held && !approveControlFiles() ? [APPROVE_ANSWER] : [];
     },
     /** The answer on the wire, if one is. */

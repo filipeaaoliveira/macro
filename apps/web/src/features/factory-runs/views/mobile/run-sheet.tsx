@@ -79,10 +79,10 @@ export function MobileRunSheet(props: {
                         class="flex flex-col gap-3"
                         describedBy={questionId}
                       >
-                        <Show when={props.controller.tampering()}>
-                          {(tampering) => (
+                        <Show when={props.controller.controlFiles()}>
+                          {(changes) => (
                             <GateControlFiles
-                              tampering={tampering()}
+                              changes={changes()}
                               approved={props.controller.approveControlFiles()}
                               onApprovedChange={
                                 props.controller.setApproveControlFiles

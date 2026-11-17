@@ -508,15 +508,23 @@ describe('RunView', () => {
     ).toBe(false);
   });
 
-  it('approves a Tampered Run only with its Control Files approved', async () => {
+  it('approves a Tampered Run only with the Control Files it saw approved', async () => {
     const answerGate = vi.fn(async () => DONE);
     const { setRun } = mount({ answerGate });
     setRun({
       ...waitingRun,
-      tampering: { files: ['.github/workflows/ci.yml'], unlisted: false },
+      controlFiles: {
+        tampered: ['.github/workflows/ci.yml'],
+        named: ['Makefile'],
+        unlisted: false,
+      },
     });
 
     expect(await screen.findByText('.github/workflows/ci.yml')).toBeTruthy();
+    const named = screen.getByRole('list', {
+      name: 'Control files named by the request',
+    });
+    expect(within(named).getByText('Makefile')).toBeTruthy();
     const approve = screen.getByRole('button', { name: 'Approve' });
     expect(approve.hasAttribute('disabled')).toBe(true);
 
@@ -531,7 +539,27 @@ describe('RunView', () => {
       step: waitingRun.steps[0],
       answer: 'approve',
       note: undefined,
-      approveControlFiles: true,
+      approvedControlFiles: ['.github/workflows/ci.yml'],
+    });
+  });
+
+  it('approves a Run that changed only named Control Files without asking', async () => {
+    const answerGate = vi.fn(async () => DONE);
+    const { setRun } = mount({ answerGate });
+    setRun({
+      ...waitingRun,
+      controlFiles: { tampered: [], named: ['Makefile'], unlisted: false },
+    });
+
+    expect(await screen.findByText('Makefile')).toBeTruthy();
+    expect(screen.queryByRole('checkbox')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+
+    expect(answerGate).toHaveBeenCalledWith({
+      runId: 'run-1',
+      step: waitingRun.steps[0],
+      answer: 'approve',
+      note: undefined,
     });
   });
 
@@ -540,7 +568,7 @@ describe('RunView', () => {
     const { setRun } = mount({ answerGate });
     setRun({
       ...waitingRun,
-      tampering: { files: [], unlisted: true },
+      controlFiles: { tampered: [], named: [], unlisted: true },
     });
 
     expect(
@@ -553,7 +581,6 @@ describe('RunView', () => {
       step: waitingRun.steps[0],
       answer: 'revise',
       note: undefined,
-      approveControlFiles: false,
     });
   });
 });

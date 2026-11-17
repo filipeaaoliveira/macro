@@ -12,6 +12,7 @@ import { RunsProvider } from './context/runs-context';
 import { RunInsightsView } from './insights-view';
 import { createAppInsightsContext } from './queries/insights';
 import { createAppRunsContext } from './queries/runs';
+import { ControlFilesSettings } from './views/control-files-settings';
 import { TaskRunsSection } from './views/task-runs-section';
 
 /**
@@ -50,6 +51,14 @@ export function TaskRuns(props: { taskId: string; order: number }) {
       </RunsProvider>
     </ShowFeatureFlag>
   );
+}
+
+/**
+ * The team's Control Files, as the body of a team settings section: the
+ * patterns its Runs' changes are checked against.
+ */
+export function TeamControlFiles() {
+  return <ControlFilesSettings />;
 }
 
 /** How the person's Runs went, as a page of its own. */

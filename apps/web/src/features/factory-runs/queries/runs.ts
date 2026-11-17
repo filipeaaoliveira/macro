@@ -46,7 +46,7 @@ function toRun(detail: RunDetail): Run {
     createdAt: run.createdAt,
     taskId: run.taskId ?? undefined,
     repository: run.repository ?? undefined,
-    tampering: run.tampering ?? undefined,
+    controlFiles: run.controlFiles ?? undefined,
     end: run.end ?? undefined,
     steps: detail.steps.map((step) => ({
       seq: step.seq,
@@ -224,7 +224,7 @@ export function createAppRunsContext(client: QueryClient): RunsContext {
         {
           answer: input.answer,
           note: input.note,
-          approveControlFiles: input.approveControlFiles,
+          approvedControlFiles: input.approvedControlFiles,
         }
       );
       // Refused or not, the Run has moved on from what this person saw.

@@ -5,6 +5,7 @@ export const factoryRunKeys = createQueryKeys('factoryRuns', {
   task: (taskId: string) => ({ queryKey: [taskId] }),
   run: (runId: string) => ({ queryKey: [runId] }),
   flows: null,
+  controlFiles: null,
   insights: (params: InsightsParams) => ({
     queryKey: [params.from, params.to, params.timeZone, params.flow ?? ''],
   }),
