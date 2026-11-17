@@ -208,8 +208,9 @@ pub struct Flow {
     /// How many questions an agent Step may put to the Run's owner, each
     /// ending the Step on a question Gate the same Role goes on from with
     /// the answer; the next question after them ends the Run `manual`, for
-    /// a person. None for a Flow whose agents ask nothing, as every Run
-    /// started before questions has: their workflows replay as before.
+    /// a person. None, or zero, for a Flow whose agents ask nothing, as
+    /// every Run started before questions has: their workflows replay as
+    /// before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub questions: Option<u8>,
 }

@@ -11,8 +11,8 @@ use agent_session::domain::session_task::TaskDocumentId;
 use chrono::Utc;
 use factory_records::domain::main_hold::{BaseState, MainHoldRepository};
 use factory_records::domain::models::{
-    GateKind, HandBack, MAX_NOTE_BYTES, MAX_OUTPUT_BYTES, MAX_QUESTION_BYTES, MAX_REQUEST_BYTES,
-    NewRun, Outcome, Repository, Run, RunId, RunInsert, RunOutcome, Step, TaskLink, TeamMembership,
+    HandBack, MAX_NOTE_BYTES, MAX_OUTPUT_BYTES, MAX_QUESTION_BYTES, MAX_REQUEST_BYTES, NewRun,
+    Outcome, Repository, Run, RunId, RunInsert, RunOutcome, Step, TaskLink, TeamMembership,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::{ReviewRound, ReviewRoundRepository};
@@ -555,7 +555,7 @@ where
         // An agent's question is answered in the owner's own words: the
         // agent goes on with them.
         let blank = note.as_deref().is_none_or(|note| note.trim().is_empty());
-        if gate.is_some_and(|gate| gate.kind == GateKind::Question) && blank {
+        if gate.is_some_and(|gate| gate.kind.answered_only_by_a_person()) && blank {
             return Err(FactoryError::AnswerMissing);
         }
 
@@ -819,6 +819,7 @@ where
             review,
             reviewer: request.round.is_some(),
             may_ask: request.may_ask,
+            questions_left: request.questions_left,
             resumes: request.resumes,
         };
         let report = self

@@ -121,6 +121,7 @@ fn input<'a>(earlier: &'a [Step]) -> StepInput<'a> {
         review: None,
         reviewer: false,
         may_ask: false,
+        questions_left: 0,
         resumes: None,
     }
 }
@@ -605,6 +606,7 @@ async fn an_agent_that_may_ask_is_offered_a_question() {
             &step("plan"),
             StepInput {
                 may_ask: true,
+                questions_left: 2,
                 ..input(&[])
             },
         )
@@ -615,6 +617,11 @@ async fn an_agent_that_may_ask_is_offered_a_question() {
     let tasks = agent.tasks.lock().expect("tasks");
     assert_eq!(tasks[0].outcomes, [Outcome::done(), Outcome::question()]);
     assert!(tasks[0].prompt.contains("## Asking the run's owner"));
+    assert!(
+        tasks[0]
+            .prompt
+            .contains("You may ask 2 questions in this step")
+    );
     assert!(tasks[0].prompt.contains("`done`, `question`"));
     assert_eq!(tasks[1].outcomes, [Outcome::done()]);
     assert!(!tasks[1].prompt.contains("question"));

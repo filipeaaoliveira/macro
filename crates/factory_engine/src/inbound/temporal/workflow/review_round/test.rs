@@ -7,12 +7,13 @@ use std::num::NonZeroU8;
 
 use factory_records::domain::models::{EntryId, Outcome, Role, RunId, RunOutcome};
 
-use super::{Panel, Round, RoundWork, review_round};
+use super::{Panel, Round, review_round};
 use crate::domain::flow::{Entry, StepName};
-use crate::domain::gate::GateOpening;
+use crate::domain::gate::{AnswerGate, GateOpening};
 use crate::domain::models::{StepEnding, StepReport, StepRequest, StepStart};
 use crate::domain::review_rounds::{ReviewRoundClosing, ReviewRoundOpening};
 use crate::inbound::temporal::workflow::Questions;
+use crate::inbound::temporal::workflow::work::Work;
 
 /// An activity that failed.
 #[derive(Debug, PartialEq, Eq)]
@@ -44,7 +45,7 @@ impl Script {
     }
 }
 
-impl RoundWork for Script {
+impl Work for Script {
     type Failure = Failed;
 
     fn cancelled(&self) -> bool {
@@ -67,6 +68,13 @@ impl RoundWork for Script {
             .get(usize::from(request.key.seq - 3))
             .copied()
             .unwrap_or(StepStart::Started))
+    }
+
+    async fn run(&self, request: &StepRequest) -> Result<StepReport, Failed> {
+        self.run_all(std::slice::from_ref(request))
+            .await
+            .pop()
+            .unwrap_or(Err(Failed))
     }
 
     async fn run_all(&self, requests: &[StepRequest]) -> Vec<Result<StepReport, Failed>> {
@@ -106,9 +114,18 @@ impl RoundWork for Script {
         self.note(format!("stop {}", request.key.seq));
     }
 
-    async fn ask(&self, opening: GateOpening) -> Result<(), Failed> {
+    async fn ask(&self, opening: GateOpening) -> Result<AnswerGate, Failed> {
         self.note(format!("ask {} {}", opening.key.seq, opening.question));
-        Ok(())
+        Ok(AnswerGate {
+            seq: opening.key.seq,
+            answer: Outcome::answer(),
+            note: Some("Keep it".to_string()),
+            user_id: macro_user_id::user_id::MacroUserIdStr::try_from(
+                "macro|julia@example.com".to_string(),
+            )
+            .expect("valid"),
+            approved_control_files: None,
+        })
     }
 
     async fn close(&self, closing: ReviewRoundClosing) -> Result<Outcome, Failed> {
@@ -347,7 +364,7 @@ async fn a_reviewer_asking_past_its_questions_ends_the_run_for_a_person() {
     let (round, held) = walk(&script, 1).await;
 
     assert_eq!(round, Ok(Round::Ended(RunOutcome::Manual)));
-    assert_eq!(held, [7]);
+    assert_eq!(held, [3, 6, 7]);
     let asked = script.asked();
     let after_work: Vec<&str> = asked
         .iter()
@@ -400,4 +417,61 @@ async fn reviewers_of_a_flow_without_questions_never_ask() {
     let asked = script.asked();
     assert!(asked.contains(&"release 4".to_string()));
     assert!(!asked.iter().any(|asked| asked.starts_with("ask")));
+}
+
+/// A reviewer that goes on from its question and fails, before or after
+/// it claimed the asking Step's session, has both its own agent and the
+/// asking Step's stopped, and the round fails.
+#[tokio::test]
+async fn a_failed_reviewer_going_on_stops_the_asking_step_too() {
+    let script = Script {
+        ends: [(3, "question"), (6, "fail")].into(),
+        ..Script::default()
+    };
+
+    let (round, held) = walk(&script, 1).await;
+
+    assert_eq!(
+        round,
+        Ok(Round::Routed(
+            Outcome::try_from("pass".to_string()).expect("valid")
+        ))
+    );
+    assert!(held.is_empty());
+    let asked = script.asked();
+    let after_work: Vec<&str> = asked
+        .iter()
+        .skip_while(|asked| !asked.starts_with("ask"))
+        .map(String::as_str)
+        .collect();
+    assert_eq!(
+        after_work,
+        [
+            "ask 3 Question of step 3?",
+            "start 6",
+            "run 6",
+            "end 6 failed",
+            "stop 6",
+            "stop 3",
+            "close 3"
+        ]
+    );
+    assert!(script.closings.borrow()[0].failed);
+}
+
+/// A Run cancelled while a reviewer goes on from its question holds the
+/// asking Step as well as the one going on, so both are stopped with the
+/// Run, whether or not the session was claimed yet.
+#[tokio::test]
+async fn a_round_cancelled_while_a_reviewer_goes_on_holds_the_asking_step() {
+    let script = Script {
+        ends: [(3, "question"), (6, "fail")].into(),
+        cancelled: true,
+        ..Script::default()
+    };
+
+    let (round, held) = walk(&script, 1).await;
+
+    assert_eq!(round, Ok(Round::Ended(RunOutcome::Cancelled)));
+    assert_eq!(held, [3, 6]);
 }

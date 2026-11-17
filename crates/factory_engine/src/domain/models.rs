@@ -53,6 +53,11 @@ pub struct StepRequest {
     /// Step `question`: its Flow lets agents ask.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub may_ask: bool,
+    /// How many questions its work may still ask before the next one ends
+    /// the Run for a person: the Flow's, less those the Steps it goes on
+    /// from asked.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub questions_left: u8,
     /// The Step whose agent asked the question this Step goes on from, by
     /// its place: this Step works in that Step's session, with the owner's
     /// answer. None for a Step that starts its work.
@@ -72,6 +77,7 @@ impl StepRequest {
             visit,
             round: None,
             may_ask: false,
+            questions_left: 0,
             resumes: None,
         }
     }
@@ -88,15 +94,9 @@ impl StepRequest {
             visit,
             round: Some(round),
             may_ask: false,
+            questions_left: 0,
             resumes: None,
         }
-    }
-
-    /// This Step, letting its agent ask the Run's owner a question when
-    /// `may_ask`.
-    pub fn asking(mut self, may_ask: bool) -> Self {
-        self.may_ask = may_ask;
-        self
     }
 
     /// The Step `key` that goes on from this one's question, as the same
@@ -108,6 +108,10 @@ impl StepRequest {
             ..self.clone()
         }
     }
+}
+
+fn is_zero(value: &u8) -> bool {
+    *value == 0
 }
 
 /// How a Step ended, for its workflow to record.
@@ -150,6 +154,9 @@ pub struct StepInput<'a> {
     pub reviewer: bool,
     /// Whether its agent may ask the Run's owner a question.
     pub may_ask: bool,
+    /// How many questions its work may still ask before the next one ends
+    /// the Run for a person.
+    pub questions_left: u8,
     /// The Step whose question it goes on from, by its place: its agent
     /// goes on in that Step's session, with the owner's answer.
     pub resumes: Option<u16>,

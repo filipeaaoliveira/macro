@@ -292,7 +292,8 @@ async fn an_answered_question_has_the_same_role_go_on_with_the_answer() {
 
 /// A Step's work asks at most the Flow's questions: the next one goes to a
 /// person as a stop, ending the Run `manual` with the question in the
-/// Step's output, and the asking Step's agent is stopped.
+/// Step's output, and the agents of the Steps holding its session are
+/// stopped.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "Temporal doesn't exist in CI"]
 async fn a_question_past_the_step_s_questions_ends_the_run_for_a_person() {
@@ -324,7 +325,9 @@ async fn a_question_past_the_step_s_questions_ends_the_run_for_a_person() {
         tasks.iter().map(|task| task.resumes).collect::<Vec<_>>(),
         [None, Some(1), Some(2)]
     );
-    assert_eq!(agent.stops.load(Ordering::SeqCst), 1);
+    // Every Step of the walk is held, the last one working in the first
+    // one's session, so each is stopped.
+    assert_eq!(agent.stops.load(Ordering::SeqCst), 3);
     assert_eq!(agent.releases.load(Ordering::SeqCst), 0);
 }
 

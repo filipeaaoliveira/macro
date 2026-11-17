@@ -3,7 +3,9 @@ use factory_records::domain::models::{
     EntryId, Gate, GateAnswer, GateKind, MAX_QUESTION_BYTES, Outcome, Role, Step, StepEnd,
 };
 
-use super::{QUESTIONS_BUDGET, answered, answers_brief, gate_question, going_on_prompt};
+use super::{
+    QUESTIONS_BUDGET, answered, answers_brief, ask_instructions, gate_question, going_on_prompt,
+};
 
 /// The Step at `seq` of `entry`, by the Role `role`, that asked `question`
 /// and whose owner answered `answer`; none for a Gate still waiting.
@@ -116,14 +118,18 @@ fn the_step_going_on_is_told_its_answer() {
         asked(2, "planner", "Which folder?", None),
     ];
 
-    let prompt = going_on_prompt(&steps, 1).expect("an answer");
+    let prompt = going_on_prompt(&steps, 1, 1).expect("an answer");
 
     assert!(prompt.starts_with("## The run's owner answered your question"));
     assert!(prompt.contains(
         "<owner-answers>\nYour question: CSV or JSON?\nThe owner's answer: CSV\n</owner-answers>"
     ));
-    assert_eq!(going_on_prompt(&steps, 2), None);
-    assert_eq!(going_on_prompt(&steps, 3), None);
+    assert!(prompt.contains("You may ask one more question in this step"));
+    let none_left = going_on_prompt(&steps, 1, 0).expect("an answer");
+    assert!(none_left.contains("You have no questions left in this step"));
+    assert!(!none_left.contains("may ask"));
+    assert_eq!(going_on_prompt(&steps, 2, 1), None);
+    assert_eq!(going_on_prompt(&steps, 3, 1), None);
 }
 
 /// A question too long for a Gate is cut, between two characters, to fit
@@ -137,4 +143,15 @@ fn a_long_question_is_cut_to_fit_its_gate() {
     assert!(question.len() <= MAX_QUESTION_BYTES);
     assert!(question.ends_with(" (cut)"));
     assert_eq!(gate_question("  Which folder?\n"), "Which folder?");
+}
+
+/// An agent that may ask is told how many questions it has left, and that
+/// asking past them ends the Run for a person.
+#[test]
+fn the_agent_is_told_how_many_questions_it_has_left() {
+    let two = ask_instructions(2);
+    assert!(two.starts_with("\n## Asking the run's owner"));
+    assert!(two.contains("You may ask 2 questions in this step"));
+    assert!(!two.contains("QUESTIONS_LEFT"));
+    assert!(ask_instructions(0).contains("You have no questions left in this step"));
 }

@@ -9,3 +9,5 @@ likely answer. It ends your turn; the owner's answer comes back to you in
 this same session, and you go on with the step from there. Ask only what
 you need: the owner is a person, and the run waits on them. Never ask for
 approval of work you can check yourself.
+
+QUESTIONS_LEFT

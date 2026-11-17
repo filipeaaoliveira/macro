@@ -175,6 +175,7 @@ fn reply_step(run_id: RunId, seq: u16) -> StepRequest {
         visit: 1,
         round: None,
         may_ask: false,
+        questions_left: 0,
         resumes: None,
     }
 }

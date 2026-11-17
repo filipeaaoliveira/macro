@@ -32,6 +32,8 @@
 //! recorded.
 
 mod review_round;
+mod step;
+mod work;
 
 use std::time::Duration;
 
@@ -44,14 +46,16 @@ use temporalio_sdk::{
     WorkflowTermination,
 };
 
-use crate::domain::flow::{Entry, Flow};
+use crate::domain::flow::Flow;
 use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening, OpenGate, check_answer};
 use crate::domain::interpreter::{Interpreter, NextStep};
-use crate::domain::models::{RunFinish, RunStart, StepEnding, StepReport, StepRequest, StepStart};
+use crate::domain::models::{RunFinish, RunStart, StepReport, StepRequest};
 use crate::domain::questions::gate_question;
 use crate::inbound::temporal::activities::FactoryActivities;
 use crate::temporal::{ANSWER_GATE_UPDATE, FLOW_WORKFLOW};
-use review_round::{Panel, Round, TemporalRound, review_round};
+use review_round::{Panel, Round, review_round};
+use step::walk_step;
+use work::TemporalWork;
 
 /// What a Step whose work failed for good shows its owner.
 const FAILED_STEP_OUTPUT: &str = "The step's work failed. The factory service's logs say why.";
@@ -130,212 +134,63 @@ impl FlowWorkflow {
         // A Flow that cannot go on still records the Run's end, then fails
         // the workflow with why, for Temporal to show.
         let mut stopped = None;
-        // The Step whose agent may still hold what its work used: from its
-        // work's start until the agent is stopped or let go.
+        // The Steps whose agents may still hold what their work used: from
+        // a Step's work's start until its agent is stopped or let go, and
+        // the Steps it goes on from, whose session it works in.
         let mut held: Vec<StepRequest> = Vec::new();
         // Whether agents may ask the Run's owner questions, and how many
         // each Step's work may ask. A Flow without them, as every Run
         // started before them carries, never takes their path, so its
         // history replays as before.
         let questions = Questions::of(&start.flow);
-        // The Step whose agent asked a question its owner answered, with
-        // its entry and how many questions its work asked so far: the next
-        // Step goes on from it, in its session.
-        let mut going_on: Option<(&Entry, StepRequest, u8)> = None;
         let outcome = loop {
-            // A Step that goes on from an answered question takes the next
-            // place, as the same visit of its entry; any other Step is the
-            // one the interpreter names next.
-            let (entry, request, asked) = match going_on.take() {
-                Some((entry, asking, asked)) => match interpreter.resume(&mut state) {
-                    Ok(Some(seq)) => {
-                        let key = StepKey {
-                            run_id: start.run_id,
-                            seq,
-                        };
-                        (entry, asking.going_on(key), asked)
-                    }
-                    // The asking Step's session is still held, and stopped
-                    // once the Run's end is recorded.
-                    Ok(None) => break RunOutcome::Blocked,
-                    Err(error) => {
+            let next = match interpreter.next_step(&mut state) {
+                Ok(next) => next,
+                Err(error) => {
+                    stopped = Some(error);
+                    break RunOutcome::Failed;
+                }
+            };
+            let (entry, visit, seq) = match next {
+                NextStep::End(outcome) => break outcome,
+                NextStep::Run { entry, visit, seq } => (entry, visit, seq),
+            };
+            let temporal = TemporalWork {
+                ctx,
+                work_options: &work_options,
+                record_options: &record_options,
+            };
+            let mut resume = || interpreter.resume(&mut state).ok().flatten();
+
+            // A review panel runs its reviewers' Steps at once, as one
+            // review round, whose outcome the Flow routes; any other entry
+            // runs one Step, and the Steps that go on from its agent's
+            // questions.
+            let walked = if entry.reviewers.is_empty() {
+                let key = StepKey {
+                    run_id: start.run_id,
+                    seq,
+                };
+                let request = questions.offer(StepRequest::of(key, entry, visit), 0);
+                walk_step(&temporal, entry, request, questions, &mut held, &mut resume).await?
+            } else {
+                let panel = Panel {
+                    run_id: start.run_id,
+                    entry,
+                    visit,
+                    seq,
+                    questions,
+                };
+                review_round(&temporal, &panel, &mut held, &mut resume).await?
+            };
+            match walked {
+                Round::Routed(outcome) => {
+                    if let Err(error) = interpreter.record(&mut state, &outcome) {
                         stopped = Some(error);
                         break RunOutcome::Failed;
                     }
-                },
-                None => {
-                    let next = match interpreter.next_step(&mut state) {
-                        Ok(next) => next,
-                        Err(error) => {
-                            stopped = Some(error);
-                            break RunOutcome::Failed;
-                        }
-                    };
-                    let (entry, visit, seq) = match next {
-                        NextStep::End(outcome) => break outcome,
-                        NextStep::Run { entry, visit, seq } => (entry, visit, seq),
-                    };
-
-                    // A review panel runs its reviewers' Steps at once, as
-                    // one review round, whose outcome the Flow routes.
-                    if !entry.reviewers.is_empty() {
-                        let panel = Panel {
-                            run_id: start.run_id,
-                            entry,
-                            visit,
-                            seq,
-                            questions,
-                        };
-                        let temporal = TemporalRound {
-                            ctx,
-                            work_options: &work_options,
-                            record_options: &record_options,
-                        };
-                        let mut resume = || interpreter.resume(&mut state).ok().flatten();
-                        let round = review_round(&temporal, &panel, &mut held, &mut resume).await?;
-                        match round {
-                            Round::Routed(outcome) => {
-                                if let Err(error) = interpreter.record(&mut state, &outcome) {
-                                    stopped = Some(error);
-                                    break RunOutcome::Failed;
-                                }
-                                continue;
-                            }
-                            Round::Ended(outcome) => break outcome,
-                        }
-                    }
-
-                    let key = StepKey {
-                        run_id: start.run_id,
-                        seq,
-                    };
-                    let request = StepRequest::of(key, entry, visit).asking(questions.may_ask);
-                    (entry, request, 0)
                 }
-            };
-            let key = request.key;
-
-            let started = ctx
-                .execute_activity(
-                    FactoryActivities::start_step,
-                    request.clone(),
-                    record_options.clone(),
-                )
-                .await;
-            match started {
-                Ok(StepStart::Started) => {}
-                // The Run ended before this workflow started, cancelled or
-                // swept: the workflow ends as the Run did.
-                Ok(StepStart::RunEnded(outcome)) => break outcome,
-                Err(_) if is_cancelled(ctx) => break RunOutcome::Cancelled,
-                Err(error) => return Err(error.into()),
-            }
-
-            // A Step that still fails for good ends `failed`, with
-            // why as its output; the Flow may route it like any other
-            // outcome. A Step stopped by cancelling the Run ends the Run.
-            // A Step that goes on from a question works in the asking
-            // Step's session, which it now holds in its place.
-            held = vec![request.clone()];
-            let worked = ctx
-                .execute_activity(
-                    FactoryActivities::run_step,
-                    request.clone(),
-                    work_options.clone(),
-                )
-                .await;
-            let (report, failed) = match worked {
-                Ok(report) => (report, false),
-                Err(_) if is_cancelled(ctx) => break RunOutcome::Cancelled,
-                // The owner reads the output; why the work failed is
-                // internal detail, which the worker logged.
-                Err(_) => (
-                    StepReport {
-                        outcome: Outcome::failed(),
-                        output: FAILED_STEP_OUTPUT.to_string(),
-                    },
-                    true,
-                ),
-            };
-            let reported = report.outcome.clone();
-            let question = questions.asked(&request, &report);
-            let ended = ctx
-                .execute_activity(
-                    FactoryActivities::end_step,
-                    StepEnding { key, report },
-                    record_options.clone(),
-                )
-                .await;
-            if ended.is_err() {
-                if is_cancelled(ctx) {
-                    break RunOutcome::Cancelled;
-                }
-                ended?;
-            }
-
-            // Work that failed for good has its agent stopped once the Step's
-            // end is recorded, so the Step reads as failed meanwhile, and an
-            // entry that fixes or retries it never runs beside it. A Step
-            // that asked a question keeps its session for the Step that goes
-            // on with the answer. Otherwise no attempt of the Step's work
-            // comes once its end is recorded, so its agent lets go of the
-            // Step's session.
-            if failed {
-                held.clear();
-                stop(ctx, &request).await;
-            } else if question.is_none() && !std::mem::take(&mut held).is_empty() {
-                let released = ctx
-                    .execute_activity(
-                        FactoryActivities::release_step,
-                        request.clone(),
-                        record_options.clone(),
-                    )
-                    .await;
-                if released.is_err() {
-                    if is_cancelled(ctx) {
-                        held = vec![request.clone()];
-                        break RunOutcome::Cancelled;
-                    }
-                    released?;
-                }
-            }
-
-            // An agent's question goes to the Run's owner on a question
-            // Gate; the Step's Role then goes on with the answer. One past
-            // the Step's questions ends the Run for a person instead, with
-            // the question in the Step's output.
-            if let Some(question) = question {
-                let asked = asked.saturating_add(1);
-                if asked > questions.most {
-                    break RunOutcome::Manual;
-                }
-                match ask(ctx, question.opening(key)).await {
-                    Ok(_) => {}
-                    Err(_) if is_cancelled(ctx) => break RunOutcome::Cancelled,
-                    Err(termination) => return Err(termination),
-                }
-                going_on = Some((entry, request, asked));
-                continue;
-            }
-
-            let outcome = match &entry.gate {
-                Some(gate) if reported == Outcome::done() => {
-                    let opening = GateOpening {
-                        key,
-                        question: gate.question.clone(),
-                        answers: gate.answers.clone(),
-                    };
-                    match ask(ctx, opening).await {
-                        Ok(answer) => answer.answer,
-                        Err(_) if is_cancelled(ctx) => break RunOutcome::Cancelled,
-                        Err(termination) => return Err(termination),
-                    }
-                }
-                _ => reported,
-            };
-            if let Err(error) = interpreter.record(&mut state, &outcome) {
-                stopped = Some(error);
-                break RunOutcome::Failed;
+                Round::Ended(outcome) => break outcome,
             }
         };
 
@@ -479,11 +334,26 @@ pub(super) struct Questions {
 }
 
 impl Questions {
-    /// The questions `flow` lets its agents ask.
+    /// The questions `flow` lets its agents ask: none when it sets none,
+    /// or zero.
     pub(super) fn of(flow: &Flow) -> Self {
+        let most = flow.questions.unwrap_or(0);
         Self {
-            may_ask: flow.questions.is_some(),
-            most: flow.questions.unwrap_or(0),
+            may_ask: most > 0,
+            most,
+        }
+    }
+
+    /// `request`, whose work asked `asked` questions so far, offering its
+    /// agent the questions left, when agents may ask.
+    pub(super) fn offer(self, request: StepRequest, asked: u8) -> StepRequest {
+        if !self.may_ask {
+            return request;
+        }
+        StepRequest {
+            may_ask: true,
+            questions_left: self.most.saturating_sub(asked),
+            ..request
         }
     }
 

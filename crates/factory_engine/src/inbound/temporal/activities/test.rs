@@ -117,6 +117,7 @@ fn plan_request() -> StepRequest {
         visit: 1,
         round: None,
         may_ask: false,
+        questions_left: 0,
         resumes: None,
     }
 }

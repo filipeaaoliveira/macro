@@ -93,6 +93,7 @@ fn input(run_id: RunId) -> StepInput<'static> {
         review: None,
         reviewer: false,
         may_ask: false,
+        questions_left: 0,
         resumes: None,
     }
 }

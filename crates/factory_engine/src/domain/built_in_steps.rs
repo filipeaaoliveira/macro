@@ -23,7 +23,7 @@ use crate::domain::ports::{
     AgentFailure, MainWatches, PullRequests, Retryable, StepAgent, StepExecutor,
 };
 use crate::domain::pull_request_steps::{PullRequestStepError, PullRequestSteps};
-use crate::domain::questions::{ASK_INSTRUCTIONS, answers_brief, going_on_prompt};
+use crate::domain::questions::{answers_brief, ask_instructions, going_on_prompt};
 use crate::domain::review_rounds::{blockers_brief, fenced_review};
 
 /// What the agent is told for a `plan` Step.
@@ -248,10 +248,9 @@ where
         // A Step that goes on from its agent's question prompts the session
         // the agent asked in with the owner's answer: the agent has the
         // Step's instructions and its work so far there.
-        let prompt = match input.resumes {
-            Some(asked) => {
-                going_on_prompt(input.earlier, asked).ok_or(BuiltInStepError::Unanswered(asked))?
-            }
+        let asked_prompt = match input.resumes {
+            Some(asked) => going_on_prompt(input.earlier, asked, input.questions_left)
+                .ok_or(BuiltInStepError::Unanswered(asked))?,
             None => prompt(instructions, &outcomes, input),
         };
         let task = AgentTask {
@@ -260,7 +259,7 @@ where
             step: step.clone(),
             role: agent_role(step, input.role)
                 .ok_or_else(|| BuiltInStepError::NotAnAgentStep(step.clone()))?,
-            prompt,
+            prompt: asked_prompt,
             outcomes: outcomes.clone(),
             repo_url: input.repository.map(|repository| repository.url.clone()),
             answer_by,
@@ -448,7 +447,11 @@ fn prompt(instructions: &str, outcomes: &[Outcome], input: StepInput<'_>) -> Str
         .map(|outcome| format!("`{outcome}`"))
         .collect::<Vec<_>>()
         .join(", ");
-    let ask = if input.may_ask { ASK_INSTRUCTIONS } else { "" };
+    let ask = if input.may_ask {
+        ask_instructions(input.questions_left)
+    } else {
+        String::new()
+    };
     let workplace = input
         .repository
         .map(|repository| workplace(repository, &run_branch(input.key.run_id)))
