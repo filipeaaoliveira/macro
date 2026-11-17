@@ -123,7 +123,7 @@ describe('ControlFilesSettings', () => {
     vi.mocked(factoryClient.setControlFiles).mockResolvedValue(
       err([
         {
-          code: 'BAD_REQUEST',
+          code: 'HTTP_ERROR',
           message:
             '"./ci.yml" is not a glob pattern of a path from the repository\'s root',
         },

@@ -166,8 +166,8 @@ export const factoryClient = {
   /**
    * Sets the team's Control File patterns; `null` goes back to the default.
    * Someone who doesn't administer the team fails `FORBIDDEN`; a pattern
-   * that doesn't read fails `BAD_REQUEST`. Either carries the service's
-   * message.
+   * that doesn't read fails `HTTP_ERROR` (400). Either carries the
+   * service's message.
    */
   setControlFiles(patterns: string[] | null) {
     return fetchWithToken<ControlFilesSettings>(
