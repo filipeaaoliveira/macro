@@ -973,7 +973,7 @@ describe('RunView', () => {
       ],
     });
 
-    expect(await screen.findByText('You answered:')).toBeTruthy();
+    expect(await screen.findByText('Answered:')).toBeTruthy();
     expect(screen.getByText('Yes, in red')).toBeTruthy();
     expect(screen.queryByText('The Planner has a question')).toBeNull();
   });

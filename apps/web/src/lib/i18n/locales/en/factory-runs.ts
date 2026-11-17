@@ -115,7 +115,7 @@ export default {
     'The run waits for your answer, then the agent goes on with it.',
   answerLabel: 'Your answer',
   answerPlaceholder: 'Write your answer',
-  questionAnswered: 'You answered:',
+  questionAnswered: 'Answered:',
   // Control Files a Run changed that its request doesn't name.
   controlFilesTitle: 'Control files changed',
   controlFilesChanged:
