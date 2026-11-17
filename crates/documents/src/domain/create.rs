@@ -776,6 +776,7 @@ where
                             team_id,
                             property_values,
                             share_with_team,
+                            document_id: None,
                         },
                     )
                     .await?;

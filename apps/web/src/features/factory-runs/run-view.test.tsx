@@ -138,6 +138,79 @@ describe('RunView', () => {
     expect(screen.queryByText('Checks running…')).toBeNull();
   });
 
+  it('shows each review round with its blockers and follow-ups', async () => {
+    const { setRun } = mount({});
+    const reviewer = (seq: number, role: string, outcome: string) => ({
+      seq,
+      entry: 'review',
+      visit: 1,
+      startedAt: '2026-11-16T10:00:00Z',
+      role,
+      end: {
+        outcome,
+        output: `${role} checked the change.`,
+        endedAt: '2026-11-16T10:05:00Z',
+      },
+    });
+    setRun({
+      ...waitingRun,
+      steps: [
+        reviewer(3, 'correctness-reviewer', 'changes'),
+        reviewer(4, 'tests-reviewer', 'changes'),
+      ],
+      reviewRounds: [
+        {
+          round: 2,
+          seq: 3,
+          reviewers: 2,
+          headSha: 'bbbbbbbbbb',
+          diffBase: 'aaaaaaaaaa',
+          fixDiff: true,
+          startedAt: '2026-11-16T10:00:00Z',
+          end: { outcome: 'changes', endedAt: '2026-11-16T10:06:00Z' },
+          findings: [
+            {
+              seq: 3,
+              place: 1,
+              role: 'correctness-reviewer',
+              path: 'src/save.rs',
+              lines: { start: 12, end: 14 },
+              problem: 'The save drops its error',
+              why: 'A failed save looks saved',
+              blocksAnywhere: false,
+              kind: 'blocker',
+            },
+            {
+              seq: 4,
+              place: 1,
+              role: 'tests-reviewer',
+              path: 'src/load.rs',
+              problem: 'Loading has no test',
+              why: 'A broken load would pass',
+              blocksAnywhere: false,
+              kind: 'follow_up',
+              followUpTaskId: 'task-2',
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(await screen.findByText('Review round 2')).toBeTruthy();
+    expect(
+      screen.getByText(
+        /Reviews the fix since aaaaaaa · 1 blocker · 1 follow-up/
+      )
+    ).toBeTruthy();
+    expect(screen.getByText('src/save.rs, lines 12–14')).toBeTruthy();
+    expect(screen.getByText('The save drops its error')).toBeTruthy();
+    expect(screen.getByText('Blocker')).toBeTruthy();
+    expect(screen.getByText('A failed save looks saved')).toBeTruthy();
+    const task = screen.getByText('Follow-up task').closest('a');
+    expect(task?.getAttribute('href')).toMatch(/\/app\/task\/task-2$/);
+    expect(screen.getByText('Loading has no test')).toBeTruthy();
+  });
+
   it('answers the open Gate once, with the note', async () => {
     let finish!: (result: RunActionResult) => void;
     const answerGate = vi.fn(

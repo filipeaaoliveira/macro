@@ -56,7 +56,10 @@ pub fn built_in_roles() -> Result<BTreeSet<Role>, FlowError> {
     let mut roles = BTreeSet::new();
     for flow in BUILT_IN_FLOWS {
         let flow = flow.read(|_| Some(StepUse::Work))?;
-        roles.extend(flow.entries.into_iter().filter_map(|entry| entry.role));
+        for entry in flow.entries {
+            roles.extend(entry.role);
+            roles.extend(entry.reviewers);
+        }
     }
     Ok(roles)
 }

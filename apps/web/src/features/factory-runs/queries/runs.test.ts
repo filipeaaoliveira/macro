@@ -49,6 +49,33 @@ const started: RunDetail = {
       ],
     },
   ],
+  reviewRounds: [
+    {
+      round: 1,
+      seq: 2,
+      reviewers: 1,
+      headSha: 'abc123',
+      diffBase: 'main',
+      fixDiff: false,
+      failure: null,
+      startedAt: '2026-11-16T09:01:00Z',
+      end: null,
+      findings: [
+        {
+          seq: 2,
+          place: 1,
+          role: null,
+          path: 'README.md',
+          lines: null,
+          problem: 'Names the old flag',
+          why: 'People follow it',
+          blocksAnywhere: false,
+          kind: null,
+          followUpTaskId: null,
+        },
+      ],
+    },
+  ],
 };
 
 const older: Run = {
@@ -99,6 +126,33 @@ describe('createAppRunsContext', () => {
               checks: ['web'],
               startedAt: '2026-11-16T09:00:02Z',
               end: undefined,
+            },
+          ],
+        },
+      ],
+      reviewRounds: [
+        {
+          round: 1,
+          seq: 2,
+          reviewers: 1,
+          headSha: 'abc123',
+          diffBase: 'main',
+          fixDiff: false,
+          failure: undefined,
+          startedAt: '2026-11-16T09:01:00Z',
+          end: undefined,
+          findings: [
+            {
+              seq: 2,
+              place: 1,
+              role: undefined,
+              path: 'README.md',
+              lines: undefined,
+              problem: 'Names the old flag',
+              why: 'People follow it',
+              blocksAnywhere: false,
+              kind: undefined,
+              followUpTaskId: undefined,
             },
           ],
         },

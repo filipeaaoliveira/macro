@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE factory_review_finding\n            SET follow_up_key = COALESCE(follow_up_key, $4)\n            WHERE run_id = $1 AND seq = $2 AND place = $3 AND kind = 'follow_up'\n            RETURNING follow_up_key AS \"follow_up_key!\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "follow_up_key!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Int4",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "ac81d8ac09c329d710e63e8493ab41bf5fdc4e87f43b37d2d65590d2842f3194"
+}

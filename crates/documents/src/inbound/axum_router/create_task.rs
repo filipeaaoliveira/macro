@@ -8,7 +8,9 @@ use entity_access::inbound::axum_extractors::{
     OptionalMacroUserTeamExtractorV2, ProjectBodyAccessLevelExtractorV2,
 };
 use entity_registry::CreationPrincipalExtractor;
-use macro_authorization::MacroAuthorizationService;
+use macro_authorization::{
+    AnyPrincipal, MacroAuthorization, MacroAuthorizationExtractor, MacroAuthorizationService,
+};
 use models_permissions::share_permission::access_level::{AccessLevel, EditAccessLevel};
 
 use super::DocumentRouterState;
@@ -35,7 +37,7 @@ use super::task_duplicates::spawn_task_duplicate_detection;
         (status = 500, body = model_error_response::ErrorResponse),
     )
 )]
-#[tracing::instrument(skip(state, optional_team, project))]
+#[tracing::instrument(skip(state, caller, optional_team, project))]
 pub async fn create_task_handler<
     T: DocumentService + DocumentCreationService,
     Svc: EntityAccessService,
@@ -43,6 +45,7 @@ pub async fn create_task_handler<
 >(
     State(state): State<DocumentRouterState<T, Svc, Auth>>,
     CreationPrincipalExtractor { principal, .. }: CreationPrincipalExtractor<Auth>,
+    caller: MacroAuthorizationExtractor<Auth, AnyPrincipal>,
     optional_team: OptionalMacroUserTeamExtractorV2<MemberTeamRole, Svc, Auth>,
     project: ProjectBodyAccessLevelExtractorV2<EditAccessLevel, CreateTaskRequest, Svc, Auth>,
 ) -> Result<Json<CreateTaskResponse>, DocumentError> {
@@ -51,6 +54,22 @@ pub async fn create_task_handler<
     let markdown = req.markdown.clone().unwrap_or_default();
 
     let mut metadata = NewDocumentMetadata::builder(task_name.clone());
+    // A service that retries names the id, so its retry finds the task;
+    // nobody else picks a document's id.
+    if let Some(document_id) = req.document_id {
+        if !matches!(caller.authorization, MacroAuthorization::Internal(_)) {
+            return Err(DocumentError::Forbidden(
+                "only an internal caller names a task's id".to_string(),
+            ));
+        }
+        // Documents are keyed by UUIDv7s, ordered by when they were made.
+        if document_id.get_version_num() != 7 {
+            return Err(DocumentError::BadRequest(
+                "a task's id must be a UUIDv7".to_string(),
+            ));
+        }
+        metadata = metadata.id(document_id);
+    }
     if let Some(project_id) = req.project_id {
         metadata = metadata.project_id(project_id);
     }

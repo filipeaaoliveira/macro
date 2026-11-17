@@ -1,9 +1,6 @@
 {
-	"description": "Takes a task to a merged pull request in a GitHub repository: plans the change and asks a person to approve the plan, writes it on the run's branch and runs the repository's own checks on it, has it reviewed and fixed, opens a pull request, waits for its checks and fixes what fails, then asks a person whether to merge the commit that passed, and merges it once the base branch's required checks pass. A review that still finds changes after three rounds leaves the pull request for a person, and checks that still fail after their last round leave the branch for one. A merge waits while the base branch's required checks fail, and asks again if they still fail after its wait.",
+	"description": "Takes a task to a merged pull request in a GitHub repository: plans the change and asks a person to approve the plan, writes it on the run's branch and runs the repository's own checks on it, has a panel of reviewers review it at once and fixes the blockers they find, reviewing each fix's changes again, opens a pull request, waits for its checks and fixes what fails, then asks a person whether to merge the commit that passed, and merges it once the base branch's required checks pass. A finding outside the changes under review becomes a follow-up task and does not hold the pull request. A review that still finds blockers after three rounds leaves the branch for a person, and checks that still fail after their last round leave the branch for one. A merge waits while the base branch's required checks fail, and asks again if they still fail after its wait.",
 	"repository": true,
-	"facts": {
-		"held": false
-	},
 	"entries": [
 		{
 			"id": "plan",
@@ -75,16 +72,13 @@
 		{
 			"id": "review",
 			"step": "review",
-			"role": "reviewer",
+			"reviewers": ["correctness-reviewer", "scope-reviewer", "tests-reviewer"],
 			"max_visits": 3,
 			"on_exhausted": [
 				{
 					"to": {
-						"kind": "entry",
-						"entry": "publish"
-					},
-					"set": {
-						"held": true
+						"kind": "end",
+						"outcome": "manual"
 					}
 				}
 			],
@@ -102,6 +96,22 @@
 						"to": {
 							"kind": "entry",
 							"entry": "fix"
+						}
+					}
+				],
+				"unresolved": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				],
+				"failed": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
 						}
 					}
 				]
@@ -161,18 +171,6 @@
 			"step": "ci",
 			"on": {
 				"green": [
-					{
-						"when": [
-							{
-								"fact": "held",
-								"equals": true
-							}
-						],
-						"to": {
-							"kind": "end",
-							"outcome": "manual"
-						}
-					},
 					{
 						"to": {
 							"kind": "entry",

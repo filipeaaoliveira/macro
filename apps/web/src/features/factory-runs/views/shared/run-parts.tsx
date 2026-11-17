@@ -50,6 +50,7 @@ export function RunContent(props: {
             mainHold={props.run.mainHold}
             baseRequiredChecks={props.run.baseRequiredChecks}
             baseBranch={props.run.repository?.baseBranch}
+            reviewRounds={props.run.reviewRounds}
             status={status()}
             time={props.controller.stepTime}
           />

@@ -12,7 +12,9 @@ use temporalio_sdk::activities::{ActivityContext, ActivityError};
 
 use crate::domain::gate::{GateAnswered, GateOpening};
 use crate::domain::models::{RunFinish, StepEnding, StepError, StepReport, StepRequest, StepStart};
-use crate::domain::ports::StepService;
+use crate::domain::ports::{ReviewService, StepService};
+use crate::domain::review_rounds::{ReviewRoundClosing, ReviewRoundOpening};
+use factory_records::domain::models::Outcome;
 
 /// How often a Step's work tells Temporal its worker is alive. The worker
 /// sends them on at most every few seconds (`MAX_HEARTBEAT_THROTTLE` in
@@ -77,16 +79,37 @@ impl<T: StepService> DynStepService for T {
     }
 }
 
+/// The review service as a trait object, as [`DynStepService`] is.
+#[async_trait::async_trait]
+trait DynReviewService: Send + Sync {
+    async fn open_round(&self, opening: ReviewRoundOpening) -> Result<bool, StepError>;
+
+    async fn close_round(&self, closing: ReviewRoundClosing) -> Result<Outcome, StepError>;
+}
+
+#[async_trait::async_trait]
+impl<T: ReviewService> DynReviewService for T {
+    async fn open_round(&self, opening: ReviewRoundOpening) -> Result<bool, StepError> {
+        ReviewService::open_round(self, opening).await
+    }
+
+    async fn close_round(&self, closing: ReviewRoundClosing) -> Result<Outcome, StepError> {
+        ReviewService::close_round(self, closing).await
+    }
+}
+
 /// The factory's activities.
 pub struct FactoryActivities {
     steps: Arc<dyn DynStepService>,
+    reviews: Arc<dyn DynReviewService>,
 }
 
 impl FactoryActivities {
-    /// The activities, over `steps`.
-    pub fn new(steps: impl StepService) -> Self {
+    /// The activities, over `steps` and the review panels' `reviews`.
+    pub fn new(steps: impl StepService, reviews: impl ReviewService) -> Self {
         Self {
             steps: Arc::new(steps),
+            reviews: Arc::new(reviews),
         }
     }
 }
@@ -238,6 +261,29 @@ impl FactoryActivities {
         answered: GateAnswered,
     ) -> Result<(), ActivityError> {
         self.steps.answer_gate(answered).await.map_err(failure)
+    }
+
+    /// Record the review round a review panel starts, before its
+    /// reviewers' Steps.
+    #[activity(name = "factory_open_review_round")]
+    pub async fn open_review_round(
+        self: Arc<Self>,
+        _ctx: ActivityContext,
+        opening: ReviewRoundOpening,
+    ) -> Result<bool, ActivityError> {
+        self.reviews.open_round(opening).await.map_err(failure)
+    }
+
+    /// End a review round once its reviewers' Steps ended, and say how it
+    /// ended: its Blockers told from its follow-ups, which become tasks.
+    /// It heartbeats while it goes, however many tasks it makes.
+    #[activity(name = "factory_close_review_round")]
+    pub async fn close_review_round(
+        self: Arc<Self>,
+        ctx: ActivityContext,
+        closing: ReviewRoundClosing,
+    ) -> Result<Outcome, ActivityError> {
+        beating(&ctx, self.reviews.close_round(closing)).await
     }
 
     /// Record how a Run ended.

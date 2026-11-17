@@ -6,21 +6,63 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 use super::{CreateTaskError, NewTask, NewTaskProperty, NewTaskPropertyValue, TaskEntityReference};
 use crate::DocumentStorageServiceClient;
 
-/// A task is created as the acting user, with its properties, and its
-/// document's id read back.
+fn follow_up() -> NewTask {
+    NewTask {
+        task_name: "Follow-up: the cache never expires".to_string(),
+        markdown: "Found in review.".to_string(),
+        project_id: Some(uuid::Uuid::from_u128(0xF00)),
+        share_with_team: false,
+        document_id: Some(uuid::Uuid::from_u128(0x101)),
+        ..NewTask::default()
+    }
+}
+
+/// The task is made as the user, with the internal key in the standard
+/// headers, in the project and with the id named.
 #[tokio::test]
-async fn a_task_is_created_as_the_acting_user() {
+async fn a_task_is_made_as_the_user_in_its_project() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/documents/create_task"))
+        .and(header("x-internal-auth-key", "internal-key"))
         .and(header(
-            "x-document-storage-service-auth-key",
-            "internal-key",
+            "x-internal-macro-user-id",
+            "macro|julia@example.com",
         ))
-        .and(header(
-            "x-document-storage-service-user-id",
-            "macro|user@example.com",
-        ))
+        .and(body_json(json!({
+            "taskName": "Follow-up: the cache never expires",
+            "markdown": "Found in review.",
+            "projectId": "00000000-0000-0000-0000-000000000f00",
+            "shareWithTeam": false,
+            "documentId": "00000000-0000-0000-0000-000000000101"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "documentId": "00000000-0000-7000-8000-000000000101",
+            "documentMetadata": {},
+            "token": "t",
+            "initialSnapshot": ""
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let made = DocumentStorageServiceClient::new("internal-key".into(), server.uri())
+        .create_task_for_user(&follow_up(), "macro|julia@example.com")
+        .await
+        .expect("made");
+
+    assert_eq!(made, "00000000-0000-7000-8000-000000000101");
+}
+
+/// A task is made as the acting user with its properties, the same
+/// standard headers, no id of its own, and its document's id read back.
+#[tokio::test]
+async fn a_task_is_made_with_its_properties() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/documents/create_task"))
+        .and(header("x-internal-auth-key", "internal-key"))
+        .and(header("x-internal-macro-user-id", "macro|user@example.com"))
         .and(body_json(json!({
             "taskName": "main is red",
             "markdown": "Checks fail.",
@@ -45,10 +87,6 @@ async fn a_task_is_created_as_the_acting_user() {
         .await;
 
     let task = NewTask {
-        task_name: "main is red".to_string(),
-        markdown: "Checks fail.".to_string(),
-        project_id: None,
-        share_with_team: true,
         property_values: vec![NewTaskProperty {
             property_id: "00000001-0000-0000-0000-000000000014".to_string(),
             value: NewTaskPropertyValue::EntityReference {
@@ -58,6 +96,7 @@ async fn a_task_is_created_as_the_acting_user() {
                 },
             },
         }],
+        ..NewTask::new("main is red", "Checks fail.")
     };
     let created = DocumentStorageServiceClient::new("internal-key".into(), server.uri())
         .create_task_for_user(&task, "macro|user@example.com")
@@ -66,45 +105,7 @@ async fn a_task_is_created_as_the_acting_user() {
     assert_eq!(created, "task-1");
 }
 
-/// A refusal is its own error, never a task.
-#[tokio::test]
-async fn a_refused_task_is_an_error() {
-    let server = MockServer::start().await;
-    Mock::given(method("POST"))
-        .and(path("/documents/create_task"))
-        .respond_with(ResponseTemplate::new(403))
-        .mount(&server)
-        .await;
-    let task = NewTask::new("main is red", "");
-    let created = DocumentStorageServiceClient::new("internal-key".into(), server.uri())
-        .create_task_for_user(&task, "macro|user@example.com")
-        .await;
-    assert!(
-        matches!(created, Err(CreateTaskError::Refused(status)) if status == 403),
-        "{created:?}"
-    );
-}
-
-/// A failing document storage is worth trying again.
-#[tokio::test]
-async fn a_failing_document_storage_is_unavailable() {
-    let server = MockServer::start().await;
-    Mock::given(method("POST"))
-        .and(path("/documents/create_task"))
-        .respond_with(ResponseTemplate::new(503))
-        .mount(&server)
-        .await;
-    let task = NewTask::new("main is red", "");
-    let created = DocumentStorageServiceClient::new("internal-key".into(), server.uri())
-        .create_task_for_user(&task, "macro|user@example.com")
-        .await;
-    assert!(
-        matches!(created, Err(CreateTaskError::Unavailable(_))),
-        "{created:?}"
-    );
-}
-
-/// A task with no properties sends none, as a caller that sets none reads.
+/// A task with no properties and no id of its own sends neither.
 #[tokio::test]
 async fn a_task_with_no_properties_sends_none() {
     let server = MockServer::start().await;
@@ -130,6 +131,36 @@ async fn a_task_with_no_properties_sends_none() {
         .await
         .expect("created");
     assert_eq!(created, "task-2");
+}
+
+/// A refusal is told apart from an outage, which is worth trying again:
+/// so are an unaccepted key or user, a timeout and throttling.
+#[tokio::test]
+async fn only_a_request_s_own_client_error_is_a_refusal() {
+    for (status, refused) in [
+        (400, true),
+        (409, true),
+        (401, false),
+        (403, false),
+        (408, false),
+        (429, false),
+        (503, false),
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(status))
+            .mount(&server)
+            .await;
+        let made = DocumentStorageServiceClient::new("internal-key".into(), server.uri())
+            .create_task_for_user(&follow_up(), "macro|julia@example.com")
+            .await;
+
+        match made {
+            Err(CreateTaskError::Refused(_)) => assert!(refused, "{status}"),
+            Err(CreateTaskError::Unavailable(_)) => assert!(!refused, "{status}"),
+            Ok(_) => panic!("{status} made a task"),
+        }
+    }
 }
 
 /// A comment on a passage is posted as the acting user.

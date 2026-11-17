@@ -1388,7 +1388,11 @@ that lists the merges since they last passed once it is filed; the Run
 merges nothing until they pass, even once its merge is approved, and asks
 again if they still fail after its wait. When the checks the base requires
 couldn't be read, or it requires none, a note says its merge doesn't wait
-on them. On desktop the Gate card (its question,
+on them. A review round shows on its first
+reviewer's Step (`Review round 2`, its outcome, whether it reviewed the whole
+change or the fix since a commit, and how many blockers and follow-ups it
+found), and each reviewer's findings on its own Step: Blocker, Follow-up or
+Follow-up task, the file and lines, and what is wrong. On desktop the Gate card (its question,
 a note field and one button per answer, the Flow's first answer primary) is
 pinned below them, the question and note scrolling inside past a few lines. On
 touch the pinned chrome between the handle and the Steps holds only the note

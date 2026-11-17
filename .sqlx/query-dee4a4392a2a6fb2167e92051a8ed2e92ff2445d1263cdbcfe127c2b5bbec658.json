@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO factory_reviewer_answer (run_id, seq, round_seq, reask_action_id)\n            VALUES ($1, $2, $3, $4)\n            ON CONFLICT (run_id, seq) DO UPDATE\n            SET reask_action_id = COALESCE(factory_reviewer_answer.reask_action_id, $4)\n            RETURNING reask_action_id AS \"reask_action_id!\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "reask_action_id!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Int4",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "dee4a4392a2a6fb2167e92051a8ed2e92ff2445d1263cdbcfe127c2b5bbec658"
+}

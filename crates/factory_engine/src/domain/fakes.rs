@@ -23,7 +23,12 @@ use crate::domain::models::{
     Check, CheckState, CheckSuite, CodeRepository, HeadChecks, Merging, OpenPullRequest, Opening,
     PullRequest, PullRequestState, RepositoryAccess, RequiredChecks,
 };
-use crate::domain::ports::{PullRequests, Retryable, TaskAccess, TaskDirectory, UserDirectory};
+use crate::domain::ports::{
+    FollowUpTask, PullRequests, Retryable, TaskAccess, TaskDirectory, UserDirectory,
+};
+use crate::domain::review_rounds::ChangedFile;
+
+mod review_rounds;
 
 /// The session an agent Step claimed, and what it handed back.
 #[derive(Clone)]
@@ -72,6 +77,16 @@ impl Retryable for FakeError {
 /// An answer recorded for a Gate, with the Control Files it approved.
 pub(crate) type Approval = (StepKey, Outcome, Option<Vec<String>>);
 
+/// A follow-up task [`FakeRepo`] made: whose, the task it follows up, and
+/// what it says.
+#[derive(Debug, Clone)]
+pub(crate) struct FollowUpMade {
+    pub(crate) owner: String,
+    pub(crate) of: Option<Uuid>,
+    pub(crate) task: FollowUpTask,
+    pub(crate) id: Uuid,
+}
+
 /// Runs, Steps and sessions in memory, with the same first-write-wins rules
 /// as the Postgres repository.
 #[derive(Clone, Default)]
@@ -105,6 +120,22 @@ pub(crate) struct FakeRepo {
     pub(crate) control_files: Arc<Mutex<BTreeMap<Uuid, Vec<String>>>>,
     /// The merges Runs made and the holds on their bases.
     pub(crate) main: Arc<Mutex<FakeMain>>,
+    /// Each Run's review rounds, with what their reviewers found.
+    pub(crate) review_rounds:
+        Arc<Mutex<Vec<(RunId, factory_records::domain::review_rounds::ReviewRound)>>>,
+    /// The follow-up tasks made, by their owner and the task each follows
+    /// up, in order.
+    pub(crate) follow_ups: Arc<Mutex<Vec<FollowUpMade>>>,
+    /// How many of the next follow-up tasks fail as an outage would, made
+    /// or not as `follow_ups_made_anyway` says.
+    pub(crate) follow_ups_fail: Arc<Mutex<usize>>,
+    /// Whether a follow-up task that fails is made all the same, as when
+    /// its answer is lost.
+    pub(crate) follow_ups_made_anyway: Arc<Mutex<bool>>,
+    /// Whether document storage refuses follow-up tasks.
+    pub(crate) follow_ups_refused: Arc<Mutex<bool>>,
+    /// The prompt each reviewer's Step was asked again in.
+    pub(crate) reasks: Arc<Mutex<Vec<(StepKey, Uuid)>>>,
 }
 
 /// Everyone has an account but `macro|nobody@example.com`.
@@ -136,6 +167,44 @@ impl TaskDirectory for FakeRepo {
         } else {
             Ok(TaskAccess::NotFound)
         }
+    }
+
+    async fn create_follow_up(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        of: Option<Uuid>,
+        follow_up: &FollowUpTask,
+        task_id: Uuid,
+    ) -> Result<crate::domain::ports::FollowUpMade, FakeError> {
+        use crate::domain::ports::FollowUpMade as Made;
+        if self.tasks.lock().expect("tasks").contains(&task_id) {
+            return Ok(Made::Made);
+        }
+        if *self.follow_ups_refused.lock().expect("refused") {
+            return Ok(Made::Refused);
+        }
+        let fails = {
+            let mut fails = self.follow_ups_fail.lock().expect("fail");
+            let failing = *fails > 0;
+            *fails = fails.saturating_sub(1);
+            failing
+        };
+        if !fails || *self.follow_ups_made_anyway.lock().expect("anyway") {
+            self.tasks.lock().expect("tasks").insert(task_id);
+            self.follow_ups
+                .lock()
+                .expect("follow ups")
+                .push(FollowUpMade {
+                    owner: user_id.as_ref().to_string(),
+                    of,
+                    task: follow_up.clone(),
+                    id: task_id,
+                });
+        }
+        if fails {
+            return Err(FakeError);
+        }
+        Ok(Made::Made)
     }
 }
 
@@ -862,6 +931,12 @@ pub(crate) struct FakeGithubState {
     pub(crate) refused_owners: BTreeSet<String>,
     /// When set, each read of the base branch waits to be let go.
     pub(crate) base_gate: Option<Arc<tokio::sync::Semaphore>>,
+    /// The commit the Run's branch is at, each time it is read next, in
+    /// order; the last one stays. None when the branch is not there.
+    pub(crate) branch_heads: VecDeque<Option<String>>,
+    /// The files each diff changed, by its base and head; a diff not here
+    /// cannot be listed in full.
+    pub(crate) diffs: BTreeMap<(String, String), Vec<ChangedFile>>,
 }
 
 /// GitHub in memory, for one Run's branch: opening its pull request makes
@@ -1055,6 +1130,32 @@ impl PullRequests for FakeGithub {
             return Ok(Some(Vec::new()));
         }
         Ok(state.changed.clone())
+    }
+
+    async fn branch_head(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        _branch: &str,
+    ) -> Result<Option<String>, FakeGithubError> {
+        let mut state = self.state();
+        let head = if state.branch_heads.len() > 1 {
+            state.branch_heads.pop_front()
+        } else {
+            state.branch_heads.front().cloned()
+        };
+        Ok(head.flatten())
+    }
+
+    async fn changed_files(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        base: &str,
+        head: &str,
+    ) -> Result<Option<Vec<ChangedFile>>, FakeGithubError> {
+        let diff = (base.to_string(), head.to_string());
+        Ok(self.state().diffs.get(&diff).cloned())
     }
 
     async fn open(

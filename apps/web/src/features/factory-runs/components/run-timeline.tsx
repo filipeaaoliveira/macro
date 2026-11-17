@@ -7,11 +7,17 @@ import { Badge, Button, Card, cn } from '@ui';
 import { CollapseTransition } from '@ui/components/CollapseTransition';
 import { createSignal, For, type JSX, Show } from 'solid-js';
 import { flowWordLabel, flowWordText } from '../core/flow-words';
-import type {
-  BaseRequiredChecks,
-  CheckRound,
-  MainHold,
-  RunStep,
+import {
+  type BaseRequiredChecks,
+  type CheckRound,
+  type MainHold,
+  findingCounts,
+  findingsOf,
+  type ReviewFinding,
+  type ReviewRound,
+  type RunStep,
+  roundStartingAt,
+  WHOLE_CHANGE,
 } from '../core/run';
 
 function stepLabel(step: Pick<RunStep, 'entry' | 'visit'>): string {
@@ -22,9 +28,10 @@ function stepLabel(step: Pick<RunStep, 'entry' | 'visit'>): string {
 
 /**
  * A Run's Steps, oldest first, on a rail like an agent's activity timeline.
- * Each Step shows its outcome and the rounds of checks it ran; its output
- * (an agent's plan, a review) and the checks' reports open below it as
- * markdown.
+ * Each Step shows its outcome and the rounds of checks it ran; a review
+ * round shows on its first reviewer's Step, and each reviewer's findings on
+ * its own. A Step's output (an agent's plan, a review) and the checks'
+ * reports open below it as markdown.
  */
 export function RunTimeline(props: {
   steps: RunStep[];
@@ -33,6 +40,7 @@ export function RunTimeline(props: {
   /** Why the base's required checks hold nothing, likewise. */
   baseRequiredChecks?: BaseRequiredChecks;
   baseBranch?: string;
+  reviewRounds?: ReviewRound[];
   /** Whether a Step's output starts open, e.g. the plan a Gate asks about. */
   outputOpen: (step: RunStep) => boolean;
   time: (value: string) => string;
@@ -43,6 +51,7 @@ export function RunTimeline(props: {
         {(step, index) => (
           <TimelineStep
             step={step}
+            reviewRounds={props.reviewRounds ?? []}
             first={index() === 0}
             latest={index() === props.steps.length - 1}
             mainHold={
@@ -65,6 +74,7 @@ export function RunTimeline(props: {
 
 function TimelineStep(props: {
   step: RunStep;
+  reviewRounds: ReviewRound[];
   first: boolean;
   latest: boolean;
   mainHold?: MainHold;
@@ -82,6 +92,8 @@ function TimelineStep(props: {
   const rounds = () => props.step.checks ?? [];
   const reports = () => rounds().filter((round) => round.end?.report.trim());
   const details = () => output() !== '' || reports().length > 0;
+  const round = () => roundStartingAt(props.reviewRounds, props.step.seq);
+  const findings = () => findingsOf(props.reviewRounds, props.step.seq);
 
   return (
     // Rail and dot sit where the agent activity timeline puts them
@@ -200,6 +212,12 @@ function TimelineStep(props: {
           <CheckRoundNote round={round} stepEnded={Boolean(props.step.end)} />
         )}
       </For>
+      <Show when={round()}>
+        {(round) => <ReviewRoundNote round={round()} />}
+      </Show>
+      <For each={findings()}>
+        {(finding) => <FindingNote finding={finding} />}
+      </For>
       <Show when={props.mainHold}>
         {(hold) => (
           <MainHoldNote hold={hold()} baseBranch={props.baseBranch ?? ''} />
@@ -311,6 +329,131 @@ function MainHoldNote(props: { hold: MainHold; baseBranch: string }) {
             {t('factoryRuns.mainHoldTask')}
           </a>
         )}
+      </Show>
+    </StepNote>
+  );
+}
+
+/**
+ * A review round: which, the diff it reviews, and once it ended, how, with
+ * how many of its findings block and how many became follow-ups.
+ */
+function ReviewRoundNote(props: { round: ReviewRound }) {
+  const counts = () => findingCounts(props.round);
+  return (
+    <StepNote>
+      <span class="flex min-w-0 items-center gap-2">
+        {t('factoryRuns.reviewRound', { round: props.round.round })}
+        <Show
+          when={props.round.end}
+          fallback={<span>{t('factoryRuns.reviewRoundReviewing')}</span>}
+        >
+          {(end) => (
+            <Badge variant="outline" size="xs">
+              {flowWordLabel(end().outcome)}
+            </Badge>
+          )}
+        </Show>
+      </span>
+      <span class="block text-ink-muted">
+        <Show
+          when={props.round.failure}
+          fallback={
+            <>
+              {props.round.fixDiff
+                ? t('factoryRuns.reviewRoundFixDiff', {
+                    commit: (props.round.diffBase ?? '').slice(0, 7),
+                  })
+                : t('factoryRuns.reviewRoundWhole')}
+              <Show when={props.round.end}>
+                {' · '}
+                {t('factoryRuns.reviewBlockers', { count: counts().blockers })}
+                {' · '}
+                {t('factoryRuns.reviewFollowUps', {
+                  count: counts().followUps,
+                })}
+              </Show>
+            </>
+          }
+        >
+          {(failure) =>
+            t('factoryRuns.reviewRoundNotOpened', { failure: failure() })
+          }
+        </Show>
+      </span>
+    </StepNote>
+  );
+}
+
+/** Where a finding is: its file, and its lines when it names some. */
+function findingPlace(finding: ReviewFinding): string {
+  if (finding.path === WHOLE_CHANGE) return t('factoryRuns.findingWholeChange');
+  const lines = finding.lines;
+  if (!lines) return finding.path;
+  if (lines.start === lines.end) {
+    return t('factoryRuns.findingLine', {
+      path: finding.path,
+      line: lines.start,
+    });
+  }
+  return t('factoryRuns.findingLines', {
+    path: finding.path,
+    start: lines.start,
+    end: lines.end,
+  });
+}
+
+function findingKind(finding: ReviewFinding): string {
+  if (finding.kind === 'blocker') return t('factoryRuns.findingBlocker');
+  if (finding.kind === 'follow_up') {
+    return finding.followUpTaskId
+      ? t('factoryRuns.findingFollowUpTask')
+      : t('factoryRuns.findingFollowUp');
+  }
+  return t('factoryRuns.findingFound');
+}
+
+/**
+ * One finding of a reviewer: what it is (a follow-up's badge opens its
+ * task), where, what is wrong and why.
+ */
+function FindingNote(props: { finding: ReviewFinding }) {
+  return (
+    <StepNote>
+      <span class="flex min-w-0 items-center gap-2">
+        <Show
+          when={props.finding.followUpTaskId}
+          fallback={
+            <Badge variant="outline" size="xs">
+              {findingKind(props.finding)}
+            </Badge>
+          }
+        >
+          {(taskId) => (
+            <a
+              href={buildSimpleEntityUrl({ type: 'task', id: taskId() })}
+              class="shrink-0"
+            >
+              <Badge variant="outline" size="xs">
+                {findingKind(props.finding)}
+              </Badge>
+            </a>
+          )}
+        </Show>
+        <span class="min-w-0 truncate font-mono">
+          {findingPlace(props.finding)}
+        </span>
+      </span>
+      <span class="block text-ink-muted">{props.finding.problem}</span>
+      <span class="block text-ink-muted">{props.finding.why}</span>
+      <Show
+        when={
+          props.finding.blocksAnywhere && props.finding.path !== WHOLE_CHANGE
+        }
+      >
+        <span class="block text-ink-muted">
+          {t('factoryRuns.findingFoundAgain')}
+        </span>
       </Show>
     </StepNote>
   );

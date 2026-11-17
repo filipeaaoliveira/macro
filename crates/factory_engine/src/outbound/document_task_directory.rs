@@ -3,12 +3,18 @@
 
 use agent_session::domain::session_task::TaskDocumentId;
 use document_storage_service_client::DocumentStorageServiceClient;
+use document_storage_service_client::task::{CreateTaskError, NewTask};
 use document_sub_type::DocumentSubType;
 use entity_access::domain::models::{AccessError, EntityType, ViewAccessLevel};
 use entity_access::domain::ports::EntityAccessService;
 use macro_user_id::user_id::MacroUserIdStr;
 
-use crate::domain::ports::{TaskAccess, TaskDirectory};
+use uuid::Uuid;
+
+#[cfg(test)]
+mod test;
+
+use crate::domain::ports::{FollowUpMade, FollowUpTask, TaskAccess, TaskDirectory};
 
 /// Whether a person may see a document comes from entity access, and
 /// whether it is a task from the document storage service, which owns
@@ -35,6 +41,9 @@ pub enum DocumentTaskDirectoryErr {
     /// The document storage service did not answer.
     #[error("the document could not be read: {0:?}")]
     Documents(rootcause::Report),
+    /// The task could not be made.
+    #[error("the task could not be made: {0}")]
+    Create(#[from] CreateTaskError),
 }
 
 impl<A: EntityAccessService> TaskDirectory for DocumentTaskDirectory<A> {
@@ -85,4 +94,82 @@ impl<A: EntityAccessService> TaskDirectory for DocumentTaskDirectory<A> {
             Ok(TaskAccess::NotATask)
         }
     }
+
+    #[tracing::instrument(err, skip(self, user_id, follow_up))]
+    async fn create_follow_up(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        of: Option<Uuid>,
+        follow_up: &FollowUpTask,
+        task_id: Uuid,
+    ) -> Result<FollowUpMade, Self::Err> {
+        self.make_follow_up(user_id, of, follow_up, task_id).await
+    }
+}
+
+impl<A> DocumentTaskDirectory<A> {
+    /// [`TaskDirectory::create_follow_up`], which needs no access check.
+    async fn make_follow_up(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        of: Option<Uuid>,
+        follow_up: &FollowUpTask,
+        task_id: Uuid,
+    ) -> Result<FollowUpMade, DocumentTaskDirectoryErr> {
+        // An earlier attempt may have made it: its id says so.
+        if self.made(task_id).await? {
+            return Ok(FollowUpMade::Made);
+        }
+
+        // A follow-up goes in the project of the task it follows up; the
+        // owner must still be able to add to it, as when they make a task.
+        // It is the owner's own, unshared, until they share it.
+        let project_id = match of {
+            Some(of) => self
+                .documents
+                .get_document_basic(&of.to_string())
+                .await
+                .map_err(documents)?
+                .and_then(|document| document.project_id)
+                .and_then(|project| Uuid::parse_str(&project).ok()),
+            None => None,
+        };
+        let task = NewTask {
+            task_name: follow_up.name.clone(),
+            markdown: follow_up.markdown.clone(),
+            project_id,
+            share_with_team: false,
+            document_id: Some(task_id),
+            property_values: Vec::new(),
+        };
+        match self
+            .documents
+            .create_task_for_user(&task, user_id.as_ref())
+            .await
+        {
+            // A task made under another id would be made again on every
+            // retry: that is a fault to stop at, never to try again.
+            Ok(made) if made == task_id.to_string() => Ok(FollowUpMade::Made),
+            Ok(made) => Ok(FollowUpMade::OtherId(made)),
+            // A refusal may be the conflict of an attempt that made it
+            // meanwhile.
+            Err(CreateTaskError::Refused(_)) if self.made(task_id).await? => Ok(FollowUpMade::Made),
+            Err(CreateTaskError::Refused(_)) => Ok(FollowUpMade::Refused),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    /// Whether the task `task_id` is there.
+    async fn made(&self, task_id: Uuid) -> Result<bool, DocumentTaskDirectoryErr> {
+        let document = self
+            .documents
+            .get_document_basic(&task_id.to_string())
+            .await
+            .map_err(documents)?;
+        Ok(document.is_some_and(|document| document.deleted_at.is_none()))
+    }
+}
+
+fn documents(error: impl std::fmt::Display) -> DocumentTaskDirectoryErr {
+    DocumentTaskDirectoryErr::Documents(rootcause::report!("{error:#}"))
 }

@@ -160,6 +160,11 @@ pub struct Entry {
     /// factory's agent definition says which Agents fill it.
     #[serde(default)]
     pub role: Option<Role>,
+    /// The Roles of a review panel, in place of `role`: the entry's Step
+    /// runs once for each, at once, each in a Step of its own, as one
+    /// review round, whose outcome the Flow routes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reviewers: Vec<Role>,
     /// Conditions on the Run's facts; when one does not hold the entry is
     /// skipped and the Run goes to its `next`.
     #[serde(default)]
@@ -247,6 +252,21 @@ pub enum FlowError {
     /// fill.
     #[error("an agent does entry {0}'s step, and it names no role")]
     NoRole(EntryId),
+    /// A review panel's entry also names a single Role, or a Gate.
+    #[error("entry {0} names reviewers, and a role or a gate beside them")]
+    ReviewersAndRole(EntryId),
+    /// A review panel bounded in rounds says nowhere for its last round's
+    /// unresolved Blockers to go.
+    #[error("entry {0} bounds its review rounds and routes no `unresolved`")]
+    NoUnresolvedRoute(EntryId),
+    /// A review panel names one Role twice.
+    #[error("entry {entry} names reviewer {role} twice")]
+    DuplicateReviewer {
+        /// The entry.
+        entry: EntryId,
+        /// The Role.
+        role: Role,
+    },
     /// An entry runs a Step the worker does not serve.
     #[error("entry {entry} runs step {step}, which no worker serves")]
     UnknownStep {
@@ -261,7 +281,7 @@ impl Flow {
     /// Read a Flow from its JSON definition and check that it holds together:
     /// unique entries, every entry, fact and Step it names known (`serves`
     /// says how a worker does each Step it serves), and a Role on every
-    /// entry an agent does.
+    /// entry an agent does, or the Roles of its review panel.
     pub fn parse(
         definition: serde_json::Value,
         serves: impl Fn(&StepName) -> Option<StepUse>,
@@ -270,6 +290,18 @@ impl Flow {
             .map_err(|error| FlowError::Unreadable(error.to_string()))?;
         flow.check(serves)?;
         Ok(flow)
+    }
+
+    /// Bound each review panel to `rounds` rounds, in place of the
+    /// `max_visits` the Flow gives it.
+    pub fn bound_review_rounds(&mut self, rounds: NonZeroU8) {
+        let panels = self
+            .entries
+            .iter_mut()
+            .filter(|entry| !entry.reviewers.is_empty());
+        for panel in panels {
+            panel.max_visits = Some(rounds);
+        }
     }
 
     fn check(&self, serves: impl Fn(&StepName) -> Option<StepUse>) -> Result<(), FlowError> {
@@ -292,11 +324,12 @@ impl Flow {
                         step: entry.step.clone(),
                     });
                 }
-                Some(StepUse::Agent) if entry.role.is_none() => {
+                Some(StepUse::Agent) if entry.role.is_none() && entry.reviewers.is_empty() => {
                     return Err(FlowError::NoRole(entry.id.clone()));
                 }
                 Some(_) => {}
             }
+            check_reviewers(entry)?;
 
             if let Some(gate) = &entry.gate {
                 check_gate(&entry.id, gate)?;
@@ -330,6 +363,35 @@ impl Flow {
         }
         Ok(())
     }
+}
+
+/// A review panel names each of its Roles once, and neither a single Role
+/// nor a Gate beside them: its outcome is the round's, which no person is
+/// asked about.
+fn check_reviewers(entry: &Entry) -> Result<(), FlowError> {
+    if entry.reviewers.is_empty() {
+        return Ok(());
+    }
+    if entry.role.is_some() || entry.gate.is_some() {
+        return Err(FlowError::ReviewersAndRole(entry.id.clone()));
+    }
+
+    // A last round that still finds Blockers routes `unresolved`: a panel
+    // bounded in rounds says where that goes.
+    let unresolved = Outcome::try_from("unresolved".to_string())
+        .map_err(|error| FlowError::Unreadable(error.to_string()))?;
+    if entry.max_visits.is_some() && !entry.on.contains_key(&unresolved) {
+        return Err(FlowError::NoUnresolvedRoute(entry.id.clone()));
+    }
+
+    let mut named = BTreeSet::new();
+    if let Some(twice) = entry.reviewers.iter().find(|role| !named.insert(*role)) {
+        return Err(FlowError::DuplicateReviewer {
+            entry: entry.id.clone(),
+            role: twice.clone(),
+        });
+    }
+    Ok(())
 }
 
 fn check_gate(entry: &EntryId, gate: &GateDefinition) -> Result<(), FlowError> {

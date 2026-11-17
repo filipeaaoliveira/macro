@@ -173,6 +173,7 @@ fn reply_step(run_id: RunId, seq: u16) -> StepRequest {
         step: StepName::try_from("reply".to_string()).expect("valid"),
         role: None,
         visit: 1,
+        round: None,
     }
 }
 

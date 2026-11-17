@@ -10,10 +10,12 @@ use temporalio_sdk::activities::ActivityError;
 use tokio::sync::{Notify, watch};
 
 use super::{FactoryActivities, Liveness};
+use crate::domain::fakes::{FakeGithub, FakeRepo};
 use crate::domain::flow::StepName;
 use crate::domain::gate::{GateAnswered, GateOpening};
 use crate::domain::models::{RunFinish, StepEnding, StepError, StepReport, StepRequest, StepStart};
 use crate::domain::ports::StepService;
+use crate::domain::review_rounds::ReviewRoundsImpl;
 
 /// An activity context the test cancels, which counts its heartbeats.
 struct Context {
@@ -113,7 +115,17 @@ fn plan_request() -> StepRequest {
         step: StepName::try_from("plan".to_string()).expect("valid"),
         role: Some(Role::try_from("planner".to_string()).expect("valid")),
         visit: 1,
+        round: None,
     }
+}
+
+/// Review rounds over records with no Run: these tests open none.
+fn no_reviews() -> ReviewRoundsImpl<FakeRepo, FakeGithub, FakeRepo> {
+    ReviewRoundsImpl::new(
+        FakeRepo::default(),
+        FakeGithub::default(),
+        FakeRepo::default(),
+    )
 }
 
 /// The activity can't tell the Run's cancellation from the worker shutting
@@ -122,7 +134,7 @@ fn plan_request() -> StepRequest {
 #[tokio::test(start_paused = true)]
 async fn a_cancelled_step_drops_its_work_and_leaves_its_agent_be() {
     let steps = Steps::default();
-    let activities = FactoryActivities::new(steps.clone());
+    let activities = FactoryActivities::new(steps.clone(), no_reviews());
     let context = Context::default();
 
     let work = activities.work(&context, plan_request());
@@ -149,7 +161,7 @@ async fn stopping_a_step_heartbeats_while_it_goes() {
         stop_takes: Duration::from_secs(70),
         ..Steps::default()
     };
-    let activities = FactoryActivities::new(steps.clone());
+    let activities = FactoryActivities::new(steps.clone(), no_reviews());
     let context = Context::default();
 
     activities

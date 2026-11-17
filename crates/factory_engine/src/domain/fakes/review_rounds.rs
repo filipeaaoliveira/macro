@@ -1,0 +1,274 @@
+//! Review rounds in memory, with the same first-write-wins rules as the
+//! Postgres repository.
+
+use std::collections::BTreeMap;
+
+use chrono::Utc;
+use factory_records::domain::models::{Role, RunId, StepKey};
+use factory_records::domain::review_rounds::{
+    Finding, FindingClass, ReviewFinding, ReviewRound, ReviewRoundEnd, ReviewRoundFailure,
+    ReviewRoundOutcome, ReviewRoundRepository, ReviewRoundStart,
+};
+use uuid::Uuid;
+
+use super::{FakeError, FakeRepo};
+
+impl FakeRepo {
+    /// Give the Step `key` the Role its agent fills, as claiming its
+    /// session does.
+    pub(crate) fn with_step_role(&self, key: StepKey, role: Role) {
+        self.with_step(key, |step| step.role = Some(role));
+    }
+
+    fn with_round<T>(
+        &self,
+        run_id: RunId,
+        seq: u16,
+        change: impl FnOnce(&mut ReviewRound) -> T,
+    ) -> Option<T> {
+        let mut rounds = self.review_rounds.lock().expect("rounds");
+        rounds
+            .iter_mut()
+            .find(|(run, round)| *run == run_id && round.seq == seq)
+            .map(|(_, round)| change(round))
+    }
+
+    fn rounds_of_run(&self, run_id: RunId) -> Vec<ReviewRound> {
+        let mut rounds: Vec<ReviewRound> = self
+            .review_rounds
+            .lock()
+            .expect("rounds")
+            .iter()
+            .filter(|(run, _)| *run == run_id)
+            .map(|(_, round)| round.clone())
+            .collect();
+        rounds.sort_by_key(|round| round.seq);
+        // A finding reads with its Step's Role, as the Postgres join reads
+        // it.
+        for round in &mut rounds {
+            for finding in &mut round.findings {
+                let key = StepKey {
+                    run_id,
+                    seq: finding.seq,
+                };
+                finding.role = self.with_step(key, |step| step.role.clone()).flatten();
+            }
+        }
+        rounds
+    }
+}
+
+impl ReviewRoundRepository for FakeRepo {
+    type Err = FakeError;
+
+    async fn start_review_round(
+        &self,
+        run_id: RunId,
+        start: &ReviewRoundStart,
+    ) -> Result<ReviewRound, FakeError> {
+        if self.with_round(run_id, start.seq, |_| ()).is_none() {
+            let round = ReviewRound {
+                round: start.round,
+                seq: start.seq,
+                reviewers: start.reviewers,
+                head_sha: Some(start.head_sha.clone()),
+                diff_base: Some(start.diff_base.clone()),
+                fix_diff: start.fix_diff,
+                failure: None,
+                started_at: Utc::now(),
+                end: None,
+                findings: Vec::new(),
+                answered: Vec::new(),
+            };
+            self.review_rounds
+                .lock()
+                .expect("rounds")
+                .push((run_id, round));
+        }
+        self.rounds_of_run(run_id)
+            .into_iter()
+            .find(|round| round.seq == start.seq)
+            .ok_or(FakeError)
+    }
+
+    async fn fail_review_round(
+        &self,
+        run_id: RunId,
+        failure: &ReviewRoundFailure,
+    ) -> Result<ReviewRound, FakeError> {
+        if self.with_round(run_id, failure.seq, |_| ()).is_none() {
+            let round = ReviewRound {
+                round: failure.round,
+                seq: failure.seq,
+                reviewers: failure.reviewers,
+                head_sha: None,
+                diff_base: None,
+                fix_diff: false,
+                failure: Some(failure.failure.clone()),
+                started_at: Utc::now(),
+                end: Some(ReviewRoundEnd {
+                    outcome: ReviewRoundOutcome::Failed,
+                    ended_at: Utc::now(),
+                }),
+                findings: Vec::new(),
+                answered: Vec::new(),
+            };
+            self.review_rounds
+                .lock()
+                .expect("rounds")
+                .push((run_id, round));
+        }
+        self.rounds_of_run(run_id)
+            .into_iter()
+            .find(|round| round.seq == failure.seq)
+            .ok_or(FakeError)
+    }
+
+    async fn review_rounds(&self, run_id: RunId) -> Result<Vec<ReviewRound>, FakeError> {
+        Ok(self.rounds_of_run(run_id))
+    }
+
+    async fn runs_review_rounds(
+        &self,
+        ids: &[RunId],
+    ) -> Result<BTreeMap<RunId, Vec<ReviewRound>>, FakeError> {
+        let mut rounds = BTreeMap::new();
+        for id in ids {
+            let of_run = self.rounds_of_run(*id);
+            if !of_run.is_empty() {
+                rounds.insert(*id, of_run);
+            }
+        }
+        Ok(rounds)
+    }
+
+    async fn record_findings(
+        &self,
+        key: StepKey,
+        round_seq: u16,
+        findings: &[Finding],
+    ) -> Result<bool, FakeError> {
+        if self.with_step(key, |step| step.end.is_some()) != Some(false) {
+            return Ok(false);
+        }
+        let recorded: Vec<ReviewFinding> = (1..)
+            .zip(findings)
+            .map(|(place, finding)| ReviewFinding {
+                seq: key.seq,
+                place,
+                role: None,
+                path: finding.path.clone(),
+                lines: finding.lines,
+                problem: finding.problem.clone(),
+                why: finding.why.clone(),
+                blocks_anywhere: finding.blocks_anywhere,
+                kind: None,
+                follow_up_task_id: None,
+                follow_up_key: None,
+            })
+            .collect();
+        self.with_round(key.run_id, round_seq, |round| {
+            round.findings.retain(|finding| finding.seq != key.seq);
+            round.findings.extend(recorded);
+            round
+                .findings
+                .sort_by_key(|finding| (finding.seq, finding.place));
+            if !round.answered.contains(&key.seq) {
+                round.answered.push(key.seq);
+                round.answered.sort_unstable();
+            }
+        })
+        .ok_or(FakeError)?;
+        Ok(true)
+    }
+
+    async fn reask_action(
+        &self,
+        key: StepKey,
+        _round_seq: u16,
+        candidate: Uuid,
+    ) -> Result<Uuid, FakeError> {
+        let mut asked = self.reasks.lock().expect("reasks");
+        if let Some((_, kept)) = asked.iter().find(|(asked, _)| *asked == key) {
+            return Ok(*kept);
+        }
+        asked.push((key, candidate));
+        Ok(candidate)
+    }
+
+    async fn follow_up_key(
+        &self,
+        key: StepKey,
+        place: u16,
+        candidate: Uuid,
+    ) -> Result<Option<Uuid>, FakeError> {
+        let mut rounds = self.review_rounds.lock().expect("rounds");
+        let found = rounds
+            .iter_mut()
+            .filter(|(run, _)| *run == key.run_id)
+            .flat_map(|(_, round)| round.findings.iter_mut())
+            .find(|finding| finding.seq == key.seq && finding.place == place)
+            .filter(|finding| {
+                finding.kind == Some(factory_records::domain::review_rounds::FindingKind::FollowUp)
+            });
+        Ok(found.map(|finding| *finding.follow_up_key.get_or_insert(candidate)))
+    }
+
+    async fn classify_findings(
+        &self,
+        run_id: RunId,
+        round_seq: u16,
+        classes: &[FindingClass],
+    ) -> Result<(), FakeError> {
+        self.with_round(run_id, round_seq, |round| {
+            for class in classes {
+                let found = round
+                    .findings
+                    .iter_mut()
+                    .find(|finding| finding.seq == class.seq && finding.place == class.place);
+                if let Some(finding) = found {
+                    finding.kind.get_or_insert(class.kind);
+                }
+            }
+        });
+        Ok(())
+    }
+
+    async fn link_follow_up(
+        &self,
+        key: StepKey,
+        place: u16,
+        task_id: Uuid,
+    ) -> Result<(), FakeError> {
+        let mut rounds = self.review_rounds.lock().expect("rounds");
+        let found = rounds
+            .iter_mut()
+            .filter(|(run, _)| *run == key.run_id)
+            .flat_map(|(_, round)| round.findings.iter_mut())
+            .find(|finding| finding.seq == key.seq && finding.place == place);
+        if let Some(finding) = found
+            && finding.kind == Some(factory_records::domain::review_rounds::FindingKind::FollowUp)
+        {
+            finding.follow_up_task_id.get_or_insert(task_id);
+        }
+        Ok(())
+    }
+
+    async fn end_review_round(
+        &self,
+        run_id: RunId,
+        seq: u16,
+        outcome: ReviewRoundOutcome,
+    ) -> Result<Option<ReviewRound>, FakeError> {
+        self.with_round(run_id, seq, |round| {
+            round.end.get_or_insert(ReviewRoundEnd {
+                outcome,
+                ended_at: Utc::now(),
+            });
+        });
+        Ok(self
+            .rounds_of_run(run_id)
+            .into_iter()
+            .find(|round| round.seq == seq))
+    }
+}

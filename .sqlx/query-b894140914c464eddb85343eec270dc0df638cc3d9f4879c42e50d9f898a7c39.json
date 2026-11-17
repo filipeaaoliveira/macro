@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT run_id, round_seq, seq\n            FROM factory_reviewer_answer\n            WHERE run_id = ANY($1) AND read_at IS NOT NULL\n            ORDER BY run_id, round_seq, seq\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "run_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "round_seq",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "seq",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "b894140914c464eddb85343eec270dc0df638cc3d9f4879c42e50d9f898a7c39"
+}

@@ -9,6 +9,13 @@
 //! The interpreter is pure, so a replay walks the Flow the same way from the
 //! recorded outcomes and answers.
 //!
+//! An entry with `reviewers` is a review panel: the workflow opens a review
+//! round, starts a Step for each reviewer, runs their work at once, records
+//! their ends in the entry's order, and closes the round, whose outcome the
+//! interpreter gets. Only such an entry takes that path, and a Run carries
+//! its Flow in its input, so Runs started on a Flow without one replay as
+//! before.
+//!
 //! Cancelling the workflow cancels the running Step, whose activity drops
 //! its work before the cancellation completes, or the wait for an answer.
 //! The workflow then stops the Step's agent, which only it can tell was
@@ -16,6 +23,8 @@
 //! also ends its open Steps. A Step whose work failed for good has its agent
 //! stopped too; one that ended has its agent let go once its end is
 //! recorded.
+
+mod review_round;
 
 use std::time::Duration;
 
@@ -34,6 +43,7 @@ use crate::domain::interpreter::{Interpreter, NextStep};
 use crate::domain::models::{RunFinish, RunStart, StepEnding, StepReport, StepRequest, StepStart};
 use crate::inbound::temporal::activities::FactoryActivities;
 use crate::temporal::{ANSWER_GATE_UPDATE, FLOW_WORKFLOW};
+use review_round::{Panel, Round, TemporalRound, review_round};
 
 /// What a Step whose work failed for good shows its owner.
 const FAILED_STEP_OUTPUT: &str = "The step's work failed. The factory service's logs say why.";
@@ -56,6 +66,17 @@ const STEP_TOTAL: Duration = Duration::from_secs(2 * 60 * 60);
 
 /// How long recording a Step, a Gate or a Run's end may take.
 const RECORD_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// How long opening a review round may take: it reads GitHub.
+const OPEN_ROUND_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+
+/// How long one attempt to close a review round may take: it reads GitHub
+/// and makes a task of each follow-up, heartbeating as it goes.
+const CLOSE_ROUND_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+
+/// How long closing a review round may take in all, across its attempts:
+/// past it the round fails, and the Flow routes `failed`.
+const CLOSE_ROUND_TOTAL: Duration = Duration::from_secs(2 * 60 * 60);
 
 /// How long one attempt to stop a Step's agent may take: past the agent's
 /// own watch of its stopped session, and the session's delete.
@@ -103,7 +124,7 @@ impl FlowWorkflow {
         let mut stopped = None;
         // The Step whose agent may still hold what its work used: from its
         // work's start until the agent is stopped or let go.
-        let mut held = None;
+        let mut held: Vec<StepRequest> = Vec::new();
         let outcome = loop {
             let next = match interpreter.next_step(&mut state) {
                 Ok(next) => next,
@@ -116,6 +137,33 @@ impl FlowWorkflow {
                 NextStep::End(outcome) => break outcome,
                 NextStep::Run { entry, visit, seq } => (entry, visit, seq),
             };
+
+            // A review panel runs its reviewers' Steps at once, as one
+            // review round, whose outcome the Flow routes.
+            if !entry.reviewers.is_empty() {
+                let panel = Panel {
+                    run_id: start.run_id,
+                    entry,
+                    visit,
+                    seq,
+                };
+                let temporal = TemporalRound {
+                    ctx,
+                    work_options: &work_options,
+                    record_options: &record_options,
+                };
+                let round = review_round(&temporal, &panel, &mut held).await?;
+                match round {
+                    Round::Routed(outcome) => {
+                        if let Err(error) = interpreter.record(&mut state, &outcome) {
+                            stopped = Some(error);
+                            break RunOutcome::Failed;
+                        }
+                        continue;
+                    }
+                    Round::Ended(outcome) => break outcome,
+                }
+            }
 
             let key = StepKey {
                 run_id: start.run_id,
@@ -141,7 +189,7 @@ impl FlowWorkflow {
             // A Step that still fails for good ends `failed`, with
             // why as its output; the Flow may route it like any other
             // outcome. A Step stopped by cancelling the Run ends the Run.
-            held = Some(request.clone());
+            held = vec![request.clone()];
             let worked = ctx
                 .execute_activity(
                     FactoryActivities::run_step,
@@ -183,9 +231,9 @@ impl FlowWorkflow {
             // no attempt of the Step's work comes once its end is recorded,
             // so its agent lets go of the Step's session.
             if failed {
-                held = None;
+                held.clear();
                 stop(ctx, &request).await;
-            } else if held.take().is_some() {
+            } else if !std::mem::take(&mut held).is_empty() {
                 let released = ctx
                     .execute_activity(
                         FactoryActivities::release_step,
@@ -195,7 +243,7 @@ impl FlowWorkflow {
                     .await;
                 if released.is_err() {
                     if is_cancelled(ctx) {
-                        held = Some(request.clone());
+                        held = vec![request.clone()];
                         break RunOutcome::Cancelled;
                     }
                     released?;
@@ -233,10 +281,10 @@ impl FlowWorkflow {
 
         // A cancelled Run's Step may still have its agent at work. The Run
         // reads as cancelled first: stopping an agent may take a while.
-        if outcome == RunOutcome::Cancelled
-            && let Some(request) = held
-        {
-            stop(ctx, &request).await;
+        if outcome == RunOutcome::Cancelled {
+            for request in &held {
+                stop(ctx, request).await;
+            }
         }
 
         match (outcome, stopped) {
@@ -268,7 +316,7 @@ impl FlowWorkflow {
 /// cancelled, on a token of its own the cancellation does not reach, or after
 /// its work failed for good. It is tried until [`STOP_TOTAL`], then given up
 /// on: the Run must not wait on an agent that won't answer.
-async fn stop(ctx: &mut WorkflowContext<FlowWorkflow>, request: &StepRequest) {
+async fn stop(ctx: &WorkflowContext<FlowWorkflow>, request: &StepRequest) {
     let options =
         ActivityOptions::with_close_timeouts(ActivityCloseTimeouts::ScheduleAndStartToClose {
             schedule_to_close: STOP_TOTAL,

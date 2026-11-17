@@ -48,7 +48,9 @@ pub enum NextStep<'a> {
         /// Which visit of the entry this is, from 1.
         visit: u16,
         /// The Step's place among the Run's Steps, from 1. Unlike a visit, a
-        /// reset never numbers it again.
+        /// reset never numbers it again. A review panel's Steps take this
+        /// place and the ones after it, one per reviewer, in the order the
+        /// entry names them.
         seq: u16,
     },
     /// The Run has ended.
@@ -137,8 +139,10 @@ impl<'a> Interpreter<'a> {
             }
 
             // A Flow that loops ends blocked once the Run took its most
-            // Steps, however its resets count visits.
-            if state.steps >= MAX_STEPS {
+            // Steps, however its resets count visits. A review panel takes
+            // a Step for each of its reviewers, all or none.
+            let taken = u16::try_from(entry.reviewers.len().max(1)).unwrap_or(u16::MAX);
+            if state.steps.saturating_add(taken) > MAX_STEPS {
                 state.position = Position::End(RunOutcome::Blocked);
                 return Ok(NextStep::End(RunOutcome::Blocked));
             }
@@ -147,12 +151,9 @@ impl<'a> Interpreter<'a> {
                 .checked_add(1)
                 .ok_or_else(|| InterpreterError::TooManyVisits(entry.id.clone()))?;
             state.visits.insert(entry.id.clone(), visit);
-            state.steps += 1;
-            return Ok(NextStep::Run {
-                entry,
-                visit,
-                seq: state.steps,
-            });
+            let seq = state.steps + 1;
+            state.steps += taken;
+            return Ok(NextStep::Run { entry, visit, seq });
         }
         Err(InterpreterError::NoStepToRun)
     }

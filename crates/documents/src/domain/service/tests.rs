@@ -2882,6 +2882,7 @@ async fn default_task_properties_assign_the_acting_user_and_never_a_team_bot() {
                 team_id: None,
                 property_values: None,
                 share_with_team: false,
+                document_id: None,
             },
         )
         .await

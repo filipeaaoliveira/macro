@@ -68,6 +68,52 @@ export type RunStep = {
   checks?: CheckRound[];
 };
 
+/**
+ * What a reviewer found: where, what is wrong and why. Once its round ends
+ * it is a `blocker`, in the diff the round reviewed, which the fix gets, or
+ * a `follow_up`, outside it, which became a task of its own.
+ */
+export type ReviewFinding = {
+  /** The reviewer's Step. */
+  seq: number;
+  place: number;
+  /** The reviewer's Role, as the Flow names it. */
+  role?: string;
+  path: string;
+  lines?: { start: number; end: number };
+  problem: string;
+  why: string;
+  /** A blocker of the round before found again, or an answer that never
+   * read: it blocks wherever it is. */
+  blocksAnywhere: boolean;
+  /** Unset while its round reviews. */
+  kind?: 'blocker' | 'follow_up';
+  /** The task a follow-up became, when it was made. */
+  followUpTaskId?: string;
+};
+
+/**
+ * One round of a review panel: its reviewers review at once, each in a
+ * Step of its own from `seq`, the Run's whole change in the first round and
+ * the fix diff, what the fix changed since, in a later one.
+ */
+export type ReviewRound = {
+  round: number;
+  /** The place of its first Step. */
+  seq: number;
+  reviewers: number;
+  /** Unset for a round that could not open. */
+  headSha?: string;
+  /** Where the diff under review starts: a branch, or a commit. */
+  diffBase?: string;
+  fixDiff: boolean;
+  /** Why the round could not open, when it could not. */
+  failure?: string;
+  startedAt: string;
+  end?: { outcome: 'pass' | 'changes' | 'failed'; endedAt: string };
+  findings: ReviewFinding[];
+};
+
 /** An Agent that couldn’t start a Step, so the next one took it. */
 export type PassedOver = {
   agent: string;
@@ -136,6 +182,8 @@ export type Run = {
    * hold nothing: they couldn't be read, or the branch requires none.
    */
   baseRequiredChecks?: BaseRequiredChecks;
+  /** Its review rounds, in order; none for a Run with no review panel. */
+  reviewRounds?: ReviewRound[];
 };
 
 /** A Flow a person can start a Run of. */
@@ -187,4 +235,39 @@ export function runTitle(run: Run): string {
 export function runRequestBody(run: Run): string {
   const [, ...rest] = run.request.trim().split('\n');
   return rest.join('\n').trim();
+}
+
+/** The path of a finding about the whole change rather than one file. */
+export const WHOLE_CHANGE = '.';
+
+/** The review round whose first Step is at `seq`, if one starts there. */
+export function roundStartingAt(
+  rounds: ReviewRound[],
+  seq: number
+): ReviewRound | undefined {
+  return rounds.find((round) => round.seq === seq);
+}
+
+/** What the reviewer of the Step at `seq` found, in its order. */
+export function findingsOf(
+  rounds: ReviewRound[],
+  seq: number
+): ReviewFinding[] {
+  return rounds.flatMap((round) =>
+    round.findings.filter((finding) => finding.seq === seq)
+  );
+}
+
+/** How many of a round's findings block, and how many became follow-ups. */
+export function findingCounts(round: ReviewRound): {
+  blockers: number;
+  followUps: number;
+} {
+  let blockers = 0;
+  let followUps = 0;
+  for (const finding of round.findings) {
+    if (finding.kind === 'blocker') blockers += 1;
+    if (finding.kind === 'follow_up') followUps += 1;
+  }
+  return { blockers, followUps };
 }

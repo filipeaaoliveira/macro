@@ -5,6 +5,7 @@
 mod test;
 
 use std::collections::BTreeMap;
+use std::num::NonZeroU8;
 
 use agent_session::domain::session_task::TaskDocumentId;
 use chrono::Utc;
@@ -14,6 +15,7 @@ use factory_records::domain::models::{
     Run, RunId, RunInsert, RunOutcome, Step, TaskLink, TeamMembership,
 };
 use factory_records::domain::ports::RunRepository;
+use factory_records::domain::review_rounds::{ReviewRound, ReviewRoundRepository};
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
@@ -64,11 +66,12 @@ pub struct FactoryServiceImpl<R, W, E, U, T, G> {
     users: U,
     tasks: T,
     github: G,
+    review_rounds: Option<NonZeroU8>,
 }
 
 impl<R, W, E, U, T, G> FactoryServiceImpl<R, W, E, U, T, G>
 where
-    R: RunRepository + MainHoldRepository,
+    R: RunRepository + MainHoldRepository + ReviewRoundRepository,
     W: RunWorkflows,
     E: StepExecutor,
     U: UserDirectory,
@@ -84,7 +87,17 @@ where
             users,
             tasks,
             github,
+            review_rounds: None,
         }
+    }
+
+    /// Bound each review panel of the Runs it starts to `rounds` rounds,
+    /// in place of the `max_visits` its Flow gives it. The bound is kept in
+    /// the Flow each Run starts with, so a Run keeps it whatever the
+    /// service is told later.
+    pub fn with_review_rounds(mut self, rounds: NonZeroU8) -> Self {
+        self.review_rounds = Some(rounds);
+        self
     }
 
     /// The repository `repo_url` names, with the branch its Run starts from,
@@ -228,13 +241,19 @@ where
     }
 
     /// `run` with its Steps, as the Run API shows it.
-    async fn detail(&self, run: Run, steps: Vec<Step>) -> Result<RunDetail, FactoryError> {
+    async fn detail(
+        &self,
+        run: Run,
+        steps: Vec<Step>,
+        review_rounds: Vec<ReviewRound>,
+    ) -> Result<RunDetail, FactoryError> {
         let base = self.base_shown(&run, &steps, &mut BTreeMap::new()).await?;
         Ok(RunDetail {
             run,
             steps,
             main_hold: base.hold,
             base_required_checks: base.required,
+            review_rounds,
         })
     }
 
@@ -261,7 +280,7 @@ where
 
 impl<R, W, E, U, T, G> FactoryService for FactoryServiceImpl<R, W, E, U, T, G>
 where
-    R: RunRepository + MainHoldRepository,
+    R: RunRepository + MainHoldRepository + ReviewRoundRepository,
     W: RunWorkflows,
     E: StepExecutor,
     U: UserDirectory,
@@ -295,7 +314,10 @@ where
         in_person: bool,
     ) -> Result<RunDetail, FactoryError> {
         let built_in = BuiltInFlow::named(&flow).ok_or(FactoryError::UnknownFlow)?;
-        let flow = built_in.read(|step| self.executor.serves(step))?;
+        let mut flow = built_in.read(|step| self.executor.serves(step))?;
+        if let Some(rounds) = self.review_rounds {
+            flow.bound_review_rounds(rounds);
+        }
         if request.trim().is_empty() {
             return Err(FactoryError::EmptyRequest);
         }
@@ -362,7 +384,7 @@ where
             return Err(error.into());
         }
 
-        self.detail(run, Vec::new()).await
+        self.detail(run, Vec::new(), Vec::new()).await
     }
 
     #[tracing::instrument(skip(self, actor))]
@@ -390,7 +412,8 @@ where
                 .map_err(internal)?;
             run = self.owned_run(actor, id).await?;
         }
-        self.detail(run, steps).await
+        let review_rounds = self.repo.review_rounds(id).await.map_err(internal)?;
+        self.detail(run, steps, review_rounds).await
     }
 
     #[tracing::instrument(skip(self, actor))]
@@ -420,17 +443,20 @@ where
             .map_err(internal)?;
         let ids: Vec<RunId> = runs.iter().map(|run| run.id).collect();
         let mut steps = self.repo.list_runs_steps(&ids).await.map_err(internal)?;
+        let mut rounds = self.repo.runs_review_rounds(&ids).await.map_err(internal)?;
         // Runs on one base share what was read of it.
         let mut known = BTreeMap::new();
         let mut details = Vec::with_capacity(runs.len());
         for run in runs {
             let steps = steps.remove(&run.id).unwrap_or_default();
+            let review_rounds = rounds.remove(&run.id).unwrap_or_default();
             let base = self.base_shown(&run, &steps, &mut known).await?;
             details.push(RunDetail {
                 run,
                 steps,
                 main_hold: base.hold,
                 base_required_checks: base.required,
+                review_rounds,
             });
         }
         Ok(details)
@@ -689,7 +715,7 @@ pub struct StepServiceImpl<R, E> {
 
 impl<R, E> StepServiceImpl<R, E>
 where
-    R: RunRepository,
+    R: RunRepository + ReviewRoundRepository,
     E: StepExecutor,
 {
     /// Create the Step service.
@@ -708,7 +734,7 @@ where
 
 impl<R, E> StepService for StepServiceImpl<R, E>
 where
-    R: RunRepository,
+    R: RunRepository + ReviewRoundRepository,
     E: StepExecutor,
 {
     #[tracing::instrument(err, skip_all, fields(run_id = %request.key.run_id, seq = request.key.seq))]
@@ -732,7 +758,9 @@ where
             return Err(StepError::RunEnded);
         }
 
-        // The Step reads what the Run's Steps before it produced.
+        // The Step reads what the Run's Steps before it produced: a
+        // reviewer, the round it reviews in, and any other Step the latest
+        // round that ended before it, whose Blockers a fix reads.
         let earlier: Vec<_> = self
             .repo
             .list_steps(request.key.run_id)
@@ -741,6 +769,12 @@ where
             .into_iter()
             .filter(|step| step.seq < request.key.seq && step.end.is_some())
             .collect();
+        let rounds = self
+            .repo
+            .review_rounds(request.key.run_id)
+            .await
+            .map_err(internal)?;
+        let review = review_of(&rounds, &request)?;
         let input = StepInput {
             key: request.key,
             role: request.role.as_ref(),
@@ -751,6 +785,7 @@ where
             task_id: run.task_id,
             repository: run.repository.as_ref(),
             earlier: &earlier,
+            review,
         };
         let report = self
             .executor
@@ -844,5 +879,27 @@ where
             .await
             .map_err(internal)?;
         Ok(())
+    }
+}
+
+/// The review round `request`'s Step reads: a reviewer's own round, which
+/// must be recorded, and for any other Step the latest round that ended
+/// before it, if any.
+fn review_of<'a>(
+    rounds: &'a [ReviewRound],
+    request: &StepRequest,
+) -> Result<Option<&'a ReviewRound>, StepError> {
+    match request.round {
+        Some(seq) => rounds
+            .iter()
+            .find(|round| round.seq == seq)
+            .map(Some)
+            .ok_or_else(|| {
+                StepError::Final(rootcause::report!("no review round starts at step {seq}"))
+            }),
+        None => Ok(rounds
+            .iter()
+            .rev()
+            .find(|round| round.seq < request.key.seq && round.end.is_some())),
     }
 }

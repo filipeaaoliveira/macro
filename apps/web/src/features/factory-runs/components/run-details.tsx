@@ -5,6 +5,7 @@ import { createSignal, createUniqueId, Show } from 'solid-js';
 import {
   type BaseRequiredChecks,
   type MainHold,
+  type ReviewRound,
   type Run,
   type RunStatus,
   type RunStep,
@@ -91,6 +92,7 @@ export function RunSteps(props: {
   mainHold?: MainHold;
   baseRequiredChecks?: BaseRequiredChecks;
   baseBranch?: string;
+  reviewRounds?: ReviewRound[];
   status: RunStatus;
   time: (value: string) => string;
 }) {
@@ -110,6 +112,7 @@ export function RunSteps(props: {
           mainHold={props.mainHold}
           baseRequiredChecks={props.baseRequiredChecks}
           baseBranch={props.baseBranch}
+          reviewRounds={props.reviewRounds}
           time={props.time}
           outputOpen={(step) =>
             props.status.kind === 'waiting' &&

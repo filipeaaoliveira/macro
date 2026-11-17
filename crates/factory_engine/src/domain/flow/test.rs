@@ -121,3 +121,71 @@ fn a_gate_offers_each_answer_once() {
 
     assert!(matches!(refused, Err(FlowError::DuplicateAnswer { .. })));
 }
+
+#[test]
+fn a_review_panel_fills_its_agent_step_with_its_reviewers() {
+    let flow = parse(json!({
+        "entries": [{ "id": "write", "step": "write", "reviewers": ["correctness", "tests"] }]
+    }))
+    .expect("a panel names its roles");
+
+    let reviewers: Vec<_> = flow.entries[0]
+        .reviewers
+        .iter()
+        .map(|role| role.as_str())
+        .collect();
+    assert_eq!(reviewers, ["correctness", "tests"]);
+}
+
+#[test]
+fn a_review_panel_names_no_single_role_no_gate_and_no_reviewer_twice() {
+    let with_role = parse(json!({
+        "entries": [{ "id": "write", "step": "write", "role": "writer", "reviewers": ["tests"] }]
+    }));
+    let with_gate = parse(json!({
+        "entries": [{
+            "id": "write",
+            "step": "write",
+            "reviewers": ["tests"],
+            "gate": { "question": "Merge?", "answers": ["approve"] }
+        }]
+    }));
+    let twice = parse(json!({
+        "entries": [{ "id": "write", "step": "write", "reviewers": ["tests", "tests"] }]
+    }));
+
+    assert!(matches!(with_role, Err(FlowError::ReviewersAndRole(_))));
+    assert!(matches!(with_gate, Err(FlowError::ReviewersAndRole(_))));
+    assert!(matches!(twice, Err(FlowError::DuplicateReviewer { .. })));
+}
+
+/// A deployment's bound on review rounds replaces the `max_visits` of each
+/// review panel, and changes nothing else.
+#[test]
+fn a_bound_on_review_rounds_changes_only_the_review_panels() {
+    let flow = parse(json!({
+        "entries": [
+            { "id": "write", "step": "write", "role": "writer", "max_visits": 2 },
+            { "id": "review", "step": "write", "reviewers": ["tests"], "max_visits": 3,
+              "on": { "unresolved": [{ "to": { "kind": "end", "outcome": "manual" } }] } }
+        ]
+    }))
+    .expect("reads");
+    let mut bounded = flow.clone();
+
+    bounded.bound_review_rounds(std::num::NonZeroU8::new(5).expect("not zero"));
+
+    assert_eq!(bounded.entries[0], flow.entries[0]);
+    assert_eq!(bounded.entries[1].max_visits, std::num::NonZeroU8::new(5));
+}
+
+/// A review panel bounded in rounds says where its last round's unresolved
+/// Blockers go.
+#[test]
+fn a_bounded_review_panel_routes_unresolved() {
+    let refused = parse(json!({
+        "entries": [{ "id": "write", "step": "write", "reviewers": ["tests"], "max_visits": 2 }]
+    }));
+
+    assert!(matches!(refused, Err(FlowError::NoUnresolvedRoute(_))));
+}

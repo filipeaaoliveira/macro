@@ -89,6 +89,29 @@ function toRun(detail: RunDetail): Run {
         }
       : undefined,
     baseRequiredChecks: detail.baseRequiredChecks ?? undefined,
+    reviewRounds: detail.reviewRounds.map((round) => ({
+      round: round.round,
+      seq: round.seq,
+      reviewers: round.reviewers,
+      headSha: round.headSha ?? undefined,
+      diffBase: round.diffBase ?? undefined,
+      fixDiff: round.fixDiff,
+      failure: round.failure ?? undefined,
+      startedAt: round.startedAt,
+      end: round.end ?? undefined,
+      findings: round.findings.map((finding) => ({
+        seq: finding.seq,
+        place: finding.place,
+        role: finding.role ?? undefined,
+        path: finding.path,
+        lines: finding.lines ?? undefined,
+        problem: finding.problem,
+        why: finding.why,
+        blocksAnywhere: finding.blocksAnywhere,
+        kind: finding.kind ?? undefined,
+        followUpTaskId: finding.followUpTaskId ?? undefined,
+      })),
+    })),
   };
 }
 

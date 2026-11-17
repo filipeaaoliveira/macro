@@ -617,6 +617,12 @@ pub struct CreateTaskRequest {
     // An agent session that may not share gets a private task by default.
     #[serde(default = "default_share_with_team")]
     pub share_with_team: bool,
+    /// The id to make the task with, so a service that retries finds the
+    /// task it made rather than making a second one. Only an internal
+    /// caller may name it.
+    #[serde(default)]
+    #[cfg_attr(feature = "axum", schema(ignore))]
+    pub document_id: Option<uuid::Uuid>,
 }
 
 /// Response for creating a task.

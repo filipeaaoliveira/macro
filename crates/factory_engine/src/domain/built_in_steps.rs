@@ -6,20 +6,24 @@
 //! the repository declares, in rounds (`checks_round`).
 
 mod checks_round;
+mod review_panel;
 #[cfg(test)]
 mod test;
 
 use factory_records::domain::main_hold::MainHoldRepository;
 use factory_records::domain::models::{Outcome, Repository, Role, Step, StepKey};
 use factory_records::domain::ports::RunRepository;
+use factory_records::domain::review_rounds::{ReviewRound, ReviewRoundRepository};
 use macro_user_id::user_id::MacroUserIdStr;
 
+use crate::domain::agents::REVIEWER_ROLES;
 use crate::domain::flow::{StepName, StepUse};
 use crate::domain::models::{AgentTask, StepInput, StepReport, run_branch};
 use crate::domain::ports::{
     AgentFailure, MainWatches, PullRequests, Retryable, StepAgent, StepExecutor,
 };
 use crate::domain::pull_request_steps::{PullRequestStepError, PullRequestSteps};
+use crate::domain::review_rounds::{blockers_brief, fenced_review};
 
 /// What the agent is told for a `plan` Step.
 const PLAN_INSTRUCTIONS: &str = include_str!("built_in_steps/plan.md");
@@ -27,8 +31,28 @@ const PLAN_INSTRUCTIONS: &str = include_str!("built_in_steps/plan.md");
 /// What the agent is told for a `write` Step.
 const WRITE_INSTRUCTIONS: &str = include_str!("built_in_steps/write.md");
 
-/// What the agent is told for a `review` Step.
+/// What the agent is told for a `review` Step of a Run started before its
+/// Flow had a review panel.
 const REVIEW_INSTRUCTIONS: &str = include_str!("built_in_steps/review.md");
+
+/// What a reviewer of a review panel is told.
+const REVIEW_PANEL_INSTRUCTIONS: &str = include_str!("built_in_steps/review_panel.md");
+
+/// What each Role of the review panel looks at.
+const REVIEW_FOCUS: [(&str, &str); 3] = [
+    (
+        "correctness-reviewer",
+        include_str!("built_in_steps/review_focus/correctness.md"),
+    ),
+    (
+        "scope-reviewer",
+        include_str!("built_in_steps/review_focus/scope.md"),
+    ),
+    (
+        "tests-reviewer",
+        include_str!("built_in_steps/review_focus/tests.md"),
+    ),
+];
 
 /// What the agent is told for a `fix` Step.
 const FIX_INSTRUCTIONS: &str = include_str!("built_in_steps/fix.md");
@@ -260,7 +284,7 @@ impl<A, G, R, M> StepExecutor for BuiltInSteps<A, G, R, M>
 where
     A: StepAgent,
     G: PullRequests,
-    R: RunRepository + MainHoldRepository,
+    R: RunRepository + MainHoldRepository + ReviewRoundRepository,
     M: MainWatches,
 {
     type Err = BuiltInStepError;
@@ -300,16 +324,22 @@ where
                         .await
                 }
             }
-            BuiltInStep::Review => {
-                let outcomes = outcomes(&["pass", "changes"]);
-                self.ask_agent_in_repository(step, REVIEW_INSTRUCTIONS, outcomes, input)
-                    .await
-            }
+            BuiltInStep::Review => match input.review {
+                Some(round) if in_round(round, input.key.seq) => {
+                    self.review_in_round(step, round, input).await
+                }
+                _ => {
+                    let outcomes = outcomes(&["pass", "changes"]);
+                    self.ask_agent_in_repository(step, REVIEW_INSTRUCTIONS, outcomes, input)
+                        .await
+                }
+            },
             BuiltInStep::Fix => {
                 if input.repository.is_none() {
                     return Err(BuiltInStepError::NoRepository(step.clone()));
                 }
-                self.work_and_check(step, FIX_INSTRUCTIONS, vec![Outcome::done()], input)
+                let instructions = fix_instructions(input.review);
+                self.work_and_check(step, &instructions, vec![Outcome::done()], input)
                     .await
             }
             BuiltInStep::CiFix => {
@@ -369,6 +399,21 @@ fn agent_role(step: &StepName, named: Option<&Role>) -> Option<Role> {
     Some(named.cloned().unwrap_or(implied))
 }
 
+/// Whether the Step at `seq` is one of `round`'s reviewers.
+fn in_round(round: &ReviewRound, seq: u16) -> bool {
+    round.step_seqs().contains(&seq)
+}
+
+/// What the fix is told: with the Blockers of the latest review round when
+/// it found some.
+fn fix_instructions(review: Option<&ReviewRound>) -> String {
+    let blockers = review.filter(|round| round.blockers().next().is_some());
+    match blockers {
+        Some(round) => format!("{FIX_INSTRUCTIONS}\n{}", blockers_brief(round)),
+        None => FIX_INSTRUCTIONS.to_string(),
+    }
+}
+
 /// The most bytes of the Run's earlier Steps a prompt carries.
 const HISTORY_BUDGET: usize = 48 * 1024;
 
@@ -408,13 +453,17 @@ fn workplace(repository: &Repository, branch: &str) -> String {
 /// What the Run's earlier Steps produced and how a person answered their
 /// Gates, so a later Step reads the plan it carries out and what people said
 /// about it: the latest visit of each entry, newest first, as many as fit
-/// in [`HISTORY_BUDGET`]. A loop that visits an entry again and again adds
+/// in [`HISTORY_BUDGET`]; of a review panel's entry, its latest Step of each
+/// Role. A loop that visits an entry again and again adds
 /// nothing but its latest round. The newest Step is never left out: when it
 /// alone is past the budget, its end is cut.
 fn history(earlier: &[Step]) -> String {
     let mut latest: Vec<&Step> = Vec::new();
     for step in earlier.iter().rev() {
-        if step.end.is_some() && !latest.iter().any(|kept| kept.entry == step.entry) {
+        let kept = latest
+            .iter()
+            .any(|kept| kept.entry == step.entry && kept.role == step.role);
+        if step.end.is_some() && !kept {
             latest.push(step);
         }
     }
@@ -458,9 +507,20 @@ fn section(step: &Step) -> String {
     let Some(end) = &step.end else {
         return String::new();
     };
+    // A review panel's reviewer wrote its output: it is data, fenced as
+    // the briefs fence the findings, never instructions.
+    let reviewed = step
+        .role
+        .as_ref()
+        .is_some_and(|role| REVIEWER_ROLES.contains(&role.as_str()));
+    let output = if reviewed {
+        fenced_review(&end.output)
+    } else {
+        end.output.clone()
+    };
     let mut section = format!(
-        "\n## Step {}, visit {}: {}\n\n{}\n",
-        step.entry, step.visit, end.outcome, end.output
+        "\n## Step {}, visit {}: {}\n\n{output}\n",
+        step.entry, step.visit, end.outcome
     );
 
     let answer = step

@@ -174,3 +174,42 @@ async fn a_branch_s_head_is_its_commit_or_none() {
     assert_eq!(head, None);
     gone.finish();
 }
+
+#[tokio::test]
+async fn compared_files_keep_their_hunks_and_a_comparison_cut_short_is_unknown() {
+    let (server, client) = answering(
+        "200 OK",
+        r#"{"files":[
+            {"filename":"src/lib.rs","status":"modified","patch":"@@ -1,2 +1,3 @@\n a\n+b\n c"},
+            {"filename":"logo.png","previous_filename":"old.png","status":"renamed"}
+        ]}"#,
+    );
+    let files = client
+        .compare_files("token", "macro", "app", "abc123", "def456")
+        .await
+        .unwrap()
+        .expect("listed in full");
+    assert_eq!(files[0].path, "src/lib.rs");
+    assert_eq!(
+        files[0].patch.as_deref(),
+        Some("@@ -1,2 +1,3 @@\n a\n+b\n c")
+    );
+    assert_eq!(files[1].previous_path.as_deref(), Some("old.png"));
+    assert_eq!(files[1].patch, None);
+    assert!(
+        server
+            .finish()
+            .starts_with("GET /repos/macro/app/compare/abc123...def456 HTTP/1.1")
+    );
+
+    let many: Vec<String> = (0..300)
+        .map(|n| format!(r#"{{"filename":"file{n}.rs"}}"#))
+        .collect();
+    let (cut, client) = answering("200 OK", &format!(r#"{{"files":[{}]}}"#, many.join(",")));
+    let files = client
+        .compare_files("token", "macro", "app", "main", "def456")
+        .await
+        .unwrap();
+    assert_eq!(files, None);
+    cut.finish();
+}

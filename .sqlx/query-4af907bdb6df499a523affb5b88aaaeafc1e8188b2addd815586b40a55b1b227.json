@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM factory_review_finding WHERE run_id = $1 AND seq = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4af907bdb6df499a523affb5b88aaaeafc1e8188b2addd815586b40a55b1b227"
+}

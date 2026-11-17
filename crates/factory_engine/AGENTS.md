@@ -86,13 +86,18 @@ hand an agent a prompt built from the Step's instructions
 produced; and `publish`, `ci`, `ready_to_merge` and `merge`, which take the
 Run's branch to a merged pull request (`src/domain/pull_request_steps.rs`). The
 agent is the `StepAgent` port.
-Each entry an agent does names the Role it fills (`"role": "planner"`): a
-Flow that leaves one out does not read (`FlowError::NoRole`). A Run started
+Each entry an agent does names the Role it fills (`"role": "planner"`), or
+the Roles of its review panel (`"reviewers": [...]`): a Flow that leaves
+both out does not read (`FlowError::NoRole`). The service also requires
+`reviewer`, which Runs started before the review panel still use. A Run started
 before Flows named Roles carries a Flow without them, and its agent Steps
 fill the Role their built-in Step implies (`plan` a planner, `write` a
 writer, `review` a reviewer, `fix` and `ci_fix` a fixer). The factory's
 agent definition (`src/domain/agents.rs`, `FACTORY_AGENTS`)
-lists the Agents that fill each Role, in order: an Agent is a Macro agent
+lists the Agents that fill each Role, in order (a review panel's Role it
+does not list, `correctness-reviewer`, `scope-reviewer` or `tests-reviewer`,
+takes `reviewer`'s, so a definition written for one reviewer keeps working;
+one that fills neither stops the service with a message naming both): an Agent is a Macro agent
 (`bot`), whose harness runs its sessions, with an optional model and
 instructions. `SessionAgent` (`src/domain/session_agent.rs`) does the Step in
 a Macro agent session of the Role's first Agent, owned by the Run's owner,
@@ -229,6 +234,65 @@ agent's work, cut to the 64 KiB a Step keeps. The rounds show on the Step
 (`checks` in the Run API). `LocalAgent` answers a round of checks `failed`:
 no check ran.
 
+An entry with `reviewers` is a review panel (`src/domain/review_rounds.rs`,
+`factory_review_round` and `factory_review_finding` in `factory_records`).
+Each visit is a review round: the workflow opens it
+(`factory_open_review_round`), which records the commit of the Run's branch it
+reviews (read from GitHub as the owner) and the diff under review: the Run's
+whole change against its base in round 1, and in a later round the fix diff,
+from the commit the round before reviewed; a fix that pushed nothing has the
+whole change reviewed again. Then it starts one Step per reviewer, at the
+places after the round's own (`NextStep::Run`'s `seq` and the ones after it,
+in the entry's order; the interpreter counts them all against `MAX_STEPS`),
+runs their work at once (`join_all`, scheduled and read in the entry's order),
+and records each end in that order. Each reviewer is told its Role's focus,
+the commit and the `git diff` under review
+(`built_in_steps/review_panel.md`, `review_focus/`), and hands back `pass` or
+`changes` with a fenced `json` block of Blockers (the last such block, in
+any case), each a file, optional lines at that commit, what is wrong and
+why. From round 2 the reviewers are also given the round before's Blockers,
+numbered, to check wherever they are now; one found again names its number
+(`previous`) and blocks wherever it is. The review Step reads the answer
+(`ReviewerAnswer`, `built_in_steps/review_panel.rs`); one that does not read,
+or whose outcome disagrees with its list, is asked for once more in the
+reviewer's session, in a prompt kept before it is sent
+(`factory_reviewer_answer`), and one that still does not read is one Blocker
+on the whole change. The findings are recorded on the round with the
+answer's having been read, and the Step's output is the summary and the
+Blockers written out. Once
+every Step ended, the workflow closes the round
+(`factory_close_review_round`, which heartbeats): a finding that blocks
+anywhere, or whose file and lines meet a hunk of the diff under review
+(GitHub's compare, as the owner), is a Blocker; one outside it becomes a
+follow-up task and holds nothing. The task is made as the Run's owner, not
+shared, in the project of the Run's task (document storage's `POST
+/documents/create_task`, with the internal key and the owner as the acting
+user), with an id kept on the finding before it is asked for, so a retry
+finds it rather than making a second; an outage (or an unaccepted key or
+user, a timeout or throttling) fails the close, which is tried again for at
+most two hours, then the round fails; a refusal leaves the follow-up with no
+task; and a task made under another id stops the round for good, since every
+retry would make another. A diff GitHub
+cannot list in full makes every finding a Blocker. The round ends `changes`
+with a Blocker, `pass` without, and `failed` when a reviewer's work failed or
+a reviewer's Step ended with no answer read (a worker without review panels
+ran it). A round that cannot open, as when the Run's branch is gone, is
+recorded as failed with why (`failure`) and runs no Step. The round's
+outcome is what the Flow routes; a last round (its visit at the entry's
+`max_visits`) that still finds Blockers routes `unresolved`, which `code`
+ends `manual` rather than run a fix no round would review; a panel with
+`max_visits` must route `unresolved` (`FlowError::NoUnresolvedRoute`). A
+round that fails routes `failed`, which `code` ends `manual` too. The next `fix` is
+given the round's Blockers in a block marked as reviewers' findings, as
+data: no `<` or `>`, code fence or heading line (ATX or setext) left in it,
+paths included, cut to `BRIEF_BUDGET`. Reviewers' outputs reach every later
+Step's history fenced the same way. A finding's path must be a plain path:
+no control character, backtick or angle bracket. An answer that never read
+is not carried to the next round. In `code`, the review panel
+runs at most `max_visits` rounds (three, or `FACTORY_REVIEW_ROUNDS`, which
+the service writes into the Flow a Run starts with). Rounds and their
+findings show on the Run (`reviewRounds` in the Run API).
+
 The head `ci` calls green is kept (`factory_run.merge_head_sha`);
 `ready_to_merge` ends `changed` unless the pull request's head is still that
 commit and its checks still pass, and otherwise ends `done`, so its Gate asks
@@ -362,6 +426,8 @@ part only.
 - `src/domain/session_agent.rs`: an agent Step in a Macro agent session.
 - `src/domain/pull_request_steps.rs`: `publish`, `ci`, `ready_to_merge` and
   `merge`, over the `PullRequests` port.
+- `src/domain/review_rounds.rs`: review rounds: what a reviewer hands
+  back, the diff a finding is in, and opening and closing a round.
 - `src/domain/built_in_steps/checks_round.rs` and `src/domain/checks.rs`:
   the checks rounds of `write` and `fix`, and the checks file they read.
 - `src/domain/control_files.rs`: Control Files, the default patterns, and
@@ -403,7 +469,10 @@ part only.
   and `run`); an agent Step also gets its instructions in `built_in_steps/`,
   and each entry that runs it names a Role.
 - Add a Role: name it on the entries that need it; every deployment's agent
-  definition must then fill it, or the service does not start.
+  definition must then fill it, or the service does not start. A review
+  panel's new Role also goes in `REVIEWER_ROLES` (`src/domain/agents.rs`), to
+  default to `reviewer`'s Agents, with its focus in `REVIEW_FOCUS`
+  (`built_in_steps.rs`).
 - Change the default Control Files: `DEFAULT_CONTROL_FILES` in
   `src/domain/control_files.rs`, and its test.
 - Add a field to the checks file: `src/domain/checks.rs` (field, check
@@ -455,6 +524,18 @@ part only.
 - Changing what the workflow or the interpreter decides breaks the replay of
   Runs already running: gate the change with Temporal patching
   (`ctx.patched`) or worker versioning.
+- A Run carries its Flow in its workflow's input, so a Run started on the
+  single-reviewer `code` Flow keeps walking it, with `review.md`, and replays
+  the same way: only an entry with `reviewers` takes the review round's path
+  in the workflow. A worker older than `reviewers` cannot read a Flow that
+  has it, so deploy every worker before the API starts such Runs.
+- `StepRequest` refuses fields it does not know, so a worker older than a
+  field fails the activity rather than run a Step it would misread; a
+  reviewer's Step a worker without review panels ran anyway records no
+  answer, and its round fails.
+- A follow-up task is made with an id document storage takes only from an
+  internal caller, and only a UUIDv7 (`CreateTaskRequest.document_id`), so
+  deploy document storage before a factory that sends it.
 - A Gate opens only for a Step that ends `done`; any other outcome routes as
   usual, so a failed plan is never put to a person.
 - Renaming or removing an Agent while its Steps run fails their retries

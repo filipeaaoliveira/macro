@@ -1,0 +1,333 @@
+{
+	"description": "Takes a task to a merged pull request in a GitHub repository: plans the change and asks a person to approve the plan, writes it on the run's branch and runs the repository's own checks on it, has it reviewed and fixed, opens a pull request, waits for its checks and fixes what fails, then asks a person whether to merge the commit that passed, and merges it. A review that still finds changes after three rounds leaves the pull request for a person, and checks that still fail after their last round leave the branch for one.",
+	"repository": true,
+	"facts": {
+		"held": false
+	},
+	"entries": [
+		{
+			"id": "plan",
+			"step": "plan",
+			"role": "planner",
+			"max_visits": 3,
+			"on_exhausted": [
+				{
+					"to": {
+						"kind": "end",
+						"outcome": "manual"
+					}
+				}
+			],
+			"gate": {
+				"question": "Approve this plan, or send it back with a note on what to change?",
+				"answers": ["approve", "revise"]
+			},
+			"on": {
+				"approve": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "write"
+						}
+					}
+				],
+				"revise": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "plan"
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "write",
+			"step": "write",
+			"role": "writer",
+			"on": {
+				"done": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "review"
+						}
+					}
+				],
+				"unchanged": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				],
+				"red": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "review",
+			"step": "review",
+			"role": "reviewer",
+			"max_visits": 3,
+			"on_exhausted": [
+				{
+					"to": {
+						"kind": "entry",
+						"entry": "publish"
+					},
+					"set": {
+						"held": true
+					}
+				}
+			],
+			"on": {
+				"pass": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "publish"
+						}
+					}
+				],
+				"changes": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "fix"
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "fix",
+			"step": "fix",
+			"role": "fixer",
+			"next": {
+				"kind": "entry",
+				"entry": "review"
+			},
+			"on": {
+				"red": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "publish",
+			"step": "publish",
+			"on": {
+				"published": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "ci"
+						}
+					}
+				],
+				"closed": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				],
+				"refused": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "ci",
+			"step": "ci",
+			"on": {
+				"green": [
+					{
+						"when": [
+							{
+								"fact": "held",
+								"equals": true
+							}
+						],
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					},
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "merge-gate"
+						}
+					}
+				],
+				"red": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "ci-fix"
+						}
+					}
+				],
+				"timeout": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				],
+				"closed": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "ci-fix",
+			"step": "ci_fix",
+			"role": "fixer",
+			"max_visits": 3,
+			"on_exhausted": [
+				{
+					"to": {
+						"kind": "end",
+						"outcome": "manual"
+					}
+				}
+			],
+			"on": {
+				"done": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "review"
+						},
+						"reset": ["review"]
+					}
+				]
+			}
+		},
+		{
+			"id": "merge-gate",
+			"step": "ready_to_merge",
+			"max_visits": 3,
+			"on_exhausted": [
+				{
+					"to": {
+						"kind": "end",
+						"outcome": "manual"
+					}
+				}
+			],
+			"gate": {
+				"question": "Merge this pull request, or send it back with a note on what to change?",
+				"answers": ["approve", "revise"]
+			},
+			"on": {
+				"approve": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "merge"
+						}
+					}
+				],
+				"revise": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "fix"
+						},
+						"reset": ["review"]
+					}
+				],
+				"changed": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "ci"
+						}
+					}
+				],
+				"merged": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "success"
+						}
+					}
+				],
+				"closed": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "merge",
+			"step": "merge",
+			"on": {
+				"merged": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "success"
+						}
+					}
+				],
+				"changed": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "ci"
+						}
+					}
+				],
+				"refused": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				],
+				"closed": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				]
+			}
+		}
+	]
+}

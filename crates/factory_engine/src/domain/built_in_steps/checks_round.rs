@@ -108,11 +108,11 @@ fn turn_role(step: &StepName, input: StepInput<'_>) -> Result<Role, BuiltInStepE
     agent_role(step, input.role).ok_or_else(|| BuiltInStepError::NotAnAgentStep(step.clone()))
 }
 
-fn records(error: impl std::error::Error + Send + Sync + 'static) -> BuiltInStepError {
+pub(super) fn records(error: impl std::error::Error + Send + Sync + 'static) -> BuiltInStepError {
     BuiltInStepError::PullRequest(PullRequestStepError::records(error))
 }
 
-fn lost(why: &str) -> BuiltInStepError {
+pub(super) fn lost(why: &str) -> BuiltInStepError {
     BuiltInStepError::Agent {
         report: rootcause::report!("{why}").into_dynamic(),
         retryable: false,
@@ -278,7 +278,10 @@ where
 
     /// When the Step's rounds must end: [`ROUNDS_END_BY`] after the Step
     /// started.
-    async fn rounds_end_by(&self, input: StepInput<'_>) -> Result<DateTime<Utc>, BuiltInStepError> {
+    pub(super) async fn rounds_end_by(
+        &self,
+        input: StepInput<'_>,
+    ) -> Result<DateTime<Utc>, BuiltInStepError> {
         let steps = self
             .pull_requests
             .records()
