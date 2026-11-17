@@ -67,7 +67,7 @@ async fn run_in_session(
     }
     let steps = BuiltInSteps::new(
         agent.clone(),
-        PullRequestSteps::new(github.clone(), repo.clone()),
+        PullRequestSteps::new(github.clone(), repo.clone(), FakeWatches::default()),
     );
     let step = StepName::try_from("write".to_string()).expect("valid");
     steps.run(&step, input).await

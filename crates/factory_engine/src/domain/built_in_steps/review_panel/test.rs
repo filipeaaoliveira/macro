@@ -81,6 +81,14 @@ impl StepAgent for Reviewer {
         Ok(answer(&self.again))
     }
 
+    async fn run_check(
+        &self,
+        _command: crate::domain::models::AgentCommand,
+    ) -> Result<Option<agent_session::domain::session_command::SessionCommandOutput>, AgentFailed>
+    {
+        Ok(None)
+    }
+
     async fn stop(
         &self,
         _key: StepKey,
