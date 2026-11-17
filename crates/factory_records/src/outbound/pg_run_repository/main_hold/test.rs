@@ -112,11 +112,10 @@ async fn a_red_period_claims_its_task_once(pool: PgPool) {
             .is_some()
     );
     assert!(
-        !repo
-            .claim_hold_task(&base, hold.since, Utc::now())
+        repo.claim_hold_task(&base, hold.since, Utc::now())
             .await
             .expect("claim again")
-            .is_some()
+            .is_none()
     );
     repo.release_hold_task(&base, hold.since)
         .await
@@ -140,21 +139,19 @@ async fn a_red_period_claims_its_task_once(pool: PgPool) {
     assert_eq!(held.task_id, Some(task));
     assert!(held.task_claimed);
     assert!(
-        !repo
-            .claim_hold_task(&base, hold.since, Utc::now())
+        repo.claim_hold_task(&base, hold.since, Utc::now())
             .await
             .expect("claim filed")
-            .is_some()
+            .is_none()
     );
 
     // A claim for another period's start is not this one's.
     let earlier = hold.since - TimeDelta::seconds(1);
     assert!(
-        !repo
-            .claim_hold_task(&base, earlier, Utc::now())
+        repo.claim_hold_task(&base, earlier, Utc::now())
             .await
             .expect("claim stale")
-            .is_some()
+            .is_none()
     );
 
     repo.clear_main_hold(&base, Utc::now())
@@ -287,11 +284,10 @@ async fn a_stale_claim_with_no_task_is_claimed_again(pool: PgPool) {
     );
     let soon = now + TimeDelta::minutes(14);
     assert!(
-        !repo
-            .claim_hold_task(&base, hold.since, soon)
+        repo.claim_hold_task(&base, hold.since, soon)
             .await
             .expect("fresh")
-            .is_some()
+            .is_none()
     );
     let later = now + TimeDelta::minutes(16);
     assert!(
@@ -335,11 +331,10 @@ async fn a_deleted_task_is_not_filed_again(pool: PgPool) {
     assert_eq!(held.task_id, None);
     let much_later = now + TimeDelta::hours(1);
     assert!(
-        !repo
-            .claim_hold_task(&base, hold.since, much_later)
+        repo.claim_hold_task(&base, hold.since, much_later)
             .await
             .expect("claim again")
-            .is_some()
+            .is_none()
     );
 }
 
