@@ -557,11 +557,14 @@ pub trait SandboxEgressProvisioner: Send + Sync + 'static {
 /// [`AgentSessionError::CommandUnsupported`]: agent_session::domain::error::AgentSessionError::CommandUnsupported
 pub trait MachineCommands: Send + Sync + 'static {
     /// Run `command` in the checkout `session` has on the machine `bot`'s
-    /// harness runs on, as [`ContainerManager::exec`] does.
+    /// harness runs on, as [`ContainerManager::exec`] does: `workspace`,
+    /// the directory the session's runtime reported it runs in when it
+    /// opened.
     fn exec(
         &self,
         bot: BotId,
         session: AgentSessionId,
+        workspace: &str,
         command: SessionCommand,
     ) -> Pin<Box<dyn Future<Output = Result<SessionCommandOutput>> + Send + '_>>;
 }

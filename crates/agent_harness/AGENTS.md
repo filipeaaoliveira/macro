@@ -170,9 +170,10 @@ wakes; interrupted quiet batches return to the next real prompt.
 agent, and answers its exit code and output (`domain/service/run_command.rs`):
 Daytona and local Docker in `/workspace`, Namespace in the instance this
 replica spawned, and an external session's on the Macro computer its harness
-runs on (`MachineCommands`, in `~/.macrod/herdr/<harness>/worktrees/<session>`).
-A paired machine, a computer whose macrod keeps no such worktree (with a
-warning), Cursor, Codex and the in-process agent answer
+runs on (`MachineCommands`, in the worktree macrod reported as the session's
+`workspace` when it opened, `…/worktrees/<session>`; one gone since is an
+error). A paired machine, a computer session in a workspace macrod shares
+(with a warning), Cursor, Codex and the in-process agent answer
 `AgentSessionError::CommandUnsupported`. It is not a queued command: it runs on
 the replica that holds the session, or, when a peer does, is forwarded there
 over the command bus (`CommandForwarder::run_command`), which waits on a reply

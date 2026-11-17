@@ -125,7 +125,7 @@ async fn a_command_runs_in_the_sessions_worktree_on_its_computer() {
     );
 
     let output = commands
-        .exec(BotId::TEST_A, session(), check())
+        .exec(BotId::TEST_A, session(), &worktree(), check())
         .await
         .unwrap();
 
@@ -133,11 +133,7 @@ async fn a_command_runs_in_the_sessions_worktree_on_its_computer() {
         output,
         SessionCommandOutput::new(101, b"error: 1 failed", b"")
     );
-    let checkout = format!(
-        "/home/macro/.macrod/herdr/{}/worktrees/{}",
-        harness(),
-        session()
-    );
+    let checkout = worktree();
     assert_eq!(
         *commands.guests.ran.lock().unwrap(),
         [
@@ -161,7 +157,7 @@ async fn only_the_end_of_a_long_output_is_kept() {
     );
 
     let output = commands
-        .exec(BotId::TEST_A, session(), check())
+        .exec(BotId::TEST_A, session(), &worktree(), check())
         .await
         .unwrap();
 
@@ -169,15 +165,63 @@ async fn only_the_end_of_a_long_output_is_kept() {
     assert!(output.stdout.ends_with("the end"));
 }
 
-/// A paired machine of someone's own, an unbound bot, and a computer
-/// without the session's worktree run nothing, and say so.
+/// The worktree macrod reported for the session when it opened.
+fn worktree() -> String {
+    format!(
+        "/home/macro/.macrod/herdr/{}/worktrees/{}",
+        harness(),
+        session()
+    )
+}
+
+/// A session macrod gave a worktree of its own, whose worktree is gone,
+/// fails, so a retry looks again: moving it never leaves the checks to
+/// the agent.
 #[tokio::test]
-async fn a_session_without_a_checkout_on_a_computer_runs_nothing() {
-    for (bound, guest) in [
-        (
-            Bound(Some(harness())),
-            Guest::new(Some(computer()), false, Vec::new(), 0),
+async fn a_session_whose_worktree_is_gone_fails() {
+    let commands = ComputerCommands::new(
+        Bound(Some(harness())),
+        Guest::new(Some(computer()), false, Vec::new(), 0),
+    );
+
+    let error = commands
+        .exec(BotId::TEST_A, session(), &worktree(), check())
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, HarnessError::Container(_)), "{error:?}");
+    assert_eq!(commands.guests.ran.lock().unwrap().len(), 1);
+}
+
+/// A session macrod opened in a workspace it shares runs nothing, whatever
+/// the computer's disk holds.
+#[tokio::test]
+async fn a_session_in_a_shared_workspace_runs_nothing() {
+    let commands = ComputerCommands::new(
+        Bound(Some(harness())),
+        Guest::new(Some(computer()), true, Vec::new(), 0),
+    );
+
+    let refused = commands
+        .exec(BotId::TEST_A, session(), "/home/macro/work/app", check())
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(
+            refused,
+            HarnessError::Session(AgentSessionError::CommandUnsupported(id)) if id == session()
         ),
+        "{refused:?}"
+    );
+    assert!(commands.guests.ran.lock().unwrap().is_empty());
+}
+
+/// A paired machine of someone's own, and an unbound bot, run nothing,
+/// and say so.
+#[tokio::test]
+async fn a_session_on_no_computer_runs_nothing() {
+    for (bound, guest) in [
         (
             Bound(None),
             Guest::new(Some(computer()), true, Vec::new(), 0),
@@ -190,7 +234,7 @@ async fn a_session_without_a_checkout_on_a_computer_runs_nothing() {
         let commands = ComputerCommands::new(bound, guest);
 
         let refused = commands
-            .exec(BotId::TEST_A, session(), check())
+            .exec(BotId::TEST_A, session(), &worktree(), check())
             .await
             .unwrap_err();
 
@@ -201,14 +245,6 @@ async fn a_session_without_a_checkout_on_a_computer_runs_nothing() {
             ),
             "{refused:?}"
         );
-        assert!(
-            commands
-                .guests
-                .ran
-                .lock()
-                .unwrap()
-                .iter()
-                .all(|argv| argv[0] == "test")
-        );
+        assert!(commands.guests.ran.lock().unwrap().is_empty());
     }
 }

@@ -3,13 +3,14 @@
 //! external sessions.
 //!
 //! A computer's macrod checks each session out in a Herdr worktree of its
-//! own, under the guest user's `~/.macrod/herdr/<harness>/worktrees/<session>`.
+//! own, `…/worktrees/<session>`, and reports it as the session's workspace.
 //! A session whose bot's harness is no computer's runs nothing, as on a
-//! paired machine of someone's own. So does one on a computer whose macrod
-//! keeps no worktree there (sessions in a shared workspace), with a
-//! warning. The checkout only locates the repository: the software factory
-//! runs its checks in a worktree of its own, at the pushed commit, so the
-//! agent gains nothing by moving its checkout.
+//! paired machine of someone's own. So does one that macrod opened in a
+//! workspace it shares, with a warning: that is what macrod reported when
+//! the session opened (its `workspace`), never what the computer's disk
+//! shows now. A session macrod gave a worktree of its own runs commands
+//! there, and one whose worktree is gone is an error, which the caller
+//! retries: an agent cannot move its checkout to stop its checks running.
 
 #[cfg(test)]
 mod test;
@@ -29,7 +30,7 @@ use agent_session::domain::session_command::{
 use bot_id::BotId;
 use harness_id::HarnessId;
 use hosted_runtimes::domain::ids::ComputerId;
-use hosted_runtimes::domain::ports::{GUEST_USER, GuestProcess};
+use hosted_runtimes::domain::ports::GuestProcess;
 use tokio::io::AsyncReadExt as _;
 
 use super::Operator;
@@ -113,8 +114,10 @@ impl<Bindings: HarnessBindings, Machines: Guests> MachineCommands
         &self,
         bot: BotId,
         session: AgentSessionId,
+        workspace: &str,
         command: SessionCommand,
     ) -> Pin<Box<dyn Future<Output = Result<SessionCommandOutput>> + Send + '_>> {
+        let workspace = workspace.to_owned();
         Box::pin(async move {
             let unsupported =
                 || HarnessError::Session(AgentSessionError::CommandUnsupported(session));
@@ -130,17 +133,27 @@ impl<Bindings: HarnessBindings, Machines: Guests> MachineCommands
                 .await?
                 .ok_or_else(unsupported)?;
 
-            let checkout = checkout(harness, session);
+            // Whether the session has a checkout of its own is what macrod
+            // reported when it opened: a worktree of the session's, or a
+            // workspace it shares. Only the first runs commands; the
+            // directory on the computer never decides it.
+            if !is_session_worktree(&workspace, session) {
+                tracing::warn!(
+                    %session,
+                    %computer,
+                    workspace,
+                    "a session on a Macro computer runs in a shared workspace; its commands run nowhere"
+                );
+                return Err(unsupported());
+            }
+            let checkout = workspace;
             let found = self
                 .run(computer, &["test", "-d", &checkout], FIND_CHECKOUT_TIMEOUT)
                 .await?;
             if found.exit_code != 0 {
-                tracing::warn!(
-                    %session,
-                    %computer,
-                    "a session on a Macro computer has no checkout where macrod keeps one; its commands run nowhere"
-                );
-                return Err(unsupported());
+                return Err(HarnessError::Container(format!(
+                    "session {session}'s worktree {checkout} is not on computer {computer}"
+                )));
             }
 
             // The guest streams stdout alone, so stderr joins it.
@@ -182,12 +195,13 @@ impl<Bindings, Machines: Guests> ComputerCommands<Bindings, Machines> {
     }
 }
 
-/// Where macrod checks `session` out for `harness` on a computer.
-fn checkout(harness: HarnessId, session: AgentSessionId) -> String {
-    format!(
-        "{}/.macrod/herdr/{harness}/worktrees/{session}",
-        GUEST_USER.home
-    )
+/// Whether `workspace` is a worktree macrod made for `session` alone:
+/// `…/worktrees/<session>`, as its Herdr workspaces are.
+fn is_session_worktree(workspace: &str, session: AgentSessionId) -> bool {
+    workspace.starts_with('/')
+        && workspace
+            .trim_end_matches('/')
+            .ends_with(&format!("/worktrees/{session}"))
 }
 
 /// All of `stdout`, read to its end so the program never blocks on a full

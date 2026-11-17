@@ -167,7 +167,11 @@ where
                 self.sandbox.exec(session, command).await
             }
             AgentKind::External => match &self.machines {
-                Some(machines) => machines.exec(row.bot_id, session, command).await,
+                Some(machines) => {
+                    machines
+                        .exec(row.bot_id, session, &row.workspace, command)
+                        .await
+                }
                 None => Err(HarnessError::Session(
                     AgentSessionError::CommandUnsupported(session),
                 )),

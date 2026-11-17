@@ -553,6 +553,7 @@ impl MachineCommands for RecordingMachines {
         &self,
         bot: BotId,
         session: AgentSessionId,
+        _workspace: &str,
         _command: SessionCommand,
     ) -> std::pin::Pin<
         Box<dyn std::future::Future<Output = Result<SessionCommandOutput>> + Send + '_>,
