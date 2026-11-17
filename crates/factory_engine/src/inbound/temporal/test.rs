@@ -1003,14 +1003,17 @@ async fn watching(repo: &FakeRepo) -> (MainWatch, Repository) {
         base_branch: "main".to_string(),
     };
     let run_id = RunId::generate();
-    repo.insert_run(
-        run_id,
-        "code",
-        "Add dark mode",
-        &julia,
-        None,
-        Some(&repository),
-    )
+    repo.insert_run(NewRun {
+        id: run_id,
+        flow: "code",
+        request: "Add dark mode",
+        user_id: &julia,
+        task_id: None,
+        repository: Some(&repository),
+        created_in_person: false,
+        control_file_patterns: &[],
+        control_files_team_id: None,
+    })
     .await
     .expect("insert");
     (MainWatch::of(run_id, &repository), repository)
@@ -1032,6 +1035,7 @@ async fn with_watch_worker<T>(
         &runtime,
         client.clone(),
         StepServiceImpl::new(repo.clone(), steps_of(&Agent::doing(Work::Works), repo)),
+        ReviewRoundsImpl::new(repo.clone(), github.clone(), repo.clone()),
         MainWatchServiceImpl::new(repo.clone(), github.clone(), tasks.clone()),
     )
     .expect("worker");

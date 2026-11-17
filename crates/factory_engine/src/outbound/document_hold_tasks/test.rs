@@ -80,8 +80,9 @@ async fn the_task_is_filed_in_the_initiative_of_the_run_s_task() {
         .await;
     Mock::given(method("POST"))
         .and(path("/documents/create_task"))
+        .and(header("x-internal-auth-key", "internal-key"))
         .and(header(
-            "x-document-storage-service-user-id",
+            "x-internal-macro-user-id",
             "macro|julia@example.com",
         ))
         .and(body_partial_json(json!({

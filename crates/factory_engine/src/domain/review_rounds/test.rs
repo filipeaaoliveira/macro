@@ -1,7 +1,7 @@
 use std::num::NonZeroU8;
 
 use factory_records::domain::models::{
-    EntryId, Outcome, Repository, Role, RunId, RunInsert, StepKey,
+    EntryId, NewRun, Outcome, Repository, Role, RunId, RunInsert, StepKey,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::{
@@ -40,14 +40,17 @@ async fn code_run(repo: &FakeRepo) -> RunId {
         base_branch: "main".to_string(),
     };
     let RunInsert::Inserted(_) = repo
-        .insert_run(
+        .insert_run(NewRun {
             id,
-            "code",
-            "Add dark mode",
-            &julia(),
-            Some(TASK),
-            Some(&repository),
-        )
+            flow: "code",
+            request: "Add dark mode",
+            user_id: &julia(),
+            task_id: Some(TASK),
+            repository: Some(&repository),
+            created_in_person: false,
+            control_file_patterns: &[],
+            control_files_team_id: None,
+        })
         .await
         .expect("insert")
     else {

@@ -964,9 +964,19 @@ async fn a_run_at_its_merge_on_a_held_base_shows_the_main_hold() {
         (&main, "ci"),
     ] {
         let run_id = RunId::generate();
-        repo.insert_run(run_id, "code", "Add dark mode", &alice, None, Some(base))
-            .await
-            .expect("insert");
+        repo.insert_run(NewRun {
+            id: run_id,
+            flow: "code",
+            request: "Add dark mode",
+            user_id: &alice,
+            task_id: None,
+            repository: Some(base),
+            created_in_person: false,
+            control_file_patterns: &[],
+            control_files_team_id: None,
+        })
+        .await
+        .expect("insert");
         let entry = EntryId::try_from(entry.to_string()).expect("entry");
         repo.start_step(StepKey { run_id, seq: 1 }, &entry, 1)
             .await

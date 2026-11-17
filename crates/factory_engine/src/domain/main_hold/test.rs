@@ -2,7 +2,7 @@ use std::sync::LazyLock;
 
 use chrono::{DateTime, TimeDelta, Utc};
 use factory_records::domain::main_hold::{MainHoldRepository, RequiredChecksState};
-use factory_records::domain::models::{Repository, RunId, StepKey};
+use factory_records::domain::models::{NewRun, Repository, RunId, StepKey};
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
@@ -56,14 +56,17 @@ async fn run_of_on(
 ) -> RunId {
     repo.tasks.lock().expect("tasks").insert(run_task());
     let run_id = RunId::generate();
-    repo.insert_run(
-        run_id,
-        "code",
-        "Add dark mode",
-        owner,
-        Some(run_task()),
-        Some(repository),
-    )
+    repo.insert_run(NewRun {
+        id: run_id,
+        flow: "code",
+        request: "Add dark mode",
+        user_id: owner,
+        task_id: Some(run_task()),
+        repository: Some(repository),
+        created_in_person: false,
+        control_file_patterns: &[],
+        control_files_team_id: None,
+    })
     .await
     .expect("insert");
     run_id
@@ -83,6 +86,9 @@ fn input(run_id: RunId) -> StepInput<'static> {
         task_id: Some(run_task()),
         repository: Some(&REPOSITORY),
         earlier: &[],
+        created_in_person: false,
+        control_file_patterns: None,
+        review: None,
     }
 }
 

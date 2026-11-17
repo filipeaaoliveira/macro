@@ -4,7 +4,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use super::super::PgRunRepository;
-use crate::domain::models::{EntryId, Outcome, RunId, RunInsert, StepKey};
+use crate::domain::models::{EntryId, NewRun, Outcome, RunId, RunInsert, StepKey};
 use crate::domain::ports::RunRepository;
 use crate::domain::review_rounds::{
     Finding, FindingClass, FindingKind, Lines, ReviewRoundFailure, ReviewRoundOutcome,
@@ -17,7 +17,17 @@ async fn reviewing(repo: &PgRunRepository) -> RunId {
     let julia = MacroUserIdStr::try_from("macro|julia@example.com".to_string()).expect("user");
     let id = RunId::generate();
     let RunInsert::Inserted(_) = repo
-        .insert_run(id, "code", "Add dark mode", &julia, None, None)
+        .insert_run(NewRun {
+            id,
+            flow: "code",
+            request: "Add dark mode",
+            user_id: &julia,
+            task_id: None,
+            repository: None,
+            created_in_person: false,
+            control_file_patterns: &[],
+            control_files_team_id: None,
+        })
         .await
         .expect("insert")
     else {

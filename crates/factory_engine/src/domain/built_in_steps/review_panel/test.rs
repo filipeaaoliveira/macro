@@ -3,7 +3,7 @@
 use std::sync::{Arc, LazyLock, Mutex};
 
 use factory_records::domain::models::{
-    EntryId, Outcome, Repository, Role, RunId, RunInsert, StepKey,
+    EntryId, NewRun, Outcome, Repository, Role, RunId, RunInsert, StepKey,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::{
@@ -13,7 +13,7 @@ use factory_records::domain::review_rounds::{
 use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::built_in_steps::BuiltInSteps;
-use crate::domain::fakes::{FakeGithub, FakeRepo};
+use crate::domain::fakes::{FakeGithub, FakeRepo, FakeWatches};
 use crate::domain::flow::StepName;
 use crate::domain::models::{AgentAnswer, AgentTask, AgentTurn, StepInput};
 use crate::domain::ports::{AgentFailure, Retryable, StepAgent, StepExecutor};
@@ -120,14 +120,17 @@ const PASSES: &str = "Checked it.\n```json\n{\"blockers\": []}\n```";
 async fn second_round(repo: &FakeRepo, blockers: &[&str], fix_diff: bool) -> (RunId, ReviewRound) {
     let run_id = RunId::generate();
     let RunInsert::Inserted(_) = repo
-        .insert_run(
-            run_id,
-            "code",
-            "Add dark mode",
-            &JULIA,
-            None,
-            Some(&REPOSITORY),
-        )
+        .insert_run(NewRun {
+            id: run_id,
+            flow: "code",
+            request: "Add dark mode",
+            user_id: &JULIA,
+            task_id: None,
+            repository: Some(&REPOSITORY),
+            created_in_person: false,
+            control_file_patterns: &[],
+            control_files_team_id: None,
+        })
         .await
         .expect("insert")
     else {
@@ -197,13 +200,18 @@ fn reviewing<'a>(run_id: RunId, round: &'a ReviewRound) -> StepInput<'a> {
         repository: Some(&REPOSITORY),
         earlier: &[],
         review: Some(round),
+        created_in_person: false,
+        control_file_patterns: None,
     }
 }
 
-fn steps(reviewer: &Reviewer, repo: &FakeRepo) -> BuiltInSteps<Reviewer, FakeGithub, FakeRepo> {
+fn steps(
+    reviewer: &Reviewer,
+    repo: &FakeRepo,
+) -> BuiltInSteps<Reviewer, FakeGithub, FakeRepo, FakeWatches> {
     BuiltInSteps::new(
         reviewer.clone(),
-        PullRequestSteps::new(FakeGithub::default(), repo.clone()),
+        PullRequestSteps::new(FakeGithub::default(), repo.clone(), FakeWatches::default()),
     )
 }
 

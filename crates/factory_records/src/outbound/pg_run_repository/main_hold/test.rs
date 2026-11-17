@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use super::super::PgRunRepository;
 use crate::domain::main_hold::{MainHoldRepository, RequiredChecksState};
-use crate::domain::models::{Repository, RunId, RunInsert};
+use crate::domain::models::{NewRun, Repository, RunId, RunInsert};
 use crate::domain::ports::RunRepository;
 
 const RED_HEAD: &str = "2222222222222222222222222222222222222222";
@@ -28,7 +28,17 @@ async fn code_run(repo: &PgRunRepository, repository: Option<&Repository>) -> Ru
     let julia = MacroUserIdStr::try_from("macro|julia@example.com".to_string()).expect("user");
     let id = RunId::generate();
     let RunInsert::Inserted(_) = repo
-        .insert_run(id, "code", "Add dark mode", &julia, None, repository)
+        .insert_run(NewRun {
+            id,
+            flow: "code",
+            request: "Add dark mode",
+            user_id: &julia,
+            task_id: None,
+            repository,
+            created_in_person: false,
+            control_file_patterns: &[],
+            control_files_team_id: None,
+        })
         .await
         .expect("insert")
     else {

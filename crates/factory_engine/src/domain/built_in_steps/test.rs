@@ -489,7 +489,7 @@ async fn a_fix_is_given_the_blockers_of_the_latest_round() {
     let repo = FakeRepo::default();
     let steps = BuiltInSteps::new(
         agent.clone(),
-        PullRequestSteps::new(FakeGithub::default(), repo.clone()),
+        PullRequestSteps::new(FakeGithub::default(), repo.clone(), FakeWatches::default()),
     );
     let repository = Repository {
         url: "https://github.com/macro/app".to_string(),
