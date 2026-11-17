@@ -311,6 +311,31 @@ export type LinkTaskRequest = {
 export type MacroUserIdStr = string;
 
 /**
+ * A hold on a base branch whose required checks failed. It lasts until the
+ * checks on the base's head pass again.
+ */
+export type MainHold = {
+    /**
+     * The checks that failed, one line each, with their pages.
+     */
+    failed: string;
+    /**
+     * The base's head commit, as the checks were last seen failing on it.
+     */
+    headSha: string;
+    /**
+     * When the base was first seen red, in this red period.
+     */
+    since: string;
+    /**
+     * The task filed with the merges made since the base was last green:
+     * its task document's id, once it is filed. None before then, or once
+     * the task document is deleted.
+     */
+    taskId?: string | null;
+};
+
+/**
  * A name a Flow gives (an outcome, a Gate's answer) and how often it came.
  */
 export type NamedCount = {
@@ -430,6 +455,7 @@ export type Run = {
  * A Run and the Steps it took.
  */
 export type RunDetail = {
+    mainHold?: null | MainHold;
     /**
      * The Run.
      */

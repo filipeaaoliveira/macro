@@ -1224,6 +1224,31 @@
       "MacroUserIdStr": {
         "type": "string"
       },
+      "MainHold": {
+        "type": "object",
+        "description": "A hold on a base branch whose required checks failed. It lasts until the\nchecks on the base's head pass again.",
+        "required": ["since", "headSha", "failed"],
+        "properties": {
+          "failed": {
+            "type": "string",
+            "description": "The checks that failed, one line each, with their pages."
+          },
+          "headSha": {
+            "type": "string",
+            "description": "The base's head commit, as the checks were last seen failing on it."
+          },
+          "since": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the base was first seen red, in this red period."
+          },
+          "taskId": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "The task filed with the merges made since the base was last green:\nits task document's id, once it is filed. None before then, or once\nthe task document is deleted."
+          }
+        }
+      },
       "NamedCount": {
         "type": "object",
         "description": "A name a Flow gives (an outcome, a Gate's answer) and how often it came.",
@@ -1385,6 +1410,17 @@
         "description": "A Run and the Steps it took.",
         "required": ["run", "steps"],
         "properties": {
+          "mainHold": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MainHold",
+                "description": "The Main Hold on the base branch the Run merges to, while the Run\ngoes and the base's required checks fail: the Run does not merge\nuntil it clears, even once its merge Gate is approved."
+              }
+            ]
+          },
           "run": {
             "$ref": "#/components/schemas/Run",
             "description": "The Run."
