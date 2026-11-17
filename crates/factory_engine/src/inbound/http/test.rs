@@ -523,8 +523,8 @@ async fn a_run_is_not_linked_to_a_task_its_owner_cannot_see() {
     assert_eq!(hidden.status(), StatusCode::BAD_REQUEST);
 }
 
-/// The Flows a person can start, with what each does: every built-in one,
-/// as the worker serves all their Steps.
+/// The Flows a person can start, with what each does and whether it works
+/// on a repository: every built-in one, as the worker serves all their Steps.
 #[tokio::test]
 async fn a_signed_in_user_lists_the_flows_the_worker_runs() {
     let router = records_router(&FakeRepo::default());
@@ -564,6 +564,13 @@ async fn a_signed_in_user_lists_the_flows_the_worker_runs() {
             .expect("description")
             .starts_with("Takes a task to a merged pull request")
     );
+    let on_repository: Vec<bool> = flows
+        .as_array()
+        .expect("flows")
+        .iter()
+        .map(|flow| flow["repository"].as_bool().expect("repository"))
+        .collect();
+    assert_eq!(on_repository, [true, false, false]);
     assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
 }
 

@@ -181,7 +181,8 @@ part only.
   `merge`, over the `PullRequests` port.
 - `flows/`: the built-in Flows, each named for its file
   (`src/domain/built_in_flows.rs`). `GET /flows` lists those whose Steps the
-  worker serves, with their `description`: `code`, `plan` and `reply`.
+  worker serves, with their `description` and whether they work on a
+  `repository`: `code`, `plan` and `reply`.
 
 ## Scope
 
