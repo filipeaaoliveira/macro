@@ -74,6 +74,12 @@ pub enum AgentDefinitionError {
     /// A built-in Flow does not read.
     #[error(transparent)]
     Flow(#[from] FlowError),
+    /// Only the retired `FACTORY_AGENT_ID` is set.
+    #[error(
+        "FACTORY_AGENT_ID is no longer read: set FACTORY_AGENTS to the agent definition \
+         (services/factory_service/AGENTS.md)"
+    )]
+    RetiredAgentId,
 }
 
 impl TryFrom<AgentDefinitionFields> for AgentDefinition {
@@ -118,6 +124,25 @@ impl AgentDefinition {
     /// The Agent named `name`, if the definition has it.
     pub fn agent(&self, name: &AgentName) -> Option<&Agent> {
         self.agents.get(name)
+    }
+
+    /// The definition the service runs its agent Steps with: `agents`, from
+    /// `FACTORY_AGENTS`, once it fills every Role of the built-in Flows.
+    /// None when it is unset, so the Steps run on the stand-in, unless the
+    /// retired `FACTORY_AGENT_ID` (`retired_agent_id`) is set: that is
+    /// refused, rather than silently doing no work.
+    pub fn configured(
+        agents: Option<Self>,
+        retired_agent_id: Option<&str>,
+    ) -> Result<Option<Self>, AgentDefinitionError> {
+        match (agents, retired_agent_id) {
+            (Some(agents), _) => {
+                agents.fills_built_in_flows()?;
+                Ok(Some(agents))
+            }
+            (None, Some(_)) => Err(AgentDefinitionError::RetiredAgentId),
+            (None, None) => Ok(None),
+        }
     }
 
     /// Fails unless every Role the built-in Flows name has its Agents: the

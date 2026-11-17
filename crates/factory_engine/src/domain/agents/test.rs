@@ -109,3 +109,31 @@ fn a_definition_must_fill_every_role_of_the_built_in_flows() {
         Err(AgentDefinitionError::UnfilledRole(role("fixer")))
     );
 }
+
+/// The service runs with the definition it is given, on the stand-in with
+/// none, and refuses the retired single agent id rather than silently doing
+/// no work.
+#[test]
+fn the_retired_agent_id_alone_is_refused() {
+    let definition = read(json!({
+        "agents": { "primary": { "bot": "00000000-0000-0000-0000-00000000c1a0" } },
+        "roles": {
+            "planner": ["primary"],
+            "writer": ["primary"],
+            "reviewer": ["primary"],
+            "fixer": ["primary"]
+        }
+    }))
+    .expect("a definition");
+    let retired = Some("00000000-0000-0000-0000-00000000c1a0");
+
+    assert_eq!(
+        AgentDefinition::configured(None, retired),
+        Err(AgentDefinitionError::RetiredAgentId)
+    );
+    assert_eq!(AgentDefinition::configured(None, None), Ok(None));
+    assert_eq!(
+        AgentDefinition::configured(Some(definition.clone()), retired),
+        Ok(Some(definition))
+    );
+}
