@@ -627,6 +627,7 @@ impl RunRepository for FakeRepo {
                     answer: answer.clone(),
                     note: note.map(str::to_string),
                     user_id: Some(user_id.clone()),
+                    rule: None,
                     approved_control_files: approved_control_files.map(<[String]>::to_vec),
                     answered_at: Utc::now(),
                 });

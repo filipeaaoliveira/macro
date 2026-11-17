@@ -8,6 +8,7 @@ use factory_records::domain::models::{
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::{ReviewRoundOutcome, ReviewRoundRepository};
+use factory_records::domain::standing_rules::RunRules;
 use macro_user_id::user_id::MacroUserIdStr;
 use serde_json::json;
 use temporalio_client::errors::WorkflowGetResultError;
@@ -184,6 +185,7 @@ where
             created_in_person: false,
             control_file_patterns: &[],
             control_files_team_id: None,
+            standing_rules: RunRules::DEFAULT,
         })
         .await
         .expect("insert")

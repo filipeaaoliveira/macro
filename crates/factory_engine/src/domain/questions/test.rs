@@ -32,6 +32,7 @@ fn asked(seq: u16, role: &str, question: &str, answer: Option<&str>) -> Step {
                 answer: Outcome::answer(),
                 note: Some(answer.to_string()),
                 user_id: None,
+                rule: None,
                 approved_control_files: None,
                 answered_at: Utc::now(),
             }),
