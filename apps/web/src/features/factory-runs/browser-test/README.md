@@ -13,7 +13,8 @@ server.
 
 The fixture mounts the real side panel, Runs section and Run view on an
 in-memory factory (`main.tsx`): one Run waits at a Gate, one runs (its
-`write` Step ran two rounds of checks, the first failed), two have ended. Its cancel shows the Run ended half a second later, as a read would.
+`write` Step ran two rounds of checks, the first failed), two have ended.
+Its cancel shows the Run ended half a second later, as a read would.
 The tests, on desktop and on a phone with touch styles:
 
 - answer the Gate with a note, cancel the Run after its confirmation, and
