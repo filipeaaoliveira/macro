@@ -965,9 +965,11 @@ impl RunRepository for PgRunRepository {
         key: StepKey,
         session_id: Uuid,
         action_id: Uuid,
+        place: u16,
         offered: &[Outcome],
     ) -> Result<bool, Self::Err> {
-        self.record_turn(key, session_id, action_id, offered).await
+        self.record_turn(key, session_id, action_id, place, offered)
+            .await
     }
 
     #[tracing::instrument(err, skip(self))]
@@ -993,6 +995,16 @@ impl RunRepository for PgRunRepository {
         report: &str,
     ) -> Result<(), Self::Err> {
         self.finish_check_round(key, round, outcome, report).await
+    }
+
+    #[tracing::instrument(err, skip(self, report))]
+    async fn end_check_round_on_quota(
+        &self,
+        key: StepKey,
+        round: u8,
+        report: &str,
+    ) -> Result<(), Self::Err> {
+        self.quota_ends_check_round(key, round, report).await
     }
 
     #[tracing::instrument(err, skip(self))]

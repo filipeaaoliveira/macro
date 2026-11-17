@@ -66,13 +66,13 @@ async fn a_later_prompt_offers_its_own_outcomes_and_clears_the_hand_back_once(po
     repo.hand_back(session.session_id, &written)
         .await
         .expect("hand back");
-    // A prompt made before the checks', as a stale attempt sends.
-    let older = Uuid::now_v7();
     let checks = Uuid::now_v7();
+    // A stale attempt's earlier prompt, whose id its worker made later.
+    let stale = Uuid::now_v7();
     let offered = [outcome("passed"), outcome("failed")];
 
     let began = repo
-        .begin_turn(key, session.session_id, checks, &offered)
+        .begin_turn(key, session.session_id, checks, 2, &offered)
         .await
         .expect("turn");
     let cleared = repo.handed_back(key, checks).await.expect("read");
@@ -84,14 +84,14 @@ async fn a_later_prompt_offers_its_own_outcomes_and_clears_the_hand_back_once(po
         .await
         .expect("hand back");
     let again = repo
-        .begin_turn(key, session.session_id, checks, &offered)
+        .begin_turn(key, session.session_id, checks, 2, &offered)
         .await
         .expect("turn again");
 
     let rewound = repo
-        .begin_turn(key, session.session_id, older, &offered)
+        .begin_turn(key, session.session_id, stale, 1, &offered)
         .await
-        .expect("an older turn");
+        .expect("an earlier turn");
 
     assert!(began && again);
     assert!(!rewound);
@@ -123,6 +123,45 @@ async fn a_later_prompt_offers_its_own_outcomes_and_clears_the_hand_back_once(po
     assert_eq!(stopping.session.action_id, checks);
 }
 
+/// The Step's place orders its later prompts, not their ids, which each
+/// worker makes on its own clock: a fix whose id sorts before the checks'
+/// it fixes is still recorded after them.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn a_later_prompt_is_later_by_its_place_not_its_id(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let (key, session) = writing(&repo).await;
+    // Made on a worker whose clock lags the one that made the checks'.
+    let fix = Uuid::now_v7();
+    let checks = Uuid::now_v7();
+    let offered = [outcome("passed"), outcome("failed")];
+
+    let checked = repo
+        .begin_turn(key, session.session_id, checks, 2, &offered)
+        .await
+        .expect("checks");
+    let fixing = repo
+        .begin_turn(key, session.session_id, fix, 3, &[outcome("done")])
+        .await
+        .expect("fix");
+    let checks_again = repo
+        .begin_turn(key, session.session_id, checks, 2, &offered)
+        .await
+        .expect("checks again");
+
+    assert!(fix < checks);
+    assert!(checked && fixing);
+    assert!(!checks_again);
+    let stopping = repo
+        .stopping_session(key, std::time::Duration::from_secs(300))
+        .await
+        .expect("stopping")
+        .expect("a session");
+    assert_eq!(stopping.session.action_id, fix);
+}
+
 /// A later prompt goes only to the session the Step works in: one named
 /// for a session it left is not recorded. Once a later prompt is recorded,
 /// the Agent at work is never passed over, so the rounds stay in its
@@ -137,7 +176,7 @@ async fn a_later_prompt_stays_in_the_session_the_step_works_in(pool: PgPool) {
     let offered = [outcome("passed"), outcome("failed")];
 
     let elsewhere_began = repo
-        .begin_turn(key, Uuid::now_v7(), Uuid::now_v7(), &offered)
+        .begin_turn(key, Uuid::now_v7(), Uuid::now_v7(), 2, &offered)
         .await
         .expect("turn in another session");
     let elsewhere = repo
@@ -146,7 +185,7 @@ async fn a_later_prompt_stays_in_the_session_the_step_works_in(pool: PgPool) {
         .expect("stopping")
         .expect("a session");
     let checks = Uuid::now_v7();
-    repo.begin_turn(key, session.session_id, checks, &offered)
+    repo.begin_turn(key, session.session_id, checks, 2, &offered)
         .await
         .expect("turn");
     let next = StepSession {
@@ -259,4 +298,59 @@ async fn a_round_keeps_its_first_record_end_and_fix(pool: PgPool) {
         .await
         .expect("steps by run");
     assert_eq!(by_run[&key.run_id][0].checks, rounds);
+}
+
+/// A round the agent's quota ended is kept as ended by it: an open round
+/// ends failed with the report given, one that failed keeps its report,
+/// and one that passed is left alone.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn a_round_the_quota_ended_is_kept_as_ended_by_it(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let (key, _) = writing(&repo).await;
+    for round in 1..=3 {
+        let start = CheckRoundStart {
+            round,
+            work_output: "Wrote the toggle".to_string(),
+            checks: vec!["web".to_string()],
+            commands: vec!["bun run check".to_string()],
+            declared: r#"{"checks":[]}"#.to_string(),
+            check_action_id: Uuid::now_v7(),
+        };
+        repo.start_check_round(key, &start).await.expect("start");
+    }
+    repo.end_check_round(key, 1, CheckRoundOutcome::Passed, "web passed")
+        .await
+        .expect("end");
+    repo.end_check_round(key, 2, CheckRoundOutcome::Failed, "web: exit 1")
+        .await
+        .expect("end");
+
+    for round in 1..=3 {
+        repo.end_check_round_on_quota(key, round, "The quota ran out.")
+            .await
+            .expect("quota");
+    }
+    repo.end_check_round_on_quota(key, 3, "Again.")
+        .await
+        .expect("quota again");
+
+    let rounds = repo.check_rounds(key).await.expect("rounds");
+    let kept: Vec<(bool, CheckRoundOutcome, &str)> = rounds
+        .iter()
+        .map(|round| {
+            let end = round.end.as_ref().expect("ended");
+            (round.quota_ran_out, end.outcome, end.report.as_str())
+        })
+        .collect();
+    assert_eq!(
+        kept,
+        [
+            (false, CheckRoundOutcome::Passed, "web passed"),
+            (true, CheckRoundOutcome::Failed, "web: exit 1"),
+            (true, CheckRoundOutcome::Failed, "The quota ran out."),
+        ]
+    );
 }

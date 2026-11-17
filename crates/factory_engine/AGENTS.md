@@ -201,14 +201,19 @@ round; a new prompt clears the session's hand back and offers its own
 outcomes (`begin_turn`), and a stop watches it. A later prompt goes to the
 session the Step works in now, of the Agent that took it after any passed
 over, run by the bot recorded with it; `begin_turn` records only for that
-session and never goes back to an older prompt, and a Step that took a
-later prompt is never passed on, so every round stays in the session that
-did the work. An attempt reads the hand back of its own prompt only: one
+session and never goes back to an earlier prompt: each later prompt has a
+place the Step gives it (`AgentTurn::place`, a round's checks at twice its
+number, its fix just after), which orders them whatever the workers'
+clocks. A Step that took a later prompt is never passed on, so every round
+stays in the session that did the work. An attempt reads the hand back of its own prompt only: one
 the Step went on from, as when an overlapping attempt started the checks
 while this one waited on the work, fails `Superseded`, which a retry goes
-on from. An Agent whose quota runs out on a later prompt is not passed
-over, since its work is in its session: the Step ends `red`, with an open
-round ended failed saying the quota ran out. The agent's work and all
+on from. A later prompt refused for lack of quota is not passed to another
+Agent, since the work is in its session: the Step ends `red`, with an open
+round ended failed saying the quota ran out, and the round is kept as
+ended by it (`quota_ran_out`), so a retry ends the Step the same way
+without asking again. A quota that runs out while the agent works on a
+turn is the session's failure, and fails the Step as any other. The agent's work and all
 rounds run in the Step's one activity: waiting for them stops
 `ROUNDS_END_BY` (105 minutes) after the Step started, short of its two
 hours, and the Step ends `red` saying so, with a round still open ended

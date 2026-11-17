@@ -27,8 +27,10 @@ pub(crate) struct FakeSession {
     pub(crate) session: StepSession,
     pub(crate) offered: Vec<Outcome>,
     pub(crate) handed: Option<HandBack>,
-    /// The later prompt the agent works on, once there is one.
+    /// The later prompt the agent works on, once there is one, and its
+    /// place among the Step's later prompts.
     pub(crate) turn: Option<Uuid>,
+    pub(crate) turn_place: Option<u16>,
     pub(crate) released: bool,
     /// When an attempt last asked for the session to be opened.
     pub(crate) prepared_at: Option<chrono::DateTime<Utc>>,
@@ -337,6 +339,7 @@ impl RunRepository for FakeRepo {
             offered: offered.to_vec(),
             handed: None,
             turn: None,
+            turn_place: None,
             released: false,
             prepared_at: None,
             opened: false,
@@ -551,6 +554,7 @@ impl RunRepository for FakeRepo {
         key: StepKey,
         session_id: Uuid,
         action_id: Uuid,
+        place: u16,
         offered: &[Outcome],
     ) -> Result<bool, FakeError> {
         let ended = self.step_ended(key);
@@ -558,18 +562,16 @@ impl RunRepository for FakeRepo {
         let Some(claimed) = sessions.iter_mut().find(|claimed| claimed.key == key) else {
             return Ok(false);
         };
-        if claimed.session.session_id != session_id
-            || ended
-            || claimed.turn.is_some_and(|turn| turn > action_id)
-        {
+        if claimed.session.session_id != session_id || ended {
             return Ok(false);
         }
-        if claimed.turn != Some(action_id) {
+        if claimed.turn_place.is_none_or(|recorded| recorded < place) {
             claimed.turn = Some(action_id);
+            claimed.turn_place = Some(place);
             claimed.offered = offered.to_vec();
             claimed.handed = None;
         }
-        Ok(true)
+        Ok(claimed.turn == Some(action_id))
     }
 
     async fn check_rounds(&self, key: StepKey) -> Result<Vec<CheckRound>, FakeError> {
@@ -598,6 +600,7 @@ impl RunRepository for FakeRepo {
                     work_output: start.work_output.clone(),
                     check_action_id: start.check_action_id,
                     fix_action_id: None,
+                    quota_ran_out: false,
                 },
             ));
         }
@@ -621,6 +624,29 @@ impl RunRepository for FakeRepo {
                 report: report.to_string(),
                 ended_at: Utc::now(),
             });
+        }
+        Ok(())
+    }
+
+    async fn end_check_round_on_quota(
+        &self,
+        key: StepKey,
+        round: u8,
+        report: &str,
+    ) -> Result<(), FakeError> {
+        let mut rounds = self.check_rounds.lock().expect("rounds");
+        if let Some((_, kept)) = rounds
+            .iter_mut()
+            .find(|(step, kept)| *step == key && kept.round == round)
+        {
+            let end = kept.end.get_or_insert_with(|| CheckRoundEnd {
+                outcome: CheckRoundOutcome::Failed,
+                report: report.to_string(),
+                ended_at: Utc::now(),
+            });
+            if end.outcome == CheckRoundOutcome::Failed {
+                kept.quota_ran_out = true;
+            }
         }
         Ok(())
     }

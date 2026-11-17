@@ -28,6 +28,7 @@ struct CheckRoundRow {
     report: Option<String>,
     ended_at: Option<DateTime<Utc>>,
     fix_action_id: Option<Uuid>,
+    quota_ran_out: bool,
 }
 
 impl TryFrom<CheckRoundRow> for CheckRound {
@@ -58,6 +59,7 @@ impl TryFrom<CheckRoundRow> for CheckRound {
             work_output: row.work_output,
             check_action_id: row.check_action_id,
             fix_action_id: row.fix_action_id,
+            quota_ran_out: row.quota_ran_out,
         })
     }
 }
@@ -74,7 +76,7 @@ impl PgRunRepository {
             SELECT
                 run_id, seq, round, work_output, checks, commands, declared, check_action_id,
                 started_at,
-                outcome, report, ended_at, fix_action_id
+                outcome, report, ended_at, fix_action_id, quota_ran_out
             FROM factory_check_round
             WHERE run_id = ANY($1)
             ORDER BY run_id, seq, round
@@ -105,7 +107,7 @@ impl PgRunRepository {
             SELECT
                 run_id, seq, round, work_output, checks, commands, declared, check_action_id,
                 started_at,
-                outcome, report, ended_at, fix_action_id
+                outcome, report, ended_at, fix_action_id, quota_ran_out
             FROM factory_check_round
             WHERE run_id = $1 AND seq = $2
             ORDER BY round
@@ -123,22 +125,28 @@ impl PgRunRepository {
         key: StepKey,
         session_id: Uuid,
         action_id: Uuid,
+        place: u16,
         offered: &[Outcome],
     ) -> Result<bool, PgRunRepositoryErr> {
         let offered: Vec<String> = offered.iter().map(|o| o.as_str().to_owned()).collect();
-        // Prompts' ids are UUIDv7s made in order, so a prompt older than the
-        // one recorded, which a stale attempt sends, never takes the Step
-        // back to it. Recorded now, or by an earlier attempt: the outer read
-        // sees the Step as it was before the update.
+        // Only a prompt at a later place than the one recorded is recorded,
+        // so one a stale attempt sends never takes the Step back to it: the
+        // place is the Step's, not the prompt's id, which the worker that
+        // made it made on its own clock. Recorded now, or by an earlier
+        // attempt: the outer read sees the Step as it was before the update.
+        // Two attempts that record the same prompt at once may both find it
+        // not recorded yet, and the one whose update then changes nothing
+        // reads false: it fails as superseded and its retry goes on, which
+        // costs that retry.
         let recorded = sqlx::query_scalar!(
             r#"
             WITH turned AS (
                 UPDATE factory_step
-                SET turn_action_id = $4, offered = $5,
+                SET turn_action_id = $4, turn_place = $6, offered = $5,
                     handed_outcome = NULL, handed_output = NULL, handed_at = NULL
                 WHERE run_id = $1 AND seq = $2
                     AND session_id = $3 AND ended_at IS NULL
-                    AND (turn_action_id IS NULL OR turn_action_id < $4)
+                    AND (turn_place IS NULL OR turn_place < $6)
                 RETURNING 1
             )
             SELECT EXISTS (SELECT 1 FROM turned)
@@ -155,6 +163,7 @@ impl PgRunRepository {
             session_id,
             action_id,
             &offered,
+            i32::from(place),
         )
         .fetch_one(&self.pool)
         .await?;
@@ -204,6 +213,34 @@ impl PgRunRepository {
             i32::from(key.seq),
             i32::from(round),
             outcome.as_str(),
+            report,
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub(super) async fn quota_ends_check_round(
+        &self,
+        key: StepKey,
+        round: u8,
+        report: &str,
+    ) -> Result<(), PgRunRepositoryErr> {
+        // An open round ends failed with `report`; one that already failed
+        // keeps its end. A round that passed is left alone.
+        sqlx::query!(
+            r#"
+            UPDATE factory_check_round
+            SET outcome = COALESCE(outcome, 'failed'),
+                report = COALESCE(report, $4),
+                ended_at = COALESCE(ended_at, now()),
+                quota_ran_out = true
+            WHERE run_id = $1 AND seq = $2 AND round = $3
+                AND outcome IS DISTINCT FROM 'passed'
+            "#,
+            key.run_id.as_uuid(),
+            i32::from(key.seq),
+            i32::from(round),
             report,
         )
         .execute(&self.pool)

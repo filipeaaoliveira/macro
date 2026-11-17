@@ -381,7 +381,16 @@ async fn a_quota_that_runs_out_during_the_checks_ends_the_step_red() {
     let report = run(&agent, &github, &repo, "write", input)
         .await
         .expect("write");
+    // A retry whose first answer was lost ends the same way, asking the
+    // agent nothing.
+    let retry = ScriptedAgent::new("done", Vec::new());
+    let again = run(&retry, &github, &repo, "write", input)
+        .await
+        .expect("write again");
 
+    assert_eq!(again, report);
+    assert!(retry.turns().is_empty());
+    assert!(retry.tasks.lock().expect("tasks").is_empty());
     assert_eq!(report.outcome, outcome("red"));
     assert!(
         report
@@ -411,8 +420,22 @@ async fn a_quota_that_runs_out_on_a_fix_ends_the_step_red() {
     let report = run(&agent, &github, &repo, "write", input)
         .await
         .expect("write");
+    // A retry whose first answer was lost ends the same way, asking the
+    // agent nothing.
+    let retry = ScriptedAgent::new("done", Vec::new());
+    let again = run(&retry, &github, &repo, "write", input)
+        .await
+        .expect("write again");
 
+    assert_eq!(again, report);
+    assert!(retry.turns().is_empty());
+    assert!(retry.tasks.lock().expect("tasks").is_empty());
     assert_eq!(report.outcome, outcome("red"));
+    assert!(
+        report
+            .output
+            .starts_with("The agent's quota ran out during the repository's checks")
+    );
     assert!(report.output.contains("web: exit 1"));
     assert_eq!(rounds(&repo, input).await.len(), 1);
 }
@@ -642,6 +665,7 @@ async fn a_retry_past_its_time_reads_the_open_round_s_hand_back() {
         input.key,
         session.session_id,
         round.check_action_id,
+        2,
         &[outcome("passed"), outcome("failed")],
     )
     .await

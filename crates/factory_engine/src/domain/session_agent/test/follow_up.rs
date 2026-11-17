@@ -45,6 +45,7 @@ async fn a_later_prompt_goes_on_in_the_step_s_session() {
         owner: julia(),
         role: planner(),
         action_id: Uuid::now_v7(),
+        place: 2,
         prompt: "Run the checks".to_string(),
         outcomes: vec![outcome("passed"), outcome("failed")],
         answer_by: chrono::Utc::now() + chrono::TimeDelta::hours(1),
@@ -96,6 +97,7 @@ async fn a_later_prompt_goes_to_the_agent_that_took_the_step() {
         owner: julia(),
         role: planner(),
         action_id: Uuid::now_v7(),
+        place: 2,
         prompt: "Run the checks".to_string(),
         outcomes: vec![outcome("passed"), outcome("failed")],
         answer_by: chrono::Utc::now() + chrono::TimeDelta::hours(1),
@@ -133,6 +135,7 @@ async fn a_later_prompt_needs_its_own_hand_back_and_a_session() {
         owner: julia(),
         role: planner(),
         action_id: Uuid::now_v7(),
+        place: 2,
         prompt: "Run the checks".to_string(),
         outcomes: vec![outcome("passed"), outcome("failed")],
         answer_by: chrono::Utc::now() + chrono::TimeDelta::hours(1),
@@ -177,6 +180,7 @@ async fn a_later_prompt_waits_no_longer_than_its_step_allows() {
         owner: julia(),
         role: planner(),
         action_id: Uuid::now_v7(),
+        place: 2,
         prompt: "Run the checks".to_string(),
         outcomes: vec![outcome("passed"), outcome("failed")],
         answer_by: chrono::Utc::now(),
@@ -214,13 +218,14 @@ async fn the_work_waits_no_longer_than_its_step_allows() {
     assert!(started.elapsed() < std::time::Duration::from_secs(60));
 }
 
-/// A checks round's prompt to `role`'s Agent, under a new id.
-fn checks_turn(key: factory_records::domain::models::StepKey) -> AgentTurn {
+/// A checks round's prompt at `place`, under a new id.
+fn checks_turn(key: factory_records::domain::models::StepKey, place: u16) -> AgentTurn {
     AgentTurn {
         key,
         owner: julia(),
         role: planner(),
         action_id: Uuid::now_v7(),
+        place,
         prompt: "Run the checks".to_string(),
         outcomes: vec![outcome("passed"), outcome("failed")],
         answer_by: chrono::Utc::now() + chrono::TimeDelta::hours(1),
@@ -245,7 +250,7 @@ async fn a_later_prompt_refused_for_lack_of_quota_stays_with_its_agent() {
         .expect("read")
         .expect("claimed");
 
-    let refused = agent.follow_up(checks_turn(key)).await;
+    let refused = agent.follow_up(checks_turn(key, 2)).await;
 
     let Err(error) = refused else {
         panic!("a refused prompt is not an answer");
@@ -280,11 +285,11 @@ async fn a_prompt_the_step_went_on_from_never_reads_a_later_answer() {
     let key = task.key;
     let agent = agent(&sessions, &repo);
     agent.answer(task.clone()).await.expect("answer");
-    let checks = checks_turn(key);
+    let checks = checks_turn(key, 2);
     agent.follow_up(checks.clone()).await.expect("checks");
 
     let stale_work = agent.answer(task).await;
-    agent.follow_up(checks_turn(key)).await.expect("next round");
+    agent.follow_up(checks_turn(key, 3)).await.expect("the fix");
     let stale_round = agent.follow_up(checks).await;
 
     for stale in [stale_work, stale_round] {
@@ -315,7 +320,7 @@ async fn a_later_prompt_keeps_the_step_in_its_session() {
     let offered = [outcome("passed"), outcome("failed")];
 
     let elsewhere = repo
-        .begin_turn(key, Uuid::now_v7(), Uuid::now_v7(), &offered)
+        .begin_turn(key, Uuid::now_v7(), Uuid::now_v7(), 2, &offered)
         .await
         .expect("turn elsewhere");
     let passed_before = repo
@@ -324,7 +329,7 @@ async fn a_later_prompt_keeps_the_step_in_its_session() {
         .expect("read")
         .expect("claimed");
     let began = repo
-        .begin_turn(key, session.session_id, Uuid::now_v7(), &offered)
+        .begin_turn(key, session.session_id, Uuid::now_v7(), 2, &offered)
         .await
         .expect("turn");
     let backup = StepSession {
@@ -357,4 +362,42 @@ async fn a_later_prompt_keeps_the_step_in_its_session() {
         .expect("read")
         .expect("claimed");
     assert_eq!(claimed, session);
+}
+
+/// A later prompt is later by the place the Step gives it, not by its id,
+/// which the worker that asks makes on its own clock: a fix whose id sorts
+/// before the checks' it follows still goes to the session.
+#[tokio::test]
+async fn a_later_prompt_is_later_by_its_place_not_its_id() {
+    let repo = FakeRepo::default();
+    let mut sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
+    sessions.follow_up_handed = Some(HandBack {
+        outcome: Outcome::done(),
+        output: "Fixed it".to_string(),
+    });
+    let task = plan_task(&repo).await;
+    let key = task.key;
+    let agent = agent(&sessions, &repo);
+    agent.answer(task).await.expect("answer");
+    // Made on a worker whose clock lags the one that made the checks'.
+    let fix_id = Uuid::now_v7();
+    let checks = checks_turn(key, 2);
+    let fix = AgentTurn {
+        action_id: fix_id,
+        place: 3,
+        outcomes: vec![Outcome::done()],
+        ..checks_turn(key, 3)
+    };
+
+    agent.follow_up(checks.clone()).await.expect("checks");
+    let fixed = agent.follow_up(fix).await.expect("fix");
+
+    assert!(fix_id < checks.action_id);
+    assert_eq!(fixed.text, "Fixed it");
+    let stopping = repo
+        .stopping_session(key, std::time::Duration::from_secs(3600))
+        .await
+        .expect("read")
+        .expect("claimed");
+    assert_eq!(stopping.session.action_id, fix_id);
 }

@@ -494,6 +494,10 @@ pub struct CheckRound {
     /// was sent.
     #[serde(skip)]
     pub fix_action_id: Option<Uuid>,
+    /// Whether the round failed because the agent's quota ran out, during
+    /// its checks or the fix of their failure: no fix or round follows it.
+    #[serde(skip)]
+    pub quota_ran_out: bool,
 }
 
 /// A round of checks to record, before the agent is asked to run them.

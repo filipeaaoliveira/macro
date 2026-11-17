@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                run_id, seq, round, work_output, checks, commands, declared, check_action_id,\n                started_at,\n                outcome, report, ended_at, fix_action_id\n            FROM factory_check_round\n            WHERE run_id = ANY($1)\n            ORDER BY run_id, seq, round\n            ",
+  "query": "\n            SELECT\n                run_id, seq, round, work_output, checks, commands, declared, check_action_id,\n                started_at,\n                outcome, report, ended_at, fix_action_id, quota_ran_out\n            FROM factory_check_round\n            WHERE run_id = ANY($1)\n            ORDER BY run_id, seq, round\n            ",
   "describe": {
     "columns": [
       {
@@ -67,6 +67,11 @@
         "ordinal": 12,
         "name": "fix_action_id",
         "type_info": "Uuid"
+      },
+      {
+        "ordinal": 13,
+        "name": "quota_ran_out",
+        "type_info": "Bool"
       }
     ],
     "parameters": {
@@ -87,8 +92,9 @@
       true,
       true,
       true,
-      true
+      true,
+      false
     ]
   },
-  "hash": "4e6648c4006daebbf2bc033622ef7b227510a2012a14479646f2165ebe124c31"
+  "hash": "8a494f65cdf44fd0b808e7fa0a0d01b53b8657d1ecc56b063132c095ce0b14f0"
 }

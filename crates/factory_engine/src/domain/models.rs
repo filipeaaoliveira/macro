@@ -118,6 +118,10 @@ pub struct AgentTurn {
     /// The prompt's id in the session, a UUIDv7 the Step recorded before
     /// asking, so a retried Step asks under the same one.
     pub action_id: Uuid,
+    /// Its place among the Step's later prompts: a later prompt has a
+    /// higher one, whatever its id, so a stale attempt never takes the Step
+    /// back to an earlier prompt.
+    pub place: u16,
     /// What the agent is asked.
     pub prompt: String,
     /// The outcomes the agent may end the prompt with.

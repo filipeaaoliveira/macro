@@ -217,15 +217,16 @@ pub trait RunRepository: Send + Sync + 'static {
     /// its session `session_id`, `action_id`, and may hand back one of
     /// `offered`: the hand back of the prompt before is cleared, and a stop
     /// reads this prompt's progress. Recording the same prompt again changes
-    /// nothing, so its hand back stays. A Step that ended, works in no
-    /// session or another one, or went on to a later prompt (prompts' ids
-    /// are UUIDv7s, made in order) is left alone. Whether the Step works on
-    /// the prompt now: false when it was left alone.
+    /// nothing, so its hand back stays. `place` orders the Step's later
+    /// prompts: a Step that ended, works in no session or another one, or
+    /// already works on a prompt at `place` or later is left alone. Whether
+    /// the Step works on the prompt now: false when it was left alone.
     fn begin_turn(
         &self,
         key: StepKey,
         session_id: Uuid,
         action_id: Uuid,
+        place: u16,
         offered: &[Outcome],
     ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
 
@@ -250,6 +251,18 @@ pub trait RunRepository: Send + Sync + 'static {
         key: StepKey,
         round: u8,
         outcome: CheckRoundOutcome,
+        report: &str,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// Record that the agent's quota ran out on the round `round` of the
+    /// Step `key`, during its checks or the fix of their failure, so no fix
+    /// or round follows it: an open round ends failed with `report`, and
+    /// one that already failed keeps its end. A round that passed is left
+    /// alone. Recording it again changes nothing.
+    fn end_check_round_on_quota(
+        &self,
+        key: StepKey,
+        round: u8,
         report: &str,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 

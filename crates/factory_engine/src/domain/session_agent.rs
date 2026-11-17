@@ -139,6 +139,11 @@ impl Retryable for SessionAgentError {
     /// prompt whose delivery stayed unknown is not tried again either:
     /// another attempt would send more.
     ///
+    /// A prompt the Step went on from is retried: another attempt took the
+    /// Step on to a later prompt, or raced this one to record the same one,
+    /// and the next attempt reads the Step's rounds afresh and goes on from
+    /// where the Step is, never from this attempt's stale view.
+    ///
     /// The records are retried: the agent's reads and writes are keyed by
     /// the Step and violate no constraint in use, so a failure is the
     /// database's, and the Step's two hours bound one that is not. A session
@@ -675,7 +680,13 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
         self.still_holds(turn.key, session.session_id).await?;
         let began = self
             .repo
-            .begin_turn(turn.key, session.session_id, turn.action_id, &turn.outcomes)
+            .begin_turn(
+                turn.key,
+                session.session_id,
+                turn.action_id,
+                turn.place,
+                &turn.outcomes,
+            )
             .await
             .map_err(Self::records)?;
         // Left alone: the Step let go of this session, or another attempt

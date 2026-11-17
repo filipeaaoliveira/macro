@@ -80,6 +80,8 @@ enum Next<'a> {
     /// The round failed: its failure goes back to the agent, or no rounds
     /// are left.
     Failed(&'a CheckRound),
+    /// The agent's quota ran out on the round: nothing follows it.
+    QuotaRanOut,
 }
 
 fn next(rounds: &[CheckRound]) -> Next<'_> {
@@ -89,8 +91,15 @@ fn next(rounds: &[CheckRound]) -> Next<'_> {
     match latest.end.as_ref().map(|end| end.outcome) {
         None => Next::Run(latest),
         Some(CheckRoundOutcome::Passed) => Next::Passed,
+        Some(CheckRoundOutcome::Failed) if latest.quota_ran_out => Next::QuotaRanOut,
         Some(CheckRoundOutcome::Failed) => Next::Failed(latest),
     }
+}
+
+/// The place of round `round`'s checks prompt among the Step's later
+/// prompts; the fix of its failure comes just after it.
+fn checks_place(round: u8) -> u16 {
+    u16::from(round) * 2
 }
 
 /// The Role whose Agent's session a later prompt of `step` goes to.
@@ -158,6 +167,9 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
             let latest = match next(&rounds) {
                 Next::FirstRound => return Err(lost("a recorded round of checks went missing")),
                 Next::Passed => return Ok(passed_report(&rounds)),
+                // A retry of a Step whose answer was lost ends as it did,
+                // without asking the agent again.
+                Next::QuotaRanOut => return Ok(red_report(&rounds, Red::QuotaRanOut)),
                 Next::Run(latest) | Next::Failed(latest) => latest,
             };
             let declared = RepositoryChecks::parse(&latest.declared)
@@ -198,7 +210,9 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
     /// End a Step whose rounds cannot go on, `why`: a round still open takes
     /// what the agent handed back for its prompt, if it did, and otherwise
     /// ends failed, so it never reads as running; then the Step ends with
-    /// what the rounds found.
+    /// what the rounds found. When the agent's quota ran out, the latest
+    /// round that did not pass is recorded as ended by it, with its end, so
+    /// a retry ends the Step the same way without asking again.
     async fn end_red(
         &self,
         input: StepInput<'_>,
@@ -229,7 +243,21 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
                     .to_string(),
                 ),
             };
-            repo.end_check_round(input.key, open.round, outcome, &report)
+            if matches!(why, Red::QuotaRanOut) && outcome == CheckRoundOutcome::Failed {
+                repo.end_check_round_on_quota(input.key, open.round, &report)
+                    .await
+                    .map_err(records)?;
+            } else {
+                repo.end_check_round(input.key, open.round, outcome, &report)
+                    .await
+                    .map_err(records)?;
+            }
+        } else if matches!(why, Red::QuotaRanOut)
+            && let Some(failed) = rounds.last()
+        {
+            // The fix of a failed round was refused: the round keeps its
+            // report, and no fix follows it.
+            repo.end_check_round_on_quota(input.key, failed.round, QUOTA_RAN_OUT)
                 .await
                 .map_err(records)?;
         }
@@ -340,6 +368,7 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
                 owner: input.owner.clone(),
                 role: turn_role(step, input)?,
                 action_id: round.check_action_id,
+                place: checks_place(round.round),
                 prompt: checks_prompt(round),
                 outcomes: vec![passed(), failed()],
                 answer_by,
@@ -391,6 +420,7 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
                 owner: input.owner.clone(),
                 role: turn_role(step, input)?,
                 action_id,
+                place: checks_place(failed.round) + 1,
                 prompt: format!("{CHECKS_FIX_INSTRUCTIONS}{report}\n"),
                 outcomes: vec![Outcome::done()],
                 answer_by,

@@ -23,7 +23,8 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   (`crates/macro_db_client/migrations/20261116083957_factory.sql`,
   `20261117093000_factory_check_round.sql`,
   `20261117104713_factory_step_agent.sql`,
-  `20261117120425_factory_step_bot.sql`).
+  `20261117120425_factory_step_bot.sql`,
+  `20261117170000_factory_turn_place.sql`).
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
 
 ## Boundaries
@@ -58,10 +59,13 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   hand back is kept on the Step while it runs (`hand_back`), and read when its
   turn ends (`handed_back`).
   A later prompt of the session (`begin_turn`) records its action in
-  `turn_action_id`, replaces `offered` and clears the hand back, once, and
-  only while the Step works in the session it names and took no later
-  prompt (prompts' ids are UUIDv7s, made in order): the same prompt again
-  keeps what was handed back, and an older one is not recorded. It says
+  `turn_action_id` with its place among the Step's later prompts
+  (`turn_place`, `20261117170000_factory_turn_place.sql`), replaces
+  `offered` and clears the hand back, once, and only while the Step works in
+  the session it names and took no prompt at that place or later: the same
+  prompt again keeps what was handed back, and an earlier one is not
+  recorded. Places order the prompts, never their ids, which workers make
+  on their own clocks. It says
   whether the Step works on the prompt. `handed_back` names the prompt it
   reads for, and one the Step went on from reads as `Superseded`, never
   with a later prompt's answer. `pass_session` leaves a Step that took a
@@ -70,6 +74,8 @@ the Gates they asked people in MacroDB, and defines the names Flows use
 - A Step's rounds of checks (`factory_check_round`,
   `src/outbound/pg_run_repository/check_rounds.rs`) keep their first
   record, end and fix prompt, so a retried Step goes on with its round.
+  `end_check_round_on_quota` keeps a round as ended by the agent's quota
+  (`quota_ran_out`): no fix or round follows it.
   `list_steps` and `list_runs_steps` attach them to their Steps.
 - `factory_run.task_id` references `"Document"` and is cleared when the task
   document is deleted; `link_task` reports a missing task or Run instead of
