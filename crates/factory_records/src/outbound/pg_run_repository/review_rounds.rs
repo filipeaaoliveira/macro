@@ -273,7 +273,10 @@ impl ReviewRoundRepository for PgRunRepository {
         let mut whys = Vec::with_capacity(findings.len());
         for (place, finding) in (1_i32..).zip(findings) {
             let (start, end) = match finding.lines {
-                Some(lines) => (Some(stored_line(lines.start)?), Some(stored_line(lines.end)?)),
+                Some(lines) => (
+                    Some(stored_line(lines.start)?),
+                    Some(stored_line(lines.end)?),
+                ),
                 None => (None, None),
             };
             places.push(place);
@@ -343,7 +346,12 @@ impl ReviewRoundRepository for PgRunRepository {
     }
 
     #[tracing::instrument(err, skip(self), fields(run_id = %key.run_id, seq = key.seq))]
-    async fn link_follow_up(&self, key: StepKey, place: u16, task_id: Uuid) -> Result<(), Self::Err> {
+    async fn link_follow_up(
+        &self,
+        key: StepKey,
+        place: u16,
+        task_id: Uuid,
+    ) -> Result<(), Self::Err> {
         sqlx::query!(
             r#"
             UPDATE factory_review_finding

@@ -18,7 +18,12 @@ use crate::domain::models::{
     Check, CheckState, CheckSuite, CodeRepository, HeadChecks, Merging, OpenPullRequest, Opening,
     PullRequest, PullRequestState, RepositoryAccess, RequiredChecks,
 };
-use crate::domain::ports::{PullRequests, Retryable, TaskAccess, TaskDirectory, UserDirectory};
+use crate::domain::ports::{
+    FollowUpTask, PullRequests, Retryable, TaskAccess, TaskDirectory, UserDirectory,
+};
+use crate::domain::review_rounds::ChangedFile;
+
+mod review_rounds;
 
 /// The session an agent Step claimed, and what it handed back.
 #[derive(Clone)]
@@ -48,6 +53,15 @@ impl Retryable for FakeError {
     }
 }
 
+/// A follow-up task [`FakeRepo`] made: whose, the task it follows up, and
+/// what it says.
+#[derive(Debug, Clone)]
+pub(crate) struct FollowUpMade {
+    pub(crate) owner: String,
+    pub(crate) of: Option<Uuid>,
+    pub(crate) task: FollowUpTask,
+}
+
 /// Runs, Steps and sessions in memory, with the same first-write-wins rules
 /// as the Postgres repository.
 #[derive(Clone, Default)]
@@ -68,6 +82,14 @@ pub(crate) struct FakeRepo {
     pub(crate) merge_heads: Arc<Mutex<BTreeMap<RunId, String>>>,
     /// Told each time a Gate opens.
     pub(crate) gate_opened: Arc<tokio::sync::Notify>,
+    /// Each Run's review rounds, with what their reviewers found.
+    pub(crate) review_rounds:
+        Arc<Mutex<Vec<(RunId, factory_records::domain::review_rounds::ReviewRound)>>>,
+    /// The follow-up tasks made, by their owner and the task each follows
+    /// up, in order.
+    pub(crate) follow_ups: Arc<Mutex<Vec<FollowUpMade>>>,
+    /// Whether making a follow-up task fails.
+    pub(crate) follow_ups_fail: Arc<Mutex<bool>>,
 }
 
 /// Everyone has an account but `macro|nobody@example.com`.
@@ -99,6 +121,28 @@ impl TaskDirectory for FakeRepo {
         } else {
             Ok(TaskAccess::NotFound)
         }
+    }
+
+    async fn create_follow_up(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        of: Option<Uuid>,
+        follow_up: &FollowUpTask,
+    ) -> Result<Uuid, FakeError> {
+        if *self.follow_ups_fail.lock().expect("fail") {
+            return Err(FakeError);
+        }
+        let task = Uuid::now_v7();
+        self.tasks.lock().expect("tasks").insert(task);
+        self.follow_ups
+            .lock()
+            .expect("follow ups")
+            .push(FollowUpMade {
+                owner: user_id.as_ref().to_string(),
+                of,
+                task: follow_up.clone(),
+            });
+        Ok(task)
     }
 }
 
@@ -727,6 +771,12 @@ pub(crate) struct FakeGithubState {
     /// The paths the Run's branch changed against its base; none when
     /// GitHub cannot list them all.
     pub(crate) changed: Option<Vec<String>>,
+    /// The commit the Run's branch is at, each time it is read next, in
+    /// order; the last one stays. None when the branch is not there.
+    pub(crate) branch_heads: VecDeque<Option<String>>,
+    /// The files each diff changed, by its base and head; a diff not here
+    /// cannot be listed in full.
+    pub(crate) diffs: BTreeMap<(String, String), Vec<ChangedFile>>,
 }
 
 /// GitHub in memory, for one Run's branch: opening its pull request makes
@@ -882,6 +932,32 @@ impl PullRequests for FakeGithub {
         _branch: &str,
     ) -> Result<Option<Vec<String>>, FakeError> {
         Ok(self.state().changed.clone())
+    }
+
+    async fn branch_head(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        _branch: &str,
+    ) -> Result<Option<String>, FakeError> {
+        let mut state = self.state();
+        let head = if state.branch_heads.len() > 1 {
+            state.branch_heads.pop_front()
+        } else {
+            state.branch_heads.front().cloned()
+        };
+        Ok(head.flatten())
+    }
+
+    async fn changed_files(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        base: &str,
+        head: &str,
+    ) -> Result<Option<Vec<ChangedFile>>, FakeError> {
+        let diff = (base.to_string(), head.to_string());
+        Ok(self.state().diffs.get(&diff).cloned())
     }
 
     async fn open(

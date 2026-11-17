@@ -3,12 +3,15 @@
 
 use agent_session::domain::session_task::TaskDocumentId;
 use document_storage_service_client::DocumentStorageServiceClient;
+use document_storage_service_client::task::{CreateTaskError, NewTask};
 use document_sub_type::DocumentSubType;
 use entity_access::domain::models::{AccessError, EntityType, ViewAccessLevel};
 use entity_access::domain::ports::EntityAccessService;
 use macro_user_id::user_id::MacroUserIdStr;
 
-use crate::domain::ports::{TaskAccess, TaskDirectory};
+use uuid::Uuid;
+
+use crate::domain::ports::{FollowUpTask, TaskAccess, TaskDirectory};
 
 /// Whether a person may see a document comes from entity access, and
 /// whether it is a task from the document storage service, which owns
@@ -35,6 +38,12 @@ pub enum DocumentTaskDirectoryErr {
     /// The document storage service did not answer.
     #[error("the document could not be read: {0:?}")]
     Documents(rootcause::Report),
+    /// The task could not be made.
+    #[error("the task could not be made: {0}")]
+    Create(#[from] CreateTaskError),
+    /// The task made has an id that is not a UUID.
+    #[error("the task made has id {0:?}, which is not a UUID")]
+    TaskId(String),
 }
 
 impl<A: EntityAccessService> TaskDirectory for DocumentTaskDirectory<A> {
@@ -84,5 +93,39 @@ impl<A: EntityAccessService> TaskDirectory for DocumentTaskDirectory<A> {
         } else {
             Ok(TaskAccess::NotATask)
         }
+    }
+
+    #[tracing::instrument(err, skip(self, user_id, follow_up))]
+    async fn create_follow_up(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        of: Option<Uuid>,
+        follow_up: &FollowUpTask,
+    ) -> Result<Uuid, Self::Err> {
+        // A follow-up goes in the project of the task it follows up; the
+        // owner must still be able to add to it, as when they make a task.
+        let project_id = match of {
+            Some(of) => self
+                .documents
+                .get_document_basic(&of.to_string())
+                .await
+                .map_err(|error| {
+                    DocumentTaskDirectoryErr::Documents(rootcause::report!("{error:#}"))
+                })?
+                .and_then(|document| document.project_id)
+                .and_then(|project| Uuid::parse_str(&project).ok()),
+            None => None,
+        };
+        let task = NewTask {
+            task_name: follow_up.name.clone(),
+            markdown: follow_up.markdown.clone(),
+            project_id,
+            share_with_team: true,
+        };
+        let made = self
+            .documents
+            .create_task_for_user(&task, user_id.as_ref())
+            .await?;
+        Uuid::parse_str(&made).map_err(|_| DocumentTaskDirectoryErr::TaskId(made))
     }
 }

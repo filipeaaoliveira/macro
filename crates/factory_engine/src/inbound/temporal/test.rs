@@ -6,6 +6,8 @@
 //! test runs its own worker on a task queue of its own, so the stack's
 //! factory worker never takes its work.
 
+mod review_panel;
+
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -34,6 +36,7 @@ use crate::domain::gate::AnswerGate;
 use crate::domain::models::{AgentAnswer, AgentTask, AgentTurn, PullRequestState, RunStart};
 use crate::domain::ports::{AgentFailure, AnswerDelivery, Retryable, RunWorkflows, StepAgent};
 use crate::domain::pull_request_steps::PullRequestSteps;
+use crate::domain::review_rounds::{ChangedFile, ReviewRoundsImpl};
 use crate::domain::service::StepServiceImpl;
 use crate::outbound::temporal_run_workflows::TemporalRunWorkflows;
 use crate::temporal::FlowWorkflowDefinition;
@@ -252,6 +255,7 @@ where
         &runtime,
         client.clone(),
         StepServiceImpl::new(repo.clone(), steps_of(agent, &repo)),
+        ReviewRoundsImpl::new(repo.clone(), FakeGithub::default(), repo.clone()),
     )
     .expect("worker");
 
@@ -427,6 +431,7 @@ async fn a_step_whose_worker_shuts_down_goes_on_at_once_on_the_next() {
     let task_queue = format!("factory-test-{}", Uuid::now_v7());
     let runtime = Runtime::from_current_tokio(Default::default()).expect("runtime");
     let steps = || StepServiceImpl::new(repo.clone(), steps_of(&agent, &repo));
+    let reviews = || ReviewRoundsImpl::new(repo.clone(), FakeGithub::default(), repo.clone());
     let handle = client
         .start_workflow(
             FlowWorkflowDefinition,
@@ -440,7 +445,8 @@ async fn a_step_whose_worker_shuts_down_goes_on_at_once_on_the_next() {
     // gets it within a few seconds.
     let mut restarted = None;
     for _ in 0..SHUTDOWNS {
-        let worker = worker_on(&task_queue, &runtime, client.clone(), steps()).expect("worker");
+        let worker =
+            worker_on(&task_queue, &runtime, client.clone(), steps(), reviews()).expect("worker");
         let reached = async {
             asked(&agent).await;
             if let Some(restarted) = restarted {
@@ -455,7 +461,8 @@ async fn a_step_whose_worker_shuts_down_goes_on_at_once_on_the_next() {
         restarted = Some(tokio::time::Instant::now());
     }
 
-    let last = worker_on(&task_queue, &runtime, client.clone(), steps()).expect("worker");
+    let last =
+        worker_on(&task_queue, &runtime, client.clone(), steps(), reviews()).expect("worker");
     let done = Notify::new();
     let walked = async {
         let ended = tokio::time::timeout(
@@ -479,15 +486,38 @@ async fn a_step_whose_worker_shuts_down_goes_on_at_once_on_the_next() {
 }
 
 /// The agent of a `code` Run: it ends each Step it is asked for `done`, but
-/// a review with the next of `reviews` (`pass` once they run out), and a CI
-/// fix by pushing a commit whose checks pass. It says when it is asked for a
-/// Step, and keeps the Steps it was asked for, by name.
+/// a reviewer's with the next of `reviews` (`pass` once they run out:
+/// `changes` hands back a Blocker in the change, `outside` one in a file it
+/// does not touch), and a CI fix by pushing a commit whose checks pass. With
+/// `together`, the reviewers of a round answer only once all of them were
+/// asked. It says when it is asked for a Step, and keeps the Steps it was
+/// asked for, by name.
 #[derive(Clone)]
 struct CodeAgent {
     github: FakeGithub,
     reviews: Arc<Mutex<Vec<&'static str>>>,
+    together: Option<Arc<tokio::sync::Barrier>>,
     steps: Arc<Mutex<Vec<String>>>,
     asked: Arc<Notify>,
+}
+
+/// What a reviewer hands back for `review`, one of [`CodeAgent`]'s
+/// `reviews`: its outcome and its text, with its Blockers' json block.
+fn reviewed(review: &str) -> (&'static str, String) {
+    let blocker = |file: &str| {
+        format!(
+            "Checked it.\n```json\n{{\"blockers\": [{{\"file\": \"{file}\", \"startLine\": 2, \
+             \"problem\": \"Collapses one dash too many\", \"why\": \"Slugs lose a word\"}}]}}\n```"
+        )
+    };
+    match review {
+        "changes" => ("changes", blocker("src/slug.rs")),
+        "outside" => ("changes", blocker("README.md")),
+        _ => (
+            "pass",
+            "Checked it.\n```json\n{\"blockers\": []}\n```".to_string(),
+        ),
+    }
 }
 
 /// The commit a CI fix pushes.
@@ -498,6 +528,7 @@ impl CodeAgent {
         Self {
             github: github.clone(),
             reviews: Arc::default(),
+            together: None,
             steps: Arc::default(),
             asked: Arc::default(),
         }
@@ -515,15 +546,27 @@ impl StepAgent for CodeAgent {
         let step = task.step.as_str().to_string();
         self.steps.lock().expect("steps").push(step.clone());
         self.asked.notify_one();
-        let outcome = match step.as_str() {
-            "review" => {
+        if step == "review" {
+            let review = {
                 let mut reviews = self.reviews.lock().expect("reviews");
                 if reviews.is_empty() {
                     "pass"
                 } else {
                     reviews.remove(0)
                 }
+            };
+            if let Some(together) = &self.together {
+                tokio::time::timeout(PATIENCE, together.wait())
+                    .await
+                    .expect("the round's reviewers work at once");
             }
+            let (outcome, text) = reviewed(review);
+            return Ok(AgentAnswer {
+                outcome: Outcome::try_from(outcome.to_string()).expect("valid"),
+                text,
+            });
+        }
+        let outcome = match step.as_str() {
             "ci_fix" => {
                 let mut github = self.github.state();
                 if let Some(pull_request) = github.pull_request.as_mut() {
@@ -667,6 +710,17 @@ where
         .expect("built in")
         .read(|_| Some(crate::domain::flow::StepUse::Work))
         .expect("valid flow");
+    // The Run's branch is at the pull request's head, and its change is to
+    // `src/slug.rs`.
+    github.state().branch_heads = [Some(FakeGithub::HEAD.to_string())].into();
+    github.state().diffs.insert(
+        ("main".to_string(), FakeGithub::HEAD.to_string()),
+        vec![ChangedFile::from_patch(
+            "src/slug.rs".to_string(),
+            None,
+            Some("@@ -1,3 +1,6 @@"),
+        )],
+    );
     let start = RunStart {
         run_id: run.id,
         flow,
@@ -682,6 +736,7 @@ where
         &runtime,
         client.clone(),
         StepServiceImpl::new(repo.clone(), steps),
+        ReviewRoundsImpl::new(repo.clone(), github.clone(), repo.clone()),
     )
     .expect("worker");
 
@@ -737,7 +792,10 @@ async fn a_code_run_merges_its_pull_request_once_a_person_approves() {
     .await;
 
     assert!(matches!(ended, Ok(RunOutcome::Success)), "{ended:?}");
-    assert_eq!(agent.steps(), ["plan", "write", "review"]);
+    assert_eq!(
+        agent.steps(),
+        ["plan", "write", "review", "review", "review"]
+    );
     let github = github.state();
     assert_eq!(github.opened, 1);
     assert_eq!(github.merges, [FakeGithub::HEAD]);
@@ -768,7 +826,9 @@ async fn red_ci_is_fixed_and_the_fixed_commit_merges() {
     assert!(matches!(ended, Ok(RunOutcome::Success)), "{ended:?}");
     assert_eq!(
         agent.steps(),
-        ["plan", "write", "review", "ci_fix", "review"]
+        [
+            "plan", "write", "review", "review", "review", "ci_fix", "review", "review", "review"
+        ]
     );
     let github = github.state();
     assert_eq!(github.opened, 1);
@@ -796,21 +856,27 @@ async fn revising_or_cancelling_at_the_merge_question_merges_nothing() {
         matches!(ended, Err(WorkflowGetResultError::Cancelled { .. })),
         "{ended:?}"
     );
-    assert_eq!(agent.steps(), ["plan", "write", "review", "fix", "review"]);
+    assert_eq!(
+        agent.steps(),
+        [
+            "plan", "write", "review", "review", "review", "fix", "review", "review", "review"
+        ]
+    );
     let github = github.state();
     assert!(github.merges.is_empty());
     assert_eq!(github.opened, 1);
 }
 
-/// Reviews that keep asking for changes stop after three rounds: the pull
-/// request is opened and checked, then left for a person, never merged.
+/// Review rounds that keep finding Blockers stop after three: the Run ends
+/// for a person, with no pull request opened.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "Temporal doesn't exist in CI"]
-async fn a_review_that_keeps_asking_for_changes_leaves_the_pull_request_for_a_person() {
+async fn a_review_that_keeps_finding_blockers_ends_the_run_for_a_person() {
     let github = FakeGithub::default();
     github.state().checks = [ci(Some("success"))].into();
     let agent = CodeAgent::new(&github);
-    *agent.reviews.lock().expect("reviews") = vec!["changes", "changes", "changes"];
+    // One reviewer of each round of three finds a Blocker.
+    *agent.reviews.lock().expect("reviews") = [["changes", "pass", "pass"]; 3].concat();
 
     let ended = walk_code(&agent, &github, |run| async move {
         run.answer_next_gate("approve").await;
@@ -818,14 +884,11 @@ async fn a_review_that_keeps_asking_for_changes_leaves_the_pull_request_for_a_pe
     .await;
 
     assert!(matches!(ended, Ok(RunOutcome::Manual)), "{ended:?}");
-    assert_eq!(
-        agent.steps(),
-        [
-            "plan", "write", "review", "fix", "review", "fix", "review", "fix"
-        ]
-    );
+    let steps = agent.steps();
+    assert_eq!(steps.iter().filter(|step| *step == "review").count(), 9);
+    assert_eq!(steps.iter().filter(|step| *step == "fix").count(), 3);
     let github = github.state();
-    assert_eq!(github.opened, 1);
+    assert_eq!(github.opened, 0);
     assert!(github.merges.is_empty());
 }
 

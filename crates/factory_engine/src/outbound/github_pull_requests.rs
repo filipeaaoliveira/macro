@@ -20,6 +20,7 @@ use crate::domain::models::{
     RequiredChecks,
 };
 use crate::domain::ports::{PullRequests, Retryable};
+use crate::domain::review_rounds::ChangedFile;
 
 /// GitHub Actions' app, whose workflow runs say whether a run still waits.
 const ACTIONS_APP: &str = "github-actions";
@@ -198,6 +199,43 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
             .github
             .list_changed_paths(&token, repository.owner(), repository.name(), base, branch)
             .await?)
+    }
+
+    #[tracing::instrument(err, skip(self, owner))]
+    async fn branch_head(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        branch: &str,
+    ) -> Result<Option<String>, GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        Ok(self
+            .github
+            .get_branch_head(&token, repository.owner(), repository.name(), branch)
+            .await?)
+    }
+
+    #[tracing::instrument(err, skip(self, owner))]
+    async fn changed_files(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        base: &str,
+        head: &str,
+    ) -> Result<Option<Vec<ChangedFile>>, GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        let files = self
+            .github
+            .compare_files(&token, repository.owner(), repository.name(), base, head)
+            .await?;
+        Ok(files.map(|files| {
+            files
+                .into_iter()
+                .map(|file| {
+                    ChangedFile::from_patch(file.path, file.previous_path, file.patch.as_deref())
+                })
+                .collect()
+        }))
     }
 
     #[tracing::instrument(err, skip(self, owner))]

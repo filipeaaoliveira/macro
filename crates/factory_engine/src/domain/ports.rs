@@ -12,6 +12,7 @@ use crate::domain::models::{
     Merging, OpenPullRequest, Opening, PullRequest, RepositoryAccess, RequiredChecks, RunDetail,
     RunFinish, RunStart, StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
 };
+use crate::domain::review_rounds::{ChangedFile, ReviewRoundClosing, ReviewRoundOpening};
 
 /// What a Run's workflow did with an answer it was sent.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -220,6 +221,26 @@ pub trait PullRequests: Send + Sync + 'static {
         branch: &str,
     ) -> impl Future<Output = Result<Option<Vec<String>>, Self::Err>> + Send;
 
+    /// The commit `branch` of `repository` is at; none when the branch is
+    /// not there.
+    fn branch_head(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        branch: &str,
+    ) -> impl Future<Output = Result<Option<String>, Self::Err>> + Send;
+
+    /// The files `head` of `repository` changed against its merge base
+    /// with `base`, with the lines each change touches; none when GitHub
+    /// cannot list them all.
+    fn changed_files(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        base: &str,
+        head: &str,
+    ) -> impl Future<Output = Result<Option<Vec<ChangedFile>>, Self::Err>> + Send;
+
     /// Ask GitHub to open `pull_request` in `repository`.
     fn open(
         &self,
@@ -274,6 +295,25 @@ pub trait TaskDirectory: Send + Sync + 'static {
         user_id: &MacroUserIdStr<'static>,
         task: &TaskDocumentId,
     ) -> impl Future<Output = Result<TaskAccess, Self::Err>> + Send;
+
+    /// Make `follow_up` a task of `user_id`'s, in the project of the task
+    /// document `of` when it has one, and return its task document's id.
+    fn create_follow_up(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        of: Option<Uuid>,
+        follow_up: &FollowUpTask,
+    ) -> impl Future<Output = Result<Uuid, Self::Err>> + Send;
+}
+
+/// A finding outside the diff a review round reviewed, as a task of its
+/// own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FollowUpTask {
+    /// The task's name.
+    pub name: String,
+    /// What it says, as markdown.
+    pub markdown: String,
 }
 
 /// Inbound service port: the Run API used by drivers (HTTP). Every call but
@@ -352,6 +392,26 @@ pub trait FactoryService: Send + Sync + 'static {
         actor: &MacroUserIdStr<'static>,
         id: RunId,
     ) -> impl Future<Output = Result<(), FactoryError>> + Send;
+}
+
+/// Inbound service port: what a Run's workflow asks its worker to do for a
+/// review panel, around its reviewers' Steps.
+pub trait ReviewService: Send + Sync + 'static {
+    /// Record the review round `opening` starts: the commit of the Run's
+    /// branch it reviews, and where the diff under review starts.
+    fn open_round(
+        &self,
+        opening: ReviewRoundOpening,
+    ) -> impl Future<Output = Result<(), StepError>> + Send;
+
+    /// End the review round `closing` names, once its reviewers' Steps
+    /// ended: tell its findings in the diff under review, its Blockers, from
+    /// those outside it, which become follow-up tasks, and return the
+    /// round's outcome for the Flow to route.
+    fn close_round(
+        &self,
+        closing: ReviewRoundClosing,
+    ) -> impl Future<Output = Result<Outcome, StepError>> + Send;
 }
 
 /// Inbound service port: what a Run's workflow asks its worker to do. Each

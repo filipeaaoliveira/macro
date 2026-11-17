@@ -9,6 +9,13 @@
 //! The interpreter is pure, so a replay walks the Flow the same way from the
 //! recorded outcomes and answers.
 //!
+//! An entry with `reviewers` is a review panel: the workflow opens a review
+//! round, starts a Step for each reviewer, runs their work at once, records
+//! their ends in the entry's order, and closes the round, whose outcome the
+//! interpreter gets. Only such an entry takes that path, and a Run carries
+//! its Flow in its input, so Runs started on a Flow without one replay as
+//! before.
+//!
 //! Cancelling the workflow cancels the running Step, whose activity drops
 //! its work before the cancellation completes, or the wait for an answer.
 //! The workflow then stops the Step's agent, which only it can tell was
@@ -19,19 +26,21 @@
 
 use std::time::Duration;
 
-use factory_records::domain::models::{Outcome, RunOutcome, StepKey};
+use factory_records::domain::models::{Outcome, RunId, RunOutcome, StepKey};
 use temporalio_common::error::ApplicationFailure;
 use temporalio_macros::{workflow, workflow_methods};
+use temporalio_sdk::workflows::join_all;
 use temporalio_sdk::{
     ActivityCancellationType, ActivityCloseTimeouts, ActivityOptions, SyncWorkflowContext,
     WorkflowCancellationToken, WorkflowContext, WorkflowContextView, WorkflowResult,
     WorkflowTermination,
 };
 
-use crate::domain::flow::GateDefinition;
+use crate::domain::flow::{Entry, GateDefinition};
 use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening, OpenGate, check_answer};
 use crate::domain::interpreter::{Interpreter, NextStep};
 use crate::domain::models::{RunFinish, RunStart, StepEnding, StepReport, StepRequest, StepStart};
+use crate::domain::review_rounds::{ReviewRoundClosing, ReviewRoundOpening};
 use crate::inbound::temporal::activities::FactoryActivities;
 use crate::temporal::{ANSWER_GATE_UPDATE, FLOW_WORKFLOW};
 
@@ -56,6 +65,10 @@ const STEP_TOTAL: Duration = Duration::from_secs(2 * 60 * 60);
 
 /// How long recording a Step, a Gate or a Run's end may take.
 const RECORD_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// How long opening or closing a review round may take: it reads GitHub,
+/// and a close makes a task of each follow-up.
+const ROUND_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 /// How long one attempt to stop a Step's agent may take: past the agent's
 /// own watch of its stopped session, and the session's delete.
@@ -103,7 +116,7 @@ impl FlowWorkflow {
         let mut stopped = None;
         // The Step whose agent may still hold what its work used: from its
         // work's start until the agent is stopped or let go.
-        let mut held = None;
+        let mut held: Vec<StepRequest> = Vec::new();
         let outcome = loop {
             let next = match interpreter.next_step(&mut state) {
                 Ok(next) => next,
@@ -116,6 +129,29 @@ impl FlowWorkflow {
                 NextStep::End(outcome) => break outcome,
                 NextStep::Run { entry, visit, seq } => (entry, visit, seq),
             };
+
+            // A review panel runs its reviewers' Steps at once, as one
+            // review round, whose outcome the Flow routes.
+            if !entry.reviewers.is_empty() {
+                let panel = Panel {
+                    run_id: start.run_id,
+                    entry,
+                    visit,
+                    seq,
+                };
+                let round =
+                    review_round(ctx, &panel, &mut held, &work_options, &record_options).await?;
+                match round {
+                    Round::Routed(outcome) => {
+                        if let Err(error) = interpreter.record(&mut state, &outcome) {
+                            stopped = Some(error);
+                            break RunOutcome::Failed;
+                        }
+                        continue;
+                    }
+                    Round::Ended(outcome) => break outcome,
+                }
+            }
 
             let key = StepKey {
                 run_id: start.run_id,
@@ -141,7 +177,7 @@ impl FlowWorkflow {
             // A Step that still fails for good ends `failed`, with
             // why as its output; the Flow may route it like any other
             // outcome. A Step stopped by cancelling the Run ends the Run.
-            held = Some(request.clone());
+            held = vec![request.clone()];
             let worked = ctx
                 .execute_activity(
                     FactoryActivities::run_step,
@@ -183,9 +219,9 @@ impl FlowWorkflow {
             // no attempt of the Step's work comes once its end is recorded,
             // so its agent lets go of the Step's session.
             if failed {
-                held = None;
+                held.clear();
                 stop(ctx, &request).await;
-            } else if held.take().is_some() {
+            } else if !std::mem::take(&mut held).is_empty() {
                 let released = ctx
                     .execute_activity(
                         FactoryActivities::release_step,
@@ -195,7 +231,7 @@ impl FlowWorkflow {
                     .await;
                 if released.is_err() {
                     if is_cancelled(ctx) {
-                        held = Some(request.clone());
+                        held = vec![request.clone()];
                         break RunOutcome::Cancelled;
                     }
                     released?;
@@ -233,10 +269,10 @@ impl FlowWorkflow {
 
         // A cancelled Run's Step may still have its agent at work. The Run
         // reads as cancelled first: stopping an agent may take a while.
-        if outcome == RunOutcome::Cancelled
-            && let Some(request) = held
-        {
-            stop(ctx, &request).await;
+        if outcome == RunOutcome::Cancelled {
+            for request in &held {
+                stop(ctx, request).await;
+            }
         }
 
         match (outcome, stopped) {
@@ -344,4 +380,170 @@ async fn ask(
     )
     .await?;
     Ok(outcome)
+}
+
+/// A review panel's visit: the entry, which visit of it, and the place of
+/// its first Step.
+struct Panel<'a> {
+    run_id: RunId,
+    entry: &'a Entry,
+    visit: u16,
+    seq: u16,
+}
+
+/// What a review round came to.
+enum Round {
+    /// Its outcome, for the Flow to route.
+    Routed(Outcome),
+    /// The Run ended: cancelled, or before the round's Steps started.
+    Ended(RunOutcome),
+}
+
+/// Run `panel`'s review round: open it, start a Step for each reviewer, in
+/// the order the entry names them, run their work at once, record each
+/// Step's end in that order, whichever ended first, and close the round,
+/// whose outcome comes back. `held` names the Steps whose agents may still
+/// hold what their work used, for a cancelled Run to stop.
+async fn review_round(
+    ctx: &mut WorkflowContext<FlowWorkflow>,
+    panel: &Panel<'_>,
+    held: &mut Vec<StepRequest>,
+    work_options: &ActivityOptions,
+    record_options: &ActivityOptions,
+) -> WorkflowResult<Round> {
+    let round_options = ActivityOptions::start_to_close_timeout(ROUND_TIMEOUT);
+    let opening = ReviewRoundOpening {
+        run_id: panel.run_id,
+        seq: panel.seq,
+        round: panel.visit,
+        reviewers: u16::try_from(panel.entry.reviewers.len()).unwrap_or(u16::MAX),
+    };
+    let opened = ctx
+        .execute_activity(
+            FactoryActivities::open_review_round,
+            opening,
+            round_options.clone(),
+        )
+        .await;
+    match opened {
+        Ok(()) => {}
+        Err(_) if is_cancelled(ctx) => return Ok(Round::Ended(RunOutcome::Cancelled)),
+        // A round that cannot open, as when the Run's branch is gone, runs
+        // no Step and ends `failed`.
+        Err(_) => return Ok(Round::Routed(Outcome::failed())),
+    }
+
+    let requests: Vec<StepRequest> = panel
+        .entry
+        .reviewers
+        .iter()
+        .zip(panel.seq..)
+        .map(|(role, seq)| {
+            let key = StepKey {
+                run_id: panel.run_id,
+                seq,
+            };
+            StepRequest::reviewer(key, panel.entry, panel.visit, role, panel.seq)
+        })
+        .collect();
+    for request in &requests {
+        let started = ctx
+            .execute_activity(
+                FactoryActivities::start_step,
+                request.clone(),
+                record_options.clone(),
+            )
+            .await;
+        match started {
+            Ok(StepStart::Started) => {}
+            Ok(StepStart::RunEnded(outcome)) => return Ok(Round::Ended(outcome)),
+            Err(_) if is_cancelled(ctx) => return Ok(Round::Ended(RunOutcome::Cancelled)),
+            Err(error) => return Err(error.into()),
+        }
+    }
+
+    // The reviewers work at once. Their activities are scheduled in the
+    // entry's order and their results read in it, so a replay walks the
+    // same way.
+    held.clone_from(&requests);
+    let worked = join_all(requests.iter().map(|request| {
+        ctx.execute_activity(
+            FactoryActivities::run_step,
+            request.clone(),
+            work_options.clone(),
+        )
+    }))
+    .await;
+
+    let mut any_failed = false;
+    for (request, worked) in requests.iter().zip(worked) {
+        let (report, failed) = match worked {
+            Ok(report) => (report, false),
+            Err(_) if is_cancelled(ctx) => return Ok(Round::Ended(RunOutcome::Cancelled)),
+            Err(_) => (
+                StepReport {
+                    outcome: Outcome::failed(),
+                    output: FAILED_STEP_OUTPUT.to_string(),
+                },
+                true,
+            ),
+        };
+        let ended = ctx
+            .execute_activity(
+                FactoryActivities::end_step,
+                StepEnding {
+                    key: request.key,
+                    report,
+                },
+                record_options.clone(),
+            )
+            .await;
+        if ended.is_err() {
+            if is_cancelled(ctx) {
+                return Ok(Round::Ended(RunOutcome::Cancelled));
+            }
+            ended?;
+        }
+
+        // As for any Step: work that failed for good has its agent
+        // stopped, and a Step that ended lets go of its session.
+        held.retain(|kept| kept.key != request.key);
+        if failed {
+            any_failed = true;
+            stop(ctx, request).await;
+            continue;
+        }
+        let released = ctx
+            .execute_activity(
+                FactoryActivities::release_step,
+                request.clone(),
+                record_options.clone(),
+            )
+            .await;
+        if released.is_err() {
+            if is_cancelled(ctx) {
+                held.push(request.clone());
+                return Ok(Round::Ended(RunOutcome::Cancelled));
+            }
+            released?;
+        }
+    }
+
+    let closing = ReviewRoundClosing {
+        run_id: panel.run_id,
+        seq: panel.seq,
+        failed: any_failed,
+    };
+    let closed = ctx
+        .execute_activity(
+            FactoryActivities::close_review_round,
+            closing,
+            round_options,
+        )
+        .await;
+    match closed {
+        Ok(outcome) => Ok(Round::Routed(outcome)),
+        Err(_) if is_cancelled(ctx) => Ok(Round::Ended(RunOutcome::Cancelled)),
+        Err(_) => Ok(Round::Routed(Outcome::failed())),
+    }
 }

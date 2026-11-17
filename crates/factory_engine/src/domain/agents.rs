@@ -15,6 +15,22 @@ use serde::Deserialize;
 use crate::domain::built_in_flows::built_in_roles;
 use crate::domain::flow::FlowError;
 
+/// The Role the single reviewer filled before the code Flow had a review
+/// panel. Its Agents fill each Role of [`REVIEWER_ROLES`] a definition does
+/// not list, so a definition written for one reviewer keeps working.
+pub const REVIEWER: &str = "reviewer";
+
+/// The Roles of the code Flow's review panel: one reviewer looks at the
+/// change's correctness, one at whether it does all the task asks and no
+/// more, and one at its tests.
+pub const REVIEWER_ROLES: [&str; 3] = ["correctness-reviewer", "scope-reviewer", "tests-reviewer"];
+
+/// Whether `role` is one of the review panel's, which [`REVIEWER`]'s Agents
+/// fill by default.
+fn is_panel_role(role: &Role) -> bool {
+    REVIEWER_ROLES.contains(&role.as_str())
+}
+
 /// An Agent: whose sessions it runs in, on which model, told what.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -71,6 +87,13 @@ pub enum AgentDefinitionError {
     /// A Flow names a Role the definition does not fill.
     #[error("a flow names role {0}, which the agent definition does not fill")]
     UnfilledRole(Role),
+    /// A Flow names a review panel's Role, and the definition fills neither
+    /// it nor `reviewer`, whose Agents would fill it.
+    #[error(
+        "a flow names reviewer role {0}: the agent definition must fill it, or `reviewer`, \
+         whose agents fill every reviewer role it does not list"
+    )]
+    UnfilledReviewer(Role),
     /// A built-in Flow does not read.
     #[error(transparent)]
     Flow(#[from] FlowError),
@@ -116,9 +139,20 @@ impl TryFrom<AgentDefinitionFields> for AgentDefinition {
 
 impl AgentDefinition {
     /// The Agents that fill `role`, in order: the first is its default.
-    /// Empty for a Role the definition does not fill.
+    /// A review panel's Role the definition does not list takes
+    /// [`REVIEWER`]'s. Empty for a Role the definition does not fill.
     pub fn for_role(&self, role: &Role) -> &[AgentName] {
-        self.roles.get(role).map_or(&[], Vec::as_slice)
+        if let Some(listed) = self.roles.get(role) {
+            return listed;
+        }
+        if is_panel_role(role) {
+            return self
+                .roles
+                .iter()
+                .find(|(listed, _)| listed.as_str() == REVIEWER)
+                .map_or(&[], |(_, agents)| agents.as_slice());
+        }
+        &[]
     }
 
     /// The Agent named `name`, if the definition has it.
@@ -157,9 +191,13 @@ impl AgentDefinition {
         roles: impl IntoIterator<Item = &'a Role>,
     ) -> Result<(), AgentDefinitionError> {
         for role in roles {
-            if !self.roles.contains_key(role) {
-                return Err(AgentDefinitionError::UnfilledRole(role.clone()));
+            if !self.for_role(role).is_empty() {
+                continue;
             }
+            if is_panel_role(role) {
+                return Err(AgentDefinitionError::UnfilledReviewer(role.clone()));
+            }
+            return Err(AgentDefinitionError::UnfilledRole(role.clone()));
         }
         Ok(())
     }

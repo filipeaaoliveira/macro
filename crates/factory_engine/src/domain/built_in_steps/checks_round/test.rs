@@ -198,6 +198,7 @@ fn input() -> StepInput<'static> {
         task_id: None,
         repository: Some(&REPOSITORY),
         earlier: &[],
+        review: None,
     }
 }
 

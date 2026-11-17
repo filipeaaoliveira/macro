@@ -77,11 +77,19 @@ async fn a_round_keeps_its_first_record_and_the_findings_its_step_ended_with(poo
     let first = [finding("src/a.rs", Some((4, 9)))];
     assert!(repo.record_findings(key, 3, &first).await.expect("first"));
     let retried = [finding("src/b.rs", None), finding("src/c.rs", Some((1, 1)))];
-    assert!(repo.record_findings(key, 3, &retried).await.expect("retried"));
+    assert!(
+        repo.record_findings(key, 3, &retried)
+            .await
+            .expect("retried")
+    );
 
-    repo.end_step(key, &Outcome::try_from("changes".to_string()).expect("outcome"), "Two")
-        .await
-        .expect("end");
+    repo.end_step(
+        key,
+        &Outcome::try_from("changes".to_string()).expect("outcome"),
+        "Two",
+    )
+    .await
+    .expect("end");
     let late = [finding("src/d.rs", None)];
     assert!(!repo.record_findings(key, 3, &late).await.expect("late"));
 
@@ -110,7 +118,10 @@ async fn a_finding_keeps_its_first_kind_and_task_and_a_round_its_first_end(pool:
     let repo = PgRunRepository::new(pool);
     let id = reviewing(&repo).await;
     let key = StepKey { run_id: id, seq: 4 };
-    let found = [finding("src/a.rs", Some((2, 3))), finding("README.md", None)];
+    let found = [
+        finding("src/a.rs", Some((2, 3))),
+        finding("README.md", None),
+    ];
     repo.record_findings(key, 3, &found).await.expect("record");
 
     let classes = [
@@ -125,13 +136,17 @@ async fn a_finding_keeps_its_first_kind_and_task_and_a_round_its_first_end(pool:
             kind: FindingKind::FollowUp,
         },
     ];
-    repo.classify_findings(id, 3, &classes).await.expect("classify");
+    repo.classify_findings(id, 3, &classes)
+        .await
+        .expect("classify");
     let flipped = [FindingClass {
         seq: 4,
         place: 1,
         kind: FindingKind::FollowUp,
     }];
-    repo.classify_findings(id, 3, &flipped).await.expect("again");
+    repo.classify_findings(id, 3, &flipped)
+        .await
+        .expect("again");
 
     let task = Uuid::parse_str("00000000-0000-7000-8000-000000000101").expect("task");
     let other = Uuid::parse_str("00000000-0000-7000-8000-000000000102").expect("task");

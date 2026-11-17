@@ -13,18 +13,23 @@ the Gates they asked people in MacroDB, and defines the names Flows use
 - `src/domain/ports.rs`: `RunRepository`, the port `factory_engine` writes through.
 - `src/outbound/pg_run_repository.rs`: the `factory_run`, `factory_step` and
   `factory_gate` queries.
+- `src/domain/review_rounds.rs` and
+  `src/outbound/pg_run_repository/review_rounds.rs`: `ReviewRoundRepository`,
+  a Run's review rounds and what their reviewers found.
 - `src/domain/insights.rs` and `src/outbound/pg_run_repository/insights.rs`:
   `RunInsightsRepository`, the reads behind Run insights.
 
 ## Scope
 
-- Owns: the `factory_run`, `factory_step`, `factory_gate` and
-  `factory_check_round` tables
+- Owns: the `factory_run`, `factory_step`, `factory_gate`,
+  `factory_check_round`, `factory_review_round` and `factory_review_finding`
+  tables
   (`crates/macro_db_client/migrations/20261116083957_factory.sql`,
   `20261117093000_factory_check_round.sql`,
   `20261117104713_factory_step_agent.sql`,
   `20261117120425_factory_step_bot.sql`,
-  `20261117170000_factory_turn_place.sql`).
+  `20261117170000_factory_turn_place.sql`,
+  `20261117184500_factory_review_round.sql`).
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
 
 ## Boundaries
@@ -77,6 +82,14 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `end_check_round_on_quota` keeps a round as ended by the agent's quota
   (`quota_ran_out`): no fix or round follows it.
   `list_steps` and `list_runs_steps` attach them to their Steps.
+- A review round (`factory_review_round`) is keyed by the place of its first
+  Step and recorded before its Steps start, so it references the Run, not a
+  Step; `start_review_round` keeps its first record. `record_findings`
+  replaces a reviewer Step's findings only while the Step has not ended,
+  under the Step's row lock, so they are the ones its end goes with.
+  `classify_findings`, `link_follow_up` and `end_review_round` keep their
+  first write. `follow_up_task_id` references `"Document"` and is cleared
+  when the task is deleted.
 - `factory_run.task_id` references `"Document"` and is cleared when the task
   document is deleted; `link_task` reports a missing task or Run instead of
   failing. `list_task_runs` reads one owner's Runs on a task newest first

@@ -1,5 +1,7 @@
 //! Startup configuration.
 
+use std::num::NonZeroU8;
+
 use database_env_vars::DatabaseUrl;
 use factory_engine::domain::agents::AgentDefinition;
 use macro_auth::InternalApiKey;
@@ -37,6 +39,10 @@ pub struct Config {
     /// each Role takes, in order, as JSON (`FACTORY_AGENTS`). Unset, the
     /// agent Steps run on a local stand-in that does no work.
     pub factory_agents: Option<AgentDefinition>,
+    /// The most review rounds a Run's review panel runs before the Run ends
+    /// for a person (`FACTORY_REVIEW_ROUNDS`); the Flow's own bound, three
+    /// for `code`, when unset.
+    pub factory_review_rounds: Option<NonZeroU8>,
     /// The retired `FACTORY_AGENT_ID`, read only to refuse it: set without
     /// `FACTORY_AGENTS`, the service does not start, and its error names
     /// `FACTORY_AGENTS`.

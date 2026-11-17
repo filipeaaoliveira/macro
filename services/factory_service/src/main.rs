@@ -23,6 +23,7 @@ use factory_engine::domain::built_in_steps::BuiltInSteps;
 use factory_engine::domain::insights::InsightsServiceImpl;
 use factory_engine::domain::ports::StepAgent;
 use factory_engine::domain::pull_request_steps::PullRequestSteps;
+use factory_engine::domain::review_rounds::ReviewRoundsImpl;
 use factory_engine::domain::service::{FactoryServiceImpl, StepServiceImpl};
 use factory_engine::domain::session_agent::SessionAgent;
 use factory_engine::inbound::http::{ApiDoc, FactoryRouterState, factory_router};
@@ -115,6 +116,7 @@ async fn run() -> Result<(), rootcause::Report> {
     let github = GithubPullRequests::new(auth.clone());
     let parts = Parts {
         port: config.port,
+        review_rounds: config.factory_review_rounds,
         repo: repo.clone(),
         usage: PgSessionUsageReader::new(db.clone()),
         users: AuthUserDirectory::new(auth),
@@ -158,6 +160,7 @@ async fn run() -> Result<(), rootcause::Report> {
 /// What serving takes besides the Steps.
 struct Parts {
     port: u16,
+    review_rounds: Option<std::num::NonZeroU8>,
     repo: PgRunRepository,
     usage: PgSessionUsageReader,
     users: AuthUserDirectory,
@@ -178,21 +181,33 @@ async fn serve<A: StepAgent + Clone>(
     steps: BuiltInSteps<A, GithubPullRequests<AuthServiceClient>, PgRunRepository>,
 ) -> Result<(), rootcause::Report> {
     let runtime = Runtime::from_current_tokio(Default::default())?;
+    // A review round reads the Run's branch on GitHub, and makes a task of
+    // each finding outside the diff it reviewed.
+    let reviews = ReviewRoundsImpl::new(
+        parts.repo.clone(),
+        parts.github.clone(),
+        parts.tasks.clone(),
+    );
     let worker = factory_engine::inbound::temporal::worker(
         &runtime,
         parts.client.clone(),
         StepServiceImpl::new(parts.repo.clone(), steps.clone()),
+        reviews,
     )?;
 
     let insights = Arc::new(InsightsServiceImpl::new(parts.repo.clone(), parts.usage));
-    let service = Arc::new(FactoryServiceImpl::new(
+    let mut service = FactoryServiceImpl::new(
         parts.repo,
         TemporalRunWorkflows::new(parts.client),
         steps,
         parts.users,
         parts.tasks,
         parts.github,
-    ));
+    );
+    if let Some(rounds) = parts.review_rounds {
+        service = service.with_review_rounds(rounds);
+    }
+    let service = Arc::new(service);
     let api = factory_router(FactoryRouterState::new(
         service,
         parts.authorization_state.clone(),

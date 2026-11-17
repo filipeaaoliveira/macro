@@ -4,9 +4,12 @@ use chrono::Utc;
 use factory_records::domain::models::{
     EntryId, Gate, GateAnswer, Outcome, Repository, Role, RunId, Step, StepEnd, StepKey,
 };
+use factory_records::domain::ports::RunRepository;
+use factory_records::domain::review_rounds::{FindingKind, Lines, ReviewFinding, ReviewRound};
 use macro_user_id::user_id::MacroUserIdStr;
 
 use super::{BuiltInStepError, BuiltInSteps};
+
 use crate::domain::fakes::{FakeGithub, FakeRepo};
 use crate::domain::flow::{Flow, StepName, StepUse};
 use crate::domain::models::{AgentAnswer, AgentTask, AgentTurn, StepInput};
@@ -102,6 +105,7 @@ fn input<'a>(earlier: &'a [Step]) -> StepInput<'a> {
         task_id: None,
         repository: None,
         earlier,
+        review: None,
     }
 }
 
@@ -433,4 +437,159 @@ async fn a_prompt_cuts_a_newest_step_past_its_budget_rather_than_leave_it_out() 
         assert!(prompt.contains("1 earlier steps are left out"), "pad {pad}");
         assert!(prompt.len() < plan.len(), "pad {pad}");
     }
+}
+
+/// A review round that starts at the Step `seq`, of two reviewers, which
+/// reviews `head` from `diff_base`, with one Blocker and one follow-up once
+/// it ended.
+fn round(seq: u16, head: &str, diff_base: &str, fix_diff: bool) -> ReviewRound {
+    let finding = |place, kind, path: &str| ReviewFinding {
+        seq,
+        place,
+        role: Some(Role::try_from("tests-reviewer".to_string()).expect("valid")),
+        path: path.to_string(),
+        lines: Some(Lines { start: 3, end: 5 }),
+        problem: format!("{path} skips the empty case"),
+        why: "An empty list panics".to_string(),
+        kind: Some(kind),
+        follow_up_task_id: None,
+    };
+    ReviewRound {
+        round: 2,
+        seq,
+        reviewers: 2,
+        head_sha: head.to_string(),
+        diff_base: diff_base.to_string(),
+        fix_diff,
+        started_at: Utc::now(),
+        end: None,
+        findings: vec![
+            finding(1, FindingKind::Blocker, "src/list.rs"),
+            finding(2, FindingKind::FollowUp, "src/other.rs"),
+        ],
+    }
+}
+
+/// A reviewer of a panel is told what its Role looks at, the commit it
+/// reviews, and the diff under review: here the fix diff, from the commit
+/// the round before reviewed. It hands its Blockers back in a json block.
+#[tokio::test]
+async fn a_panel_reviewer_is_told_its_focus_and_the_fix_diff() {
+    let agent = FakeAgent::ending_with("pass");
+    let steps = BuiltInSteps::new(agent.clone(), pull_requests());
+    let repository = Repository {
+        url: "https://github.com/macro/app".to_string(),
+        base_branch: "trunk".to_string(),
+    };
+    let reviewer = Role::try_from("correctness-reviewer".to_string()).expect("valid");
+    let fix_round = round(2, "bbb", "aaa", true);
+    let mut reviewing = input(&[]);
+    reviewing.repository = Some(&repository);
+    reviewing.role = Some(&reviewer);
+    reviewing.review = Some(&fix_round);
+
+    steps.run(&step("review"), reviewing).await.expect("review");
+
+    let tasks = agent.tasks.lock().expect("tasks");
+    let prompt = &tasks[0].prompt;
+    assert_eq!(tasks[0].role, reviewer);
+    assert!(prompt.contains("Review commit `bbb`"), "{prompt}");
+    assert!(prompt.contains("`git diff aaa...bbb`"), "{prompt}");
+    assert!(
+        prompt.contains("since review round 1 reviewed `aaa`"),
+        "{prompt}"
+    );
+    assert!(
+        prompt.contains("You review the change's correctness"),
+        "{prompt}"
+    );
+    assert!(prompt.contains("```json"), "{prompt}");
+}
+
+/// The first round reviews the Run's whole change against its base.
+#[tokio::test]
+async fn a_first_round_reviews_the_whole_change() {
+    let agent = FakeAgent::ending_with("pass");
+    let steps = BuiltInSteps::new(agent.clone(), pull_requests());
+    let repository = Repository {
+        url: "https://github.com/macro/app".to_string(),
+        base_branch: "trunk".to_string(),
+    };
+    let reviewer = Role::try_from("tests-reviewer".to_string()).expect("valid");
+    let first = round(1, "aaa", "trunk", false);
+    let mut reviewing = input(&[]);
+    reviewing.repository = Some(&repository);
+    reviewing.role = Some(&reviewer);
+    reviewing.review = Some(&first);
+
+    steps.run(&step("review"), reviewing).await.expect("review");
+
+    let prompt = &agent.tasks.lock().expect("tasks")[0].prompt;
+    assert!(prompt.contains("`git diff origin/trunk...aaa`"), "{prompt}");
+    assert!(prompt.contains("the run's whole change"), "{prompt}");
+    assert!(prompt.contains("You review the change's tests"), "{prompt}");
+}
+
+/// The fix is given the Blockers of the latest round, with where each is,
+/// what is wrong and why, and not its follow-ups.
+#[tokio::test]
+async fn a_fix_is_given_the_blockers_of_the_latest_round() {
+    let agent = FakeAgent::ending_with("done");
+    let repo = FakeRepo::default();
+    let steps = BuiltInSteps::new(
+        agent.clone(),
+        PullRequestSteps::new(FakeGithub::default(), repo.clone()),
+    );
+    let repository = Repository {
+        url: "https://github.com/macro/app".to_string(),
+        base_branch: "trunk".to_string(),
+    };
+    let ended_round = round(2, "bbb", "aaa", true);
+    let mut fixing = input(&[]);
+    fixing.repository = Some(&repository);
+    fixing.review = Some(&ended_round);
+    let entry = EntryId::try_from("fix".to_string()).expect("valid");
+    repo.start_step(fixing.key, &entry, 1).await.expect("start");
+
+    steps.run(&step("fix"), fixing).await.ok();
+
+    let prompt = &agent.tasks.lock().expect("tasks")[0].prompt;
+    assert!(prompt.contains("## Blockers of review round 2"), "{prompt}");
+    assert!(
+        prompt.contains("1. `src/list.rs` lines 3-5: src/list.rs skips the empty case"),
+        "{prompt}"
+    );
+    assert!(prompt.contains("Why: An empty list panics"), "{prompt}");
+    assert!(!prompt.contains("src/other.rs"), "{prompt}");
+}
+
+/// Each reviewer of a round says what it checked: a later Step reads them
+/// all, not only the last to end.
+#[tokio::test]
+async fn a_prompt_carries_each_reviewer_s_latest_step() {
+    let agent = FakeAgent::ending_with("done");
+    let steps = BuiltInSteps::new(agent.clone(), pull_requests());
+    let reviewer = |mut step: Step, role: &str| {
+        step.role = Some(Role::try_from(role.to_string()).expect("valid"));
+        step
+    };
+    let earlier = [
+        reviewer(
+            ended(3, "review", 1, "Correctness looks fine"),
+            "correctness-reviewer",
+        ),
+        reviewer(
+            ended(4, "review", 1, "Tests miss the empty list"),
+            "tests-reviewer",
+        ),
+    ];
+
+    steps
+        .run(&step("write"), input(&earlier))
+        .await
+        .expect("write");
+
+    let prompt = &agent.tasks.lock().expect("tasks")[0].prompt;
+    assert!(prompt.contains("Correctness looks fine"));
+    assert!(prompt.contains("Tests miss the empty list"));
 }

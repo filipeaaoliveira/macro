@@ -11,12 +11,14 @@ mod test;
 
 use factory_records::domain::models::{Outcome, Repository, Role, Step, StepKey};
 use factory_records::domain::ports::RunRepository;
+use factory_records::domain::review_rounds::ReviewRound;
 use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::flow::{StepName, StepUse};
 use crate::domain::models::{AgentTask, StepInput, StepReport, run_branch};
 use crate::domain::ports::{AgentFailure, PullRequests, Retryable, StepAgent, StepExecutor};
 use crate::domain::pull_request_steps::{PullRequestStepError, PullRequestSteps};
+use crate::domain::review_rounds::blockers_brief;
 
 /// What the agent is told for a `plan` Step.
 const PLAN_INSTRUCTIONS: &str = include_str!("built_in_steps/plan.md");
@@ -24,8 +26,28 @@ const PLAN_INSTRUCTIONS: &str = include_str!("built_in_steps/plan.md");
 /// What the agent is told for a `write` Step.
 const WRITE_INSTRUCTIONS: &str = include_str!("built_in_steps/write.md");
 
-/// What the agent is told for a `review` Step.
+/// What the agent is told for a `review` Step of a Run started before its
+/// Flow had a review panel.
 const REVIEW_INSTRUCTIONS: &str = include_str!("built_in_steps/review.md");
+
+/// What a reviewer of a review panel is told.
+const REVIEW_PANEL_INSTRUCTIONS: &str = include_str!("built_in_steps/review_panel.md");
+
+/// What each Role of the review panel looks at.
+const REVIEW_FOCUS: [(&str, &str); 3] = [
+    (
+        "correctness-reviewer",
+        include_str!("built_in_steps/review_focus/correctness.md"),
+    ),
+    (
+        "scope-reviewer",
+        include_str!("built_in_steps/review_focus/scope.md"),
+    ),
+    (
+        "tests-reviewer",
+        include_str!("built_in_steps/review_focus/tests.md"),
+    ),
+];
 
 /// What the agent is told for a `fix` Step.
 const FIX_INSTRUCTIONS: &str = include_str!("built_in_steps/fix.md");
@@ -287,14 +309,21 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> StepExecutor for BuiltInSt
             }
             BuiltInStep::Review => {
                 let outcomes = outcomes(&["pass", "changes"]);
-                self.ask_agent_in_repository(step, REVIEW_INSTRUCTIONS, outcomes, input)
+                let instructions = match input.review {
+                    Some(round) if input.role.is_some() && in_round(round, input.key.seq) => {
+                        panel_instructions(round, input.role)
+                    }
+                    _ => REVIEW_INSTRUCTIONS.to_string(),
+                };
+                self.ask_agent_in_repository(step, &instructions, outcomes, input)
                     .await
             }
             BuiltInStep::Fix => {
                 if input.repository.is_none() {
                     return Err(BuiltInStepError::NoRepository(step.clone()));
                 }
-                self.work_and_check(step, FIX_INSTRUCTIONS, vec![Outcome::done()], input)
+                let instructions = fix_instructions(input.review);
+                self.work_and_check(step, &instructions, vec![Outcome::done()], input)
                     .await
             }
             BuiltInStep::CiFix => {
@@ -354,6 +383,55 @@ fn agent_role(step: &StepName, named: Option<&Role>) -> Option<Role> {
     Some(named.cloned().unwrap_or(implied))
 }
 
+/// Whether the Step at `seq` is one of `round`'s reviewers.
+fn in_round(round: &ReviewRound, seq: u16) -> bool {
+    round.step_seqs().contains(&seq)
+}
+
+/// What a reviewer of `round` filling `role` is told: what its Role looks
+/// at, the commit it reviews, and the diff under review, the Run's whole
+/// change or the fix diff.
+fn panel_instructions(round: &ReviewRound, role: Option<&Role>) -> String {
+    let focus = REVIEW_FOCUS
+        .iter()
+        .find(|(name, _)| role.is_some_and(|role| role.as_str() == *name))
+        .map_or("", |(_, focus)| focus.trim());
+    let (base, scope) = if round.fix_diff {
+        (
+            round.diff_base.clone(),
+            format!(
+                "the changes the fix made since review round {} reviewed `{}`",
+                round.round.saturating_sub(1),
+                round.diff_base
+            ),
+        )
+    } else {
+        (
+            format!("origin/{}", round.diff_base),
+            "the run's whole change against its base".to_string(),
+        )
+    };
+    REVIEW_PANEL_INSTRUCTIONS
+        .replace("{focus}", focus)
+        .replace("{head}", &round.head_sha)
+        .replace("{base}", &base)
+        .replace("{scope}", &scope)
+}
+
+/// What the fix is told: with the Blockers of the latest review round when
+/// it found some.
+fn fix_instructions(review: Option<&ReviewRound>) -> String {
+    let blockers = review.filter(|round| round.blockers().next().is_some());
+    match blockers {
+        Some(round) => format!(
+            "{FIX_INSTRUCTIONS}\n## Blockers of review round {}\n{}\n",
+            round.round,
+            blockers_brief(round)
+        ),
+        None => FIX_INSTRUCTIONS.to_string(),
+    }
+}
+
 /// The most bytes of the Run's earlier Steps a prompt carries.
 const HISTORY_BUDGET: usize = 48 * 1024;
 
@@ -393,13 +471,17 @@ fn workplace(repository: &Repository, branch: &str) -> String {
 /// What the Run's earlier Steps produced and how a person answered their
 /// Gates, so a later Step reads the plan it carries out and what people said
 /// about it: the latest visit of each entry, newest first, as many as fit
-/// in [`HISTORY_BUDGET`]. A loop that visits an entry again and again adds
+/// in [`HISTORY_BUDGET`]; of a review panel's entry, its latest Step of each
+/// Role. A loop that visits an entry again and again adds
 /// nothing but its latest round. The newest Step is never left out: when it
 /// alone is past the budget, its end is cut.
 fn history(earlier: &[Step]) -> String {
     let mut latest: Vec<&Step> = Vec::new();
     for step in earlier.iter().rev() {
-        if step.end.is_some() && !latest.iter().any(|kept| kept.entry == step.entry) {
+        let kept = latest
+            .iter()
+            .any(|kept| kept.entry == step.entry && kept.role == step.role);
+        if step.end.is_some() && !kept {
             latest.push(step);
         }
     }

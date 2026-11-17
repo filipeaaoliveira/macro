@@ -137,3 +137,65 @@ fn the_retired_agent_id_alone_is_refused() {
         Ok(Some(definition))
     );
 }
+
+/// A definition written for the single reviewer keeps working: the review
+/// panel's Roles it does not list take `reviewer`'s Agents, one it lists
+/// takes its own, and one filled by neither stops the service with a
+/// message that names both.
+#[test]
+fn the_review_panel_roles_default_to_the_reviewer() {
+    let definition = |roles: serde_json::Value| {
+        read(json!({
+            "agents": {
+                "primary": { "bot": "00000000-0000-0000-0000-00000000c1a0" },
+                "backup": { "bot": "00000000-0000-0000-0000-00000000c0de" }
+            },
+            "roles": roles
+        }))
+        .expect("a definition")
+    };
+    let single = definition(json!({
+        "planner": ["primary"],
+        "writer": ["primary"],
+        "reviewer": ["backup", "primary"],
+        "fixer": ["primary"]
+    }));
+    let own_tests = definition(json!({
+        "planner": ["primary"],
+        "writer": ["primary"],
+        "reviewer": ["backup"],
+        "tests-reviewer": ["primary"],
+        "fixer": ["primary"]
+    }));
+    let no_reviewer = definition(json!({
+        "planner": ["primary"],
+        "writer": ["primary"],
+        "correctness-reviewer": ["primary"],
+        "fixer": ["primary"]
+    }));
+
+    assert_eq!(single.fills_built_in_flows(), Ok(()));
+    assert_eq!(
+        single.for_role(&role("scope-reviewer")),
+        [agent("backup"), agent("primary")]
+    );
+    assert_eq!(
+        own_tests.for_role(&role("tests-reviewer")),
+        [agent("primary")]
+    );
+    assert_eq!(
+        own_tests.for_role(&role("correctness-reviewer")),
+        [agent("backup")]
+    );
+    assert_eq!(own_tests.for_role(&role("other-reviewer")), []);
+
+    let refused = no_reviewer.fills_built_in_flows();
+    assert_eq!(
+        refused,
+        Err(AgentDefinitionError::UnfilledReviewer(role(
+            "scope-reviewer"
+        )))
+    );
+    let message = refused.expect_err("refused").to_string();
+    assert!(message.contains("scope-reviewer") && message.contains("`reviewer`"));
+}

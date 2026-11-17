@@ -10,7 +10,7 @@ use std::time::Duration;
 use temporalio_client::Client;
 use temporalio_sdk::{Runtime, Worker, WorkerOptions};
 
-use crate::domain::ports::StepService;
+use crate::domain::ports::{ReviewService, StepService};
 use crate::inbound::temporal::activities::FactoryActivities;
 use crate::inbound::temporal::workflow::FlowWorkflow;
 use crate::temporal::TASK_QUEUE;
@@ -27,13 +27,14 @@ const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 const MAX_HEARTBEAT_THROTTLE: Duration = Duration::from_secs(4);
 
 /// A worker on the factory's task queue that runs the Flow workflow and its
-/// activities, over `steps`.
+/// activities, over `steps` and the review panels' `reviews`.
 pub fn worker(
     runtime: &Runtime,
     client: Client,
     steps: impl StepService,
+    reviews: impl ReviewService,
 ) -> Result<Worker, rootcause::Report> {
-    worker_on(TASK_QUEUE, runtime, client, steps)
+    worker_on(TASK_QUEUE, runtime, client, steps, reviews)
 }
 
 /// A worker on `task_queue`, as [`worker`] is on the factory's.
@@ -42,10 +43,11 @@ fn worker_on(
     runtime: &Runtime,
     client: Client,
     steps: impl StepService,
+    reviews: impl ReviewService,
 ) -> Result<Worker, rootcause::Report> {
     let options = WorkerOptions::new(task_queue)
         .register_workflow::<FlowWorkflow>()?
-        .register_activities(FactoryActivities::new(steps))
+        .register_activities(FactoryActivities::new(steps, reviews))
         .graceful_shutdown_period(SHUTDOWN_GRACE)
         .max_heartbeat_throttle_interval(MAX_HEARTBEAT_THROTTLE)
         .build();

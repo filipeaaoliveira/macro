@@ -63,8 +63,8 @@ fn a_flow_is_found_by_its_name_only() {
     assert!(BuiltInFlow::named("Plan").is_none());
 }
 
-/// Every entry an agent does names the Role it fills, and the built-in
-/// Flows need four.
+/// Every entry an agent does names the Role it fills, or the Roles of its
+/// review panel, and the built-in Flows need six.
 #[test]
 fn every_agent_entry_names_its_role() {
     for flow in BUILT_IN_FLOWS {
@@ -75,7 +75,7 @@ fn every_agent_entry_names_its_role() {
             let agent_step =
                 ["plan", "write", "review", "fix", "ci_fix"].contains(&entry.step.as_str());
             assert_eq!(
-                entry.role.is_some(),
+                entry.role.is_some() || !entry.reviewers.is_empty(),
                 agent_step,
                 "entry {} of flow {}",
                 entry.id,
@@ -89,5 +89,15 @@ fn every_agent_entry_names_its_role() {
         .into_iter()
         .map(String::from)
         .collect();
-    assert_eq!(roles, ["fixer", "planner", "reviewer", "writer"]);
+    assert_eq!(
+        roles,
+        [
+            "correctness-reviewer",
+            "fixer",
+            "planner",
+            "scope-reviewer",
+            "tests-reviewer",
+            "writer"
+        ]
+    );
 }

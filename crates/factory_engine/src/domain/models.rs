@@ -7,6 +7,7 @@ use chrono::{DateTime, Utc};
 use factory_records::domain::models::{
     EntryId, Outcome, Repository, Role, Run, RunId, RunOutcome, Step, StepKey,
 };
+use factory_records::domain::review_rounds::ReviewRound;
 use macro_user_id::user_id::MacroUserIdStr;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -37,6 +38,10 @@ pub struct StepRequest {
     pub role: Option<Role>,
     /// Which visit of the entry it is, from 1.
     pub visit: u16,
+    /// The review round the Step reviews in, by the place of the round's
+    /// first Step; none for a Step of no review panel.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub round: Option<u16>,
 }
 
 impl StepRequest {
@@ -49,6 +54,21 @@ impl StepRequest {
             step: entry.step.clone(),
             role: entry.role.clone(),
             visit,
+            round: None,
+        }
+    }
+
+    /// The Step `key` of the review round that starts at `round`, the
+    /// `visit` of the review panel `entry`, in which a reviewer of `role`
+    /// reviews.
+    pub fn reviewer(key: StepKey, entry: &Entry, visit: u16, role: &Role, round: u16) -> Self {
+        Self {
+            key,
+            entry: entry.id.clone(),
+            step: entry.step.clone(),
+            role: Some(role.clone()),
+            visit,
+            round: Some(round),
         }
     }
 }
@@ -80,6 +100,9 @@ pub struct StepInput<'a> {
     pub repository: Option<&'a Repository>,
     /// The Run's Steps that ended before this one, in order.
     pub earlier: &'a [Step],
+    /// For a reviewer's Step, the review round it reviews in; for any
+    /// other, the Run's latest review round that ended before it.
+    pub review: Option<&'a ReviewRound>,
 }
 
 /// What an agent is asked to do for one Step.
@@ -426,6 +449,8 @@ pub struct RunDetail {
     pub run: Run,
     /// Its Steps, in the order they started.
     pub steps: Vec<Step>,
+    /// Its review rounds, in order, each with what its reviewers found.
+    pub review_rounds: Vec<ReviewRound>,
 }
 
 /// A Flow a person can start a Run of.
