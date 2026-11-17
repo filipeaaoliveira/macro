@@ -2,7 +2,9 @@ use std::sync::LazyLock;
 
 use chrono::{DateTime, TimeDelta, Utc};
 use factory_records::domain::main_hold::{MainHoldRepository, RequiredChecksState};
-use factory_records::domain::models::{NewRun, Repository, RunId, StepKey};
+use factory_records::domain::models::{
+    EntryId, Gate, GateAnswer, NewRun, Outcome, Repository, RunId, Step, StepEnd, StepKey,
+};
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
@@ -725,4 +727,130 @@ async fn a_merge_waits_out_a_hold_that_clears() {
     assert_eq!(merges[0].1.url, "https://github.com/macro/app/pull/7");
     // Once for the hold it found, then after each merge it saw.
     assert_eq!(watches.started().len(), 3);
+}
+
+/// The merge Gate's Step, answered `approve`, approving `approved`.
+fn approved_merge_gate(approved: &[&str]) -> Step {
+    let approve = Outcome::try_from("approve".to_string()).expect("valid");
+    Step {
+        seq: 4,
+        entry: EntryId::try_from("merge-gate".to_string()).expect("valid"),
+        visit: 1,
+        started_at: Utc::now(),
+        role: None,
+        agent: None,
+        passed_over: Vec::new(),
+        end: Some(StepEnd {
+            outcome: Outcome::done(),
+            output: "Every check passed.".to_string(),
+            ended_at: Utc::now(),
+        }),
+        gate: Some(Gate {
+            question: "Merge?".to_string(),
+            answers: vec![approve.clone()],
+            opened_at: Utc::now(),
+            answer: Some(GateAnswer {
+                answer: approve,
+                note: None,
+                user_id: None,
+                approved_control_files: Some(
+                    approved.iter().map(|path| (*path).to_string()).collect(),
+                ),
+                answered_at: Utc::now(),
+            }),
+        }),
+        checks: Vec::new(),
+    }
+}
+
+/// A Tampered Run whose Control Files no person approved goes back to its
+/// merge Gate at once, even while its base is held: it neither waits out
+/// the hold nor merges.
+#[tokio::test(start_paused = true)]
+async fn an_unapproved_tampered_run_on_a_held_base_goes_back_at_once() {
+    let repo = FakeRepo::default();
+    let github = open_pull_request();
+    github.state().changed = Some(vec!["src/slug.ts".to_string(), "package.json".to_string()]);
+    let watches = FakeWatches::default();
+    let run_id = code_run(&repo).await;
+    repo.set_merge_head(run_id, FakeGithub::HEAD)
+        .await
+        .expect("keep");
+    repo.hold_main(&REPOSITORY, RED_HEAD, "- test (failure)", a_minute_ago())
+        .await
+        .expect("hold");
+
+    let started = tokio::time::Instant::now();
+    let report = PullRequestSteps::new(github.clone(), repo.clone(), watches.clone())
+        .merge(input(run_id))
+        .await
+        .expect("merge");
+
+    assert_eq!(report.outcome.as_str(), "changed");
+    assert!(report.output.contains("package.json"), "{}", report.output);
+    assert!(started.elapsed() < std::time::Duration::from_secs(1));
+    assert!(github.state().merges.is_empty(), "nothing merged");
+    assert!(watches.started().is_empty(), "no hold waited on");
+    assert!(repo.main().merges.is_empty());
+}
+
+/// A Tampered Run whose Control Files a person approved still merges
+/// nothing while its base is held: it waits, then ends `held`, naming the
+/// failing checks.
+#[tokio::test(start_paused = true)]
+async fn an_approved_tampered_run_on_a_held_base_is_held() {
+    let repo = FakeRepo::default();
+    let github = open_pull_request();
+    github.state().changed = Some(vec!["src/slug.ts".to_string(), "package.json".to_string()]);
+    let watches = FakeWatches::default();
+    let run_id = code_run(&repo).await;
+    repo.set_merge_head(run_id, FakeGithub::HEAD)
+        .await
+        .expect("keep");
+    repo.hold_main(&REPOSITORY, RED_HEAD, "- test (failure)", a_minute_ago())
+        .await
+        .expect("hold");
+    let earlier = [approved_merge_gate(&["package.json"])];
+    let mut merging = input(run_id);
+    merging.earlier = &earlier;
+
+    let report = PullRequestSteps::new(github.clone(), repo.clone(), watches.clone())
+        .merge(merging)
+        .await
+        .expect("merge");
+
+    assert_eq!(report.outcome.as_str(), "held");
+    assert!(
+        report.output.contains("test (failure)"),
+        "{}",
+        report.output
+    );
+    assert!(github.state().merges.is_empty(), "nothing merged");
+    assert_eq!(watches.started(), vec![MainWatch::of(run_id, &REPOSITORY)]);
+}
+
+/// A pull request merged outside the Run is recorded as the Run's merge,
+/// so its base is watched, and the Step names the Control Files the Run
+/// last kept.
+#[tokio::test]
+async fn a_pull_request_merged_outside_is_recorded_and_names_its_control_files() {
+    let repo = FakeRepo::default();
+    let github = open_pull_request();
+    github.state().changed = Some(vec!["package.json".to_string()]);
+    let watches = FakeWatches::default();
+    let run_id = code_run(&repo).await;
+    repo.set_merge_head(run_id, FakeGithub::HEAD)
+        .await
+        .expect("keep");
+    let steps = PullRequestSteps::new(github.clone(), repo.clone(), watches.clone());
+    let ready = steps.merge(input(run_id)).await.expect("read once");
+    assert_eq!(ready.outcome.as_str(), "changed");
+    github.state().pull_request.as_mut().expect("opened").state = PullRequestState::Merged;
+
+    let report = steps.merge(input(run_id)).await.expect("merge");
+
+    assert_eq!(report.outcome.as_str(), "merged");
+    assert!(report.output.contains("package.json"), "{}", report.output);
+    assert_eq!(repo.main().merges.len(), 1);
+    assert_eq!(watches.started(), vec![MainWatch::of(run_id, &REPOSITORY)]);
 }

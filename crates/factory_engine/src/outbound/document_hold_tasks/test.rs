@@ -154,4 +154,7 @@ async fn a_hidden_run_task_files_the_task_in_no_initiative() {
         .body_json()
         .expect("json");
     assert!(created.get("propertyValues").is_none(), "{created}");
+    // The hold's task takes the id document storage gives it; only a
+    // follow-up names its own.
+    assert!(created.get("documentId").is_none(), "{created}");
 }
