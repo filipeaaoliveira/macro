@@ -833,6 +833,9 @@ pub struct GithubCheckSuite {
     /// How many check runs it holds; an app that runs nothing on the commit
     /// leaves an empty suite queued.
     pub check_runs: u64,
+    /// When GitHub created it, as an app's CI may add its runs a while
+    /// after.
+    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// The latest commit status of one context on a commit.

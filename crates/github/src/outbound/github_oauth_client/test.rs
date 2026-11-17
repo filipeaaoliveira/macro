@@ -24,17 +24,28 @@ impl MockServer {
 
     /// Answers one connection per response, in order.
     pub(super) fn start_many(responses: Vec<MockResponse>) -> Self {
+        Self::start_with_headers(
+            responses
+                .into_iter()
+                .map(|response| (response, ""))
+                .collect(),
+        )
+    }
+
+    /// Answers one connection per response, in order, each with its extra
+    /// header lines (`Name: value\r\n` each).
+    pub(super) fn start_with_headers(responses: Vec<(MockResponse, &'static str)>) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let base_url = format!("http://{}", listener.local_addr().unwrap());
         let (request_sender, requests) = mpsc::channel();
         let handle = std::thread::spawn(move || {
-            for response in responses {
+            for (response, headers) in responses {
                 let (mut stream, _) = listener.accept().unwrap();
                 let request = read_request(&mut stream);
                 request_sender.send(request).unwrap();
                 write!(
                     stream,
-                    "HTTP/1.1 {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    "HTTP/1.1 {}\r\nContent-Type: application/json\r\n{headers}Content-Length: {}\r\nConnection: close\r\n\r\n{}",
                     response.status,
                     response.body.len(),
                     response.body

@@ -27,7 +27,11 @@ use crate::domain::models::{
 mod test;
 
 /// The most items one page of a list holds.
-const PAGE: &str = "100";
+const PAGE_SIZE: usize = 100;
+
+/// The most pages of one list read: past any real commit's checks, so a
+/// list GitHub keeps paging is not read for ever.
+const MAX_PAGES: usize = 10;
 
 /// What a refused read is, once throttling is ruled out.
 fn refusal(status: StatusCode) -> Option<GithubError> {
@@ -80,6 +84,8 @@ struct CheckSuiteResponse {
     #[serde(default)]
     latest_check_runs_count: u64,
     app: Option<AppResponse>,
+    #[serde(default)]
+    created_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(serde::Deserialize)]
@@ -97,6 +103,45 @@ struct StatusResponse {
     context: String,
     state: String,
     target_url: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct BranchResponse {
+    #[serde(default)]
+    protection: Option<BranchProtection>,
+}
+
+#[derive(serde::Deserialize)]
+struct BranchProtection {
+    #[serde(default)]
+    required_status_checks: Option<RequiredStatusChecks>,
+}
+
+#[derive(serde::Deserialize)]
+struct RequiredStatusChecks {
+    #[serde(default)]
+    contexts: Vec<String>,
+    #[serde(default)]
+    checks: Vec<RequiredCheck>,
+}
+
+#[derive(serde::Deserialize)]
+struct RequiredCheck {
+    context: String,
+}
+
+#[derive(serde::Deserialize)]
+struct BranchRule {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default)]
+    parameters: Option<BranchRuleParameters>,
+}
+
+#[derive(serde::Deserialize)]
+struct BranchRuleParameters {
+    #[serde(default)]
+    required_status_checks: Vec<RequiredCheck>,
 }
 
 #[derive(serde::Deserialize)]
@@ -145,6 +190,100 @@ impl GithubOauthImpl {
             return Err(unexpected(status, &headers, body, context));
         }
         Err(refusal(status).unwrap_or_else(|| unexpected(status, &headers, body, context)))
+    }
+
+    /// Every page of the list at `path`, each read as `T` and its items
+    /// taken out by `items`, up to [`MAX_PAGES`]: a page shorter than a full
+    /// one is the last.
+    async fn read_pages<T: DeserializeOwned, I>(
+        &self,
+        access_token: &str,
+        path: &str,
+        context: &str,
+        items: impl Fn(T) -> Vec<I>,
+    ) -> Result<Vec<I>, GithubError> {
+        let page_size = PAGE_SIZE.to_string();
+        let mut all = Vec::new();
+        for page in 1..=MAX_PAGES {
+            let page = page.to_string();
+            let read: T = self
+                .read(
+                    access_token,
+                    path,
+                    &[("per_page", page_size.as_str()), ("page", page.as_str())],
+                    context,
+                )
+                .await?;
+            let read = items(read);
+            let last = read.len() < PAGE_SIZE;
+            all.extend(read);
+            if last {
+                break;
+            }
+        }
+        Ok(all)
+    }
+
+    /// The checks a pull request to `branch` must pass before it merges:
+    /// the branch protection's and the rulesets' required status checks, by
+    /// name. `None` when the user may not read them, so a caller cannot tell
+    /// which checks are required.
+    #[tracing::instrument(skip(self, access_token), err)]
+    pub async fn get_required_checks(
+        &self,
+        access_token: &str,
+        owner: &str,
+        repo: &str,
+        branch: &str,
+    ) -> Result<Option<Vec<String>>, GithubError> {
+        let branch_read: Result<BranchResponse, GithubError> = self
+            .read(
+                access_token,
+                &format!("/repos/{owner}/{repo}/branches/{branch}"),
+                &[],
+                "failed to read branch",
+            )
+            .await;
+        let rules_read: Result<Vec<BranchRule>, GithubError> = self
+            .read(
+                access_token,
+                &format!("/repos/{owner}/{repo}/rules/branches/{branch}"),
+                &[("per_page", "100")],
+                "failed to read branch rules",
+            )
+            .await;
+        let (branch_read, rules) = match (branch_read, rules_read) {
+            (Ok(branch_read), Ok(rules)) => (branch_read, rules),
+            (Err(GithubError::Forbidden | GithubError::RepositoryUnavailable), _)
+            | (_, Err(GithubError::Forbidden | GithubError::RepositoryUnavailable)) => {
+                return Ok(None);
+            }
+            (Err(error), _) | (_, Err(error)) => return Err(error),
+        };
+
+        let mut required = Vec::new();
+        if let Some(checks) = branch_read
+            .protection
+            .and_then(|protection| protection.required_status_checks)
+        {
+            required.extend(checks.contexts);
+            required.extend(checks.checks.into_iter().map(|check| check.context));
+        }
+        for rule in rules {
+            if rule.kind == "required_status_checks"
+                && let Some(parameters) = rule.parameters
+            {
+                required.extend(
+                    parameters
+                        .required_status_checks
+                        .into_iter()
+                        .map(|check| check.context),
+                );
+            }
+        }
+        required.sort();
+        required.dedup();
+        Ok(Some(required))
     }
 
     /// The repository's default branch, and whether the user may push to
@@ -225,16 +364,15 @@ impl GithubOauthImpl {
         repo: &str,
         sha: &str,
     ) -> Result<Vec<GithubCheckSuite>, GithubError> {
-        let suites: CheckSuitesResponse = self
-            .read(
+        let suites = self
+            .read_pages(
                 access_token,
                 &format!("/repos/{owner}/{repo}/commits/{sha}/check-suites"),
-                &[("per_page", PAGE)],
                 "failed to list check suites",
+                |page: CheckSuitesResponse| page.check_suites,
             )
             .await?;
         Ok(suites
-            .check_suites
             .into_iter()
             .map(|suite| GithubCheckSuite {
                 id: suite.id,
@@ -245,6 +383,7 @@ impl GithubOauthImpl {
                 status: suite.status.unwrap_or_else(|| "queued".to_string()),
                 conclusion: suite.conclusion,
                 check_runs: suite.latest_check_runs_count,
+                created_at: suite.created_at,
             })
             .collect())
     }
@@ -258,16 +397,15 @@ impl GithubOauthImpl {
         repo: &str,
         sha: &str,
     ) -> Result<Vec<GithubCommitStatus>, GithubError> {
-        let combined: CombinedStatusResponse = self
-            .read(
+        let statuses = self
+            .read_pages(
                 access_token,
                 &format!("/repos/{owner}/{repo}/commits/{sha}/status"),
-                &[("per_page", PAGE)],
                 "failed to read commit status",
+                |page: CombinedStatusResponse| page.statuses,
             )
             .await?;
-        Ok(combined
-            .statuses
+        Ok(statuses
             .into_iter()
             .map(|status| GithubCommitStatus {
                 context: status.context,
@@ -286,16 +424,15 @@ impl GithubOauthImpl {
         repo: &str,
         sha: &str,
     ) -> Result<Vec<GithubPullRequestCheckRun>, GithubError> {
-        let runs: CheckRunsResponse = self
-            .read(
+        let runs = self
+            .read_pages(
                 access_token,
                 &format!("/repos/{owner}/{repo}/commits/{sha}/check-runs"),
-                &[("per_page", PAGE)],
                 "failed to list check runs",
+                |page: CheckRunsResponse| page.check_runs,
             )
             .await?;
         Ok(runs
-            .check_runs
             .into_iter()
             .map(|run| GithubPullRequestCheckRun {
                 id: run.id,

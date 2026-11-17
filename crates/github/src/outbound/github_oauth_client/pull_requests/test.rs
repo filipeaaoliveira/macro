@@ -164,11 +164,15 @@ async fn check_suites_and_statuses_read_what_ci_waits_on() {
     assert_eq!(suites[0].app, "github-actions");
     assert_eq!(suites[1].check_runs, 0);
     assert!(
-        suites_request.starts_with("GET /repos/macro/app/commits/abc/check-suites?per_page=100 ")
+        suites_request
+            .starts_with("GET /repos/macro/app/commits/abc/check-suites?per_page=100&page=1 ")
     );
     assert_eq!(statuses[0].context, "ci/lint");
     assert_eq!(statuses[0].state, "failure");
-    assert!(statuses_request.starts_with("GET /repos/macro/app/commits/abc/status?per_page=100 "));
+    assert!(
+        statuses_request
+            .starts_with("GET /repos/macro/app/commits/abc/status?per_page=100&page=1 ")
+    );
 }
 
 #[tokio::test]
@@ -221,4 +225,112 @@ async fn open_pull_request_without_access_is_a_refusal() {
 
     assert!(matches!(outcome, Err(GithubError::RepositoryUnavailable)));
     server.finish();
+}
+
+/// A 403 that says the token's quota is spent is throttling, tried again,
+/// not a refusal.
+#[tokio::test]
+async fn a_403_with_no_quota_left_is_throttling() {
+    let server = MockServer::start_with_headers(vec![(
+        MockResponse {
+            status: "403 Forbidden",
+            body: r#"{"message":"API rate limit exceeded"}"#.to_string(),
+        },
+        "x-ratelimit-remaining: 0\r\nx-ratelimit-reset: 4102444800\r\n",
+    )]);
+    let client = GithubOauthImpl::with_api_base_url(server.base_url.clone());
+
+    let read = client
+        .list_check_suites("token", "macro", "app", "abc")
+        .await;
+
+    assert!(matches!(read, Err(GithubError::Upstream(_))));
+    server.finish();
+}
+
+/// A commit with more check suites than one page holds is read to its
+/// last page.
+#[tokio::test]
+async fn every_page_of_check_suites_is_read() {
+    let suite = |id: u64| {
+        serde_json::json!({
+            "id": id, "status": "completed", "conclusion": "success",
+            "latest_check_runs_count": 1, "app": { "slug": "ci" }
+        })
+    };
+    let full: Vec<_> = (1..=100).map(suite).collect();
+    let server = MockServer::start_many(vec![
+        MockResponse {
+            status: "200 OK",
+            body: serde_json::json!({ "total_count": 101, "check_suites": full }).to_string(),
+        },
+        MockResponse {
+            status: "200 OK",
+            body: serde_json::json!({ "total_count": 101, "check_suites": [suite(101)] })
+                .to_string(),
+        },
+    ]);
+    let client = GithubOauthImpl::with_api_base_url(server.base_url.clone());
+
+    let suites = client
+        .list_check_suites("token", "macro", "app", "abc")
+        .await
+        .unwrap();
+
+    assert_eq!(suites.len(), 101);
+    let requests = server.finish_all();
+    assert!(
+        requests[1]
+            .starts_with("GET /repos/macro/app/commits/abc/check-suites?per_page=100&page=2 ")
+    );
+}
+
+/// The required checks are the branch protection's and the rulesets',
+/// once each.
+#[tokio::test]
+async fn required_checks_join_branch_protection_and_rulesets() {
+    let server = MockServer::start_many(vec![
+        MockResponse {
+            status: "200 OK",
+            body: r#"{"name":"main","protected":true,"protection":{"required_status_checks":{"contexts":["test"],"checks":[{"context":"test","app_id":15368}]}}}"#.to_string(),
+        },
+        MockResponse {
+            status: "200 OK",
+            body: r#"[{"type":"pull_request"},{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"lint"}]}}]"#.to_string(),
+        },
+    ]);
+    let client = GithubOauthImpl::with_api_base_url(server.base_url.clone());
+
+    let required = client
+        .get_required_checks("token", "macro", "app", "main")
+        .await
+        .unwrap();
+
+    assert_eq!(required, Some(vec!["lint".to_string(), "test".to_string()]));
+    server.finish_all();
+}
+
+/// A user who may not read the branch's rules cannot be told which checks
+/// are required.
+#[tokio::test]
+async fn required_checks_the_user_may_not_read_are_unknown() {
+    let server = MockServer::start_many(vec![
+        MockResponse {
+            status: "200 OK",
+            body: r#"{"name":"main","protected":true}"#.to_string(),
+        },
+        MockResponse {
+            status: "404 Not Found",
+            body: r#"{"message":"Not Found"}"#.to_string(),
+        },
+    ]);
+    let client = GithubOauthImpl::with_api_base_url(server.base_url.clone());
+
+    let required = client
+        .get_required_checks("token", "macro", "app", "main")
+        .await
+        .unwrap();
+
+    assert_eq!(required, None);
+    server.finish_all();
 }

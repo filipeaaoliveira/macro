@@ -123,7 +123,7 @@ struct GithubEmail {
 pub struct GithubOauthImpl {
     /// The reqwest client
     client: reqwest::Client,
-    #[cfg(test)]
+    /// A GitHub stand-in's API, instead of GitHub's.
     api_base_url: Option<String>,
 }
 
@@ -295,16 +295,12 @@ impl GithubOauthImpl {
     }
 
     fn api_base_url(&self) -> &str {
-        #[cfg(test)]
-        if let Some(api_base_url) = &self.api_base_url {
-            return api_base_url;
-        }
-
-        GITHUB_API_BASE_URL
+        self.api_base_url.as_deref().unwrap_or(GITHUB_API_BASE_URL)
     }
 
-    #[cfg(test)]
-    fn with_api_base_url(api_base_url: String) -> Self {
+    /// The client, against a GitHub stand-in at `api_base_url`, such as a
+    /// test's.
+    pub fn with_api_base_url(api_base_url: String) -> Self {
         Self {
             client: reqwest::Client::default(),
             api_base_url: Some(api_base_url),
