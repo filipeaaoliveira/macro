@@ -6,6 +6,7 @@
 //! test runs its own worker on a task queue of its own, so the stack's
 //! factory worker never takes its work.
 
+mod questions;
 mod review_panel;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -553,6 +554,7 @@ fn reviewed(review: &str) -> (&'static str, String) {
         )
     };
     match review {
+        "question" => ("question", "Should slugs keep a trailing dash?".to_string()),
         "changes" => ("changes", blocker("src/slug.rs")),
         "outside" => ("changes", blocker("README.md")),
         _ => (
@@ -687,11 +689,16 @@ impl CodeRun {
     /// that lands in between is refused, as the API would refuse it: the
     /// answer is sent again, a few times at most.
     async fn answer(&self, seq: u16, answer: &str) {
+        self.answer_with(seq, answer, None).await;
+    }
+
+    /// [`Self::answer`], with `note`.
+    async fn answer_with(&self, seq: u16, answer: &str, note: Option<&str>) {
         let workflows = TemporalRunWorkflows::new(self.client.clone());
         let answer = AnswerGate {
             seq,
             answer: Outcome::try_from(answer.to_string()).expect("valid"),
-            note: None,
+            note: note.map(str::to_string),
             user_id: julia(),
             approved_control_files: None,
         };
@@ -737,6 +744,20 @@ async fn walk_code<F>(
 where
     F: Future<Output = ()>,
 {
+    walk_code_asking(agent, github, None, drive).await
+}
+
+/// [`walk_code`], its agents asking the Run's owner up to `questions`
+/// questions a Step when the Flow lets them.
+async fn walk_code_asking<F>(
+    agent: &CodeAgent,
+    github: &FakeGithub,
+    questions: Option<u8>,
+    drive: impl FnOnce(CodeRun) -> F,
+) -> Result<RunOutcome, WorkflowGetResultError>
+where
+    F: Future<Output = ()>,
+{
     let client = client().await;
     let repo = FakeRepo::default();
     let repository = Repository {
@@ -760,10 +781,13 @@ where
     else {
         panic!("a run with no task is kept");
     };
-    let flow = BuiltInFlow::named("code")
+    let mut flow = BuiltInFlow::named("code")
         .expect("built in")
         .read(|_| Some(crate::domain::flow::StepUse::Work))
         .expect("valid flow");
+    if let Some(questions) = questions {
+        flow.allow_questions(questions);
+    }
     // The Run's branch is at the pull request's head, and its change is to
     // `src/slug.rs`.
     github.state().branch_heads = [Some(FakeGithub::HEAD.to_string())].into();
