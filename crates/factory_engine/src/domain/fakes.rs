@@ -14,7 +14,8 @@ use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
 use crate::domain::models::{
-    Check, CodeRepository, Merging, OpenPullRequest, Opening, PullRequest, PullRequestState,
+    Check, CheckState, CheckSuite, CodeRepository, HeadChecks, Merging, OpenPullRequest, Opening,
+    PullRequest, PullRequestState, RepositoryAccess, RequiredChecks,
 };
 use crate::domain::ports::{PullRequests, Retryable, TaskAccess, TaskDirectory, UserDirectory};
 
@@ -497,17 +498,23 @@ impl RunRepository for FakeRepo {
 pub(crate) struct FakeGithubState {
     /// Whether the Run's owner cannot reach the repository.
     pub(crate) unreachable: bool,
+    /// Whether the Run's owner may only read the repository.
+    pub(crate) read_only: bool,
+    /// The checks the base branch requires, when they can be named.
+    pub(crate) required: Option<RequiredChecks>,
     /// The pull request from the Run's branch, once opened.
     pub(crate) pull_request: Option<PullRequest>,
-    /// The checks each read of the open pull request shows next, in order;
-    /// the last one stays once the others were read.
-    pub(crate) checks: VecDeque<Vec<Check>>,
+    /// The checks each read of the open pull request's head shows next, in
+    /// order; the last one stays once the others were read.
+    pub(crate) checks: VecDeque<HeadChecks>,
     /// How many times the pull request was looked for.
     pub(crate) reads: usize,
     /// How many times a pull request was opened.
     pub(crate) opened: usize,
     /// GitHub's reason to refuse opening one, if it does.
     pub(crate) open_refusal: Option<String>,
+    /// The descriptions pull requests were opened with.
+    pub(crate) bodies: Vec<String>,
     /// The head commits merges were asked for, in order.
     pub(crate) merges: Vec<String>,
     /// GitHub's reason to refuse a merge, if it does.
@@ -527,50 +534,97 @@ impl FakeGithub {
     /// The commit an opened pull request's head is at.
     pub(crate) const HEAD: &str = "1111111111111111111111111111111111111111";
 
+    /// GitHub's id of the CI app whose runs [`ci`] makes.
+    pub(crate) const ACTIONS: u64 = 15368;
+
     pub(crate) fn state(&self) -> std::sync::MutexGuard<'_, FakeGithubState> {
         self.state.lock().expect("github")
     }
 
-    /// GitHub with the Run's pull request open at [`Self::HEAD`], showing
-    /// `checks`.
-    pub(crate) fn with_open_pull_request(checks: Vec<Check>) -> Self {
+    /// GitHub with the Run's pull request open at [`Self::HEAD`], its head
+    /// showing `checks`.
+    pub(crate) fn with_open_pull_request(checks: HeadChecks) -> Self {
         let github = Self::default();
         github.state().pull_request = Some(PullRequest {
             number: 7,
             url: "https://github.com/macro/app/pull/7".to_string(),
             state: PullRequestState::Open,
-            head_sha: Some(Self::HEAD.to_string()),
-            checks: Some(checks),
+            head_sha: Self::HEAD.to_string(),
         });
+        github.state().checks = [checks].into();
         github
+    }
+
+    /// The pull request, with its head's next checks.
+    fn read(&self) -> Option<(PullRequest, HeadChecks)> {
+        let found = {
+            let mut state = self.state();
+            state.reads += 1;
+            let checks = if state.checks.len() > 1 {
+                state.checks.pop_front()
+            } else {
+                state.checks.front().cloned()
+            };
+            state
+                .pull_request
+                .clone()
+                .map(|pull_request| (pull_request, checks.unwrap_or_default()))
+        };
+        self.read.notify_one();
+        found
     }
 }
 
-/// A completed check named `name` that concluded `conclusion`, or one still
+/// One suite of `app`, holding a run: completed with `conclusion`, or still
 /// running when `conclusion` is none.
-pub(crate) fn check(name: &str, conclusion: Option<&str>) -> Check {
-    Check {
-        name: name.to_string(),
-        status: if conclusion.is_some() {
-            "completed"
-        } else {
-            "in_progress"
-        }
-        .to_string(),
-        conclusion: conclusion.map(str::to_string),
-        url: Some(format!("https://github.com/macro/app/runs/{name}")),
+pub(crate) fn suite(id: u64, app: &str, conclusion: Option<&str>) -> CheckSuite {
+    CheckSuite {
+        id,
+        app: app.to_string(),
+        state: match conclusion {
+            Some(conclusion) => CheckState::of_check("completed", Some(conclusion)),
+            None => CheckState::Waiting,
+        },
+        check_runs: 1,
+        created_at: Some(Utc::now()),
+    }
+}
+
+/// A head whose checks are the CI suite with its one run, `test`,
+/// concluded `conclusion`, or running when it is none.
+pub(crate) fn ci(conclusion: Option<&str>) -> HeadChecks {
+    let state = match conclusion {
+        Some(conclusion) => CheckState::of_check("completed", Some(conclusion)),
+        None => CheckState::Waiting,
+    };
+    HeadChecks {
+        suites: vec![suite(1, "github-actions", conclusion)],
+        statuses: Vec::new(),
+        runs: vec![Check {
+            name: "test".to_string(),
+            state,
+            url: Some("https://github.com/macro/app/runs/test".to_string()),
+            app_id: Some(FakeGithub::ACTIONS),
+        }],
+        truncated: false,
+        held_apps: Vec::new(),
+        actions_unread: false,
     }
 }
 
 impl PullRequests for FakeGithub {
     type Err = FakeError;
 
-    async fn default_branch(
+    async fn repository_access(
         &self,
         _owner: &MacroUserIdStr<'static>,
         _repository: &CodeRepository,
-    ) -> Result<Option<String>, FakeError> {
-        Ok((!self.state().unreachable).then(|| "main".to_string()))
+    ) -> Result<Option<RepositoryAccess>, FakeError> {
+        let state = self.state();
+        Ok((!state.unreachable).then(|| RepositoryAccess {
+            default_branch: "main".to_string(),
+            can_push: !state.read_only,
+        }))
     }
 
     async fn find(
@@ -579,42 +633,45 @@ impl PullRequests for FakeGithub {
         _repository: &CodeRepository,
         _branch: &str,
     ) -> Result<Option<PullRequest>, FakeError> {
-        let found = {
-            let mut state = self.state();
-            state.reads += 1;
-            if state.pull_request.is_some() {
-                let next = if state.checks.len() > 1 {
-                    state.checks.pop_front()
-                } else {
-                    state.checks.front().cloned()
-                };
-                if let (Some(pull_request), Some(checks)) = (state.pull_request.as_mut(), next) {
-                    pull_request.checks = Some(checks);
-                }
-            }
-            state.pull_request.clone()
-        };
-        self.read.notify_one();
-        Ok(found)
+        Ok(self.read().map(|(pull_request, _)| pull_request))
+    }
+
+    async fn find_with_checks(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        _branch: &str,
+        _all_runs: bool,
+    ) -> Result<Option<(PullRequest, HeadChecks)>, FakeError> {
+        Ok(self.read())
+    }
+
+    async fn required_checks(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        _base: &str,
+    ) -> Result<Option<RequiredChecks>, FakeError> {
+        Ok(self.state().required.clone())
     }
 
     async fn open(
         &self,
         _owner: &MacroUserIdStr<'static>,
         repository: &CodeRepository,
-        _pull_request: &OpenPullRequest,
+        pull_request: &OpenPullRequest,
     ) -> Result<Opening, FakeError> {
         let mut state = self.state();
         if let Some(why) = state.open_refusal.clone() {
             return Ok(Opening::Refused(why));
         }
         state.opened += 1;
+        state.bodies.push(pull_request.body.clone());
         state.pull_request = Some(PullRequest {
             number: 7,
             url: format!("{}/pull/7", repository.url()),
             state: PullRequestState::Open,
-            head_sha: Some(Self::HEAD.to_string()),
-            checks: Some(Vec::new()),
+            head_sha: Self::HEAD.to_string(),
         });
         Ok(Opening::Opened)
     }
@@ -634,7 +691,7 @@ impl PullRequests for FakeGithub {
         let Some(pull_request) = state.pull_request.as_mut() else {
             return Ok(Merging::Refused("Not Found".to_string()));
         };
-        if pull_request.head_sha.as_deref() != Some(head_sha) {
+        if pull_request.head_sha != head_sha {
             return Ok(Merging::HeadChanged);
         }
         pull_request.state = PullRequestState::Merged;

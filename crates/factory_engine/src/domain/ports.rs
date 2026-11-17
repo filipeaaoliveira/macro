@@ -8,9 +8,9 @@ use uuid::Uuid;
 use crate::domain::flow::StepName;
 use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening};
 use crate::domain::models::{
-    AgentAnswer, AgentTask, CodeRepository, FactoryError, FlowSummary, Merging, OpenPullRequest,
-    Opening, PullRequest, RunDetail, RunFinish, RunStart, StepEnding, StepError, StepInput,
-    StepReport, StepRequest, StepStart,
+    AgentAnswer, AgentTask, CodeRepository, FactoryError, FlowSummary, HeadChecks, Merging,
+    OpenPullRequest, Opening, PullRequest, RepositoryAccess, RequiredChecks, RunDetail, RunFinish,
+    RunStart, StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
 };
 
 /// What a Run's workflow did with an answer it was sent.
@@ -138,14 +138,13 @@ pub trait PullRequests: Send + Sync + 'static {
     /// The error type returned when GitHub cannot be asked.
     type Err: std::error::Error + Retryable + Send + Sync + 'static;
 
-    /// The branch `repository` checks out by default, as `owner` sees it;
-    /// none when they cannot reach the repository, have connected no GitHub
-    /// account, or the repository has no branch yet.
-    fn default_branch(
+    /// What `owner` may do with `repository`: none when they cannot reach
+    /// it, have connected no GitHub account, or it has no branch yet.
+    fn repository_access(
         &self,
         owner: &MacroUserIdStr<'static>,
         repository: &CodeRepository,
-    ) -> impl Future<Output = Result<Option<String>, Self::Err>> + Send;
+    ) -> impl Future<Output = Result<Option<RepositoryAccess>, Self::Err>> + Send;
 
     /// The newest pull request from `branch` of `repository`, open or not.
     fn find(
@@ -154,6 +153,28 @@ pub trait PullRequests: Send + Sync + 'static {
         repository: &CodeRepository,
         branch: &str,
     ) -> impl Future<Output = Result<Option<PullRequest>, Self::Err>> + Send;
+
+    /// [`Self::find`], with the checks on the pull request's head, read
+    /// with one token: what a CI wait reads on each look. All its check runs
+    /// are read when `all_runs`, to find required checks by name; otherwise
+    /// only those of a failed suite.
+    fn find_with_checks(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        branch: &str,
+        all_runs: bool,
+    ) -> impl Future<Output = Result<Option<(PullRequest, HeadChecks)>, Self::Err>> + Send;
+
+    /// The checks a pull request to `base` must pass before it merges, from
+    /// its branch protection and rulesets, as far as they could be read;
+    /// none when `owner` cannot tell which checks they are.
+    fn required_checks(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        base: &str,
+    ) -> impl Future<Output = Result<Option<RequiredChecks>, Self::Err>> + Send;
 
     /// Ask GitHub to open `pull_request` in `repository`.
     fn open(

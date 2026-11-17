@@ -12,13 +12,15 @@ mod test;
 
 use std::time::Duration;
 
+use chrono::{DateTime, Utc};
 use factory_records::domain::models::{Outcome, Repository};
 use factory_records::domain::ports::RunRepository;
 use github::domain::models::MacroTaskId;
 
 use crate::domain::models::{
-    Check, CodeRepository, Merging, OpenPullRequest, Opening, PullRequest, PullRequestState,
-    StepInput, StepReport, run_branch,
+    CheckState, CheckSuite, CodeRepository, HeadChecks, Merging, OpenPullRequest, Opening,
+    PullRequest, PullRequestState, RequiredCheck, RequiredChecks, StepInput, StepReport,
+    run_branch,
 };
 use crate::domain::ports::{PullRequests, Retryable};
 
@@ -32,8 +34,18 @@ const CI_POLL: Duration = Duration::from_secs(20);
 /// The longest pull request title the Steps write.
 const MAX_TITLE_CHARS: usize = 72;
 
-/// The conclusions of a completed check that let a pull request merge.
-const PASSING: [&str; 3] = ["success", "neutral", "skipped"];
+/// What `ci` tells the Run's owner when their token may not read GitHub
+/// Actions runs.
+const ACTIONS_UNREAD_NOTE: &str = "\n\nThe GitHub account linked to Macro may not read this repository's \
+     Actions runs, so a run that waits was seen only through an empty Actions suite.";
+
+/// The most characters GitHub keeps in a pull request's description.
+const MAX_BODY_CHARS: usize = 65_536;
+
+/// How long a check suite that holds no run, of an app with no run waiting
+/// on the head, is waited for: one that adds its runs after it made the suite
+/// fills it within this; an app that checks nothing never does.
+const EMPTY_SUITE_GRACE: chrono::TimeDelta = chrono::TimeDelta::minutes(5);
 
 /// Why a pull request Step could not be done.
 #[derive(Debug, thiserror::Error)]
@@ -97,51 +109,136 @@ impl Retryable for PullRequestStepError {
 /// What a pull request's checks on its head say.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Verdict {
-    /// Some check has not finished, or none was reported yet.
+    /// A check has not finished, a required one has not appeared, a list
+    /// was longer than was read, or none was reported yet.
     Pending,
-    /// Every check passed, or the pull request merged.
-    Green,
-    /// These checks failed.
-    Red(Vec<Check>),
+    /// Every check that counts passed: the suites' ids, the statuses'
+    /// contexts and the required checks that did, so two reads can tell
+    /// whether a check appeared between them.
+    Green(Vec<String>),
+    /// These checks failed, one line each for a person and the CI fix.
+    Red(Vec<String>),
     /// The pull request was closed without merging.
     Closed,
 }
 
-/// What the checks of `pull_request` say. Checks that could not be read, or
-/// a head with none yet, wait: CI may not have reported on a fresh push.
-fn verdict(pull_request: &PullRequest) -> Verdict {
+/// Whether `check` appeared on the head and passed: as a run of the app it
+/// names, or, when it names none, as any app's run or a commit status.
+fn required_passed(check: &RequiredCheck, checks: &HeadChecks) -> bool {
+    let run = checks.runs.iter().any(|run| {
+        run.name == check.name
+            && run.state == CheckState::Passed
+            && check.app_id.is_none_or(|app_id| run.app_id == Some(app_id))
+    });
+    let status = check.app_id.is_none()
+        && checks
+            .statuses
+            .iter()
+            .any(|status| status.context == check.name && status.state == CheckState::Passed);
+    run || status
+}
+
+/// What the checks of `pull_request` say at `now`, given the checks its base
+/// `required`, as far as they could be read.
+///
+/// Any failure is red. Otherwise every suite that holds a run, and every
+/// commit status, must have passed, and every required check that could be
+/// named must have appeared and passed. A suite that holds no run yet holds
+/// CI back unless:
+/// - the required checks were read in full, name at least one check, and all
+///   passed: the owner's rule is then met, and another app's empty suite does
+///   not matter;
+/// - or [`EMPTY_SUITE_GRACE`] passed since GitHub made it: an app that checks
+///   nothing on the commit never fills it.
+///
+/// Short of the owner's rule, an app with a run on the head not finished, or
+/// runs not all read, as a GitHub Actions run a concurrency group holds,
+/// holds CI until it times out, whether or not its suite exists yet.
+/// Lists longer than were read, or nothing reported, wait. A merged pull
+/// request is green.
+fn verdict(
+    pull_request: &PullRequest,
+    checks: &HeadChecks,
+    required: Option<&RequiredChecks>,
+    now: DateTime<Utc>,
+) -> Verdict {
     match pull_request.state {
-        PullRequestState::Merged => return Verdict::Green,
+        PullRequestState::Merged => return Verdict::Green(Vec::new()),
         PullRequestState::Closed => return Verdict::Closed,
         PullRequestState::Open => {}
     }
-    let Some(checks) = pull_request
-        .checks
-        .as_ref()
-        .filter(|checks| !checks.is_empty())
-    else {
-        return Verdict::Pending;
-    };
 
-    let failed: Vec<Check> = checks
-        .iter()
-        .filter(|check| {
-            check.status == "completed"
-                && !check
-                    .conclusion
-                    .as_deref()
-                    .is_some_and(|conclusion| PASSING.contains(&conclusion))
-        })
-        .cloned()
-        .collect();
+    // A failure anywhere is red at once; the failed runs name what failed
+    // in a suite.
+    let mut failed = Vec::new();
+    for suite in &checks.suites {
+        if let CheckState::Failed(conclusion) = &suite.state {
+            failed.push(format!("- {} checks ({conclusion})", suite.app));
+        }
+    }
+    for run in &checks.runs {
+        if let CheckState::Failed(conclusion) = &run.state {
+            let url = run.url.as_deref().unwrap_or("no page");
+            failed.push(format!("  - {} ({conclusion}): {url}", run.name));
+        }
+    }
+    for status in &checks.statuses {
+        if let CheckState::Failed(state) = &status.state {
+            let url = status.url.as_deref().unwrap_or("no page");
+            failed.push(format!("- {} ({state}): {url}", status.context));
+        }
+    }
     if !failed.is_empty() {
         return Verdict::Red(failed);
     }
-    if checks.iter().all(|check| check.status == "completed") {
-        Verdict::Green
-    } else {
-        Verdict::Pending
+    if checks.truncated {
+        return Verdict::Pending;
     }
+
+    let named: &[RequiredCheck] = required.map_or(&[], |required| &required.checks);
+    if !named.iter().all(|check| required_passed(check, checks)) {
+        return Verdict::Pending;
+    }
+    // Only a set read in full may stand for every check that matters.
+    let required_met = required.is_some_and(|required| required.complete) && !named.is_empty();
+
+    let counted: Vec<&CheckSuite> = checks
+        .suites
+        .iter()
+        .filter(|suite| {
+            if suite.check_runs > 0 {
+                return true;
+            }
+            if required_met {
+                return false;
+            }
+            suite
+                .created_at
+                .is_none_or(|created_at| now - created_at < EMPTY_SUITE_GRACE)
+        })
+        .collect();
+    // A run not finished, or runs not all read, hold CI, whether or not the
+    // app made a suite for them yet.
+    if !required_met && !checks.held_apps.is_empty() {
+        return Verdict::Pending;
+    }
+    let finished = counted
+        .iter()
+        .all(|suite| suite.state == CheckState::Passed)
+        && checks
+            .statuses
+            .iter()
+            .all(|status| status.state == CheckState::Passed);
+    let reported = !counted.is_empty() || !checks.statuses.is_empty() || required_met;
+    if !reported || !finished {
+        return Verdict::Pending;
+    }
+
+    let mut seen: Vec<String> = counted.iter().map(|suite| suite.id.to_string()).collect();
+    seen.extend(checks.statuses.iter().map(|status| status.context.clone()));
+    seen.extend(named.iter().map(|check| check.name.clone()));
+    seen.sort();
+    Verdict::Green(seen)
 }
 
 fn outcome(name: &str) -> Outcome {
@@ -180,18 +277,31 @@ fn title(request: &str) -> String {
 
 /// The description of the Run's pull request: the request, then the task it
 /// works on, written so GitHub's webhook links the pull request to the task.
+/// A request too long for GitHub's [`MAX_BODY_CHARS`] is cut, never the
+/// lines after it.
 fn body(input: &StepInput<'_>) -> String {
-    let mut body = format!(
-        "{}\n\nOpened by a Macro factory run ({}).",
-        input.request, input.key.run_id
-    );
+    const CUT: &str = "\n\n(The rest of the request is left out.)";
+
+    let mut footer = format!("\n\nOpened by a Macro factory run ({}).", input.key.run_id);
     if let Some(task_id) = input.task_id {
-        body.push_str(&format!(
+        footer.push_str(&format!(
             "\n\nTask: {}",
             MacroTaskId::from_uuid(&task_id).to_task_id_string()
         ));
     }
-    body
+
+    let room = MAX_BODY_CHARS - footer.chars().count();
+    let request = if input.request.chars().count() <= room {
+        input.request.to_string()
+    } else {
+        let kept: String = input
+            .request
+            .chars()
+            .take(room - CUT.chars().count())
+            .collect();
+        format!("{kept}{CUT}")
+    };
+    format!("{request}{footer}")
 }
 
 /// The pull request Steps, on GitHub through `github`, keeping the commit a
@@ -278,37 +388,105 @@ impl<G: PullRequests, R: RunRepository> PullRequestSteps<G, R> {
         })
     }
 
+    /// The pull request from the Run's branch with the checks on its head,
+    /// read with one token; all its runs when `required` names any.
+    async fn find_with_checks(
+        &self,
+        input: &StepInput<'_>,
+        repository: &CodeRepository,
+        required: Option<&RequiredChecks>,
+    ) -> Result<(PullRequest, HeadChecks), PullRequestStepError> {
+        let all_runs = required.is_some_and(|required| !required.checks.is_empty());
+        self.github
+            .find_with_checks(
+                input.owner,
+                repository,
+                &run_branch(input.key.run_id),
+                all_runs,
+            )
+            .await
+            .map_err(PullRequestStepError::github)?
+            .ok_or(PullRequestStepError::NoPullRequest)
+    }
+
+    /// The checks the base branch requires, as far as they can be read.
+    async fn required_checks(
+        &self,
+        input: &StepInput<'_>,
+        repository: &CodeRepository,
+        recorded: &Repository,
+    ) -> Result<Option<RequiredChecks>, PullRequestStepError> {
+        self.github
+            .required_checks(input.owner, repository, &recorded.base_branch)
+            .await
+            .map_err(PullRequestStepError::github)
+    }
+
     /// Wait for the checks on the head of the Run's pull request: `green`
-    /// once they all passed, `red` with the failing ones as soon as one
-    /// fails, `timeout` after [`CI_WAIT`], or `closed` when a person closed
-    /// the pull request. A pull request that merged meanwhile is `green`.
+    /// once the checks that count passed, as [`verdict`] says, on two reads
+    /// in a row that saw the same checks, so a check that appears late is
+    /// waited for; `red`
+    /// with the failing ones as soon as one fails; `timeout` after
+    /// [`CI_WAIT`]; or `closed` when a person closed the pull request. A pull
+    /// request that merged meanwhile is `green`. The head it calls green is
+    /// kept as the one a person may be asked to merge.
     pub async fn ci(&self, input: StepInput<'_>) -> Result<StepReport, PullRequestStepError> {
-        let (repository, _) = Self::repository(&input)?;
-        let deadline = tokio::time::Instant::now() + CI_WAIT;
+        let (repository, recorded) = Self::repository(&input)?;
+        let required = self.required_checks(&input, &repository, recorded).await?;
+        // The wall clock a suite's age is read against, moved on by the
+        // waits, so a test's paused clock moves it too.
+        let started = tokio::time::Instant::now();
+        let started_at = Utc::now();
+        let deadline = started + CI_WAIT;
+        // The head and the checks the last read saw all pass, if it did.
+        let mut last_green: Option<(String, Vec<String>)> = None;
+        // Whether a read could not see the head's Actions runs.
+        let mut actions_unread = false;
         loop {
-            let pull_request = self
-                .find(&input, &repository)
-                .await?
-                .ok_or(PullRequestStepError::NoPullRequest)?;
-            let head = pull_request.head_sha.as_deref().unwrap_or("its head");
-            match verdict(&pull_request) {
-                Verdict::Green => {
-                    return Ok(report(
-                        "green",
-                        format!("{}\n\nEvery check passed on {head}.", named(&pull_request)),
-                    ));
+            let (pull_request, checks) = self
+                .find_with_checks(&input, &repository, required.as_ref())
+                .await?;
+            let head = pull_request.head_sha.clone();
+            actions_unread |= checks.actions_unread;
+            let note = if actions_unread {
+                ACTIONS_UNREAD_NOTE
+            } else {
+                ""
+            };
+            let elapsed = chrono::TimeDelta::from_std(started.elapsed()).unwrap_or_default();
+            match verdict(
+                &pull_request,
+                &checks,
+                required.as_ref(),
+                started_at + elapsed,
+            ) {
+                Verdict::Green(passed) => {
+                    let seen = (head.clone(), passed);
+                    let merged = pull_request.state == PullRequestState::Merged;
+                    if merged || last_green.as_ref() == Some(&seen) {
+                        self.repo
+                            .set_merge_head(input.key.run_id, &head)
+                            .await
+                            .map_err(PullRequestStepError::records)?;
+                        return Ok(report(
+                            "green",
+                            format!(
+                                "{}\n\nEvery check passed on {head}.{note}",
+                                named(&pull_request)
+                            ),
+                        ));
+                    }
+                    last_green = Some(seen);
                 }
                 Verdict::Red(failed) => {
-                    let mut output = format!(
-                        "{}\n\nThese checks failed on {head}:\n",
-                        named(&pull_request)
-                    );
-                    for check in failed {
-                        let conclusion = check.conclusion.as_deref().unwrap_or("no conclusion");
-                        let url = check.url.as_deref().unwrap_or("no page");
-                        output.push_str(&format!("\n- {} ({conclusion}): {url}", check.name));
-                    }
-                    return Ok(report("red", output));
+                    return Ok(report(
+                        "red",
+                        format!(
+                            "{}\n\nThese checks failed on {head}:\n\n{}",
+                            named(&pull_request),
+                            failed.join("\n")
+                        ),
+                    ));
                 }
                 Verdict::Closed => {
                     return Ok(report(
@@ -316,14 +494,14 @@ impl<G: PullRequests, R: RunRepository> PullRequestSteps<G, R> {
                         format!("{}\n\nIt was closed without merging.", named(&pull_request)),
                     ));
                 }
-                Verdict::Pending => {}
+                Verdict::Pending => last_green = None,
             }
 
             if tokio::time::Instant::now() + CI_POLL > deadline {
                 return Ok(report(
                     "timeout",
                     format!(
-                        "{}\n\nIts checks on {head} did not finish within {} minutes.",
+                        "{}\n\nIts checks on {head} did not finish within {} minutes.{note}",
                         named(&pull_request),
                         CI_WAIT.as_secs() / 60
                     ),
@@ -334,19 +512,25 @@ impl<G: PullRequests, R: RunRepository> PullRequestSteps<G, R> {
     }
 
     /// Before a person is asked to merge, check the pull request's head is
-    /// still the commit whose checks passed, and keep it as the one commit
-    /// that may merge: `done`, which asks the person; `changed` when the
-    /// head's checks no longer all passed, as after a push; `merged` or
-    /// `closed` when a person already merged or closed it.
+    /// still the commit `ci` called green, and its checks still all pass:
+    /// `done`, which asks the person, who then merges exactly that commit;
+    /// `changed` when the head moved since, as after a push, or a check no
+    /// longer passes; `merged` or `closed` when a person already merged or
+    /// closed it.
     pub async fn ready_to_merge(
         &self,
         input: StepInput<'_>,
     ) -> Result<StepReport, PullRequestStepError> {
-        let (repository, _) = Self::repository(&input)?;
-        let pull_request = self
-            .find(&input, &repository)
-            .await?
-            .ok_or(PullRequestStepError::NoPullRequest)?;
+        let (repository, recorded) = Self::repository(&input)?;
+        let approved = self
+            .repo
+            .merge_head(input.key.run_id)
+            .await
+            .map_err(PullRequestStepError::records)?;
+        let required = self.required_checks(&input, &repository, recorded).await?;
+        let (pull_request, checks) = self
+            .find_with_checks(&input, &repository, required.as_ref())
+            .await?;
 
         match pull_request.state {
             PullRequestState::Merged => {
@@ -360,23 +544,21 @@ impl<G: PullRequests, R: RunRepository> PullRequestSteps<G, R> {
             }
             PullRequestState::Open => {}
         }
-        let head = match (&pull_request.head_sha, verdict(&pull_request)) {
-            (Some(head), Verdict::Green) => head.clone(),
-            _ => {
-                return Ok(report(
-                    "changed",
-                    format!(
-                        "{}\n\nIts head changed since its checks passed.",
-                        named(&pull_request)
-                    ),
-                ));
-            }
-        };
+        let head = pull_request.head_sha.clone();
+        let green = matches!(
+            verdict(&pull_request, &checks, required.as_ref(), Utc::now()),
+            Verdict::Green(_)
+        );
+        if approved.as_deref() != Some(head.as_str()) || !green {
+            return Ok(report(
+                "changed",
+                format!(
+                    "{}\n\nIts head is {head}, not the commit whose checks passed, or a check no longer passes.",
+                    named(&pull_request)
+                ),
+            ));
+        }
 
-        self.repo
-            .set_merge_head(input.key.run_id, &head)
-            .await
-            .map_err(PullRequestStepError::records)?;
         Ok(report(
             "done",
             format!(

@@ -180,9 +180,9 @@ pub trait RunRepository: Send + Sync + 'static {
         key: StepKey,
     ) -> impl Future<Output = Result<Option<HandBack>, Self::Err>> + Send;
 
-    /// Keep `sha` as the commit the Run asks a person to merge into its
-    /// repository, replacing the one kept before: only that commit merges
-    /// once they agree. Keeping it again changes nothing.
+    /// Keep `sha` as the commit whose checks passed, which the Run asks a
+    /// person to merge, replacing the one kept before: only that commit
+    /// merges once they agree. Keeping it again changes nothing.
     fn set_merge_head(
         &self,
         id: RunId,

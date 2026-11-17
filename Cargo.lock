@@ -8377,6 +8377,7 @@ dependencies = [
  "agent_runtime_protocol",
  "agent_session",
  "ai_usage",
+ "anyhow",
  "async-trait",
  "authentication_service_client",
  "axum",
@@ -8410,6 +8411,7 @@ dependencies = [
  "upstream_error",
  "utoipa",
  "uuid",
+ "wiremock",
  "workspace-hack",
 ]
 

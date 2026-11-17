@@ -252,7 +252,7 @@ fn a_person_sending_the_merge_back_has_the_change_fixed_and_asked_again() {
             "ci#1",
             "merge-gate#1",
             "fix#1",
-            "review#2",
+            "review#1",
             "publish#2",
             "ci#2",
             "merge-gate#2",
@@ -260,6 +260,40 @@ fn a_person_sending_the_merge_back_has_the_change_fixed_and_asked_again() {
         ]
     );
     assert_eq!(end, Ok(RunOutcome::Success));
+}
+
+/// A person's revise is reviewed again even after the reviews ran out of
+/// visits, and the merge question is asked at most three times.
+#[test]
+fn a_revise_at_the_merge_question_is_reviewed_again_and_the_question_is_capped() {
+    let mut outcomes = vec![
+        "approve",
+        "done",
+        "changes",
+        "done",
+        "changes",
+        "done",
+        "pass",
+        "published",
+        "green",
+    ];
+    for _ in 0..3 {
+        outcomes.extend(["revise", "done", "pass", "published", "green"]);
+    }
+
+    let (steps, end) = walk(&flow(CODE_FLOW), &outcomes);
+
+    // After three reviews, the first revise is still reviewed: the reset
+    // counts its visits from one.
+    assert_eq!(steps[9..12], ["merge-gate#1", "fix#3", "review#1"]);
+    assert_eq!(
+        steps
+            .iter()
+            .filter(|step| step.starts_with("merge-gate#"))
+            .count(),
+        3
+    );
+    assert_eq!(end, Ok(RunOutcome::Manual));
 }
 
 #[test]

@@ -4,6 +4,7 @@
 mod test;
 
 mod changes;
+mod checks;
 mod diff;
 mod index;
 mod key;
@@ -18,6 +19,10 @@ pub use changes::{
     GithubPullRequestChangesError, GithubPullRequestChangeset, changeset_id, changeset_patch_key,
     github_key_of,
 };
+pub use checks::{
+    GithubCheckRun, GithubCheckSuite, GithubCommitStatus, GithubListing, GithubRequiredCheck,
+    GithubRequiredChecks, GithubWorkflowRun, GithubWorkflowRunStatus,
+};
 pub use diff::{
     ChangesetRange, GitRef, GithubPullRequestDiff, GithubPullRequestDiffError, PullRequestRef,
     RepositorySlug,
@@ -29,11 +34,12 @@ pub use pull_request::{
     EnrichedGithubPullRequest, GITHUB_PULL_REQUEST_FOREIGN_ENTITY_SOURCE, GithubMergeMethod,
     GithubMergeOutcome, GithubMergeRejection, GithubOpenPullRequest, GithubOpenPullRequestOutcome,
     GithubPullRequestCheckRun, GithubPullRequestComment, GithubPullRequestDetails,
-    GithubPullRequestLabel, GithubPullRequestMerge, GithubPullRequestMergeability,
-    GithubPullRequestMergeabilityEntry, GithubPullRequestMergeabilityRequest,
-    GithubPullRequestMergeabilityResponse, GithubPullRequestNumber, GithubPullRequestRef,
-    GithubPullRequestReview, GithubPullRequestReviewDecision, GithubPullRequestReviewState,
-    GithubPullRequestStatus, GithubPullRequestUser, GithubRepositoryMergeSettings,
+    GithubPullRequestHead, GithubPullRequestLabel, GithubPullRequestMerge,
+    GithubPullRequestMergeability, GithubPullRequestMergeabilityEntry,
+    GithubPullRequestMergeabilityRequest, GithubPullRequestMergeabilityResponse,
+    GithubPullRequestNumber, GithubPullRequestRef, GithubPullRequestReview,
+    GithubPullRequestReviewDecision, GithubPullRequestReviewState, GithubPullRequestStatus,
+    GithubPullRequestUser, GithubRepositoryAccess, GithubRepositoryMergeSettings,
     MergeGithubPullRequestRequest, MergeGithubPullRequestResponse, latest_reviews,
 };
 pub use update::{

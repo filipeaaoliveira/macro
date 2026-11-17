@@ -26,10 +26,9 @@ use crate::domain::{
         EnrichedGithubPullRequest, GITHUB_PULL_REQUEST_FOREIGN_ENTITY_SOURCE, GithubAccessToken,
         GithubDraftOutcome, GithubError, GithubExchangeTokenResponse, GithubGrantLinkOutcome,
         GithubLink, GithubMergeMethod, GithubMergeOutcome, GithubMergeRejection,
-        GithubOpenPullRequest, GithubOpenPullRequestOutcome, GithubPullRequestDetails,
-        GithubPullRequestMerge, GithubPullRequestMergeability, GithubPullRequestMergeabilityEntry,
-        GithubPullRequestNumber, GithubPullRequestRef, GithubPullRequestState,
-        GithubPullRequestUpdateRejection, GithubRepository, GithubRepositoryMergeSettings,
+        GithubPullRequestDetails, GithubPullRequestMerge, GithubPullRequestMergeability,
+        GithubPullRequestMergeabilityEntry, GithubPullRequestNumber, GithubPullRequestRef,
+        GithubPullRequestState, GithubPullRequestUpdateRejection, GithubRepositoryMergeSettings,
         GithubStateOutcome, GithubUserInfo, MergeGithubPullRequestRequest,
         SetGithubPullRequestDraftRequest,
     },
@@ -511,41 +510,6 @@ impl GithubOauth for StubGithubOauth {
             .state_outcome
             .clone()
             .ok_or_else(|| GithubError::Internal(anyhow::anyhow!("GitHub unreachable")))
-    }
-
-    async fn get_repository(
-        &self,
-        _access_token: &str,
-        _owner: &str,
-        _repo: &str,
-    ) -> Result<Option<GithubRepository>, Self::Err> {
-        Err(GithubError::Internal(anyhow::anyhow!(
-            "not used by the link service"
-        )))
-    }
-
-    async fn find_pull_request_by_head(
-        &self,
-        _access_token: &str,
-        _owner: &str,
-        _repo: &str,
-        _head: &str,
-    ) -> Result<Option<u64>, Self::Err> {
-        Err(GithubError::Internal(anyhow::anyhow!(
-            "not used by the link service"
-        )))
-    }
-
-    async fn open_pull_request(
-        &self,
-        _access_token: &str,
-        _owner: &str,
-        _repo: &str,
-        _pull_request: &GithubOpenPullRequest,
-    ) -> Result<GithubOpenPullRequestOutcome, Self::Err> {
-        Err(GithubError::Internal(anyhow::anyhow!(
-            "not used by the link service"
-        )))
     }
 
     async fn get_pull_request_mergeability(

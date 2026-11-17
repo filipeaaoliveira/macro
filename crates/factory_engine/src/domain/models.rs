@@ -1,5 +1,9 @@
 //! What the factory's use cases take and return.
 
+#[cfg(test)]
+mod test;
+
+use chrono::{DateTime, Utc};
 use factory_records::domain::models::{
     EntryId, Outcome, Repository, Run, RunId, RunOutcome, Step, StepKey,
 };
@@ -88,9 +92,10 @@ pub struct CodeRepository {
 impl CodeRepository {
     /// The repository `url` names. It must be exactly
     /// `https://github.com/owner/name`, each segment of `[A-Za-z0-9._-]` and
-    /// neither `.` nor `..`, as the agent egress reads a session's repository:
-    /// the two ends must agree on which repository a Run works on, and the
-    /// segments are put into GitHub's API paths.
+    /// neither `.` nor `..`, with no `.git` ending or trailing slash: the
+    /// canonical form a coding session's repository takes, so a Run and its
+    /// sessions agree on which repository they work on. The segments are put
+    /// into GitHub's API paths.
     pub fn parse(url: &str) -> Option<Self> {
         let path = url.strip_prefix("https://github.com/")?;
         let (owner, name) = path.split_once('/')?;
@@ -102,7 +107,9 @@ impl CodeRepository {
                     .chars()
                     .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
         };
-        if !segment(owner) || !segment(name) {
+        // A `.git` ending names the same repository as one without; one
+        // form keeps a Run's record and its session's equal.
+        if !segment(owner) || !segment(name) || name.ends_with(".git") {
             return None;
         }
         Some(Self {
@@ -134,6 +141,15 @@ pub fn run_branch(run_id: RunId) -> String {
     format!("factory/{run_id}")
 }
 
+/// What a Run's owner may do with a repository on GitHub.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepositoryAccess {
+    /// The branch it checks out by default.
+    pub default_branch: String,
+    /// Whether the owner may push to it.
+    pub can_push: bool,
+}
+
 /// A pull request as the Run's owner sees it on GitHub.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PullRequest {
@@ -143,10 +159,8 @@ pub struct PullRequest {
     pub url: String,
     /// Whether it is open, closed, or merged.
     pub state: PullRequestState,
-    /// The commit its head branch is at, when GitHub says.
-    pub head_sha: Option<String>,
-    /// The checks on that commit; none when they could not be read.
-    pub checks: Option<Vec<Check>>,
+    /// The commit its head branch is at.
+    pub head_sha: String,
 }
 
 /// Whether a pull request is open, closed, or merged.
@@ -160,17 +174,126 @@ pub enum PullRequestState {
     Merged,
 }
 
-/// One check on a commit, such as a CI job.
+/// What GitHub says of the checks on a pull request's head commit.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct HeadChecks {
+    /// Its check suites, one per app that checks it, such as a CI.
+    pub suites: Vec<CheckSuite>,
+    /// Its commit statuses, the latest of each context.
+    pub statuses: Vec<CommitStatus>,
+    /// Its check runs: every one when they were read to find required
+    /// checks by name, else only those that failed, read to name them.
+    pub runs: Vec<Check>,
+    /// Whether a list was longer than was read, so these are not all its
+    /// checks.
+    pub truncated: bool,
+    /// The apps, by slug, that hold CI on the head: a run not finished, or
+    /// runs not all read, as a GitHub Actions run a concurrency group holds,
+    /// whose suite may be empty or not made yet.
+    pub held_apps: Vec<String>,
+    /// Whether the owner's token may not read GitHub Actions runs, so a run
+    /// that waits shows only through an empty Actions suite.
+    pub actions_unread: bool,
+}
+
+/// The checks a pull request's base requires, as far as they could be read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequiredChecks {
+    /// The checks the readable sources name.
+    pub checks: Vec<RequiredCheck>,
+    /// Whether every source was read in full; a partial set may leave
+    /// required checks out.
+    pub complete: bool,
+}
+
+/// A check a pull request's base requires before it merges.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequiredCheck {
+    /// The check run's name, or the commit status's context.
+    pub name: String,
+    /// The app whose check run it must be; none when any app's run, or a
+    /// commit status, will do.
+    pub app_id: Option<u64>,
+}
+
+/// Where one check stands. GitHub's states map onto it in one place
+/// ([`CheckState::of_check`], [`CheckState::of_status`]), so every reader
+/// agrees on what passed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CheckState {
+    /// Not finished, or not started.
+    Waiting,
+    /// Finished, and lets a pull request merge.
+    Passed,
+    /// Finished, and does not: GitHub's conclusion or state, for people.
+    Failed(String),
+}
+
+impl CheckState {
+    /// A check suite's or run's state from GitHub's `status` and
+    /// `conclusion`: a completed one passed when it succeeded, was neutral,
+    /// or was skipped.
+    pub fn of_check(status: &str, conclusion: Option<&str>) -> Self {
+        if status != "completed" {
+            return Self::Waiting;
+        }
+        match conclusion {
+            Some("success" | "neutral" | "skipped") => Self::Passed,
+            Some(conclusion) => Self::Failed(conclusion.to_string()),
+            None => Self::Failed("no conclusion".to_string()),
+        }
+    }
+
+    /// A commit status's state from GitHub's: `success` passed, `pending`
+    /// waits, and `failure` or `error` failed.
+    pub fn of_status(state: &str) -> Self {
+        match state {
+            "success" => Self::Passed,
+            "pending" => Self::Waiting,
+            other => Self::Failed(other.to_string()),
+        }
+    }
+}
+
+/// One app's checks on a commit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckSuite {
+    /// GitHub's id for it.
+    pub id: u64,
+    /// The app that runs it.
+    pub app: String,
+    /// Where it stands.
+    pub state: CheckState,
+    /// How many check runs it holds: an app that runs nothing on the commit
+    /// leaves an empty suite queued for good, though a CI may add its runs
+    /// a while after it made the suite.
+    pub check_runs: u64,
+    /// When GitHub created it.
+    pub created_at: Option<DateTime<Utc>>,
+}
+
+/// The latest commit status of one context.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitStatus {
+    /// The context, such as a CI's name.
+    pub context: String,
+    /// Where it stands.
+    pub state: CheckState,
+    /// Its page, when it gives one.
+    pub url: Option<String>,
+}
+
+/// One check run, such as a CI job.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Check {
-    /// Its name.
+    /// Its name, which a branch's required checks name it by.
     pub name: String,
-    /// GitHub's status: `queued`, `in_progress` or `completed`, among others.
-    pub status: String,
-    /// How it concluded, once completed: `success`, `failure` and so on.
-    pub conclusion: Option<String>,
+    /// Where it stands.
+    pub state: CheckState,
     /// Its page, when GitHub gives one.
     pub url: Option<String>,
+    /// GitHub's id of the app that runs it.
+    pub app_id: Option<u64>,
 }
 
 /// A pull request to open.
@@ -307,6 +430,9 @@ pub enum FactoryError {
         "the run's owner must connect GitHub to Macro and be able to reach the repository, which needs a branch"
     )]
     UnreachableRepository,
+    /// The Run's owner may read the repository, but not push to it.
+    #[error("the run's owner must be able to push to the repository")]
+    NoPushAccess,
     /// The Gate does not offer the answer.
     #[error("the gate offers {offered:?}")]
     AnswerNotOffered {

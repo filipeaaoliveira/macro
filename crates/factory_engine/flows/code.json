@@ -211,6 +211,15 @@
 		{
 			"id": "merge-gate",
 			"step": "ready_to_merge",
+			"max_visits": 3,
+			"on_exhausted": [
+				{
+					"to": {
+						"kind": "end",
+						"outcome": "manual"
+					}
+				}
+			],
 			"gate": {
 				"question": "Merge this pull request, or send it back with a note on what to change?",
 				"answers": ["approve", "revise"]
@@ -229,7 +238,8 @@
 						"to": {
 							"kind": "entry",
 							"entry": "fix"
-						}
+						},
+						"reset": ["review"]
 					}
 				],
 				"changed": [

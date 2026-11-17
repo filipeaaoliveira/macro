@@ -793,6 +793,32 @@ pub enum GithubOpenPullRequestOutcome {
     Rejected(String),
 }
 
+/// What a user may do with a repository, as GitHub says.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GithubRepositoryAccess {
+    /// The branch a clone checks out, absent for a repository with no
+    /// commits.
+    pub default_branch: Option<String>,
+    /// Whether the user may push to it.
+    pub push: bool,
+}
+
+/// A pull request's number, state and head, from GitHub's pull request
+/// list: one call, without its discussion or checks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GithubPullRequestHead {
+    /// Its number in its repository.
+    pub number: u64,
+    /// Its page on GitHub.
+    pub html_url: String,
+    /// GitHub's state: `open` or `closed`.
+    pub state: String,
+    /// Whether it was merged.
+    pub merged: bool,
+    /// The commit its head branch is at.
+    pub head_sha: String,
+}
+
 /// A request to merge one pull request on the user's behalf.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]

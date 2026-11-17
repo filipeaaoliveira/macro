@@ -104,29 +104,66 @@ work and hands back the prompt it was given: the tests' stand-in, and the
 service's when no agent is configured.
 
 A Flow with `"repository": true` (`code`) works on one GitHub repository: `POST
-/runs` must name it as `repoUrl` (`https://github.com/owner/name`, the form a
-coding session takes), other Flows refuse one, and the owner's linked GitHub
-account must reach it; its default branch, read then, is the Run's base
-(`factory_run.repo_url`, `base_branch`). Each agent Step of such a Run opens its
-session with that repository (`PrepareRoutineSession.repo_url`), so its runtime
-checks it out: a managed sandbox through the agent egress, macrod in a
-per-session worktree or its configured workspace. The prompt names the Run's
-branch, `factory/{run id}`, and its base: the agent checks the branch out, and
+/runs` must name it as `repoUrl` (`https://github.com/owner/name`, the canonical
+form a coding session takes: no `.git`, no trailing slash), other Flows refuse
+one, and the owner's linked GitHub account must reach it and may push to it;
+its default branch, read then, is the Run's base (`factory_run.repo_url`,
+`base_branch`). Each agent Step of such a Run opens its session with that
+repository (`PrepareRoutineSession.repo_url`), so its runtime checks it out: a
+managed sandbox through the agent egress, macrod in a per-session worktree or
+its configured workspace. The prompt names the Run's branch,
+`factory/{run id}`, and its base: the agent checks the branch out, and
 `write`, `fix` and `ci_fix` commit and push it from their runtime; `review`
 changes nothing. The pull request Steps act on GitHub as the Run's owner, with
-the token of the GitHub account they linked to Macro, which the authentication
-service gives (`outbound/github_pull_requests.rs`, the `github` crate's
-user-token client); an owner with none fails the Step for good. Each reads
-before it writes, so a retry or a Run sent back finds what it did: `publish`
-finds the branch's pull request or opens it, and a refusal because another
-attempt opened it reads as published; `ci` reads the checks on the pull
-request's head every 20 s, heartbeating, until one fails (`red`), all pass
-(`green`), or 25 minutes pass (`timeout`), within one Step attempt;
-`ready_to_merge` keeps the head whose checks passed (`factory_run.merge_head_sha`)
-and ends `done`, so its Gate asks the owner whether to merge; `merge` merges
-only that commit, naming it to GitHub, and a merged pull request reads as
-merged. A head that moved goes back to `ci`. The pull request's description
-names the Run's task as `MACRO-{short id}`, so GitHub's webhook links them.
+the token of the GitHub account they linked to Macro, which the
+authentication service gives (`outbound/github_pull_requests.rs`, over the
+`github` crate's user-token client), read on every call. A missing link, a
+token GitHub no longer takes (401), a refusal that is not throttling (403) and
+a repository out of reach (404) fail the Step for good; throttling, 5xx and
+transport failures are tried again. Each Step reads before it writes, so a
+retry or a Run sent back finds what it did: `publish` finds the branch's pull
+request or opens it, and a refusal because another attempt opened it reads as
+published; `ci` reads the pull request's head, its check suites, commit statuses and
+GitHub Actions workflow runs and, when required checks are named, its check
+runs, every 20 s, with one token per read and every page of each list,
+heartbeating. Once per Step it reads the checks the base requires (branch
+protection and rulesets, joined from what can be read, and marked complete
+only when both were read in full). Reading the workflow runs needs the GitHub
+App's Actions read permission: a token that may not read them holds CI only
+while an Actions suite sits empty. Its guarantees:
+- It ends `red` as soon as a suite, run or status fails, naming them.
+- It ends `green` only on two reads in a row that saw the same checks, each
+  with every suite that holds a run passed and every status succeeded, and
+  every required check that could be named appeared and passed: as a run of
+  the app the rule names, or, when it names none (or GitHub's -1, any
+  source), any app's run or a status of that name.
+- Once a complete, non-empty required set all passed, empty suites no longer
+  hold it back. A set read only in part must pass, but drops no empty suite.
+- Short of that, a GitHub Actions run on the head that has not finished
+  (queued, pending, waiting, requested, in progress, or a status GitHub adds
+  later), as one a concurrency group holds, holds it up to the 25-minute wait,
+  whether or not its suite exists yet; any other app's empty suite holds it
+  only until 5 minutes after GitHub made it.
+- A CI app other than GitHub Actions whose suite stays empty past 5 minutes is
+  not waited for; make its check required so `ci` waits for it.
+- A list longer than the 10 pages read, or no check reported, keeps it waiting.
+- After 25 minutes, within one Step attempt, it ends `timeout`.
+- GitHub does not say which app posted a commit status, so a required check
+  that names an app is met only by that app's check run: one such app that
+  reports only by status (as some deploy previews do) keeps CI waiting until
+  it times out.
+
+The head `ci` calls green is kept (`factory_run.merge_head_sha`);
+`ready_to_merge` ends `changed` unless the pull request's head is still that
+commit and its checks still pass, and otherwise ends `done`, so its Gate asks
+the owner whether to merge; `merge` merges only that commit, naming it to
+GitHub, and a merged pull request reads as merged. A head that moved goes back
+to `ci`, and a person's `revise` goes to `fix` with the review's visits reset.
+The merge-gate entry runs at most three times, including visits that end
+`changed` without asking; then the Run ends for a person. The pull
+request's description names the Run's task as `MACRO-{short id}`, so GitHub's
+webhook links them, and is cut to GitHub's 65,536 characters in its request
+part only.
 
 ## Start here
 
@@ -186,6 +223,9 @@ names the Run's task as `MACRO-{short id}`, so GitHub's webhook links them.
   for them, and a cancelled `ci` only drops its wait. A CI wait is bounded by
   one Step attempt (25 of its 30 minutes); a longer one needs the workflow to
   wait on a timer instead.
+- Deploy `agent_harness_service` before `factory_service`: an older harness
+  drops the routine session's `repo_url`, so a `code` Run's agents would work
+  outside its repository.
 - The agent pushes the Run's branch with its runtime's own git credentials
   (the egress's GitHub App token in a managed sandbox, the operator's git on
   macrod), and the pull request Steps use the owner's linked account: both

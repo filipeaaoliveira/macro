@@ -6,35 +6,53 @@ use std::time::Duration;
 
 use super::*;
 
-struct MockResponse {
-    status: &'static str,
-    body: String,
+/// What a [`MockServer`] answers one request with.
+pub(super) struct MockResponse {
+    /// The status line's code and reason, such as `200 OK`.
+    pub(super) status: &'static str,
+    /// The JSON body.
+    pub(super) body: String,
 }
 
-struct MockServer {
-    base_url: String,
+/// A local HTTP server that answers each request in turn with a scripted
+/// response, and keeps the requests it got.
+pub(super) struct MockServer {
+    /// Its address, to point a client at.
+    pub(super) base_url: String,
     requests: Receiver<String>,
     handle: JoinHandle<()>,
 }
 
 impl MockServer {
-    fn start(response: MockResponse) -> Self {
+    /// Answers one request with `response`.
+    pub(super) fn start(response: MockResponse) -> Self {
         Self::start_many(vec![response])
     }
 
     /// Answers one connection per response, in order.
-    fn start_many(responses: Vec<MockResponse>) -> Self {
+    pub(super) fn start_many(responses: Vec<MockResponse>) -> Self {
+        Self::start_with_headers(
+            responses
+                .into_iter()
+                .map(|response| (response, ""))
+                .collect(),
+        )
+    }
+
+    /// Answers one connection per response, in order, each with its extra
+    /// header lines (`Name: value\r\n` each).
+    pub(super) fn start_with_headers(responses: Vec<(MockResponse, &'static str)>) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let base_url = format!("http://{}", listener.local_addr().unwrap());
         let (request_sender, requests) = mpsc::channel();
         let handle = std::thread::spawn(move || {
-            for response in responses {
+            for (response, headers) in responses {
                 let (mut stream, _) = listener.accept().unwrap();
                 let request = read_request(&mut stream);
                 request_sender.send(request).unwrap();
                 write!(
                     stream,
-                    "HTTP/1.1 {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    "HTTP/1.1 {}\r\nContent-Type: application/json\r\n{headers}Content-Length: {}\r\nConnection: close\r\n\r\n{}",
                     response.status,
                     response.body.len(),
                     response.body
@@ -50,11 +68,13 @@ impl MockServer {
         }
     }
 
-    fn finish(self) -> String {
+    /// The one request it got, once answered.
+    pub(super) fn finish(self) -> String {
         self.finish_all().remove(0)
     }
 
-    fn finish_all(self) -> Vec<String> {
+    /// Every request it got, in order, once all are answered.
+    pub(super) fn finish_all(self) -> Vec<String> {
         self.handle.join().unwrap();
         self.requests.try_iter().collect()
     }
@@ -163,150 +183,6 @@ async fn merge_pull_request_names_the_head_it_merges() {
             .finish()
             .ends_with(r#"{"merge_method":"squash","sha":"6dcb09b"}"#)
     );
-}
-
-#[tokio::test]
-async fn get_repository_reads_its_default_branch() {
-    let server = MockServer::start(MockResponse {
-        status: "200 OK",
-        body: serde_json::json!({
-            "id": 42,
-            "name": "app",
-            "owner": { "login": "macro" },
-            "html_url": "https://github.com/macro/app",
-            "default_branch": "trunk",
-            "private": true
-        })
-        .to_string(),
-    });
-    let client = GithubOauthImpl::with_api_base_url(server.base_url.clone());
-
-    let repository = client
-        .get_repository("token", "macro", "app")
-        .await
-        .unwrap()
-        .expect("the user sees it");
-
-    assert_eq!(repository.default_branch.as_deref(), Some("trunk"));
-    assert!(server.finish().starts_with("GET /repos/macro/app HTTP/1.1"));
-}
-
-#[tokio::test]
-async fn get_repository_the_user_cannot_see_is_none() {
-    let server = MockServer::start(MockResponse {
-        status: "404 Not Found",
-        body: r#"{"message":"Not Found"}"#.to_string(),
-    });
-    let client = GithubOauthImpl::with_api_base_url(server.base_url.clone());
-
-    let repository = client
-        .get_repository("token", "macro", "app")
-        .await
-        .unwrap();
-
-    assert_eq!(repository, None);
-    server.finish();
-}
-
-#[tokio::test]
-async fn find_pull_request_by_head_asks_for_the_newest_of_the_branch() {
-    let server = MockServer::start(MockResponse {
-        status: "200 OK",
-        body: r#"[{"number":12}]"#.to_string(),
-    });
-    let client = GithubOauthImpl::with_api_base_url(server.base_url.clone());
-
-    let number = client
-        .find_pull_request_by_head("token", "macro", "app", "factory/run")
-        .await
-        .unwrap();
-
-    assert_eq!(number, Some(12));
-    let request = server.finish();
-    assert!(request.starts_with(
-        "GET /repos/macro/app/pulls?head=macro%3Afactory%2Frun&state=all&sort=created&direction=desc&per_page=1 HTTP/1.1"
-    ));
-}
-
-#[tokio::test]
-async fn find_pull_request_by_head_with_none_is_none() {
-    let server = MockServer::start(MockResponse {
-        status: "200 OK",
-        body: "[]".to_string(),
-    });
-    let client = GithubOauthImpl::with_api_base_url(server.base_url.clone());
-
-    let number = client
-        .find_pull_request_by_head("token", "macro", "app", "factory/run")
-        .await
-        .unwrap();
-
-    assert_eq!(number, None);
-    server.finish();
-}
-
-#[tokio::test]
-async fn open_pull_request_reports_its_number() {
-    let server = MockServer::start(MockResponse {
-        status: "201 Created",
-        body: r#"{"number":13}"#.to_string(),
-    });
-    let client = GithubOauthImpl::with_api_base_url(server.base_url.clone());
-
-    let outcome = client
-        .open_pull_request(
-            "token",
-            "macro",
-            "app",
-            &GithubOpenPullRequest {
-                head: "factory/run".to_string(),
-                base: "main".to_string(),
-                title: "Collapse repeated dashes".to_string(),
-                body: "Why".to_string(),
-            },
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(outcome, GithubOpenPullRequestOutcome::Opened(13));
-    let request = server.finish();
-    assert!(request.starts_with("POST /repos/macro/app/pulls HTTP/1.1"));
-    assert!(request.ends_with(
-        r#"{"title":"Collapse repeated dashes","body":"Why","head":"factory/run","base":"main"}"#
-    ));
-}
-
-#[tokio::test]
-async fn open_pull_request_reports_github_s_reason_for_declining() {
-    let server = MockServer::start(MockResponse {
-        status: "422 Unprocessable Entity",
-        body: r#"{"message":"Validation Failed","errors":[{"resource":"PullRequest","code":"custom","message":"A pull request already exists for macro:factory/run."}]}"#
-            .to_string(),
-    });
-    let client = GithubOauthImpl::with_api_base_url(server.base_url.clone());
-
-    let outcome = client
-        .open_pull_request(
-            "token",
-            "macro",
-            "app",
-            &GithubOpenPullRequest {
-                head: "factory/run".to_string(),
-                base: "main".to_string(),
-                title: "Collapse repeated dashes".to_string(),
-                body: "Why".to_string(),
-            },
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(
-        outcome,
-        GithubOpenPullRequestOutcome::Rejected(
-            "A pull request already exists for macro:factory/run.".to_string()
-        )
-    );
-    server.finish();
 }
 
 #[tokio::test]

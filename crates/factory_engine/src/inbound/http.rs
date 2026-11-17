@@ -504,6 +504,7 @@ impl FactoryError {
             | FactoryError::RepositoryNotUsed
             | FactoryError::InvalidRepository
             | FactoryError::UnreachableRepository
+            | FactoryError::NoPushAccess
             | FactoryError::AnswerNotOffered { .. }
             | FactoryError::NotAStepSession
             | FactoryError::OutcomeNotOffered { .. }
