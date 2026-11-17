@@ -27,9 +27,11 @@ github = { path = "../github", default-features = false, features = ["link", "ou
 macro_authorization = { path = "../macro_authorization", default-features = false, features = ["axum"] }
 macro_user_id = { path = "../macro_user_id", features = ["schema"] }
 model-error-response = { path = "../model-error-response" }
+models_properties = { path = "../models_properties" }
 rootcause = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+system_properties = { path = "../system_properties" }
 temporalio-client = { workspace = true }
 temporalio-common = { workspace = true }
 temporalio-macros = { workspace = true }

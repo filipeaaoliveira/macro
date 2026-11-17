@@ -1,5 +1,9 @@
 //! In-memory stand-ins for the factory's records, for the domain's tests.
 
+mod main_hold;
+
+pub(crate) use main_hold::{FakeHoldTasks, FakeMain, FakeWatches};
+
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Arc, Mutex};
 
@@ -68,6 +72,8 @@ pub(crate) struct FakeRepo {
     pub(crate) merge_heads: Arc<Mutex<BTreeMap<RunId, String>>>,
     /// Told each time a Gate opens.
     pub(crate) gate_opened: Arc<tokio::sync::Notify>,
+    /// The merges Runs made and the holds on their bases.
+    pub(crate) main: Arc<Mutex<FakeMain>>,
 }
 
 /// Everyone has an account but `macro|nobody@example.com`.
@@ -727,6 +733,9 @@ pub(crate) struct FakeGithubState {
     /// The paths the Run's branch changed against its base; none when
     /// GitHub cannot list them all.
     pub(crate) changed: Option<Vec<String>>,
+    /// The base branch's head commit and the checks on it; none when the
+    /// owner reaches no such branch.
+    pub(crate) base: Option<(String, HeadChecks)>,
 }
 
 /// GitHub in memory, for one Run's branch: opening its pull request makes
@@ -852,6 +861,16 @@ impl PullRequests for FakeGithub {
         _all_runs: bool,
     ) -> Result<Option<(PullRequest, HeadChecks)>, FakeError> {
         Ok(self.read())
+    }
+
+    async fn branch_checks(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        _branch: &str,
+        _all_runs: bool,
+    ) -> Result<Option<(String, HeadChecks)>, FakeError> {
+        Ok(self.state().base.clone())
     }
 
     async fn required_checks(

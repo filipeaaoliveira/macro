@@ -11,6 +11,7 @@ model = { path = "../model" }
 model_owner = { path = "../model_owner" }
 models_bulk_upload = { path = "../models_bulk_upload" }
 models_permissions = { path = "../models_permissions" }
+models_properties = { path = "../models_properties" }
 reqwest = { workspace = true, features = ["query"] }
 rootcause = { workspace = true }
 serde = { workspace = true }

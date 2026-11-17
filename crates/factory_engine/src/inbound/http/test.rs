@@ -4,7 +4,10 @@ use axum::Router;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode};
 use bot_id::BotId;
-use factory_records::domain::models::{EntryId, HandBack, Outcome, RunId, RunInsert, StepKey};
+use factory_records::domain::main_hold::MainHoldRepository;
+use factory_records::domain::models::{
+    EntryId, HandBack, Outcome, Repository, RunId, RunInsert, RunOutcome, StepKey,
+};
 use factory_records::domain::ports::RunRepository;
 use macro_authorization::{
     AuthorizedUserApiKey, CODE_EXECUTION_HEADER, CredentialOrigin, INTERNAL_API_KEY_HEADER,
@@ -21,7 +24,7 @@ use uuid::Uuid;
 
 use super::{FactoryRouterState, factory_router};
 use crate::domain::built_in_steps::BuiltInSteps;
-use crate::domain::fakes::{FakeGithub, FakeRepo};
+use crate::domain::fakes::{FakeGithub, FakeRepo, FakeWatches};
 use crate::domain::gate::AnswerGate;
 use crate::domain::models::{FactoryError, FlowSummary, RunDetail, RunStart};
 use crate::domain::ports::{AnswerDelivery, FactoryService, RunWorkflows, RunWorkflowsError};
@@ -277,7 +280,7 @@ fn github_router(repo: &FakeRepo, github: FakeGithub) -> Router {
         AcceptingWorkflows,
         BuiltInSteps::new(
             LocalAgent,
-            PullRequestSteps::new(github.clone(), repo.clone()),
+            PullRequestSteps::new(github.clone(), repo.clone(), FakeWatches::default()),
         ),
         repo.clone(),
         repo.clone(),
@@ -898,4 +901,67 @@ async fn a_user_api_key_acts_for_its_owner() {
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
     assert_eq!(*service.actors.lock().expect("actors"), [ALICE]);
+}
+
+/// A Run that goes on a held base shows the hold, which its merge waits
+/// on; one that ended, or works on another base, shows none.
+#[tokio::test]
+async fn a_run_on_a_held_base_shows_the_main_hold() {
+    let repo = FakeRepo::default();
+    let alice = MacroUserIdStr::try_from(ALICE.to_string()).expect("valid");
+    let main = Repository {
+        url: "https://github.com/macro/app".to_string(),
+        base_branch: "main".to_string(),
+    };
+    let release = Repository {
+        base_branch: "release".to_string(),
+        ..main.clone()
+    };
+    let mut runs = Vec::new();
+    for base in [&main, &main, &release] {
+        let run_id = RunId::generate();
+        repo.insert_run(run_id, "code", "Add dark mode", &alice, None, Some(base))
+            .await
+            .expect("insert");
+        runs.push(run_id);
+    }
+    repo.end_run(runs[1], RunOutcome::Manual)
+        .await
+        .expect("end");
+    repo.hold_main(
+        &main,
+        "2222222222222222222222222222222222222222",
+        "- test (failure): https://ci/1",
+    )
+    .await
+    .expect("hold");
+
+    let read = |run_id: RunId| {
+        let router = records_router(&repo);
+        async move {
+            let response = router
+                .oneshot(call(
+                    "GET",
+                    &format!("/runs/{run_id}"),
+                    Caller::User("alice"),
+                    serde_json::Value::Null,
+                ))
+                .await
+                .expect("response");
+            assert_eq!(response.status(), StatusCode::OK);
+            body(response).await
+        }
+    };
+
+    let held = read(runs[0]).await;
+    assert_eq!(
+        held["mainHold"]["headSha"],
+        "2222222222222222222222222222222222222222"
+    );
+    assert_eq!(held["mainHold"]["failed"], "- test (failure): https://ci/1");
+    assert!(held["mainHold"]["since"].is_string());
+    assert!(held["mainHold"]["taskId"].is_null());
+    assert!(held["mainHold"].get("taskClaimed").is_none());
+    assert!(read(runs[1]).await["mainHold"].is_null());
+    assert!(read(runs[2]).await["mainHold"].is_null());
 }

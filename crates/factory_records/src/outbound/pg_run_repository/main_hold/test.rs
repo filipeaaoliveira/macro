@@ -49,7 +49,11 @@ async fn a_red_base_is_held_until_a_green_look_clears_it(pool: PgPool) {
         .await
         .expect("hold");
     let again = repo
-        .hold_main(&base, "3333333333333333333333333333333333333333", "- lint (failure)")
+        .hold_main(
+            &base,
+            "3333333333333333333333333333333333333333",
+            "- lint (failure)",
+        )
         .await
         .expect("hold again");
     assert_eq!(again.since, first.since);
@@ -86,12 +90,25 @@ async fn a_red_period_claims_its_task_once(pool: PgPool) {
         .expect("hold");
     assert!(!hold.task_claimed);
 
-    assert!(repo.claim_hold_task(&base, hold.since).await.expect("claim"));
-    assert!(!repo.claim_hold_task(&base, hold.since).await.expect("claim again"));
+    assert!(
+        repo.claim_hold_task(&base, hold.since)
+            .await
+            .expect("claim")
+    );
+    assert!(
+        !repo
+            .claim_hold_task(&base, hold.since)
+            .await
+            .expect("claim again")
+    );
     repo.release_hold_task(&base, hold.since)
         .await
         .expect("release");
-    assert!(repo.claim_hold_task(&base, hold.since).await.expect("claim after release"));
+    assert!(
+        repo.claim_hold_task(&base, hold.since)
+            .await
+            .expect("claim after release")
+    );
 
     let task = Uuid::parse_str(TASK).expect("uuid");
     repo.record_hold_task(&base, hold.since, task)
@@ -104,11 +121,21 @@ async fn a_red_period_claims_its_task_once(pool: PgPool) {
     let held = repo.main_hold(&base).await.expect("read").expect("held");
     assert_eq!(held.task_id, Some(task));
     assert!(held.task_claimed);
-    assert!(!repo.claim_hold_task(&base, hold.since).await.expect("claim filed"));
+    assert!(
+        !repo
+            .claim_hold_task(&base, hold.since)
+            .await
+            .expect("claim filed")
+    );
 
     // A claim for another period's start is not this one's.
     let earlier = hold.since - TimeDelta::seconds(1);
-    assert!(!repo.claim_hold_task(&base, earlier).await.expect("claim stale"));
+    assert!(
+        !repo
+            .claim_hold_task(&base, earlier)
+            .await
+            .expect("claim stale")
+    );
 
     repo.clear_main_hold(&base, Utc::now())
         .await
@@ -118,7 +145,11 @@ async fn a_red_period_claims_its_task_once(pool: PgPool) {
         .await
         .expect("hold");
     assert_eq!(next.task_id, None);
-    assert!(repo.claim_hold_task(&base, next.since).await.expect("claim next"));
+    assert!(
+        repo.claim_hold_task(&base, next.since)
+            .await
+            .expect("claim next")
+    );
 }
 
 /// The suspects are the base's merges since it was last green, oldest
@@ -158,13 +189,23 @@ async fn the_suspects_are_the_merges_since_the_base_was_last_green(pool: PgPool)
         base_branch: "main".to_string(),
     };
     let other = code_run(&repo, Some(&elsewhere)).await;
-    repo.record_merge(other, 9, "https://github.com/macro/other/pull/9", Utc::now())
-        .await
-        .expect("merge elsewhere");
+    repo.record_merge(
+        other,
+        9,
+        "https://github.com/macro/other/pull/9",
+        Utc::now(),
+    )
+    .await
+    .expect("merge elsewhere");
     let no_code = code_run(&repo, None).await;
-    repo.record_merge(no_code, 5, "https://github.com/macro/app/pull/5", Utc::now())
-        .await
-        .expect("no repository");
+    repo.record_merge(
+        no_code,
+        5,
+        "https://github.com/macro/app/pull/5",
+        Utc::now(),
+    )
+    .await
+    .expect("no repository");
 
     let suspects = repo.suspect_merges(&base, 10).await.expect("suspects");
     let numbers: Vec<u64> = suspects.iter().map(|merge| merge.number).collect();

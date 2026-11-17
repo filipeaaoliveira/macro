@@ -31,6 +31,7 @@ mod test;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
+use factory_records::domain::main_hold::MainHoldRepository;
 use factory_records::domain::models::{
     CheckRound, CheckRoundOutcome, CheckRoundStart, HandedBack, MAX_OUTPUT_BYTES, Outcome, Role,
 };
@@ -41,7 +42,7 @@ use super::{BuiltInStepError, BuiltInSteps, agent_role, cut};
 use crate::domain::checks::{CHECKS_FILE, RepositoryCheck, RepositoryChecks};
 use crate::domain::flow::StepName;
 use crate::domain::models::{AgentTurn, StepInput, StepReport};
-use crate::domain::ports::{PullRequests, StepAgent};
+use crate::domain::ports::{MainWatches, PullRequests, StepAgent};
 use crate::domain::pull_request_steps::PullRequestStepError;
 
 /// What the agent is told for a round of checks.
@@ -119,7 +120,13 @@ fn lost(why: &str) -> BuiltInStepError {
     }
 }
 
-impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
+impl<A, G, R, M> BuiltInSteps<A, G, R, M>
+where
+    A: StepAgent,
+    G: PullRequests,
+    R: RunRepository + MainHoldRepository,
+    M: MainWatches,
+{
     /// Have the agent do `step`'s work, then run the repository's checks on
     /// it in the same session, round after round. The Step ends with the
     /// agent's outcome when the work changed nothing or the base declares

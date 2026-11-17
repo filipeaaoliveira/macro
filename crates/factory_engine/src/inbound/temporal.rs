@@ -1,6 +1,7 @@
 //! The Temporal worker that runs the Runs' workflows and their Steps.
 
 mod activities;
+mod main_watch;
 #[cfg(test)]
 mod test;
 mod workflow;
@@ -10,8 +11,9 @@ use std::time::Duration;
 use temporalio_client::Client;
 use temporalio_sdk::{Runtime, Worker, WorkerOptions};
 
-use crate::domain::ports::StepService;
+use crate::domain::ports::{MainWatchService, StepService};
 use crate::inbound::temporal::activities::FactoryActivities;
+use crate::inbound::temporal::main_watch::{MainWatchActivities, MainWatchWorkflow};
 use crate::inbound::temporal::workflow::FlowWorkflow;
 use crate::temporal::TASK_QUEUE;
 
@@ -27,13 +29,15 @@ const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 const MAX_HEARTBEAT_THROTTLE: Duration = Duration::from_secs(4);
 
 /// A worker on the factory's task queue that runs the Flow workflow and its
-/// activities, over `steps`.
+/// activities, over `steps`, and the watches of base branches, over
+/// `watches`.
 pub fn worker(
     runtime: &Runtime,
     client: Client,
     steps: impl StepService,
+    watches: impl MainWatchService,
 ) -> Result<Worker, rootcause::Report> {
-    worker_on(TASK_QUEUE, runtime, client, steps)
+    worker_on(TASK_QUEUE, runtime, client, steps, watches)
 }
 
 /// A worker on `task_queue`, as [`worker`] is on the factory's.
@@ -42,10 +46,13 @@ fn worker_on(
     runtime: &Runtime,
     client: Client,
     steps: impl StepService,
+    watches: impl MainWatchService,
 ) -> Result<Worker, rootcause::Report> {
     let options = WorkerOptions::new(task_queue)
         .register_workflow::<FlowWorkflow>()?
+        .register_workflow::<MainWatchWorkflow>()?
         .register_activities(FactoryActivities::new(steps))
+        .register_activities(MainWatchActivities::new(watches))
         .graceful_shutdown_period(SHUTDOWN_GRACE)
         .max_heartbeat_throttle_interval(MAX_HEARTBEAT_THROTTLE)
         .build();

@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use factory_records::domain::main_hold::MainHoldRepository;
 use factory_records::domain::models::{
     Outcome, Repository, Role, RunId, RunInsert, RunOutcome, StepKey,
 };
@@ -28,15 +29,19 @@ use uuid::Uuid;
 use super::worker_on;
 use crate::domain::built_in_flows::BuiltInFlow;
 use crate::domain::built_in_steps::BuiltInSteps;
-use crate::domain::fakes::{FakeGithub, FakeRepo, ci};
+use crate::domain::fakes::{FakeGithub, FakeHoldTasks, FakeRepo, FakeWatches, ci};
 use crate::domain::flow::Flow;
 use crate::domain::gate::AnswerGate;
+use crate::domain::main_hold::{MainWatch, MainWatchServiceImpl};
 use crate::domain::models::{AgentAnswer, AgentTask, AgentTurn, PullRequestState, RunStart};
-use crate::domain::ports::{AgentFailure, AnswerDelivery, Retryable, RunWorkflows, StepAgent};
+use crate::domain::ports::{
+    AgentFailure, AnswerDelivery, MainWatches, Retryable, RunWorkflows, StepAgent,
+};
 use crate::domain::pull_request_steps::PullRequestSteps;
 use crate::domain::service::StepServiceImpl;
+use crate::outbound::temporal_main_watches::TemporalMainWatches;
 use crate::outbound::temporal_run_workflows::TemporalRunWorkflows;
-use crate::temporal::FlowWorkflowDefinition;
+use crate::temporal::{FlowWorkflowDefinition, MainWatchWorkflowDefinition};
 
 /// How long a test waits on Temporal before it fails.
 const PATIENCE: Duration = Duration::from_secs(60);
@@ -149,10 +154,19 @@ impl StepAgent for Agent {
 fn steps_of<A: StepAgent + Clone>(
     agent: &A,
     repo: &FakeRepo,
-) -> BuiltInSteps<A, FakeGithub, FakeRepo> {
+) -> BuiltInSteps<A, FakeGithub, FakeRepo, FakeWatches> {
     BuiltInSteps::new(
         agent.clone(),
-        PullRequestSteps::new(FakeGithub::default(), repo.clone()),
+        PullRequestSteps::new(FakeGithub::default(), repo.clone(), FakeWatches::default()),
+    )
+}
+
+/// The watches of base branches, over `repo`, with no base on GitHub.
+fn watches(repo: &FakeRepo) -> MainWatchServiceImpl<FakeRepo, FakeGithub, FakeHoldTasks> {
+    MainWatchServiceImpl::new(
+        repo.clone(),
+        FakeGithub::default(),
+        FakeHoldTasks::default(),
     )
 }
 
@@ -252,6 +266,7 @@ where
         &runtime,
         client.clone(),
         StepServiceImpl::new(repo.clone(), steps_of(agent, &repo)),
+        watches(&repo),
     )
     .expect("worker");
 
@@ -440,7 +455,14 @@ async fn a_step_whose_worker_shuts_down_goes_on_at_once_on_the_next() {
     // gets it within a few seconds.
     let mut restarted = None;
     for _ in 0..SHUTDOWNS {
-        let worker = worker_on(&task_queue, &runtime, client.clone(), steps()).expect("worker");
+        let worker = worker_on(
+            &task_queue,
+            &runtime,
+            client.clone(),
+            steps(),
+            watches(&repo),
+        )
+        .expect("worker");
         let reached = async {
             asked(&agent).await;
             if let Some(restarted) = restarted {
@@ -455,7 +477,14 @@ async fn a_step_whose_worker_shuts_down_goes_on_at_once_on_the_next() {
         restarted = Some(tokio::time::Instant::now());
     }
 
-    let last = worker_on(&task_queue, &runtime, client.clone(), steps()).expect("worker");
+    let last = worker_on(
+        &task_queue,
+        &runtime,
+        client.clone(),
+        steps(),
+        watches(&repo),
+    )
+    .expect("worker");
     let done = Notify::new();
     let walked = async {
         let ended = tokio::time::timeout(
@@ -675,13 +704,14 @@ where
     let runtime = Runtime::from_current_tokio(Default::default()).expect("runtime");
     let steps = BuiltInSteps::new(
         agent.clone(),
-        PullRequestSteps::new(github.clone(), repo.clone()),
+        PullRequestSteps::new(github.clone(), repo.clone(), FakeWatches::default()),
     );
     let worker = worker_on(
         &task_queue,
         &runtime,
         client.clone(),
         StepServiceImpl::new(repo.clone(), steps),
+        watches(&repo),
     )
     .expect("worker");
 
@@ -889,4 +919,84 @@ async fn a_head_that_moves_before_the_merge_goes_back_to_ci() {
     let github = github.state();
     assert_eq!(github.merges, [FakeGithub::HEAD, FIXED_HEAD]);
     assert_eq!(github.opened, 1);
+}
+
+/// The watch of a red base holds it and files its task once, a second
+/// start uses the watch that runs, and the watch ends once the base's
+/// checks pass, clearing the hold.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "Temporal doesn't exist in CI"]
+async fn a_base_s_watch_holds_it_while_red_and_ends_once_green() {
+    let client = client().await;
+    let repo = FakeRepo::default();
+    let github = FakeGithub::default();
+    github.state().base = Some((
+        "2222222222222222222222222222222222222222".to_string(),
+        ci(Some("failure")),
+    ));
+    let tasks = FakeHoldTasks::default();
+    let julia = MacroUserIdStr::try_from("macro|julia@example.com".to_string()).expect("valid");
+    let repository = Repository {
+        url: format!("https://github.com/macro/app-{}", Uuid::now_v7().simple()),
+        base_branch: "main".to_string(),
+    };
+    let run_id = RunId::generate();
+    repo.insert_run(
+        run_id,
+        "code",
+        "Add dark mode",
+        &julia,
+        None,
+        Some(&repository),
+    )
+    .await
+    .expect("insert");
+    let watch = MainWatch::of(run_id, &repository);
+
+    let task_queue = format!("factory-test-{}", Uuid::now_v7());
+    let runtime = Runtime::from_current_tokio(Default::default()).expect("runtime");
+    let worker = worker_on(
+        &task_queue,
+        &runtime,
+        client.clone(),
+        StepServiceImpl::new(repo.clone(), steps_of(&Agent::doing(Work::Works), &repo)),
+        MainWatchServiceImpl::new(repo.clone(), github.clone(), tasks.clone()),
+    )
+    .expect("worker");
+    let watches = TemporalMainWatches::on(client.clone(), &task_queue);
+
+    let done = Notify::new();
+    let watched = async {
+        watches.watch(&watch).await.expect("start");
+        tokio::time::timeout(PATIENCE, tasks.filing.notified())
+            .await
+            .expect("the task is filed");
+        watches.watch(&watch).await.expect("start again");
+        assert!(
+            repo.main_hold(&repository)
+                .await
+                .expect("read")
+                .is_some_and(|hold| hold.task_id.is_some())
+        );
+
+        github.state().base = Some((
+            "2222222222222222222222222222222222222222".to_string(),
+            ci(Some("success")),
+        ));
+        let ended = tokio::time::timeout(
+            PATIENCE,
+            client
+                .get_workflow_handle::<MainWatchWorkflowDefinition>(watch.workflow_id())
+                .get_result(WorkflowGetResultOptions::default()),
+        )
+        .await
+        .expect("the watch ends");
+        done.notify_one();
+        ended
+    };
+    let (worked, ended) = tokio::join!(worker.run_until(done.notified()), watched);
+    worked.expect("the worker ran");
+    ended.expect("the watch ended well");
+    assert_eq!(repo.main_hold(&repository).await.expect("read"), None);
+    assert_eq!(tasks.filed().len(), 1);
 }

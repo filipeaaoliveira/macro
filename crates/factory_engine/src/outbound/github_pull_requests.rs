@@ -124,6 +124,114 @@ impl<T: OwnerTokens> GithubPullRequests<T> {
             .await?;
         Ok(found.map(pull_request))
     }
+
+    /// The checks on the commit `sha` of `repository`, with `token`: all
+    /// its check runs when `all_runs`, else only those of a failed suite.
+    async fn checks_on(
+        &self,
+        token: &str,
+        repository: &CodeRepository,
+        sha: &str,
+        all_runs: bool,
+    ) -> Result<HeadChecks, GithubPullRequestsErr> {
+        let (owner_name, name) = (repository.owner(), repository.name());
+        let suites = self
+            .github
+            .list_check_suites(token, owner_name, name, sha)
+            .await?;
+        let statuses = self
+            .github
+            .list_commit_statuses(token, owner_name, name, sha)
+            .await?;
+        let mut truncated = !suites.complete || !statuses.complete;
+        let suites: Vec<CheckSuite> = suites
+            .items
+            .into_iter()
+            .map(|suite| CheckSuite {
+                id: suite.id,
+                app: suite.app,
+                state: CheckState::of_check(&suite.status, suite.conclusion.as_deref()),
+                check_runs: suite.check_runs,
+                created_at: suite.created_at,
+            })
+            .collect();
+        let statuses = statuses
+            .items
+            .into_iter()
+            .map(|status| CommitStatus {
+                context: status.context,
+                state: CheckState::of_status(&status.state),
+                url: status.target_url,
+            })
+            .collect();
+
+        // Runs are read to find required checks by name, or to name what
+        // failed in a failed suite; only the failed ones are kept then.
+        let suite_failed = suites
+            .iter()
+            .any(|suite| matches!(suite.state, CheckState::Failed(_)));
+        let runs = if all_runs || suite_failed {
+            let runs = self
+                .github
+                .list_check_runs(token, owner_name, name, sha)
+                .await?;
+            truncated |= !runs.complete;
+            runs.items
+                .into_iter()
+                .map(|run| Check {
+                    name: run.name,
+                    state: CheckState::of_check(&run.status, run.conclusion.as_deref()),
+                    url: run.html_url,
+                    app_id: run.app_id,
+                })
+                .filter(|run| all_runs || matches!(run.state, CheckState::Failed(_)))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        // A GitHub Actions run not finished, as one a concurrency group
+        // holds or one whose suite GitHub has not made yet, shows only in the
+        // head's workflow runs; runs not all read may hide one, so they hold
+        // too. A token that may not read Actions cannot tell: it holds only
+        // while an Actions suite sits empty, so a repository the App may not
+        // read Actions in is not stalled.
+        let mut held_apps = Vec::new();
+        let mut actions_unread = false;
+        match self
+            .github
+            .list_workflow_runs(token, owner_name, name, sha)
+            .await
+        {
+            Ok(runs) => {
+                let waiting = runs.items.iter().any(|run| run.status.is_waiting());
+                if waiting || !runs.complete {
+                    held_apps.push(ACTIONS_APP.to_string());
+                }
+            }
+            Err(error @ (GithubError::Forbidden | GithubError::RepositoryUnavailable)) => {
+                tracing::warn!(
+                    %error,
+                    "the github token may not read actions runs; an empty actions suite is held"
+                );
+                actions_unread = true;
+                let actions_empty = suites
+                    .iter()
+                    .any(|suite| suite.app == ACTIONS_APP && suite.check_runs == 0);
+                if actions_empty {
+                    held_apps.push(ACTIONS_APP.to_string());
+                }
+            }
+            Err(error) => return Err(error.into()),
+        }
+        Ok(HeadChecks {
+            suites,
+            statuses,
+            runs,
+            truncated,
+            held_apps,
+            actions_unread,
+        })
+    }
 }
 
 /// The pull request `found` describes.
@@ -223,110 +331,30 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
         let Some(pull_request) = self.head(&token, repository, branch).await? else {
             return Ok(None);
         };
-        let (owner_name, name, sha) = (
-            repository.owner(),
-            repository.name(),
-            pull_request.head_sha.as_str(),
-        );
-        let suites = self
-            .github
-            .list_check_suites(&token, owner_name, name, sha)
+        let checks = self
+            .checks_on(&token, repository, &pull_request.head_sha, all_runs)
             .await?;
-        let statuses = self
-            .github
-            .list_commit_statuses(&token, owner_name, name, sha)
-            .await?;
-        let mut truncated = !suites.complete || !statuses.complete;
-        let suites: Vec<CheckSuite> = suites
-            .items
-            .into_iter()
-            .map(|suite| CheckSuite {
-                id: suite.id,
-                app: suite.app,
-                state: CheckState::of_check(&suite.status, suite.conclusion.as_deref()),
-                check_runs: suite.check_runs,
-                created_at: suite.created_at,
-            })
-            .collect();
-        let statuses = statuses
-            .items
-            .into_iter()
-            .map(|status| CommitStatus {
-                context: status.context,
-                state: CheckState::of_status(&status.state),
-                url: status.target_url,
-            })
-            .collect();
+        Ok(Some((pull_request, checks)))
+    }
 
-        // Runs are read to find required checks by name, or to name what
-        // failed in a failed suite; only the failed ones are kept then.
-        let suite_failed = suites
-            .iter()
-            .any(|suite| matches!(suite.state, CheckState::Failed(_)));
-        let runs = if all_runs || suite_failed {
-            let runs = self
-                .github
-                .list_check_runs(&token, owner_name, name, sha)
-                .await?;
-            truncated |= !runs.complete;
-            runs.items
-                .into_iter()
-                .map(|run| Check {
-                    name: run.name,
-                    state: CheckState::of_check(&run.status, run.conclusion.as_deref()),
-                    url: run.html_url,
-                    app_id: run.app_id,
-                })
-                .filter(|run| all_runs || matches!(run.state, CheckState::Failed(_)))
-                .collect()
-        } else {
-            Vec::new()
-        };
-        // A GitHub Actions run not finished, as one a concurrency group
-        // holds or one whose suite GitHub has not made yet, shows only in the
-        // head's workflow runs; runs not all read may hide one, so they hold
-        // too. A token that may not read Actions cannot tell: it holds only
-        // while an Actions suite sits empty, so a repository the App may not
-        // read Actions in is not stalled.
-        let mut held_apps = Vec::new();
-        let mut actions_unread = false;
-        match self
+    #[tracing::instrument(err, skip(self, owner))]
+    async fn branch_checks(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        branch: &str,
+        all_runs: bool,
+    ) -> Result<Option<(String, HeadChecks)>, GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        let Some(head) = self
             .github
-            .list_workflow_runs(&token, owner_name, name, sha)
-            .await
-        {
-            Ok(runs) => {
-                let waiting = runs.items.iter().any(|run| run.status.is_waiting());
-                if waiting || !runs.complete {
-                    held_apps.push(ACTIONS_APP.to_string());
-                }
-            }
-            Err(error @ (GithubError::Forbidden | GithubError::RepositoryUnavailable)) => {
-                tracing::warn!(
-                    %error,
-                    "the github token may not read actions runs; an empty actions suite is held"
-                );
-                actions_unread = true;
-                let actions_empty = suites
-                    .iter()
-                    .any(|suite| suite.app == ACTIONS_APP && suite.check_runs == 0);
-                if actions_empty {
-                    held_apps.push(ACTIONS_APP.to_string());
-                }
-            }
-            Err(error) => return Err(error.into()),
-        }
-        Ok(Some((
-            pull_request,
-            HeadChecks {
-                suites,
-                statuses,
-                runs,
-                truncated,
-                held_apps,
-                actions_unread,
-            },
-        )))
+            .get_branch_head(&token, repository.owner(), repository.name(), branch)
+            .await?
+        else {
+            return Ok(None);
+        };
+        let checks = self.checks_on(&token, repository, &head, all_runs).await?;
+        Ok(Some((head, checks)))
     }
 
     #[tracing::instrument(err, skip(self, owner))]

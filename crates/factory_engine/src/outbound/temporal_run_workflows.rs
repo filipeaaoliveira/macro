@@ -41,7 +41,7 @@ impl TemporalRunWorkflows {
 
 /// A gRPC failure: Temporal's outage when retrying later can help, anything
 /// else ours to look at.
-fn from_status(status: Status) -> RunWorkflowsError {
+pub(crate) fn from_status(status: Status) -> RunWorkflowsError {
     match status.code() {
         Code::Unavailable | Code::DeadlineExceeded | Code::ResourceExhausted | Code::Aborted => {
             RunWorkflowsError::Unavailable(UpstreamError {
@@ -53,7 +53,7 @@ fn from_status(status: Status) -> RunWorkflowsError {
     }
 }
 
-fn other(error: impl std::error::Error + Send + Sync + 'static) -> RunWorkflowsError {
+pub(crate) fn other(error: impl std::error::Error + Send + Sync + 'static) -> RunWorkflowsError {
     RunWorkflowsError::Other(rootcause::Report::new(error).into_dynamic())
 }
 

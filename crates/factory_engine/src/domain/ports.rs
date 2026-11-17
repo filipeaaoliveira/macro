@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 use crate::domain::flow::{StepName, StepUse};
 use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening};
+use crate::domain::main_hold::{HoldTask, MainLook, MainWatch};
 use crate::domain::models::{
     AgentAnswer, AgentTask, AgentTurn, CodeRepository, FactoryError, FlowSummary, HeadChecks,
     Merging, OpenPullRequest, Opening, PullRequest, RepositoryAccess, RequiredChecks, RunDetail,
@@ -190,6 +191,19 @@ pub trait PullRequests: Send + Sync + 'static {
         all_runs: bool,
     ) -> impl Future<Output = Result<Option<(PullRequest, HeadChecks)>, Self::Err>> + Send;
 
+    /// The commit at the head of `branch` of `repository`, with the checks
+    /// on it, read with one token: what a watch of a base branch reads on
+    /// each look. None when `owner` reaches no such branch. All its check
+    /// runs are read when `all_runs`; otherwise only those of a failed
+    /// suite.
+    fn branch_checks(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        branch: &str,
+        all_runs: bool,
+    ) -> impl Future<Output = Result<Option<(String, HeadChecks)>, Self::Err>> + Send;
+
     /// The checks a pull request to `base` must pass before it merges, from
     /// its branch protection and rulesets, as far as they could be read;
     /// none when `owner` cannot tell which checks they are.
@@ -237,6 +251,41 @@ pub trait PullRequests: Send + Sync + 'static {
         number: u64,
         head_sha: &str,
     ) -> impl Future<Output = Result<Merging, Self::Err>> + Send;
+}
+
+/// Starts the watch of a base branch's checks that sets and clears its
+/// Main Hold.
+pub trait MainWatches: Send + Sync + 'static {
+    /// The error type returned when the watch cannot be started.
+    type Err: std::error::Error + Retryable + Send + Sync + 'static;
+
+    /// Watch `watch`'s base branch, unless a watch of it already runs, which
+    /// goes on as it was.
+    fn watch(&self, watch: &MainWatch) -> impl Future<Output = Result<(), Self::Err>> + Send;
+}
+
+/// Files the task that names the merges a red base branch may come from.
+pub trait HoldTasks: Send + Sync + 'static {
+    /// The error type returned when the task cannot be filed.
+    type Err: std::error::Error + Send + Sync + 'static;
+
+    /// File `task` as `owner`, in the initiative of the task document
+    /// `beside` when it has one, and return the new task document's id.
+    fn file(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        beside: Option<Uuid>,
+        task: &HoldTask,
+    ) -> impl Future<Output = Result<Uuid, Self::Err>> + Send;
+}
+
+/// Inbound service port: what the watch of a base branch asks its worker
+/// to do.
+pub trait MainWatchService: Send + Sync + 'static {
+    /// Look at the checks on the head of `watch`'s base branch once: hold
+    /// the base when they fail, filing the task with the suspect merges once
+    /// per red period, and clear the hold when they pass.
+    fn look(&self, watch: MainWatch) -> impl Future<Output = Result<MainLook, StepError>> + Send;
 }
 
 /// The people Macro knows.

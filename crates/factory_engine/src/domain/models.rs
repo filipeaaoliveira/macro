@@ -4,6 +4,7 @@
 mod test;
 
 use chrono::{DateTime, Utc};
+use factory_records::domain::main_hold::MainHold;
 use factory_records::domain::models::{
     EntryId, Outcome, Repository, Role, Run, RunId, RunOutcome, Step, StepKey,
 };
@@ -426,6 +427,10 @@ pub struct RunDetail {
     pub run: Run,
     /// Its Steps, in the order they started.
     pub steps: Vec<Step>,
+    /// The Main Hold on the base branch the Run merges to, while the Run
+    /// goes and the base's required checks fail: the Run does not merge
+    /// until it clears, even once its merge Gate is approved.
+    pub main_hold: Option<MainHold>,
 }
 
 /// A Flow a person can start a Run of.

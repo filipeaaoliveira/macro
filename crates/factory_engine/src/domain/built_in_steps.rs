@@ -9,13 +9,16 @@ mod checks_round;
 #[cfg(test)]
 mod test;
 
+use factory_records::domain::main_hold::MainHoldRepository;
 use factory_records::domain::models::{Outcome, Repository, Role, Step, StepKey};
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::flow::{StepName, StepUse};
 use crate::domain::models::{AgentTask, StepInput, StepReport, run_branch};
-use crate::domain::ports::{AgentFailure, PullRequests, Retryable, StepAgent, StepExecutor};
+use crate::domain::ports::{
+    AgentFailure, MainWatches, PullRequests, Retryable, StepAgent, StepExecutor,
+};
 use crate::domain::pull_request_steps::{PullRequestStepError, PullRequestSteps};
 
 /// What the agent is told for a `plan` Step.
@@ -163,14 +166,20 @@ fn outcomes(names: &[&str]) -> Vec<Outcome> {
 /// The built-in Steps, over the agent that does the agent Steps and the
 /// pull request Steps.
 #[derive(Debug, Clone)]
-pub struct BuiltInSteps<A, G, R> {
+pub struct BuiltInSteps<A, G, R, M> {
     agent: A,
-    pull_requests: PullRequestSteps<G, R>,
+    pull_requests: PullRequestSteps<G, R, M>,
 }
 
-impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
+impl<A, G, R, M> BuiltInSteps<A, G, R, M>
+where
+    A: StepAgent,
+    G: PullRequests,
+    R: RunRepository + MainHoldRepository,
+    M: MainWatches,
+{
     /// The built-in Steps, with `agent` doing the agent Steps.
-    pub fn new(agent: A, pull_requests: PullRequestSteps<G, R>) -> Self {
+    pub fn new(agent: A, pull_requests: PullRequestSteps<G, R, M>) -> Self {
         Self {
             agent,
             pull_requests,
@@ -247,7 +256,13 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
     }
 }
 
-impl<A: StepAgent, G: PullRequests, R: RunRepository> StepExecutor for BuiltInSteps<A, G, R> {
+impl<A, G, R, M> StepExecutor for BuiltInSteps<A, G, R, M>
+where
+    A: StepAgent,
+    G: PullRequests,
+    R: RunRepository + MainHoldRepository,
+    M: MainWatches,
+{
     type Err = BuiltInStepError;
 
     fn serves(&self, step: &StepName) -> Option<StepUse> {
