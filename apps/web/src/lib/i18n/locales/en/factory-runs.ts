@@ -27,6 +27,20 @@ export default {
   flowLabel: 'Flow',
   flowsLoading: 'Loading flows…',
   flowsFailed: 'Flows couldn’t be loaded',
+  repositoryLabel: 'Repository',
+  repositoryPlaceholder: 'Search repositories',
+  repositoryDescription:
+    'The run opens its pull request here, with your linked GitHub account, which must be able to push to it.',
+  repositoriesLoading: 'Loading repositories…',
+  repositoriesFailed: 'Repositories couldn’t be loaded',
+  noRepositories:
+    'No repositories yet. Give Macro’s GitHub App access to the repository this run should work on.',
+  showRepositories: 'Show repositories',
+  connectGitHub: 'Connect GitHub',
+  repositoryUnreachable:
+    'Your linked GitHub account can’t reach this repository, or it has no branch yet. Connect GitHub in Settings, or choose another repository.',
+  repositoryNoPush:
+    'Your linked GitHub account can’t push to this repository. Choose one it can push to.',
   startRun: 'Start run',
   startFailed: 'Couldn’t start the run. Please try again.',
   // A Run.
@@ -34,6 +48,8 @@ export default {
   closeRun: 'Close run',
   runLoadFailed: 'This run couldn’t be loaded',
   request: 'Request',
+  repository: 'Repository',
+  repositoryFrom: '{{repository}}, from {{branch}}',
   steps: 'Steps',
   noSteps: 'No steps yet',
   stepVisit: '{{entry}} · visit {{visit}}',

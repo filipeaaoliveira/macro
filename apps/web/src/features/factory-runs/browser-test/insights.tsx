@@ -389,6 +389,7 @@ function createFixtureRuns(): RunsContext {
     taskRuns: () => ready(() => RUNS),
     run: (runId) => ready(() => RUNS.find((run) => run.id === runId())),
     flows: () => ready(() => []),
+    repositories: () => ready(() => []),
     startRun: async () => ({ ok: false, reason: 'failed' }),
     answerGate: async () => ({ ok: false, reason: 'failed' }),
     cancelRun: async () => ({ ok: false, reason: 'failed' }),

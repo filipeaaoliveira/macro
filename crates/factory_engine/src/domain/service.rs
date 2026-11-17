@@ -187,6 +187,7 @@ where
                 Some(FlowSummary {
                     name: flow.name.to_string(),
                     description: read.description,
+                    repository: read.repository,
                 })
             })
             .collect()

@@ -17,8 +17,8 @@ ended. Its cancel shows the Run ended half a second later, as a read would.
 The tests, on desktop and on a phone with touch styles:
 
 - answer the Gate with a note, cancel the Run after its confirmation, and
-  start a new Run from a chosen Flow (Code, which needs a repository, isn't
-  offered), checking that the Gate's question and answers are in view
+  start a new Run of Code on a repository picked from the listed ones,
+  checking that the Gate's question and answers are in view
   together and where focus lands;
 - open `/?long-question`, whose Gate asks a 14-line question, type a long
   note, and check Approve and Cancel stay in view, the note stops growing,

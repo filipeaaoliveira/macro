@@ -386,6 +386,9 @@ pub struct FlowSummary {
     pub name: String,
     /// What it does, for a person.
     pub description: String,
+    /// Whether a Run of it works on a GitHub repository, which starting it
+    /// must name.
+    pub repository: bool,
 }
 
 /// Errors of the factory's Run use cases.

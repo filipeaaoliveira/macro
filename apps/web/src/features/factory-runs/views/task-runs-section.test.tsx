@@ -82,6 +82,7 @@ function mount(
     startRun?: RunsContext['startRun'];
     flowsState?: Accessor<'pending' | 'error' | 'ready'>;
     flowsRetry?: () => void;
+    repositories?: Accessor<string[]>;
   } = {}
 ) {
   const [list, setList] = createSignal(runs);
@@ -106,20 +107,34 @@ function mount(
         options.flowsState && options.flowsState() !== 'ready'
           ? undefined
           : [
-              {
-                name: 'plan',
-                description: 'Plans the change, then writes it.',
-              },
+              // In the order the service lists them.
               {
                 name: 'code',
                 description: 'Takes a task to a merged pull request.',
+                repository: true,
+              },
+              {
+                name: 'plan',
+                description: 'Plans the change, then writes it.',
+                repository: false,
               },
               {
                 name: 'reply',
                 description: 'Answers the request.',
+                repository: false,
               },
             ],
       retry: options.flowsRetry ?? vi.fn(),
+    }),
+    repositories: () => ({
+      state: () => 'ready',
+      data:
+        options.repositories ??
+        (() => [
+          'https://github.com/macro-inc/app',
+          'https://github.com/macro-inc/docs',
+        ]),
+      retry: vi.fn(),
     }),
     startRun:
       options.startRun ??
@@ -184,14 +199,131 @@ describe('TaskRunsSection', () => {
     expect(screen.queryByRole('button', { name: 'Start run' })).toBeNull();
   });
 
-  it('doesn’t offer a Flow that needs a repository', async () => {
+  it('starts a Run of a Flow that works on a repository on the one chosen', async () => {
+    const { context } = mount([running]);
+
+    fireEvent.click(screen.getByRole('button', { name: 'New run' }));
+    const start = await screen.findByRole('button', { name: 'Start run' });
+    fireEvent.input(screen.getByLabelText('Request'), {
+      target: { value: 'Add a due date column' },
+    });
+    expect(screen.queryByRole('combobox', { name: 'Repository' })).toBeNull();
+    fireEvent.click(screen.getByRole('radio', { name: /Code/ }));
+    // It doesn't start until a repository is chosen.
+    expect(start.hasAttribute('disabled')).toBe(true);
+
+    const repository = screen.getByRole('combobox', { name: 'Repository' });
+    fireEvent.input(repository, { target: { value: 'docs' } });
+    fireEvent.click(
+      await screen.findByRole('option', { name: 'macro-inc/docs' })
+    );
+    expect(start.hasAttribute('disabled')).toBe(false);
+    fireEvent.click(start);
+
+    await waitFor(() =>
+      expect(context.startRun).toHaveBeenCalledWith({
+        taskId: 'task-1',
+        flow: 'code',
+        request: 'Add a due date column',
+        repoUrl: 'https://github.com/macro-inc/docs',
+      })
+    );
+  });
+
+  it('opens on the first Flow that needs no repository', async () => {
     mount([running]);
 
     fireEvent.click(screen.getByRole('button', { name: 'New run' }));
     await screen.findByRole('radiogroup', { name: 'Flow' });
-    expect(screen.getByRole('radio', { name: /Plan/ })).toBeTruthy();
-    expect(screen.getByRole('radio', { name: /Reply/ })).toBeTruthy();
-    expect(screen.queryByRole('radio', { name: /Code/ })).toBeNull();
+
+    expect(
+      (screen.getByRole('radio', { name: /Plan/ }) as HTMLInputElement).checked
+    ).toBe(true);
+    expect(screen.queryByRole('combobox', { name: 'Repository' })).toBeNull();
+  });
+
+  it('starts a Flow that needs no repository with none, though one was chosen before', async () => {
+    const { context } = mount([running]);
+
+    fireEvent.click(screen.getByRole('button', { name: 'New run' }));
+    const start = await screen.findByRole('button', { name: 'Start run' });
+    fireEvent.input(screen.getByLabelText('Request'), {
+      target: { value: 'Add a due date column' },
+    });
+    fireEvent.click(screen.getByRole('radio', { name: /Code/ }));
+    fireEvent.input(screen.getByRole('combobox', { name: 'Repository' }), {
+      target: { value: 'docs' },
+    });
+    fireEvent.click(
+      await screen.findByRole('option', { name: 'macro-inc/docs' })
+    );
+    fireEvent.click(screen.getByRole('radio', { name: /Reply/ }));
+    fireEvent.click(start);
+
+    await waitFor(() => expect(context.startRun).toHaveBeenCalledOnce());
+    const [input] = vi.mocked(context.startRun).mock.calls[0] ?? [];
+    expect(input).not.toHaveProperty('repoUrl');
+    expect(input).toEqual({
+      taskId: 'task-1',
+      flow: 'reply',
+      request: 'Add a due date column',
+    });
+  });
+
+  it('lets go of a repository a later read no longer lists', async () => {
+    const [listed, setListed] = createSignal([
+      'https://github.com/macro-inc/app',
+      'https://github.com/macro-inc/docs',
+    ]);
+    mount([running], { repositories: listed });
+
+    fireEvent.click(screen.getByRole('button', { name: 'New run' }));
+    const start = await screen.findByRole('button', { name: 'Start run' });
+    fireEvent.input(screen.getByLabelText('Request'), {
+      target: { value: 'Add a due date column' },
+    });
+    fireEvent.click(screen.getByRole('radio', { name: /Code/ }));
+    fireEvent.input(screen.getByRole('combobox', { name: 'Repository' }), {
+      target: { value: 'docs' },
+    });
+    fireEvent.click(
+      await screen.findByRole('option', { name: 'macro-inc/docs' })
+    );
+    expect(start.hasAttribute('disabled')).toBe(false);
+
+    setListed(['https://github.com/macro-inc/app']);
+
+    expect(start.hasAttribute('disabled')).toBe(true);
+  });
+
+  it('says why a repository was refused, without asking to try again', async () => {
+    mount([running], {
+      startRun: vi.fn(async () => ({
+        ok: false as const,
+        reason: 'noPushAccess' as const,
+      })),
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'New run' }));
+    const start = await screen.findByRole('button', { name: 'Start run' });
+    fireEvent.input(screen.getByLabelText('Request'), {
+      target: { value: 'Add a due date column' },
+    });
+    fireEvent.click(screen.getByRole('radio', { name: /Code/ }));
+    fireEvent.input(screen.getByRole('combobox', { name: 'Repository' }), {
+      target: { value: 'docs' },
+    });
+    fireEvent.click(
+      await screen.findByRole('option', { name: 'macro-inc/docs' })
+    );
+    fireEvent.click(start);
+
+    expect(
+      await screen.findByText(
+        'Your linked GitHub account can’t push to this repository. Choose one it can push to.'
+      )
+    ).toBeTruthy();
+    expect(screen.queryByText(/Please try again/)).toBeNull();
   });
 
   it('retries a list that couldn’t be loaded', () => {

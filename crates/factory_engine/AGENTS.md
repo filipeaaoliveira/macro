@@ -108,7 +108,9 @@ A Flow with `"repository": true` (`code`) works on one GitHub repository: `POST
 form a coding session takes: no `.git`, no trailing slash), other Flows refuse
 one, and the owner's linked GitHub account must reach it and may push to it;
 its default branch, read then, is the Run's base (`factory_run.repo_url`,
-`base_branch`). Each agent Step of such a Run opens its session with that
+`base_branch`). A refusal for either reason carries a `code` in its body
+(`unreachableRepository`, `noPushAccess`) beside the message, for a client to
+name the cause. Each agent Step of such a Run opens its session with that
 repository (`PrepareRoutineSession.repo_url`), so its runtime checks it out: a
 managed sandbox through the agent egress, macrod in a per-session worktree or
 its configured workspace. The prompt names the Run's branch,
@@ -181,7 +183,8 @@ part only.
   `merge`, over the `PullRequests` port.
 - `flows/`: the built-in Flows, each named for its file
   (`src/domain/built_in_flows.rs`). `GET /flows` lists those whose Steps the
-  worker serves, with their `description`: `code`, `plan` and `reply`.
+  worker serves, with their `description` and whether they work on a
+  `repository`: `code`, `plan` and `reply`.
 
 ## Scope
 

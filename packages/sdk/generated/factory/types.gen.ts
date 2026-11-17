@@ -146,6 +146,11 @@ export type FlowSummary = {
      * Its name, which a Run of it is started with.
      */
     name: string;
+    /**
+     * Whether a Run of it works on a GitHub repository, which starting it
+     * must name.
+     */
+    repository: boolean;
 };
 
 /**
@@ -375,6 +380,23 @@ export type RunEnd = {
      * How the Run ended.
      */
     outcome: RunOutcome;
+};
+
+/**
+ * Why a request was refused, where a client acts on the cause.
+ */
+export type RunErrorCode = 'unreachableRepository' | 'noPushAccess';
+
+/**
+ * What a refused or failed request answers: a message, and for a refusal
+ * a client acts on, its code.
+ */
+export type RunErrorResponse = {
+    code?: null | RunErrorCode;
+    /**
+     * What went wrong, in words.
+     */
+    message: string;
 };
 
 /**
@@ -681,7 +703,7 @@ export type CreateFactoryRunData = {
 };
 
 export type CreateFactoryRunErrors = {
-    400: ErrorResponse;
+    400: RunErrorResponse;
     401: ErrorResponse;
     403: ErrorResponse;
     500: ErrorResponse;

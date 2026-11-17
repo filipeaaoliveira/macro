@@ -11,41 +11,86 @@ import {
   Show,
   Switch,
 } from 'solid-js';
+import { match } from 'ts-pattern';
+import type { StartRunFailure } from '../context/runs-context';
 import { flowWordLabel } from '../core/flow-words';
 import type { Flow } from '../core/run';
+import { RepositoryField } from './repository-field';
+
+/** What a Run is started with. */
+export type StartRunChoice = {
+  flow: string;
+  request: string;
+  /** The repository's URL, for a Flow that works on one. */
+  repoUrl?: string;
+};
 
 /**
- * Starts a Run on a task: what it should do, and which Flow takes it there.
- * Stays open with the error when starting fails.
+ * Starts a Run on a task: what it should do, which Flow takes it there, and
+ * the repository it works on when the Flow works on one. Opens on the first
+ * Flow that needs no repository. Stays open with the error when starting
+ * fails.
  */
 export function StartRunDialog(props: {
   flows: Flow[] | undefined;
   flowsState: 'pending' | 'error' | 'ready';
   onRetryFlows: () => void;
+  /** The URLs of the repositories a Run can work on. */
+  repositories: string[] | undefined;
+  repositoriesState: 'pending' | 'error' | 'ready';
+  onRetryRepositories: () => void;
+  /** Where to send someone who reaches no repository yet. */
+  onConnectGitHub?: () => void;
   onOpenChange: (open: boolean) => void;
-  /** Resolves true once the Run started. */
-  onStart: (flow: string, request: string) => Promise<boolean>;
+  /** Resolves `started` once the Run started, else why it didn't. */
+  onStart: (choice: StartRunChoice) => Promise<'started' | StartRunFailure>;
 }) {
   const [request, setRequest] = createSignal('');
   const [chosenFlow, setChosenFlow] = createSignal<string>();
+  const [chosenRepository, setChosenRepository] = createSignal<string>();
   const [pending, setPending] = createSignal(false);
-  const [failed, setFailed] = createSignal(false);
-  const flow = () => chosenFlow() ?? props.flows?.[0]?.name;
+  const [failure, setFailure] = createSignal<StartRunFailure>();
+  const flow = () =>
+    props.flows?.find((option) => option.name === chosenFlow()) ??
+    props.flows?.find((option) => !option.repository) ??
+    props.flows?.[0];
+  const needsRepository = () => flow()?.repository ?? false;
+  // A repository a later read no longer lists is no longer chosen.
+  const repoUrl = () => {
+    const url = chosenRepository();
+    return url && props.repositories?.includes(url) ? url : undefined;
+  };
   const canSubmit = () =>
-    !pending() && request().trim().length > 0 && flow() !== undefined;
+    !pending() &&
+    request().trim().length > 0 &&
+    flow() !== undefined &&
+    (!needsRepository() || repoUrl() !== undefined);
 
   const submit = async (event: SubmitEvent) => {
     event.preventDefault();
-    const name = flow();
+    const name = flow()?.name;
     if (!canSubmit() || !name) return;
 
+    const choice: StartRunChoice = { flow: name, request: request().trim() };
+    const url = repoUrl();
+    if (needsRepository() && url) choice.repoUrl = url;
+
     setPending(true);
-    setFailed(false);
-    const started = await props.onStart(name, request().trim());
+    setFailure(undefined);
+    const outcome = await props.onStart(choice);
     setPending(false);
-    if (started) props.onOpenChange(false);
-    else setFailed(true);
+    if (outcome === 'started') props.onOpenChange(false);
+    else setFailure(outcome);
   };
+
+  const failureMessage = (reason: StartRunFailure) =>
+    match(reason)
+      .with('failed', () => t('factoryRuns.startFailed'))
+      .with('unreachableRepository', () =>
+        t('factoryRuns.repositoryUnreachable')
+      )
+      .with('noPushAccess', () => t('factoryRuns.repositoryNoPush'))
+      .exhaustive();
 
   return (
     <Dialog
@@ -107,7 +152,7 @@ export function StartRunDialog(props: {
                 {(flows) => (
                   <RadioGroup
                     variant="cards"
-                    value={flow()}
+                    value={flow()?.name}
                     onChange={setChosenFlow}
                     disabled={pending()}
                     class="grid-cols-1"
@@ -135,10 +180,23 @@ export function StartRunDialog(props: {
                 )}
               </Match>
             </Switch>
-            <Show when={failed()}>
-              <p role="alert" class="text-sm text-failure">
-                {t('factoryRuns.startFailed')}
-              </p>
+            <Show when={needsRepository()}>
+              <RepositoryField
+                repositories={props.repositories}
+                state={props.repositoriesState}
+                onRetry={props.onRetryRepositories}
+                value={repoUrl()}
+                onChange={setChosenRepository}
+                onConnectGitHub={props.onConnectGitHub}
+                disabled={pending()}
+              />
+            </Show>
+            <Show when={failure()}>
+              {(reason) => (
+                <p role="alert" class="text-sm text-failure">
+                  {failureMessage(reason())}
+                </p>
+              )}
             </Show>
           </ActionDialogShell.Body>
           <ActionDialogShell.Footer>

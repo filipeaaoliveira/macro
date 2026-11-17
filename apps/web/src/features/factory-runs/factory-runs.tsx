@@ -3,6 +3,7 @@ import { useOptionalSplitRouter } from '@app/lib/split-router';
 import { PaneContext } from '@app/lib/split-router/solid/context';
 import { factoryInsightsRoute } from '@app/routes/routes';
 import { enableFactoryRuns } from '@core/constant/featureFlags';
+import { useSettingsState } from '@core/constant/SettingsState';
 import { fireAndForget } from '@core/util/fireAndForget';
 import { queryClient } from '@queries/client';
 import { useContext } from 'solid-js';
@@ -35,6 +36,7 @@ function useOpenInsights(): (() => void) | undefined {
 /** A task's Runs, as a section of its side panel. */
 export function TaskRuns(props: { taskId: string; order: number }) {
   const openInsights = useOpenInsights();
+  const { openSettings } = useSettingsState();
 
   return (
     <ShowFeatureFlag flag={enableFactoryRuns}>
@@ -43,6 +45,7 @@ export function TaskRuns(props: { taskId: string; order: number }) {
           taskId={props.taskId}
           order={props.order}
           onOpenInsights={openInsights}
+          onConnectGitHub={() => openSettings('Connected')}
         />
       </RunsProvider>
     </ShowFeatureFlag>

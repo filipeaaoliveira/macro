@@ -83,6 +83,11 @@ function mount(options: {
       retry: options.retry ?? vi.fn(),
     }),
     flows: () => ({ state: () => 'ready', data: () => [], retry: vi.fn() }),
+    repositories: () => ({
+      state: () => 'ready',
+      data: () => [],
+      retry: vi.fn(),
+    }),
     startRun: vi.fn(),
     answerGate: options.answerGate ?? vi.fn(async () => DONE),
     cancelRun: options.cancelRun ?? vi.fn(async () => DONE),
@@ -221,6 +226,22 @@ describe('RunView', () => {
     expect(
       screen.getByRole('button', { name: 'Approve' }).hasAttribute('disabled')
     ).toBe(false);
+  });
+
+  it('names the repository a Run works on, and the branch it starts from', () => {
+    const { setRun } = mount({});
+    expect(screen.queryByText('Repository')).toBeNull();
+
+    setRun({
+      ...waitingRun,
+      repository: {
+        url: 'https://github.com/macro-inc/app',
+        baseBranch: 'develop',
+      },
+    });
+
+    expect(screen.getByText('Repository')).toBeTruthy();
+    expect(screen.getByText('macro-inc/app, from develop')).toBeTruthy();
   });
 
   it('retries a Run that couldn’t be loaded', () => {

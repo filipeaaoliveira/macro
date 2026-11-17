@@ -17,6 +17,9 @@ vi.mock('@app/lib/analytics/posthog', () => ({
   ),
 }));
 vi.mock('@queries/client', () => ({ queryClient: {} }));
+vi.mock('@core/constant/SettingsState', () => ({
+  useSettingsState: () => ({ openSettings: vi.fn() }),
+}));
 vi.mock('./queries/runs', () => ({ createAppRunsContext: vi.fn(() => ({})) }));
 vi.mock('./views/task-runs-section', () => ({
   TaskRunsSection: (props: { taskId: string }) => (

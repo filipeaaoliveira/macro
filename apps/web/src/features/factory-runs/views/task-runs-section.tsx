@@ -19,37 +19,41 @@ import {
 import { RunStatusDot, runStatusDetail } from '../components/run-status';
 import { StartRunDialog } from '../components/start-run-dialog';
 import { useRunsContext } from '../context/runs-context';
-import { runStatus, runTitle, startableFlows } from '../core/run';
+import { runStatus, runTitle } from '../core/run';
 import { RunView } from '../run-view';
 
 /** Starts a Run on the task with the Flows the factory offers. */
 function StartRun(props: {
   taskId: string;
+  onConnectGitHub?: () => void;
   onClose: () => void;
   onStarted: (runId: string) => void;
 }) {
   const context = useRunsContext();
   const flows = context.flows();
-  const offered = () => {
-    const data = flows.data();
-    return data && startableFlows(data);
-  };
+  // Read only when a Flow on offer works on a repository.
+  const repositories = context.repositories(
+    () => flows.data()?.some((flow) => flow.repository) ?? false
+  );
 
   return (
     <StartRunDialog
-      flows={offered()}
+      flows={flows.data()}
       flowsState={flows.state()}
       onRetryFlows={flows.retry}
+      repositories={repositories.data()}
+      repositoriesState={repositories.state()}
+      onRetryRepositories={repositories.retry}
+      onConnectGitHub={props.onConnectGitHub}
       onOpenChange={(open) => !open && props.onClose()}
-      onStart={async (flow, request) => {
+      onStart={async (choice) => {
         const result = await context.startRun({
           taskId: props.taskId,
-          flow,
-          request,
+          ...choice,
         });
-        if (!result.ok) return false;
+        if (!result.ok) return result.reason;
         props.onStarted(result.value.id);
-        return true;
+        return 'started';
       }}
     />
   );
@@ -88,6 +92,8 @@ export function TaskRunsSection(props: {
   taskId: string;
   order: number;
   onOpenInsights?: () => void;
+  /** Where to send someone who reaches no repository yet. */
+  onConnectGitHub?: () => void;
 }) {
   const context = useRunsContext();
   const runs = context.taskRuns(() => props.taskId);
@@ -205,6 +211,7 @@ export function TaskRunsSection(props: {
       <Show when={starting()}>
         <StartRun
           taskId={props.taskId}
+          onConnectGitHub={props.onConnectGitHub}
           onClose={() => setStarting(false)}
           onStarted={setOpenRunId}
         />

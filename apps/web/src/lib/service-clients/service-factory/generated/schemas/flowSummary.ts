@@ -13,4 +13,7 @@ export interface FlowSummary {
   description: string;
   /** Its name, which a Run of it is started with. */
   name: string;
+  /** Whether a Run of it works on a GitHub repository, which starting it
+must name. */
+  repository: boolean;
 }

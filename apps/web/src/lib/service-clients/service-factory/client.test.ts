@@ -64,6 +64,33 @@ describe('factoryClient routes', () => {
     });
   });
 
+  it('names the repository cause of a refused start, else the status', async () => {
+    await factoryClient.startRun({
+      flow: 'code',
+      request: 'Add a due date column',
+      repoUrl: 'https://github.com/macro-inc/app',
+    });
+    const handler = vi
+      .mocked(fetchWithToken)
+      .mock.calls.at(-1)?.[1]?.errorResponseHandler;
+    if (!handler) throw new Error('No error response handler');
+    const refused = (body: unknown) =>
+      handler(new Response(JSON.stringify(body), { status: 400 }));
+
+    expect(
+      await refused({ message: 'cannot push', code: 'noPushAccess' })
+    ).toEqual({ code: 'NO_PUSH_ACCESS', message: 'cannot push' });
+    expect(
+      await refused({ message: 'cannot reach', code: 'unreachableRepository' })
+    ).toEqual({ code: 'UNREACHABLE_REPOSITORY', message: 'cannot reach' });
+    expect(await refused({ message: 'the request must not be empty' })).toEqual(
+      { code: 'HTTP_ERROR', message: 'HTTP error! status: 400' }
+    );
+    expect(
+      await handler(new Response('Bad gateway', { status: 502 }))
+    ).toMatchObject({ code: 'HTTP_ERROR' });
+  });
+
   it('answers a Gate without naming the person, and cancels', async () => {
     await factoryClient.answerGate('run-1', 3, {
       answer: 'approve',

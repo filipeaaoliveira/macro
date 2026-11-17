@@ -90,6 +90,65 @@ describe('createAppRunsContext', () => {
     );
   });
 
+  it('starts a Run on the repository it names and keeps it on the Run', async () => {
+    const repository = {
+      url: 'https://github.com/macro-inc/app',
+      baseBranch: 'main',
+    };
+    vi.mocked(factoryClient.startRun).mockResolvedValue(
+      ok({ ...started, run: { ...started.run, repository } })
+    );
+
+    const result = await createAppRunsContext(new QueryClient()).startRun({
+      taskId: 'task-1',
+      flow: 'code',
+      request: 'Add a due date column',
+      repoUrl: 'https://github.com/macro-inc/app',
+    });
+
+    expect(factoryClient.startRun).toHaveBeenCalledWith({
+      taskId: 'task-1',
+      flow: 'code',
+      request: 'Add a due date column',
+      repoUrl: 'https://github.com/macro-inc/app',
+    });
+    expect(result.ok && result.value.repository).toEqual(repository);
+  });
+
+  it('tells a refused repository apart from a failed start', async () => {
+    const context = createAppRunsContext(new QueryClient());
+    const input = {
+      taskId: 'task-1',
+      flow: 'code',
+      request: 'Add a due date column',
+      repoUrl: 'https://github.com/macro-inc/app',
+    };
+
+    vi.mocked(factoryClient.startRun).mockResolvedValueOnce(
+      err([{ code: 'UNREACHABLE_REPOSITORY', message: 'unreachable' }])
+    );
+    expect(await context.startRun(input)).toEqual({
+      ok: false,
+      reason: 'unreachableRepository',
+    });
+
+    vi.mocked(factoryClient.startRun).mockResolvedValueOnce(
+      err([{ code: 'NO_PUSH_ACCESS', message: 'no push' }])
+    );
+    expect(await context.startRun(input)).toEqual({
+      ok: false,
+      reason: 'noPushAccess',
+    });
+
+    vi.mocked(factoryClient.startRun).mockResolvedValueOnce(
+      err([{ code: 'HTTP_ERROR', message: 'HTTP error! status: 400' }])
+    );
+    expect(await context.startRun(input)).toEqual({
+      ok: false,
+      reason: 'failed',
+    });
+  });
+
   it('tells a refused answer apart from a failed one', async () => {
     const context = createAppRunsContext(new QueryClient());
     const input = {

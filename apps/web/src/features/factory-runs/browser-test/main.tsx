@@ -188,20 +188,29 @@ function createFixtureContext(): RunsContext {
     run: (runId) => ready(() => runs().find((run) => run.id === runId())),
     flows: () =>
       ready(() => [
-        {
-          name: 'plan',
-          description:
-            'Plans the change, asks you to approve the plan, then writes it.',
-        },
+        // In the order the service lists them.
         {
           name: 'code',
           description:
             'Takes the task to a merged pull request: plan, write, review, publish, CI, merge.',
+          repository: true,
+        },
+        {
+          name: 'plan',
+          description:
+            'Plans the change, asks you to approve the plan, then writes it.',
+          repository: false,
         },
         {
           name: 'reply',
           description: 'Answers the request in one Step.',
+          repository: false,
         },
+      ]),
+    repositories: () =>
+      ready(() => [
+        'https://github.com/macro-inc/app',
+        'https://github.com/macro-inc/docs',
       ]),
     async startRun(input) {
       const run: Run = {
@@ -209,6 +218,9 @@ function createFixtureContext(): RunsContext {
         request: input.request,
         createdAt: new Date().toISOString(),
         taskId: input.taskId,
+        repository: input.repoUrl
+          ? { url: input.repoUrl, baseBranch: 'main' }
+          : undefined,
         steps: [
           {
             seq: 1,
