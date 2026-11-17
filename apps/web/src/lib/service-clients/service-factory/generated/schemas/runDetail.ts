@@ -4,6 +4,7 @@
  * factory_engine
  * OpenAPI spec version: 0.1.0
  */
+import type { ReviewRound } from './reviewRound';
 import type { Run } from './run';
 import type { Step } from './step';
 
@@ -11,6 +12,8 @@ import type { Step } from './step';
  * A Run and the Steps it took.
  */
 export interface RunDetail {
+  /** Its review rounds, in order, each with what its reviewers found. */
+  reviewRounds: ReviewRound[];
   /** The Run. */
   run: Run;
   /** Its Steps, in the order they started. */

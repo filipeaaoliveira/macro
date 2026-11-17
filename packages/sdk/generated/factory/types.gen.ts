@@ -171,6 +171,11 @@ export type ErrorResponse = {
 };
 
 /**
+ * What a finding turned out to be once its round ended.
+ */
+export type FindingKind = 'blocker' | 'follow_up';
+
+/**
  * The Runs of one Flow.
  */
 export type FlowInsight = {
@@ -299,6 +304,20 @@ export type InsightDay = {
 };
 
 /**
+ * The lines of a file a finding is about, from 1, both included.
+ */
+export type Lines = {
+    /**
+     * The last line; the first, for one line.
+     */
+    end: number;
+    /**
+     * The first line.
+     */
+    start: number;
+};
+
+/**
  * Request body for linking a Run to a task.
  */
 export type LinkTaskRequest = {
@@ -391,6 +410,101 @@ export type Repository = {
 };
 
 /**
+ * A finding as its round keeps it.
+ */
+export type ReviewFinding = {
+    /**
+     * The follow-up task it became, when it is a follow-up and the task
+     * was made: its task document's id.
+     */
+    followUpTaskId?: string | null;
+    kind?: null | FindingKind;
+    lines?: null | Lines;
+    /**
+     * The file, from the repository's root.
+     */
+    path: string;
+    /**
+     * Its place among what the reviewer handed back, from 1.
+     */
+    place: number;
+    /**
+     * What is wrong.
+     */
+    problem: string;
+    role?: null | Role;
+    /**
+     * The reviewer's Step: its place among the Run's Steps.
+     */
+    seq: number;
+    /**
+     * Why it must change.
+     */
+    why: string;
+};
+
+/**
+ * One round of a Run's review panel.
+ */
+export type ReviewRound = {
+    /**
+     * Where the diff under review starts: the Run's base branch, or the
+     * commit the round before reviewed.
+     */
+    diffBase: string;
+    end?: null | ReviewRoundEnd;
+    /**
+     * What its reviewers found, by Step and place.
+     */
+    findings: Array<ReviewFinding>;
+    /**
+     * Whether it reviews the fix diff, the changes made since the round
+     * before, rather than the Run's whole change.
+     */
+    fixDiff: boolean;
+    /**
+     * The commit of the Run's branch it reviews.
+     */
+    headSha: string;
+    /**
+     * How many reviewers it has, each in a Step of its own.
+     */
+    reviewers: number;
+    /**
+     * Which round of its entry, from 1; a reset counts from 1 again.
+     */
+    round: number;
+    /**
+     * The place of its first Step among the Run's Steps; its reviewers'
+     * Steps take this place and the ones after it.
+     */
+    seq: number;
+    /**
+     * When it started.
+     */
+    startedAt: string;
+};
+
+/**
+ * A review round that has ended.
+ */
+export type ReviewRoundEnd = {
+    /**
+     * When.
+     */
+    endedAt: string;
+    /**
+     * How it ended.
+     */
+    outcome: ReviewRoundOutcome;
+};
+
+/**
+ * How a review round ended.
+ */
+export type ReviewRoundOutcome = 'pass' | 'changes' | 'failed';
+
+/**
  * A job in a Flow, such as `planner`, `writer`, `reviewer` or `fixer`. An
  * entry whose Step an agent does names the Role, and the factory's agent
  * definition lists the Agents that may fill it.
@@ -430,6 +544,10 @@ export type Run = {
  * A Run and the Steps it took.
  */
 export type RunDetail = {
+    /**
+     * Its review rounds, in order, each with what its reviewers found.
+     */
+    reviewRounds: Array<ReviewRound>;
     /**
      * The Run.
      */
