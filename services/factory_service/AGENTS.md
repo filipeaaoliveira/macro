@@ -102,8 +102,11 @@ worker that walks each Run's Flow, in one process.
   in the standard internal headers and the owner as the acting user, and an
   id it picks, so a retry finds the task: the owner must be able to add
   tasks to that project, and document storage must take the id (deploy it
-  first). A task it refuses is not made; its finding stays on the round as
-  a follow-up.
+  first). Whether the owner may add to the project is read from entity
+  access before the task is asked for (document storage answers a project
+  they may not add to with the same 401 as a key it does not accept). A
+  task it refuses, or one in a project the owner may not add to, is not
+  made; its finding stays on the round as a follow-up.
 - The service tells which accounts exist with the authentication service's
   `POST /internal/get_existing_users`, so it requires the auth service's fix
   that serves that route as POST: before it, the route answered only GET,

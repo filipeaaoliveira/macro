@@ -5,7 +5,7 @@ use agent_session::domain::session_task::TaskDocumentId;
 use document_storage_service_client::DocumentStorageServiceClient;
 use document_storage_service_client::task::{CreateTaskError, NewTask};
 use document_sub_type::DocumentSubType;
-use entity_access::domain::models::{AccessError, EntityType, ViewAccessLevel};
+use entity_access::domain::models::{AccessError, AccessLevel, EntityType, ViewAccessLevel};
 use entity_access::domain::ports::EntityAccessService;
 use macro_user_id::user_id::MacroUserIdStr;
 
@@ -103,18 +103,53 @@ impl<A: EntityAccessService> TaskDirectory for DocumentTaskDirectory<A> {
         follow_up: &FollowUpTask,
         task_id: Uuid,
     ) -> Result<FollowUpMade, Self::Err> {
-        self.make_follow_up(user_id, of, follow_up, task_id).await
+        let access = &self.access;
+        self.make_follow_up(user_id, of, follow_up, task_id, async |project| {
+            may_add_to(access, user_id, project).await
+        })
+        .await
+    }
+}
+
+/// Whether `user_id` may add a task to `project`, as document storage's
+/// project check decides: at least edit access. A project they cannot
+/// reach, or one that is gone, is a no; only a failed check is an error.
+async fn may_add_to(
+    access: &impl EntityAccessService,
+    user_id: &MacroUserIdStr<'static>,
+    project: Uuid,
+) -> Result<bool, DocumentTaskDirectoryErr> {
+    let level = access
+        .get_access_level(Some(user_id), &project.to_string(), EntityType::Project)
+        .await;
+    match level {
+        Ok(level) => Ok(matches!(
+            level,
+            Some(AccessLevel::Edit | AccessLevel::Owner)
+        )),
+        Err(
+            AccessError::Unauthorized
+            | AccessError::UnauthorizedWithMessage(_)
+            | AccessError::NotFound(_)
+            | AccessError::BadRequest(_),
+        ) => Ok(false),
+        Err(error) => Err(DocumentTaskDirectoryErr::Access(error)),
     }
 }
 
 impl<A> DocumentTaskDirectory<A> {
-    /// [`TaskDirectory::create_follow_up`], which needs no access check.
+    /// [`TaskDirectory::create_follow_up`], with `may_add` saying whether the
+    /// owner may add a task to the project it goes in. One they may not add
+    /// to is refused before it is asked for: document storage answers that
+    /// with the same 401 as a key it does not accept, which is worth trying
+    /// again.
     async fn make_follow_up(
         &self,
         user_id: &MacroUserIdStr<'static>,
         of: Option<Uuid>,
         follow_up: &FollowUpTask,
         task_id: Uuid,
+        may_add: impl AsyncFnOnce(Uuid) -> Result<bool, DocumentTaskDirectoryErr>,
     ) -> Result<FollowUpMade, DocumentTaskDirectoryErr> {
         // An earlier attempt may have made it: its id says so.
         if self.made(task_id).await? {
@@ -134,6 +169,11 @@ impl<A> DocumentTaskDirectory<A> {
                 .and_then(|project| Uuid::parse_str(&project).ok()),
             None => None,
         };
+        if let Some(project) = project_id
+            && !may_add(project).await?
+        {
+            return Ok(FollowUpMade::Refused);
+        }
         let task = NewTask {
             task_name: follow_up.name.clone(),
             markdown: follow_up.markdown.clone(),

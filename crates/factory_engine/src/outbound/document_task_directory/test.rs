@@ -63,7 +63,7 @@ async fn make(id: Uuid, found: &[bool], made: Option<ResponseTemplate>) -> (Foll
     };
 
     let outcome = directory
-        .make_follow_up(&julia(), None, &follow_up(), id)
+        .make_follow_up(&julia(), None, &follow_up(), id, async |_| Ok(true))
         .await
         .expect("answered");
     let posts = server
@@ -119,4 +119,72 @@ async fn a_task_made_under_another_id_is_told_apart() {
 
     assert_eq!(same, FollowUpMade::Made);
     assert_eq!(elsewhere, FollowUpMade::OtherId(other.to_string()));
+}
+
+/// A follow-up of a task in a project the owner may no longer add to is
+/// refused without asking document storage, which would answer 401, as
+/// for a key it does not accept; one they may add to goes in the project.
+#[tokio::test]
+async fn a_project_the_owner_may_not_add_to_refuses_the_follow_up() {
+    let id = Uuid::now_v7();
+    let of = Uuid::now_v7();
+    let project = Uuid::now_v7();
+
+    for may in [false, true] {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(format!("/internal/documents/{id}/basic")))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!("/internal/documents/{of}/basic")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "documentId": of.to_string(),
+                "documentName": "Add dark mode",
+                "owner": "macro|julia@example.com",
+                "projectId": project.to_string(),
+                "deletedAt": null
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/documents/create_task"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!({ "documentId": id.to_string() })),
+            )
+            .mount(&server)
+            .await;
+        let directory = DocumentTaskDirectory {
+            access: (),
+            documents: DocumentStorageServiceClient::new("key".into(), server.uri()),
+        };
+        let asked = std::sync::Mutex::new(Vec::new());
+
+        let outcome = directory
+            .make_follow_up(&julia(), Some(of), &follow_up(), id, async |checked| {
+                asked.lock().expect("asked").push(checked);
+                Ok(may)
+            })
+            .await
+            .expect("answered");
+
+        assert_eq!(*asked.lock().expect("asked"), [project], "may add: {may}");
+        let posts: Vec<serde_json::Value> = server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+            .iter()
+            .filter(|request| request.method.as_str() == "POST")
+            .map(|request| request.body_json().expect("json"))
+            .collect();
+        if may {
+            assert_eq!(outcome, FollowUpMade::Made);
+            assert_eq!(posts.len(), 1);
+            assert_eq!(posts[0]["projectId"], json!(project.to_string()));
+        } else {
+            assert_eq!(outcome, FollowUpMade::Refused);
+            assert!(posts.is_empty(), "nothing asked for");
+        }
+    }
 }
