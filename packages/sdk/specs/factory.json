@@ -1408,8 +1408,12 @@
       "RunDetail": {
         "type": "object",
         "description": "A Run and the Steps it took.",
-        "required": ["run", "steps"],
+        "required": ["run", "steps", "baseChecksUnread"],
         "properties": {
+          "baseChecksUnread": {
+            "type": "boolean",
+            "description": "Whether the checks the base branch requires could not be read, or\nname none, while the Run is at its merge: nothing holds the merge\non them."
+          },
           "mainHold": {
             "oneOf": [
               {
@@ -1417,7 +1421,7 @@
               },
               {
                 "$ref": "#/components/schemas/MainHold",
-                "description": "The Main Hold on the base branch the Run merges to, while the Run\ngoes and the base's required checks fail: the Run does not merge\nuntil it clears, even once its merge Gate is approved."
+                "description": "The Main Hold on the base branch the Run merges to, while the Run\nis at its merge and the base's required checks fail: the Run does\nnot merge until it clears, even once its merge Gate is approved."
               }
             ]
           },

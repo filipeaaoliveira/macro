@@ -455,6 +455,12 @@ export type Run = {
  * A Run and the Steps it took.
  */
 export type RunDetail = {
+    /**
+     * Whether the checks the base branch requires could not be read, or
+     * name none, while the Run is at its merge: nothing holds the merge
+     * on them.
+     */
+    baseChecksUnread: boolean;
     mainHold?: null | MainHold;
     /**
      * The Run.
