@@ -15,7 +15,12 @@ use uuid::Uuid;
 mod test;
 
 use crate::domain::ports::{FollowUpMade, FollowUpTask, TaskAccess, TaskDirectory};
-use crate::outbound::task_project::{initiative_of, project_property};
+use crate::outbound::task_project::{initiative_of, new_task_properties};
+
+/// What a follow-up's text adds when it could not go in the Run task's
+/// project.
+const OUTSIDE_THE_PROJECT: &str = "This task is in no project: its owner may not add tasks to the \
+     project of the run's task.";
 
 /// Whether a person may see a document comes from entity access, and
 /// whether it is a task from the document storage service, which owns
@@ -141,10 +146,11 @@ async fn may_add_to(
 
 impl<A> DocumentTaskDirectory<A> {
     /// [`TaskDirectory::create_follow_up`], with `may_add` saying whether the
-    /// owner may add a task to the project (an initiative) it goes in. One they may not add
-    /// to is refused before it is asked for: document storage answers that
-    /// with the same 401 as a key it does not accept, which is worth trying
-    /// again.
+    /// owner may add a task to the project (an initiative) it would go in.
+    /// One they may not add to is never asked for: document storage would
+    /// answer it with the same 401 as a key it does not accept, which is
+    /// worth trying again. The follow-up is made in no project then, and
+    /// says so.
     async fn make_follow_up(
         &self,
         user_id: &MacroUserIdStr<'static>,
@@ -168,18 +174,22 @@ impl<A> DocumentTaskDirectory<A> {
                 .map_err(DocumentTaskDirectoryErr::Documents)?,
             None => None,
         };
-        if let Some(initiative) = &initiative
-            && !may_add(initiative.clone()).await?
-        {
-            return Ok(FollowUpMade::Refused);
-        }
+        let mut markdown = follow_up.markdown.clone();
+        let initiative = match initiative {
+            Some(initiative) if may_add(initiative.clone()).await? => Some(initiative),
+            Some(_) => {
+                markdown = format!("{}\n\n{OUTSIDE_THE_PROJECT}\n", markdown.trim_end());
+                None
+            }
+            None => None,
+        };
         let task = NewTask {
             task_name: follow_up.name.clone(),
-            markdown: follow_up.markdown.clone(),
+            markdown,
             project_id: None,
             share_with_team: false,
             document_id: Some(task_id),
-            property_values: initiative.map(project_property).into_iter().collect(),
+            property_values: new_task_properties(user_id, initiative),
         };
         match self
             .documents

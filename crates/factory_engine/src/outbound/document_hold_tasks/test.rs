@@ -8,7 +8,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 use super::DocumentHoldTasks;
 use crate::domain::main_hold::HoldTask;
 use crate::domain::ports::HoldTasks;
-use crate::outbound::task_project::fixture::{PROJECT, task_properties};
+use crate::outbound::task_project::fixture::{new_task_property_values, task_properties};
 
 const RUN_TASK: &str = "00000000-0000-7000-8000-000000000101";
 const NEW_TASK: &str = "00000000-0000-7000-8000-000000000202";
@@ -70,13 +70,7 @@ async fn the_task_is_filed_in_the_initiative_of_the_run_s_task() {
             "taskName": "main is red in macro/app",
             "markdown": "Checks fail.",
             "shareWithTeam": true,
-            "propertyValues": [{
-                "propertyId": PROJECT,
-                "value": {
-                    "type": "entity_reference",
-                    "reference": { "entity_id": INITIATIVE, "entity_type": "INITIATIVE" },
-                },
-            }],
+            "propertyValues": new_task_property_values("macro|julia@example.com", Some(INITIATIVE)),
         })))
         .respond_with(created())
         .expect(1)
@@ -136,30 +130,77 @@ async fn a_hidden_run_task_files_the_task_in_no_initiative() {
         .expect("created")
         .body_json()
         .expect("json");
-    assert!(created.get("propertyValues").is_none(), "{created}");
+    assert_eq!(
+        created["propertyValues"],
+        new_task_property_values("macro|julia@example.com", None),
+        "{created}"
+    );
     // It is made under the id its claim chose, so a retry finds it.
     assert_eq!(created["documentId"], json!(NEW_TASK), "{created}");
 }
 
-/// A Run task whose project cannot be read, because document storage
-/// fails or answers with something that does not read, still has the
-/// hold's task filed, in no initiative.
+/// A Run task whose properties do not read has the hold's task filed in
+/// no initiative, assigned to the owner and not started, as document
+/// storage would file one with no properties.
 #[tokio::test]
-async fn a_project_that_cannot_be_read_files_the_task_in_no_initiative() {
-    for answer in [
-        ResponseTemplate::new(500),
-        ResponseTemplate::new(200).set_body_json(json!({ "entityId": RUN_TASK })),
-    ] {
+async fn properties_that_do_not_read_file_the_task_in_no_initiative() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(format!("/properties/entities/DOCUMENT/{RUN_TASK}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "entityId": RUN_TASK })))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/documents/create_task"))
+        .respond_with(created())
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let tasks = DocumentHoldTasks::new(DocumentStorageServiceClient::new(
+        "internal-key".into(),
+        server.uri(),
+    ));
+    let filed = tasks
+        .file(
+            &julia(),
+            Some(Uuid::parse_str(RUN_TASK).expect("uuid")),
+            &task(),
+            new_task(),
+        )
+        .await;
+
+    assert_eq!(filed.expect("filed"), new_task());
+    let requests = server.received_requests().await.expect("recorded");
+    let created: serde_json::Value = requests
+        .iter()
+        .find(|request| request.url.path() == "/documents/create_task")
+        .expect("created")
+        .body_json()
+        .expect("json");
+    assert_eq!(
+        created["propertyValues"],
+        new_task_property_values("macro|julia@example.com", None),
+        "{created}"
+    );
+}
+
+/// A Run task whose properties document storage could not read for now
+/// (it failed, or refused the key) files nothing yet: the filing fails, to
+/// be tried again, rather than file the task outside its project.
+#[tokio::test]
+async fn a_failed_properties_read_is_tried_again() {
+    for status in [500, 503, 401] {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path(format!("/properties/entities/DOCUMENT/{RUN_TASK}")))
-            .respond_with(answer)
+            .respond_with(ResponseTemplate::new(status))
             .mount(&server)
             .await;
         Mock::given(method("POST"))
             .and(path("/documents/create_task"))
             .respond_with(created())
-            .expect(1)
+            .expect(0)
             .mount(&server)
             .await;
 
@@ -176,15 +217,7 @@ async fn a_project_that_cannot_be_read_files_the_task_in_no_initiative() {
             )
             .await;
 
-        assert_eq!(filed.expect("filed"), new_task());
-        let requests = server.received_requests().await.expect("recorded");
-        let created: serde_json::Value = requests
-            .iter()
-            .find(|request| request.url.path() == "/documents/create_task")
-            .expect("created")
-            .body_json()
-            .expect("json");
-        assert!(created.get("propertyValues").is_none(), "{created}");
+        assert!(filed.is_err(), "{status}: {filed:?}");
     }
 }
 

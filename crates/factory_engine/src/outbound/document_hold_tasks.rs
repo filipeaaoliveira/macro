@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::domain::main_hold::HoldTask;
 use crate::domain::ports::HoldTasks;
-use crate::outbound::task_project::{initiative_of, project_property};
+use crate::outbound::task_project::{initiative_of, new_task_properties};
 
 /// Files a hold's task as the Run's owner, in the initiative (a task's
 /// Project property) of the Run's own task.
@@ -35,28 +35,6 @@ impl DocumentHoldTasks {
             .map_err(|error| DocumentHoldTasksErr(rootcause::report!("{error:#}")))?;
         Ok(document.is_some())
     }
-
-    /// The initiative of the task document `task_id`, as `owner` sees it;
-    /// none when it has none, or the owner no longer sees it. One that
-    /// cannot be read files the task in none rather than hold the filing
-    /// back: that the hold's task is there matters more than where.
-    async fn initiative_of(
-        &self,
-        owner: &MacroUserIdStr<'static>,
-        task_id: Uuid,
-    ) -> Option<String> {
-        match initiative_of(&self.documents, owner, task_id).await {
-            Ok(initiative) => initiative,
-            Err(error) => {
-                tracing::warn!(
-                    ?error,
-                    %task_id,
-                    "the run task's project could not be read: the hold's task goes in none"
-                );
-                None
-            }
-        }
-    }
 }
 
 /// The document storage service did not read or create the task.
@@ -80,10 +58,15 @@ impl HoldTasks for DocumentHoldTasks {
             return Ok(task_id);
         }
         let initiative = match beside {
-            Some(task_id) => self.initiative_of(owner, task_id).await,
+            // A Run task whose properties do not read files the task in no
+            // initiative; one document storage could not answer for is
+            // tried again.
+            Some(task_id) => initiative_of(&self.documents, owner, task_id)
+                .await
+                .map_err(DocumentHoldTasksErr)?,
             None => None,
         };
-        let property_values = initiative.map(project_property).into_iter().collect();
+        let property_values = new_task_properties(owner, initiative);
         // Shared with the owner's team, as the tasks people make are.
         let created = self
             .documents

@@ -318,12 +318,14 @@ shared, in the project of the Run's task: the initiative its Project
 property names, read and set as a Main Hold's task does
 (`outbound/task_project.rs`; document storage's `POST
 /documents/create_task`, with the internal key and the owner as the acting
-user), with an id kept on its findings before it is asked for, so a retry
+user), assigned to the owner and not started (named with the Project, since
+naming any property drops document storage's defaults), with an id kept on its findings before it is asked for, so a retry
 finds it rather than making a second; an outage (or an unaccepted key or
 user, a timeout or throttling) fails the close, which is tried again for at
-most two hours, then the round fails; a refusal, or a project the owner
-may not edit as entity access reads it before asking, leaves the
-follow-up with no task; and a task made under another id stops the round for good, since every
+most two hours, then the round fails; a project the owner may not edit
+(entity access on the initiative, read before asking) has the task made in
+no project, saying so; properties of the Run's task that do not read put it
+in none too; a refusal leaves the follow-up with no task; and a task made under another id stops the round for good, since every
 retry would make another. A diff GitHub
 cannot list in full makes every finding a Blocker. The round ends `changes`
 with a Blocker, `pass` without, and `failed` when a reviewer's work failed or
@@ -449,8 +451,11 @@ period, as that Run's owner, in the initiative of that Run's task (its
 Project property), naming the factory merges to the base since its checks
 last passed, oldest first, with their pull requests
 (`outbound/document_hold_tasks.rs`, through the document storage service).
-A Run task whose project cannot be read files the task in no initiative,
-with a warning, rather than hold the filing back.
+A Run task whose properties do not read, or that the owner no longer sees,
+files the task in no initiative (with a warning for the first); a read
+document storage fails, times out or refuses the key for fails the filing,
+which is tried again. The task is assigned to the owner and not started, as
+a follow-up is.
 The task is claimed before it is filed, so a retry or a second look files
 none; the claim chooses the id it is filed under, kept by every later
 claim of the red period, so a filing whose answer was lost is found under

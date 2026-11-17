@@ -7,9 +7,16 @@ use uuid::Uuid;
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use super::DocumentTaskDirectory;
+use super::{DocumentTaskDirectory, may_add_to};
 use crate::domain::ports::{FollowUpMade, FollowUpTask};
-use crate::outbound::task_project::fixture::{PROJECT, task_properties};
+use crate::outbound::task_project::fixture::{new_task_property_values, task_properties};
+use entity_access::domain::models::{
+    AccessError, AccessLevel, BotAccessScope, BotId, CallChannelInfo, EntityAccessReceipt,
+    EntityPermission, EntityType, RequiredPermission, TeamRole, UserTeamInfo,
+};
+use entity_access::domain::ports::EntityAccessService;
+use macro_user_id::lowercased::Lowercase;
+use macro_user_id::user_id::MacroUserId;
 
 fn julia() -> MacroUserIdStr<'static> {
     MacroUserIdStr::try_from("macro|julia@example.com".to_string()).expect("valid")
@@ -124,9 +131,10 @@ async fn a_task_made_under_another_id_is_told_apart() {
 
 /// A follow-up goes in the project its task's Project property names, as
 /// a Main Hold's task does, though the task is in no folder of a project.
-/// One in a project the owner may no longer add to is refused without
-/// asking document storage, which would answer 401, as for a key it does
-/// not accept; one they may add to is made with the task's Project.
+/// It is assigned to its owner and not started, as document storage makes
+/// a task with no properties. One in a project the owner may no longer add
+/// to (document storage would answer 401, as for a key it does not accept)
+/// is made in no project, and says so.
 #[tokio::test]
 async fn a_follow_up_goes_in_the_project_its_task_s_project_property_names() {
     let id = Uuid::now_v7();
@@ -196,23 +204,151 @@ async fn a_follow_up_goes_in_the_project_its_task_s_project_property_names() {
             .filter(|request| request.method.as_str() == "POST")
             .map(|request| request.body_json().expect("json"))
             .collect();
+        assert_eq!(outcome, FollowUpMade::Made);
+        assert_eq!(posts.len(), 1);
+        assert_eq!(posts[0]["projectId"], json!(null));
+        let markdown = posts[0]["markdown"].as_str().expect("markdown");
         if may {
-            assert_eq!(outcome, FollowUpMade::Made);
-            assert_eq!(posts.len(), 1);
-            assert_eq!(posts[0]["projectId"], json!(null));
             assert_eq!(
                 posts[0]["propertyValues"],
-                json!([{
-                    "propertyId": PROJECT,
-                    "value": {
-                        "type": "entity_reference",
-                        "reference": { "entity_id": project, "entity_type": "INITIATIVE" }
-                    }
-                }])
+                new_task_property_values("macro|julia@example.com", Some(&project))
             );
+            assert_eq!(markdown, "Found in review.");
         } else {
-            assert_eq!(outcome, FollowUpMade::Refused);
-            assert!(posts.is_empty(), "nothing asked for");
+            assert_eq!(
+                posts[0]["propertyValues"],
+                new_task_property_values("macro|julia@example.com", None)
+            );
+            assert!(markdown.starts_with("Found in review.\n\n"), "{markdown}");
+            assert!(markdown.contains("in no project"), "{markdown}");
         }
+    }
+}
+
+/// Entity access that gives one level on any entity, and keeps what it
+/// was asked about.
+#[derive(Clone, Default)]
+struct OneLevel {
+    level: Option<AccessLevel>,
+    asked: std::sync::Arc<std::sync::Mutex<Vec<(String, EntityType)>>>,
+}
+
+impl EntityAccessService for OneLevel {
+    async fn generate_entity_access_receipt<T: RequiredPermission>(
+        &self,
+        _: &MacroUserId<Lowercase<'_>>,
+        _: Option<i64>,
+        _: &str,
+        _: EntityType,
+    ) -> Result<EntityAccessReceipt<T>, AccessError> {
+        unimplemented!("a follow-up only reads an access level")
+    }
+    async fn generate_bot_entity_access_receipt<T: RequiredPermission>(
+        &self,
+        _: BotId,
+        _: BotAccessScope,
+        _: &str,
+        _: EntityType,
+    ) -> Result<EntityAccessReceipt<T>, AccessError> {
+        unimplemented!("a follow-up only reads an access level")
+    }
+    async fn get_access_level(
+        &self,
+        _: Option<&MacroUserId<Lowercase<'_>>>,
+        entity_id: &str,
+        entity_type: EntityType,
+    ) -> Result<Option<AccessLevel>, AccessError> {
+        self.asked
+            .lock()
+            .expect("asked")
+            .push((entity_id.to_string(), entity_type));
+        Ok(self.level)
+    }
+    async fn check_access(
+        &self,
+        _: Option<&MacroUserId<Lowercase<'_>>>,
+        _: &str,
+        _: EntityType,
+        _: AccessLevel,
+    ) -> Result<AccessLevel, AccessError> {
+        unimplemented!("a follow-up only reads an access level")
+    }
+    async fn check_public_access(
+        &self,
+        _: &str,
+        _: EntityType,
+        _: AccessLevel,
+    ) -> Result<AccessLevel, AccessError> {
+        unimplemented!("a follow-up only reads an access level")
+    }
+    async fn get_entity_permission(
+        &self,
+        _: Option<&MacroUserId<Lowercase<'_>>>,
+        _: &str,
+        _: EntityType,
+        _: Option<i64>,
+    ) -> Result<EntityPermission, AccessError> {
+        unimplemented!("a follow-up only reads an access level")
+    }
+    async fn get_crm_entity_permission_with_team(
+        &self,
+        _: Option<&MacroUserId<Lowercase<'_>>>,
+        _: &str,
+        _: EntityType,
+    ) -> Result<(EntityPermission, Uuid, TeamRole), AccessError> {
+        unimplemented!("a follow-up only reads an access level")
+    }
+    async fn get_users_by_entity(
+        &self,
+        _: &str,
+        _: EntityType,
+    ) -> Result<Vec<MacroUserIdStr<'static>>, AccessError> {
+        unimplemented!("a follow-up only reads an access level")
+    }
+    async fn get_call_channel(&self, _: &Uuid) -> Result<Option<CallChannelInfo>, AccessError> {
+        unimplemented!("a follow-up only reads an access level")
+    }
+    async fn get_call_channel_by_channel_id(
+        &self,
+        _: &Uuid,
+    ) -> Result<Option<CallChannelInfo>, AccessError> {
+        unimplemented!("a follow-up only reads an access level")
+    }
+    async fn get_user_team(
+        &self,
+        _: &MacroUserId<Lowercase<'_>>,
+    ) -> Result<Option<UserTeamInfo>, AccessError> {
+        unimplemented!("a follow-up only reads an access level")
+    }
+}
+
+/// The owner may add a follow-up to an initiative they may edit or own,
+/// and not to one they may only view, comment on, or not reach: entity
+/// access is asked about the initiative, not a project folder.
+#[tokio::test]
+async fn a_follow_up_may_go_in_an_initiative_the_owner_may_edit() {
+    let initiative = Uuid::now_v7().to_string();
+    for (level, may) in [
+        (Some(AccessLevel::Owner), true),
+        (Some(AccessLevel::Edit), true),
+        (Some(AccessLevel::Comment), false),
+        (Some(AccessLevel::View), false),
+        (None, false),
+    ] {
+        let access = OneLevel {
+            level,
+            ..OneLevel::default()
+        };
+
+        let allowed = may_add_to(&access, &julia(), initiative.clone())
+            .await
+            .expect("checked");
+
+        assert_eq!(allowed, may, "{level:?}");
+        assert_eq!(
+            *access.asked.lock().expect("asked"),
+            [(initiative.clone(), EntityType::Initiative)],
+            "{level:?}"
+        );
     }
 }

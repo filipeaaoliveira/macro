@@ -1,36 +1,46 @@
 //! The project a task is in, as its Project property names it: an
 //! initiative. A task the factory files beside a Run's task (a Main Hold's
-//! task, a review's follow-up) goes in the Run task's project, read and set
-//! here the same way for each.
+//! task, a review's follow-up) goes in the Run task's project, read here,
+//! and starts with the properties set here the same way for each.
 
 #[cfg(test)]
 pub(crate) mod fixture;
 
 use document_storage_service_client::DocumentStorageServiceClient;
 use document_storage_service_client::task::{
-    NewTaskProperty, NewTaskPropertyValue, TaskEntityReference,
+    NewTaskProperty, NewTaskPropertyValue, PropertiesReadError, TaskEntityReference,
 };
 use macro_user_id::user_id::MacroUserIdStr;
 use models_properties::EntityType;
 use models_properties::service::property_value::PropertyValue;
-use system_properties::SystemPropertyKey;
+use system_properties::{StatusOption, SystemPropertyKey};
 use uuid::Uuid;
 
 /// The initiative the task document `task_id` is in, as its Project
-/// property names it and `owner` sees it; none when it is in none, or the
-/// owner no longer sees the task. An error when document storage did not
-/// answer, or answered with something that does not read.
+/// property names it and `owner` sees it; none when it is in none, the
+/// owner no longer sees the task, or its properties do not read (with a
+/// warning: reading them again would read the same). An error when
+/// document storage did not answer, which is worth trying again.
 pub(crate) async fn initiative_of(
     documents: &DocumentStorageServiceClient,
     owner: &MacroUserIdStr<'static>,
     task_id: Uuid,
 ) -> Result<Option<String>, rootcause::Report> {
-    let properties = documents
+    let properties = match documents
         .get_document_properties(&task_id.to_string(), owner.as_ref())
         .await
-        .map_err(|error| rootcause::report!("{error:#}"))?;
-    let Some(properties) = properties else {
-        return Ok(None);
+    {
+        Ok(Some(properties)) => properties,
+        Ok(None) => return Ok(None),
+        Err(PropertiesReadError::Unreadable(error)) => {
+            tracing::warn!(
+                %error,
+                %task_id,
+                "the run task's properties do not read: its project is taken as none"
+            );
+            return Ok(None);
+        }
+        Err(PropertiesReadError::Unavailable(error)) => return Err(error),
     };
     Ok(properties
         .properties
@@ -45,9 +55,31 @@ pub(crate) async fn initiative_of(
         }))
 }
 
-/// The Project property that puts a new task in `initiative`.
-pub(crate) fn project_property(initiative: String) -> NewTaskProperty {
-    NewTaskProperty {
+/// The properties a task the factory files for `owner` starts with: the
+/// owner as its assignee and Not started as its status, the defaults
+/// document storage gives a task made with none, and its Project, when it
+/// goes in the initiative `initiative`. Naming any property drops those
+/// defaults, so they are named too, as the app names them.
+pub(crate) fn new_task_properties(
+    owner: &MacroUserIdStr<'static>,
+    initiative: Option<String>,
+) -> Vec<NewTaskProperty> {
+    let assignee = NewTaskProperty {
+        property_id: SystemPropertyKey::ASSIGNEES_UUID.to_string(),
+        value: NewTaskPropertyValue::MultiEntityReference {
+            references: vec![TaskEntityReference {
+                entity_id: owner.as_ref().to_string(),
+                entity_type: EntityType::User,
+            }],
+        },
+    };
+    let status = NewTaskProperty {
+        property_id: SystemPropertyKey::STATUS_UUID.to_string(),
+        value: NewTaskPropertyValue::SelectOption {
+            option_id: StatusOption::NOT_STARTED_UUID,
+        },
+    };
+    let project = initiative.map(|initiative| NewTaskProperty {
         property_id: SystemPropertyKey::PROJECT_UUID.to_string(),
         value: NewTaskPropertyValue::EntityReference {
             reference: TaskEntityReference {
@@ -55,5 +87,6 @@ pub(crate) fn project_property(initiative: String) -> NewTaskProperty {
                 entity_type: EntityType::Initiative,
             },
         },
-    }
+    });
+    [assignee, status].into_iter().chain(project).collect()
 }

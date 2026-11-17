@@ -69,3 +69,35 @@ pub(crate) fn task_properties(task: &str, initiative: &str) -> serde_json::Value
         ]
     })
 }
+
+/// The properties a task filed for `owner` is made with, as `POST
+/// /documents/create_task` reads them: the owner assigned, Not started,
+/// and the Project naming `initiative` when it has one.
+pub(crate) fn new_task_property_values(owner: &str, initiative: Option<&str>) -> serde_json::Value {
+    let mut values = vec![
+        json!({
+            "propertyId": "00000001-0000-0000-0000-000000000001",
+            "value": {
+                "type": "multi_entity_reference",
+                "references": [{ "entity_id": owner, "entity_type": "USER" }]
+            }
+        }),
+        json!({
+            "propertyId": "00000001-0000-0000-0000-000000000002",
+            "value": {
+                "type": "select_option",
+                "option_id": "00000001-0000-0000-0002-000000000001"
+            }
+        }),
+    ];
+    if let Some(initiative) = initiative {
+        values.push(json!({
+            "propertyId": PROJECT,
+            "value": {
+                "type": "entity_reference",
+                "reference": { "entity_id": initiative, "entity_type": "INITIATIVE" }
+            }
+        }));
+    }
+    serde_json::Value::Array(values)
+}

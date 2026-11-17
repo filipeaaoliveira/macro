@@ -76,6 +76,16 @@ pub enum NewTaskPropertyValue {
         /// The entity.
         reference: TaskEntityReference,
     },
+    /// References to entities, such as the people a task is assigned to.
+    MultiEntityReference {
+        /// The entities.
+        references: Vec<TaskEntityReference>,
+    },
+    /// One option of a select property, such as a task's status.
+    SelectOption {
+        /// The option's id.
+        option_id: uuid::Uuid,
+    },
 }
 
 /// An entity a new task's property refers to.
@@ -91,6 +101,19 @@ pub struct TaskEntityReference {
 #[serde(rename_all = "camelCase")]
 struct CreatedTask {
     document_id: String,
+}
+
+/// Why a document's properties could not be read.
+#[derive(thiserror::Error, Debug)]
+pub enum PropertiesReadError {
+    /// Document storage answered with something that does not read as a
+    /// document's properties: trying again would read the same.
+    #[error("the properties do not read: {0}")]
+    Unreadable(serde_json::Error),
+    /// The request failed, or document storage failed, timed out or
+    /// refused the key: worth trying again.
+    #[error("{0}")]
+    Unavailable(rootcause::Report),
 }
 
 /// Why a task could not be made.
@@ -111,13 +134,17 @@ pub enum CreateTaskError {
 impl DocumentStorageServiceClient {
     /// The properties of the document `document_id`, tasks included, as
     /// `user_id` sees them; none when it is missing or they cannot see it.
-    /// They read in the shape the properties API answers with, its own.
+    /// They read in the shape the properties API answers with, its own. An
+    /// answer that does not read is told apart from a failed request.
     #[tracing::instrument(skip(self), err)]
     pub async fn get_document_properties(
         &self,
         document_id: &str,
         user_id: &str,
-    ) -> Result<Option<EntityPropertiesResponse>> {
+    ) -> Result<Option<EntityPropertiesResponse>, PropertiesReadError> {
+        let unavailable = |error: reqwest::Error| {
+            PropertiesReadError::Unavailable(rootcause::Report::new(error).into_dynamic())
+        };
         let response = self
             .client
             .get(format!(
@@ -126,14 +153,23 @@ impl DocumentStorageServiceClient {
             ))
             .header(MACRO_INTERNAL_USER_ID_HEADER_KEY, user_id)
             .send()
-            .await?;
+            .await
+            .map_err(unavailable)?;
         if matches!(
             response.status(),
             StatusCode::FORBIDDEN | StatusCode::NOT_FOUND
         ) {
             return Ok(None);
         }
-        Ok(Some(response.error_for_status()?.json().await?))
+        let body = response
+            .error_for_status()
+            .map_err(unavailable)?
+            .bytes()
+            .await
+            .map_err(unavailable)?;
+        serde_json::from_slice(&body)
+            .map(Some)
+            .map_err(PropertiesReadError::Unreadable)
     }
 
     /// Make `task` as `user_id`, who owns it, and return its document's

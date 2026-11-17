@@ -240,3 +240,38 @@ async fn a_task_s_properties_read_as_document_storage_answers_them() {
         })
     );
 }
+
+/// Properties that do not read are told apart from a request that failed,
+/// which is worth trying again; a hidden or missing document has none.
+#[tokio::test]
+async fn unreadable_properties_are_told_apart_from_a_failed_read() {
+    for (answer, expected) in [
+        (
+            ResponseTemplate::new(200).set_body_json(json!({ "entityId": "task-1" })),
+            "unreadable",
+        ),
+        (ResponseTemplate::new(500), "unavailable"),
+        (ResponseTemplate::new(401), "unavailable"),
+        (ResponseTemplate::new(404), "none"),
+        (ResponseTemplate::new(403), "none"),
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/properties/entities/DOCUMENT/task-1"))
+            .respond_with(answer)
+            .mount(&server)
+            .await;
+
+        let read = DocumentStorageServiceClient::new("internal-key".into(), server.uri())
+            .get_document_properties("task-1", "macro|julia@example.com")
+            .await;
+
+        let got = match read {
+            Err(super::PropertiesReadError::Unreadable(_)) => "unreadable",
+            Err(super::PropertiesReadError::Unavailable(_)) => "unavailable",
+            Ok(None) => "none",
+            Ok(Some(_)) => "read",
+        };
+        assert_eq!(got, expected);
+    }
+}
