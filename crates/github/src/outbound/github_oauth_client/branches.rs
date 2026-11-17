@@ -1,5 +1,5 @@
-//! Reads of what a branch holds as the user: a file at its head, and the
-//! paths it changed against another branch.
+//! Reads of what a branch holds as the user: its head, a file at its head,
+//! and what it changed against another branch.
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
@@ -34,6 +34,30 @@ struct CompareFile {
     filename: String,
     #[serde(default)]
     previous_filename: Option<String>,
+    #[serde(default)]
+    patch: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct BranchResponse {
+    commit: BranchCommit,
+}
+
+#[derive(serde::Deserialize)]
+struct BranchCommit {
+    sha: String,
+}
+
+/// A file one commit changed against another, with what changed in it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComparedFile {
+    /// Its path at the later commit.
+    pub path: String,
+    /// Its path at the earlier one, when it was renamed.
+    pub previous_path: Option<String>,
+    /// Its unified diff's hunks; none when GitHub gives none, as for a
+    /// binary file or one too large to show.
+    pub patch: Option<String>,
 }
 
 impl GithubOauthImpl {
@@ -104,6 +128,68 @@ impl GithubOauthImpl {
         String::from_utf8(bytes)
             .map(Some)
             .map_err(|_| GithubError::Internal(anyhow::anyhow!("file {path} is not UTF-8 text")))
+    }
+
+    /// The commit `branch` is at; `None` when the user reaches no such
+    /// branch, as when it was never pushed.
+    #[tracing::instrument(skip(self, access_token), err)]
+    pub async fn get_branch_head(
+        &self,
+        access_token: &str,
+        owner: &str,
+        repo: &str,
+        branch: &str,
+    ) -> Result<Option<String>, GithubError> {
+        let read: Result<BranchResponse, GithubError> = self
+            .read(
+                access_token,
+                &format!("/repos/{owner}/{repo}/branches/{branch}"),
+                &[],
+                "failed to read a branch",
+            )
+            .await;
+        match read {
+            Ok(branch) => Ok(Some(branch.commit.sha)),
+            Err(GithubError::RepositoryUnavailable) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// The files `head` changed against its merge base with `base`, with
+    /// their hunks; `None` when GitHub lists only part of them.
+    #[tracing::instrument(skip(self, access_token), err)]
+    pub async fn compare_files(
+        &self,
+        access_token: &str,
+        owner: &str,
+        repo: &str,
+        base: &str,
+        head: &str,
+    ) -> Result<Option<Vec<ComparedFile>>, GithubError> {
+        let compared: CompareResponse = self
+            .read(
+                access_token,
+                &format!("/repos/{owner}/{repo}/compare/{base}...{head}"),
+                &[],
+                "failed to compare commits",
+            )
+            .await?;
+        let Some(files) = compared.files else {
+            return Ok(None);
+        };
+        if files.len() >= COMPARE_FILES_LISTED {
+            return Ok(None);
+        }
+        Ok(Some(
+            files
+                .into_iter()
+                .map(|file| ComparedFile {
+                    path: file.filename,
+                    previous_path: file.previous_filename,
+                    patch: file.patch,
+                })
+                .collect(),
+        ))
     }
 
     /// The paths `head` changed against its merge base with `base`, a

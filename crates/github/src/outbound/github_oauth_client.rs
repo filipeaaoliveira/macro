@@ -22,6 +22,7 @@ use crate::domain::{
 };
 
 mod branches;
+pub use branches::ComparedFile;
 mod pull_requests;
 #[cfg(test)]
 mod test;
