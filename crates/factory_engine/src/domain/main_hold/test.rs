@@ -92,6 +92,14 @@ fn input(run_id: RunId) -> StepInput<'static> {
     }
 }
 
+/// GitHub with the Run's pull request open and passing, its branch changing
+/// no Control File, so the Run is not Tampered.
+fn open_pull_request() -> FakeGithub {
+    let github = FakeGithub::with_open_pull_request(ci(Some("success")));
+    github.state().changed = Some(Vec::new());
+    github
+}
+
 /// The base's checks: the CI suite with its one run, `test`, concluded
 /// `conclusion`, or running when none.
 fn base_checks(conclusion: Option<&str>) -> HeadChecks {
@@ -619,7 +627,7 @@ async fn an_unheld_watch_idles_hours_after_the_latest_merge() {
 #[tokio::test]
 async fn a_watch_that_does_not_start_leaves_the_merge_merged() {
     let repo = FakeRepo::default();
-    let github = FakeGithub::with_open_pull_request(ci(Some("success")));
+    let github = open_pull_request();
     let watches = FakeWatches::default();
     *watches.failing.lock().expect("failing") = true;
     let run_id = code_run(&repo).await;
@@ -642,7 +650,7 @@ async fn a_watch_that_does_not_start_leaves_the_merge_merged() {
 #[tokio::test(start_paused = true)]
 async fn a_held_base_merges_nothing_even_once_approved() {
     let repo = FakeRepo::default();
-    let github = FakeGithub::with_open_pull_request(ci(Some("success")));
+    let github = open_pull_request();
     let watches = FakeWatches::default();
     let run_id = code_run(&repo).await;
     repo.set_merge_head(run_id, FakeGithub::HEAD)
@@ -687,7 +695,7 @@ async fn a_held_base_merges_nothing_even_once_approved() {
 #[tokio::test(start_paused = true)]
 async fn a_merge_waits_out_a_hold_that_clears() {
     let repo = FakeRepo::default();
-    let github = FakeGithub::with_open_pull_request(ci(Some("success")));
+    let github = open_pull_request();
     let watches = FakeWatches::default();
     let run_id = code_run(&repo).await;
     repo.set_merge_head(run_id, FakeGithub::HEAD)
