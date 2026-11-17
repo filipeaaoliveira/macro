@@ -15,8 +15,16 @@ export type GateAnswer = {
   answeredAt: string;
 };
 
+/**
+ * Who asks a Gate's question: the Flow, once its Step is done, offering
+ * answers to pick from, or the Step's agent, which the Run's owner answers
+ * in their own words (the note of its one answer, `answer`).
+ */
+export type GateKind = 'flow' | 'question';
+
 /** A question a Step's end put to a person. */
 export type Gate = {
+  kind: GateKind;
   question: string;
   /** The answers it offers, in the Flow's order. */
   answers: string[];
@@ -252,6 +260,25 @@ export function runStatus(run: Run): RunStatus {
 
 /** The answer that agrees to a Gate; on a Tampered Run it needs approval. */
 export const APPROVE_ANSWER = 'approve';
+
+/** The one answer an agent's question offers: the owner's words go with it. */
+export const QUESTION_ANSWER = 'answer';
+
+/** Whether an agent asked `gate`'s question, so the owner writes the answer. */
+export function isQuestion(gate: Pick<Gate, 'kind'>): boolean {
+  return gate.kind === 'question';
+}
+
+/**
+ * The Role of the agent that asks `gate`'s question, the Gate of `step`:
+ * none for a question the Flow asks.
+ */
+export function gateAsker(
+  step: Pick<RunStep, 'role'>,
+  gate: Pick<Gate, 'kind'>
+): string | undefined {
+  return isQuestion(gate) ? (step.role ?? 'agent') : undefined;
+}
 
 /** The first line of the request, which names the Run in lists. */
 export function runTitle(run: Run): string {

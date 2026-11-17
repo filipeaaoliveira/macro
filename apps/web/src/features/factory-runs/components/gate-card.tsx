@@ -11,9 +11,14 @@ import { For, type JSX, Show } from 'solid-js';
 import { flowWordLabel } from '../core/flow-words';
 import { type ControlFileChanges, isTampered } from '../core/run';
 
-/** The Gate's header and its question, in a block nested in the card. */
+/**
+ * The Gate's header and its question, in a block nested in the card. An
+ * agent's question says which Role asks.
+ */
 export function GateQuestion(props: {
   question: string;
+  /** The Role of the agent that asks, for an agent's question. */
+  asker?: string;
   /**
    * Cap the question's height where it is pinned; it scrolls, and takes
    * keyboard focus so it can be scrolled without a pointer.
@@ -31,10 +36,18 @@ export function GateQuestion(props: {
           </Item.Media>
           <Item.Content class="gap-0.5">
             <UiCard.Title class="[overflow-wrap:anywhere]">
-              {t('factoryRuns.gateTitle')}
+              <Show when={props.asker} fallback={t('factoryRuns.gateTitle')}>
+                {(asker) =>
+                  t('factoryRuns.questionTitle', {
+                    role: flowWordLabel(asker()),
+                  })
+                }
+              </Show>
             </UiCard.Title>
             <UiCard.Description class="leading-5">
-              {t('factoryRuns.gateWaiting')}
+              {props.asker
+                ? t('factoryRuns.questionWaiting')
+                : t('factoryRuns.gateWaiting')}
             </UiCard.Description>
           </Item.Content>
         </Item>
@@ -65,27 +78,37 @@ export function GateQuestion(props: {
 
 /**
  * A note for the next Steps, at most a few lines tall before it scrolls,
- * so a long note never pushes the answers out of reach.
+ * so a long note never pushes the answers out of reach. For an agent's
+ * question it is the answer itself, which the person must write.
  */
 export function GateNote(props: {
   note: string;
   onNoteChange: (note: string) => void;
   locked: boolean;
+  /** The note answers an agent's question. */
+  answers?: boolean;
 }) {
   return (
     <TextField
       value={props.note}
       onChange={props.onNoteChange}
       disabled={props.locked}
+      required={props.answers}
     >
       <TextField.Label class="sr-only">
-        {t('factoryRuns.noteLabel')}
+        {props.answers
+          ? t('factoryRuns.answerLabel')
+          : t('factoryRuns.noteLabel')}
       </TextField.Label>
       <TextField.TextArea
         autoResize
-        rows={1}
+        rows={props.answers ? 2 : 1}
         class="max-h-24 overflow-y-auto"
-        placeholder={t('factoryRuns.notePlaceholder')}
+        placeholder={
+          props.answers
+            ? t('factoryRuns.answerPlaceholder')
+            : t('factoryRuns.notePlaceholder')
+        }
       />
     </TextField>
   );
@@ -253,6 +276,8 @@ export function GateGroup(props: {
  */
 export function GateCard(props: {
   question: string;
+  /** The Role of the agent that asks, for an agent's question. */
+  asker?: string;
   answers: readonly string[];
   /** The Control Files the Run's branch changed, if any. */
   controlFiles?: ControlFileChanges;
@@ -268,7 +293,7 @@ export function GateCard(props: {
   return (
     <GateGroup>
       <Card width="wide">
-        <GateQuestion question={props.question} capped />
+        <GateQuestion question={props.question} asker={props.asker} capped />
         <Show when={props.controlFiles}>
           {(changes) => (
             <div class="px-3 pb-2">
@@ -286,6 +311,7 @@ export function GateCard(props: {
             note={props.note}
             onNoteChange={props.onNoteChange}
             locked={props.locked}
+            answers={props.asker !== undefined}
           />
         </div>
         <CardFooter class="justify-end">

@@ -109,6 +109,13 @@ export default {
   answerConflict: 'This question was already answered',
   answerConflictDescription: 'The run has moved on and now shows where it is',
   answered: 'Answered: {{answer}}',
+  // An agent's question to the Run's owner.
+  questionTitle: 'The {{role}} has a question',
+  questionWaiting:
+    'The run waits for your answer, then the agent goes on with it.',
+  answerLabel: 'Your answer',
+  answerPlaceholder: 'Write your answer',
+  questionAnswered: 'You answered:',
   // Control Files a Run changed that its request doesn't name.
   controlFilesTitle: 'Control files changed',
   controlFilesChanged:

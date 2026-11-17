@@ -15,7 +15,7 @@ import {
   type RunsContext,
   RunsProvider,
 } from './context/runs-context';
-import type { Run } from './core/run';
+import type { Run, RunStep } from './core/run';
 import { RunView } from './run-view';
 
 vi.mock('@core/component/Toast/Toast', () => ({
@@ -53,6 +53,7 @@ const waitingRun: Run = {
         endedAt: '2026-11-16T09:01:00Z',
       },
       gate: {
+        kind: 'flow',
         question: 'Approve this plan, or send it back with a note?',
         answers: ['approve', 'revise'],
         openedAt: '2026-11-16T09:01:00Z',
@@ -733,7 +734,7 @@ describe('RunView', () => {
   it('shows a held, Tampered merge with its review and verified checks', async () => {
     const answerGate = vi.fn(async () => DONE);
     const { setRun } = mount({ answerGate });
-    const mergeGate = {
+    const mergeGate: RunStep = {
       seq: 6,
       entry: 'merge-gate',
       visit: 1,
@@ -744,6 +745,7 @@ describe('RunView', () => {
         endedAt: '2026-11-16T11:01:00Z',
       },
       gate: {
+        kind: 'flow',
         question: 'Merge this pull request?',
         answers: ['approve', 'revise'],
         openedAt: '2026-11-16T11:01:00Z',
@@ -891,5 +893,88 @@ describe('RunView', () => {
       answer: 'revise',
       note: undefined,
     });
+  });
+  it('answers an agent’s question in the person’s own words', async () => {
+    const answerGate = vi.fn(async () => DONE);
+    const { setRun } = mount({ answerGate });
+    const asking = {
+      seq: 1,
+      entry: 'plan',
+      visit: 1,
+      role: 'planner',
+      startedAt: '2026-11-16T09:00:00Z',
+      end: {
+        outcome: 'question',
+        output: 'Should the column show overdue dates in red?',
+        endedAt: '2026-11-16T09:01:00Z',
+      },
+      gate: {
+        kind: 'question' as const,
+        question: 'Should the column show overdue dates in red?',
+        answers: ['answer'],
+        openedAt: '2026-11-16T09:01:00Z',
+      },
+    };
+    setRun({ ...waitingRun, steps: [asking] });
+
+    expect(await screen.findByText('The Planner has a question')).toBeTruthy();
+    const send = screen.getByRole('button', { name: 'Answer' });
+    // Nothing goes out until the person wrote an answer.
+    expect(send.hasAttribute('disabled')).toBe(true);
+    fireEvent.input(screen.getByPlaceholderText('Write your answer'), {
+      target: { value: 'Yes, in red' },
+    });
+    await waitFor(() => expect(send.hasAttribute('disabled')).toBe(false));
+    fireEvent.click(send);
+
+    expect(answerGate).toHaveBeenCalledWith({
+      runId: 'run-1',
+      step: asking,
+      answer: 'answer',
+      note: 'Yes, in red',
+    });
+  });
+
+  it('shows the answer to an agent’s question on its Step', async () => {
+    const { setRun } = mount({});
+    setRun({
+      ...waitingRun,
+      steps: [
+        {
+          seq: 1,
+          entry: 'plan',
+          visit: 1,
+          role: 'planner',
+          startedAt: '2026-11-16T09:00:00Z',
+          end: {
+            outcome: 'question',
+            output: 'Should the column show overdue dates in red?',
+            endedAt: '2026-11-16T09:01:00Z',
+          },
+          gate: {
+            kind: 'question',
+            question: 'Should the column show overdue dates in red?',
+            answers: ['answer'],
+            openedAt: '2026-11-16T09:01:00Z',
+            answer: {
+              answer: 'answer',
+              note: 'Yes, in red',
+              answeredAt: '2026-11-16T09:05:00Z',
+            },
+          },
+        },
+        {
+          seq: 2,
+          entry: 'plan',
+          visit: 1,
+          role: 'planner',
+          startedAt: '2026-11-16T09:05:00Z',
+        },
+      ],
+    });
+
+    expect(await screen.findByText('You answered:')).toBeTruthy();
+    expect(screen.getByText('Yes, in red')).toBeTruthy();
+    expect(screen.queryByText('The Planner has a question')).toBeNull();
   });
 });

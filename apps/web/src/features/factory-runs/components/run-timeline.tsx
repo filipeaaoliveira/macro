@@ -12,6 +12,7 @@ import {
   type CheckRound,
   findingCounts,
   findingsOf,
+  isQuestion,
   type MainHold,
   type ReviewFinding,
   type ReviewRound,
@@ -197,9 +198,11 @@ function TimelineStep(props: {
       <Show when={answer()}>
         {(answer) => (
           <StepNote>
-            {t('factoryRuns.answered', {
-              answer: flowWordLabel(answer().answer),
-            })}
+            {props.step.gate && isQuestion(props.step.gate)
+              ? t('factoryRuns.questionAnswered')
+              : t('factoryRuns.answered', {
+                  answer: flowWordLabel(answer().answer),
+                })}
             <Show when={answer().note}>
               {(note) => (
                 <span class="block whitespace-pre-wrap text-ink-muted">

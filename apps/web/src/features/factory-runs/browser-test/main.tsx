@@ -56,6 +56,7 @@ const INITIAL_RUNS: Run[] = [
         startedAt: at(12),
         end: { outcome: 'done', output: 'A first plan.', endedAt: at(10) },
         gate: {
+          kind: 'flow',
           question:
             'Approve this plan, or send it back with a note on what to change?',
           answers: ['approve', 'revise'],
@@ -74,6 +75,7 @@ const INITIAL_RUNS: Run[] = [
         startedAt: at(8),
         end: { outcome: 'done', output: PLAN, endedAt: at(6) },
         gate: {
+          kind: 'flow',
           question: QUESTION,
           answers: ['approve', 'revise'],
           openedAt: at(6),

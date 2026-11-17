@@ -7,7 +7,9 @@ import type {
 } from '../context/runs-context';
 import {
   APPROVE_ANSWER,
+  isQuestion,
   isTampered,
+  QUESTION_ANSWER,
   type Run,
   type RunStep,
   runStatus,
@@ -128,11 +130,16 @@ export function createRunController(
     setApproveControlFiles,
     /**
      * The answers the person can't send yet: approving a Tampered Run before
-     * they ticked their approval of its files.
+     * they ticked their approval of its files, and answering an agent's
+     * question before they wrote their answer.
      */
     heldAnswers: (): string[] => {
       const run = source.data();
-      const held = waiting() && run && tampered(run);
+      const gate = waiting()?.gate;
+      if (gate && isQuestion(gate)) {
+        return note().trim() ? [] : [QUESTION_ANSWER];
+      }
+      const held = gate && run && tampered(run);
       return held && !approveControlFiles() ? [APPROVE_ANSWER] : [];
     },
     /** The answer on the wire, if one is. */

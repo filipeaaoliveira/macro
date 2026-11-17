@@ -4,7 +4,7 @@ import XIcon from '@icon/system/regular/x.svg';
 import { ActionDialogShell, Button, Dialog } from '@ui';
 import { createSignal, Match, Show, Switch } from 'solid-js';
 import { GateCard } from '../components/gate-card';
-import { runTitle } from '../core/run';
+import { gateAsker, runTitle } from '../core/run';
 import { createFocusRescue } from '../primitives/focus-rescue';
 import type { RunController } from '../primitives/run-controller';
 import {
@@ -41,6 +41,7 @@ function RunGate(props: { controller: RunController }) {
       {(waiting) => (
         <GateCard
           question={waiting().gate.question}
+          asker={gateAsker(waiting().step, waiting().gate)}
           answers={waiting().gate.answers}
           controlFiles={props.controller.controlFiles()}
           approveControlFiles={props.controller.approveControlFiles()}
