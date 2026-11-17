@@ -292,6 +292,66 @@ where
         })
     }
 
+    async fn follow_up(
+        &self,
+        command: PromptRoutineSession,
+    ) -> Result<RoutinePromptAccepted, RoutineSessionError> {
+        let action = command.action;
+        self.owned_session(&action).await?;
+        if command.prompt.trim().is_empty() {
+            return Err(RoutineSessionError::InvalidCommand);
+        }
+
+        // The prompt's own id guards it, as the first prompt's history check
+        // does: a prompt the session already took or holds queued under this
+        // id is refused.
+        let log = self
+            .sessions
+            .session_log(action.session_id)
+            .await
+            .map_err(session_error)?;
+        let mut fold = LifecycleFold::new();
+        for row in log.entries {
+            let _ = fold.push(row.entry);
+        }
+        let in_history = fold.inner().messages().iter().any(|message| {
+            matches!(message.author, Author::User { .. })
+                && message.request_id == Some(action.action_id)
+        });
+        let queued = self
+            .controls
+            .queued_controls(action.session_id)
+            .await
+            .map_err(session_error)?
+            .iter()
+            .any(|control| control.action_id == action.action_id);
+        if in_history || queued {
+            return Err(RoutineSessionError::Conflict);
+        }
+
+        let accepted = self
+            .controls
+            .control_event(
+                action.session_id,
+                ControlEvent {
+                    action: AgentAction::prompt(command.prompt),
+                    action_id: Some(action.action_id),
+                    actor: Some(action.owner),
+                    context: command.context,
+                    client: None,
+                },
+            )
+            .await
+            .map_err(prompt_error)?;
+        if accepted.action_id != action.action_id {
+            return Err(RoutineSessionError::PromptDeliveryUnknown);
+        }
+        Ok(RoutinePromptAccepted {
+            action_id: accepted.action_id,
+            queued: accepted.disposition == ControlDisposition::Queued,
+        })
+    }
+
     async fn status(
         &self,
         command: RoutineSessionAction,

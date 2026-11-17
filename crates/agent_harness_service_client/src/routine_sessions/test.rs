@@ -300,6 +300,41 @@ async fn malformed_and_ambiguous_prompt_responses_never_replay() {
     }
 }
 
+/// A follow-up goes to its own route, and an answer that leaves its delivery
+/// unknown is never read as a refusal, as for the first prompt.
+#[tokio::test]
+async fn a_follow_up_is_sent_once_to_its_route() {
+    let action = identity();
+    let server = server(vec![
+        Reply::json(
+            200,
+            json!({"action_id": action.action_id, "queued": true}),
+        ),
+        Reply::json(504, json!("gateway timeout")),
+    ])
+    .await;
+    let client = AgentSessionClient::new(&server.url, KEY).unwrap();
+    let command = PromptRoutineSession {
+        action: action.clone(),
+        prompt: "run the checks".into(),
+        context: None,
+    };
+
+    let accepted = client.follow_up(command.clone()).await.unwrap();
+    let ambiguous = client.follow_up(command).await.unwrap_err();
+
+    assert_eq!(accepted.action_id, action.action_id);
+    assert!(accepted.queued);
+    assert_eq!(ambiguous, RoutineSessionError::PromptDeliveryUnknown);
+    let requests = server.requests.lock().unwrap();
+    assert!(
+        requests[0]
+            .head
+            .starts_with("POST /internal/routine-sessions/follow-up HTTP/1.1")
+    );
+    assert_eq!(requests[0].body["prompt"], "run the checks");
+}
+
 /// A harness nothing listens for refuses the connection, and never got the
 /// prompt: that is a definite failure, safe to send again.
 #[tokio::test]

@@ -87,14 +87,15 @@ pub struct RoutineSessionAction {
     pub bot_id: BotId,
     /// Caller-generated UUIDv7 session id.
     pub session_id: AgentSessionId,
-    /// Caller-generated UUIDv7 identifying the initial prompt, not a later turn.
+    /// Caller-generated UUIDv7 identifying one prompt: the initial one, or a
+    /// follow-up's ([`super::RoutineSessions::follow_up`]).
     pub action_id: AgentActionId,
 }
 
-/// The first task sent to a prepared session.
+/// A prompt sent to a prepared session: its first, or a follow-up.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptRoutineSession {
-    /// Owner, persona, session, and initial action identity.
+    /// Owner, persona, session, and the prompt's action identity.
     pub action: RoutineSessionAction,
     /// Routine guidance, instructions, and context; not persona system settings.
     pub prompt: String,
@@ -106,7 +107,7 @@ pub struct PromptRoutineSession {
 /// Prompt admission is not completion.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoutinePromptAccepted {
-    /// The requested initial action id.
+    /// The requested action id.
     pub action_id: AgentActionId,
     /// Whether admission queued the prompt rather than immediately sending it.
     pub queued: bool,

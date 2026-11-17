@@ -3,7 +3,8 @@
 //! All operations use POST with the domain command as JSON (including status,
 //! so explicit owner/action identity is not placed in URLs). Successful cancel
 //! returns 204; other successes return the domain result. Errors carry only a
-//! closed `code`. Prepare and prompt must not be replayed after ambiguous errors.
+//! closed `code`. Prepare, prompt and follow-up must not be replayed after
+//! ambiguous errors.
 
 use std::{sync::Arc, time::Duration};
 
@@ -73,6 +74,7 @@ pub fn routine_sessions_router<Service: RoutineSessions, Auth: MacroAuthorizatio
             .route("/validate", post(validate::<Service, Auth>))
             .route("/prepare", post(prepare::<Service, Auth>))
             .route("/prompt", post(prompt::<Service, Auth>))
+            .route("/follow-up", post(follow_up::<Service, Auth>))
             .route("/status", post(status::<Service, Auth>))
             .route("/cancel", post(cancel::<Service, Auth>))
             .route("/delete", post(delete::<Service, Auth>))
@@ -129,8 +131,8 @@ impl IntoResponse for ApiError {
 }
 
 async fn bound_request(request: Request, next: Next) -> Response {
-    let is_prompt = request.uri().path().ends_with("/prompt");
     let path = request.uri().path();
+    let is_prompt = path.ends_with("/prompt") || path.ends_with("/follow-up");
     let timeout = if path.ends_with("/status") || path.ends_with("/activity") {
         STATUS_TIMEOUT
     } else {
@@ -184,6 +186,14 @@ async fn prompt<Service: RoutineSessions, Auth: MacroAuthorizationService>(
     command: Result<Json<PromptRoutineSession>, JsonRejection>,
 ) -> Result<Json<RoutinePromptAccepted>, ApiError> {
     Ok(Json(state.service.prompt(command?.0).await?))
+}
+
+async fn follow_up<Service: RoutineSessions, Auth: MacroAuthorizationService>(
+    State(state): State<RoutineSessionsState<Service, Auth>>,
+    _internal: MacroAuthorizationExtractor<Auth, InternalOnly>,
+    command: Result<Json<PromptRoutineSession>, JsonRejection>,
+) -> Result<Json<RoutinePromptAccepted>, ApiError> {
+    Ok(Json(state.service.follow_up(command?.0).await?))
 }
 
 async fn status<Service: RoutineSessions, Auth: MacroAuthorizationService>(
