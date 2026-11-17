@@ -1385,7 +1385,12 @@ output a waiting Gate asks about open. On desktop the Gate card (its question,
 a note field and one button per answer, the Flow's first answer primary) is
 pinned below them, the question and note scrolling inside past a few lines. On
 touch the pinned chrome between the handle and the Steps holds only the note
-and the answers, and the question opens the scrolling content. **Cancel run**
+and the answers, and the question opens the scrolling content. A Run whose
+branch changed Control Files its request doesn't name (tests, lint and test
+configuration, CI workflows, package scripts, agent instructions) shows them
+on its Gate, above the note on touch, with an **I approve these changes**
+checkbox: **Approve** stays disabled until it is ticked. A branch GitHub
+couldn't list says so instead of naming files. **Cancel run**
 is pinned on both and confirms in place. Phone sheets have no close button.
 When an answer or a cancel takes the focused control away, focus moves to
 the Run's status line; that includes an answer refused because someone

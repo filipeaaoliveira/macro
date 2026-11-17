@@ -78,4 +78,11 @@ export default {
   answerConflict: 'This question was already answered',
   answerConflictDescription: 'The run has moved on and now shows where it is',
   answered: 'Answered: {{answer}}',
+  // Control Files a Run changed that its request doesn't name.
+  controlFilesTitle: 'Control files changed',
+  controlFilesChanged:
+    'This branch changes files that decide whether its checks pass, and its request doesn’t name them. It merges only once you approve them.',
+  controlFilesUnlisted:
+    'GitHub couldn’t list this branch’s changes, so it may change files that decide whether its checks pass. It merges only once you approve that.',
+  approveControlFiles: 'I approve these changes',
 };

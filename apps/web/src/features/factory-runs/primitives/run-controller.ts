@@ -5,7 +5,7 @@ import type {
   RunsContext,
   RunsSource,
 } from '../context/runs-context';
-import { type Run, type RunStep, runStatus } from '../core/run';
+import { APPROVE_ANSWER, type Run, type RunStep, runStatus } from '../core/run';
 
 /** How often Step times ("5m") move on. */
 const CLOCK_MS = 30_000;
@@ -26,6 +26,8 @@ export function createRunController(
 ) {
   const source: RunsSource<Run> = context.run(runId);
   const [note, setNote] = createSignal('');
+  // Whether the person ticked their approval of a Tampered Run's files.
+  const [approveControlFiles, setApproveControlFiles] = createSignal(false);
   // The Gate this person answered stays locked until the Run is read again
   // past it, so a second click can't send a second answer.
   const [answeredGate, setAnsweredGate] = createSignal<number>();
@@ -66,11 +68,14 @@ export function createRunController(
       step: gate.step,
       answer: value,
       note: note().trim() || undefined,
+      // Only a Tampered Run's answer approves Control Files.
+      ...(run.tampering ? { approveControlFiles: approveControlFiles() } : {}),
     });
     setAnswering(undefined);
     if (result.ok) {
       setAnsweredGate(gateKey(gate.step));
       setNote('');
+      setApproveControlFiles(false);
     } else if (rescue() === 'answer') {
       // A refused answer (409) arrives with the Run read again. When that
       // read took the Gate away, focus has already moved; when it still
@@ -103,6 +108,18 @@ export function createRunController(
     waiting,
     note,
     setNote,
+    /** The Control Files the Run's branch changed unasked, while it waits. */
+    tampering: () => (waiting() ? source.data()?.tampering : undefined),
+    approveControlFiles,
+    setApproveControlFiles,
+    /**
+     * The answers the person can't send yet: approving a Tampered Run before
+     * they ticked their approval of its files.
+     */
+    heldAnswers: (): string[] => {
+      const held = waiting() && source.data()?.tampering;
+      return held && !approveControlFiles() ? [APPROVE_ANSWER] : [];
+    },
     /** The answer on the wire, if one is. */
     answering,
     gateLocked: () => {

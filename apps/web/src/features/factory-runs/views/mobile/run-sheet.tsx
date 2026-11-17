@@ -5,6 +5,7 @@ import { LoadingSpinner } from '@core/component/LoadingSpinner';
 import { createSignal, createUniqueId, Match, Show, Switch } from 'solid-js';
 import {
   GateAnswers,
+  GateControlFiles,
   GateGroup,
   GateNote,
   GateQuestion,
@@ -78,6 +79,18 @@ export function MobileRunSheet(props: {
                         class="flex flex-col gap-3"
                         describedBy={questionId}
                       >
+                        <Show when={props.controller.tampering()}>
+                          {(tampering) => (
+                            <GateControlFiles
+                              tampering={tampering()}
+                              approved={props.controller.approveControlFiles()}
+                              onApprovedChange={
+                                props.controller.setApproveControlFiles
+                              }
+                              locked={props.controller.gateLocked()}
+                            />
+                          )}
+                        </Show>
                         <GateNote
                           note={props.controller.note()}
                           onNoteChange={props.controller.setNote}
@@ -86,6 +99,7 @@ export function MobileRunSheet(props: {
                         <div class="flex flex-wrap items-center justify-end gap-2">
                           <GateAnswers
                             answers={waiting().gate.answers}
+                            held={props.controller.heldAnswers()}
                             locked={props.controller.gateLocked()}
                             answering={props.controller.answering()}
                             onAnswer={(value) =>
