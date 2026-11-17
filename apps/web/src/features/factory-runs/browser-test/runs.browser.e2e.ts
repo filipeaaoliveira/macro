@@ -79,7 +79,9 @@ test('answers a Gate, starts a Run and cancels one', async ({
   await page.getByRole('button', { name: 'New run' }).click();
   const start = page.getByRole('dialog', { name: 'New run' });
   await start.getByLabel('Request').fill('Show overdue tasks in red');
-  await start.getByText('Code', { exact: true }).click();
+  // Code needs a repository, which the dialog doesn't ask for yet.
+  await expect(start.getByText('Code', { exact: true })).toHaveCount(0);
+  await start.getByText('Reply', { exact: true }).click();
   await shoot(page, 'start-run', testInfo.project.name);
   await start.getByRole('button', { name: 'Start run' }).click();
   const started = page.getByRole('dialog', {

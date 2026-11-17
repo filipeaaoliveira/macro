@@ -198,6 +198,10 @@ function createFixtureContext(): RunsContext {
           description:
             'Takes the task to a merged pull request: plan, write, review, publish, CI, merge.',
         },
+        {
+          name: 'reply',
+          description: 'Answers the request in one Step.',
+        },
       ]),
     async startRun(input) {
       const run: Run = {

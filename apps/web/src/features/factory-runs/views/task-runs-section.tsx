@@ -19,7 +19,7 @@ import {
 import { RunStatusDot, runStatusDetail } from '../components/run-status';
 import { StartRunDialog } from '../components/start-run-dialog';
 import { useRunsContext } from '../context/runs-context';
-import { runStatus, runTitle } from '../core/run';
+import { runStatus, runTitle, startableFlows } from '../core/run';
 import { RunView } from '../run-view';
 
 /** Starts a Run on the task with the Flows the factory offers. */
@@ -30,10 +30,14 @@ function StartRun(props: {
 }) {
   const context = useRunsContext();
   const flows = context.flows();
+  const offered = () => {
+    const data = flows.data();
+    return data && startableFlows(data);
+  };
 
   return (
     <StartRunDialog
-      flows={flows.data()}
+      flows={offered()}
       flowsState={flows.state()}
       onRetryFlows={flows.retry}
       onOpenChange={(open) => !open && props.onClose()}

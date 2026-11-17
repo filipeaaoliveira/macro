@@ -56,6 +56,17 @@ export type Flow = {
   description: string;
 };
 
+/**
+ * Flows whose Runs work on a repository. Starting one needs a repository,
+ * which the New run dialog doesn't ask for yet, so it isn't offered.
+ */
+const REPOSITORY_FLOWS = new Set(['code']);
+
+/** The Flows the New run dialog offers: those that need no repository. */
+export function startableFlows(flows: Flow[]): Flow[] {
+  return flows.filter((flow) => !REPOSITORY_FLOWS.has(flow.name));
+}
+
 /** Where a Run is now. */
 export type RunStatus =
   /** A Step is running, or the next one is about to start. */

@@ -114,6 +114,10 @@ function mount(
                 name: 'code',
                 description: 'Takes a task to a merged pull request.',
               },
+              {
+                name: 'reply',
+                description: 'Answers the request.',
+              },
             ],
       retry: options.flowsRetry ?? vi.fn(),
     }),
@@ -166,18 +170,28 @@ describe('TaskRunsSection', () => {
       target: { value: '  Add a due date column  ' },
     });
     expect(screen.getByRole('radiogroup', { name: 'Flow' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('radio', { name: /Code/ }));
+    fireEvent.click(screen.getByRole('radio', { name: /Reply/ }));
     fireEvent.click(start);
 
     await waitFor(() =>
       expect(context.startRun).toHaveBeenCalledWith({
         taskId: 'task-1',
-        flow: 'code',
+        flow: 'reply',
         request: 'Add a due date column',
       })
     );
     await waitFor(() => expect(openedRuns).toEqual(['run-2']));
     expect(screen.queryByRole('button', { name: 'Start run' })).toBeNull();
+  });
+
+  it('doesn’t offer a Flow that needs a repository', async () => {
+    mount([running]);
+
+    fireEvent.click(screen.getByRole('button', { name: 'New run' }));
+    await screen.findByRole('radiogroup', { name: 'Flow' });
+    expect(screen.getByRole('radio', { name: /Plan/ })).toBeTruthy();
+    expect(screen.getByRole('radio', { name: /Reply/ })).toBeTruthy();
+    expect(screen.queryByRole('radio', { name: /Code/ })).toBeNull();
   });
 
   it('retries a list that couldn’t be loaded', () => {
