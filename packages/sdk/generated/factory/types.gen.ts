@@ -330,7 +330,7 @@ export type Gate = {
 };
 
 /**
- * A person's answer to a Gate.
+ * The answer to a Gate: a person's, or a Standing Rule's (a Rule Answer).
  */
 export type GateAnswer = {
     /**
@@ -351,6 +351,7 @@ export type GateAnswer = {
      * What the person added, for the Run's later Steps to read.
      */
     note?: string | null;
+    rule?: null | StandingRule;
     userId?: null | MacroUserIdStr;
 };
 
@@ -467,6 +468,30 @@ export type NamedCount = {
 };
 
 /**
+ * A workspace's Orchestrator Definition: which kinds of Gate the factory
+ * decides on its own. A kind left off waits for a person, as every Gate
+ * did before Standing Rules. Whatever it says, a Tampered Run's Gates and
+ * a merge through a Main Hold stay a person's.
+ */
+export type OrchestratorDefinition = {
+    /**
+     * Send a review round's Blockers to be fixed (`fix_blockers`), for at
+     * most two fix rounds in a row; Blockers found after those go to a
+     * person.
+     */
+    blockers: boolean;
+    /**
+     * Merge once CI is green, nothing is Tampered and the base branch has
+     * no Main Hold (`merge_when_green`).
+     */
+    merge: boolean;
+    /**
+     * Approve the plan Gate (`approve_plan`).
+     */
+    plan: boolean;
+};
+
+/**
  * How a Step ended, in the words of its Flow (`done`, `clean`, `blockers`,
  * ...). The Flow decides where each outcome takes the Run.
  */
@@ -515,6 +540,20 @@ export type PassedOver = {
      * Why it could not start, as a code such as `ai_allowance_exhausted`.
      */
     reason: string;
+};
+
+/**
+ * A Project's own Standing Rules, which its team set.
+ */
+export type ProjectRules = {
+    /**
+     * Which kinds of Gate its rules decide.
+     */
+    definition: OrchestratorDefinition;
+    /**
+     * The Project: an initiative's id.
+     */
+    projectId: string;
 };
 
 /**
@@ -660,6 +699,11 @@ export type ReviewRoundOutcome = 'pass' | 'changes' | 'failed';
 export type Role = string;
 
 /**
+ * Where a Run's Standing Rules came from.
+ */
+export type RulesSource = 'default' | 'team' | 'project';
+
+/**
  * One Run of a Flow.
  */
 export type Run = {
@@ -684,6 +728,7 @@ export type Run = {
      * What the Run was asked to do.
      */
     request: string;
+    standingRules?: null | RunRules;
     /**
      * The Macro task the Run works on: its task document's id. None when
      * the Run has no task, or its task was deleted.
@@ -828,6 +873,25 @@ export type RunLink = {
 export type RunOutcome = 'success' | 'manual' | 'blocked' | 'failed' | 'cancelled';
 
 /**
+ * The Standing Rules a Run keeps from when it was created.
+ */
+export type RunRules = {
+    /**
+     * Which kinds of Gate its rules decide.
+     */
+    definition: OrchestratorDefinition;
+    /**
+     * The Project (an initiative) they were set for, when they are a
+     * Project's.
+     */
+    projectId?: string | null;
+    /**
+     * Where they came from.
+     */
+    source: RulesSource;
+};
+
+/**
  * One of the period's Runs and the tokens its agent Steps used.
  */
 export type RunTokens = {
@@ -852,6 +916,48 @@ export type SetControlFilesRequest = {
      * factory's default; an empty list checks no file.
      */
     patterns?: Array<string> | null;
+};
+
+/**
+ * Request body for setting an Orchestrator Definition.
+ */
+export type SetStandingRulesRequest = {
+    definition?: null | OrchestratorDefinition;
+};
+
+/**
+ * A Standing Rule: the answer the factory gives a Gate of one kind on its
+ * own, when what the rule requires holds.
+ */
+export type StandingRule = 'approve_plan' | 'fix_blockers' | 'merge_when_green';
+
+/**
+ * The Standing Rules a person's Runs are created with: their team's
+ * Orchestrator Definition, or the factory's default, and the team's
+ * Projects' own, which replace it for a Run whose task is in one.
+ */
+export type StandingRulesSettings = {
+    /**
+     * Whether the person may change them: they administer the team.
+     */
+    canEdit: boolean;
+    /**
+     * Which kinds of Gate the factory answers on its own.
+     */
+    definition: OrchestratorDefinition;
+    /**
+     * Whether it is the factory's default: the team set none, or the
+     * person is on no team.
+     */
+    isDefault: boolean;
+    /**
+     * The team's Projects that have their own, by the initiative's id.
+     */
+    projects: Array<ProjectRules>;
+    /**
+     * The team whose rules they are; none when the person is on no team.
+     */
+    teamId?: string | null;
 };
 
 /**
@@ -1251,6 +1357,76 @@ export type SetFactoryControlFilesResponses = {
 };
 
 export type SetFactoryControlFilesResponse = SetFactoryControlFilesResponses[keyof SetFactoryControlFilesResponses];
+
+export type GetFactoryStandingRulesData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/settings/standing-rules';
+};
+
+export type GetFactoryStandingRulesErrors = {
+    401: ErrorResponse;
+    403: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type GetFactoryStandingRulesError = GetFactoryStandingRulesErrors[keyof GetFactoryStandingRulesErrors];
+
+export type GetFactoryStandingRulesResponses = {
+    200: StandingRulesSettings;
+};
+
+export type GetFactoryStandingRulesResponse = GetFactoryStandingRulesResponses[keyof GetFactoryStandingRulesResponses];
+
+export type SetFactoryStandingRulesData = {
+    body: SetStandingRulesRequest;
+    path?: never;
+    query?: never;
+    url: '/settings/standing-rules';
+};
+
+export type SetFactoryStandingRulesErrors = {
+    400: ErrorResponse;
+    401: ErrorResponse;
+    403: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type SetFactoryStandingRulesError = SetFactoryStandingRulesErrors[keyof SetFactoryStandingRulesErrors];
+
+export type SetFactoryStandingRulesResponses = {
+    200: StandingRulesSettings;
+};
+
+export type SetFactoryStandingRulesResponse = SetFactoryStandingRulesResponses[keyof SetFactoryStandingRulesResponses];
+
+export type SetFactoryProjectStandingRulesData = {
+    body: SetStandingRulesRequest;
+    path: {
+        /**
+         * The Project: an initiative's id.
+         */
+        project_id: string;
+    };
+    query?: never;
+    url: '/settings/standing-rules/projects/{project_id}';
+};
+
+export type SetFactoryProjectStandingRulesErrors = {
+    400: ErrorResponse;
+    401: ErrorResponse;
+    403: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type SetFactoryProjectStandingRulesError = SetFactoryProjectStandingRulesErrors[keyof SetFactoryProjectStandingRulesErrors];
+
+export type SetFactoryProjectStandingRulesResponses = {
+    200: StandingRulesSettings;
+};
+
+export type SetFactoryProjectStandingRulesResponse = SetFactoryProjectStandingRulesResponses[keyof SetFactoryProjectStandingRulesResponses];
 
 export type ListFactoryTaskRunsData = {
     body?: never;

@@ -7,11 +7,12 @@
 
 import type { GateAnswerApprovedControlFiles } from './gateAnswerApprovedControlFiles';
 import type { GateAnswerNote } from './gateAnswerNote';
+import type { GateAnswerRule } from './gateAnswerRule';
 import type { GateAnswerUserId } from './gateAnswerUserId';
 import type { Outcome } from './outcome';
 
 /**
- * A person's answer to a Gate.
+ * The answer to a Gate: a person's, or a Standing Rule's (a Rule Answer).
  */
 export interface GateAnswer {
   /** The answer, one the Gate offered: the outcome the Flow routes. */
@@ -24,5 +25,6 @@ when the answer approved none. */
   approvedControlFiles?: GateAnswerApprovedControlFiles;
   /** What the person added, for the Run's later Steps to read. */
   note?: GateAnswerNote;
+  rule?: GateAnswerRule;
   userId?: GateAnswerUserId;
 }

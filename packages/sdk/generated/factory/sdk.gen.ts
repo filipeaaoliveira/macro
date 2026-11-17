@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AnswerFactoryGateData, AnswerFactoryGateErrors, AnswerFactoryGateResponses, CancelFactoryRunData, CancelFactoryRunErrors, CancelFactoryRunResponses, CreateFactoryRunData, CreateFactoryRunErrors, CreateFactoryRunResponses, GetFactoryControlFilesData, GetFactoryControlFilesErrors, GetFactoryControlFilesResponses, GetFactoryInsightsData, GetFactoryInsightsErrors, GetFactoryInsightsResponses, GetFactoryRunData, GetFactoryRunErrors, GetFactoryRunResponses, HandBackFactoryStepData, HandBackFactoryStepErrors, HandBackFactoryStepResponses, LinkFactoryRunTaskData, LinkFactoryRunTaskErrors, LinkFactoryRunTaskResponses, ListFactoryFlowsData, ListFactoryFlowsErrors, ListFactoryFlowsResponses, ListFactoryTaskRunsData, ListFactoryTaskRunsErrors, ListFactoryTaskRunsResponses, SetFactoryControlFilesData, SetFactoryControlFilesErrors, SetFactoryControlFilesResponses } from './types.gen';
+import type { AnswerFactoryGateData, AnswerFactoryGateErrors, AnswerFactoryGateResponses, CancelFactoryRunData, CancelFactoryRunErrors, CancelFactoryRunResponses, CreateFactoryRunData, CreateFactoryRunErrors, CreateFactoryRunResponses, GetFactoryControlFilesData, GetFactoryControlFilesErrors, GetFactoryControlFilesResponses, GetFactoryInsightsData, GetFactoryInsightsErrors, GetFactoryInsightsResponses, GetFactoryRunData, GetFactoryRunErrors, GetFactoryRunResponses, GetFactoryStandingRulesData, GetFactoryStandingRulesErrors, GetFactoryStandingRulesResponses, HandBackFactoryStepData, HandBackFactoryStepErrors, HandBackFactoryStepResponses, LinkFactoryRunTaskData, LinkFactoryRunTaskErrors, LinkFactoryRunTaskResponses, ListFactoryFlowsData, ListFactoryFlowsErrors, ListFactoryFlowsResponses, ListFactoryTaskRunsData, ListFactoryTaskRunsErrors, ListFactoryTaskRunsResponses, SetFactoryControlFilesData, SetFactoryControlFilesErrors, SetFactoryControlFilesResponses, SetFactoryProjectStandingRulesData, SetFactoryProjectStandingRulesErrors, SetFactoryProjectStandingRulesResponses, SetFactoryStandingRulesData, SetFactoryStandingRulesErrors, SetFactoryStandingRulesResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -171,6 +171,50 @@ export class Sdk extends HeyApiClient {
     public setFactoryControlFiles<ThrowOnError extends boolean = false>(options: Options<SetFactoryControlFilesData, ThrowOnError>): RequestResult<SetFactoryControlFilesResponses, SetFactoryControlFilesErrors, ThrowOnError> {
         return (options.client ?? this.client).put<SetFactoryControlFilesResponses, SetFactoryControlFilesErrors, ThrowOnError>({
             url: '/settings/control-files',
+            ...options,
+            headers: {
+                'Content-Type': 'application/json',
+                ...options.headers
+            }
+        });
+    }
+
+    /**
+     * The Standing Rules the caller's Runs are created with: their team's, or
+     * the factory's default, the team's Projects' own, and whether the caller
+     * may change them.
+     */
+    public getFactoryStandingRules<ThrowOnError extends boolean = false>(options?: Options<GetFactoryStandingRulesData, ThrowOnError>): RequestResult<GetFactoryStandingRulesResponses, GetFactoryStandingRulesErrors, ThrowOnError> {
+        return (options?.client ?? this.client).get<GetFactoryStandingRulesResponses, GetFactoryStandingRulesErrors, ThrowOnError>({ url: '/settings/standing-rules', ...options });
+    }
+
+    /**
+     * Set the Orchestrator Definition of the caller's team, or go back to the
+     * factory's default. It applies to Runs created from now on. Only an admin
+     * or the owner of the team sets it, in their own signed-in session (403
+     * otherwise): a rule answers Gates in its place.
+     */
+    public setFactoryStandingRules<ThrowOnError extends boolean = false>(options: Options<SetFactoryStandingRulesData, ThrowOnError>): RequestResult<SetFactoryStandingRulesResponses, SetFactoryStandingRulesErrors, ThrowOnError> {
+        return (options.client ?? this.client).put<SetFactoryStandingRulesResponses, SetFactoryStandingRulesErrors, ThrowOnError>({
+            url: '/settings/standing-rules',
+            ...options,
+            headers: {
+                'Content-Type': 'application/json',
+                ...options.headers
+            }
+        });
+    }
+
+    /**
+     * Set the Orchestrator Definition of the caller's team for one Project,
+     * which replaces the team's for Runs created on a task in it, or remove
+     * it. The caller must administer the team, in their own signed-in session
+     * (403 otherwise), and be able to edit the Project (400 otherwise, as for
+     * one that does not exist).
+     */
+    public setFactoryProjectStandingRules<ThrowOnError extends boolean = false>(options: Options<SetFactoryProjectStandingRulesData, ThrowOnError>): RequestResult<SetFactoryProjectStandingRulesResponses, SetFactoryProjectStandingRulesErrors, ThrowOnError> {
+        return (options.client ?? this.client).put<SetFactoryProjectStandingRulesResponses, SetFactoryProjectStandingRulesErrors, ThrowOnError>({
+            url: '/settings/standing-rules/projects/{project_id}',
             ...options,
             headers: {
                 'Content-Type': 'application/json',

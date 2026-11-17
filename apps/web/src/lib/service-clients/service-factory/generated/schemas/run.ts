@@ -10,6 +10,7 @@ import type { RunControlFiles } from './runControlFiles';
 import type { RunEndProperty } from './runEndProperty';
 import type { RunId } from './runId';
 import type { RunRepository } from './runRepository';
+import type { RunStandingRules } from './runStandingRules';
 import type { RunTaskId } from './runTaskId';
 
 /**
@@ -29,6 +30,7 @@ the Control Files it names. */
   repository?: RunRepository;
   /** What the Run was asked to do. */
   request: string;
+  standingRules?: RunStandingRules;
   /** The Macro task the Run works on: its task document's id. None when
 the Run has no task, or its task was deleted. */
   taskId?: RunTaskId;
