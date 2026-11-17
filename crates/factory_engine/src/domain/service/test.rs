@@ -2,8 +2,8 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use factory_records::domain::models::{
-    AgentName, EntryId, HandBack, HandedBack, Outcome, Role, RunId, RunInsert, RunOutcome, StepKey,
-    StepSession,
+    AgentName, EntryId, HandBack, HandedBack, NewRun, Outcome, Role, RunId, RunInsert, RunOutcome,
+    StepKey, StepSession,
 };
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
@@ -213,15 +213,15 @@ fn code_service(
 /// A Run of Julia's, kept with no task.
 async fn julia_s_run(repo: &FakeRepo) -> RunId {
     match repo
-        .insert_run(
-            RunId::generate(),
-            "plan",
-            "Plan",
-            &julia(),
-            None,
-            None,
-            false,
-        )
+        .insert_run(NewRun {
+            id: RunId::generate(),
+            flow: "plan",
+            request: "Plan",
+            user_id: &julia(),
+            task_id: None,
+            repository: None,
+            created_in_person: false,
+        })
         .await
         .expect("insert")
     {
@@ -1045,15 +1045,15 @@ async fn a_task_s_list_holds_its_owner_s_fifty_newest_runs() {
     let mut started = Vec::new();
     for n in 0..51 {
         match repo
-            .insert_run(
-                RunId::generate(),
-                "plan",
-                &format!("Run {n}"),
-                &julia(),
-                Some(task_id),
-                None,
-                false,
-            )
+            .insert_run(NewRun {
+                id: RunId::generate(),
+                flow: "plan",
+                request: &format!("Run {n}"),
+                user_id: &julia(),
+                task_id: Some(task_id),
+                repository: None,
+                created_in_person: false,
+            })
             .await
             .expect("insert")
         {

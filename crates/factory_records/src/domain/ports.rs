@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::domain::models::{
     CheckRound, CheckRoundOutcome, CheckRoundStart, ClaimedSession, ControlFileChanges, EntryId,
-    HandBack, HandedBack, Outcome, PassedOver, Repository, Role, Run, RunId, RunInsert, RunOutcome,
+    HandBack, HandedBack, NewRun, Outcome, PassedOver, Role, Run, RunId, RunInsert, RunOutcome,
     SessionStep, Step, StepKey, StepSession, StoppingSession, TaskLink, TeamMembership,
 };
 
@@ -20,19 +20,11 @@ pub trait RunRepository: Send + Sync + 'static {
     /// The error type returned by repository operations.
     type Err: std::error::Error + Send + Sync + 'static;
 
-    /// Keep a new Run of `user_id` that has not started yet, of the built-in
-    /// Flow named `flow`, working on the task document `task_id` and in
-    /// `repository` if they are given, in one write. `created_in_person`
-    /// says whether its owner created it in their own signed-in session.
+    /// Keep `run`, a new Run that has not started yet, working on its task
+    /// document and in its repository if they are given, in one write.
     fn insert_run(
         &self,
-        id: RunId,
-        flow: &str,
-        request: &str,
-        user_id: &MacroUserIdStr<'static>,
-        task_id: Option<Uuid>,
-        repository: Option<&Repository>,
-        created_in_person: bool,
+        run: NewRun<'_>,
     ) -> impl Future<Output = Result<RunInsert, Self::Err>> + Send;
 
     /// Link the Run to the task document `task_id`, replacing any task it

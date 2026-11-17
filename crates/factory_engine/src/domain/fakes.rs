@@ -7,7 +7,7 @@ use agent_session::domain::session_task::TaskDocumentId;
 use chrono::Utc;
 use factory_records::domain::models::{
     CheckRound, CheckRoundEnd, CheckRoundOutcome, CheckRoundStart, ClaimedSession,
-    ControlFileChanges, EntryId, Gate, HandBack, HandedBack, Outcome, PassedOver, Repository, Role,
+    ControlFileChanges, EntryId, Gate, HandBack, HandedBack, NewRun, Outcome, PassedOver, Role,
     Run, RunEnd, RunId, RunInsert, RunOutcome, SessionStep, Step, StepEnd, StepKey, StepSession,
     StoppingSession, TaskLink, TeamMembership,
 };
@@ -143,16 +143,16 @@ impl FakeRepo {
 impl RunRepository for FakeRepo {
     type Err = FakeError;
 
-    async fn insert_run(
-        &self,
-        id: RunId,
-        _flow: &str,
-        request: &str,
-        user_id: &MacroUserIdStr<'static>,
-        task_id: Option<Uuid>,
-        repository: Option<&Repository>,
-        created_in_person: bool,
-    ) -> Result<RunInsert, FakeError> {
+    async fn insert_run(&self, new: NewRun<'_>) -> Result<RunInsert, FakeError> {
+        let NewRun {
+            id,
+            request,
+            user_id,
+            task_id,
+            repository,
+            created_in_person,
+            ..
+        } = new;
         if let Some(task_id) = task_id
             && !self.tasks.lock().expect("tasks").contains(&task_id)
         {

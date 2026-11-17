@@ -380,6 +380,25 @@ pub struct Repository {
     pub base_branch: String,
 }
 
+/// A Run to keep before it starts.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NewRun<'a> {
+    /// Its id, also its Temporal workflow id.
+    pub id: RunId,
+    /// The built-in Flow it walks, by name.
+    pub flow: &'a str,
+    /// What it is asked to do.
+    pub request: &'a str,
+    /// Who owns it.
+    pub user_id: &'a MacroUserIdStr<'static>,
+    /// The task document it works on, if any.
+    pub task_id: Option<Uuid>,
+    /// The repository it works in, if any.
+    pub repository: Option<&'a Repository>,
+    /// Whether its owner created it in their own signed-in session.
+    pub created_in_person: bool,
+}
+
 /// What keeping a new Run came to.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RunInsert {

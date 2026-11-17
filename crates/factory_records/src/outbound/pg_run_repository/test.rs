@@ -5,8 +5,8 @@ use uuid::Uuid;
 
 use super::PgRunRepository;
 use crate::domain::models::{
-    AgentName, ClaimedSession, EntryId, HandBack, HandedBack, Outcome, PassedOver, Repository,
-    Role, Run, RunId, RunInsert, RunOutcome, StepKey, StepSession, TaskLink,
+    AgentName, ClaimedSession, EntryId, HandBack, HandedBack, NewRun, Outcome, PassedOver,
+    Repository, Role, Run, RunId, RunInsert, RunOutcome, StepKey, StepSession, TaskLink,
 };
 use crate::domain::ports::RunRepository;
 
@@ -38,7 +38,15 @@ fn key(run_id: RunId, seq: u16) -> StepKey {
 /// Keep a new Run of Julia's with no task.
 async fn insert(repo: &PgRunRepository, id: RunId, request: &str) -> Run {
     match repo
-        .insert_run(id, "plan", request, &julia(), None, None, false)
+        .insert_run(NewRun {
+            id,
+            flow: "plan",
+            request,
+            user_id: &julia(),
+            task_id: None,
+            repository: None,
+            created_in_person: false,
+        })
         .await
         .expect("insert")
     {
@@ -334,15 +342,15 @@ async fn a_run_keeps_its_repository_and_the_commit_it_asks_to_merge(pool: PgPool
     };
 
     let inserted = repo
-        .insert_run(
+        .insert_run(NewRun {
             id,
-            "code",
-            "Collapse dashes",
-            &julia(),
-            None,
-            Some(&repository),
-            false,
-        )
+            flow: "code",
+            request: "Collapse dashes",
+            user_id: &julia(),
+            task_id: None,
+            repository: Some(&repository),
+            created_in_person: false,
+        })
         .await
         .expect("insert");
     repo.set_merge_head(id, "1111111111111111111111111111111111111111")
@@ -376,27 +384,27 @@ async fn a_run_is_kept_with_its_task_in_one_write(pool: PgPool) {
     let id = RunId::generate();
 
     let inserted = repo
-        .insert_run(
+        .insert_run(NewRun {
             id,
-            "plan",
-            "Fix the login bug",
-            &julia(),
-            Some(task(LOGIN_TASK)),
-            None,
-            false,
-        )
+            flow: "plan",
+            request: "Fix the login bug",
+            user_id: &julia(),
+            task_id: Some(task(LOGIN_TASK)),
+            repository: None,
+            created_in_person: false,
+        })
         .await
         .expect("insert");
     let missing = repo
-        .insert_run(
-            RunId::generate(),
-            "plan",
-            "Fix the login bug",
-            &julia(),
-            Some(Uuid::now_v7()),
-            None,
-            false,
-        )
+        .insert_run(NewRun {
+            id: RunId::generate(),
+            flow: "plan",
+            request: "Fix the login bug",
+            user_id: &julia(),
+            task_id: Some(Uuid::now_v7()),
+            repository: None,
+            created_in_person: false,
+        })
         .await
         .expect("insert for a missing task");
 
@@ -1155,15 +1163,15 @@ async fn insert_on_task(
 ) -> RunId {
     let id = RunId::generate();
     match repo
-        .insert_run(
+        .insert_run(NewRun {
             id,
-            "plan",
+            flow: "plan",
             request,
             user_id,
-            Some(task(task_id)),
-            None,
-            false,
-        )
+            task_id: Some(task(task_id)),
+            repository: None,
+            created_in_person: false,
+        })
         .await
         .expect("insert")
     {

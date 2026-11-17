@@ -7,8 +7,8 @@ mod test;
 use agent_session::domain::session_task::TaskDocumentId;
 use chrono::Utc;
 use factory_records::domain::models::{
-    HandBack, MAX_NOTE_BYTES, MAX_OUTPUT_BYTES, MAX_REQUEST_BYTES, Outcome, Repository, Run, RunId,
-    RunInsert, RunOutcome, TaskLink,
+    HandBack, MAX_NOTE_BYTES, MAX_OUTPUT_BYTES, MAX_REQUEST_BYTES, NewRun, Outcome, Repository,
+    Run, RunId, RunInsert, RunOutcome, TaskLink,
 };
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
@@ -240,15 +240,15 @@ where
         tracing::Span::current().record("run_id", tracing::field::display(run_id));
         let run = match self
             .repo
-            .insert_run(
-                run_id,
-                built_in.name,
-                &request,
-                &actor,
+            .insert_run(NewRun {
+                id: run_id,
+                flow: built_in.name,
+                request: &request,
+                user_id: &actor,
                 task_id,
-                repository.as_ref(),
-                in_person,
-            )
+                repository: repository.as_ref(),
+                created_in_person: in_person,
+            })
             .await
             .map_err(internal)?
         {

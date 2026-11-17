@@ -6,7 +6,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use super::{entry, insert, julia, key, outcome};
-use crate::domain::models::{ControlFileChanges, RunId, RunInsert, TeamMembership};
+use crate::domain::models::{ControlFileChanges, NewRun, RunId, RunInsert, TeamMembership};
 use crate::domain::ports::RunRepository;
 use crate::outbound::pg_run_repository::PgRunRepository;
 
@@ -25,7 +25,15 @@ async fn a_run_keeps_whether_it_was_created_in_person(pool: PgPool) {
     for in_person in [true, false] {
         let id = RunId::generate();
         let RunInsert::Inserted(inserted) = repo
-            .insert_run(id, "plan", "Fix it", &julia(), None, None, in_person)
+            .insert_run(NewRun {
+                id,
+                flow: "plan",
+                request: "Fix it",
+                user_id: &julia(),
+                task_id: None,
+                repository: None,
+                created_in_person: in_person,
+            })
             .await
             .expect("insert")
         else {

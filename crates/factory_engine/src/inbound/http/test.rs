@@ -4,7 +4,9 @@ use axum::Router;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode};
 use bot_id::BotId;
-use factory_records::domain::models::{EntryId, HandBack, Outcome, RunId, RunInsert, StepKey};
+use factory_records::domain::models::{
+    EntryId, HandBack, NewRun, Outcome, RunId, RunInsert, StepKey,
+};
 use factory_records::domain::ports::RunRepository;
 use macro_authorization::{
     AuthorizedUserApiKey, CODE_EXECUTION_HEADER, CredentialOrigin, INTERNAL_API_KEY_HEADER,
@@ -309,15 +311,15 @@ fn github_router(repo: &FakeRepo, github: FakeGithub) -> Router {
 async fn alice_s_run(repo: &FakeRepo) -> RunId {
     let alice = MacroUserIdStr::try_from(ALICE.to_string()).expect("valid");
     match repo
-        .insert_run(
-            RunId::generate(),
-            "plan",
-            "Plan the export",
-            &alice,
-            None,
-            None,
-            false,
-        )
+        .insert_run(NewRun {
+            id: RunId::generate(),
+            flow: "plan",
+            request: "Plan the export",
+            user_id: &alice,
+            task_id: None,
+            repository: None,
+            created_in_person: false,
+        })
         .await
         .expect("insert")
     {

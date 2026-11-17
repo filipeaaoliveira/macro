@@ -194,22 +194,23 @@ async fn a_team_admin_sets_the_team_s_control_files() {
     let repo = FakeRepo::default();
     let service = service(&repo, &FakeWorkflows::default());
     let team_id = Uuid::now_v7();
-    let mut teams = repo.teams.lock().expect("teams");
-    teams.insert(
-        julia().to_string(),
-        TeamMembership {
-            team_id,
-            admin: true,
-        },
-    );
-    teams.insert(
-        teo().to_string(),
-        TeamMembership {
-            team_id,
-            admin: false,
-        },
-    );
-    drop(teams);
+    {
+        let mut teams = repo.teams.lock().expect("teams");
+        teams.insert(
+            julia().to_string(),
+            TeamMembership {
+                team_id,
+                admin: true,
+            },
+        );
+        teams.insert(
+            teo().to_string(),
+            TeamMembership {
+                team_id,
+                admin: false,
+            },
+        );
+    }
     let own = files(&["ci/**"]);
 
     let before = service.control_files(&teo()).await.expect("read");

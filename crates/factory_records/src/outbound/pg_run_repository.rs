@@ -14,9 +14,9 @@ use uuid::Uuid;
 
 use crate::domain::models::{
     AgentName, CheckRound, CheckRoundOutcome, CheckRoundStart, ClaimedSession, ControlFileChanges,
-    EntryId, Gate, GateAnswer, HandBack, HandedBack, InvalidName, Outcome, PassedOver, Repository,
-    Role, Run, RunEnd, RunId, RunInsert, RunOutcome, SessionStep, Step, StepEnd, StepKey,
-    StepSession, StoppingSession, TaskLink, TeamMembership,
+    EntryId, Gate, GateAnswer, HandBack, HandedBack, InvalidName, NewRun, Outcome, PassedOver,
+    Repository, Role, Run, RunEnd, RunId, RunInsert, RunOutcome, SessionStep, Step, StepEnd,
+    StepKey, StepSession, StoppingSession, TaskLink, TeamMembership,
 };
 use crate::domain::ports::RunRepository;
 
@@ -273,17 +273,8 @@ impl TryFrom<StepRow> for Step {
 impl RunRepository for PgRunRepository {
     type Err = PgRunRepositoryErr;
 
-    #[tracing::instrument(err, skip(self, request, user_id))]
-    async fn insert_run(
-        &self,
-        id: RunId,
-        flow: &str,
-        request: &str,
-        user_id: &MacroUserIdStr<'static>,
-        task_id: Option<Uuid>,
-        repository: Option<&Repository>,
-        created_in_person: bool,
-    ) -> Result<RunInsert, Self::Err> {
+    #[tracing::instrument(err, skip_all, fields(id = %run.id))]
+    async fn insert_run(&self, run: NewRun<'_>) -> Result<RunInsert, Self::Err> {
         let inserted = sqlx::query_as!(
             RunRow,
             r#"
@@ -294,14 +285,15 @@ impl RunRepository for PgRunRepository {
                 id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,
                 tampered_files, named_control_files, control_files_unlisted, outcome, ended_at
             "#,
-            id.as_uuid(),
-            flow,
-            request,
-            user_id.as_ref(),
-            task_id.map(|task_id| task_id.to_string()),
-            repository.map(|repository| repository.url.as_str()),
-            repository.map(|repository| repository.base_branch.as_str()),
-            created_in_person,
+            run.id.as_uuid(),
+            run.flow,
+            run.request,
+            run.user_id.as_ref(),
+            run.task_id.map(|task_id| task_id.to_string()),
+            run.repository.map(|repository| repository.url.as_str()),
+            run.repository
+                .map(|repository| repository.base_branch.as_str()),
+            run.created_in_person,
         )
         .fetch_one(&self.pool)
         .await;
