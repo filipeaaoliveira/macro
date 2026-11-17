@@ -53,8 +53,28 @@ worker that walks each Run's Flow, in one process.
   Run's owner must be allowed to use; an optional `model` and
   `instructions`), and `roles` lists, for each Role, the Agents that fill it
   in order (`factory_engine`'s `domain/agents.rs`). The service refuses to
-  start when a Role a built-in Flow names has no Agent. Unset, the agent
-  Steps run on `LocalAgent`, which does no work. Locally, set it in the
+  start when a Role a built-in Flow names has no Agent. For example, with a
+  backup for planning when the first Agent's quota runs out:
+
+  ```json
+  {
+    "agents": {
+      "primary": { "bot": "<agent id>", "model": "<model>" },
+      "backup": { "bot": "<another agent id>", "instructions": "<text>" }
+    },
+    "roles": {
+      "planner": ["primary", "backup"],
+      "writer": ["primary"],
+      "reviewer": ["backup"],
+      "fixer": ["primary"]
+    }
+  }
+  ```
+
+  Unset, the agent Steps run on `LocalAgent`, which does no work, unless the
+  retired `FACTORY_AGENT_ID` is set: then the service refuses to start and
+  names `FACTORY_AGENTS`. It is optional and the service has no Doppler
+  project yet, so it has no Doppler entry or boot stub. Locally, set it in the
   `--env-file` the stack is started with
   (`docs/development/running-locally.md`). A macrod agent's sessions need
   its machine connected, and routine apps are refused for it.

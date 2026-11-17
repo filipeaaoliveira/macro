@@ -18,7 +18,6 @@ use config::Config;
 use document_storage_service_client::DocumentStorageServiceClient;
 use entity_access::domain::service::EntityAccessServiceImpl;
 use entity_access::outbound::PgAccessRepository;
-use factory_engine::domain::built_in_flows::built_in_roles;
 use factory_engine::domain::built_in_steps::BuiltInSteps;
 use factory_engine::domain::insights::InsightsServiceImpl;
 use factory_engine::domain::ports::StepAgent;
@@ -136,9 +135,15 @@ async fn run() -> Result<(), rootcause::Report> {
     // The agent Steps run as the Run's owner in sessions of the Agents each
     // Role takes, which must fill every Role a built-in Flow names. Without
     // them, they run on the local stand-in, which does no work.
+    if config.factory_agents.is_none() && config.factory_agent_id.is_some() {
+        return Err(rootcause::report!(
+            "FACTORY_AGENT_ID is no longer read: set FACTORY_AGENTS to the agent definition \
+             (services/factory_service/AGENTS.md)"
+        ));
+    }
     match config.factory_agents {
         Some(agents) => {
-            agents.fills(&built_in_roles()?)?;
+            agents.fills_built_in_flows()?;
             let sessions = AgentSessionClient::new(
                 AgentHarnessServiceUrl::new()?.as_ref(),
                 config.internal_api_key.as_ref(),

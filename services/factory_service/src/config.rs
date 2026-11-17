@@ -37,4 +37,7 @@ pub struct Config {
     /// each Role takes, in order, as JSON (`FACTORY_AGENTS`). Unset, the
     /// agent Steps run on a local stand-in that does no work.
     pub factory_agents: Option<AgentDefinition>,
+    /// No longer read: set alone, the service refuses to start and names
+    /// `FACTORY_AGENTS`, rather than run the agent Steps on the stand-in.
+    pub factory_agent_id: Option<String>,
 }
