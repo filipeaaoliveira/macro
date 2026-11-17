@@ -11,6 +11,8 @@ use macro_user_id::user_id::MacroUserIdStr;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::domain::standing_rules::{RunRules, StandingRule};
+
 /// The most bytes a Run's request may hold (the `factory_run.request` check).
 pub const MAX_REQUEST_BYTES: usize = 65_536;
 
@@ -325,6 +327,10 @@ pub struct Run {
     /// The Control Files its branch changed, as the pull request Steps last
     /// read them. None when it changed none.
     pub control_files: Option<ControlFileChanges>,
+    /// The Standing Rules that answer its Gates, as they were when it was
+    /// created; none for a Run created before Runs kept them, whose Gates
+    /// all wait for a person.
+    pub standing_rules: Option<RunRules>,
     /// How and when it ended; none while it runs.
     pub end: Option<RunEnd>,
 }
@@ -411,6 +417,8 @@ pub struct NewRun<'a> {
     pub control_file_patterns: &'a [String],
     /// The team those patterns came from; none when they are the default.
     pub control_files_team_id: Option<Uuid>,
+    /// The Standing Rules that answer its Gates.
+    pub standing_rules: RunRules,
 }
 
 /// What keeping a new Run came to.
@@ -446,7 +454,7 @@ pub struct StepEnd {
     pub ended_at: DateTime<Utc>,
 }
 
-/// A person's answer to a Gate.
+/// The answer to a Gate: a person's, or a Standing Rule's (a Rule Answer).
 #[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GateAnswer {
@@ -454,8 +462,12 @@ pub struct GateAnswer {
     pub answer: Outcome,
     /// What the person added, for the Run's later Steps to read.
     pub note: Option<String>,
-    /// Who answered; none once their account is gone.
+    /// Who answered; none once their account is gone, and for a Rule
+    /// Answer.
     pub user_id: Option<MacroUserIdStr<'static>>,
+    /// The Standing Rule that answered, for a Rule Answer; none for a
+    /// person's.
+    pub rule: Option<StandingRule>,
     /// The Run's Tampered files the person approved with their answer: an
     /// empty list approves a Run whose changes GitHub could not list. None
     /// when the answer approved none.

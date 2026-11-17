@@ -4,6 +4,7 @@ mod check_rounds;
 mod insights;
 mod main_hold;
 mod review_rounds;
+mod standing_rules;
 #[cfg(test)]
 mod test;
 
@@ -21,6 +22,7 @@ use crate::domain::models::{
     Step, StepEnd, StepKey, StepSession, StoppingSession, TaskLink, TeamMembership,
 };
 use crate::domain::ports::RunRepository;
+use crate::domain::standing_rules::{OrchestratorDefinition, RulesSource, RunRules, StandingRule};
 
 /// The foreign key from a Run to its task document.
 const TASK_FOREIGN_KEY: &str = "factory_run_task_id_fkey";
@@ -96,6 +98,13 @@ pub enum PgRunRepositoryErr {
     /// A stored Run has only part of the Control Files its branch changed.
     #[error("a stored run has only part of the control files its branch changed")]
     PartialControlFiles,
+    /// A stored Run has only part of its Standing Rules.
+    #[error("a stored run has only part of its standing rules")]
+    PartialStandingRules,
+    /// A stored Gate kind, rule or rules' source is not one this code
+    /// knows.
+    #[error("unknown standing rules {0:?}")]
+    UnknownStandingRules(Vec<String>),
     /// A stored Gate has only part of its question or its answer.
     #[error("a stored gate has only part of its question or its answer")]
     PartialGate,
@@ -137,6 +146,9 @@ struct RunRow {
     tampered_files: Option<Vec<String>>,
     named_control_files: Option<Vec<String>>,
     control_files_unlisted: bool,
+    standing_rules: Option<Vec<String>>,
+    standing_rules_source: Option<String>,
+    standing_rules_project_id: Option<Uuid>,
     outcome: Option<String>,
     ended_at: Option<DateTime<Utc>>,
 }
@@ -159,6 +171,18 @@ impl TryFrom<RunRow> for Run {
             (Some(url), Some(base_branch)) => Some(Repository { url, base_branch }),
             (None, None) => None,
             _ => return Err(PgRunRepositoryErr::PartialRepository),
+        };
+        let standing_rules = match (row.standing_rules, row.standing_rules_source) {
+            (Some(kinds), Some(source)) => Some(RunRules {
+                definition: OrchestratorDefinition::from_kinds(&kinds)
+                    .ok_or(PgRunRepositoryErr::UnknownStandingRules(kinds))?,
+                source: source
+                    .parse::<RulesSource>()
+                    .map_err(|_| PgRunRepositoryErr::UnknownStandingRules(vec![source]))?,
+                project_id: row.standing_rules_project_id,
+            }),
+            (None, None) => None,
+            _ => return Err(PgRunRepositoryErr::PartialStandingRules),
         };
         Ok(Run {
             id: RunId::from_uuid(row.id),
@@ -183,6 +207,7 @@ impl TryFrom<RunRow> for Run {
                 (None, None) => None,
                 _ => return Err(PgRunRepositoryErr::PartialControlFiles),
             },
+            standing_rules,
             end,
         })
     }
@@ -204,6 +229,7 @@ struct StepRow {
     note: Option<String>,
     user_id: Option<String>,
     approved_control_files: Option<Vec<String>>,
+    rule: Option<String>,
     answered_at: Option<DateTime<Utc>>,
     role: Option<String>,
     agent: Option<String>,
@@ -227,6 +253,14 @@ impl StepRow {
                     })
                     .transpose()?,
                 approved_control_files: self.approved_control_files.take(),
+                rule: self
+                    .rule
+                    .take()
+                    .map(|rule| {
+                        rule.parse::<StandingRule>()
+                            .map_err(|_| PgRunRepositoryErr::UnknownStandingRules(vec![rule]))
+                    })
+                    .transpose()?,
                 answered_at,
             }),
             (None, None) => None,
@@ -307,12 +341,14 @@ impl RunRepository for PgRunRepository {
             r#"
             INSERT INTO factory_run (
                 id, flow, request, user_id, task_id, repo_url, base_branch, created_in_person,
-                control_file_patterns, control_files_team_id
+                control_file_patterns, control_files_team_id, standing_rules, standing_rules_source,
+                standing_rules_project_id
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
             RETURNING
                 id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,
-                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted, outcome, ended_at
+                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,
+                standing_rules, standing_rules_source, standing_rules_project_id, outcome, ended_at
             "#,
             run.id.as_uuid(),
             run.flow,
@@ -325,6 +361,9 @@ impl RunRepository for PgRunRepository {
             run.created_in_person,
             run.control_file_patterns,
             run.control_files_team_id,
+            &run.standing_rules.definition.kinds(),
+            run.standing_rules.source.as_ref(),
+            run.standing_rules.project_id,
         )
         .fetch_one(&self.pool)
         .await;
@@ -436,39 +475,41 @@ impl RunRepository for PgRunRepository {
         )
         .fetch_optional(&self.pool)
         .await?;
-        Ok(patterns)
+        Ok(patterns.flatten())
     }
 
+    // The row also keeps the team's Standing Rules: going back to the
+    // default patterns clears them from it, and removes a row left with
+    // neither setting.
     #[tracing::instrument(err, skip(self, patterns))]
     async fn set_team_control_files(
         &self,
         team_id: Uuid,
         patterns: Option<&[String]>,
     ) -> Result<(), Self::Err> {
-        match patterns {
-            Some(patterns) => {
-                sqlx::query!(
-                    r#"
-                    INSERT INTO factory_team_settings (team_id, control_files)
-                    VALUES ($1, $2)
-                    ON CONFLICT (team_id)
-                    DO UPDATE SET control_files = EXCLUDED.control_files, updated_at = now()
-                    "#,
-                    team_id,
-                    patterns,
-                )
-                .execute(&self.pool)
-                .await?;
-            }
-            None => {
-                sqlx::query!(
-                    "DELETE FROM factory_team_settings WHERE team_id = $1",
-                    team_id
-                )
-                .execute(&self.pool)
-                .await?;
-            }
-        }
+        let mut transaction = self.pool.begin().await?;
+        sqlx::query!(
+            r#"
+            INSERT INTO factory_team_settings (team_id, control_files)
+            VALUES ($1, $2)
+            ON CONFLICT (team_id)
+            DO UPDATE SET control_files = EXCLUDED.control_files, updated_at = now()
+            "#,
+            team_id,
+            patterns,
+        )
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query!(
+            r#"
+            DELETE FROM factory_team_settings
+            WHERE team_id = $1 AND control_files IS NULL AND standing_rules IS NULL
+            "#,
+            team_id,
+        )
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
         Ok(())
     }
 
@@ -498,7 +539,8 @@ impl RunRepository for PgRunRepository {
             r#"
             SELECT
                 id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,
-                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted, outcome, ended_at
+                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,
+                standing_rules, standing_rules_source, standing_rules_project_id, outcome, ended_at
             FROM factory_run
             WHERE id = $1
             "#,
@@ -530,6 +572,7 @@ impl RunRepository for PgRunRepository {
                 g.note,
                 g.user_id,
                 g.approved_control_files,
+                g.rule,
                 g.answered_at,
                 s.role,
                 s.agent,
@@ -574,7 +617,8 @@ impl RunRepository for PgRunRepository {
             r#"
             SELECT
                 id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,
-                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted, outcome, ended_at
+                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,
+                standing_rules, standing_rules_source, standing_rules_project_id, outcome, ended_at
             FROM factory_run
             WHERE task_id = $1 AND user_id = $2
             ORDER BY created_at DESC, id DESC
@@ -615,6 +659,7 @@ impl RunRepository for PgRunRepository {
                 g.note,
                 g.user_id,
                 g.approved_control_files,
+                g.rule,
                 g.answered_at,
                 s.role,
                 s.agent,
@@ -700,6 +745,29 @@ impl RunRepository for PgRunRepository {
             i32::from(key.seq),
             question,
             &answers,
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    #[tracing::instrument(err, skip(self), fields(answer = %answer, rule = %rule))]
+    async fn answer_gate_by_rule(
+        &self,
+        key: StepKey,
+        answer: &Outcome,
+        rule: StandingRule,
+    ) -> Result<(), Self::Err> {
+        sqlx::query!(
+            r#"
+            UPDATE factory_gate
+            SET answer = $3, rule = $4, answered_at = now()
+            WHERE run_id = $1 AND seq = $2 AND answer IS NULL
+            "#,
+            key.run_id.as_uuid(),
+            i32::from(key.seq),
+            answer.as_str(),
+            rule.as_ref(),
         )
         .execute(&self.pool)
         .await?;

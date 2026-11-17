@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                s.run_id,\n                s.seq,\n                s.entry,\n                s.visit,\n                s.started_at,\n                s.outcome,\n                s.output,\n                s.ended_at,\n                g.question AS \"question?\",\n                g.answers AS \"answers?\",\n                g.opened_at AS \"opened_at?\",\n                g.answer,\n                g.note,\n                g.user_id,\n                g.approved_control_files,\n                g.answered_at,\n                s.role,\n                s.agent,\n                s.passed_over,\n                s.pass_reasons\n            FROM factory_step s\n            LEFT JOIN factory_gate g ON g.run_id = s.run_id AND g.seq = s.seq\n            WHERE s.run_id = $1\n            ORDER BY s.seq\n            ",
+  "query": "\n            SELECT\n                s.run_id,\n                s.seq,\n                s.entry,\n                s.visit,\n                s.started_at,\n                s.outcome,\n                s.output,\n                s.ended_at,\n                g.question AS \"question?\",\n                g.answers AS \"answers?\",\n                g.opened_at AS \"opened_at?\",\n                g.answer,\n                g.note,\n                g.user_id,\n                g.approved_control_files,\n                g.rule,\n                g.answered_at,\n                s.role,\n                s.agent,\n                s.passed_over,\n                s.pass_reasons\n            FROM factory_step s\n            LEFT JOIN factory_gate g ON g.run_id = s.run_id AND g.seq = s.seq\n            WHERE s.run_id = $1\n            ORDER BY s.seq\n            ",
   "describe": {
     "columns": [
       {
@@ -80,26 +80,31 @@
       },
       {
         "ordinal": 15,
+        "name": "rule",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 16,
         "name": "answered_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 16,
+        "ordinal": 17,
         "name": "role",
         "type_info": "Text"
       },
       {
-        "ordinal": 17,
+        "ordinal": 18,
         "name": "agent",
         "type_info": "Text"
       },
       {
-        "ordinal": 18,
+        "ordinal": 19,
         "name": "passed_over",
         "type_info": "TextArray"
       },
       {
-        "ordinal": 19,
+        "ordinal": 20,
         "name": "pass_reasons",
         "type_info": "TextArray"
       }
@@ -128,9 +133,10 @@
       true,
       true,
       true,
+      true,
       false,
       false
     ]
   },
-  "hash": "432a2aec88db02193a3fb692230827348acf9ea7fe0189d9639ea81d703ddcb0"
+  "hash": "a289d7c335b05bd0982af6d0082e5f55c136f0bbb07e98703e6c6da85e5db30d"
 }

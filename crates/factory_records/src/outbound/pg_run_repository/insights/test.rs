@@ -1,3 +1,4 @@
+use crate::domain::standing_rules::RunRules;
 use chrono::{DateTime, Utc};
 use macro_db_migrator::MACRO_DB_MIGRATIONS;
 use macro_user_id::user_id::MacroUserIdStr;
@@ -291,6 +292,7 @@ async fn a_new_run_is_read_with_its_flow(pool: PgPool) {
             created_in_person: false,
             control_file_patterns: &[],
             control_files_team_id: None,
+            standing_rules: RunRules::DEFAULT,
         })
         .await
         .expect("insert")

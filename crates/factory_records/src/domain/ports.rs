@@ -11,6 +11,7 @@ use crate::domain::models::{
     RunId, RunInsert, RunOutcome, SessionStep, Step, StepKey, StepSession, StoppingSession,
     TaskLink, TeamMembership,
 };
+use crate::domain::standing_rules::StandingRule;
 
 /// Where Runs and their Steps are kept.
 ///
@@ -98,6 +99,16 @@ pub trait RunRepository: Send + Sync + 'static {
         note: Option<&str>,
         user_id: &MacroUserIdStr<'static>,
         approved_control_files: Option<&[String]>,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// Record the Standing Rule `rule`'s answer to the Gate of the Step
+    /// `key`: a Rule Answer, with no author or note, approving no Control
+    /// Files. A Gate already answered keeps its first answer.
+    fn answer_gate_by_rule(
+        &self,
+        key: StepKey,
+        answer: &Outcome,
+        rule: StandingRule,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// Record that the Step `key` works in `session` for `role`, offering its

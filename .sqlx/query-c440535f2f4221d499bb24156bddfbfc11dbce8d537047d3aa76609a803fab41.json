@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted, outcome, ended_at\n            FROM factory_run\n            WHERE task_id = $1 AND user_id = $2\n            ORDER BY created_at DESC, id DESC\n            LIMIT $3\n            ",
+  "query": "\n            SELECT\n                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,\n                standing_rules, standing_rules_source, standing_rules_project_id, outcome, ended_at\n            FROM factory_run\n            WHERE id = $1\n            ",
   "describe": {
     "columns": [
       {
@@ -70,20 +70,33 @@
       },
       {
         "ordinal": 13,
+        "name": "standing_rules",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 14,
+        "name": "standing_rules_source",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 15,
+        "name": "standing_rules_project_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 16,
         "name": "outcome",
         "type_info": "Text"
       },
       {
-        "ordinal": 14,
+        "ordinal": 17,
         "name": "ended_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Text",
-        "Text",
-        "Int8"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -101,8 +114,11 @@
       true,
       false,
       true,
+      true,
+      true,
+      true,
       true
     ]
   },
-  "hash": "48b5b0c743955176b657d16f971fc06ff1c2046c2babebbcce8bb35939342738"
+  "hash": "c440535f2f4221d499bb24156bddfbfc11dbce8d537047d3aa76609a803fab41"
 }

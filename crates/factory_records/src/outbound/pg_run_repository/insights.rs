@@ -136,14 +136,16 @@ impl RunInsightsRepository for PgRunRepository {
         // not finish its work, so its time is left out. A Run visits an entry
         // more than once when the Flow loops back to it, or a reset starts it
         // over; `visit` restarts at a reset, so visits are counted rather
-        // than read.
+        // than read. A Gate a Standing Rule answered asked no one, so its
+        // wait and its answer are left out, as if it had not opened.
         let entries = sqlx::query!(
             r#"
             WITH steps AS (
                 SELECT s.run_id, s.entry, s.outcome, s.started_at, s.ended_at,
                        g.opened_at, g.answered_at
                 FROM factory_step s
-                LEFT JOIN factory_gate g ON g.run_id = s.run_id AND g.seq = s.seq
+                LEFT JOIN factory_gate g
+                    ON g.run_id = s.run_id AND g.seq = s.seq AND g.rule IS NULL
                 WHERE s.run_id = ANY($1)
             ),
             by_entry AS (
@@ -232,7 +234,8 @@ impl RunInsightsRepository for PgRunRepository {
             WITH steps AS MATERIALIZED (
                 SELECT s.entry, s.outcome, g.answer
                 FROM factory_step s
-                LEFT JOIN factory_gate g ON g.run_id = s.run_id AND g.seq = s.seq
+                LEFT JOIN factory_gate g
+                    ON g.run_id = s.run_id AND g.seq = s.seq AND g.rule IS NULL
                 WHERE s.run_id = ANY($1)
             )
             SELECT entry AS "entry!", 'outcome' AS "kind!", outcome AS "value!", count(*) AS "count!"

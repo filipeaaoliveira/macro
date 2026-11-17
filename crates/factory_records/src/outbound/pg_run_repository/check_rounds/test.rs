@@ -1,3 +1,4 @@
+use crate::domain::standing_rules::RunRules;
 use macro_db_migrator::MACRO_DB_MIGRATIONS;
 use macro_user_id::user_id::MacroUserIdStr;
 use sqlx::PgPool;
@@ -30,6 +31,7 @@ async fn writing(repo: &PgRunRepository) -> (StepKey, StepSession) {
             created_in_person: false,
             control_file_patterns: &[],
             control_files_team_id: None,
+            standing_rules: RunRules::DEFAULT,
         })
         .await
         .expect("insert")

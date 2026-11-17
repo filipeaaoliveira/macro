@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM factory_team_settings\n            WHERE team_id = $1 AND control_files IS NULL AND standing_rules IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4e329b09f86f59426b35dd9dbe8e6e670d04ab5f7f67819e1bf1d19f810fc45d"
+}
