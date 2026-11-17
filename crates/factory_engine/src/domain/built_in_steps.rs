@@ -24,7 +24,7 @@ use crate::domain::ports::{
 };
 use crate::domain::pull_request_steps::{PullRequestStepError, PullRequestSteps};
 use crate::domain::questions::{answers_brief, ask_instructions, going_on_prompt};
-use crate::domain::review_rounds::{blockers_brief, fenced_review};
+use crate::domain::review_rounds::{blockers_brief, escape, fenced_review};
 
 /// What the agent is told for a `plan` Step.
 const PLAN_INSTRUCTIONS: &str = include_str!("built_in_steps/plan.md");
@@ -554,10 +554,17 @@ fn section(step: &Step) -> String {
         .gate
         .as_ref()
         .and_then(|gate| gate.answer.as_ref().map(|answer| (&gate.question, answer)));
+    // An agent may have asked the question, and the note is a person's
+    // words: both are escaped, as findings are, so neither reads as a
+    // heading or opens a block.
     if let Some((question, answer)) = answer {
-        let note = answer.note.as_deref().unwrap_or("(no note)");
+        let note = answer
+            .note
+            .as_deref()
+            .map_or("(no note)".to_string(), escape);
         section.push_str(&format!(
-            "\nA person was asked \"{question}\" and answered `{}`: {note}\n",
+            "\nA person was asked \"{}\" and answered `{}`: {note}\n",
+            escape(question),
             answer.answer
         ));
     }
