@@ -85,7 +85,7 @@ function toRun(detail: RunDetail): Run {
           taskId: detail.mainHold.taskId ?? undefined,
         }
       : undefined,
-    baseChecksUnread: detail.baseChecksUnread,
+    baseRequiredChecks: detail.baseRequiredChecks ?? undefined,
   };
 }
 

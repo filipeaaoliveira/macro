@@ -67,6 +67,8 @@ export default {
   mainHoldTask: 'See the merges since they last passed',
   baseChecksUnread:
     'Couldn’t read which checks {{branch}} requires, so this run’s merge doesn’t wait on them.',
+  baseChecksNone:
+    '{{branch}} has no required checks, so merges to it aren’t held.',
   cancelRun: 'Cancel run',
   cancelTitle: 'Cancel this run?',
   cancelBody:

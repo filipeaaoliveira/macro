@@ -19,7 +19,6 @@ vi.mock('@service-factory/client', () => ({
 }));
 
 const started: RunDetail = {
-  baseChecksUnread: false,
   run: {
     id: 'run-2',
     request: 'Add a due date column',

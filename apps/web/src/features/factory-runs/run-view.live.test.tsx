@@ -33,7 +33,6 @@ beforeAll(() => {
 });
 
 const planning: RunDetail = {
-  baseChecksUnread: false,
   run: {
     id: 'run-1',
     request: 'Add a due date column',

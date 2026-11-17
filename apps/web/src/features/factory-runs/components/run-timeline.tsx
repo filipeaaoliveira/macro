@@ -1,13 +1,18 @@
 import { t } from '@app/lib/i18n';
 import { StaticMarkdown } from '@core/component/LexicalMarkdown/component/core/StaticMarkdown';
 import { channelTheme } from '@core/component/LexicalMarkdown/theme';
+import { buildSimpleEntityUrl } from '@core/util/url';
 import CaretDownIcon from '@icon/system/regular/caret-down.svg';
 import { Badge, Button, Card, cn } from '@ui';
 import { CollapseTransition } from '@ui/components/CollapseTransition';
 import { createSignal, For, type JSX, Show } from 'solid-js';
 import { flowWordLabel, flowWordText } from '../core/flow-words';
-import { buildSimpleEntityUrl } from '@core/util/url';
-import type { CheckRound, MainHold, RunStep } from '../core/run';
+import type {
+  BaseRequiredChecks,
+  CheckRound,
+  MainHold,
+  RunStep,
+} from '../core/run';
 
 function stepLabel(step: Pick<RunStep, 'entry' | 'visit'>): string {
   const entry = flowWordLabel(step.entry);
@@ -25,8 +30,8 @@ export function RunTimeline(props: {
   steps: RunStep[];
   /** The hold on the Run's base branch, shown on its latest Step. */
   mainHold?: MainHold;
-  /** Whether the base's required checks couldn't be read, likewise. */
-  baseChecksUnread?: boolean;
+  /** Why the base's required checks hold nothing, likewise. */
+  baseRequiredChecks?: BaseRequiredChecks;
   baseBranch?: string;
   /** Whether a Step's output starts open, e.g. the plan a Gate asks about. */
   outputOpen: (step: RunStep) => boolean;
@@ -43,8 +48,10 @@ export function RunTimeline(props: {
             mainHold={
               index() === props.steps.length - 1 ? props.mainHold : undefined
             }
-            baseChecksUnread={
-              index() === props.steps.length - 1 && props.baseChecksUnread
+            baseRequiredChecks={
+              index() === props.steps.length - 1
+                ? props.baseRequiredChecks
+                : undefined
             }
             baseBranch={props.baseBranch}
             defaultOpen={props.outputOpen(step)}
@@ -61,7 +68,7 @@ function TimelineStep(props: {
   first: boolean;
   latest: boolean;
   mainHold?: MainHold;
-  baseChecksUnread?: boolean;
+  baseRequiredChecks?: BaseRequiredChecks;
   baseBranch?: string;
   defaultOpen: boolean;
   time: (value: string) => string;
@@ -198,12 +205,18 @@ function TimelineStep(props: {
           <MainHoldNote hold={hold()} baseBranch={props.baseBranch ?? ''} />
         )}
       </Show>
-      <Show when={props.baseChecksUnread}>
-        <StepNote>
-          {t('factoryRuns.baseChecksUnread', {
-            branch: props.baseBranch ?? '',
-          })}
-        </StepNote>
+      <Show when={props.baseRequiredChecks}>
+        {(why) => (
+          <StepNote>
+            {why() === 'none'
+              ? t('factoryRuns.baseChecksNone', {
+                  branch: props.baseBranch ?? '',
+                })
+              : t('factoryRuns.baseChecksUnread', {
+                  branch: props.baseBranch ?? '',
+                })}
+          </StepNote>
+        )}
       </Show>
       <Show when={details()}>
         <CollapseTransition open={open()}>

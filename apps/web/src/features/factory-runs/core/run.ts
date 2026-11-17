@@ -96,6 +96,9 @@ export type MainHold = {
   taskId?: string;
 };
 
+/** Why a base branch's required checks hold no merge. */
+export type BaseRequiredChecks = 'unread' | 'none';
+
 /** One Run of a Flow, with the Steps it took in the order they started. */
 export type Run = {
   id: string;
@@ -108,10 +111,10 @@ export type Run = {
   /** While the Run is at its merge and its base branch is red. */
   mainHold?: MainHold;
   /**
-   * While the Run is at its merge: the checks its base branch requires
-   * couldn't be read, so nothing holds the merge on them.
+   * While the Run is at its merge, why its base branch's required checks
+   * hold nothing: they couldn't be read, or the branch requires none.
    */
-  baseChecksUnread?: boolean;
+  baseRequiredChecks?: BaseRequiredChecks;
 };
 
 /** A Flow a person can start a Run of. */

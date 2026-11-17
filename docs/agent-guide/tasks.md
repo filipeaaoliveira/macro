@@ -1387,7 +1387,8 @@ Step shows a **Main hold** note with the failing checks, and links the task
 that lists the merges since they last passed once it is filed; the Run
 merges nothing until they pass, even once its merge is approved, and asks
 again if they still fail after its wait. When the checks the base requires
-couldn't be read, the note says its merge doesn't wait on them. On desktop the Gate card (its question,
+couldn't be read, or it requires none, a note says its merge doesn't wait
+on them. On desktop the Gate card (its question,
 a note field and one button per answer, the Flow's first answer primary) is
 pinned below them, the question and note scrolling inside past a few lines. On
 touch the pinned chrome between the handle and the Steps holds only the note
