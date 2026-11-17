@@ -554,3 +554,59 @@ fn a_run_on_the_single_reviewer_code_flow_walks_it_as_before() {
     let entries = written["entries"].as_array().expect("entries");
     assert!(entries.iter().all(|entry| entry.get("reviewers").is_none()));
 }
+
+/// A merge held by a red base goes back to the merge Gate, whose visits
+/// start over, so a Run whose Tampered merges went back through `ci`
+/// before is still asked again, and merges once approved.
+#[test]
+fn a_held_merge_asks_again_even_after_tampered_merges_went_back() {
+    let (steps, end) = walk(
+        &flow(CODE_FLOW),
+        &[
+            "approve",
+            "done",
+            "pass",
+            "published",
+            "green",
+            "approve",
+            "changed",
+            "green",
+            "approve",
+            "changed",
+            "green",
+            "approve",
+            "held",
+            "approve",
+            "merged",
+        ],
+    );
+
+    assert_eq!(
+        steps[5..],
+        [
+            "merge-gate#1",
+            "merge#1",
+            "ci#2",
+            "merge-gate#2",
+            "merge#2",
+            "ci#3",
+            "merge-gate#3",
+            "merge#3",
+            "merge-gate#1",
+            "merge#4",
+        ]
+    );
+    assert_eq!(end, Ok(RunOutcome::Success));
+}
+
+/// A review panel whose blockers stay unresolved, or whose review failed,
+/// leaves the branch for a person.
+#[test]
+fn an_unresolved_or_failed_review_is_left_for_a_person() {
+    for outcome in ["unresolved", "failed"] {
+        let (steps, end) = walk(&flow(CODE_FLOW), &["approve", "done", outcome]);
+
+        assert_eq!(steps, ["plan#1", "write#1", "review#1"], "{outcome}");
+        assert_eq!(end, Ok(RunOutcome::Manual), "{outcome}");
+    }
+}
