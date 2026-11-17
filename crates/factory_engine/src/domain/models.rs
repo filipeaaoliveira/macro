@@ -9,6 +9,7 @@ use factory_records::domain::models::{
     EntryId, Outcome, Repository, Role, Run, RunId, RunOutcome, Step, StepKey,
 };
 use factory_records::domain::review_rounds::ReviewRound;
+use factory_records::domain::standing_rules::{OrchestratorDefinition, ProjectRules};
 use macro_user_id::user_id::MacroUserIdStr;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -506,6 +507,25 @@ pub struct ControlFilesSettings {
     pub can_edit: bool,
 }
 
+/// The Standing Rules a person's Runs are created with: their team's
+/// Orchestrator Definition, or the factory's default, and the team's
+/// Projects' own, which replace it for a Run whose task is in one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct StandingRulesSettings {
+    /// Which kinds of Gate the factory answers on its own.
+    pub definition: OrchestratorDefinition,
+    /// Whether it is the factory's default: the team set none, or the
+    /// person is on no team.
+    pub is_default: bool,
+    /// The team's Projects that have their own, by the initiative's id.
+    pub projects: Vec<ProjectRules>,
+    /// The team whose rules they are; none when the person is on no team.
+    pub team_id: Option<Uuid>,
+    /// Whether the person may change them: they administer the team.
+    pub can_edit: bool,
+}
+
 /// A Flow a person can start a Run of.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -576,10 +596,15 @@ pub enum FactoryError {
         "the run's branch changes control files its request does not ask for: approve them by listing them in approvedControlFiles"
     )]
     ControlFilesNotApproved,
-    /// Someone who does not administer a team set its Control Files, or is
-    /// on no team.
-    #[error("only an admin of a team can set its control files")]
+    /// Someone who does not administer a team set its Control Files or its
+    /// Standing Rules, or is on no team.
+    #[error("only an admin of a team can change its factory settings")]
     NotATeamAdmin,
+    /// Standing Rules were set for a Project no initiative has, or one the
+    /// caller may not edit: the same answer, so a hidden one is not
+    /// revealed.
+    #[error("no project the caller can edit has this id")]
+    UnknownProject,
     /// A list of Control File patterns does not hold together.
     #[error(transparent)]
     InvalidControlFiles(#[from] ControlFilesError),
@@ -599,7 +624,7 @@ pub enum FactoryError {
     /// answered a Gate or set their Control File patterns: an internal
     /// caller, an API key or token, or an agent's program acting for them.
     #[error(
-        "only the person, signed in to Macro, can answer a run's gate or set its control files"
+        "only the person, signed in to Macro, can answer a run's gate or change the factory's settings"
     )]
     NotAPerson,
     /// A hand back came from someone other than the Run's owner.

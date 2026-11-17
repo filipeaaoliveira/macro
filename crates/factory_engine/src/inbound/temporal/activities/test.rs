@@ -100,6 +100,13 @@ impl StepService for Steps {
         Ok(())
     }
 
+    async fn rule_gate(
+        &self,
+        _ruling: crate::domain::gate::GateRuling,
+    ) -> Result<Option<crate::domain::standing_rules::RuleAnswer>, StepError> {
+        Ok(None)
+    }
+
     async fn end_run(&self, _finish: RunFinish) -> Result<(), StepError> {
         Ok(())
     }

@@ -16,20 +16,26 @@ use factory_records::domain::models::{
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::{ReviewRound, ReviewRoundRepository};
+use factory_records::domain::standing_rules::{
+    GateKind, OrchestratorDefinition, ProjectRulesSet, RulesSource, RunRules,
+    StandingRulesRepository,
+};
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
 use crate::domain::built_in_flows::{BUILT_IN_FLOWS, BuiltInFlow};
 use crate::domain::control_files::ControlFiles;
-use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening};
+use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening, GateRuling};
 use crate::domain::models::{
     CodeRepository, ControlFilesSettings, FactoryError, FlowSummary, RunDetail, RunFinish,
-    RunStart, StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
+    RunStart, StandingRulesSettings, StepEnding, StepError, StepInput, StepReport, StepRequest,
+    StepStart,
 };
 use crate::domain::ports::{
     AnswerDelivery, FactoryService, PullRequests, Retryable, RunWorkflows, RunWorkflowsError,
     StepExecutor, StepService, TaskAccess, TaskDirectory, UserDirectory,
 };
+use crate::domain::standing_rules::{GateFacts, RuleAnswer, rule_answer};
 
 fn internal(error: impl std::error::Error + Send + Sync + 'static) -> rootcause::Report {
     rootcause::Report::new(error).into_dynamic()
@@ -71,7 +77,7 @@ pub struct FactoryServiceImpl<R, W, E, U, T, G> {
 
 impl<R, W, E, U, T, G> FactoryServiceImpl<R, W, E, U, T, G>
 where
-    R: RunRepository + MainHoldRepository + ReviewRoundRepository,
+    R: RunRepository + MainHoldRepository + ReviewRoundRepository + StandingRulesRepository,
     W: RunWorkflows,
     E: StepExecutor,
     U: UserDirectory,
@@ -163,6 +169,65 @@ where
             None => None,
         };
         Ok((team, own))
+    }
+
+    /// The Standing Rules a Run of `user_id`'s on the task `task_id` is
+    /// created with: the Project's own, when its owner's team set rules
+    /// for the Project the task is in, else the team's, else the
+    /// factory's default.
+    async fn run_rules(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        team: Option<TeamMembership>,
+        task_id: Option<Uuid>,
+    ) -> Result<RunRules, FactoryError> {
+        let Some(team) = team else {
+            return Ok(RunRules::DEFAULT);
+        };
+        if let Some(task_id) = task_id {
+            let project = self
+                .tasks
+                .task_project(user_id, task_id)
+                .await
+                .map_err(internal)?;
+            if let Some(project_id) = project
+                && let Some(definition) = self
+                    .repo
+                    .project_rules(team.team_id, project_id)
+                    .await
+                    .map_err(internal)?
+            {
+                return Ok(RunRules {
+                    definition,
+                    source: RulesSource::Project,
+                    project_id: Some(project_id),
+                });
+            }
+        }
+        let own = self.repo.team_rules(team.team_id).await.map_err(internal)?;
+        Ok(match own {
+            Some(definition) => RunRules {
+                definition,
+                source: RulesSource::Team,
+                project_id: None,
+            },
+            None => RunRules::DEFAULT,
+        })
+    }
+
+    /// The team `actor` administers, in an account that is not an
+    /// agent's.
+    async fn administered_team(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+    ) -> Result<TeamMembership, FactoryError> {
+        self.not_an_agent(actor).await?;
+        self.repo
+            .team_of(actor)
+            .await
+            .map_err(internal)?
+            .filter(|team| team.admin)
+            .ok_or(FactoryError::NotATeamAdmin)
     }
 
     /// Fails unless the task document `task_id` is a task `user_id` can see.
@@ -280,7 +345,7 @@ where
 
 impl<R, W, E, U, T, G> FactoryService for FactoryServiceImpl<R, W, E, U, T, G>
 where
-    R: RunRepository + MainHoldRepository + ReviewRoundRepository,
+    R: RunRepository + MainHoldRepository + ReviewRoundRepository + StandingRulesRepository,
     W: RunWorkflows,
     E: StepExecutor,
     U: UserDirectory,
@@ -351,6 +416,10 @@ where
         let control_file_patterns = own.unwrap_or_else(ControlFiles::default_patterns);
         let created_in_person =
             in_person && !self.repo.is_agent_account(&actor).await.map_err(internal)?;
+        // The Run keeps its Standing Rules the same way: a change to the
+        // team's or the Project's rules, or a task linked later, does not
+        // change which of its Gates a rule answers.
+        let standing_rules = self.run_rules(&actor, team, task_id).await?;
 
         // The Run and its task are kept in one write, so a task deleted
         // since it was checked leaves nothing behind.
@@ -368,6 +437,7 @@ where
                 created_in_person,
                 control_file_patterns: &control_file_patterns,
                 control_files_team_id,
+                standing_rules,
             })
             .await
             .map_err(internal)?
@@ -647,20 +717,80 @@ where
         if let Some(patterns) = &patterns {
             ControlFiles::parse(patterns)?;
         }
-        self.not_an_agent(&actor).await?;
-        let team = self
-            .repo
-            .team_of(&actor)
-            .await
-            .map_err(internal)?
-            .filter(|team| team.admin)
-            .ok_or(FactoryError::NotATeamAdmin)?;
-
+        let team = self.administered_team(&actor).await?;
         self.repo
             .set_team_control_files(team.team_id, patterns.as_deref())
             .await
             .map_err(internal)?;
         self.control_files(&actor).await
+    }
+
+    #[tracing::instrument(skip(self, actor))]
+    async fn standing_rules(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+    ) -> Result<StandingRulesSettings, FactoryError> {
+        let team = self.repo.team_of(actor).await.map_err(internal)?;
+        let (own, projects) = match team {
+            Some(team) => (
+                self.repo.team_rules(team.team_id).await.map_err(internal)?,
+                self.repo
+                    .list_project_rules(team.team_id)
+                    .await
+                    .map_err(internal)?,
+            ),
+            None => (None, Vec::new()),
+        };
+        Ok(StandingRulesSettings {
+            is_default: own.is_none(),
+            definition: own.unwrap_or(OrchestratorDefinition::DEFAULT),
+            projects,
+            team_id: team.map(|team| team.team_id),
+            can_edit: team.is_some_and(|team| team.admin),
+        })
+    }
+
+    #[tracing::instrument(skip(self, actor))]
+    async fn set_standing_rules(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        definition: Option<OrchestratorDefinition>,
+    ) -> Result<StandingRulesSettings, FactoryError> {
+        let team = self.administered_team(&actor).await?;
+        self.repo
+            .set_team_rules(team.team_id, definition)
+            .await
+            .map_err(internal)?;
+        self.standing_rules(&actor).await
+    }
+
+    #[tracing::instrument(skip(self, actor))]
+    async fn set_project_rules(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        project_id: Uuid,
+        definition: Option<OrchestratorDefinition>,
+    ) -> Result<StandingRulesSettings, FactoryError> {
+        let team = self.administered_team(&actor).await?;
+        // A Project the admin may not edit is not theirs to give rules: it
+        // reads as one that does not exist.
+        if !self
+            .tasks
+            .may_edit_project(&actor, project_id)
+            .await
+            .map_err(internal)?
+        {
+            return Err(FactoryError::UnknownProject);
+        }
+        match self
+            .repo
+            .set_project_rules(team.team_id, project_id, definition)
+            .await
+            .map_err(internal)?
+        {
+            ProjectRulesSet::Set => self.standing_rules(&actor).await,
+            ProjectRulesSet::NoSuchProject => Err(FactoryError::UnknownProject),
+        }
     }
 
     #[tracing::instrument(skip(self, actor))]
@@ -715,7 +845,7 @@ pub struct StepServiceImpl<R, E> {
 
 impl<R, E> StepServiceImpl<R, E>
 where
-    R: RunRepository + ReviewRoundRepository,
+    R: RunRepository + ReviewRoundRepository + MainHoldRepository,
     E: StepExecutor,
 {
     /// Create the Step service.
@@ -734,7 +864,7 @@ where
 
 impl<R, E> StepService for StepServiceImpl<R, E>
 where
-    R: RunRepository + ReviewRoundRepository,
+    R: RunRepository + ReviewRoundRepository + MainHoldRepository,
     E: StepExecutor,
 {
     #[tracing::instrument(err, skip_all, fields(run_id = %request.key.run_id, seq = request.key.seq))]
@@ -870,6 +1000,62 @@ where
             .await
             .map_err(internal)?;
         Ok(())
+    }
+
+    #[tracing::instrument(err, skip_all, fields(run_id = %ruling.key.run_id, seq = ruling.key.seq, kind = %ruling.kind))]
+    async fn rule_gate(&self, ruling: GateRuling) -> Result<Option<RuleAnswer>, StepError> {
+        let key = ruling.key;
+        // An earlier attempt may have answered the Gate before its result
+        // was lost: that answer stands, whatever the Run reads now.
+        let steps = self.repo.list_steps(key.run_id).await.map_err(internal)?;
+        let answered = steps
+            .iter()
+            .find(|step| step.seq == key.seq)
+            .and_then(|step| step.gate.as_ref())
+            .and_then(|gate| gate.answer.as_ref());
+        if let Some(answer) = answered {
+            return Ok(answer.rule.map(|rule| RuleAnswer {
+                rule,
+                answer: answer.answer.clone(),
+            }));
+        }
+
+        let run = self
+            .repo
+            .get_run(key.run_id)
+            .await
+            .map_err(internal)?
+            .ok_or(StepError::NoSuchRun)?;
+        if run.end.is_some() {
+            return Ok(None);
+        }
+        let Some(rules) = run.standing_rules else {
+            return Ok(None);
+        };
+        let held = match (&run.repository, ruling.kind) {
+            (Some(base), GateKind::Merge) => {
+                self.repo.main_hold(base).await.map_err(internal)?.is_some()
+            }
+            _ => false,
+        };
+        let facts = GateFacts {
+            kind: ruling.kind,
+            fix_rounds: ruling.fix_rounds,
+            tampered: run
+                .control_files
+                .as_ref()
+                .is_some_and(|changes| changes.is_tampered()),
+            held,
+        };
+        let Some(ruled) = rule_answer(Some(rules.definition), &facts, &ruling.answers) else {
+            return Ok(None);
+        };
+        self.repo
+            .answer_gate_by_rule(key, &ruled.answer, ruled.rule)
+            .await
+            .map_err(internal)?;
+        tracing::info!(rule = %ruled.rule, answer = %ruled.answer, "a standing rule answered a gate");
+        Ok(Some(ruled))
     }
 
     #[tracing::instrument(err, skip_all, fields(run_id = %finish.run_id, outcome = %finish.outcome))]

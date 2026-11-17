@@ -7,6 +7,7 @@ use factory_records::domain::models::{
     ControlFileChanges, EntryId, Gate, GateAnswer, NewRun, Outcome, RunId, Step, StepEnd,
 };
 use factory_records::domain::ports::RunRepository;
+use factory_records::domain::standing_rules::RunRules;
 
 use super::{JULIA, input, outcome, steps};
 use crate::domain::fakes::{FakeGithub, FakeRepo, ci};
@@ -57,6 +58,7 @@ fn merge_gate(seq: u16, approved: Option<&[&str]>) -> Step {
                 answer: approve,
                 note: None,
                 user_id: None,
+                rule: None,
                 approved_control_files: approved.map(paths),
                 answered_at: Utc::now(),
             }),
@@ -194,6 +196,7 @@ async fn a_pull_request_merged_outside_the_run_keeps_its_control_files() {
             created_in_person: true,
             control_file_patterns: &[],
             control_files_team_id: None,
+            standing_rules: RunRules::DEFAULT,
         })
         .await
         .expect("insert");

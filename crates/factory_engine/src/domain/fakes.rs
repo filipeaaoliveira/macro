@@ -11,11 +11,14 @@ use agent_session::domain::session_task::TaskDocumentId;
 use chrono::Utc;
 use factory_records::domain::models::{
     CheckResult, CheckRound, CheckRoundEnd, CheckRoundOutcome, CheckRoundStart, ClaimedSession,
-    ControlFileChanges, EntryId, Gate, HandBack, HandedBack, NewRun, Outcome, PassedOver, Role,
-    Run, RunEnd, RunId, RunInsert, RunOutcome, SessionStep, Step, StepEnd, StepKey, StepSession,
-    StoppingSession, TaskLink, TeamMembership,
+    ControlFileChanges, EntryId, Gate, GateAnswer, HandBack, HandedBack, NewRun, Outcome,
+    PassedOver, Role, Run, RunEnd, RunId, RunInsert, RunOutcome, SessionStep, Step, StepEnd,
+    StepKey, StepSession, StoppingSession, TaskLink, TeamMembership,
 };
 use factory_records::domain::ports::RunRepository;
+use factory_records::domain::standing_rules::{
+    OrchestratorDefinition, ProjectRules, ProjectRulesSet, StandingRule, StandingRulesRepository,
+};
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
@@ -112,12 +115,24 @@ pub(crate) struct FakeRepo {
     pub(crate) control_file_changes: Arc<Mutex<BTreeMap<RunId, ControlFileChanges>>>,
     /// The answers recorded, by Gate, with the Control Files they approved.
     pub(crate) approvals: Arc<Mutex<Vec<Approval>>>,
+    /// The Rule Answers recorded, by Gate, with the rule that gave each.
+    pub(crate) rule_answers: Arc<Mutex<Vec<(StepKey, Outcome, StandingRule)>>>,
     /// The agents' accounts, by their id.
     pub(crate) agent_accounts: Arc<Mutex<BTreeSet<String>>>,
     /// The team each person is on, by their id.
     pub(crate) teams: Arc<Mutex<BTreeMap<String, TeamMembership>>>,
     /// The Control File patterns each team set.
     pub(crate) control_files: Arc<Mutex<BTreeMap<Uuid, Vec<String>>>>,
+    /// The Standing Rules each team set.
+    pub(crate) team_rules: Arc<Mutex<BTreeMap<Uuid, OrchestratorDefinition>>>,
+    /// The Standing Rules each team set for a Project, by team and Project.
+    pub(crate) project_rules: Arc<Mutex<BTreeMap<(Uuid, Uuid), OrchestratorDefinition>>>,
+    /// The Projects that exist.
+    pub(crate) projects: Arc<Mutex<BTreeSet<Uuid>>>,
+    /// The Project each task is in.
+    pub(crate) task_projects: Arc<Mutex<BTreeMap<Uuid, Uuid>>>,
+    /// The Projects a person may not edit: their id and the Project's.
+    pub(crate) uneditable_projects: Arc<Mutex<BTreeSet<(String, Uuid)>>>,
     /// The merges Runs made and the holds on their bases.
     pub(crate) main: Arc<Mutex<FakeMain>>,
     /// Each Run's review rounds, with what their reviewers found.
@@ -167,6 +182,32 @@ impl TaskDirectory for FakeRepo {
         } else {
             Ok(TaskAccess::NotFound)
         }
+    }
+
+    async fn task_project(
+        &self,
+        _user_id: &MacroUserIdStr<'static>,
+        task_id: Uuid,
+    ) -> Result<Option<Uuid>, FakeError> {
+        Ok(self
+            .task_projects
+            .lock()
+            .expect("task projects")
+            .get(&task_id)
+            .copied())
+    }
+
+    async fn may_edit_project(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        project_id: Uuid,
+    ) -> Result<bool, FakeError> {
+        let uneditable = (user_id.as_ref().to_string(), project_id);
+        Ok(!self
+            .uneditable_projects
+            .lock()
+            .expect("uneditable")
+            .contains(&uneditable))
     }
 
     async fn create_follow_up(
@@ -246,6 +287,7 @@ impl RunRepository for FakeRepo {
             created_in_person,
             control_file_patterns,
             control_files_team_id,
+            standing_rules,
             ..
         } = new;
         if let Some(task_id) = task_id
@@ -264,6 +306,7 @@ impl RunRepository for FakeRepo {
             control_file_patterns: Some(control_file_patterns.to_vec()),
             control_files_team_id,
             control_files: None,
+            standing_rules: Some(standing_rules),
             end: None,
         };
         self.runs.lock().expect("runs").insert(id, run.clone());
@@ -505,6 +548,33 @@ impl RunRepository for FakeRepo {
             answer.clone(),
             approved_control_files.map(<[String]>::to_vec),
         ));
+        Ok(())
+    }
+
+    async fn answer_gate_by_rule(
+        &self,
+        key: StepKey,
+        answer: &Outcome,
+        rule: StandingRule,
+    ) -> Result<(), FakeError> {
+        self.with_step(key, |step| {
+            if let Some(gate) = step.gate.as_mut()
+                && gate.answer.is_none()
+            {
+                gate.answer = Some(GateAnswer {
+                    answer: answer.clone(),
+                    note: None,
+                    user_id: None,
+                    rule: Some(rule),
+                    approved_control_files: None,
+                    answered_at: Utc::now(),
+                });
+            }
+        });
+        self.rule_answers
+            .lock()
+            .expect("rule answers")
+            .push((key, answer.clone(), rule));
         Ok(())
     }
 
@@ -1229,5 +1299,85 @@ impl PullRequests for FakeGithub {
         }
         pull_request.state = PullRequestState::Merged;
         Ok(Merging::Merged)
+    }
+}
+
+impl StandingRulesRepository for FakeRepo {
+    type Err = FakeError;
+
+    async fn team_rules(&self, team_id: Uuid) -> Result<Option<OrchestratorDefinition>, FakeError> {
+        Ok(self
+            .team_rules
+            .lock()
+            .expect("rules")
+            .get(&team_id)
+            .copied())
+    }
+
+    async fn set_team_rules(
+        &self,
+        team_id: Uuid,
+        definition: Option<OrchestratorDefinition>,
+    ) -> Result<(), FakeError> {
+        let mut kept = self.team_rules.lock().expect("rules");
+        match definition {
+            Some(definition) => kept.insert(team_id, definition),
+            None => kept.remove(&team_id),
+        };
+        Ok(())
+    }
+
+    async fn project_rules(
+        &self,
+        team_id: Uuid,
+        project_id: Uuid,
+    ) -> Result<Option<OrchestratorDefinition>, FakeError> {
+        Ok(self
+            .project_rules
+            .lock()
+            .expect("rules")
+            .get(&(team_id, project_id))
+            .copied())
+    }
+
+    async fn list_project_rules(&self, team_id: Uuid) -> Result<Vec<ProjectRules>, FakeError> {
+        Ok(self
+            .project_rules
+            .lock()
+            .expect("rules")
+            .iter()
+            .filter(|((team, _), _)| *team == team_id)
+            .map(|((_, project_id), definition)| ProjectRules {
+                project_id: *project_id,
+                definition: *definition,
+            })
+            .collect())
+    }
+
+    async fn set_project_rules(
+        &self,
+        team_id: Uuid,
+        project_id: Uuid,
+        definition: Option<OrchestratorDefinition>,
+    ) -> Result<ProjectRulesSet, FakeError> {
+        let mut kept = self.project_rules.lock().expect("rules");
+        match definition {
+            None => {
+                kept.remove(&(team_id, project_id));
+            }
+            Some(_)
+                if !self
+                    .projects
+                    .lock()
+                    .expect("projects")
+                    .contains(&project_id) =>
+            {
+                return Ok(ProjectRulesSet::NoSuchProject);
+            }
+            Some(definition) => {
+                kept.insert((team_id, project_id), definition);
+            }
+        }
+        Ok(ProjectRulesSet::Set)
     }
 }

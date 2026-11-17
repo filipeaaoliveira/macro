@@ -334,6 +334,7 @@ async fn a_plan_reads_what_a_person_answered_the_last_one() {
                 answer: revise,
                 note: Some("Keep the old index".to_string()),
                 user_id: None,
+                rule: None,
                 approved_control_files: None,
                 answered_at: Utc::now(),
             }),

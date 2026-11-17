@@ -1,3 +1,4 @@
+use factory_records::domain::standing_rules::RunRules;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
@@ -390,6 +391,7 @@ async fn plan_task(repo: &FakeRepo) -> AgentTask {
             created_in_person: false,
             control_file_patterns: &[],
             control_files_team_id: None,
+            standing_rules: RunRules::DEFAULT,
         })
         .await
         .expect("insert");

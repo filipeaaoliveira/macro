@@ -10,10 +10,11 @@ use temporalio_common::error::ApplicationFailure;
 use temporalio_macros::activities;
 use temporalio_sdk::activities::{ActivityContext, ActivityError};
 
-use crate::domain::gate::{GateAnswered, GateOpening};
+use crate::domain::gate::{GateAnswered, GateOpening, GateRuling};
 use crate::domain::models::{RunFinish, StepEnding, StepError, StepReport, StepRequest, StepStart};
 use crate::domain::ports::{ReviewService, StepService};
 use crate::domain::review_rounds::{ReviewRoundClosing, ReviewRoundOpening};
+use crate::domain::standing_rules::RuleAnswer;
 use factory_records::domain::models::Outcome;
 
 /// How often a Step's work tells Temporal its worker is alive. The worker
@@ -40,6 +41,8 @@ trait DynStepService: Send + Sync {
     async fn open_gate(&self, opening: GateOpening) -> Result<(), StepError>;
 
     async fn answer_gate(&self, answered: GateAnswered) -> Result<(), StepError>;
+
+    async fn rule_gate(&self, ruling: GateRuling) -> Result<Option<RuleAnswer>, StepError>;
 
     async fn end_run(&self, finish: RunFinish) -> Result<(), StepError>;
 }
@@ -72,6 +75,10 @@ impl<T: StepService> DynStepService for T {
 
     async fn answer_gate(&self, answered: GateAnswered) -> Result<(), StepError> {
         StepService::answer_gate(self, answered).await
+    }
+
+    async fn rule_gate(&self, ruling: GateRuling) -> Result<Option<RuleAnswer>, StepError> {
+        StepService::rule_gate(self, ruling).await
     }
 
     async fn end_run(&self, finish: RunFinish) -> Result<(), StepError> {
@@ -261,6 +268,17 @@ impl FactoryActivities {
         answered: GateAnswered,
     ) -> Result<(), ActivityError> {
         self.steps.answer_gate(answered).await.map_err(failure)
+    }
+
+    /// Ask the Run's Standing Rules about a Gate it opened, and record the
+    /// Rule Answer they give, if any.
+    #[activity(name = "factory_rule_gate")]
+    pub async fn rule_gate(
+        self: Arc<Self>,
+        _ctx: ActivityContext,
+        ruling: GateRuling,
+    ) -> Result<Option<RuleAnswer>, ActivityError> {
+        self.steps.rule_gate(ruling).await.map_err(failure)
     }
 
     /// Record the review round a review panel starts, before its

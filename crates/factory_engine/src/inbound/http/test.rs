@@ -1,3 +1,4 @@
+use factory_records::domain::standing_rules::RunRules;
 use std::sync::{Arc, Mutex};
 
 use axum::Router;
@@ -33,6 +34,7 @@ use crate::domain::service::FactoryServiceImpl;
 use crate::outbound::local_agent::LocalAgent;
 
 mod control_files;
+mod standing_rules;
 
 const KEY: &str = "test-internal-key";
 const ALICE: &str = "macro|alice@example.com";
@@ -242,6 +244,30 @@ impl FactoryService for FakeService {
         Err(self.refusing(&actor))
     }
 
+    async fn standing_rules(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+    ) -> Result<crate::domain::models::StandingRulesSettings, FactoryError> {
+        Err(self.refusing(actor))
+    }
+
+    async fn set_standing_rules(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        _definition: Option<factory_records::domain::standing_rules::OrchestratorDefinition>,
+    ) -> Result<crate::domain::models::StandingRulesSettings, FactoryError> {
+        Err(self.refusing(&actor))
+    }
+
+    async fn set_project_rules(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        _project_id: Uuid,
+        _definition: Option<factory_records::domain::standing_rules::OrchestratorDefinition>,
+    ) -> Result<crate::domain::models::StandingRulesSettings, FactoryError> {
+        Err(self.refusing(&actor))
+    }
+
     async fn hand_back(
         &self,
         _session_id: Uuid,
@@ -338,6 +364,7 @@ async fn alice_s_run(repo: &FakeRepo) -> RunId {
             created_in_person: false,
             control_file_patterns: &[],
             control_files_team_id: None,
+            standing_rules: RunRules::DEFAULT,
         })
         .await
         .expect("insert")
@@ -974,6 +1001,7 @@ async fn a_run_at_its_merge_on_a_held_base_shows_the_main_hold() {
             created_in_person: false,
             control_file_patterns: &[],
             control_files_team_id: None,
+            standing_rules: RunRules::DEFAULT,
         })
         .await
         .expect("insert");

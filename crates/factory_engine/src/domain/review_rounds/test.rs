@@ -1,3 +1,4 @@
+use factory_records::domain::standing_rules::RunRules;
 use std::num::NonZeroU8;
 
 use factory_records::domain::models::{
@@ -50,6 +51,7 @@ async fn code_run(repo: &FakeRepo) -> RunId {
             created_in_person: false,
             control_file_patterns: &[],
             control_files_team_id: None,
+            standing_rules: RunRules::DEFAULT,
         })
         .await
         .expect("insert")

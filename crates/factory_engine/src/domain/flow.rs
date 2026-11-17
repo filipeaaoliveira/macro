@@ -136,8 +136,10 @@ impl Transition {
     }
 }
 
-/// A question an entry puts to a person once its Step ends `done`. The Run
-/// waits for the answer, and the answer is the outcome the Flow routes.
+/// A question an entry puts to a person once its Step ends `done`, or, for
+/// a review panel, once a round ends with the outcome it names. The Run
+/// waits for the answer, unless a Standing Rule gives it, and the answer
+/// is the outcome the Flow routes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GateDefinition {
@@ -145,6 +147,20 @@ pub struct GateDefinition {
     pub question: String,
     /// The answers a person may give.
     pub answers: Vec<Outcome>,
+    /// The outcome that opens it: `done` when absent. A review panel's Gate
+    /// names the round's outcome it asks about, such as `changes`. Left
+    /// out of a Flow that has none, so Runs that carry such a Flow read the
+    /// same.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after: Option<Outcome>,
+}
+
+impl GateDefinition {
+    /// The outcome of the entry's Step, or of its review round, that opens
+    /// the Gate.
+    pub fn opened_by(&self) -> Outcome {
+        self.after.clone().unwrap_or_else(Outcome::done)
+    }
 }
 
 /// One entry of a Flow: a Step to run, when, how often, and where each of its
@@ -183,8 +199,9 @@ pub struct Entry {
     /// Where each outcome goes: the first transition whose conditions hold.
     #[serde(default)]
     pub on: BTreeMap<Outcome, Vec<Transition>>,
-    /// The question the entry asks once its Step ends `done`; its answer is
-    /// then the outcome `on` routes.
+    /// The question the entry asks once its Step ends `done` (or the
+    /// outcome its `after` names); its answer is then the outcome `on`
+    /// routes.
     #[serde(default)]
     pub gate: Option<GateDefinition>,
 }
@@ -252,8 +269,9 @@ pub enum FlowError {
     /// fill.
     #[error("an agent does entry {0}'s step, and it names no role")]
     NoRole(EntryId),
-    /// A review panel's entry also names a single Role, or a Gate.
-    #[error("entry {0} names reviewers, and a role or a gate beside them")]
+    /// A review panel's entry also names a single Role, or a Gate that does
+    /// not say which round's outcome opens it.
+    #[error("entry {0} names reviewers, and a role or a gate with no `after` beside them")]
     ReviewersAndRole(EntryId),
     /// A review panel bounded in rounds says nowhere for its last round's
     /// unresolved Blockers to go.
@@ -365,14 +383,15 @@ impl Flow {
     }
 }
 
-/// A review panel names each of its Roles once, and neither a single Role
-/// nor a Gate beside them: its outcome is the round's, which no person is
-/// asked about.
+/// A review panel names each of its Roles once, and no single Role beside
+/// them. Its outcome is the round's; a Gate on it asks about one of the
+/// round's outcomes (`after`), since a round never ends `done`.
 fn check_reviewers(entry: &Entry) -> Result<(), FlowError> {
     if entry.reviewers.is_empty() {
         return Ok(());
     }
-    if entry.role.is_some() || entry.gate.is_some() {
+    let unopened = entry.gate.as_ref().is_some_and(|gate| gate.after.is_none());
+    if entry.role.is_some() || unopened {
         return Err(FlowError::ReviewersAndRole(entry.id.clone()));
     }
 
