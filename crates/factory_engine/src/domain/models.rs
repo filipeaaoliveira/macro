@@ -5,7 +5,7 @@ mod test;
 
 use chrono::{DateTime, Utc};
 use factory_records::domain::models::{
-    EntryId, Outcome, Repository, Run, RunId, RunOutcome, Step, StepKey,
+    EntryId, Outcome, Repository, Role, Run, RunId, RunOutcome, Step, StepKey,
 };
 use macro_user_id::user_id::MacroUserIdStr;
 use serde::{Deserialize, Serialize};
@@ -32,6 +32,9 @@ pub struct StepRequest {
     pub entry: EntryId,
     /// The work it does.
     pub step: StepName,
+    /// The Role an agent fills to do it, as its entry names.
+    #[serde(default)]
+    pub role: Option<Role>,
     /// Which visit of the entry it is, from 1.
     pub visit: u16,
 }
@@ -51,6 +54,8 @@ pub struct StepEnding {
 pub struct StepInput<'a> {
     /// The Step: its Run and its place in it.
     pub key: StepKey,
+    /// The Role an agent fills to do the Step, as its entry names.
+    pub role: Option<&'a Role>,
     /// The Run's owner, as whom an agent does the Step.
     pub owner: &'a MacroUserIdStr<'static>,
     /// What the Run was asked to do.
@@ -72,6 +77,8 @@ pub struct AgentTask {
     pub owner: MacroUserIdStr<'static>,
     /// The Step.
     pub step: StepName,
+    /// The Role the agent fills.
+    pub role: Role,
     /// The Step's instructions, the Run's request and its earlier Steps.
     pub prompt: String,
     /// The outcomes the agent may end the Step with.

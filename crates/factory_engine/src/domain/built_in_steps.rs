@@ -93,6 +93,9 @@ pub enum BuiltInStepError {
     /// The Step works on the Run's repository, and the Run has none.
     #[error("step {0} works on the run's repository, and the run has none")]
     NoRepository(StepName),
+    /// An agent does the Step, and its entry names no Role for it to fill.
+    #[error("an agent does step {0}, and its entry names no role")]
+    NoRole(StepName),
     /// The agent could not do the Step.
     #[error("the agent failed: {report:?}")]
     Agent {
@@ -130,6 +133,7 @@ impl Retryable for BuiltInStepError {
             BuiltInStepError::PullRequest(error) => error.retryable(),
             BuiltInStepError::UnknownStep(_)
             | BuiltInStepError::NoRepository(_)
+            | BuiltInStepError::NoRole(_)
             | BuiltInStepError::UnexpectedOutcome { .. } => false,
         }
     }
@@ -159,9 +163,10 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
         }
     }
 
-    /// Hand `step` to the agent with `instructions`, and check it ends with
-    /// one of `outcomes`. When the Run works on a repository, the agent's
-    /// session works in it, on the Run's branch.
+    /// Hand `step` to an agent of the Role its entry names, with
+    /// `instructions`, and check it ends with one of `outcomes`. When the
+    /// Run works on a repository, the agent's session works in it, on the
+    /// Run's branch.
     async fn ask_agent(
         &self,
         step: &StepName,
@@ -169,10 +174,14 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
         outcomes: Vec<Outcome>,
         input: StepInput<'_>,
     ) -> Result<StepReport, BuiltInStepError> {
+        let role = input
+            .role
+            .ok_or_else(|| BuiltInStepError::NoRole(step.clone()))?;
         let task = AgentTask {
             key: input.key,
             owner: input.owner.clone(),
             step: step.clone(),
+            role: role.clone(),
             prompt: prompt(instructions, &outcomes, input),
             outcomes: outcomes.clone(),
             repo_url: input.repository.map(|repository| repository.url.clone()),

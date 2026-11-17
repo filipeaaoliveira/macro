@@ -4,6 +4,10 @@
 #[cfg(test)]
 mod test;
 
+use std::collections::BTreeSet;
+
+use factory_records::domain::models::Role;
+
 use crate::domain::flow::{Flow, FlowError, StepName};
 
 /// A built-in Flow: the name a Run of it is started with, and its JSON
@@ -44,4 +48,15 @@ impl BuiltInFlow {
             .map_err(|error| FlowError::Unreadable(error.to_string()))?;
         Flow::parse(definition, serves)
     }
+}
+
+/// The Roles the built-in Flows' entries name: the factory's agent
+/// definition must fill each one.
+pub fn built_in_roles() -> Result<BTreeSet<Role>, FlowError> {
+    let mut roles = BTreeSet::new();
+    for flow in BUILT_IN_FLOWS {
+        let flow = flow.read(|_| true)?;
+        roles.extend(flow.entries.into_iter().filter_map(|entry| entry.role));
+    }
+    Ok(roles)
 }

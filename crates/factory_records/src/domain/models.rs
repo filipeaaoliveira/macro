@@ -180,6 +180,43 @@ impl fmt::Display for Outcome {
     }
 }
 
+/// A job in a Flow, such as `planner`, `writer`, `reviewer` or `fixer`. An
+/// entry whose Step an agent does names the Role, and the factory's agent
+/// definition lists the Agents that may fill it.
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, utoipa::ToSchema,
+)]
+#[serde(try_from = "String", into = "String")]
+#[schema(value_type = String)]
+pub struct Role(String);
+
+impl Role {
+    /// The Role as written in the Flow.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for Role {
+    type Error = InvalidName;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        checked_name("role", value).map(Self)
+    }
+}
+
+impl From<Role> for String {
+    fn from(role: Role) -> Self {
+        role.0
+    }
+}
+
+impl fmt::Display for Role {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 /// How a Run ended.
 #[derive(
     Debug,

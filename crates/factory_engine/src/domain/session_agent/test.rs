@@ -9,7 +9,7 @@ use agent_session::domain::routines::{
 };
 use bot_id::BotId;
 use factory_records::domain::models::{
-    EntryId, HandBack, Outcome, RunId, RunInsert, StepKey, StepSession,
+    EntryId, HandBack, Outcome, Role, RunId, RunInsert, StepKey, StepSession,
 };
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
@@ -290,6 +290,7 @@ async fn plan_task(repo: &FakeRepo) -> AgentTask {
         key,
         owner: julia(),
         step: StepName::try_from("plan".to_string()).expect("valid"),
+        role: Role::try_from("planner".to_string()).expect("valid"),
         prompt: "Plan the change".to_string(),
         outcomes: vec![Outcome::done()],
         repo_url: None,

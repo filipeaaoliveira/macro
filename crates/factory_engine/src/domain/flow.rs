@@ -9,7 +9,7 @@ use std::fmt;
 use std::num::NonZeroU8;
 
 use factory_records::domain::models::{
-    EntryId, InvalidName, MAX_QUESTION_BYTES, Outcome, RunOutcome, checked_name,
+    EntryId, InvalidName, MAX_QUESTION_BYTES, Outcome, Role, RunOutcome, checked_name,
 };
 use serde::{Deserialize, Serialize};
 
@@ -147,6 +147,10 @@ pub struct Entry {
     pub id: EntryId,
     /// The Step it runs.
     pub step: StepName,
+    /// The Role an agent fills to do the Step, when an agent does it: the
+    /// factory's agent definition says which Agents fill it.
+    #[serde(default)]
+    pub role: Option<Role>,
     /// Conditions on the Run's facts; when one does not hold the entry is
     /// skipped and the Run goes to its `next`.
     #[serde(default)]

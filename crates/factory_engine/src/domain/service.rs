@@ -542,6 +542,7 @@ where
             .collect();
         let input = StepInput {
             key: request.key,
+            role: request.role.as_ref(),
             owner: &run.user_id,
             request: &run.request,
             task_id: run.task_id,

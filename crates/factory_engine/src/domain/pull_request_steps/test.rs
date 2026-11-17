@@ -26,6 +26,7 @@ static REPOSITORY: LazyLock<Repository> = LazyLock::new(|| Repository {
 fn input(run_id: RunId) -> StepInput<'static> {
     StepInput {
         key: StepKey { run_id, seq: 5 },
+        role: None,
         owner: &JULIA,
         request: "Collapse repeated dashes in slugs\n\nAnd add a test.",
         task_id: Some(Uuid::parse_str("00000000-0000-7000-8000-000000000101").expect("valid")),

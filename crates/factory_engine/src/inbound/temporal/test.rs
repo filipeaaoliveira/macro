@@ -181,6 +181,7 @@ async fn plan_run(repo: &FakeRepo) -> RunStart {
             "entries": [{
                 "id": "plan",
                 "step": "plan",
+                "role": "planner",
                 "on": { "done": [{ "to": { "kind": "end", "outcome": "success" } }] }
             }]
         }),

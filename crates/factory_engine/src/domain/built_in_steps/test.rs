@@ -2,7 +2,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 
 use chrono::Utc;
 use factory_records::domain::models::{
-    EntryId, Gate, GateAnswer, Outcome, Repository, RunId, Step, StepEnd, StepKey,
+    EntryId, Gate, GateAnswer, Outcome, Repository, Role, RunId, Step, StepEnd, StepKey,
 };
 use macro_user_id::user_id::MacroUserIdStr;
 
@@ -75,12 +75,16 @@ static JULIA: LazyLock<MacroUserIdStr<'static>> = LazyLock::new(|| {
     MacroUserIdStr::try_from("macro|julia@example.com".to_string()).expect("valid")
 });
 
+static WRITER: LazyLock<Role> =
+    LazyLock::new(|| Role::try_from("writer".to_string()).expect("valid"));
+
 fn input<'a>(earlier: &'a [Step]) -> StepInput<'a> {
     StepInput {
         key: StepKey {
             run_id: RunId::generate(),
             seq: 2,
         },
+        role: Some(&WRITER),
         owner: &JULIA,
         request: "Add a dark mode toggle",
         task_id: None,
@@ -108,6 +112,28 @@ fn the_code_flow_s_steps_are_served() {
         assert!(steps.serves(&step(name)), "{name}");
     }
     assert!(!steps.serves(&step("deploy")));
+}
+
+/// An agent Step goes to an Agent of the Role its entry names; one whose
+/// entry names none fails for good, as no Agent is meant for it.
+#[tokio::test]
+async fn an_agent_step_asks_for_the_role_its_entry_names() {
+    let agent = FakeAgent::ending_with("done");
+    let steps = BuiltInSteps::new(agent.clone(), pull_requests());
+    let mut no_role = input(&[]);
+    no_role.role = None;
+
+    steps.run(&step("write"), input(&[])).await.expect("write");
+    let refused = steps
+        .run(&step("write"), no_role)
+        .await
+        .expect_err("no role");
+
+    let tasks = agent.tasks.lock().expect("tasks");
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].role.as_str(), "writer");
+    assert!(matches!(refused, BuiltInStepError::NoRole(_)));
+    assert!(!refused.retryable());
 }
 
 /// An agent Step of a Run that works on a repository works in its own

@@ -125,6 +125,7 @@ impl FlowWorkflow {
                 key,
                 entry: entry.id.clone(),
                 step: entry.step.clone(),
+                role: entry.role.clone(),
                 visit,
             };
             let started = ctx
