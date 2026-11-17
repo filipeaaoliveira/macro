@@ -2,17 +2,15 @@ import {
   Card,
   CardBody,
   CardFooter,
-  CardHeader,
 } from '@app/features/agent-cards/components/kit/card';
-import { Tile, Well } from '@app/features/agent-cards/components/kit/parts';
 import { t } from '@app/lib/i18n';
 import { fireAndForget } from '@core/util/fireAndForget';
 import QuestionIcon from '@icon/system/regular/question.svg';
-import { Button, cn, TextField } from '@ui';
+import { Button, cn, Item, TextField, Card as UiCard } from '@ui';
 import { For, type JSX, Show } from 'solid-js';
 import { flowWordLabel } from '../core/flow-words';
 
-/** The Gate's header and its question, in a well. */
+/** The Gate's header and its question, in a block nested in the card. */
 export function GateQuestion(props: {
   question: string;
   /**
@@ -25,18 +23,27 @@ export function GateQuestion(props: {
 }) {
   return (
     <>
-      <CardHeader
-        tile={
-          <Tile size={32} tone="accent">
+      <UiCard.Header class="pb-2">
+        <Item class="items-start gap-3 border-0 p-0">
+          <Item.Media>
             <QuestionIcon />
-          </Tile>
-        }
-        title={t('factoryRuns.gateTitle')}
-        subtitle={t('factoryRuns.gateWaiting')}
-        wrap
-      />
+          </Item.Media>
+          <Item.Content class="gap-0.5">
+            <UiCard.Title class="[overflow-wrap:anywhere]">
+              {t('factoryRuns.gateTitle')}
+            </UiCard.Title>
+            <UiCard.Description class="leading-5">
+              {t('factoryRuns.gateWaiting')}
+            </UiCard.Description>
+          </Item.Content>
+        </Item>
+      </UiCard.Header>
       <CardBody>
-        <Well class="text-sm leading-5 whitespace-pre-wrap [overflow-wrap:anywhere]">
+        <UiCard
+          variant="filled"
+          offset={1}
+          class="px-3 py-2.5 text-sm leading-5 whitespace-pre-wrap [overflow-wrap:anywhere]"
+        >
           <div
             id={props.id}
             role={props.capped ? 'region' : undefined}
@@ -49,7 +56,7 @@ export function GateQuestion(props: {
           >
             {props.question}
           </div>
-        </Well>
+        </UiCard>
       </CardBody>
     </>
   );
