@@ -808,10 +808,30 @@
           }
         }
       },
+      "CheckResult": {
+        "type": "object",
+        "description": "How one check of a verified round ran.",
+        "required": ["name", "exitCode", "output"],
+        "properties": {
+          "exitCode": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Its exit code: 0 when it passed."
+          },
+          "name": {
+            "type": "string",
+            "description": "The check's name."
+          },
+          "output": {
+            "type": "string",
+            "description": "The end of what it printed, at most [`MAX_CHECK_RESULT_OUTPUT_BYTES`]."
+          }
+        }
+      },
       "CheckRound": {
         "type": "object",
         "description": "One round of the repository's checks a Step ran on its agent's work, in\nthe agent's session.",
-        "required": ["round", "checks", "startedAt"],
+        "required": ["round", "checks", "startedAt", "verified", "results"],
         "properties": {
           "checks": {
             "type": "array",
@@ -831,6 +851,13 @@
               }
             ]
           },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CheckResult"
+            },
+            "description": "How each check of a verified round ran so far, in the round's\norder; none for a round the agent reports."
+          },
           "round": {
             "type": "integer",
             "format": "int32",
@@ -841,6 +868,10 @@
             "type": "string",
             "format": "date-time",
             "description": "When it started."
+          },
+          "verified": {
+            "type": "boolean",
+            "description": "Whether the engine runs the checks itself, reading each one's exit\ncode; otherwise the agent runs them and reports how they went."
           }
         }
       },
@@ -860,7 +891,7 @@
           },
           "report": {
             "type": "string",
-            "description": "What the agent reported of each check, for a person and for the\nagent's fix to read."
+            "description": "What each check did, for a person and for the agent's fix to read:\nthe agent's report, or, for a verified round, the checks that failed\nwith the end of their output."
           }
         }
       },

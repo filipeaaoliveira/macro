@@ -25,6 +25,24 @@ export type AnswerGateRequest = {
 };
 
 /**
+ * How one check of a verified round ran.
+ */
+export type CheckResult = {
+    /**
+     * Its exit code: 0 when it passed.
+     */
+    exitCode: number;
+    /**
+     * The check's name.
+     */
+    name: string;
+    /**
+     * The end of what it printed, at most [`MAX_CHECK_RESULT_OUTPUT_BYTES`].
+     */
+    output: string;
+};
+
+/**
  * One round of the repository's checks a Step ran on its agent's work, in
  * the agent's session.
  */
@@ -35,6 +53,11 @@ export type CheckRound = {
     checks: Array<string>;
     end?: null | CheckRoundEnd;
     /**
+     * How each check of a verified round ran so far, in the round's
+     * order; none for a round the agent reports.
+     */
+    results: Array<CheckResult>;
+    /**
      * Which round, from 1.
      */
     round: number;
@@ -42,6 +65,11 @@ export type CheckRound = {
      * When it started.
      */
     startedAt: string;
+    /**
+     * Whether the engine runs the checks itself, reading each one's exit
+     * code; otherwise the agent runs them and reports how they went.
+     */
+    verified: boolean;
 };
 
 /**
@@ -57,8 +85,9 @@ export type CheckRoundEnd = {
      */
     outcome: CheckRoundOutcome;
     /**
-     * What the agent reported of each check, for a person and for the
-     * agent's fix to read.
+     * What each check did, for a person and for the agent's fix to read:
+     * the agent's report, or, for a verified round, the checks that failed
+     * with the end of their output.
      */
     report: string;
 };

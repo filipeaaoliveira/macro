@@ -8,6 +8,7 @@
 export * from './agentName';
 export * from './answerGateRequest';
 export * from './answerGateRequestNote';
+export * from './checkResult';
 export * from './checkRound';
 export * from './checkRoundEnd';
 export * from './checkRoundEndProperty';
