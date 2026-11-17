@@ -13,7 +13,7 @@ use super::{PgRunRepository, PgRunRepositoryErr, number};
 use crate::domain::models::{Role, RunId, StepKey};
 use crate::domain::review_rounds::{
     Finding, FindingClass, FindingKind, Lines, ReviewFinding, ReviewRound, ReviewRoundEnd,
-    ReviewRoundFailure, ReviewRoundOutcome, ReviewRoundRepository, ReviewRoundStart,
+    ReviewRoundFailure, ReviewRoundOutcome, ReviewRoundRepository, ReviewRoundStart, number_rounds,
 };
 
 struct RoundRow {
@@ -48,7 +48,9 @@ impl TryFrom<RoundRow> for ReviewRound {
             _ => return Err(PgRunRepositoryErr::PartialEnd),
         };
         Ok(ReviewRound {
-            round: number(row.round)?,
+            // Numbered among the Run's rounds once they are all read.
+            round: 0,
+            visit: number(row.round)?,
             seq: number(row.seq)?,
             reviewers: number(row.reviewers)?,
             head_sha: row.head_sha,
@@ -193,6 +195,9 @@ impl PgRunRepository {
             round.findings = found.remove(&(run_id, round.seq)).unwrap_or_default();
             round.answered = answered.remove(&(run_id, round.seq)).unwrap_or_default();
             rounds.entry(run_id).or_default().push(round);
+        }
+        for run_rounds in rounds.values_mut() {
+            number_rounds(run_rounds);
         }
         Ok(rounds)
     }

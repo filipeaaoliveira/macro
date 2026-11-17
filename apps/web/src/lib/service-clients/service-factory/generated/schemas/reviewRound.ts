@@ -37,7 +37,8 @@ could not open. */
    */
   reviewers: number;
   /**
-   * Which round of its entry, from 1; a reset counts from 1 again.
+   * Which round of the Run it is, from 1, counting every round the Run
+recorded: a reset of its entry does not count again from 1.
    * @minimum 0
    */
   round: number;
@@ -49,4 +50,12 @@ Steps take this place and the ones after it.
   seq: number;
   /** When it started. */
   startedAt: string;
+  /**
+   * Which round of its entry it is since the entry was last reset, from
+1, as the entry's round limit counts them: a round after a reset
+(as when a person sends the change back) is visit 1 again, and
+reviews the whole change.
+   * @minimum 0
+   */
+  visit: number;
 }

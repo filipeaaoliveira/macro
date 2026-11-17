@@ -141,8 +141,14 @@ pub struct ReviewRoundEnd {
 #[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ReviewRound {
-    /// Which round of its entry, from 1; a reset counts from 1 again.
+    /// Which round of the Run it is, from 1, counting every round the Run
+    /// recorded: a reset of its entry does not count again from 1.
     pub round: u16,
+    /// Which round of its entry it is since the entry was last reset, from
+    /// 1, as the entry's round limit counts them: a round after a reset
+    /// (as when a person sends the change back) is visit 1 again, and
+    /// reviews the whole change.
+    pub visit: u16,
     /// The place of its first Step among the Run's Steps; its reviewers'
     /// Steps take this place and the ones after it.
     pub seq: u16,
@@ -187,12 +193,22 @@ impl ReviewRound {
     }
 }
 
+/// Number the Run's `rounds`, given in the order of their Steps, from 1: each
+/// one's [`ReviewRound::round`] is its place among them, whatever its
+/// visit.
+pub fn number_rounds(rounds: &mut [ReviewRound]) {
+    for (number, round) in (1..).zip(rounds.iter_mut()) {
+        round.round = number;
+    }
+}
+
 /// A review round to record, before its reviewers start.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReviewRoundStart {
     /// The place of its first Step.
     pub seq: u16,
-    /// Which round of its entry, from 1.
+    /// Which round of its entry since its last reset, from 1: its
+    /// [`ReviewRound::visit`].
     pub round: u16,
     /// How many reviewers it has.
     pub reviewers: u16,
@@ -209,7 +225,8 @@ pub struct ReviewRoundStart {
 pub struct ReviewRoundFailure {
     /// The place of its first Step.
     pub seq: u16,
-    /// Which round of its entry, from 1.
+    /// Which round of its entry since its last reset, from 1: its
+    /// [`ReviewRound::visit`].
     pub round: u16,
     /// How many reviewers it would have had.
     pub reviewers: u16,

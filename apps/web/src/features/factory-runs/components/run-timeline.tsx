@@ -358,15 +358,19 @@ function MainHoldNote(props: { hold: MainHold; baseBranch: string }) {
 }
 
 /**
- * A review round: which, the diff it reviews, and once it ended, how, with
- * how many of its findings block and how many became follow-ups.
+ * A review round: which of the Run's (a fresh review when its entry was
+ * reset, as when the change was sent back), the diff it reviews, and once
+ * it ended, how, with how many of its findings block and how many became
+ * follow-ups.
  */
 function ReviewRoundNote(props: { round: ReviewRound }) {
   const counts = () => findingCounts(props.round);
   return (
     <StepNote>
       <span class="flex min-w-0 items-center gap-2">
-        {t('factoryRuns.reviewRound', { round: props.round.round })}
+        {props.round.visit === 1 && props.round.round > 1
+          ? t('factoryRuns.reviewRoundAfresh', { round: props.round.round })
+          : t('factoryRuns.reviewRound', { round: props.round.round })}
         <Show
           when={props.round.end}
           fallback={<span>{t('factoryRuns.reviewRoundReviewing')}</span>}

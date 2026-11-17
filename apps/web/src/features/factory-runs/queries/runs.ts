@@ -97,6 +97,7 @@ function toRun(detail: RunDetail): Run {
     baseRequiredChecks: detail.baseRequiredChecks ?? undefined,
     reviewRounds: detail.reviewRounds.map((round) => ({
       round: round.round,
+      visit: round.visit,
       seq: round.seq,
       reviewers: round.reviewers,
       headSha: round.headSha ?? undefined,

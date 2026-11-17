@@ -91,6 +91,7 @@ fn an_unreadable_answer_is_not_carried_to_the_next_round() {
     whole.blocks_anywhere = true;
     let round = |number: u16, seq: u16, findings: Vec<ReviewFinding>| ReviewRound {
         round: number,
+        visit: number,
         seq,
         reviewers: 1,
         head_sha: Some("aaa".to_string()),
@@ -111,4 +112,31 @@ fn an_unreadable_answer_is_not_carried_to_the_next_round() {
 
     assert_eq!(carried.len(), 1);
     assert_eq!(carried[0].path, "src/a.rs");
+}
+
+/// A round after its entry was reset reviews the whole change afresh: it
+/// is the Run's next round, but the first of its entry again, and carries
+/// no Blocker of the round before.
+#[test]
+fn a_round_after_a_reset_carries_nothing() {
+    let round = |number: u16, visit: u16, seq: u16, findings: Vec<ReviewFinding>| ReviewRound {
+        round: number,
+        visit,
+        seq,
+        reviewers: 1,
+        head_sha: Some("aaa".to_string()),
+        diff_base: Some("main".to_string()),
+        fix_diff: false,
+        failure: None,
+        started_at: Utc::now(),
+        end: None,
+        findings,
+        answered: Vec::new(),
+    };
+    let rounds = [
+        round(1, 1, 3, vec![finding(1, "Drops the error")]),
+        round(2, 1, 5, Vec::new()),
+    ];
+
+    assert!(carried_blockers(&rounds, &rounds[1]).is_empty());
 }

@@ -343,7 +343,11 @@ no control character, backtick or angle bracket. An answer that never read
 is not carried to the next round. In `code`, the review panel
 runs at most `max_visits` rounds (three, or `FACTORY_REVIEW_ROUNDS`, which
 the service writes into the Flow a Run starts with). Rounds and their
-findings show on the Run (`reviewRounds` in the Run API).
+findings show on the Run (`reviewRounds` in the Run API), numbered across
+the whole Run (`round`), with the visit of their entry (`visit`): a reset
+(as when the merge gate's `revise` sends the change back) starts the
+visits, and the round limit, again from 1, and that round reviews the whole
+change, with no Blockers carried, but it is still the Run's next round.
 
 The head `ci` calls green is kept (`factory_run.merge_head_sha`);
 `ready_to_merge` ends `changed` unless the pull request's head is still that

@@ -1681,6 +1681,7 @@
         "description": "One round of a Run's review panel.",
         "required": [
           "round",
+          "visit",
           "seq",
           "reviewers",
           "fixDiff",
@@ -1731,7 +1732,7 @@
           "round": {
             "type": "integer",
             "format": "int32",
-            "description": "Which round of its entry, from 1; a reset counts from 1 again.",
+            "description": "Which round of the Run it is, from 1, counting every round the Run\nrecorded: a reset of its entry does not count again from 1.",
             "minimum": 0
           },
           "seq": {
@@ -1744,6 +1745,12 @@
             "type": "string",
             "format": "date-time",
             "description": "When it started."
+          },
+          "visit": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Which round of its entry it is since the entry was last reset, from\n1, as the entry's round limit counts them: a round after a reset\n(as when a person sends the change back) is visit 1 again, and\nreviews the whole change.",
+            "minimum": 0
           }
         }
       },

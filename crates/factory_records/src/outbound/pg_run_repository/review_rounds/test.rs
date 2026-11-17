@@ -282,3 +282,34 @@ async fn a_failed_opening_a_re_ask_and_a_follow_up_key_keep_their_first_record(p
         None
     );
 }
+
+/// The Run's rounds are numbered in order across the whole Run, whichever
+/// visit of their entry each is: a round after a reset is the Run's next
+/// round, and visit 1 again.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn rounds_are_numbered_across_the_run_through_a_reset(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let id = reviewing(&repo).await;
+    let after_reset = ReviewRoundStart {
+        seq: 8,
+        head_sha: "def456".to_string(),
+        ..first_round()
+    };
+    let started = repo
+        .start_review_round(id, &after_reset)
+        .await
+        .expect("round");
+
+    assert_eq!((started.round, started.visit), (2, 1));
+    let rounds = repo.review_rounds(id).await.expect("rounds");
+    let numbered: Vec<(u16, u16, u16)> = rounds
+        .iter()
+        .map(|round| (round.seq, round.round, round.visit))
+        .collect();
+    assert_eq!(numbered, [(3, 1, 1), (8, 2, 1)]);
+    let listed = repo.runs_review_rounds(&[id]).await.expect("listed");
+    assert_eq!(listed.get(&id), Some(&rounds));
+}

@@ -168,6 +168,52 @@ async fn a_later_round_reviews_the_fix_diff() {
     assert_eq!(read, [(1, "aaa", "main", false), (2, "bbb", "aaa", true)]);
 }
 
+/// A round after its entry was reset, as when a person sends the change
+/// back at the merge gate, is the Run's next round, not round 1 again: it
+/// is visit 1 of its entry, so the round limit counts from it, and it
+/// reviews the whole change.
+#[tokio::test]
+async fn a_round_after_a_reset_is_the_run_s_next_round_over_the_whole_change() {
+    let repo = FakeRepo::default();
+    let github = FakeGithub::default();
+    let run_id = code_run(&repo).await;
+    github.state().branch_heads = [
+        Some("aaa".to_string()),
+        Some("bbb".to_string()),
+        Some("ccc".to_string()),
+    ]
+    .into();
+    let rounds = rounds(&repo, &github);
+
+    for (seq, visit) in [(3, 1), (6, 2), (10, 1)] {
+        rounds
+            .open_round(opening(run_id, seq, visit))
+            .await
+            .expect("open");
+    }
+
+    let recorded = repo.review_rounds(run_id).await.expect("rounds");
+    let read: Vec<_> = recorded
+        .iter()
+        .map(|round| {
+            (
+                round.round,
+                round.visit,
+                round.diff_base.as_deref().unwrap_or_default(),
+                round.fix_diff,
+            )
+        })
+        .collect();
+    assert_eq!(
+        read,
+        [
+            (1, 1, "main", false),
+            (2, 2, "aaa", true),
+            (3, 1, "main", false)
+        ]
+    );
+}
+
 /// A fix that pushed nothing leaves its round nothing new to review: the
 /// round reviews the whole change again, so what the fix left is found
 /// again and blocks. A branch that is gone opens no round.

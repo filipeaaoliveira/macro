@@ -472,6 +472,7 @@ fn round(seq: u16, head: &str, diff_base: &str, fix_diff: bool) -> ReviewRound {
     };
     ReviewRound {
         round: 2,
+        visit: 2,
         seq,
         reviewers: 2,
         head_sha: Some(head.to_string()),

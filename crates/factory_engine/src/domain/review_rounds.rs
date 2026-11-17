@@ -6,7 +6,9 @@
 //! Steps end, a finding in that diff is a Blocker, which the fix gets; one
 //! outside it becomes a follow-up task, in the project of the Run's task,
 //! and holds nothing. Reviewers that report one problem (the same file, at
-//! lines that meet) make one follow-up task, which names each of them.
+//! lines that meet) make one follow-up task, which names each of them. A
+//! round is numbered among all the Run's rounds; a reset of its entry
+//! counts its visits, for the round limit, from 1 again.
 
 mod answer;
 mod brief;

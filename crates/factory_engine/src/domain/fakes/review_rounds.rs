@@ -7,7 +7,7 @@ use chrono::Utc;
 use factory_records::domain::models::{Role, RunId, StepKey};
 use factory_records::domain::review_rounds::{
     Finding, FindingClass, ReviewFinding, ReviewRound, ReviewRoundEnd, ReviewRoundFailure,
-    ReviewRoundOutcome, ReviewRoundRepository, ReviewRoundStart,
+    ReviewRoundOutcome, ReviewRoundRepository, ReviewRoundStart, number_rounds,
 };
 use uuid::Uuid;
 
@@ -43,6 +43,7 @@ impl FakeRepo {
             .map(|(_, round)| round.clone())
             .collect();
         rounds.sort_by_key(|round| round.seq);
+        number_rounds(&mut rounds);
         // A finding reads with its Step's Role, as the Postgres join reads
         // it.
         for round in &mut rounds {
@@ -68,7 +69,8 @@ impl ReviewRoundRepository for FakeRepo {
     ) -> Result<ReviewRound, FakeError> {
         if self.with_round(run_id, start.seq, |_| ()).is_none() {
             let round = ReviewRound {
-                round: start.round,
+                round: 0,
+                visit: start.round,
                 seq: start.seq,
                 reviewers: start.reviewers,
                 head_sha: Some(start.head_sha.clone()),
@@ -98,7 +100,8 @@ impl ReviewRoundRepository for FakeRepo {
     ) -> Result<ReviewRound, FakeError> {
         if self.with_round(run_id, failure.seq, |_| ()).is_none() {
             let round = ReviewRound {
-                round: failure.round,
+                round: 0,
+                visit: failure.round,
                 seq: failure.seq,
                 reviewers: failure.reviewers,
                 head_sha: None,

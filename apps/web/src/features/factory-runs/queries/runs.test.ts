@@ -55,6 +55,7 @@ const started: RunDetail = {
   reviewRounds: [
     {
       round: 1,
+      visit: 1,
       seq: 2,
       reviewers: 1,
       headSha: 'abc123',
@@ -139,6 +140,7 @@ describe('createAppRunsContext', () => {
       reviewRounds: [
         {
           round: 1,
+          visit: 1,
           seq: 2,
           reviewers: 1,
           headSha: 'abc123',

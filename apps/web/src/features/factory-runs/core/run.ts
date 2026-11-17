@@ -118,7 +118,14 @@ export type ReviewFinding = {
  * the fix diff, what the fix changed since, in a later one.
  */
 export type ReviewRound = {
+  /** Which round of the Run, from 1, across every round it recorded. */
   round: number;
+  /**
+   * Which round of its entry since the entry was last reset, from 1: a
+   * round after a reset (as when the change is sent back) is 1 again, and
+   * reviews the whole change afresh.
+   */
+  visit: number;
   /** The place of its first Step. */
   seq: number;
   reviewers: number;

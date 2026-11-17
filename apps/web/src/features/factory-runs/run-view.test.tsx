@@ -163,6 +163,7 @@ describe('RunView', () => {
       reviewRounds: [
         {
           round: 2,
+          visit: 2,
           seq: 3,
           reviewers: 2,
           headSha: 'bbbbbbbbbb',
@@ -211,6 +212,40 @@ describe('RunView', () => {
     const task = screen.getByText('Follow-up task').closest('a');
     expect(task?.getAttribute('href')).toMatch(/\/app\/task\/task-2$/);
     expect(screen.getByText('Loading has no test')).toBeTruthy();
+  });
+
+  it('labels a review round after a reset as a fresh review', async () => {
+    const { setRun } = mount({});
+    setRun({
+      ...waitingRun,
+      steps: [
+        {
+          seq: 9,
+          entry: 'review',
+          visit: 1,
+          startedAt: '2026-11-16T11:00:00Z',
+          role: 'correctness-reviewer',
+        },
+      ],
+      reviewRounds: [
+        {
+          round: 3,
+          visit: 1,
+          seq: 9,
+          reviewers: 1,
+          headSha: 'cccccccccc',
+          diffBase: 'main',
+          fixDiff: false,
+          startedAt: '2026-11-16T11:00:00Z',
+          findings: [],
+        },
+      ],
+    });
+
+    expect(
+      await screen.findByText('Review round 3, a fresh review')
+    ).toBeTruthy();
+    expect(screen.getByText('Reviews the whole change')).toBeTruthy();
   });
 
   it('says who ran each round, and the exit code of each check that failed', async () => {
@@ -757,6 +792,7 @@ describe('RunView', () => {
       reviewRounds: [
         {
           round: 1,
+          visit: 1,
           seq: 3,
           reviewers: 1,
           headSha: '0123456789',

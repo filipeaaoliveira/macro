@@ -70,6 +70,7 @@ export default {
   baseChecksNone:
     '{{branch}} has no required checks, so merges to it aren’t held.',
   reviewRound: 'Review round {{round}}',
+  reviewRoundAfresh: 'Review round {{round}}, a fresh review',
   reviewRoundWhole: 'Reviews the whole change',
   reviewRoundFixDiff: 'Reviews the fix since {{commit}}',
   reviewRoundReviewing: 'Reviewing…',

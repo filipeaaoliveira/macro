@@ -21,13 +21,13 @@ const CLOSE: &str = "</reviewer-findings>";
 
 /// The Blockers the round before `round` found, which its reviewers check
 /// again, numbered from 1 in the order the brief gives them: none for a
-/// first round. An answer that never read names no place to check, so it
-/// is not carried.
+/// first round of its entry, the first after a reset included. An answer
+/// that never read names no place to check, so it is not carried.
 pub fn carried_blockers<'a>(
     rounds: &'a [ReviewRound],
     round: &ReviewRound,
 ) -> Vec<&'a ReviewFinding> {
-    if round.round <= 1 {
+    if round.visit <= 1 {
         return Vec::new();
     }
     rounds
