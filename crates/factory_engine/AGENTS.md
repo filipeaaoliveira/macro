@@ -316,8 +316,9 @@ shared, in the project of the Run's task (document storage's `POST
 user), with an id kept on the finding before it is asked for, so a retry
 finds it rather than making a second; an outage (or an unaccepted key or
 user, a timeout or throttling) fails the close, which is tried again for at
-most two hours, then the round fails; a refusal leaves the follow-up with no
-task; and a task made under another id stops the round for good, since every
+most two hours, then the round fails; a refusal, or a project the owner
+may not add to as entity access reads it before asking, leaves the
+follow-up with no task; and a task made under another id stops the round for good, since every
 retry would make another. A diff GitHub
 cannot list in full makes every finding a Blocker. The round ends `changes`
 with a Blocker, `pass` without, and `failed` when a reviewer's work failed or
@@ -398,7 +399,8 @@ back through `ci` to the merge Gate, which shows the files: that route is
 in every `code` Flow a Run carries, so a Run in flight when this shipped,
 whose Gate approved before its files were read, takes it too, and nothing
 in the workflow or the interpreter changed. A pull request merged outside
-the Run is not compared again, since GitHub's comparison of a merged head
+the Run, found by `ready_to_merge` or `merge`, is recorded as the Run's
+merge and its base watched, as one the Run made; it is not compared again, since GitHub's comparison of a merged head
 with its base lists nothing: the Steps keep, and name, the Control Files
 last read. Nothing but a person's answer approves them.
 
@@ -439,8 +441,10 @@ Project property), naming the factory merges to the base since its checks
 last passed, oldest first, with their pull requests
 (`outbound/document_hold_tasks.rs`, through the document storage service).
 The task is claimed before it is filed, so a retry or a second look files
-none; a filing that fails gives the claim back, a claim never filed is
-taken again after 15 minutes, and a task filed then deleted is not filed
+none; the claim chooses the id it is filed under, kept by every later
+claim of the red period, so a filing whose answer was lost is found under
+it rather than filed twice; a filing that fails gives the claim back, a
+claim never filed is taken again after 15 minutes, and a task filed then deleted is not filed
 again in the same red period. A green look clears the hold, unless its
 read started before the hold's red one. The watch never ends while the base
 is held or a look fails; with nothing held it ends on a green or unread
