@@ -49,6 +49,7 @@ const planning: RunDetail = {
       startedAt: '2026-11-16T09:00:00Z',
       end: null,
       gate: null,
+      checks: [],
     },
   ],
 };
@@ -72,6 +73,7 @@ const waiting: RunDetail = {
         openedAt: '2026-11-16T09:01:00Z',
         answer: null,
       },
+      checks: [],
     },
   ],
 };

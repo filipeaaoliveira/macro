@@ -39,6 +39,8 @@ export default {
   stepVisit: '{{entry}} · visit {{visit}}',
   stepRunning: 'Running…',
   showOutput: 'Show output for {{step}}',
+  checksRound: 'Checks, round {{round}}',
+  checksRunning: 'Checks running…',
   cancelRun: 'Cancel run',
   cancelTitle: 'Cancel this run?',
   cancelBody:

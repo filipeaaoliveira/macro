@@ -22,6 +22,24 @@ export type Gate = {
   answer?: GateAnswer;
 };
 
+/**
+ * One round of the repository's checks a Step had its agent run: which
+ * checks, and how they went (`passed` or `failed`, with the agent's report).
+ */
+export type CheckRound = {
+  /** Which round, from 1. */
+  round: number;
+  /** The checks' names, in the repository's order. */
+  checks: string[];
+  startedAt: string;
+  end?: {
+    outcome: 'passed' | 'failed';
+    /** What the agent reported of each check, as markdown. */
+    report: string;
+    endedAt: string;
+  };
+};
+
 /** One visit of one of a Flow's entries. */
 export type RunStep = {
   /** The Step's place among the Run's Steps, from 1: what keys it. */
@@ -38,6 +56,8 @@ export type RunStep = {
     endedAt: string;
   };
   gate?: Gate;
+  /** The rounds of checks it ran, in order; none for most Steps. */
+  checks?: CheckRound[];
 };
 
 /** One Run of a Flow, with the Steps it took in the order they started. */

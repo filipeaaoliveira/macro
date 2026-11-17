@@ -63,6 +63,12 @@ function toRun(detail: RunDetail): Run {
               : undefined,
           }
         : undefined,
+      checks: step.checks.map((round) => ({
+        round: round.round,
+        checks: round.checks,
+        startedAt: round.startedAt,
+        end: round.end ?? undefined,
+      })),
     })),
   };
 }

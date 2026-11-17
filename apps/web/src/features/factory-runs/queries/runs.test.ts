@@ -35,6 +35,14 @@ const started: RunDetail = {
       startedAt: '2026-11-16T09:00:01Z',
       end: null,
       gate: null,
+      checks: [
+        {
+          round: 1,
+          checks: ['web'],
+          startedAt: '2026-11-16T09:00:02Z',
+          end: null,
+        },
+      ],
     },
   ],
 };
@@ -78,6 +86,14 @@ describe('createAppRunsContext', () => {
           startedAt: '2026-11-16T09:00:01Z',
           end: undefined,
           gate: undefined,
+          checks: [
+            {
+              round: 1,
+              checks: ['web'],
+              startedAt: '2026-11-16T09:00:02Z',
+              end: undefined,
+            },
+          ],
         },
       ],
     };
@@ -236,6 +252,7 @@ describe('createAppRunsContext', () => {
               openedAt: '2026-11-16T09:01:00Z',
               answer: null,
             },
+            checks: [],
           },
         ],
       };
