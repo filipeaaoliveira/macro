@@ -13,6 +13,7 @@ import type {
   HandBackRequest,
   LinkTaskRequest,
   RunDetail,
+  RunErrorResponse,
   RunId,
   RunInsights,
   TaskRunsResponse,
@@ -245,7 +246,7 @@ export type createFactoryRunResponse201 = {
 };
 
 export type createFactoryRunResponse400 = {
-  data: ErrorResponse;
+  data: RunErrorResponse;
   status: 400;
 };
 

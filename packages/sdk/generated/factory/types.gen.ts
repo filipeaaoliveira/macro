@@ -383,6 +383,23 @@ export type RunEnd = {
 };
 
 /**
+ * Why a request was refused, where a client acts on the cause.
+ */
+export type RunErrorCode = 'unreachableRepository' | 'noPushAccess';
+
+/**
+ * What a refused or failed request answers: a message, and for a refusal
+ * a client acts on, its code.
+ */
+export type RunErrorResponse = {
+    code?: null | RunErrorCode;
+    /**
+     * What went wrong, in words.
+     */
+    message: string;
+};
+
+/**
  * A Run's id.
  */
 export type RunId = string;
@@ -686,7 +703,7 @@ export type CreateFactoryRunData = {
 };
 
 export type CreateFactoryRunErrors = {
-    400: ErrorResponse;
+    400: RunErrorResponse;
     401: ErrorResponse;
     403: ErrorResponse;
     500: ErrorResponse;

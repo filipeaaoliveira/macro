@@ -250,7 +250,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/RunErrorResponse"
                 }
               }
             }
@@ -1327,6 +1327,33 @@
           "outcome": {
             "$ref": "#/components/schemas/RunOutcome",
             "description": "How the Run ended."
+          }
+        }
+      },
+      "RunErrorCode": {
+        "type": "string",
+        "description": "Why a request was refused, where a client acts on the cause.",
+        "enum": ["unreachableRepository", "noPushAccess"]
+      },
+      "RunErrorResponse": {
+        "type": "object",
+        "description": "What a refused or failed request answers: a message, and for a refusal\na client acts on, its code.",
+        "required": ["message"],
+        "properties": {
+          "code": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RunErrorCode",
+                "description": "Why it was refused, when a client acts on the cause."
+              }
+            ]
+          },
+          "message": {
+            "type": "string",
+            "description": "What went wrong, in words."
           }
         }
       },
