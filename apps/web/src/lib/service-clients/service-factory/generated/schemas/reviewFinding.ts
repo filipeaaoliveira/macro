@@ -13,6 +13,9 @@ import type { ReviewFindingRole } from './reviewFindingRole';
  * A finding as its round keeps it.
  */
 export interface ReviewFinding {
+  /** Whether it blocks wherever it is: a Blocker of the round before
+found again, or a reviewer's answer that never read. */
+  blocksAnywhere: boolean;
   /** The follow-up task it became, when it is a follow-up and the task
 was made: its task document's id. */
   followUpTaskId?: ReviewFindingFollowUpTaskId;

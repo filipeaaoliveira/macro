@@ -1352,8 +1352,19 @@
       "ReviewFinding": {
         "type": "object",
         "description": "A finding as its round keeps it.",
-        "required": ["seq", "place", "path", "problem", "why"],
+        "required": [
+          "seq",
+          "place",
+          "path",
+          "problem",
+          "why",
+          "blocksAnywhere"
+        ],
         "properties": {
+          "blocksAnywhere": {
+            "type": "boolean",
+            "description": "Whether it blocks wherever it is: a Blocker of the round before\nfound again, or a reviewer's answer that never read."
+          },
           "followUpTaskId": {
             "type": ["string", "null"],
             "format": "uuid",
@@ -1425,16 +1436,14 @@
           "round",
           "seq",
           "reviewers",
-          "headSha",
-          "diffBase",
           "fixDiff",
           "startedAt",
           "findings"
         ],
         "properties": {
           "diffBase": {
-            "type": "string",
-            "description": "Where the diff under review starts: the Run's base branch, or the\ncommit the round before reviewed."
+            "type": ["string", "null"],
+            "description": "Where the diff under review starts: the Run's base branch, or the\ncommit the round before reviewed; none for a round that could not\nopen."
           },
           "end": {
             "oneOf": [
@@ -1446,6 +1455,10 @@
                 "description": "How and when it ended; none while it reviews."
               }
             ]
+          },
+          "failure": {
+            "type": ["string", "null"],
+            "description": "Why it could not open, as when the Run's branch is gone: it then\nran no reviewer and ended failed."
           },
           "findings": {
             "type": "array",
@@ -1459,8 +1472,8 @@
             "description": "Whether it reviews the fix diff, the changes made since the round\nbefore, rather than the Run's whole change."
           },
           "headSha": {
-            "type": "string",
-            "description": "The commit of the Run's branch it reviews."
+            "type": ["string", "null"],
+            "description": "The commit of the Run's branch it reviews; none for a round that\ncould not open."
           },
           "reviewers": {
             "type": "integer",

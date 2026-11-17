@@ -6,23 +6,31 @@
  */
 
 import type { ReviewFinding } from './reviewFinding';
+import type { ReviewRoundDiffBase } from './reviewRoundDiffBase';
 import type { ReviewRoundEndProperty } from './reviewRoundEndProperty';
+import type { ReviewRoundFailure } from './reviewRoundFailure';
+import type { ReviewRoundHeadSha } from './reviewRoundHeadSha';
 
 /**
  * One round of a Run's review panel.
  */
 export interface ReviewRound {
   /** Where the diff under review starts: the Run's base branch, or the
-commit the round before reviewed. */
-  diffBase: string;
+commit the round before reviewed; none for a round that could not
+open. */
+  diffBase?: ReviewRoundDiffBase;
   end?: ReviewRoundEndProperty;
+  /** Why it could not open, as when the Run's branch is gone: it then
+ran no reviewer and ended failed. */
+  failure?: ReviewRoundFailure;
   /** What its reviewers found, by Step and place. */
   findings: ReviewFinding[];
   /** Whether it reviews the fix diff, the changes made since the round
 before, rather than the Run's whole change. */
   fixDiff: boolean;
-  /** The commit of the Run's branch it reviews. */
-  headSha: string;
+  /** The commit of the Run's branch it reviews; none for a round that
+could not open. */
+  headSha?: ReviewRoundHeadSha;
   /**
    * How many reviewers it has, each in a Step of its own.
    * @minimum 0

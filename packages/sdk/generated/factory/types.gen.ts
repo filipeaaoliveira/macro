@@ -414,6 +414,11 @@ export type Repository = {
  */
 export type ReviewFinding = {
     /**
+     * Whether it blocks wherever it is: a Blocker of the round before
+     * found again, or a reviewer's answer that never read.
+     */
+    blocksAnywhere: boolean;
+    /**
      * The follow-up task it became, when it is a follow-up and the task
      * was made: its task document's id.
      */
@@ -449,10 +454,16 @@ export type ReviewFinding = {
 export type ReviewRound = {
     /**
      * Where the diff under review starts: the Run's base branch, or the
-     * commit the round before reviewed.
+     * commit the round before reviewed; none for a round that could not
+     * open.
      */
-    diffBase: string;
+    diffBase?: string | null;
     end?: null | ReviewRoundEnd;
+    /**
+     * Why it could not open, as when the Run's branch is gone: it then
+     * ran no reviewer and ended failed.
+     */
+    failure?: string | null;
     /**
      * What its reviewers found, by Step and place.
      */
@@ -463,9 +474,10 @@ export type ReviewRound = {
      */
     fixDiff: boolean;
     /**
-     * The commit of the Run's branch it reviews.
+     * The commit of the Run's branch it reviews; none for a round that
+     * could not open.
      */
-    headSha: string;
+    headSha?: string | null;
     /**
      * How many reviewers it has, each in a Step of its own.
      */
