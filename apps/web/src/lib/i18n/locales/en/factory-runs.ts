@@ -61,6 +61,9 @@ export default {
   checksRound: 'Checks, round {{round}}',
   checksRunning: 'Checks running…',
   checksUnfinished: 'Didn’t finish',
+  checksVerified: 'Verified',
+  checksReported: 'Reported by the agent',
+  checkExited: '{{check}} exited {{code}}',
   cancelRun: 'Cancel run',
   cancelTitle: 'Cancel this run?',
   cancelBody:

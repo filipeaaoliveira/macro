@@ -215,14 +215,28 @@ function StepMarkdown(props: { markdown: string }) {
 }
 
 /**
- * A round of checks: which it ran, and how they went. A round with no end
- * runs only while its Step does.
+ * A round of checks: which it ran, who ran them, and how they went. A round
+ * the factory verified names each check that failed with its exit code. A
+ * round with no end runs only while its Step does.
  */
 function CheckRoundNote(props: { round: CheckRound; stepEnded: boolean }) {
+  const checks = () =>
+    props.round.checks.map((name) => {
+      const result = props.round.results.find((ran) => ran.name === name);
+      return result && result.exitCode !== 0
+        ? t('factoryRuns.checkExited', { check: name, code: result.exitCode })
+        : name;
+    });
+
   return (
     <StepNote>
       <span class="flex min-w-0 items-center gap-2">
         {t('factoryRuns.checksRound', { round: props.round.round })}
+        <span>
+          {props.round.verified
+            ? t('factoryRuns.checksVerified')
+            : t('factoryRuns.checksReported')}
+        </span>
         <Show
           when={props.round.end}
           fallback={
@@ -240,7 +254,7 @@ function CheckRoundNote(props: { round: CheckRound; stepEnded: boolean }) {
           )}
         </Show>
       </span>
-      <span class="block text-ink-muted">{props.round.checks.join(', ')}</span>
+      <span class="block text-ink-muted">{checks().join(', ')}</span>
     </StepNote>
   );
 }

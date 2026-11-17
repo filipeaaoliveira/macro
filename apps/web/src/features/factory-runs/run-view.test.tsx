@@ -127,6 +127,8 @@ describe('RunView', () => {
               round: 1,
               checks: ['web'],
               startedAt: '2026-11-16T09:30:00Z',
+              verified: false,
+              results: [],
             },
           ],
         },
@@ -136,6 +138,51 @@ describe('RunView', () => {
     expect(await screen.findByText('Checks, round 1')).toBeTruthy();
     expect(screen.getByText('Didn’t finish')).toBeTruthy();
     expect(screen.queryByText('Checks running…')).toBeNull();
+  });
+
+  it('says who ran each round, and the exit code of each check that failed', async () => {
+    const { setRun } = mount({});
+    setRun({
+      ...waitingRun,
+      steps: [
+        {
+          seq: 1,
+          entry: 'write',
+          visit: 1,
+          startedAt: '2026-11-16T09:00:00Z',
+          checks: [
+            {
+              round: 1,
+              checks: ['web', 'lint'],
+              startedAt: '2026-11-16T09:30:00Z',
+              verified: true,
+              results: [
+                { name: 'web', exitCode: 0 },
+                { name: 'lint', exitCode: 2 },
+              ],
+              end: {
+                outcome: 'failed',
+                report: 'lint failed',
+                endedAt: '2026-11-16T09:40:00Z',
+              },
+            },
+            {
+              round: 2,
+              checks: ['web', 'lint'],
+              startedAt: '2026-11-16T09:50:00Z',
+              verified: false,
+              results: [],
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(await screen.findByText('Checks, round 1')).toBeTruthy();
+    expect(screen.getByText('Verified')).toBeTruthy();
+    expect(screen.getByText('web, lint exited 2')).toBeTruthy();
+    expect(screen.getByText('Reported by the agent')).toBeTruthy();
+    expect(screen.getByText('web, lint')).toBeTruthy();
   });
 
   it('answers the open Gate once, with the note', async () => {
