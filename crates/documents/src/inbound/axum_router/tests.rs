@@ -2337,3 +2337,29 @@ async fn a_scoped_session_edits_a_document_but_not_its_sharing() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(*documents.edit_calls.lock().unwrap(), [false, true]);
 }
+
+/// Only an internal caller names the id of a task it makes, and only a
+/// UUIDv7: a person's request naming one is refused, and so is an internal
+/// one naming the nil id, before anything is made.
+#[tokio::test]
+async fn only_an_internal_caller_names_a_task_s_id() {
+    let named = |id: Uuid| {
+        Body::from(json!({ "taskName": "Follow-up", "documentId": id.to_string() }).to_string())
+    };
+
+    let (router, document_service, _access_service, _authorization_service) = test_router();
+    let request =
+        with_jwt(Request::post("/create_task").header("content-type", "application/json"))
+            .body(named(Uuid::now_v7()))
+            .expect("request should build");
+    assert_eq!(send_status(&router, request).await, StatusCode::FORBIDDEN);
+    assert!(document_service.create_calls().is_empty());
+
+    let request = with_internal_caller(
+        Request::post("/create_task").header("content-type", "application/json"),
+    )
+    .body(named(Uuid::nil()))
+    .expect("request should build");
+    assert_eq!(send_status(&router, request).await, StatusCode::BAD_REQUEST);
+    assert!(document_service.create_calls().is_empty());
+}

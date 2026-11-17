@@ -62,6 +62,12 @@ pub async fn create_task_handler<
                 "only an internal caller names a task's id".to_string(),
             ));
         }
+        // Documents are keyed by UUIDv7s, ordered by when they were made.
+        if document_id.get_version_num() != 7 {
+            return Err(DocumentError::BadRequest(
+                "a task's id must be a UUIDv7".to_string(),
+            ));
+        }
         metadata = metadata.id(document_id);
     }
     if let Some(project_id) = req.project_id {

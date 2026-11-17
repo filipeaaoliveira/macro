@@ -37,12 +37,14 @@ struct CreatedTask {
 /// Why a task could not be made.
 #[derive(thiserror::Error, Debug)]
 pub enum CreateTaskError {
-    /// Document storage refused it, for this status: the user may not add
-    /// to the project, or the request does not read.
+    /// Document storage refused it, for this status: the request does not
+    /// read, or conflicts with a document there.
     #[error("the task was refused: HTTP {0}")]
     Refused(StatusCode),
-    /// The request failed, or document storage failed or answered with
-    /// something unusable: worth trying again.
+    /// The request failed, or document storage failed, throttled, timed
+    /// out, refused the key or the user (which a configuration or access
+    /// change may fix), or answered with something unusable: worth trying
+    /// again.
     #[error("{0}")]
     Unavailable(rootcause::Report),
 }
@@ -71,7 +73,7 @@ impl DocumentStorageServiceClient {
             .map_err(unavailable)?;
 
         let status = res.status();
-        if status.is_client_error() {
+        if refused(status) {
             let body = res.text().await.unwrap_or_default();
             tracing::warn!(%status, %body, "document storage refused a task");
             return Err(CreateTaskError::Refused(status));
@@ -86,4 +88,17 @@ impl DocumentStorageServiceClient {
         let created: CreatedTask = res.json().await.map_err(unavailable)?;
         Ok(created.document_id)
     }
+}
+
+/// Whether `status` refuses the task for good. An unaccepted key or user
+/// (401, 403), a timeout (408) and throttling (429) may pass, so they are
+/// tried again; any other client error is the request's own.
+fn refused(status: StatusCode) -> bool {
+    let passing = [
+        StatusCode::UNAUTHORIZED,
+        StatusCode::FORBIDDEN,
+        StatusCode::REQUEST_TIMEOUT,
+        StatusCode::TOO_MANY_REQUESTS,
+    ];
+    status.is_client_error() && !passing.contains(&status)
 }

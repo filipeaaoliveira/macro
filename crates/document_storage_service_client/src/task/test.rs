@@ -52,28 +52,32 @@ async fn a_task_is_made_as_the_user_in_its_project() {
     assert_eq!(made, "00000000-0000-7000-8000-000000000101");
 }
 
-/// A refusal is told apart from an outage, which is worth trying again.
+/// A refusal is told apart from an outage, which is worth trying again:
+/// so are an unaccepted key or user, a timeout and throttling.
 #[tokio::test]
-async fn a_refusal_is_not_an_outage() {
-    let server = MockServer::start().await;
-    Mock::given(method("POST"))
-        .respond_with(ResponseTemplate::new(403))
-        .up_to_n_times(1)
-        .mount(&server)
-        .await;
-    Mock::given(method("POST"))
-        .respond_with(ResponseTemplate::new(503))
-        .mount(&server)
-        .await;
-    let client = DocumentStorageServiceClient::new("internal-key".into(), server.uri());
+async fn only_a_request_s_own_client_error_is_a_refusal() {
+    for (status, refused) in [
+        (400, true),
+        (409, true),
+        (401, false),
+        (403, false),
+        (408, false),
+        (429, false),
+        (503, false),
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(status))
+            .mount(&server)
+            .await;
+        let made = DocumentStorageServiceClient::new("internal-key".into(), server.uri())
+            .create_task_for_user(&follow_up(), "macro|julia@example.com")
+            .await;
 
-    let refused = client
-        .create_task_for_user(&follow_up(), "macro|julia@example.com")
-        .await;
-    let down = client
-        .create_task_for_user(&follow_up(), "macro|julia@example.com")
-        .await;
-
-    assert!(matches!(refused, Err(CreateTaskError::Refused(status)) if status == 403));
-    assert!(matches!(down, Err(CreateTaskError::Unavailable(_))));
+        match made {
+            Err(CreateTaskError::Refused(_)) => assert!(refused, "{status}"),
+            Err(CreateTaskError::Unavailable(_)) => assert!(!refused, "{status}"),
+            Ok(_) => panic!("{status} made a task"),
+        }
+    }
 }
