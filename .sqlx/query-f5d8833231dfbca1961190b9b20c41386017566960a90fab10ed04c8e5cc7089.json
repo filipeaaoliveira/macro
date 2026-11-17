@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE factory_check_round\n            SET fix_action_id = COALESCE(fix_action_id, $4)\n            WHERE run_id = $1 AND seq = $2 AND round = $3 AND outcome = 'failed'\n            RETURNING fix_action_id AS \"fix_action_id!\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "fix_action_id!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Int4",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "f5d8833231dfbca1961190b9b20c41386017566960a90fab10ed04c8e5cc7089"
+}

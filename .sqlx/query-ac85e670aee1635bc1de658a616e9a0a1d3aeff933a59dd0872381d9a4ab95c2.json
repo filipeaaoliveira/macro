@@ -1,0 +1,83 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                run_id, seq, round, work_output, checks, check_action_id, started_at,\n                outcome, report, ended_at, fix_action_id\n            FROM factory_check_round\n            WHERE run_id = $1 AND seq = $2\n            ORDER BY round\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "run_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "seq",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "round",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "work_output",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "checks",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 5,
+        "name": "check_action_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "started_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "outcome",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "report",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "ended_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "fix_action_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "ac85e670aee1635bc1de658a616e9a0a1d3aeff933a59dd0872381d9a4ab95c2"
+}

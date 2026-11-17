@@ -6,8 +6,9 @@ use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
 use crate::domain::models::{
-    ClaimedSession, EntryId, HandBack, Outcome, Repository, Run, RunId, RunInsert, RunOutcome,
-    SessionStep, Step, StepKey, StepSession, StoppingSession, TaskLink,
+    CheckRound, CheckRoundOutcome, CheckRoundStart, ClaimedSession, EntryId, HandBack, Outcome,
+    Repository, Run, RunId, RunInsert, RunOutcome, SessionStep, Step, StepKey, StepSession,
+    StoppingSession, TaskLink,
 };
 
 /// Where Runs and their Steps are kept.
@@ -179,6 +180,54 @@ pub trait RunRepository: Send + Sync + 'static {
         &self,
         key: StepKey,
     ) -> impl Future<Output = Result<Option<HandBack>, Self::Err>> + Send;
+
+    /// Record that the agent of the Step `key` works on a later prompt of
+    /// its session, `action_id`, and may hand back one of `offered`: the
+    /// hand back of the prompt before is cleared, and a stop reads this
+    /// prompt's progress. Recording the same prompt again changes nothing,
+    /// so its hand back stays. A Step that ended, or holds no session, is
+    /// left alone.
+    fn begin_turn(
+        &self,
+        key: StepKey,
+        action_id: Uuid,
+        offered: &[Outcome],
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// The rounds of checks the Step `key` ran, in order.
+    fn check_rounds(
+        &self,
+        key: StepKey,
+    ) -> impl Future<Output = Result<Vec<CheckRound>, Self::Err>> + Send;
+
+    /// Record that the Step `key` starts the round of checks `start`.
+    /// Recording a round again changes nothing: the first record stays.
+    fn start_check_round(
+        &self,
+        key: StepKey,
+        start: &CheckRoundStart,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// Record how the round `round` of the Step `key` ended. A round that
+    /// already ended keeps its first end.
+    fn end_check_round(
+        &self,
+        key: StepKey,
+        round: u8,
+        outcome: CheckRoundOutcome,
+        report: &str,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// Record that the failure of the round `round` of the Step `key` goes
+    /// back to its agent in the prompt `fix_action_id`, unless it already
+    /// went back in another. The prompt it goes back in; `None` when the
+    /// round did not fail.
+    fn send_back_check_round(
+        &self,
+        key: StepKey,
+        round: u8,
+        fix_action_id: Uuid,
+    ) -> impl Future<Output = Result<Option<Uuid>, Self::Err>> + Send;
 
     /// Keep `sha` as the commit whose checks passed, which the Run asks a
     /// person to merge, replacing the one kept before: only that commit

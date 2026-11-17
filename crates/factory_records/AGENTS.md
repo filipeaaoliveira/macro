@@ -18,8 +18,10 @@ the Gates they asked people in MacroDB, and defines the names Flows use
 
 ## Scope
 
-- Owns: the `factory_run`, `factory_step` and `factory_gate` tables
-  (`crates/macro_db_client/migrations/20261116083957_factory.sql`).
+- Owns: the `factory_run`, `factory_step`, `factory_gate` and
+  `factory_check_round` tables
+  (`crates/macro_db_client/migrations/20261116083957_factory.sql`,
+  `20261117093000_factory_check_round.sql`).
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
 
 ## Boundaries
@@ -44,6 +46,14 @@ the Gates they asked people in MacroDB, and defines the names Flows use
 - An agent Step records its session (`session_id`, `action_id`, `offered`)
   once, in `claim_session`; the agent's latest hand back is kept on the Step
   while it runs (`hand_back`), and read when its turn ends (`handed_back`).
+  A later prompt of the session (`begin_turn`) records its action in
+  `turn_action_id`, replaces `offered` and clears the hand back, once: the
+  same prompt again keeps what was handed back. `stopping_session` reads the
+  latest prompt's action.
+- A Step's rounds of checks (`factory_check_round`,
+  `src/outbound/pg_run_repository/check_rounds.rs`) keep their first
+  record, end and fix prompt, so a retried Step goes on with its round.
+  `list_steps` and `list_runs_steps` attach them to their Steps.
 - `factory_run.task_id` references `"Document"` and is cleared when the task
   document is deleted; `link_task` reports a missing task or Run instead of
   failing. `list_task_runs` reads one owner's Runs on a task newest first

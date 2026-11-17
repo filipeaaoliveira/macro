@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE factory_step\n            SET turn_action_id = $3, offered = $4,\n                handed_outcome = NULL, handed_output = NULL, handed_at = NULL\n            WHERE run_id = $1 AND seq = $2\n                AND session_id IS NOT NULL AND ended_at IS NULL\n                AND turn_action_id IS DISTINCT FROM $3\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Uuid",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "550edd28ab7627c1d93b15385594e6a21463cb64fbfbc6cc6ace0b125fc4eee4"
+}
