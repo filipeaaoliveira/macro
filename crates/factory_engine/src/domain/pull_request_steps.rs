@@ -509,12 +509,16 @@ where
     }
 
     /// A pull request merged outside the Run: `merged`, naming the Control
-    /// Files the Run last kept.
+    /// Files the Run last kept. The merge is recorded as the Run's, and its
+    /// base `recorded` watched, as for a merge the Run made, whichever Step
+    /// found it.
     async fn merged_outside(
         &self,
         input: &StepInput<'_>,
+        recorded: &Repository,
         pull_request: &PullRequest,
     ) -> Result<StepReport, PullRequestStepError> {
+        self.merged(input, recorded, pull_request).await?;
         let note = self.kept_note(input).await?;
         Ok(report("merged", format!("{}{note}", named(pull_request))))
     }
@@ -745,7 +749,9 @@ where
             .await?;
 
         match pull_request.state {
-            PullRequestState::Merged => return self.merged_outside(&input, &pull_request).await,
+            PullRequestState::Merged => {
+                return self.merged_outside(&input, recorded, &pull_request).await;
+            }
             PullRequestState::Closed => {
                 return Ok(report(
                     "closed",
@@ -877,8 +883,7 @@ where
         // the pull request merged.
         match pull_request.state {
             PullRequestState::Merged => {
-                self.merged(&input, recorded, &pull_request).await?;
-                return self.merged_outside(&input, &pull_request).await;
+                return self.merged_outside(&input, recorded, &pull_request).await;
             }
             PullRequestState::Closed => {
                 return Ok(report(
