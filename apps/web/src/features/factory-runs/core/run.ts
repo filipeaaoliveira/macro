@@ -34,12 +34,15 @@ export type CheckRound = {
   checks: string[];
   startedAt: string;
   /**
-   * Whether the factory ran the checks itself and read their exit codes;
-   * otherwise the agent ran them and reported how they went.
+   * Whether the factory ran the checks itself, on the pushed commit, and
+   * read their exit codes; otherwise the agent ran them and reported how
+   * they went.
    */
   verified: boolean;
   /** The exit code of each check a verified round ran so far. */
   results: CheckResult[];
+  /** The commit a verified round's checks ran on: the pushed branch's head. */
+  checkedCommit?: string;
   end?: {
     outcome: 'passed' | 'failed';
     /**

@@ -61,7 +61,7 @@ export default {
   checksRound: 'Checks, round {{round}}',
   checksRunning: 'Checks running…',
   checksUnfinished: 'Didn’t finish',
-  checksVerified: 'Run on the pushed commit',
+  checksVerified: 'Run on pushed commit {{commit}}',
   checksReported: 'Reported by the agent',
   checkExited: '{{check}} exited {{code}}',
   cancelRun: 'Cancel run',

@@ -231,7 +231,11 @@ function CheckRoundNote(props: { round: CheckRound; stepEnded: boolean }) {
   // Who ran the round's checks: the factory on the pushed commit, or the
   // agent, which is known only once its report ends the round.
   const who = () => {
-    if (props.round.verified) return t('factoryRuns.checksVerified');
+    if (props.round.verified) {
+      return t('factoryRuns.checksVerified', {
+        commit: props.round.checkedCommit?.slice(0, 7) ?? '',
+      });
+    }
     if (props.round.end) return t('factoryRuns.checksReported');
     return undefined;
   };

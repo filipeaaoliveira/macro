@@ -75,6 +75,7 @@ function toRun(detail: RunDetail): Run {
         checks: round.checks,
         startedAt: round.startedAt,
         verified: round.verified,
+        checkedCommit: round.checkedCommit ?? undefined,
         results: round.results.map((result) => ({
           name: result.name,
           exitCode: result.exitCode,

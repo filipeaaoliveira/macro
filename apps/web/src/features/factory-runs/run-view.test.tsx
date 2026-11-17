@@ -156,6 +156,7 @@ describe('RunView', () => {
               checks: ['web', 'lint'],
               startedAt: '2026-11-16T09:30:00Z',
               verified: true,
+              checkedCommit: '0123456789abcdef0123456789abcdef01234567',
               results: [
                 { name: 'web', exitCode: 0 },
                 { name: 'lint', exitCode: 2 },
@@ -191,7 +192,7 @@ describe('RunView', () => {
     });
 
     expect(await screen.findByText('Checks, round 1')).toBeTruthy();
-    expect(screen.getByText('Run on the pushed commit')).toBeTruthy();
+    expect(screen.getByText('Run on pushed commit 0123456')).toBeTruthy();
     expect(screen.getByText('web, lint exited 2')).toBeTruthy();
     // Only the ended round the agent reported says so; the open one runs.
     expect(screen.getAllByText('Reported by the agent')).toHaveLength(1);
