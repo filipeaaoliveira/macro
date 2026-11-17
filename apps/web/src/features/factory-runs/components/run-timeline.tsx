@@ -10,9 +10,9 @@ import { flowWordLabel, flowWordText } from '../core/flow-words';
 import {
   type BaseRequiredChecks,
   type CheckRound,
-  type MainHold,
   findingCounts,
   findingsOf,
+  type MainHold,
   type ReviewFinding,
   type ReviewRound,
   type RunStep,
