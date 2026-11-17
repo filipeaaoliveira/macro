@@ -98,7 +98,7 @@ impl Machine {
         let path = format!(
             "{}:{}",
             self.root.join("bin").display(),
-            std::env::var("PATH").unwrap()
+            std::env::var_os("PATH").unwrap().to_string_lossy()
         );
         self.bash_with_path(script, &path)
     }
