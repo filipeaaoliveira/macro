@@ -155,13 +155,26 @@ pub trait PullRequests: Send + Sync + 'static {
     ) -> impl Future<Output = Result<Option<PullRequest>, Self::Err>> + Send;
 
     /// [`Self::find`], with the checks on the pull request's head, read
-    /// with one token: what a CI wait reads on each look.
+    /// with one token: what a CI wait reads on each look. All its check runs
+    /// are read when `all_runs`, to find required checks by name; otherwise
+    /// only those of a failed suite.
     fn find_with_checks(
         &self,
         owner: &MacroUserIdStr<'static>,
         repository: &CodeRepository,
         branch: &str,
+        all_runs: bool,
     ) -> impl Future<Output = Result<Option<(PullRequest, HeadChecks)>, Self::Err>> + Send;
+
+    /// The checks a pull request to `base` must pass before it merges, by
+    /// name, from its branch protection and rulesets; none when `owner` may
+    /// not read them.
+    fn required_checks(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        base: &str,
+    ) -> impl Future<Output = Result<Option<Vec<String>>, Self::Err>> + Send;
 
     /// Ask GitHub to open `pull_request` in `repository`.
     fn open(

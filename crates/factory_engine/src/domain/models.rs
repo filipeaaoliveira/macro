@@ -3,6 +3,7 @@
 #[cfg(test)]
 mod test;
 
+use chrono::{DateTime, Utc};
 use factory_records::domain::models::{
     EntryId, Outcome, Repository, Run, RunId, RunOutcome, Step, StepKey,
 };
@@ -180,9 +181,48 @@ pub struct HeadChecks {
     pub suites: Vec<CheckSuite>,
     /// Its commit statuses, the latest of each context.
     pub statuses: Vec<CommitStatus>,
-    /// Its check runs that failed, read only when a suite failed, to name
-    /// them.
-    pub failed_runs: Vec<Check>,
+    /// Its check runs: every one when they were read to find required
+    /// checks by name, else only those that failed, read to name them.
+    pub runs: Vec<Check>,
+}
+
+/// Where one check stands. GitHub's states map onto it in one place
+/// ([`CheckState::of_check`], [`CheckState::of_status`]), so every reader
+/// agrees on what passed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CheckState {
+    /// Not finished, or not started.
+    Waiting,
+    /// Finished, and lets a pull request merge.
+    Passed,
+    /// Finished, and does not: GitHub's conclusion or state, for people.
+    Failed(String),
+}
+
+impl CheckState {
+    /// A check suite's or run's state from GitHub's `status` and
+    /// `conclusion`: a completed one passed when it succeeded, was neutral,
+    /// or was skipped.
+    pub fn of_check(status: &str, conclusion: Option<&str>) -> Self {
+        if status != "completed" {
+            return Self::Waiting;
+        }
+        match conclusion {
+            Some("success" | "neutral" | "skipped") => Self::Passed,
+            Some(conclusion) => Self::Failed(conclusion.to_string()),
+            None => Self::Failed("no conclusion".to_string()),
+        }
+    }
+
+    /// A commit status's state from GitHub's: `success` passed, `pending`
+    /// waits, and `failure` or `error` failed.
+    pub fn of_status(state: &str) -> Self {
+        match state {
+            "success" => Self::Passed,
+            "pending" => Self::Waiting,
+            other => Self::Failed(other.to_string()),
+        }
+    }
 }
 
 /// One app's checks on a commit.
@@ -192,13 +232,14 @@ pub struct CheckSuite {
     pub id: u64,
     /// The app that runs it.
     pub app: String,
-    /// `queued`, `in_progress` or `completed`, among others.
-    pub status: String,
-    /// How it concluded, once completed.
-    pub conclusion: Option<String>,
+    /// Where it stands.
+    pub state: CheckState,
     /// How many check runs it holds: an app that runs nothing on the commit
-    /// leaves an empty suite queued for good.
+    /// leaves an empty suite queued for good, though a CI may add its runs
+    /// a while after it made the suite.
     pub check_runs: u64,
+    /// When GitHub created it.
+    pub created_at: Option<DateTime<Utc>>,
 }
 
 /// The latest commit status of one context.
@@ -206,8 +247,8 @@ pub struct CheckSuite {
 pub struct CommitStatus {
     /// The context, such as a CI's name.
     pub context: String,
-    /// `success`, `pending`, `failure` or `error`.
-    pub state: String,
+    /// Where it stands.
+    pub state: CheckState,
     /// Its page, when it gives one.
     pub url: Option<String>,
 }
@@ -215,10 +256,10 @@ pub struct CommitStatus {
 /// One check run, such as a CI job.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Check {
-    /// Its name.
+    /// Its name, which a branch's required checks name it by.
     pub name: String,
-    /// How it concluded, once completed.
-    pub conclusion: Option<String>,
+    /// Where it stands.
+    pub state: CheckState,
     /// Its page, when GitHub gives one.
     pub url: Option<String>,
 }

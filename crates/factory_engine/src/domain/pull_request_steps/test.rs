@@ -1,5 +1,7 @@
 use std::sync::LazyLock;
 
+use chrono::Utc;
+
 use factory_records::domain::models::{Repository, RunId, StepKey};
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
@@ -8,7 +10,7 @@ use uuid::Uuid;
 use super::{CI_WAIT, PullRequestStepError, PullRequestSteps};
 use crate::domain::fakes::{FakeGithub, FakeRepo, ci, suite};
 use crate::domain::models::{
-    CheckSuite, CommitStatus, HeadChecks, PullRequestState, StepInput, StepReport,
+    CheckState, CheckSuite, CommitStatus, HeadChecks, PullRequestState, StepInput, StepReport,
 };
 
 static JULIA: LazyLock<MacroUserIdStr<'static>> = LazyLock::new(|| {
@@ -143,7 +145,7 @@ async fn a_failing_commit_status_is_red_beside_passing_checks() {
     let github = FakeGithub::with_open_pull_request(HeadChecks {
         statuses: vec![CommitStatus {
             context: "ci/lint".to_string(),
-            state: "failure".to_string(),
+            state: CheckState::of_status("failure"),
             url: Some("https://ci.example.com/1".to_string()),
         }],
         ..ci(Some("success"))
@@ -187,26 +189,82 @@ async fn a_check_that_appears_after_the_others_passed_is_waited_for() {
     assert!(report.output.contains("deploy-preview checks (failure)"));
 }
 
-/// Checks that passed on two reads in a row are green; an app's empty
-/// suite, which never runs anything, is not waited for.
+/// Checks that passed on two reads in a row are green, and the head they
+/// passed on is kept as the one a person may merge; an app's suite that
+/// stayed empty past the grace, as one that never runs anything, is not
+/// waited for.
 #[tokio::test(start_paused = true)]
 async fn ci_is_green_once_two_reads_see_every_check_passed() {
     let mut passing = ci(Some("success"));
     passing.suites.push(CheckSuite {
         check_runs: 0,
+        created_at: Some(Utc::now() - chrono::TimeDelta::minutes(10)),
         ..suite(9, "other-app", None)
     });
     let github = FakeGithub::with_open_pull_request(HeadChecks::default());
     github.state().checks = [ci(None), passing].into();
+    let repo = FakeRepo::default();
+    let run_id = RunId::generate();
+
+    let report = steps(&github, &repo).ci(input(run_id)).await.expect("ci");
+
+    assert_eq!(outcome(&report), "green");
+    assert!(report.output.contains(FakeGithub::HEAD));
+    assert_eq!(github.state().reads, 3);
+    assert_eq!(
+        repo.merge_head(run_id).await.expect("read").as_deref(),
+        Some(FakeGithub::HEAD)
+    );
+}
+
+/// A suite that holds no run yet is waited for within its grace, as a CI
+/// held by a concurrency group, or one that adds its runs after it made the
+/// suite: CI is not green on the checks reported so far.
+#[tokio::test(start_paused = true)]
+async fn an_empty_suite_within_its_grace_is_waited_for() {
+    let mut early = ci(Some("success"));
+    early.suites.push(CheckSuite {
+        check_runs: 0,
+        ..suite(9, "another-ci", None)
+    });
+    let github = FakeGithub::with_open_pull_request(early);
 
     let report = steps(&github, &FakeRepo::default())
         .ci(input(RunId::generate()))
         .await
         .expect("ci");
 
-    assert_eq!(outcome(&report), "green");
-    assert!(report.output.contains(FakeGithub::HEAD));
-    assert_eq!(github.state().reads, 3);
+    assert_eq!(outcome(&report), "timeout");
+}
+
+/// A check the base branch requires is waited for until it appears and
+/// passes, as a check run or a commit status, though every check reported
+/// so far passed.
+#[tokio::test(start_paused = true)]
+async fn a_required_check_that_has_not_appeared_is_waited_for() {
+    let missing = FakeGithub::with_open_pull_request(ci(Some("success")));
+    missing.state().required = Some(vec!["deploy".to_string()]);
+    let reported = FakeGithub::with_open_pull_request(HeadChecks {
+        statuses: vec![CommitStatus {
+            context: "deploy".to_string(),
+            state: CheckState::of_status("success"),
+            url: None,
+        }],
+        ..ci(Some("success"))
+    });
+    reported.state().required = Some(vec!["deploy".to_string(), "test".to_string()]);
+
+    let waiting = steps(&missing, &FakeRepo::default())
+        .ci(input(RunId::generate()))
+        .await
+        .expect("ci");
+    let passed = steps(&reported, &FakeRepo::default())
+        .ci(input(RunId::generate()))
+        .await
+        .expect("ci");
+
+    assert_eq!(outcome(&waiting), "timeout");
+    assert_eq!(outcome(&passed), "green");
 }
 
 /// Checks that never finish end CI `timeout` once it waited [`CI_WAIT`].
@@ -224,13 +282,15 @@ async fn ci_that_never_finishes_times_out() {
     assert!(started.elapsed() <= CI_WAIT);
 }
 
-/// The commit whose checks passed is the one a person is asked to merge,
-/// and the one kept for the merge.
+/// The head CI called green is the one a person is asked to merge.
 #[tokio::test]
-async fn ready_to_merge_keeps_the_commit_whose_checks_passed() {
+async fn ready_to_merge_asks_about_the_head_ci_called_green() {
     let github = FakeGithub::with_open_pull_request(ci(Some("success")));
     let repo = FakeRepo::default();
     let run_id = RunId::generate();
+    repo.set_merge_head(run_id, FakeGithub::HEAD)
+        .await
+        .expect("keep");
 
     let report = steps(&github, &repo)
         .ready_to_merge(input(run_id))
@@ -239,27 +299,36 @@ async fn ready_to_merge_keeps_the_commit_whose_checks_passed() {
 
     assert_eq!(outcome(&report), "done");
     assert!(report.output.contains(FakeGithub::HEAD));
-    assert_eq!(
-        repo.merge_head(run_id).await.expect("read").as_deref(),
-        Some(FakeGithub::HEAD)
-    );
 }
 
-/// A head pushed to after CI passed, whose checks have not, goes back to CI
-/// rather than to a person.
+/// A head that is not the one CI called green, though its checks pass, as
+/// after a push whose checks are fast, goes back to CI rather than to a
+/// person; so does a head whose checks no longer pass.
 #[tokio::test]
 async fn ready_to_merge_sends_a_changed_head_back_to_ci() {
-    let github = FakeGithub::with_open_pull_request(ci(None));
+    let pushed = FakeGithub::with_open_pull_request(ci(Some("success")));
+    let running = FakeGithub::with_open_pull_request(ci(None));
     let repo = FakeRepo::default();
-    let run_id = RunId::generate();
+    let moved = RunId::generate();
+    repo.set_merge_head(moved, "2222222222222222222222222222222222222222")
+        .await
+        .expect("keep");
+    let rerun = RunId::generate();
+    repo.set_merge_head(rerun, FakeGithub::HEAD)
+        .await
+        .expect("keep");
 
-    let report = steps(&github, &repo)
-        .ready_to_merge(input(run_id))
+    let after_push = steps(&pushed, &repo)
+        .ready_to_merge(input(moved))
+        .await
+        .expect("ready");
+    let checks_running = steps(&running, &repo)
+        .ready_to_merge(input(rerun))
         .await
         .expect("ready");
 
-    assert_eq!(outcome(&report), "changed");
-    assert_eq!(repo.merge_head(run_id).await.expect("read"), None);
+    assert_eq!(outcome(&after_push), "changed");
+    assert_eq!(outcome(&checks_running), "changed");
 }
 
 /// The merge merges the commit the person agreed to; a retry whose merge
@@ -341,7 +410,8 @@ async fn a_refused_merge_or_one_no_person_agreed_to_merges_nothing() {
 #[tokio::test]
 async fn a_long_request_is_cut_to_fit_the_description_keeping_the_task() {
     let github = FakeGithub::default();
-    let request = "x".repeat(70_000);
+    // Characters, not bytes, count: each of these is two bytes.
+    let request = "é".repeat(70_000);
     let mut long = input(RunId::generate());
     long.request = &request;
 
@@ -352,6 +422,7 @@ async fn a_long_request_is_cut_to_fit_the_description_keeping_the_task() {
 
     let body = github.state().bodies[0].clone();
     assert!(body.chars().count() <= 65_536);
+    assert!(body.starts_with("ééé"));
     assert!(body.contains("(The rest of the request is left out.)"));
     assert!(body.contains("\n\nTask: MACRO-"));
 }

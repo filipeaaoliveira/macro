@@ -15,8 +15,8 @@ use github::outbound::github_oauth_client::GithubOauthImpl;
 use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::models::{
-    Check, CheckSuite, CodeRepository, CommitStatus, HeadChecks, Merging, OpenPullRequest, Opening,
-    PullRequest, PullRequestState, RepositoryAccess,
+    Check, CheckState, CheckSuite, CodeRepository, CommitStatus, HeadChecks, Merging,
+    OpenPullRequest, Opening, PullRequest, PullRequestState, RepositoryAccess,
 };
 use crate::domain::ports::{PullRequests, Retryable};
 
@@ -81,10 +81,13 @@ pub struct GithubPullRequests<T> {
 impl<T: OwnerTokens> GithubPullRequests<T> {
     /// Pull requests on GitHub, with tokens from `tokens`.
     pub fn new(tokens: T) -> Self {
-        Self {
-            tokens,
-            github: GithubOauthImpl::default(),
-        }
+        Self::with_client(tokens, GithubOauthImpl::default())
+    }
+
+    /// Pull requests on the GitHub `github` reaches, with tokens from
+    /// `tokens`.
+    pub fn with_client(tokens: T, github: GithubOauthImpl) -> Self {
+        Self { tokens, github }
     }
 
     /// The owner's GitHub token, read on every call so a relinked account
@@ -176,6 +179,7 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
         owner: &MacroUserIdStr<'static>,
         repository: &CodeRepository,
         branch: &str,
+        all_runs: bool,
     ) -> Result<Option<(PullRequest, HeadChecks)>, GithubPullRequestsErr> {
         let token = self.token(owner).await?;
         let Some(pull_request) = self.head(&token, repository, branch).await? else {
@@ -194,9 +198,9 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
             .map(|suite| CheckSuite {
                 id: suite.id,
                 app: suite.app,
-                status: suite.status,
-                conclusion: suite.conclusion,
+                state: CheckState::of_check(&suite.status, suite.conclusion.as_deref()),
                 check_runs: suite.check_runs,
+                created_at: suite.created_at,
             })
             .collect();
         let statuses = self
@@ -206,36 +210,27 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
             .into_iter()
             .map(|status| CommitStatus {
                 context: status.context,
-                state: status.state,
+                state: CheckState::of_status(&status.state),
                 url: status.target_url,
             })
             .collect();
 
-        // Runs are read only to name what failed in a failed suite.
-        let suite_failed = suites.iter().any(|suite| {
-            suite.status == "completed"
-                && !matches!(
-                    suite.conclusion.as_deref(),
-                    Some("success" | "neutral" | "skipped")
-                )
-        });
-        let failed_runs = if suite_failed {
+        // Runs are read to find required checks by name, or to name what
+        // failed in a failed suite; only the failed ones are kept then.
+        let suite_failed = suites
+            .iter()
+            .any(|suite| matches!(suite.state, CheckState::Failed(_)));
+        let runs = if all_runs || suite_failed {
             self.github
                 .list_check_runs(&token, owner_name, name, sha)
                 .await?
                 .into_iter()
-                .filter(|run| {
-                    run.status == "completed"
-                        && !matches!(
-                            run.conclusion.as_deref(),
-                            Some("success" | "neutral" | "skipped")
-                        )
-                })
                 .map(|run| Check {
                     name: run.name,
-                    conclusion: run.conclusion,
+                    state: CheckState::of_check(&run.status, run.conclusion.as_deref()),
                     url: run.url,
                 })
+                .filter(|run| all_runs || matches!(run.state, CheckState::Failed(_)))
                 .collect()
         } else {
             Vec::new()
@@ -245,9 +240,23 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
             HeadChecks {
                 suites,
                 statuses,
-                failed_runs,
+                runs,
             },
         )))
+    }
+
+    #[tracing::instrument(err, skip(self, owner))]
+    async fn required_checks(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        base: &str,
+    ) -> Result<Option<Vec<String>>, GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        Ok(self
+            .github
+            .get_required_checks(&token, repository.owner(), repository.name(), base)
+            .await?)
     }
 
     #[tracing::instrument(err, skip(self, owner, pull_request), fields(branch = %pull_request.branch))]

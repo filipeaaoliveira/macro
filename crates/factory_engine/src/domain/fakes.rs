@@ -14,8 +14,8 @@ use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
 use crate::domain::models::{
-    Check, CheckSuite, CodeRepository, HeadChecks, Merging, OpenPullRequest, Opening, PullRequest,
-    PullRequestState, RepositoryAccess,
+    Check, CheckState, CheckSuite, CodeRepository, HeadChecks, Merging, OpenPullRequest, Opening,
+    PullRequest, PullRequestState, RepositoryAccess,
 };
 use crate::domain::ports::{PullRequests, Retryable, TaskAccess, TaskDirectory, UserDirectory};
 
@@ -499,6 +499,8 @@ pub(crate) struct FakeGithubState {
     pub(crate) unreachable: bool,
     /// Whether the Run's owner may only read the repository.
     pub(crate) read_only: bool,
+    /// The checks the base branch requires, when the owner may read them.
+    pub(crate) required: Option<Vec<String>>,
     /// The pull request from the Run's branch, once opened.
     pub(crate) pull_request: Option<PullRequest>,
     /// The checks each read of the open pull request's head shows next, in
@@ -569,38 +571,36 @@ impl FakeGithub {
     }
 }
 
-/// The checks of one CI suite of `app`: completed with `conclusion`, or still
+/// One suite of `app`, holding a run: completed with `conclusion`, or still
 /// running when `conclusion` is none.
 pub(crate) fn suite(id: u64, app: &str, conclusion: Option<&str>) -> CheckSuite {
     CheckSuite {
         id,
         app: app.to_string(),
-        status: if conclusion.is_some() {
-            "completed"
-        } else {
-            "in_progress"
-        }
-        .to_string(),
-        conclusion: conclusion.map(str::to_string),
+        state: match conclusion {
+            Some(conclusion) => CheckState::of_check("completed", Some(conclusion)),
+            None => CheckState::Waiting,
+        },
         check_runs: 1,
+        created_at: Some(Utc::now()),
     }
 }
 
-/// A head whose checks are the CI `test` suite, concluded `conclusion`, or
-/// running when it is none.
+/// A head whose checks are the CI suite with its one run, `test`,
+/// concluded `conclusion`, or running when it is none.
 pub(crate) fn ci(conclusion: Option<&str>) -> HeadChecks {
-    let failed_runs = match conclusion {
-        Some("failure") => vec![Check {
-            name: "test".to_string(),
-            conclusion: Some("failure".to_string()),
-            url: Some("https://github.com/macro/app/runs/test".to_string()),
-        }],
-        _ => Vec::new(),
+    let state = match conclusion {
+        Some(conclusion) => CheckState::of_check("completed", Some(conclusion)),
+        None => CheckState::Waiting,
     };
     HeadChecks {
         suites: vec![suite(1, "github-actions", conclusion)],
         statuses: Vec::new(),
-        failed_runs,
+        runs: vec![Check {
+            name: "test".to_string(),
+            state,
+            url: Some("https://github.com/macro/app/runs/test".to_string()),
+        }],
     }
 }
 
@@ -633,8 +633,18 @@ impl PullRequests for FakeGithub {
         _owner: &MacroUserIdStr<'static>,
         _repository: &CodeRepository,
         _branch: &str,
+        _all_runs: bool,
     ) -> Result<Option<(PullRequest, HeadChecks)>, FakeError> {
         Ok(self.read())
+    }
+
+    async fn required_checks(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        _base: &str,
+    ) -> Result<Option<Vec<String>>, FakeError> {
+        Ok(self.state().required.clone())
     }
 
     async fn open(

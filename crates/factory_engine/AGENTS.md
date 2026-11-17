@@ -115,15 +115,24 @@ transport failures are tried again. Each Step reads before it writes, so a
 retry or a Run sent back finds what it did: `publish` finds the branch's pull
 request or opens it, and a refusal because another attempt opened it reads as
 published; `ci` reads the pull request's head, its check suites and its
-commit statuses every 20 s, with one token per read, heartbeating, until one
-fails (`red`, naming the failed runs and statuses), every suite that holds a
-run is completed and passed and every status succeeded on two reads in a row
-that saw the same checks (`green`), or 25 minutes pass (`timeout`), within one
-Step attempt; `ready_to_merge` keeps the head whose checks passed
-(`factory_run.merge_head_sha`) and ends `done`, so its Gate asks the owner
-whether to merge; `merge` merges only that commit, naming it to GitHub, and a
-merged pull request reads as merged. A head that moved goes back to `ci`, and
-a person's `revise` goes to `fix` with the review's visits reset. The pull
+commit statuses every 20 s, with one token per read and every page of each
+list, heartbeating. It ends `red` as soon as a suite, run or status fails,
+naming them. It ends `green` when every suite passed, every status succeeded,
+and every check the base branch requires (branch protection and rulesets,
+read once per Step) appeared and passed as a check run or status, on two reads
+in a row that saw the same checks; a suite that holds no run is waited for
+until 5 minutes after GitHub made it, then let go, as an app that checks
+nothing on the commit never fills it. If the owner may not read the required
+checks, only that grace rule holds. After 25 minutes, within one Step attempt,
+it ends `timeout`. The head `ci` calls green is kept
+(`factory_run.merge_head_sha`); `ready_to_merge` ends `changed` unless the
+pull request's head is still that commit and its checks still pass, and
+otherwise ends `done`, so its Gate asks the owner whether to merge; `merge`
+merges only that commit, naming it to GitHub, and a merged pull request reads
+as merged. A head that moved goes back to `ci`, and a person's `revise` goes to
+`fix` with the review's visits reset. The merge question is asked at most
+three times, counting every ask, also one after a push moved the head; then
+the Run ends for a person. The pull
 request's description names the Run's task as `MACRO-{short id}`, so GitHub's
 webhook links them, and is cut to GitHub's 65,536 characters in its request
 part only.
