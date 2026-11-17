@@ -747,3 +747,97 @@ async fn a_retried_close_makes_each_follow_up_task_once() {
     let round = repo.review_rounds(run_id).await.expect("rounds").remove(0);
     assert_eq!(round.findings[0].follow_up_task_id, Some(made[0].id));
 }
+
+/// Two reviewers that report one problem outside the diff, at lines of the
+/// same file that meet, make one follow-up task naming both, and each
+/// finding stays recorded, linked to it; a problem elsewhere, and two of
+/// one reviewer's own findings, each make a task of their own. A retried
+/// close makes none again.
+#[tokio::test]
+async fn reviewers_reporting_one_problem_make_one_follow_up_task() {
+    let repo = FakeRepo::default();
+    let github = FakeGithub::default();
+    let run_id = code_run(&repo).await;
+    github.state().branch_heads = [Some("aaa".to_string())].into();
+    github
+        .state()
+        .diffs
+        .insert(("main".to_string(), "aaa".to_string()), Vec::new());
+    let rounds = rounds(&repo, &github);
+    rounds
+        .open_round(opening(run_id, 3, 1))
+        .await
+        .expect("open");
+    start_reviewers(
+        &repo,
+        run_id,
+        3,
+        &["correctness-reviewer", "scope-reviewer"],
+    )
+    .await;
+    let key = |seq| StepKey { run_id, seq };
+    repo.record_findings(
+        key(3),
+        3,
+        &[
+            finding("src/text.js", Some((6, 15))),
+            finding("src/text.js", Some((30, 31))),
+        ],
+    )
+    .await
+    .expect("record");
+    repo.record_findings(
+        key(4),
+        3,
+        &[
+            finding("./src/text.js", Some((5, 16))),
+            finding("src/other.js", Some((6, 15))),
+        ],
+    )
+    .await
+    .expect("record");
+
+    let closed = rounds.close_round(closing(run_id, 3)).await.expect("close");
+    assert_eq!(closed, outcome("pass"));
+    let again = rounds.close_round(closing(run_id, 3)).await.expect("again");
+    assert_eq!(again, outcome("pass"));
+
+    let made = repo.follow_ups.lock().expect("follow ups").clone();
+    assert_eq!(made.len(), 3, "{made:#?}");
+    let round = repo.review_rounds(run_id).await.expect("rounds").remove(0);
+    let linked: Vec<_> = round
+        .findings
+        .iter()
+        .map(|found| (found.seq, found.place, found.follow_up_task_id))
+        .collect();
+    let task = |index: usize| Some(made[index].id);
+    assert_eq!(
+        linked,
+        [
+            (3, 1, task(0)),
+            (3, 2, task(1)),
+            (4, 1, task(0)),
+            (4, 2, task(2)),
+        ]
+    );
+    let shared = &made[0].task.markdown;
+    assert!(
+        shared.starts_with("the correctness-reviewer and the scope-reviewer found this"),
+        "{shared}"
+    );
+    assert!(
+        shared.contains("## Reported by the correctness-reviewer")
+            && shared.contains("## Reported by the scope-reviewer"),
+        "{shared}"
+    );
+    assert!(shared.contains("`src/text.js` lines 6"), "{shared}");
+    assert!(shared.contains("`./src/text.js` lines 5"), "{shared}");
+    assert!(
+        made[2]
+            .task
+            .markdown
+            .starts_with("the scope-reviewer found this"),
+        "{}",
+        made[2].task.markdown
+    );
+}

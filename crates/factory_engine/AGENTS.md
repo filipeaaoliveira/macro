@@ -310,12 +310,15 @@ every Step ended, the workflow closes the round
 (`factory_close_review_round`, which heartbeats): a finding that blocks
 anywhere, or whose file and lines meet a hunk of the diff under review
 (GitHub's compare, as the owner), is a Blocker; one outside it becomes a
-follow-up task and holds nothing. The task is made as the Run's owner, not
+follow-up task and holds nothing. Reviewers that report one problem (the
+same file, at lines that meet; a finding with no lines covers its file) make
+one task, which names each of them with what each reported; each finding
+stays recorded and is linked to it. The task is made as the Run's owner, not
 shared, in the project of the Run's task: the initiative its Project
 property names, read and set as a Main Hold's task does
 (`outbound/task_project.rs`; document storage's `POST
 /documents/create_task`, with the internal key and the owner as the acting
-user), with an id kept on the finding before it is asked for, so a retry
+user), with an id kept on its findings before it is asked for, so a retry
 finds it rather than making a second; an outage (or an unaccepted key or
 user, a timeout or throttling) fails the close, which is tried again for at
 most two hours, then the round fails; a refusal, or a project the owner

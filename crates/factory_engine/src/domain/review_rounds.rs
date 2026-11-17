@@ -5,7 +5,8 @@
 //! diff, what the fix changed since the round before. Once its reviewers'
 //! Steps end, a finding in that diff is a Blocker, which the fix gets; one
 //! outside it becomes a follow-up task, in the project of the Run's task,
-//! and holds nothing.
+//! and holds nothing. Reviewers that report one problem (the same file, at
+//! lines that meet) make one follow-up task, which names each of them.
 
 mod answer;
 mod brief;
@@ -135,27 +136,105 @@ pub fn in_diff(path: &str, lines: Option<Lines>, files: &[ChangedFile]) -> bool 
     }
 }
 
-/// The follow-up task a finding outside the diff under review becomes.
-fn follow_up(run_id: RunId, round: &ReviewRound, finding: &ReviewFinding) -> FollowUpTask {
-    let first_line = finding.problem.lines().next().unwrap_or_default();
-    let name: String = first_line.chars().take(120).collect();
-    let reviewer = finding
+/// The reviewer that found `finding`, for a person.
+fn reviewer(finding: &ReviewFinding) -> String {
+    finding
         .role
         .as_ref()
         .map(|role| format!("the {role}"))
-        .unwrap_or_else(|| "a reviewer".to_string());
-    FollowUpTask {
-        name: format!("Follow-up: {name}"),
-        markdown: format!(
-            "{reviewer} found this in review round {} of factory run {run_id}, outside the \
-             changes it reviewed, so it did not hold the pull request.\n\n\
-             **Where:** {}\n\n**What is wrong:** {}\n\n**Why it matters:** {}\n",
-            round.round,
+        .unwrap_or_else(|| "a reviewer".to_string())
+}
+
+/// The follow-up task the findings `same` outside the diff under review
+/// become: one problem, as each reviewer that raised it reported it, the
+/// first named first.
+fn follow_up(run_id: RunId, round: &ReviewRound, same: &[&ReviewFinding]) -> FollowUpTask {
+    let first = same.first().copied();
+    let first_line = first
+        .and_then(|finding| finding.problem.lines().next())
+        .unwrap_or_default();
+    let name: String = first_line.chars().take(120).collect();
+    let mut reviewers: Vec<String> = Vec::new();
+    for finding in same {
+        let reviewer = reviewer(finding);
+        if !reviewers.contains(&reviewer) {
+            reviewers.push(reviewer);
+        }
+    }
+    let found_by = match reviewers.split_last() {
+        Some((last, [])) => last.clone(),
+        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
+        None => "a reviewer".to_string(),
+    };
+    let intro = format!(
+        "{found_by} found this in review round {} of factory run {run_id}, outside the \
+         changes it reviewed, so it did not hold the pull request.",
+        round.round
+    );
+    let report = |finding: &ReviewFinding| {
+        format!(
+            "**Where:** {}\n\n**What is wrong:** {}\n\n**Why it matters:** {}\n",
             place(&finding.path, finding.lines),
             finding.problem,
             finding.why
-        ),
+        )
+    };
+    let markdown = match same {
+        [finding] => format!("{intro}\n\n{}", report(finding)),
+        _ => {
+            let mut markdown = intro;
+            for finding in same {
+                markdown.push_str(&format!(
+                    "\n\n## Reported by {}\n\n{}",
+                    reviewer(finding),
+                    report(finding)
+                ));
+            }
+            markdown
+        }
+    };
+    FollowUpTask {
+        name: format!("Follow-up: {name}"),
+        markdown,
     }
+}
+
+/// Whether the findings `a` and `b` report one problem: two reviewers
+/// point at the same file, at lines that meet (a finding that names no
+/// lines is about the whole file).
+fn same_problem(a: &ReviewFinding, b: &ReviewFinding) -> bool {
+    let path = |finding: &ReviewFinding| {
+        finding
+            .path
+            .trim_start_matches("./")
+            .trim_start_matches('/')
+            .to_string()
+    };
+    let lines_meet = match (a.lines, b.lines) {
+        (Some(a), Some(b)) => a.start <= b.end && b.start <= a.end,
+        _ => true,
+    };
+    a.seq != b.seq && path(a) == path(b) && lines_meet
+}
+
+/// The follow-ups of a round, grouped by problem: each finding joins the
+/// first group that has a finding of another reviewer about the same
+/// problem and none of its own reviewer's, in the order they were found.
+fn same_problems<'a>(
+    follow_ups: impl Iterator<Item = &'a ReviewFinding>,
+) -> Vec<Vec<&'a ReviewFinding>> {
+    let mut groups: Vec<Vec<&ReviewFinding>> = Vec::new();
+    for finding in follow_ups {
+        let joins = groups.iter_mut().find(|group| {
+            group.iter().all(|other| other.seq != finding.seq)
+                && group.iter().any(|other| same_problem(other, finding))
+        });
+        match joins {
+            Some(group) => group.push(finding),
+            None => groups.push(vec![finding]),
+        }
+    }
+    groups
 }
 
 /// Whether the findings of `round` were all classified: none waits for
@@ -454,63 +533,104 @@ where
         self.end(run_id, round.seq, ended).await
     }
 
-    /// Make a task of each follow-up of `round` that has none. Each task is
-    /// made with an id kept before it is asked for, so a retry finds the
-    /// task rather than making a second. A follow-up document storage
-    /// refuses stays on the round as one, with no task; one it could not
-    /// answer fails the close, which is tried again. Either way it never
-    /// holds the pull request.
+    /// Make a task of each problem among the follow-ups of `round` that has
+    /// none: findings of several reviewers about one problem become one
+    /// task, which names each of them, and each finding stays recorded,
+    /// linked to it. Each task is made with an id kept on its findings
+    /// before it is asked for, so a retry finds the task rather than making
+    /// a second. A follow-up document storage refuses stays on the round as
+    /// one, with no task; one it could not answer fails the close, which is
+    /// tried again. Either way it never holds the pull request.
     async fn make_follow_ups(
         &self,
         run: &factory_records::domain::models::Run,
         round: &ReviewRound,
     ) -> Result<(), StepError> {
-        let waiting = round
+        let follow_ups = round
             .findings
             .iter()
-            .filter(|finding| finding.kind == Some(FindingKind::FollowUp))
-            .filter(|finding| finding.follow_up_task_id.is_none());
-        for finding in waiting {
-            let key = StepKey {
-                run_id: run.id,
-                seq: finding.seq,
-            };
-            let Some(task_id) = self
-                .repo
-                .follow_up_key(key, finding.place, Uuid::now_v7())
-                .await
-                .map_err(internal)?
-            else {
+            .filter(|finding| finding.kind == Some(FindingKind::FollowUp));
+        for same in same_problems(follow_ups) {
+            if same
+                .iter()
+                .all(|finding| finding.follow_up_task_id.is_some())
+            {
                 continue;
-            };
-            let task = follow_up(run.id, round, finding);
-            let made = self
-                .tasks
-                .create_follow_up(&run.user_id, run.task_id, &task, task_id)
-                .await
-                .map_err(|error| StepError::Internal(internal(error)))?;
-            match made {
-                FollowUpMade::Made => {
+            }
+            // The problem's task id: the one an earlier attempt kept on one
+            // of its findings, else a new one, kept on each of them. A
+            // finding that kept another id goes in a task of its own.
+            let candidate = same
+                .iter()
+                .find_map(|finding| finding.follow_up_task_id.or(finding.follow_up_key))
+                .unwrap_or_else(Uuid::now_v7);
+            let mut tasks: Vec<(Uuid, Vec<&ReviewFinding>)> = Vec::new();
+            for finding in &same {
+                let key = StepKey {
+                    run_id: run.id,
+                    seq: finding.seq,
+                };
+                let Some(task_id) = self
+                    .repo
+                    .follow_up_key(key, finding.place, candidate)
+                    .await
+                    .map_err(internal)?
+                else {
+                    continue;
+                };
+                match tasks.iter_mut().find(|(id, _)| *id == task_id) {
+                    Some((_, findings)) => findings.push(finding),
+                    None => tasks.push((task_id, vec![finding])),
+                }
+            }
+            for (task_id, findings) in tasks {
+                self.make_follow_up(run, round, task_id, &findings).await?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Make the task `task_id` of the follow-ups `same`, one problem, and
+    /// link each of them to it.
+    async fn make_follow_up(
+        &self,
+        run: &factory_records::domain::models::Run,
+        round: &ReviewRound,
+        task_id: Uuid,
+        same: &[&ReviewFinding],
+    ) -> Result<(), StepError> {
+        let task = follow_up(run.id, round, same);
+        let made = self
+            .tasks
+            .create_follow_up(&run.user_id, run.task_id, &task, task_id)
+            .await
+            .map_err(|error| StepError::Internal(internal(error)))?;
+        match made {
+            FollowUpMade::Made => {
+                for finding in same {
+                    let key = StepKey {
+                        run_id: run.id,
+                        seq: finding.seq,
+                    };
                     self.repo
                         .link_follow_up(key, finding.place, task_id)
                         .await
                         .map_err(internal)?;
                 }
-                FollowUpMade::OtherId(made) => {
-                    return Err(StepError::Final(rootcause::report!(
-                        "document storage made follow-up {task_id} as {made}"
-                    )));
-                }
-                FollowUpMade::Refused => {
-                    tracing::warn!(
-                        seq = finding.seq,
-                        place = finding.place,
-                        "document storage refused a follow-up task"
-                    );
-                }
+                Ok(())
+            }
+            FollowUpMade::OtherId(made) => Err(StepError::Final(rootcause::report!(
+                "document storage made follow-up {task_id} as {made}"
+            ))),
+            FollowUpMade::Refused => {
+                tracing::warn!(
+                    %task_id,
+                    findings = same.len(),
+                    "document storage refused a follow-up task"
+                );
+                Ok(())
             }
         }
-        Ok(())
     }
 }
 
