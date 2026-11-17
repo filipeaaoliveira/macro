@@ -498,6 +498,7 @@ fn session_of(name: &str) -> StepSession {
         session_id: Uuid::now_v7(),
         action_id: Uuid::now_v7(),
         agent: Some(agent(name)),
+        bot: Some(Uuid::now_v7()),
     }
 }
 
@@ -643,6 +644,22 @@ async fn a_step_handed_to_the_next_agent_keeps_who_was_passed_over_and_why(pool:
             .await
             .expect("read")
     );
+    repo.record_open(key(id, 1), first.session_id)
+        .await
+        .expect("open");
+    let stopping = repo
+        .stopping_session(key(id, 1), std::time::Duration::from_secs(3600))
+        .await
+        .expect("read")
+        .expect("claimed");
+    assert!(
+        !stopping.opened,
+        "the session handed on is never recorded open"
+    );
+    assert_eq!(
+        stopping.session.bot, next.bot,
+        "the next session's bot is kept"
+    );
 }
 
 /// When the last Agent of the Role cannot start either, the Step keeps its
@@ -679,8 +696,19 @@ async fn the_last_agent_passed_over_is_recorded_with_the_step_s_own_session(pool
         )
         .await
         .expect("pass");
+    let recorded_again = repo
+        .pass_session(
+            key(id, 1),
+            last.session_id,
+            &planner(),
+            &passed("backup"),
+            None,
+        )
+        .await
+        .expect("pass again");
 
     assert!(recorded);
+    assert!(!recorded_again, "an overlapping attempt records it once");
     assert_eq!(
         repo.claimed_session(key(id, 1)).await.expect("read"),
         Some(last)
@@ -710,7 +738,7 @@ async fn a_session_claimed_before_agents_were_recorded_still_reads(pool: PgPool)
         .expect("claim")
         .session;
     // As the step was kept before the migration that added the columns.
-    sqlx::query!("UPDATE factory_step SET role = NULL, agent = NULL")
+    sqlx::query!("UPDATE factory_step SET role = NULL, agent = NULL, bot_id = NULL")
         .execute(&pool)
         .await
         .expect("forget the agent");
@@ -738,7 +766,7 @@ async fn a_session_claimed_before_agents_were_recorded_still_reads(pool: PgPool)
         .expect("pass");
 
     assert_eq!(retried.session_id, claimed.session_id);
-    assert_eq!(retried.agent, None);
+    assert_eq!((retried.agent, retried.bot), (None, None));
     assert_eq!(stopping.session.agent, None);
     assert!(handed_on);
     let steps = repo.list_steps(id).await.expect("list");

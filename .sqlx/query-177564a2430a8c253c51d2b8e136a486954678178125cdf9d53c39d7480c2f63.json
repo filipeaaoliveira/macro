@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                session_id AS \"session_id!\",\n                action_id AS \"action_id!\",\n                agent,\n                opened_at IS NOT NULL AS \"opened!\",\n                COALESCE(prepared_at > now() - make_interval(secs => $3), false)\n                    AS \"may_still_open!\"\n            FROM factory_step\n            WHERE run_id = $1 AND seq = $2 AND session_id IS NOT NULL\n            ",
+  "query": "\n            SELECT\n                session_id AS \"session_id!\",\n                action_id AS \"action_id!\",\n                agent,\n                bot_id,\n                opened_at IS NOT NULL AS \"opened!\",\n                COALESCE(prepared_at > now() - make_interval(secs => $3), false)\n                    AS \"may_still_open!\"\n            FROM factory_step\n            WHERE run_id = $1 AND seq = $2 AND session_id IS NOT NULL\n            ",
   "describe": {
     "columns": [
       {
@@ -20,11 +20,16 @@
       },
       {
         "ordinal": 3,
+        "name": "bot_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
         "name": "opened!",
         "type_info": "Bool"
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "may_still_open!",
         "type_info": "Bool"
       }
@@ -40,9 +45,10 @@
       true,
       true,
       true,
+      true,
       null,
       null
     ]
   },
-  "hash": "f266470b8984363d62f568eeeca744498f3facdb93d427b3d611eb006d7bb0bc"
+  "hash": "177564a2430a8c253c51d2b8e136a486954678178125cdf9d53c39d7480c2f63"
 }

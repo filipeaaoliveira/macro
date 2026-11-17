@@ -18,6 +18,7 @@ use agent_session::domain::routines::{
     ValidateRoutineSession,
 };
 use ai_billing::DenyReason;
+use bot_id::BotId;
 use factory_records::domain::models::{AgentName, Outcome, PassedOver, Role, StepKey, StepSession};
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
@@ -190,23 +191,64 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
             .ok_or_else(|| SessionAgentError::UnknownAgent(name.clone()))
     }
 
+    /// The bot whose harness runs the session `session` of a Step of
+    /// `role`: the one recorded with it, so a stop or a release never
+    /// depends on the agent definition still naming its Agent; else, for a
+    /// session claimed before Steps recorded it, its Agent's.
+    fn bot(&self, session: &StepSession, role: &Role) -> Result<BotId, SessionAgentError> {
+        match session.bot {
+            Some(bot) => Ok(BotId::new_from_uuid(bot)),
+            None => Ok(self.agent(&self.agent_name(session, role)?)?.bot),
+        }
+    }
+
+    /// A new session of the Agent `name`, its ids made now.
+    fn new_session(&self, name: &AgentName) -> Result<StepSession, SessionAgentError> {
+        Ok(StepSession {
+            session_id: Uuid::now_v7(),
+            action_id: Uuid::now_v7(),
+            agent: Some(name.clone()),
+            bot: Some(self.agent(name)?.bot.as_uuid()),
+        })
+    }
+
+    /// The session the Step `key` works in now, when another attempt handed
+    /// it on from `session`, and it still holds it; none when it still works
+    /// in `session`. Fails once it let go of its session.
+    async fn moved_on(
+        &self,
+        key: StepKey,
+        session: &StepSession,
+    ) -> Result<Option<StepSession>, SessionAgentError> {
+        let current = self
+            .repo
+            .claimed_session(key)
+            .await
+            .map_err(Self::records)?
+            .ok_or(SessionAgentError::Released)?;
+        if current.session_id == session.session_id {
+            return Ok(None);
+        }
+        self.still_holds(key, current.session_id).await?;
+        Ok(Some(current))
+    }
+
     fn records(error: impl std::error::Error + Send + Sync + 'static) -> SessionAgentError {
         SessionAgentError::Records(rootcause::Report::new(error).into_dynamic())
     }
 
-    /// The first prompt of `owner`'s session `session`, of `agent`.
+    /// The first prompt of `owner`'s session `session`, run by `bot`.
     fn action(
-        &self,
         owner: &MacroUserIdStr<'static>,
         session: &StepSession,
-        agent: &AgentName,
-    ) -> Result<RoutineSessionAction, SessionAgentError> {
-        Ok(RoutineSessionAction {
+        bot: BotId,
+    ) -> RoutineSessionAction {
+        RoutineSessionAction {
             owner: owner.clone(),
-            bot_id: self.agent(agent)?.bot,
+            bot_id: bot,
             session_id: AgentSessionId::new_from_uuid(session.session_id),
             action_id: AgentActionId::from_uuid(session.action_id),
-        })
+        }
     }
 
     /// Open the Step's session, or find it open. A prepare that fails
@@ -399,7 +441,7 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
         agent_name: &AgentName,
     ) -> Result<RoutineSessionAction, SessionAgentError> {
         let agent = self.agent(agent_name)?;
-        let action = self.action(&task.owner, session, agent_name)?;
+        let action = Self::action(&task.owner, session, self.bot(session, &task.role)?);
 
         // A deleted session is gone: preparing it again would open a fresh
         // one under its id, and prompting it would start the work over. An
@@ -469,7 +511,12 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
         // twice.
         let mut session = self
             .repo
-            .claim_session(task.key, new_session(first), &task.role, &task.outcomes)
+            .claim_session(
+                task.key,
+                self.new_session(first)?,
+                &task.role,
+                &task.outcomes,
+            )
             .await
             .map_err(Self::records)?
             .session;
@@ -483,13 +530,29 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
             let reason = match self.start(&task, &session, &agent).await {
                 Ok(action) => break action,
                 Err(SessionAgentError::NoQuota(reason)) => reason,
+                // An overlapping attempt handed the Step on while this one
+                // opened its session: go on in the session it works in now.
+                Err(SessionAgentError::Released) => {
+                    match self.moved_on(task.key, &session).await? {
+                        Some(current) => {
+                            session = current;
+                            continue;
+                        }
+                        None => return Err(SessionAgentError::Released),
+                    }
+                }
                 Err(error) => return Err(error),
             };
-            let to = agents
+            // The Agent after this one in the Role's list, or its first
+            // when the definition no longer lists this one for the Role.
+            let next = agents
                 .iter()
-                .skip_while(|listed| **listed != agent)
-                .nth(1)
-                .map(new_session);
+                .position(|listed| *listed == agent)
+                .map_or(0, |place| place + 1);
+            let to = agents
+                .get(next)
+                .map(|name| self.new_session(name))
+                .transpose()?;
             let passed = PassedOver {
                 agent: agent.clone(),
                 reason: reason.code().to_string(),
@@ -521,17 +584,10 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
             // Another attempt handed the Step on already, or it let go of
             // its session: go on in the session it works in now, while it
             // holds it.
-            let current = self
-                .repo
-                .claimed_session(task.key)
-                .await
-                .map_err(Self::records)?
-                .ok_or(SessionAgentError::Released)?;
-            self.still_holds(task.key, current.session_id).await?;
-            if current.session_id == session.session_id {
-                return Err(SessionAgentError::NoQuota(reason));
+            match self.moved_on(task.key, &session).await? {
+                Some(current) => session = current,
+                None => return Err(SessionAgentError::NoQuota(reason)),
             }
-            session = current;
         };
         self.finished(&action, deadline).await?;
 
@@ -584,8 +640,7 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
         // whose prepare is still in flight, or a harness that fails a while,
         // answers neither the stop nor a read, yet may open or work on, so
         // the watch rides that out.
-        let agent = self.agent_name(&stopping.session, role)?;
-        let action = self.action(owner, &stopping.session, &agent)?;
+        let action = Self::action(owner, &stopping.session, self.bot(&stopping.session, role)?);
         self.cancel(&action).await;
         let mut seen = false;
         let deadline = tokio::time::Instant::now() + STOP_WATCH;
@@ -641,23 +696,14 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
             .await
             .map_err(Self::records)?;
         if let Some(session) = claimed {
+            let bot = self.bot(&session, role)?;
             self.repo
                 .release_session(key)
                 .await
                 .map_err(Self::records)?;
-            let agent = self.agent_name(&session, role)?;
-            self.delete(&self.action(owner, &session, &agent)?).await;
+            self.delete(&Self::action(owner, &session, bot)).await;
         }
         Ok(())
-    }
-}
-
-/// A new session of `agent`, its ids made now.
-fn new_session(agent: &AgentName) -> StepSession {
-    StepSession {
-        session_id: Uuid::now_v7(),
-        action_id: Uuid::now_v7(),
-        agent: Some(agent.clone()),
     }
 }
 

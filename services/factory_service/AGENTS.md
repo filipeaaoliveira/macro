@@ -71,6 +71,11 @@ worker that walks each Run's Flow, in one process.
   }
   ```
 
+  When moving off `FACTORY_AGENT_ID`, make that bot the first Agent of every
+  Role until the Runs started before have ended: a Step that opened its
+  session before Steps recorded their Agent and bot is stopped, deleted or
+  retried as the first Agent of its Role.
+
   Unset, the agent Steps run on `LocalAgent`, which does no work, unless the
   retired `FACTORY_AGENT_ID` is set: then the service refuses to start and
   names `FACTORY_AGENTS`. It is optional and the service has no Doppler

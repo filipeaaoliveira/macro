@@ -20,7 +20,8 @@ the Gates they asked people in MacroDB, and defines the names Flows use
 
 - Owns: the `factory_run`, `factory_step` and `factory_gate` tables
   (`crates/macro_db_client/migrations/20261116083957_factory.sql`,
-  `20261117104713_factory_step_agent.sql`).
+  `20261117104713_factory_step_agent.sql`,
+  `20261117120425_factory_step_bot.sql`).
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
 
 ## Boundaries
@@ -43,11 +44,13 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   it.
 - `factory_run.user_id` is the Run's owner and goes with their account.
 - An agent Step records its session (`session_id`, `action_id`, `offered`),
-  its Role and the Agent the session is of once, in `claim_session`;
+  its Role, the Agent the session is of and the bot that runs it
+  (`bot_id`) once, in `claim_session`;
   `pass_session` records an Agent that could not start in `passed_over`, with
   its reason (`pass_reasons`), and replaces the session and Agent with the
   next one's when there is one, only while the Step still holds the session
-  it replaces. `record_prepare`, `record_open` and `holds_session` name the
+  it replaces; with none, an Agent already recorded last is not recorded
+  again. `record_prepare`, `record_open` and `holds_session` name the
   session too, so none acts on one the Step no longer works in. A session
   claimed before the Agent was recorded reads with none. The agent's latest
   hand back is kept on the Step while it runs (`hand_back`), and read when its

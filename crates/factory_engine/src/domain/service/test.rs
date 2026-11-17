@@ -732,6 +732,7 @@ async fn step_in_a_session(repo: &FakeRepo) -> (StepKey, Uuid) {
         session_id: Uuid::now_v7(),
         action_id: Uuid::now_v7(),
         agent: Some(AgentName::try_from("primary".to_string()).expect("valid")),
+        bot: None,
     };
     let session_id = session.session_id;
     let planner = Role::try_from("planner".to_string()).expect("valid");

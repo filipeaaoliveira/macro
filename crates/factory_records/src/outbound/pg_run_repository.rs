@@ -598,7 +598,8 @@ impl RunRepository for PgRunRepository {
         let claimed = sqlx::query!(
             r#"
             UPDATE factory_step
-            SET session_id = $3, action_id = $4, offered = $5, role = $6, agent = $7
+            SET session_id = $3, action_id = $4, offered = $5, role = $6, agent = $7,
+                bot_id = $8
             WHERE run_id = $1 AND seq = $2 AND session_id IS NULL
             "#,
             key.run_id.as_uuid(),
@@ -608,6 +609,7 @@ impl RunRepository for PgRunRepository {
             &offered,
             role.as_str(),
             session.agent.as_ref().map(AgentName::as_str),
+            session.bot,
         )
         .execute(&self.pool)
         .await?;
@@ -638,7 +640,9 @@ impl RunRepository for PgRunRepository {
         // agent handed nothing back in the one it leaves. With no next
         // session the Step keeps its own, and only the pass is recorded. A
         // session claimed before Steps recorded their Role and Agent gets
-        // both, so they pair up with the Agents passed over.
+        // both, so they pair up with the Agents passed over. With no next
+        // session, an Agent already recorded last is not recorded again, as
+        // when overlapping attempts both find the Role exhausted.
         let to_agent = to.and_then(|to| to.agent.as_ref()).map(AgentName::as_str);
         let recorded = sqlx::query!(
             r#"
@@ -647,6 +651,7 @@ impl RunRepository for PgRunRepository {
                 action_id = COALESCE($5, s.action_id),
                 role = COALESCE(s.role, $6),
                 agent = COALESCE($7, s.agent, $8),
+                bot_id = CASE WHEN $4::uuid IS NULL THEN s.bot_id ELSE $10 END,
                 passed_over = array_append(s.passed_over, $8),
                 pass_reasons = array_append(s.pass_reasons, $9),
                 prepared_at = CASE WHEN $4::uuid IS NULL THEN s.prepared_at END,
@@ -655,6 +660,10 @@ impl RunRepository for PgRunRepository {
             WHERE r.id = s.run_id AND s.run_id = $1 AND s.seq = $2 AND s.session_id = $3
                 AND s.session_released_at IS NULL AND s.handed_at IS NULL
                 AND s.ended_at IS NULL AND r.ended_at IS NULL
+                AND (
+                    $4::uuid IS NOT NULL
+                    OR s.passed_over[cardinality(s.passed_over)] IS DISTINCT FROM $8
+                )
             "#,
             key.run_id.as_uuid(),
             i32::from(key.seq),
@@ -665,6 +674,7 @@ impl RunRepository for PgRunRepository {
             to_agent,
             passed.agent.as_str(),
             passed.reason,
+            to.and_then(|to| to.bot),
         )
         .execute(&self.pool)
         .await?;
@@ -675,7 +685,7 @@ impl RunRepository for PgRunRepository {
     async fn claimed_session(&self, key: StepKey) -> Result<Option<StepSession>, Self::Err> {
         let row = sqlx::query!(
             r#"
-            SELECT session_id AS "session_id!", action_id AS "action_id!", agent
+            SELECT session_id AS "session_id!", action_id AS "action_id!", agent, bot_id
             FROM factory_step
             WHERE run_id = $1 AND seq = $2 AND session_id IS NOT NULL
             "#,
@@ -689,6 +699,7 @@ impl RunRepository for PgRunRepository {
                 session_id: row.session_id,
                 action_id: row.action_id,
                 agent: row.agent.map(AgentName::try_from).transpose()?,
+                bot: row.bot_id,
             })
         })
         .transpose()
@@ -770,6 +781,7 @@ impl RunRepository for PgRunRepository {
                 session_id AS "session_id!",
                 action_id AS "action_id!",
                 agent,
+                bot_id,
                 opened_at IS NOT NULL AS "opened!",
                 COALESCE(prepared_at > now() - make_interval(secs => $3), false)
                     AS "may_still_open!"
@@ -788,6 +800,7 @@ impl RunRepository for PgRunRepository {
                     session_id: row.session_id,
                     action_id: row.action_id,
                     agent: row.agent.map(AgentName::try_from).transpose()?,
+                    bot: row.bot_id,
                 },
                 opened: row.opened,
                 may_still_open: row.may_still_open,

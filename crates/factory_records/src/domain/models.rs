@@ -448,6 +448,10 @@ pub struct StepSession {
     /// The Agent the session is of; none for a session claimed before
     /// Steps recorded their Agent, which is of the first Agent of its Role.
     pub agent: Option<AgentName>,
+    /// The bot whose harness runs the session, so it can be stopped and
+    /// deleted whatever the agent definition says now; none for a session
+    /// claimed before Steps recorded it.
+    pub bot: Option<Uuid>,
 }
 
 /// A Step's session as `RunRepository::claim_session` left it.

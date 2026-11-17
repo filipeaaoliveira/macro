@@ -106,8 +106,12 @@ code (`passed_over`, `pass_reasons`); a session that opened is deleted
 first. Only that refusal passes the Step on; when no Agent is left, the Step
 records the last one passed over too and fails for good. An attempt
 prepares, opens and prompts only the session the Step works in now, so an
-overlapping attempt never prompts a session handed on. A session claimed
-before Steps recorded their Agent is of the first Agent of its Role. The Step claims its
+overlapping attempt never prompts a session handed on: it deletes the one
+it opened and goes on in the Step's current session. Each session keeps the
+bot that runs it, so a stop or a release never depends on the agent
+definition; a session claimed before Steps recorded their Agent and bot is
+of the first Agent of its Role. A Step whose Agent its Role no longer lists
+passes to the Role's first Agent. The Step claims its
 session in `factory_step` first, so a retried Step goes on in the same session
 and does not start the work over: it always asks, and the session refuses a
 prompt it already has with a conflict. That guard is a check of the session's
@@ -275,9 +279,9 @@ part only.
   (`ctx.patched`) or worker versioning.
 - A Gate opens only for a Step that ends `done`; any other outcome routes as
   usual, so a failed plan is never put to a person.
-- A Step's session is stopped and deleted as the Agent recorded on it, found
-  by name in the agent definition: renaming or removing an Agent while its
-  Steps run leaves their sessions for nothing to stop.
+- Renaming or removing an Agent while its Steps run fails their retries
+  (`UnknownAgent`: its model and instructions are gone), though stops and
+  releases still reach their sessions through the recorded bot.
 - A subscription that runs out mid-turn (a turn that fails with the
   provider's usage limit) is not a refusal to start: it fails the Step as any
   failed turn does, and no other Agent takes it.

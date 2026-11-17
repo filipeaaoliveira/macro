@@ -98,6 +98,9 @@ pub enum BuiltInStepError {
     /// No built-in Step has this name.
     #[error("no built-in step is named {0}")]
     UnknownStep(StepName),
+    /// The Step was handed to an agent, and no agent does it.
+    #[error("no agent does step {0}")]
+    NotAnAgentStep(StepName),
     /// The Step works on the Run's repository, and the Run has none.
     #[error("step {0} works on the run's repository, and the run has none")]
     NoRepository(StepName),
@@ -137,6 +140,7 @@ impl Retryable for BuiltInStepError {
             BuiltInStepError::Agent { retryable, .. } => *retryable,
             BuiltInStepError::PullRequest(error) => error.retryable(),
             BuiltInStepError::UnknownStep(_)
+            | BuiltInStepError::NotAnAgentStep(_)
             | BuiltInStepError::NoRepository(_)
             | BuiltInStepError::UnexpectedOutcome { .. } => false,
         }
@@ -183,7 +187,7 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
             owner: input.owner.clone(),
             step: step.clone(),
             role: agent_role(step, input.role)
-                .ok_or_else(|| BuiltInStepError::UnknownStep(step.clone()))?,
+                .ok_or_else(|| BuiltInStepError::NotAnAgentStep(step.clone()))?,
             prompt: prompt(instructions, &outcomes, input),
             outcomes: outcomes.clone(),
             repo_url: input.repository.map(|repository| repository.url.clone()),
