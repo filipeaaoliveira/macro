@@ -36,3 +36,7 @@ INSERT INTO factory_gate (run_id, seq, question, answers, opened_at, answer, use
     ('00000000-0000-7000-8000-000000000201', 1, 'Approve this plan?', '{approve,revise}', '2026-11-10 09:05Z', 'revise', 'macro|julia@example.com', '2026-11-10 09:15Z'),
     ('00000000-0000-7000-8000-000000000201', 2, 'Approve this plan?', '{approve,revise}', '2026-11-10 09:18Z', 'approve', 'macro|julia@example.com', '2026-11-10 09:20Z'),
     ('00000000-0000-7000-8000-000000000204', 1, 'Approve this plan?', '{approve,revise}', '2026-11-12 12:05Z', 'approve', 'macro|julia@example.com', '2026-11-12 12:06Z');
+
+-- A Gate a Standing Rule answered at once: no person was asked.
+INSERT INTO factory_gate (run_id, seq, question, answers, opened_at, answer, rule, answered_at) VALUES
+    ('00000000-0000-7000-8000-000000000201', 3, 'Go on?', '{approve,revise}', '2026-11-10 09:30Z', 'approve', 'approve_plan', '2026-11-10 09:30Z');

@@ -1,0 +1,96 @@
+/** @vitest-environment jsdom */
+
+import { factoryClient } from '@service-factory/client';
+import type { StandingRulesSettings as Settings } from '@service-factory/generated/schemas';
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@solidjs/testing-library';
+import { QueryClient, QueryClientProvider } from '@tanstack/solid-query';
+import { ok } from 'neverthrow';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { StandingRulesSettings } from './standing-rules-settings';
+
+vi.mock('@service-factory/client', () => ({
+  factoryClient: {
+    getStandingRules: vi.fn(),
+    setStandingRules: vi.fn(),
+  },
+}));
+
+vi.mock('@core/component/Toast/Toast', () => ({
+  toast: { alert: vi.fn(), failure: vi.fn(), success: vi.fn() },
+}));
+
+const teamDefault: Settings = {
+  definition: { plan: false, blockers: true, merge: false },
+  isDefault: true,
+  projects: [],
+  teamId: '00000000-0000-7000-8000-000000000201',
+  canEdit: true,
+};
+
+function mount(settings: Settings) {
+  vi.mocked(factoryClient.getStandingRules).mockResolvedValue(ok(settings));
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  render(() => (
+    <QueryClientProvider client={client}>
+      <StandingRulesSettings />
+    </QueryClientProvider>
+  ));
+}
+
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
+
+describe('StandingRulesSettings', () => {
+  it('turns an admin’s rule on, keeping the others, and goes back to the default', async () => {
+    vi.mocked(factoryClient.setStandingRules)
+      .mockResolvedValueOnce(
+        ok({
+          ...teamDefault,
+          definition: { plan: false, blockers: true, merge: true },
+          isDefault: false,
+        })
+      )
+      .mockResolvedValueOnce(ok(teamDefault));
+    mount(teamDefault);
+
+    const merge = await screen.findByRole('checkbox', {
+      name: 'Merge when CI is green',
+    });
+    expect((merge as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(merge);
+
+    await waitFor(() =>
+      expect(factoryClient.setStandingRules).toHaveBeenCalledWith({
+        plan: false,
+        blockers: true,
+        merge: true,
+      })
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Use default' }));
+    await waitFor(() =>
+      expect(factoryClient.setStandingRules).toHaveBeenLastCalledWith(null)
+    );
+  });
+
+  it('shows a member the team’s rules without letting them change them', async () => {
+    mount({ ...teamDefault, canEdit: false });
+
+    const blockers = await screen.findByRole('checkbox', {
+      name: 'Fix review blockers',
+    });
+    expect((blockers as HTMLInputElement).checked).toBe(true);
+    expect(blockers.hasAttribute('disabled')).toBe(true);
+    expect(screen.getByText('Only team admins can change them.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Use default' })).toBeNull();
+  });
+});

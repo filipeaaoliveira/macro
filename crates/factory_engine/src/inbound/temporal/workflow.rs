@@ -16,6 +16,16 @@
 //! its Flow in its input, so Runs started on a Flow without one replay as
 //! before.
 //!
+//! Once a Gate is recorded, and before a person may answer it, the worker
+//! asks the Run's Standing Rules about it (`factory_rule_gate`): a Rule
+//! Answer comes back as the activity's result, so a replay reads it from
+//! the history and walks the same way. That activity is behind the
+//! [`STANDING_RULES_PATCH`] marker: a Run whose history opened a Gate
+//! before it replays without asking, and a Gate a Run opens on a newer
+//! worker asks. A review panel's Gate (`after` a round's outcome) asks once
+//! the round ends with that outcome; only a Flow that has one takes that
+//! path, so Runs on a Flow without one replay as before.
+//!
 //! Cancelling the workflow cancels the running Step, whose activity drops
 //! its work before the cancellation completes, or the wait for an answer.
 //! The workflow then stops the Step's agent, which only it can tell was
@@ -37,10 +47,15 @@ use temporalio_sdk::{
     WorkflowTermination,
 };
 
+use factory_records::domain::standing_rules::GateKind;
+
 use crate::domain::flow::GateDefinition;
-use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening, OpenGate, check_answer};
+use crate::domain::gate::{
+    AnswerGate, GateAnswered, GateOpening, GateRuling, OpenGate, check_answer,
+};
 use crate::domain::interpreter::{Interpreter, NextStep};
 use crate::domain::models::{RunFinish, RunStart, StepEnding, StepReport, StepRequest, StepStart};
+use crate::domain::standing_rules::rule_fix_limit;
 use crate::inbound::temporal::activities::FactoryActivities;
 use crate::temporal::{ANSWER_GATE_UPDATE, FLOW_WORKFLOW};
 use review_round::{Panel, Round, TemporalRound, review_round};
@@ -85,6 +100,10 @@ const STOP_TIMEOUT: Duration = Duration::from_secs(3 * 60);
 /// How long stopping a Step's agent may take in all, across its attempts,
 /// before it is given up on.
 const STOP_TOTAL: Duration = Duration::from_secs(15 * 60);
+
+/// The marker of the workflow that asks a Run's Standing Rules about each
+/// Gate it opens. Renaming it breaks the replay of Runs that passed it.
+pub(crate) const STANDING_RULES_PATCH: &str = "factory-standing-rules";
 
 /// The workflow of one Run.
 #[workflow]
@@ -155,6 +174,33 @@ impl FlowWorkflow {
                 let round = review_round(&temporal, &panel, &mut held).await?;
                 match round {
                     Round::Routed(outcome) => {
+                        // A Gate on the panel asks about the round's
+                        // outcome it names, on the round's last Step: the
+                        // one a Run's latest Step is while it waits.
+                        let outcome = match &entry.gate {
+                            Some(gate) if outcome == gate.opened_by() => {
+                                let reviewers = u16::try_from(entry.reviewers.len())
+                                    .unwrap_or(u16::MAX)
+                                    .max(1);
+                                let key = StepKey {
+                                    run_id: start.run_id,
+                                    seq: seq.saturating_add(reviewers - 1),
+                                };
+                                // The rounds before this one each sent their
+                                // Blockers to a fix.
+                                let asking = Asking {
+                                    kind: gate.kind,
+                                    fix_rounds: visit.saturating_sub(1),
+                                    fix_limit: rule_fix_limit(entry.max_visits),
+                                };
+                                match ask(ctx, key, gate, asking).await {
+                                    Ok(answer) => answer,
+                                    Err(_) if is_cancelled(ctx) => break RunOutcome::Cancelled,
+                                    Err(termination) => return Err(termination),
+                                }
+                            }
+                            _ => outcome,
+                        };
                         if let Err(error) = interpreter.record(&mut state, &outcome) {
                             stopped = Some(error);
                             break RunOutcome::Failed;
@@ -251,11 +297,18 @@ impl FlowWorkflow {
             }
 
             let outcome = match &entry.gate {
-                Some(gate) if reported == Outcome::done() => match ask(ctx, key, gate).await {
-                    Ok(answer) => answer,
-                    Err(_) if is_cancelled(ctx) => break RunOutcome::Cancelled,
-                    Err(termination) => return Err(termination),
-                },
+                Some(gate) if reported == gate.opened_by() => {
+                    let asking = Asking {
+                        kind: gate.kind,
+                        fix_rounds: 0,
+                        fix_limit: 0,
+                    };
+                    match ask(ctx, key, gate, asking).await {
+                        Ok(answer) => answer,
+                        Err(_) if is_cancelled(ctx) => break RunOutcome::Cancelled,
+                        Err(termination) => return Err(termination),
+                    }
+                }
                 _ => reported,
             };
             if let Err(error) = interpreter.record(&mut state, &outcome) {
@@ -337,12 +390,26 @@ fn is_cancelled(ctx: &WorkflowContext<FlowWorkflow>) -> bool {
     ctx.cancellation_token().is_cancelled()
 }
 
-/// Open the Gate of the Step `key`, wait for a person's answer, record it,
-/// and return it as the entry's outcome.
+/// What a Gate's Standing Rule reads of where the Run is.
+struct Asking {
+    /// The Gate's kind; none for a Gate no rule decides.
+    kind: Option<GateKind>,
+    /// For a review panel's Gate, the fix rounds in a row its Blockers
+    /// went to.
+    fix_rounds: u16,
+    /// For a review panel's Gate, the fix rounds in a row its rule may
+    /// send.
+    fix_limit: u16,
+}
+
+/// Open the Gate of the Step `key`, ask the Run's Standing Rules about it,
+/// and return their Rule Answer, or else wait for a person's answer, record
+/// it, and return it as the entry's outcome.
 async fn ask(
     ctx: &mut WorkflowContext<FlowWorkflow>,
     key: StepKey,
     gate: &GateDefinition,
+    asking: Asking,
 ) -> WorkflowResult<Outcome> {
     let record_options = ActivityOptions::start_to_close_timeout(RECORD_TIMEOUT);
     let opening = GateOpening {
@@ -356,6 +423,27 @@ async fn ask(
         record_options.clone(),
     )
     .await?;
+
+    // The rules are asked before a person may answer, so the two never
+    // race: the worker records a Rule Answer itself. A Run whose history
+    // opened this Gate before the marker existed replays without asking.
+    if ctx.patched(STANDING_RULES_PATCH)
+        && let Some(kind) = asking.kind
+    {
+        let ruling = GateRuling {
+            key,
+            kind,
+            fix_rounds: asking.fix_rounds,
+            fix_limit: asking.fix_limit,
+            answers: gate.answers.clone(),
+        };
+        let ruled = ctx
+            .execute_activity(FactoryActivities::rule_gate, ruling, record_options.clone())
+            .await?;
+        if let Some(ruled) = ruled {
+            return Ok(ruled.answer);
+        }
+    }
 
     // Answers are taken only once the Gate is recorded, so a person never
     // answers a Gate the Run's records do not show.

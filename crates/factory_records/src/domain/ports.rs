@@ -7,10 +7,11 @@ use uuid::Uuid;
 
 use crate::domain::models::{
     CheckResult, CheckRound, CheckRoundOutcome, CheckRoundStart, ClaimedSession,
-    ControlFileChanges, EntryId, HandBack, HandedBack, NewRun, Outcome, PassedOver, Role, Run,
-    RunId, RunInsert, RunOutcome, SessionStep, Step, StepKey, StepSession, StoppingSession,
-    TaskLink, TeamMembership,
+    ControlFileChanges, EntryId, GateAnswer, HandBack, HandedBack, NewRun, Outcome, PassedOver,
+    Role, Run, RunId, RunInsert, RunOutcome, SessionStep, Step, StepKey, StepSession,
+    StoppingSession, TaskLink, TeamMembership,
 };
+use crate::domain::standing_rules::StandingRule;
 
 /// Where Runs and their Steps are kept.
 ///
@@ -99,6 +100,18 @@ pub trait RunRepository: Send + Sync + 'static {
         user_id: &MacroUserIdStr<'static>,
         approved_control_files: Option<&[String]>,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// Record the Standing Rule `rule`'s answer to the Gate of the Step
+    /// `key`: a Rule Answer, with no author or note, approving no Control
+    /// Files. A Gate already answered keeps its first answer. Returns the
+    /// answer the Gate keeps once written, read back; none when the Step
+    /// has no Gate.
+    fn answer_gate_by_rule(
+        &self,
+        key: StepKey,
+        answer: &Outcome,
+        rule: StandingRule,
+    ) -> impl Future<Output = Result<Option<GateAnswer>, Self::Err>> + Send;
 
     /// Record that the Step `key` works in `session` for `role`, offering its
     /// agent `offered`, unless an earlier attempt of the Step already

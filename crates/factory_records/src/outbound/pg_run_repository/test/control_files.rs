@@ -1,6 +1,7 @@
 //! A Run's Control File changes, the approval a Gate's answer gives them,
 //! and a team's Control File patterns.
 
+use crate::domain::standing_rules::RunRules;
 use macro_db_migrator::MACRO_DB_MIGRATIONS;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -38,6 +39,7 @@ async fn a_run_keeps_how_it_was_created(pool: PgPool) {
                 created_in_person: in_person,
                 control_file_patterns: &patterns,
                 control_files_team_id: team,
+                standing_rules: RunRules::DEFAULT,
             })
             .await
             .expect("insert")

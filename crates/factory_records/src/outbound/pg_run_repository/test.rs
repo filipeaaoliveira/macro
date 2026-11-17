@@ -1,3 +1,4 @@
+use crate::domain::standing_rules::RunRules;
 use macro_db_migrator::MACRO_DB_MIGRATIONS;
 use macro_user_id::user_id::MacroUserIdStr;
 use sqlx::PgPool;
@@ -15,15 +16,15 @@ mod control_files;
 const LOGIN_TASK: &str = "00000000-0000-7000-8000-000000000101";
 const DARK_MODE_TASK: &str = "00000000-0000-7000-8000-000000000102";
 
-fn entry(id: &str) -> EntryId {
+pub(super) fn entry(id: &str) -> EntryId {
     EntryId::try_from(id.to_string()).expect("valid entry id")
 }
 
-fn outcome(name: &str) -> Outcome {
+pub(super) fn outcome(name: &str) -> Outcome {
     Outcome::try_from(name.to_string()).expect("valid outcome")
 }
 
-fn julia() -> MacroUserIdStr<'static> {
+pub(super) fn julia() -> MacroUserIdStr<'static> {
     MacroUserIdStr::try_from("macro|julia@example.com".to_string()).expect("valid user id")
 }
 
@@ -31,12 +32,12 @@ fn task(id: &str) -> Uuid {
     Uuid::parse_str(id).expect("valid task id")
 }
 
-fn key(run_id: RunId, seq: u16) -> StepKey {
+pub(super) fn key(run_id: RunId, seq: u16) -> StepKey {
     StepKey { run_id, seq }
 }
 
 /// Keep a new Run of Julia's with no task.
-async fn insert(repo: &PgRunRepository, id: RunId, request: &str) -> Run {
+pub(super) async fn insert(repo: &PgRunRepository, id: RunId, request: &str) -> Run {
     match repo
         .insert_run(NewRun {
             id,
@@ -48,6 +49,7 @@ async fn insert(repo: &PgRunRepository, id: RunId, request: &str) -> Run {
             created_in_person: false,
             control_file_patterns: &[],
             control_files_team_id: None,
+            standing_rules: RunRules::DEFAULT,
         })
         .await
         .expect("insert")
@@ -354,6 +356,7 @@ async fn a_run_keeps_its_repository_and_the_commit_it_asks_to_merge(pool: PgPool
             created_in_person: false,
             control_file_patterns: &[],
             control_files_team_id: None,
+            standing_rules: RunRules::DEFAULT,
         })
         .await
         .expect("insert");
@@ -398,6 +401,7 @@ async fn a_run_is_kept_with_its_task_in_one_write(pool: PgPool) {
             created_in_person: false,
             control_file_patterns: &[],
             control_files_team_id: None,
+            standing_rules: RunRules::DEFAULT,
         })
         .await
         .expect("insert");
@@ -412,6 +416,7 @@ async fn a_run_is_kept_with_its_task_in_one_write(pool: PgPool) {
             created_in_person: false,
             control_file_patterns: &[],
             control_files_team_id: None,
+            standing_rules: RunRules::DEFAULT,
         })
         .await
         .expect("insert for a missing task");
@@ -1181,6 +1186,7 @@ async fn insert_on_task(
             created_in_person: false,
             control_file_patterns: &[],
             control_files_team_id: None,
+            standing_rules: RunRules::DEFAULT,
         })
         .await
         .expect("insert")

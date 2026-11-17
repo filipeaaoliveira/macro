@@ -2,6 +2,7 @@
 
 mod control_files;
 mod main_hold;
+mod standing_rules;
 #[cfg(test)]
 mod test;
 
@@ -27,8 +28,13 @@ use model_error_response::ErrorResponse;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::domain::models::{ControlFilesSettings, FactoryError, FlowSummary, RunDetail};
+use crate::domain::models::{
+    ControlFilesSettings, FactoryError, FlowSummary, RunDetail, StandingRulesSettings,
+};
 use crate::domain::ports::FactoryService;
+use factory_records::domain::standing_rules::{
+    OrchestratorDefinition, ProjectRules, RulesSource, RunRules, StandingRule,
+};
 
 /// Router state for the Run API.
 pub struct FactoryRouterState<S, Auth> {
@@ -85,6 +91,12 @@ impl<S, Auth> FromRef<FactoryRouterState<S, Auth>> for MacroAuthorizationState<A
 /// - `GET /settings/control-files` — the Control File patterns the caller's
 ///   Runs are checked against.
 /// - `PUT /settings/control-files` — set them, or go back to the default.
+/// - `GET /settings/standing-rules` — the Standing Rules the caller's Runs
+///   are created with.
+/// - `PUT /settings/standing-rules` — set the team's, or go back to the
+///   default.
+/// - `PUT /settings/standing-rules/projects/{project_id}` — set or remove a
+///   Project's own.
 /// - `POST /internal/main-holds/clear` — an internal caller, for an
 ///   operator, clears a base branch's Main Hold; not in the OpenAPI
 ///   document.
@@ -113,6 +125,15 @@ where
             "/settings/control-files",
             get(control_files::get_control_files_handler::<S, Auth>)
                 .put(control_files::set_control_files_handler::<S, Auth>),
+        )
+        .route(
+            "/settings/standing-rules",
+            get(standing_rules::get_standing_rules_handler::<S, Auth>)
+                .put(standing_rules::set_standing_rules_handler::<S, Auth>),
+        )
+        .route(
+            "/settings/standing-rules/projects/{project_id}",
+            put(standing_rules::set_project_standing_rules_handler::<S, Auth>),
         )
         .route(
             "/internal/main-holds/clear",
@@ -566,6 +587,7 @@ impl FactoryError {
             | FactoryError::OutcomeNotOffered { .. }
             | FactoryError::HandBackTooLarge { .. }
             | FactoryError::ControlFilesNotApproved
+            | FactoryError::UnknownProject
             | FactoryError::InvalidControlFiles(_) => StatusCode::BAD_REQUEST,
             FactoryError::NotTheOwner | FactoryError::NotAPerson | FactoryError::NotATeamAdmin => {
                 StatusCode::FORBIDDEN
@@ -654,7 +676,10 @@ impl IntoResponse for FactoryError {
         link_task_handler,
         hand_back_handler,
         control_files::get_control_files_handler,
-        control_files::set_control_files_handler
+        control_files::set_control_files_handler,
+        standing_rules::get_standing_rules_handler,
+        standing_rules::set_standing_rules_handler,
+        standing_rules::set_project_standing_rules_handler
     ),
     components(schemas(
         FlowsResponse,
@@ -675,6 +700,13 @@ impl IntoResponse for FactoryError {
         ControlFileChanges,
         ControlFilesSettings,
         control_files::SetControlFilesRequest,
+        StandingRulesSettings,
+        OrchestratorDefinition,
+        ProjectRules,
+        RunRules,
+        RulesSource,
+        StandingRule,
+        standing_rules::SetStandingRulesRequest,
         MacroUserIdStr,
         EntryId,
         Outcome,

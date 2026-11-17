@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO factory_team_settings (team_id, control_files)\n            VALUES ($1, $2)\n            ON CONFLICT (team_id)\n            DO UPDATE SET control_files = EXCLUDED.control_files, updated_at = now()\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "75eadfd4760c855a8c4a6d6aa063d7f24cd1de7965810623036383b4a70ff3dc"
+}

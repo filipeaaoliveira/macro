@@ -1,5 +1,6 @@
 //! A reviewer's Step of a review round, with an agent the test scripts.
 
+use factory_records::domain::standing_rules::RunRules;
 use std::sync::{Arc, LazyLock, Mutex};
 
 use factory_records::domain::models::{
@@ -138,6 +139,7 @@ async fn second_round(repo: &FakeRepo, blockers: &[&str], fix_diff: bool) -> (Ru
             created_in_person: false,
             control_file_patterns: &[],
             control_files_team_id: None,
+            standing_rules: RunRules::DEFAULT,
         })
         .await
         .expect("insert")

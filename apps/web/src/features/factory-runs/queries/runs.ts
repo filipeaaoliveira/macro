@@ -63,6 +63,7 @@ function toRun(detail: RunDetail): Run {
               ? {
                   answer: step.gate.answer.answer,
                   note: step.gate.answer.note ?? undefined,
+                  rule: step.gate.answer.rule ?? undefined,
                   approvedControlFiles:
                     step.gate.answer.approvedControlFiles ?? undefined,
                   answeredAt: step.gate.answer.answeredAt,

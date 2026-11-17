@@ -21,13 +21,17 @@ the Gates they asked people in MacroDB, and defines the names Flows use
 - `src/domain/main_hold.rs` and `src/outbound/pg_run_repository/main_hold.rs`:
   `MainHoldRepository`, the merges Runs made and the Main Holds on the base
   branches they merge to.
+- `src/domain/standing_rules.rs` and
+  `src/outbound/pg_run_repository/standing_rules.rs`:
+  `StandingRulesRepository`, teams' and Projects' Standing Rules, and the
+  Gate kinds, rules and Orchestrator Definition they are made of.
 
 ## Scope
 
 - Owns: the `factory_run`, `factory_step`, `factory_gate`,
   `factory_check_round`, `factory_team_settings`, `factory_merge`,
-  `factory_main_hold`, `factory_review_round` and `factory_review_finding`
-  tables
+  `factory_main_hold`, `factory_review_round`, `factory_review_finding` and
+  `factory_project_rules` tables
   (`crates/macro_db_client/migrations/20261116083957_factory.sql`,
   `20261117093000_factory_check_round.sql`,
   `20261117104713_factory_step_agent.sql`,
@@ -40,7 +44,8 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261117190000_factory_check_round_commit.sql`,
   `20261117200000_factory_check_round_commit_check.sql`,
   `20261117210000_factory_main_hold_task_key.sql`,
-  `20261117220000_factory_follow_up_commented.sql`).
+  `20261117220000_factory_follow_up_commented.sql`,
+  `20261117221000_factory_standing_rules.sql`).
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
 
 ## Boundaries
@@ -143,8 +148,18 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `factory_gate.approved_control_files` keeps the files an answer approved,
   written with the answer by `answer_gate`, and only with one.
 - `factory_team_settings` keeps a team's own Control File patterns
-  (`team_control_files`, `set_team_control_files`); no row means the
-  factory's default applies, and it goes with the team. `team_of` reads a
+  (`team_control_files`, `set_team_control_files`) and Standing Rules
+  (`team_rules`, `set_team_rules`); a null column, or no row, means the
+  factory's default applies for that setting, each setter leaves the other
+  column alone, and a row left with neither is removed. It goes with the
+  team. `factory_project_rules` keeps a team's rules for one Project (an
+  initiative), and goes with either. Rules are stored as the Gate kinds
+  they decide (`plan`, `blockers`, `merge`), checked against those names.
+- `factory_run.standing_rules`, `standing_rules_source` and
+  `standing_rules_project_id` are set once, by `insert_run`; all null for
+  a Run created before Runs kept rules. `answer_gate_by_rule` records a
+  Rule Answer (`factory_gate.rule`, with no author, note or approved
+  Control Files) and, like `answer_gate`, keeps the first answer. `team_of` reads a
   person's team and role from `team_user`, as other features' records do:
   a person is on at most one team, and an agent's account
   (`"User"."isAgent"`, which `is_agent_account` reads) is never an admin.

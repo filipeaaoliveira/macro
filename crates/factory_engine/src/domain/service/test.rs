@@ -1,3 +1,4 @@
+use factory_records::domain::standing_rules::RunRules;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
@@ -23,6 +24,7 @@ use crate::domain::ports::{
 };
 
 mod control_files;
+mod standing_rules;
 
 /// Keeps what it was sent. Refuses every answer when `refuse` is set; a
 /// start fails when `fail` is set, and leaves its workflow behind when
@@ -224,6 +226,7 @@ async fn julia_s_run(repo: &FakeRepo) -> RunId {
             created_in_person: false,
             control_file_patterns: &[],
             control_files_team_id: None,
+            standing_rules: RunRules::DEFAULT,
         })
         .await
         .expect("insert")
@@ -1058,6 +1061,7 @@ async fn a_task_s_list_holds_its_owner_s_fifty_newest_runs() {
                 created_in_person: false,
                 control_file_patterns: &[],
                 control_files_team_id: None,
+                standing_rules: RunRules::DEFAULT,
             })
             .await
             .expect("insert")

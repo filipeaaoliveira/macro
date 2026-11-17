@@ -821,6 +821,203 @@
         }
       }
     },
+    "/settings/standing-rules": {
+      "get": {
+        "tags": ["factory"],
+        "summary": "The Standing Rules the caller's Runs are created with: their team's, or\nthe factory's default, the team's Projects' own, and whether the caller\nmay change them.",
+        "operationId": "get_factory_standing_rules",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandingRulesSettings"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": ["factory"],
+        "summary": "Set the Orchestrator Definition of the caller's team, or go back to the\nfactory's default. It applies to Runs created from now on. Only an admin\nor the owner of the team sets it, in their own signed-in session (403\notherwise): a rule answers Gates in its place.",
+        "operationId": "set_factory_standing_rules",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetStandingRulesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandingRulesSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/settings/standing-rules/projects/{project_id}": {
+      "put": {
+        "tags": ["factory"],
+        "summary": "Set the Orchestrator Definition of the caller's team for one Project,\nwhich replaces the team's for Runs created on a task in it, or remove\nit. The caller must administer the team, in their own signed-in session\n(403 otherwise), and be able to edit the Project (400 otherwise, as for\none that does not exist).",
+        "operationId": "set_factory_project_standing_rules",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "The Project: an initiative's id.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetStandingRulesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandingRulesSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/tasks/{task_id}/runs": {
       "get": {
         "tags": ["factory"],
@@ -1327,7 +1524,7 @@
       },
       "GateAnswer": {
         "type": "object",
-        "description": "A person's answer to a Gate.",
+        "description": "The answer to a Gate: a person's, or a Standing Rule's (a Rule Answer).",
         "required": ["answer", "answeredAt"],
         "properties": {
           "answer": {
@@ -1350,6 +1547,17 @@
             "type": ["string", "null"],
             "description": "What the person added, for the Run's later Steps to read."
           },
+          "rule": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/StandingRule",
+                "description": "The Standing Rule that answered, for a Rule Answer; none for a\nperson's."
+              }
+            ]
+          },
           "userId": {
             "oneOf": [
               {
@@ -1357,7 +1565,7 @@
               },
               {
                 "$ref": "#/components/schemas/MacroUserIdStr",
-                "description": "Who answered; none once their account is gone."
+                "description": "Who answered; none once their account is gone, and for a Rule\nAnswer."
               }
             ]
           }
@@ -1507,6 +1715,26 @@
           }
         }
       },
+      "OrchestratorDefinition": {
+        "type": "object",
+        "description": "A workspace's Orchestrator Definition: which kinds of Gate the factory\ndecides on its own. A kind left off waits for a person, as every Gate\ndid before Standing Rules. Whatever it says, a Tampered Run's Gates and\na merge through a Main Hold stay a person's.",
+        "required": ["plan", "blockers", "merge"],
+        "properties": {
+          "blockers": {
+            "type": "boolean",
+            "description": "Send a review round's Blockers to be fixed (`fix_blockers`), for at\nmost two fix rounds in a row; Blockers found after those go to a\nperson."
+          },
+          "merge": {
+            "type": "boolean",
+            "description": "Merge once CI is green, nothing is Tampered and the base branch has\nno Main Hold (`merge_when_green`)."
+          },
+          "plan": {
+            "type": "boolean",
+            "description": "Approve the plan Gate (`approve_plan`)."
+          }
+        },
+        "additionalProperties": false
+      },
       "Outcome": {
         "type": "string",
         "description": "How a Step ended, in the words of its Flow (`done`, `clean`, `blockers`,\n...). The Flow decides where each outcome takes the Run."
@@ -1573,6 +1801,22 @@
           "reason": {
             "type": "string",
             "description": "Why it could not start, as a code such as `ai_allowance_exhausted`."
+          }
+        }
+      },
+      "ProjectRules": {
+        "type": "object",
+        "description": "A Project's own Standing Rules, which its team set.",
+        "required": ["projectId", "definition"],
+        "properties": {
+          "definition": {
+            "$ref": "#/components/schemas/OrchestratorDefinition",
+            "description": "Which kinds of Gate its rules decide."
+          },
+          "projectId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The Project: an initiative's id."
           }
         }
       },
@@ -1779,6 +2023,11 @@
         "type": "string",
         "description": "A job in a Flow, such as `planner`, `writer`, `reviewer` or `fixer`. An\nentry whose Step an agent does names the Role, and the factory's agent\ndefinition lists the Agents that may fill it."
       },
+      "RulesSource": {
+        "type": "string",
+        "description": "Where a Run's Standing Rules came from.",
+        "enum": ["default", "team", "project"]
+      },
       "Run": {
         "type": "object",
         "description": "One Run of a Flow.",
@@ -1833,6 +2082,17 @@
           "request": {
             "type": "string",
             "description": "What the Run was asked to do."
+          },
+          "standingRules": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RunRules",
+                "description": "The Standing Rules that answer its Gates, as they were when it was\ncreated; none for a Run created before Runs kept them, whose Gates\nall wait for a person."
+              }
+            ]
           },
           "taskId": {
             "type": ["string", "null"],
@@ -2066,6 +2326,26 @@
         "description": "How a Run ended.",
         "enum": ["success", "manual", "blocked", "failed", "cancelled"]
       },
+      "RunRules": {
+        "type": "object",
+        "description": "The Standing Rules a Run keeps from when it was created.",
+        "required": ["definition", "source"],
+        "properties": {
+          "definition": {
+            "$ref": "#/components/schemas/OrchestratorDefinition",
+            "description": "Which kinds of Gate its rules decide."
+          },
+          "projectId": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "The Project (an initiative) they were set for, when they are a\nProject's."
+          },
+          "source": {
+            "$ref": "#/components/schemas/RulesSource",
+            "description": "Where they came from."
+          }
+        }
+      },
       "RunTokens": {
         "type": "object",
         "description": "One of the period's Runs and the tokens its agent Steps used.",
@@ -2091,6 +2371,59 @@
               "type": "string"
             },
             "description": "The glob patterns, matched against each changed path from the\nrepository's root: `*` stays within one folder, `**` spans any\nnumber. At most 200, each at most 256 bytes. Null goes back to the\nfactory's default; an empty list checks no file."
+          }
+        }
+      },
+      "SetStandingRulesRequest": {
+        "type": "object",
+        "description": "Request body for setting an Orchestrator Definition.",
+        "properties": {
+          "definition": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/OrchestratorDefinition",
+                "description": "Which kinds of Gate the factory answers on its own. Null goes back\nto the factory's default (a team's), or removes the Project's own\n(a Project's)."
+              }
+            ]
+          }
+        }
+      },
+      "StandingRule": {
+        "type": "string",
+        "description": "A Standing Rule: the answer the factory gives a Gate of one kind on its\nown, when what the rule requires holds.",
+        "enum": ["approve_plan", "fix_blockers", "merge_when_green"]
+      },
+      "StandingRulesSettings": {
+        "type": "object",
+        "description": "The Standing Rules a person's Runs are created with: their team's\nOrchestrator Definition, or the factory's default, and the team's\nProjects' own, which replace it for a Run whose task is in one.",
+        "required": ["definition", "isDefault", "projects", "canEdit"],
+        "properties": {
+          "canEdit": {
+            "type": "boolean",
+            "description": "Whether the person may change them: they administer the team."
+          },
+          "definition": {
+            "$ref": "#/components/schemas/OrchestratorDefinition",
+            "description": "Which kinds of Gate the factory answers on its own."
+          },
+          "isDefault": {
+            "type": "boolean",
+            "description": "Whether it is the factory's default: the team set none, or the\nperson is on no team."
+          },
+          "projects": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProjectRules"
+            },
+            "description": "The team's Projects that have their own, by the initiative's id."
+          },
+          "teamId": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "The team whose rules they are; none when the person is on no team."
           }
         }
       },

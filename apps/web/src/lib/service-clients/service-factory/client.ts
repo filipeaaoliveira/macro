@@ -12,9 +12,11 @@ import {
   getGetFactoryControlFilesUrl,
   getGetFactoryInsightsUrl,
   getGetFactoryRunUrl,
+  getGetFactoryStandingRulesUrl,
   getListFactoryFlowsUrl,
   getListFactoryTaskRunsUrl,
   getSetFactoryControlFilesUrl,
+  getSetFactoryStandingRulesUrl,
 } from './generated/client';
 import type {
   AnswerGateRequest,
@@ -25,6 +27,7 @@ import type {
   RunDetail,
   RunErrorCode,
   RunInsights,
+  StandingRulesSettings,
   TaskRunsResponse,
 } from './generated/schemas';
 
@@ -175,6 +178,34 @@ export const factoryClient = {
       {
         method: 'PUT',
         body: JSON.stringify({ patterns }),
+        errorResponseHandler: refusal,
+      }
+    );
+  },
+
+  /**
+   * The Standing Rules the person's Runs start with: which kinds of Gate
+   * the factory answers on its own, their team's or the default, and
+   * whether the person may change them.
+   */
+  getStandingRules(signal?: AbortSignal) {
+    return fetchWithToken<StandingRulesSettings>(
+      `${host()}${getGetFactoryStandingRulesUrl()}`,
+      { method: 'GET', signal }
+    );
+  },
+
+  /**
+   * Sets the team's Standing Rules; `null` goes back to the default. Someone
+   * who doesn't administer the team fails `FORBIDDEN`, with the service's
+   * message.
+   */
+  setStandingRules(definition: StandingRulesSettings['definition'] | null) {
+    return fetchWithToken<StandingRulesSettings>(
+      `${host()}${getSetFactoryStandingRulesUrl()}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ definition }),
         errorResponseHandler: refusal,
       }
     );

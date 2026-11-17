@@ -1,5 +1,7 @@
 use serde_json::json;
 
+use factory_records::domain::models::Outcome;
+
 use super::{Flow, FlowError, StepName, StepUse};
 
 /// A worker that replies itself, and has an agent write.
@@ -138,7 +140,7 @@ fn a_review_panel_fills_its_agent_step_with_its_reviewers() {
 }
 
 #[test]
-fn a_review_panel_names_no_single_role_no_gate_and_no_reviewer_twice() {
+fn a_review_panel_names_no_single_role_no_gate_on_done_and_no_reviewer_twice() {
     let with_role = parse(json!({
         "entries": [{ "id": "write", "step": "write", "role": "writer", "reviewers": ["tests"] }]
     }));
@@ -157,6 +159,61 @@ fn a_review_panel_names_no_single_role_no_gate_and_no_reviewer_twice() {
     assert!(matches!(with_role, Err(FlowError::ReviewersAndRole(_))));
     assert!(matches!(with_gate, Err(FlowError::ReviewersAndRole(_))));
     assert!(matches!(twice, Err(FlowError::DuplicateReviewer { .. })));
+}
+
+/// A review panel's Gate asks about one of its rounds' outcomes, which it
+/// names; a Gate written as before opens on `done`.
+#[test]
+fn a_review_panel_s_gate_opens_on_the_outcome_it_names() {
+    let flow = parse(json!({
+        "entries": [{
+            "id": "review",
+            "step": "write",
+            "reviewers": ["tests"],
+            "gate": { "question": "Fix?", "answers": ["fix", "stop"], "after": "changes" }
+        }, {
+            "id": "plan",
+            "step": "write",
+            "role": "planner",
+            "gate": { "question": "Approve?", "answers": ["approve"] }
+        }]
+    }))
+    .expect("a panel's gate names its outcome");
+
+    let opened_by = |index: usize| {
+        flow.entries[index]
+            .gate
+            .as_ref()
+            .map(|gate| gate.opened_by())
+    };
+    assert_eq!(
+        opened_by(0),
+        Some(Outcome::try_from("changes".to_string()).expect("valid"))
+    );
+    assert_eq!(opened_by(1), Some(Outcome::done()));
+    // A Gate with no `after` is written as before, so a Run carrying it
+    // reads the same.
+    let written = serde_json::to_value(&flow.entries[1]).expect("writes");
+    assert!(written["gate"].get("after").is_none());
+}
+
+/// A review panel's Gate opens after an outcome a round ends with; one
+/// after `done` would never open.
+#[test]
+fn a_review_panel_s_gate_opens_after_a_round_s_outcome() {
+    let refused = parse(json!({
+        "entries": [{
+            "id": "review",
+            "step": "write",
+            "reviewers": ["tests"],
+            "gate": { "question": "Fix?", "answers": ["fix", "stop"], "after": "done" }
+        }]
+    }));
+
+    assert!(matches!(
+        refused,
+        Err(FlowError::GateAfterNoRoundOutcome(_))
+    ));
 }
 
 /// A deployment's bound on review rounds replaces the `max_visits` of each

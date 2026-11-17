@@ -101,6 +101,29 @@ impl<A: EntityAccessService> TaskDirectory for DocumentTaskDirectory<A> {
         }
     }
 
+    #[tracing::instrument(err, skip(self, user_id))]
+    async fn task_project(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        task_id: Uuid,
+    ) -> Result<Option<Uuid>, Self::Err> {
+        let initiative = initiative_of(&self.documents, user_id, task_id)
+            .await
+            .map_err(DocumentTaskDirectoryErr::Documents)?;
+        // An initiative's id is a UUID; one that is not names no Project
+        // a team could set rules for.
+        Ok(initiative.and_then(|id| Uuid::parse_str(&id).ok()))
+    }
+
+    #[tracing::instrument(err, skip(self, user_id))]
+    async fn may_edit_project(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        project_id: Uuid,
+    ) -> Result<bool, Self::Err> {
+        may_add_to(&self.access, user_id, project_id.to_string()).await
+    }
+
     #[tracing::instrument(err, skip(self, user_id, follow_up))]
     async fn create_follow_up(
         &self,

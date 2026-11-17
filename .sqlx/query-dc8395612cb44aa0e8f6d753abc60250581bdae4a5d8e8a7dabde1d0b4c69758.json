@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO factory_project_rules (team_id, project_id, standing_rules)\n            VALUES ($1, $2, $3)\n            ON CONFLICT (team_id, project_id)\n            DO UPDATE SET standing_rules = EXCLUDED.standing_rules, updated_at = now()\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "dc8395612cb44aa0e8f6d753abc60250581bdae4a5d8e8a7dabde1d0b4c69758"
+}

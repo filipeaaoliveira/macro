@@ -516,12 +516,17 @@ export const factoryExcluded = [
   'getFactoryControlFiles',
   'getFactoryInsights',
   'getFactoryRun',
+  'getFactoryStandingRules',
   'linkFactoryRunTask',
   'listFactoryFlows',
   'listFactoryTaskRuns',
   // Only the person in their own session sets the Control Files an agent's
   // changes are checked against.
   'setFactoryControlFiles',
+  // Only the person in their own session sets the Standing Rules that
+  // answer Gates in a person's place.
+  'setFactoryProjectStandingRules',
+  'setFactoryStandingRules',
 ] as const satisfies readonly (keyof FactorySdk)[];
 
 export const factoryBacklog =

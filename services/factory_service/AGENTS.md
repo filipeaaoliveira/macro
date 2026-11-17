@@ -52,6 +52,12 @@ worker that walks each Run's Flow, in one process.
   `{"patterns": [...]}` sets the team's, and `{"patterns": null}` goes back
   to the default. `PUT` takes only an admin or the owner of the team, in
   their own signed-in session, as a Gate's answer does.
+  `GET /settings/standing-rules` reads the Standing Rules a person's Runs
+  are created with; `PUT` with
+  `{"definition": {"plan": true, "blockers": true, "merge": false}}` sets
+  the team's, `{"definition": null}` goes back to the default, and `PUT
+  /settings/standing-rules/projects/<initiative id>` sets or removes a
+  Project's own, the same way.
 
 ## Gotchas
 

@@ -18,3 +18,4 @@ pub mod pull_request_steps;
 pub mod review_rounds;
 pub mod service;
 pub mod session_agent;
+pub mod standing_rules;

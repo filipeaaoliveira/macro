@@ -1,3 +1,4 @@
+use factory_records::domain::standing_rules::RunRules;
 use std::sync::LazyLock;
 
 use chrono::{DateTime, TimeDelta, Utc};
@@ -68,6 +69,7 @@ async fn run_of_on(
         created_in_person: false,
         control_file_patterns: &[],
         control_files_team_id: None,
+        standing_rules: RunRules::DEFAULT,
     })
     .await
     .expect("insert");
@@ -764,6 +766,7 @@ fn approved_merge_gate(approved: &[&str]) -> Step {
                 answer: approve,
                 note: None,
                 user_id: None,
+                rule: None,
                 approved_control_files: Some(
                     approved.iter().map(|path| (*path).to_string()).collect(),
                 ),

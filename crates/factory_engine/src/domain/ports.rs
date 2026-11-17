@@ -7,15 +7,17 @@ use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
 use crate::domain::flow::{StepName, StepUse};
-use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening};
+use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening, GateRuling};
 use crate::domain::main_hold::{HoldTask, MainLook, MainWatch};
 use crate::domain::models::{
     AgentAnswer, AgentCommand, AgentTask, AgentTurn, CodeRepository, ControlFilesSettings,
     FactoryError, FlowSummary, HeadChecks, Merging, OpenPullRequest, Opening, PullRequest,
-    RepositoryAccess, RequiredChecks, RunDetail, RunFinish, RunStart, StepEnding, StepError,
-    StepInput, StepReport, StepRequest, StepStart,
+    RepositoryAccess, RequiredChecks, RunDetail, RunFinish, RunStart, StandingRulesSettings,
+    StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
 };
 use crate::domain::review_rounds::{ChangedFile, ReviewRoundClosing, ReviewRoundOpening};
+use crate::domain::standing_rules::RuleAnswer;
+use factory_records::domain::standing_rules::OrchestratorDefinition;
 
 /// What a Run's workflow did with an answer it was sent.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -372,6 +374,23 @@ pub trait TaskDirectory: Send + Sync + 'static {
         task: &TaskDocumentId,
     ) -> impl Future<Output = Result<TaskAccess, Self::Err>> + Send;
 
+    /// The Project (an initiative) the task document `task_id` is in, as
+    /// its Project property names it and `user_id` sees it; none when it is
+    /// in none, or `user_id` no longer sees it.
+    fn task_project(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        task_id: Uuid,
+    ) -> impl Future<Output = Result<Option<Uuid>, Self::Err>> + Send;
+
+    /// Whether `user_id` may edit the Project (an initiative) `project_id`:
+    /// one they cannot reach, or that is gone, is a no.
+    fn may_edit_project(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        project_id: Uuid,
+    ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
+
     /// Make `follow_up` a task of `user_id`'s, with the id `task_id`, in
     /// the project of the task document `of` when it has one, unless a
     /// task with that id is already there: then it was made before. An
@@ -498,6 +517,32 @@ pub trait FactoryService: Send + Sync + 'static {
         patterns: Option<Vec<String>>,
     ) -> impl Future<Output = Result<ControlFilesSettings, FactoryError>> + Send;
 
+    /// The Standing Rules `actor`'s Runs are created with: their team's
+    /// Orchestrator Definition, or the factory's default, and the team's
+    /// Projects' own.
+    fn standing_rules(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+    ) -> impl Future<Output = Result<StandingRulesSettings, FactoryError>> + Send;
+
+    /// Set the Orchestrator Definition of `actor`'s team; none goes back to
+    /// the factory's default. The actor must administer the team.
+    fn set_standing_rules(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        definition: Option<OrchestratorDefinition>,
+    ) -> impl Future<Output = Result<StandingRulesSettings, FactoryError>> + Send;
+
+    /// Set the Orchestrator Definition of `actor`'s team for the Project
+    /// `project_id`; none removes it, so the team's applies. The actor must
+    /// administer the team and may edit the Project.
+    fn set_project_rules(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        project_id: Uuid,
+        definition: Option<OrchestratorDefinition>,
+    ) -> impl Future<Output = Result<StandingRulesSettings, FactoryError>> + Send;
+
     /// Keep what the agent working in the session `session_id`, acting as
     /// `user_id`, hands back for its Step, replacing an earlier hand back.
     fn hand_back(
@@ -587,6 +632,14 @@ pub trait StepService: Send + Sync + 'static {
         &self,
         answered: GateAnswered,
     ) -> impl Future<Output = Result<(), StepError>> + Send;
+
+    /// Ask the Run's Standing Rules about a Gate it opened: record and
+    /// return the Rule Answer, or none, for a person to answer it. Asking
+    /// again returns the Rule Answer recorded first.
+    fn rule_gate(
+        &self,
+        ruling: GateRuling,
+    ) -> impl Future<Output = Result<Option<RuleAnswer>, StepError>> + Send;
 
     /// Record how a Run ended.
     fn end_run(&self, finish: RunFinish) -> impl Future<Output = Result<(), StepError>> + Send;

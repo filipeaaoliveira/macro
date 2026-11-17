@@ -42,7 +42,8 @@ An entry with a `gate` asks a person a question once its Step ends `done`: the
 workflow records the Gate (`factory_open_gate`), waits for the
 `factory_answer_gate` update that `POST /runs/{id}/steps/{seq}/answer` sends,
 records the answer (`factory_answer_gate` activity), and routes the answer as
-the entry's outcome. An answer the recorded Gate does not offer is refused
+the entry's outcome, unless a Standing Rule answers it first (below). An
+answer the recorded Gate does not offer is refused
 before it is sent (400); the update's validator (`domain/gate.rs`) refuses an
 answer to a Gate the Run does not wait on and a second answer (409). Only the
 Run's owner answers its Gates, in their own signed-in session: an internal
@@ -494,6 +495,73 @@ request's description names the Run's task as `MACRO-{short id}`, so GitHub's
 webhook links them, and is cut to GitHub's 65,536 characters in its request
 part only.
 
+Standing Rules (`src/domain/standing_rules.rs`, `factory_records`'
+`domain/standing_rules.rs`) let the factory answer a Gate on its own, with
+a Rule Answer. A team's Orchestrator Definition says, for each kind of
+Gate, whether its rule decides it: `plan` (`approve_plan`: approve the
+plan Gate), `blockers` (`fix_blockers`: send a review round's Blockers to
+be fixed) and `merge` (`merge_when_green`: merge once CI is green). A
+Gate's kind is what its Flow names (`GateDefinition::kind`), never read
+from the work of its entry, and a Gate of a kind must offer exactly its
+kind's answers (`approve` and `revise`; `fix` and `stop` for `blockers`),
+which the Flow's check and the rule both require. The built-in Flows name
+the `plan` Flow's and `code` Flow's plan Gates, the `code` review panel's
+and its merge Gate. A Gate with no kind, as any other Flow's, is never
+answered by a rule. The default, for a team
+that set none or an owner on no team, decides `blockers` only, so a Run's
+review keeps fixing its Blockers on its own, as before Standing Rules, and
+the plan and the merge wait for a person. An admin or the owner of the team
+sets the team's with `PUT /settings/standing-rules`
+(`{"definition": {"plan", "blockers", "merge"}}`, null for the default;
+`factory_team_settings.standing_rules`), and a Project's own (an
+initiative's, which replaces the team's for a Run whose task is in it)
+with `PUT /settings/standing-rules/projects/{project_id}`
+(`factory_project_rules`; null removes it), in their own signed-in session,
+as for Control Files; a Project's also needs the admin to be able to edit
+the initiative (400 `UnknownProject` otherwise, as for one that does not
+exist). `GET /settings/standing-rules` reads the team's, or the default,
+with its Projects' and whether the caller may change them. A Run keeps
+the rules it was created with, and where they came from
+(`factory_run.standing_rules`, `standingRules` in the Run API): its task's
+Project's when its owner's team set some, else the team's, else the
+default (a Project that cannot be read then gives the team's, with a
+warning, rather than refusing the Run); an agent's account never may
+change them (`canEdit`); a change to either later, or a task linked later, does not change
+a Run under way.
+
+The `code` Flow's review panel has a Gate `after` its round ends
+`changes` (`GateDefinition::after`, which must be an outcome a round ends
+with: `pass`, `changes`, `unresolved` or `failed`), on the round's last
+Step: `fix` sends the Blockers to `fix`, `stop` ends the Run `manual`. A
+round at the panel's last visit routes `unresolved`, which asks nothing.
+
+Once a Gate is recorded, and before a person may answer it, the workflow
+asks the worker (`factory_rule_gate`, behind the `factory-standing-rules`
+patch marker) whether the Run's rules answer it. The worker reads the Run:
+no rule approves a Tampered Run's plan or merge (a Rule Answer approves no
+Control Files, so `merge` would not merge it either), though its Blockers
+may still go to a fix, which approves nothing; `merge_when_green` answers
+nothing while the base branch has a Main Hold (and `merge` holds anyway);
+and `fix_blockers` sends at most `rule_fix_limit` fixes in a row since the
+panel's visits last started: two (`MAX_RULE_FIX_ROUNDS`), and never more
+than the rounds before the panel's last. With the `code` Flow's three
+rounds the cap is never what stops it: the rule fixes the first two
+rounds' Blockers, and the third round's route `unresolved`, which ends the
+Run `manual` for a person. A panel bound to more rounds
+(`FACTORY_REVIEW_ROUNDS`) reaches the cap, and its next Blockers wait at
+the Gate for a person, who may send them to another fix or stop. The
+worker writes the Rule Answer only on a Gate with no answer and reads
+back what the Gate keeps, which is what it returns. A Rule Answer is
+recorded on the Gate with its rule
+(`factory_gate.rule`, `rule` on the Gate's answer, with no author) and
+routed as the entry's outcome; the activity's result carries it, so a
+replay reads it from the history. An attempt that finds the Gate answered
+returns that answer, so a retry never decides again. A Gate no rule answers
+waits for a person, as before. A Run created before Runs kept rules has
+none, so no rule answers its Gates; a Gate opened before a worker had the
+marker replays without asking. A rule therefore never answers a Gate opened
+before the rules it would apply were kept.
+
 ## Start here
 
 - `src/domain/flow.rs`: the Flow model and the checks a definition must pass.
@@ -516,6 +584,9 @@ part only.
   what makes a Run Tampered.
 - `src/domain/main_hold.rs` and `src/inbound/temporal/main_watch.rs`: the
   Main Hold, its looks at a base branch and the watch that makes them.
+- `src/domain/standing_rules.rs`: which Gates a Standing Rule answers, and
+  what it never answers. Project rules are set through the API only: team
+  settings show how many Projects have their own.
 - `flows/`: the built-in Flows, each named for its file
   (`src/domain/built_in_flows.rs`). `GET /flows` lists those whose Steps the
   worker serves, with their `description` and whether they work on a
@@ -557,6 +628,11 @@ part only.
   (`built_in_steps.rs`).
 - Change the default Control Files: `DEFAULT_CONTROL_FILES` in
   `src/domain/control_files.rs`, and its test.
+- Add a Standing Rule: a `GateKind` and its `StandingRule` in
+  `factory_records`' `domain/standing_rules.rs` (and the migration's checks
+  of the stored names), the kind's field on `OrchestratorDefinition`,
+  `kind_answers` and `rule_answer` in `src/domain/standing_rules.rs`, the
+  `kind` on the built-in Flows' Gates it decides, and their tests.
 - Add a field to the checks file: `src/domain/checks.rs` (field, check
   and test), then `checks_round.rs`: the prompt, if the agent needs it, and
   the command the engine runs.
@@ -622,8 +698,17 @@ part only.
 - A follow-up task is made with an id document storage takes only from an
   internal caller, and only a UUIDv7 (`CreateTaskRequest.document_id`), so
   deploy document storage before a factory that sends it.
-- A Gate opens only for a Step that ends `done`; any other outcome routes as
-  usual, so a failed plan is never put to a person.
+- A Gate opens only for a Step that ends `done` (or, on a review panel, a
+  round that ends with the outcome its `after` names); any other outcome
+  routes as usual, so a failed plan is never put to a person.
+- A worker older than `GateDefinition::after` cannot read a Flow that has
+  it, and one older than `factory_rule_gate` fails that activity: deploy
+  every worker before the API starts Runs on the new `code` Flow.
+- Removing the `factory-standing-rules` patch, or asking anything new
+  between recording a Gate and waiting on it without a patch of its own,
+  breaks the replay of Runs in flight: `inbound/temporal/test/replay.rs`
+  replays recorded histories, and gets new ones recorded beside them when
+  the workflow changes.
 - Renaming or removing an Agent while its Steps run fails their retries
   (`UnknownAgent`: its model and instructions are gone), though stops and
   releases still reach their sessions through the recorded bot.

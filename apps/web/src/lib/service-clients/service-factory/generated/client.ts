@@ -18,6 +18,8 @@ import type {
   RunId,
   RunInsights,
   SetControlFilesRequest,
+  SetStandingRulesRequest,
+  StandingRulesSettings,
   TaskRunsResponse,
 } from './schemas';
 
@@ -800,6 +802,223 @@ export const setFactoryControlFiles = async (
     status: res.status,
     headers: res.headers,
   } as setFactoryControlFilesResponse;
+};
+
+/**
+ * @summary The Standing Rules the caller's Runs are created with: their team's, or
+the factory's default, the team's Projects' own, and whether the caller
+may change them.
+ */
+export type getFactoryStandingRulesResponse200 = {
+  data: StandingRulesSettings;
+  status: 200;
+};
+
+export type getFactoryStandingRulesResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type getFactoryStandingRulesResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type getFactoryStandingRulesResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type getFactoryStandingRulesResponseSuccess =
+  getFactoryStandingRulesResponse200 & {
+    headers: Headers;
+  };
+export type getFactoryStandingRulesResponseError = (
+  | getFactoryStandingRulesResponse401
+  | getFactoryStandingRulesResponse403
+  | getFactoryStandingRulesResponse500
+) & {
+  headers: Headers;
+};
+
+export type getFactoryStandingRulesResponse =
+  | getFactoryStandingRulesResponseSuccess
+  | getFactoryStandingRulesResponseError;
+
+export const getGetFactoryStandingRulesUrl = () => {
+  return `/settings/standing-rules`;
+};
+
+export const getFactoryStandingRules = async (
+  options?: RequestInit
+): Promise<getFactoryStandingRulesResponse> => {
+  const res = await fetch(getGetFactoryStandingRulesUrl(), {
+    ...options,
+    method: 'GET',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: getFactoryStandingRulesResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as getFactoryStandingRulesResponse;
+};
+
+/**
+ * @summary Set the Orchestrator Definition of the caller's team, or go back to the
+factory's default. It applies to Runs created from now on. Only an admin
+or the owner of the team sets it, in their own signed-in session (403
+otherwise): a rule answers Gates in its place.
+ */
+export type setFactoryStandingRulesResponse200 = {
+  data: StandingRulesSettings;
+  status: 200;
+};
+
+export type setFactoryStandingRulesResponse400 = {
+  data: ErrorResponse;
+  status: 400;
+};
+
+export type setFactoryStandingRulesResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type setFactoryStandingRulesResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type setFactoryStandingRulesResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type setFactoryStandingRulesResponseSuccess =
+  setFactoryStandingRulesResponse200 & {
+    headers: Headers;
+  };
+export type setFactoryStandingRulesResponseError = (
+  | setFactoryStandingRulesResponse400
+  | setFactoryStandingRulesResponse401
+  | setFactoryStandingRulesResponse403
+  | setFactoryStandingRulesResponse500
+) & {
+  headers: Headers;
+};
+
+export type setFactoryStandingRulesResponse =
+  | setFactoryStandingRulesResponseSuccess
+  | setFactoryStandingRulesResponseError;
+
+export const getSetFactoryStandingRulesUrl = () => {
+  return `/settings/standing-rules`;
+};
+
+export const setFactoryStandingRules = async (
+  setStandingRulesRequest: SetStandingRulesRequest,
+  options?: RequestInit
+): Promise<setFactoryStandingRulesResponse> => {
+  const res = await fetch(getSetFactoryStandingRulesUrl(), {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(setStandingRulesRequest),
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: setFactoryStandingRulesResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as setFactoryStandingRulesResponse;
+};
+
+/**
+ * @summary Set the Orchestrator Definition of the caller's team for one Project,
+which replaces the team's for Runs created on a task in it, or remove
+it. The caller must administer the team, in their own signed-in session
+(403 otherwise), and be able to edit the Project (400 otherwise, as for
+one that does not exist).
+ */
+export type setFactoryProjectStandingRulesResponse200 = {
+  data: StandingRulesSettings;
+  status: 200;
+};
+
+export type setFactoryProjectStandingRulesResponse400 = {
+  data: ErrorResponse;
+  status: 400;
+};
+
+export type setFactoryProjectStandingRulesResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type setFactoryProjectStandingRulesResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type setFactoryProjectStandingRulesResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type setFactoryProjectStandingRulesResponseSuccess =
+  setFactoryProjectStandingRulesResponse200 & {
+    headers: Headers;
+  };
+export type setFactoryProjectStandingRulesResponseError = (
+  | setFactoryProjectStandingRulesResponse400
+  | setFactoryProjectStandingRulesResponse401
+  | setFactoryProjectStandingRulesResponse403
+  | setFactoryProjectStandingRulesResponse500
+) & {
+  headers: Headers;
+};
+
+export type setFactoryProjectStandingRulesResponse =
+  | setFactoryProjectStandingRulesResponseSuccess
+  | setFactoryProjectStandingRulesResponseError;
+
+export const getSetFactoryProjectStandingRulesUrl = (projectId: string) => {
+  return `/settings/standing-rules/projects/${projectId}`;
+};
+
+export const setFactoryProjectStandingRules = async (
+  projectId: string,
+  setStandingRulesRequest: SetStandingRulesRequest,
+  options?: RequestInit
+): Promise<setFactoryProjectStandingRulesResponse> => {
+  const res = await fetch(getSetFactoryProjectStandingRulesUrl(projectId), {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(setStandingRulesRequest),
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: setFactoryProjectStandingRulesResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as setFactoryProjectStandingRulesResponse;
 };
 
 /**
