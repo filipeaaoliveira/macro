@@ -6,10 +6,10 @@ use std::sync::{Arc, Mutex};
 use agent_session::domain::session_task::TaskDocumentId;
 use chrono::Utc;
 use factory_records::domain::models::{
-    CheckRound, CheckRoundEnd, CheckRoundOutcome, CheckRoundStart, ClaimedSession, EntryId, Gate,
-    HandBack, HandedBack, Outcome, PassedOver, Repository, Role, Run, RunEnd, RunId, RunInsert,
-    RunOutcome, SessionStep, Step, StepEnd, StepKey, StepSession, StoppingSession, Tampering,
-    TaskLink,
+    CheckRound, CheckRoundEnd, CheckRoundOutcome, CheckRoundStart, ClaimedSession,
+    ControlFileChanges, EntryId, Gate, HandBack, HandedBack, Outcome, PassedOver, Repository, Role,
+    Run, RunEnd, RunId, RunInsert, RunOutcome, SessionStep, Step, StepEnd, StepKey, StepSession,
+    StoppingSession, TaskLink, TeamMembership,
 };
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
@@ -72,13 +72,15 @@ pub(crate) struct FakeRepo {
     pub(crate) merge_heads: Arc<Mutex<BTreeMap<RunId, String>>>,
     /// Told each time a Gate opens.
     pub(crate) gate_opened: Arc<tokio::sync::Notify>,
-    /// The Control Files each Run's branch last changed that its request
-    /// does not name, also for Runs the fake does not keep.
-    pub(crate) tampering: Arc<Mutex<BTreeMap<RunId, Tampering>>>,
+    /// The Control Files each Run's branch last changed, also for Runs the
+    /// fake does not keep.
+    pub(crate) control_file_changes: Arc<Mutex<BTreeMap<RunId, ControlFileChanges>>>,
     /// The answers recorded, by Gate, with the Control Files they approved.
     pub(crate) approvals: Arc<Mutex<Vec<Approval>>>,
-    /// The Control File patterns each person set, by their id.
-    pub(crate) control_files: Arc<Mutex<BTreeMap<String, Vec<String>>>>,
+    /// The team each person is on, by their id.
+    pub(crate) teams: Arc<Mutex<BTreeMap<String, TeamMembership>>>,
+    /// The Control File patterns each team set.
+    pub(crate) control_files: Arc<Mutex<BTreeMap<Uuid, Vec<String>>>>,
 }
 
 /// Everyone has an account but `macro|nobody@example.com`.
@@ -149,6 +151,7 @@ impl RunRepository for FakeRepo {
         user_id: &MacroUserIdStr<'static>,
         task_id: Option<Uuid>,
         repository: Option<&Repository>,
+        created_in_person: bool,
     ) -> Result<RunInsert, FakeError> {
         if let Some(task_id) = task_id
             && !self.tasks.lock().expect("tasks").contains(&task_id)
@@ -162,7 +165,8 @@ impl RunRepository for FakeRepo {
             created_at: Utc::now(),
             task_id,
             repository: repository.cloned(),
-            tampering: None,
+            created_in_person,
+            control_files: None,
             end: None,
         };
         self.runs.lock().expect("runs").insert(id, run.clone());
@@ -205,50 +209,67 @@ impl RunRepository for FakeRepo {
     }
 
     async fn get_run(&self, id: RunId) -> Result<Option<Run>, FakeError> {
-        let tampering = self.tampering.lock().expect("tampering").get(&id).cloned();
+        let control_files = self
+            .control_file_changes
+            .lock()
+            .expect("control files")
+            .get(&id)
+            .cloned();
         Ok(self
             .runs
             .lock()
             .expect("runs")
             .get(&id)
             .cloned()
-            .map(|run| Run { tampering, ..run }))
+            .map(|run| Run {
+                control_files,
+                ..run
+            }))
     }
 
-    async fn set_tampering(
+    async fn set_control_file_changes(
         &self,
         id: RunId,
-        tampering: Option<&Tampering>,
+        changes: Option<&ControlFileChanges>,
     ) -> Result<(), FakeError> {
-        let mut kept = self.tampering.lock().expect("tampering");
-        match tampering {
-            Some(tampering) => kept.insert(id, tampering.clone()),
+        let mut kept = self.control_file_changes.lock().expect("control files");
+        match changes {
+            Some(changes) => kept.insert(id, changes.clone()),
             None => kept.remove(&id),
         };
         Ok(())
     }
 
-    async fn control_files(
+    async fn team_of(
         &self,
         user_id: &MacroUserIdStr<'static>,
-    ) -> Result<Option<Vec<String>>, FakeError> {
+    ) -> Result<Option<TeamMembership>, FakeError> {
+        Ok(self
+            .teams
+            .lock()
+            .expect("teams")
+            .get(user_id.as_ref())
+            .copied())
+    }
+
+    async fn team_control_files(&self, team_id: Uuid) -> Result<Option<Vec<String>>, FakeError> {
         Ok(self
             .control_files
             .lock()
             .expect("control files")
-            .get(user_id.as_ref())
+            .get(&team_id)
             .cloned())
     }
 
-    async fn set_control_files(
+    async fn set_team_control_files(
         &self,
-        user_id: &MacroUserIdStr<'static>,
+        team_id: Uuid,
         patterns: Option<&[String]>,
     ) -> Result<(), FakeError> {
         let mut kept = self.control_files.lock().expect("control files");
         match patterns {
-            Some(patterns) => kept.insert(user_id.as_ref().to_string(), patterns.to_vec()),
-            None => kept.remove(user_id.as_ref()),
+            Some(patterns) => kept.insert(team_id, patterns.to_vec()),
+            None => kept.remove(&team_id),
         };
         Ok(())
     }

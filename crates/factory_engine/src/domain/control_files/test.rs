@@ -1,4 +1,4 @@
-use factory_records::domain::models::Tampering;
+use factory_records::domain::models::ControlFileChanges;
 
 use super::{ControlFiles, ControlFilesError, MAX_PATTERNS};
 
@@ -10,9 +10,26 @@ fn paths(paths: &[&str]) -> Vec<String> {
     paths.iter().map(|path| (*path).to_string()).collect()
 }
 
+fn tampered(files: &[&str]) -> Option<ControlFileChanges> {
+    Some(ControlFileChanges {
+        tampered: paths(files),
+        named: Vec::new(),
+        unlisted: false,
+    })
+}
+
+fn unlisted() -> Option<ControlFileChanges> {
+    Some(ControlFileChanges {
+        tampered: Vec::new(),
+        named: Vec::new(),
+        unlisted: true,
+    })
+}
+
 /// The default list holds CI workflows, the checks file, agent
-/// instructions, package scripts, test and lint configuration, and tests,
-/// at the root or in a folder; other code is not a Control File.
+/// instructions and their tools' settings, package and build scripts, test
+/// and lint configuration, and tests with what they compare against, at the
+/// root or in a folder; other code is not a Control File.
 #[test]
 fn the_defaults_name_what_decides_whether_checks_pass() {
     let control_files = defaults();
@@ -23,14 +40,28 @@ fn the_defaults_name_what_decides_whether_checks_pass() {
         "AGENTS.md",
         "apps/web/AGENTS.md",
         "CLAUDE.md",
+        ".claude/settings.json",
+        ".agents/rules/rust.md",
+        ".cursor/rules/web.mdc",
         "package.json",
         "apps/web/package.json",
+        "Cargo.toml",
+        "GNUmakefile",
+        ".config/nextest.toml",
+        "deny.toml",
         "biome.jsonc",
+        "biome.base.jsonc",
         "apps/web/tsconfig.app.json",
+        "apps/web/vite.config.ts",
         "apps/web/vitest.config.ts",
         "apps/web/src/login.test.tsx",
         "crates/engine/src/flow/test.rs",
+        "crates/engine/src/flow/tests.rs",
         "crates/engine/tests/flow.rs",
+        "crates/engine/src/snapshots/flow.snap",
+        "apps/web/src/__snapshots__/login.snap",
+        "crates/records/src/fixtures/people.sql",
+        "tools/conftest.py",
         "apps/web/.eslintrc.cjs",
     ] {
         assert!(control_files.matches(path), "{path} is a Control File");
@@ -38,11 +69,28 @@ fn the_defaults_name_what_decides_whether_checks_pass() {
     for path in [
         "apps/web/src/login.tsx",
         "crates/engine/src/flow.rs",
+        "crates/engine/Cargo.toml",
         "README.md",
         "docs/testing.md",
         ".github/CODEOWNERS",
     ] {
         assert!(!control_files.matches(path), "{path} is not a Control File");
+    }
+}
+
+/// A path matches whatever its case: a tool reads `makefile` as it reads
+/// `Makefile`.
+#[test]
+fn a_path_matches_whatever_its_case() {
+    let control_files = defaults();
+
+    for path in [
+        "makefile",
+        "Justfile",
+        "tools/agents.md",
+        ".GitHub/Workflows/ci.yml",
+    ] {
+        assert!(control_files.matches(path), "{path} is a Control File");
     }
 }
 
@@ -66,37 +114,52 @@ fn a_branch_that_changes_control_files_is_tampered_with_them() {
         ".github/workflows/ci.yml",
     ]);
 
-    let tampering = defaults().tampering(Some(&changed), "Fix the login bug");
+    let changes = defaults().changes(Some(&changed), "Fix the login bug", true);
 
     assert_eq!(
-        tampering,
-        Some(Tampering {
-            files: paths(&[".github/workflows/ci.yml", "src/login.test.ts"]),
-            unlisted: false,
-        })
+        changes,
+        tampered(&[".github/workflows/ci.yml", "src/login.test.ts"])
     );
 }
 
-/// A Control File the request names by its path is asked for: only the
-/// others are Tampered, and a branch that changes none is not.
+/// A Run created in person asks for the Control Files its request names by
+/// path: they are kept as named, and only the others are Tampered. A branch
+/// that changes only named ones is not Tampered.
 #[test]
-fn a_control_file_the_request_names_is_asked_for() {
+fn a_control_file_an_in_person_request_names_is_asked_for() {
     let changed = paths(&["src/login.ts", ".github/workflows/ci.yml", "package.json"]);
     let request = "Run the login tests in CI\n\nAdd a job to .github/workflows/ci.yml.";
 
-    let tampering = defaults().tampering(Some(&changed), request);
+    let changes = defaults().changes(Some(&changed), request, true);
+    let only_named = defaults()
+        .changes(Some(&paths(&[".github/workflows/ci.yml"])), request, true)
+        .expect("it changed a Control File");
 
     assert_eq!(
-        tampering,
-        Some(Tampering {
-            files: paths(&["package.json"]),
+        changes,
+        Some(ControlFileChanges {
+            tampered: paths(&["package.json"]),
+            named: paths(&[".github/workflows/ci.yml"]),
             unlisted: false,
         })
     );
+    assert!(!only_named.is_tampered());
     assert_eq!(
-        defaults().tampering(Some(&paths(&["src/login.ts"])), request),
+        defaults().changes(Some(&paths(&["src/login.ts"])), request, true),
         None
     );
+}
+
+/// A Run not created in person, as by an agent, asks for nothing: a file
+/// its request names is Tampered all the same.
+#[test]
+fn a_request_not_made_in_person_asks_for_nothing() {
+    let changed = paths(&[".github/workflows/ci.yml"]);
+    let request = "Add a job to .github/workflows/ci.yml.";
+
+    let changes = defaults().changes(Some(&changed), request, false);
+
+    assert_eq!(changes, tampered(&[".github/workflows/ci.yml"]));
 }
 
 /// A request names a path only whole: not inside a longer path, nor by a
@@ -104,10 +167,6 @@ fn a_control_file_the_request_names_is_asked_for() {
 #[test]
 fn a_request_names_a_path_only_whole() {
     let changed = paths(&["src/login.test.ts"]);
-    let tampered = Some(Tampering {
-        files: paths(&["src/login.test.ts"]),
-        unlisted: false,
-    });
 
     for request in [
         "Fix login.test.ts",
@@ -116,8 +175,8 @@ fn a_request_names_a_path_only_whole() {
         "Fix src/login.test.ts.snap",
     ] {
         assert_eq!(
-            defaults().tampering(Some(&changed), request),
-            tampered,
+            defaults().changes(Some(&changed), request, true),
+            tampered(&["src/login.test.ts"]),
             "{request} does not name it"
         );
     }
@@ -126,11 +185,10 @@ fn a_request_names_a_path_only_whole() {
         "Fix `src/login.test.ts`",
         "src/login.test.ts: fix it",
     ] {
-        assert_eq!(
-            defaults().tampering(Some(&changed), request),
-            None,
-            "{request} names it"
-        );
+        let changes = defaults()
+            .changes(Some(&changed), request, true)
+            .expect("it changed a Control File");
+        assert!(!changes.is_tampered(), "{request} names it");
     }
 }
 
@@ -139,23 +197,40 @@ fn a_request_names_a_path_only_whole() {
 #[test]
 fn an_unlisted_branch_is_tampered_unless_the_list_is_empty() {
     assert_eq!(
-        defaults().tampering(None, "Fix the login bug"),
-        Some(Tampering {
-            files: Vec::new(),
-            unlisted: true,
-        })
+        defaults().changes(None, "Fix the login bug", true),
+        unlisted()
     );
 
     let none = ControlFiles::parse(&[]).expect("parses");
-    assert_eq!(none.tampering(None, "Fix the login bug"), None);
+    assert_eq!(none.changes(None, "Fix the login bug", true), None);
     assert_eq!(
-        none.tampering(Some(&paths(&[".github/workflows/ci.yml"])), "Fix it"),
+        none.changes(Some(&paths(&[".github/workflows/ci.yml"])), "Fix it", true),
         None
     );
 }
 
-/// A list too long, or a pattern that is empty, too long, absolute or not
-/// a glob, is refused.
+/// More Tampered files than a Run keeps, as a rename lists both of its
+/// paths, read as unlisted rather than as a list too long to keep.
+#[test]
+fn more_control_files_than_a_run_keeps_are_unlisted() {
+    let max = ControlFileChanges::MAX_FILES;
+    let at_most: Vec<String> = (0..max).map(|n| format!("tests/case{n}.rs")).collect();
+    let more: Vec<String> = (0..=max).map(|n| format!("tests/case{n}.rs")).collect();
+
+    let kept = defaults()
+        .changes(Some(&at_most), "Rename the cases", true)
+        .expect("it changed Control Files");
+
+    assert_eq!(kept.tampered.len(), max);
+    assert!(!kept.unlisted);
+    assert_eq!(
+        defaults().changes(Some(&more), "Rename the cases", true),
+        unlisted()
+    );
+}
+
+/// A list too long, or a pattern that is empty, too long, starts at the
+/// root or `./`, or is not a glob, is refused.
 #[test]
 fn a_list_that_does_not_hold_together_is_refused() {
     let too_many = vec!["*.rs".to_string(); MAX_PATTERNS + 1];
@@ -164,7 +239,7 @@ fn a_list_that_does_not_hold_together_is_refused() {
         Some(ControlFilesError::TooMany)
     );
 
-    for pattern in ["", "/ci.yml", "a**b", &"a".repeat(257)] {
+    for pattern in ["", "/ci.yml", "./ci.yml", "a**b", &"a".repeat(257)] {
         assert_eq!(
             ControlFiles::parse(&paths(&[pattern])).err(),
             Some(ControlFilesError::InvalidPattern(pattern.to_string())),
@@ -173,22 +248,24 @@ fn a_list_that_does_not_hold_together_is_refused() {
     }
 }
 
-/// An approval covers the files it names; an unlisted Tampering only an
-/// approval given while it was unlisted.
+/// An approval covers the Tampered files it names; unlisted changes only an
+/// approval given while they were unlisted.
 #[test]
 fn an_approval_covers_the_files_it_names() {
-    let tampering = Tampering {
-        files: paths(&["package.json", "ci.yml"]),
+    let changes = ControlFileChanges {
+        tampered: paths(&["package.json", "ci.yml"]),
+        named: paths(&["Makefile"]),
         unlisted: false,
     };
-    let unlisted = Tampering {
-        files: Vec::new(),
+    let unlisted = ControlFileChanges {
+        tampered: Vec::new(),
+        named: Vec::new(),
         unlisted: true,
     };
 
-    assert!(tampering.approved_by(&paths(&["ci.yml", "package.json"])));
-    assert!(!tampering.approved_by(&paths(&["ci.yml"])));
-    assert!(!tampering.approved_by(&[]));
+    assert!(changes.approved_by(&paths(&["ci.yml", "package.json"])));
+    assert!(!changes.approved_by(&paths(&["ci.yml"])));
+    assert!(!changes.approved_by(&[]));
     assert!(unlisted.approved_by(&[]));
     assert!(!unlisted.approved_by(&paths(&["ci.yml"])));
 }

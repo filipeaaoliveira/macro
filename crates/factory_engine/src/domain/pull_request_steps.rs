@@ -9,9 +9,10 @@
 //!
 //! `publish`, `ready_to_merge` and `merge` check the Control Files the
 //! commit they act on changed against the base (`control_files`), and keep
-//! the files the request does not name on the Run: it is Tampered. `merge`
-//! merges a Tampered Run only when the answer that agreed to it approved
-//! those files.
+//! them on the Run: one its request does not ask for makes it Tampered.
+//! `merge` merges a Tampered Run only when the answer that agreed to it
+//! approved those files; otherwise it sends the Run back through `ci` to
+//! the merge Gate, which shows them.
 
 #[cfg(test)]
 mod test;
@@ -19,7 +20,7 @@ mod test;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use factory_records::domain::models::{Outcome, Repository, Tampering};
+use factory_records::domain::models::{ControlFileChanges, Outcome, Repository};
 use factory_records::domain::ports::RunRepository;
 use github::domain::models::MacroTaskId;
 
@@ -274,23 +275,40 @@ fn named(pull_request: &PullRequest) -> String {
     )
 }
 
-/// What a person reads of the Control Files a Tampered Run changed.
-fn tampering_note(tampering: &Tampering) -> String {
-    if tampering.unlisted {
-        return "\n\nGitHub could not list this branch's changes, so it may change Control Files: \
-             files that decide whether its checks pass. It merges only once a person approves that."
+/// What a person reads of the Control Files a Run's branch changed.
+fn changes_note(changes: &ControlFileChanges) -> String {
+    if changes.unlisted {
+        return "\n\nGitHub could not list this branch's changes in full, so it may change Control \
+             Files: files that decide whether its checks pass. It merges only once a person \
+             approves that."
             .to_string();
     }
-    let files: Vec<String> = tampering
-        .files
-        .iter()
-        .map(|file| format!("- `{file}`"))
-        .collect();
-    format!(
-        "\n\nThis branch changes Control Files its request does not name, files that decide \
-         whether its checks pass:\n\n{}\n\nIt merges only once a person approves them.",
-        files.join("\n")
-    )
+
+    let mut note = String::new();
+    if !changes.tampered.is_empty() {
+        let files: Vec<String> = changes
+            .tampered
+            .iter()
+            .map(|file| format!("- `{file}`"))
+            .collect();
+        note.push_str(&format!(
+            "\n\nThis branch changes Control Files its request does not ask for, files that \
+             decide whether its checks pass:\n\n{}\n\nIt merges only once a person approves them.",
+            files.join("\n")
+        ));
+    }
+    if !changes.named.is_empty() {
+        let files: Vec<String> = changes
+            .named
+            .iter()
+            .map(|file| format!("- `{file}`"))
+            .collect();
+        note.push_str(&format!(
+            "\n\nIt also changes Control Files named by the request:\n\n{}",
+            files.join("\n")
+        ));
+    }
+    note
 }
 
 /// The title of the Run's pull request: the request's first line, cut to
@@ -383,25 +401,33 @@ impl<G: PullRequests, R: RunRepository> PullRequestSteps<G, R> {
             .map_err(PullRequestStepError::github)
     }
 
-    /// The Control Files `head` changed against the Run's base that its
-    /// request does not name, by the patterns of the Run's owner or the
-    /// factory's default: kept on the Run, replacing what was kept before.
+    /// The Control Files `head` changed against the Run's base, by the
+    /// patterns of the team of the Run's owner or the factory's default:
+    /// kept on the Run, replacing what was kept before.
     async fn check_control_files(
         &self,
         input: &StepInput<'_>,
         repository: &CodeRepository,
         recorded: &Repository,
         head: &str,
-    ) -> Result<Option<Tampering>, PullRequestStepError> {
-        let patterns = self
+    ) -> Result<Option<ControlFileChanges>, PullRequestStepError> {
+        let team = self
             .repo
-            .control_files(input.owner)
+            .team_of(input.owner)
             .await
-            .map_err(PullRequestStepError::records)?
-            .unwrap_or_else(ControlFiles::default_patterns);
+            .map_err(PullRequestStepError::records)?;
+        let own = match team {
+            Some(team) => self
+                .repo
+                .team_control_files(team.team_id)
+                .await
+                .map_err(PullRequestStepError::records)?,
+            None => None,
+        };
+        let patterns = own.unwrap_or_else(ControlFiles::default_patterns);
         let control_files = ControlFiles::parse(&patterns)?;
 
-        let tampering = if control_files.is_empty() {
+        let changes = if control_files.is_empty() {
             None
         } else {
             let changed = self
@@ -409,13 +435,13 @@ impl<G: PullRequests, R: RunRepository> PullRequestSteps<G, R> {
                 .changed_paths(input.owner, repository, &recorded.base_branch, head)
                 .await
                 .map_err(PullRequestStepError::github)?;
-            control_files.tampering(changed.as_deref(), input.request)
+            control_files.changes(changed.as_deref(), input.request, input.created_in_person)
         };
         self.repo
-            .set_tampering(input.key.run_id, tampering.as_ref())
+            .set_control_file_changes(input.key.run_id, changes.as_ref())
             .await
             .map_err(PullRequestStepError::records)?;
-        Ok(tampering)
+        Ok(changes)
     }
 
     /// The repository the Run works on, and its record.
@@ -443,8 +469,7 @@ impl<G: PullRequests, R: RunRepository> PullRequestSteps<G, R> {
     /// Open the Run's pull request, or find the one it opened: `published`,
     /// `closed` when a person closed it without merging, or `refused` with
     /// GitHub's reason, such as a branch with nothing its base lacks. A
-    /// published head's Control Files are checked, and named when it is
-    /// Tampered.
+    /// published head's Control Files are checked, and named.
     pub async fn publish(&self, input: StepInput<'_>) -> Result<StepReport, PullRequestStepError> {
         let (repository, recorded) = Self::repository(&input)?;
 
@@ -485,10 +510,10 @@ impl<G: PullRequests, R: RunRepository> PullRequestSteps<G, R> {
                 format!("{}\n\nIt was closed without merging.", named(&pull_request)),
             ),
             PullRequestState::Open | PullRequestState::Merged => {
-                let tampering = self
+                let changes = self
                     .check_control_files(&input, &repository, recorded, &pull_request.head_sha)
                     .await?;
-                let note = tampering.as_ref().map(tampering_note).unwrap_or_default();
+                let note = changes.as_ref().map(changes_note).unwrap_or_default();
                 report("published", format!("{}{note}", named(&pull_request)))
             }
         })
@@ -641,8 +666,14 @@ impl<G: PullRequests, R: RunRepository> PullRequestSteps<G, R> {
             .await?;
 
         match pull_request.state {
+            // Merged outside the Run: its Control Files are kept all the
+            // same, for a person to see what it changed.
             PullRequestState::Merged => {
-                return Ok(report("merged", named(&pull_request)));
+                let changes = self
+                    .check_control_files(&input, &repository, recorded, &pull_request.head_sha)
+                    .await?;
+                let note = changes.as_ref().map(changes_note).unwrap_or_default();
+                return Ok(report("merged", format!("{}{note}", named(&pull_request))));
             }
             PullRequestState::Closed => {
                 return Ok(report(
@@ -667,10 +698,10 @@ impl<G: PullRequests, R: RunRepository> PullRequestSteps<G, R> {
             ));
         }
 
-        let tampering = self
+        let changes = self
             .check_control_files(&input, &repository, recorded, &head)
             .await?;
-        let note = tampering.as_ref().map(tampering_note).unwrap_or_default();
+        let note = changes.as_ref().map(changes_note).unwrap_or_default();
         Ok(report(
             "done",
             format!(
@@ -683,9 +714,12 @@ impl<G: PullRequests, R: RunRepository> PullRequestSteps<G, R> {
     /// Merge the commit a person agreed to merge: `merged`, also when it
     /// already was; `changed` when the pull request's head moved since, so
     /// its checks run again; `refused` with GitHub's reason; or `closed`.
-    /// A commit that changes Control Files its request does not name is
-    /// `refused` unless the latest answer to a Gate of the Run, the one
-    /// that agreed to the merge, approved every one of them.
+    /// A Tampered commit merges only when the latest answer to a Gate of the
+    /// Run, the one that agreed to the merge, approved every Control File
+    /// it changes without its request asking: otherwise it is `changed`, so
+    /// the Run goes back through `ci` to the merge Gate, which shows the
+    /// files. That route is in every `code` Flow a Run carries, so Runs in
+    /// flight take it too, as a Run that agreed before its files were read.
     pub async fn merge(&self, input: StepInput<'_>) -> Result<StepReport, PullRequestStepError> {
         let (repository, recorded) = Self::repository(&input)?;
         let head = self
@@ -702,7 +736,13 @@ impl<G: PullRequests, R: RunRepository> PullRequestSteps<G, R> {
         // A retry whose merge GitHub took, though its answer was lost, finds
         // the pull request merged.
         match pull_request.state {
-            PullRequestState::Merged => return Ok(report("merged", named(&pull_request))),
+            PullRequestState::Merged => {
+                let changes = self
+                    .check_control_files(&input, &repository, recorded, &pull_request.head_sha)
+                    .await?;
+                let note = changes.as_ref().map(changes_note).unwrap_or_default();
+                return Ok(report("merged", format!("{}{note}", named(&pull_request))));
+            }
             PullRequestState::Closed => {
                 return Ok(report(
                     "closed",
@@ -712,23 +752,24 @@ impl<G: PullRequests, R: RunRepository> PullRequestSteps<G, R> {
             PullRequestState::Open => {}
         }
 
-        let tampering = self
+        let changes = self
             .check_control_files(&input, &repository, recorded, &head)
             .await?;
-        if let Some(tampering) = &tampering {
+        if let Some(changes) = changes.as_ref().filter(|changes| changes.is_tampered()) {
             let approved = input
                 .earlier
                 .iter()
                 .rev()
                 .find_map(|step| step.gate.as_ref()?.answer.as_ref())
                 .and_then(|answer| answer.approved_control_files.as_deref());
-            if !approved.is_some_and(|approved| tampering.approved_by(approved)) {
+            if !approved.is_some_and(|approved| changes.approved_by(approved)) {
                 return Ok(report(
-                    "refused",
+                    "changed",
                     format!(
-                        "{}\n\nIt was not merged: no person approved the Control Files it changes.{}",
+                        "{}\n\nIt was not merged: no person approved the Control Files it changes, \
+                         so the merge Gate asks again.{}",
                         named(&pull_request),
-                        tampering_note(tampering)
+                        changes_note(changes)
                     ),
                 ));
             }

@@ -281,7 +281,7 @@ async fn a_new_run_is_read_with_its_flow(pool: PgPool) {
     let id = RunId::generate();
     let julia = user("macro|julia@example.com");
     let RunInsert::Inserted(inserted) = repo
-        .insert_run(id, "reply", "Say hi", &julia, None, None)
+        .insert_run(id, "reply", "Say hi", &julia, None, None, false)
         .await
         .expect("insert")
     else {

@@ -367,6 +367,7 @@ async fn plan_task(repo: &FakeRepo) -> AgentTask {
             &julia(),
             None,
             None,
+            false,
         )
         .await
         .expect("insert");

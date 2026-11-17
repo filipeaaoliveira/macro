@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                id, request, user_id, created_at, task_id, repo_url, base_branch, tampered_files,\n                outcome, ended_at\n            FROM factory_run\n            WHERE id = $1\n            ",
+  "query": "\n            INSERT INTO factory_run\n                (id, flow, request, user_id, task_id, repo_url, base_branch, created_in_person)\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n            RETURNING\n                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,\n                tampered_files, named_control_files, control_files_unlisted, outcome, ended_at\n            ",
   "describe": {
     "columns": [
       {
@@ -40,23 +40,45 @@
       },
       {
         "ordinal": 7,
+        "name": "created_in_person",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
         "name": "tampered_files",
         "type_info": "TextArray"
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
+        "name": "named_control_files",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 10,
+        "name": "control_files_unlisted",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 11,
         "name": "outcome",
         "type_info": "Text"
       },
       {
-        "ordinal": 9,
+        "ordinal": 12,
         "name": "ended_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Bool"
       ]
     },
     "nullable": [
@@ -67,10 +89,13 @@
       true,
       true,
       true,
+      false,
       true,
+      true,
+      false,
       true,
       true
     ]
   },
-  "hash": "718695bca1ea70475d5d60a3bb6ded32e0f292f1b32ff3e64ca7cf78add64b5d"
+  "hash": "9e0459f98f47054c7b2e7eafe8745d3569db18443d6997f45be84490cb38cff7"
 }

@@ -31,6 +31,7 @@ fn input(run_id: RunId) -> StepInput<'static> {
         role: None,
         owner: &JULIA,
         request: "Collapse repeated dashes in slugs\n\nAnd add a test.",
+        created_in_person: true,
         task_id: Some(Uuid::parse_str("00000000-0000-7000-8000-000000000101").expect("valid")),
         repository: Some(&REPOSITORY),
         earlier: &[],

@@ -239,31 +239,48 @@ The merge-gate entry runs at most three times, including visits that end
 `changed` without asking; then the Run ends for a person.
 
 Control Files (`src/domain/control_files.rs`) are the files that decide
-whether a repository's checks pass: tests, test and lint configuration, CI
-workflows, package scripts, agent instructions (`AGENTS.md`, `CLAUDE.md`) and
-`.macro/checks.json`. They are glob patterns matched against each changed
-path from the root (`*` within a folder, `**` across folders, `**/name` also
-at the root); `DEFAULT_CONTROL_FILES` applies until the Run's owner sets
-their own with `PUT /settings/control-files` (`GET` reads them; a null list
-goes back to the default, an empty one checks nothing). Only the owner's own
-signed-in session sets them, as for a Gate: a shorter list lets an agent
-change more unseen. `publish` (on the pull request's head), `ready_to_merge`
-and `merge` (on the commit to merge) compare that commit with the base
-(`PullRequests::changed_paths`) and keep on the Run the Control Files it
-changed that the Run's request does not name (`factory_run.tampered_files`,
-`tampering` in the Run API): the Run is Tampered, and their outputs name the
-files. The request asks for a file only by naming its path from the root,
-whole (`.github/workflows/ci.yml`); a pattern, a folder or a bare file name
-asks for nothing, and a person approves those on the Gate instead. A
-comparison GitHub cuts short (300 files) is Tampered with no files,
-`unlisted`. Approving a Gate (`approve`) of a Tampered Run needs
-`approveControlFiles: true` in the answer (400 `controlFilesNotApproved`
-otherwise), which only the owner's own session can send; the answer keeps
-the files approved (`factory_gate.approved_control_files`). `merge` reads
-the commit's Control Files again, and refuses (`refused`, so the Run ends
-`manual`) unless the latest Gate answer before it approved every one; an
-unlisted commit needs an approval given while it was unlisted. Nothing but
-a person's answer approves them. The pull
+whether a repository's checks pass: tests and what they compare against
+(snapshots, fixtures), test and lint configuration, CI workflows, package and
+build scripts, agent instructions and their tools' settings (`AGENTS.md`,
+`CLAUDE.md`, `.claude/`, `.agents/`, `.cursor/`) and `.macro/checks.json`.
+They are glob patterns matched against each changed path from the root,
+ignoring case (`*` within a folder, `**` across folders, `**/name` also at
+the root). `DEFAULT_CONTROL_FILES` applies until an admin or the owner of
+the team of the Run's owner sets the team's own with
+`PUT /settings/control-files` (`factory_team_settings`; `GET` reads them
+with whether the caller may change them; a null list goes back to the
+default, an empty one checks nothing). Only that admin's own signed-in
+session sets them, as for a Gate: a shorter list lets an agent change more
+unseen. Team settings show them in a Control files section (behind
+`enable-factory-runs`). A path says nothing of a change inside a file, so a
+check weakened in ordinary source (a lint suppression, an ignored test) is
+the review's to catch.
+
+`publish` (on the pull request's head), `ready_to_merge` and `merge` (on the
+commit to merge, and on the head of a pull request merged outside the Run)
+compare that commit with the base (`PullRequests::changed_paths`) and keep
+the Control Files it changed on the Run (`controlFiles` in the Run API):
+`named`, those the request asks for, and `tampered`, the others, which make
+the Run Tampered. The request asks for a file only by naming its path from
+the root, whole (`.github/workflows/ci.yml`), and only when its owner
+created the Run in their own signed-in session (`factory_run.created_in_person`):
+an agent could otherwise start a Run whose request names the file it means
+to weaken. A pattern, a folder or a bare file name asks for nothing. A
+comparison GitHub cuts short (300 files), or more files than a Run keeps
+(`ControlFileChanges::MAX_FILES`, as a rename lists both paths), is Tampered
+and `unlisted`. Approving a Gate (`approve`) of a Tampered Run needs
+`approvedControlFiles` in the answer, listing exactly the Tampered files the
+person saw (400 `controlFilesNotApproved` otherwise), which only the owner's
+own session can send; the answer keeps them
+(`factory_gate.approved_control_files`). `merge` reads the commit's Control
+Files again and merges a Tampered one only when the latest Gate answer
+before it approved every Tampered file (an unlisted commit, an approval
+given while it was unlisted). Otherwise it ends `changed`, so the Run goes
+back through `ci` to the merge Gate, which shows the files: that route is
+in every `code` Flow a Run carries, so a Run in flight when this shipped,
+whose Gate approved before its files were read, takes it too, and nothing
+in the workflow or the interpreter changed. Nothing but a person's answer
+approves them. The pull
 request's description names the Run's task as `MACRO-{short id}`, so GitHub's
 webhook links them, and is cut to GitHub's 65,536 characters in its request
 part only.

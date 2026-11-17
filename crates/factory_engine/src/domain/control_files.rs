@@ -8,22 +8,31 @@
 //! Run merges only once a person approves them on the merge Gate.
 //!
 //! The request asks for a file when it names the file's path from the
-//! repository's root, as `.github/workflows/ci.yml`. A pattern or a folder
-//! in the request asks for nothing: a person approves those on the Gate.
+//! repository's root, as `.github/workflows/ci.yml`, and only when the Run's
+//! owner created it in their own signed-in session: an agent that starts a
+//! Run could otherwise name the file it means to weaken. A pattern or a
+//! folder in the request asks for nothing: a person approves those on the
+//! Gate. The files a request asks for are kept too, and the Gate lists them
+//! as named by the request.
 //!
 //! Which files are Control Files is a list of glob patterns, matched
-//! against each changed path from the repository's root: `*` stays within
-//! one folder, `**` spans any number of them, and `**/name` also matches
-//! `name` at the root. [`DEFAULT_CONTROL_FILES`] is the list a Run's owner
-//! has until they set their own.
+//! against each changed path from the repository's root, ignoring case:
+//! `*` stays within one folder, `**` spans any number of them, and
+//! `**/name` also matches `name` at the root. [`DEFAULT_CONTROL_FILES`] is
+//! the list a team has until its admins set their own.
+//!
+//! A path says nothing of what a change does inside a file, so a check
+//! weakened in ordinary source, such as a lint suppression, an ignored
+//! test or a type check turned off on one line, is not caught here: the
+//! review sees those.
 
 #[cfg(test)]
 mod test;
 
-use factory_records::domain::models::Tampering;
+use factory_records::domain::models::ControlFileChanges;
 use glob::{MatchOptions, Pattern};
 
-/// The Control File patterns a Run's owner has until they set their own.
+/// The Control File patterns a team has until its admins set their own.
 pub const DEFAULT_CONTROL_FILES: &[&str] = &[
     // CI workflows.
     ".github/workflows/**",
@@ -32,19 +41,25 @@ pub const DEFAULT_CONTROL_FILES: &[&str] = &[
     ".circleci/**",
     // The repository's own checks, which the factory's checks rounds run.
     ".macro/checks.json",
-    // Agent instructions.
+    // Agent instructions and their tools' settings.
     "**/AGENTS.md",
     "**/CLAUDE.md",
-    // Package scripts.
+    ".claude/**",
+    ".agents/**",
+    ".cursor/**",
+    // Package and build scripts.
     "**/package.json",
     "**/justfile",
     "**/Makefile",
+    "**/GNUmakefile",
+    "Cargo.toml",
     // Test and lint configuration.
-    "**/biome.json",
-    "**/biome.jsonc",
+    ".config/**",
+    "**/biome*.json*",
     "**/.eslintrc*",
     "**/eslint.config.*",
     "**/tsconfig*.json",
+    "**/vite.config.*",
     "**/vitest.config.*",
     "**/jest.config.*",
     "**/playwright.config.*",
@@ -52,22 +67,28 @@ pub const DEFAULT_CONTROL_FILES: &[&str] = &[
     "**/rustfmt.toml",
     "**/.rustfmt.toml",
     "**/.cargo/config.toml",
+    "deny.toml",
     "**/pyproject.toml",
     "**/pytest.ini",
+    "**/conftest.py",
     "**/ruff.toml",
     "**/.pre-commit-config.yaml",
-    // The tests themselves.
+    // The tests themselves, and what they compare against.
     "**/test/**",
     "**/tests/**",
     "**/__tests__/**",
     "**/*.test.*",
     "**/*.spec.*",
     "**/test.rs",
+    "**/tests.rs",
     "**/*_test.go",
     "**/test_*.py",
+    "**/snapshots/**",
+    "**/__snapshots__/**",
+    "**/fixtures/**",
 ];
 
-/// The most patterns a person's list holds.
+/// The most patterns a team's list holds.
 pub const MAX_PATTERNS: usize = 200;
 
 /// The longest pattern, in bytes.
@@ -80,7 +101,7 @@ pub enum ControlFilesError {
     #[error("at most {MAX_PATTERNS} control file patterns")]
     TooMany,
     /// A pattern is empty, longer than [`MAX_PATTERN_BYTES`], starts at
-    /// `/`, or is not a glob pattern.
+    /// `/` or `./`, or is not a glob pattern.
     #[error("{0:?} is not a glob pattern of a path from the repository's root")]
     InvalidPattern(String),
 }
@@ -103,7 +124,8 @@ impl ControlFiles {
             .map(|pattern| {
                 let usable = !pattern.is_empty()
                     && pattern.len() <= MAX_PATTERN_BYTES
-                    && !pattern.starts_with('/');
+                    && !pattern.starts_with('/')
+                    && !pattern.starts_with("./");
                 usable
                     .then(|| Pattern::new(pattern).ok())
                     .flatten()
@@ -126,10 +148,11 @@ impl ControlFiles {
         self.patterns.is_empty()
     }
 
-    /// Whether `path`, from the repository's root, is a Control File.
+    /// Whether `path`, from the repository's root, is a Control File,
+    /// whatever its case: a tool may read `Makefile` and `makefile` alike.
     pub fn matches(&self, path: &str) -> bool {
         let options = MatchOptions {
-            case_sensitive: true,
+            case_sensitive: false,
             require_literal_separator: true,
             require_literal_leading_dot: false,
         };
@@ -138,29 +161,55 @@ impl ControlFiles {
             .any(|pattern| pattern.matches_with(path, options))
     }
 
-    /// What a branch that changed `changed` did to the Control Files that
-    /// `request` does not ask for: none when it changed none of them, and
-    /// unlisted when GitHub could not list the changes (`None`).
-    pub fn tampering(&self, changed: Option<&[String]>, request: &str) -> Option<Tampering> {
+    /// The Control Files a branch that changed `changed` changed: those
+    /// `request` asks for by naming them, when `request_asks` (its Run was
+    /// created in person), and the others, which make it Tampered. None when
+    /// it changed none; unlisted when GitHub could not list the changes
+    /// (`None`), or either list is longer than a Run keeps.
+    pub fn changes(
+        &self,
+        changed: Option<&[String]>,
+        request: &str,
+        request_asks: bool,
+    ) -> Option<ControlFileChanges> {
         if self.is_empty() {
             return None;
         }
+        let unlisted = ControlFileChanges {
+            tampered: Vec::new(),
+            named: Vec::new(),
+            unlisted: true,
+        };
         let Some(changed) = changed else {
-            return Some(Tampering {
-                files: Vec::new(),
-                unlisted: true,
-            });
+            return Some(unlisted);
         };
 
-        let mut files: Vec<String> = Vec::new();
+        let mut tampered: Vec<String> = Vec::new();
+        let mut named: Vec<String> = Vec::new();
         for path in changed {
-            let tampered = self.matches(path) && !names(request, path);
-            if tampered && !files.contains(path) {
-                files.push(path.clone());
+            let seen = tampered.contains(path) || named.contains(path);
+            if seen || !self.matches(path) {
+                continue;
+            }
+            if request_asks && names(request, path) {
+                named.push(path.clone());
+            } else {
+                tampered.push(path.clone());
             }
         }
-        (!files.is_empty()).then_some(Tampering {
-            files,
+
+        if tampered.is_empty() && named.is_empty() {
+            return None;
+        }
+        // A rename lists both of its paths, so a comparison GitHub lists in
+        // full can still name more files than a Run keeps.
+        let max = ControlFileChanges::MAX_FILES;
+        if tampered.len() > max || named.len() > max {
+            return Some(unlisted);
+        }
+        Some(ControlFileChanges {
+            tampered,
+            named,
             unlisted: false,
         })
     }

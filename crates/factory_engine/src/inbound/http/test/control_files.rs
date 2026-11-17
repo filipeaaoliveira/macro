@@ -1,11 +1,13 @@
-//! The Control File settings routes, and answering a Tampered Run's Gate.
+//! The Control File settings routes, Runs created in person, and answering
+//! a Tampered Run's Gate.
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use factory_records::domain::models::Tampering;
+use factory_records::domain::models::{ControlFileChanges, TeamMembership};
 use factory_records::domain::ports::RunRepository;
 use macro_authorization::CODE_EXECUTION_HEADER;
 use tower::ServiceExt as _;
+use uuid::Uuid;
 
 use super::{ALICE, Caller, alice_s_run, body, call, records_router};
 use crate::domain::control_files::ControlFiles;
@@ -13,13 +15,27 @@ use crate::domain::fakes::FakeRepo;
 
 const PATH: &str = "/settings/control-files";
 
-/// Only the person in their own signed-in session sets their patterns: a
-/// shorter list lets an agent change more files unseen. An internal caller
-/// acting for them, their API key or token, and an agent working as them
-/// are refused, and nothing is kept.
+/// A repository where Alice administers a team.
+fn alice_s_team(repo: &FakeRepo) -> Uuid {
+    let team_id = Uuid::now_v7();
+    repo.teams.lock().expect("teams").insert(
+        ALICE.to_string(),
+        TeamMembership {
+            team_id,
+            admin: true,
+        },
+    );
+    team_id
+}
+
+/// Only the team admin in their own signed-in session sets the team's
+/// patterns: a shorter list lets an agent change more files unseen. An
+/// internal caller acting for them, their API key or token, and an agent
+/// working as them are refused, and nothing is kept.
 #[tokio::test]
-async fn only_the_person_s_own_session_sets_their_control_files() {
+async fn only_the_admin_s_own_session_sets_the_team_s_control_files() {
     let repo = FakeRepo::default();
+    let team_id = alice_s_team(&repo);
     let router = records_router(&repo);
     let patterns = serde_json::json!({ "patterns": ["ci/**"] });
     let send = |request: Request<Body>| {
@@ -48,8 +64,9 @@ async fn only_the_person_s_own_session_sets_their_control_files() {
         .headers_mut()
         .insert(CODE_EXECUTION_HEADER, "true".parse().expect("header"));
     let in_code_mode = send(in_code_mode).await;
+    let no_team = send(call("PUT", PATH, Caller::User("eve"), patterns.clone())).await;
 
-    for refused in [internal, api_key, sdk, agent, in_code_mode] {
+    for refused in [internal, api_key, sdk, agent, in_code_mode, no_team] {
         assert_eq!(refused, StatusCode::FORBIDDEN);
     }
     assert!(repo.control_files.lock().expect("patterns").is_empty());
@@ -62,15 +79,21 @@ async fn only_the_person_s_own_session_sets_their_control_files() {
     assert_eq!(person.status(), StatusCode::OK);
     assert_eq!(
         body(person).await,
-        serde_json::json!({ "patterns": ["ci/**"], "isDefault": false })
+        serde_json::json!({
+            "patterns": ["ci/**"],
+            "isDefault": false,
+            "teamId": team_id,
+            "canEdit": true,
+        })
     );
 }
 
-/// The patterns read as the caller's own, or the default, by any caller
-/// acting for them.
+/// The patterns read as the caller's team's, or the default, by any caller
+/// acting for them; patterns that do not read are refused.
 #[tokio::test]
-async fn the_control_files_read_as_the_caller_s_own_or_the_default() {
+async fn the_control_files_read_as_the_team_s_or_the_default() {
     let repo = FakeRepo::default();
+    alice_s_team(&repo);
     let router = records_router(&repo);
 
     let default = router
@@ -78,7 +101,7 @@ async fn the_control_files_read_as_the_caller_s_own_or_the_default() {
         .oneshot(call(
             "GET",
             PATH,
-            Caller::Internal(Some(ALICE)),
+            Caller::Internal(Some("macro|eve@example.com")),
             serde_json::Value::Null,
         ))
         .await
@@ -89,6 +112,8 @@ async fn the_control_files_read_as_the_caller_s_own_or_the_default() {
         serde_json::json!({
             "patterns": ControlFiles::default_patterns(),
             "isDefault": true,
+            "teamId": null,
+            "canEdit": false,
         })
     );
 
@@ -104,22 +129,60 @@ async fn the_control_files_read_as_the_caller_s_own_or_the_default() {
     assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
 }
 
-/// A Tampered Run shows its files; approving its Gate without approving
-/// them is refused with a code a client acts on, and with them is taken.
+/// A Run created in the owner's own session is kept as created in person;
+/// one an internal caller, or an agent working as them, created is not.
 #[tokio::test]
-async fn approving_a_tampered_run_needs_approve_control_files() {
+async fn a_run_is_created_in_person_only_from_the_owner_s_own_session() {
+    let repo = FakeRepo::default();
+    let router = records_router(&repo);
+    let create = serde_json::json!({ "flow": "reply", "request": "Fix ci.yml" });
+    let mut in_code_mode = call("POST", "/runs", Caller::User("alice"), create.clone());
+    in_code_mode
+        .headers_mut()
+        .insert(CODE_EXECUTION_HEADER, "true".parse().expect("header"));
+
+    for (request, expected) in [
+        (
+            call("POST", "/runs", Caller::User("alice"), create.clone()),
+            true,
+        ),
+        (
+            call(
+                "POST",
+                "/runs",
+                Caller::Internal(Some(ALICE)),
+                create.clone(),
+            ),
+            false,
+        ),
+        (
+            call("POST", "/runs", Caller::User("agent"), create.clone()),
+            false,
+        ),
+        (in_code_mode, false),
+    ] {
+        let response = router.clone().oneshot(request).await.expect("response");
+
+        assert_eq!(response.status(), StatusCode::CREATED);
+        assert_eq!(body(response).await["run"]["createdInPerson"], expected);
+    }
+}
+
+/// A Tampered Run shows its files; approving its Gate without listing them
+/// is refused with a code a client acts on, and with them is taken.
+#[tokio::test]
+async fn approving_a_tampered_run_needs_the_files_listed() {
     let repo = FakeRepo::default();
     let router = records_router(&repo);
     let run_id = alice_s_run(&repo).await;
-    repo.set_tampering(
-        run_id,
-        Some(&Tampering {
-            files: vec!["package.json".to_string()],
-            unlisted: false,
-        }),
-    )
-    .await
-    .expect("keep");
+    let changes = ControlFileChanges {
+        tampered: vec!["package.json".to_string()],
+        named: vec!["Makefile".to_string()],
+        unlisted: false,
+    };
+    repo.set_control_file_changes(run_id, Some(&changes))
+        .await
+        .expect("keep");
     let answer = format!("/runs/{run_id}/steps/4/answer");
 
     let read = router
@@ -133,8 +196,12 @@ async fn approving_a_tampered_run_needs_approve_control_files() {
         .await
         .expect("response");
     assert_eq!(
-        body(read).await["run"]["tampering"],
-        serde_json::json!({ "files": ["package.json"], "unlisted": false })
+        body(read).await["run"]["controlFiles"],
+        serde_json::json!({
+            "tampered": ["package.json"],
+            "named": ["Makefile"],
+            "unlisted": false,
+        })
     );
 
     let refused = router
@@ -155,7 +222,10 @@ async fn approving_a_tampered_run_needs_approve_control_files() {
             "POST",
             &answer,
             Caller::User("alice"),
-            serde_json::json!({ "answer": "approve", "approveControlFiles": true }),
+            serde_json::json!({
+                "answer": "approve",
+                "approvedControlFiles": ["package.json"],
+            }),
         ))
         .await
         .expect("response");

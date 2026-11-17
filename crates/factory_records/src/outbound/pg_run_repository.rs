@@ -13,10 +13,10 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::domain::models::{
-    AgentName, CheckRound, CheckRoundOutcome, CheckRoundStart, ClaimedSession, EntryId, Gate,
-    GateAnswer, HandBack, HandedBack, InvalidName, Outcome, PassedOver, Repository, Role, Run,
-    RunEnd, RunId, RunInsert, RunOutcome, SessionStep, Step, StepEnd, StepKey, StepSession,
-    StoppingSession, Tampering, TaskLink,
+    AgentName, CheckRound, CheckRoundOutcome, CheckRoundStart, ClaimedSession, ControlFileChanges,
+    EntryId, Gate, GateAnswer, HandBack, HandedBack, InvalidName, Outcome, PassedOver, Repository,
+    Role, Run, RunEnd, RunId, RunInsert, RunOutcome, SessionStep, Step, StepEnd, StepKey,
+    StepSession, StoppingSession, TaskLink, TeamMembership,
 };
 use crate::domain::ports::RunRepository;
 
@@ -79,6 +79,9 @@ pub enum PgRunRepositoryErr {
     /// round.
     #[error("a stored run has a repository but no base branch, or the other way round")]
     PartialRepository,
+    /// A stored Run has only part of the Control Files its branch changed.
+    #[error("a stored run has only part of the control files its branch changed")]
+    PartialControlFiles,
     /// A stored Gate has only part of its question or its answer.
     #[error("a stored gate has only part of its question or its answer")]
     PartialGate,
@@ -105,7 +108,10 @@ struct RunRow {
     task_id: Option<String>,
     repo_url: Option<String>,
     base_branch: Option<String>,
+    created_in_person: bool,
     tampered_files: Option<Vec<String>>,
+    named_control_files: Option<Vec<String>>,
+    control_files_unlisted: bool,
     outcome: Option<String>,
     ended_at: Option<DateTime<Utc>>,
 }
@@ -140,11 +146,16 @@ impl TryFrom<RunRow> for Run {
                 .map(|id| Uuid::parse_str(&id).map_err(|_| PgRunRepositoryErr::InvalidTaskId(id)))
                 .transpose()?,
             repository,
-            // An empty list keeps a Run whose changes GitHub could not list.
-            tampering: row.tampered_files.map(|files| Tampering {
-                unlisted: files.is_empty(),
-                files,
-            }),
+            created_in_person: row.created_in_person,
+            control_files: match (row.tampered_files, row.named_control_files) {
+                (Some(tampered), Some(named)) => Some(ControlFileChanges {
+                    tampered,
+                    named,
+                    unlisted: row.control_files_unlisted,
+                }),
+                (None, None) => None,
+                _ => return Err(PgRunRepositoryErr::PartialControlFiles),
+            },
             end,
         })
     }
@@ -271,15 +282,17 @@ impl RunRepository for PgRunRepository {
         user_id: &MacroUserIdStr<'static>,
         task_id: Option<Uuid>,
         repository: Option<&Repository>,
+        created_in_person: bool,
     ) -> Result<RunInsert, Self::Err> {
         let inserted = sqlx::query_as!(
             RunRow,
             r#"
-            INSERT INTO factory_run (id, flow, request, user_id, task_id, repo_url, base_branch)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            INSERT INTO factory_run
+                (id, flow, request, user_id, task_id, repo_url, base_branch, created_in_person)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING
-                id, request, user_id, created_at, task_id, repo_url, base_branch, tampered_files,
-                outcome, ended_at
+                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,
+                tampered_files, named_control_files, control_files_unlisted, outcome, ended_at
             "#,
             id.as_uuid(),
             flow,
@@ -288,6 +301,7 @@ impl RunRepository for PgRunRepository {
             task_id.map(|task_id| task_id.to_string()),
             repository.map(|repository| repository.url.as_str()),
             repository.map(|repository| repository.base_branch.as_str()),
+            created_in_person,
         )
         .fetch_one(&self.pool)
         .await;
@@ -333,60 +347,79 @@ impl RunRepository for PgRunRepository {
         Ok(())
     }
 
-    #[tracing::instrument(err, skip(self, tampering))]
-    async fn set_tampering(
+    #[tracing::instrument(err, skip(self, changes))]
+    async fn set_control_file_changes(
         &self,
         id: RunId,
-        tampering: Option<&Tampering>,
+        changes: Option<&ControlFileChanges>,
     ) -> Result<(), Self::Err> {
-        // A Run whose changes GitHub could not list keeps an empty list.
-        let files: Option<&[String]> = tampering.map(|tampering| {
-            if tampering.unlisted {
-                &[][..]
-            } else {
-                tampering.files.as_slice()
-            }
-        });
         sqlx::query!(
-            "UPDATE factory_run SET tampered_files = $2 WHERE id = $1",
+            r#"
+            UPDATE factory_run
+            SET tampered_files = $2, named_control_files = $3, control_files_unlisted = $4
+            WHERE id = $1
+            "#,
             id.as_uuid(),
-            files,
+            changes.map(|changes| changes.tampered.as_slice()),
+            changes.map(|changes| changes.named.as_slice()),
+            changes.is_some_and(|changes| changes.unlisted),
         )
         .execute(&self.pool)
         .await?;
         Ok(())
     }
 
+    // A person is on at most one team (`team_user_user_id_unique`), and its
+    // owner is on it as `owner`.
     #[tracing::instrument(err, skip(self, user_id))]
-    async fn control_files(
+    async fn team_of(
         &self,
         user_id: &MacroUserIdStr<'static>,
-    ) -> Result<Option<Vec<String>>, Self::Err> {
-        let patterns = sqlx::query_scalar!(
-            "SELECT control_files FROM factory_settings WHERE user_id = $1",
+    ) -> Result<Option<TeamMembership>, Self::Err> {
+        let membership = sqlx::query!(
+            r#"
+            SELECT team_id, team_role IN ('admin', 'owner') AS "admin!"
+            FROM team_user
+            WHERE user_id = $1
+            LIMIT 1
+            "#,
             user_id.as_ref(),
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(membership.map(|row| TeamMembership {
+            team_id: row.team_id,
+            admin: row.admin,
+        }))
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn team_control_files(&self, team_id: Uuid) -> Result<Option<Vec<String>>, Self::Err> {
+        let patterns = sqlx::query_scalar!(
+            "SELECT control_files FROM factory_team_settings WHERE team_id = $1",
+            team_id,
         )
         .fetch_optional(&self.pool)
         .await?;
         Ok(patterns)
     }
 
-    #[tracing::instrument(err, skip(self, user_id, patterns))]
-    async fn set_control_files(
+    #[tracing::instrument(err, skip(self, patterns))]
+    async fn set_team_control_files(
         &self,
-        user_id: &MacroUserIdStr<'static>,
+        team_id: Uuid,
         patterns: Option<&[String]>,
     ) -> Result<(), Self::Err> {
         match patterns {
             Some(patterns) => {
                 sqlx::query!(
                     r#"
-                    INSERT INTO factory_settings (user_id, control_files)
+                    INSERT INTO factory_team_settings (team_id, control_files)
                     VALUES ($1, $2)
-                    ON CONFLICT (user_id)
+                    ON CONFLICT (team_id)
                     DO UPDATE SET control_files = EXCLUDED.control_files, updated_at = now()
                     "#,
-                    user_id.as_ref(),
+                    team_id,
                     patterns,
                 )
                 .execute(&self.pool)
@@ -394,8 +427,8 @@ impl RunRepository for PgRunRepository {
             }
             None => {
                 sqlx::query!(
-                    "DELETE FROM factory_settings WHERE user_id = $1",
-                    user_id.as_ref(),
+                    "DELETE FROM factory_team_settings WHERE team_id = $1",
+                    team_id
                 )
                 .execute(&self.pool)
                 .await?;
@@ -429,8 +462,8 @@ impl RunRepository for PgRunRepository {
             RunRow,
             r#"
             SELECT
-                id, request, user_id, created_at, task_id, repo_url, base_branch, tampered_files,
-                outcome, ended_at
+                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,
+                tampered_files, named_control_files, control_files_unlisted, outcome, ended_at
             FROM factory_run
             WHERE id = $1
             "#,
@@ -505,8 +538,8 @@ impl RunRepository for PgRunRepository {
             RunRow,
             r#"
             SELECT
-                id, request, user_id, created_at, task_id, repo_url, base_branch, tampered_files,
-                outcome, ended_at
+                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,
+                tampered_files, named_control_files, control_files_unlisted, outcome, ended_at
             FROM factory_run
             WHERE task_id = $1 AND user_id = $2
             ORDER BY created_at DESC, id DESC

@@ -288,7 +288,8 @@ pub trait FactoryService: Send + Sync + 'static {
     /// `request`, working on the task document `task_id` if one is given,
     /// and on the GitHub repository `repo_url` if the Flow works on one,
     /// and start it. The actor must have an account, see the task, and
-    /// reach the repository with their GitHub account.
+    /// reach the repository with their GitHub account. `in_person` says
+    /// whether they create it in their own signed-in session.
     fn create_run(
         &self,
         actor: MacroUserIdStr<'static>,
@@ -296,6 +297,7 @@ pub trait FactoryService: Send + Sync + 'static {
         request: String,
         task_id: Option<Uuid>,
         repo_url: Option<String>,
+        in_person: bool,
     ) -> impl Future<Output = Result<RunDetail, FactoryError>> + Send;
 
     /// `actor`'s Run and the Steps it took. Reading a Run whose workflow
@@ -328,8 +330,8 @@ pub trait FactoryService: Send + Sync + 'static {
     ) -> impl Future<Output = Result<RunDetail, FactoryError>> + Send;
 
     /// Give `actor`'s answer to the Gate the actor's Run waits on. Approving
-    /// a Gate of a Tampered Run needs `approve_control_files`: the actor
-    /// approves the Control Files the Run's branch changed.
+    /// a Gate of a Tampered Run needs `approved_control_files`: the
+    /// Tampered files the actor saw and approves, which must be the Run's.
     fn answer_gate(
         &self,
         actor: MacroUserIdStr<'static>,
@@ -337,19 +339,18 @@ pub trait FactoryService: Send + Sync + 'static {
         seq: u16,
         answer: Outcome,
         note: Option<String>,
-        approve_control_files: bool,
+        approved_control_files: Option<Vec<String>>,
     ) -> impl Future<Output = Result<(), FactoryError>> + Send;
 
     /// The Control File patterns `actor`'s Runs are checked against: their
-    /// own, or the factory's default.
+    /// team's, or the factory's default.
     fn control_files(
         &self,
         actor: &MacroUserIdStr<'static>,
     ) -> impl Future<Output = Result<ControlFilesSettings, FactoryError>> + Send;
 
-    /// Set the Control File patterns `actor`'s Runs are checked against;
-    /// none goes back to the factory's default. The actor must have an
-    /// account.
+    /// Set the Control File patterns of `actor`'s team's Runs; none goes
+    /// back to the factory's default. The actor must administer the team.
     fn set_control_files(
         &self,
         actor: MacroUserIdStr<'static>,

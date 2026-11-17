@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE factory_run\n            SET tampered_files = $2, named_control_files = $3, control_files_unlisted = $4\n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray",
+        "TextArray",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "116627630dee800fd298862e0c7da801cd5e314b9c6447d7afd7d6cc73cc0c33"
+}

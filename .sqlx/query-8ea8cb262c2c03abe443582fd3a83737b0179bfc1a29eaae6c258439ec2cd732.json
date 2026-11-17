@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                id, request, user_id, created_at, task_id, repo_url, base_branch, tampered_files,\n                outcome, ended_at\n            FROM factory_run\n            WHERE task_id = $1 AND user_id = $2\n            ORDER BY created_at DESC, id DESC\n            LIMIT $3\n            ",
+  "query": "\n            SELECT\n                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,\n                tampered_files, named_control_files, control_files_unlisted, outcome, ended_at\n            FROM factory_run\n            WHERE id = $1\n            ",
   "describe": {
     "columns": [
       {
@@ -40,25 +40,38 @@
       },
       {
         "ordinal": 7,
+        "name": "created_in_person",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
         "name": "tampered_files",
         "type_info": "TextArray"
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
+        "name": "named_control_files",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 10,
+        "name": "control_files_unlisted",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 11,
         "name": "outcome",
         "type_info": "Text"
       },
       {
-        "ordinal": 9,
+        "ordinal": 12,
         "name": "ended_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Text",
-        "Text",
-        "Int8"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -69,10 +82,13 @@
       true,
       true,
       true,
+      false,
       true,
+      true,
+      false,
       true,
       true
     ]
   },
-  "hash": "3840c6964be53895be07427de17bd3aa1e94fdcea00e2a20710af997aad3b393"
+  "hash": "8ea8cb262c2c03abe443582fd3a83737b0179bfc1a29eaae6c258439ec2cd732"
 }

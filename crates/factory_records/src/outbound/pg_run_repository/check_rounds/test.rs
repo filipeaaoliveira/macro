@@ -20,7 +20,7 @@ async fn writing(repo: &PgRunRepository) -> (StepKey, StepSession) {
     let julia = MacroUserIdStr::try_from("macro|julia@example.com".to_string()).expect("user");
     let id = RunId::generate();
     let RunInsert::Inserted(_) = repo
-        .insert_run(id, "code", "Add dark mode", &julia, None, None)
+        .insert_run(id, "code", "Add dark mode", &julia, None, None, false)
         .await
         .expect("insert")
     else {

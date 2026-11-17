@@ -99,6 +99,7 @@ fn input<'a>(earlier: &'a [Step]) -> StepInput<'a> {
         role: Some(&WRITER),
         owner: &JULIA,
         request: "Add a dark mode toggle",
+        created_in_person: true,
         task_id: None,
         repository: None,
         earlier,

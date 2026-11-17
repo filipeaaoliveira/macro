@@ -310,42 +310,63 @@ pub struct Run {
     /// The GitHub repository the Run works on; none for a Run that works on
     /// no code.
     pub repository: Option<Repository>,
-    /// The Control Files its branch changed that its request does not name,
-    /// as the pull request Steps last read them: the Run is Tampered, and
-    /// merges only once a person approves them. None when it changed none.
-    pub tampering: Option<Tampering>,
+    /// Whether its owner created it in their own signed-in session: only
+    /// then does its request ask for the Control Files it names.
+    pub created_in_person: bool,
+    /// The Control Files its branch changed, as the pull request Steps last
+    /// read them. None when it changed none.
+    pub control_files: Option<ControlFileChanges>,
     /// How and when it ended; none while it runs.
     pub end: Option<RunEnd>,
 }
 
-/// The Control Files a Run's branch changed that its request does not name:
-/// files that decide whether the repository's checks pass, such as its
-/// tests, lint configuration and CI workflows.
+/// The Control Files a Run's branch changed: files that decide whether the
+/// repository's checks pass, such as its tests, lint configuration and CI
+/// workflows. The Run is Tampered when it changed one its request does not
+/// ask for, and merges only once a person approves them.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct Tampering {
-    /// The files, from the repository's root, in GitHub's order: empty when
-    /// `unlisted`.
-    pub files: Vec<String>,
-    /// GitHub could not list all of the branch's changes, so which Control
-    /// Files it changed is not known.
+pub struct ControlFileChanges {
+    /// The files its request does not ask for, from the repository's root,
+    /// in GitHub's order: empty when `unlisted`.
+    pub tampered: Vec<String>,
+    /// The files its request asks for by naming them, which need no
+    /// approval: empty when `unlisted`.
+    pub named: Vec<String>,
+    /// GitHub could not list all of the branch's changes, or they were more
+    /// than [`Self::MAX_FILES`], so which Control Files it changed is not
+    /// known.
     pub unlisted: bool,
 }
 
-impl Tampering {
-    /// The most files a Tampering names: GitHub lists at most 300 changes
-    /// of a comparison, and a longer list is `unlisted`.
+impl ControlFileChanges {
+    /// The most files either list keeps; a longer one is `unlisted`.
     pub const MAX_FILES: usize = 300;
 
-    /// Whether `approved`, the files a person approved, covers it: every
-    /// file it names, or, when it is `unlisted`, an approval given while it
-    /// was.
+    /// Whether the Run is Tampered: it changed a Control File its request
+    /// does not ask for, or which ones it changed is not known.
+    pub fn is_tampered(&self) -> bool {
+        self.unlisted || !self.tampered.is_empty()
+    }
+
+    /// Whether `approved`, the Tampered files a person approved, covers
+    /// them: every one, or, when the changes are `unlisted`, an approval
+    /// given while they were.
     pub fn approved_by(&self, approved: &[String]) -> bool {
         if self.unlisted {
             return approved.is_empty();
         }
-        self.files.iter().all(|file| approved.contains(file))
+        self.tampered.iter().all(|file| approved.contains(file))
     }
+}
+
+/// The team a person is on, as the factory's settings read it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TeamMembership {
+    /// The team.
+    pub team_id: Uuid,
+    /// Whether they are its owner or one of its admins.
+    pub admin: bool,
 }
 
 /// The GitHub repository a Run works on.

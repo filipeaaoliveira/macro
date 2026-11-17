@@ -174,6 +174,7 @@ impl FactoryService for FakeService {
         _request: String,
         _task_id: Option<Uuid>,
         _repo_url: Option<String>,
+        _in_person: bool,
     ) -> Result<RunDetail, FactoryError> {
         Err(self.refusing(&actor))
     }
@@ -210,7 +211,7 @@ impl FactoryService for FakeService {
         _seq: u16,
         _answer: Outcome,
         _note: Option<String>,
-        _approve_control_files: bool,
+        _approved_control_files: Option<Vec<String>>,
     ) -> Result<(), FactoryError> {
         Err(self.refusing(&actor))
     }
@@ -315,6 +316,7 @@ async fn alice_s_run(repo: &FakeRepo) -> RunId {
             &alice,
             None,
             None,
+            false,
         )
         .await
         .expect("insert")

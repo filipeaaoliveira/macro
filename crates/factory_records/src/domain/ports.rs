@@ -6,9 +6,9 @@ use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
 use crate::domain::models::{
-    CheckRound, CheckRoundOutcome, CheckRoundStart, ClaimedSession, EntryId, HandBack, HandedBack,
-    Outcome, PassedOver, Repository, Role, Run, RunId, RunInsert, RunOutcome, SessionStep, Step,
-    StepKey, StepSession, StoppingSession, Tampering, TaskLink,
+    CheckRound, CheckRoundOutcome, CheckRoundStart, ClaimedSession, ControlFileChanges, EntryId,
+    HandBack, HandedBack, Outcome, PassedOver, Repository, Role, Run, RunId, RunInsert, RunOutcome,
+    SessionStep, Step, StepKey, StepSession, StoppingSession, TaskLink, TeamMembership,
 };
 
 /// Where Runs and their Steps are kept.
@@ -22,7 +22,8 @@ pub trait RunRepository: Send + Sync + 'static {
 
     /// Keep a new Run of `user_id` that has not started yet, of the built-in
     /// Flow named `flow`, working on the task document `task_id` and in
-    /// `repository` if they are given, in one write.
+    /// `repository` if they are given, in one write. `created_in_person`
+    /// says whether its owner created it in their own signed-in session.
     fn insert_run(
         &self,
         id: RunId,
@@ -31,6 +32,7 @@ pub trait RunRepository: Send + Sync + 'static {
         user_id: &MacroUserIdStr<'static>,
         task_id: Option<Uuid>,
         repository: Option<&Repository>,
+        created_in_person: bool,
     ) -> impl Future<Output = Result<RunInsert, Self::Err>> + Send;
 
     /// Link the Run to the task document `task_id`, replacing any task it
@@ -288,27 +290,34 @@ pub trait RunRepository: Send + Sync + 'static {
         sha: &str,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
-    /// Keep the Control Files the Run's branch changed that its request does
-    /// not name, as last read, replacing what was kept before: none clears
-    /// it. Keeping it again changes nothing.
-    fn set_tampering(
+    /// Keep the Control Files the Run's branch changed, as last read,
+    /// replacing what was kept before: none clears it. Keeping it again
+    /// changes nothing.
+    fn set_control_file_changes(
         &self,
         id: RunId,
-        tampering: Option<&Tampering>,
+        changes: Option<&ControlFileChanges>,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
-    /// The Control File patterns `user_id` set for their Runs; none when
-    /// they set none, so the factory's default applies.
-    fn control_files(
+    /// The team `user_id` is on, and whether they administer it; none when
+    /// they are on no team.
+    fn team_of(
         &self,
         user_id: &MacroUserIdStr<'static>,
+    ) -> impl Future<Output = Result<Option<TeamMembership>, Self::Err>> + Send;
+
+    /// The Control File patterns the team `team_id` set for its members'
+    /// Runs; none when it set none, so the factory's default applies.
+    fn team_control_files(
+        &self,
+        team_id: Uuid,
     ) -> impl Future<Output = Result<Option<Vec<String>>, Self::Err>> + Send;
 
-    /// Set the Control File patterns of `user_id`'s Runs; none goes back to
-    /// the factory's default.
-    fn set_control_files(
+    /// Set the Control File patterns of the team `team_id`'s Runs; none goes
+    /// back to the factory's default.
+    fn set_team_control_files(
         &self,
-        user_id: &MacroUserIdStr<'static>,
+        team_id: Uuid,
         patterns: Option<&[String]>,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 

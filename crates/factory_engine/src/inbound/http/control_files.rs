@@ -1,4 +1,4 @@
-//! The Run API's Control File settings: the patterns a person's Runs are
+//! The Run API's Control File settings: the patterns a team's Runs are
 //! checked against (`domain/control_files.rs`).
 
 use axum::{Json, extract::State, http::HeaderMap};
@@ -22,7 +22,8 @@ pub struct SetControlFilesRequest {
 }
 
 /// The Control File patterns the caller's Runs are checked against: their
-/// own, or the factory's default.
+/// team's, or the factory's default, and whether the caller may change
+/// them.
 #[utoipa::path(
     get,
     tag = "factory",
@@ -48,10 +49,10 @@ where
     Ok(Json(state.service.control_files(&actor).await?))
 }
 
-/// Set the Control File patterns the caller's Runs are checked against, or
-/// go back to the factory's default. A shorter list lets a Run's agent
-/// change more files unseen, so only the person in their own signed-in
-/// session sets it (403 otherwise).
+/// Set the Control File patterns the Runs of the caller's team are checked
+/// against, or go back to the factory's default. Only an admin or the owner
+/// of the team sets them, and a shorter list lets a Run's agent change more
+/// files unseen, so only in their own signed-in session (403 otherwise).
 #[utoipa::path(
     put,
     tag = "factory",

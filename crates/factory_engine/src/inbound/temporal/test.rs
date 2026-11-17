@@ -181,6 +181,7 @@ async fn plan_run(repo: &FakeRepo) -> RunStart {
             &julia,
             None,
             None,
+            false,
         )
         .await
         .expect("insert")
@@ -658,6 +659,7 @@ where
             &julia(),
             None,
             Some(&repository),
+            false,
         )
         .await
         .expect("insert")

@@ -75,6 +75,9 @@ pub struct StepInput<'a> {
     pub owner: &'a MacroUserIdStr<'static>,
     /// What the Run was asked to do.
     pub request: &'a str,
+    /// Whether the Run's owner created it in their own signed-in session:
+    /// only then does its request ask for the Control Files it names.
+    pub created_in_person: bool,
     /// The Macro task the Run works on: its task document's id.
     pub task_id: Option<Uuid>,
     /// The repository the Run works on, if it works on one.
@@ -429,15 +432,22 @@ pub struct RunDetail {
     pub steps: Vec<Step>,
 }
 
-/// The Control File patterns a person's Runs are checked against.
+/// The Control File patterns a person's Runs are checked against: their
+/// team's, or the factory's default.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ControlFilesSettings {
     /// The glob patterns, matched against each changed path from the
-    /// repository's root.
+    /// repository's root, ignoring case.
     pub patterns: Vec<String>,
-    /// Whether they are the factory's default: the person set none.
+    /// Whether they are the factory's default: the team set none, or the
+    /// person is on no team.
     pub is_default: bool,
+    /// The team whose patterns they are; none when the person is on no
+    /// team.
+    pub team_id: Option<Uuid>,
+    /// Whether the person may change them: they administer the team.
+    pub can_edit: bool,
 }
 
 /// A Flow a person can start a Run of.
@@ -505,11 +515,15 @@ pub enum FactoryError {
         offered: Vec<String>,
     },
     /// The Run is Tampered, and the answer approving its Gate does not
-    /// approve the Control Files its branch changed.
+    /// approve exactly the Control Files its branch changed unasked.
     #[error(
-        "the run's branch changes control files its request does not name: approve them with approveControlFiles"
+        "the run's branch changes control files its request does not ask for: approve them by listing them in approvedControlFiles"
     )]
     ControlFilesNotApproved,
+    /// Someone who does not administer a team set its Control Files, or is
+    /// on no team.
+    #[error("only an admin of a team can set its control files")]
+    NotATeamAdmin,
     /// A list of Control File patterns does not hold together.
     #[error(transparent)]
     InvalidControlFiles(#[from] ControlFilesError),

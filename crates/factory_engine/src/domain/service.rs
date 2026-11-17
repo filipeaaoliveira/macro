@@ -206,6 +206,7 @@ where
         request: String,
         task_id: Option<Uuid>,
         repo_url: Option<String>,
+        in_person: bool,
     ) -> Result<RunDetail, FactoryError> {
         let built_in = BuiltInFlow::named(&flow).ok_or(FactoryError::UnknownFlow)?;
         let flow = built_in.read(|step| self.executor.serves(step))?;
@@ -246,6 +247,7 @@ where
                 &actor,
                 task_id,
                 repository.as_ref(),
+                in_person,
             )
             .await
             .map_err(internal)?
@@ -357,7 +359,7 @@ where
         seq: u16,
         answer: Outcome,
         note: Option<String>,
-        approve_control_files: bool,
+        approved_control_files: Option<Vec<String>>,
     ) -> Result<(), FactoryError> {
         let note_bytes = note.as_ref().map_or(0, String::len);
         if note_bytes > MAX_NOTE_BYTES {
@@ -387,16 +389,25 @@ where
         }
 
         // A Tampered Run merges only once its owner approves the Control
-        // Files its branch changed: approving its Gate must say so, and
-        // the answer keeps the files approved, which the merge checks. The
-        // pull request Steps keep them before the Gate opens, and nothing
-        // changes them while the Run waits.
-        let approved_control_files = match &run.tampering {
-            Some(tampering) if answer.as_str() == APPROVE => {
-                if !approve_control_files {
+        // Files its branch changed unasked: approving its Gate must list the
+        // ones they saw, which must be the Run's, and the answer keeps them
+        // for the merge to check. The pull request Steps keep them before
+        // the Gate opens, and nothing changes them while the Run waits.
+        let tampered = run
+            .control_files
+            .as_ref()
+            .filter(|changes| changes.is_tampered());
+        let approved_control_files = match tampered {
+            Some(changes) if answer.as_str() == APPROVE => {
+                let mut seen =
+                    approved_control_files.ok_or(FactoryError::ControlFilesNotApproved)?;
+                let mut kept = changes.tampered.clone();
+                seen.sort();
+                kept.sort();
+                if seen != kept {
                     return Err(FactoryError::ControlFilesNotApproved);
                 }
-                Some(tampering.files.clone())
+                Some(changes.tampered.clone())
             }
             _ => None,
         };
@@ -464,16 +475,20 @@ where
         &self,
         actor: &MacroUserIdStr<'static>,
     ) -> Result<ControlFilesSettings, FactoryError> {
-        let own = self.repo.control_files(actor).await.map_err(internal)?;
-        Ok(match own {
-            Some(patterns) => ControlFilesSettings {
-                patterns,
-                is_default: false,
-            },
-            None => ControlFilesSettings {
-                patterns: ControlFiles::default_patterns(),
-                is_default: true,
-            },
+        let team = self.repo.team_of(actor).await.map_err(internal)?;
+        let own = match team {
+            Some(team) => self
+                .repo
+                .team_control_files(team.team_id)
+                .await
+                .map_err(internal)?,
+            None => None,
+        };
+        Ok(ControlFilesSettings {
+            is_default: own.is_none(),
+            patterns: own.unwrap_or_else(ControlFiles::default_patterns),
+            team_id: team.map(|team| team.team_id),
+            can_edit: team.is_some_and(|team| team.admin),
         })
     }
 
@@ -486,10 +501,16 @@ where
         if let Some(patterns) = &patterns {
             ControlFiles::parse(patterns)?;
         }
-        self.known(&actor).await?;
+        let team = self
+            .repo
+            .team_of(&actor)
+            .await
+            .map_err(internal)?
+            .filter(|team| team.admin)
+            .ok_or(FactoryError::NotATeamAdmin)?;
 
         self.repo
-            .set_control_files(&actor, patterns.as_deref())
+            .set_team_control_files(team.team_id, patterns.as_deref())
             .await
             .map_err(internal)?;
         self.control_files(&actor).await
@@ -604,6 +625,7 @@ where
             role: request.role.as_ref(),
             owner: &run.user_id,
             request: &run.request,
+            created_in_person: run.created_in_person,
             task_id: run.task_id,
             repository: run.repository.as_ref(),
             earlier: &earlier,

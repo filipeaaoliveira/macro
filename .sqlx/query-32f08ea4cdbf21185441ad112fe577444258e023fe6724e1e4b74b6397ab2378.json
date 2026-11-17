@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT control_files FROM factory_settings WHERE user_id = $1",
+  "query": "SELECT control_files FROM factory_team_settings WHERE team_id = $1",
   "describe": {
     "columns": [
       {
@@ -11,12 +11,12 @@
     ],
     "parameters": {
       "Left": [
-        "Text"
+        "Uuid"
       ]
     },
     "nullable": [
       false
     ]
   },
-  "hash": "93a0ba46816f97819dd79dab5b3da1a804d13058a59f1fadbf23cd310291eac5"
+  "hash": "32f08ea4cdbf21185441ad112fe577444258e023fe6724e1e4b74b6397ab2378"
 }

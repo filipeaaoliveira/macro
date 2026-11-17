@@ -14,8 +14,8 @@ use axum::{
     routing::{get, post, put},
 };
 use factory_records::domain::models::{
-    EntryId, Gate, GateAnswer, HandBack, Outcome, Run, RunEnd, RunId, RunOutcome, Step, StepEnd,
-    Tampering,
+    ControlFileChanges, EntryId, Gate, GateAnswer, HandBack, Outcome, Run, RunEnd, RunId,
+    RunOutcome, Step, StepEnd,
 };
 use macro_authorization::{
     CODE_EXECUTION_HEADER, MacroAuthorizationExtractor, MacroAuthorizationService,
@@ -190,11 +190,11 @@ pub struct AnswerGateRequest {
     /// What the person adds, for the Run's later Steps to read.
     #[serde(default)]
     pub note: Option<String>,
-    /// Whether the person approves the Control Files the Run's branch
-    /// changed that its request does not name: required to approve a Gate
-    /// of a Tampered Run.
+    /// The Control Files the Run's branch changed unasked that the person
+    /// saw and approves: required to approve a Gate of a Tampered Run, and
+    /// must be exactly its `controlFiles.tampered` (empty when `unlisted`).
     #[serde(default)]
-    pub approve_control_files: bool,
+    pub approved_control_files: Option<Vec<String>>,
 }
 
 /// Request body for handing back an agent Step's result.
@@ -255,18 +255,30 @@ where
 pub async fn create_run_handler<S, Auth>(
     State(state): State<FactoryRouterState<S, Auth>>,
     caller: MacroAuthorizationExtractor<Auth, UserOrInternal>,
+    headers: HeaderMap,
     Json(body): Json<CreateRunRequest>,
 ) -> Result<(StatusCode, Json<RunDetail>), FactoryError>
 where
     S: FactoryService,
     Auth: MacroAuthorizationService,
 {
+    // Only a Run its owner created in person asks for the Control Files its
+    // request names: an agent could otherwise name the file it means to
+    // weaken.
+    let created_in_person = is_in_person(&caller.authorization, &headers);
     // The id is lowercase, whatever case the caller named it in: a
     // `MacroUserIdStr` lowercases what it parses, as `"User".id` is stored.
     let actor = caller.authorization.user.macro_user_id;
     let created = state
         .service
-        .create_run(actor, body.flow, body.request, body.task_id, body.repo_url)
+        .create_run(
+            actor,
+            body.flow,
+            body.request,
+            body.task_id,
+            body.repo_url,
+            created_in_person,
+        )
         .await?;
     Ok((StatusCode::CREATED, Json(created)))
 }
@@ -379,7 +391,7 @@ where
             params.seq,
             body.answer,
             body.note,
-            body.approve_control_files,
+            body.approved_control_files,
         )
         .await?;
     Ok(StatusCode::ACCEPTED)
@@ -392,13 +404,17 @@ fn in_person(
     authorization: UserOrInternalAuthorization,
     headers: &HeaderMap,
 ) -> Result<MacroUserIdStr<'static>, FactoryError> {
-    let in_person = authorization.caller == UserOrInternalCaller::User
-        && authorization.user.is_human_session()
-        && !headers.contains_key(CODE_EXECUTION_HEADER);
-    if !in_person {
+    if !is_in_person(&authorization, headers) {
         return Err(FactoryError::NotAPerson);
     }
     Ok(authorization.user.macro_user_id)
+}
+
+/// Whether the caller is the person in their own signed-in session.
+fn is_in_person(authorization: &UserOrInternalAuthorization, headers: &HeaderMap) -> bool {
+    authorization.caller == UserOrInternalCaller::User
+        && authorization.user.is_human_session()
+        && !headers.contains_key(CODE_EXECUTION_HEADER)
 }
 
 /// Cancel one of the caller's Runs. Its running Step or Gate stops, and
@@ -541,7 +557,9 @@ impl FactoryError {
             | FactoryError::HandBackTooLarge { .. }
             | FactoryError::ControlFilesNotApproved
             | FactoryError::InvalidControlFiles(_) => StatusCode::BAD_REQUEST,
-            FactoryError::NotTheOwner | FactoryError::NotAPerson => StatusCode::FORBIDDEN,
+            FactoryError::NotTheOwner | FactoryError::NotAPerson | FactoryError::NotATeamAdmin => {
+                StatusCode::FORBIDDEN
+            }
             FactoryError::NotFound | FactoryError::TaskNotFound => StatusCode::NOT_FOUND,
             FactoryError::RunEnded | FactoryError::AnswerRefused(_) | FactoryError::StepEnded => {
                 StatusCode::CONFLICT
@@ -563,7 +581,7 @@ pub enum RunErrorCode {
     /// push to it.
     NoPushAccess,
     /// The Run is Tampered, and approving its Gate needs
-    /// `approveControlFiles`.
+    /// `approvedControlFiles` listing its Tampered files.
     ControlFilesNotApproved,
 }
 
@@ -644,7 +662,7 @@ impl IntoResponse for FactoryError {
         StepEnd,
         Gate,
         GateAnswer,
-        Tampering,
+        ControlFileChanges,
         ControlFilesSettings,
         control_files::SetControlFilesRequest,
         MacroUserIdStr,
