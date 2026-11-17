@@ -48,7 +48,7 @@ pub struct Config {
     pub factory_review_rounds: Option<NonZeroU8>,
     /// The most questions each agent Step of a Run may ask the Run's owner
     /// (`FACTORY_QUESTIONS`): the next one ends the Run for a person. Two
-    /// when unset; zero sends each question to a person that way.
+    /// when unset; zero offers agents no question.
     pub factory_questions: Option<u8>,
     /// The retired `FACTORY_AGENT_ID`, read only to refuse it: set without
     /// `FACTORY_AGENTS`, the service does not start, and its error names

@@ -17,7 +17,8 @@ worker that walks each Run's Flow, in one process.
   Steps), `FACTORY_REVIEW_ROUNDS` (optional: the most rounds a `code` Run's
   review panel runs, three when unset), `FACTORY_QUESTIONS` (optional: the
   most questions each agent Step may ask the Run's owner before the next
-  one ends the Run for a person, two when unset).
+  one ends the Run for a person, two when unset; zero offers agents no
+  question).
 
 ## Scope
 
