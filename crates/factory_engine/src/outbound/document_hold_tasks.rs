@@ -4,17 +4,13 @@
 mod test;
 
 use document_storage_service_client::DocumentStorageServiceClient;
-use document_storage_service_client::task::{
-    CreateTaskError, NewTask, NewTaskProperty, NewTaskPropertyValue, TaskEntityReference,
-};
+use document_storage_service_client::task::{CreateTaskError, NewTask};
 use macro_user_id::user_id::MacroUserIdStr;
-use models_properties::EntityType;
-use models_properties::api::responses::PropertyValue;
-use system_properties::SystemPropertyKey;
 use uuid::Uuid;
 
 use crate::domain::main_hold::HoldTask;
 use crate::domain::ports::HoldTasks;
+use crate::outbound::task_project::{initiative_of, project_property};
 
 /// Files a hold's task as the Run's owner, in the initiative (a task's
 /// Project property) of the Run's own task.
@@ -41,31 +37,25 @@ impl DocumentHoldTasks {
     }
 
     /// The initiative of the task document `task_id`, as `owner` sees it;
-    /// none when it has none, or the owner no longer sees it.
+    /// none when it has none, or the owner no longer sees it. One that
+    /// cannot be read files the task in none rather than hold the filing
+    /// back: that the hold's task is there matters more than where.
     async fn initiative_of(
         &self,
         owner: &MacroUserIdStr<'static>,
         task_id: Uuid,
-    ) -> Result<Option<String>, DocumentHoldTasksErr> {
-        let properties = self
-            .documents
-            .get_document_properties(&task_id.to_string(), owner.as_ref())
-            .await
-            .map_err(|error| DocumentHoldTasksErr(rootcause::report!("{error:#}")))?;
-        let Some(properties) = properties else {
-            return Ok(None);
-        };
-        Ok(properties
-            .properties
-            .into_iter()
-            .filter(|property| property.definition.id == SystemPropertyKey::PROJECT_UUID)
-            .find_map(|property| match property.value {
-                Some(PropertyValue::EntityRef(references)) => references
-                    .into_iter()
-                    .find(|reference| reference.entity_type == EntityType::Initiative)
-                    .map(|reference| reference.entity_id),
-                _ => None,
-            }))
+    ) -> Option<String> {
+        match initiative_of(&self.documents, owner, task_id).await {
+            Ok(initiative) => initiative,
+            Err(error) => {
+                tracing::warn!(
+                    ?error,
+                    %task_id,
+                    "the run task's project could not be read: the hold's task goes in none"
+                );
+                None
+            }
+        }
     }
 }
 
@@ -90,21 +80,10 @@ impl HoldTasks for DocumentHoldTasks {
             return Ok(task_id);
         }
         let initiative = match beside {
-            Some(task_id) => self.initiative_of(owner, task_id).await?,
+            Some(task_id) => self.initiative_of(owner, task_id).await,
             None => None,
         };
-        let property_values = initiative
-            .map(|initiative| NewTaskProperty {
-                property_id: SystemPropertyKey::PROJECT_UUID.to_string(),
-                value: NewTaskPropertyValue::EntityReference {
-                    reference: TaskEntityReference {
-                        entity_id: initiative,
-                        entity_type: EntityType::Initiative,
-                    },
-                },
-            })
-            .into_iter()
-            .collect();
+        let property_values = initiative.map(project_property).into_iter().collect();
         // Shared with the owner's team, as the tasks people make are.
         let created = self
             .documents

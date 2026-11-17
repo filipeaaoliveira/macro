@@ -30,3 +30,13 @@ impl From<EntityPropertyWithDefinition> for crate::api::EntityPropertyWithDefini
         }
     }
 }
+
+// The properties API answers `GET /properties/entities/{type}/{id}` with it,
+// and its clients read it here, so both sides share one shape. Its doc line
+// is its OpenAPI description.
+/// Response for document/entity properties endpoint.
+#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct EntityPropertiesResponse {
+    pub entity_id: String,
+    pub properties: Vec<EntityPropertyWithDefinition>,
+}

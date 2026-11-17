@@ -190,3 +190,53 @@ async fn a_comment_is_posted_on_the_passage() {
         .await
         .expect("commented");
 }
+
+/// A task's properties, as document storage answered for a task in a
+/// project, with its owner's id changed.
+const TASK_PROPERTIES: &str = include_str!("fixtures/task_properties.json");
+
+/// The properties read in the shape document storage answers with, the
+/// Project's reference to its initiative included.
+#[tokio::test]
+async fn a_task_s_properties_read_as_document_storage_answers_them() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(
+            "/properties/entities/DOCUMENT/01a1eb0a-99e6-7e44-a502-d8fd8f59a274",
+        ))
+        .and(header(
+            "x-document-storage-service-user-id",
+            "macro|julia@example.com",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(TASK_PROPERTIES, "application/json"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let properties = DocumentStorageServiceClient::new("internal-key".into(), server.uri())
+        .get_document_properties(
+            "01a1eb0a-99e6-7e44-a502-d8fd8f59a274",
+            "macro|julia@example.com",
+        )
+        .await
+        .expect("read")
+        .expect("visible");
+
+    assert_eq!(properties.entity_id, "01a1eb0a-99e6-7e44-a502-d8fd8f59a274");
+    assert_eq!(properties.properties.len(), 11);
+    let project = properties
+        .properties
+        .iter()
+        .find(|property| property.definition.display_name == "Project")
+        .expect("a Project");
+    assert_eq!(
+        serde_json::to_value(&project.value).expect("value"),
+        json!({
+            "type": "EntityReference",
+            "value": [{
+                "entity_id": "01a1eb09-4b32-7231-85fb-084e173b74db",
+                "entity_type": "INITIATIVE"
+            }]
+        })
+    );
+}

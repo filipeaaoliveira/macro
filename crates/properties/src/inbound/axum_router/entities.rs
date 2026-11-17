@@ -17,7 +17,7 @@ use entity_access::domain::models::EditAccessLevel;
 use entity_access::domain::ports::EntityAccessService;
 use macro_authorization::{MacroAuthorizationExtractor, MacroAuthorizationService, UserOrInternal};
 use models_properties::api::{PropertyTargetEntityType, PropertyTargetReference, SetPropertyValue};
-use models_properties::service::entity_property_with_definition::EntityPropertyWithDefinition;
+pub use models_properties::service::entity_property_with_definition::EntityPropertiesResponse;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use utoipa::ToSchema;
@@ -36,13 +36,6 @@ mod test;
 
 // Re-export EntityQueryParams from models_properties for convenience
 pub use models_properties::api::EntityQueryParams;
-
-/// Response for document/entity properties endpoint.
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-pub struct EntityPropertiesResponse {
-    pub entity_id: String,
-    pub properties: Vec<EntityPropertyWithDefinition>,
-}
 
 /// Type-safe request for setting entity property values.
 #[derive(Debug, Serialize, Deserialize, ToSchema)]

@@ -440,6 +440,8 @@ period, as that Run's owner, in the initiative of that Run's task (its
 Project property), naming the factory merges to the base since its checks
 last passed, oldest first, with their pull requests
 (`outbound/document_hold_tasks.rs`, through the document storage service).
+A Run task whose project cannot be read files the task in no initiative,
+with a warning, rather than hold the filing back.
 The task is claimed before it is filed, so a retry or a second look files
 none; the claim chooses the id it is filed under, kept by every later
 claim of the red period, so a filing whose answer was lost is found under

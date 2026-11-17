@@ -1,0 +1,459 @@
+{
+  "entity_id": "01a1eb0a-99e6-7e44-a502-d8fd8f59a274",
+  "properties": [
+    {
+      "property": {
+        "id": "01a1eb0a-9a05-7ae7-9748-748058df0d5e",
+        "entity_id": "01a1eb0a-99e6-7e44-a502-d8fd8f59a274",
+        "entity_type": "TASK",
+        "property_definition_id": "00000001-0000-0000-0000-000000000001",
+        "created_at": "2026-11-17T19:45:02.982493Z",
+        "updated_at": "2026-11-17T19:45:03.005986Z"
+      },
+      "definition": {
+        "id": "00000001-0000-0000-0000-000000000001",
+        "owner": {
+          "scope": "system"
+        },
+        "display_name": "Assignees",
+        "data_type": "ENTITY",
+        "is_multi_select": true,
+        "specific_entity_type": "USER",
+        "created_at": "2026-11-15T17:36:34.117779Z",
+        "updated_at": "2026-11-15T17:36:34.117779Z",
+        "is_system": true,
+        "is_metadata": false
+      },
+      "value": {
+        "type": "EntityReference",
+        "value": [
+          {
+            "entity_id": "macro|julia@example.com",
+            "entity_type": "USER"
+          }
+        ]
+      },
+      "options": null
+    },
+    {
+      "property": {
+        "id": "01a1eb0a-9a05-7aec-8466-2c552bb777e7",
+        "entity_id": "01a1eb0a-99e6-7e44-a502-d8fd8f59a274",
+        "entity_type": "TASK",
+        "property_definition_id": "00000001-0000-0000-0000-000000000007",
+        "created_at": "2026-11-17T19:45:02.982493Z",
+        "updated_at": "2026-11-17T19:45:02.982493Z"
+      },
+      "definition": {
+        "id": "00000001-0000-0000-0000-000000000007",
+        "owner": {
+          "scope": "system"
+        },
+        "display_name": "Depends On",
+        "data_type": "ENTITY",
+        "is_multi_select": true,
+        "specific_entity_type": "TASK",
+        "created_at": "2026-11-15T17:36:34.117779Z",
+        "updated_at": "2026-11-15T17:36:34.117779Z",
+        "is_system": true,
+        "is_metadata": false
+      },
+      "value": null,
+      "options": null
+    },
+    {
+      "property": {
+        "id": "01a1eb0a-9a05-7cf3-85b4-8ffec413dfe2",
+        "entity_id": "01a1eb0a-99e6-7e44-a502-d8fd8f59a274",
+        "entity_type": "TASK",
+        "property_definition_id": "00000001-0000-0000-0000-000000000004",
+        "created_at": "2026-11-17T19:45:02.982493Z",
+        "updated_at": "2026-11-17T19:45:02.982493Z"
+      },
+      "definition": {
+        "id": "00000001-0000-0000-0000-000000000004",
+        "owner": {
+          "scope": "system"
+        },
+        "display_name": "Due Date",
+        "data_type": "DATE",
+        "is_multi_select": false,
+        "specific_entity_type": null,
+        "created_at": "2026-11-15T17:36:34.117779Z",
+        "updated_at": "2026-11-15T17:36:34.117779Z",
+        "is_system": true,
+        "is_metadata": false
+      },
+      "value": null,
+      "options": null
+    },
+    {
+      "property": {
+        "id": "01a1eb0a-9a05-7c89-ad87-8494b8e1ca7b",
+        "entity_id": "01a1eb0a-99e6-7e44-a502-d8fd8f59a274",
+        "entity_type": "TASK",
+        "property_definition_id": "00000001-0000-0000-0000-000000000008",
+        "created_at": "2026-11-17T19:45:02.982493Z",
+        "updated_at": "2026-11-17T19:45:02.982493Z"
+      },
+      "definition": {
+        "id": "00000001-0000-0000-0000-000000000008",
+        "owner": {
+          "scope": "system"
+        },
+        "display_name": "Effort",
+        "data_type": "SELECT_STRING",
+        "is_multi_select": false,
+        "specific_entity_type": null,
+        "created_at": "2026-11-15T17:36:34.117779Z",
+        "updated_at": "2026-11-15T17:36:34.117779Z",
+        "is_system": true,
+        "is_metadata": false
+      },
+      "value": null,
+      "options": [
+        {
+          "id": "00000001-0000-0000-0008-000000000001",
+          "property_definition_id": "00000001-0000-0000-0000-000000000008",
+          "display_order": 0,
+          "value": {
+            "type": "string",
+            "value": "Small"
+          },
+          "color": null,
+          "created_at": "2026-11-15T17:36:34.117779Z",
+          "updated_at": "2026-11-15T17:36:34.117779Z"
+        },
+        {
+          "id": "00000001-0000-0000-0008-000000000002",
+          "property_definition_id": "00000001-0000-0000-0000-000000000008",
+          "display_order": 1,
+          "value": {
+            "type": "string",
+            "value": "Medium"
+          },
+          "color": null,
+          "created_at": "2026-11-15T17:36:34.117779Z",
+          "updated_at": "2026-11-15T17:36:34.117779Z"
+        },
+        {
+          "id": "00000001-0000-0000-0008-000000000003",
+          "property_definition_id": "00000001-0000-0000-0000-000000000008",
+          "display_order": 2,
+          "value": {
+            "type": "string",
+            "value": "Large"
+          },
+          "color": null,
+          "created_at": "2026-11-15T17:36:34.117779Z",
+          "updated_at": "2026-11-15T17:36:34.117779Z"
+        }
+      ]
+    },
+    {
+      "property": {
+        "id": "01a1eb0a-9a05-736b-8863-65949d72bd2d",
+        "entity_id": "01a1eb0a-99e6-7e44-a502-d8fd8f59a274",
+        "entity_type": "TASK",
+        "property_definition_id": "00000001-0000-0000-0000-000000000005",
+        "created_at": "2026-11-17T19:45:02.982493Z",
+        "updated_at": "2026-11-17T19:45:02.982493Z"
+      },
+      "definition": {
+        "id": "00000001-0000-0000-0000-000000000005",
+        "owner": {
+          "scope": "system"
+        },
+        "display_name": "Parent Task",
+        "data_type": "ENTITY",
+        "is_multi_select": false,
+        "specific_entity_type": "TASK",
+        "created_at": "2026-11-15T17:36:34.117779Z",
+        "updated_at": "2026-11-15T17:36:34.117779Z",
+        "is_system": true,
+        "is_metadata": false
+      },
+      "value": null,
+      "options": null
+    },
+    {
+      "property": {
+        "id": "01a1eb0a-9a05-7640-8319-4a58c27781cc",
+        "entity_id": "01a1eb0a-99e6-7e44-a502-d8fd8f59a274",
+        "entity_type": "TASK",
+        "property_definition_id": "00000001-0000-0000-0000-000000000003",
+        "created_at": "2026-11-17T19:45:02.982493Z",
+        "updated_at": "2026-11-17T19:45:02.982493Z"
+      },
+      "definition": {
+        "id": "00000001-0000-0000-0000-000000000003",
+        "owner": {
+          "scope": "system"
+        },
+        "display_name": "Priority",
+        "data_type": "SELECT_STRING",
+        "is_multi_select": false,
+        "specific_entity_type": null,
+        "created_at": "2026-11-15T17:36:34.117779Z",
+        "updated_at": "2026-11-15T17:36:34.117779Z",
+        "is_system": true,
+        "is_metadata": false
+      },
+      "value": null,
+      "options": [
+        {
+          "id": "00000001-0000-0000-0003-000000000001",
+          "property_definition_id": "00000001-0000-0000-0000-000000000003",
+          "display_order": 0,
+          "value": {
+            "type": "string",
+            "value": "Low"
+          },
+          "color": null,
+          "created_at": "2026-11-15T17:36:34.117779Z",
+          "updated_at": "2026-11-15T17:36:34.117779Z"
+        },
+        {
+          "id": "00000001-0000-0000-0003-000000000002",
+          "property_definition_id": "00000001-0000-0000-0000-000000000003",
+          "display_order": 1,
+          "value": {
+            "type": "string",
+            "value": "Medium"
+          },
+          "color": null,
+          "created_at": "2026-11-15T17:36:34.117779Z",
+          "updated_at": "2026-11-15T17:36:34.117779Z"
+        },
+        {
+          "id": "00000001-0000-0000-0003-000000000003",
+          "property_definition_id": "00000001-0000-0000-0000-000000000003",
+          "display_order": 2,
+          "value": {
+            "type": "string",
+            "value": "High"
+          },
+          "color": null,
+          "created_at": "2026-11-15T17:36:34.117779Z",
+          "updated_at": "2026-11-15T17:36:34.117779Z"
+        },
+        {
+          "id": "00000001-0000-0000-0003-000000000004",
+          "property_definition_id": "00000001-0000-0000-0000-000000000003",
+          "display_order": 3,
+          "value": {
+            "type": "string",
+            "value": "Urgent"
+          },
+          "color": null,
+          "created_at": "2026-11-15T17:36:34.117779Z",
+          "updated_at": "2026-11-15T17:36:34.117779Z"
+        }
+      ]
+    },
+    {
+      "property": {
+        "id": "01a1eb0a-9a45-712f-be66-f42e2d90e13c",
+        "entity_id": "01a1eb0a-99e6-7e44-a502-d8fd8f59a274",
+        "entity_type": "TASK",
+        "property_definition_id": "00000001-0000-0000-0000-000000000014",
+        "created_at": "2026-11-17T19:45:03.040992Z",
+        "updated_at": "2026-11-17T19:45:03.040992Z"
+      },
+      "definition": {
+        "id": "00000001-0000-0000-0000-000000000014",
+        "owner": {
+          "scope": "system"
+        },
+        "display_name": "Project",
+        "data_type": "ENTITY",
+        "is_multi_select": false,
+        "specific_entity_type": "INITIATIVE",
+        "created_at": "2026-11-15T17:36:36.980465Z",
+        "updated_at": "2026-11-15T17:36:36.980465Z",
+        "is_system": true,
+        "is_metadata": false
+      },
+      "value": {
+        "type": "EntityReference",
+        "value": [
+          {
+            "entity_id": "01a1eb09-4b32-7231-85fb-084e173b74db",
+            "entity_type": "INITIATIVE"
+          }
+        ]
+      },
+      "options": null
+    },
+    {
+      "property": {
+        "id": "01a1eb0a-9a05-7b98-ad5c-c3be77e9ea64",
+        "entity_id": "01a1eb0a-99e6-7e44-a502-d8fd8f59a274",
+        "entity_type": "TASK",
+        "property_definition_id": "00000001-0000-0000-0000-00000000000a",
+        "created_at": "2026-11-17T19:45:02.982493Z",
+        "updated_at": "2026-11-17T19:45:02.982493Z"
+      },
+      "definition": {
+        "id": "00000001-0000-0000-0000-00000000000a",
+        "owner": {
+          "scope": "system"
+        },
+        "display_name": "Relevant Docs",
+        "data_type": "ENTITY",
+        "is_multi_select": true,
+        "specific_entity_type": "DOCUMENT",
+        "created_at": "2026-11-15T17:36:34.117779Z",
+        "updated_at": "2026-11-15T17:36:34.117779Z",
+        "is_system": true,
+        "is_metadata": false
+      },
+      "value": null,
+      "options": null
+    },
+    {
+      "property": {
+        "id": "01a1eb0a-9a05-7e2c-b6e5-37e1a4a4e7cf",
+        "entity_id": "01a1eb0a-99e6-7e44-a502-d8fd8f59a274",
+        "entity_type": "TASK",
+        "property_definition_id": "00000001-0000-0000-0000-000000000002",
+        "created_at": "2026-11-17T19:45:02.982493Z",
+        "updated_at": "2026-11-17T19:45:03.015608Z"
+      },
+      "definition": {
+        "id": "00000001-0000-0000-0000-000000000002",
+        "owner": {
+          "scope": "system"
+        },
+        "display_name": "Status",
+        "data_type": "SELECT_STRING",
+        "is_multi_select": false,
+        "specific_entity_type": null,
+        "created_at": "2026-11-15T17:36:34.117779Z",
+        "updated_at": "2026-11-15T17:36:34.117779Z",
+        "is_system": true,
+        "is_metadata": false
+      },
+      "value": {
+        "type": "SelectOption",
+        "value": [
+          "00000001-0000-0000-0002-000000000001"
+        ]
+      },
+      "options": [
+        {
+          "id": "00000001-0000-0000-0002-000000000001",
+          "property_definition_id": "00000001-0000-0000-0000-000000000002",
+          "display_order": 0,
+          "value": {
+            "type": "string",
+            "value": "Not Started"
+          },
+          "color": null,
+          "created_at": "2026-11-15T17:36:34.117779Z",
+          "updated_at": "2026-11-15T17:36:34.117779Z"
+        },
+        {
+          "id": "00000001-0000-0000-0002-000000000002",
+          "property_definition_id": "00000001-0000-0000-0000-000000000002",
+          "display_order": 1,
+          "value": {
+            "type": "string",
+            "value": "In Progress"
+          },
+          "color": null,
+          "created_at": "2026-11-15T17:36:34.117779Z",
+          "updated_at": "2026-11-15T17:36:34.117779Z"
+        },
+        {
+          "id": "00000001-0000-0000-0002-000000000003",
+          "property_definition_id": "00000001-0000-0000-0000-000000000002",
+          "display_order": 2,
+          "value": {
+            "type": "string",
+            "value": "In Review"
+          },
+          "color": null,
+          "created_at": "2026-11-15T17:36:34.117779Z",
+          "updated_at": "2026-11-15T17:36:34.117779Z"
+        },
+        {
+          "id": "00000001-0000-0000-0002-000000000004",
+          "property_definition_id": "00000001-0000-0000-0000-000000000002",
+          "display_order": 3,
+          "value": {
+            "type": "string",
+            "value": "Completed"
+          },
+          "color": null,
+          "created_at": "2026-11-15T17:36:34.117779Z",
+          "updated_at": "2026-11-15T17:36:34.117779Z"
+        },
+        {
+          "id": "00000001-0000-0000-0002-000000000005",
+          "property_definition_id": "00000001-0000-0000-0000-000000000002",
+          "display_order": 4,
+          "value": {
+            "type": "string",
+            "value": "Canceled"
+          },
+          "color": null,
+          "created_at": "2026-11-15T17:36:34.117779Z",
+          "updated_at": "2026-11-15T17:36:34.117779Z"
+        }
+      ]
+    },
+    {
+      "property": {
+        "id": "01a1eb0a-9a05-713b-b66d-31520caa4a5c",
+        "entity_id": "01a1eb0a-99e6-7e44-a502-d8fd8f59a274",
+        "entity_type": "TASK",
+        "property_definition_id": "00000001-0000-0000-0000-000000000009",
+        "created_at": "2026-11-17T19:45:02.982493Z",
+        "updated_at": "2026-11-17T19:45:02.982493Z"
+      },
+      "definition": {
+        "id": "00000001-0000-0000-0000-000000000009",
+        "owner": {
+          "scope": "system"
+        },
+        "display_name": "Story Points",
+        "data_type": "NUMBER",
+        "is_multi_select": false,
+        "specific_entity_type": null,
+        "created_at": "2026-11-15T17:36:34.117779Z",
+        "updated_at": "2026-11-15T17:36:34.117779Z",
+        "is_system": true,
+        "is_metadata": false
+      },
+      "value": null,
+      "options": null
+    },
+    {
+      "property": {
+        "id": "01a1eb0a-9a05-7785-a520-c002f350fa15",
+        "entity_id": "01a1eb0a-99e6-7e44-a502-d8fd8f59a274",
+        "entity_type": "TASK",
+        "property_definition_id": "00000001-0000-0000-0000-000000000006",
+        "created_at": "2026-11-17T19:45:02.982493Z",
+        "updated_at": "2026-11-17T19:45:02.982493Z"
+      },
+      "definition": {
+        "id": "00000001-0000-0000-0000-000000000006",
+        "owner": {
+          "scope": "system"
+        },
+        "display_name": "Subtasks",
+        "data_type": "ENTITY",
+        "is_multi_select": true,
+        "specific_entity_type": "TASK",
+        "created_at": "2026-11-15T17:36:34.117779Z",
+        "updated_at": "2026-11-15T17:36:34.117779Z",
+        "is_system": true,
+        "is_metadata": false
+      },
+      "value": null,
+      "options": null
+    }
+  ]
+}

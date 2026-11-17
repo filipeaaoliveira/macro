@@ -7,7 +7,7 @@ mod test;
 
 use anyhow::Result;
 use models_properties::EntityType;
-use models_properties::api::responses::EntityPropertiesResponse;
+use models_properties::service::entity_property_with_definition::EntityPropertiesResponse;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 
@@ -111,6 +111,7 @@ pub enum CreateTaskError {
 impl DocumentStorageServiceClient {
     /// The properties of the document `document_id`, tasks included, as
     /// `user_id` sees them; none when it is missing or they cannot see it.
+    /// They read in the shape the properties API answers with, its own.
     #[tracing::instrument(skip(self), err)]
     pub async fn get_document_properties(
         &self,
