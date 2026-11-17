@@ -48,6 +48,14 @@ impl StepAgent for FakeAgent {
         Err(FakeError)
     }
 
+    async fn run_check(
+        &self,
+        _command: crate::domain::models::AgentCommand,
+    ) -> Result<Option<agent_session::domain::session_command::SessionCommandOutput>, FakeError>
+    {
+        Ok(None)
+    }
+
     async fn stop(
         &self,
         _key: StepKey,

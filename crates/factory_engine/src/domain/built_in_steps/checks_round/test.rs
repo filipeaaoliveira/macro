@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, LazyLock, Mutex};
 
+use agent_session::domain::session_command::SessionCommandOutput;
 use factory_records::domain::models::{
     AgentName, CheckRound, CheckRoundOutcome, EntryId, HandBack, MAX_OUTPUT_BYTES, Outcome,
     Repository, Role, RunId, StepKey, StepSession,
@@ -13,9 +14,13 @@ use super::super::BuiltInSteps;
 use crate::domain::checks::CHECKS_FILE;
 use crate::domain::fakes::{FakeGithub, FakeRepo};
 use crate::domain::flow::StepName;
-use crate::domain::models::{AgentAnswer, AgentTask, AgentTurn, StepInput, StepReport};
+use crate::domain::models::{
+    AgentAnswer, AgentCommand, AgentTask, AgentTurn, StepInput, StepReport,
+};
 use crate::domain::ports::{AgentFailure, Retryable, StepAgent, StepExecutor};
 use crate::domain::pull_request_steps::PullRequestSteps;
+
+mod verified;
 
 #[derive(Debug, thiserror::Error)]
 #[error("the agent's session failed")]
@@ -58,7 +63,14 @@ struct ScriptedAgent {
     ages: Option<FakeRepo>,
     tasks: Arc<Mutex<Vec<AgentTask>>>,
     turns: Arc<Mutex<Vec<AgentTurn>>>,
+    /// How each command run in the session's checkout ends, in order: none
+    /// for a runtime that runs no command, as a paired machine's.
+    checkout: Option<Arc<Mutex<VecDeque<Ran>>>>,
+    commands: Arc<Mutex<Vec<AgentCommand>>>,
 }
+
+/// How a command run in the checkout ended, or the session failing.
+type Ran = Result<SessionCommandOutput, SessionFailed>;
 
 impl ScriptedAgent {
     fn new(work: &'static str, later: Vec<Scripted>) -> Self {
@@ -112,6 +124,28 @@ impl StepAgent for ScriptedAgent {
             outcome: outcome(ended),
             text: text.to_string(),
         })
+    }
+
+    async fn run_check(
+        &self,
+        command: AgentCommand,
+    ) -> Result<Option<SessionCommandOutput>, SessionFailed> {
+        let Some(checkout) = &self.checkout else {
+            return Ok(None);
+        };
+        let key = command.key;
+        self.commands.lock().expect("commands").push(command);
+        let ran = checkout
+            .lock()
+            .expect("checkout")
+            .pop_front()
+            .expect("a scripted run");
+        if ran.is_err()
+            && let Some(repo) = &self.ages
+        {
+            age(repo, key);
+        }
+        ran.map(Some)
     }
 
     async fn stop(

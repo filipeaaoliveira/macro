@@ -24,7 +24,8 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261117093000_factory_check_round.sql`,
   `20261117104713_factory_step_agent.sql`,
   `20261117120425_factory_step_bot.sql`,
-  `20261117170000_factory_turn_place.sql`).
+  `20261117170000_factory_turn_place.sql`,
+  `20261117180000_factory_check_round_verified.sql`).
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
 
 ## Boundaries
@@ -75,7 +76,10 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `src/outbound/pg_run_repository/check_rounds.rs`) keep their first
   record, end and fix prompt, so a retried Step goes on with its round.
   `end_check_round_on_quota` keeps a round as ended by the agent's quota
-  (`quota_ran_out`): no fix or round follows it.
+  (`quota_ran_out`): no fix or round follows it. `record_check_result` keeps
+  how each check of a round the engine ran itself went, once per check and
+  only while the round is open, and marks the round `verified`; a round the
+  agent reported has no `results`.
   `list_steps` and `list_runs_steps` attach them to their Steps.
 - `factory_run.task_id` references `"Document"` and is cleared when the task
   document is deleted; `link_task` reports a missing task or Run instead of

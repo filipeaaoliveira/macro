@@ -189,15 +189,26 @@ pushes: the first round keeps it, with the checks and commands it runs, and
 every later round and retry goes by that record. A later round runs the
 first round's checks and any others the branch's changes now reach (every
 check when GitHub lists only part of the changes); a check only a later
-round reached is dropped again once the changes no longer reach it. The checks run where the
-agent works, by the agent: the engine can only prompt the session, so a
-round is a later prompt of the Step's session (`StepAgent::follow_up`, the
-routine sessions' `follow_up`) that asks it to run them verbatim, change
-nothing, and hand back `passed` or `failed` with a report. A failure goes
-back to the same session in another prompt with the report, and the next
-round checks the fix. Each round, with its prompts' ids, is recorded before
-it is asked (`factory_check_round`), so a retried Step goes on with its
-round; a new prompt clears the session's hand back and offers its own
+round reached is dropped again once the changes no longer reach it. The checks run in the
+agent's checkout. Where its session's runtime runs commands (a managed
+sandbox, a Macro computer), the engine runs each check there itself
+(`StepAgent::run_check`, the routine sessions' `exec`), beside the agent,
+from the repository's root, for at most `CHECK_TIMEOUT` (20 minutes), and
+its exit code decides: the round is `verified`, and each check's exit code
+and the end of its output (`results`) are recorded as it ends, so a retry
+runs only the checks still to run. An attempt runs checks for at most
+`ATTEMPT_CHECKS_FOR` (25 minutes) of its 30, and leaves the rest to its
+retry. Nothing the agent hands back decides a verified round. Elsewhere (a
+paired machine, a cloud agent: `run_check` answers none) the agent runs
+them: a round is a later prompt of the Step's session
+(`StepAgent::follow_up`, the routine sessions' `follow_up`) that asks it to
+run them verbatim, change nothing, and hand back `passed` or `failed` with a
+report; a round whose prompt was sent stays the agent's on a retry. A
+failure goes back to the same session in another prompt with the report
+(for a verified round, only the checks that failed, with their output), and
+the next round checks the fix. Each round, with its prompts' ids, is
+recorded before it runs or is asked (`factory_check_round`), so a retried
+Step goes on with its round; a new prompt clears the session's hand back and offers its own
 outcomes (`begin_turn`), and a stop watches it. A later prompt goes to the
 session the Step works in now, of the Agent that took it after any passed
 over, run by the bot recorded with it; `begin_turn` records only for that
@@ -226,8 +237,9 @@ changed nothing or no check applies, and `red` when the last round failed,
 the rounds ran out of time, or the file does not read; the `code` Flow ends
 such a Run `manual`. Its output says which, then the last report and the
 agent's work, cut to the 64 KiB a Step keeps. The rounds show on the Step
-(`checks` in the Run API). `LocalAgent` answers a round of checks `failed`:
-no check ran.
+(`checks` in the Run API, each `verified` or reported by the agent).
+`LocalAgent` runs no command, and answers a round of checks `failed`: no
+check ran.
 
 The head `ci` calls green is kept (`factory_run.merge_head_sha`);
 `ready_to_merge` ends `changed` unless the pull request's head is still that
@@ -291,7 +303,8 @@ part only.
 - Add a Role: name it on the entries that need it; every deployment's agent
   definition must then fill it, or the service does not start.
 - Add a field to the checks file: `src/domain/checks.rs` (field, check
-  and test), and the prompt in `checks_round.rs` if the agent needs it.
+  and test), then `checks_round.rs`: the prompt, if the agent needs it, and
+  the command the engine runs.
 - Add a Flow keyword: `src/domain/flow.rs` (field and check) →
   `src/domain/interpreter.rs` → `src/domain/interpreter/test.rs`.
 
@@ -309,7 +322,11 @@ part only.
   wait on a timer instead.
 - Deploy `agent_harness_service` before `factory_service`: an older harness
   drops the routine session's `repo_url`, so a `code` Run's agents would work
-  outside its repository.
+  outside its repository, and has no `exec` route, which fails a round's
+  checks instead of leaving them to the agent.
+- A verified check runs in the agent's checkout as the agent left it, not a
+  fresh clone of the pushed branch: work the agent did not commit is part of
+  what the check sees.
 - The agent pushes the Run's branch with its runtime's own git credentials
   (the egress's GitHub App token in a managed sandbox, the operator's git on
   macrod), and the pull request Steps use the owner's linked account: both

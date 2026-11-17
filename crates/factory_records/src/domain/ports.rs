@@ -6,9 +6,9 @@ use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
 use crate::domain::models::{
-    CheckRound, CheckRoundOutcome, CheckRoundStart, ClaimedSession, EntryId, HandBack, HandedBack,
-    Outcome, PassedOver, Repository, Role, Run, RunId, RunInsert, RunOutcome, SessionStep, Step,
-    StepKey, StepSession, StoppingSession, TaskLink,
+    CheckResult, CheckRound, CheckRoundOutcome, CheckRoundStart, ClaimedSession, EntryId, HandBack,
+    HandedBack, Outcome, PassedOver, Repository, Role, Run, RunId, RunInsert, RunOutcome,
+    SessionStep, Step, StepKey, StepSession, StoppingSession, TaskLink,
 };
 
 /// Where Runs and their Steps are kept.
@@ -252,6 +252,17 @@ pub trait RunRepository: Send + Sync + 'static {
         round: u8,
         outcome: CheckRoundOutcome,
         report: &str,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// Record how one check of the open round `round` of the Step `key`
+    /// ran, which the engine ran itself: the round is verified from then
+    /// on. A check whose run is recorded keeps it, and a round that ended
+    /// changes no more.
+    fn record_check_result(
+        &self,
+        key: StepKey,
+        round: u8,
+        result: &CheckResult,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// Record that the agent's quota ran out on the round `round` of the

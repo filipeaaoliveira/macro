@@ -6,9 +6,10 @@ use std::sync::{Arc, Mutex};
 use agent_session::domain::session_task::TaskDocumentId;
 use chrono::Utc;
 use factory_records::domain::models::{
-    CheckRound, CheckRoundEnd, CheckRoundOutcome, CheckRoundStart, ClaimedSession, EntryId, Gate,
-    HandBack, HandedBack, Outcome, PassedOver, Repository, Role, Run, RunEnd, RunId, RunInsert,
-    RunOutcome, SessionStep, Step, StepEnd, StepKey, StepSession, StoppingSession, TaskLink,
+    CheckResult, CheckRound, CheckRoundEnd, CheckRoundOutcome, CheckRoundStart, ClaimedSession,
+    EntryId, Gate, HandBack, HandedBack, Outcome, PassedOver, Repository, Role, Run, RunEnd, RunId,
+    RunInsert, RunOutcome, SessionStep, Step, StepEnd, StepKey, StepSession, StoppingSession,
+    TaskLink,
 };
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
@@ -601,6 +602,8 @@ impl RunRepository for FakeRepo {
                     check_action_id: start.check_action_id,
                     fix_action_id: None,
                     quota_ran_out: false,
+                    verified: false,
+                    results: Vec::new(),
                 },
             ));
         }
@@ -624,6 +627,25 @@ impl RunRepository for FakeRepo {
                 report: report.to_string(),
                 ended_at: Utc::now(),
             });
+        }
+        Ok(())
+    }
+
+    async fn record_check_result(
+        &self,
+        key: StepKey,
+        round: u8,
+        result: &CheckResult,
+    ) -> Result<(), FakeError> {
+        let mut rounds = self.check_rounds.lock().expect("rounds");
+        if let Some((_, kept)) = rounds
+            .iter_mut()
+            .find(|(step, kept)| *step == key && kept.round == round)
+            && kept.end.is_none()
+            && !kept.results.iter().any(|run| run.name == result.name)
+        {
+            kept.verified = true;
+            kept.results.push(result.clone());
         }
         Ok(())
     }

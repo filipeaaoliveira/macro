@@ -131,6 +131,20 @@ pub struct AgentTurn {
     pub answer_by: DateTime<Utc>,
 }
 
+/// A command run in the checkout of the session a Step's agent works in,
+/// beside the agent: one check of a round the engine runs itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentCommand {
+    /// The Step: its Run and its place in it.
+    pub key: StepKey,
+    /// The Run's owner, whose session it is.
+    pub owner: MacroUserIdStr<'static>,
+    /// The Role the agent fills, whose Agent's session the Step works in.
+    pub role: Role,
+    /// What to run, from the checkout's root.
+    pub command: agent_session::domain::session_command::SessionCommand,
+}
+
 /// A GitHub repository, named by its owner and name: the two segments of
 /// the `https://github.com/owner/name` URL a coding session takes.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -11,7 +11,8 @@ use uuid::Uuid;
 
 use super::{PgRunRepository, PgRunRepositoryErr};
 use crate::domain::models::{
-    CheckRound, CheckRoundEnd, CheckRoundOutcome, CheckRoundStart, Outcome, RunId, StepKey,
+    CheckResult, CheckRound, CheckRoundEnd, CheckRoundOutcome, CheckRoundStart, Outcome, RunId,
+    StepKey,
 };
 
 struct CheckRoundRow {
@@ -29,6 +30,8 @@ struct CheckRoundRow {
     ended_at: Option<DateTime<Utc>>,
     fix_action_id: Option<Uuid>,
     quota_ran_out: bool,
+    verified: bool,
+    results: Option<serde_json::Value>,
 }
 
 impl TryFrom<CheckRoundRow> for CheckRound {
@@ -48,7 +51,14 @@ impl TryFrom<CheckRoundRow> for CheckRound {
             (None, None, None) => None,
             _ => return Err(PgRunRepositoryErr::PartialEnd),
         };
+        let results: Vec<CheckResult> = match row.results {
+            Some(results) => serde_json::from_value(results)
+                .map_err(|_| PgRunRepositoryErr::UnreadableCheckResults)?,
+            None => Vec::new(),
+        };
         Ok(CheckRound {
+            verified: row.verified,
+            results,
             round: u8::try_from(row.round)
                 .map_err(|_| PgRunRepositoryErr::OutOfRange(row.round))?,
             checks: row.checks,
@@ -76,7 +86,7 @@ impl PgRunRepository {
             SELECT
                 run_id, seq, round, work_output, checks, commands, declared, check_action_id,
                 started_at,
-                outcome, report, ended_at, fix_action_id, quota_ran_out
+                outcome, report, ended_at, fix_action_id, quota_ran_out, verified, results
             FROM factory_check_round
             WHERE run_id = ANY($1)
             ORDER BY run_id, seq, round
@@ -107,7 +117,7 @@ impl PgRunRepository {
             SELECT
                 run_id, seq, round, work_output, checks, commands, declared, check_action_id,
                 started_at,
-                outcome, report, ended_at, fix_action_id, quota_ran_out
+                outcome, report, ended_at, fix_action_id, quota_ran_out, verified, results
             FROM factory_check_round
             WHERE run_id = $1 AND seq = $2
             ORDER BY round
@@ -214,6 +224,34 @@ impl PgRunRepository {
             i32::from(round),
             outcome.as_str(),
             report,
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub(super) async fn add_check_result(
+        &self,
+        key: StepKey,
+        round: u8,
+        result: &CheckResult,
+    ) -> Result<(), PgRunRepositoryErr> {
+        let added = serde_json::to_value([result])
+            .map_err(|_| PgRunRepositoryErr::UnreadableCheckResults)?;
+        // Appended only while the round is open, and once per check: a
+        // retry that ran the check again keeps its first run.
+        sqlx::query!(
+            r#"
+            UPDATE factory_check_round
+            SET verified = true, results = COALESCE(results, '[]'::jsonb) || $4
+            WHERE run_id = $1 AND seq = $2 AND round = $3 AND ended_at IS NULL
+                AND NOT COALESCE(results, '[]'::jsonb) @> jsonb_build_array(jsonb_build_object('name', $5::text))
+            "#,
+            key.run_id.as_uuid(),
+            i32::from(key.seq),
+            i32::from(round),
+            added,
+            result.name,
         )
         .execute(&self.pool)
         .await?;

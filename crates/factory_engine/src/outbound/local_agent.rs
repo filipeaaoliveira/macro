@@ -3,7 +3,9 @@
 use factory_records::domain::models::{Role, StepKey};
 use macro_user_id::user_id::MacroUserIdStr;
 
-use crate::domain::models::{AgentAnswer, AgentTask, AgentTurn};
+use agent_session::domain::session_command::SessionCommandOutput;
+
+use crate::domain::models::{AgentAnswer, AgentCommand, AgentTask, AgentTurn};
 use crate::domain::ports::{AgentFailure, Retryable, StepAgent};
 
 /// The task gave the agent no outcome to end with.
@@ -56,6 +58,14 @@ impl StepAgent for LocalAgent {
                 turn.prompt
             ),
         })
+    }
+
+    /// Runs nothing: with no agent, there is no checkout to run in.
+    async fn run_check(
+        &self,
+        _command: AgentCommand,
+    ) -> Result<Option<SessionCommandOutput>, NoOutcome> {
+        Ok(None)
     }
 
     async fn stop(

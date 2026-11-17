@@ -1,5 +1,6 @@
 //! Ports (trait contracts) of the factory's use cases.
 
+use agent_session::domain::session_command::SessionCommandOutput;
 use agent_session::domain::session_task::TaskDocumentId;
 use factory_records::domain::models::{HandBack, Outcome, Role, RunId, StepKey};
 use macro_user_id::user_id::MacroUserIdStr;
@@ -8,9 +9,10 @@ use uuid::Uuid;
 use crate::domain::flow::{StepName, StepUse};
 use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening};
 use crate::domain::models::{
-    AgentAnswer, AgentTask, AgentTurn, CodeRepository, FactoryError, FlowSummary, HeadChecks,
-    Merging, OpenPullRequest, Opening, PullRequest, RepositoryAccess, RequiredChecks, RunDetail,
-    RunFinish, RunStart, StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
+    AgentAnswer, AgentCommand, AgentTask, AgentTurn, CodeRepository, FactoryError, FlowSummary,
+    HeadChecks, Merging, OpenPullRequest, Opening, PullRequest, RepositoryAccess, RequiredChecks,
+    RunDetail, RunFinish, RunStart, StepEnding, StepError, StepInput, StepReport, StepRequest,
+    StepStart,
 };
 
 /// What a Run's workflow did with an answer it was sent.
@@ -137,6 +139,16 @@ pub trait StepAgent: Send + Sync + 'static {
         &self,
         turn: AgentTurn,
     ) -> impl Future<Output = Result<AgentAnswer, Self::Err>> + Send;
+
+    /// Run `command` in the checkout of the session the Step works in,
+    /// beside the agent, and hand back how it ended, whatever its exit
+    /// code. None when the session's runtime runs no command (a paired
+    /// machine, a cloud agent): only the agent can run it there. A
+    /// Temporal retry may run it again.
+    fn run_check(
+        &self,
+        command: AgentCommand,
+    ) -> impl Future<Output = Result<Option<SessionCommandOutput>, Self::Err>> + Send;
 
     /// Stop working on the Step `key` of `role` for `owner`, for good.
     fn stop(

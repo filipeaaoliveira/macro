@@ -1,13 +1,18 @@
 //! The checks round of the `write` and `fix` Steps: once the agent hands
-//! back its work, the Step has the same agent session run the checks its
-//! repository declares ([`crate::domain::checks`]), and sends a failure back
-//! to it, until they pass or the repository's rounds run out.
+//! back its work, the Step runs the checks its repository declares
+//! ([`crate::domain::checks`]) on it, and sends a failure back to the agent,
+//! until they pass or the repository's rounds run out.
 //!
-//! The agent runs the checks: the engine has no way to run a command where
-//! the agent works (its machine's worktree or its managed sandbox), only to
-//! prompt its session. Each round is recorded before its prompt is sent, so
-//! a retried Step goes on with the round it was at, never starts one twice,
-//! and asks under the prompt ids it recorded.
+//! Where the agent's session runs in a checkout Macro reaches (a managed
+//! sandbox, a Macro computer), the engine runs each check there itself,
+//! beside the agent, and reads its exit code: the round is verified, and
+//! each check's run is recorded as it ends, so a retry runs only the checks
+//! still to run. Elsewhere (a paired machine, a cloud agent) the agent runs
+//! the checks in its session and reports how they went. A round the agent
+//! was asked to run stays the agent's, and the agent's word never decides a
+//! verified round. Each round is recorded before its checks run or its
+//! prompt is sent, so a retried Step goes on with the round it was at,
+//! never starts one twice, and asks under the prompt ids it recorded.
 //!
 //! The checks file is read from the Run's base branch, which the agent does
 //! not push to, once: the first round keeps it, with the checks it runs, and
@@ -28,11 +33,13 @@
 #[cfg(test)]
 mod test;
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use agent_session::domain::session_command::{SessionCommand, SessionCommandOutput};
 use chrono::{DateTime, Utc};
 use factory_records::domain::models::{
-    CheckRound, CheckRoundOutcome, CheckRoundStart, HandedBack, MAX_OUTPUT_BYTES, Outcome, Role,
+    CheckResult, CheckRound, CheckRoundOutcome, CheckRoundStart, HandedBack,
+    MAX_CHECK_RESULT_OUTPUT_BYTES, MAX_OUTPUT_BYTES, Outcome, Role,
 };
 use factory_records::domain::ports::RunRepository;
 use uuid::Uuid;
@@ -40,7 +47,7 @@ use uuid::Uuid;
 use super::{BuiltInStepError, BuiltInSteps, agent_role, cut};
 use crate::domain::checks::{CHECKS_FILE, RepositoryCheck, RepositoryChecks};
 use crate::domain::flow::StepName;
-use crate::domain::models::{AgentTurn, StepInput, StepReport};
+use crate::domain::models::{AgentCommand, AgentTurn, StepInput, StepReport};
 use crate::domain::ports::{PullRequests, StepAgent};
 use crate::domain::pull_request_steps::PullRequestStepError;
 
@@ -58,6 +65,19 @@ pub(super) const RED: &str = "red";
 /// hours its activity's retries have (the workflow's `STEP_TOTAL`), so the
 /// Step ends with what the rounds found.
 pub(crate) const ROUNDS_END_BY: Duration = Duration::from_secs(105 * 60);
+
+/// The longest one check the engine runs may take: past it, the check is
+/// stopped, and fails.
+const CHECK_TIMEOUT: Duration = Duration::from_secs(20 * 60);
+
+/// How long one attempt of the Step runs checks, from its start: short of
+/// its activity's 30 minutes, as a CI wait is. The checks still to run then
+/// go on in the next attempt.
+const ATTEMPT_CHECKS_FOR: Duration = Duration::from_secs(25 * 60);
+
+/// The least time a check is started with; with less left, the attempt
+/// leaves the round to the next one.
+const SHORTEST_CHECK: Duration = Duration::from_secs(60);
 
 /// What a Step whose agent was still at work when its time ran out says.
 const WORK_OUT_OF_TIME: &str = "The agent's work did not end before the step's time ran out, so the repository's checks did not run.";
@@ -133,6 +153,7 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
         outcomes: Vec<Outcome>,
         input: StepInput<'_>,
     ) -> Result<StepReport, BuiltInStepError> {
+        let checks_until = Instant::now() + ATTEMPT_CHECKS_FOR;
         let repo = self.pull_requests.records();
         let rounds = repo.check_rounds(input.key).await.map_err(records)?;
         let end_by = self.rounds_end_by(input).await?;
@@ -186,7 +207,8 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
                 self.fix_round(step, input, &rounds, latest, &declared, end_by)
                     .await
             } else {
-                self.run_round(step, input, latest, end_by).await
+                self.run_round(step, input, latest, end_by, checks_until)
+                    .await
             };
             // An agent whose quota ran out cannot go on, and no other Agent
             // takes over its session: the Step ends with what the rounds
@@ -220,7 +242,17 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
     ) -> Result<StepReport, BuiltInStepError> {
         let repo = self.pull_requests.records();
         let rounds = repo.check_rounds(input.key).await.map_err(records)?;
-        if let Some(open) = rounds.last().filter(|round| round.end.is_none()) {
+        if let Some(open) = rounds
+            .last()
+            .filter(|round| round.end.is_none() && round.verified)
+        {
+            // What the engine read of the checks decides: the agent was
+            // never asked, and its word does not count.
+            let (outcome, report) = verified_end(open, &open.results);
+            repo.end_check_round(input.key, open.round, outcome, &report)
+                .await
+                .map_err(records)?;
+        } else if let Some(open) = rounds.last().filter(|round| round.end.is_none()) {
             let handed = repo
                 .handed_back(input.key, open.check_action_id)
                 .await
@@ -352,15 +384,35 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
             .map_err(records)
     }
 
-    /// Have the agent run `round`'s recorded checks, and record how they
-    /// went.
+    /// Run `round`'s recorded checks in the agent's checkout, or, where its
+    /// session's runtime runs no command, have the agent run them; and
+    /// record how they went. A round the agent was already asked to run,
+    /// by an earlier attempt, stays the agent's.
     async fn run_round(
         &self,
         step: &StepName,
         input: StepInput<'_>,
         round: &CheckRound,
         answer_by: DateTime<Utc>,
+        checks_until: Instant,
     ) -> Result<(), BuiltInStepError> {
+        let asked = !round.verified
+            && !matches!(
+                self.pull_requests
+                    .records()
+                    .handed_back(input.key, round.check_action_id)
+                    .await
+                    .map_err(records)?,
+                HandedBack::Superseded
+            );
+        if !asked
+            && self
+                .verify_round(step, input, round, answer_by, checks_until)
+                .await?
+        {
+            return Ok(());
+        }
+
         let answer = self
             .agent
             .follow_up(AgentTurn {
@@ -391,6 +443,79 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
             .end_check_round(input.key, round.round, outcome, &answer.text)
             .await
             .map_err(records)
+    }
+
+    /// Run each of `round`'s checks not run yet in the agent's checkout,
+    /// recording how each ran as it ends, then end the round with what
+    /// their exit codes say. False, running nothing, when the session's
+    /// runtime runs no command. With too little of the attempt's time left
+    /// for the next check, the attempt fails, and its retry goes on with
+    /// the checks still to run.
+    async fn verify_round(
+        &self,
+        step: &StepName,
+        input: StepInput<'_>,
+        round: &CheckRound,
+        answer_by: DateTime<Utc>,
+        checks_until: Instant,
+    ) -> Result<bool, BuiltInStepError> {
+        let repo = self.pull_requests.records();
+        let role = turn_role(step, input)?;
+        let mut results = round.results.clone();
+        for (name, run) in round.checks.iter().zip(&round.commands) {
+            if results.iter().any(|result| &result.name == name) {
+                continue;
+            }
+            let left = checks_until
+                .saturating_duration_since(Instant::now())
+                .min(until(answer_by));
+            if left < SHORTEST_CHECK {
+                return Err(BuiltInStepError::Agent {
+                    report: rootcause::report!("this attempt has no time left for check {name}")
+                        .into_dynamic(),
+                    retryable: true,
+                    out_of_quota: false,
+                });
+            }
+            let timeout = left.min(CHECK_TIMEOUT);
+            let ran = self
+                .agent
+                .run_check(AgentCommand {
+                    key: input.key,
+                    owner: input.owner.clone(),
+                    role: role.clone(),
+                    command: SessionCommand {
+                        cwd: ".".to_string(),
+                        command: run.clone(),
+                        timeout_secs: timeout.as_secs(),
+                    },
+                })
+                .await
+                .map_err(BuiltInStepError::agent)?;
+            let Some(output) = ran else {
+                // A runtime that ran some of the round's checks runs the
+                // rest: one that no longer does is not the session's.
+                if !results.is_empty() {
+                    return Err(lost("the agent's session no longer runs the checks"));
+                }
+                return Ok(false);
+            };
+            let result = CheckResult {
+                name: name.clone(),
+                exit_code: output.exit_code,
+                output: check_output(&output, timeout),
+            };
+            repo.record_check_result(input.key, round.round, &result)
+                .await
+                .map_err(records)?;
+            results.push(result);
+        }
+
+        let (outcome, report) = verified_end(round, &results);
+        repo.end_check_round(input.key, round.round, outcome, &report)
+            .await
+            .map_err(records)?;
+        Ok(true)
     }
 
     /// Send `failed`'s report back to the agent, wait for its fix, and
@@ -456,8 +581,9 @@ fn passed_report(rounds: &[CheckRound]) -> StepReport {
     let last = rounds.last();
     let summary = last.map_or_else(String::new, |last| {
         format!(
-            "The repository's checks passed in round {}: {}.",
+            "The repository's checks passed in round {}{}: {}.",
             last.round,
+            how_run(last),
             last.checks.join(", ")
         )
     });
@@ -490,10 +616,11 @@ fn red_report(rounds: &[CheckRound], why: Red) -> StepReport {
         .last()
         .map_or_else(String::new, |round| round.checks.join(", "));
     let last = rounds.last().map_or(0, |round| round.round);
+    let how = rounds.last().map_or("", how_run);
     let summary = match why {
-        Red::NeverPassed => {
-            format!("The repository's checks still fail in round {last}, their last: {checks}.")
-        }
+        Red::NeverPassed => format!(
+            "The repository's checks still fail in round {last}{how}, their last: {checks}."
+        ),
         Red::OutOfTime => format!(
             "The repository's checks did not pass before the step's time ran out, with {ended} of their rounds ended: {checks}."
         ),
@@ -526,6 +653,104 @@ fn work(rounds: &[CheckRound]) -> String {
         }
     }
     work
+}
+
+/// How `round`'s checks ran, as a Step's summary says it: nothing for the
+/// agent's report, which was all there was before the engine ran checks.
+fn how_run(round: &CheckRound) -> &'static str {
+    if round.verified {
+        ", run by the factory in the agent's checkout"
+    } else {
+        ""
+    }
+}
+
+/// How a verified round ends, from the runs of its checks so far: passed
+/// when every check ran and exited 0, failed otherwise. Its report, which
+/// the agent's fix reads, holds only the checks that failed or did not
+/// run, each with the end of its output.
+fn verified_end(round: &CheckRound, results: &[CheckResult]) -> (CheckRoundOutcome, String) {
+    let failed: Vec<&CheckResult> = results
+        .iter()
+        .filter(|result| result.exit_code != 0)
+        .collect();
+    let not_run: Vec<&String> = round
+        .checks
+        .iter()
+        .filter(|name| !results.iter().any(|result| &result.name == *name))
+        .collect();
+    if failed.is_empty() && not_run.is_empty() {
+        return (
+            CheckRoundOutcome::Passed,
+            format!(
+                "Every check exited with status 0: {}.",
+                round.checks.join(", ")
+            ),
+        );
+    }
+
+    let mut report = String::from(
+        "The factory ran these checks in your checkout, from the repository's root, and they failed:\n",
+    );
+    for result in failed {
+        let command = round
+            .checks
+            .iter()
+            .position(|name| *name == result.name)
+            .and_then(|at| round.commands.get(at))
+            .map_or("", String::as_str);
+        report.push_str(&format!(
+            "\n### `{}`: `{command}` exited with status {}\n\n```\n{}\n```\n",
+            result.name,
+            result.exit_code,
+            result.output.trim_end()
+        ));
+    }
+    if !not_run.is_empty() {
+        let names: Vec<&str> = not_run.iter().map(|name| name.as_str()).collect();
+        report.push_str(&format!(
+            "\nThe step's time ran out before these ran: {}.\n",
+            names.join(", ")
+        ));
+    }
+    (
+        CheckRoundOutcome::Failed,
+        cut(&report, MAX_OUTPUT_BYTES).to_string(),
+    )
+}
+
+/// What a verified round keeps of a check's run: the end of its output,
+/// both streams, and why it stopped when its timeout stopped it.
+fn check_output(output: &SessionCommandOutput, timeout: Duration) -> String {
+    let mut text = output.stdout.clone();
+    if !output.stderr.is_empty() {
+        if !text.is_empty() && !text.ends_with('\n') {
+            text.push('\n');
+        }
+        text.push_str(&output.stderr);
+    }
+    // `timeout` exits 124, or 137 once it had to kill the check.
+    if matches!(output.exit_code, 124 | 137) {
+        text.push_str(&format!(
+            "\n(The check may have run past its {} seconds and been stopped.)",
+            timeout.as_secs()
+        ));
+    }
+    tail(&text, MAX_CHECK_RESULT_OUTPUT_BYTES).to_string()
+}
+
+/// The last `max` bytes of `text`, never split inside a character.
+fn tail(text: &str, max: usize) -> &str {
+    let mut start = text.len().saturating_sub(max);
+    while !text.is_char_boundary(start) {
+        start += 1;
+    }
+    &text[start..]
+}
+
+/// How long from now until `at`; nothing once it passed.
+fn until(at: DateTime<Utc>) -> Duration {
+    (at - Utc::now()).to_std().unwrap_or(Duration::ZERO)
 }
 
 /// `summary`, then `body` cut to fit what a Step's output holds.
