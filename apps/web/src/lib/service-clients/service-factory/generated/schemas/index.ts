@@ -5,6 +5,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './agentName';
 export * from './answerGateRequest';
 export * from './answerGateRequestNote';
 export * from './createRunRequest';
@@ -36,7 +37,9 @@ export * from './macroUserIdStr';
 export * from './namedCount';
 export * from './outcome';
 export * from './outcomeCounts';
+export * from './passedOver';
 export * from './repository';
+export * from './role';
 export * from './run';
 export * from './runDetail';
 export * from './runEnd';
@@ -55,9 +58,11 @@ export * from './runRepository';
 export * from './runTaskId';
 export * from './runTokens';
 export * from './step';
+export * from './stepAgent';
 export * from './stepEnd';
 export * from './stepEndProperty';
 export * from './stepGate';
+export * from './stepRole';
 export * from './taskRunsResponse';
 export * from './tokenCounts';
 export * from './troubleRun';

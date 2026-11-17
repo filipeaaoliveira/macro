@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use factory_records::domain::models::{
-    EntryId, HandBack, Outcome, RunId, RunInsert, RunOutcome, StepKey, StepSession,
+    AgentName, EntryId, HandBack, Outcome, Role, RunId, RunInsert, RunOutcome, StepKey, StepSession,
 };
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use super::{FactoryServiceImpl, StepServiceImpl};
 use crate::domain::fakes::{FakeGithub, FakeRepo};
-use crate::domain::flow::StepName;
+use crate::domain::flow::{StepName, StepUse};
 use crate::domain::gate::AnswerGate;
 use crate::domain::models::{
     FactoryError, RunFinish, RunStart, StepEnding, StepError, StepInput, StepReport, StepRequest,
@@ -114,8 +114,8 @@ impl Retryable for WorkFailure {
 impl StepExecutor for FakeExecutor {
     type Err = WorkFailure;
 
-    fn serves(&self, step: &StepName) -> bool {
-        self.serves_all || step.as_str() == "reply"
+    fn serves(&self, step: &StepName) -> Option<StepUse> {
+        (self.serves_all || step.as_str() == "reply").then_some(StepUse::Work)
     }
 
     async fn run(&self, _step: &StepName, input: StepInput<'_>) -> Result<StepReport, WorkFailure> {
@@ -133,6 +133,7 @@ impl StepExecutor for FakeExecutor {
     async fn stop(
         &self,
         _step: &StepName,
+        _role: Option<&Role>,
         _key: StepKey,
         _owner: &MacroUserIdStr<'static>,
     ) -> Result<(), WorkFailure> {
@@ -142,6 +143,7 @@ impl StepExecutor for FakeExecutor {
     async fn release(
         &self,
         _step: &StepName,
+        _role: Option<&Role>,
         _key: StepKey,
         _owner: &MacroUserIdStr<'static>,
     ) -> Result<(), WorkFailure> {
@@ -166,6 +168,7 @@ fn reply_step(run_id: RunId, seq: u16) -> StepRequest {
         key: StepKey { run_id, seq },
         entry: EntryId::try_from("reply".to_string()).expect("valid"),
         step: StepName::try_from("reply".to_string()).expect("valid"),
+        role: None,
         visit: 1,
     }
 }
@@ -728,11 +731,15 @@ async fn step_in_a_session(repo: &FakeRepo) -> (StepKey, Uuid) {
     let session = StepSession {
         session_id: Uuid::now_v7(),
         action_id: Uuid::now_v7(),
+        agent: Some(AgentName::try_from("primary".to_string()).expect("valid")),
+        bot: None,
     };
-    repo.claim_session(key, session, &[Outcome::done()])
+    let session_id = session.session_id;
+    let planner = Role::try_from("planner".to_string()).expect("valid");
+    repo.claim_session(key, session, &planner, &[Outcome::done()])
         .await
         .expect("claim");
-    (key, session.session_id)
+    (key, session_id)
 }
 
 fn handing_back(outcome: Outcome) -> HandBack {

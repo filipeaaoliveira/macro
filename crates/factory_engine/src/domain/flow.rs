@@ -9,7 +9,7 @@ use std::fmt;
 use std::num::NonZeroU8;
 
 use factory_records::domain::models::{
-    EntryId, InvalidName, MAX_QUESTION_BYTES, Outcome, RunOutcome, checked_name,
+    EntryId, InvalidName, MAX_QUESTION_BYTES, Outcome, Role, RunOutcome, checked_name,
 };
 use serde::{Deserialize, Serialize};
 
@@ -70,6 +70,15 @@ impl fmt::Display for StepName {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0)
     }
+}
+
+/// How a worker does a Step it serves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StepUse {
+    /// It does the work itself.
+    Work,
+    /// An agent does it, filling the Role its entry names.
+    Agent,
 }
 
 /// Where a transition takes the Run: to an entry, or to the Run's end.
@@ -147,6 +156,10 @@ pub struct Entry {
     pub id: EntryId,
     /// The Step it runs.
     pub step: StepName,
+    /// The Role an agent fills to do the Step, when an agent does it: the
+    /// factory's agent definition says which Agents fill it.
+    #[serde(default)]
+    pub role: Option<Role>,
     /// Conditions on the Run's facts; when one does not hold the entry is
     /// skipped and the Run goes to its `next`.
     #[serde(default)]
@@ -230,6 +243,10 @@ pub enum FlowError {
         /// The answer.
         answer: Outcome,
     },
+    /// An agent does the entry's Step, and the entry names no Role for it to
+    /// fill.
+    #[error("an agent does entry {0}'s step, and it names no role")]
+    NoRole(EntryId),
     /// An entry runs a Step the worker does not serve.
     #[error("entry {entry} runs step {step}, which no worker serves")]
     UnknownStep {
@@ -242,10 +259,12 @@ pub enum FlowError {
 
 impl Flow {
     /// Read a Flow from its JSON definition and check that it holds together:
-    /// unique entries, and every entry, fact and Step it names known.
+    /// unique entries, every entry, fact and Step it names known (`serves`
+    /// says how a worker does each Step it serves), and a Role on every
+    /// entry an agent does.
     pub fn parse(
         definition: serde_json::Value,
-        serves: impl Fn(&StepName) -> bool,
+        serves: impl Fn(&StepName) -> Option<StepUse>,
     ) -> Result<Self, FlowError> {
         let flow: Flow = serde_json::from_value(definition)
             .map_err(|error| FlowError::Unreadable(error.to_string()))?;
@@ -253,7 +272,7 @@ impl Flow {
         Ok(flow)
     }
 
-    fn check(&self, serves: impl Fn(&StepName) -> bool) -> Result<(), FlowError> {
+    fn check(&self, serves: impl Fn(&StepName) -> Option<StepUse>) -> Result<(), FlowError> {
         if self.entries.is_empty() {
             return Err(FlowError::NoEntries);
         }
@@ -266,11 +285,17 @@ impl Flow {
         }
 
         for entry in &self.entries {
-            if !serves(&entry.step) {
-                return Err(FlowError::UnknownStep {
-                    entry: entry.id.clone(),
-                    step: entry.step.clone(),
-                });
+            match serves(&entry.step) {
+                None => {
+                    return Err(FlowError::UnknownStep {
+                        entry: entry.id.clone(),
+                        step: entry.step.clone(),
+                    });
+                }
+                Some(StepUse::Agent) if entry.role.is_none() => {
+                    return Err(FlowError::NoRole(entry.id.clone()));
+                }
+                Some(_) => {}
             }
 
             if let Some(gate) = &entry.gate {

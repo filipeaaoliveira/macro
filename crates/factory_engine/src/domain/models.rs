@@ -5,13 +5,13 @@ mod test;
 
 use chrono::{DateTime, Utc};
 use factory_records::domain::models::{
-    EntryId, Outcome, Repository, Run, RunId, RunOutcome, Step, StepKey,
+    EntryId, Outcome, Repository, Role, Run, RunId, RunOutcome, Step, StepKey,
 };
 use macro_user_id::user_id::MacroUserIdStr;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::domain::flow::{Flow, FlowError, StepName};
+use crate::domain::flow::{Entry, Flow, FlowError, StepName};
 
 /// What a Run's workflow starts with. The Run's request stays in its
 /// records, so a Run's history carries ids, not its text.
@@ -32,8 +32,25 @@ pub struct StepRequest {
     pub entry: EntryId,
     /// The work it does.
     pub step: StepName,
+    /// The Role an agent fills to do it, as its entry names.
+    #[serde(default)]
+    pub role: Option<Role>,
     /// Which visit of the entry it is, from 1.
     pub visit: u16,
+}
+
+impl StepRequest {
+    /// The `visit` of `entry`, as the Step `key`: the work its entry names,
+    /// and the Role it names for an agent to fill.
+    pub fn of(key: StepKey, entry: &Entry, visit: u16) -> Self {
+        Self {
+            key,
+            entry: entry.id.clone(),
+            step: entry.step.clone(),
+            role: entry.role.clone(),
+            visit,
+        }
+    }
 }
 
 /// How a Step ended, for its workflow to record.
@@ -51,6 +68,8 @@ pub struct StepEnding {
 pub struct StepInput<'a> {
     /// The Step: its Run and its place in it.
     pub key: StepKey,
+    /// The Role an agent fills to do the Step, as its entry names.
+    pub role: Option<&'a Role>,
     /// The Run's owner, as whom an agent does the Step.
     pub owner: &'a MacroUserIdStr<'static>,
     /// What the Run was asked to do.
@@ -72,6 +91,8 @@ pub struct AgentTask {
     pub owner: MacroUserIdStr<'static>,
     /// The Step.
     pub step: StepName,
+    /// The Role the agent fills.
+    pub role: Role,
     /// The Step's instructions, the Run's request and its earlier Steps.
     pub prompt: String,
     /// The outcomes the agent may end the Step with.

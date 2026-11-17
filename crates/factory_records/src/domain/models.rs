@@ -180,6 +180,79 @@ impl fmt::Display for Outcome {
     }
 }
 
+/// A job in a Flow, such as `planner`, `writer`, `reviewer` or `fixer`. An
+/// entry whose Step an agent does names the Role, and the factory's agent
+/// definition lists the Agents that may fill it.
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, utoipa::ToSchema,
+)]
+#[serde(try_from = "String", into = "String")]
+#[schema(value_type = String)]
+pub struct Role(String);
+
+impl Role {
+    /// The Role as written in the Flow.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for Role {
+    type Error = InvalidName;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        checked_name("role", value).map(Self)
+    }
+}
+
+impl From<Role> for String {
+    fn from(role: Role) -> Self {
+        role.0
+    }
+}
+
+impl fmt::Display for Role {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// The name the factory's agent definition gives an Agent: a harness, a
+/// model and its instructions.
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, utoipa::ToSchema,
+)]
+#[serde(try_from = "String", into = "String")]
+#[schema(value_type = String)]
+pub struct AgentName(String);
+
+impl AgentName {
+    /// The name as the agent definition writes it.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for AgentName {
+    type Error = InvalidName;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        checked_name("agent", value).map(Self)
+    }
+}
+
+impl From<AgentName> for String {
+    fn from(name: AgentName) -> Self {
+        name.0
+    }
+}
+
+impl fmt::Display for AgentName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 /// How a Run ended.
 #[derive(
     Debug,
@@ -343,20 +416,46 @@ pub struct Step {
     pub end: Option<StepEnd>,
     /// The question its end put to a person, if its entry has a Gate.
     pub gate: Option<Gate>,
+    /// The Role an agent filled for the Step; none for a Step no agent does.
+    pub role: Option<Role>,
+    /// The Agent that took the Step, from its Role's Agents.
+    pub agent: Option<AgentName>,
+    /// The Agents before it that could not start the Step, in order, and
+    /// why.
+    pub passed_over: Vec<PassedOver>,
 }
 
-/// The agent session a Step works in: the session, and the action of the
-/// prompt that starts the Step's work. Both are UUIDv7s the factory makes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// An Agent that could not start a Step, so the next Agent of its Role took
+/// it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PassedOver {
+    /// The Agent.
+    pub agent: AgentName,
+    /// Why it could not start, as a code such as `ai_allowance_exhausted`.
+    pub reason: String,
+}
+
+/// The agent session a Step works in: the session, the action of the
+/// prompt that starts the Step's work, both UUIDv7s the factory makes, and
+/// the Agent whose session it is.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StepSession {
     /// The agent session.
     pub session_id: Uuid,
     /// Its first prompt's action.
     pub action_id: Uuid,
+    /// The Agent the session is of; none for a session claimed before
+    /// Steps recorded their Agent, which is of the first Agent of its Role.
+    pub agent: Option<AgentName>,
+    /// The bot whose harness runs the session, so it can be stopped and
+    /// deleted whatever the agent definition says now; none for a session
+    /// claimed before Steps recorded it.
+    pub bot: Option<Uuid>,
 }
 
 /// A Step's session as `RunRepository::claim_session` left it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClaimedSession {
     /// The session the Step works in.
     pub session: StepSession,
@@ -366,7 +465,7 @@ pub struct ClaimedSession {
 }
 
 /// The session a Step claimed, as a stop sees it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoppingSession {
     /// The session.
     pub session: StepSession,

@@ -1,11 +1,11 @@
 //! Ports (trait contracts) of the factory's use cases.
 
 use agent_session::domain::session_task::TaskDocumentId;
-use factory_records::domain::models::{HandBack, Outcome, RunId, StepKey};
+use factory_records::domain::models::{HandBack, Outcome, Role, RunId, StepKey};
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
-use crate::domain::flow::StepName;
+use crate::domain::flow::{StepName, StepUse};
 use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening};
 use crate::domain::models::{
     AgentAnswer, AgentTask, CodeRepository, FactoryError, FlowSummary, HeadChecks, Merging,
@@ -72,8 +72,8 @@ pub trait StepExecutor: Send + Sync + 'static {
     /// The error type returned when a Step's work fails.
     type Err: std::error::Error + Retryable + Send + Sync + 'static;
 
-    /// Whether it does `step`'s work.
-    fn serves(&self, step: &StepName) -> bool;
+    /// How it does `step`'s work, if it does.
+    fn serves(&self, step: &StepName) -> Option<StepUse>;
 
     /// Do `step`'s work on `input`. A Temporal retry may call it again for
     /// the same Step: it goes on with the work, never starts it twice.
@@ -89,6 +89,7 @@ pub trait StepExecutor: Send + Sync + 'static {
     fn stop(
         &self,
         step: &StepName,
+        role: Option<&Role>,
         key: StepKey,
         owner: &MacroUserIdStr<'static>,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
@@ -98,6 +99,7 @@ pub trait StepExecutor: Send + Sync + 'static {
     fn release(
         &self,
         step: &StepName,
+        role: Option<&Role>,
         key: StepKey,
         owner: &MacroUserIdStr<'static>,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
@@ -116,18 +118,20 @@ pub trait StepAgent: Send + Sync + 'static {
         task: AgentTask,
     ) -> impl Future<Output = Result<AgentAnswer, Self::Err>> + Send;
 
-    /// Stop working on the Step `key` for `owner`, for good.
+    /// Stop working on the Step `key` of `role` for `owner`, for good.
     fn stop(
         &self,
         key: StepKey,
+        role: &Role,
         owner: &MacroUserIdStr<'static>,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
-    /// Let go of the Step `key`'s work for `owner`, which ended and whose end
-    /// is recorded.
+    /// Let go of the Step `key`'s work of `role` for `owner`, which ended
+    /// and whose end is recorded.
     fn release(
         &self,
         key: StepKey,
+        role: &Role,
         owner: &MacroUserIdStr<'static>,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 }

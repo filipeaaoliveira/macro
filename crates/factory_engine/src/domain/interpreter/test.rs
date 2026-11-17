@@ -8,7 +8,8 @@ const CODE_FLOW: &str = include_str!("../../../flows/code.json");
 
 fn flow(definition: &str) -> Flow {
     let definition = serde_json::from_str(definition).expect("the flow is JSON");
-    Flow::parse(definition, |_| true).expect("the flow holds together")
+    Flow::parse(definition, |_| Some(crate::domain::flow::StepUse::Work))
+        .expect("the flow holds together")
 }
 
 /// The Steps a Run of `flow` takes when its Steps end with `outcomes`, in

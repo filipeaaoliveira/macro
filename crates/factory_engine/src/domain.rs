@@ -1,5 +1,6 @@
 //! Domain layer of the factory's engine.
 
+pub mod agents;
 pub mod built_in_flows;
 pub mod built_in_steps;
 #[cfg(test)]

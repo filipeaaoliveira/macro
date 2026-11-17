@@ -1,9 +1,14 @@
 use serde_json::json;
 
-use super::{Flow, FlowError, StepName};
+use super::{Flow, FlowError, StepName, StepUse};
 
+/// A worker that replies itself, and has an agent write.
 fn parse(definition: serde_json::Value) -> Result<Flow, FlowError> {
-    Flow::parse(definition, |step: &StepName| step.as_str() == "reply")
+    Flow::parse(definition, |step: &StepName| match step.as_str() {
+        "reply" => Some(StepUse::Work),
+        "write" => Some(StepUse::Agent),
+        _ => None,
+    })
 }
 
 #[test]
@@ -69,6 +74,17 @@ fn an_entry_must_run_a_step_the_worker_serves() {
     let refused = parse(json!({ "entries": [{ "id": "plan", "step": "plan" }] }));
 
     assert!(matches!(refused, Err(FlowError::UnknownStep { .. })));
+}
+
+#[test]
+fn an_entry_an_agent_does_must_name_its_role() {
+    let refused = parse(json!({ "entries": [{ "id": "write", "step": "write" }] }));
+    let named = parse(json!({
+        "entries": [{ "id": "write", "step": "write", "role": "writer" }]
+    }));
+
+    assert!(matches!(refused, Err(FlowError::NoRole(_))));
+    assert!(named.is_ok());
 }
 
 #[test]

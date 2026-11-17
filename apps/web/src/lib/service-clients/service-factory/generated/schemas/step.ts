@@ -6,17 +6,25 @@
  */
 
 import type { EntryId } from './entryId';
+import type { PassedOver } from './passedOver';
+import type { StepAgent } from './stepAgent';
 import type { StepEndProperty } from './stepEndProperty';
 import type { StepGate } from './stepGate';
+import type { StepRole } from './stepRole';
 
 /**
  * One visit of one of a Run's entries.
  */
 export interface Step {
+  agent?: StepAgent;
   end?: StepEndProperty;
   /** The entry the Step visits. */
   entry: EntryId;
   gate?: StepGate;
+  /** The Agents before it that could not start the Step, in order, and
+why. */
+  passedOver: PassedOver[];
+  role?: StepRole;
   /**
    * The Step's place among the Run's Steps, from 1.
    * @minimum 0

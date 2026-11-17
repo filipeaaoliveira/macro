@@ -1,4 +1,4 @@
-use super::{BUILT_IN_FLOWS, BuiltInFlow};
+use super::{BUILT_IN_FLOWS, BuiltInFlow, built_in_roles};
 use crate::domain::built_in_steps::BuiltInSteps;
 use crate::domain::fakes::{FakeGithub, FakeRepo};
 use crate::domain::ports::StepExecutor;
@@ -11,7 +11,7 @@ use crate::outbound::local_agent::LocalAgent;
 fn every_built_in_flow_reads_and_describes_itself() {
     for flow in BUILT_IN_FLOWS {
         let read = flow
-            .read(|_| true)
+            .read(|_| Some(crate::domain::flow::StepUse::Work))
             .unwrap_or_else(|error| panic!("flow {} does not read: {error}", flow.name));
 
         assert!(
@@ -43,7 +43,10 @@ fn the_built_in_steps_run_every_built_in_flow() {
 fn only_the_code_flow_works_on_a_repository() {
     let on_repository: Vec<&str> = BUILT_IN_FLOWS
         .into_iter()
-        .filter(|flow| flow.read(|_| true).is_ok_and(|read| read.repository))
+        .filter(|flow| {
+            flow.read(|_| Some(crate::domain::flow::StepUse::Work))
+                .is_ok_and(|read| read.repository)
+        })
         .map(|flow| flow.name)
         .collect();
 
@@ -58,4 +61,33 @@ fn a_flow_is_found_by_its_name_only() {
     );
     assert!(BuiltInFlow::named("plan.json").is_none());
     assert!(BuiltInFlow::named("Plan").is_none());
+}
+
+/// Every entry an agent does names the Role it fills, and the built-in
+/// Flows need four.
+#[test]
+fn every_agent_entry_names_its_role() {
+    for flow in BUILT_IN_FLOWS {
+        let read = flow
+            .read(|_| Some(crate::domain::flow::StepUse::Work))
+            .expect("reads");
+        for entry in read.entries {
+            let agent_step =
+                ["plan", "write", "review", "fix", "ci_fix"].contains(&entry.step.as_str());
+            assert_eq!(
+                entry.role.is_some(),
+                agent_step,
+                "entry {} of flow {}",
+                entry.id,
+                flow.name
+            );
+        }
+    }
+
+    let roles: Vec<String> = built_in_roles()
+        .expect("roles")
+        .into_iter()
+        .map(String::from)
+        .collect();
+    assert_eq!(roles, ["fixer", "planner", "reviewer", "writer"]);
 }

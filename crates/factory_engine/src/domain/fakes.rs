@@ -6,8 +6,9 @@ use std::sync::{Arc, Mutex};
 use agent_session::domain::session_task::TaskDocumentId;
 use chrono::Utc;
 use factory_records::domain::models::{
-    ClaimedSession, EntryId, Gate, HandBack, Outcome, Repository, Run, RunEnd, RunId, RunInsert,
-    RunOutcome, SessionStep, Step, StepEnd, StepKey, StepSession, StoppingSession, TaskLink,
+    ClaimedSession, EntryId, Gate, HandBack, Outcome, PassedOver, Repository, Role, Run, RunEnd,
+    RunId, RunInsert, RunOutcome, SessionStep, Step, StepEnd, StepKey, StepSession,
+    StoppingSession, TaskLink,
 };
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
@@ -236,6 +237,9 @@ impl RunRepository for FakeRepo {
                 started_at: Utc::now(),
                 end: None,
                 gate: None,
+                role: None,
+                agent: None,
+                passed_over: Vec::new(),
             },
         ));
         Ok(())
@@ -291,18 +295,23 @@ impl RunRepository for FakeRepo {
         &self,
         key: StepKey,
         session: StepSession,
+        role: &Role,
         offered: &[Outcome],
     ) -> Result<ClaimedSession, FakeError> {
         let mut sessions = self.sessions.lock().expect("sessions");
         if let Some(claimed) = sessions.iter().find(|claimed| claimed.key == key) {
             return Ok(ClaimedSession {
-                session: claimed.session,
+                session: claimed.session.clone(),
                 new: false,
             });
         }
+        self.with_step(key, |step| {
+            step.role = Some(role.clone());
+            step.agent = session.agent.clone();
+        });
         sessions.push(FakeSession {
             key,
-            session,
+            session: session.clone(),
             offered: offered.to_vec(),
             handed: None,
             released: false,
@@ -312,12 +321,46 @@ impl RunRepository for FakeRepo {
         Ok(ClaimedSession { session, new: true })
     }
 
+    async fn pass_session(
+        &self,
+        key: StepKey,
+        from: Uuid,
+        role: &Role,
+        passed: &PassedOver,
+        to: Option<&StepSession>,
+    ) -> Result<bool, FakeError> {
+        if !self.holds_session(key, from).await? {
+            return Ok(false);
+        }
+        let mut sessions = self.sessions.lock().expect("sessions");
+        let Some(claimed) = sessions
+            .iter_mut()
+            .find(|claimed| claimed.key == key && claimed.handed.is_none())
+        else {
+            return Ok(false);
+        };
+        if let Some(to) = to {
+            claimed.session = to.clone();
+            claimed.prepared_at = None;
+            claimed.opened = false;
+        }
+        self.with_step(key, |step| {
+            step.role.get_or_insert_with(|| role.clone());
+            if let Some(agent) = to.and_then(|to| to.agent.clone()) {
+                step.agent = Some(agent);
+            }
+            step.agent.get_or_insert_with(|| passed.agent.clone());
+            step.passed_over.push(passed.clone());
+        });
+        Ok(true)
+    }
+
     async fn claimed_session(&self, key: StepKey) -> Result<Option<StepSession>, FakeError> {
         let sessions = self.sessions.lock().expect("sessions");
         Ok(sessions
             .iter()
             .find(|claimed| claimed.key == key)
-            .map(|claimed| claimed.session))
+            .map(|claimed| claimed.session.clone()))
     }
 
     async fn release_session(&self, key: StepKey) -> Result<(), FakeError> {
@@ -331,6 +374,7 @@ impl RunRepository for FakeRepo {
     async fn record_prepare(
         &self,
         key: StepKey,
+        session_id: Uuid,
     ) -> Result<Option<chrono::DateTime<Utc>>, FakeError> {
         let run_ended = self
             .runs
@@ -342,9 +386,9 @@ impl RunRepository for FakeRepo {
             return Ok(None);
         }
         let mut sessions = self.sessions.lock().expect("sessions");
-        let claimed = sessions
-            .iter_mut()
-            .find(|claimed| claimed.key == key && !claimed.released);
+        let claimed = sessions.iter_mut().find(|claimed| {
+            claimed.key == key && claimed.session.session_id == session_id && !claimed.released
+        });
         Ok(claimed.map(|claimed| {
             let now = Utc::now();
             claimed.prepared_at = Some(now);
@@ -366,9 +410,12 @@ impl RunRepository for FakeRepo {
         Ok(())
     }
 
-    async fn record_open(&self, key: StepKey) -> Result<(), FakeError> {
+    async fn record_open(&self, key: StepKey, session_id: Uuid) -> Result<(), FakeError> {
         let mut sessions = self.sessions.lock().expect("sessions");
-        if let Some(claimed) = sessions.iter_mut().find(|claimed| claimed.key == key) {
+        if let Some(claimed) = sessions
+            .iter_mut()
+            .find(|claimed| claimed.key == key && claimed.session.session_id == session_id)
+        {
             claimed.opened = true;
         }
         Ok(())
@@ -385,7 +432,7 @@ impl RunRepository for FakeRepo {
             .iter()
             .find(|claimed| claimed.key == key)
             .map(|claimed| StoppingSession {
-                session: claimed.session,
+                session: claimed.session.clone(),
                 opened: claimed.opened,
                 may_still_open: claimed
                     .prepared_at
@@ -393,13 +440,15 @@ impl RunRepository for FakeRepo {
             }))
     }
 
-    async fn holds_session(&self, key: StepKey) -> Result<bool, FakeError> {
+    async fn holds_session(&self, key: StepKey, session_id: Uuid) -> Result<bool, FakeError> {
         let held = self
             .sessions
             .lock()
             .expect("sessions")
             .iter()
-            .any(|claimed| claimed.key == key && !claimed.released);
+            .any(|claimed| {
+                claimed.key == key && claimed.session.session_id == session_id && !claimed.released
+            });
         let run_ended = self
             .runs
             .lock()

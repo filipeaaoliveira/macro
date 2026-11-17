@@ -24,6 +24,7 @@ use macro_user_id::user_id::MacroUserIdStr;
 use serde::Serialize;
 
 use crate::domain::built_in_flows::{BUILT_IN_FLOWS, BuiltInFlow};
+use crate::domain::flow::StepUse;
 
 /// The most Runs insights read for one period: the newest in it.
 pub const INSIGHTS_RUN_CAP: u16 = 1000;
@@ -433,7 +434,7 @@ fn entry_order(flow: Option<&str>) -> Vec<String> {
     };
     let mut order: Vec<String> = Vec::new();
     for built_in in flows {
-        let Ok(read) = built_in.read(|_| true) else {
+        let Ok(read) = built_in.read(|_| Some(StepUse::Work)) else {
             continue;
         };
         for entry in read.entries {

@@ -5,7 +5,7 @@ import CaretDownIcon from '@icon/system/regular/caret-down.svg';
 import { Badge, Button, Card, cn } from '@ui';
 import { CollapseTransition } from '@ui/components/CollapseTransition';
 import { createSignal, For, type JSX, Show } from 'solid-js';
-import { flowWordLabel } from '../core/flow-words';
+import { flowWordLabel, flowWordText } from '../core/flow-words';
 import type { RunStep } from '../core/run';
 
 function stepLabel(step: Pick<RunStep, 'entry' | 'visit'>): string {
@@ -126,6 +126,32 @@ function TimelineStep(props: {
           </Button>
         </Show>
       </div>
+      <Show when={props.step.agent}>
+        {(agent) => (
+          <StepNote>
+            {/* An Agent passed over is the one that took the Step only when
+                none could start it. */}
+            {props.step.passedOver?.some((passed) => passed.agent === agent())
+              ? t('factoryRuns.stepNoAgent', {
+                  role: flowWordLabel(props.step.role ?? ''),
+                })
+              : t('factoryRuns.stepAgent', {
+                  role: flowWordLabel(props.step.role ?? ''),
+                  agent: agent(),
+                })}
+            <For each={props.step.passedOver}>
+              {(passed) => (
+                <span class="block text-ink-muted">
+                  {t('factoryRuns.passedOver', {
+                    agent: passed.agent,
+                    reason: flowWordText(passed.reason),
+                  })}
+                </span>
+              )}
+            </For>
+          </StepNote>
+        )}
+      </Show>
       <Show when={answer()}>
         {(answer) => (
           <StepNote>

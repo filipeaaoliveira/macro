@@ -1,7 +1,7 @@
 //! Startup configuration.
 
-use bot_id::BotId;
 use database_env_vars::DatabaseUrl;
+use factory_engine::domain::agents::AgentDefinition;
 use macro_auth::InternalApiKey;
 use macro_env::Environment;
 use macro_env_var::env_vars;
@@ -33,7 +33,12 @@ pub struct Config {
     /// The key the authentication service's internal routes take, to tell
     /// which accounts exist.
     pub authentication_service_secret_key: String,
-    /// The agent whose sessions do the agent Steps, as each Run's owner. Unset,
-    /// they run on a local stand-in that does no work.
-    pub factory_agent_id: Option<BotId>,
+    /// The Agents that do the agent Steps, as each Run's owner, and the ones
+    /// each Role takes, in order, as JSON (`FACTORY_AGENTS`). Unset, the
+    /// agent Steps run on a local stand-in that does no work.
+    pub factory_agents: Option<AgentDefinition>,
+    /// The retired `FACTORY_AGENT_ID`, read only to refuse it: set without
+    /// `FACTORY_AGENTS`, the service does not start, and its error names
+    /// `FACTORY_AGENTS`.
+    pub factory_agent_id: Option<String>,
 }

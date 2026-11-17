@@ -4,6 +4,7 @@
     {
       "id": "plan",
       "step": "plan",
+      "role": "planner",
       "max_visits": 3,
       "on_exhausted": [{ "to": { "kind": "end", "outcome": "manual" } }],
       "gate": {
@@ -18,6 +19,7 @@
     {
       "id": "write",
       "step": "write",
+      "role": "writer",
       "on": {
         "done": [{ "to": { "kind": "end", "outcome": "success" } }],
         "unchanged": [{ "to": { "kind": "end", "outcome": "success" } }]

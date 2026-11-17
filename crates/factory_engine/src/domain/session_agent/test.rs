@@ -1,21 +1,24 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
+use agent_session::domain::error::AiAdmissionError;
 use agent_session::domain::model::SessionVisibility;
 use agent_session::domain::routines::{
     PrepareRoutineSession, PreparedRoutineSession, PromptRoutineSession, RoutineActionStatus,
     RoutineFailureReason, RoutinePendingReason, RoutinePromptAccepted, RoutineSessionAction,
     RoutineSessionError, RoutineSessions, ValidateRoutineSession, ValidatedRoutineSession,
 };
+use ai_billing::DenyReason;
 use bot_id::BotId;
 use factory_records::domain::models::{
-    EntryId, HandBack, Outcome, RunId, RunInsert, StepKey, StepSession,
+    AgentName, EntryId, HandBack, Outcome, PassedOver, Role, RunId, RunInsert, StepKey, StepSession,
 };
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
 use super::{SessionAgent, SessionAgentError};
+use crate::domain::agents::AgentDefinition;
 use crate::domain::fakes::FakeRepo;
 use crate::domain::flow::StepName;
 use crate::domain::models::AgentTask;
@@ -64,6 +67,9 @@ struct FakeSessions {
     /// The Step lets go of its session while a prepare is in flight, as
     /// when Temporal gave the attempt up and another one ended the Step.
     releases_on_prepare: bool,
+    /// The first prepare's Step is handed to a `backup` session while the
+    /// prepare is in flight, as when an overlapping attempt passed it on.
+    passes_on_prepare: Arc<Mutex<bool>>,
     cancelled: Arc<Mutex<Vec<RoutineSessionAction>>>,
     deleted: Arc<Mutex<Vec<RoutineSessionAction>>>,
     /// Stops the session ignores before its turn ends cancelled, as when a
@@ -89,6 +95,7 @@ impl FakeSessions {
             deletes_missing: false,
             disconnected: false,
             releases_on_prepare: false,
+            passes_on_prepare: Arc::default(),
             cancelled: Arc::default(),
             deleted: Arc::default(),
             ignored_stops: 0,
@@ -143,6 +150,39 @@ impl RoutineSessions for FakeSessions {
                 .map(|claimed| claimed.key)
                 .expect("a claimed session");
             self.repo.release_session(key).await.expect("release");
+        }
+        let passes = std::mem::take(&mut *self.passes_on_prepare.lock().expect("passes"));
+        if passes {
+            let key = self
+                .repo
+                .sessions
+                .lock()
+                .expect("sessions")
+                .iter()
+                .find(|claimed| claimed.session.session_id == session_id.as_uuid())
+                .map(|claimed| claimed.key)
+                .expect("a claimed session");
+            let backup = StepSession {
+                session_id: Uuid::now_v7(),
+                action_id: Uuid::now_v7(),
+                agent: Some(AgentName::try_from("backup".to_string()).expect("valid")),
+                bot: Some(Uuid::from_u128(0xc0de)),
+            };
+            let passed = self
+                .repo
+                .pass_session(
+                    key,
+                    session_id.as_uuid(),
+                    &Role::try_from("planner".to_string()).expect("valid"),
+                    &PassedOver {
+                        agent: AgentName::try_from("primary".to_string()).expect("valid"),
+                        reason: "ai_allowance_exhausted".to_string(),
+                    },
+                    Some(&backup),
+                )
+                .await
+                .expect("pass");
+            assert!(passed);
         }
         let reply = self
             .prepares
@@ -290,6 +330,7 @@ async fn plan_task(repo: &FakeRepo) -> AgentTask {
         key,
         owner: julia(),
         step: StepName::try_from("plan".to_string()).expect("valid"),
+        role: Role::try_from("planner".to_string()).expect("valid"),
         prompt: "Plan the change".to_string(),
         outcomes: vec![Outcome::done()],
         repo_url: None,
@@ -303,11 +344,72 @@ fn the_plan() -> HandBack {
     }
 }
 
+fn planner() -> Role {
+    Role::try_from("planner".to_string()).expect("valid")
+}
+
+/// The session the Step `key` works in.
+async fn claimed_id(repo: &FakeRepo, key: StepKey) -> Uuid {
+    repo.claimed_session(key)
+        .await
+        .expect("read")
+        .expect("claimed")
+        .session_id
+}
+
+fn name(agent: &str) -> AgentName {
+    AgentName::try_from(agent.to_string()).expect("valid")
+}
+
+/// The bot whose sessions `primary` runs in.
+const PRIMARY: BotId = BotId::new_from_uuid(Uuid::from_u128(0xc1a0));
+
+/// The bot whose sessions `backup` runs in.
+const BACKUP: BotId = BotId::new_from_uuid(Uuid::from_u128(0xc0de));
+
+/// A planner is `primary`, on its own model and instructions, or `backup`
+/// when `primary` cannot start.
+fn agents() -> AgentDefinition {
+    serde_json::from_value(serde_json::json!({
+        "agents": {
+            "primary": {
+                "bot": Uuid::from_u128(0xc1a0),
+                "model": "large-model",
+                "instructions": "Keep each commit small."
+            },
+            "backup": { "bot": Uuid::from_u128(0xc0de) },
+            "spare": { "bot": Uuid::from_u128(0x5a5e) }
+        },
+        "roles": { "planner": ["primary", "backup"] }
+    }))
+    .expect("a definition")
+}
+
 fn agent(sessions: &FakeSessions, repo: &FakeRepo) -> SessionAgent<FakeSessions, FakeRepo> {
-    SessionAgent::new(
-        sessions.clone(),
-        repo.clone(),
-        BotId::new_from_uuid(Uuid::nil()),
+    SessionAgent::new(sessions.clone(), repo.clone(), agents())
+}
+
+/// A refusal because the owner's quota for the agent is used up.
+fn no_quota() -> Reply {
+    Reply {
+        error: Some(RoutineSessionError::Admission(AiAdmissionError::Denied(
+            DenyReason::AllowanceExhausted,
+        ))),
+        lands: false,
+    }
+}
+
+/// The Step's Role, Agent and the Agents passed over, as its record reads.
+fn recorded(repo: &FakeRepo, key: StepKey) -> (Option<Role>, Option<AgentName>, Vec<PassedOver>) {
+    let steps = repo.steps.lock().expect("steps");
+    let (_, step) = steps
+        .iter()
+        .find(|(run, step)| *run == key.run_id && step.seq == key.seq)
+        .expect("the step");
+    (
+        step.role.clone(),
+        step.agent.clone(),
+        step.passed_over.clone(),
     )
 }
 
@@ -332,6 +434,22 @@ async fn a_step_runs_in_a_session_of_its_owner_and_returns_what_the_agent_handed
     let prepared = sessions.prepared_calls.lock().expect("prepared");
     assert_eq!(prepared.len(), 1);
     assert_eq!(prepared[0].selection.owner, julia());
+    // The session is of the Role's first Agent, on its model and told its
+    // instructions, and the Step keeps who took it.
+    assert_eq!(prepared[0].selection.bot_id, PRIMARY);
+    assert_eq!(prepared[0].selection.model.as_deref(), Some("large-model"));
+    assert_eq!(
+        prepared[0].instructions.as_deref(),
+        Some("Keep each commit small.")
+    );
+    assert_eq!(
+        recorded(&repo, key),
+        (
+            Some(Role::try_from("planner".to_string()).expect("valid")),
+            Some(name("primary")),
+            Vec::new()
+        )
+    );
     assert_eq!(prepared[0].visibility, SessionVisibility::Hidden);
     assert_eq!(prepared[0].repo_url, None);
     assert!(sessions.deleted.lock().expect("deleted").is_empty());
@@ -398,7 +516,7 @@ async fn releasing_a_step_deletes_its_session() {
     agent(&sessions, &repo).answer(task).await.expect("answer");
 
     agent(&sessions, &repo)
-        .release(key, &julia())
+        .release(key, &planner(), &julia())
         .await
         .expect("release");
 
@@ -564,18 +682,23 @@ async fn stopping_a_step_stops_its_session_until_the_turn_ends() {
         StepSession {
             session_id: Uuid::now_v7(),
             action_id: Uuid::now_v7(),
+            agent: Some(name("primary")),
+            bot: Some(PRIMARY.as_uuid()),
         },
+        &task.role,
         &task.outcomes,
     )
     .await
     .expect("claim");
     // An attempt opened the session and saw it open.
-    repo.record_open(key).await.expect("open");
+    repo.record_open(key, claimed_id(&repo, key).await)
+        .await
+        .expect("open");
     *sessions.open.lock().expect("open") = true;
     *sessions.prompted.lock().expect("prompted") = true;
 
     agent(&sessions, &repo)
-        .stop(key, &julia())
+        .stop(key, &planner(), &julia())
         .await
         .expect("stop");
 
@@ -613,7 +736,10 @@ async fn stopping_a_step_whose_session_opened_is_tried_again_when_its_delete_fai
         StepSession {
             session_id: Uuid::new_v7(claimed_long_ago),
             action_id: Uuid::now_v7(),
+            agent: Some(name("primary")),
+            bot: Some(PRIMARY.as_uuid()),
         },
+        &task.role,
         &task.outcomes,
     )
     .await
@@ -623,7 +749,9 @@ async fn stopping_a_step_whose_session_opened_is_tried_again_when_its_delete_fai
         claimed.opened = true;
     }
 
-    let stopped = agent(&sessions, &repo).stop(task.key, &julia()).await;
+    let stopped = agent(&sessions, &repo)
+        .stop(task.key, &planner(), &julia())
+        .await;
 
     let Err(error) = stopped else {
         panic!("a session that opened is never written off");
@@ -645,7 +773,10 @@ async fn stopping_a_step_whose_session_never_opened_ends_promptly() {
         StepSession {
             session_id: Uuid::now_v7(),
             action_id: Uuid::now_v7(),
+            agent: Some(name("primary")),
+            bot: Some(PRIMARY.as_uuid()),
         },
+        &task.role,
         &task.outcomes,
     )
     .await
@@ -656,7 +787,7 @@ async fn stopping_a_step_whose_session_never_opened_ends_promptly() {
     let started = tokio::time::Instant::now();
 
     agent(&sessions, &repo)
-        .stop(task.key, &julia())
+        .stop(task.key, &planner(), &julia())
         .await
         .expect("stop");
 
@@ -666,7 +797,13 @@ async fn stopping_a_step_whose_session_never_opened_ends_promptly() {
         started.elapsed()
     );
     assert_eq!(sessions.deleted.lock().expect("deleted").len(), 1);
-    assert!(!repo.holds_session(task.key).await.expect("read"), "let go");
+    assert!(
+        !repo
+            .holds_session(task.key, claimed_id(&repo, task.key).await)
+            .await
+            .expect("read"),
+        "let go"
+    );
 }
 
 /// A session whose prepare was sent lately may still open: a delete that
@@ -681,14 +818,21 @@ async fn stopping_a_step_whose_prepare_was_sent_lately_is_tried_again() {
         StepSession {
             session_id: Uuid::now_v7(),
             action_id: Uuid::now_v7(),
+            agent: Some(name("primary")),
+            bot: Some(PRIMARY.as_uuid()),
         },
+        &task.role,
         &task.outcomes,
     )
     .await
     .expect("claim");
-    repo.record_prepare(task.key).await.expect("prepare");
+    repo.record_prepare(task.key, claimed_id(&repo, task.key).await)
+        .await
+        .expect("prepare");
 
-    let stopped = agent(&sessions, &repo).stop(task.key, &julia()).await;
+    let stopped = agent(&sessions, &repo)
+        .stop(task.key, &planner(), &julia())
+        .await;
 
     let Err(error) = stopped else {
         panic!("a session that may still open is not written off");
@@ -717,18 +861,25 @@ async fn a_session_a_retry_prepares_as_the_run_is_cancelled_is_still_deleted() {
         StepSession {
             session_id: Uuid::new_v7(claimed_long_ago),
             action_id: Uuid::now_v7(),
+            agent: Some(name("primary")),
+            bot: Some(PRIMARY.as_uuid()),
         },
+        &task.role,
         &task.outcomes,
     )
     .await
     .expect("claim");
-    repo.record_prepare(task.key)
+    repo.record_prepare(task.key, claimed_id(&repo, task.key).await)
         .await
         .expect("the retry's prepare");
 
-    let in_flight = agent(&sessions, &repo).stop(task.key, &julia()).await;
+    let in_flight = agent(&sessions, &repo)
+        .stop(task.key, &planner(), &julia())
+        .await;
     *sessions.open.lock().expect("open") = true;
-    let landed = agent(&sessions, &repo).stop(task.key, &julia()).await;
+    let landed = agent(&sessions, &repo)
+        .stop(task.key, &planner(), &julia())
+        .await;
 
     assert!(in_flight.is_err_and(|error| error.retryable()));
     landed.expect("the session the prepare opened is deleted");
@@ -751,20 +902,25 @@ async fn stopping_a_step_rides_out_a_harness_that_fails_a_while() {
         StepSession {
             session_id: Uuid::now_v7(),
             action_id: Uuid::now_v7(),
+            agent: Some(name("primary")),
+            bot: Some(PRIMARY.as_uuid()),
         },
+        &task.role,
         &task.outcomes,
     )
     .await
     .expect("claim");
     // An attempt opened the session and saw it open.
-    repo.record_open(task.key).await.expect("open");
+    repo.record_open(task.key, claimed_id(&repo, task.key).await)
+        .await
+        .expect("open");
     *sessions.open.lock().expect("open") = true;
     *sessions.prompted.lock().expect("prompted") = true;
     *sessions.failing_cancels.lock().expect("failing cancels") = 2;
     *sessions.failing_reads.lock().expect("failing reads") = 2;
 
     agent(&sessions, &repo)
-        .stop(task.key, &julia())
+        .stop(task.key, &planner(), &julia())
         .await
         .expect("stop");
 
@@ -785,7 +941,7 @@ async fn a_step_that_let_go_of_its_session_never_opens_it_again() {
         .await
         .expect("answer");
     agent(&sessions, &repo)
-        .release(task.key, &julia())
+        .release(task.key, &planner(), &julia())
         .await
         .expect("release");
 
@@ -883,7 +1039,9 @@ async fn a_step_whose_prepare_was_refused_stops_promptly() {
     let refused = agent(&sessions, &repo).answer(task).await;
     let started = tokio::time::Instant::now();
 
-    let stopped = agent(&sessions, &repo).stop(key, &julia()).await;
+    let stopped = agent(&sessions, &repo)
+        .stop(key, &planner(), &julia())
+        .await;
 
     assert!(refused.is_err());
     stopped.expect("nothing to wait for");
@@ -910,18 +1068,353 @@ async fn a_session_whose_prepare_is_in_flight_is_deleted_once_it_opens() {
         StepSession {
             session_id: Uuid::now_v7(),
             action_id: Uuid::now_v7(),
+            agent: Some(name("primary")),
+            bot: Some(PRIMARY.as_uuid()),
         },
+        &task.role,
         &task.outcomes,
     )
     .await
     .expect("claim");
-    repo.record_prepare(task.key).await.expect("prepare");
+    repo.record_prepare(task.key, claimed_id(&repo, task.key).await)
+        .await
+        .expect("prepare");
 
-    let in_flight = agent(&sessions, &repo).stop(task.key, &julia()).await;
+    let in_flight = agent(&sessions, &repo)
+        .stop(task.key, &planner(), &julia())
+        .await;
     *sessions.open.lock().expect("open") = true;
-    let opened = agent(&sessions, &repo).stop(task.key, &julia()).await;
+    let opened = agent(&sessions, &repo)
+        .stop(task.key, &planner(), &julia())
+        .await;
 
     assert!(in_flight.is_err_and(|error| error.retryable()));
     opened.expect("the session the prepare opened is deleted");
     assert!(!*sessions.open.lock().expect("open"));
+}
+
+/// An Agent whose owner's quota is used up is refused its session before
+/// any work starts: the next Agent of the Role takes the Step in a session
+/// of its own, and the Step keeps who was passed over and why.
+#[tokio::test]
+async fn an_agent_out_of_quota_passes_the_step_to_the_next_agent_of_its_role() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded)
+        .preparing(&[no_quota()]);
+    let task = plan_task(&repo).await;
+    let key = task.key;
+
+    let answer = agent(&sessions, &repo).answer(task).await.expect("answer");
+
+    let claimed = repo
+        .claimed_session(key)
+        .await
+        .expect("read")
+        .expect("claimed");
+    assert_eq!(answer.text, "Add a toggle to the settings page");
+    let prepared = sessions.prepared_calls.lock().expect("prepared");
+    let bots: Vec<BotId> = prepared.iter().map(|call| call.selection.bot_id).collect();
+    assert_eq!(bots, [PRIMARY, BACKUP]);
+    assert_ne!(prepared[0].session_id, prepared[1].session_id);
+    assert_eq!(prepared[1].selection.model, None);
+    assert_eq!(sessions.landed(), 1);
+    assert_eq!(
+        recorded(&repo, key).2,
+        [PassedOver {
+            agent: name("primary"),
+            reason: "ai_allowance_exhausted".to_string(),
+        }]
+    );
+    assert_eq!(recorded(&repo, key).1, Some(name("backup")));
+    assert_eq!(claimed.session_id, prepared[1].session_id.as_uuid());
+}
+
+/// An Agent refused its prompt for lack of quota opened a session that did
+/// no work: it is deleted, and the next Agent takes the Step.
+#[tokio::test]
+async fn an_agent_refused_its_prompt_for_lack_of_quota_leaves_no_session() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded)
+        .prompting(&[no_quota()]);
+    let task = plan_task(&repo).await;
+    let key = task.key;
+
+    agent(&sessions, &repo).answer(task).await.expect("answer");
+
+    let deleted = sessions.deleted.lock().expect("deleted");
+    assert_eq!(deleted.len(), 1);
+    assert_eq!(deleted[0].bot_id, PRIMARY);
+    let prompts = sessions.prompt_calls.lock().expect("prompts");
+    let bots: Vec<BotId> = prompts.iter().map(|call| call.action.bot_id).collect();
+    assert_eq!(bots, [PRIMARY, BACKUP]);
+    assert_eq!(recorded(&repo, key).1, Some(name("backup")));
+}
+
+/// A retry goes on with the Agent that took the Step, and a stop stops that
+/// Agent's session.
+#[tokio::test(start_paused = true)]
+async fn a_step_handed_on_is_retried_and_stopped_in_the_next_agent_s_session() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded)
+        .preparing(&[no_quota()]);
+    let task = plan_task(&repo).await;
+    let key = task.key;
+    agent(&sessions, &repo)
+        .answer(task.clone())
+        .await
+        .expect("first attempt");
+
+    agent(&sessions, &repo).answer(task).await.expect("retry");
+    agent(&sessions, &repo)
+        .stop(key, &planner(), &julia())
+        .await
+        .expect("stop");
+
+    let prepared = sessions.prepared_calls.lock().expect("prepared");
+    let bots: Vec<BotId> = prepared.iter().map(|call| call.selection.bot_id).collect();
+    assert_eq!(bots, [PRIMARY, BACKUP, BACKUP]);
+    assert_eq!(sessions.landed(), 1);
+    assert_eq!(recorded(&repo, key).2.len(), 1);
+    let deleted = sessions.deleted.lock().expect("deleted");
+    assert_eq!(deleted.len(), 1);
+    assert_eq!(deleted[0].bot_id, BACKUP);
+}
+
+/// When every Agent of the Role is out of quota, the Step fails for good,
+/// having passed over each of them, the last one too.
+#[tokio::test]
+async fn a_step_whose_every_agent_is_out_of_quota_fails_for_good() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded)
+        .preparing(&[no_quota(), no_quota()]);
+    let task = plan_task(&repo).await;
+    let key = task.key;
+
+    let failed = agent(&sessions, &repo).answer(task).await;
+
+    let Err(error) = failed else {
+        panic!("no agent could start");
+    };
+    assert!(
+        matches!(
+            error,
+            SessionAgentError::NoQuota(DenyReason::AllowanceExhausted)
+        ),
+        "{error:?}"
+    );
+    assert!(!error.retryable());
+    assert_eq!(sessions.prepares(), 2);
+    assert_eq!(recorded(&repo, key).1, Some(name("backup")));
+    let passed: Vec<AgentName> = recorded(&repo, key)
+        .2
+        .into_iter()
+        .map(|passed| passed.agent)
+        .collect();
+    assert_eq!(passed, [name("primary"), name("backup")]);
+}
+
+/// Only a lack of quota passes the Step on: any other refusal, and a quota
+/// check that could not run, fail the Step's own Agent as before.
+#[tokio::test(start_paused = true)]
+async fn other_refusals_keep_the_step_with_its_agent() {
+    for refusal in [
+        RoutineSessionError::Forbidden,
+        RoutineSessionError::PersonaUnavailable,
+        RoutineSessionError::Admission(AiAdmissionError::Unavailable),
+    ] {
+        let repo = FakeRepo::default();
+        let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded)
+            .preparing(&[Reply {
+                error: Some(refusal),
+                lands: false,
+            }]);
+        let task = plan_task(&repo).await;
+        let key = task.key;
+
+        let failed = agent(&sessions, &repo).answer(task).await;
+
+        assert!(
+            matches!(failed, Err(SessionAgentError::Session(error)) if error == refusal),
+            "{refusal:?}"
+        );
+        assert_eq!(sessions.prepares(), 1, "{refusal:?}");
+        assert_eq!(recorded(&repo, key).1, Some(name("primary")), "{refusal:?}");
+        assert!(recorded(&repo, key).2.is_empty(), "{refusal:?}");
+    }
+}
+
+/// A Role the agent definition does not fill fails the Step for good.
+#[tokio::test]
+async fn a_role_no_agent_fills_fails_the_step_for_good() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
+    let task = AgentTask {
+        role: Role::try_from("reviewer".to_string()).expect("valid"),
+        ..plan_task(&repo).await
+    };
+
+    let failed = agent(&sessions, &repo).answer(task).await;
+
+    let Err(error) = failed else {
+        panic!("no agent reviews");
+    };
+    assert!(matches!(error, SessionAgentError::UnfilledRole(_)));
+    assert!(!error.retryable());
+    assert_eq!(sessions.prepares(), 0);
+}
+
+/// An attempt whose session the Step handed to another Agent while it
+/// opened never prompts it: it deletes the session it opened and goes on in
+/// the session the Step works in now.
+#[tokio::test]
+async fn a_session_handed_on_while_it_opened_is_never_prompted() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
+    *sessions.passes_on_prepare.lock().expect("passes") = true;
+    let task = plan_task(&repo).await;
+
+    let answer = agent(&sessions, &repo).answer(task).await.expect("answer");
+
+    assert_eq!(answer.text, "Add a toggle to the settings page");
+    let prepared = sessions.prepared_calls.lock().expect("prepared");
+    let deleted = sessions.deleted.lock().expect("deleted");
+    assert_eq!(deleted.len(), 1);
+    assert_eq!(deleted[0].bot_id, PRIMARY);
+    assert_eq!(deleted[0].session_id, prepared[0].session_id);
+    let prompts = sessions.prompt_calls.lock().expect("prompts");
+    let prompted: Vec<BotId> = prompts.iter().map(|call| call.action.bot_id).collect();
+    assert_eq!(
+        prompted,
+        [BACKUP],
+        "the session handed on is never prompted"
+    );
+}
+
+/// An attempt out of quota whose Step another attempt already handed on goes
+/// on in the next Agent's session, and records no second pass.
+#[tokio::test]
+async fn an_attempt_finds_its_step_handed_on_by_another_and_goes_on_there() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded)
+        .preparing(&[no_quota()]);
+    *sessions.passes_on_prepare.lock().expect("passes") = true;
+    let task = plan_task(&repo).await;
+    let key = task.key;
+
+    let answer = agent(&sessions, &repo).answer(task).await.expect("answer");
+
+    assert_eq!(answer.text, "Add a toggle to the settings page");
+    let prepared = sessions.prepared_calls.lock().expect("prepared");
+    let bots: Vec<BotId> = prepared.iter().map(|call| call.selection.bot_id).collect();
+    assert_eq!(bots, [PRIMARY, BACKUP]);
+    assert_eq!(recorded(&repo, key).1, Some(name("backup")));
+    assert_eq!(recorded(&repo, key).2.len(), 1);
+}
+
+/// A session claimed before Steps recorded their Agent is of the first
+/// Agent of the Step's Role: a stop stops that Agent's session.
+#[tokio::test(start_paused = true)]
+async fn a_session_claimed_with_no_agent_is_stopped_as_the_role_s_first_agent() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
+    let task = plan_task(&repo).await;
+    repo.claim_session(
+        task.key,
+        StepSession {
+            session_id: Uuid::now_v7(),
+            action_id: Uuid::now_v7(),
+            agent: None,
+            bot: None,
+        },
+        &task.role,
+        &task.outcomes,
+    )
+    .await
+    .expect("claim");
+    repo.record_prepare(task.key, claimed_id(&repo, task.key).await)
+        .await
+        .expect("prepare");
+    repo.record_open(task.key, claimed_id(&repo, task.key).await)
+        .await
+        .expect("open");
+    *sessions.open.lock().expect("open") = true;
+
+    agent(&sessions, &repo)
+        .stop(task.key, &planner(), &julia())
+        .await
+        .expect("stop");
+
+    let deleted = sessions.deleted.lock().expect("deleted");
+    assert_eq!(deleted.len(), 1);
+    assert_eq!(deleted[0].bot_id, PRIMARY);
+}
+
+/// A session's bot is kept with it: a stop deletes it as its bot even once
+/// the agent definition no longer names its Agent.
+#[tokio::test(start_paused = true)]
+async fn a_session_whose_agent_was_removed_is_still_stopped() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
+    let task = plan_task(&repo).await;
+    let gone = Uuid::from_u128(0x6033);
+    repo.claim_session(
+        task.key,
+        StepSession {
+            session_id: Uuid::now_v7(),
+            action_id: Uuid::now_v7(),
+            agent: Some(name("retired")),
+            bot: Some(gone),
+        },
+        &task.role,
+        &task.outcomes,
+    )
+    .await
+    .expect("claim");
+    repo.record_open(task.key, claimed_id(&repo, task.key).await)
+        .await
+        .expect("open");
+    *sessions.open.lock().expect("open") = true;
+
+    agent(&sessions, &repo)
+        .stop(task.key, &planner(), &julia())
+        .await
+        .expect("stop");
+
+    let deleted = sessions.deleted.lock().expect("deleted");
+    assert_eq!(deleted.len(), 1);
+    assert_eq!(deleted[0].bot_id.as_uuid(), gone);
+}
+
+/// A Step whose Agent the Role no longer lists, out of quota, goes to the
+/// Role's first Agent now.
+#[tokio::test]
+async fn an_agent_the_role_no_longer_lists_passes_the_step_to_its_first() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded)
+        .preparing(&[no_quota()]);
+    let task = plan_task(&repo).await;
+    let key = task.key;
+    repo.claim_session(
+        key,
+        StepSession {
+            session_id: Uuid::now_v7(),
+            action_id: Uuid::now_v7(),
+            agent: Some(name("spare")),
+            bot: Some(Uuid::from_u128(0x5a5e)),
+        },
+        &task.role,
+        &task.outcomes,
+    )
+    .await
+    .expect("claim");
+
+    agent(&sessions, &repo).answer(task).await.expect("answer");
+
+    let prepared = sessions.prepared_calls.lock().expect("prepared");
+    let bots: Vec<BotId> = prepared.iter().map(|call| call.selection.bot_id).collect();
+    assert_eq!(
+        bots,
+        [BotId::new_from_uuid(Uuid::from_u128(0x5a5e)), PRIMARY]
+    );
+    assert_eq!(recorded(&repo, key).1, Some(name("primary")));
 }

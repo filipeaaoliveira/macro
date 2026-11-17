@@ -789,6 +789,10 @@
   },
   "components": {
     "schemas": {
+      "AgentName": {
+        "type": "string",
+        "description": "The name the factory's agent definition gives an Agent: a harness, a\nmodel and its instructions."
+      },
       "AnswerGateRequest": {
         "type": "object",
         "description": "Request body for answering a Gate.",
@@ -1230,6 +1234,21 @@
           }
         }
       },
+      "PassedOver": {
+        "type": "object",
+        "description": "An Agent that could not start a Step, so the next Agent of its Role took\nit.",
+        "required": ["agent", "reason"],
+        "properties": {
+          "agent": {
+            "$ref": "#/components/schemas/AgentName",
+            "description": "The Agent."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why it could not start, as a code such as `ai_allowance_exhausted`."
+          }
+        }
+      },
       "Repository": {
         "type": "object",
         "description": "The GitHub repository a Run works on.",
@@ -1244,6 +1263,10 @@
             "description": "Its `https://github.com/owner/name` URL."
           }
         }
+      },
+      "Role": {
+        "type": "string",
+        "description": "A job in a Flow, such as `planner`, `writer`, `reviewer` or `fixer`. An\nentry whose Step an agent does names the Role, and the factory's agent\ndefinition lists the Agents that may fill it."
       },
       "Run": {
         "type": "object",
@@ -1502,8 +1525,19 @@
       "Step": {
         "type": "object",
         "description": "One visit of one of a Run's entries.",
-        "required": ["seq", "entry", "visit", "startedAt"],
+        "required": ["seq", "entry", "visit", "startedAt", "passedOver"],
         "properties": {
+          "agent": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AgentName",
+                "description": "The Agent that took the Step, from its Role's Agents."
+              }
+            ]
+          },
           "end": {
             "oneOf": [
               {
@@ -1527,6 +1561,24 @@
               {
                 "$ref": "#/components/schemas/Gate",
                 "description": "The question its end put to a person, if its entry has a Gate."
+              }
+            ]
+          },
+          "passedOver": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PassedOver"
+            },
+            "description": "The Agents before it that could not start the Step, in order, and\nwhy."
+          },
+          "role": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Role",
+                "description": "The Role an agent filled for the Step; none for a Step no agent does."
               }
             ]
           },

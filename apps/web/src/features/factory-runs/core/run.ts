@@ -38,6 +38,19 @@ export type RunStep = {
     endedAt: string;
   };
   gate?: Gate;
+  /** The Role an agent filled for the Step, as the Flow names it. */
+  role?: string;
+  /** The Agent that took the Step, as the agent definition names it. */
+  agent?: string;
+  /** The Agents before it that couldn’t start the Step, in order. */
+  passedOver?: PassedOver[];
+};
+
+/** An Agent that couldn’t start a Step, so the next one took it. */
+export type PassedOver = {
+  agent: string;
+  /** Why, as a code such as `ai_allowance_exhausted`. */
+  reason: string;
 };
 
 /** The GitHub repository a Run works on. */

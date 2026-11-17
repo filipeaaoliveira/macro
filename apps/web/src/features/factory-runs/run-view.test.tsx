@@ -283,6 +283,44 @@ describe('RunView', () => {
     expect(answers).toEqual(['Reject', 'Revise', 'Approve']);
   });
 
+  it('shows the Role and Agent of each Step, and who was passed over', async () => {
+    const { setRun } = mount({});
+    const [first] = waitingRun.steps;
+    if (!first) throw new Error('No first Step');
+    setRun({
+      ...waitingRun,
+      steps: [
+        {
+          ...first,
+          role: 'planner',
+          agent: 'backup',
+          passedOver: [{ agent: 'primary', reason: 'ai_allowance_exhausted' }],
+        },
+        {
+          ...first,
+          seq: 2,
+          visit: 2,
+          role: 'planner',
+          agent: 'backup',
+          passedOver: [
+            { agent: 'primary', reason: 'ai_allowance_exhausted' },
+            { agent: 'backup', reason: 'ai_overage_limit_reached' },
+          ],
+        },
+      ],
+    });
+
+    expect(await screen.findByText('Planner · backup')).toBeTruthy();
+    expect(
+      screen.getAllByText('primary couldn’t start: AI allowance exhausted')
+    ).toHaveLength(2);
+    // When the last Agent couldn't start either, none took the Step.
+    expect(screen.getByText('Planner · no agent could start')).toBeTruthy();
+    expect(
+      screen.getByText('backup couldn’t start: AI overage limit reached')
+    ).toBeTruthy();
+  });
+
   it('says so when an answer fails for another reason', async () => {
     mount({
       answerGate: vi.fn(async () => ({

@@ -1,6 +1,8 @@
 //! A [`StepAgent`] that does a Step's work in a Macro agent session, run as
 //! the Run's owner through the routine sessions capability, and reads the
-//! result the agent hands back from it.
+//! result the agent hands back from it. The session is of the first Agent
+//! the agent definition lists for the Step's Role; when an Agent cannot start
+//! for lack of quota, the next one takes the Step.
 
 #[cfg(test)]
 mod test;
@@ -8,19 +10,22 @@ mod test;
 use std::time::Duration;
 
 use agent_runtime_protocol::domain::action::AgentActionId;
+use agent_session::domain::error::AiAdmissionError;
 use agent_session::domain::model::{AgentSessionId, SessionSource, SessionVisibility};
 use agent_session::domain::routines::{
     PrepareRoutineSession, PromptRoutineSession, RoutineActionStatus, RoutineFailureReason,
     RoutinePendingReason, RoutineSessionAction, RoutineSessionError, RoutineSessions,
     ValidateRoutineSession,
 };
+use ai_billing::DenyReason;
 use bot_id::BotId;
-use factory_records::domain::models::{Outcome, StepKey, StepSession};
+use factory_records::domain::models::{AgentName, Outcome, PassedOver, Role, StepKey, StepSession};
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
 use trigger_context::TriggerOrigin;
 use uuid::Uuid;
 
+use crate::domain::agents::{Agent, AgentDefinition};
 use crate::domain::models::{AgentAnswer, AgentTask};
 use crate::domain::ports::{Retryable, StepAgent};
 
@@ -70,6 +75,17 @@ pub enum SessionAgentError {
     /// The session could not be opened, prompted or read.
     #[error("the agent session failed: {0}")]
     Session(#[from] RoutineSessionError),
+    /// The Agent could not start: its owner's quota for it is used up. The
+    /// next Agent of the Step's Role takes the Step; this fails it only when
+    /// no Agent is left.
+    #[error("the agent could not start for lack of quota: {}", .0.code())]
+    NoQuota(DenyReason),
+    /// The agent definition lists no Agent for the Step's Role.
+    #[error("no agent fills role {0}")]
+    UnfilledRole(Role),
+    /// The Step's session is of an Agent the agent definition no longer has.
+    #[error("the agent definition has no agent {0}")]
+    UnknownAgent(AgentName),
     /// The session did not open, or did not show it opened in time.
     #[error("the agent session did not open")]
     NotOpened,
@@ -100,7 +116,9 @@ pub enum SessionAgentError {
 impl Retryable for SessionAgentError {
     /// A turn that ended without a result, or ran past its deadline, ends
     /// the same way when asked again, as does a refusal, a mismatch or a
-    /// conflict from the session (only an outage passes on a retry). A
+    /// conflict from the session (only an outage passes on a retry), and a
+    /// quota every Agent of the Role used up, or an agent definition that
+    /// does not fill it. A
     /// prompt whose delivery stayed unknown is not tried again either:
     /// another attempt would send more.
     ///
@@ -116,6 +134,9 @@ impl Retryable for SessionAgentError {
             | SessionAgentError::MayStillOpen => true,
             SessionAgentError::Session(error) => error.is_transient(),
             SessionAgentError::TurnFailed(_)
+            | SessionAgentError::NoQuota(_)
+            | SessionAgentError::UnfilledRole(_)
+            | SessionAgentError::UnknownAgent(_)
             | SessionAgentError::NothingHandedBack
             | SessionAgentError::PromptUnsettled
             | SessionAgentError::Released
@@ -124,39 +145,107 @@ impl Retryable for SessionAgentError {
     }
 }
 
-/// Runs each task in a session of the agent `bot_id`, owned by the Run's
+/// Runs each task in a session of an Agent of its Role, owned by the Run's
 /// owner, and waits for the session's turn to end.
 #[derive(Debug, Clone)]
 pub struct SessionAgent<S, R> {
     sessions: S,
     repo: R,
-    bot_id: BotId,
+    agents: AgentDefinition,
 }
 
 impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
-    /// The agent `bot_id`, reached through `sessions`, with its sessions
-    /// recorded in `repo`.
-    pub fn new(sessions: S, repo: R, bot_id: BotId) -> Self {
+    /// The Agents of `agents`, reached through `sessions`, with their
+    /// sessions recorded in `repo`.
+    pub fn new(sessions: S, repo: R, agents: AgentDefinition) -> Self {
         Self {
             sessions,
             repo,
-            bot_id,
+            agents,
         }
+    }
+
+    /// The name of the Agent whose session `session` of a Step of `role`
+    /// is: the one recorded, else, for a session claimed before Steps
+    /// recorded their Agent, the first Agent of the Role.
+    fn agent_name(
+        &self,
+        session: &StepSession,
+        role: &Role,
+    ) -> Result<AgentName, SessionAgentError> {
+        match &session.agent {
+            Some(agent) => Ok(agent.clone()),
+            None => self
+                .agents
+                .for_role(role)
+                .first()
+                .cloned()
+                .ok_or_else(|| SessionAgentError::UnfilledRole(role.clone())),
+        }
+    }
+
+    /// The Agent named `name`.
+    fn agent(&self, name: &AgentName) -> Result<&Agent, SessionAgentError> {
+        self.agents
+            .agent(name)
+            .ok_or_else(|| SessionAgentError::UnknownAgent(name.clone()))
+    }
+
+    /// The bot whose harness runs the session `session` of a Step of
+    /// `role`: the one recorded with it, so a stop or a release never
+    /// depends on the agent definition still naming its Agent; else, for a
+    /// session claimed before Steps recorded it, its Agent's.
+    fn bot(&self, session: &StepSession, role: &Role) -> Result<BotId, SessionAgentError> {
+        match session.bot {
+            Some(bot) => Ok(BotId::new_from_uuid(bot)),
+            None => Ok(self.agent(&self.agent_name(session, role)?)?.bot),
+        }
+    }
+
+    /// A new session of the Agent `name`, its ids made now.
+    fn new_session(&self, name: &AgentName) -> Result<StepSession, SessionAgentError> {
+        Ok(StepSession {
+            session_id: Uuid::now_v7(),
+            action_id: Uuid::now_v7(),
+            agent: Some(name.clone()),
+            bot: Some(self.agent(name)?.bot.as_uuid()),
+        })
+    }
+
+    /// The session the Step `key` works in now, when another attempt handed
+    /// it on from `session`, and it still holds it; none when it still works
+    /// in `session`. Fails once it let go of its session.
+    async fn moved_on(
+        &self,
+        key: StepKey,
+        session: &StepSession,
+    ) -> Result<Option<StepSession>, SessionAgentError> {
+        let current = self
+            .repo
+            .claimed_session(key)
+            .await
+            .map_err(Self::records)?
+            .ok_or(SessionAgentError::Released)?;
+        if current.session_id == session.session_id {
+            return Ok(None);
+        }
+        self.still_holds(key, current.session_id).await?;
+        Ok(Some(current))
     }
 
     fn records(error: impl std::error::Error + Send + Sync + 'static) -> SessionAgentError {
         SessionAgentError::Records(rootcause::Report::new(error).into_dynamic())
     }
 
-    /// The first prompt of `owner`'s session `session`.
+    /// The first prompt of `owner`'s session `session`, run by `bot`.
     fn action(
-        &self,
         owner: &MacroUserIdStr<'static>,
-        session: StepSession,
+        session: &StepSession,
+        bot: BotId,
     ) -> RoutineSessionAction {
         RoutineSessionAction {
             owner: owner.clone(),
-            bot_id: self.bot_id,
+            bot_id: bot,
             session_id: AgentSessionId::new_from_uuid(session.session_id),
             action_id: AgentActionId::from_uuid(session.action_id),
         }
@@ -170,6 +259,7 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
     async fn open(
         &self,
         task: &AgentTask,
+        agent: &Agent,
         action: &RoutineSessionAction,
     ) -> Result<(), SessionAgentError> {
         let prepared = self
@@ -177,8 +267,8 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
             .prepare(PrepareRoutineSession {
                 selection: ValidateRoutineSession {
                     owner: task.owner.clone(),
-                    bot_id: self.bot_id,
-                    model: None,
+                    bot_id: agent.bot,
+                    model: agent.model.clone(),
                     mcp_servers: Vec::new(),
                 },
                 session_id: action.session_id,
@@ -191,7 +281,7 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
                     by: task.owner.clone(),
                 },
                 billing: Default::default(),
-                instructions: None,
+                instructions: agent.instructions.clone(),
                 repo_url: task.repo_url.clone(),
             })
             .await;
@@ -211,7 +301,7 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
                     wait = (wait * 2).min(LONGEST_WAIT);
                 }
             }
-            Err(error) => Err(error.into()),
+            Err(error) => Err(refusal(error)),
         }
     }
 
@@ -244,7 +334,7 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
                     Err(SessionAgentError::PromptUnsettled)
                 }
             }
-            Err(error) => Err(error.into()),
+            Err(error) => Err(refusal(error)),
         }
     }
 
@@ -283,9 +373,14 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
         }
     }
 
-    /// Fails unless the Step `key` still holds its session.
-    async fn still_holds(&self, key: StepKey) -> Result<(), SessionAgentError> {
-        if self.repo.holds_session(key).await.map_err(Self::records)? {
+    /// Fails unless the Step `key` still holds the session `session_id`.
+    async fn still_holds(&self, key: StepKey, session_id: Uuid) -> Result<(), SessionAgentError> {
+        let holds = self
+            .repo
+            .holds_session(key, session_id)
+            .await
+            .map_err(Self::records)?;
+        if holds {
             Ok(())
         } else {
             Err(SessionAgentError::Released)
@@ -334,33 +429,25 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
     }
 }
 
-impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
-    type Err = SessionAgentError;
-
-    #[tracing::instrument(err, skip_all, fields(run_id = %task.key.run_id, seq = task.key.seq, step = %task.step))]
-    async fn answer(&self, task: AgentTask) -> Result<AgentAnswer, SessionAgentError> {
-        // Opening and prompting count against the deadline too.
-        let deadline = tokio::time::Instant::now() + SESSION_DEADLINE;
-        // A retried Step goes on in the session its first attempt claimed,
-        // so the work is never started twice.
-        let claimed = self
-            .repo
-            .claim_session(
-                task.key,
-                StepSession {
-                    session_id: Uuid::now_v7(),
-                    action_id: Uuid::now_v7(),
-                },
-                &task.outcomes,
-            )
-            .await
-            .map_err(Self::records)?;
-        let action = self.action(&task.owner, claimed.session);
+impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
+    /// Open the Step's `session` and prompt it, as the session's Agent, and
+    /// the action to wait on. An Agent whose quota is used up refuses either
+    /// before any work starts: its session, if it opened, is deleted, and
+    /// the error says so.
+    async fn start(
+        &self,
+        task: &AgentTask,
+        session: &StepSession,
+        agent_name: &AgentName,
+    ) -> Result<RoutineSessionAction, SessionAgentError> {
+        let agent = self.agent(agent_name)?;
+        let action = Self::action(&task.owner, session, self.bot(session, &task.role)?);
 
         // A deleted session is gone: preparing it again would open a fresh
         // one under its id, and prompting it would start the work over. An
         // attempt Temporal gave up on may still run here after the Step let
-        // go of its session, so it checks before each.
+        // go of its session, or handed it to another Agent, so it checks
+        // before each that the Step still works in this session.
         //
         // The prepare is recorded at the database's time before it is sent,
         // so a stop can tell a session that may still open from one that
@@ -368,13 +455,13 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
         // whose Run ended, sends no prepare.
         let Some(prepared_at) = self
             .repo
-            .record_prepare(task.key)
+            .record_prepare(task.key, session.session_id)
             .await
             .map_err(Self::records)?
         else {
             return Err(SessionAgentError::Released);
         };
-        if let Err(error) = self.open(&task, &action).await {
+        if let Err(error) = self.open(task, agent, &action).await {
             // Refused outright, or never shown open within the settle: this
             // prepare is not in flight, so a stop need not wait for it. A
             // later attempt's prepare keeps its record.
@@ -386,16 +473,122 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
         }
         // The session just opened is this attempt's to delete when the Step
         // let go of it meanwhile: nothing else will.
-        if let Err(released) = self.still_holds(task.key).await {
+        if let Err(released) = self.still_holds(task.key, session.session_id).await {
             self.delete(&action).await;
             return Err(released);
         }
         // A session that opened is never written off by a stop.
         self.repo
-            .record_open(task.key)
+            .record_open(task.key, session.session_id)
             .await
             .map_err(Self::records)?;
-        self.prompt_once(&task, &action).await?;
+        if let Err(error) = self.prompt_once(task, &action).await {
+            // A refused prompt started no work: the session is no use to
+            // the next Agent, and the Step stops pointing at it once handed
+            // on, so it is deleted here.
+            if matches!(error, SessionAgentError::NoQuota(_)) {
+                self.delete(&action).await;
+            }
+            return Err(error);
+        }
+        Ok(action)
+    }
+}
+
+impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
+    type Err = SessionAgentError;
+
+    #[tracing::instrument(err, skip_all, fields(run_id = %task.key.run_id, seq = task.key.seq, step = %task.step, role = %task.role))]
+    async fn answer(&self, task: AgentTask) -> Result<AgentAnswer, SessionAgentError> {
+        // Opening and prompting count against the deadline too.
+        let deadline = tokio::time::Instant::now() + SESSION_DEADLINE;
+        let agents = self.agents.for_role(&task.role);
+        let first = agents
+            .first()
+            .ok_or_else(|| SessionAgentError::UnfilledRole(task.role.clone()))?;
+        // A retried Step goes on in the session its first attempt claimed,
+        // or the one a later Agent took over, so the work is never started
+        // twice.
+        let mut session = self
+            .repo
+            .claim_session(
+                task.key,
+                self.new_session(first)?,
+                &task.role,
+                &task.outcomes,
+            )
+            .await
+            .map_err(Self::records)?
+            .session;
+
+        // An Agent that cannot start for lack of quota hands the Step to the
+        // next Agent of its Role, in a session of its own, until one starts
+        // or none is left; the Step records each Agent passed over, the last
+        // one too.
+        let action = loop {
+            let agent = self.agent_name(&session, &task.role)?;
+            let reason = match self.start(&task, &session, &agent).await {
+                Ok(action) => break action,
+                Err(SessionAgentError::NoQuota(reason)) => reason,
+                // An overlapping attempt handed the Step on while this one
+                // opened its session: go on in the session it works in now.
+                Err(SessionAgentError::Released) => {
+                    match self.moved_on(task.key, &session).await? {
+                        Some(current) => {
+                            session = current;
+                            continue;
+                        }
+                        None => return Err(SessionAgentError::Released),
+                    }
+                }
+                Err(error) => return Err(error),
+            };
+            // The Agent after this one in the Role's list, or its first
+            // when the definition no longer lists this one for the Role.
+            let next = agents
+                .iter()
+                .position(|listed| *listed == agent)
+                .map_or(0, |place| place + 1);
+            let to = agents
+                .get(next)
+                .map(|name| self.new_session(name))
+                .transpose()?;
+            let passed = PassedOver {
+                agent: agent.clone(),
+                reason: reason.code().to_string(),
+            };
+            let recorded = self
+                .repo
+                .pass_session(
+                    task.key,
+                    session.session_id,
+                    &task.role,
+                    &passed,
+                    to.as_ref(),
+                )
+                .await
+                .map_err(Self::records)?;
+            let Some(to) = to else {
+                return Err(SessionAgentError::NoQuota(reason));
+            };
+            if recorded {
+                tracing::info!(
+                    from = %agent,
+                    reason = reason.code(),
+                    "a factory step's agent could not start: the next agent takes it"
+                );
+                session = to;
+                continue;
+            }
+
+            // Another attempt handed the Step on already, or it let go of
+            // its session: go on in the session it works in now, while it
+            // holds it.
+            match self.moved_on(task.key, &session).await? {
+                Some(current) => session = current,
+                None => return Err(SessionAgentError::NoQuota(reason)),
+            }
+        };
         self.finished(&action, deadline).await?;
 
         // The session stays until the Step's end is recorded: a retry of an
@@ -416,6 +609,7 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
     async fn stop(
         &self,
         key: StepKey,
+        role: &Role,
         owner: &MacroUserIdStr<'static>,
     ) -> Result<(), SessionAgentError> {
         // Recorded first, so no attempt prepares or opens the session again
@@ -446,7 +640,7 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
         // whose prepare is still in flight, or a harness that fails a while,
         // answers neither the stop nor a read, yet may open or work on, so
         // the watch rides that out.
-        let action = self.action(owner, stopping.session);
+        let action = Self::action(owner, &stopping.session, self.bot(&stopping.session, role)?);
         self.cancel(&action).await;
         let mut seen = false;
         let deadline = tokio::time::Instant::now() + STOP_WATCH;
@@ -493,6 +687,7 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
     async fn release(
         &self,
         key: StepKey,
+        role: &Role,
         owner: &MacroUserIdStr<'static>,
     ) -> Result<(), SessionAgentError> {
         let claimed = self
@@ -501,13 +696,25 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
             .await
             .map_err(Self::records)?;
         if let Some(session) = claimed {
+            let bot = self.bot(&session, role)?;
             self.repo
                 .release_session(key)
                 .await
                 .map_err(Self::records)?;
-            self.delete(&self.action(owner, session)).await;
+            self.delete(&Self::action(owner, &session, bot)).await;
         }
         Ok(())
+    }
+}
+
+/// What a session's refusal means for the Step: an Agent out of quota
+/// passes the Step on; anything else is the session's failure.
+fn refusal(error: RoutineSessionError) -> SessionAgentError {
+    match error {
+        RoutineSessionError::Admission(AiAdmissionError::Denied(reason)) => {
+            SessionAgentError::NoQuota(reason)
+        }
+        error => SessionAgentError::Session(error),
     }
 }
 

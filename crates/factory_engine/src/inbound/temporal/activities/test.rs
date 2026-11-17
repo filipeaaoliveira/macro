@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use factory_records::domain::models::{EntryId, RunId, StepKey};
+use factory_records::domain::models::{EntryId, Role, RunId, StepKey};
 use temporalio_sdk::activities::ActivityError;
 use tokio::sync::{Notify, watch};
 
@@ -111,6 +111,7 @@ fn plan_request() -> StepRequest {
         },
         entry: EntryId::try_from("plan".to_string()).expect("valid"),
         step: StepName::try_from("plan".to_string()).expect("valid"),
+        role: Some(Role::try_from("planner".to_string()).expect("valid")),
         visit: 1,
     }
 }
