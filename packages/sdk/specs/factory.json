@@ -833,6 +833,10 @@
         "description": "One round of the repository's checks a Step ran on its agent's work, in\nthe agent's session.",
         "required": ["round", "checks", "startedAt", "verified", "results"],
         "properties": {
+          "checkedCommit": {
+            "type": ["string", "null"],
+            "description": "The commit a verified round's checks run on: the head of the Run's\nbranch on GitHub when its first check ran."
+          },
           "checks": {
             "type": "array",
             "items": {
@@ -871,7 +875,7 @@
           },
           "verified": {
             "type": "boolean",
-            "description": "Whether the engine runs the checks itself, on the pushed commit,\nreading each one's exit code; otherwise the agent runs them and\nreports how they went."
+            "description": "Whether the engine runs the checks itself, on the pushed commit in a\nworktree of its own, reading each one's exit code; otherwise the\nagent runs them and reports how they went."
           }
         }
       },

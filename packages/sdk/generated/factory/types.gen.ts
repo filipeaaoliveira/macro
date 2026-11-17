@@ -48,6 +48,11 @@ export type CheckResult = {
  */
 export type CheckRound = {
     /**
+     * The commit a verified round's checks run on: the head of the Run's
+     * branch on GitHub when its first check ran.
+     */
+    checkedCommit?: string | null;
+    /**
      * The names of the checks it runs, in the repository's order.
      */
     checks: Array<string>;
@@ -66,9 +71,9 @@ export type CheckRound = {
      */
     startedAt: string;
     /**
-     * Whether the engine runs the checks itself, on the pushed commit,
-     * reading each one's exit code; otherwise the agent runs them and
-     * reports how they went.
+     * Whether the engine runs the checks itself, on the pushed commit in a
+     * worktree of its own, reading each one's exit code; otherwise the
+     * agent runs them and reports how they went.
      */
     verified: boolean;
 };

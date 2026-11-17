@@ -6,6 +6,7 @@
  */
 
 import type { CheckResult } from './checkResult';
+import type { CheckRoundCheckedCommit } from './checkRoundCheckedCommit';
 import type { CheckRoundEndProperty } from './checkRoundEndProperty';
 
 /**
@@ -13,6 +14,9 @@ import type { CheckRoundEndProperty } from './checkRoundEndProperty';
 the agent's session.
  */
 export interface CheckRound {
+  /** The commit a verified round's checks run on: the head of the Run's
+branch on GitHub when its first check ran. */
+  checkedCommit?: CheckRoundCheckedCommit;
   /** The names of the checks it runs, in the repository's order. */
   checks: string[];
   end?: CheckRoundEndProperty;
@@ -26,8 +30,8 @@ order; none for a round the agent reports. */
   round: number;
   /** When it started. */
   startedAt: string;
-  /** Whether the engine runs the checks itself, on the pushed commit,
-reading each one's exit code; otherwise the agent runs them and
-reports how they went. */
+  /** Whether the engine runs the checks itself, on the pushed commit in a
+worktree of its own, reading each one's exit code; otherwise the
+agent runs them and reports how they went. */
   verified: boolean;
 }

@@ -10,6 +10,7 @@ export * from './answerGateRequest';
 export * from './answerGateRequestNote';
 export * from './checkResult';
 export * from './checkRound';
+export * from './checkRoundCheckedCommit';
 export * from './checkRoundEnd';
 export * from './checkRoundEndProperty';
 export * from './checkRoundOutcome';
