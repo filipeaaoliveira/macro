@@ -124,6 +124,7 @@ async fn run() -> Result<(), rootcause::Report> {
     let parts = Parts {
         port: config.port,
         review_rounds: config.factory_review_rounds,
+        questions: config.factory_questions,
         repo: repo.clone(),
         usage: PgSessionUsageReader::new(db.clone()),
         users: AuthUserDirectory::new(auth),
@@ -170,6 +171,7 @@ async fn run() -> Result<(), rootcause::Report> {
 struct Parts {
     port: u16,
     review_rounds: Option<std::num::NonZeroU8>,
+    questions: Option<u8>,
     repo: PgRunRepository,
     usage: PgSessionUsageReader,
     users: AuthUserDirectory,
@@ -222,6 +224,9 @@ async fn serve<A: StepAgent + Clone>(
     );
     if let Some(rounds) = parts.review_rounds {
         service = service.with_review_rounds(rounds);
+    }
+    if let Some(questions) = parts.questions {
+        service = service.with_questions(questions);
     }
     let service = Arc::new(service);
     let api = factory_router(FactoryRouterState::new(
