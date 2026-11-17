@@ -101,3 +101,47 @@ fn a_session_with_a_pending_command_is_not_reaped() {
         "a container whose session has a pending command must not be reaped"
     );
 }
+
+#[test]
+fn a_container_running_a_command_is_not_reaped_until_it_idles_after_it() {
+    let managed = ManagedContainers::new();
+    let now = Instant::now();
+    activate(&managed, "checking", seconds_ago(now, 900));
+
+    managed.begin_command(&"checking", session(1), seconds_ago(now, 600));
+    assert!(
+        managed
+            .reap_stale(now, Duration::from_secs(300), never_skip)
+            .is_empty()
+    );
+
+    managed.end_command(&"checking", seconds_ago(now, 299));
+    assert!(
+        managed
+            .reap_stale(now, Duration::from_secs(300), never_skip)
+            .is_empty()
+    );
+    assert_eq!(
+        managed.reap_stale(
+            now + Duration::from_secs(1),
+            Duration::from_secs(300),
+            never_skip
+        ),
+        ["checking"]
+    );
+}
+
+#[test]
+fn a_command_in_an_untracked_container_tracks_it_until_it_idles() {
+    let managed = ManagedContainers::new();
+    let now = Instant::now();
+
+    managed.begin_command(&"elsewhere", session(2), seconds_ago(now, 600));
+    managed.end_command(&"elsewhere", seconds_ago(now, 300));
+
+    assert_eq!(managed.session_of(&"elsewhere"), Some(session(2)));
+    assert_eq!(
+        managed.reap_stale(now, Duration::from_secs(300), never_skip),
+        ["elsewhere"]
+    );
+}

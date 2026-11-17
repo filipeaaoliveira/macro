@@ -399,3 +399,31 @@ fn only_a_background_session_with_instructions_goes_unread() {
     session.visibility = agent_session::domain::model::SessionVisibility::Listed;
     assert_eq!(reply_delivery(&session), ReplyDelivery::Streamed);
 }
+
+/// The in-process agent works on no repository: it has no checkout to run
+/// a command in, and says so instead of reaching for a sandbox.
+#[tokio::test]
+async fn an_in_process_session_runs_no_command() {
+    let (id, repo) = repo_with_session(bot_id::MACRO_NEW_BOT_ID, "opencode");
+    let containers = in_process_containers(&repo);
+
+    let refused = containers
+        .exec(
+            id,
+            SessionCommand {
+                cwd: ".".to_owned(),
+                command: "just check".to_owned(),
+                timeout_secs: 60,
+            },
+        )
+        .await
+        .expect_err("no checkout");
+
+    assert!(
+        matches!(
+            refused,
+            HarnessError::Session(AgentSessionError::CommandUnsupported(session)) if session == id
+        ),
+        "{refused:?}"
+    );
+}

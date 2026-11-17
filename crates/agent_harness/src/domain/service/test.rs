@@ -14,6 +14,7 @@ mod owned_purge;
 mod permission_refresh;
 mod presentation;
 mod quota;
+mod run_command;
 mod runtime_access;
 mod user_cleanup;
 mod warm;
@@ -3884,6 +3885,8 @@ type ForwardCall = (crate::domain::ports::CommandTarget, AgentSessionId);
 #[derive(Clone, Default)]
 struct RecordingForwarder {
     calls: Arc<Mutex<Vec<ForwardCall>>>,
+    /// The replica and session each forwarded command run was for.
+    runs: Arc<Mutex<Vec<(ReplicaId, AgentSessionId)>>>,
 }
 
 impl crate::domain::ports::CommandForwarder for RecordingForwarder {
@@ -3895,6 +3898,20 @@ impl crate::domain::ports::CommandForwarder for RecordingForwarder {
     ) -> crate::domain::error::Result<CommandOutcome> {
         self.calls.lock().unwrap().push((target, session));
         Ok(CommandOutcome::Completed)
+    }
+
+    /// The peer's run fails with exit code 3.
+    async fn run_command(
+        &self,
+        session: AgentSessionId,
+        _command: agent_session::domain::session_command::SessionCommand,
+        replica: ReplicaId,
+    ) -> crate::domain::error::Result<agent_session::domain::session_command::SessionCommandOutput>
+    {
+        self.runs.lock().unwrap().push((replica, session));
+        Ok(agent_session::domain::session_command::SessionCommandOutput::new(
+            3, b"on the peer", b"",
+        ))
     }
 }
 

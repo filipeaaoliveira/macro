@@ -10,18 +10,24 @@
 //! only a session id, so they read the session's bot from the repo — the same
 //! key, recovered from the same durable row that spawn wrote it to. External
 //! sessions have no provider here: preflight succeeds, teardown is a no-op,
-//! and operations requiring a managed runtime refuse.
+//! a command runs on the Macro computer the session's harness is, when the
+//! router has [`MachineCommands`], and operations requiring a managed
+//! runtime refuse.
 
 use agent_runtime_protocol::domain::ports::{
     Transport, TransportError, TransportReceiver, TransportSender,
 };
 use agent_runtime_protocol::domain::schema::v0::{ToRuntimeMessage, ToServerMessage};
+use std::sync::Arc;
+
+use agent_session::domain::error::AgentSessionError;
 use agent_session::domain::model::AgentSessionId;
 use agent_session::domain::ports::AgentSessionRepo;
+use agent_session::domain::session_command::{SessionCommand, SessionCommandOutput};
 
 use crate::domain::error::{HarnessError, Result};
 use crate::domain::model::{AgentKind, SessionBlocker, SpawnContainer};
-use crate::domain::ports::ContainerManager;
+use crate::domain::ports::{ContainerManager, MachineCommands};
 use crate::domain::sandbox::SandboxResizeEffect;
 use agent_session::domain::model::SandboxSize;
 use macro_user_id::user_id::MacroUserIdStr;
@@ -36,6 +42,9 @@ pub struct RoutedContainerManager<Sandbox, Cursor, Codex, Sessions> {
     cursor: Cursor,
     codex: Codex,
     sessions: Sessions,
+    /// Where an external session's commands run: Macro computers, when the
+    /// deployment has a fleet. None runs them nowhere.
+    machines: Option<Arc<dyn MachineCommands>>,
 }
 
 impl<Sandbox, Cursor, Codex, Sessions> RoutedContainerManager<Sandbox, Cursor, Codex, Sessions> {
@@ -46,7 +55,15 @@ impl<Sandbox, Cursor, Codex, Sessions> RoutedContainerManager<Sandbox, Cursor, C
             cursor,
             codex,
             sessions,
+            machines: None,
         }
+    }
+
+    /// Run external sessions' commands on `machines`.
+    #[must_use]
+    pub fn with_machines(mut self, machines: Arc<dyn MachineCommands>) -> Self {
+        self.machines = Some(machines);
+        self
     }
 }
 
@@ -134,6 +151,27 @@ where
                 self.sandbox.session_token(session).await
             }
             AgentKind::External => Err(external_is_unroutable()),
+        }
+    }
+
+    async fn exec(
+        &self,
+        session: AgentSessionId,
+        command: SessionCommand,
+    ) -> Result<SessionCommandOutput> {
+        let row = self.sessions.get(session).await?;
+        match AgentKind::for_session(row.bot_id, &row.harness) {
+            AgentKind::CodexCloud => self.codex.exec(session, command).await,
+            AgentKind::Cursor => self.cursor.exec(session, command).await,
+            AgentKind::SandboxedCoder | AgentKind::InMemory => {
+                self.sandbox.exec(session, command).await
+            }
+            AgentKind::External => match &self.machines {
+                Some(machines) => machines.exec(row.bot_id, session, command).await,
+                None => Err(HarnessError::Session(
+                    AgentSessionError::CommandUnsupported(session),
+                )),
+            },
         }
     }
 

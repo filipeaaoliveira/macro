@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use agent_session::domain::model::{AgentSessionId, SandboxSize};
+use agent_session::domain::session_command::{SessionCommand, SessionCommandOutput};
 
 use super::docker::{ContainerRef, Docker, RunSpec};
 use super::errors::LocalError;
@@ -297,6 +298,35 @@ impl ContainerManager for LocalContainerManager {
             return Ok(None);
         }
         Ok(provision::parse_session_token(&output))
+    }
+
+    /// Runs in the session's container, started first if it stopped.
+    #[tracing::instrument(err, skip(self, command))]
+    async fn exec(
+        &self,
+        session: AgentSessionId,
+        command: SessionCommand,
+    ) -> Result<SessionCommandOutput> {
+        let container = self.find(session).await?.ok_or_else(|| {
+            HarnessError::Container(format!(
+                "session {session} has no container to run a command in"
+            ))
+        })?;
+        self.docker.start(&container).await.map_err(unavailable)?;
+        let output = self
+            .docker
+            .exec_output(
+                &container,
+                &command.script(provision::CHECKOUT),
+                command.timeout() + provision::EXEC_MARGIN,
+            )
+            .await
+            .map_err(unavailable)?;
+        Ok(SessionCommandOutput::new(
+            output.status.code().unwrap_or(-1),
+            &output.stdout,
+            &output.stderr,
+        ))
     }
 
     #[tracing::instrument(err, skip(self))]

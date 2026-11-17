@@ -4,6 +4,7 @@ use agent_harness::domain::model::{CommandOutcome, HarnessCommand};
 use agent_harness::domain::ports::{CommandForwarder as _, CommandTarget};
 use agent_harness::outbound::forward::RedisCommandForwarder;
 use agent_session::domain::model::AgentSessionId;
+use agent_session::domain::session_command::{SessionCommand, SessionCommandOutput};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 struct RecordingHarness {
@@ -22,6 +23,26 @@ impl ForwardedCommands for RecordingHarness {
             return Err(HarnessError::Disconnected(session_id));
         }
         Ok(CommandOutcome::Completed)
+    }
+
+    /// Runs nothing: answers with the command line as its output, failing
+    /// with exit code 2, or as a runtime that runs no command.
+    async fn run_forwarded_command(
+        &self,
+        session_id: AgentSessionId,
+        command: SessionCommand,
+    ) -> Result<SessionCommandOutput> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        if self.fails {
+            return Err(HarnessError::Session(
+                agent_session::domain::error::AgentSessionError::CommandUnsupported(session_id),
+            ));
+        }
+        Ok(SessionCommandOutput::new(
+            2,
+            command.command.as_bytes(),
+            b"",
+        ))
     }
 }
 
@@ -225,4 +246,88 @@ fn empty_models(redis: redis::Client) -> MacrodModels {
         redis,
         std::time::Duration::from_secs(2),
     )
+}
+
+fn check() -> SessionCommand {
+    SessionCommand {
+        cwd: ".".into(),
+        command: "just check".into(),
+        timeout_secs: 5,
+    }
+}
+
+/// A command for a session a peer holds runs on that peer alone, and its
+/// end comes back to the replica that forwarded it.
+#[tokio::test]
+async fn a_forwarded_command_runs_on_the_peer_and_its_end_comes_back() {
+    let redis = redis_client();
+    let origin = ReplicaId::mint();
+    let peer = ReplicaId::mint();
+    let origin_harness = harness(false);
+    let peer_harness = harness(false);
+    let (origin_ready, mut origin_readiness) = tokio::sync::watch::channel(false);
+    let origin_consumer = tokio::spawn(consume_runtime_commands(
+        redis.clone(),
+        origin,
+        Arc::new(|_| false),
+        Arc::clone(&origin_harness),
+        origin_ready,
+        empty_models(redis.clone()),
+    ));
+    let (peer_ready, mut peer_readiness) = tokio::sync::watch::channel(false);
+    let peer_consumer = tokio::spawn(consume_runtime_commands(
+        redis.clone(),
+        peer,
+        Arc::new(|_| false),
+        Arc::clone(&peer_harness),
+        peer_ready,
+        empty_models(redis.clone()),
+    ));
+    ready(&mut origin_readiness).await;
+    ready(&mut peer_readiness).await;
+
+    let output = RedisCommandForwarder::new(redis)
+        .run_command(AgentSessionId::TEST_A, check(), peer)
+        .await
+        .unwrap();
+
+    assert_eq!(output, SessionCommandOutput::new(2, b"just check", b""));
+    assert_eq!(peer_harness.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(origin_harness.calls.load(Ordering::SeqCst), 0);
+    origin_consumer.abort();
+    peer_consumer.abort();
+}
+
+/// A peer whose session runs no command says so, typed, across the bus.
+#[tokio::test]
+async fn a_peer_that_runs_no_command_says_so() {
+    let redis = redis_client();
+    let peer = ReplicaId::mint();
+    let peer_harness = harness(true);
+    let (peer_ready, mut peer_readiness) = tokio::sync::watch::channel(false);
+    let peer_consumer = tokio::spawn(consume_runtime_commands(
+        redis.clone(),
+        peer,
+        Arc::new(|_| false),
+        Arc::clone(&peer_harness),
+        peer_ready,
+        empty_models(redis.clone()),
+    ));
+    ready(&mut peer_readiness).await;
+
+    let refused = RedisCommandForwarder::new(redis)
+        .run_command(AgentSessionId::TEST_A, check(), peer)
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(
+            refused,
+            HarnessError::Session(
+                agent_session::domain::error::AgentSessionError::CommandUnsupported(_)
+            )
+        ),
+        "{refused:?}"
+    );
+    peer_consumer.abort();
 }

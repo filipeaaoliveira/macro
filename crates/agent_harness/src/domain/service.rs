@@ -26,6 +26,7 @@ mod open;
 mod present;
 mod queue;
 mod reattach;
+mod run_command;
 mod session_mcp;
 mod warm;
 
@@ -814,6 +815,14 @@ pub trait ForwardedCommands: Send + Sync + 'static {
         session_id: AgentSessionId,
         command: HarnessCommand,
     ) -> impl Future<Output = Result<CommandOutcome>> + Send;
+
+    /// Run a command in the checkout of a session this replica holds, for
+    /// the replica that forwarded it, and say how it ended.
+    fn run_forwarded_command(
+        &self,
+        session_id: AgentSessionId,
+        command: agent_session::domain::session_command::SessionCommand,
+    ) -> impl Future<Output = Result<agent_session::domain::session_command::SessionCommandOutput>> + Send;
 }
 
 impl<
@@ -858,6 +867,14 @@ where
         command: HarnessCommand,
     ) -> Result<CommandOutcome> {
         self.execute_here(session_id, command).await
+    }
+
+    async fn run_forwarded_command(
+        &self,
+        session_id: AgentSessionId,
+        command: agent_session::domain::session_command::SessionCommand,
+    ) -> Result<agent_session::domain::session_command::SessionCommandOutput> {
+        self.inner.containers.exec(session_id, command).await
     }
 }
 

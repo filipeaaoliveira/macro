@@ -17,6 +17,14 @@ impl ForwardedCommands for NoCommands {
     ) -> HarnessResult<CommandOutcome> {
         panic!("model discovery must not create or execute session commands")
     }
+
+    async fn run_forwarded_command(
+        &self,
+        _: AgentSessionId,
+        _: agent_session::domain::session_command::SessionCommand,
+    ) -> HarnessResult<agent_session::domain::session_command::SessionCommandOutput> {
+        panic!("model discovery must not run session commands")
+    }
 }
 
 struct Peer {

@@ -166,6 +166,18 @@ Reconcile active leases against terminal log evidence too: an observer can miss 
 completion during takeover. Previously bound quiet attempts reconcile before new
 wakes; interrupted quiet batches return to the next real prompt.
 
+`ContainerManager::exec` runs one command in a session's checkout, beside its
+agent, and answers its exit code and output (`domain/service/run_command.rs`):
+Daytona and local Docker in `/workspace`, Namespace in the instance this
+replica spawned, and an external session's on the Macro computer its harness
+runs on (`MachineCommands`, in `~/.macrod/herdr/<harness>/worktrees/<session>`).
+A paired machine, Cursor, Codex and the in-process agent answer
+`AgentSessionError::CommandUnsupported`. It is not a queued command: it runs on
+the replica that holds the session, or, when a peer does, is forwarded there
+over the command bus (`CommandForwarder::run_command`), which waits on a reply
+channel of its own for the command's end. Daytona keeps a sandbox running a
+command from its idle reaper (`ManagedContainers::begin_command`).
+
 `RuntimeRegistry::computer_control` forwards typed computer commands to the
 local live connection, returning `None` when another replica owns it. The
 service composition owns cross-replica carriage and request deadlines.

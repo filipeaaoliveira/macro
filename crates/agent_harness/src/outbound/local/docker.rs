@@ -80,17 +80,27 @@ impl Docker {
         command: &str,
         timeout: Duration,
     ) -> Result<(i32, String), LocalError> {
+        let output = self.exec_output(container, command, timeout).await?;
+        let mut combined = String::from_utf8_lossy(&output.stdout).into_owned();
+        combined.push_str(&String::from_utf8_lossy(&output.stderr));
+        Ok((output.status.code().unwrap_or(-1), combined))
+    }
+
+    /// Run one command inside a container, returning its exit status and
+    /// its two streams apart.
+    pub async fn exec_output(
+        &self,
+        container: &ContainerRef,
+        command: &str,
+        timeout: Duration,
+    ) -> Result<std::process::Output, LocalError> {
         let args = exec_args(&container.name, command);
-        let output = tokio::time::timeout(timeout, self.output(&args))
+        tokio::time::timeout(timeout, self.output(&args))
             .await
             .map_err(|_| LocalError::ExecTimeout {
                 container: container.name.clone(),
                 seconds: timeout.as_secs(),
-            })??;
-
-        let mut combined = String::from_utf8_lossy(&output.stdout).into_owned();
-        combined.push_str(&String::from_utf8_lossy(&output.stderr));
-        Ok((output.status.code().unwrap_or(-1), combined))
+            })?
     }
 
     /// The container carrying `value` for `label`, if one exists.

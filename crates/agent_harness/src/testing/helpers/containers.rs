@@ -12,6 +12,7 @@ use agent_runtime_protocol::domain::schema::v0::{
     AcpMessage, SystemEvent, ToRuntimeMessage, ToServerMessage,
 };
 use agent_session::domain::model::{AgentSessionId, SandboxSize};
+use agent_session::domain::session_command::{SessionCommand, SessionCommandOutput};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use crate::domain::error::{HarnessError, Result};
@@ -219,6 +220,8 @@ pub struct MockContainerManager {
     /// Sessions asked whether their release is lossless, once per ask.
     lossless_checks: Arc<Mutex<Vec<AgentSessionId>>>,
     lossless_checked: Arc<tokio::sync::Notify>,
+    /// Commands run in a spawned container, in order.
+    commands: Arc<Mutex<Vec<(AgentSessionId, SessionCommand)>>>,
 }
 
 impl MockContainerManager {
@@ -226,6 +229,15 @@ impl MockContainerManager {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// The commands run in sessions' containers, in order.
+    #[must_use]
+    pub fn commands(&self) -> Vec<(AgentSessionId, SessionCommand)> {
+        self.commands
+            .lock()
+            .expect("commands lock should not be poisoned")
+            .clone()
     }
 
     /// The container this session was given, so a test can drive it.
@@ -522,6 +534,26 @@ impl ContainerManager for MockContainerManager {
             .lock()
             .contains_key(&session)
             .then(|| "test-session-token".to_owned()))
+    }
+
+    /// A command in a spawned container exits 0 and echoes its line; a
+    /// session with none has nothing to run it in.
+    async fn exec(
+        &self,
+        session: AgentSessionId,
+        command: SessionCommand,
+    ) -> Result<SessionCommandOutput, HarnessError> {
+        if !self.lock().contains_key(&session) {
+            return Err(HarnessError::Container(format!(
+                "session {session} has no container"
+            )));
+        }
+        let output = SessionCommandOutput::new(0, command.command.as_bytes(), b"");
+        self.commands
+            .lock()
+            .expect("commands lock should not be poisoned")
+            .push((session, command));
+        Ok(output)
     }
 
     async fn teardown(&self, session: AgentSessionId) -> Result<(), HarnessError> {

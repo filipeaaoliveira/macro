@@ -20,6 +20,10 @@ pub(crate) struct ManagedContainers<Id> {
     /// which only ever sees `Id` - can ask whether the harness has a
     /// command in flight for it.
     sessions: DashMap<Id, AgentSessionId>,
+    /// How many commands run in each container now, beside its agent: a
+    /// reaper leaves a container with one alone, however long it has been
+    /// since its agent's last activity.
+    commands: DashMap<Id, usize>,
 }
 
 impl<Id> ManagedContainers<Id>
@@ -30,6 +34,7 @@ where
         Self {
             entries: DashMap::new(),
             sessions: DashMap::new(),
+            commands: DashMap::new(),
         }
     }
 
@@ -61,6 +66,32 @@ where
         }
     }
 
+    /// Count a command that starts running in `id`, the container of
+    /// `session`, now. One this manager does not track yet (its session
+    /// is attached nowhere) is tracked from now on as active, so the
+    /// reaper stops it once it idles after the command.
+    pub(crate) fn begin_command(&self, id: &Id, session: AgentSessionId, now: Instant) {
+        *self.commands.entry(id.clone()).or_insert(0) += 1;
+        self.entries
+            .entry(id.clone())
+            .or_insert(ContainerState::Active { last_activity: now });
+        self.sessions.entry(id.clone()).or_insert(session);
+    }
+
+    /// Count a command in `id` as ended now: the container's idle time
+    /// starts again from its end.
+    pub(crate) fn end_command(&self, id: &Id, now: Instant) {
+        self.commands.remove_if_mut(id, |_, running| {
+            *running = running.saturating_sub(1);
+            *running == 0
+        });
+        self.record_activity(id, now);
+    }
+
+    fn runs_command(&self, id: &Id) -> bool {
+        self.commands.contains_key(id)
+    }
+
     pub(crate) fn remove(&self, id: &Id) -> bool {
         self.sessions.remove(id);
         self.entries.remove(id).is_some()
@@ -86,6 +117,7 @@ where
             .filter_map(|entry| match entry.value() {
                 ContainerState::Active { last_activity }
                     if now.saturating_duration_since(*last_activity) >= max_idle
+                        && !self.runs_command(entry.key())
                         && !skip(entry.key()) =>
                 {
                     Some(entry.key().clone())
@@ -100,6 +132,7 @@ where
             };
             if let ContainerState::Active { last_activity } = *state
                 && now.saturating_duration_since(last_activity) >= max_idle
+                && !self.runs_command(&id)
                 && !skip(&id)
             {
                 *state = ContainerState::Stopping { last_activity };

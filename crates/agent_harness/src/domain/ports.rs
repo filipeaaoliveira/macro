@@ -9,6 +9,7 @@ use agent_client_protocol::schema::v1::SessionId;
 use agent_session::domain::connection::RuntimeAttachment;
 use agent_session::domain::model::{AgentMcpServers, AgentSessionId, SandboxSize};
 use agent_session::domain::ports::AgentConnector;
+use agent_session::domain::session_command::{SessionCommand, SessionCommandOutput};
 use bot_id::BotId;
 use harness_id::HarnessId;
 
@@ -72,6 +73,18 @@ pub trait CommandForwarder: Send + Sync + 'static {
         command: HarnessCommand,
         target: CommandTarget,
     ) -> impl Future<Output = Result<CommandOutcome>> + Send;
+
+    /// Run `command` in `session`'s checkout on `replica`, the replica that
+    /// holds the session, and wait for how it ended. Unlike
+    /// [`Self::forward`], which answers once the command is sent, this
+    /// answers with the command's end, or fails when no answer comes in
+    /// its time.
+    fn run_command(
+        &self,
+        session: AgentSessionId,
+        command: SessionCommand,
+        replica: agent_session::domain::model::ReplicaId,
+    ) -> impl Future<Output = Result<SessionCommandOutput>> + Send;
 }
 
 /// A forwarder for deployments with exactly one replica, where a live peer
@@ -87,6 +100,15 @@ impl CommandForwarder for NoPeers {
         _command: HarnessCommand,
         _target: CommandTarget,
     ) -> Result<CommandOutcome> {
+        Err(HarnessError::Disconnected(session))
+    }
+
+    async fn run_command(
+        &self,
+        session: AgentSessionId,
+        _command: SessionCommand,
+        _replica: agent_session::domain::model::ReplicaId,
+    ) -> Result<SessionCommandOutput> {
         Err(HarnessError::Disconnected(session))
     }
 }
@@ -525,6 +547,25 @@ pub trait SandboxEgressProvisioner: Send + Sync + 'static {
     ) -> impl Future<Output = Result<SandboxEgress>> + Send;
 }
 
+/// Runs commands in the checkouts of sessions whose agents work on machines
+/// Macro runs but does not provision per session: Macro computers, which
+/// pair as external runtimes. A paired machine of someone's own is out of
+/// reach, and answers [`AgentSessionError::CommandUnsupported`].
+///
+/// Object-safe, as it is wired in beside the providers rather than as one.
+///
+/// [`AgentSessionError::CommandUnsupported`]: agent_session::domain::error::AgentSessionError::CommandUnsupported
+pub trait MachineCommands: Send + Sync + 'static {
+    /// Run `command` in the checkout `session` has on the machine `bot`'s
+    /// harness runs on, as [`ContainerManager::exec`] does.
+    fn exec(
+        &self,
+        bot: BotId,
+        session: AgentSessionId,
+        command: SessionCommand,
+    ) -> Pin<Box<dyn Future<Output = Result<SessionCommandOutput>> + Send + '_>>;
+}
+
 /// Provisions the container transports agent sessions run through.
 pub trait ContainerManager: Send + Sync + 'static {
     /// Transport returned by this provider.
@@ -597,6 +638,20 @@ pub trait ContainerManager: Send + Sync + 'static {
         &self,
         session: AgentSessionId,
     ) -> impl Future<Output = Result<Option<String>>> + Send;
+
+    /// Run `command` in the session's checkout, beside its agent, and say
+    /// how it ended: its exit code, whatever it is, and the end of its
+    /// output. A provider whose sessions have no checkout it can reach
+    /// answers [`AgentSessionError::CommandUnsupported`], wrapped in
+    /// [`crate::domain::error::HarnessError::Session`]. A provider that
+    /// stops idle containers keeps this one running while the command runs.
+    ///
+    /// [`AgentSessionError::CommandUnsupported`]: agent_session::domain::error::AgentSessionError::CommandUnsupported
+    fn exec(
+        &self,
+        session: AgentSessionId,
+        command: SessionCommand,
+    ) -> impl Future<Output = Result<SessionCommandOutput>> + Send;
 
     /// Destroy a session's container for good.
     ///

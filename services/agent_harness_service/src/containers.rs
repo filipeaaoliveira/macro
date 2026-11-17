@@ -24,6 +24,7 @@ use agent_runtime_protocol::domain::schema::v0::{ToRuntimeMessage, ToServerMessa
 use agent_session::domain::error::AgentSessionError;
 use agent_session::domain::model::{AgentSession, AgentSessionId, SandboxSize, SessionManagement};
 use agent_session::domain::service::AgentSessionService;
+use agent_session::domain::session_command::{SessionCommand, SessionCommandOutput};
 
 #[cfg(test)]
 mod test;
@@ -285,6 +286,20 @@ where
         match self.route(session).await? {
             Route::InMem(_) => Ok(self.inmem().manager.session_token(session)),
             Route::Sandbox => self.sandbox.session_token(session).await,
+        }
+    }
+
+    /// The in-process agent has no checkout: it works on no repository.
+    async fn exec(
+        &self,
+        session: AgentSessionId,
+        command: SessionCommand,
+    ) -> Result<SessionCommandOutput> {
+        match self.route(session).await? {
+            Route::InMem(_) => Err(HarnessError::Session(
+                AgentSessionError::CommandUnsupported(session),
+            )),
+            Route::Sandbox => self.sandbox.exec(session, command).await,
         }
     }
 

@@ -92,6 +92,19 @@ where
         .map_err(|_| AgentSessionError::DeliveryTimedOut(id))?
     }
 
+    async fn run_command(
+        &self,
+        id: AgentSessionId,
+        command: agent_session::domain::session_command::SessionCommand,
+    ) -> agent_session::domain::error::Result<
+        agent_session::domain::session_command::SessionCommandOutput,
+    > {
+        self.inner
+            .run_command(id, command)
+            .await
+            .map_err(into_session_error)
+    }
+
     async fn delete_user_sessions(
         &self,
         owner: MacroUserIdStr<'static>,

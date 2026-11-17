@@ -3,6 +3,8 @@ use std::sync::Arc;
 use agent_runtime_protocol::domain::ports::Transport;
 use agent_runtime_protocol::domain::schema::v0::{ToRuntimeMessage, ToServerMessage};
 use agent_session::domain::model::{AgentSessionId, SandboxSize};
+use agent_session::domain::session_command::{SessionCommand, SessionCommandOutput};
+use dashmap::DashMap;
 use tracing::Instrument as _;
 
 use super::client::NamespaceClient;
@@ -15,11 +17,18 @@ use crate::domain::sandbox::{SandboxResizeEffect, create_only_resize_effect, res
 use crate::outbound::provision;
 use crate::outbound::sidecar::SidecarTransport;
 
+#[cfg(test)]
+mod test;
+
 /// Hands out Namespace instances.
 pub struct NamespaceContainerManager {
     client: NamespaceClient,
     image_ref: super::types::ImageRef,
     lifetime: std::time::Duration,
+    /// The instance of each session this process spawned, which is the
+    /// only lookup from a session to its instance there is yet: a command
+    /// reaches the replica that holds the session, which spawned it.
+    instances: DashMap<AgentSessionId, Arc<Instance>>,
 }
 
 impl NamespaceContainerManager {
@@ -36,6 +45,7 @@ impl NamespaceContainerManager {
             client: NamespaceClient::new(api_url, token),
             image_ref,
             lifetime,
+            instances: DashMap::new(),
         }
     }
 
@@ -120,9 +130,13 @@ impl ContainerManager for NamespaceContainerManager {
         let instance_id = instance.id.clone();
 
         match self.bring_up(instance).await {
-            Ok(container) => Ok(agent_session::domain::connection::RuntimeAttachment::solo(
-                container,
-            )),
+            Ok(container) => {
+                self.instances
+                    .insert(command.session_id, Arc::clone(&container.instance));
+                Ok(agent_session::domain::connection::RuntimeAttachment::solo(
+                    container,
+                ))
+            }
             Err(error) => {
                 if let Err(destroy_error) = self.client.destroy_instance(&instance_id).await {
                     tracing::error!(
@@ -158,6 +172,42 @@ impl ContainerManager for NamespaceContainerManager {
         // needs the instance id for a session - the same lookup `resume` is
         // waiting on.
         todo!("recovering a Namespace instance's session token is not implemented yet")
+    }
+
+    /// Runs in the instance this process spawned for the session; one it
+    /// did not spawn is not known here.
+    #[tracing::instrument(err, skip(self, command))]
+    async fn exec(
+        &self,
+        session: AgentSessionId,
+        command: SessionCommand,
+    ) -> Result<SessionCommandOutput> {
+        let instance = self
+            .instances
+            .get(&session)
+            .map(|entry| Arc::clone(entry.value()))
+            .ok_or_else(|| {
+                HarnessError::Container(format!(
+                    "session {session} has no instance spawned here to run a command in"
+                ))
+            })?;
+        let script = command.script(provision::CHECKOUT);
+        let argv = ["bash", "-c", script.as_str()];
+        let run = self.client.run_command(&instance, &argv);
+        let output = tokio::time::timeout(command.timeout() + provision::EXEC_MARGIN, run)
+            .await
+            .map_err(|_| {
+                HarnessError::Container(format!(
+                    "instance {} did not answer the command in time",
+                    instance.id
+                ))
+            })?
+            .map_err(unavailable)?;
+        Ok(SessionCommandOutput::new(
+            output.exit_code,
+            output.stdout.as_bytes(),
+            output.stderr.as_bytes(),
+        ))
     }
 
     async fn teardown(&self, _session: AgentSessionId) -> Result<()> {

@@ -14,6 +14,14 @@ pub const SIDECAR_LOG: &str = "/tmp/acp-sidecar.log";
 /// Port exposed by the ACP sidecar.
 pub const SIDECAR_PORT: u16 = 8700;
 
+/// Where the readiness recipe checks the session's repository out
+/// (`container/ensure_ready.sh`), and where its agent works.
+pub const CHECKOUT: &str = "/workspace";
+
+/// How much longer than its own timeout a provider's exec call is given,
+/// to reach the container and hand the output back.
+pub const EXEC_MARGIN: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// Provider-side label carrying the session a container belongs to.
 ///
 /// Shared by every provider because it is what `resume` and `teardown` look a
@@ -34,6 +42,14 @@ mod test;
 #[must_use]
 pub fn ensure_ready_command() -> String {
     format!("bash -c '{}'", ENSURE_READY_SCRIPT.replace('\'', r"'\''"))
+}
+
+/// `command` as one `bash -c` command line for provider exec APIs, run in
+/// the checkout under its timeout.
+#[must_use]
+pub fn session_command(command: &agent_session::domain::session_command::SessionCommand) -> String {
+    let script = command.script(CHECKOUT);
+    format!("bash -c '{}'", script.replace('\'', r"'\''"))
 }
 
 /// Read the egress session token back out of a running container.
