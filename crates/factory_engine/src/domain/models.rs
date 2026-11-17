@@ -81,6 +81,23 @@ pub struct AgentTask {
     pub repo_url: Option<String>,
 }
 
+/// A later prompt an agent is asked to work on, in the session it did its
+/// Step's work in: a round of checks, or the fix of one that failed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentTurn {
+    /// The Step: its Run and its place in it.
+    pub key: StepKey,
+    /// The Run's owner, as whom the agent works.
+    pub owner: MacroUserIdStr<'static>,
+    /// The prompt's id in the session, a UUIDv7 the Step recorded before
+    /// asking, so a retried Step asks under the same one.
+    pub action_id: Uuid,
+    /// What the agent is asked.
+    pub prompt: String,
+    /// The outcomes the agent may end the prompt with.
+    pub outcomes: Vec<Outcome>,
+}
+
 /// A GitHub repository, named by its owner and name: the two segments of
 /// the `https://github.com/owner/name` URL a coding session takes.
 #[derive(Debug, Clone, PartialEq, Eq)]

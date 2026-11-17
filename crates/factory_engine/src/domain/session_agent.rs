@@ -11,8 +11,8 @@ use agent_runtime_protocol::domain::action::AgentActionId;
 use agent_session::domain::model::{AgentSessionId, SessionSource, SessionVisibility};
 use agent_session::domain::routines::{
     PrepareRoutineSession, PromptRoutineSession, RoutineActionStatus, RoutineFailureReason,
-    RoutinePendingReason, RoutineSessionAction, RoutineSessionError, RoutineSessions,
-    ValidateRoutineSession,
+    RoutinePendingReason, RoutinePromptAccepted, RoutineSessionAction, RoutineSessionError,
+    RoutineSessions, ValidateRoutineSession,
 };
 use bot_id::BotId;
 use factory_records::domain::models::{Outcome, StepKey, StepSession};
@@ -21,7 +21,7 @@ use macro_user_id::user_id::MacroUserIdStr;
 use trigger_context::TriggerOrigin;
 use uuid::Uuid;
 
-use crate::domain::models::{AgentAnswer, AgentTask};
+use crate::domain::models::{AgentAnswer, AgentTask, AgentTurn};
 use crate::domain::ports::{Retryable, StepAgent};
 
 /// What the agent is told about handing its result back.
@@ -89,6 +89,9 @@ pub enum SessionAgentError {
     /// The session's turn ended unsuccessfully.
     #[error("the agent's turn ended unsuccessfully: {0:?}")]
     TurnFailed(RoutineFailureReason),
+    /// A later prompt was asked of a Step that claimed no session.
+    #[error("the step has no agent session to go on in")]
+    NoSession,
     /// The session's turn ended with nothing handed back.
     #[error("the agent's turn ended without handing back a result")]
     NothingHandedBack,
@@ -117,6 +120,7 @@ impl Retryable for SessionAgentError {
             SessionAgentError::Session(error) => error.is_transient(),
             SessionAgentError::TurnFailed(_)
             | SessionAgentError::NothingHandedBack
+            | SessionAgentError::NoSession
             | SessionAgentError::PromptUnsettled
             | SessionAgentError::Released
             | SessionAgentError::TooSlow(_) => false,
@@ -224,17 +228,9 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
     /// over fails the Step for good.
     async fn prompt_once(
         &self,
-        task: &AgentTask,
         action: &RoutineSessionAction,
+        prompted: Result<RoutinePromptAccepted, RoutineSessionError>,
     ) -> Result<(), SessionAgentError> {
-        let prompted = self
-            .sessions
-            .prompt(PromptRoutineSession {
-                action: action.clone(),
-                prompt: prompt(task),
-                context: None,
-            })
-            .await;
         match prompted {
             Ok(_) | Err(RoutineSessionError::Conflict) => Ok(()),
             Err(RoutineSessionError::PromptDeliveryUnknown) => {
@@ -395,7 +391,15 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
             .record_open(task.key)
             .await
             .map_err(Self::records)?;
-        self.prompt_once(&task, &action).await?;
+        let prompted = self
+            .sessions
+            .prompt(PromptRoutineSession {
+                action: action.clone(),
+                prompt: prompt(&task.prompt, &task.outcomes),
+                context: None,
+            })
+            .await;
+        self.prompt_once(&action, prompted).await?;
         self.finished(&action, deadline).await?;
 
         // The session stays until the Step's end is recorded: a retry of an
@@ -403,6 +407,51 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
         let handed = self
             .repo
             .handed_back(task.key)
+            .await
+            .map_err(Self::records)?
+            .ok_or(SessionAgentError::NothingHandedBack)?;
+        Ok(AgentAnswer {
+            outcome: handed.outcome,
+            text: handed.output,
+        })
+    }
+
+    #[tracing::instrument(err, skip_all, fields(run_id = %turn.key.run_id, seq = turn.key.seq))]
+    async fn follow_up(&self, turn: AgentTurn) -> Result<AgentAnswer, SessionAgentError> {
+        let deadline = tokio::time::Instant::now() + SESSION_DEADLINE;
+        let session = self
+            .repo
+            .claimed_session(turn.key)
+            .await
+            .map_err(Self::records)?
+            .ok_or(SessionAgentError::NoSession)?;
+        let action = RoutineSessionAction {
+            action_id: AgentActionId::from_uuid(turn.action_id),
+            ..self.action(&turn.owner, session)
+        };
+
+        // Recorded before the prompt is sent: the agent's hand back from now
+        // on is this prompt's, and a stop watches this prompt. A retry
+        // records it again, which keeps what was handed back since.
+        self.still_holds(turn.key).await?;
+        self.repo
+            .begin_turn(turn.key, turn.action_id, &turn.outcomes)
+            .await
+            .map_err(Self::records)?;
+        let prompted = self
+            .sessions
+            .follow_up(PromptRoutineSession {
+                action: action.clone(),
+                prompt: prompt(&turn.prompt, &turn.outcomes),
+                context: None,
+            })
+            .await;
+        self.prompt_once(&action, prompted).await?;
+        self.finished(&action, deadline).await?;
+
+        let handed = self
+            .repo
+            .handed_back(turn.key)
             .await
             .map_err(Self::records)?
             .ok_or(SessionAgentError::NothingHandedBack)?;
@@ -511,17 +560,16 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
     }
 }
 
-/// The task's prompt, then how to hand back one of its outcomes.
-fn prompt(task: &AgentTask) -> String {
-    let outcomes = task
-        .outcomes
+/// `text`, then how to hand back one of `outcomes`.
+fn prompt(text: &str, outcomes: &[Outcome]) -> String {
+    let rendered = outcomes
         .iter()
         .map(|outcome| format!("`{outcome}`"))
         .collect::<Vec<_>>()
         .join(", ");
-    let first = task.outcomes.first().map_or("done", Outcome::as_str);
+    let first = outcomes.first().map_or("done", Outcome::as_str);
     let hand_back = HAND_BACK
-        .replace("OUTCOMES", &outcomes)
+        .replace("OUTCOMES", &rendered)
         .replace("OUTCOME", first);
-    format!("{}{hand_back}", task.prompt)
+    format!("{text}{hand_back}")
 }

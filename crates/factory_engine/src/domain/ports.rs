@@ -8,7 +8,7 @@ use uuid::Uuid;
 use crate::domain::flow::StepName;
 use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening};
 use crate::domain::models::{
-    AgentAnswer, AgentTask, CodeRepository, FactoryError, FlowSummary, HeadChecks, Merging,
+    AgentAnswer, AgentTask, AgentTurn, CodeRepository, FactoryError, FlowSummary, HeadChecks, Merging,
     OpenPullRequest, Opening, PullRequest, RepositoryAccess, RequiredChecks, RunDetail, RunFinish,
     RunStart, StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
 };
@@ -116,6 +116,15 @@ pub trait StepAgent: Send + Sync + 'static {
         task: AgentTask,
     ) -> impl Future<Output = Result<AgentAnswer, Self::Err>> + Send;
 
+    /// Work on `turn`, a later prompt of the Step's work, in the session
+    /// the Step's [`Self::answer`] worked in, and hand back how it ended. A
+    /// Temporal retry may ask again for the same prompt: the agent goes on
+    /// with it, never starts it twice.
+    fn follow_up(
+        &self,
+        turn: AgentTurn,
+    ) -> impl Future<Output = Result<AgentAnswer, Self::Err>> + Send;
+
     /// Stop working on the Step `key` for `owner`, for good.
     fn stop(
         &self,
@@ -175,6 +184,26 @@ pub trait PullRequests: Send + Sync + 'static {
         repository: &CodeRepository,
         base: &str,
     ) -> impl Future<Output = Result<Option<RequiredChecks>, Self::Err>> + Send;
+
+    /// The text of the file at `path` on `branch` of `repository`; none
+    /// when the branch holds no file there.
+    fn file_text(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        branch: &str,
+        path: &str,
+    ) -> impl Future<Output = Result<Option<String>, Self::Err>> + Send;
+
+    /// The paths `branch` of `repository` changed against its merge base
+    /// with `base`; none when GitHub cannot list them all.
+    fn changed_paths(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        base: &str,
+        branch: &str,
+    ) -> impl Future<Output = Result<Option<Vec<String>>, Self::Err>> + Send;
 
     /// Ask GitHub to open `pull_request` in `repository`.
     fn open(

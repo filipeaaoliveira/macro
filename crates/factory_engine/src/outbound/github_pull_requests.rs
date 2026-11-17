@@ -171,6 +171,36 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
     }
 
     #[tracing::instrument(err, skip(self, owner))]
+    async fn file_text(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        branch: &str,
+        path: &str,
+    ) -> Result<Option<String>, GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        Ok(self
+            .github
+            .get_file_text(&token, repository.owner(), repository.name(), branch, path)
+            .await?)
+    }
+
+    #[tracing::instrument(err, skip(self, owner))]
+    async fn changed_paths(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        base: &str,
+        branch: &str,
+    ) -> Result<Option<Vec<String>>, GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        Ok(self
+            .github
+            .list_changed_paths(&token, repository.owner(), repository.name(), base, branch)
+            .await?)
+    }
+
+    #[tracing::instrument(err, skip(self, owner))]
     async fn find(
         &self,
         owner: &MacroUserIdStr<'static>,

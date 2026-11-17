@@ -153,6 +153,29 @@ while an Actions suite sits empty. Its guarantees:
   reports only by status (as some deploy previews do) keeps CI waiting until
   it times out.
 
+On a repository, `write` and `fix` then run the repository's own checks
+(`src/domain/built_in_steps/checks_round.rs`). The repository declares them
+in `.macro/checks.json` on the Run's branch (`src/domain/checks.rs`): each a
+`name`, a `run` command from the repository's root, and optional `paths`
+(files or folders) whose change makes it run; `rounds` (1 to 10, default 3)
+is how many times a Step runs them. The Step reads the file and the paths
+the branch changed against its base from GitHub (every check runs when
+GitHub lists only part of them). The checks run where the agent works, by
+the agent: the engine can only prompt the session, so a round is a later
+prompt of the Step's session (`StepAgent::follow_up`, the routine sessions'
+`follow_up`) that asks it to run them verbatim, change nothing, and hand back
+`passed` or `failed` with a report. A failure goes back to the same session
+in another prompt with the report, and the next round checks the fix. Each
+round, with its prompts' ids, is recorded before it is asked
+(`factory_check_round`), so a retried Step goes on with its round; a new
+prompt clears the session's hand back and offers its own outcomes
+(`begin_turn`), and a stop watches it. The Step ends `done` once a round
+passes, the agent's own outcome when its work changed nothing or no check
+applies, and `red` when the last round failed or the file does not read; the
+`code` Flow ends such a Run `manual`. The rounds show on the Step
+(`checks` in the Run API). A Step's rounds share its attempts' 30 minutes
+each and its two hours of retries.
+
 The head `ci` calls green is kept (`factory_run.merge_head_sha`);
 `ready_to_merge` ends `changed` unless the pull request's head is still that
 commit and its checks still pass, and otherwise ends `done`, so its Gate asks
@@ -179,6 +202,8 @@ part only.
 - `src/domain/session_agent.rs`: an agent Step in a Macro agent session.
 - `src/domain/pull_request_steps.rs`: `publish`, `ci`, `ready_to_merge` and
   `merge`, over the `PullRequests` port.
+- `src/domain/built_in_steps/checks_round.rs` and `src/domain/checks.rs`:
+  the checks rounds of `write` and `fix`, and the checks file they read.
 - `flows/`: the built-in Flows, each named for its file
   (`src/domain/built_in_flows.rs`). `GET /flows` lists those whose Steps the
   worker serves, with their `description`: `code`, `plan` and `reply`.
@@ -208,6 +233,8 @@ part only.
   in `BUILT_IN_FLOWS` (`src/domain/built_in_flows.rs`).
 - Add a built-in Step: `src/domain/built_in_steps.rs` (`BuiltInStep`, `named`
   and `run`); an agent Step also gets its instructions in `built_in_steps/`.
+- Add a field to the checks file: `src/domain/checks.rs` (field, check
+  and test), and the prompt in `checks_round.rs` if the agent needs it.
 - Add a Flow keyword: `src/domain/flow.rs` (field and check) →
   `src/domain/interpreter.rs` → `src/domain/interpreter/test.rs`.
 

@@ -3,7 +3,7 @@
 use factory_records::domain::models::StepKey;
 use macro_user_id::user_id::MacroUserIdStr;
 
-use crate::domain::models::{AgentAnswer, AgentTask};
+use crate::domain::models::{AgentAnswer, AgentTask, AgentTurn};
 use crate::domain::ports::{Retryable, StepAgent};
 
 /// The task gave the agent no outcome to end with.
@@ -34,6 +34,18 @@ impl StepAgent for LocalAgent {
             text: format!(
                 "No agent ran this step: the local agent stands in for one. It was asked:\n\n{}",
                 task.prompt
+            ),
+        })
+    }
+
+    #[tracing::instrument(err, skip_all, fields(run_id = %turn.key.run_id, seq = turn.key.seq))]
+    async fn follow_up(&self, turn: AgentTurn) -> Result<AgentAnswer, NoOutcome> {
+        let outcome = turn.outcomes.first().cloned().ok_or(NoOutcome)?;
+        Ok(AgentAnswer {
+            outcome,
+            text: format!(
+                "No agent ran this prompt: the local agent stands in for one. It was asked:\n\n{}",
+                turn.prompt
             ),
         })
     }

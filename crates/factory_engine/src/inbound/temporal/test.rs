@@ -29,7 +29,7 @@ use crate::domain::built_in_steps::BuiltInSteps;
 use crate::domain::fakes::{FakeGithub, FakeRepo, ci};
 use crate::domain::flow::Flow;
 use crate::domain::gate::AnswerGate;
-use crate::domain::models::{AgentAnswer, AgentTask, PullRequestState, RunStart};
+use crate::domain::models::{AgentAnswer, AgentTask, AgentTurn, PullRequestState, RunStart};
 use crate::domain::ports::{AnswerDelivery, Retryable, RunWorkflows, StepAgent};
 use crate::domain::pull_request_steps::PullRequestSteps;
 use crate::domain::service::StepServiceImpl;
@@ -109,6 +109,11 @@ impl StepAgent for Agent {
             Work::WorksThenEnds(works) if asked <= works => std::future::pending().await,
             Work::WorksThenEnds(_) => Ok(ends),
         }
+    }
+
+    /// The Runs here work on no repository, so no Step runs checks.
+    async fn follow_up(&self, _turn: AgentTurn) -> Result<AgentAnswer, AgentFailed> {
+        Err(AgentFailed)
     }
 
     async fn stop(
@@ -526,6 +531,11 @@ impl StepAgent for CodeAgent {
             outcome: Outcome::try_from(outcome.to_string()).expect("valid"),
             text: format!("The {step}"),
         })
+    }
+
+    /// Its repository declares no checks, so no Step asks.
+    async fn follow_up(&self, _turn: AgentTurn) -> Result<AgentAnswer, AgentFailed> {
+        Err(AgentFailed)
     }
 
     async fn stop(
