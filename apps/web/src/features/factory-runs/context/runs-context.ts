@@ -47,6 +47,8 @@ export type AnswerGateInput = {
   step: Pick<RunStep, 'seq'>;
   answer: string;
   note?: string;
+  /** The Run's Tampered files the person saw and approves with the answer. */
+  approvedControlFiles?: string[];
 };
 
 /** What the Runs views need from the factory. */

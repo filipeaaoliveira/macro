@@ -5,6 +5,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
+import type { AnswerGateRequestApprovedControlFiles } from './answerGateRequestApprovedControlFiles';
 import type { AnswerGateRequestNote } from './answerGateRequestNote';
 import type { Outcome } from './outcome';
 
@@ -14,6 +15,10 @@ import type { Outcome } from './outcome';
 export interface AnswerGateRequest {
   /** The answer, one the Gate offers. */
   answer: Outcome;
+  /** The Control Files the Run's branch changed unasked that the person
+saw and approves: required to approve a Gate of a Tampered Run, and
+must be exactly its `controlFiles.tampered` (empty when `unlisted`). */
+  approvedControlFiles?: AnswerGateRequestApprovedControlFiles;
   /** What the person adds, for the Run's later Steps to read. */
   note?: AnswerGateRequestNote;
 }

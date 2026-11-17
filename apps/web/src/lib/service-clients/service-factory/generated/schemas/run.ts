@@ -6,6 +6,7 @@
  */
 
 import type { MacroUserIdStr } from './macroUserIdStr';
+import type { RunControlFiles } from './runControlFiles';
 import type { RunEndProperty } from './runEndProperty';
 import type { RunId } from './runId';
 import type { RunRepository } from './runRepository';
@@ -15,8 +16,13 @@ import type { RunTaskId } from './runTaskId';
  * One Run of a Flow.
  */
 export interface Run {
+  controlFiles?: RunControlFiles;
   /** When the Run was created. */
   createdAt: string;
+  /** Whether its owner created it in their own signed-in session, from an
+account that is not an agent's: only then does its request ask for
+the Control Files it names. */
+  createdInPerson: boolean;
   end?: RunEndProperty;
   /** The Run's id, also its Temporal workflow id. */
   id: RunId;

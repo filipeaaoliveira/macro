@@ -42,6 +42,10 @@ function RunGate(props: { controller: RunController }) {
         <GateCard
           question={waiting().gate.question}
           answers={waiting().gate.answers}
+          controlFiles={props.controller.controlFiles()}
+          approveControlFiles={props.controller.approveControlFiles()}
+          onApproveControlFilesChange={props.controller.setApproveControlFiles}
+          held={props.controller.heldAnswers()}
           note={props.controller.note()}
           onNoteChange={props.controller.setNote}
           locked={props.controller.gateLocked()}

@@ -46,6 +46,7 @@ function toRun(detail: RunDetail): Run {
     createdAt: run.createdAt,
     taskId: run.taskId ?? undefined,
     repository: run.repository ?? undefined,
+    controlFiles: run.controlFiles ?? undefined,
     end: run.end ?? undefined,
     steps: detail.steps.map((step) => ({
       seq: step.seq,
@@ -62,6 +63,8 @@ function toRun(detail: RunDetail): Run {
               ? {
                   answer: step.gate.answer.answer,
                   note: step.gate.answer.note ?? undefined,
+                  approvedControlFiles:
+                    step.gate.answer.approvedControlFiles ?? undefined,
                   answeredAt: step.gate.answer.answeredAt,
                 }
               : undefined,
@@ -218,7 +221,11 @@ export function createAppRunsContext(client: QueryClient): RunsContext {
       const result = await factoryClient.answerGate(
         input.runId,
         input.step.seq,
-        { answer: input.answer, note: input.note }
+        {
+          answer: input.answer,
+          note: input.note,
+          approvedControlFiles: input.approvedControlFiles,
+        }
       );
       // Refused or not, the Run has moved on from what this person saw.
       const reads = refreshRun(

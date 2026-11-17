@@ -6,6 +6,7 @@
  */
 import type {
   AnswerGateRequest,
+  ControlFilesSettings,
   CreateRunRequest,
   ErrorResponse,
   FlowsResponse,
@@ -16,6 +17,7 @@ import type {
   RunErrorResponse,
   RunId,
   RunInsights,
+  SetControlFilesRequest,
   TaskRunsResponse,
 } from './schemas';
 
@@ -658,6 +660,146 @@ export const linkFactoryRunTask = async (
     status: res.status,
     headers: res.headers,
   } as linkFactoryRunTaskResponse;
+};
+
+/**
+ * @summary The Control File patterns the caller's Runs are checked against: their
+team's, or the factory's default, and whether the caller may change
+them.
+ */
+export type getFactoryControlFilesResponse200 = {
+  data: ControlFilesSettings;
+  status: 200;
+};
+
+export type getFactoryControlFilesResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type getFactoryControlFilesResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type getFactoryControlFilesResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type getFactoryControlFilesResponseSuccess =
+  getFactoryControlFilesResponse200 & {
+    headers: Headers;
+  };
+export type getFactoryControlFilesResponseError = (
+  | getFactoryControlFilesResponse401
+  | getFactoryControlFilesResponse403
+  | getFactoryControlFilesResponse500
+) & {
+  headers: Headers;
+};
+
+export type getFactoryControlFilesResponse =
+  | getFactoryControlFilesResponseSuccess
+  | getFactoryControlFilesResponseError;
+
+export const getGetFactoryControlFilesUrl = () => {
+  return `/settings/control-files`;
+};
+
+export const getFactoryControlFiles = async (
+  options?: RequestInit
+): Promise<getFactoryControlFilesResponse> => {
+  const res = await fetch(getGetFactoryControlFilesUrl(), {
+    ...options,
+    method: 'GET',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: getFactoryControlFilesResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as getFactoryControlFilesResponse;
+};
+
+/**
+ * @summary Set the Control File patterns the Runs of the caller's team are checked
+against, or go back to the factory's default. Only an admin or the owner
+of the team sets them, and a shorter list lets a Run's agent change more
+files unseen, so only in their own signed-in session (403 otherwise).
+ */
+export type setFactoryControlFilesResponse200 = {
+  data: ControlFilesSettings;
+  status: 200;
+};
+
+export type setFactoryControlFilesResponse400 = {
+  data: ErrorResponse;
+  status: 400;
+};
+
+export type setFactoryControlFilesResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type setFactoryControlFilesResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type setFactoryControlFilesResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type setFactoryControlFilesResponseSuccess =
+  setFactoryControlFilesResponse200 & {
+    headers: Headers;
+  };
+export type setFactoryControlFilesResponseError = (
+  | setFactoryControlFilesResponse400
+  | setFactoryControlFilesResponse401
+  | setFactoryControlFilesResponse403
+  | setFactoryControlFilesResponse500
+) & {
+  headers: Headers;
+};
+
+export type setFactoryControlFilesResponse =
+  | setFactoryControlFilesResponseSuccess
+  | setFactoryControlFilesResponseError;
+
+export const getSetFactoryControlFilesUrl = () => {
+  return `/settings/control-files`;
+};
+
+export const setFactoryControlFiles = async (
+  setControlFilesRequest: SetControlFilesRequest,
+  options?: RequestInit
+): Promise<setFactoryControlFilesResponse> => {
+  const res = await fetch(getSetFactoryControlFilesUrl(), {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(setControlFilesRequest),
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: setFactoryControlFilesResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as setFactoryControlFilesResponse;
 };
 
 /**

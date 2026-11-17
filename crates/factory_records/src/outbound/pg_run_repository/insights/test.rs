@@ -8,7 +8,7 @@ use crate::domain::insights::{
     DurationSpread, EntryCount, EntryCountKind, EntrySummary, EntryTrouble, InsightsRecords,
     InsightsScope, RunInsightsRepository, RunSummary, StepSessionRef,
 };
-use crate::domain::models::{EntryId, RunId, RunInsert, RunOutcome};
+use crate::domain::models::{EntryId, NewRun, RunId, RunInsert, RunOutcome};
 use crate::domain::ports::RunRepository;
 use crate::outbound::pg_run_repository::PgRunRepository;
 
@@ -281,7 +281,17 @@ async fn a_new_run_is_read_with_its_flow(pool: PgPool) {
     let id = RunId::generate();
     let julia = user("macro|julia@example.com");
     let RunInsert::Inserted(inserted) = repo
-        .insert_run(id, "reply", "Say hi", &julia, None, None)
+        .insert_run(NewRun {
+            id,
+            flow: "reply",
+            request: "Say hi",
+            user_id: &julia,
+            task_id: None,
+            repository: None,
+            created_in_person: false,
+            control_file_patterns: &[],
+            control_files_team_id: None,
+        })
         .await
         .expect("insert")
     else {

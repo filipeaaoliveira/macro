@@ -7,18 +7,19 @@ mod test;
 use agent_session::domain::session_task::TaskDocumentId;
 use chrono::Utc;
 use factory_records::domain::models::{
-    HandBack, MAX_NOTE_BYTES, MAX_OUTPUT_BYTES, MAX_REQUEST_BYTES, Outcome, Repository, Run, RunId,
-    RunInsert, RunOutcome, TaskLink,
+    HandBack, MAX_NOTE_BYTES, MAX_OUTPUT_BYTES, MAX_REQUEST_BYTES, NewRun, Outcome, Repository,
+    Run, RunId, RunInsert, RunOutcome, TaskLink, TeamMembership,
 };
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
 use crate::domain::built_in_flows::{BUILT_IN_FLOWS, BuiltInFlow};
+use crate::domain::control_files::ControlFiles;
 use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening};
 use crate::domain::models::{
-    CodeRepository, FactoryError, FlowSummary, RunDetail, RunFinish, RunStart, StepEnding,
-    StepError, StepInput, StepReport, StepRequest, StepStart,
+    CodeRepository, ControlFilesSettings, FactoryError, FlowSummary, RunDetail, RunFinish,
+    RunStart, StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
 };
 use crate::domain::ports::{
     AnswerDelivery, FactoryService, PullRequests, Retryable, RunWorkflows, RunWorkflowsError,
@@ -37,6 +38,10 @@ impl From<RunWorkflowsError> for FactoryError {
         }
     }
 }
+
+/// The answer that agrees to what a Gate asks, which on a Tampered Run
+/// approves the Control Files its branch changed.
+const APPROVE: &str = "approve";
 
 /// The most Runs a task's list holds: its owner's newest.
 pub const TASK_RUNS_LISTED: u16 = 50;
@@ -110,6 +115,38 @@ where
         } else {
             Err(FactoryError::UnknownUser)
         }
+    }
+
+    /// Fails when `user_id`'s account is an agent's: it signs in as a person
+    /// does, yet never acts as one in person.
+    async fn not_an_agent(&self, user_id: &MacroUserIdStr<'static>) -> Result<(), FactoryError> {
+        if self
+            .repo
+            .is_agent_account(user_id)
+            .await
+            .map_err(internal)?
+        {
+            return Err(FactoryError::NotAPerson);
+        }
+        Ok(())
+    }
+
+    /// The team `user_id` is on, and the Control File patterns it set; none
+    /// for either when it has none.
+    async fn team_control_files(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+    ) -> Result<(Option<TeamMembership>, Option<Vec<String>>), FactoryError> {
+        let team = self.repo.team_of(user_id).await.map_err(internal)?;
+        let own = match team {
+            Some(team) => self
+                .repo
+                .team_control_files(team.team_id)
+                .await
+                .map_err(internal)?,
+            None => None,
+        };
+        Ok((team, own))
     }
 
     /// Fails unless the task document `task_id` is a task `user_id` can see.
@@ -201,6 +238,7 @@ where
         request: String,
         task_id: Option<Uuid>,
         repo_url: Option<String>,
+        in_person: bool,
     ) -> Result<RunDetail, FactoryError> {
         let built_in = BuiltInFlow::named(&flow).ok_or(FactoryError::UnknownFlow)?;
         let flow = built_in.read(|step| self.executor.serves(step))?;
@@ -228,24 +266,37 @@ where
             None => None,
         };
 
+        // The Run keeps the Control File patterns it is checked against as
+        // its owner's team has them now, so a change to the team's list,
+        // whoever makes it, does not change a Run under way. An agent's
+        // account is never its owner in person.
+        let (team, own) = self.team_control_files(&actor).await?;
+        let control_files_team_id = team.filter(|_| own.is_some()).map(|team| team.team_id);
+        let control_file_patterns = own.unwrap_or_else(ControlFiles::default_patterns);
+        let created_in_person =
+            in_person && !self.repo.is_agent_account(&actor).await.map_err(internal)?;
+
         // The Run and its task are kept in one write, so a task deleted
         // since it was checked leaves nothing behind.
         let run_id = RunId::generate();
         tracing::Span::current().record("run_id", tracing::field::display(run_id));
         let run = match self
             .repo
-            .insert_run(
-                run_id,
-                built_in.name,
-                &request,
-                &actor,
+            .insert_run(NewRun {
+                id: run_id,
+                flow: built_in.name,
+                request: &request,
+                user_id: &actor,
                 task_id,
-                repository.as_ref(),
-            )
+                repository: repository.as_ref(),
+                created_in_person,
+                control_file_patterns: &control_file_patterns,
+                control_files_team_id,
+            })
             .await
             .map_err(internal)?
         {
-            RunInsert::Inserted(run) => run,
+            RunInsert::Inserted(run) => *run,
             RunInsert::NoSuchTask => return Err(FactoryError::UnknownTask),
         };
 
@@ -352,6 +403,7 @@ where
         seq: u16,
         answer: Outcome,
         note: Option<String>,
+        approved_control_files: Option<Vec<String>>,
     ) -> Result<(), FactoryError> {
         let note_bytes = note.as_ref().map_or(0, String::len);
         if note_bytes > MAX_NOTE_BYTES {
@@ -360,6 +412,7 @@ where
             });
         }
         self.known(&actor).await?;
+        self.not_an_agent(&actor).await?;
         let run = self.owned_run(&actor, id).await?;
         if run.end.is_some() {
             return Err(FactoryError::RunEnded);
@@ -380,11 +433,36 @@ where
             });
         }
 
+        // A Tampered Run merges only once its owner approves the Control
+        // Files its branch changed unasked: approving its Gate must list the
+        // ones they saw, which must be the Run's, and the answer keeps them
+        // for the merge to check. The pull request Steps keep them before
+        // the Gate opens, and nothing changes them while the Run waits.
+        let tampered = run
+            .control_files
+            .as_ref()
+            .filter(|changes| changes.is_tampered());
+        let approved_control_files = match tampered {
+            Some(changes) if answer.as_str() == APPROVE => {
+                let mut seen =
+                    approved_control_files.ok_or(FactoryError::ControlFilesNotApproved)?;
+                let mut kept = changes.tampered.clone();
+                seen.sort();
+                kept.sort();
+                if seen != kept {
+                    return Err(FactoryError::ControlFilesNotApproved);
+                }
+                Some(changes.tampered.clone())
+            }
+            _ => None,
+        };
+
         let answer = AnswerGate {
             seq,
             answer,
             note,
             user_id: actor,
+            approved_control_files,
         };
         match self.workflows.answer(id, &answer).await? {
             AnswerDelivery::Taken => Ok(()),
@@ -435,6 +513,45 @@ where
         } else {
             Err(FactoryError::StepEnded)
         }
+    }
+
+    #[tracing::instrument(skip(self, actor))]
+    async fn control_files(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+    ) -> Result<ControlFilesSettings, FactoryError> {
+        let (team, own) = self.team_control_files(actor).await?;
+        Ok(ControlFilesSettings {
+            is_default: own.is_none(),
+            patterns: own.unwrap_or_else(ControlFiles::default_patterns),
+            team_id: team.map(|team| team.team_id),
+            can_edit: team.is_some_and(|team| team.admin),
+        })
+    }
+
+    #[tracing::instrument(skip(self, actor, patterns))]
+    async fn set_control_files(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        patterns: Option<Vec<String>>,
+    ) -> Result<ControlFilesSettings, FactoryError> {
+        if let Some(patterns) = &patterns {
+            ControlFiles::parse(patterns)?;
+        }
+        self.not_an_agent(&actor).await?;
+        let team = self
+            .repo
+            .team_of(&actor)
+            .await
+            .map_err(internal)?
+            .filter(|team| team.admin)
+            .ok_or(FactoryError::NotATeamAdmin)?;
+
+        self.repo
+            .set_team_control_files(team.team_id, patterns.as_deref())
+            .await
+            .map_err(internal)?;
+        self.control_files(&actor).await
     }
 
     #[tracing::instrument(skip(self, actor))]
@@ -546,6 +663,8 @@ where
             role: request.role.as_ref(),
             owner: &run.user_id,
             request: &run.request,
+            created_in_person: run.created_in_person,
+            control_file_patterns: run.control_file_patterns.as_deref(),
             task_id: run.task_id,
             repository: run.repository.as_ref(),
             earlier: &earlier,
@@ -628,6 +747,7 @@ where
                 &answer.answer,
                 answer.note.as_deref(),
                 &answer.user_id,
+                answer.approved_control_files.as_deref(),
             )
             .await
             .map_err(internal)?;

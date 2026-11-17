@@ -5,10 +5,12 @@ use uuid::Uuid;
 
 use super::PgRunRepository;
 use crate::domain::models::{
-    AgentName, ClaimedSession, EntryId, HandBack, HandedBack, Outcome, PassedOver, Repository,
-    Role, Run, RunId, RunInsert, RunOutcome, StepKey, StepSession, TaskLink,
+    AgentName, ClaimedSession, EntryId, HandBack, HandedBack, NewRun, Outcome, PassedOver,
+    Repository, Role, Run, RunId, RunInsert, RunOutcome, StepKey, StepSession, TaskLink,
 };
 use crate::domain::ports::RunRepository;
+
+mod control_files;
 
 const LOGIN_TASK: &str = "00000000-0000-7000-8000-000000000101";
 const DARK_MODE_TASK: &str = "00000000-0000-7000-8000-000000000102";
@@ -36,11 +38,21 @@ fn key(run_id: RunId, seq: u16) -> StepKey {
 /// Keep a new Run of Julia's with no task.
 async fn insert(repo: &PgRunRepository, id: RunId, request: &str) -> Run {
     match repo
-        .insert_run(id, "plan", request, &julia(), None, None)
+        .insert_run(NewRun {
+            id,
+            flow: "plan",
+            request,
+            user_id: &julia(),
+            task_id: None,
+            repository: None,
+            created_in_person: false,
+            control_file_patterns: &[],
+            control_files_team_id: None,
+        })
         .await
         .expect("insert")
     {
-        RunInsert::Inserted(run) => run,
+        RunInsert::Inserted(run) => *run,
         RunInsert::NoSuchTask => panic!("a run with no task has no task to miss"),
     }
 }
@@ -90,7 +102,7 @@ async fn a_reset_entry_keeps_every_visit_it_made(pool: PgPool) {
         repo.open_gate(key(id, seq), "Go on?", &[outcome("yes")])
             .await
             .expect("open");
-        repo.answer_gate(key(id, seq), &outcome("yes"), Some(output), &julia())
+        repo.answer_gate(key(id, seq), &outcome("yes"), Some(output), &julia(), None)
             .await
             .expect("answer");
         repo.end_step(key(id, seq), &outcome("done"), output)
@@ -266,10 +278,11 @@ async fn a_gate_waits_then_keeps_its_first_answer(pool: PgPool) {
         &outcome("revise"),
         Some("Keep the old index"),
         &julia(),
+        None,
     )
     .await
     .expect("answer");
-    repo.answer_gate(key(id, 1), &outcome("approve"), None, &julia())
+    repo.answer_gate(key(id, 1), &outcome("approve"), None, &julia(), None)
         .await
         .expect("answer again");
 
@@ -302,7 +315,7 @@ async fn an_answer_from_an_account_gone_since_records_no_one(pool: PgPool) {
     // The API refuses an unknown user, but an account can go between that
     // check and the workflow recording the answer.
     let gone = MacroUserIdStr::try_from("macro|gone@example.com".to_string()).expect("valid");
-    repo.answer_gate(key(id, 1), &outcome("approve"), None, &gone)
+    repo.answer_gate(key(id, 1), &outcome("approve"), None, &gone, None)
         .await
         .expect("answer");
 
@@ -331,14 +344,17 @@ async fn a_run_keeps_its_repository_and_the_commit_it_asks_to_merge(pool: PgPool
     };
 
     let inserted = repo
-        .insert_run(
+        .insert_run(NewRun {
             id,
-            "code",
-            "Collapse dashes",
-            &julia(),
-            None,
-            Some(&repository),
-        )
+            flow: "code",
+            request: "Collapse dashes",
+            user_id: &julia(),
+            task_id: None,
+            repository: Some(&repository),
+            created_in_person: false,
+            control_file_patterns: &[],
+            control_files_team_id: None,
+        })
         .await
         .expect("insert");
     repo.set_merge_head(id, "1111111111111111111111111111111111111111")
@@ -372,25 +388,31 @@ async fn a_run_is_kept_with_its_task_in_one_write(pool: PgPool) {
     let id = RunId::generate();
 
     let inserted = repo
-        .insert_run(
+        .insert_run(NewRun {
             id,
-            "plan",
-            "Fix the login bug",
-            &julia(),
-            Some(task(LOGIN_TASK)),
-            None,
-        )
+            flow: "plan",
+            request: "Fix the login bug",
+            user_id: &julia(),
+            task_id: Some(task(LOGIN_TASK)),
+            repository: None,
+            created_in_person: false,
+            control_file_patterns: &[],
+            control_files_team_id: None,
+        })
         .await
         .expect("insert");
     let missing = repo
-        .insert_run(
-            RunId::generate(),
-            "plan",
-            "Fix the login bug",
-            &julia(),
-            Some(Uuid::now_v7()),
-            None,
-        )
+        .insert_run(NewRun {
+            id: RunId::generate(),
+            flow: "plan",
+            request: "Fix the login bug",
+            user_id: &julia(),
+            task_id: Some(Uuid::now_v7()),
+            repository: None,
+            created_in_person: false,
+            control_file_patterns: &[],
+            control_files_team_id: None,
+        })
         .await
         .expect("insert for a missing task");
 
@@ -1149,7 +1171,17 @@ async fn insert_on_task(
 ) -> RunId {
     let id = RunId::generate();
     match repo
-        .insert_run(id, "plan", request, user_id, Some(task(task_id)), None)
+        .insert_run(NewRun {
+            id,
+            flow: "plan",
+            request,
+            user_id,
+            task_id: Some(task(task_id)),
+            repository: None,
+            created_in_person: false,
+            control_file_patterns: &[],
+            control_files_team_id: None,
+        })
         .await
         .expect("insert")
     {

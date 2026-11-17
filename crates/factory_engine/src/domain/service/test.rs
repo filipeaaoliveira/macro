@@ -2,8 +2,8 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use factory_records::domain::models::{
-    AgentName, EntryId, HandBack, HandedBack, Outcome, Role, RunId, RunInsert, RunOutcome, StepKey,
-    StepSession,
+    AgentName, EntryId, HandBack, HandedBack, NewRun, Outcome, Role, RunId, RunInsert, RunOutcome,
+    StepKey, StepSession,
 };
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
@@ -21,6 +21,8 @@ use crate::domain::ports::{
     AnswerDelivery, FactoryService, Retryable, RunWorkflows, RunWorkflowsError, StepExecutor,
     StepService,
 };
+
+mod control_files;
 
 /// Keeps what it was sent. Refuses every answer when `refuse` is set; a
 /// start fails when `fail` is set, and leaves its workflow behind when
@@ -211,7 +213,17 @@ fn code_service(
 /// A Run of Julia's, kept with no task.
 async fn julia_s_run(repo: &FakeRepo) -> RunId {
     match repo
-        .insert_run(RunId::generate(), "plan", "Plan", &julia(), None, None)
+        .insert_run(NewRun {
+            id: RunId::generate(),
+            flow: "plan",
+            request: "Plan",
+            user_id: &julia(),
+            task_id: None,
+            repository: None,
+            created_in_person: false,
+            control_file_patterns: &[],
+            control_files_team_id: None,
+        })
         .await
         .expect("insert")
     {
@@ -233,6 +245,7 @@ async fn creating_a_run_records_it_for_its_owner_and_starts_its_workflow() {
             "Summarise the release notes".to_string(),
             None,
             None,
+            true,
         )
         .await
         .expect("create");
@@ -262,6 +275,7 @@ async fn a_code_run_keeps_its_repository_and_its_base_branch() {
             "Collapse repeated dashes".to_string(),
             None,
             Some("https://github.com/macro/app".to_string()),
+            true,
         )
         .await
         .expect("create");
@@ -295,6 +309,7 @@ async fn a_run_s_repository_must_fit_its_flow_and_be_reachable() {
                     "Collapse repeated dashes".to_string(),
                     None,
                     repo_url,
+                    true,
                 )
                 .await
         }
@@ -343,6 +358,7 @@ async fn a_run_whose_workflow_does_not_start_is_not_kept() {
             "Summarise".to_string(),
             None,
             None,
+            true,
         )
         .await;
 
@@ -368,6 +384,7 @@ async fn a_run_whose_workflow_started_despite_a_failed_start_is_kept() {
             "Summarise".to_string(),
             None,
             None,
+            true,
         )
         .await;
 
@@ -388,6 +405,7 @@ async fn a_flow_with_a_step_no_worker_serves_is_refused_before_anything_is_kept(
             "Plan the migration".to_string(),
             None,
             None,
+            true,
         )
         .await;
 
@@ -408,6 +426,7 @@ async fn a_flow_no_built_in_flow_is_named_for_is_refused_before_anything_is_kept
             "Deploy the release".to_string(),
             None,
             None,
+            true,
         )
         .await;
 
@@ -419,7 +438,14 @@ async fn a_flow_no_built_in_flow_is_named_for_is_refused_before_anything_is_kept
 #[tokio::test]
 async fn an_empty_request_is_refused() {
     let refused = service(&FakeRepo::default(), &FakeWorkflows::default())
-        .create_run(julia(), "reply".to_string(), "  ".to_string(), None, None)
+        .create_run(
+            julia(),
+            "reply".to_string(),
+            "  ".to_string(),
+            None,
+            None,
+            true,
+        )
         .await;
 
     assert!(matches!(refused, Err(FactoryError::EmptyRequest)));
@@ -436,6 +462,7 @@ async fn a_run_for_a_user_with_no_account_is_refused() {
             "Fix the login bug".to_string(),
             None,
             None,
+            true,
         )
         .await;
 
@@ -452,7 +479,7 @@ async fn someone_else_s_run_reads_answers_and_cancels_as_missing() {
 
     let read = service.get_run(&teo(), run_id).await;
     let answered = service
-        .answer_gate(teo(), run_id, 1, Outcome::done(), None)
+        .answer_gate(teo(), run_id, 1, Outcome::done(), None, None)
         .await;
     let cancelled = service.cancel_run(&teo(), run_id).await;
     let linked = service.link_task(&teo(), run_id, Uuid::now_v7()).await;
@@ -478,6 +505,7 @@ async fn an_answer_is_sent_to_the_run_s_workflow_as_its_owner() {
             1,
             Outcome::done(),
             Some("Go ahead".to_string()),
+            None,
         )
         .await
         .expect("answer");
@@ -490,6 +518,7 @@ async fn an_answer_is_sent_to_the_run_s_workflow_as_its_owner() {
             answer: Outcome::done(),
             note: Some("Go ahead".to_string()),
             user_id: julia(),
+            approved_control_files: None,
         }]
     );
 }
@@ -504,7 +533,7 @@ async fn an_answer_the_workflow_refuses_is_a_conflict() {
     let run_id = julia_s_run(&repo).await;
 
     let refused = service(&repo, &workflows)
-        .answer_gate(julia(), run_id, 1, Outcome::done(), None)
+        .answer_gate(julia(), run_id, 1, Outcome::done(), None, None)
         .await;
 
     assert!(matches!(refused, Err(FactoryError::AnswerRefused(_))));
@@ -517,7 +546,7 @@ async fn an_answer_from_a_user_with_no_account_never_reaches_the_workflow() {
     let run_id = julia_s_run(&repo).await;
 
     let refused = service(&repo, &workflows)
-        .answer_gate(nobody(), run_id, 1, Outcome::done(), None)
+        .answer_gate(nobody(), run_id, 1, Outcome::done(), None, None)
         .await;
 
     assert!(matches!(refused, Err(FactoryError::UnknownUser)));
@@ -531,7 +560,14 @@ async fn a_note_larger_than_a_gate_keeps_is_refused() {
     let run_id = julia_s_run(&repo).await;
 
     let refused = service(&repo, &workflows)
-        .answer_gate(julia(), run_id, 1, Outcome::done(), Some("x".repeat(4_097)))
+        .answer_gate(
+            julia(),
+            run_id,
+            1,
+            Outcome::done(),
+            Some("x".repeat(4_097)),
+            None,
+        )
         .await;
 
     assert!(matches!(refused, Err(FactoryError::NoteTooLarge { .. })));
@@ -581,6 +617,7 @@ async fn a_run_created_for_a_task_keeps_it() {
             "Fix the login bug".to_string(),
             Some(task_id),
             None,
+            true,
         )
         .await
         .expect("create");
@@ -603,6 +640,7 @@ async fn a_run_for_a_document_that_is_not_a_task_or_is_missing_is_refused() {
             "Fix".to_string(),
             Some(note),
             None,
+            true,
         )
         .await;
     let missing = service
@@ -612,6 +650,7 @@ async fn a_run_for_a_document_that_is_not_a_task_or_is_missing_is_refused() {
             "Fix".to_string(),
             Some(Uuid::now_v7()),
             None,
+            true,
         )
         .await;
 
@@ -807,7 +846,7 @@ async fn an_answer_the_gate_does_not_offer_never_reaches_the_workflow() {
         .expect("open");
 
     let refused = service(&repo, &workflows)
-        .answer_gate(julia(), run_id, 1, Outcome::unchanged(), None)
+        .answer_gate(julia(), run_id, 1, Outcome::unchanged(), None, None)
         .await;
 
     assert!(matches!(
@@ -1008,14 +1047,17 @@ async fn a_task_s_list_holds_its_owner_s_fifty_newest_runs() {
     let mut started = Vec::new();
     for n in 0..51 {
         match repo
-            .insert_run(
-                RunId::generate(),
-                "plan",
-                &format!("Run {n}"),
-                &julia(),
-                Some(task_id),
-                None,
-            )
+            .insert_run(NewRun {
+                id: RunId::generate(),
+                flow: "plan",
+                request: &format!("Run {n}"),
+                user_id: &julia(),
+                task_id: Some(task_id),
+                repository: None,
+                created_in_person: false,
+                control_file_patterns: &[],
+                control_files_team_id: None,
+            })
             .await
             .expect("insert")
         {

@@ -11,6 +11,7 @@ use macro_user_id::user_id::MacroUserIdStr;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::domain::control_files::ControlFilesError;
 use crate::domain::flow::{Entry, Flow, FlowError, StepName};
 
 /// What a Run's workflow starts with. The Run's request stays in its
@@ -74,6 +75,12 @@ pub struct StepInput<'a> {
     pub owner: &'a MacroUserIdStr<'static>,
     /// What the Run was asked to do.
     pub request: &'a str,
+    /// Whether the Run's owner created it in their own signed-in session:
+    /// only then does its request ask for the Control Files it names.
+    pub created_in_person: bool,
+    /// The Control File patterns the Run keeps from its creation; none for
+    /// a Run created before Runs kept them, which the default checks.
+    pub control_file_patterns: Option<&'a [String]>,
     /// The Macro task the Run works on: its task document's id.
     pub task_id: Option<Uuid>,
     /// The repository the Run works on, if it works on one.
@@ -428,6 +435,24 @@ pub struct RunDetail {
     pub steps: Vec<Step>,
 }
 
+/// The Control File patterns a person's Runs are checked against: their
+/// team's, or the factory's default.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ControlFilesSettings {
+    /// The glob patterns, matched against each changed path from the
+    /// repository's root, ignoring case.
+    pub patterns: Vec<String>,
+    /// Whether they are the factory's default: the team set none, or the
+    /// person is on no team.
+    pub is_default: bool,
+    /// The team whose patterns they are; none when the person is on no
+    /// team.
+    pub team_id: Option<Uuid>,
+    /// Whether the person may change them: they administer the team.
+    pub can_edit: bool,
+}
+
 /// A Flow a person can start a Run of.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -492,6 +517,19 @@ pub enum FactoryError {
         /// The answers it offers.
         offered: Vec<String>,
     },
+    /// The Run is Tampered, and the answer approving its Gate does not
+    /// approve exactly the Control Files its branch changed unasked.
+    #[error(
+        "the run's branch changes control files its request does not ask for: approve them by listing them in approvedControlFiles"
+    )]
+    ControlFilesNotApproved,
+    /// Someone who does not administer a team set its Control Files, or is
+    /// on no team.
+    #[error("only an admin of a team can set its control files")]
+    NotATeamAdmin,
+    /// A list of Control File patterns does not hold together.
+    #[error(transparent)]
+    InvalidControlFiles(#[from] ControlFilesError),
     /// Temporal could not be reached or did not answer.
     #[error(transparent)]
     Upstream(#[from] upstream_error::UpstreamError),
@@ -505,9 +543,11 @@ pub enum FactoryError {
     #[error("only a factory step's agent session can hand back, from its code")]
     NotAStepSession,
     /// Someone other than the person in their own signed-in session
-    /// answered a Gate: an internal caller, an API key or token, or an
-    /// agent's program acting for them.
-    #[error("only the run's owner, signed in to Macro, can answer its gate")]
+    /// answered a Gate or set their Control File patterns: an internal
+    /// caller, an API key or token, or an agent's program acting for them.
+    #[error(
+        "only the person, signed in to Macro, can answer a run's gate or set its control files"
+    )]
     NotAPerson,
     /// A hand back came from someone other than the Run's owner.
     #[error("only the run's owner can hand back its step")]

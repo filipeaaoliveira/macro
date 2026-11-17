@@ -236,7 +236,61 @@ the owner whether to merge; `merge` merges only that commit, naming it to
 GitHub, and a merged pull request reads as merged. A head that moved goes back
 to `ci`, and a person's `revise` goes to `fix` with the review's visits reset.
 The merge-gate entry runs at most three times, including visits that end
-`changed` without asking; then the Run ends for a person. The pull
+`changed` without asking; then the Run ends for a person.
+
+Control Files (`src/domain/control_files.rs`) are the files that decide
+whether a repository's checks pass: tests and what they compare against
+(snapshots, fixtures), test and lint configuration, CI workflows, package and
+build scripts, agent instructions and their tools' settings (`AGENTS.md`,
+`CLAUDE.md`, `.claude/`, `.agents/`, `.cursor/`) and `.macro/checks.json`.
+They are glob patterns matched against each changed path from the root,
+ignoring case (`*` within a folder, `**` across folders, `**/name` also at
+the root). `DEFAULT_CONTROL_FILES` applies until an admin or the owner of
+the team of the Run's owner sets the team's own with
+`PUT /settings/control-files` (`factory_team_settings`; `GET` reads them
+with whether the caller may change them; a null list goes back to the
+default, an empty one checks nothing). Only that admin's own signed-in
+session sets them, as for a Gate: a shorter list lets an agent change more
+unseen. A Run keeps the list, and the team it came from, as they were when
+it was created (`factory_run.control_file_patterns`,
+`control_files_team_id`), so a change to the team's list later, by anyone,
+does not change a Run under way; a Run created before Runs kept them is
+checked against the default. "In person" means the owner's own session
+(`is_in_person`: no internal caller, API key or token, agent or routine
+program, nor code mode) from an account that is not an agent's
+(`"User"."isAgent"`, which signs in with ordinary sessions): the service
+refuses an agent's account a Gate answer and a settings change, never keeps
+its Run as created in person, and never counts it as a team admin. Team settings show them in a Control files section (behind
+`enable-factory-runs`). A path says nothing of a change inside a file, so a
+check weakened in ordinary source (a lint suppression, an ignored test) is
+the review's to catch.
+
+`publish` (on the pull request's head), `ready_to_merge` and `merge` (on the
+commit to merge) compare that commit with the base (`PullRequests::changed_paths`) and keep
+the Control Files it changed on the Run (`controlFiles` in the Run API):
+`named`, those the request asks for, and `tampered`, the others, which make
+the Run Tampered. The request asks for a file only by naming its path from
+the root, whole (`.github/workflows/ci.yml`), and only when its owner
+created the Run in their own signed-in session (`factory_run.created_in_person`):
+an agent could otherwise start a Run whose request names the file it means
+to weaken. A pattern, a folder or a bare file name asks for nothing. A
+comparison GitHub cuts short (300 files), or more files than a Run keeps
+(`ControlFileChanges::MAX_FILES`, as a rename lists both paths), is Tampered
+and `unlisted`. Approving a Gate (`approve`) of a Tampered Run needs
+`approvedControlFiles` in the answer, listing exactly the Tampered files the
+person saw (400 `controlFilesNotApproved` otherwise), which only the owner's
+own session can send; the answer keeps them
+(`factory_gate.approved_control_files`). `merge` reads the commit's Control
+Files again and merges a Tampered one only when the latest Gate answer
+before it approved every Tampered file (an unlisted commit, an approval
+given while it was unlisted). Otherwise it ends `changed`, so the Run goes
+back through `ci` to the merge Gate, which shows the files: that route is
+in every `code` Flow a Run carries, so a Run in flight when this shipped,
+whose Gate approved before its files were read, takes it too, and nothing
+in the workflow or the interpreter changed. A pull request merged outside
+the Run is not compared again, since GitHub's comparison of a merged head
+with its base lists nothing: the Steps keep, and name, the Control Files
+last read. Nothing but a person's answer approves them. The pull
 request's description names the Run's task as `MACRO-{short id}`, so GitHub's
 webhook links them, and is cut to GitHub's 65,536 characters in its request
 part only.
@@ -257,6 +311,8 @@ part only.
   `merge`, over the `PullRequests` port.
 - `src/domain/built_in_steps/checks_round.rs` and `src/domain/checks.rs`:
   the checks rounds of `write` and `fix`, and the checks file they read.
+- `src/domain/control_files.rs`: Control Files, the default patterns, and
+  what makes a Run Tampered.
 - `flows/`: the built-in Flows, each named for its file
   (`src/domain/built_in_flows.rs`). `GET /flows` lists those whose Steps the
   worker serves, with their `description` and whether they work on a
@@ -290,6 +346,8 @@ part only.
   and each entry that runs it names a Role.
 - Add a Role: name it on the entries that need it; every deployment's agent
   definition must then fill it, or the service does not start.
+- Change the default Control Files: `DEFAULT_CONTROL_FILES` in
+  `src/domain/control_files.rs`, and its test.
 - Add a field to the checks file: `src/domain/checks.rs` (field, check
   and test), and the prompt in `checks_round.rs` if the agent needs it.
 - Add a Flow keyword: `src/domain/flow.rs` (field and check) →

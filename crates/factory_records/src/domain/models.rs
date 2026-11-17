@@ -310,8 +310,73 @@ pub struct Run {
     /// The GitHub repository the Run works on; none for a Run that works on
     /// no code.
     pub repository: Option<Repository>,
+    /// Whether its owner created it in their own signed-in session, from an
+    /// account that is not an agent's: only then does its request ask for
+    /// the Control Files it names.
+    pub created_in_person: bool,
+    /// The Control File patterns it is checked against, as its owner's team
+    /// had them when it was created; none for a Run created before Runs
+    /// kept them, which the factory's default checks.
+    #[serde(skip)]
+    pub control_file_patterns: Option<Vec<String>>,
+    /// The team those patterns came from; none when they are the default.
+    #[serde(skip)]
+    pub control_files_team_id: Option<Uuid>,
+    /// The Control Files its branch changed, as the pull request Steps last
+    /// read them. None when it changed none.
+    pub control_files: Option<ControlFileChanges>,
     /// How and when it ended; none while it runs.
     pub end: Option<RunEnd>,
+}
+
+/// The Control Files a Run's branch changed: files that decide whether the
+/// repository's checks pass, such as its tests, lint configuration and CI
+/// workflows. The Run is Tampered when it changed one its request does not
+/// ask for, and merges only once a person approves them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ControlFileChanges {
+    /// The files its request does not ask for, from the repository's root,
+    /// in GitHub's order: empty when `unlisted`.
+    pub tampered: Vec<String>,
+    /// The files its request asks for by naming them, which need no
+    /// approval: empty when `unlisted`.
+    pub named: Vec<String>,
+    /// GitHub could not list all of the branch's changes, or they were more
+    /// than a Run keeps (300 a list), so which Control Files it changed is
+    /// not known.
+    pub unlisted: bool,
+}
+
+impl ControlFileChanges {
+    /// The most files either list keeps; a longer one is `unlisted`.
+    pub const MAX_FILES: usize = 300;
+
+    /// Whether the Run is Tampered: it changed a Control File its request
+    /// does not ask for, or which ones it changed is not known.
+    pub fn is_tampered(&self) -> bool {
+        self.unlisted || !self.tampered.is_empty()
+    }
+
+    /// Whether `approved`, the Tampered files a person approved, covers
+    /// them: every one, or, when the changes are `unlisted`, an approval
+    /// given while they were.
+    pub fn approved_by(&self, approved: &[String]) -> bool {
+        if self.unlisted {
+            return approved.is_empty();
+        }
+        self.tampered.iter().all(|file| approved.contains(file))
+    }
+}
+
+/// The team a person is on, as the factory's settings read it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TeamMembership {
+    /// The team.
+    pub team_id: Uuid,
+    /// Whether they are its owner or one of its admins, from an account
+    /// that is not an agent's.
+    pub admin: bool,
 }
 
 /// The GitHub repository a Run works on.
@@ -325,11 +390,34 @@ pub struct Repository {
     pub base_branch: String,
 }
 
+/// A Run to keep before it starts.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NewRun<'a> {
+    /// Its id, also its Temporal workflow id.
+    pub id: RunId,
+    /// The built-in Flow it walks, by name.
+    pub flow: &'a str,
+    /// What it is asked to do.
+    pub request: &'a str,
+    /// Who owns it.
+    pub user_id: &'a MacroUserIdStr<'static>,
+    /// The task document it works on, if any.
+    pub task_id: Option<Uuid>,
+    /// The repository it works in, if any.
+    pub repository: Option<&'a Repository>,
+    /// Whether its owner created it in their own signed-in session.
+    pub created_in_person: bool,
+    /// The Control File patterns it is checked against.
+    pub control_file_patterns: &'a [String],
+    /// The team those patterns came from; none when they are the default.
+    pub control_files_team_id: Option<Uuid>,
+}
+
 /// What keeping a new Run came to.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RunInsert {
     /// The Run is kept.
-    Inserted(Run),
+    Inserted(Box<Run>),
     /// No document has the task id the Run was to work on, so nothing was
     /// kept.
     NoSuchTask,
@@ -368,6 +456,10 @@ pub struct GateAnswer {
     pub note: Option<String>,
     /// Who answered; none once their account is gone.
     pub user_id: Option<MacroUserIdStr<'static>>,
+    /// The Run's Tampered files the person approved with their answer: an
+    /// empty list approves a Run whose changes GitHub could not list. None
+    /// when the answer approved none.
+    pub approved_control_files: Option<Vec<String>>,
     /// When they answered.
     pub answered_at: DateTime<Utc>,
 }

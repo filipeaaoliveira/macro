@@ -10,6 +10,8 @@ export type RunOutcome =
 export type GateAnswer = {
   answer: string;
   note?: string;
+  /** The Run's Tampered files the answer approved. */
+  approvedControlFiles?: string[];
   answeredAt: string;
 };
 
@@ -81,6 +83,23 @@ export type RunRepository = {
   baseBranch: string;
 };
 
+/**
+ * The Control Files a Run's branch changed: files that decide whether its
+ * checks pass. `tampered` are the ones its request doesn't ask for, `named`
+ * the ones it names. `unlisted` when GitHub couldn't list the branch's
+ * changes, so which ones is unknown.
+ */
+export type ControlFileChanges = {
+  tampered: string[];
+  named: string[];
+  unlisted: boolean;
+};
+
+/** Whether the Run merges only once a person approves its Control Files. */
+export function isTampered(changes: ControlFileChanges): boolean {
+  return changes.unlisted || changes.tampered.length > 0;
+}
+
 /** One Run of a Flow, with the Steps it took in the order they started. */
 export type Run = {
   id: string;
@@ -88,6 +107,8 @@ export type Run = {
   createdAt: string;
   taskId?: string;
   repository?: RunRepository;
+  /** The Control Files its branch changed, if any. */
+  controlFiles?: ControlFileChanges;
   end?: { outcome: RunOutcome; endedAt: string };
   steps: RunStep[];
 };
@@ -128,6 +149,9 @@ export function runStatus(run: Run): RunStatus {
 
   return { kind: 'running', step };
 }
+
+/** The answer that agrees to a Gate; on a Tampered Run it needs approval. */
+export const APPROVE_ANSWER = 'approve';
 
 /** The first line of the request, which names the Run in lists. */
 export function runTitle(run: Run): string {

@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use factory_records::domain::models::{
-    Outcome, Repository, Role, RunId, RunInsert, RunOutcome, StepKey,
+    NewRun, Outcome, Repository, Role, RunId, RunInsert, RunOutcome, StepKey,
 };
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
@@ -174,14 +174,17 @@ async fn client() -> Client {
 async fn plan_run(repo: &FakeRepo) -> RunStart {
     let julia = MacroUserIdStr::try_from("macro|julia@example.com".to_string()).expect("valid");
     let RunInsert::Inserted(run) = repo
-        .insert_run(
-            RunId::generate(),
-            "plan",
-            "Add a dark mode toggle",
-            &julia,
-            None,
-            None,
-        )
+        .insert_run(NewRun {
+            id: RunId::generate(),
+            flow: "plan",
+            request: "Add a dark mode toggle",
+            user_id: &julia,
+            task_id: None,
+            repository: None,
+            created_in_person: false,
+            control_file_patterns: &[],
+            control_files_team_id: None,
+        })
         .await
         .expect("insert")
     else {
@@ -600,6 +603,7 @@ impl CodeRun {
             answer: Outcome::try_from(answer.to_string()).expect("valid"),
             note: None,
             user_id: julia(),
+            approved_control_files: None,
         };
         let mut delivery = AnswerDelivery::Refused("not sent".to_string());
         for _ in 0..50 {
@@ -650,14 +654,17 @@ where
         base_branch: "main".to_string(),
     };
     let RunInsert::Inserted(run) = repo
-        .insert_run(
-            RunId::generate(),
-            "code",
-            "Collapse repeated dashes in slugs",
-            &julia(),
-            None,
-            Some(&repository),
-        )
+        .insert_run(NewRun {
+            id: RunId::generate(),
+            flow: "code",
+            request: "Collapse repeated dashes in slugs",
+            user_id: &julia(),
+            task_id: None,
+            repository: Some(&repository),
+            created_in_person: false,
+            control_file_patterns: &[],
+            control_files_team_id: None,
+        })
         .await
         .expect("insert")
     else {

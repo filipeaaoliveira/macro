@@ -19,6 +19,12 @@ export type AnswerGateRequest = {
      */
     answer: Outcome;
     /**
+     * The Control Files the Run's branch changed unasked that the person
+     * saw and approves: required to approve a Gate of a Tampered Run, and
+     * must be exactly its `controlFiles.tampered` (empty when `unlisted`).
+     */
+    approvedControlFiles?: Array<string> | null;
+    /**
      * What the person adds, for the Run's later Steps to read.
      */
     note?: string | null;
@@ -67,6 +73,57 @@ export type CheckRoundEnd = {
  * How a round of a Step's checks ended.
  */
 export type CheckRoundOutcome = 'passed' | 'failed';
+
+/**
+ * The Control Files a Run's branch changed: files that decide whether the
+ * repository's checks pass, such as its tests, lint configuration and CI
+ * workflows. The Run is Tampered when it changed one its request does not
+ * ask for, and merges only once a person approves them.
+ */
+export type ControlFileChanges = {
+    /**
+     * The files its request asks for by naming them, which need no
+     * approval: empty when `unlisted`.
+     */
+    named: Array<string>;
+    /**
+     * The files its request does not ask for, from the repository's root,
+     * in GitHub's order: empty when `unlisted`.
+     */
+    tampered: Array<string>;
+    /**
+     * GitHub could not list all of the branch's changes, or they were more
+     * than a Run keeps (300 a list), so which Control Files it changed is
+     * not known.
+     */
+    unlisted: boolean;
+};
+
+/**
+ * The Control File patterns a person's Runs are checked against: their
+ * team's, or the factory's default.
+ */
+export type ControlFilesSettings = {
+    /**
+     * Whether the person may change them: they administer the team.
+     */
+    canEdit: boolean;
+    /**
+     * Whether they are the factory's default: the team set none, or the
+     * person is on no team.
+     */
+    isDefault: boolean;
+    /**
+     * The glob patterns, matched against each changed path from the
+     * repository's root, ignoring case.
+     */
+    patterns: Array<string>;
+    /**
+     * The team whose patterns they are; none when the person is on no
+     * team.
+     */
+    teamId?: string | null;
+};
 
 /**
  * Request body for creating a Run.
@@ -245,6 +302,12 @@ export type GateAnswer = {
      */
     answeredAt: string;
     /**
+     * The Run's Tampered files the person approved with their answer: an
+     * empty list approves a Run whose changes GitHub could not list. None
+     * when the answer approved none.
+     */
+    approvedControlFiles?: Array<string> | null;
+    /**
      * What the person added, for the Run's later Steps to read.
      */
     note?: string | null;
@@ -401,10 +464,17 @@ export type Role = string;
  * One Run of a Flow.
  */
 export type Run = {
+    controlFiles?: null | ControlFileChanges;
     /**
      * When the Run was created.
      */
     createdAt: string;
+    /**
+     * Whether its owner created it in their own signed-in session, from an
+     * account that is not an agent's: only then does its request ask for
+     * the Control Files it names.
+     */
+    createdInPerson: boolean;
     end?: null | RunEnd;
     /**
      * The Run's id, also its Temporal workflow id.
@@ -457,7 +527,7 @@ export type RunEnd = {
 /**
  * Why a request was refused, where a client acts on the cause.
  */
-export type RunErrorCode = 'unreachableRepository' | 'noPushAccess';
+export type RunErrorCode = 'unreachableRepository' | 'noPushAccess' | 'controlFilesNotApproved';
 
 /**
  * What a refused or failed request answers: a message, and for a refusal
@@ -564,6 +634,19 @@ export type RunTokens = {
      * What its agents used.
      */
     tokens: TokenCounts;
+};
+
+/**
+ * Request body for setting the Control File patterns.
+ */
+export type SetControlFilesRequest = {
+    /**
+     * The glob patterns, matched against each changed path from the
+     * repository's root: `*` stays within one folder, `**` spans any
+     * number. At most 200, each at most 256 bytes. Null goes back to the
+     * factory's default; an empty list checks no file.
+     */
+    patterns?: Array<string> | null;
 };
 
 /**
@@ -920,6 +1003,49 @@ export type LinkFactoryRunTaskResponses = {
 };
 
 export type LinkFactoryRunTaskResponse = LinkFactoryRunTaskResponses[keyof LinkFactoryRunTaskResponses];
+
+export type GetFactoryControlFilesData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/settings/control-files';
+};
+
+export type GetFactoryControlFilesErrors = {
+    401: ErrorResponse;
+    403: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type GetFactoryControlFilesError = GetFactoryControlFilesErrors[keyof GetFactoryControlFilesErrors];
+
+export type GetFactoryControlFilesResponses = {
+    200: ControlFilesSettings;
+};
+
+export type GetFactoryControlFilesResponse = GetFactoryControlFilesResponses[keyof GetFactoryControlFilesResponses];
+
+export type SetFactoryControlFilesData = {
+    body: SetControlFilesRequest;
+    path?: never;
+    query?: never;
+    url: '/settings/control-files';
+};
+
+export type SetFactoryControlFilesErrors = {
+    400: ErrorResponse;
+    401: ErrorResponse;
+    403: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type SetFactoryControlFilesError = SetFactoryControlFilesErrors[keyof SetFactoryControlFilesErrors];
+
+export type SetFactoryControlFilesResponses = {
+    200: ControlFilesSettings;
+};
+
+export type SetFactoryControlFilesResponse = SetFactoryControlFilesResponses[keyof SetFactoryControlFilesResponses];
 
 export type ListFactoryTaskRunsData = {
     body?: never;

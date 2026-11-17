@@ -4,7 +4,9 @@ use axum::Router;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode};
 use bot_id::BotId;
-use factory_records::domain::models::{EntryId, HandBack, Outcome, RunId, RunInsert, StepKey};
+use factory_records::domain::models::{
+    EntryId, HandBack, NewRun, Outcome, RunId, RunInsert, StepKey,
+};
 use factory_records::domain::ports::RunRepository;
 use macro_authorization::{
     AuthorizedUserApiKey, CODE_EXECUTION_HEADER, CredentialOrigin, INTERNAL_API_KEY_HEADER,
@@ -23,19 +25,25 @@ use super::{FactoryRouterState, factory_router};
 use crate::domain::built_in_steps::BuiltInSteps;
 use crate::domain::fakes::{FakeGithub, FakeRepo};
 use crate::domain::gate::AnswerGate;
-use crate::domain::models::{FactoryError, FlowSummary, RunDetail, RunStart};
+use crate::domain::models::{ControlFilesSettings, FactoryError, FlowSummary, RunDetail, RunStart};
 use crate::domain::ports::{AnswerDelivery, FactoryService, RunWorkflows, RunWorkflowsError};
 use crate::domain::pull_request_steps::PullRequestSteps;
 use crate::domain::service::FactoryServiceImpl;
 use crate::outbound::local_agent::LocalAgent;
 
+mod control_files;
+
 const KEY: &str = "test-internal-key";
 const ALICE: &str = "macro|alice@example.com";
 const EVE: &str = "macro|eve@example.com";
+/// An agent's account: it signs in with a session as a person does.
+const ROBOT: &str = "macro|robot@example.com";
 
 /// Accepts the bearer tokens `alice` and `eve`, each its person's own
-/// session, `sdk`: Alice's Macro API token, and `agent`: that token carrying
-/// an agent's attribution, as code mode mints.
+/// session, `robot`: an agent account's session, `sdk`: Alice's Macro API
+/// token, `agent`: that token carrying an agent's attribution, as code mode
+/// mints, and `routine` and `routine-session`: a routine's token, and one
+/// that reads as a session yet signs a routine.
 #[derive(Clone, Copy)]
 struct Tokens;
 
@@ -45,11 +53,15 @@ impl JwtValidator for Tokens {
         jwt: &str,
     ) -> Result<ValidatedCredential, Report<MacroAuthorizationError>> {
         let agent = BotId::new_from_uuid(Uuid::from_u128(0xB07A));
-        let (user_id, origin, agent_id) = match jwt {
-            "alice" => (ALICE, CredentialOrigin::Session, None),
-            "eve" => (EVE, CredentialOrigin::Session, None),
-            "sdk" => (ALICE, CredentialOrigin::MacroApiJwt, None),
-            "agent" => (ALICE, CredentialOrigin::MacroApiJwt, Some(agent)),
+        let routine = Uuid::from_u128(0x2007);
+        let (user_id, origin, agent_id, routine_id) = match jwt {
+            "alice" => (ALICE, CredentialOrigin::Session, None, None),
+            "eve" => (EVE, CredentialOrigin::Session, None, None),
+            "robot" => (ROBOT, CredentialOrigin::Session, None, None),
+            "sdk" => (ALICE, CredentialOrigin::MacroApiJwt, None, None),
+            "agent" => (ALICE, CredentialOrigin::MacroApiJwt, Some(agent), None),
+            "routine" => (ALICE, CredentialOrigin::MacroApiJwt, None, Some(routine)),
+            "routine-session" => (ALICE, CredentialOrigin::Session, None, Some(routine)),
             _ => return Err(Report::new(MacroAuthorizationError::InvalidCredentials)),
         };
         Ok(ValidatedCredential {
@@ -57,7 +69,7 @@ impl JwtValidator for Tokens {
             identity: ValidatedIdentity {
                 agent_id,
                 agent_via: None,
-                routine_id: None,
+                routine_id,
                 user_id: user_id.to_string(),
                 fusion_user_id: format!("fusion-{jwt}"),
                 organization_id: None,
@@ -172,6 +184,7 @@ impl FactoryService for FakeService {
         _request: String,
         _task_id: Option<Uuid>,
         _repo_url: Option<String>,
+        _in_person: bool,
     ) -> Result<RunDetail, FactoryError> {
         Err(self.refusing(&actor))
     }
@@ -208,7 +221,23 @@ impl FactoryService for FakeService {
         _seq: u16,
         _answer: Outcome,
         _note: Option<String>,
+        _approved_control_files: Option<Vec<String>>,
     ) -> Result<(), FactoryError> {
+        Err(self.refusing(&actor))
+    }
+
+    async fn control_files(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+    ) -> Result<ControlFilesSettings, FactoryError> {
+        Err(self.refusing(actor))
+    }
+
+    async fn set_control_files(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        _patterns: Option<Vec<String>>,
+    ) -> Result<ControlFilesSettings, FactoryError> {
         Err(self.refusing(&actor))
     }
 
@@ -290,14 +319,17 @@ fn github_router(repo: &FakeRepo, github: FakeGithub) -> Router {
 async fn alice_s_run(repo: &FakeRepo) -> RunId {
     let alice = MacroUserIdStr::try_from(ALICE.to_string()).expect("valid");
     match repo
-        .insert_run(
-            RunId::generate(),
-            "plan",
-            "Plan the export",
-            &alice,
-            None,
-            None,
-        )
+        .insert_run(NewRun {
+            id: RunId::generate(),
+            flow: "plan",
+            request: "Plan the export",
+            user_id: &alice,
+            task_id: None,
+            repository: None,
+            created_in_person: false,
+            control_file_patterns: &[],
+            control_files_team_id: None,
+        })
         .await
         .expect("insert")
     {

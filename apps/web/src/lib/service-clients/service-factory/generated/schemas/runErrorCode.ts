@@ -14,4 +14,5 @@ export type RunErrorCode = (typeof RunErrorCode)[keyof typeof RunErrorCode];
 export const RunErrorCode = {
   unreachableRepository: 'unreachableRepository',
   noPushAccess: 'noPushAccess',
+  controlFilesNotApproved: 'controlFilesNotApproved',
 } as const;

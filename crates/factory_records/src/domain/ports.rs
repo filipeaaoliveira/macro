@@ -6,9 +6,9 @@ use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
 use crate::domain::models::{
-    CheckRound, CheckRoundOutcome, CheckRoundStart, ClaimedSession, EntryId, HandBack, HandedBack,
-    Outcome, PassedOver, Repository, Role, Run, RunId, RunInsert, RunOutcome, SessionStep, Step,
-    StepKey, StepSession, StoppingSession, TaskLink,
+    CheckRound, CheckRoundOutcome, CheckRoundStart, ClaimedSession, ControlFileChanges, EntryId,
+    HandBack, HandedBack, NewRun, Outcome, PassedOver, Role, Run, RunId, RunInsert, RunOutcome,
+    SessionStep, Step, StepKey, StepSession, StoppingSession, TaskLink, TeamMembership,
 };
 
 /// Where Runs and their Steps are kept.
@@ -20,17 +20,11 @@ pub trait RunRepository: Send + Sync + 'static {
     /// The error type returned by repository operations.
     type Err: std::error::Error + Send + Sync + 'static;
 
-    /// Keep a new Run of `user_id` that has not started yet, of the built-in
-    /// Flow named `flow`, working on the task document `task_id` and in
-    /// `repository` if they are given, in one write.
+    /// Keep `run`, a new Run that has not started yet, working on its task
+    /// document and in its repository if they are given, in one write.
     fn insert_run(
         &self,
-        id: RunId,
-        flow: &str,
-        request: &str,
-        user_id: &MacroUserIdStr<'static>,
-        task_id: Option<Uuid>,
-        repository: Option<&Repository>,
+        run: NewRun<'_>,
     ) -> impl Future<Output = Result<RunInsert, Self::Err>> + Send;
 
     /// Link the Run to the task document `task_id`, replacing any task it
@@ -93,14 +87,16 @@ pub trait RunRepository: Send + Sync + 'static {
         answers: &[Outcome],
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
-    /// Record `user_id`'s answer to the Gate of the Step `key`. A Gate
-    /// already answered keeps its first answer.
+    /// Record `user_id`'s answer to the Gate of the Step `key`, with the
+    /// Tampered files it approved, if any. A Gate already answered keeps its
+    /// first answer.
     fn answer_gate(
         &self,
         key: StepKey,
         answer: &Outcome,
         note: Option<&str>,
         user_id: &MacroUserIdStr<'static>,
+        approved_control_files: Option<&[String]>,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// Record that the Step `key` works in `session` for `role`, offering its
@@ -284,6 +280,44 @@ pub trait RunRepository: Send + Sync + 'static {
         &self,
         id: RunId,
         sha: &str,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// Keep the Control Files the Run's branch changed, as last read,
+    /// replacing what was kept before: none clears it. Keeping it again
+    /// changes nothing.
+    fn set_control_file_changes(
+        &self,
+        id: RunId,
+        changes: Option<&ControlFileChanges>,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// Whether `user_id`'s account is an agent's (`"User"."isAgent"`): it
+    /// signs in as any person does, yet is never one in person.
+    fn is_agent_account(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+    ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
+
+    /// The team `user_id` is on, and whether they administer it (an agent's
+    /// account never does); none when they are on no team.
+    fn team_of(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+    ) -> impl Future<Output = Result<Option<TeamMembership>, Self::Err>> + Send;
+
+    /// The Control File patterns the team `team_id` set for its members'
+    /// Runs; none when it set none, so the factory's default applies.
+    fn team_control_files(
+        &self,
+        team_id: Uuid,
+    ) -> impl Future<Output = Result<Option<Vec<String>>, Self::Err>> + Send;
+
+    /// Set the Control File patterns of the team `team_id`'s Runs; none goes
+    /// back to the factory's default.
+    fn set_team_control_files(
+        &self,
+        team_id: Uuid,
+        patterns: Option<&[String]>,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// The commit the Run last asked a person to merge, if any.

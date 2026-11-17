@@ -11,7 +11,8 @@ use agent_session::domain::routines::{
 use ai_billing::DenyReason;
 use bot_id::BotId;
 use factory_records::domain::models::{
-    AgentName, EntryId, HandBack, Outcome, PassedOver, Role, RunId, RunInsert, StepKey, StepSession,
+    AgentName, EntryId, HandBack, NewRun, Outcome, PassedOver, Role, RunId, RunInsert, StepKey,
+    StepSession,
 };
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
@@ -360,14 +361,17 @@ fn julia() -> MacroUserIdStr<'static> {
 /// A `plan` task of a new Run of Julia's, its Step started.
 async fn plan_task(repo: &FakeRepo) -> AgentTask {
     let run = repo
-        .insert_run(
-            RunId::generate(),
-            "plan",
-            "Add a dark mode toggle",
-            &julia(),
-            None,
-            None,
-        )
+        .insert_run(NewRun {
+            id: RunId::generate(),
+            flow: "plan",
+            request: "Add a dark mode toggle",
+            user_id: &julia(),
+            task_id: None,
+            repository: None,
+            created_in_person: false,
+            control_file_patterns: &[],
+            control_files_team_id: None,
+        })
         .await
         .expect("insert");
     let RunInsert::Inserted(run) = run else {

@@ -507,4 +507,80 @@ describe('RunView', () => {
       screen.getByRole('button', { name: 'Approve' }).hasAttribute('disabled')
     ).toBe(false);
   });
+
+  it('approves a Tampered Run only with the Control Files it saw approved', async () => {
+    const answerGate = vi.fn(async () => DONE);
+    const { setRun } = mount({ answerGate });
+    setRun({
+      ...waitingRun,
+      controlFiles: {
+        tampered: ['.github/workflows/ci.yml'],
+        named: ['Makefile'],
+        unlisted: false,
+      },
+    });
+
+    expect(await screen.findByText('.github/workflows/ci.yml')).toBeTruthy();
+    const named = screen.getByRole('list', {
+      name: 'Control files named by the request',
+    });
+    expect(within(named).getByText('Makefile')).toBeTruthy();
+    const approve = screen.getByRole('button', { name: 'Approve' });
+    expect(approve.hasAttribute('disabled')).toBe(true);
+
+    fireEvent.click(
+      screen.getByRole('checkbox', { name: 'I approve these changes' })
+    );
+    await waitFor(() => expect(approve.hasAttribute('disabled')).toBe(false));
+    fireEvent.click(approve);
+
+    expect(answerGate).toHaveBeenCalledWith({
+      runId: 'run-1',
+      step: waitingRun.steps[0],
+      answer: 'approve',
+      note: undefined,
+      approvedControlFiles: ['.github/workflows/ci.yml'],
+    });
+  });
+
+  it('approves a Run that changed only named Control Files without asking', async () => {
+    const answerGate = vi.fn(async () => DONE);
+    const { setRun } = mount({ answerGate });
+    setRun({
+      ...waitingRun,
+      controlFiles: { tampered: [], named: ['Makefile'], unlisted: false },
+    });
+
+    expect(await screen.findByText('Makefile')).toBeTruthy();
+    expect(screen.queryByRole('checkbox')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+
+    expect(answerGate).toHaveBeenCalledWith({
+      runId: 'run-1',
+      step: waitingRun.steps[0],
+      answer: 'approve',
+      note: undefined,
+    });
+  });
+
+  it('sends a Tampered Run back without approving its Control Files', async () => {
+    const answerGate = vi.fn(async () => DONE);
+    const { setRun } = mount({ answerGate });
+    setRun({
+      ...waitingRun,
+      controlFiles: { tampered: [], named: [], unlisted: true },
+    });
+
+    expect(
+      await screen.findByText(/GitHub couldn’t list this branch’s changes/)
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Revise' }));
+
+    expect(answerGate).toHaveBeenCalledWith({
+      runId: 'run-1',
+      step: waitingRun.steps[0],
+      answer: 'revise',
+      note: undefined,
+    });
+  });
 });

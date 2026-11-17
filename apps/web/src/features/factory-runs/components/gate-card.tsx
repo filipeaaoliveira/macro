@@ -6,9 +6,10 @@ import {
 import { t } from '@app/lib/i18n';
 import { fireAndForget } from '@core/util/fireAndForget';
 import QuestionIcon from '@icon/system/regular/question.svg';
-import { Button, cn, Item, TextField, Card as UiCard } from '@ui';
+import { Button, Checkbox, cn, Item, TextField, Card as UiCard } from '@ui';
 import { For, type JSX, Show } from 'solid-js';
 import { flowWordLabel } from '../core/flow-words';
+import { type ControlFileChanges, isTampered } from '../core/run';
 
 /** The Gate's header and its question, in a block nested in the card. */
 export function GateQuestion(props: {
@@ -91,13 +92,79 @@ export function GateNote(props: {
 }
 
 /**
+ * The Control Files a Run's branch changed: those its request doesn't ask
+ * for, with the person's approval of them, which approving the Gate needs,
+ * and those the request names, which need none. Each list scrolls past a
+ * few lines.
+ */
+export function GateControlFiles(props: {
+  changes: ControlFileChanges;
+  approved: boolean;
+  onApprovedChange: (approved: boolean) => void;
+  locked: boolean;
+}) {
+  return (
+    <UiCard
+      variant="filled"
+      offset={1}
+      class="flex flex-col gap-2 px-3 py-2.5 text-sm leading-5"
+    >
+      <p class="font-medium">{t('factoryRuns.controlFilesTitle')}</p>
+      <Show when={props.changes.unlisted}>
+        <p class="text-ink-muted">{t('factoryRuns.controlFilesUnlisted')}</p>
+      </Show>
+      <Show when={props.changes.tampered.length > 0}>
+        <p class="text-ink-muted">{t('factoryRuns.controlFilesChanged')}</p>
+        <ControlFileList
+          label={t('factoryRuns.controlFilesTitle')}
+          files={props.changes.tampered}
+        />
+      </Show>
+      <Show when={props.changes.named.length > 0}>
+        <p class="text-ink-muted">{t('factoryRuns.controlFilesNamed')}</p>
+        <ControlFileList
+          label={t('factoryRuns.controlFilesNamedLabel')}
+          files={props.changes.named}
+        />
+      </Show>
+      <Show when={isTampered(props.changes)}>
+        <Checkbox
+          size="sm"
+          checked={props.approved}
+          onChange={props.onApprovedChange}
+          disabled={props.locked}
+        >
+          <Checkbox.Control />
+          <Checkbox.Label>
+            {t('factoryRuns.approveControlFiles')}
+          </Checkbox.Label>
+        </Checkbox>
+      </Show>
+    </UiCard>
+  );
+}
+
+function ControlFileList(props: { label: string; files: readonly string[] }) {
+  return (
+    <ul
+      aria-label={props.label}
+      class="max-h-24 overflow-y-auto font-mono text-xs [overflow-wrap:anywhere]"
+    >
+      <For each={props.files}>{(file) => <li>{file}</li>}</For>
+    </ul>
+  );
+}
+
+/**
  * One button per answer. The Flow lists its main answer first, so that one
  * is the primary action, last on the right. `onAnswer` resolves whether the
  * answer went through; when it did not, focus goes back to the button,
- * which its loading state had taken focus from.
+ * which its loading state had taken focus from. An answer in `held` can't
+ * be sent yet.
  */
 export function GateAnswers(props: {
   answers: readonly string[];
+  held?: readonly string[];
   locked: boolean;
   /** The answer on the wire, shown loading. */
   answering?: string;
@@ -134,7 +201,7 @@ export function GateAnswers(props: {
     <Button
       type="button"
       variant={answerProps.variant}
-      disabled={props.locked}
+      disabled={props.locked || props.held?.includes(answerProps.answer)}
       loading={props.answering === answerProps.answer}
       onClick={(event: MouseEvent & { currentTarget: HTMLButtonElement }) =>
         fireAndForget(
@@ -187,6 +254,11 @@ export function GateGroup(props: {
 export function GateCard(props: {
   question: string;
   answers: readonly string[];
+  /** The Control Files the Run's branch changed, if any. */
+  controlFiles?: ControlFileChanges;
+  approveControlFiles: boolean;
+  onApproveControlFilesChange: (approved: boolean) => void;
+  held?: readonly string[];
   note: string;
   onNoteChange: (note: string) => void;
   locked: boolean;
@@ -197,6 +269,18 @@ export function GateCard(props: {
     <GateGroup>
       <Card width="wide">
         <GateQuestion question={props.question} capped />
+        <Show when={props.controlFiles}>
+          {(changes) => (
+            <div class="px-3 pb-2">
+              <GateControlFiles
+                changes={changes()}
+                approved={props.approveControlFiles}
+                onApprovedChange={props.onApproveControlFilesChange}
+                locked={props.locked}
+              />
+            </div>
+          )}
+        </Show>
         <div class="px-3">
           <GateNote
             note={props.note}
@@ -207,6 +291,7 @@ export function GateCard(props: {
         <CardFooter class="justify-end">
           <GateAnswers
             answers={props.answers}
+            held={props.held}
             locked={props.locked}
             answering={props.answering}
             onAnswer={props.onAnswer}

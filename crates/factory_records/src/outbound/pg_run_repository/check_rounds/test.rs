@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use super::super::PgRunRepository;
 use crate::domain::models::{
-    AgentName, CheckRoundOutcome, CheckRoundStart, EntryId, HandBack, HandedBack, Outcome,
+    AgentName, CheckRoundOutcome, CheckRoundStart, EntryId, HandBack, HandedBack, NewRun, Outcome,
     PassedOver, Role, RunId, RunInsert, StepKey, StepSession,
 };
 use crate::domain::ports::RunRepository;
@@ -20,7 +20,17 @@ async fn writing(repo: &PgRunRepository) -> (StepKey, StepSession) {
     let julia = MacroUserIdStr::try_from("macro|julia@example.com".to_string()).expect("user");
     let id = RunId::generate();
     let RunInsert::Inserted(_) = repo
-        .insert_run(id, "code", "Add dark mode", &julia, None, None)
+        .insert_run(NewRun {
+            id,
+            flow: "code",
+            request: "Add dark mode",
+            user_id: &julia,
+            task_id: None,
+            repository: None,
+            created_in_person: false,
+            control_file_patterns: &[],
+            control_files_team_id: None,
+        })
         .await
         .expect("insert")
     else {

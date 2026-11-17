@@ -9,13 +9,16 @@ import {
   getAnswerFactoryGateUrl,
   getCancelFactoryRunUrl,
   getCreateFactoryRunUrl,
+  getGetFactoryControlFilesUrl,
   getGetFactoryInsightsUrl,
   getGetFactoryRunUrl,
   getListFactoryFlowsUrl,
   getListFactoryTaskRunsUrl,
+  getSetFactoryControlFilesUrl,
 } from './generated/client';
 import type {
   AnswerGateRequest,
+  ControlFilesSettings,
   CreateRunRequest,
   FlowsResponse,
   GetFactoryInsightsParams,
@@ -30,12 +33,15 @@ const host = () => SERVER_HOSTS.factory;
 /** Why a Run wasn't started, when the service names the cause. */
 export type StartRunErrorCode = 'UNREACHABLE_REPOSITORY' | 'NO_PUSH_ACCESS';
 
-const START_RUN_ERROR_CODES: Record<RunErrorCode, StartRunErrorCode> = {
+/** The codes the service refuses a start with. */
+type StartRunRefusal = Exclude<RunErrorCode, 'controlFilesNotApproved'>;
+
+const START_RUN_ERROR_CODES: Record<StartRunRefusal, StartRunErrorCode> = {
   unreachableRepository: 'UNREACHABLE_REPOSITORY',
   noPushAccess: 'NO_PUSH_ACCESS',
 };
 
-function isRunErrorCode(code: unknown): code is RunErrorCode {
+function isRunErrorCode(code: unknown): code is StartRunRefusal {
   return typeof code === 'string' && Object.hasOwn(START_RUN_ERROR_CODES, code);
 }
 
@@ -56,6 +62,22 @@ async function startRunError(
       ? body.message
       : failure.message;
   return { code: START_RUN_ERROR_CODES[body.code], message };
+}
+
+/**
+ * A refusal that says why in its body's `message`, else the status's error.
+ */
+async function refusal(
+  response: Response
+): Promise<ResultError<FetchWithTokenErrorCode>> {
+  const failure = statusError(response.status);
+  const body: unknown = await response.json().catch(() => undefined);
+  if (!body || typeof body !== 'object' || !('message' in body)) {
+    return failure;
+  }
+  const message =
+    typeof body.message === 'string' ? body.message : failure.message;
+  return { code: failure.code, message };
 }
 
 /**
@@ -120,13 +142,42 @@ export const factoryClient = {
    * Answers the Gate of the Run's Step `seq`; the service answers 202 with
    * no body. A Gate that was already answered, or that the Run no longer
    * waits on, fails `CONFLICT`; an agent answering for its owner fails
-   * `FORBIDDEN`.
+   * `FORBIDDEN`. Approving a Tampered Run without `approvedControlFiles`
+   * listing its Tampered files fails `BAD_REQUEST`.
    */
   answerGate(runId: string, seq: number, answer: AnswerGateRequest) {
     return fetchWithToken<Record<string, never>>(
       `${host()}${getAnswerFactoryGateUrl(encodeURIComponent(runId), seq)}`,
       { method: 'POST', body: JSON.stringify(answer) }
     ).then((result) => result.map(() => undefined));
+  },
+
+  /**
+   * The Control File patterns the person's Runs are checked against: their
+   * team's or the default, and whether the person may change them.
+   */
+  getControlFiles(signal?: AbortSignal) {
+    return fetchWithToken<ControlFilesSettings>(
+      `${host()}${getGetFactoryControlFilesUrl()}`,
+      { method: 'GET', signal }
+    );
+  },
+
+  /**
+   * Sets the team's Control File patterns; `null` goes back to the default.
+   * Someone who doesn't administer the team fails `FORBIDDEN`; a pattern
+   * that doesn't read fails `HTTP_ERROR` (400). Either carries the
+   * service's message.
+   */
+  setControlFiles(patterns: string[] | null) {
+    return fetchWithToken<ControlFilesSettings>(
+      `${host()}${getSetFactoryControlFilesUrl()}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ patterns }),
+        errorResponseHandler: refusal,
+      }
+    );
   },
 
   /**
