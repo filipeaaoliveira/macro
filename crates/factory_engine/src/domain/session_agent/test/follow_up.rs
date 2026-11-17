@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use super::{FakeSessions, agent, julia, plan_task, the_plan};
 use crate::domain::fakes::FakeRepo;
-use crate::domain::models::AgentTurn;
+use crate::domain::models::{AgentTask, AgentTurn};
 use crate::domain::ports::{Retryable, StepAgent};
 use crate::domain::session_agent::SessionAgentError;
 
@@ -129,4 +129,27 @@ async fn a_later_prompt_waits_no_longer_than_its_step_allows() {
     };
     assert!(matches!(error, SessionAgentError::Overdue));
     assert!(error.retryable());
+}
+
+/// A Step's work is waited for no longer than the time its Step gave.
+#[tokio::test(start_paused = true)]
+async fn the_work_waits_no_longer_than_its_step_allows() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(
+        &repo,
+        Some(the_plan()),
+        RoutineActionStatus::Pending(
+            agent_session::domain::routines::RoutinePendingReason::Running,
+        ),
+    );
+    let task = AgentTask {
+        answer_by: Some(chrono::Utc::now()),
+        ..plan_task(&repo).await
+    };
+
+    let started = tokio::time::Instant::now();
+    let answer = agent(&sessions, &repo).answer(task).await;
+
+    assert!(matches!(answer, Err(SessionAgentError::TooSlow(_))));
+    assert!(started.elapsed() < std::time::Duration::from_secs(60));
 }

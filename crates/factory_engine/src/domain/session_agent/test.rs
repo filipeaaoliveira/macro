@@ -328,6 +328,7 @@ async fn plan_task(repo: &FakeRepo) -> AgentTask {
         prompt: "Plan the change".to_string(),
         outcomes: vec![Outcome::done()],
         repo_url: None,
+        answer_by: None,
     }
 }
 

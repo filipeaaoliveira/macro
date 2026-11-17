@@ -342,8 +342,12 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
 
     #[tracing::instrument(err, skip_all, fields(run_id = %task.key.run_id, seq = task.key.seq, step = %task.step))]
     async fn answer(&self, task: AgentTask) -> Result<AgentAnswer, SessionAgentError> {
-        // Opening and prompting count against the deadline too.
-        let deadline = tokio::time::Instant::now() + SESSION_DEADLINE;
+        // Opening and prompting count against the deadline too: the sooner
+        // of SESSION_DEADLINE from this call and the time the Step gave.
+        let left = task.answer_by.map_or(SESSION_DEADLINE, |answer_by| {
+            until(answer_by).min(SESSION_DEADLINE)
+        });
+        let deadline = tokio::time::Instant::now() + left;
         // A retried Step goes on in the session its first attempt claimed,
         // so the work is never started twice.
         let claimed = self
@@ -425,11 +429,10 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
 
     #[tracing::instrument(err, skip_all, fields(run_id = %turn.key.run_id, seq = turn.key.seq))]
     async fn follow_up(&self, turn: AgentTurn) -> Result<AgentAnswer, SessionAgentError> {
-        // The sooner of this attempt's own deadline and the Step's.
-        let left = (turn.answer_by - chrono::Utc::now())
-            .to_std()
-            .unwrap_or(Duration::ZERO);
-        let deadline = tokio::time::Instant::now() + left.min(SESSION_DEADLINE);
+        // The sooner of SESSION_DEADLINE from this call and the time the
+        // Step gave. Past either, the wait ends as `Overdue`, which a retry
+        // goes on from, waiting on the same turn.
+        let deadline = tokio::time::Instant::now() + until(turn.answer_by).min(SESSION_DEADLINE);
         let session = self
             .repo
             .claimed_session(turn.key)
@@ -572,6 +575,11 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
         }
         Ok(())
     }
+}
+
+/// How long from now until `at`; nothing once it passed.
+fn until(at: chrono::DateTime<chrono::Utc>) -> Duration {
+    (at - chrono::Utc::now()).to_std().unwrap_or(Duration::ZERO)
 }
 
 /// `text`, then how to hand back one of `outcomes`.

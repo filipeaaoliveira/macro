@@ -79,6 +79,9 @@ pub struct AgentTask {
     /// The repository the agent works in, as its
     /// `https://github.com/owner/name` URL, if the Run works on one.
     pub repo_url: Option<String>,
+    /// When to stop waiting for the agent's answer, at the latest, when the
+    /// Step sets a time of its own; the attempt's own deadline holds too.
+    pub answer_by: Option<DateTime<Utc>>,
 }
 
 /// A later prompt an agent is asked to work on, in the session it did its

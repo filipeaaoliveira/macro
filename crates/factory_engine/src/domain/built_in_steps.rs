@@ -172,6 +172,20 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
         outcomes: Vec<Outcome>,
         input: StepInput<'_>,
     ) -> Result<StepReport, BuiltInStepError> {
+        self.ask_agent_by(step, instructions, outcomes, input, None)
+            .await
+    }
+
+    /// [`Self::ask_agent`], waiting for the answer until `answer_by` at the
+    /// latest.
+    async fn ask_agent_by(
+        &self,
+        step: &StepName,
+        instructions: &str,
+        outcomes: Vec<Outcome>,
+        input: StepInput<'_>,
+        answer_by: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<StepReport, BuiltInStepError> {
         let task = AgentTask {
             key: input.key,
             owner: input.owner.clone(),
@@ -179,6 +193,7 @@ impl<A: StepAgent, G: PullRequests, R: RunRepository> BuiltInSteps<A, G, R> {
             prompt: prompt(instructions, &outcomes, input),
             outcomes: outcomes.clone(),
             repo_url: input.repository.map(|repository| repository.url.clone()),
+            answer_by,
         };
         let answer = self
             .agent
