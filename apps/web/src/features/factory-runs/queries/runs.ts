@@ -63,6 +63,9 @@ function toRun(detail: RunDetail): Run {
               : undefined,
           }
         : undefined,
+      role: step.role ?? undefined,
+      agent: step.agent ?? undefined,
+      passedOver: step.passedOver,
     })),
   };
 }

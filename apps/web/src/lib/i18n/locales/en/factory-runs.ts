@@ -38,6 +38,8 @@ export default {
   noSteps: 'No steps yet',
   stepVisit: '{{entry}} · visit {{visit}}',
   stepRunning: 'Running…',
+  stepAgent: '{{role}} · {{agent}}',
+  passedOver: '{{agent}} had no quota left, so the next agent took over',
   showOutput: 'Show output for {{step}}',
   cancelRun: 'Cancel run',
   cancelTitle: 'Cancel this run?',

@@ -1372,8 +1372,9 @@ request and a Flow, starts the Run and opens it.
 
 A Run opens in a dialog on desktop and in a sheet on touch (after the side
 panel's sheet closes). Its Steps scroll: each with its outcome, its time
-(`5m`) and its output as markdown, the output a waiting Gate asks about
-open. On desktop the Gate card (its question, a note field and one button
+(`5m`), the Role and Agent an agent Step used (`Planner · claude`, with a
+line for each Agent passed over for lack of quota) and its output as
+markdown, the output a waiting Gate asks about open. On desktop the Gate card (its question, a note field and one button
 per answer, the Flow's first answer primary) is pinned below them, the
 question and note scrolling inside past a few lines. On touch the pinned
 chrome between the handle and the Steps holds only the note and the

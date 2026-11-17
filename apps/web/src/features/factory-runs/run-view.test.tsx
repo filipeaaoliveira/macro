@@ -262,6 +262,28 @@ describe('RunView', () => {
     expect(answers).toEqual(['Reject', 'Revise', 'Approve']);
   });
 
+  it('shows the Role and Agent of each Step, and who was passed over', async () => {
+    const { setRun } = mount({});
+    const [first] = waitingRun.steps;
+    if (!first) throw new Error('No first Step');
+    setRun({
+      ...waitingRun,
+      steps: [
+        {
+          ...first,
+          role: 'planner',
+          agent: 'codex',
+          passedOver: [{ agent: 'claude', reason: 'ai_allowance_exhausted' }],
+        },
+      ],
+    });
+
+    expect(await screen.findByText('Planner · codex')).toBeTruthy();
+    expect(
+      screen.getByText('claude had no quota left, so the next agent took over')
+    ).toBeTruthy();
+  });
+
   it('says so when an answer fails for another reason', async () => {
     mount({
       answerGate: vi.fn(async () => ({

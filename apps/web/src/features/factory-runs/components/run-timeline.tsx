@@ -126,6 +126,23 @@ function TimelineStep(props: {
           </Button>
         </Show>
       </div>
+      <Show when={props.step.agent}>
+        {(agent) => (
+          <StepNote>
+            {t('factoryRuns.stepAgent', {
+              role: flowWordLabel(props.step.role ?? ''),
+              agent: agent(),
+            })}
+            <For each={props.step.passedOver}>
+              {(passed) => (
+                <span class="block text-ink-muted">
+                  {t('factoryRuns.passedOver', { agent: passed.agent })}
+                </span>
+              )}
+            </For>
+          </StepNote>
+        )}
+      </Show>
       <Show when={answer()}>
         {(answer) => (
           <StepNote>
