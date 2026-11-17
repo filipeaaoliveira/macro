@@ -1006,9 +1006,10 @@ impl RunRepository for PgRunRepository {
         &self,
         key: StepKey,
         round: u8,
+        commit: &str,
         result: &CheckResult,
     ) -> Result<(), Self::Err> {
-        self.add_check_result(key, round, result).await
+        self.add_check_result(key, round, commit, result).await
     }
 
     #[tracing::instrument(err, skip(self, report))]

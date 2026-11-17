@@ -31,7 +31,15 @@ fn commands(agent: &ScriptedAgent) -> Vec<String> {
         .lock()
         .expect("commands")
         .iter()
-        .map(|command| command.command.command.clone())
+        .map(|command| {
+            command
+                .command
+                .command
+                .lines()
+                .last()
+                .unwrap_or_default()
+                .to_string()
+        })
         .collect()
 }
 
@@ -89,16 +97,18 @@ async fn checks_the_factory_runs_decide_the_round() {
 
     assert_eq!(report.outcome, Outcome::done());
     assert!(report.output.starts_with(
-        "The repository's checks passed in round 1, run by the factory in the agent's checkout: web."
+        "The repository's checks passed in round 1, run by the factory on the pushed commit: web."
     ));
     assert!(agent.turns().is_empty());
     let sent = agent.commands.lock().expect("commands").clone();
     assert_eq!(sent.len(), 1);
     assert_eq!(sent[0].command.cwd, ".");
-    assert_eq!(sent[0].command.command, "bun run check");
+    assert!(sent[0].command.command.ends_with("\nbun run check"));
+    assert_eq!(sent[0].command.timeout_secs, 1200);
     assert_eq!(sent[0].role.as_str(), "writer");
     let rounds = rounds(&repo, input).await;
     assert!(rounds[0].verified);
+    assert_eq!(rounds[0].checked_commit.as_deref(), Some(HEAD));
     assert_eq!(rounds[0].results.len(), 1);
     assert_eq!(
         (
@@ -186,7 +196,7 @@ async fn an_agent_s_word_never_overrides_a_real_failure() {
 
     assert_eq!(report.outcome, outcome("red"));
     assert!(report.output.starts_with(
-        "The repository's checks still fail in round 2, run by the factory in the agent's checkout, their last: web."
+        "The repository's checks still fail in round 2, run by the factory on the pushed commit, their last: web."
     ));
     assert!(report.output.contains("error: 3 failed"));
     let ends: Vec<CheckRoundOutcome> = rounds(&repo, input)
@@ -337,24 +347,31 @@ async fn a_round_the_agent_was_asked_to_run_stays_the_agents() {
     assert!(!rounds(&repo, input).await[0].verified);
 }
 
-/// Reads the checkout as `stdout` says: its uncommitted changes, then the
-/// commit it is at.
-fn checkout_reading(stdout: &str) -> Option<Ran> {
-    Some(ran(0, stdout))
+/// Make the Step `key` as old as `minutes`: its rounds have 105 minus that
+/// left.
+async fn started_ago(repo: &FakeRepo, key: StepKey, minutes: i64) {
+    let entry = EntryId::try_from("write".to_string()).expect("valid");
+    repo.start_step(key, &entry, 1).await.expect("start");
+    let mut steps = repo.steps.lock().expect("steps");
+    for (run, step) in steps.iter_mut() {
+        if *run == key.run_id && step.seq == key.seq {
+            step.started_at = chrono::Utc::now() - chrono::TimeDelta::minutes(minutes);
+        }
+    }
 }
 
-/// A checkout at another commit than the branch's head on GitHub is not
-/// what the checks would run on: the round fails saying so, no check runs,
-/// and the agent is asked to push.
+/// A check starts only with its whole timeout left in the Step's rounds:
+/// short of it, the round and the Step end at once, red, saying what did
+/// not run, and nothing runs that would be cut short.
 #[tokio::test]
-async fn a_checkout_off_the_pushed_commit_runs_no_check() {
-    let agent = ScriptedAgent {
-        checkout_read: checkout_reading("\n2222222222222222222222222222222222222222\n"),
-        ..verifying(Vec::new(), vec![Ok(("done", "Pushed it"))])
-    };
+async fn a_round_short_of_a_check_s_timeout_ends_the_step_red() {
+    let agent = verifying(vec![ran(0, "never run")], Vec::new());
     let github = github(Some(CHECKS), Some(&["apps/web/src/main.ts"]));
     let repo = FakeRepo::default();
     let input = input();
+    // Fifteen minutes of the Step's rounds are left, short of the check's
+    // twenty.
+    started_ago(&repo, input.key, 90).await;
 
     let report = run_in_session(&agent, &github, &repo, input)
         .await
@@ -362,60 +379,70 @@ async fn a_checkout_off_the_pushed_commit_runs_no_check() {
 
     assert_eq!(report.outcome, outcome("red"));
     assert!(commands(&agent).is_empty());
-    let turns = agent.turns();
-    assert!(turns[0].prompt.contains(&format!(
-        "your checkout is at commit 2222222222222222222222222222222222222222, and the run's branch on GitHub at {HEAD}."
-    )));
-    assert!(turns[0].prompt.contains("push the run's branch"));
-    let rounds = rounds(&repo, input).await;
-    assert!(rounds[0].verified);
-    assert_eq!(rounds[0].results[0].name, "pushed commit");
-    assert_eq!(
-        rounds[0].end.as_ref().expect("ended").outcome,
-        CheckRoundOutcome::Failed
+    let end = rounds(&repo, input).await[0].end.clone().expect("ended");
+    assert_eq!(end.outcome, CheckRoundOutcome::Failed);
+    assert!(
+        end.report
+            .contains("The step's time ran out before these ran: web.")
     );
 }
 
-/// Uncommitted work in the checkout fails the round before any check runs.
+/// A check that declares a shorter timeout runs with less time left, under
+/// that timeout.
 #[tokio::test]
-async fn uncommitted_work_runs_no_check() {
-    let agent = ScriptedAgent {
-        checkout_read: checkout_reading(&format!(" M src/lib.rs\n?? notes.txt\n{HEAD}\n")),
-        ..verifying(Vec::new(), vec![Ok(("done", "Committed it"))])
-    };
-    let github = github(Some(CHECKS), Some(&["apps/web/src/main.ts"]));
+async fn a_short_check_runs_with_less_time_left() {
+    let agent = verifying(vec![ran(0, "ok")], Vec::new());
+    let github = github(
+        Some(r#"{"checks":[{"name":"web","run":"bun run check","timeout":300}]}"#),
+        None,
+    );
     let repo = FakeRepo::default();
+    let input = input();
+    started_ago(&repo, input.key, 90).await;
 
-    let report = run_in_session(&agent, &github, &repo, input())
+    let report = run_in_session(&agent, &github, &repo, input)
         .await
         .expect("write");
 
-    assert_eq!(report.outcome, outcome("red"));
-    assert!(commands(&agent).is_empty());
-    let prompt = &agent.turns()[0].prompt;
-    assert!(prompt.contains("your checkout has changes that are not committed"));
-    assert!(prompt.contains(" M src/lib.rs\n?? notes.txt"));
+    assert_eq!(report.outcome, Outcome::done());
+    let sent = agent.commands.lock().expect("commands").clone();
+    assert_eq!(sent[0].command.timeout_secs, 300);
 }
 
-/// A check starts only with its whole timeout left: with less, the attempt
-/// fails for its retry to run it, and nothing is recorded as a failure.
+/// The worktree is set up before the round's checks, on the machine, and
+/// removed after them.
 #[tokio::test]
-async fn a_check_never_starts_short_of_its_timeout() {
-    let agent = verifying(vec![ran(0, "never run")], Vec::new());
+async fn the_worktree_is_set_up_before_the_checks_and_removed_after() {
+    let agent = verifying(vec![ran(0, "12 passed"), ran(0, "ok")], Vec::new());
+    let github = github(Some(CHECKS), Some(BOTH));
+    let repo = FakeRepo::default();
+
+    run_in_session(&agent, &github, &repo, input())
+        .await
+        .expect("write");
+
+    assert_eq!(
+        *agent.machine.lock().expect("machine"),
+        [
+            "set up",
+            "check bun run check",
+            "check cargo test -p app",
+            "remove"
+        ]
+    );
+}
+
+/// A worktree that cannot be set up fails the attempt for a retry: no
+/// check runs, and nothing is recorded as a failure.
+#[tokio::test]
+async fn a_worktree_that_cannot_be_set_up_is_left_to_a_retry() {
+    let agent = ScriptedAgent {
+        set_up: Some(ran(128, "fatal: not a git repository")),
+        ..verifying(Vec::new(), Vec::new())
+    };
     let github = github(Some(CHECKS), Some(&["apps/web/src/main.ts"]));
     let repo = FakeRepo::default();
     let input = input();
-    let entry = EntryId::try_from("write".to_string()).expect("valid");
-    repo.start_step(input.key, &entry, 1).await.expect("start");
-    // Fifteen minutes of the Step's rounds are left.
-    {
-        let mut steps = repo.steps.lock().expect("steps");
-        for (run, step) in steps.iter_mut() {
-            if *run == input.key.run_id && step.seq == input.key.seq {
-                step.started_at = chrono::Utc::now() - chrono::TimeDelta::minutes(90);
-            }
-        }
-    }
 
     let failed = run_in_session(&agent, &github, &repo, input).await;
 
@@ -430,6 +457,64 @@ async fn a_check_never_starts_short_of_its_timeout() {
     let rounds = rounds(&repo, input).await;
     assert!(rounds[0].results.is_empty());
     assert!(rounds[0].end.is_none());
+}
+
+/// A branch GitHub does not have fails the attempt for a retry: nothing
+/// runs on the machine.
+#[tokio::test]
+async fn a_branch_missing_on_github_is_left_to_a_retry() {
+    let agent = verifying(Vec::new(), Vec::new());
+    let github = github(Some(CHECKS), Some(&["apps/web/src/main.ts"]));
+    github.state().head = None;
+    let repo = FakeRepo::default();
+    let input = input();
+
+    let failed = run_in_session(&agent, &github, &repo, input).await;
+
+    assert!(matches!(
+        failed,
+        Err(super::super::super::BuiltInStepError::Agent {
+            retryable: true,
+            ..
+        })
+    ));
+    assert!(agent.machine.lock().expect("machine").is_empty());
+    assert!(rounds(&repo, input).await[0].end.is_none());
+}
+
+/// A run that found another holding the round's lock is left to a retry,
+/// and recorded as nothing: the retry runs the check.
+#[tokio::test]
+async fn a_run_that_found_the_lock_held_is_retried() {
+    let github = github(Some(CHECKS), Some(&["apps/web/src/main.ts"]));
+    let repo = FakeRepo::default();
+    let input = input();
+    let first = verifying(
+        vec![Ok(SessionCommandOutput {
+            exit_code: 75,
+            stdout: String::new(),
+            stderr: "macro-check: another run holds the lock on this worktree\n".to_string(),
+        })],
+        Vec::new(),
+    );
+    let failed = run_in_session(&first, &github, &repo, input).await;
+    let recorded = rounds(&repo, input).await[0].results.len();
+    let retry = verifying(vec![ran(0, "12 passed")], Vec::new());
+
+    let report = run_in_session(&retry, &github, &repo, input)
+        .await
+        .expect("write");
+
+    assert!(matches!(
+        failed,
+        Err(super::super::super::BuiltInStepError::Agent {
+            retryable: true,
+            ..
+        })
+    ));
+    assert_eq!(recorded, 0);
+    assert_eq!(report.outcome, Outcome::done());
+    assert_eq!(commands(&retry), ["bun run check"]);
 }
 
 /// What a round keeps of a check's output fits its record once escaped as

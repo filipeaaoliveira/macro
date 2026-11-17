@@ -255,13 +255,14 @@ pub trait RunRepository: Send + Sync + 'static {
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// Record how one check of the open round `round` of the Step `key`
-    /// ran, which the engine ran itself: the round is verified from then
-    /// on. A check whose run is recorded keeps it, and a round that ended
-    /// changes no more.
+    /// ran, which the engine ran itself on `commit`: the round is verified
+    /// from then on, and keeps the commit of its first run. A check whose
+    /// run is recorded keeps it, and a round that ended changes no more.
     fn record_check_result(
         &self,
         key: StepKey,
         round: u8,
+        commit: &str,
         result: &CheckResult,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 

@@ -356,7 +356,8 @@ async fn a_round_the_quota_ended_is_kept_as_ended_by_it(pool: PgPool) {
 }
 
 /// A round the engine runs keeps each check's exit code and output as it
-/// runs, once per check, and says it is verified; one the agent reported
+/// runs, once per check, and the commit of its first run, and says it is
+/// verified; one the agent reported
 /// says it is not, with no results. An ended round takes no more.
 #[sqlx::test(
     migrator = "MACRO_DB_MIGRATIONS",
@@ -394,11 +395,16 @@ async fn a_verified_round_keeps_each_checks_run(pool: PgPool) {
     repo.end_check_round(key, 1, CheckRoundOutcome::Failed, "lint failed")
         .await
         .expect("end reported");
-    repo.record_check_result(key, 2, &web).await.expect("web");
+    let pushed = "1111111111111111111111111111111111111111";
+    let later = "2222222222222222222222222222222222222222";
+    repo.record_check_result(key, 2, pushed, &web)
+        .await
+        .expect("web");
     // A retry runs it again: the first run stays.
     repo.record_check_result(
         key,
         2,
+        later,
         &CheckResult {
             exit_code: 1,
             ..web.clone()
@@ -406,13 +412,16 @@ async fn a_verified_round_keeps_each_checks_run(pool: PgPool) {
     )
     .await
     .expect("web again");
-    repo.record_check_result(key, 2, &lint).await.expect("lint");
+    repo.record_check_result(key, 2, later, &lint)
+        .await
+        .expect("lint");
     repo.end_check_round(key, 2, CheckRoundOutcome::Failed, "lint exited 1")
         .await
         .expect("end verified");
     repo.record_check_result(
         key,
         2,
+        later,
         &CheckResult {
             name: "late".to_string(),
             exit_code: 0,
@@ -425,7 +434,10 @@ async fn a_verified_round_keeps_each_checks_run(pool: PgPool) {
     let rounds = repo.check_rounds(key).await.expect("rounds");
     assert!(!rounds[0].verified);
     assert!(rounds[0].results.is_empty());
+    assert_eq!(rounds[0].checked_commit, None);
     assert!(rounds[1].verified);
+    // The commit the round's first run was on stays its commit.
+    assert_eq!(rounds[1].checked_commit.as_deref(), Some(pushed));
     assert_eq!(rounds[1].results, [web, lint]);
     assert_eq!(
         rounds[1].end.as_ref().expect("ended").report,

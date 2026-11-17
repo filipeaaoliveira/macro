@@ -604,6 +604,7 @@ impl RunRepository for FakeRepo {
                     quota_ran_out: false,
                     verified: false,
                     results: Vec::new(),
+                    checked_commit: None,
                 },
             ));
         }
@@ -635,6 +636,7 @@ impl RunRepository for FakeRepo {
         &self,
         key: StepKey,
         round: u8,
+        commit: &str,
         result: &CheckResult,
     ) -> Result<(), FakeError> {
         let mut rounds = self.check_rounds.lock().expect("rounds");
@@ -645,6 +647,8 @@ impl RunRepository for FakeRepo {
             && !kept.results.iter().any(|run| run.name == result.name)
         {
             kept.verified = true;
+            kept.checked_commit
+                .get_or_insert_with(|| commit.to_string());
             kept.results.push(result.clone());
         }
         Ok(())

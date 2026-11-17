@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                run_id, seq, round, work_output, checks, commands, declared, check_action_id,\n                started_at,\n                outcome, report, ended_at, fix_action_id, quota_ran_out, verified, results\n            FROM factory_check_round\n            WHERE run_id = $1 AND seq = $2\n            ORDER BY round\n            ",
+  "query": "\n            SELECT\n                run_id, seq, round, work_output, checks, commands, declared, check_action_id,\n                started_at,\n                outcome, report, ended_at, fix_action_id, quota_ran_out, verified, results,\n                checked_commit\n            FROM factory_check_round\n            WHERE run_id = $1 AND seq = $2\n            ORDER BY round\n            ",
   "describe": {
     "columns": [
       {
@@ -82,6 +82,11 @@
         "ordinal": 15,
         "name": "results",
         "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 16,
+        "name": "checked_commit",
+        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -106,8 +111,9 @@
       true,
       false,
       false,
+      true,
       true
     ]
   },
-  "hash": "72d7ea2350597f7a2524f082297678de151aa35ea9dc523046fae99f80f21b5a"
+  "hash": "35a6397326614bea00abf8781d4e2f0225344788ee8e1bf84ca3ddfeb101ecf1"
 }

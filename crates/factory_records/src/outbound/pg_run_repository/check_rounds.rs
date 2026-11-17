@@ -32,6 +32,7 @@ struct CheckRoundRow {
     quota_ran_out: bool,
     verified: bool,
     results: Option<serde_json::Value>,
+    checked_commit: Option<String>,
 }
 
 impl TryFrom<CheckRoundRow> for CheckRound {
@@ -59,6 +60,7 @@ impl TryFrom<CheckRoundRow> for CheckRound {
         Ok(CheckRound {
             verified: row.verified,
             results,
+            checked_commit: row.checked_commit,
             round: u8::try_from(row.round)
                 .map_err(|_| PgRunRepositoryErr::OutOfRange(row.round))?,
             checks: row.checks,
@@ -86,7 +88,8 @@ impl PgRunRepository {
             SELECT
                 run_id, seq, round, work_output, checks, commands, declared, check_action_id,
                 started_at,
-                outcome, report, ended_at, fix_action_id, quota_ran_out, verified, results
+                outcome, report, ended_at, fix_action_id, quota_ran_out, verified, results,
+                checked_commit
             FROM factory_check_round
             WHERE run_id = ANY($1)
             ORDER BY run_id, seq, round
@@ -117,7 +120,8 @@ impl PgRunRepository {
             SELECT
                 run_id, seq, round, work_output, checks, commands, declared, check_action_id,
                 started_at,
-                outcome, report, ended_at, fix_action_id, quota_ran_out, verified, results
+                outcome, report, ended_at, fix_action_id, quota_ran_out, verified, results,
+                checked_commit
             FROM factory_check_round
             WHERE run_id = $1 AND seq = $2
             ORDER BY round
@@ -234,6 +238,7 @@ impl PgRunRepository {
         &self,
         key: StepKey,
         round: u8,
+        commit: &str,
         result: &CheckResult,
     ) -> Result<(), PgRunRepositoryErr> {
         let added = serde_json::to_value([result])
@@ -243,7 +248,8 @@ impl PgRunRepository {
         sqlx::query!(
             r#"
             UPDATE factory_check_round
-            SET verified = true, results = COALESCE(results, '[]'::jsonb) || $4
+            SET verified = true, results = COALESCE(results, '[]'::jsonb) || $4,
+                checked_commit = COALESCE(checked_commit, $6)
             WHERE run_id = $1 AND seq = $2 AND round = $3 AND ended_at IS NULL
                 AND NOT COALESCE(results, '[]'::jsonb) @> jsonb_build_array(jsonb_build_object('name', $5::text))
             "#,
@@ -252,6 +258,7 @@ impl PgRunRepository {
             i32::from(round),
             added,
             result.name,
+            commit,
         )
         .execute(&self.pool)
         .await?;

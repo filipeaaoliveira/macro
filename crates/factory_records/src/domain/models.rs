@@ -494,13 +494,16 @@ pub struct CheckRound {
     pub started_at: DateTime<Utc>,
     /// How and when it ended; none while the checks run.
     pub end: Option<CheckRoundEnd>,
-    /// Whether the engine runs the checks itself, on the pushed commit,
-    /// reading each one's exit code; otherwise the agent runs them and
-    /// reports how they went.
+    /// Whether the engine runs the checks itself, on the pushed commit in a
+    /// worktree of its own, reading each one's exit code; otherwise the
+    /// agent runs them and reports how they went.
     pub verified: bool,
     /// How each check of a verified round ran so far, in the round's
     /// order; none for a round the agent reports.
     pub results: Vec<CheckResult>,
+    /// The commit a verified round's checks run on: the head of the Run's
+    /// branch on GitHub when its first check ran.
+    pub checked_commit: Option<String>,
     /// What the agent handed back for the work the round checks.
     #[serde(skip)]
     pub work_output: String,

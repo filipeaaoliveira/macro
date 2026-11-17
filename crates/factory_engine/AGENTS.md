@@ -182,30 +182,43 @@ On a repository, `write` and `fix` then run the repository's own checks
 (`src/domain/built_in_steps/checks_round.rs`). The repository declares them
 in `.macro/checks.json` on its base branch (`src/domain/checks.rs`): each a
 `name`, a `run` command from the repository's root, and optional `paths`
-(files or folders from the root, no patterns) whose change makes it run;
+(files or folders from the root, no patterns) whose change makes it run,
+and an optional `timeout` (seconds, 1 to 1200, default 1200);
 `rounds` (1 to 10, default 3) is how many times a Step runs them. The file is
 read from the Run's recorded base, never the Run's branch, which the agent
 pushes: the first round keeps it, with the checks and commands it runs, and
 every later round and retry goes by that record. A later round runs the
 first round's checks and any others the branch's changes now reach (every
 check when GitHub lists only part of the changes); a check only a later
-round reached is dropped again once the changes no longer reach it. The checks run in the
-agent's checkout. Where its session's runtime runs commands (a managed
-sandbox, a Macro computer), the engine runs each check there itself
-(`StepAgent::run_check`, the routine sessions' `exec`), beside the agent,
-from the repository's root, in a shell that reads no profile or rc file and
-under a lock in the checkout's git directory, for at most `CHECK_TIMEOUT`
-(20 minutes), and its exit code decides: the round is `verified`, and each
+round reached is dropped again once the changes no longer reach it. Where the agent's
+session runs on a machine Macro reaches, the engine runs each check itself
+(`StepAgent::run_check`, the routine sessions' `exec`), on the Run branch's
+head as GitHub has it (`PullRequests::branch_head`, read again once after
+2 s when missing), in a worktree it sets up beside the agent's checkout
+(`checks_round/worktree.rs`: `git worktree add --detach` under `/tmp`,
+fetching the commit when the repository lacks it), and removes after the
+round. Git runs by absolute path where the machine has one, without system
+or global configuration, hooks or filesystem monitor. Each check holds the
+round's lock (`flock -w 60`, else a `mkdir` lock, which a run logs and
+reports) and runs with `bash --noprofile --norc` for its `timeout` from the
+checks file (20 minutes at most and by default); its exit code decides. The
+round is `verified`, keeps the commit it checked (`checked_commit`) and each
 check's exit code and the end of its output (`results`, 4 KiB once escaped
-as JSON) are recorded as it ends, so a retry runs only the checks still to
-run. Before a round's first check the engine reads the checkout: unless it
-is at the Run branch's head on GitHub with nothing uncommitted, the round
-fails saying so (`pushed commit` in its results), no check runs, and the
-fix prompt asks the agent to commit and push. A check starts only with its
-whole `CHECK_TIMEOUT` left in the attempt (25 of its 30 minutes,
-`ATTEMPT_CHECKS_FOR`) and the Step's rounds; with less, the attempt fails
-and its retry runs it. Nothing the agent hands back decides a verified
-round. Elsewhere (a paired machine, a cloud agent, or a harness from before
+as JSON) as it ends, so a retry runs only the checks still to run. A check
+starts only with its whole timeout left: short in the attempt (25 of its 30
+minutes, `ATTEMPT_CHECKS_FOR`), the attempt fails for its retry; short in
+the Step's rounds, the round and the Step end `red` at once. A worktree that
+cannot be set up, a branch GitHub does not have, and a run that found the
+lock held fail the attempt for a retry and record nothing. Nothing the agent
+hands back decides a verified round, and nothing it leaves in its own
+checkout reaches the checks. What remains in the agent's hands: the machine
+and its toolchain (`BASH_ENV`, which a sandbox's dev shell needs, the
+compilers, git where it is not at a fixed path), so a verified round says
+the checks passed there on the pushed commit, and CI on that commit stays
+the gate before a merge. Machines: Daytona, local Docker and Namespace
+sandboxes and Macro computers run the checks; a paired machine of someone's
+own, a computer whose macrod keeps no worktree for the session, Cursor and
+Codex do not. Elsewhere (those, or a harness from before
 the `exec` route, which answers 404: `run_check` answers none) the agent runs
 them: a round is a later prompt of the Step's session
 (`StepAgent::follow_up`, the routine sessions' `follow_up`) that asks it to
@@ -331,9 +344,8 @@ part only.
   drops the routine session's `repo_url`, so a `code` Run's agents would work
   outside its repository. One without the `exec` route leaves rounds that
   have not started their checks to the agent.
-- A verified check runs in the agent's checkout, checked to be the pushed
-  commit with nothing uncommitted only before the round's first check: a
-  check that changes the tree changes what later checks see.
+- A round's checks share its worktree: a check that changes the tree changes
+  what later checks of the round see.
 - The agent pushes the Run's branch with its runtime's own git credentials
   (the egress's GitHub App token in a managed sandbox, the operator's git on
   macrod), and the pull request Steps use the owner's linked account: both

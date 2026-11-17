@@ -7,15 +7,17 @@
 //!   "rounds": 3,
 //!   "checks": [
 //!     { "name": "web", "run": "bun run --cwd apps/web check", "paths": ["apps/web", "packages"] },
-//!     { "name": "lint", "run": "just check" }
+//!     { "name": "lint", "run": "just check", "timeout": 300 }
 //!   ]
 //! }
 //! ```
 //!
 //! A check runs `run` from the repository's root. One with `paths` runs only
 //! when the branch changed a file at one of them, or under one when it is a
-//! folder; one without runs every time. `rounds` is how many times a Step
-//! runs the checks at most, 3 when left out.
+//! folder; one without runs every time. `timeout` is how many seconds a
+//! check the factory runs itself may take, from 1 to 1200 (20 minutes, the
+//! default); a Step starts it only with that much time left. `rounds` is how
+//! many times a Step runs the checks at most, 3 when left out.
 
 #[cfg(test)]
 mod test;
@@ -37,6 +39,9 @@ const MAX_CHECKS: usize = 64;
 /// The longest command a check runs, in bytes.
 const MAX_RUN_BYTES: usize = 4096;
 
+/// The longest, and the default, time a check may take, in seconds.
+pub const MAX_CHECK_TIMEOUT_SECS: u64 = 20 * 60;
+
 /// The largest checks file read, in bytes: what a round's record keeps.
 const MAX_FILE_BYTES: usize = 64 * 1024;
 
@@ -52,6 +57,13 @@ pub struct RepositoryCheck {
     /// makes it run; none runs it every time.
     #[serde(default)]
     pub paths: Vec<String>,
+    /// How many seconds it may take when the factory runs it itself.
+    #[serde(default = "default_timeout")]
+    pub timeout: u64,
+}
+
+fn default_timeout() -> u64 {
+    MAX_CHECK_TIMEOUT_SECS
 }
 
 impl RepositoryCheck {
@@ -119,6 +131,11 @@ pub enum ChecksFileError {
     /// The file is larger than a round keeps.
     #[error("{CHECKS_FILE} is over {MAX_FILE_BYTES} bytes")]
     TooLarge,
+    /// A check's timeout is zero or past [`MAX_CHECK_TIMEOUT_SECS`].
+    #[error(
+        "{CHECKS_FILE} gives check {0} a timeout outside 1 to {MAX_CHECK_TIMEOUT_SECS} seconds"
+    )]
+    Timeout(String),
     /// A check's command is blank or too long.
     #[error("{CHECKS_FILE} gives check {0} a blank command or one over {MAX_RUN_BYTES} bytes")]
     Run(String),
@@ -153,6 +170,9 @@ impl RepositoryChecks {
             }
             if check.run.trim().is_empty() || check.run.len() > MAX_RUN_BYTES {
                 return Err(ChecksFileError::Run(check.name.clone()));
+            }
+            if check.timeout == 0 || check.timeout > MAX_CHECK_TIMEOUT_SECS {
+                return Err(ChecksFileError::Timeout(check.name.clone()));
             }
             if let Some(path) = check.paths.iter().find(|path| !valid_path(path)) {
                 return Err(ChecksFileError::Path {

@@ -67,12 +67,15 @@ struct ScriptedAgent {
     /// for a runtime that runs no command, as a paired machine's.
     checkout: Option<Arc<Mutex<VecDeque<Ran>>>>,
     commands: Arc<Mutex<Vec<AgentCommand>>>,
-    /// What reading the checkout before a round answers: by default, no
-    /// uncommitted change and the branch's [`HEAD`].
-    checkout_read: Option<Ran>,
+    /// What setting a round's worktree up answers: by default, that it is
+    /// at the branch's [`HEAD`].
+    set_up: Option<Ran>,
+    /// What the machine ran, in order: `set up`, `check <its command>` and
+    /// `remove`.
+    machine: Arc<Mutex<Vec<String>>>,
 }
 
-/// The head commit of the Run's branch, on GitHub and in the checkout.
+/// The head commit of the Run's branch on GitHub.
 const HEAD: &str = "1111111111111111111111111111111111111111";
 
 /// How a command run in the checkout ended, or the session failing.
@@ -139,19 +142,40 @@ impl StepAgent for ScriptedAgent {
         let Some(checkout) = &self.checkout else {
             return Ok(None);
         };
-        if command.command.command == super::CHECKOUT_COMMAND {
+        let line = command.command.command.clone();
+        if line.contains("g worktree add") {
+            self.machine
+                .lock()
+                .expect("machine")
+                .push("set up".to_string());
             return self
-                .checkout_read
+                .set_up
                 .clone()
                 .unwrap_or_else(|| {
                     Ok(SessionCommandOutput {
                         exit_code: 0,
-                        stdout: format!("\n{HEAD}\n"),
+                        stdout: format!("macro-check: worktree at {HEAD}\n"),
                         stderr: String::new(),
                     })
                 })
                 .map(Some);
         }
+        if line.contains("g worktree remove") {
+            self.machine
+                .lock()
+                .expect("machine")
+                .push("remove".to_string());
+            return Ok(Some(SessionCommandOutput {
+                exit_code: 0,
+                stdout: String::new(),
+                stderr: String::new(),
+            }));
+        }
+        let run = line.lines().last().unwrap_or_default().to_string();
+        self.machine
+            .lock()
+            .expect("machine")
+            .push(format!("check {run}"));
         let key = command.key;
         self.commands.lock().expect("commands").push(command);
         let ran = checkout
