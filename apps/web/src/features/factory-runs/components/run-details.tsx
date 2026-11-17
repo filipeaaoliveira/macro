@@ -13,8 +13,9 @@ import { RunTimeline } from './run-timeline';
 
 /**
  * Where the Run is, when it started and ended, the repository it works on,
- * and what its request says past the title. The status line takes focus when the control a person
- * used goes away (an answered Gate, a cancelled Run).
+ * and what its request says past the title. The status line takes focus
+ * when the control a person used goes away (an answered Gate, a cancelled
+ * Run).
  */
 export function RunSummary(props: {
   run: Run;

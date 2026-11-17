@@ -5,7 +5,7 @@ import CheckIcon from '@icon/system/regular/check.svg';
 import { Combobox } from '@kobalte/core/combobox';
 import GithubIcon from '@phosphor/github-logo.svg';
 import { Button, Layer, selectTriggerClasses } from '@ui';
-import { createMemo, createUniqueId, Match, Switch } from 'solid-js';
+import { createMemo, createUniqueId, Match, Show, Switch } from 'solid-js';
 
 type RepositoryOption = { url: string; label: string };
 
@@ -20,6 +20,8 @@ export function RepositoryField(props: {
   onRetry: () => void;
   value: string | undefined;
   onChange: (url: string) => void;
+  /** Where to send someone who reaches no repository yet. */
+  onConnectGitHub?: () => void;
   disabled?: boolean;
 }) {
   const labelId = createUniqueId();
@@ -125,9 +127,23 @@ export function RepositoryField(props: {
           </div>
         </Match>
         <Match when={none()}>
-          <p id={descriptionId} class="text-xs text-ink-muted">
-            {t('factoryRuns.noRepositories')}
-          </p>
+          <div id={descriptionId} class="flex flex-col items-start gap-2">
+            <p class="text-xs text-ink-muted">
+              {t('factoryRuns.noRepositories')}
+            </p>
+            <Show when={props.onConnectGitHub}>
+              {(connect) => (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => connect()()}
+                >
+                  {t('factoryRuns.connectGitHub')}
+                </Button>
+              )}
+            </Show>
+          </div>
         </Match>
       </Switch>
     </div>

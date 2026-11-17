@@ -36,6 +36,11 @@ export default {
   noRepositories:
     'No repositories yet. Give Macro’s GitHub App access to the repository this run should work on.',
   showRepositories: 'Show repositories',
+  connectGitHub: 'Connect GitHub',
+  repositoryUnreachable:
+    'Your linked GitHub account can’t reach this repository, or it has no branch yet. Connect GitHub in Settings, or choose another repository.',
+  repositoryNoPush:
+    'Your linked GitHub account can’t push to this repository. Choose one it can push to.',
   startRun: 'Start run',
   startFailed: 'Couldn’t start the run. Please try again.',
   // A Run.

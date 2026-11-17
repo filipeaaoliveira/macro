@@ -188,17 +188,18 @@ function createFixtureContext(): RunsContext {
     run: (runId) => ready(() => runs().find((run) => run.id === runId())),
     flows: () =>
       ready(() => [
-        {
-          name: 'plan',
-          description:
-            'Plans the change, asks you to approve the plan, then writes it.',
-          repository: false,
-        },
+        // In the order the service lists them.
         {
           name: 'code',
           description:
             'Takes the task to a merged pull request: plan, write, review, publish, CI, merge.',
           repository: true,
+        },
+        {
+          name: 'plan',
+          description:
+            'Plans the change, asks you to approve the plan, then writes it.',
+          repository: false,
         },
         {
           name: 'reply',

@@ -20,6 +20,20 @@ export type RunActionResult<T = undefined> =
   | { ok: true; value: T }
   | { ok: false; reason: 'conflict' | 'failed' };
 
+/**
+ * Why a Run didn't start. `unreachableRepository` and `noPushAccess` mean the
+ * person's linked GitHub account can't reach the repository, or can't push to
+ * it.
+ */
+export type StartRunFailure =
+  | 'failed'
+  | 'unreachableRepository'
+  | 'noPushAccess';
+
+export type StartRunResult =
+  | { ok: true; value: Run }
+  | { ok: false; reason: StartRunFailure };
+
 export type StartRunInput = {
   taskId: string;
   flow: string;
@@ -47,7 +61,7 @@ export type RunsContext = {
    * while `enabled`.
    */
   repositories: (enabled: Accessor<boolean>) => RunsSource<string[]>;
-  startRun: (input: StartRunInput) => Promise<RunActionResult<Run>>;
+  startRun: (input: StartRunInput) => Promise<StartRunResult>;
   answerGate: (input: AnswerGateInput) => Promise<RunActionResult>;
   cancelRun: (runId: string) => Promise<RunActionResult>;
 };

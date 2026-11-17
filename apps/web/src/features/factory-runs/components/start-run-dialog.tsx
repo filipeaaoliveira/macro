@@ -11,6 +11,8 @@ import {
   Show,
   Switch,
 } from 'solid-js';
+import { match } from 'ts-pattern';
+import type { StartRunFailure } from '../context/runs-context';
 import { flowWordLabel } from '../core/flow-words';
 import type { Flow } from '../core/run';
 import { RepositoryField } from './repository-field';
@@ -25,8 +27,9 @@ export type StartRunChoice = {
 
 /**
  * Starts a Run on a task: what it should do, which Flow takes it there, and
- * the repository it works on when the Flow works on one. Stays open with the
- * error when starting fails.
+ * the repository it works on when the Flow works on one. Opens on the first
+ * Flow that needs no repository. Stays open with the error when starting
+ * fails.
  */
 export function StartRunDialog(props: {
   flows: Flow[] | undefined;
@@ -36,19 +39,27 @@ export function StartRunDialog(props: {
   repositories: string[] | undefined;
   repositoriesState: 'pending' | 'error' | 'ready';
   onRetryRepositories: () => void;
+  /** Where to send someone who reaches no repository yet. */
+  onConnectGitHub?: () => void;
   onOpenChange: (open: boolean) => void;
-  /** Resolves true once the Run started. */
-  onStart: (choice: StartRunChoice) => Promise<boolean>;
+  /** Resolves `started` once the Run started, else why it didn't. */
+  onStart: (choice: StartRunChoice) => Promise<'started' | StartRunFailure>;
 }) {
   const [request, setRequest] = createSignal('');
   const [chosenFlow, setChosenFlow] = createSignal<string>();
-  const [repoUrl, setRepoUrl] = createSignal<string>();
+  const [chosenRepository, setChosenRepository] = createSignal<string>();
   const [pending, setPending] = createSignal(false);
-  const [failed, setFailed] = createSignal(false);
+  const [failure, setFailure] = createSignal<StartRunFailure>();
   const flow = () =>
     props.flows?.find((option) => option.name === chosenFlow()) ??
+    props.flows?.find((option) => !option.repository) ??
     props.flows?.[0];
   const needsRepository = () => flow()?.repository ?? false;
+  // A repository a later read no longer lists is no longer chosen.
+  const repoUrl = () => {
+    const url = chosenRepository();
+    return url && props.repositories?.includes(url) ? url : undefined;
+  };
   const canSubmit = () =>
     !pending() &&
     request().trim().length > 0 &&
@@ -60,17 +71,26 @@ export function StartRunDialog(props: {
     const name = flow()?.name;
     if (!canSubmit() || !name) return;
 
+    const choice: StartRunChoice = { flow: name, request: request().trim() };
+    const url = repoUrl();
+    if (needsRepository() && url) choice.repoUrl = url;
+
     setPending(true);
-    setFailed(false);
-    const started = await props.onStart({
-      flow: name,
-      request: request().trim(),
-      repoUrl: needsRepository() ? repoUrl() : undefined,
-    });
+    setFailure(undefined);
+    const outcome = await props.onStart(choice);
     setPending(false);
-    if (started) props.onOpenChange(false);
-    else setFailed(true);
+    if (outcome === 'started') props.onOpenChange(false);
+    else setFailure(outcome);
   };
+
+  const failureMessage = (reason: StartRunFailure) =>
+    match(reason)
+      .with('failed', () => t('factoryRuns.startFailed'))
+      .with('unreachableRepository', () =>
+        t('factoryRuns.repositoryUnreachable')
+      )
+      .with('noPushAccess', () => t('factoryRuns.repositoryNoPush'))
+      .exhaustive();
 
   return (
     <Dialog
@@ -166,14 +186,17 @@ export function StartRunDialog(props: {
                 state={props.repositoriesState}
                 onRetry={props.onRetryRepositories}
                 value={repoUrl()}
-                onChange={setRepoUrl}
+                onChange={setChosenRepository}
+                onConnectGitHub={props.onConnectGitHub}
                 disabled={pending()}
               />
             </Show>
-            <Show when={failed()}>
-              <p role="alert" class="text-sm text-failure">
-                {t('factoryRuns.startFailed')}
-              </p>
+            <Show when={failure()}>
+              {(reason) => (
+                <p role="alert" class="text-sm text-failure">
+                  {failureMessage(reason())}
+                </p>
+              )}
             </Show>
           </ActionDialogShell.Body>
           <ActionDialogShell.Footer>

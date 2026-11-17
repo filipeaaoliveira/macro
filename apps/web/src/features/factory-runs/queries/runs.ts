@@ -1,7 +1,8 @@
+import type { FetchWithTokenErrorCode } from '@core/util/fetchWithToken';
 import { fireAndForget } from '@core/util/fireAndForget';
 import { type ResultError, throwOnErr } from '@core/util/result';
 import { useAgentRepositoriesQuery } from '@queries/agent-repositories/repositories';
-import { factoryClient } from '@service-factory/client';
+import { factoryClient, type StartRunErrorCode } from '@service-factory/client';
 import type { RunDetail } from '@service-factory/generated/schemas';
 import {
   type QueryClient,
@@ -14,6 +15,7 @@ import type {
   RunActionResult,
   RunsContext,
   RunsSource,
+  StartRunFailure,
 } from '../context/runs-context';
 import { type Run, runStatus } from '../core/run';
 import { factoryRunKeys } from './keys';
@@ -133,6 +135,16 @@ function failure(
   return { ok: false, reason: conflict ? 'conflict' : 'failed' };
 }
 
+/** Why a Run didn't start: the repository cause the service named, if any. */
+function startFailure(
+  errors: ResultError<FetchWithTokenErrorCode | StartRunErrorCode>[]
+): StartRunFailure {
+  const codes = errors.map((error) => error.code);
+  if (codes.includes('NO_PUSH_ACCESS')) return 'noPushAccess';
+  if (codes.includes('UNREACHABLE_REPOSITORY')) return 'unreachableRepository';
+  return 'failed';
+}
+
 /** Reads the Run, and its task's list, again; resolves once they are read. */
 function refreshRun(
   client: QueryClient,
@@ -180,7 +192,9 @@ export function createAppRunsContext(client: QueryClient): RunsContext {
 
     async startRun(input) {
       const result = await factoryClient.startRun(input);
-      if (result.isErr()) return failure(result.error);
+      if (result.isErr()) {
+        return { ok: false, reason: startFailure(result.error) };
+      }
 
       const run = toRun(result.value);
       seedRun(client, run);

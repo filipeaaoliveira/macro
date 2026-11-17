@@ -228,6 +228,22 @@ describe('RunView', () => {
     ).toBe(false);
   });
 
+  it('names the repository a Run works on, and the branch it starts from', () => {
+    const { setRun } = mount({});
+    expect(screen.queryByText('Repository')).toBeNull();
+
+    setRun({
+      ...waitingRun,
+      repository: {
+        url: 'https://github.com/macro-inc/app',
+        baseBranch: 'develop',
+      },
+    });
+
+    expect(screen.getByText('Repository')).toBeTruthy();
+    expect(screen.getByText('macro-inc/app, from develop')).toBeTruthy();
+  });
+
   it('retries a Run that couldn’t be loaded', () => {
     const [state, setState] = createSignal<'pending' | 'error' | 'ready'>(
       'error'

@@ -1,5 +1,10 @@
 import { SERVER_HOSTS } from '@core/constant/servers';
-import { fetchWithToken } from '@core/util/fetchWithToken';
+import {
+  type FetchWithTokenErrorCode,
+  fetchWithToken,
+} from '@core/util/fetchWithToken';
+import type { ResultError } from '@core/util/result';
+import { statusError } from '@core/util/safeFetch';
 import {
   getAnswerFactoryGateUrl,
   getCancelFactoryRunUrl,
@@ -15,11 +20,43 @@ import type {
   FlowsResponse,
   GetFactoryInsightsParams,
   RunDetail,
+  RunErrorCode,
   RunInsights,
   TaskRunsResponse,
 } from './generated/schemas';
 
 const host = () => SERVER_HOSTS.factory;
+
+/** Why a Run wasn't started, when the service names the cause. */
+export type StartRunErrorCode = 'UNREACHABLE_REPOSITORY' | 'NO_PUSH_ACCESS';
+
+const START_RUN_ERROR_CODES: Record<RunErrorCode, StartRunErrorCode> = {
+  unreachableRepository: 'UNREACHABLE_REPOSITORY',
+  noPushAccess: 'NO_PUSH_ACCESS',
+};
+
+function isRunErrorCode(code: unknown): code is RunErrorCode {
+  return typeof code === 'string' && Object.hasOwn(START_RUN_ERROR_CODES, code);
+}
+
+/**
+ * A refused start: the cause the service names in its body's `code`, else
+ * the status's error.
+ */
+async function startRunError(
+  response: Response
+): Promise<ResultError<FetchWithTokenErrorCode | StartRunErrorCode>> {
+  const failure = statusError(response.status);
+  const body: unknown = await response.json().catch(() => undefined);
+  if (!body || typeof body !== 'object' || !('code' in body)) return failure;
+  if (!isRunErrorCode(body.code)) return failure;
+
+  const message =
+    'message' in body && typeof body.message === 'string'
+      ? body.message
+      : failure.message;
+  return { code: START_RUN_ERROR_CODES[body.code], message };
+}
 
 /**
  * The software factory's Runs, as the signed-in person sees them: their own
@@ -63,12 +100,20 @@ export const factoryClient = {
     ).then((result) => result.map((data) => data.flows));
   },
 
-  /** Starts a Run of a Flow, by its name. */
+  /**
+   * Starts a Run of a Flow, by its name. A repository the caller's linked
+   * GitHub account can't reach fails `UNREACHABLE_REPOSITORY`, one it can't
+   * push to `NO_PUSH_ACCESS`.
+   */
   startRun(request: CreateRunRequest) {
-    return fetchWithToken<RunDetail>(`${host()}${getCreateFactoryRunUrl()}`, {
-      method: 'POST',
-      body: JSON.stringify(request),
-    });
+    return fetchWithToken<RunDetail, StartRunErrorCode>(
+      `${host()}${getCreateFactoryRunUrl()}`,
+      {
+        method: 'POST',
+        body: JSON.stringify(request),
+        errorResponseHandler: startRunError,
+      }
+    );
   },
 
   /**
