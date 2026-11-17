@@ -136,6 +136,19 @@ fn changes_loop_through_fix_until_the_review_runs_out_of_visits() {
     assert_eq!(end, Ok(RunOutcome::Manual));
 }
 
+/// Checks that never go green end the Run for a person, from `write` and
+/// from `fix` alike, before any pull request is opened.
+#[test]
+fn red_checks_end_the_code_run_for_a_person() {
+    let (steps, end) = walk(&flow(CODE_FLOW), &["approve", "red"]);
+    assert_eq!(steps, ["plan#1", "write#1"]);
+    assert_eq!(end, Ok(RunOutcome::Manual));
+
+    let (steps, end) = walk(&flow(CODE_FLOW), &["approve", "done", "changes", "red"]);
+    assert_eq!(steps, ["plan#1", "write#1", "review#1", "fix#1"]);
+    assert_eq!(end, Ok(RunOutcome::Manual));
+}
+
 #[test]
 fn a_transition_sets_the_facts_later_conditions_read() {
     let code = flow(CODE_FLOW);
