@@ -16,6 +16,7 @@ import {
   type ReviewFinding,
   type ReviewRound,
   type RunStep,
+  reviewsAfresh,
   roundStartingAt,
   WHOLE_CHANGE,
 } from '../core/run';
@@ -52,6 +53,7 @@ export function RunTimeline(props: {
           <TimelineStep
             step={step}
             reviewRounds={props.reviewRounds ?? []}
+            steps={props.steps}
             first={index() === 0}
             latest={index() === props.steps.length - 1}
             mainHold={
@@ -75,6 +77,7 @@ export function RunTimeline(props: {
 function TimelineStep(props: {
   step: RunStep;
   reviewRounds: ReviewRound[];
+  steps: RunStep[];
   first: boolean;
   latest: boolean;
   mainHold?: MainHold;
@@ -213,7 +216,12 @@ function TimelineStep(props: {
         )}
       </For>
       <Show when={round()}>
-        {(round) => <ReviewRoundNote round={round()} />}
+        {(round) => (
+          <ReviewRoundNote
+            round={round()}
+            afresh={reviewsAfresh(props.reviewRounds, props.steps, round())}
+          />
+        )}
       </Show>
       <For each={findings()}>
         {(finding) => <FindingNote finding={finding} />}
@@ -363,12 +371,12 @@ function MainHoldNote(props: { hold: MainHold; baseBranch: string }) {
  * it ended, how, with how many of its findings block and how many became
  * follow-ups.
  */
-function ReviewRoundNote(props: { round: ReviewRound }) {
+function ReviewRoundNote(props: { round: ReviewRound; afresh: boolean }) {
   const counts = () => findingCounts(props.round);
   return (
     <StepNote>
       <span class="flex min-w-0 items-center gap-2">
-        {props.round.visit === 1 && props.round.round > 1
+        {props.afresh
           ? t('factoryRuns.reviewRoundAfresh', { round: props.round.round })
           : t('factoryRuns.reviewRound', { round: props.round.round })}
         <Show

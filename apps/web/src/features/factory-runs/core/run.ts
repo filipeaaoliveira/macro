@@ -275,6 +275,27 @@ export function roundStartingAt(
   return rounds.find((round) => round.seq === seq);
 }
 
+/**
+ * Whether `round` reviews afresh after its entry was reset (as when the
+ * change is sent back): the Run's round before it of the same entry, the
+ * entry its first Step in `steps` is of, came at the same visit or a later
+ * one. A round of a second panel entry is not a fresh review of the first.
+ */
+export function reviewsAfresh(
+  rounds: ReviewRound[],
+  steps: Pick<RunStep, 'seq' | 'entry'>[],
+  round: ReviewRound
+): boolean {
+  const entryOf = (seq: number) =>
+    steps.find((step) => step.seq === seq)?.entry;
+  const entry = entryOf(round.seq);
+  if (entry === undefined) return false;
+  const before = rounds
+    .filter((other) => other.seq < round.seq && entryOf(other.seq) === entry)
+    .at(-1);
+  return before !== undefined && before.visit >= round.visit;
+}
+
 /** What the reviewer of the Step at `seq` found, in its order. */
 export function findingsOf(
   rounds: ReviewRound[],

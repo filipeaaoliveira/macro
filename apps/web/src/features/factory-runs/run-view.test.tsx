@@ -214,38 +214,56 @@ describe('RunView', () => {
     expect(screen.getByText('Loading has no test')).toBeTruthy();
   });
 
-  it('labels a review round after a reset as a fresh review', async () => {
+  it('labels only a review round after a reset as a fresh review', async () => {
     const { setRun } = mount({});
+    const reviewer = (seq: number, entry: string, visit: number) => ({
+      seq,
+      entry,
+      visit,
+      startedAt: '2026-11-16T11:00:00Z',
+      role: 'correctness-reviewer',
+    });
+    const round = (
+      number: number,
+      visit: number,
+      seq: number,
+      fixDiff: boolean
+    ) => ({
+      round: number,
+      visit,
+      seq,
+      reviewers: 1,
+      headSha: 'cccccccccc',
+      diffBase: fixDiff ? 'bbbbbbbbbb' : 'main',
+      fixDiff,
+      startedAt: '2026-11-16T11:00:00Z',
+      findings: [],
+    });
     setRun({
       ...waitingRun,
+      // Two rounds of `review`, a reset sending it back to visit 1, then
+      // the first round of a second panel entry.
       steps: [
-        {
-          seq: 9,
-          entry: 'review',
-          visit: 1,
-          startedAt: '2026-11-16T11:00:00Z',
-          role: 'correctness-reviewer',
-        },
+        reviewer(3, 'review', 1),
+        reviewer(6, 'review', 2),
+        reviewer(9, 'review', 1),
+        reviewer(12, 'final-review', 1),
       ],
       reviewRounds: [
-        {
-          round: 3,
-          visit: 1,
-          seq: 9,
-          reviewers: 1,
-          headSha: 'cccccccccc',
-          diffBase: 'main',
-          fixDiff: false,
-          startedAt: '2026-11-16T11:00:00Z',
-          findings: [],
-        },
+        round(1, 1, 3, false),
+        round(2, 2, 6, true),
+        round(3, 1, 9, false),
+        round(4, 1, 12, false),
       ],
     });
 
     expect(
       await screen.findByText('Review round 3, a fresh review')
     ).toBeTruthy();
-    expect(screen.getByText('Reviews the whole change')).toBeTruthy();
+    expect(screen.getByText('Review round 1')).toBeTruthy();
+    expect(screen.getByText('Review round 2')).toBeTruthy();
+    expect(screen.getByText('Review round 4')).toBeTruthy();
+    expect(screen.queryAllByText(/a fresh review/)).toHaveLength(1);
   });
 
   it('says who ran each round, and the exit code of each check that failed', async () => {
