@@ -77,8 +77,11 @@ pub const MAX_FLOWS: usize = 32;
 /// The most Scorers a Definition names.
 pub const MAX_SCORERS: usize = 64;
 
+/// The most KiB one file of a Definition may hold.
+const MAX_FILE_KIB: usize = 256;
+
 /// The most bytes one file of a Definition may hold.
-pub const MAX_FILE_BYTES: usize = 256 * 1024;
+pub const MAX_FILE_BYTES: usize = MAX_FILE_KIB * 1024;
 
 /// The beginnings of keys and tokens that must never be in a Definition:
 /// a file holding one, followed by [`SECRET_TAIL`] or more characters of a
@@ -234,7 +237,7 @@ pub enum DefinitionError {
     #[error("{0} is missing")]
     Missing(String),
     /// A file is larger than a Definition's file may be.
-    #[error("{0} is over {MAX_FILE_BYTES} bytes")]
+    #[error("{0} is over the {MAX_FILE_KIB} KiB a definition file may hold")]
     TooLarge(String),
     /// A file is not what its name says it holds.
     #[error("{path} does not read: {error}")]

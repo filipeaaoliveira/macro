@@ -233,11 +233,24 @@ pub trait StepAgent: Send + Sync + 'static {
     }
 }
 
+/// Why GitHub will not give a file, however often it is asked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileRefusal {
+    /// It is over the 1 MB GitHub's contents API gives.
+    TooLarge,
+    /// GitHub refuses the owner the file.
+    Refused,
+}
+
 /// Pull requests on GitHub, read and changed as a Run's owner, with the
 /// GitHub account they connected to Macro.
 pub trait PullRequests: Send + Sync + 'static {
     /// The error type returned when GitHub cannot be asked.
     type Err: std::error::Error + Retryable + Send + Sync + 'static;
+
+    /// Why `error`, from [`Self::file_text`], is GitHub refusing that file
+    /// for good; none when it is any other failure.
+    fn file_refusal(error: &Self::Err) -> Option<FileRefusal>;
 
     /// What `owner` may do with `repository`: none when they cannot reach
     /// it, have connected no GitHub account, or it has no branch yet.

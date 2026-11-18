@@ -20,7 +20,7 @@ use crate::domain::definition::{
 use crate::domain::flow::Flow;
 use crate::domain::models::{CodeRepository, DefinitionSettings, FactoryError};
 use crate::domain::ports::{
-    PullRequests, Retryable, RunWorkflows, StepExecutor, TaskDirectory, UserDirectory,
+    FileRefusal, PullRequests, RunWorkflows, StepExecutor, TaskDirectory, UserDirectory,
 };
 
 /// A Factory Definition read at one commit of its repository: what a Run
@@ -65,16 +65,14 @@ enum RepositoryFileError<E: std::error::Error + 'static> {
     /// GitHub could not be asked; a retry may read it.
     #[error(transparent)]
     Github(E),
-    /// GitHub will not give the file, however often it is asked, as one
-    /// over the 1 MB its contents API gives: the Definition's to fix.
-    #[error(
-        "{path} could not be read from GitHub ({error}); a definition file must be text under 1 MB"
-    )]
+    /// GitHub will not give the file, however often it is asked: the
+    /// Definition's to fix.
+    #[error("{path} was refused")]
     Refused {
         /// The file.
         path: String,
-        /// What GitHub said.
-        error: E,
+        /// Why.
+        refusal: FileRefusal,
     },
 }
 
@@ -85,15 +83,12 @@ impl<G: PullRequests> DefinitionFiles for RepositoryFiles<'_, G> {
         self.github
             .file_text(self.reader, self.repository, self.commit, path)
             .await
-            .map_err(|error| {
-                if error.retryable() {
-                    RepositoryFileError::Github(error)
-                } else {
-                    RepositoryFileError::Refused {
-                        path: path.to_string(),
-                        error,
-                    }
-                }
+            .map_err(|error| match G::file_refusal(&error) {
+                Some(refusal) => RepositoryFileError::Refused {
+                    path: path.to_string(),
+                    refusal,
+                },
+                None => RepositoryFileError::Github(error),
             })
     }
 }
@@ -167,14 +162,19 @@ where
         let definition = read_definition(&files, |step| self.executor.serves(step))
             .await
             .map_err(|error| match error {
-                DefinitionReadError::Files(RepositoryFileError::Refused { path, error }) => {
-                    FactoryError::InvalidDefinition(DefinitionError::Unreadable {
-                        path,
-                        error: format!(
-                            "GitHub would not give it ({error}): a definition file must be text under 1 MB"
-                        ),
-                    })
-                }
+                // GitHub's own words name the request; the Definition's
+                // error says only what the person can fix.
+                DefinitionReadError::Files(RepositoryFileError::Refused {
+                    path,
+                    refusal: FileRefusal::TooLarge,
+                }) => FactoryError::InvalidDefinition(DefinitionError::TooLarge(path)),
+                DefinitionReadError::Files(RepositoryFileError::Refused {
+                    path,
+                    refusal: FileRefusal::Refused,
+                }) => FactoryError::InvalidDefinition(DefinitionError::Unreadable {
+                    path,
+                    error: "GitHub refused to give it".to_string(),
+                }),
                 DefinitionReadError::Files(RepositoryFileError::Github(error)) => {
                     FactoryError::Internal(internal(error))
                 }

@@ -37,7 +37,7 @@ use crate::domain::models::{
     OpenPullRequest, Opening, PullRequest, PullRequestState, RepositoryAccess, RequiredChecks,
 };
 use crate::domain::ports::{
-    FollowUpTask, PullRequests, Retryable, TaskAccess, TaskDirectory, UserDirectory,
+    FileRefusal, FollowUpTask, PullRequests, Retryable, TaskAccess, TaskDirectory, UserDirectory,
 };
 use crate::domain::review_rounds::ChangedFile;
 
@@ -72,6 +72,8 @@ pub(crate) enum FakeGithubError {
     Down,
     #[error("github refused the owner")]
     Refused,
+    #[error("the file is over 1 MB")]
+    TooLarge,
 }
 
 impl Retryable for FakeGithubError {
@@ -1594,6 +1596,14 @@ pub(crate) fn ci(conclusion: Option<&str>) -> HeadChecks {
 impl PullRequests for FakeGithub {
     type Err = FakeGithubError;
 
+    fn file_refusal(error: &FakeGithubError) -> Option<FileRefusal> {
+        match error {
+            FakeGithubError::TooLarge => Some(FileRefusal::TooLarge),
+            FakeGithubError::Refused => Some(FileRefusal::Refused),
+            FakeGithubError::Down => None,
+        }
+    }
+
     async fn repository_access(
         &self,
         _owner: &MacroUserIdStr<'static>,
@@ -1680,7 +1690,7 @@ impl PullRequests for FakeGithub {
         let mut state = self.state();
         state.file_reads.push(path.to_string());
         if state.refused_files.contains(path) {
-            return Err(FakeGithubError::Refused);
+            return Err(FakeGithubError::TooLarge);
         }
         Ok(state.files.get(&file).cloned())
     }

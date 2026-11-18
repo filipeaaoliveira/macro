@@ -11,7 +11,7 @@ use github::domain::models::{
     GithubOpenPullRequestOutcome, GithubPullRequestHead,
 };
 use github::domain::ports::GithubOauth;
-use github::outbound::github_oauth_client::GithubOauthImpl;
+use github::outbound::github_oauth_client::{FileTooLarge, GithubOauthImpl};
 use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::models::{
@@ -19,7 +19,7 @@ use crate::domain::models::{
     HeadChecks, Merging, OpenPullRequest, Opening, PullRequest, PullRequestState, RepositoryAccess,
     RequiredCheck, RequiredChecks,
 };
-use crate::domain::ports::{PullRequests, Retryable};
+use crate::domain::ports::{FileRefusal, PullRequests, Retryable};
 use crate::domain::review_rounds::ChangedFile;
 
 /// GitHub Actions' app, whose workflow runs say whether a run still waits.
@@ -255,6 +255,18 @@ fn pull_request(found: GithubPullRequestHead) -> PullRequest {
 
 impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
     type Err = GithubPullRequestsErr;
+
+    fn file_refusal(error: &GithubPullRequestsErr) -> Option<FileRefusal> {
+        match error {
+            GithubPullRequestsErr::Github(GithubError::Internal(error))
+                if error.downcast_ref::<FileTooLarge>().is_some() =>
+            {
+                Some(FileRefusal::TooLarge)
+            }
+            GithubPullRequestsErr::Github(GithubError::Forbidden) => Some(FileRefusal::Refused),
+            _ => None,
+        }
+    }
 
     #[tracing::instrument(err, skip(self, owner))]
     async fn repository_access(

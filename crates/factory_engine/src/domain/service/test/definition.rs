@@ -539,7 +539,7 @@ async fn a_file_github_will_not_give_is_the_definition_s_problem() {
     assert!(
         matches!(
             &refused,
-            Err(FactoryError::InvalidDefinition(DefinitionError::Unreadable { path, .. })) if path == "agents.json"
+            Err(FactoryError::InvalidDefinition(DefinitionError::TooLarge(path))) if path == "agents.json"
         ),
         "{refused:?}"
     );
