@@ -302,6 +302,7 @@ export function getNotificationActionText(n: Notification): string {
         ? 'failed'
         : 'ready';
     })
+    .with('factory_gate_waiting', () => 'waiting')
     .exhaustive(() => 'notified');
 }
 
@@ -397,6 +398,7 @@ export function extractMessageContent(notification: Notification): string {
       { tag: 'computer_setup' },
       (m) => m.content.agent?.name ?? m.content.computerName
     )
+    .with({ tag: 'factory_gate_waiting' }, (m) => m.content.question)
     .exhaustive(() => '');
 }
 

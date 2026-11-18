@@ -70,8 +70,11 @@ export function TeamStandingRules() {
   return <StandingRulesSettings />;
 }
 
-/** How the person's Runs went, as a page of its own. */
-export function FactoryInsights() {
+/**
+ * How the person's Runs went, as a page of its own, with the Run
+ * `openRunId` opened over it when a link names one.
+ */
+export function FactoryInsights(props: { openRunId?: string }) {
   return (
     <ShowFeatureFlag flag={enableFactoryRuns}>
       <RunsProvider value={createAppRunsContext(queryClient)}>
@@ -79,6 +82,7 @@ export function FactoryInsights() {
           <RunInsightsView
             timeZone={Intl.DateTimeFormat().resolvedOptions().timeZone}
             now={() => new Date()}
+            openRunId={props.openRunId}
           />
         </InsightsProvider>
       </RunsProvider>

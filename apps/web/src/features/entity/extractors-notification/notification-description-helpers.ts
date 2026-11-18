@@ -140,6 +140,7 @@ export function getActionVerb(type: NotificationType): string {
       .with('routine_run_finished', () => 'ran')
       .with('agent_sign_in_expiry', () => 'needs a new sign-in')
       .with('computer_setup', () => 'finished setup')
+      .with('factory_gate_waiting', () => 'waits on your answer')
       .exhaustive(() => 'updated')
   );
 }
@@ -225,6 +226,9 @@ export function getTypeNoun(type: NotificationType, count: number): string {
     )
     .with('computer_setup', () =>
       count === 1 ? 'computer setup' : 'computer setups'
+    )
+    .with('factory_gate_waiting', () =>
+      count === 1 ? 'factory run' : 'factory runs'
     )
     .exhaustive(() => (count === 1 ? 'notification' : 'notifications'));
 }

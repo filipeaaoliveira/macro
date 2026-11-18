@@ -773,6 +773,38 @@ export type ExternalChatMessageMetadata = {
 export type ExternalChatProvider = 'whatsapp';
 
 /**
+ * A factory Run waits on its owner at a Gate. The notification is about
+ * the Run's task, and opens the Run, where the owner answers the Gate.
+ */
+export type FactoryGateWaitingMetadata = {
+    /**
+     * For an agent's question, the Role of the agent that asks; absent
+     * for a Gate of the Run's Flow.
+     */
+    asker?: string | null;
+    /**
+     * The start of the Gate's question.
+     */
+    question: string;
+    /**
+     * The start of what the Run was asked to do.
+     */
+    request: string;
+    /**
+     * The Run that waits.
+     */
+    runId: string;
+    /**
+     * The place, among the Run's Steps, of the Step whose Gate waits.
+     */
+    seq: number;
+    /**
+     * The task document the Run works on.
+     */
+    taskId: string;
+};
+
+/**
  * The strongly typed response for listing user notifications.
  */
 export type GetAllUserNotificationsResponse = {
@@ -1451,6 +1483,12 @@ export type NotifEvent = {
      */
     content: RuntimeAccessRemovedMetadata;
     tag: 'runtime_access_removed';
+} | {
+    /**
+     * A factory Run the user owns waits on them at a Gate.
+     */
+    content: FactoryGateWaitingMetadata;
+    tag: 'factory_gate_waiting';
 };
 
 /**

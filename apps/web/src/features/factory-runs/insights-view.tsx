@@ -11,9 +11,15 @@ import { MobileInsightsView } from './views/mobile/insights';
  * desktop and phone views share it. A Run opened from it opens as from a
  * task.
  */
-export function RunInsightsView(props: { timeZone: string; now: () => Date }) {
+export function RunInsightsView(props: {
+  timeZone: string;
+  now: () => Date;
+  /** A Run to open at once, as a link to it does. */
+  openRunId?: string;
+}) {
   const context = useInsightsContext();
   const state = createInsightsState(props.timeZone, props.now);
+  if (props.openRunId) state.setOpenRunId(props.openRunId);
   const source = context.insights(state.params);
   const flowNames = context.flowNames();
   // The filter offers the Flows a Run can start from, and any Flow the

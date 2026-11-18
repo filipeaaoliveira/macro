@@ -1383,6 +1383,21 @@ function mapGraphqlNotificationMetadata(
         }) satisfies NotifEventMember<'runtime_access_removed'>
     )
     .with(
+      { __typename: 'GraphqlFactoryGateWaitingMetadata' },
+      (metadata) =>
+        ({
+          tag: 'factory_gate_waiting',
+          content: {
+            runId: metadata.factoryGateWaitingRunId,
+            seq: metadata.factoryGateWaitingSeq,
+            taskId: metadata.factoryGateWaitingTaskId,
+            request: metadata.factoryGateWaitingRequest,
+            question: metadata.factoryGateWaitingQuestion,
+            asker: metadata.factoryGateWaitingAsker ?? undefined,
+          },
+        }) satisfies NotifEventMember<'factory_gate_waiting'>
+    )
+    .with(
       { __typename: 'GraphqlCommentedOnDocumentMetadata' },
       (metadata) =>
         ({

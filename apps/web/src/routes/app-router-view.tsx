@@ -57,6 +57,7 @@ import {
   ExternalChatRouteView,
   ExternalRouteView,
   FactoryInsightsRouteView,
+  FactoryRunRouteView,
   FoldersRouteView,
   FormRespondRoutePage,
   ForYouRouteView,
@@ -141,6 +142,7 @@ import {
   externalChatRoute,
   externalRoute,
   factoryInsightsRoute,
+  factoryRunRoute,
   foldersRoute,
   formRespondRoute,
   forYouRoute,
@@ -445,6 +447,7 @@ export function appRouteElements(): JSX.Element {
           definition={factoryInsightsRoute}
           component={FactoryInsightsRouteView}
         />
+        <Route definition={factoryRunRoute} component={FactoryRunRouteView} />
         <Route
           definition={externalRoute}
           component={ExternalRouteView}

@@ -17,6 +17,7 @@ import { teamKeys } from '@queries/team/keys';
 import { onCleanup } from 'solid-js';
 import { match, P } from 'ts-pattern';
 import { shareEntity } from '../access-requests/core/types';
+import { factoryRunKeys } from '../factory-runs/queries/keys';
 import { passwordKeys } from '../passwords/queries/keys';
 import { scheduledActionKeys } from '../routines/queries/keys';
 import type { NotificationSource } from './notification-source';
@@ -211,6 +212,16 @@ export function handleNotificationUpdate(notification: UnifiedNotification) {
     })
     .with({ tag: 'task_assigned' }, () => {
       refreshSoupEntity(notification, 'document');
+    })
+    // The Run waits on its owner: the list of Runs waiting on them, and
+    // the Run itself, are read again.
+    .with({ tag: 'factory_gate_waiting' }, (metadata) => {
+      queryClient.invalidateQueries({
+        queryKey: factoryRunKeys.waiting.queryKey,
+      });
+      queryClient.invalidateQueries({
+        queryKey: factoryRunKeys.run(metadata.content.runId).queryKey,
+      });
     })
     .with({ tag: 'ai_response' }, () => {
       refreshSoupEntity(notification, 'chat');

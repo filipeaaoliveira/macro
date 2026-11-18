@@ -494,6 +494,27 @@ function getSupportedHandler(
           };
         }
       )
+      // The Run, over the person's factory insights, where its Gate is
+      // answered.
+      .with('factory_gate_waiting', () => {
+        const meta = notification.notification_metadata;
+        if (meta.tag !== 'factory_gate_waiting') return null;
+        const runId = meta.content.runId;
+        return async (lm: SplitManager, newSplit: boolean = false) => {
+          openContent(
+            lm,
+            {
+              type: 'component',
+              id: 'factory-run',
+              params: { runId },
+              entryMetadata: {
+                route: paneRoute({ id: 'view-factory-run', params: { runId } }),
+              },
+            },
+            { newSplit, sourceHandle, onApplied }
+          );
+        };
+      })
       .with('task_assigned', () => {
         const meta = notification.notification_metadata;
         if (meta.tag !== 'task_assigned') return null;

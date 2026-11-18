@@ -22,6 +22,10 @@ export const FactoryInsightsRouteView = lazyNamed(
   () => import('@app/features/factory-runs/route-views'),
   'FactoryInsightsRouteView'
 );
+export const FactoryRunRouteView = lazyNamed(
+  () => import('@app/features/factory-runs/route-views'),
+  'FactoryRunRouteView'
+);
 export const ExternalRouteView = lazyNamed(
   () => import('@app/features/external-view/route-views'),
   'ExternalRouteView'

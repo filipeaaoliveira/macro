@@ -134,6 +134,7 @@ export function getNotificationAction(n: UnifiedNotification): string {
           ? "couldn't be set up"
           : 'could not be set up';
       })
+      .with('factory_gate_waiting', () => 'waits on your answer in')
       .exhaustive(() => 'notified you about')
   );
 }
@@ -200,6 +201,7 @@ export function getNotificationTargetName(
       .with({ tag: 'routine_run_finished' }, () => undefined)
       .with({ tag: 'agent_sign_in_expiry' }, () => undefined)
       .with({ tag: 'computer_setup' }, () => undefined)
+      .with({ tag: 'factory_gate_waiting' }, (m) => m.content.request)
       .with(
         {
           tag: P.union(
@@ -306,6 +308,7 @@ export function getNotificationContent(
       .with({ tag: 'runtime_access_removed' }, (m) =>
         stoppedAgentsText(m.content.agents, m.content.runtimeName)
       )
+      .with({ tag: 'factory_gate_waiting' }, (m) => m.content.question)
       // An agent teammate's: what to do with the agent, not its computer.
       .with({ tag: 'computer_setup', content: { agent: P.nonNullable } }, (m) =>
         match(m.content.outcome)
@@ -404,6 +407,7 @@ export function shouldShowNotificationTarget(n: UnifiedNotification): boolean {
       .with({ tag: 'agent_sign_in_expiry' }, () => false)
       .with({ tag: 'computer_setup' }, () => false)
       .with({ tag: 'runtime_access_removed' }, () => true)
+      .with({ tag: 'factory_gate_waiting' }, () => true)
       .with(
         {
           tag: P.union(
