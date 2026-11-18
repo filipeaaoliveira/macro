@@ -3,8 +3,8 @@
 //! They need no Temporal server, so they run in CI.
 //!
 //! The histories were recorded from the ignored tests in `test.rs` on a
-//! Temporal dev server, then read with the client's `fetch_history` and `to_json`, with one null
-//! field the history reads as its default left out:
+//! Temporal dev server, then read with the client's `fetch_history` and `to_json`, with null
+//! fields the history reads as their defaults left out:
 //! - `code_merged`: a person approves the plan and the merge;
 //! - `code_revised_then_cancelled`: a person sends the merge back, and
 //!   cancels the Run at the next merge Gate;
