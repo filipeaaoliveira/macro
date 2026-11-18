@@ -58,6 +58,13 @@
 //!   tells the owner goes on to write without an answer; the owner answers
 //!   the merge Gate.
 //!
+//! Recorded with every marker above and the scoring marker
+//! (`factory-scoring`), from `a_run_whose_scorer_s_judge_fails_ends_as_it_would_have`
+//! in `test.rs` with `FACTORY_RECORD_HISTORY` set:
+//! - `plan_scored_judge_failed`: a `plan` Run ends `success`, then a
+//!   sampled Scorer's judge fails on each of its three attempts, and the
+//!   Run ends as it would have.
+//!
 //! Before changing what the workflow decides, record the histories it
 //! makes now beside these, so the change is checked against both.
 
@@ -226,6 +233,15 @@ async fn a_run_whose_notify_only_gate_told_its_owner_replays() {
     replays(
         "code_notify_only_plan_with_thread",
         include_bytes!("histories/code_notify_only_plan_with_thread.json"),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_run_scored_once_it_ended_replays() {
+    replays(
+        "plan_scored_judge_failed",
+        include_bytes!("histories/plan_scored_judge_failed.json"),
     )
     .await;
 }

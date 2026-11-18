@@ -52,6 +52,7 @@ use crate::domain::main_hold::{MainWatch, MainWatchServiceImpl};
 use crate::domain::models::{
     AgentAnswer, AgentTask, AgentTurn, PullRequestState, RequiredCheck, RequiredChecks, RunStart,
 };
+use crate::domain::ports::ScoringService;
 use crate::domain::ports::{
     AgentFailure, AnswerDelivery, MainWatches, Retryable, RunWorkflows, StepAgent,
 };
@@ -211,11 +212,13 @@ fn watches(repo: &FakeRepo) -> MainWatchServiceImpl<FakeRepo, FakeGithub, FakeHo
 /// nothing is judged.
 fn scoring(
     repo: &FakeRepo,
-) -> ScoringServiceImpl<FakeRepo, FakeJudge, crate::domain::insights::fakes::FakeUsage> {
+) -> ScoringServiceImpl<FakeRepo, FakeJudge, crate::domain::insights::fakes::FakeUsage, FakeGithub>
+{
     ScoringServiceImpl::new(
         repo.clone(),
         FakeJudge::default(),
         crate::domain::insights::fakes::FakeUsage::new(Vec::new()),
+        FakeGithub::default(),
         std::sync::Arc::default(),
     )
 }
@@ -284,7 +287,7 @@ async fn walk<F>(
 where
     F: Future<Output = ()>,
 {
-    walk_with(agent, None, drive).await
+    walk_with(agent, None, scoring, drive).await
 }
 
 /// [`walk`] a Run that ended `outcome` before its workflow started.
@@ -296,12 +299,15 @@ async fn walk_after<F>(
 where
     F: Future<Output = ()>,
 {
-    walk_with(agent, Some(outcome), drive).await
+    walk_with(agent, Some(outcome), scoring, drive).await
 }
 
-async fn walk_with<F>(
+/// [`walk`] a Run, scored by the scoring service `scored` makes over its
+/// records once it ends.
+async fn walk_with<F, S: ScoringService>(
     agent: &Agent,
     ended_before: Option<RunOutcome>,
+    scored: impl FnOnce(&FakeRepo) -> S,
     drive: impl FnOnce(Client, RunId) -> F,
 ) -> (Result<RunOutcome, WorkflowGetResultError>, FakeRepo, RunId)
 where
@@ -325,7 +331,7 @@ where
             reviews: ReviewRoundsImpl::new(repo.clone(), FakeGithub::default(), repo.clone()),
             gates: gates(&repo),
             watches: watches(&repo),
-            scoring: scoring(&repo),
+            scoring: scored(&repo),
         },
     )
     .expect("worker");
@@ -353,6 +359,55 @@ where
     let (worked, ended) = tokio::join!(worker.run_until(done.notified()), walked);
     worked.expect("the worker ran");
     (ended, repo, run_id)
+}
+
+/// A Run a sampled Scorer judges, whose judge fails on every attempt, ends
+/// as it would have without it: scoring decides nothing the Run does, and
+/// gives up after its attempts. With `FACTORY_RECORD_HISTORY` set to a
+/// path, the Run's history, which passed the `factory-scoring` marker, is
+/// written there for the replay tests.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "Temporal doesn't exist in CI"]
+async fn a_run_whose_scorer_s_judge_fails_ends_as_it_would_have() {
+    let agent = Agent::doing(Work::Ends);
+    let definition: crate::domain::evaluation::EvaluationDefinition =
+        serde_json::from_value(json!({ "scorers": [{
+            "name": "correctness",
+            "instructions": "Does the change do what the request asks?",
+            "samplePercent": 100
+        }]}))
+        .expect("a definition");
+    let definition = Arc::new(definition);
+    let judged = |repo: &FakeRepo| {
+        ScoringServiceImpl::new(
+            repo.clone(),
+            FakeJudge::down(),
+            crate::domain::insights::fakes::FakeUsage::new(Vec::new()),
+            FakeGithub::default(),
+            definition,
+        )
+    };
+
+    let (ended, repo, run_id) = walk_with(&agent, None, judged, |_, _| async {}).await;
+
+    assert_eq!(ended.expect("the workflow ends"), RunOutcome::Success);
+    assert!(
+        repo.evaluation
+            .lock()
+            .expect("evaluation")
+            .run_scores
+            .is_empty()
+    );
+    if let Some(path) = macro_env_var::maybe_read_env("FACTORY_RECORD_HISTORY") {
+        let history = client()
+            .await
+            .get_workflow_handle::<FlowWorkflowDefinition>(run_id.to_string())
+            .fetch_history(temporalio_client::WorkflowFetchHistoryOptions::default())
+            .to_json()
+            .await
+            .expect("the history reads");
+        std::fs::write(path, history).expect("the history is written");
+    }
 }
 
 /// Wait until a task reached `agent`.
