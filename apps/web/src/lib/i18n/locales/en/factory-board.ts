@@ -72,6 +72,7 @@ export default {
     'Merges at its run’s merge gate, once the run gets there: it’s at {{step}}',
   noReviewRounds: 'No review rounds yet',
   mergeChecking: 'Checking for a factory run…',
+  mergeLoadFailed: 'Couldn’t check for a factory run. Reload the page to merge',
   mergeUnguarded: 'Open this pull request in Macro’s Reviews to merge it',
   mergeAfterOtherGate:
     'Merges at its run’s merge gate: the run waits at {{step}} first',

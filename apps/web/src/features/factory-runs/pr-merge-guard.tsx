@@ -6,6 +6,8 @@ import type {
 } from '@block-pr/primitives/pr-merge-guard-context';
 import { toast } from '@core/component/Toast/Toast';
 import { enableFactoryRuns } from '@core/constant/featureFlags';
+import { fireAndForget } from '@core/util/fireAndForget';
+import { ResultAsync } from 'neverthrow';
 import {
   type Accessor,
   createEffect,
@@ -30,15 +32,28 @@ export const factoryMergeGuard: PrMergeGuardSource = (
 ): PrMergeGuard => {
   const flag = useFeatureFlag(enableFactoryRuns);
   const [factory, setFactory] = createSignal<FactoryModule>();
+  // The factory's code could not be loaded (offline, or a release replaced
+  // its chunk): nothing merges still, and the guard says why.
+  const [failed, setFailed] = createSignal(false);
   let live = true;
   onCleanup(() => {
     live = false;
   });
+  const load = async () => {
+    const loaded = await ResultAsync.fromPromise(
+      import('./factory-runs'),
+      (error) => error
+    );
+    if (!live) return;
+    if (loaded.isErr()) {
+      setFailed(true);
+      return;
+    }
+    setFactory(() => loaded.value);
+  };
   createEffect(() => {
-    if (flag().loading || !flag().enabled || factory()) return;
-    void import('./factory-runs').then((loaded) => {
-      if (live) setFactory(() => loaded);
-    });
+    if (flag().loading || !flag().enabled || factory() || failed()) return;
+    fireAndForget(load(), 'factory-runs');
   });
   // The factory's hooks run once its code is here, in this caller's scope,
   // and only then: they read `urls` as they set up, and a memo tracking that
@@ -48,7 +63,10 @@ export const factoryMergeGuard: PrMergeGuardSource = (
   );
   // Off for this person: no Run guards a pull request.
   const off = () => !flag().loading && !flag().enabled;
-  const checking = () => t('factoryBoard.mergeChecking');
+  const checking = () =>
+    failed()
+      ? t('factoryBoard.mergeLoadFailed')
+      : t('factoryBoard.mergeChecking');
 
   return {
     mark: (url) => <>{reviews()?.mark(url)}</>,
@@ -58,6 +76,8 @@ export const factoryMergeGuard: PrMergeGuardSource = (
       if (loaded) return loaded.merge(url);
       if (off()) return false;
       toast.failure(checking());
+      // Asked to merge after the load failed: try loading again.
+      setFailed(false);
       return true;
     },
     mergeRefusal: (url) => {
