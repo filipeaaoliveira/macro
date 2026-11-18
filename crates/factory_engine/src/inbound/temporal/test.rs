@@ -1600,7 +1600,7 @@ async fn with_watch_worker<T>(
             reviews: ReviewRoundsImpl::new(repo.clone(), github.clone(), repo.clone()),
             gates: gates(repo),
             watches: MainWatchServiceImpl::new(repo.clone(), github.clone(), tasks.clone()),
-            scoring: scoring(&repo),
+            scoring: scoring(repo),
         },
     )
     .expect("worker");
