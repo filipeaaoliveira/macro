@@ -216,14 +216,14 @@ export function BoardView(props: {
           </ViewSidebar.Title>
         }
       >
+        <Tabs
+          aria-label={t('factoryBoard.scope')}
+          size="md"
+          options={scopeOptions()}
+          value={props.state.scope()}
+          onChange={(scope: BoardScope) => props.state.setScope(scope)}
+        />
         <HeaderActionGroup label={t('factoryBoard.actions')} size="md">
-          <Tabs
-            aria-label={t('factoryBoard.scope')}
-            size="md"
-            options={scopeOptions()}
-            value={props.state.scope()}
-            onChange={(scope: BoardScope) => props.state.setScope(scope)}
-          />
           <BoardFilterMenu
             state={props.state}
             flows={props.flows}
