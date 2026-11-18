@@ -4,13 +4,15 @@
  * factory_engine
  * OpenAPI spec version: 0.1.0
  */
+import type { StandInKinds } from './standInKinds';
 
 /**
  * A workspace's Orchestrator Definition: which kinds of Gate the factory
-decides on its own, and whether the Gates it leaves go to the Run's
-owner. A kind left off waits for a person, as every Gate did before
-Standing Rules. Whatever it says, a Tampered Run's Gates and a merge
-through a Main Hold stay a person's.
+decides on its own, whether the Gates it leaves go to the Run's owner,
+and which the stand-in answers for the Run's owner when no rule does. A
+kind left off waits for a person, as every Gate did before Standing
+Rules. Whatever it says, a Tampered Run's Gates and a merge through a
+Main Hold stay a person's.
  */
 export interface OrchestratorDefinition {
   /** Send a review round's Blockers to be fixed (`fix_blockers`), for at
@@ -30,4 +32,7 @@ before. A definition sent without it has it off. */
   ownerGates?: boolean;
   /** Approve the plan Gate (`approve_plan`). */
   plan: boolean;
+  /** The kinds of Gate the stand-in answers for the Run's owner, after
+the rules and before the person; off for every kind when left out. */
+  standIn?: StandInKinds;
 }
