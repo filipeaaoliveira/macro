@@ -52,6 +52,12 @@ impl HttpClientExt for CaptureTransport {
 }
 
 async fn captured_wire_body(streaming: bool) -> Value {
+    captured_body(streaming, true).await
+}
+
+/// The body a request leaves with, from the cached completion model or the
+/// uncached one.
+async fn captured_body(streaming: bool, cached: bool) -> Value {
     let transport = CaptureTransport::default();
     let client = anthropic::Client::builder()
         .api_key("test-anthropic-key")
@@ -91,12 +97,17 @@ async fn captured_wire_body(streaming: bool) -> Value {
         output_schema: None,
         record_telemetry_content: false,
     };
+    let completion = if cached {
+        model.completion()
+    } else {
+        model.uncached_completion()
+    };
     if streaming {
-        let mut response = model.completion().stream(request).await.unwrap();
+        let mut response = completion.stream(request).await.unwrap();
         // Rig starts its HTTP request lazily on the first stream poll.
         let _ = response.next().await;
     } else {
-        assert!(model.completion().completion(request).await.is_err());
+        assert!(completion.completion(request).await.is_err());
     }
     let captured = transport.0.lock().unwrap();
     assert_eq!(captured.len(), 1, "request must reach the HTTP boundary");
@@ -141,6 +152,16 @@ async fn completion_caches_tools_system_and_conversation() {
 #[tokio::test]
 async fn stream_caches_tools_system_and_conversation() {
     assert_cached_wire_body(true).await;
+}
+
+#[tokio::test]
+async fn uncached_completion_marks_no_cache_breakpoint() {
+    // A one-shot prompt nothing reads back writes nothing to the cache.
+    let body = captured_body(false, false).await;
+    assert!(
+        !body.to_string().contains("cache_control"),
+        "an uncached request carries no breakpoint: {body}"
+    );
 }
 
 #[test]
