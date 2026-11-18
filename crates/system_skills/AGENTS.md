@@ -12,6 +12,10 @@ open or edit it; its id is derived from its slug.
 - `src/compose_routines.rs`: Compose Routines, writing a routine from a
   chat, and the example of a skill that comes with an SDK area's guide.
   Its text is in `src/compose_routines/*.md`; the module composes it.
+- `src/orchestrate_factory.rs`: Orchestrate Factory Runs, the Orchestrator's
+  instructions: what an agent may do with a person's software factory Runs
+  through `macro.factory`, what stays the person's, and the Queue limit.
+  The factory namespace's `@agent` guide names it.
 
 ## How a skill reaches a session
 
