@@ -29,7 +29,8 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `src/outbound/pg_run_repository/automations.rs`: `AutomationRepository`,
   teams' Automations and each time one fired.
 - `src/domain/board.rs` and `src/outbound/pg_run_repository/board.rs`:
-  `RunBoardRepository`, the board's read of Runs across tasks.
+  `RunBoardRepository`, the board's read of Runs across tasks, and of the
+  Runs that opened some pull requests.
 - `src/domain/gate_replies.rs` and
   `src/outbound/pg_run_repository/gate_replies.rs`: `GateReplyRepository`,
   a person's answer read from their words, the factory asking back, the
@@ -67,7 +68,9 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261118143000_factory_automation.sql`,
   `20261118150000_factory_standing_rules_names.sql`,
   `20261118170000_factory_step_terminal.sql`,
-  `20261118190000_factory_run_board.sql`), and `factory_step_steer`.
+  `20261118190000_factory_run_board.sql`,
+  `20261118233000_factory_run_pull_request_url_index.sql`), and
+  `factory_step_steer`.
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
 
 ## Boundaries
@@ -191,6 +194,11 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   task's name with `ILIKE`, its `%`, `_` and `\` literal, and so reads
   every Run of the owners (some 200 ms on 280k). A held Run is held only at
   its merge, so a merged Run is `finished`.
+- `pull_request_runs` reads the Runs whose `lower(pull_request_url)` is one
+  of the keys asked (`pull_request_key`), through
+  `factory_run_pull_request_url_idx`, of the person or a member of the team
+  given, newest first up to the limit, each where it is as `board_runs`
+  reads it.
 - `read_insights` reads one person's newest Runs in a period through
   `factory_run_user_created_idx` (`user_id, created_at DESC, id DESC`), up to
   its cap (one past it, to tell whether Runs were left out), then their Steps

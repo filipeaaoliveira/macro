@@ -3,7 +3,9 @@
 //! A Run is running, waiting at an open Gate, stopped or finished; the
 //! Postgres repository's tests cover a held one.
 
-use factory_records::domain::board::{BoardQuery, BoardRun, BoardState, RunBoardRepository};
+use factory_records::domain::board::{
+    BoardQuery, BoardRun, BoardState, PullRequestRunsQuery, RunBoardRepository, pull_request_key,
+};
 use factory_records::domain::models::{Run, RunOutcome};
 
 use super::{FakeError, FakeRepo};
@@ -72,6 +74,34 @@ impl RunBoardRepository for FakeRepo {
             .filter(|listed| query.state.is_none_or(|state| state == listed.state))
             .collect();
         listed.sort_by_key(|listed| std::cmp::Reverse((listed.run.created_at, listed.run.id)));
+        listed.truncate(usize::from(query.limit));
+        Ok(listed)
+    }
+
+    async fn pull_request_runs(
+        &self,
+        query: &PullRequestRunsQuery,
+    ) -> Result<Vec<BoardRun>, FakeError> {
+        let board = BoardQuery {
+            user_id: query.user_id.clone(),
+            team_id: query.team_id,
+            state: None,
+            flow: None,
+            repo_url: None,
+            project_id: None,
+            search: None,
+            merge_entries: query.merge_entries.clone(),
+            after: None,
+            limit: u16::MAX,
+        };
+        let mut listed = self.board_runs(&board).await?;
+        listed.retain(|listed| {
+            listed
+                .run
+                .pull_request_url
+                .as_deref()
+                .is_some_and(|url| query.urls.contains(&pull_request_key(url)))
+        });
         listed.truncate(usize::from(query.limit));
         Ok(listed)
     }

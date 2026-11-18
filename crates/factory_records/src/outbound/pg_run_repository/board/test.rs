@@ -1,6 +1,8 @@
 //! The board's read: whose Runs, where each one is, the filters, and the
 //! pages.
 
+mod pull_requests;
+
 use chrono::Utc;
 use macro_db_migrator::MACRO_DB_MIGRATIONS;
 use macro_user_id::user_id::MacroUserIdStr;

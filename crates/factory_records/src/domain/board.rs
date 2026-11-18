@@ -92,6 +92,23 @@ pub struct BoardRun {
     pub task_live: bool,
 }
 
+/// The Runs that opened some pull requests, among those a board of
+/// `user_id`'s reads: theirs, and their team members' when `team_id` names
+/// their team.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PullRequestRunsQuery {
+    /// The person asking.
+    pub user_id: MacroUserIdStr<'static>,
+    /// Their team, to read its members' Runs too; none for theirs alone.
+    pub team_id: Option<Uuid>,
+    /// The pull requests' pages, as [`pull_request_key`] reads each.
+    pub urls: Vec<String>,
+    /// The Flow entries that merge a Run's change, as the board's.
+    pub merge_entries: Vec<String>,
+    /// The most Runs read.
+    pub limit: u16,
+}
+
 /// The board's reads.
 pub trait RunBoardRepository: Send + Sync + 'static {
     /// The error type returned by the repository.
@@ -102,6 +119,19 @@ pub trait RunBoardRepository: Send + Sync + 'static {
         &self,
         query: &BoardQuery,
     ) -> impl Future<Output = Result<Vec<BoardRun>, Self::Err>> + Send;
+
+    /// The Runs whose pull request is one of `query`'s, each read as the
+    /// board reads it, newest first, up to its limit.
+    fn pull_request_runs(
+        &self,
+        query: &PullRequestRunsQuery,
+    ) -> impl Future<Output = Result<Vec<BoardRun>, Self::Err>> + Send;
+}
+
+/// The page of a pull request as Runs are looked up by it: GitHub names
+/// owners and repositories in any case, so in lower case.
+pub fn pull_request_key(url: &str) -> String {
+    url.to_lowercase()
 }
 
 /// `search` as a pattern `ILIKE` reads literally, anywhere in the text.

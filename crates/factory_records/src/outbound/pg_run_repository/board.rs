@@ -8,7 +8,9 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use super::{PgRunRepository, PgRunRepositoryErr, RunRow};
-use crate::domain::board::{BoardQuery, BoardRun, BoardState, RunBoardRepository, search_pattern};
+use crate::domain::board::{
+    BoardQuery, BoardRun, BoardState, PullRequestRunsQuery, RunBoardRepository, search_pattern,
+};
 use crate::domain::models::Run;
 
 /// A Run row with where the board finds it.
@@ -320,6 +322,91 @@ impl RunBoardRepository for PgRunRepository {
             .await?
         };
         transaction.commit().await?;
+        rows.into_iter().map(BoardRun::try_from).collect()
+    }
+
+    #[tracing::instrument(err, skip_all, fields(team = query.team_id.is_some(), urls = query.urls.len()))]
+    async fn pull_request_runs(
+        &self,
+        query: &PullRequestRunsQuery,
+    ) -> Result<Vec<BoardRun>, Self::Err> {
+        // The pull requests' Runs are read through
+        // `factory_run_pull_request_url_idx`, then kept when the person or
+        // a member of their team owns them; where each is reads as the
+        // board's read does.
+        let rows = sqlx::query_as!(
+            BoardRunRow,
+            r#"
+            SELECT
+                r.id AS "id!", r.request AS "request!", r.user_id AS "user_id!",
+                r.flow AS "flow?", r.created_at AS "created_at!", r.task_id AS "task_id?",
+                r.project_id AS "project_id?", r.repo_url AS "repo_url?",
+                r.base_branch AS "base_branch?", r.created_in_person AS "created_in_person!",
+                r.control_file_patterns AS "control_file_patterns?",
+                r.control_files_team_id AS "control_files_team_id?",
+                r.tampered_files AS "tampered_files?",
+                r.named_control_files AS "named_control_files?",
+                r.control_files_unlisted AS "control_files_unlisted!",
+                r.standing_rules AS "standing_rules?",
+                r.standing_rules_source AS "standing_rules_source?",
+                r.standing_rules_project_id AS "standing_rules_project_id?",
+                r.automation_id AS "automation_id?", r.automation_name AS "automation_name?",
+                r.automation_trigger AS "automation_trigger?",
+                r.pull_request_url AS "pull_request_url?",
+                r.outcome AS "outcome?", r.ended_at AS "ended_at?",
+                CASE WHEN task.live THEN d.name END AS "task_name?",
+                task.live AS "task_live!",
+                place.state AS "state!"
+            FROM factory_run r
+            LEFT JOIN "Document" d ON d.id = r.task_id
+            CROSS JOIN LATERAL (
+                SELECT d.id IS NOT NULL
+                    AND d."deletedAt" IS NULL
+                    AND EXISTS (
+                        SELECT 1 FROM document_sub_type st
+                        WHERE st.document_id = d.id AND st.sub_type = 'task'
+                    ) AS live
+            ) task
+            CROSS JOIN LATERAL (
+                SELECT CASE
+                    WHEN r.outcome IN ('success', 'cancelled') THEN 'finished'
+                    WHEN r.outcome IS NOT NULL THEN 'stopped'
+                    WHEN EXISTS (
+                        SELECT 1 FROM factory_gate g
+                        WHERE g.run_id = r.id AND g.answer IS NULL
+                    ) THEN 'waiting'
+                    WHEN EXISTS (
+                        SELECT 1 FROM factory_main_hold h
+                        WHERE h.repo_url = r.repo_url
+                            AND h.base_branch = r.base_branch
+                            AND h.held_since IS NOT NULL
+                    ) AND (
+                        SELECT s.entry FROM factory_step s
+                        WHERE s.run_id = r.id
+                        ORDER BY s.seq DESC
+                        LIMIT 1
+                    ) = ANY($4::text[]) THEN 'held'
+                    ELSE 'running'
+                END AS state
+            ) place
+            WHERE lower(r.pull_request_url) = ANY($3::text[])
+                AND (
+                    r.user_id = $1
+                    OR r.user_id IN (
+                        SELECT tu.user_id FROM team_user tu WHERE tu.team_id = $2
+                    )
+                )
+            ORDER BY r.created_at DESC, r.id DESC
+            LIMIT $5
+            "#,
+            query.user_id.as_ref(),
+            query.team_id,
+            &query.urls,
+            &query.merge_entries,
+            i64::from(query.limit),
+        )
+        .fetch_all(&self.pool)
+        .await?;
         rows.into_iter().map(BoardRun::try_from).collect()
     }
 }
