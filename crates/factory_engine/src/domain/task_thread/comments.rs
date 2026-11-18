@@ -256,7 +256,8 @@ fn worked_by(step: &Step) -> String {
 
 /// Who or what gave `answer`, as a comment names them: a person by the
 /// name they show others (`name`), else "the run's owner", since only
-/// they answer.
+/// they answer, and the Orchestrator, an agent in Macro chat answering for
+/// them, as itself.
 fn answered_by(answer: &GateAnswer, name: Option<&str>) -> String {
     if let Some(rule) = answer.rule {
         return format!("by the `{rule}` Standing Rule");
@@ -265,6 +266,9 @@ fn answered_by(answer: &GateAnswer, name: Option<&str>) -> String {
         return "by the stand-in, for the run's owner".to_string();
     }
     let person = name.map_or_else(|| "the run's owner".to_string(), escape);
+    if answer.agent_session_id.is_some() {
+        return format!("by the Orchestrator, for {person}");
+    }
     match answer.reply_confidence {
         Some(_) => format!("by {person}, read from their words"),
         None => format!("by {person}"),

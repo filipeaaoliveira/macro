@@ -62,6 +62,7 @@ async fn run_on_task(repo: &FakeRepo, rules: RunRules) -> (RunId, Uuid) {
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: rules,
+            automation: None,
         })
         .await
         .expect("insert")
@@ -148,6 +149,7 @@ async fn a_run_s_updates_are_posted_once_each_to_one_thread_on_its_task() {
             note: None,
             user_id: julia(),
             approved_control_files: None,
+            agent_session: None,
         },
     };
     steps.answer_gate(answered.clone()).await.expect("answer");
@@ -412,6 +414,7 @@ async fn a_review_round_is_one_comment() {
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: rules(true, false),
+            automation: None,
         })
         .await
         .expect("insert")
@@ -534,6 +537,58 @@ async fn a_rule_answer_is_posted_with_its_rule() {
         format!(
             "Step 1's gate was answered `fix` by the `fix_blockers` Standing Rule.\n\n{FACTORY_SIGNATURE}"
         )
+    );
+}
+
+/// An answer the Orchestrator gave for the owner, from their agent session
+/// in Macro chat, is posted as the Orchestrator's, not as the owner's own.
+#[tokio::test]
+async fn an_orchestrator_answer_is_posted_as_the_orchestrator_s() {
+    let repo = FakeRepo::default();
+    let (run_id, _) = run_on_task(&repo, rules(true, false)).await;
+    let thread = FakeTaskThread::default();
+    let steps = service(&repo, &FakeNotifier::default(), &thread);
+    repo.display_names.lock().expect("names").insert(
+        "macro|julia@example.com".to_string(),
+        "Julia Ruiz".to_string(),
+    );
+    steps
+        .start_step(reply_step(run_id, 1))
+        .await
+        .expect("start");
+    steps
+        .end_step(ending(run_id, 1, "done", "Planned"))
+        .await
+        .expect("end");
+    let key = StepKey { run_id, seq: 1 };
+    repo.open_gate(key, "Approve the plan?", &[outcome("approve"), outcome("revise")])
+        .await
+        .expect("open");
+    steps
+        .answer_gate(GateAnswered {
+            key,
+            answer: AnswerGate {
+                seq: 1,
+                answer: outcome("revise"),
+                note: None,
+                user_id: julia(),
+                approved_control_files: None,
+                agent_session: Some(Uuid::from_u128(0xa6e)),
+            },
+        })
+        .await
+        .expect("answer");
+
+    let texts = thread.texts();
+    assert_eq!(
+        texts.last().map(String::as_str),
+        Some(
+            format!(
+                "Step 1's gate was answered `revise` by the Orchestrator, for Julia Ruiz.\n\n{FACTORY_SIGNATURE}"
+            )
+            .as_str()
+        ),
+        "{texts:?}"
     );
 }
 

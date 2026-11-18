@@ -6,9 +6,9 @@
 //! each later update is one reply: each Step's end (a pull request Step's
 //! names its pull request), each review round as one comment with its
 //! reviewers' results, a Gate that waits for a person, a Gate's answer and
-//! who or what gave it (the owner by name, a Standing Rule or the
-//! stand-in), a notify-only Gate's notice, and the Run's end. One thread
-//! per Run keeps the task's comments to one discussion a Run.
+//! who or what gave it (the owner by name, a Standing Rule, the stand-in
+//! or the Orchestrator), a notify-only Gate's notice, and the Run's end.
+//! One thread per Run keeps the task's comments to one discussion a Run.
 //!
 //! Every comment is signed as the factory's ([`factory_signed`]), so the
 //! owner's notes leave it out, and posted so it notifies no one: the

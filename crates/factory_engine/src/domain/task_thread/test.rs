@@ -32,6 +32,7 @@ fn run() -> Run {
         control_files_team_id: None,
         control_files: None,
         standing_rules: None,
+        automation: None,
         end: None,
     }
 }
@@ -88,6 +89,7 @@ fn answer(answered: impl FnOnce(&mut GateAnswer)) -> GateAnswer {
         approved_control_files: None,
         reply_confidence: None,
         by_stand_in: false,
+        agent_session_id: None,
         answered_at: at(9),
     };
     answered(&mut answer);
@@ -143,8 +145,9 @@ fn every_update_replies_to_the_run_s_first_comment_and_is_signed() {
 }
 
 /// An answer names who or what gave it: a Standing Rule, the stand-in,
-/// or the person by the name they show others, from a button or their
-/// words; a person with no name set is the run's owner.
+/// the person by the name they show others, from a button or their
+/// words, or the Orchestrator for them; a person with no name set is the
+/// run's owner.
 #[test]
 fn an_answer_names_who_or_what_gave_it() {
     let run = run();
@@ -198,6 +201,17 @@ fn an_answer_names_who_or_what_gave_it() {
     );
     let unnamed = answered(answer(|answer| answer.user_id = Some(julia.clone())), None);
     assert!(unnamed.contains("by the run's owner."), "{unnamed}");
+    let by_orchestrator = answered(
+        answer(|answer| {
+            answer.user_id = Some(julia.clone());
+            answer.agent_session_id = Some(uuid::Uuid::from_u128(0xa6e));
+        }),
+        Some("Julia Ruiz"),
+    );
+    assert!(
+        by_orchestrator.contains("by the Orchestrator, for Julia Ruiz."),
+        "{by_orchestrator}"
+    );
 }
 
 /// An agent's question is not quoted: the thread says only which Role
