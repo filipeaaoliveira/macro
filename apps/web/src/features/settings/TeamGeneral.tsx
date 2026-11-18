@@ -1,6 +1,7 @@
 import {
   TeamAutomations,
   TeamControlFiles,
+  TeamDefinition,
   TeamStandingRules,
 } from '@app/features/factory-runs/factory-runs';
 import { ShowFeatureFlag } from '@app/lib/analytics/posthog';
@@ -421,6 +422,14 @@ export function TeamGeneral(props: { team: TeamSummary }) {
         </SettingsSection>
         <ShowFeatureFlag flag={enableFactoryRuns}>
           <>
+            <SettingsSection
+              title="Factory definition"
+              description="A GitHub repository whose files hold the factory's flows, agents, rules and scorers, changed by pull request. Each run keeps the commit it read."
+            >
+              <SettingsCard>
+                <TeamDefinition />
+              </SettingsCard>
+            </SettingsSection>
             <SettingsSection
               title="Control files"
               description="Files that decide whether a repository's checks pass, such as tests, lint configuration and CI workflows. A factory run that changes one unasked merges only once a person approves it."

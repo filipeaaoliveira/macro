@@ -12,6 +12,7 @@ import {
   getCreateFactoryRunUrl,
   getDeleteFactoryAutomationUrl,
   getGetFactoryControlFilesUrl,
+  getGetFactoryDefinitionUrl,
   getGetFactoryInsightsUrl,
   getGetFactoryRunUrl,
   getGetFactorySessionStepUrl,
@@ -26,6 +27,7 @@ import {
   getResumeFactoryStepUrl,
   getSetFactoryAutomationEnabledUrl,
   getSetFactoryControlFilesUrl,
+  getSetFactoryDefinitionUrl,
   getSetFactoryStandingRulesUrl,
   getStopFactoryStepUrl,
 } from './generated/client';
@@ -37,6 +39,7 @@ import type {
   ControlFilesSettings,
   CreatedAutomation,
   CreateRunRequest,
+  DefinitionSettings,
   FlowsResponse,
   GetFactoryInsightsParams,
   NoteStepRequest,
@@ -57,18 +60,21 @@ const host = () => SERVER_HOSTS.factory;
 export type StartRunErrorCode =
   | 'UNREACHABLE_REPOSITORY'
   | 'NO_PUSH_ACCESS'
-  | 'QUEUE_FULL';
+  | 'QUEUE_FULL'
+  | 'DEFINITION_UNREADABLE';
 
 /** The codes the service refuses a start with. */
 type StartRunRefusal = Exclude<
   RunErrorCode,
-  'controlFilesNotApproved' | 'reservedForAPerson'
+  'controlFilesNotApproved' | 'reservedForAPerson' | 'definitionNamed'
 >;
 
 const START_RUN_ERROR_CODES: Record<StartRunRefusal, StartRunErrorCode> = {
   unreachableRepository: 'UNREACHABLE_REPOSITORY',
   noPushAccess: 'NO_PUSH_ACCESS',
   queueFull: 'QUEUE_FULL',
+  unreachableDefinition: 'DEFINITION_UNREADABLE',
+  invalidDefinition: 'DEFINITION_UNREADABLE',
 };
 
 function isRunErrorCode(code: unknown): code is StartRunRefusal {
@@ -275,6 +281,35 @@ export const factoryClient = {
       {
         method: 'PUT',
         body: JSON.stringify({ patterns }),
+        errorResponseHandler: refusal,
+      }
+    );
+  },
+
+  /**
+   * The Factory Definition the person's team names: its repository, the
+   * commit a Run started now would read, or why it doesn't read, and
+   * whether the person may change it.
+   */
+  getDefinition(signal?: AbortSignal) {
+    return fetchWithToken<DefinitionSettings>(
+      `${host()}${getGetFactoryDefinitionUrl()}`,
+      { method: 'GET', signal }
+    );
+  },
+
+  /**
+   * Names the team's Factory Definition by its repository's URL; `null`
+   * names none. A Definition that doesn't read fails `HTTP_ERROR` (400),
+   * and someone who doesn't administer the team fails `FORBIDDEN`; either
+   * carries the service's message.
+   */
+  setDefinition(repoUrl: string | null) {
+    return fetchWithToken<DefinitionSettings>(
+      `${host()}${getSetFactoryDefinitionUrl()}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ repoUrl }),
         errorResponseHandler: refusal,
       }
     );

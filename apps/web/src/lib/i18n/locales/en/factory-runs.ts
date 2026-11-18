@@ -46,6 +46,8 @@ export default {
   queueFull:
     'Your queue is full: as many of your runs wait on you, or have yet to ask you anything, as this project’s queue limit allows. Answer some in Waiting on you, or cancel one listed there that you no longer need, then start the run.',
   openWaitingOnYou: 'Open Waiting on you',
+  definitionUnreadable:
+    'Your team’s factory definition doesn’t read, or your linked GitHub account can’t reach its repository. Team settings say why.',
   // A Run.
   runDetails: 'Run details',
   closeRun: 'Close run',
@@ -53,6 +55,8 @@ export default {
   request: 'Request',
   repository: 'Repository',
   repositoryFrom: '{{repository}}, from {{branch}}',
+  definition: 'Factory definition',
+  definitionAt: '{{repository}} at {{commit}}',
   steps: 'Steps',
   noSteps: 'No steps yet',
   stepVisit: '{{entry}} · visit {{visit}}',
@@ -160,6 +164,22 @@ export default {
     'An empty list checks no file: a run may then change its tests or CI unseen.',
   controlFilesSaved: 'Control files saved',
   controlFilesSaveFailed: 'Couldn’t save the control files',
+  // A team's Factory Definition, in team settings.
+  definitionRepository: 'Definition repository',
+  definitionPlaceholder: 'https://github.com/owner/name',
+  definitionLoading: 'Loading the factory definition…',
+  definitionLoadFailed: 'The factory definition couldn’t be loaded',
+  definitionNone:
+    'Your team names no definition: runs use Macro’s built-in flows and agents, and the settings below.',
+  definitionReads: 'Runs started now read it at {{commit}}.',
+  definitionProblem: 'It doesn’t read: {{problem}}',
+  definitionHowTo:
+    'Runs take their flows, agents, rules and control files from this repository’s default branch, and keep the commit they read. Change it by pull request; the settings below no longer apply.',
+  definitionAdminsOnly: 'Only team admins can change it.',
+  definitionSave: 'Save',
+  definitionRemove: 'Stop using it',
+  definitionSaved: 'Factory definition saved',
+  definitionSaveFailed: 'Couldn’t save the factory definition',
   // A team's Standing Rules, in team settings.
   standingRulesLoading: 'Loading standing rules…',
   standingRulesLoadFailed: 'Standing rules couldn’t be loaded',

@@ -7,6 +7,7 @@ export const factoryRunKeys = createQueryKeys('factoryRuns', {
   waiting: null,
   flows: null,
   controlFiles: null,
+  definition: null,
   standingRules: null,
   automations: null,
   sessionStep: (sessionId: string) => ({ queryKey: [sessionId] }),
