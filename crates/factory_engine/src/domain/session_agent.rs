@@ -31,7 +31,9 @@ use crate::domain::agents::{Agent, AgentDefinition};
 use agent_session::domain::session_command::SessionCommandOutput;
 
 use crate::domain::models::{AgentAnswer, AgentCommand, AgentTask, AgentTurn, SessionSteer};
+use crate::domain::ports::PauseNotices;
 use crate::domain::ports::{AgentFailure, Retryable, StepAgent};
+use crate::domain::step_terminal::{PAUSE_WARNING, paused_step_ends_by};
 
 /// What the agent is told about handing its result back.
 const HAND_BACK: &str = include_str!("session_agent/hand_back.md");
@@ -146,6 +148,9 @@ pub enum SessionAgentError {
     /// The Run's owner stopped the Step from its Step Terminal.
     #[error("the run's owner stopped the step")]
     StoppedByOwner,
+    /// The Step stayed paused past its work's time.
+    #[error("the step stayed paused past its time")]
+    PausedTooLong,
 }
 
 impl Retryable for SessionAgentError {
@@ -186,7 +191,8 @@ impl Retryable for SessionAgentError {
             | SessionAgentError::Released
             | SessionAgentError::SessionLost
             | SessionAgentError::TooSlow(_)
-            | SessionAgentError::StoppedByOwner => false,
+            | SessionAgentError::StoppedByOwner
+            | SessionAgentError::PausedTooLong => false,
         }
     }
 }
@@ -204,6 +210,17 @@ pub struct SessionAgent<S, R> {
     sessions: S,
     repo: R,
     agents: AgentDefinition,
+    pause_notices: Option<Notices>,
+}
+
+/// Where a paused Step's owner is told its time runs out.
+#[derive(Clone)]
+struct Notices(std::sync::Arc<dyn PauseNotices>);
+
+impl std::fmt::Debug for Notices {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("PauseNotices")
+    }
 }
 
 impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
@@ -214,7 +231,15 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
             sessions,
             repo,
             agents,
+            pause_notices: None,
         }
+    }
+
+    /// Tell a paused Step's owner through `notices` when its time runs out.
+    #[must_use]
+    pub fn with_pause_notices(mut self, notices: impl PauseNotices) -> Self {
+        self.pause_notices = Some(Notices(std::sync::Arc::new(notices)));
+        self
     }
 
     /// The name of the Agent whose session `session` of a Step of `role`
@@ -486,6 +511,11 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
         resumed: bool,
     ) -> Result<(), SessionAgentError> {
         let mut watched = action.clone();
+        // The turns the wait followed, the first the Step's own: a prompt
+        // of the owner's the session refused never arrives, and the wait
+        // goes back to the one before it.
+        let mut followed: Vec<AgentActionId> = vec![action.action_id];
+        let mut warned = false;
         let mut deadline = deadline;
         let mut wait = FIRST_LOOK;
         let mut failed_reads = 0;
@@ -497,6 +527,23 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
                 // ends failed, its session stopped for good with it.
                 self.cancel(&watched).await;
                 return Err(SessionAgentError::StoppedByOwner);
+            }
+            // A Step paused near the end of its work's time tells its owner
+            // once, and ends failed when the time runs out, saying why.
+            if let Some(started_at) = steering.started_at.filter(|_| steering.paused) {
+                let ends_by = paused_step_ends_by(started_at);
+                let now = chrono::Utc::now();
+                if now >= ends_by {
+                    self.repo.pause_ran_out(key).await.map_err(Self::records)?;
+                    self.cancel(&watched).await;
+                    return Err(SessionAgentError::PausedTooLong);
+                }
+                if !warned && now >= ends_by - PAUSE_WARNING {
+                    warned = true;
+                    if let Some(notices) = &self.pause_notices {
+                        notices.0.running_out(key, ends_by).await;
+                    }
+                }
             }
             // A read that fails now and then is the transport's; only a run
             // of them fails the Step.
@@ -512,6 +559,25 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
                         return Err(SessionAgentError::SessionLost);
                     }
                     None
+                }
+                // The owner's prompt the wait followed never reached the
+                // session: it refused it, and the Step follows the turn
+                // before it again.
+                Ok(RoutineActionStatus::Pending(RoutinePendingReason::AwaitingPrompt))
+                    if followed.len() > 1
+                        && steering.prompt != Some(watched.action_id.as_uuid())
+                        && steering.prompt.is_none_or(|prompt| {
+                            followed.iter().any(|turn| turn.as_uuid() == prompt)
+                        }) =>
+                {
+                    followed.pop();
+                    while followed.len() > 1
+                        && steering.prompt != followed.last().map(|turn| turn.as_uuid())
+                    {
+                        followed.pop();
+                    }
+                    watched.action_id = followed[followed.len() - 1];
+                    continue;
                 }
                 Ok(RoutineActionStatus::Pending(pending)) => {
                     failed_reads = 0;
@@ -539,6 +605,7 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
                     // Step goes on with its turn.
                     Some(prompt) if prompt != watched.action_id.as_uuid() => {
                         watched.action_id = AgentActionId::from_uuid(prompt);
+                        followed.push(watched.action_id);
                         wait = FIRST_LOOK;
                         continue;
                     }

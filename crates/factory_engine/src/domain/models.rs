@@ -552,6 +552,16 @@ pub struct RunFinish {
     pub outcome: RunOutcome,
 }
 
+/// The factory Step an agent session works in, as its owner reads it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionStepRef {
+    /// The Run the Step belongs to.
+    pub run_id: RunId,
+    /// The Step's place among the Run's Steps.
+    pub seq: u16,
+}
+
 /// A Run and the Steps it took.
 #[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]

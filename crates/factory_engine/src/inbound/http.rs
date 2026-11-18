@@ -30,7 +30,7 @@ use uuid::Uuid;
 
 use crate::domain::models::{
     Answerer, ControlFilesSettings, FactoryError, FlowSummary, PersonOnly, RunDetail,
-    StandingRulesSettings,
+    SessionStepRef, StandingRulesSettings,
 };
 use crate::domain::ports::FactoryService;
 use crate::domain::step_terminal::TerminalRequest;
@@ -93,6 +93,9 @@ impl<S, Auth> FromRef<FactoryRouterState<S, Auth>> for MacroAuthorizationState<A
 ///   Step `seq`.
 /// - `POST /runs/{id}/steps/{seq}/reply` — reply to it in words, which the
 ///   factory reads as one of its answers or asks back.
+/// - `GET /sessions/{session_id}/step` — the caller's factory Step that
+///   works in an agent session, so the session's view sends them to its
+///   Run rather than let them prompt it.
 /// - `POST /runs/{id}/steps/{seq}/note` — send the agent of the Run's
 ///   running Step `seq` a note, from its Step Terminal.
 /// - `POST /runs/{id}/steps/{seq}/pause` — pause it.
@@ -136,6 +139,10 @@ where
         .route(
             "/runs/{id}/steps/{seq}/reply",
             post(reply_to_gate_handler::<S, Auth>),
+        )
+        .route(
+            "/sessions/{session_id}/step",
+            get(session_step_handler::<S, Auth>),
         )
         .route(
             "/runs/{id}/steps/{seq}/note",
@@ -590,6 +597,50 @@ where
         .reply_to_gate(actor, params.id, params.seq, body.reply)
         .await?;
     Ok(StatusCode::ACCEPTED)
+}
+
+/// Path params naming an agent session.
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Path)]
+pub struct SessionStepParams {
+    /// The agent session's id.
+    pub session_id: Uuid,
+}
+
+/// The Step of one of the caller's Runs that works, or worked, in an agent
+/// session: the session's view tells the person to steer it from its Run.
+/// A session no Step of theirs works in is not found (404).
+#[utoipa::path(
+    get,
+    tag = "factory",
+    operation_id = "get_factory_session_step",
+    path = "/sessions/{session_id}/step",
+    params(SessionStepParams),
+    responses(
+        (status = 200, body = SessionStepRef),
+        (status = 401, body = ErrorResponse),
+        (status = 403, body = ErrorResponse),
+        (status = 404, body = ErrorResponse),
+        (status = 500, body = ErrorResponse),
+    )
+)]
+#[tracing::instrument(skip_all, fields(session_id = %params.session_id))]
+pub async fn session_step_handler<S, Auth>(
+    State(state): State<FactoryRouterState<S, Auth>>,
+    caller: MacroAuthorizationExtractor<Auth, UserOrInternal>,
+    Path(params): Path<SessionStepParams>,
+) -> Result<Json<SessionStepRef>, FactoryError>
+where
+    S: FactoryService,
+    Auth: MacroAuthorizationService,
+{
+    let actor = caller.authorization.user.macro_user_id;
+    Ok(Json(
+        state
+            .service
+            .session_step(&actor, params.session_id)
+            .await?,
+    ))
 }
 
 /// Send the agent of the running Step `seq` of one of the caller's Runs a
@@ -1104,6 +1155,7 @@ impl IntoResponse for FactoryError {
         get_run_handler,
         answer_gate_handler,
         reply_to_gate_handler,
+        session_step_handler,
         note_step_handler,
         pause_step_handler,
         resume_step_handler,
@@ -1127,6 +1179,7 @@ impl IntoResponse for FactoryError {
         ReplyToGateRequest,
         NoteStepRequest,
         ResumeStepRequest,
+        SessionStepRef,
         LinkTaskRequest,
         HandBackRequest,
         RunDetail,

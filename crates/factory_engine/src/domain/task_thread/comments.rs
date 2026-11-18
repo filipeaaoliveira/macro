@@ -143,6 +143,15 @@ pub fn update_comment(
             );
             Some(reply(format!("notice:{seq}"), end.ended_at, text))
         }
+        RunUpdate::PauseRunningOut { seq, ends_by } => {
+            let step = step_at(*seq)?;
+            let paused_at = step.terminal.paused_at.filter(|_| step.end.is_none())?;
+            let text = format!(
+                "Step {seq} is paused. Its time runs out at {} UTC: unless the run's owner resumes it from the run, it ends failed then.",
+                ends_by.format("%Y-%m-%d %H:%M")
+            );
+            Some(reply(format!("pause:{seq}"), paused_at, text))
+        }
         RunUpdate::Ended => {
             let end = run.end.as_ref()?;
             let text = format!("**The factory run ended** `{}`.", end.outcome);

@@ -261,6 +261,14 @@ impl FactoryService for FakeService {
         Err(self.refusing(&actor))
     }
 
+    async fn session_step(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        _session_id: Uuid,
+    ) -> Result<crate::domain::models::SessionStepRef, FactoryError> {
+        Err(self.refusing(actor))
+    }
+
     async fn steer_step(
         &self,
         actor: MacroUserIdStr<'static>,

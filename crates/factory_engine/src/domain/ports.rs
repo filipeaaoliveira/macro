@@ -24,7 +24,8 @@ use crate::domain::models::{
     AgentAnswer, AgentCommand, AgentTask, AgentTurn, Answerer, CodeRepository,
     ControlFilesSettings, FactoryError, FlowSummary, HeadChecks, Merging, OpenPullRequest, Opening,
     PullRequest, RepositoryAccess, RequiredChecks, RunDetail, RunFinish, RunStart, SessionSteer,
-    StandingRulesSettings, StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
+    SessionStepRef, StandingRulesSettings, StepEnding, StepError, StepInput, StepReport,
+    StepRequest, StepStart,
 };
 use crate::domain::review_rounds::{ChangedFile, ReviewRoundClosing, ReviewRoundOpening};
 use crate::domain::standing_rules::RuleAnswer;
@@ -399,6 +400,18 @@ pub trait GateNotifier: Send + Sync + 'static {
     ) -> impl Future<Output = ()> + Send;
 }
 
+/// Tells a paused Step's owner, quietly, that its work's time runs out.
+pub trait PauseNotices: Send + Sync + 'static {
+    /// Tell the owner of the paused Step `key` that it ends failed at
+    /// `ends_by` unless they resume it. Telling them again is the same
+    /// notice; one that cannot be told is logged and dropped.
+    fn running_out(
+        &self,
+        key: StepKey,
+        ends_by: chrono::DateTime<chrono::Utc>,
+    ) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send + '_>>;
+}
+
 /// Reads what a Run's owner commented on the Run's task.
 pub trait TaskNotes: Send + Sync + 'static {
     /// The error type returned when the comments cannot be read now.
@@ -689,6 +702,15 @@ pub trait FactoryService: Send + Sync + 'static {
         id: RunId,
         task_id: Uuid,
     ) -> impl Future<Output = Result<RunDetail, FactoryError>> + Send;
+
+    /// The Step of one of `actor`'s Runs that works, or worked, in the agent
+    /// session `session_id`: the one that has not ended, else the latest.
+    /// Not found when no Step of theirs does.
+    fn session_step(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        session_id: Uuid,
+    ) -> impl Future<Output = Result<SessionStepRef, FactoryError>> + Send;
 
     /// Steer the running Step `seq` of `actor`'s Run from its Step
     /// Terminal: send its agent a note, pause it, resume it, or stop it

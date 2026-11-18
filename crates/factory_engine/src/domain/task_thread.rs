@@ -34,12 +34,12 @@ mod comments;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use factory_records::domain::models::{Run, RunId};
+use factory_records::domain::models::{Run, RunId, StepKey};
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::ReviewRoundRepository;
 use uuid::Uuid;
 
-use crate::domain::ports::{TaskThread, ThreadPosted};
+use crate::domain::ports::{PauseNotices, TaskThread, ThreadPosted};
 
 pub use comments::{UpdateContext, first_comment, update_comment};
 
@@ -85,6 +85,14 @@ pub enum RunUpdate {
         seq: u16,
         /// What it tells.
         question: String,
+    },
+    /// The Step `seq` is paused, and its work's time runs out at
+    /// `ends_by`: it ends failed then unless its owner resumes it.
+    PauseRunningOut {
+        /// The paused Step's place.
+        seq: u16,
+        /// When its work's time runs out.
+        ends_by: DateTime<Utc>,
     },
     /// The Run ended.
     Ended,
@@ -244,4 +252,42 @@ pub fn comment_id(run_id: RunId, event: &str, at: DateTime<Utc>) -> Uuid {
     bytes.copy_from_slice(&fixed.as_bytes()[6..16]);
     let millis = u64::try_from(at.timestamp_millis()).unwrap_or(0);
     uuid::Builder::from_unix_timestamp_millis(millis, &bytes).into_uuid()
+}
+
+/// [`PauseNotices`] on the Run's task thread, when its section is on: a
+/// comment that notifies no one, as every update the thread posts.
+#[derive(Debug, Clone)]
+pub struct ThreadPauseNotices<R, P> {
+    repo: R,
+    thread: P,
+}
+
+impl<R, P> ThreadPauseNotices<R, P> {
+    /// Notices posted to the task threads `thread` keeps, of the Runs
+    /// `repo` reads.
+    pub fn new(repo: R, thread: P) -> Self {
+        Self { repo, thread }
+    }
+}
+
+impl<R, P> PauseNotices for ThreadPauseNotices<R, P>
+where
+    R: RunRepository + ReviewRoundRepository,
+    P: TaskThread,
+{
+    fn running_out(
+        &self,
+        key: StepKey,
+        ends_by: DateTime<Utc>,
+    ) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+        Box::pin(post_update(
+            &self.repo,
+            &self.thread,
+            key.run_id,
+            RunUpdate::PauseRunningOut {
+                seq: key.seq,
+                ends_by,
+            },
+        ))
+    }
 }

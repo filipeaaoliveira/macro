@@ -138,7 +138,8 @@ async fn only_the_run_s_owner_steers_it() {
     assert!(matches!(agent, Err(FactoryError::NotAPerson)), "{agent:?}");
 
     assert!(executor.steered.lock().expect("steered").is_empty());
-    assert!(repo.steering(key).await.expect("read") == Default::default());
+    let steering = repo.steering(key).await.expect("read");
+    assert!(!steering.paused && !steering.stop_asked && steering.prompt.is_none());
 }
 
 /// A note while the Step is paused, a resume of a Step that is not, a
@@ -258,4 +259,99 @@ async fn a_prompt_the_session_refuses_is_not_followed() {
         .map(|steer| steer.undelivered)
         .collect();
     assert_eq!(undelivered, [true, false, true]);
+}
+
+/// A Step its owner stopped, or that stayed paused past its time, ends
+/// failed saying so, not with the word for any failed work; a paused Step
+/// reads when it ends unless resumed.
+#[tokio::test]
+async fn a_stopped_or_timed_out_step_says_why_it_failed() {
+    use crate::domain::models::{StepEnding, StepReport};
+    use crate::domain::ports::StepService;
+    use crate::domain::service::StepServiceImpl;
+    use crate::domain::step_terminal::{
+        PAUSE_RAN_OUT_OUTPUT, PAUSED_STEP_ENDS_AFTER, STOPPED_OUTPUT,
+    };
+    use factory_records::domain::models::Outcome;
+
+    let repo = FakeRepo::default();
+    let executor = FakeExecutor::default();
+    let service = terminal(&repo, &executor);
+    let steps = StepServiceImpl::new(repo.clone(), executor.clone());
+    let (key, _) = step_in_a_session(&repo).await;
+
+    service
+        .steer_step(julia(), key.run_id, key.seq, TerminalRequest::Pause)
+        .await
+        .expect("pause");
+    let paused = service.get_run(&julia(), key.run_id).await.expect("get");
+    let step = &paused.steps[0];
+    assert_eq!(
+        step.terminal.ends_by,
+        Some(step.started_at + PAUSED_STEP_ENDS_AFTER)
+    );
+    repo.pause_ran_out(key).await.expect("ran out");
+    let failed = |output: &str| StepEnding {
+        key,
+        report: StepReport {
+            outcome: Outcome::failed(),
+            output: output.to_string(),
+        },
+    };
+    steps
+        .end_step(failed("The step's work failed."))
+        .await
+        .expect("end");
+    let ended = service.get_run(&julia(), key.run_id).await.expect("get");
+    assert_eq!(
+        ended.steps[0].end.as_ref().map(|end| end.output.as_str()),
+        Some(PAUSE_RAN_OUT_OUTPUT)
+    );
+    assert_eq!(ended.steps[0].terminal.ends_by, None);
+
+    let (stopped, _) = step_in_a_session(&repo).await;
+    service
+        .steer_step(julia(), stopped.run_id, stopped.seq, TerminalRequest::Stop)
+        .await
+        .expect("stop");
+    steps
+        .end_step(StepEnding {
+            key: stopped,
+            ..failed("The step's work failed.")
+        })
+        .await
+        .expect("end");
+    let read = service
+        .get_run(&julia(), stopped.run_id)
+        .await
+        .expect("get");
+    assert_eq!(
+        read.steps[0].end.as_ref().map(|end| end.output.as_str()),
+        Some(STOPPED_OUTPUT)
+    );
+}
+
+/// A session a Step of the owner's works in reads as that Step, for its
+/// view to send them to the Run; to anyone else, and for a session no Step
+/// works in, it is not found.
+#[tokio::test]
+async fn a_step_s_session_names_its_step_to_its_owner_only() {
+    let repo = FakeRepo::default();
+    let executor = FakeExecutor::default();
+    let service = terminal(&repo, &executor);
+    let (key, session_id) = step_in_a_session(&repo).await;
+
+    let step = service
+        .session_step(&julia(), session_id)
+        .await
+        .expect("julia's step");
+    assert_eq!((step.run_id, step.seq), (key.run_id, key.seq));
+    assert!(matches!(
+        service.session_step(&teo(), session_id).await,
+        Err(FactoryError::NotFound)
+    ));
+    assert!(matches!(
+        service.session_step(&julia(), uuid::Uuid::now_v7()).await,
+        Err(FactoryError::NotFound)
+    ));
 }

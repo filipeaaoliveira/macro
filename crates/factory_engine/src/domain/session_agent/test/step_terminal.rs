@@ -19,9 +19,10 @@ use uuid::Uuid;
 
 use super::{agents, julia, plan_task, planner, the_plan};
 use crate::domain::fakes::FakeRepo;
-use crate::domain::models::{AgentAnswer, SessionSteer};
-use crate::domain::ports::{Retryable, StepAgent};
+use crate::domain::models::{AgentAnswer, AgentTurn, SessionSteer};
+use crate::domain::ports::{PauseNotices, Retryable, StepAgent};
 use crate::domain::session_agent::{SESSION_DEADLINE, SessionAgent, SessionAgentError};
+use crate::domain::step_terminal::PAUSED_STEP_ENDS_AFTER;
 
 /// A session whose turns end only when the test says: each prompt's
 /// status is what the test set for its action, `Running` once the first
@@ -388,5 +389,142 @@ async fn the_terminal_reaches_the_step_s_session() {
             .steer(key, &planner(), &julia(), &session, prompt(Uuid::now_v7()))
             .await;
         assert_eq!(steered.is_ok(), taken, "{refusal:?}");
+    }
+}
+
+/// A note the session refused never arrives: once the Step no longer
+/// follows it, the wait goes back to the turn it followed before, and the
+/// Step ends with it rather than wait for the note.
+#[tokio::test(start_paused = true)]
+async fn the_step_stops_waiting_for_a_note_the_session_refused() {
+    let repo = FakeRepo::default();
+    let sessions = ScriptedSessions::default();
+    let working = working(&repo, &sessions).await;
+
+    let note = working.note(&repo, "Use the theme tokens").await;
+    working.hand_back(&repo, &the_plan()).await;
+    sessions.set(working.session.action_id, RoutineActionStatus::Succeeded);
+    tokio::time::sleep(Duration::from_secs(60)).await;
+    assert!(!working.work.is_finished(), "the wait follows the note");
+
+    // The Run API found the session refused it, after the wait took it on.
+    repo.unsteer(working.key, note, None)
+        .await
+        .expect("unsteer");
+    tokio::time::sleep(Duration::from_secs(60)).await;
+    let answer = working.work.await.expect("joined").expect("answer");
+    assert_eq!(answer.text, the_plan().output);
+}
+
+/// A note the owner sent during the Step's work is not followed once the
+/// factory sent the session a prompt of its own: that prompt's failed turn
+/// fails it, whatever the note's turn did.
+#[tokio::test(start_paused = true)]
+async fn a_leftover_note_does_not_hide_a_failed_factory_turn() {
+    let repo = FakeRepo::default();
+    let sessions = ScriptedSessions::default();
+    let working = working(&repo, &sessions).await;
+    let note = working.note(&repo, "Use the theme tokens").await;
+    working.hand_back(&repo, &the_plan()).await;
+    sessions.set(working.session.action_id, RoutineActionStatus::Succeeded);
+    sessions.set(note, RoutineActionStatus::Succeeded);
+    working.work.await.expect("joined").expect("answer");
+
+    let fix = Uuid::now_v7();
+    sessions.set(
+        fix,
+        RoutineActionStatus::Failed(RoutineFailureReason::RuntimeError),
+    );
+    let fixed = working
+        .agent
+        .follow_up(AgentTurn {
+            key: working.key,
+            owner: julia(),
+            role: planner(),
+            action_id: fix,
+            place: 3,
+            prompt: "Fix the checks".to_string(),
+            outcomes: vec![Outcome::done()],
+            answer_by: chrono::Utc::now() + chrono::TimeDelta::minutes(30),
+        })
+        .await;
+
+    assert!(
+        matches!(fixed, Err(SessionAgentError::TurnFailed(_))),
+        "{fixed:?}"
+    );
+    let sent = sessions.follow_ups.lock().expect("follow-ups").clone();
+    assert!(
+        sent.iter().all(|prompt| prompt.out_of_sight),
+        "factory prompts are out of sight"
+    );
+}
+
+/// A Step paused near the end of its work's time tells its owner once, and
+/// ends failed when the time runs out, recording why.
+#[tokio::test(start_paused = true)]
+async fn a_step_paused_past_its_time_ends_saying_why() {
+    let repo = FakeRepo::default();
+    let sessions = ScriptedSessions::default();
+    let told = Arc::new(Mutex::new(Vec::new()));
+    let agent = SessionAgent::new(sessions.clone(), repo.clone(), agents())
+        .with_pause_notices(Told(told.clone()));
+    let task = plan_task(&repo).await;
+    let key = task.key;
+    // The Step started long ago: its time is nearly out.
+    let started = chrono::Utc::now() - PAUSED_STEP_ENDS_AFTER + chrono::TimeDelta::minutes(5);
+    repo.steps
+        .lock()
+        .expect("steps")
+        .iter_mut()
+        .filter(|(run, step)| *run == key.run_id && step.seq == key.seq)
+        .for_each(|(_, step)| step.started_at = started);
+    let work = tokio::spawn({
+        let agent = agent.clone();
+        async move { agent.answer(task).await }
+    });
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    repo.steer(key, &NewSteer::Pause)
+        .await
+        .expect("records")
+        .expect("pause");
+    tokio::time::sleep(Duration::from_secs(30)).await;
+    assert_eq!(
+        *told.lock().expect("told"),
+        [(key, started + PAUSED_STEP_ENDS_AFTER)],
+        "the owner is told once"
+    );
+    assert!(!work.is_finished());
+
+    // The wall clock is the work's: move the Step's start back past it.
+    repo.steps
+        .lock()
+        .expect("steps")
+        .iter_mut()
+        .filter(|(run, step)| *run == key.run_id && step.seq == key.seq)
+        .for_each(|(_, step)| step.started_at = started - chrono::TimeDelta::minutes(10));
+    let ended = work.await.expect("joined");
+    assert!(
+        matches!(ended, Err(SessionAgentError::PausedTooLong)),
+        "{ended:?}"
+    );
+    assert!(repo.steering(key).await.expect("read").pause_ran_out);
+    assert_eq!(told.lock().expect("told").len(), 1);
+}
+
+/// A paused Step and when its time runs out, as its owner was told.
+type Notice = (StepKey, chrono::DateTime<chrono::Utc>);
+
+/// Keeps who was told a paused Step's time runs out.
+struct Told(Arc<Mutex<Vec<Notice>>>);
+
+impl PauseNotices for Told {
+    fn running_out(
+        &self,
+        key: StepKey,
+        ends_by: chrono::DateTime<chrono::Utc>,
+    ) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+        self.0.lock().expect("told").push((key, ends_by));
+        Box::pin(async {})
     }
 }
