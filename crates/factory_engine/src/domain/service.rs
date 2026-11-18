@@ -1322,6 +1322,33 @@ where
             .end_run(finish.run_id, finish.outcome)
             .await
             .map_err(internal)?;
+
+        // A Gate left open when the Run ended (cancelled, or ended for a
+        // person) waits on no one now: the notification its owner was told
+        // of it by is done, as an answer would make it. One never sent
+        // changes nothing, so a retry marks the same ones again.
+        let run = self
+            .repo
+            .get_run(finish.run_id)
+            .await
+            .map_err(internal)?
+            .ok_or(StepError::NoSuchRun)?;
+        let owner_gates = run
+            .standing_rules
+            .is_some_and(|rules| rules.definition.owner_gates);
+        if owner_gates {
+            let steps = self
+                .repo
+                .list_steps(finish.run_id)
+                .await
+                .map_err(internal)?;
+            for step in steps {
+                if step.gate.as_ref().is_some_and(|gate| gate.answer.is_none()) {
+                    let id = notice_id(finish.run_id, step.seq);
+                    self.notifier.answered(&run.user_id, id).await;
+                }
+            }
+        }
         Ok(())
     }
 }

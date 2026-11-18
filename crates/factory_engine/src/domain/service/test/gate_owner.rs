@@ -4,7 +4,9 @@
 //! with the section off.
 
 use chrono::{TimeDelta, Utc};
-use factory_records::domain::models::{EntryId, NewRun, Outcome, Role, RunId, RunInsert, StepKey};
+use factory_records::domain::models::{
+    EntryId, NewRun, Outcome, Role, RunId, RunInsert, RunOutcome, StepKey,
+};
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::{FindingKind, Lines, ReviewFinding, ReviewRound};
 use factory_records::domain::standing_rules::{
@@ -20,7 +22,7 @@ use crate::domain::gate::{
 use crate::domain::gate_owner::{OwnerNote, factory_signed, notice_id};
 use crate::domain::gate_replies::GateReplySettings;
 use crate::domain::gate_replies::service::GateRepliesImpl;
-use crate::domain::models::{StepEnding, StepError, StepReport};
+use crate::domain::models::{RunFinish, StepEnding, StepError, StepReport};
 use crate::domain::ports::{GateReplyService, StepService};
 use crate::domain::service::StepServiceImpl;
 use crate::domain::standing_rules::RuleAnswer;
@@ -559,4 +561,44 @@ async fn the_stand_in_leaves_the_owner_s_blockers_to_the_owner() {
         .await
         .expect("stand in");
     assert_eq!(stood.map(|stood| stood.answer), Some(outcome("fix")));
+}
+
+/// A Run that ends while a Gate waits (cancelled, or ended for a person)
+/// has that Gate's notification marked done; an answered Gate's is left
+/// as its answer left it, and with the owner section off nothing is.
+#[tokio::test]
+async fn an_open_gate_s_notification_is_done_once_its_run_ends() {
+    for owner_gates in [true, false] {
+        let repo = FakeRepo::default();
+        let (run_id, _task) = run_on_task(&repo, rules(owner_gates)).await;
+        let plan = StepKey { run_id, seq: 1 };
+        gate_at(&repo, plan, "plan", "done", &["approve", "revise"]).await;
+        repo.answer_gate(plan, &outcome("approve"), None, &julia(), None)
+            .await
+            .expect("answer");
+        let merge = StepKey { run_id, seq: 2 };
+        gate_at(&repo, merge, "merge", "done", &["approve", "revise"]).await;
+        let notifier = FakeNotifier::default();
+        let steps = service(
+            &repo,
+            &FakeExecutor::default(),
+            &notifier,
+            &FakeTaskNotes::default(),
+        );
+
+        steps
+            .end_run(RunFinish {
+                run_id,
+                outcome: RunOutcome::Cancelled,
+            })
+            .await
+            .expect("end");
+
+        let done = notifier.done.lock().expect("done").clone();
+        if owner_gates {
+            assert_eq!(done, [notice_id(run_id, 2)]);
+        } else {
+            assert!(done.is_empty());
+        }
+    }
 }
