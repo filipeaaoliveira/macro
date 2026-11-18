@@ -14,7 +14,7 @@ use super::{CodeAgent, CodeWalk, client, walk_code_with};
 use crate::domain::built_in_flows::BuiltInFlow;
 use crate::domain::fakes::{FakeGithub, FakeNotifier, FakeRepo, FakeTaskThread, ci};
 use crate::domain::flow::{Flow, GateDefinition, StepUse, Target, Transition};
-use crate::domain::gate_owner::{FACTORY_SIGNATURE, TOLD_PREFIX};
+use crate::domain::gate_owner::FACTORY_SIGNATURE;
 use crate::temporal::FlowWorkflowDefinition;
 
 /// The built-in `code` Flow, whose plan Gate only tells the Run's owner:
@@ -99,7 +99,8 @@ async fn a_notify_only_plan_gate_tells_the_owner_and_the_run_goes_on() {
     assert_eq!(sent.len(), 2, "{sent:?}");
     assert_eq!(sent[0].metadata.seq, 1);
     assert!(!sent[0].push);
-    assert!(sent[0].metadata.question.starts_with(TOLD_PREFIX));
+    assert!(sent[0].metadata.notify_only);
+    assert!(!sent[1].metadata.notify_only);
     assert!(sent[1].push, "the merge gate waits on the owner");
 
     let texts = thread.texts();

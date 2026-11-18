@@ -75,6 +75,7 @@ fn notice() -> GateNotice {
             request: "Fix the login bug".to_string(),
             question: "Approve the plan?".to_string(),
             asker: None,
+            notify_only: false,
         },
         push: true,
     }

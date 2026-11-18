@@ -59,17 +59,16 @@ tried for at most five minutes, its failure ignored) and routes that
 outcome, so the entry's `on` routes `done` (or the round's outcome) as if
 there were no Gate. No Gate is recorded: the Run never waits on it, is not
 listed as waiting, and insights count none. The worker tells the owner
-with the waiting Gate's notification kind (`factory_gate_waiting`, its
-question starting "For your information, the run goes on: "), lighter:
+with the waiting Gate's notification kind (`factory_gate_waiting`,
+flagged `notifyOnly`, so its title and the inbox say the Run goes on
+rather than waits on an answer), lighter:
 not pushed to their phone, one per entry and Run however often its Gate
 tells (`gate_owner::told_id`), and marked done in `factory_end_run`
 (every entry's, since no record says which told; one never sent changes
 nothing). It is sent whatever the owner section says, since the Gate
 exists only to tell the owner (`gate_owner::gate_told`); the worker also
-posts the notice to the task thread when that section is on. The inbox
-still describes it as the waiting kind does: giving it words of its own
-needs a field on the notification's metadata, its GraphQL type and the
-generated clients. No built-in Flow has one.
+posts the notice to the task thread when that section is on. No built-in
+Flow has one.
 
 An agent may ask the Run's owner a question mid-Step (`src/domain/questions.rs`)
 when its Flow says how many (`questions`, which the service writes into the

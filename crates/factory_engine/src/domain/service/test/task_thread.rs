@@ -20,7 +20,7 @@ use super::{FakeExecutor, julia, reply_step};
 use crate::domain::fakes::{FakeGithub, FakeNotifier, FakeRepo, FakeTaskNotes, FakeTaskThread};
 use crate::domain::flow::StepName;
 use crate::domain::gate::{AnswerGate, GateAnswered, GateRuling, GateTelling};
-use crate::domain::gate_owner::{FACTORY_SIGNATURE, TOLD_PREFIX, told_id};
+use crate::domain::gate_owner::{FACTORY_SIGNATURE, told_id};
 use crate::domain::models::{RunFinish, StepEnding, StepReport, StepRequest};
 use crate::domain::ports::{ReviewService, StepService, TaskThread};
 use crate::domain::review_rounds::{
@@ -575,10 +575,8 @@ async fn a_notify_only_gate_is_told_once_per_entry_until_the_run_ends() {
     );
     assert!(!sent[0].push);
     assert_eq!(sent[0].task_id, task);
-    assert_eq!(
-        sent[0].metadata.question,
-        format!("{TOLD_PREFIX}The plan is ready.")
-    );
+    assert_eq!(sent[0].metadata.question, "The plan is ready.");
+    assert!(sent[0].metadata.notify_only);
     let texts = thread.texts();
     assert_eq!(
         texts[2],

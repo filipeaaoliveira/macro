@@ -128,14 +128,11 @@ pub fn gate_notice(run: &Run, step: &Step) -> Option<GateNotice> {
             request: FactoryGateWaitingMetadata::excerpt(&run.request),
             question: FactoryGateWaitingMetadata::excerpt(&gate.question),
             asker,
+            notify_only: false,
         },
         push: true,
     })
 }
-
-/// What a notify-only Gate's notice to its owner starts with, so it reads
-/// as news rather than a question to answer.
-pub const TOLD_PREFIX: &str = "For your information, the run goes on: ";
 
 /// The id of the notification the notify-only Gate of the entry `entry`
 /// sends in the Run `run_id`: one per entry and Run, however often its
@@ -150,8 +147,9 @@ pub fn told_id(run_id: RunId, entry: &EntryId) -> Uuid {
 /// `question`, warrants: none once the Run ended, or when it works on no
 /// task, which Macro notifies about. It is sent whatever the owner section
 /// says, since the Gate exists only to tell the owner. The notice is the
-/// waiting Gate's kind, lighter: one per entry and Run ([`told_id`]), not
-/// pushed, and saying the Run goes on.
+/// waiting Gate's kind, lighter: flagged `notify_only`, so it reads as news
+/// rather than a question, one per entry and Run ([`told_id`]), and not
+/// pushed.
 pub fn gate_told(run: &Run, step: &Step, question: &str) -> Option<GateNotice> {
     if run.end.is_some() {
         return None;
@@ -166,8 +164,9 @@ pub fn gate_told(run: &Run, step: &Step, question: &str) -> Option<GateNotice> {
             seq: step.seq,
             task_id: task_id.to_string(),
             request: FactoryGateWaitingMetadata::excerpt(&run.request),
-            question: FactoryGateWaitingMetadata::excerpt(&format!("{TOLD_PREFIX}{question}")),
+            question: FactoryGateWaitingMetadata::excerpt(question),
             asker: None,
+            notify_only: true,
         },
         push: false,
     })
