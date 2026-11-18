@@ -12,6 +12,33 @@ export default {
   judged: 'Judged',
   meanScore: 'Mean score',
   passed: 'Passed',
+  // Self-improvement.
+  selfImprovement: 'Self-improvement',
+  selfImprovementDescription:
+    'Failed judgments and flawed runs wait here until a run against your factory definition addresses them. A person merges its pull request.',
+  pendingFailures: 'Pending failures',
+  startsAt: 'Starts a run at',
+  startsAtValue: {
+    one: '{{count}} failure or {{days}} days',
+    other: '{{count}} failures or {{days}} days',
+  },
+  oldestPending: 'Oldest pending',
+  improvementOff: 'Turned off in the factory definition.',
+  improvementNoOwner:
+    'No one is kept as naming the factory definition, so no run starts. An admin names it again in team settings.',
+  flawedSource: 'Marked flawed',
+  lastImprovement: 'Last self-improvement run',
+  noImprovement: 'No self-improvement run yet.',
+  improvementFailures: {
+    one: '{{count}} failure',
+    other: '{{count}} failures',
+  },
+  openImprovement: 'Open run',
+  improvementStarting: 'Starting',
+  improvementOpen: 'Open',
+  improvementMerged: 'Merged',
+  improvementClosed: 'Closed unmerged',
+  improvementRefused: 'Couldn’t start',
   // Experiments.
   experiments: 'Experiments',
   experimentsDescription:

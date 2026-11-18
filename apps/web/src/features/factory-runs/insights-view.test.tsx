@@ -530,6 +530,53 @@ describe('RunInsightsView', () => {
     expect(lost.textContent).not.toMatch(/\d\.\d\d/);
   });
 
+  it('shows the team’s pending failures and its last self-improvement run, and opens it', async () => {
+    mount({
+      insights: november,
+      evaluation: {
+        ...judged,
+        selfImprovement: {
+          repoUrl: 'https://github.com/macro/factory-definition',
+          enabled: true,
+          failuresThreshold: 25,
+          oldestDays: 7,
+          hasOwner: true,
+          pending: 4,
+          oldestPendingAt: '2026-11-05T09:00:00Z',
+          pendingBySource: [
+            { source: 'correctness', count: 3 },
+            { source: 'flawed', count: 1 },
+          ],
+          last: {
+            runId: failedImport.id,
+            state: 'closed',
+            failures: 12,
+            createdAt: '2026-11-01T09:00:00Z',
+          },
+        },
+      },
+    });
+
+    const section = screen.getByRole('heading', { name: 'Self-improvement' })
+      .parentElement?.parentElement?.parentElement as HTMLElement;
+    expect(within(section).getByText('4')).toBeTruthy();
+    expect(within(section).getByText('25 failures or 7 days')).toBeTruthy();
+    expect(section.textContent).toContain('correctness 3');
+    expect(section.textContent).toContain('Marked flawed 1');
+    expect(within(section).getByText('Closed unmerged')).toBeTruthy();
+    expect(section.textContent).toContain('12 failures');
+
+    fireEvent.click(within(section).getByRole('button', { name: 'Open run' }));
+    expect(await screen.findByText('No steps yet')).toBeTruthy();
+  });
+
+  it('shows no self-improvement for a team with no factory definition', () => {
+    mount({ insights: november, evaluation: judged });
+    expect(
+      screen.queryByRole('heading', { name: 'Self-improvement' })
+    ).toBeNull();
+  });
+
   it('holds a placeholder while the evaluation loads, and reads it again on Retry', () => {
     mount({ insights: november });
     expect(
