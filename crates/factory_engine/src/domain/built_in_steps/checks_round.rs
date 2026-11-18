@@ -42,17 +42,17 @@ use chrono::{DateTime, Utc};
 use factory_records::domain::main_hold::MainHoldRepository;
 use factory_records::domain::models::{
     CheckResult, CheckRound, CheckRoundOutcome, CheckRoundStart, HandedBack,
-    MAX_CHECK_RESULT_OUTPUT_BYTES, MAX_OUTPUT_BYTES, Outcome, Role,
+    MAX_OUTPUT_BYTES, Outcome, Role,
 };
 use factory_records::domain::ports::RunRepository;
 use uuid::Uuid;
 
 use super::{BuiltInStepError, BuiltInSteps, agent_role, cut};
 use crate::domain::checks::{
-    CHECKS_FILE, DEFAULT_CHECK_TIMEOUT_SECS, RepositoryCheck, RepositoryChecks,
+    CHECKS_FILE, DEFAULT_CHECK_TIMEOUT_SECS, RepositoryCheck, RepositoryChecks, kept_output,
 };
 use crate::domain::flow::StepName;
-use crate::domain::setup::{RepositorySetup, SETUP_FILE};
+use crate::domain::setup::{RepositorySetup, SETUP_FILE, redacted};
 use crate::domain::models::{AgentCommand, AgentTurn, StepInput, StepReport};
 use crate::domain::ports::{MainWatches, PullRequests, StepAgent};
 use crate::domain::pull_request_steps::PullRequestStepError;
@@ -637,7 +637,7 @@ where
             let result = CheckResult {
                 name,
                 exit_code: output.exit_code,
-                output: check_output(&output, timeout),
+                output: setup_output(&output, timeout),
             };
             repo.record_check_result(input.key, round.round, &commit, &result)
                 .await
@@ -1129,9 +1129,21 @@ fn setup_failed_report(
     cut(&report, MAX_OUTPUT_BYTES).to_string()
 }
 
+/// What a verified round keeps of a setup command's run: as of a check's,
+/// with each line that looks like a secret left out, since the setup's
+/// output is shown to the agent and the Run's owner.
+fn setup_output(output: &SessionCommandOutput, timeout: Duration) -> String {
+    kept_output(&redacted(&run_text(output, timeout)))
+}
+
 /// What a verified round keeps of a check's run: the end of its output,
 /// both streams, and why it stopped when its timeout stopped it.
 fn check_output(output: &SessionCommandOutput, timeout: Duration) -> String {
+    kept_output(&run_text(output, timeout))
+}
+
+/// Both streams of a run, and why it stopped when its timeout stopped it.
+fn run_text(output: &SessionCommandOutput, timeout: Duration) -> String {
     let mut text = output.stdout.clone();
     if !output.stderr.is_empty() {
         if !text.is_empty() && !text.ends_with('\n') {
@@ -1146,29 +1158,7 @@ fn check_output(output: &SessionCommandOutput, timeout: Duration) -> String {
             timeout.as_secs()
         ));
     }
-    kept_output(&text)
-}
-
-/// The end of `text` a verified round keeps: without control characters
-/// but line breaks and tabs, and at most [`MAX_CHECK_RESULT_OUTPUT_BYTES`]
-/// once escaped as JSON, so a round's results stay within what their
-/// record holds. Never split inside a character.
-fn kept_output(text: &str) -> String {
-    let mut kept = Vec::new();
-    let mut size = 0;
-    for character in text.chars().rev() {
-        let escaped = match character {
-            '"' | '\\' | '\n' | '\r' | '\t' => 2,
-            character if character.is_control() => continue,
-            character => character.len_utf8(),
-        };
-        if size + escaped > MAX_CHECK_RESULT_OUTPUT_BYTES {
-            break;
-        }
-        size += escaped;
-        kept.push(character);
-    }
-    kept.iter().rev().collect()
+    text
 }
 
 /// How long from now until `at`; nothing once it passed.

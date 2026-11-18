@@ -1,4 +1,6 @@
-use super::{RepositorySetup, SetupFileError};
+use agent_session::domain::session_command::SessionCommandOutput;
+
+use super::{REDACTED, RepositorySetup, SetupFileError, output_tail};
 
 const SETUP: &str = r#"{
     "setup": [
@@ -181,4 +183,23 @@ fn an_env_name_that_says_it_holds_a_secret_does_not_read() {
             "{name}"
         );
     }
+}
+
+/// What a failed setup shows of its output: both streams, each line that
+/// looks like a secret left out, no control character but line breaks and
+/// tabs, and only its end.
+#[test]
+fn a_setup_s_output_tail_leaves_secrets_and_control_characters_out() {
+    let output = SessionCommandOutput {
+        exit_code: 1,
+        stdout: format!("{}\nfetching\u{1b}[0m\ttwo", "x".repeat(10_000)),
+        stderr: concat!("token: ghp_", "abcdefghijklmnopqrstuvwxyz0123\nerror: 401").to_string(),
+    };
+
+    let tail = output_tail(&output);
+
+    assert!(tail.ends_with(&format!("fetching[0m\ttwo\n{REDACTED}\nerror: 401")), "{tail}");
+    assert!(!tail.contains("ghp_"));
+    assert!(tail.len() <= 4096);
+    assert!(tail.starts_with('x'));
 }

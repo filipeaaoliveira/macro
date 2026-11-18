@@ -30,7 +30,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use agent_session::domain::session_command::SessionCommandOutput;
 use serde::Deserialize;
 
-use crate::domain::checks::{DEFAULT_CHECK_TIMEOUT_SECS, MAX_CHECK_TIMEOUT_SECS};
+use crate::domain::checks::{DEFAULT_CHECK_TIMEOUT_SECS, MAX_CHECK_TIMEOUT_SECS, kept_output};
 use crate::domain::definition::{UniqueKeys, secret_in, secret_in_value};
 
 /// Where a repository declares its setup, from its root.
@@ -251,12 +251,12 @@ impl RepositorySetup {
     }
 }
 
-/// The most of a setup command's output a failure shows, in bytes.
-pub const MAX_OUTPUT_TAIL_BYTES: usize = 4096;
+/// What stands in a setup's output for a line that looks like a secret.
+pub const REDACTED: &str = "(a line that looks like a secret is left out)";
 
 /// The end of what a setup command printed, both streams, as a failure
-/// shows it: without control characters but line breaks and tabs, and at
-/// most [`MAX_OUTPUT_TAIL_BYTES`], never split inside a character.
+/// shows it: each line that looks like a secret left out, then as a
+/// verified round keeps a check's output.
 pub fn output_tail(output: &SessionCommandOutput) -> String {
     let mut text = output.stdout.clone();
     if !output.stderr.is_empty() {
@@ -265,19 +265,16 @@ pub fn output_tail(output: &SessionCommandOutput) -> String {
         }
         text.push_str(&output.stderr);
     }
-    let mut kept = Vec::new();
-    let mut size = 0;
-    for character in text.chars().rev() {
-        if character.is_control() && !matches!(character, '\n' | '\t') {
-            continue;
-        }
-        if size + character.len_utf8() > MAX_OUTPUT_TAIL_BYTES {
-            break;
-        }
-        size += character.len_utf8();
-        kept.push(character);
-    }
-    kept.iter().rev().collect()
+    kept_output(&redacted(&text))
+}
+
+/// `text` with each line that looks like a secret (the Definition's check)
+/// replaced by [`REDACTED`].
+pub fn redacted(text: &str) -> String {
+    text.split('\n')
+        .map(|line| if secret_in(line).is_some() { REDACTED } else { line })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Whether `name` is a shell variable's name the setup may set.

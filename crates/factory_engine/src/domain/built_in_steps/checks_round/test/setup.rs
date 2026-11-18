@@ -249,7 +249,13 @@ async fn a_retried_round_does_not_run_its_passed_setup_again() {
 async fn a_setup_that_fails_in_the_round_is_a_red_check() {
     let agent = verifying(
         vec![
-            ran(1, "error: lockfile had changes"),
+            ran(
+                1,
+                concat!(
+                    "using ghp_",
+                    "abcdefghijklmnopqrstuvwxyz0123\nerror: lockfile had changes"
+                ),
+            ),
             ran(0, "installed"),
             ran(0, "12 passed"),
         ],
@@ -285,6 +291,8 @@ async fn a_setup_that_fails_in_the_round_is_a_red_check() {
         end.report
     );
     assert!(end.report.contains("error: lockfile had changes"));
+    assert!(!end.report.contains("ghp_"), "{}", end.report);
+    assert!(end.report.contains(crate::domain::setup::REDACTED));
     assert!(end.report.contains("So these checks did not run: web."));
     let turns = agent.turns();
     assert_eq!(turns.len(), 1);

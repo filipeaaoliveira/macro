@@ -24,7 +24,7 @@ mod test;
 
 use std::collections::BTreeSet;
 
-use factory_records::domain::models::MAX_CHECK_ROUNDS;
+use factory_records::domain::models::{MAX_CHECK_RESULT_OUTPUT_BYTES, MAX_CHECK_ROUNDS};
 use serde::Deserialize;
 
 /// Where a repository declares its checks, from its root.
@@ -216,4 +216,26 @@ fn valid_path(path: &str) -> bool {
         && path
             .split('/')
             .all(|part| !part.is_empty() && part != "." && part != "..")
+}
+
+/// The end of `text` a verified round keeps: without control characters
+/// but line breaks and tabs, and at most [`MAX_CHECK_RESULT_OUTPUT_BYTES`]
+/// once escaped as JSON, so a round's results stay within what their
+/// record holds. Never split inside a character.
+pub(crate) fn kept_output(text: &str) -> String {
+    let mut kept = Vec::new();
+    let mut size = 0;
+    for character in text.chars().rev() {
+        let escaped = match character {
+            '"' | '\\' | '\n' | '\r' | '\t' => 2,
+            character if character.is_control() => continue,
+            character => character.len_utf8(),
+        };
+        if size + escaped > MAX_CHECK_RESULT_OUTPUT_BYTES {
+            break;
+        }
+        size += escaped;
+        kept.push(character);
+    }
+    kept.iter().rev().collect()
 }
