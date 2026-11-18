@@ -530,7 +530,7 @@ pub async fn read_definition<F: DefinitionFiles>(
         let definition: serde_json::Value = required(files, &path).await?;
         let flow = Flow::parse(definition, serves)
             .and_then(|flow| flow.check_merges().map(|()| flow))
-            .and_then(|flow| flow.check_work_roles(&serves).map(|()| flow))
+            .and_then(|flow| flow.check_work_roles(serves).map(|()| flow))
             .map_err(|error| DefinitionError::Flow { path, error })?;
         flows.insert(name, flow);
     }
