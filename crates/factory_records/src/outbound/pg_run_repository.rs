@@ -9,6 +9,7 @@ mod gate_replies;
 mod insights;
 mod main_hold;
 mod review_rounds;
+mod self_improvement;
 mod standing_rules;
 mod steering;
 #[cfg(test)]
@@ -211,6 +212,9 @@ pub enum PgRunRepositoryErr {
     /// A stored user id does not read as one.
     #[error("stored user id {0:?} does not read as one")]
     InvalidUserId(String),
+    /// A stored self-improvement Run's state is not one this code knows.
+    #[error("unknown self-improvement state {0:?}")]
+    UnknownImprovementState(String),
     /// A stored Step has passed over a different number of Agents than it
     /// has reasons for.
     #[error("a stored step's passed over agents and their reasons do not pair up")]
@@ -895,18 +899,21 @@ impl RunRepository for PgRunRepository {
         &self,
         team_id: Uuid,
         repo_url: Option<&str>,
+        named_by: &MacroUserIdStr<'static>,
     ) -> Result<(), Self::Err> {
         match repo_url {
             Some(repo_url) => {
                 sqlx::query!(
                     r#"
-                    INSERT INTO factory_team_definition (team_id, repo_url)
-                    VALUES ($1, $2)
+                    INSERT INTO factory_team_definition (team_id, repo_url, named_by_user_id)
+                    VALUES ($1, $2, $3)
                     ON CONFLICT (team_id)
-                    DO UPDATE SET repo_url = EXCLUDED.repo_url, updated_at = now()
+                    DO UPDATE SET repo_url = EXCLUDED.repo_url,
+                        named_by_user_id = EXCLUDED.named_by_user_id, updated_at = now()
                     "#,
                     team_id,
                     repo_url,
+                    named_by.as_ref(),
                 )
                 .execute(&self.pool)
                 .await?;

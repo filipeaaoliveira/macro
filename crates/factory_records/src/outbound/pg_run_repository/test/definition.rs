@@ -26,10 +26,10 @@ async fn a_team_names_its_definition(pool: PgPool) {
     let team_id = Uuid::parse_str("00000000-0000-7000-8000-000000000201").expect("valid");
     assert_eq!(repo.team_definition(team_id).await.expect("read"), None);
 
-    repo.set_team_definition(team_id, Some("https://github.com/macro/old"))
+    repo.set_team_definition(team_id, Some("https://github.com/macro/old"), &julia())
         .await
         .expect("name");
-    repo.set_team_definition(team_id, Some(REPO_URL))
+    repo.set_team_definition(team_id, Some(REPO_URL), &julia())
         .await
         .expect("name another");
     assert_eq!(
@@ -40,7 +40,7 @@ async fn a_team_names_its_definition(pool: PgPool) {
         Some(REPO_URL)
     );
 
-    repo.set_team_definition(team_id, None)
+    repo.set_team_definition(team_id, None, &julia())
         .await
         .expect("name none");
     assert_eq!(repo.team_definition(team_id).await.expect("read"), None);

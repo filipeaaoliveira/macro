@@ -458,12 +458,14 @@ pub trait RunRepository: Send + Sync + 'static {
         team_id: Uuid,
     ) -> impl Future<Output = Result<Option<String>, Self::Err>> + Send;
 
-    /// Name `repo_url` as the team `team_id`'s Factory Definition; none
+    /// Name `repo_url` as the team `team_id`'s Factory Definition, kept as
+    /// named by `named_by`, whose self-improvement Runs are theirs; none
     /// names none, so its Runs go back to the team's settings.
     fn set_team_definition(
         &self,
         team_id: Uuid,
         repo_url: Option<&str>,
+        named_by: &MacroUserIdStr<'static>,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// The Agents of the Factory Definition the Run `id` started under, as
