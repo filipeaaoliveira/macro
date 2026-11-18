@@ -515,6 +515,9 @@ impl RunRepository for FakeRepo {
     }
 
     async fn set_pull_request_url(&self, id: RunId, url: &str) -> Result<(), FakeError> {
+        if self.fails("set_pull_request_url") {
+            return Err(FakeError);
+        }
         if let Some(run) = self.runs.lock().expect("runs").get_mut(&id) {
             run.pull_request_url = Some(url.to_string());
         }

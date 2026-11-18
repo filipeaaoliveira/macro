@@ -565,24 +565,25 @@ where
             .await
             .map_err(PullRequestStepError::github)?;
         if let Some(pull_request) = &found {
-            self.keep_page(input, pull_request).await?;
+            self.keep_page(input, pull_request).await;
         }
         Ok(found)
     }
 
-    /// Keep `pull_request`'s page on the Run, when GitHub names one.
-    async fn keep_page(
-        &self,
-        input: &StepInput<'_>,
-        pull_request: &PullRequest,
-    ) -> Result<(), PullRequestStepError> {
+    /// Keep `pull_request`'s page on the Run, when GitHub names one. The
+    /// page is only shown, so a write that fails is logged and the Step
+    /// goes on; the next Step that finds the pull request keeps it.
+    async fn keep_page(&self, input: &StepInput<'_>, pull_request: &PullRequest) {
         if !pull_request.url.starts_with("https://") {
-            return Ok(());
+            return;
         }
-        self.repo
+        if let Err(error) = self
+            .repo
             .set_pull_request_url(input.key.run_id, &pull_request.url)
             .await
-            .map_err(PullRequestStepError::records)
+        {
+            tracing::warn!(?error, "could not keep the run's pull request page");
+        }
     }
 
     /// Open the Run's pull request, or find the one it opened: `published`,
@@ -662,7 +663,7 @@ where
             .await
             .map_err(PullRequestStepError::github)?
             .ok_or(PullRequestStepError::NoPullRequest)?;
-        self.keep_page(input, &pull_request).await?;
+        self.keep_page(input, &pull_request).await;
         Ok((pull_request, checks))
     }
 
