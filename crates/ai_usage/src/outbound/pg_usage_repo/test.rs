@@ -234,6 +234,36 @@ async fn insert_and_query_roundtrips(pool: PgPool) {
     assert!((priced.cost.price.as_ref().unwrap().total - 30.0).abs() < 1e-3);
 }
 
+/// Claude Haiku 5.5, the factory's Gate model, is priced as the router
+/// names it: a Gate's usage row records its cost in every dimension.
+#[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
+async fn claude_haiku_5_5_usage_is_priced(pool: PgPool) {
+    let service = UsageServiceImpl::new(PgUsageRepo::new(pool.clone()));
+    let owner = MacroUserIdStr::try_from("macro|owner@example.com".to_owned()).unwrap();
+    service
+        .record_now(UsageContext::new(AiFeature::FactoryGate, owner).into_event(
+            "anthropic/claude-haiku-5-5".into(),
+            UsageAmount::Tokens {
+                input: 1_000_000,
+                output: 1_000_000,
+                cache_read: 1_000_000,
+                cache_write: 1_000_000,
+            },
+        ))
+        .await
+        .unwrap();
+
+    let rows = PgUsageRepo::new(pool)
+        .query_usage(&UsageApiParams::default())
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].cost.model, "claude-haiku-5-5");
+    // $0.10 in, $0.50 out, $0.01 cache reads, $0.125 cache writes.
+    let total = rows[0].cost.price.as_ref().expect("priced").total;
+    assert!((total - 0.735).abs() < 1e-4, "{total}");
+}
+
 #[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
 async fn gemini_3_8_flash_is_priced_like_deepseek_v4p1_flash(pool: PgPool) {
     let repo = PgUsageRepo::new(pool);

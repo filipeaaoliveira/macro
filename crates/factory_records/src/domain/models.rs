@@ -456,9 +456,9 @@ pub enum RunInsert {
     TaskBusy,
     /// A Run of the same Automation's firing is kept already.
     FiringStarted,
-    /// Its owner already held more places in their Queue than the Queue
+    /// Its owner already held as many places in their Queue as the Queue
     /// limit it started under, so nothing was kept: the places they held,
-    /// counted up to one past the limit.
+    /// counted up to the limit.
     QueueFull(QueuePlaces),
 }
 
@@ -484,8 +484,8 @@ impl QueuePlaces {
 #[derive(Debug, Clone, Copy)]
 pub struct QueueHold<'a> {
     /// The Queue limit of the rules it starts under: it is kept only while
-    /// its owner holds no more places than this before it. None sets no
-    /// limit.
+    /// its owner holds fewer places than this before it, so they hold at
+    /// most this many. Zero starts no Run; None sets no limit.
     pub limit: Option<u16>,
     /// The Flows whose Runs hold a place before their first Gate: those
     /// with a Gate of their own. A Run of another Flow holds one only once

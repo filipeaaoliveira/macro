@@ -240,8 +240,9 @@ async fn a_run_holds_its_place_in_the_queue_before_its_first_gate(pool: PgPool) 
     assert_eq!(places(&pool, &julia(), 10).await.held(), 0);
 }
 
-/// Under a Queue limit, a Run is kept only while its owner holds no more
-/// places than the limit before it; starts made at the same time are
+/// Under a Queue limit, a Run is kept only while its owner holds fewer
+/// places than the limit before it, so a limit of 2 lets them hold at
+/// most 2; starts made at the same time are
 /// counted one after the other, each with the places of those kept before
 /// it, so they never all pass a limit only one of them fits under. A
 /// refused start says which places were held. A Run kept reads with no
@@ -253,7 +254,7 @@ async fn a_run_holds_its_place_in_the_queue_before_its_first_gate(pool: PgPool) 
 async fn starts_at_the_same_time_are_held_to_the_queue_limit(pool: PgPool) {
     let repo = PgRunRepository::new(pool);
     let hold = QueueHold {
-        limit: Some(1),
+        limit: Some(2),
         asking_flows: ASKING,
     };
     let owner = julia();

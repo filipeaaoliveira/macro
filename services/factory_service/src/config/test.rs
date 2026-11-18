@@ -13,7 +13,8 @@ fn secrets(extra: &str) -> String {
 /// `FACTORY_REVIEW_ROUNDS` bounds the review panel's rounds; unset leaves
 /// the Flow's own bound, and zero rounds is refused. `FACTORY_QUESTIONS`
 /// bounds each agent Step's questions, zero included; unset leaves the
-/// engine's default.
+/// engine's default. `FACTORY_GATE_MODEL` names the Gate model, Claude
+/// Haiku 5.5 when unset.
 #[test]
 fn the_review_rounds_and_questions_are_read() {
     let read = |extra: &str| {
@@ -37,15 +38,12 @@ fn the_review_rounds_and_questions_are_read() {
     assert!(zero.is_err());
 
     let gates = read(
-        r#","FACTORY_GATE_MODEL":"claude-haiku-4-5","FACTORY_GATE_REPLY_THRESHOLD":"80","FACTORY_STAND_IN_THRESHOLD":"95","FACTORY_STAND_IN_WINDOW_SECS":"300""#,
+        r#","FACTORY_GATE_MODEL":"anthropic/claude-haiku-4-5","FACTORY_GATE_REPLY_THRESHOLD":"80","FACTORY_STAND_IN_THRESHOLD":"95","FACTORY_STAND_IN_WINDOW_SECS":"300""#,
     )
     .expect("reads");
-    assert_eq!(
-        gates.factory_gate_model.as_deref(),
-        Some("claude-haiku-4-5")
-    );
+    assert_eq!(gates.factory_gate_model, "anthropic/claude-haiku-4-5");
     assert_eq!(gates.factory_gate_reply_threshold, Some(80));
     assert_eq!(gates.factory_stand_in_threshold, Some(95));
     assert_eq!(gates.factory_stand_in_window_secs, Some(300));
-    assert_eq!(unset.factory_gate_model, None);
+    assert_eq!(unset.factory_gate_model, "anthropic/claude-haiku-5-5");
 }

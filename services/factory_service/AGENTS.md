@@ -20,7 +20,8 @@ worker that walks each Run's Flow, in one process.
   one ends the Run for a person, two when unset; zero offers agents no
   question), `FACTORY_GATE_MODEL` (optional: the model, by the id Macro's
   model router knows, that reads a person's words on a Gate and stands in
-  for the owner; the router's fast model when unset),
+  for the owner; Claude Haiku 5.5, `anthropic/claude-haiku-5-5`, when
+  unset),
   `FACTORY_GATE_REPLY_THRESHOLD` and `FACTORY_STAND_IN_THRESHOLD` (optional:
   how sure, in percent, the model must be before words answer a Gate, 85,
   and before the stand-in answers one, 90), `FACTORY_STAND_IN_WINDOW_SECS`
@@ -78,9 +79,9 @@ worker that walks each Run's Flow, in one process.
   Project's own, the same way; `"ownerGates": true` in a definition turns
   its owner section on, `"taskThread": true` its task thread section
   (each Run on a task posts its updates to one comment thread on it), and
-  `"queueLimit": 5` sets its Queue limit (null or left out: none): the
-  most places a person may hold before `POST /runs` refuses their new Run
-  (409 `queueFull`, its message counting both kinds), a place being a Run
+  `"queueLimit": 5` sets its Queue limit (1 to 1000, else 400; null or
+  left out: none): the most places a person may hold. Once they hold that
+  many, `POST /runs` refuses their new Run (409 `queueFull`, its message counting both kinds), a place being a Run
   waiting on them at a Gate or a question, or a Run of a Flow with a Gate
   that has not reached one yet. `GET /runs/waiting` lists the caller's
   Runs waiting at a Gate (`runs`) and those yet to reach their first

@@ -14,6 +14,7 @@ import type { Accessor } from 'solid-js';
 import type {
   RunActionResult,
   RunsContext,
+  RunsQueue,
   RunsSource,
   StartRunFailure,
 } from '../context/runs-context';
@@ -153,17 +154,21 @@ export function taskRunsOptions(client: QueryClient, taskId: string) {
   });
 }
 
-/** The person's Runs that wait on them; read again slowly, as a waiting task's are. */
+/**
+ * The person's Runs that hold a place in their Queue; read again slowly, as
+ * a waiting task's are.
+ */
 export function waitingRunsOptions(client: QueryClient) {
   return queryOptions({
     queryKey: factoryRunKeys.waiting.queryKey,
-    queryFn: async ({ signal }) => {
-      const details = await throwOnErr(() =>
+    queryFn: async ({ signal }): Promise<RunsQueue> => {
+      const queue = await throwOnErr(() =>
         factoryClient.listWaitingRuns(signal)
       );
-      const runs = details.map(toRun);
-      for (const run of runs) seedRun(client, run);
-      return runs;
+      const waiting = queue.runs.map(toRun);
+      const starting = queue.starting.map(toRun);
+      for (const run of [...waiting, ...starting]) seedRun(client, run);
+      return { waiting, starting };
     },
     refetchInterval: WAITING_POLL_MS,
     reconcile: 'id',

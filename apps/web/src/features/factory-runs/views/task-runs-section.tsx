@@ -26,6 +26,7 @@ import { RunView } from '../run-view';
 function StartRun(props: {
   taskId: string;
   onConnectGitHub?: () => void;
+  onOpenQueue?: () => void;
   onClose: () => void;
   onStarted: (runId: string) => void;
 }) {
@@ -45,6 +46,7 @@ function StartRun(props: {
       repositoriesState={repositories.state()}
       onRetryRepositories={repositories.retry}
       onConnectGitHub={props.onConnectGitHub}
+      onOpenQueue={props.onOpenQueue}
       onOpenChange={(open) => !open && props.onClose()}
       onStart={async (choice) => {
         const result = await context.startRun({
@@ -212,6 +214,14 @@ export function TaskRunsSection(props: {
         <StartRun
           taskId={props.taskId}
           onConnectGitHub={props.onConnectGitHub}
+          onOpenQueue={
+            props.onOpenInsights
+              ? () => {
+                  setStarting(false);
+                  props.onOpenInsights?.();
+                }
+              : undefined
+          }
           onClose={() => setStarting(false)}
           onStarted={setOpenRunId}
         />

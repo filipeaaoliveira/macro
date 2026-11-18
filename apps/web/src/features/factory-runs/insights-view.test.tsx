@@ -12,7 +12,11 @@ import {
   type InsightsContext,
   InsightsProvider,
 } from './context/insights-context';
-import { type RunsContext, RunsProvider } from './context/runs-context';
+import {
+  type RunsContext,
+  RunsProvider,
+  type RunsQueue,
+} from './context/runs-context';
 import type { InsightsParams, RunInsights } from './core/insights';
 import type { Run } from './core/run';
 import { RunInsightsView } from './insights-view';
@@ -47,6 +51,33 @@ const failedImport: Run = {
   request: 'Plan the import',
   createdAt: '2026-11-11T10:00:00Z',
   end: { outcome: 'failed', endedAt: '2026-11-11T10:10:00Z' },
+  steps: [],
+};
+
+const gateRun: Run = {
+  id: 'run-gate',
+  request: 'Plan the export',
+  createdAt: '2026-11-11T11:00:00Z',
+  steps: [
+    {
+      seq: 1,
+      entry: 'plan',
+      visit: 1,
+      startedAt: '2026-11-11T11:00:00Z',
+      gate: {
+        kind: 'flow',
+        question: 'Approve the plan?',
+        answers: ['approve', 'revise'],
+        openedAt: '2026-11-11T11:05:00Z',
+      },
+    },
+  ],
+};
+
+const startingRun: Run = {
+  id: 'run-starting',
+  request: 'Plan the archive',
+  createdAt: '2026-11-11T11:30:00Z',
   steps: [],
 };
 
@@ -125,6 +156,7 @@ function mount(options: {
   insights?: RunInsights;
   retry?: () => void;
   openRunId?: Accessor<string | undefined>;
+  queue?: RunsQueue;
 }) {
   const asked: InsightsParams[] = [];
   const insights: InsightsContext = {
@@ -148,12 +180,13 @@ function mount(options: {
     taskRuns: () => ({ state: () => 'ready', data: () => [], retry: vi.fn() }),
     waitingRuns: () => ({
       state: () => 'ready',
-      data: () => [],
+      data: () => options.queue ?? { waiting: [], starting: [] },
       retry: vi.fn(),
     }),
     run: (runId) => ({
       state: () => 'ready',
-      data: () => (runId() === failedImport.id ? failedImport : undefined),
+      data: () =>
+        [failedImport, gateRun, startingRun].find((run) => run.id === runId()),
       retry: vi.fn(),
     }),
     flows: () => ({ state: () => 'ready', data: () => [], retry: vi.fn() }),
@@ -269,6 +302,36 @@ describe('RunInsightsView', () => {
 
     // The Run opens as from its task: its Steps, which this one has none of.
     expect(await screen.findByText('No steps yet')).toBeTruthy();
+  });
+
+  it('lists the runs holding a place before their first gate apart from those at a gate', async () => {
+    mount({
+      insights: november,
+      queue: { waiting: [gateRun], starting: [startingRun] },
+    });
+
+    expect(screen.getByText('Waiting on you')).toBeTruthy();
+    const holding = screen.getByRole('region', {
+      name: 'Yet to ask you anything',
+    });
+    expect(within(holding).getByText('Plan the archive')).toBeTruthy();
+    expect(within(holding).queryByText('Plan the export')).toBeNull();
+    expect(screen.getByText('Plan the export')).toBeTruthy();
+
+    fireEvent.click(
+      within(holding).getByRole('button', { name: /Plan the archive/ })
+    );
+    expect(await screen.findByText('No steps yet')).toBeTruthy();
+  });
+
+  it('shows Waiting on you while only runs yet to ask anything hold a place', () => {
+    mount({
+      insights: november,
+      queue: { waiting: [], starting: [startingRun] },
+    });
+
+    expect(screen.getByText('Waiting on you')).toBeTruthy();
+    expect(screen.getByText('Plan the archive')).toBeTruthy();
   });
 
   it('opens the run a link names, and another link’s run in the same view', async () => {

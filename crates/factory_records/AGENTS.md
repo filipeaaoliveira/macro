@@ -189,7 +189,9 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   allows every one of them). A definition kept before a section has none of
   it, and reads with it off. The definition's Queue limit has a
   column of its own beside them (`queue_limit`,
-  `20261118131500_factory_queue_limit.sql`, 0 to `MAX_QUEUE_LIMIT`), null
+  `20261118131500_factory_queue_limit.sql`, held from `MIN_QUEUE_LIMIT`
+  to `MAX_QUEUE_LIMIT`, 1 to 1000, by
+  `20261118160000_factory_queue_limit_minimum.sql`), null
   for no limit, and none on a team's row without Standing Rules; a Run
   does not keep it, so a Run's rules read with none. The kinds the
   Orchestrator may approve are kept in the same arrays as the rules
@@ -203,9 +205,10 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `lock_timeout`); under a Queue limit it first counts the places the owner
   holds (`queue_places`: their open Runs at an unanswered Gate the stand-in
   has not answered, and those of the given `asking_flows` that have not
-  reached a Gate yet, through `factory_run_user_open_idx`, up to one past
-  the limit) and keeps nothing above it (`RunInsert::QueueFull`, with the
-  counts). `insert_run` takes the same lock with no limit.
+  reached a Gate yet, through `factory_run_user_open_idx`, up to the
+  limit) and keeps nothing once they hold as many as the limit
+  (`RunInsert::QueueFull`, with the counts), so a limit of N lets them
+  hold at most N. `insert_run` takes the same lock with no limit.
   `list_starting_runs` lists the second kind.
 - `factory_run.standing_rules`, `standing_rules_source` and
   `standing_rules_project_id` are set once, by `insert_run`; all null for

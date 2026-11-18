@@ -7,6 +7,7 @@ use std::num::NonZeroU8;
 
 use database_env_vars::DatabaseUrl;
 use factory_engine::domain::agents::AgentDefinition;
+use factory_engine::outbound::fast_gate_model::DEFAULT_GATE_MODEL;
 use macro_auth::InternalApiKey;
 use macro_env::Environment;
 use macro_env_var::env_vars;
@@ -52,8 +53,10 @@ pub struct Config {
     pub factory_questions: Option<u8>,
     /// The model that reads a person's words on a Gate and stands in for
     /// the owner at routine Gates (`FACTORY_GATE_MODEL`), a model id Macro's
-    /// model router knows; its fast model when unset.
-    pub factory_gate_model: Option<String>,
+    /// model router knows; Claude Haiku 5.5 ([`DEFAULT_GATE_MODEL`]) when
+    /// unset.
+    #[macro_config_default(String::from(DEFAULT_GATE_MODEL))]
+    pub factory_gate_model: String,
     /// How sure the Gate model must be, in percent, before a person's words
     /// answer a Gate (`FACTORY_GATE_REPLY_THRESHOLD`); the engine's default
     /// when unset.

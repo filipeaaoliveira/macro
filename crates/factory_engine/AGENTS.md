@@ -162,11 +162,12 @@ session's.
 A person's Queue is their Runs waiting on them at a Gate or an agent's
 question (`GET /runs/waiting`, Insights' "Waiting on you"). A team's
 Orchestrator Definition, or a Project's own, may set a Queue limit
-(`queueLimit`, 0 to 1000; none by default). `POST /runs` counts the owner's
-Queue across all their Projects, against the limit of the rules the Run
-would start under, and refuses the Run while the owner holds more places
-than the limit (409 `queueFull`, naming the team's or the Project's rules),
-for the person, an agent for them and an Automation alike; Runs under way
+(`queueLimit`, 1 to 1000, else 400; none by default). `POST /runs` counts
+the owner's Queue across all their Projects, against the limit of the
+rules the Run would start under, and refuses the Run while the owner holds
+as many places as the limit or more, so a limit of N lets them hold at
+most N (409 `queueFull`, naming the team's or the Project's rules), for
+the person, an agent for them and an Automation alike; Runs under way
 go on. A place is an open Run at an unanswered Gate the stand-in has not
 answered, or an open Run of a Flow with a Gate of its own (`asking_flows`:
 `plan`, `code`; not `reply`, which holds one only once it asks a question)
@@ -790,7 +791,8 @@ with the `factory_reply_gate` update (refused, as an answer is, for a Gate
 the Run does not wait on, after an answer or other words it has not read,
 and for a Gate opened before replies) and asks the worker to read them
 (`factory_read_gate_reply`): a small model (the `GateModel` port; on
-Macro's model router in `outbound/fast_gate_model.rs`,
+Macro's model router in `outbound/fast_gate_model.rs`, Claude Haiku 5.5
+(`DEFAULT_GATE_MODEL`) unless `FACTORY_GATE_MODEL` names another,
 `AiFeature::FactoryGate`, billed to no one) picks one of the Gate's answers
 or `unclear`, with how sure it is. The question, its answers and the words
 reach the model as one JSON object, so the words open no section of their
@@ -951,7 +953,7 @@ Automation), never started again. A firing starts nothing, and records why
 repository event about a Run's own branch (`own_branch`), its creator is
 no longer on its team (`creator_left_team`) or their account is an
 agent's (`agent_account`), the queue takes no more of the creator's Runs
-(`queue_full`: the Run API refuses the Run with `QueueFull` under the
+(`queue_full`: the Run API refuses the Run with `QueueFull` at the
 limit of the rules it would start under, the one the creator's own starts
 meet, counted as the Run is kept), a Run already runs on its task,
 whoever started it (`task_busy`: checked before the Run is created, and

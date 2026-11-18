@@ -185,9 +185,9 @@ export class Sdk extends HeyApiClient {
 
     /**
      * Create a Run of a built-in Flow, owned by the caller, and start its
-     * workflow. Above the Queue limit of the Project it would start in, it is
+     * workflow. At the Queue limit of the Project it would start in, it is
      * refused (409 `queueFull`, its message counting both): the caller holds
-     * more places in their Queue than the limit, a place being a Run waiting
+     * as many places in their Queue as the limit, a place being a Run waiting
      * on them at a Gate or a question, or a Run of a Flow with a Gate that has
      * not reached one yet (`GET /runs/waiting` lists both). The Runs under
      * way go on.

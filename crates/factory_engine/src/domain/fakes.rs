@@ -678,10 +678,10 @@ impl RunRepository for FakeRepo {
         hold: QueueHold<'_>,
     ) -> Result<RunInsert, FakeError> {
         // As the database: the places the owner holds before it, counted up
-        // to one past the limit.
+        // to the limit.
         if let Some(limit) = hold.limit {
-            let places = self.queue_places(run.user_id, hold.asking_flows, limit.saturating_add(1));
-            if places.held() > limit {
+            let places = self.queue_places(run.user_id, hold.asking_flows, limit);
+            if places.held() >= limit {
                 return Ok(RunInsert::QueueFull(places));
             }
         }

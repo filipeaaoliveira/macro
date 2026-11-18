@@ -21,8 +21,8 @@ use factory_records::domain::models::{
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::{ReviewRound, ReviewRoundRepository};
 use factory_records::domain::standing_rules::{
-    MAX_QUEUE_LIMIT, OrchestratorDefinition, ProjectRulesSet, RuleGateKind, RulesSource, RunRules,
-    StandingRulesRepository,
+    MAX_QUEUE_LIMIT, MIN_QUEUE_LIMIT, OrchestratorDefinition, ProjectRulesSet, RuleGateKind,
+    RulesSource, RunRules, StandingRulesRepository,
 };
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
@@ -611,11 +611,11 @@ where
         // change which of its Gates a rule answers.
         let standing_rules = self.run_rules(&actor, team, task_id).await?;
         // The Run and its task are kept in one write, so a task deleted
-        // since it was checked leaves nothing behind. Above the Queue limit
-        // of the rules it would start under, counted in the same write, no
-        // new Run starts, whoever asks: the person, an agent for them, or
-        // an Automation; starts at the same time are counted one after the
-        // other.
+        // since it was checked leaves nothing behind. Once the owner holds
+        // as many places as the Queue limit of the rules it would start
+        // under, counted in the same write, no new Run starts, whoever
+        // asks: the person, an agent for them, or an Automation; starts at
+        // the same time are counted one after the other.
         let asking_flows = self.asking_flows();
         let hold = QueueHold {
             limit: standing_rules.definition.queue_limit,
@@ -1268,13 +1268,15 @@ where
     }
 }
 
-/// Fails when `definition` sets a Queue limit above [`MAX_QUEUE_LIMIT`].
+/// Fails when `definition` sets a Queue limit below [`MIN_QUEUE_LIMIT`] or
+/// above [`MAX_QUEUE_LIMIT`].
 fn valid_queue_limit(definition: Option<&OrchestratorDefinition>) -> Result<(), FactoryError> {
-    let too_high = definition
+    let out_of_range = definition
         .and_then(|definition| definition.queue_limit)
-        .is_some_and(|limit| limit > MAX_QUEUE_LIMIT);
-    if too_high {
+        .is_some_and(|limit| !(MIN_QUEUE_LIMIT..=MAX_QUEUE_LIMIT).contains(&limit));
+    if out_of_range {
         return Err(FactoryError::InvalidQueueLimit {
+            min: MIN_QUEUE_LIMIT,
             max: MAX_QUEUE_LIMIT,
         });
     }

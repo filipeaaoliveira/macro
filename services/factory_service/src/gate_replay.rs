@@ -5,15 +5,15 @@
 //! (`FACTORY_GATE_REPLY_THRESHOLD`, `FACTORY_STAND_IN_THRESHOLD`) are set
 //! from it.
 //!
-//! It reads `DATABASE_URL`, the model `FACTORY_GATE_MODEL` (the router's
-//! fast model when unset) and how many answered Gates to read,
+//! It reads `DATABASE_URL`, the model `FACTORY_GATE_MODEL` (Claude Haiku
+//! 5.5 when unset) and how many answered Gates to read,
 //! `FACTORY_GATE_REPLAY_LIMIT` (500 when unset); the model router reads its
 //! provider keys from the environment, as in the service. Each call is
 //! recorded against the Gate's owner, as the service's are.
 
 use database_env_vars::DatabaseUrl;
 use factory_engine::domain::gate_replies::measure::{describe, replay, runs};
-use factory_engine::outbound::fast_gate_model::FastGateModel;
+use factory_engine::outbound::fast_gate_model::{DEFAULT_GATE_MODEL, FastGateModel};
 use factory_records::domain::gate_replies::GateReplyRepository;
 use factory_records::outbound::pg_run_repository::PgRunRepository;
 use sqlx::postgres::PgPoolOptions;
@@ -27,8 +27,9 @@ const DEFAULT_LIMIT: u32 = 500;
 struct ReplayConfig {
     /// MacroDB, which keeps the Runs and their Gates.
     database_url: DatabaseUrl,
-    /// The model to replay.
-    factory_gate_model: Option<String>,
+    /// The model to replay; Claude Haiku 5.5 when unset.
+    #[macro_config_default(String::from(DEFAULT_GATE_MODEL))]
+    factory_gate_model: String,
     /// How many answered Gates to read, oldest first.
     factory_gate_replay_limit: Option<u32>,
 }

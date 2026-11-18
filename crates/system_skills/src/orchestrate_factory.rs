@@ -33,7 +33,7 @@ A routine's run and a factory Step's own agent session never answer a Gate: if a
 
 ## The Queue limit
 
-A team may set a Queue limit in its Orchestrator Definition, and a Project may set its own. The Queue counts the places the person holds across all their Projects: each Run waiting on them at a Gate or a question, and each Run of a Flow with a Gate that has not reached one yet (a `reply` Run holds none until it asks something). It is counted against the limit of the Project the new Run would start in. Above it, no new Run starts there, for the person, for you or for an Automation: the start is refused with the code `queueFull`, its message giving both counts, and the Runs under way go on. Do not retry. Tell the person what holds their places: the Runs waiting on them from `macro.factory.queue()`, and the Runs yet to ask anything from `macro.factory.starting()`. Start the Run once they have answered some, or cancelled a Run they no longer need.
+A team may set a Queue limit in its Orchestrator Definition, and a Project may set its own. The Queue counts the places the person holds across all their Projects: each Run waiting on them at a Gate or a question, and each Run of a Flow with a Gate that has not reached one yet (a `reply` Run holds none until it asks something). It is counted against the limit of the Project the new Run would start in: a limit of 5 lets the person hold at most 5 places. Once they hold that many, no new Run starts there, for the person, for you or for an Automation: the start is refused with the code `queueFull`, its message giving both counts, and the Runs under way go on. Do not retry. Tell the person what holds their places: the Runs waiting on them from `macro.factory.queue()`, and the Runs yet to ask anything from `macro.factory.starting()`. Start the Run once they have answered some, or cancelled a Run they no longer need.
 
 ## Report
 
@@ -43,7 +43,7 @@ After each action, say in one or two lines what you did, on which Run, and what 
 static INTENT: &str = "The Orchestrator starts, steers and answers the person's factory Runs from \
      code in chat with their own access, answers a Gate only with the answer the person gave in \
      chat and within what their Orchestrator Definition allows, never merges, leaves what the \
-     factory keeps for the person to them, and stops starting Runs above the Queue limit.";
+     factory keeps for the person to them, and stops starting Runs at the Queue limit.";
 
 /// The skill's instructions as a composable prompt section.
 pub static PROMPT: StaticPrompt<'static> = StaticPrompt::borrowed(TITLE, INSTRUCTIONS, INTENT);

@@ -44,7 +44,8 @@ export default {
   startRun: 'Start run',
   startFailed: 'Couldn’t start the run. Please try again.',
   queueFull:
-    'Your queue is full: too many of your runs wait on you, or have yet to ask you anything, above this project’s queue limit. Answer some in Waiting on you, or cancel a run you no longer need, then start the run.',
+    'Your queue is full: as many of your runs wait on you, or have yet to ask you anything, as this project’s queue limit allows. Answer some in Waiting on you, or cancel one listed there that you no longer need, then start the run.',
+  openWaitingOnYou: 'Open Waiting on you',
   // A Run.
   runDetails: 'Run details',
   closeRun: 'Close run',
@@ -181,7 +182,11 @@ export default {
   },
   // The person's Runs that wait on them, on the insights page.
   waitingOnYou: 'Waiting on you',
-  waitingOnYouHint: 'Runs stopped at a gate only you can answer.',
+  waitingOnYouHint:
+    'Runs stopped at a gate or a question only you can answer, and runs yet to ask you anything. Each holds a place in your queue.',
+  holdingAPlace: 'Yet to ask you anything',
+  holdingAPlaceHint:
+    'Each holds the place it will ask for. Cancel one you no longer need to free its place.',
   standingRulesOwnerGates: 'Send undecided gates to the run’s owner',
   standingRulesOwnerGatesHint:
     'Notify the run’s owner when a gate waits on them, ask them instead of fixing again when a fix leaves the blockers unchanged, and give the next step their comments on the task.',
@@ -196,7 +201,7 @@ export default {
     'When no rule answers, the stand-in answers as the owner would, if it is sure enough, and says why. The owner can change its answer for ten minutes before the run goes on. It never answers a merge, a run that changes control files, or an agent’s question.',
   queueLimit: 'Limit the queue',
   queueLimitHint:
-    'Above this many of a person’s runs waiting on them, or yet to ask them anything, no new run of theirs starts, whoever starts it: the person, the Orchestrator or an automation. A run that never asks anything holds no place until it does. Runs under way go on.',
+    'Once this many of a person’s runs wait on them, or have yet to ask them anything, no new run of theirs starts, whoever starts it: the person, the Orchestrator or an automation. A run that never asks anything holds no place until it does. Runs under way go on.',
   queueLimitLabel: 'Queue limit',
   queueLimitUnit: 'waiting',
   orchestratorTitle: 'Orchestrator',

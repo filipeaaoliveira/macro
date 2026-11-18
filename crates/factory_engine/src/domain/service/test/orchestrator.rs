@@ -375,19 +375,20 @@ fn julia_s_team(repo: &FakeRepo, definition: OrchestratorDefinition) -> Uuid {
     team_id
 }
 
-/// Above the Queue limit no new Run starts, whoever asks, and says why; a
-/// Run just started holds the place it will ask for; a Run already going
-/// goes on, and once the Queue is back at its limit Runs start again. A
-/// Project's own limit replaces the team's.
+/// At the Queue limit no new Run starts, whoever asks, and says why: a
+/// limit of 2 lets a person hold at most 2 places. A Run just started
+/// holds the place it will ask for; a Run already going goes on, and once
+/// the Queue is back under its limit Runs start again. A Project's own
+/// limit replaces the team's.
 #[tokio::test]
-async fn above_the_queue_limit_no_new_run_starts() {
+async fn at_the_queue_limit_no_new_run_starts() {
     let repo = FakeRepo::default();
     let workflows = FakeWorkflows::default();
     let service = code_service(&repo, &workflows, &FakeGithub::default());
     let team_id = julia_s_team(
         &repo,
         OrchestratorDefinition {
-            queue_limit: Some(1),
+            queue_limit: Some(2),
             ..OrchestratorDefinition::DEFAULT
         },
     );
@@ -408,11 +409,7 @@ async fn above_the_queue_limit_no_new_run_starts() {
     start_flow("reply").await.expect("and another");
 
     let first = waiting_at(&repo, "plan", "done", &["approve", "revise"]).await;
-    let started = start()
-        .await
-        .expect("one waits: at the limit, not above")
-        .run
-        .id;
+    let started = start().await.expect("one waits: under the limit").run.id;
 
     // The Run just started has not asked anything yet, but holds its place.
     let refused = start().await;
@@ -420,7 +417,7 @@ async fn above_the_queue_limit_no_new_run_starts() {
         matches!(
             refused,
             Err(FactoryError::QueueFull {
-                limit: 1,
+                limit: 2,
                 waiting: 1,
                 starting: 1,
                 ..
@@ -461,7 +458,7 @@ async fn above_the_queue_limit_no_new_run_starts() {
     )
     .await
     .expect("recorded");
-    let again = start().await.expect("back at the limit").run.id;
+    let again = start().await.expect("back under the limit").run.id;
     for run in [started, again] {
         repo.end_run(run, RunOutcome::Cancelled)
             .await
@@ -502,7 +499,7 @@ async fn above_the_queue_limit_no_new_run_starts() {
         .insert((team_id, project), OrchestratorDefinition::DEFAULT);
     assert!(matches!(
         start().await,
-        Err(FactoryError::QueueFull { limit: 1, .. })
+        Err(FactoryError::QueueFull { limit: 2, .. })
     ));
     service
         .create_run(
@@ -517,27 +514,48 @@ async fn above_the_queue_limit_no_new_run_starts() {
         .expect("the project sets no limit");
 }
 
-/// A Queue limit above the highest one is refused before anything is
-/// kept.
+/// A Queue limit below the lowest or above the highest one is refused
+/// before anything is kept: 0 would start no Run. The lowest and highest
+/// are kept.
 #[tokio::test]
-async fn a_queue_limit_above_the_highest_is_refused() {
+async fn a_queue_limit_out_of_range_is_refused() {
     let repo = FakeRepo::default();
     let workflows = FakeWorkflows::default();
     let service = code_service(&repo, &workflows, &FakeGithub::default());
-    julia_s_team(&repo, OrchestratorDefinition::DEFAULT);
+    let team_id = julia_s_team(&repo, OrchestratorDefinition::DEFAULT);
+    let with_limit = |limit: u16| {
+        Some(OrchestratorDefinition {
+            queue_limit: Some(limit),
+            ..OrchestratorDefinition::DEFAULT
+        })
+    };
 
-    let refused = service
-        .set_standing_rules(
-            julia(),
-            Some(OrchestratorDefinition {
-                queue_limit: Some(1001),
-                ..OrchestratorDefinition::DEFAULT
-            }),
-        )
-        .await;
-
-    assert!(
-        matches!(refused, Err(FactoryError::InvalidQueueLimit { max: 1000 })),
-        "{refused:?}"
+    for limit in [0, 1001] {
+        let refused = service.set_standing_rules(julia(), with_limit(limit)).await;
+        assert!(
+            matches!(
+                refused,
+                Err(FactoryError::InvalidQueueLimit { min: 1, max: 1000 })
+            ),
+            "{limit}: {refused:?}"
+        );
+        let refused = service
+            .set_project_rules(julia(), Uuid::now_v7(), with_limit(limit))
+            .await;
+        assert!(
+            matches!(refused, Err(FactoryError::InvalidQueueLimit { .. })),
+            "{limit}: {refused:?}"
+        );
+    }
+    assert_eq!(
+        repo.team_rules.lock().expect("rules").get(&team_id),
+        Some(&OrchestratorDefinition::DEFAULT)
     );
+
+    for limit in [1, 1000] {
+        service
+            .set_standing_rules(julia(), with_limit(limit))
+            .await
+            .expect("in range");
+    }
 }

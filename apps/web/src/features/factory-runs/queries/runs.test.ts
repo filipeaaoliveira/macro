@@ -5,11 +5,17 @@ import { err, ok } from 'neverthrow';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Run } from '../core/run';
 import { factoryRunKeys } from './keys';
-import { createAppRunsContext, runOptions, taskRunsOptions } from './runs';
+import {
+  createAppRunsContext,
+  runOptions,
+  taskRunsOptions,
+  waitingRunsOptions,
+} from './runs';
 
 vi.mock('@service-factory/client', () => ({
   factoryClient: {
     listTaskRuns: vi.fn(),
+    listWaitingRuns: vi.fn(),
     getRun: vi.fn(),
     listFlows: vi.fn(),
     startRun: vi.fn(),
@@ -340,6 +346,26 @@ describe('createAppRunsContext', () => {
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: factoryRunKeys.task('task-1').queryKey,
     });
+  });
+
+  it('reads the Runs at a Gate and those yet to reach one as the Queue', async () => {
+    const atGate: RunDetail = {
+      ...started,
+      run: { ...started.run, id: 'run-3', request: 'Plan the export' },
+    };
+    vi.mocked(factoryClient.listWaitingRuns).mockResolvedValue(
+      ok({ runs: [atGate], starting: [started] })
+    );
+    const client = new QueryClient();
+
+    const queue = await client.fetchQuery(waitingRunsOptions(client));
+
+    expect(queue.waiting.map((run) => run.id)).toEqual(['run-3']);
+    expect(queue.starting.map((run) => run.id)).toEqual(['run-2']);
+    // Each opens from the list with what it already read.
+    expect(client.getQueryData(runOptions('run-2').queryKey)?.request).toBe(
+      'Add a due date column'
+    );
   });
 
   it('stops reading a Run again once it has ended', async () => {

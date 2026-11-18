@@ -493,7 +493,7 @@ async fn a_full_queue_starts_no_run() {
     repo.team_rules.lock().expect("rules").insert(
         TEAM,
         OrchestratorDefinition {
-            queue_limit: Some(1),
+            queue_limit: Some(2),
             ..OrchestratorDefinition::DEFAULT
         },
     );
@@ -532,7 +532,7 @@ async fn a_full_queue_starts_no_run() {
         .fire_from_routine(&julia(), ROUTINE, routine_firing("run-1", None))
         .await
         .expect("fired");
-    assert!(fired.run_id.is_some(), "at the limit, not above: {fired:?}");
+    assert!(fired.run_id.is_some(), "under the limit: {fired:?}");
 
     let held = automations
         .fire_from_routine(&julia(), ROUTINE, routine_firing("run-2", None))
@@ -543,7 +543,7 @@ async fn a_full_queue_starts_no_run() {
     assert_eq!(workflows.started.lock().expect("started").len(), 2);
     let refused = own_start().await;
     assert!(
-        matches!(refused, Err(FactoryError::QueueFull { limit: 1, .. })),
+        matches!(refused, Err(FactoryError::QueueFull { limit: 2, .. })),
         "the firing's run holds its place against her own starts too: {refused:?}"
     );
 }
