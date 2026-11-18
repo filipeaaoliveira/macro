@@ -9,6 +9,7 @@ import {
   GATE_KINDS,
   type GateKind,
   MAX_QUEUE_LIMIT,
+  MIN_QUEUE_LIMIT,
   type OrchestratorDefinition,
   type OrchestratorKinds,
   RULE_NAMES,
@@ -133,7 +134,7 @@ export function StandingRulesSettings() {
             setTypedLimit(undefined);
             if (typed === undefined || Number.isNaN(typed)) return;
             const limit = Math.min(
-              Math.max(Math.round(typed), 0),
+              Math.max(Math.round(typed), MIN_QUEUE_LIMIT),
               MAX_QUEUE_LIMIT
             );
             if (limit !== queueLimit()) setQueueLimit(limit);
@@ -223,7 +224,7 @@ export function StandingRulesSettings() {
                   class="pl-6"
                   format={false}
                   rawValue={typedLimit() ?? queueLimit() ?? undefined}
-                  minValue={0}
+                  minValue={MIN_QUEUE_LIMIT}
                   maxValue={MAX_QUEUE_LIMIT}
                   step={1}
                   disabled={locked()}

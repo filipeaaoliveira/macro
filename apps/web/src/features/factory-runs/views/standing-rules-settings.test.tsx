@@ -195,6 +195,12 @@ describe('StandingRulesSettings', () => {
           ...limited,
           definition: { ...limited.definition, queueLimit: 2 },
         })
+      )
+      .mockResolvedValueOnce(
+        ok({
+          ...limited,
+          definition: { ...limited.definition, queueLimit: 1 },
+        })
       );
     mount(teamDefault);
 
@@ -223,6 +229,19 @@ describe('StandingRulesSettings', () => {
         merge: false,
         ownerGates: false,
         queueLimit: 2,
+      })
+    );
+
+    // A limit below 1 would start no run: it is saved as 1.
+    fireEvent.input(field, { target: { value: '0' } });
+    fireEvent.blur(field);
+    await waitFor(() =>
+      expect(factoryClient.setStandingRules).toHaveBeenLastCalledWith({
+        plan: false,
+        blockers: true,
+        merge: false,
+        ownerGates: false,
+        queueLimit: 1,
       })
     );
   });

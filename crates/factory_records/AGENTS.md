@@ -189,7 +189,9 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   allows every one of them). A definition kept before a section has none of
   it, and reads with it off. The definition's Queue limit has a
   column of its own beside them (`queue_limit`,
-  `20261118131500_factory_queue_limit.sql`, 0 to `MAX_QUEUE_LIMIT`), null
+  `20261118131500_factory_queue_limit.sql`, held from `MIN_QUEUE_LIMIT`
+  to `MAX_QUEUE_LIMIT`, 1 to 1000, by
+  `20261118160000_factory_queue_limit_minimum.sql`), null
   for no limit, and none on a team's row without Standing Rules; a Run
   does not keep it, so a Run's rules read with none. The kinds the
   Orchestrator may approve are kept in the same arrays as the rules

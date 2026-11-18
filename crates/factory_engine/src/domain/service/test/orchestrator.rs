@@ -514,27 +514,48 @@ async fn at_the_queue_limit_no_new_run_starts() {
         .expect("the project sets no limit");
 }
 
-/// A Queue limit above the highest one is refused before anything is
-/// kept.
+/// A Queue limit below the lowest or above the highest one is refused
+/// before anything is kept: 0 would start no Run. The lowest and highest
+/// are kept.
 #[tokio::test]
-async fn a_queue_limit_above_the_highest_is_refused() {
+async fn a_queue_limit_out_of_range_is_refused() {
     let repo = FakeRepo::default();
     let workflows = FakeWorkflows::default();
     let service = code_service(&repo, &workflows, &FakeGithub::default());
-    julia_s_team(&repo, OrchestratorDefinition::DEFAULT);
+    let team_id = julia_s_team(&repo, OrchestratorDefinition::DEFAULT);
+    let with_limit = |limit: u16| {
+        Some(OrchestratorDefinition {
+            queue_limit: Some(limit),
+            ..OrchestratorDefinition::DEFAULT
+        })
+    };
 
-    let refused = service
-        .set_standing_rules(
-            julia(),
-            Some(OrchestratorDefinition {
-                queue_limit: Some(1001),
-                ..OrchestratorDefinition::DEFAULT
-            }),
-        )
-        .await;
-
-    assert!(
-        matches!(refused, Err(FactoryError::InvalidQueueLimit { max: 1000 })),
-        "{refused:?}"
+    for limit in [0, 1001] {
+        let refused = service.set_standing_rules(julia(), with_limit(limit)).await;
+        assert!(
+            matches!(
+                refused,
+                Err(FactoryError::InvalidQueueLimit { min: 1, max: 1000 })
+            ),
+            "{limit}: {refused:?}"
+        );
+        let refused = service
+            .set_project_rules(julia(), Uuid::now_v7(), with_limit(limit))
+            .await;
+        assert!(
+            matches!(refused, Err(FactoryError::InvalidQueueLimit { .. })),
+            "{limit}: {refused:?}"
+        );
+    }
+    assert_eq!(
+        repo.team_rules.lock().expect("rules").get(&team_id),
+        Some(&OrchestratorDefinition::DEFAULT)
     );
+
+    for limit in [1, 1000] {
+        service
+            .set_standing_rules(julia(), with_limit(limit))
+            .await
+            .expect("in range");
+    }
 }

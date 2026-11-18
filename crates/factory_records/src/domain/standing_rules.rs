@@ -8,7 +8,8 @@
 //! its updates to its task's comments (`task_thread`). Its Queue limit says
 //! how many places a person may hold in their Queue (Runs waiting on them
 //! at a Gate or a question, and Runs of a Flow with a Gate yet to reach
-//! one) before no new Run of theirs starts (`queue_limit`).
+//! one): a new Run of theirs starts only while they hold fewer places than
+//! the limit (`queue_limit`).
 
 #[cfg(test)]
 mod test;
@@ -95,6 +96,10 @@ pub const OWNER_GATES: &str = "owner_gates";
 /// kinds.
 pub const TASK_THREAD: &str = "task_thread";
 
+/// The lowest Queue limit a definition may set: a limit of 1 lets a person
+/// hold one place, and a lower one would start no Run.
+pub const MIN_QUEUE_LIMIT: u16 = 1;
+
 /// The highest Queue limit a definition may set.
 pub const MAX_QUEUE_LIMIT: u16 = 1000;
 
@@ -135,14 +140,15 @@ pub struct OrchestratorDefinition {
     #[serde(default)]
     pub task_thread: bool,
     /// The Queue limit: the most places a person may hold in their Queue
-    /// for a new Run of theirs to start under this definition. A place is
-    /// a Run of theirs waiting on them at a Gate or a question, or a Run
-    /// of a Flow with a Gate that has not reached one yet. Once they hold
-    /// that many, no new Run starts; Runs already going go on.
-    /// None, and a definition sent without it, sets no limit. At most
-    /// [`MAX_QUEUE_LIMIT`]. A Run does not keep it: it decides only
+    /// under this definition. A place is a Run of theirs waiting on them at
+    /// a Gate or a question, or a Run of a Flow with a Gate that has not
+    /// reached one yet. A new Run of theirs starts only while they hold
+    /// fewer places than the limit; Runs already going go on. None, and a
+    /// definition sent without it, sets no limit. From [`MIN_QUEUE_LIMIT`]
+    /// to [`MAX_QUEUE_LIMIT`]. A Run does not keep it: it decides only
     /// whether a Run starts, so a Run's rules read with none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(minimum = 1, maximum = 1000)]
     pub queue_limit: Option<u16>,
     /// The kinds of Gate the stand-in answers for the Run's owner, after
     /// the rules and before the person; off for every kind when left out.

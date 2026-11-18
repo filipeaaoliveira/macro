@@ -817,9 +817,12 @@ pub enum FactoryError {
         /// The person's Runs that hold a place before their first Gate.
         starting: u16,
     },
-    /// A Queue limit above the highest one a definition may set.
-    #[error("the queue limit must be at most {max}")]
+    /// A Queue limit below the lowest or above the highest one a definition
+    /// may set.
+    #[error("the queue limit must be from {min} to {max}")]
     InvalidQueueLimit {
+        /// The lowest Queue limit.
+        min: u16,
         /// The highest Queue limit.
         max: u16,
     },

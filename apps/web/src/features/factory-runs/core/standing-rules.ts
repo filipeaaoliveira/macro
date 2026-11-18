@@ -47,6 +47,9 @@ export type GateKind = Exclude<
 /** The Queue limit a team starts from when it turns the limit on. */
 export const DEFAULT_QUEUE_LIMIT = 5;
 
+/** The lowest Queue limit the factory takes: lower would start no run. */
+export const MIN_QUEUE_LIMIT = 1;
+
 /** The highest Queue limit the factory takes. */
 export const MAX_QUEUE_LIMIT = 1000;
 
