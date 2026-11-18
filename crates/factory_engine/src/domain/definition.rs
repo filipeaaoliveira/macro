@@ -84,7 +84,7 @@ pub const MAX_FILE_BYTES: usize = 256 * 1024;
 /// a file holding one, followed by [`SECRET_TAIL`] or more characters of a
 /// token, does not read, wherever it is, glued to a URL's query or not.
 /// The more specific come first, so the error names them.
-const SECRET_PREFIXES: [&str; 24] = [
+const SECRET_PREFIXES: [&str; 25] = [
     "ghp_",
     "gho_",
     "ghu_",
@@ -102,6 +102,7 @@ const SECRET_PREFIXES: [&str; 24] = [
     "xoxb-",
     "xoxp-",
     "xoxr-",
+    "xoxe-",
     "xoxs-",
     "xapp-",
     "ya29.",
@@ -120,7 +121,10 @@ const WORD_START_PREFIXES: [&str; 1] = ["sk-"];
 const SECRET_TAIL: usize = 16;
 
 /// What begins a private key in a file.
-const PRIVATE_KEY: &str = "PRIVATE KEY-----";
+const PRIVATE_KEY: &str = "PRIVATE KEY";
+
+/// What begins a key's or a certificate's block in a file.
+const PEM_BEGIN: &str = "-----BEGIN";
 
 /// What only a secret is written beside, whatever follows it, in any case:
 /// a Slack webhook, an AWS secret key's name, an Azure storage key.
@@ -146,7 +150,8 @@ fn credentials_in_url(text: &str) -> bool {
         };
         user_info
             .split_once(':')
-            .is_some_and(|(user, password)| !user.is_empty() && !password.is_empty())
+            .is_some_and(|(_, password)| !password.is_empty())
+        // `redis://:password@host` names no user: a password all the same.
     })
 }
 
@@ -315,8 +320,16 @@ fn is_name(name: &str) -> bool {
 
 /// How the first secret `text` holds begins, if it holds one.
 fn secret_in(text: &str) -> Option<&'static str> {
-    // A certificate is public: only a private key's block is a secret.
-    if text.contains(PRIVATE_KEY) {
+    // A certificate or a public key is public: only a private key's block
+    // (`-----BEGIN RSA PRIVATE KEY-----`, `-----BEGIN PGP PRIVATE KEY
+    // BLOCK-----`) is a secret.
+    let private_block = text.match_indices(PEM_BEGIN).any(|(at, _)| {
+        // The block's label, up to the dashes that close it.
+        let label = &text[at + PEM_BEGIN.len()..];
+        let label = label.split("-----").next().unwrap_or_default();
+        label.contains(PRIVATE_KEY)
+    });
+    if private_block {
         return Some(PRIVATE_KEY);
     }
     let lower = text.to_ascii_lowercase();

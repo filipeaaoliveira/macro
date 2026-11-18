@@ -289,7 +289,7 @@ async fn a_file_holding_a_secret_does_not_read() {
         read(with("scorers.json", key)).await,
         Err(DefinitionError::Secret {
             path: "scorers.json".to_string(),
-            kind: "PRIVATE KEY-----",
+            kind: "PRIVATE KEY",
         })
     );
     // A word that only begins like a token is not one.
@@ -685,3 +685,13 @@ async fn more_secret_shapes_do_not_read_and_public_text_does() {
     assert_eq!(kind("-----BEGIN CERTIFICATE-----").await, None);
     assert_eq!(kind("https://github.com/macro/app").await, None);
 }
+    assert_eq!(kind("-----BEGIN PUBLIC KEY-----").await, None);
+    assert_eq!(
+        kind("-----BEGIN PGP PRIVATE KEY BLOCK-----").await,
+        Some("PRIVATE KEY")
+    );
+    assert_eq!(
+        kind("redis://:hunter2@cache.internal:6379").await,
+        Some("://user:password@")
+    );
+    assert_eq!(kind("xoxe-0123456789abcdefABCDEF").await, Some("xoxe-"));
