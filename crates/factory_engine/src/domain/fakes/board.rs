@@ -64,6 +64,9 @@ impl RunBoardRepository for FakeRepo {
             .map(|run| BoardRun {
                 state: self.board_state(&run),
                 task_name: run.task_id.map(|task_id| format!("Task {task_id}")),
+                task_live: run
+                    .task_id
+                    .is_some_and(|task_id| self.tasks.lock().expect("tasks").contains(&task_id)),
                 run,
             })
             .filter(|listed| query.state.is_none_or(|state| state == listed.state))

@@ -84,8 +84,12 @@ pub struct BoardRun {
     pub run: Run,
     /// Where it is.
     pub state: BoardState,
-    /// The name of the task it works on; none without a task.
+    /// The name of the task it works on; none without a task, or once the
+    /// task is trashed.
     pub task_name: Option<String>,
+    /// Whether it works on a task that is there: a task document, not
+    /// trashed.
+    pub task_live: bool,
 }
 
 /// The board's reads.

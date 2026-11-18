@@ -227,7 +227,7 @@ async fn the_team_board_lists_the_members_runs(pool: PgPool) {
 /// search reads the request and the task's name, its `%` literally.
 #[sqlx::test(
     migrator = "MACRO_DB_MIGRATIONS",
-    fixtures(path = "../fixtures", scripts("people", "tasks"))
+    fixtures(path = "../fixtures", scripts("people", "tasks", "task_types"))
 )]
 async fn the_filters_narrow_the_board(pool: PgPool) {
     let repo = PgRunRepository::new(pool);
@@ -395,7 +395,7 @@ async fn runs_created_at_once_page_by_id(pool: PgPool) {
 /// The board reads each Run's task by its name.
 #[sqlx::test(
     migrator = "MACRO_DB_MIGRATIONS",
-    fixtures(path = "../fixtures", scripts("people", "tasks"))
+    fixtures(path = "../fixtures", scripts("people", "tasks", "task_types"))
 )]
 async fn the_board_names_each_run_s_task(pool: PgPool) {
     let repo = PgRunRepository::new(pool);
@@ -457,4 +457,71 @@ async fn a_run_keeps_its_pull_request_s_page(pool: PgPool) {
         page(&repo).await.as_deref(),
         Some("https://github.com/acme/shop/pull/8")
     );
+}
+
+/// A team's board merges its owners' Runs newest first and cuts them to
+/// the limit, though each owner's are read apart.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "team"))
+)]
+async fn the_team_board_merges_its_owners_runs_newest_first(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let mut kept = Vec::new();
+    for request in ["One", "Two", "Three", "Four", "Five", "Six"] {
+        let owner = if kept.len() % 2 == 0 { julia() } else { teo() };
+        kept.push(
+            keep(
+                &repo,
+                Kept {
+                    user_id: owner,
+                    ..Kept::julias(request)
+                },
+            )
+            .await,
+        );
+    }
+    kept.reverse();
+
+    let page = repo
+        .board_runs(&BoardQuery {
+            limit: 3,
+            ..query(Some(TEAM))
+        })
+        .await
+        .expect("board");
+    let ids: Vec<RunId> = page.iter().map(|listed| listed.run.id).collect();
+    assert_eq!(ids, kept[..3]);
+}
+
+/// A trashed task's name is not read, and its Run reads as on no live
+/// task.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "tasks", "task_types"))
+)]
+async fn a_trashed_task_s_name_is_not_read(pool: PgPool) {
+    let repo = PgRunRepository::new(pool.clone());
+    keep(
+        &repo,
+        Kept {
+            task_id: Some(LOGIN_TASK),
+            ..Kept::julias("Look into it")
+        },
+    )
+    .await;
+    let read = repo.board_runs(&query(None)).await.expect("board");
+    assert!(read[0].task_live);
+    assert_eq!(read[0].task_name.as_deref(), Some("Fix the login bug"));
+
+    sqlx::query!(
+        r#"UPDATE "Document" SET "deletedAt" = now() WHERE id = $1"#,
+        LOGIN_TASK
+    )
+    .execute(&pool)
+    .await
+    .expect("trash");
+    let read = repo.board_runs(&query(None)).await.expect("board");
+    assert!(!read[0].task_live);
+    assert_eq!(read[0].task_name, None);
 }

@@ -179,14 +179,18 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   up to the limit, then merges the owners' Runs newest first and cuts them
   to it; the states of Runs that go read through `factory_run_user_open_idx`
   in a query of their own with a literal `ended_at IS NULL`. A first page
-  starts past the latest time there is. It runs under a 5 s timeout. Where
-  a Run is (`BoardState`) is read in the same query: its outcome, an
-  unanswered Gate, and for a Run whose latest Step is one of the given merge
-  entries, its base's Main Hold, each by primary key; it also reads the
-  task's name (`"Document".name`). A search reads the request and the
-  task's name with `ILIKE`, its `%`, `_` and `\` literal, and so reads every
-  Run of the owners. A held Run is held only at its merge, so a merged Run
-  is `finished`.
+  starts past the latest time there is. It runs under a 5 s timeout and
+  `plan_cache_mode = force_custom_plan`: a generic plan, which a reused
+  statement may get, cannot tell which filters are unset and reads and
+  sorts every Run of the owners (on 280k Runs, 90 to 330 ms against 0.2 to
+  0.5 ms). Where a Run is (`BoardState`) is read in the same query: its
+  outcome, an unanswered Gate, and for a Run whose latest Step is one of the
+  given merge entries, its base's Main Hold, each by primary key; it also
+  reads whether its task is a live task (`task_live`: a task document, not
+  trashed) and, only then, its name. A search reads the request and a live
+  task's name with `ILIKE`, its `%`, `_` and `\` literal, and so reads
+  every Run of the owners (some 200 ms on 280k). A held Run is held only at
+  its merge, so a merged Run is `finished`.
 - `read_insights` reads one person's newest Runs in a period through
   `factory_run_user_created_idx` (`user_id, created_at DESC, id DESC`), up to
   its cap (one past it, to tell whether Runs were left out), then their Steps

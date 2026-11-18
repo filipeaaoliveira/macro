@@ -38,6 +38,7 @@ struct BoardRunRow {
     outcome: Option<String>,
     ended_at: Option<DateTime<Utc>>,
     task_name: Option<String>,
+    task_live: bool,
     state: String,
 }
 
@@ -79,6 +80,7 @@ impl TryFrom<BoardRunRow> for BoardRun {
             run,
             state,
             task_name: row.task_name,
+            task_live: row.task_live,
         })
     }
 }
@@ -112,6 +114,13 @@ impl RunBoardRepository for PgRunRepository {
         sqlx::query!("SET LOCAL statement_timeout = '5s'")
             .execute(&mut *transaction)
             .await?;
+        // A plan made for the filters given reads each owner's Runs in the
+        // index's order; a generic plan, which a reused statement may get,
+        // cannot tell which filters are unset, and may read and sort them
+        // all.
+        sqlx::query!("SET LOCAL plan_cache_mode = force_custom_plan")
+            .execute(&mut *transaction)
+            .await?;
         // The open states read only Runs that go, in their own query, so
         // the partial index applies.
         let rows = if open_only {
@@ -135,16 +144,29 @@ impl RunBoardRepository for PgRunRepository {
                 r.automation_trigger AS "automation_trigger?",
                 r.pull_request_url AS "pull_request_url?",
                 r.outcome AS "outcome?", r.ended_at AS "ended_at?",
-                r.task_name AS "task_name?", r.state AS "state!"
+                r.task_name AS "task_name?", r.task_live AS "task_live!",
+                r.state AS "state!"
             FROM (
                 SELECT $1::text AS user_id
                 UNION
                 SELECT tu.user_id FROM team_user tu WHERE tu.team_id = $2
             ) member
             CROSS JOIN LATERAL (
-                SELECT r.*, d.name AS task_name, place.state
+                SELECT
+                    r.*,
+                    CASE WHEN task.live THEN d.name END AS task_name,
+                    task.live AS task_live,
+                    place.state
                 FROM factory_run r
                 LEFT JOIN "Document" d ON d.id = r.task_id
+                CROSS JOIN LATERAL (
+                    SELECT d.id IS NOT NULL
+                        AND d."deletedAt" IS NULL
+                        AND EXISTS (
+                            SELECT 1 FROM document_sub_type st
+                            WHERE st.document_id = d.id AND st.sub_type = 'task'
+                        ) AS live
+                ) task
                 CROSS JOIN LATERAL (
                     SELECT CASE
                         WHEN r.outcome IN ('success', 'cancelled') THEN 'finished'
@@ -174,7 +196,11 @@ impl RunBoardRepository for PgRunRepository {
                     AND ($7::text IS NULL OR r.flow = $7)
                     AND ($8::text IS NULL OR r.repo_url = $8)
                     AND ($9::uuid IS NULL OR r.project_id = $9)
-                    AND ($10::text IS NULL OR r.request ILIKE $10 OR d.name ILIKE $10)
+                    AND (
+                        $10::text IS NULL
+                        OR r.request ILIKE $10
+                        OR (task.live AND d.name ILIKE $10)
+                    )
                 ORDER BY r.created_at DESC, r.id DESC
                 LIMIT $11
             ) r
@@ -216,16 +242,29 @@ impl RunBoardRepository for PgRunRepository {
                 r.automation_trigger AS "automation_trigger?",
                 r.pull_request_url AS "pull_request_url?",
                 r.outcome AS "outcome?", r.ended_at AS "ended_at?",
-                r.task_name AS "task_name?", r.state AS "state!"
+                r.task_name AS "task_name?", r.task_live AS "task_live!",
+                r.state AS "state!"
             FROM (
                 SELECT $1::text AS user_id
                 UNION
                 SELECT tu.user_id FROM team_user tu WHERE tu.team_id = $2
             ) member
             CROSS JOIN LATERAL (
-                SELECT r.*, d.name AS task_name, place.state
+                SELECT
+                    r.*,
+                    CASE WHEN task.live THEN d.name END AS task_name,
+                    task.live AS task_live,
+                    place.state
                 FROM factory_run r
                 LEFT JOIN "Document" d ON d.id = r.task_id
+                CROSS JOIN LATERAL (
+                    SELECT d.id IS NOT NULL
+                        AND d."deletedAt" IS NULL
+                        AND EXISTS (
+                            SELECT 1 FROM document_sub_type st
+                            WHERE st.document_id = d.id AND st.sub_type = 'task'
+                        ) AS live
+                ) task
                 CROSS JOIN LATERAL (
                     SELECT CASE
                         WHEN r.outcome IN ('success', 'cancelled') THEN 'finished'
@@ -254,7 +293,11 @@ impl RunBoardRepository for PgRunRepository {
                     AND ($7::text IS NULL OR r.flow = $7)
                     AND ($8::text IS NULL OR r.repo_url = $8)
                     AND ($9::uuid IS NULL OR r.project_id = $9)
-                    AND ($10::text IS NULL OR r.request ILIKE $10 OR d.name ILIKE $10)
+                    AND (
+                        $10::text IS NULL
+                        OR r.request ILIKE $10
+                        OR (task.live AND d.name ILIKE $10)
+                    )
                 ORDER BY r.created_at DESC, r.id DESC
                 LIMIT $11
             ) r
