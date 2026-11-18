@@ -33,7 +33,7 @@ use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
 use crate::domain::models::{
-    Check, CheckState, CheckSuite, CodeRepository, Deployment, HeadChecks, Merging,
+    BranchDeletion, Check, CheckState, CheckSuite, CodeRepository, Deployment, HeadChecks, Merging,
     OpenPullRequest, Opening, PullRequest, PullRequestState, RepositoryAccess, RequiredChecks,
 };
 use crate::domain::ports::{
@@ -1663,7 +1663,7 @@ impl PullRequests for FakeGithub {
         _owner: &MacroUserIdStr<'static>,
         _repository: &CodeRepository,
         branch: &str,
-    ) -> Result<bool, FakeGithubError> {
+    ) -> Result<BranchDeletion, FakeGithubError> {
         let mut state = self.state();
         if state.delete_fails {
             return Err(FakeGithubError::Down);
@@ -1671,10 +1671,11 @@ impl PullRequests for FakeGithub {
         let there = state.head.is_some() || state.branch_heads.iter().any(Option::is_some);
         state.head = None;
         state.branch_heads = [None].into();
-        if there {
-            state.deleted_branches.push(branch.to_string());
+        if !there {
+            return Ok(BranchDeletion::Missing);
         }
-        Ok(there)
+        state.deleted_branches.push(branch.to_string());
+        Ok(BranchDeletion::Deleted)
     }
 
     async fn deployments(

@@ -793,6 +793,15 @@ pub enum GithubOpenPullRequestOutcome {
     Rejected(String),
 }
 
+/// What deleting a branch did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GithubBranchDeletion {
+    /// The branch was deleted.
+    Deleted,
+    /// The repository has no such branch, as when it was deleted already.
+    Missing,
+}
+
 /// What a user may do with a repository, as GitHub says.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GithubRepositoryAccess {

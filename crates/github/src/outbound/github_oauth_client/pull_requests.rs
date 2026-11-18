@@ -19,8 +19,8 @@ use super::{
     transport_error, unexpected,
 };
 use crate::domain::models::{
-    GithubCheckRun, GithubCheckSuite, GithubCommitStatus, GithubError, GithubListing,
-    GithubOpenPullRequest, GithubOpenPullRequestOutcome, GithubPullRequestHead,
+    GithubBranchDeletion, GithubCheckRun, GithubCheckSuite, GithubCommitStatus, GithubError,
+    GithubListing, GithubOpenPullRequest, GithubOpenPullRequestOutcome, GithubPullRequestHead,
     GithubRepositoryAccess, GithubRequiredCheck, GithubRequiredChecks, GithubWorkflowRun,
     GithubWorkflowRunStatus,
 };
@@ -705,18 +705,18 @@ impl GithubOauthImpl {
         }
     }
 
-    /// Deletes `branch` as the user: `true` once deleted, `false` when the
-    /// repository has no such branch, as when it was deleted already.
-    /// GitHub refusing it, as for a protected branch, is an error, and so
-    /// is a name git would not take for a branch, which is never sent.
-    #[tracing::instrument(skip(self, access_token), err)]
+    /// Deletes `branch` as the user, or finds it missing, as when it was
+    /// deleted already. GitHub refusing it, as for a protected branch, is
+    /// an error, and so is a name git would not take for a branch, which is
+    /// never sent. The caller logs a failure.
+    #[tracing::instrument(skip(self, access_token))]
     pub async fn delete_branch(
         &self,
         access_token: &str,
         owner: &str,
         repo: &str,
         branch: &str,
-    ) -> Result<bool, GithubError> {
+    ) -> Result<GithubBranchDeletion, GithubError> {
         // A part such as `..` would survive the encoding below and move the
         // request off the branch's ref, onto the repository itself.
         if !is_branch_name(branch) {
@@ -749,7 +749,7 @@ impl GithubOauthImpl {
 
         let status = response.status();
         if status.is_success() {
-            return Ok(true);
+            return Ok(GithubBranchDeletion::Deleted);
         }
 
         let headers = response.headers().clone();
@@ -767,7 +767,7 @@ impl GithubOauthImpl {
             && serde_json::from_str::<GithubErrorBody>(&body)
                 .is_ok_and(|error| error.message == MISSING_REFERENCE);
         if missing {
-            return Ok(false);
+            return Ok(GithubBranchDeletion::Missing);
         }
         Err(refusal(status)
             .unwrap_or_else(|| unexpected(status, &headers, body, "failed to delete a branch")))

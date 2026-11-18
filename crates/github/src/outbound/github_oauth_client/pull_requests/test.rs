@@ -1,8 +1,8 @@
 use super::super::GithubOauthImpl;
 use super::super::test::{MockResponse, MockServer};
 use crate::domain::models::{
-    GithubError, GithubOpenPullRequest, GithubOpenPullRequestOutcome, GithubRepositoryAccess,
-    GithubRequiredCheck, GithubRequiredChecks, GithubWorkflowRunStatus,
+    GithubBranchDeletion, GithubError, GithubOpenPullRequest, GithubOpenPullRequestOutcome,
+    GithubRepositoryAccess, GithubRequiredCheck, GithubRequiredChecks, GithubWorkflowRunStatus,
 };
 
 fn answering(status: &'static str, body: &str) -> (MockServer, GithubOauthImpl) {
@@ -507,7 +507,7 @@ async fn delete_branch_deletes_the_branch_s_ref() {
         .await
         .unwrap();
 
-    assert!(deleted);
+    assert_eq!(deleted, GithubBranchDeletion::Deleted);
     assert!(
         server
             .finish()
@@ -529,7 +529,7 @@ async fn delete_branch_of_a_branch_already_gone_deletes_nothing() {
         .await
         .unwrap();
 
-    assert!(!deleted);
+    assert_eq!(deleted, GithubBranchDeletion::Missing);
     server.finish();
 }
 

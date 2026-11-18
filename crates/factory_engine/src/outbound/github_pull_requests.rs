@@ -7,17 +7,17 @@ mod test;
 
 use authentication_service_client::AuthServiceClient;
 use github::domain::models::{
-    GithubError, GithubMergeOutcome, GithubMergeRejection, GithubOpenPullRequest,
-    GithubOpenPullRequestOutcome, GithubPullRequestHead,
+    GithubBranchDeletion, GithubError, GithubMergeOutcome, GithubMergeRejection,
+    GithubOpenPullRequest, GithubOpenPullRequestOutcome, GithubPullRequestHead,
 };
 use github::domain::ports::GithubOauth;
 use github::outbound::github_oauth_client::GithubOauthImpl;
 use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::models::{
-    Check, CheckState, CheckSuite, CodeRepository, CommitStatus, Deployment, DeploymentState,
-    HeadChecks, Merging, OpenPullRequest, Opening, PullRequest, PullRequestState, RepositoryAccess,
-    RequiredCheck, RequiredChecks,
+    BranchDeletion, Check, CheckState, CheckSuite, CodeRepository, CommitStatus, Deployment,
+    DeploymentState, HeadChecks, Merging, OpenPullRequest, Opening, PullRequest, PullRequestState,
+    RepositoryAccess, RequiredCheck, RequiredChecks,
 };
 use crate::domain::ports::{PullRequests, Retryable};
 use crate::domain::review_rounds::ChangedFile;
@@ -558,17 +558,22 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
         })
     }
 
-    #[tracing::instrument(err, skip(self, owner))]
+    /// The Step that asks logs a failure, so it is not logged here too.
+    #[tracing::instrument(skip(self, owner))]
     async fn delete_branch(
         &self,
         owner: &MacroUserIdStr<'static>,
         repository: &CodeRepository,
         branch: &str,
-    ) -> Result<bool, GithubPullRequestsErr> {
+    ) -> Result<BranchDeletion, GithubPullRequestsErr> {
         let token = self.token(owner).await?;
-        Ok(self
+        let deletion = self
             .github
             .delete_branch(&token, repository.owner(), repository.name(), branch)
-            .await?)
+            .await?;
+        Ok(match deletion {
+            GithubBranchDeletion::Deleted => BranchDeletion::Deleted,
+            GithubBranchDeletion::Missing => BranchDeletion::Missing,
+        })
     }
 }

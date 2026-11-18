@@ -40,8 +40,8 @@ use crate::domain::checks::CHECKS_FILE;
 use crate::domain::control_files::{ControlFiles, ControlFilesError};
 use crate::domain::main_hold::{MainWatch, held_note};
 use crate::domain::models::{
-    CheckState, CheckSuite, CodeRepository, HeadChecks, Merging, OpenPullRequest, Opening,
-    PullRequest, PullRequestState, RequiredCheck, RequiredChecks, StepInput, StepReport,
+    BranchDeletion, CheckState, CheckSuite, CodeRepository, HeadChecks, Merging, OpenPullRequest,
+    Opening, PullRequest, PullRequestState, RequiredCheck, RequiredChecks, StepInput, StepReport,
     run_branch,
 };
 use crate::domain::ports::{MainWatches, PullRequests, Retryable};
@@ -566,12 +566,12 @@ where
     /// repository deletes merged branches itself.
     async fn delete_merged_branch(&self, input: &StepInput<'_>, merged_head: &str, merger: Merger) {
         let branch = run_branch(input.key.run_id);
-        let deleted = self
+        let _ = self
             .delete_branch_at(input, &branch, merged_head, merger)
-            .await;
-        if let Err(error) = deleted {
-            tracing::warn!(?error, %branch, "the merged run's branch was not deleted");
-        }
+            .await
+            .inspect_err(|error| {
+                tracing::warn!(?error, %branch, "the merged run's branch was not deleted");
+            });
     }
 
     /// [`Self::delete_merged_branch`], with its failure.
@@ -605,17 +605,17 @@ where
             .map_err(PullRequestStepError::github)?;
         if head.as_deref() != Some(merged_head) {
             if head.is_some() {
-                tracing::info!(%branch, "the merged run's branch moved since its merge, so it is kept");
+                tracing::info!(%branch, "kept the merged run's branch: it moved since");
             }
             return Ok(());
         }
 
-        let deleted = self
+        let deletion = self
             .github
             .delete_branch(input.owner, &repository, branch)
             .await
             .map_err(PullRequestStepError::github)?;
-        if deleted {
+        if deletion == BranchDeletion::Deleted {
             tracing::info!(%branch, "deleted the merged run's branch");
         }
         Ok(())

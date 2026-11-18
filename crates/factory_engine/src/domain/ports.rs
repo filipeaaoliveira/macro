@@ -21,7 +21,7 @@ use crate::domain::gate::{
 use crate::domain::gate_owner::{GateNotice, OwnerNote};
 use crate::domain::main_hold::{HoldTask, MainLook, MainWatch};
 use crate::domain::models::{
-    AgentAnswer, AgentCommand, AgentTask, AgentTurn, Answerer, CodeRepository,
+    AgentAnswer, AgentCommand, AgentTask, AgentTurn, Answerer, BranchDeletion, CodeRepository,
     ControlFilesSettings, Deployment, FactoryError, FlowSummary, HeadChecks, Merging,
     OpenPullRequest, Opening, PullRequest, RepositoryAccess, RequiredChecks, RunDetail, RunFinish,
     RunStart, SessionSteer, SessionStepRef, StandingRulesSettings, StepEnding, StepError,
@@ -379,14 +379,13 @@ pub trait PullRequests: Send + Sync + 'static {
         head_sha: &str,
     ) -> impl Future<Output = Result<Merging, Self::Err>> + Send;
 
-    /// Ask GitHub to delete `branch` of `repository`: `true` once deleted,
-    /// `false` when it was not there.
+    /// Ask GitHub to delete `branch` of `repository`, or find it missing.
     fn delete_branch(
         &self,
         owner: &MacroUserIdStr<'static>,
         repository: &CodeRepository,
         branch: &str,
-    ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
+    ) -> impl Future<Output = Result<BranchDeletion, Self::Err>> + Send;
 }
 
 /// Asks the watch of a base branch's checks, which sets and clears its

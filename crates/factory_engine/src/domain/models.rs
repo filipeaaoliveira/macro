@@ -546,6 +546,15 @@ impl DeploymentState {
     }
 }
 
+/// What asking GitHub to delete a branch came to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BranchDeletion {
+    /// The branch was deleted.
+    Deleted,
+    /// The repository has no such branch, as when it was deleted already.
+    Missing,
+}
+
 /// What asking GitHub to merge a pull request came to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Merging {
