@@ -210,6 +210,7 @@ async fn a_run_keeps_the_rules_it_was_created_with(pool: PgPool) {
             standing_rules: rules,
             automation: None,
             definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert")
@@ -332,6 +333,7 @@ async fn the_queue_limit_is_kept_with_the_rules(pool: PgPool) {
             standing_rules: rules,
             automation: None,
             definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert")
@@ -380,6 +382,7 @@ async fn kept_everywhere(pool: PgPool, definition: OrchestratorDefinition) {
             standing_rules: rules,
             automation: None,
             definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert")

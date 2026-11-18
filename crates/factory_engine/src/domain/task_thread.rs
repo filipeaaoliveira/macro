@@ -39,6 +39,7 @@ use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::ReviewRoundRepository;
 use uuid::Uuid;
 
+use crate::domain::built_in_flows::walked_flow;
 use crate::domain::ports::{PauseNotices, TaskThread, ThreadPosted};
 
 pub use comments::{UpdateContext, first_comment, update_comment};
@@ -201,11 +202,18 @@ where
         None => None,
     };
 
+    // Which entries name the Run's pull request is read from its own Flow.
+    let flow = repo
+        .run_flow(run_id)
+        .await
+        .map_err(|e| e.to_string())?
+        .and_then(walked_flow);
     let run_link = thread.run_link(run_id);
     let context = UpdateContext {
         run_link: &run_link,
         rounds: &rounds,
         answerer_name: answerer_name.as_deref(),
+        flow: flow.as_ref(),
     };
     Ok(update_comment(&run, &steps, &context, update).map(|comment| (run, task_id, comment)))
 }

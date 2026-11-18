@@ -84,6 +84,7 @@ async fn run_at_plan_gate(
             },
             automation: None,
             definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert")

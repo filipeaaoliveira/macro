@@ -441,6 +441,7 @@ async fn plan_task(repo: &FakeRepo) -> AgentTask {
             standing_rules: RunRules::DEFAULT,
             automation: None,
             definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert");

@@ -237,6 +237,7 @@ async fn plan_run(repo: &FakeRepo) -> RunStart {
             standing_rules: RunRules::DEFAULT,
             automation: None,
             definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert")
@@ -944,6 +945,7 @@ where
             standing_rules: walk.rules,
             automation: None,
             definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert")
@@ -1504,6 +1506,7 @@ async fn watching(repo: &FakeRepo) -> (MainWatch, Repository) {
         standing_rules: RunRules::DEFAULT,
         automation: None,
         definition: None,
+        kept_flow: None,
     })
     .await
     .expect("insert");

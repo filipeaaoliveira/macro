@@ -8,8 +8,9 @@ use uuid::Uuid;
 use crate::domain::models::{
     CheckResult, CheckRound, CheckRoundOutcome, CheckRoundStart, ClaimedSession,
     ControlFileChanges, EntryId, GateAnswer, HandBack, HandedBack, NewRun, NewSteer, Outcome,
-    PassedOver, QueueHold, Role, Run, RunId, RunInsert, RunOutcome, SessionStep, SteerRefusal,
-    Steered, Step, StepKey, StepSession, StepSteering, StoppingSession, TaskLink, TeamMembership,
+    PassedOver, QueueHold, Role, Run, RunFlow, RunId, RunInsert, RunOutcome, SessionStep,
+    SteerRefusal, Steered, Step, StepKey, StepSession, StepSteering, StoppingSession, TaskLink,
+    TeamMembership,
 };
 use crate::domain::standing_rules::StandingRule;
 
@@ -462,6 +463,13 @@ pub trait RunRepository: Send + Sync + 'static {
         &self,
         id: RunId,
     ) -> impl Future<Output = Result<Option<serde_json::Value>, Self::Err>> + Send;
+
+    /// The Flow the Run `id` walks, as it keeps it; none when there is no
+    /// such Run.
+    fn run_flow(
+        &self,
+        id: RunId,
+    ) -> impl Future<Output = Result<Option<RunFlow>, Self::Err>> + Send;
 
     /// The commit the Run last asked a person to merge, if any.
     fn merge_head(

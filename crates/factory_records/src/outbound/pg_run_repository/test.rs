@@ -55,6 +55,7 @@ pub(super) async fn insert(repo: &PgRunRepository, id: RunId, request: &str) -> 
             standing_rules: RunRules::DEFAULT,
             automation: None,
             definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert")
@@ -377,6 +378,7 @@ async fn a_run_keeps_its_repository_and_the_commit_it_asks_to_merge(pool: PgPool
             standing_rules: RunRules::DEFAULT,
             automation: None,
             definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert");
@@ -424,6 +426,7 @@ async fn a_run_is_kept_with_its_task_in_one_write(pool: PgPool) {
             standing_rules: RunRules::DEFAULT,
             automation: None,
             definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert");
@@ -441,6 +444,7 @@ async fn a_run_is_kept_with_its_task_in_one_write(pool: PgPool) {
             standing_rules: RunRules::DEFAULT,
             automation: None,
             definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert for a missing task");
@@ -1213,6 +1217,7 @@ async fn insert_on_task(
             standing_rules: RunRules::DEFAULT,
             automation: None,
             definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert")

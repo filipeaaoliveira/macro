@@ -61,6 +61,7 @@ async fn run_on_task(repo: &FakeRepo, rules: RunRules) -> (RunId, Uuid) {
             standing_rules: rules,
             automation: None,
             definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert")

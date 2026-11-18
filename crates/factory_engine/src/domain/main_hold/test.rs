@@ -72,6 +72,7 @@ async fn run_of_on(
         standing_rules: RunRules::DEFAULT,
         automation: None,
         definition: None,
+        kept_flow: None,
     })
     .await
     .expect("insert");

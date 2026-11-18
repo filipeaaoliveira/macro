@@ -206,6 +206,7 @@ async fn a_pull_request_merged_outside_the_run_keeps_its_control_files() {
             standing_rules: RunRules::DEFAULT,
             automation: None,
             definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert");

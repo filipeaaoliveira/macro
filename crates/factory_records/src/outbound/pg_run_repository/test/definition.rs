@@ -6,7 +6,9 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use super::{insert, julia};
-use crate::domain::models::{NewRun, NewRunDefinition, RunDefinition, RunId, RunInsert};
+use crate::domain::models::{
+    KeptFlow, NewRun, NewRunDefinition, RunDefinition, RunId, RunInsert,
+};
 use crate::domain::ports::RunRepository;
 use crate::domain::standing_rules::{OrchestratorDefinition, RulesSource, RunRules};
 use crate::outbound::pg_run_repository::PgRunRepository;
@@ -81,6 +83,7 @@ async fn a_run_keeps_the_definition_commit_it_read(pool: PgPool) {
                 commit: COMMIT,
                 agents: &agents,
             }),
+            kept_flow: None,
         })
         .await
         .expect("insert")
@@ -114,4 +117,66 @@ async fn a_run_keeps_the_definition_commit_it_read(pool: PgPool) {
         repo.run_definition_agents(without).await.expect("read"),
         None
     );
+}
+
+/// A Run keeps the Flow it walks, and whether it asks before its first
+/// Gate, which decides whether it holds a starting place in its owner's
+/// Queue; a Run kept before is counted by its Flow's name.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn a_run_keeps_its_flow_and_whether_it_asks(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let flow = serde_json::json!({ "entries": [] });
+    let keep = |flow_name: &'static str, asks: Option<bool>| {
+        let repo = &repo;
+        let flow = &flow;
+        async move {
+            let id = RunId::generate();
+            let inserted = repo
+                .insert_run(NewRun {
+                    id,
+                    flow: flow_name,
+                    request: "Do it",
+                    user_id: &julia(),
+                    task_id: None,
+                    repository: None,
+                    created_in_person: true,
+                    control_file_patterns: &[],
+                    control_files_team_id: None,
+                    standing_rules: RunRules::DEFAULT,
+                    automation: None,
+                    definition: None,
+                    kept_flow: asks.map(|asks| KeptFlow {
+                        definition: flow,
+                        asks,
+                    }),
+                })
+                .await
+                .expect("insert");
+            assert!(matches!(inserted, RunInsert::Inserted(_)));
+            id
+        }
+    };
+    let asking = keep("notes", Some(true)).await;
+    let quiet = keep("plan", Some(false)).await;
+    let before = keep("plan", None).await;
+
+    let starting = repo
+        .list_starting_runs(&julia(), &["plan"], 10)
+        .await
+        .expect("starting");
+    let mut ids: Vec<RunId> = starting.into_iter().map(|run| run.id).collect();
+    ids.sort();
+    let mut expected = vec![asking, before];
+    expected.sort();
+
+    assert_eq!(ids, expected);
+    assert!(!ids.contains(&quiet));
+    let kept = repo.run_flow(asking).await.expect("read").expect("the run");
+    assert_eq!(kept.name.as_deref(), Some("notes"));
+    assert_eq!(kept.definition, Some(flow.clone()));
+    let older = repo.run_flow(before).await.expect("read").expect("the run");
+    assert_eq!(older.definition, None);
 }

@@ -6,7 +6,7 @@ mod test;
 
 use std::collections::BTreeSet;
 
-use factory_records::domain::models::Role;
+use factory_records::domain::models::{Role, RunFlow};
 
 use crate::domain::flow::{Flow, FlowError, StepName, StepUse};
 
@@ -62,4 +62,16 @@ pub fn built_in_roles() -> Result<BTreeSet<Role>, FlowError> {
         }
     }
     Ok(roles)
+}
+
+/// The Flow a Run walks, from what it keeps: the Flow it kept when it
+/// started, or, for a Run kept before Runs kept theirs, the built-in Flow
+/// of its name. None when neither reads.
+pub fn walked_flow(kept: RunFlow) -> Option<Flow> {
+    match kept.definition {
+        Some(definition) => serde_json::from_value(definition).ok(),
+        None => BuiltInFlow::named(kept.name.as_deref()?)?
+            .read(|_| Some(StepUse::Work))
+            .ok(),
+    }
 }

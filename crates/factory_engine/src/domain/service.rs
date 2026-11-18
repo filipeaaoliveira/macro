@@ -15,9 +15,9 @@ use factory_records::domain::automations::{
 };
 use factory_records::domain::main_hold::{BaseState, MainHoldRepository};
 use factory_records::domain::models::{
-    EntryId, HandBack, MAX_NOTE_BYTES, MAX_OUTPUT_BYTES, MAX_QUESTION_BYTES, MAX_REQUEST_BYTES,
-    NewRun, NewSteer, Outcome, QueueHold, Repository, Run, RunId, RunInsert, RunOutcome,
-    SteerRefusal, Step, StepKey, TaskLink, TeamMembership,
+    EntryId, HandBack, KeptFlow, MAX_NOTE_BYTES, MAX_OUTPUT_BYTES, MAX_QUESTION_BYTES,
+    MAX_REQUEST_BYTES, NewRun, NewSteer, Outcome, QueueHold, Repository, Run, RunId, RunInsert,
+    RunOutcome, SteerRefusal, Step, StepKey, TaskLink, TeamMembership,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::{ReviewRound, ReviewRoundRepository};
@@ -30,6 +30,7 @@ use uuid::Uuid;
 
 use crate::domain::built_in_flows::BUILT_IN_FLOWS;
 use crate::domain::control_files::ControlFiles;
+use crate::domain::flow::Flow;
 use crate::domain::gate::{
     AnswerGate, GateAnswered, GateOpening, GateRuling, GateTelling, ReplyGate,
 };
@@ -348,19 +349,14 @@ where
     }
 
     /// Whether `steps`' latest Step is at a merge: its entry runs
-    /// `ready_to_merge` or `merge` in a built-in Flow.
-    fn at_merge(&self, steps: &[Step]) -> bool {
+    /// `ready_to_merge` or `merge` in `flow`, the Run's own.
+    fn at_merge(steps: &[Step], flow: &Flow) -> bool {
         let Some(latest) = steps.last() else {
             return false;
         };
-        BUILT_IN_FLOWS
-            .into_iter()
-            .filter_map(|flow| flow.read(|step| self.executor.serves(step)).ok())
-            .flat_map(|flow| flow.entries)
-            .any(|entry| {
-                entry.id == latest.entry
-                    && matches!(entry.step.as_str(), "ready_to_merge" | "merge")
-            })
+        flow.entries.iter().any(|entry| {
+            entry.id == latest.entry && matches!(entry.step.as_str(), "ready_to_merge" | "merge")
+        })
     }
 
     /// What the Run shows of the base branch it merges to: nothing unless
@@ -375,7 +371,14 @@ where
         let Some(repository) = run.repository.as_ref() else {
             return Ok(BaseState::default());
         };
-        if run.end.is_some() || !self.at_merge(steps) {
+        if run.end.is_some() || steps.is_empty() {
+            return Ok(BaseState::default());
+        }
+        let at_merge = self
+            .run_flow(run.id)
+            .await?
+            .is_some_and(|flow| Self::at_merge(steps, &flow));
+        if !at_merge {
             return Ok(BaseState::default());
         }
         let base = (repository.url.clone(), repository.base_branch.clone());
@@ -442,37 +445,17 @@ where
             .collect()
     }
 
-    /// The kind of Gate the entry `entry` asks, by its Flow, when an agent
-    /// answering for the Run's owner may answer it, with the most visits
-    /// the entry runs: every built-in Flow that has the entry asks the same
-    /// kind of Gate there, not one kept for a person. A Run does not keep
-    /// its Flow's name, so the entry is looked up in each, as for a Run at
-    /// its merge, bound to the review rounds the Runs this service starts
-    /// are.
-    fn agent_answerable_entry(&self, entry: &EntryId) -> Option<(RuleGateKind, Option<NonZeroU8>)> {
-        let mut asked = BUILT_IN_FLOWS
-            .into_iter()
-            .filter_map(|flow| flow.read(|step| self.executor.serves(step)).ok())
-            .flat_map(|mut flow| {
-                if let Some(rounds) = self.review_rounds {
-                    flow.bound_review_rounds(rounds);
-                }
-                flow.entries
-            })
-            .filter(|asking| asking.id == *entry)
-            .map(|asking| match asking.gate {
-                Some(gate) if !gate.person_only => gate.kind.map(|kind| (kind, asking.max_visits)),
-                _ => None,
-            });
-        let (kind, mut max_visits) = asked.next()??;
-        for other in asked {
-            let (other_kind, other_visits) = other?;
-            if other_kind != kind {
-                return None;
-            }
-            max_visits = max_visits.min(other_visits);
-        }
-        Some((kind, max_visits))
+    /// The kind of Gate the entry `entry` asks in `flow`, the Run's own,
+    /// when an agent answering for the Run's owner may answer it, with the
+    /// most visits the entry runs: a Gate of a kind, not one kept for a
+    /// person.
+    fn agent_answerable_entry(
+        flow: &Flow,
+        entry: &EntryId,
+    ) -> Option<(RuleGateKind, Option<NonZeroU8>)> {
+        let asking = flow.entries.iter().find(|asking| asking.id == *entry)?;
+        let gate = asking.gate.as_ref().filter(|gate| !gate.person_only)?;
+        Some((gate.kind?, asking.max_visits))
     }
 
     /// Fails unless an agent answering for the Run's owner from the session
@@ -529,8 +512,13 @@ where
         {
             return Err(PersonOnly::PersonsGate.into());
         }
-        let (kind, max_visits) = self
-            .agent_answerable_entry(&step.entry)
+        // The kind comes from the Run's own Flow, as the workflow and the
+        // Standing Rules read it: never from another Flow with an entry of
+        // the same id.
+        let flow = self.run_flow(run.id).await?;
+        let (kind, max_visits) = flow
+            .as_ref()
+            .and_then(|flow| Self::agent_answerable_entry(flow, &step.entry))
             .filter(|(kind, _)| offers_kind_answers(*kind, &gate.answers))
             .ok_or(PersonOnly::PersonsGate)?;
         if approved_control_files {
@@ -667,15 +655,13 @@ where
         // under, counted in the same write, no new Run starts, whoever
         // asks: the person, an agent for them, or an Automation; starts at
         // the same time are counted one after the other.
-        let mut asking_flows: Vec<&str> = self.asking_flows();
-        if let Some(pinned) = &definition {
-            let asking = pinned.definition.flows.iter().filter(|(name, flow)| {
-                !asking_flows.contains(&name.as_str())
-                    && flow.entries.iter().any(|entry| entry.gate.is_some())
-            });
-            let asking: Vec<&str> = asking.map(|(name, _)| name.as_str()).collect();
-            asking_flows.extend(asking);
-        }
+        // The Run keeps the Flow it walks, and whether it asks before its
+        // first Gate: what its Gates are, and whether it holds a place in
+        // the Queue, are read from it, whatever its team's Definition says
+        // later. Runs kept before are counted by their Flow's name.
+        let asking_flows = self.asking_flows();
+        let kept = serde_json::to_value(&flow).map_err(internal)?;
+        let asks = flow.entries.iter().any(|entry| entry.gate.is_some());
         let hold = QueueHold {
             limit: standing_rules.definition.queue_limit,
             asking_flows: &asking_flows,
@@ -699,6 +685,10 @@ where
                     standing_rules,
                     automation,
                     definition: definition.as_ref().map(PinnedDefinition::kept),
+                    kept_flow: Some(KeptFlow {
+                        definition: &kept,
+                        asks,
+                    }),
                 },
                 hold,
             )

@@ -46,6 +46,7 @@ fn context() -> UpdateContext<'static> {
         run_link: LINK,
         rounds: &[],
         answerer_name: None,
+        flow: None,
     }
 }
 
@@ -345,4 +346,37 @@ fn a_paused_step_running_out_of_time_is_told_once_per_pause() {
         ended_at: at(51),
     });
     assert!(update_comment(&run, &[step], &context(), &update).is_none());
+}
+
+/// Whether a Step's comment names its pull request is read from the Run's
+/// own Flow: the same entry names it where it runs a pull request Step,
+/// and not where it plans.
+#[test]
+fn a_step_names_its_pull_request_by_the_run_s_own_flow() {
+    let run = run();
+    let mut ended = step_with(None);
+    if let Some(end) = ended.end.as_mut() {
+        end.output = "Opened https://github.com/macro/app/pull/7\nMore".to_string();
+    }
+    let steps = [ended];
+    let flow_of = |step: &str| -> crate::domain::flow::Flow {
+        serde_json::from_value(serde_json::json!({
+            "entries": [{ "id": "plan", "step": step, "on": {} }]
+        }))
+        .expect("a flow")
+    };
+    let publishing = flow_of("publish");
+    let planning = flow_of("plan");
+    let comment = |flow| {
+        let context = UpdateContext {
+            flow: Some(flow),
+            ..context()
+        };
+        update_comment(&run, &steps, &context, &RunUpdate::StepEnded { seq: 3 })
+            .expect("ended")
+            .text
+    };
+
+    assert!(comment(&publishing).contains("pull/7"));
+    assert!(!comment(&planning).contains("pull/7"));
 }

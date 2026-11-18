@@ -77,6 +77,7 @@ async fn waiting_with(
             standing_rules: rules,
             automation: None,
             definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert")
@@ -574,4 +575,54 @@ async fn a_queue_limit_out_of_range_is_refused() {
             .await
             .expect("in range");
     }
+}
+
+/// The kind of a Gate is its Run's own Flow's: a Definition's Flow whose
+/// entry `plan` asks to merge is a merge Gate, which the Orchestrator never
+/// approves, whatever a built-in Flow's `plan` entry asks.
+#[tokio::test]
+async fn an_entry_s_gate_kind_is_read_from_the_run_s_own_flow() {
+    let repo = FakeRepo::default();
+    let workflows = FakeWorkflows::default();
+    let service = code_service(&repo, &workflows, &FakeGithub::default());
+    let run = waiting_with(
+        &repo,
+        rules(true, true, false),
+        "plan",
+        1,
+        "done",
+        &["approve", "revise"],
+    )
+    .await;
+    let merging = serde_json::json!({
+        "repository": true,
+        "entries": [{
+            "id": "plan",
+            "step": "ready_to_merge",
+            "gate": {
+                "kind": "merge",
+                "question": "Merge?",
+                "answers": ["approve", "revise"]
+            },
+            "on": {
+                "approve": [{ "to": { "kind": "end", "outcome": "success" } }],
+                "revise": [{ "to": { "kind": "end", "outcome": "manual" } }]
+            }
+        }]
+    });
+    repo.kept_flows
+        .lock()
+        .expect("kept flows")
+        .insert(run, (merging, true));
+
+    let approved = agent_answers(&service, run, "approve").await;
+
+    assert!(
+        matches!(
+            approved,
+            Err(FactoryError::ReservedForAPerson(PersonOnly::Merge))
+        ),
+        "{approved:?}"
+    );
+    assert!(workflows.answers.lock().expect("answers").is_empty());
 }

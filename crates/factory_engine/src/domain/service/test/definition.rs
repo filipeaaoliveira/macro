@@ -329,3 +329,67 @@ async fn naming_a_definition_checks_it_and_holds_the_team_s_settings() {
         .await
         .expect("the team's own settings again");
 }
+
+/// A Definition of one Flow, `change`, that works on a repository and asks
+/// a person once its reply is done.
+fn asking_definition(github: &FakeGithub, commit: &str) {
+    let flow = r#"{
+        "description": "Change it.",
+        "repository": true,
+        "entries": [{
+            "id": "reply",
+            "step": "reply",
+            "gate": { "question": "Good?", "answers": ["yes", "no"] },
+            "on": {
+                "yes": [{ "to": { "kind": "end", "outcome": "success" } }],
+                "no": [{ "to": { "kind": "end", "outcome": "manual" } }]
+            }
+        }]
+    }"#;
+    let files = [
+        ("factory.json", r#"{ "version": 1, "flows": ["change"] }"#),
+        ("flows/change.json", flow),
+        ("agents.json", AGENTS),
+        ("rules.json", r#"{ "controlFiles": ["ci/**"] }"#),
+    ];
+    let mut state = github.state();
+    for (path, text) in files {
+        state
+            .files
+            .insert((commit.to_string(), path.to_string()), text.to_string());
+    }
+}
+
+/// A Run of a Definition's Flow that asks holds a place in its owner's
+/// Queue before its first Gate, by the Flow it kept: the Flows the factory
+/// knows by name never had it.
+#[tokio::test]
+async fn a_definition_run_that_asks_holds_its_queue_place() {
+    let repo = team_repo();
+    let workflows = FakeWorkflows::default();
+    let github = github_at(FIRST);
+    asking_definition(&github, FIRST);
+    let service = code_service(&repo, &workflows, &github);
+
+    let started = service
+        .create_run(
+            teo(),
+            "change".to_string(),
+            "Change it".to_string(),
+            None,
+            Some("https://github.com/macro/app".to_string()),
+            true,
+        )
+        .await
+        .expect("a run");
+    let starting = service.list_starting_runs(&teo()).await.expect("starting");
+
+    assert_eq!(
+        starting
+            .iter()
+            .map(|detail| detail.run.id)
+            .collect::<Vec<_>>(),
+        [started.run.id]
+    );
+}
+

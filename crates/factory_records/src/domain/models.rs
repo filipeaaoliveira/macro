@@ -479,6 +479,29 @@ pub struct NewRun<'a> {
     /// The Factory Definition it starts under, if its owner's team names
     /// one.
     pub definition: Option<NewRunDefinition<'a>>,
+    /// The Flow it walks, as it starts, kept so what the Run's Gates are is
+    /// read from its own Flow; none only for records written before.
+    pub kept_flow: Option<KeptFlow<'a>>,
+}
+
+/// The Flow a new Run walks, as the Run keeps it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct KeptFlow<'a> {
+    /// The Flow, as it starts.
+    pub definition: &'a serde_json::Value,
+    /// Whether it has a Gate of its own, so the Run holds a place in its
+    /// owner's Queue before its first Gate.
+    pub asks: bool,
+}
+
+/// The Flow a Run walks, as it keeps it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RunFlow {
+    /// The Flow's name; none for a Run of an early local build.
+    pub name: Option<String>,
+    /// The Flow as the Run started it; none for a Run created before Runs
+    /// kept it, which is looked up by its name.
+    pub definition: Option<serde_json::Value>,
 }
 
 /// The Factory Definition a new Run keeps.

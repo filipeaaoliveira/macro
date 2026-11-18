@@ -295,6 +295,7 @@ async fn a_new_run_is_read_with_its_flow(pool: PgPool) {
             standing_rules: RunRules::DEFAULT,
             automation: None,
             definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert")
@@ -449,6 +450,7 @@ async fn a_question_and_the_step_going_on_from_it_are_one_visit(pool: PgPool) {
             standing_rules: RunRules::DEFAULT,
             automation: None,
             definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert")
@@ -590,6 +592,7 @@ async fn a_step_without_a_result_is_one_visit_retried_and_a_failure_stopped(pool
             standing_rules: RunRules::DEFAULT,
             automation: None,
             definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert")
@@ -689,6 +692,7 @@ async fn a_failed_verify_or_deploy_is_a_failed_step(pool: PgPool) {
                 standing_rules: RunRules::DEFAULT,
                 automation: None,
                 definition: None,
+                kept_flow: None,
             })
             .await
             .expect("insert")
@@ -774,6 +778,7 @@ async fn a_verifier_without_a_result_counts_with_the_verifier_s_failures(pool: P
                 standing_rules: RunRules::DEFAULT,
                 automation: None,
                 definition: None,
+                kept_flow: None,
             })
             .await
             .expect("insert")

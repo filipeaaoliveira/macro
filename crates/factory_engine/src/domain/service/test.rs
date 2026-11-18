@@ -283,6 +283,7 @@ async fn julia_s_run(repo: &FakeRepo) -> RunId {
             standing_rules: RunRules::DEFAULT,
             automation: None,
             definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert")
@@ -1163,6 +1164,7 @@ async fn a_task_s_list_holds_its_owner_s_fifty_newest_runs() {
                 standing_rules: RunRules::DEFAULT,
                 automation: None,
                 definition: None,
+                kept_flow: None,
             })
             .await
             .expect("insert")

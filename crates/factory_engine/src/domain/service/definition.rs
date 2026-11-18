@@ -4,14 +4,14 @@
 
 use factory_records::domain::automations::AutomationRepository;
 use factory_records::domain::main_hold::MainHoldRepository;
-use factory_records::domain::models::{NewRunDefinition, TeamMembership};
+use factory_records::domain::models::{NewRunDefinition, RunId, TeamMembership};
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::ReviewRoundRepository;
 use factory_records::domain::standing_rules::StandingRulesRepository;
 use macro_user_id::user_id::MacroUserIdStr;
 
 use super::{FactoryServiceImpl, internal};
-use crate::domain::built_in_flows::BuiltInFlow;
+use crate::domain::built_in_flows::{BuiltInFlow, walked_flow};
 use crate::domain::definition::{
     DefinitionFiles, DefinitionReadError, FactoryDefinition, read_definition,
 };
@@ -186,6 +186,24 @@ where
         Ok(flow)
     }
 
+    /// The Flow the Run `run_id` walks: the one it kept when it started, or,
+    /// for a Run kept before Runs kept theirs, the built-in Flow of its
+    /// name, bound as this service bounds the Flows it starts. None when
+    /// neither is there.
+    pub(super) async fn run_flow(&self, run_id: RunId) -> Result<Option<Flow>, FactoryError> {
+        let Some(kept) = self.repo.run_flow(run_id).await.map_err(internal)? else {
+            return Ok(None);
+        };
+        let built_in = kept.definition.is_none();
+        let Some(mut flow) = walked_flow(kept) else {
+            return Ok(None);
+        };
+        if built_in && let Some(rounds) = self.review_rounds {
+            flow.bound_review_rounds(rounds);
+        }
+        Ok(Some(flow))
+    }
+
     /// The team's Factory Definition, as `actor` sees it: read at its
     /// head, saying why when it does not read.
     pub(super) async fn definition_settings(
@@ -195,9 +213,9 @@ where
         let team = self.repo.team_of(actor).await.map_err(internal)?;
         let agent = self.repo.is_agent_account(actor).await.map_err(internal)?;
         let repo_url = self.named_definition(team).await?;
-        let (commit, problem) = match &repo_url {
+        let (pinned, problem) = match &repo_url {
             Some(repo_url) => match self.definition_at_head(actor, repo_url).await {
-                Ok(pinned) => (Some(pinned.commit), None),
+                Ok(pinned) => (Some(pinned), None),
                 Err(FactoryError::Internal(report)) => return Err(FactoryError::Internal(report)),
                 Err(refused) => (None, Some(refused.to_string())),
             },
@@ -205,7 +223,7 @@ where
         };
         Ok(DefinitionSettings {
             repo_url,
-            commit,
+            commit: pinned.map(|pinned| pinned.commit),
             problem,
             team_id: team.map(|team| team.team_id),
             can_edit: !agent && team.is_some_and(|team| team.admin),

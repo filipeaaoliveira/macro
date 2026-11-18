@@ -42,6 +42,7 @@ async fn code_run(repo: &PgRunRepository, repository: Option<&Repository>) -> Ru
             standing_rules: RunRules::DEFAULT,
             automation: None,
             definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert")

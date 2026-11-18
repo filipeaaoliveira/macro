@@ -23,7 +23,7 @@ use crate::domain::models::{
     AgentName, AskedBack, CheckResult, CheckRound, CheckRoundOutcome, CheckRoundStart,
     ClaimedSession, ControlFileChanges, EntryId, Gate, GateAnswer, GateKind, HandBack, HandedBack,
     InvalidName, NewRun, NewSteer, Outcome, PassedOver, QueueHold, QueuePlaces, Repository, Role,
-    Run, RunDefinition, RunEnd, RunId, RunInsert, RunOutcome, SessionStep, StandInAnswer,
+    Run, RunDefinition, RunEnd, RunFlow, RunId, RunInsert, RunOutcome, SessionStep, StandInAnswer,
     SteerRefusal, Steered, Step, StepEnd, StepKey, StepSession, StepSteering, StepTerminal,
     StoppingSession, TaskLink, TeamMembership,
 };
@@ -482,7 +482,7 @@ async fn queue_places(
                             AND g.stand_in_answer IS NULL
                     )
                     OR (
-                        r.flow = ANY($2)
+                        COALESCE(r.flow_asks, r.flow = ANY($2))
                         AND NOT EXISTS (SELECT 1 FROM factory_gate g WHERE g.run_id = r.id)
                     )
                 )
@@ -610,11 +610,12 @@ impl RunRepository for PgRunRepository {
                 id, flow, request, user_id, task_id, repo_url, base_branch, created_in_person,
                 control_file_patterns, control_files_team_id, standing_rules, standing_rules_source,
                 standing_rules_project_id, automation_id, automation_name, automation_trigger,
-                automation_firing_key, definition_repo_url, definition_commit, definition_agents
+                automation_firing_key, definition_repo_url, definition_commit, definition_agents,
+                flow_definition, flow_asks
             )
             VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
-                $19, $20
+                $19, $20, $21, $22
             )
             RETURNING
                 id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,
@@ -644,6 +645,8 @@ impl RunRepository for PgRunRepository {
             run.definition.map(|definition| definition.repo_url),
             run.definition.map(|definition| definition.commit),
             run.definition.map(|definition| definition.agents),
+            run.kept_flow.map(|flow| flow.definition),
+            run.kept_flow.map(|flow| flow.asks),
         )
         .fetch_one(&mut *transaction)
         .await;
@@ -832,6 +835,19 @@ impl RunRepository for PgRunRepository {
             }
         }
         Ok(())
+    }
+
+    async fn run_flow(&self, id: RunId) -> Result<Option<RunFlow>, Self::Err> {
+        let row = sqlx::query!(
+            "SELECT flow, flow_definition FROM factory_run WHERE id = $1",
+            id.as_uuid(),
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|row| RunFlow {
+            name: row.flow,
+            definition: row.flow_definition,
+        }))
     }
 
     async fn run_definition_agents(
@@ -1096,7 +1112,7 @@ impl RunRepository for PgRunRepository {
             FROM factory_run r
             WHERE r.user_id = $1
                 AND r.ended_at IS NULL
-                AND r.flow = ANY($2)
+                AND COALESCE(r.flow_asks, r.flow = ANY($2))
                 AND NOT EXISTS (SELECT 1 FROM factory_gate g WHERE g.run_id = r.id)
             ORDER BY r.created_at DESC, r.id DESC
             LIMIT $3

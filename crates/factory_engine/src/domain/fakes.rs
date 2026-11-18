@@ -21,9 +21,9 @@ use factory_records::domain::automations::{Automation, FiringEnd};
 use factory_records::domain::models::{
     CheckResult, CheckRound, CheckRoundEnd, CheckRoundOutcome, CheckRoundStart, ClaimedSession,
     ControlFileChanges, EntryId, Gate, GateAnswer, GateKind, HandBack, HandedBack, NewRun,
-    NewSteer, Outcome, PassedOver, QueueHold, QueuePlaces, Role, Run, RunDefinition, RunEnd, RunId,
-    RunInsert, RunOutcome, SessionStep, SteerRefusal, Steered, Step, StepEnd, StepKey, StepSession,
-    StepSteering, StoppingSession, TaskLink, TeamMembership,
+    NewSteer, Outcome, PassedOver, QueueHold, QueuePlaces, Role, Run, RunDefinition, RunEnd,
+    RunFlow, RunId, RunInsert, RunOutcome, SessionStep, SteerRefusal, Steered, Step, StepEnd,
+    StepKey, StepSession, StepSteering, StoppingSession, TaskLink, TeamMembership,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::standing_rules::{
@@ -149,6 +149,8 @@ pub(crate) struct FakeRepo {
     pub(crate) control_files: Arc<Mutex<BTreeMap<Uuid, Vec<String>>>>,
     /// The Factory Definition each team names, by its repository's URL.
     pub(crate) team_definitions: Arc<Mutex<BTreeMap<Uuid, String>>>,
+    /// The Flow each Run kept, and whether it asks, by Run.
+    pub(crate) kept_flows: Arc<Mutex<BTreeMap<RunId, (serde_json::Value, bool)>>>,
     /// The Agents of the Definition each Run started under, as kept.
     pub(crate) definition_agents: Arc<Mutex<BTreeMap<RunId, serde_json::Value>>>,
     /// The Standing Rules each team set.
@@ -363,7 +365,7 @@ impl FakeRepo {
             })
             .map(|(run, _)| *run)
             .collect();
-        let flows = self.flows.lock().expect("flows").clone();
+        let asks = self.asks(asking_flows);
         let mut places = QueuePlaces::default();
         for run in self.runs.lock().expect("runs").values() {
             if run.user_id != *user_id || run.end.is_some() || places.held() >= limit {
@@ -371,15 +373,27 @@ impl FakeRepo {
             }
             if waiting.contains(&run.id) {
                 places.waiting += 1;
-            } else if !gated.contains(&run.id)
-                && flows
-                    .get(&run.id)
-                    .is_some_and(|flow| asking_flows.contains(&flow.as_str()))
-            {
+            } else if !gated.contains(&run.id) && asks.contains(&run.id) {
                 places.starting += 1;
             }
         }
         places
+    }
+
+    /// As the database: the Runs whose Flow asks before their first Gate,
+    /// as each kept it, else by `asking_flows`, its Flow's name.
+    fn asks(&self, asking_flows: &[&str]) -> BTreeSet<RunId> {
+        let kept = self.kept_flows.lock().expect("kept flows").clone();
+        self.flows
+            .lock()
+            .expect("flows")
+            .iter()
+            .filter(|(run, flow)| match kept.get(run) {
+                Some((_, asks)) => *asks,
+                None => asking_flows.contains(&flow.as_str()),
+            })
+            .map(|(run, _)| *run)
+            .collect()
     }
 
     /// Fail the call `name` once, after `passing` calls of it pass.
@@ -447,6 +461,7 @@ impl RunRepository for FakeRepo {
             standing_rules,
             automation,
             definition,
+            kept_flow,
         } = new;
         if let Some(task_id) = task_id
             && !self.tasks.lock().expect("tasks").contains(&task_id)
@@ -488,6 +503,12 @@ impl RunRepository for FakeRepo {
             }),
             end: None,
         };
+        if let Some(kept) = kept_flow {
+            self.kept_flows
+                .lock()
+                .expect("kept flows")
+                .insert(id, (kept.definition.clone(), kept.asks));
+        }
         if let Some(definition) = definition {
             self.definition_agents
                 .lock()
@@ -636,6 +657,22 @@ impl RunRepository for FakeRepo {
         Ok(())
     }
 
+    async fn run_flow(&self, id: RunId) -> Result<Option<RunFlow>, FakeError> {
+        let Some(name) = self.flows.lock().expect("flows").get(&id).cloned() else {
+            return Ok(None);
+        };
+        let definition = self
+            .kept_flows
+            .lock()
+            .expect("kept flows")
+            .get(&id)
+            .map(|(flow, _)| flow.clone());
+        Ok(Some(RunFlow {
+            name: Some(name),
+            definition,
+        }))
+    }
+
     async fn run_definition_agents(
         &self,
         id: RunId,
@@ -748,7 +785,7 @@ impl RunRepository for FakeRepo {
         limit: u16,
     ) -> Result<Vec<Run>, FakeError> {
         let gated = self.gated_runs();
-        let flows = self.flows.lock().expect("flows").clone();
+        let asks = self.asks(asking_flows);
         let mut runs: Vec<Run> = self
             .runs
             .lock()
@@ -758,9 +795,7 @@ impl RunRepository for FakeRepo {
                 run.user_id == *user_id
                     && run.end.is_none()
                     && !gated.contains(&run.id)
-                    && flows
-                        .get(&run.id)
-                        .is_some_and(|flow| asking_flows.contains(&flow.as_str()))
+                    && asks.contains(&run.id)
             })
             .cloned()
             .collect();

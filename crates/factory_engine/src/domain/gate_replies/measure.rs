@@ -25,12 +25,11 @@ mod test;
 use std::collections::BTreeMap;
 
 use factory_records::domain::gate_replies::{AnsweredGate, PastAnswer};
-use factory_records::domain::models::{GateKind, Outcome, RunId};
+use factory_records::domain::models::{GateKind, Outcome, RunFlow, RunId};
 use factory_records::domain::standing_rules::RuleGateKind;
 
 use super::{percent, reply_question};
-use crate::domain::built_in_flows::BuiltInFlow;
-use crate::domain::flow::StepUse;
+use crate::domain::built_in_flows::walked_flow;
 use crate::domain::ports::{GateModel, ModelPick};
 use crate::domain::stand_in::{PAST_ANSWERS_READ, StandInContext, stand_in_question};
 use crate::domain::standing_rules::offers_kind_answers;
@@ -131,13 +130,14 @@ pub struct ReplayReport {
     pub stand_in: Measure,
 }
 
-/// The kind of `gate`, as its built-in Flow names it, when the stand-in
+/// The kind of `gate`, as its Run's own Flow names it, when the stand-in
 /// may answer Gates of that kind: never a merge Gate, nor a Gate of a Run
 /// whose Flow is not known.
 pub fn stand_in_kind(gate: &AnsweredGate) -> Option<RuleGateKind> {
-    let flow = BuiltInFlow::named(gate.flow.as_deref()?)?
-        .read(|_| Some(StepUse::Work))
-        .ok()?;
+    let flow = walked_flow(RunFlow {
+        name: gate.flow.clone(),
+        definition: gate.flow_definition.clone(),
+    })?;
     let kind = flow
         .entries
         .iter()
