@@ -276,6 +276,11 @@ async fn a_refused_trial_stops_the_suite_and_a_suite_with_none_started_is_not_ke
     assert_eq!(partial.runs.keys().collect::<Vec<_>>(), ["export"]);
     let refused = partial.refused.expect("the second trial was refused");
     assert_eq!(refused.task, "typo");
+    // The suite plans only the trial it started.
+    assert_eq!(
+        repo.evaluation.lock().expect("evaluation").suites[&partial.id].planned,
+        1
+    );
 
     let other = FakeRepo::default();
     let service = suites(&other, &FakeGithub::default());

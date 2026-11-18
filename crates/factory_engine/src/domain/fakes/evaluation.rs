@@ -21,6 +21,7 @@ use super::{FakeError, FakeRepo};
 /// A suite kept: whose, its Benchmark and configuration.
 #[derive(Debug, Clone)]
 pub(crate) struct FakeSuite {
+    pub(crate) planned: u16,
     pub(crate) owner: String,
     pub(crate) benchmark: String,
     pub(crate) agents: AgentChoices,
@@ -124,6 +125,14 @@ impl EvaluationRepository for FakeRepo {
         Ok(())
     }
 
+    async fn set_planned_trials(&self, suite_id: Uuid, trials: u16) -> Result<(), FakeError> {
+        let mut kept = self.evaluation.lock().expect("evaluation");
+        if let Some(suite) = kept.suites.get_mut(&suite_id) {
+            suite.planned = trials;
+        }
+        Ok(())
+    }
+
     async fn delete_suite(&self, suite_id: Uuid) -> Result<(), FakeError> {
         let mut kept = self.evaluation.lock().expect("evaluation");
         if !kept.trials.keys().any(|(suite, _)| *suite == suite_id) {
@@ -169,7 +178,11 @@ impl EvaluationRepository for FakeRepo {
             user_id: run.user_id,
             flow,
             request: run.request,
-            repo_url: run.repository.map(|repository| repository.url),
+            repo_url: run
+                .repository
+                .as_ref()
+                .map(|repository| repository.url.clone()),
+            base_branch: run.repository.map(|repository| repository.base_branch),
             outcome: run.end.map(|end| end.outcome),
             steps,
             trial,
@@ -246,6 +259,7 @@ impl EvaluationRepository for FakeRepo {
             return Ok(SuiteInsert::TooManyTrials(open));
         }
         kept.suites.entry(suite.id).or_insert_with(|| FakeSuite {
+            planned: suite.trials,
             owner,
             benchmark: suite.benchmark.to_string(),
             agents: suite.agents.clone(),

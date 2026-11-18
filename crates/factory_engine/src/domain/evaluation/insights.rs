@@ -577,6 +577,12 @@ where
                     return Err(error.into());
                 }
                 Err(error) => {
+                    // The tasks after it never start, so they hold no place
+                    // of the caller's running trials.
+                    let started = u16::try_from(runs.len()).unwrap_or(u16::MAX);
+                    if let Err(error) = self.repo.set_planned_trials(id, started).await {
+                        tracing::error!(?error, "a stopped suite kept its planned trials");
+                    }
                     refused = Some(RefusedTrial {
                         task: task.name.clone(),
                         reason: error.to_string(),
