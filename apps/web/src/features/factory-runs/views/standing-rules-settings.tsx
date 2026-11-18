@@ -33,8 +33,9 @@ const NO_STAND_IN: StandInKinds = { plan: false, blockers: false };
 
 /**
  * The team's Standing Rules: which kinds of Gate the factory answers on its
- * own for its Runs, whether the Gates it leaves go to the Run's owner, and
- * which the stand-in answers for the owner when no rule does.
+ * own for its Runs, whether the Gates it leaves go to the Run's owner,
+ * whether its Runs post their updates to their task's thread, and which
+ * the stand-in answers for the owner when no rule does.
  * Its admins turn each on or off, or go back to the default; other members
  * read them. A Tampered Run always waits for a person, whatever they say.
  */
@@ -134,6 +135,22 @@ export function StandingRulesSettings() {
                   </Checkbox.Label>
                   <Checkbox.Description class="text-xs text-ink-muted">
                     {t('factoryRuns.standingRulesOwnerGatesHint')}
+                  </Checkbox.Description>
+                </div>
+              </Checkbox>
+              <Checkbox
+                size="sm"
+                checked={definition().taskThread ?? false}
+                onChange={(on: boolean) => toggle('taskThread', on)}
+                disabled={locked()}
+              >
+                <Checkbox.Control />
+                <div class="flex flex-col gap-0.5">
+                  <Checkbox.Label class="text-sm">
+                    {t('factoryRuns.standingRulesTaskThread')}
+                  </Checkbox.Label>
+                  <Checkbox.Description class="text-xs text-ink-muted">
+                    {t('factoryRuns.standingRulesTaskThreadHint')}
                   </Checkbox.Description>
                 </div>
               </Checkbox>

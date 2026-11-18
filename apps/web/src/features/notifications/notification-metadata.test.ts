@@ -1,0 +1,34 @@
+import { describe, expect, it } from 'vitest';
+import { getNotificationAction } from './notification-metadata';
+import type { UnifiedNotification } from './types';
+
+/** A factory Gate's notification, notify-only or not. */
+function factoryGate(notifyOnly?: boolean): UnifiedNotification {
+  return {
+    notification_metadata: {
+      tag: 'factory_gate_waiting',
+      content: {
+        runId: '00000000-0000-7000-8000-000000000001',
+        seq: 3,
+        taskId: '00000000-0000-7000-8000-000000000002',
+        request: 'Fix the login bug',
+        question: 'The plan is ready.',
+        notifyOnly,
+      },
+    },
+  } as UnifiedNotification;
+}
+
+describe('a factory Gate notification', () => {
+  it('waits on an answer, unless the Gate only tells the owner', () => {
+    expect(getNotificationAction(factoryGate())).toBe(
+      'waits on your answer in'
+    );
+    expect(getNotificationAction(factoryGate(false))).toBe(
+      'waits on your answer in'
+    );
+    expect(getNotificationAction(factoryGate(true))).toBe(
+      'for your information — the run goes on in'
+    );
+  });
+});

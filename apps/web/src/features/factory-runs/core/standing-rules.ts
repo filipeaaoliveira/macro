@@ -10,21 +10,23 @@ export const RULE_NAMES = {
 /**
  * Which kinds of Gate the factory answers on its own: the plan, a review's
  * blockers, and the merge; whether the Gates it leaves go to the Run's
- * owner (the owner section); and which the stand-in answers for the Run's
- * owner when no rule does (never the merge).
+ * owner (the owner section); which the stand-in answers for the Run's
+ * owner when no rule does (never the merge); and whether a Run posts its
+ * updates to its task's thread (off when left out).
  */
 export type OrchestratorDefinition = {
   plan: boolean;
   blockers: boolean;
   merge: boolean;
   ownerGates: boolean;
+  taskThread?: boolean;
   standIn?: StandInKinds;
 };
 
 /** A kind of Gate a rule decides. */
 export type GateKind = Exclude<
   keyof OrchestratorDefinition,
-  'ownerGates' | 'standIn'
+  'ownerGates' | 'taskThread' | 'standIn'
 >;
 
 /** The kinds of Gate the stand-in answers for the Run's owner. */

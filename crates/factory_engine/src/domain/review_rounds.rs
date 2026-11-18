@@ -38,8 +38,10 @@ use uuid::Uuid;
 
 use crate::domain::models::{CodeRepository, StepError, run_branch};
 use crate::domain::ports::{
-    FollowUpMade, FollowUpTask, PullRequests, Retryable, ReviewService, TaskAccess, TaskDirectory,
+    FollowUpMade, FollowUpTask, NoTaskThread, PullRequests, Retryable, ReviewService, TaskAccess,
+    TaskDirectory, TaskThread,
 };
+use crate::domain::task_thread::{RunUpdate, post_update};
 
 /// A review round for a Run's workflow to open, before its reviewers'
 /// Steps start.
@@ -348,10 +350,11 @@ fn github_failure(error: impl std::error::Error + Retryable + Send + Sync + 'sta
 /// Opens and closes a Run's review rounds, over the Run records, GitHub,
 /// which says what the Run's branch holds, and the tasks follow-ups become.
 #[derive(Debug, Clone)]
-pub struct ReviewRoundsImpl<R, G, T> {
+pub struct ReviewRoundsImpl<R, G, T, P = NoTaskThread> {
     repo: R,
     github: G,
     tasks: T,
+    thread: P,
 }
 
 impl<R, G, T> ReviewRoundsImpl<R, G, T> {
@@ -362,12 +365,28 @@ impl<R, G, T> ReviewRoundsImpl<R, G, T> {
             repo,
             github,
             tasks,
+            thread: NoTaskThread,
         }
     }
 }
 
-impl<R, G, T> ReviewRoundsImpl<R, G, T>
+impl<R, G, T, P> ReviewRoundsImpl<R, G, T, P> {
+    /// The review rounds, posting each round's result to its Run's task
+    /// thread through `thread`, for the Runs whose task thread section is
+    /// on.
+    pub fn with_task_thread<P2: TaskThread>(self, thread: P2) -> ReviewRoundsImpl<R, G, T, P2> {
+        ReviewRoundsImpl {
+            repo: self.repo,
+            github: self.github,
+            tasks: self.tasks,
+            thread,
+        }
+    }
+}
+
+impl<R, G, T, P> ReviewRoundsImpl<R, G, T, P>
 where
+    P: TaskThread,
     R: RunRepository + ReviewRoundRepository,
     G: PullRequests,
     T: TaskDirectory,
@@ -446,8 +465,9 @@ where
     }
 }
 
-impl<R, G, T> ReviewService for ReviewRoundsImpl<R, G, T>
+impl<R, G, T, P> ReviewService for ReviewRoundsImpl<R, G, T, P>
 where
+    P: TaskThread,
     R: RunRepository + ReviewRoundRepository,
     G: PullRequests,
     T: TaskDirectory,
@@ -523,6 +543,9 @@ where
     #[tracing::instrument(err, skip_all, fields(run_id = %closing.run_id, seq = closing.seq))]
     async fn close_round(&self, closing: ReviewRoundClosing) -> Result<Outcome, StepError> {
         let ended = self.closed(&closing).await?;
+        // The round's reviewers are told as one comment, once it closed.
+        let closed = RunUpdate::RoundClosed { seq: closing.seq };
+        post_update(&self.repo, &self.thread, closing.run_id, closed).await;
         // The last round's Blockers end the Run for a person: no round
         // would review a fix of them.
         if closing.last && ended == ReviewRoundOutcome::Changes {
@@ -533,8 +556,9 @@ where
     }
 }
 
-impl<R, G, T> ReviewRoundsImpl<R, G, T>
+impl<R, G, T, P> ReviewRoundsImpl<R, G, T, P>
 where
+    P: TaskThread,
     R: RunRepository + ReviewRoundRepository,
     G: PullRequests,
     T: TaskDirectory,
@@ -854,8 +878,9 @@ where
     }
 }
 
-impl<R, G, T> ReviewRoundsImpl<R, G, T>
+impl<R, G, T, P> ReviewRoundsImpl<R, G, T, P>
 where
+    P: TaskThread,
     R: RunRepository + ReviewRoundRepository,
 {
     /// End the round at `seq` with `ended`, and return the outcome it was

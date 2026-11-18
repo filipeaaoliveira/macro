@@ -982,6 +982,12 @@ impl GraphqlFactoryGateWaitingMetadata {
     async fn asker(&self) -> Option<&str> {
         self.0.asker.as_deref()
     }
+
+    /// Whether the Gate only tells the owner, and the Run goes on without
+    /// an answer.
+    async fn notify_only(&self) -> bool {
+        self.0.notify_only
+    }
 }
 
 /// GraphQL wrapper for team invitation metadata.

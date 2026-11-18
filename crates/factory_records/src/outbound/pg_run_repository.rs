@@ -528,6 +528,25 @@ impl RunRepository for PgRunRepository {
     }
 
     #[tracing::instrument(err, skip(self, user_id))]
+    #[tracing::instrument(err, skip(self, user_id))]
+    async fn display_name(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+    ) -> Result<Option<String>, Self::Err> {
+        let row = sqlx::query!(
+            r#"
+            SELECT mui.first_name, mui.last_name
+            FROM macro_user_info mui
+            JOIN "User" u ON mui.macro_user_id = u.macro_user_id
+            WHERE u.id = $1
+            "#,
+            user_id.as_ref(),
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.and_then(|row| display_name(row.first_name.as_deref(), row.last_name.as_deref())))
+    }
+
     async fn is_agent_account(&self, user_id: &MacroUserIdStr<'static>) -> Result<bool, Self::Err> {
         let is_agent = sqlx::query_scalar!(
             r#"SELECT "isAgent" FROM "User" WHERE id = $1"#,
@@ -1443,5 +1462,23 @@ impl RunRepository for PgRunRepository {
         }
         transaction.commit().await?;
         Ok(())
+    }
+}
+
+/// Stands in for a name part a person never filled in.
+const UNSET_NAME: &str = "N/A";
+
+/// The name `first` and `last` make, as Macro shows a person: the parts they
+/// set, none when they set neither.
+fn display_name(first: Option<&str>, last: Option<&str>) -> Option<String> {
+    let part = |part: Option<&str>| {
+        part.map(str::trim)
+            .filter(|part| !part.is_empty() && *part != UNSET_NAME)
+            .map(str::to_owned)
+    };
+    match (part(first), part(last)) {
+        (None, None) => None,
+        (Some(only), None) | (None, Some(only)) => Some(only),
+        (Some(first), Some(last)) => Some(format!("{first} {last}")),
     }
 }

@@ -12,7 +12,7 @@ use tokio::sync::{Notify, watch};
 use super::{FactoryActivities, Liveness};
 use crate::domain::fakes::{FakeGithub, FakeRepo};
 use crate::domain::flow::StepName;
-use crate::domain::gate::{GateAnswered, GateOpening};
+use crate::domain::gate::{GateAnswered, GateOpening, GateTelling};
 use crate::domain::models::{RunFinish, StepEnding, StepError, StepReport, StepRequest, StepStart};
 use crate::domain::ports::StepService;
 use crate::domain::review_rounds::ReviewRoundsImpl;
@@ -108,6 +108,10 @@ impl StepService for Steps {
     }
 
     async fn notify_gate(&self, _key: StepKey) -> Result<(), StepError> {
+        Ok(())
+    }
+
+    async fn tell_gate(&self, _telling: GateTelling) -> Result<(), StepError> {
         Ok(())
     }
 

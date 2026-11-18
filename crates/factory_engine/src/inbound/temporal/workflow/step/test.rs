@@ -10,7 +10,7 @@ use serde_json::json;
 
 use super::walk_step;
 use crate::domain::flow::{Entry, Flow, StepUse};
-use crate::domain::gate::GateOpening;
+use crate::domain::gate::{GateOpening, GateTelling};
 use crate::domain::models::{StepEnding, StepReport, StepRequest, StepStart};
 use crate::domain::review_rounds::{ReviewRoundClosing, ReviewRoundOpening};
 use crate::domain::standing_rules::{GateFacts, rule_answer};
@@ -122,6 +122,10 @@ impl Work for Script {
             return Err(Failed);
         }
         Ok(opening.answers[0].clone())
+    }
+
+    async fn tell(&self, telling: GateTelling) {
+        self.note(format!("tell {} {}", telling.key.seq, telling.question));
     }
 
     async fn close(&self, _closing: ReviewRoundClosing) -> Result<Outcome, Failed> {
@@ -447,6 +451,7 @@ const EVERY_RULE: OrchestratorDefinition = OrchestratorDefinition {
     blockers: true,
     merge: true,
     owner_gates: false,
+    task_thread: false,
 };
 
 /// A `plan` entry whose Gate is of the `plan` kind, as the built-in Flows
@@ -523,5 +528,54 @@ async fn a_gate_of_no_kind_waits_for_a_person_with_every_rule_on() {
             "release 1",
             "ask 1 Approve?"
         ]
+    );
+}
+
+/// A notify-only Gate tells the Run's owner once its Step ends `done`, and
+/// the Run goes on with `done`, asking no one; a Step that ends otherwise
+/// tells no one.
+#[tokio::test]
+async fn a_notify_only_gate_tells_and_routes_the_step_s_outcome() {
+    let entry = Flow::parse(
+        json!({ "entries": [{
+            "id": "plan",
+            "step": "plan",
+            "role": "planner",
+            "gate": { "question": "The plan is ready.", "notify_only": true }
+        }] }),
+        |_| Some(StepUse::Agent),
+    )
+    .expect("valid flow")
+    .entries[0]
+        .clone();
+
+    let told = Script::default();
+    let (walked, held) = walk(&told, &entry, asking(0), 10).await;
+    assert_eq!(walked, Ok(Round::Routed(Outcome::done())));
+    assert!(held.is_empty());
+    assert_eq!(
+        told.asked(),
+        [
+            "start 1",
+            "run 1",
+            "end 1 done",
+            "release 1",
+            "tell 1 The plan is ready."
+        ]
+    );
+
+    let failing = Script {
+        ends: [(1, "fail")].into(),
+        ..Script::default()
+    };
+    let (walked, _) = walk(&failing, &entry, asking(0), 10).await;
+    assert_eq!(walked, Ok(Round::Routed(Outcome::failed())));
+    assert!(
+        !failing
+            .asked()
+            .iter()
+            .any(|asked| asked.starts_with("tell")),
+        "{:?}",
+        failing.asked()
     );
 }

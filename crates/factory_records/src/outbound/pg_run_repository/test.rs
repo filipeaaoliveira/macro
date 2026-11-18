@@ -1350,3 +1350,34 @@ async fn a_step_going_on_after_a_question_works_in_the_asking_step_s_session(poo
     assert_eq!(gate.kind, GateKind::Question);
     assert!(gate.kind.answered_only_by_a_person());
 }
+
+/// A person is named by the parts of their name they set, and has no name
+/// with none set; one with no account has none either.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "fixtures", scripts("people", "names"))
+)]
+async fn a_person_is_named_by_the_name_they_set(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let person = |id: &str| MacroUserIdStr::try_from(id.to_string()).expect("valid");
+
+    assert_eq!(
+        repo.display_name(&person("macro|julia@example.com"))
+            .await
+            .expect("read")
+            .as_deref(),
+        Some("Julia Ruiz")
+    );
+    assert_eq!(
+        repo.display_name(&person("macro|teo@example.com"))
+            .await
+            .expect("read"),
+        None
+    );
+    assert_eq!(
+        repo.display_name(&person("macro|nobody@example.com"))
+            .await
+            .expect("read"),
+        None
+    );
+}

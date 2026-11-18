@@ -148,6 +148,40 @@ describe('StandingRulesSettings', () => {
     );
   });
 
+  it('turns the task thread on, keeping the rules and the owner section', async () => {
+    const ownerOn: Settings = {
+      ...teamDefault,
+      definition: { ...teamDefault.definition, ownerGates: true },
+      isDefault: false,
+    };
+    vi.mocked(factoryClient.setStandingRules).mockResolvedValueOnce(
+      ok({
+        ...ownerOn,
+        definition: { ...ownerOn.definition, taskThread: true },
+      })
+    );
+    mount(ownerOn);
+
+    const thread = await screen.findByRole('checkbox', {
+      name: 'Post run updates to the task',
+    });
+    expect((thread as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(thread);
+
+    await waitFor(() =>
+      expect(factoryClient.setStandingRules).toHaveBeenCalledWith({
+        plan: false,
+        blockers: true,
+        merge: false,
+        ownerGates: true,
+        taskThread: true,
+      })
+    );
+    await waitFor(() =>
+      expect((thread as HTMLInputElement).checked).toBe(true)
+    );
+  });
+
   it('shows a member the team’s rules without letting them change them', async () => {
     mount({ ...teamDefault, canEdit: false });
 

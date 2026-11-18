@@ -39,6 +39,7 @@ const STAND_IN_ONLY: OrchestratorDefinition = OrchestratorDefinition {
     blockers: false,
     merge: false,
     owner_gates: false,
+    task_thread: false,
     stand_in: StandInKinds {
         plan: true,
         blockers: true,

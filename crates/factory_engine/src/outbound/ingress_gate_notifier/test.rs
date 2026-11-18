@@ -75,7 +75,9 @@ fn notice() -> GateNotice {
             request: "Fix the login bug".to_string(),
             question: "Approve the plan?".to_string(),
             asker: None,
+            notify_only: false,
         },
+        push: true,
     }
 }
 
@@ -105,6 +107,29 @@ async fn the_owner_is_notified_about_the_run_s_task() {
         "{request}"
     );
     assert!(request.contains("\"document\""), "{request}");
+}
+
+/// A notify-only Gate's notice is delivered live, and not pushed.
+#[tokio::test]
+async fn a_notice_that_is_not_pushed_is_delivered_live_only() {
+    let ingress = std::sync::Arc::new(RecordingIngress::default());
+    let notifier = IngressGateNotifier::new(
+        ingress.clone(),
+        std::sync::Arc::new(RecordingReader::default()),
+    );
+    notifier.notify(notice()).await;
+    notifier
+        .notify(GateNotice {
+            push: false,
+            ..notice()
+        })
+        .await;
+
+    let sent = ingress.sent.lock().expect("sent");
+    assert_eq!(sent.len(), 2);
+    assert!(!sent[0]["build_apns"].is_null(), "{}", sent[0]);
+    assert!(sent[1]["build_apns"].is_null(), "{}", sent[1]);
+    assert_eq!(sent[1]["send_conn_gateway"], true, "{}", sent[1]);
 }
 
 /// A send that fails is dropped: the Gate waits all the same.

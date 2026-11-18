@@ -26,6 +26,7 @@ use crate::domain::ports::{
 mod control_files;
 mod gate_owner;
 mod standing_rules;
+mod task_thread;
 
 /// Keeps what it was sent. Refuses every answer when `refuse` is set; a
 /// start fails when `fail` is set, and leaves its workflow behind when

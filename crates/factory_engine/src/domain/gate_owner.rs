@@ -19,6 +19,11 @@
 //! With it off, as for a Run created before it, none of this happens:
 //! every Gate a rule leaves waits for a person, as before.
 //!
+//! A notify-only Gate tells the owner what it says ([`gate_told`])
+//! whatever the section says, since it exists only to tell them: with the
+//! same kind of notification, lighter: one per entry and Run, not pushed to
+//! their phone, saying the Run goes on, and marked done once the Run ends.
+//!
 //! Which Runs wait on their owner is read from the records whatever the
 //! section says: a Run waiting at a Gate no one answered.
 
@@ -26,7 +31,7 @@
 mod test;
 
 use chrono::{DateTime, Utc};
-use factory_records::domain::models::{GateKind, Run, RunId, Step};
+use factory_records::domain::models::{EntryId, GateKind, Run, RunId, Step};
 use macro_user_id::user_id::MacroUserIdStr;
 use model_notifications::FactoryGateWaitingMetadata;
 use uuid::Uuid;
@@ -83,6 +88,9 @@ pub struct GateNotice {
     pub task_id: Uuid,
     /// What the notification carries.
     pub metadata: FactoryGateWaitingMetadata,
+    /// Whether it is pushed to the owner's phone: a Gate that waits on
+    /// them is, a notify-only Gate's notice is not.
+    pub push: bool,
 }
 
 /// The notice the Gate of `step`, of the Run `run`, warrants: none unless
@@ -120,7 +128,47 @@ pub fn gate_notice(run: &Run, step: &Step) -> Option<GateNotice> {
             request: FactoryGateWaitingMetadata::excerpt(&run.request),
             question: FactoryGateWaitingMetadata::excerpt(&gate.question),
             asker,
+            notify_only: false,
         },
+        push: true,
+    })
+}
+
+/// The id of the notification the notify-only Gate of the entry `entry`
+/// sends in the Run `run_id`: one per entry and Run, however often its
+/// Gate tells, so the owner gets one notice of it, and it is how the
+/// notice is marked done once the Run ends.
+pub fn told_id(run_id: RunId, entry: &EntryId) -> Uuid {
+    let name = format!("{run_id}:told:{entry}");
+    Uuid::new_v5(&NOTICE_NAMESPACE, name.as_bytes())
+}
+
+/// The notice the notify-only Gate of the Step `step` of `run`, which says
+/// `question`, warrants: none once the Run ended, or when it works on no
+/// task, which Macro notifies about. It is sent whatever the owner section
+/// says, since the Gate exists only to tell the owner. The notice is the
+/// waiting Gate's kind, lighter: flagged `notify_only`, so it reads as news
+/// rather than a question, one per entry and Run ([`told_id`]), and not
+/// pushed.
+pub fn gate_told(run: &Run, step: &Step, question: &str) -> Option<GateNotice> {
+    if run.end.is_some() {
+        return None;
+    }
+    let task_id = run.task_id?;
+    Some(GateNotice {
+        notification_id: told_id(run.id, &step.entry),
+        owner: run.user_id.clone(),
+        task_id,
+        metadata: FactoryGateWaitingMetadata {
+            run_id: run.id.as_uuid(),
+            seq: step.seq,
+            task_id: task_id.to_string(),
+            request: FactoryGateWaitingMetadata::excerpt(&run.request),
+            question: FactoryGateWaitingMetadata::excerpt(question),
+            asker: None,
+            notify_only: true,
+        },
+        push: false,
     })
 }
 

@@ -1709,6 +1709,7 @@ fn factory_gate_waiting_serializes_with_the_run_and_its_gate() {
         panic!("expected a factory gate notice, got {event:?}");
     };
     assert_eq!(metadata.asker, None);
+    assert!(!metadata.notify_only);
     assert_eq!(metadata.seq, 4);
     assert_eq!(
         metadata.format_title(None).unwrap(),
@@ -1727,6 +1728,25 @@ fn factory_gate_waiting_serializes_with_the_run_and_its_gate() {
         asked.format_title(None).unwrap(),
         "The planner asks you a question"
     );
+
+    // A notify-only Gate's notice says the Run goes on, and keeps its flag
+    // through the queue; a waiting Gate's carries none.
+    let told = FactoryGateWaitingMetadata {
+        notify_only: true,
+        ..asked
+    };
+    assert_eq!(
+        told.format_title(None).unwrap(),
+        "For your information: a factory run goes on"
+    );
+    let json = serde_json::to_value(&told).unwrap();
+    assert_eq!(json["notifyOnly"], true);
+    let waiting = serde_json::to_value(FactoryGateWaitingMetadata {
+        notify_only: false,
+        ..told
+    })
+    .unwrap();
+    assert!(waiting.get("notifyOnly").is_none());
 }
 
 #[test]

@@ -3,10 +3,12 @@
 mod gate_owner;
 mod gate_replies;
 mod main_hold;
+mod task_thread;
 
 pub(crate) use gate_owner::{FakeNotifier, FakeTaskNotes};
 pub(crate) use gate_replies::FakeGateModel;
 pub(crate) use main_hold::{FakeHoldTasks, FakeMain, FakeWatches};
+pub(crate) use task_thread::FakeTaskThread;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Arc, Mutex};
@@ -133,6 +135,8 @@ pub(crate) struct FakeRepo {
     pub(crate) rule_answers: Arc<Mutex<Vec<(StepKey, Outcome, StandingRule)>>>,
     /// The agents' accounts, by their id.
     pub(crate) agent_accounts: Arc<Mutex<BTreeSet<String>>>,
+    /// The names people show others, by user id.
+    pub(crate) display_names: Arc<Mutex<BTreeMap<String, String>>>,
     /// The team each person is on, by their id.
     pub(crate) teams: Arc<Mutex<BTreeMap<String, TeamMembership>>>,
     /// The Control File patterns each team set.
@@ -463,6 +467,18 @@ impl RunRepository for FakeRepo {
             None => kept.remove(&id),
         };
         Ok(())
+    }
+
+    async fn display_name(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+    ) -> Result<Option<String>, FakeError> {
+        Ok(self
+            .display_names
+            .lock()
+            .expect("display names")
+            .get(user_id.as_ref())
+            .cloned())
     }
 
     async fn is_agent_account(&self, user_id: &MacroUserIdStr<'static>) -> Result<bool, FakeError> {

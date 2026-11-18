@@ -1,6 +1,7 @@
 //! Notification sent to a software factory Run's owner when one of its
 //! Gates waits on them: no Standing Rule answered it, or an agent asked
-//! them a question.
+//! them a question; or, flagged `notify_only`, when a notify-only Gate
+//! tells them something while the Run goes on.
 use super::*;
 
 /// The most characters of the Gate's question, or of the Run's request,
@@ -26,6 +27,10 @@ pub struct FactoryGateWaitingMetadata {
     /// for a Gate of the Run's Flow.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub asker: Option<String>,
+    /// Whether the Gate only tells the owner, for their information, and
+    /// the Run goes on without an answer; absent for a Gate that waits.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub notify_only: bool,
 }
 
 impl FactoryGateWaitingMetadata {
@@ -48,6 +53,9 @@ impl Notification for FactoryGateWaitingMetadata {
 
 impl NotificationTitle for FactoryGateWaitingMetadata {
     fn format_title(&self, _sender_id: Option<MacroUserIdStr<'_>>) -> Result<String, Report> {
+        if self.notify_only {
+            return Ok("For your information: a factory run goes on".to_owned());
+        }
         Ok(match &self.asker {
             Some(role) => format!("The {role} asks you a question"),
             None => "A factory run waits on your answer".to_owned(),

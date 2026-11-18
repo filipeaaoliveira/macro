@@ -11,6 +11,7 @@ mod gate_replies;
 mod questions;
 mod replay;
 mod review_panel;
+mod task_thread;
 
 use factory_records::domain::standing_rules::{
     OrchestratorDefinition, RulesSource, RunRules, StandingRule,
@@ -39,8 +40,8 @@ use super::{WorkerServices, worker_on};
 use crate::domain::built_in_flows::BuiltInFlow;
 use crate::domain::built_in_steps::BuiltInSteps;
 use crate::domain::fakes::{
-    FakeGateModel, FakeGithub, FakeHoldTasks, FakeNotifier, FakeRepo, FakeTaskNotes, FakeWatches,
-    ci,
+    FakeGateModel, FakeGithub, FakeHoldTasks, FakeNotifier, FakeRepo, FakeTaskNotes,
+    FakeTaskThread, FakeWatches, ci,
 };
 use crate::domain::flow::Flow;
 use crate::domain::gate::{AnswerGate, ReplyGate};
@@ -871,6 +872,8 @@ struct CodeWalk {
     /// The Gate model and how Gate replies and the stand-in are set, in
     /// place of a model that fails.
     gates: Option<(FakeGateModel, GateReplySettings)>,
+    /// Where the Run's updates are posted, for a Run on a task.
+    thread: Option<FakeTaskThread>,
 }
 
 impl Default for CodeWalk {
@@ -882,6 +885,7 @@ impl Default for CodeWalk {
             questions: None,
             notifier: None,
             gates: None,
+            thread: None,
         }
     }
 }
@@ -903,9 +907,10 @@ where
         url: "https://github.com/macro/app".to_string(),
         base_branch: "main".to_string(),
     };
-    // A Run whose owner is told of its Gates works on a task, which the
-    // notification is about.
-    let task_id = walk.notifier.as_ref().map(|_| {
+    // A Run whose owner is told of its Gates, or whose updates are posted,
+    // works on a task, which the notification and the comments are about.
+    let on_task = walk.notifier.is_some() || walk.thread.is_some();
+    let task_id = on_task.then(|| {
         let task = Uuid::now_v7();
         repo.tasks.lock().expect("tasks").insert(task);
         task
@@ -962,6 +967,7 @@ where
         PullRequestSteps::new(github.clone(), repo.clone(), FakeWatches::default()),
     );
     let notifier = walk.notifier.clone().unwrap_or_default();
+    let thread = walk.thread.clone().unwrap_or_default();
     let gate_replies = match walk.gates {
         Some((model, settings)) => GateRepliesImpl::new(repo.clone(), model, settings),
         None => gates(&repo),
@@ -972,9 +978,13 @@ where
         client.clone(),
         WorkerServices {
             steps: StepServiceImpl::new(repo.clone(), steps)
-                .with_owner_gates(notifier.clone(), FakeTaskNotes::default()),
-            reviews: ReviewRoundsImpl::new(repo.clone(), github.clone(), repo.clone()),
-            gates: gate_replies.with_notifier(notifier),
+                .with_owner_gates(notifier.clone(), FakeTaskNotes::default())
+                .with_task_thread(thread.clone()),
+            reviews: ReviewRoundsImpl::new(repo.clone(), github.clone(), repo.clone())
+                .with_task_thread(thread.clone()),
+            gates: gate_replies
+                .with_notifier(notifier)
+                .with_task_thread(thread),
             watches: watches(&repo),
         },
     )
@@ -1174,6 +1184,7 @@ async fn a_run_whose_rules_decide_every_gate_merges_with_no_person_asked() {
             blockers: true,
             merge: true,
             owner_gates: false,
+            task_thread: false,
         },
         source: RulesSource::Team,
         project_id: None,
@@ -1229,6 +1240,7 @@ async fn a_gate_of_no_kind_waits_for_a_person_whatever_the_rules() {
             blockers: true,
             merge: true,
             owner_gates: false,
+            task_thread: false,
         },
         source: RulesSource::Team,
         project_id: None,

@@ -54,7 +54,8 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261117221000_factory_standing_rules.sql`,
   `20261118004853_factory_gate_replies.sql`,
   `20261118005054_factory_owner_gates.sql`,
-  `20261118120000_factory_owner_gates_and_stand_in.sql`).
+  `20261118120000_factory_owner_gates_and_stand_in.sql`,
+  `20261118130000_factory_task_thread.sql`).
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
 
 ## Boundaries
@@ -172,10 +173,11 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   column alone, and a row left with neither is removed. It goes with the
   team. `factory_project_rules` keeps a team's rules for one Project (an
   initiative), and goes with either. Rules are stored as the Gate kinds
-  they decide (`plan`, `blockers`, `merge`), and `owner_gates` when the
-  definition's owner section is on (`OrchestratorDefinition::kinds`),
-  checked against those names. A definition kept before the section has
-  none of it, and reads with it off.
+  they decide (`plan`, `blockers`, `merge`), `owner_gates` when the
+  definition's owner section is on, and `task_thread` when its task
+  thread section is on (`OrchestratorDefinition::kinds`), checked against
+  those names (`20261118130000_factory_task_thread.sql` adds the last). A
+  definition kept before a section has none of it, and reads with it off.
 - `factory_run.standing_rules`, `standing_rules_source` and
   `standing_rules_project_id` are set once, by `insert_run`; all null for
   a Run created before Runs kept rules. `answer_gate_by_rule` records a

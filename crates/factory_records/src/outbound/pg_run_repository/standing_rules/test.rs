@@ -26,6 +26,7 @@ const PLAN_AND_MERGE: OrchestratorDefinition = OrchestratorDefinition {
     blockers: false,
     merge: true,
     owner_gates: false,
+    task_thread: false,
     stand_in: StandInKinds {
         plan: false,
         blockers: true,
@@ -37,6 +38,7 @@ const OWNER_GATES_ON: OrchestratorDefinition = OrchestratorDefinition {
     blockers: true,
     merge: false,
     owner_gates: true,
+    task_thread: false,
     stand_in: StandInKinds {
         plan: false,
         blockers: false,
@@ -48,6 +50,7 @@ const EVERY_SETTING: OrchestratorDefinition = OrchestratorDefinition {
     blockers: true,
     merge: true,
     owner_gates: true,
+    task_thread: true,
     stand_in: StandInKinds {
         plan: true,
         blockers: true,
@@ -222,8 +225,8 @@ async fn the_owner_section_is_kept_with_the_rules(pool: PgPool) {
     kept_everywhere(pool, OWNER_GATES_ON).await;
 }
 
-/// A definition with every setting on, the owner section and the stand-in
-/// among them, is kept as a team's, a Project's and a Run's.
+/// A definition with every setting on, the owner section, the stand-in and
+/// the task thread among them, is kept as a team's, a Project's and a Run's.
 #[sqlx::test(
     migrator = "MACRO_DB_MIGRATIONS",
     fixtures(path = "../fixtures", scripts("people", "team", "project"))

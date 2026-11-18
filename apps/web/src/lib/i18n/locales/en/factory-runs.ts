@@ -182,6 +182,9 @@ export default {
   standingRulesOwnerGates: 'Send undecided gates to the run’s owner',
   standingRulesOwnerGatesHint:
     'Notify the run’s owner when a gate waits on them, ask them instead of fixing again when a fix leaves the blockers unchanged, and give the next step their comments on the task.',
+  standingRulesTaskThread: 'Post run updates to the task',
+  standingRulesTaskThreadHint:
+    'Each run posts one thread on its task, as the run’s owner: its start, each step’s end, its gates and who answered them, its pull request, the merge and how it ended.',
   standingRulesUseDefault: 'Use default',
   standInTitle: 'Stand-in',
   standInPlan: 'Answer plan questions for the run’s owner',

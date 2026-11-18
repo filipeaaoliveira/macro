@@ -78,12 +78,14 @@ where
 {
     /// The notification is about the Run's task, has no sender (the factory
     /// is no user, so the owner is never dropped as their own sender), is
-    /// pushed to phones and delivered live, and keeps the notice's id, so
-    /// the ingress makes one notification however often it is sent. A send
-    /// that fails is logged and dropped: the Gate waits all the same.
+    /// delivered live, and pushed to phones when the notice says so, and
+    /// keeps the notice's id, so the ingress makes one notification however
+    /// often it is sent. A send that fails is logged and dropped: the Gate
+    /// waits all the same.
     async fn notify(&self, notice: GateNotice) {
         let run_id = notice.metadata.run_id;
         let seq = notice.metadata.seq;
+        let push = notice.push;
         let request = SendNotificationRequestBuilder {
             notification_entity: EntityType::Document
                 .with_entity_string(notice.task_id.to_string()),
@@ -93,10 +95,14 @@ where
             recipient_ids: HashSet::from([notice.owner]),
         }
         .into_request_with_id(notice.notification_id)
-        .with_apns()
         .with_conn_gateway();
-        if let Err(error) = self.ingress.send_notification(request).await {
-            tracing::warn!(?error, %run_id, seq, "a waiting gate's notification was not sent");
+        let sent = if push {
+            self.ingress.send_notification(request.with_apns()).await
+        } else {
+            self.ingress.send_notification(request).await
+        };
+        if let Err(error) = sent {
+            tracing::warn!(?error, %run_id, seq, "a gate's notification was not sent");
         }
     }
 

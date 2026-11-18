@@ -36,6 +36,7 @@ use factory_engine::outbound::auth_user_directory::AuthUserDirectory;
 use factory_engine::outbound::document_hold_tasks::DocumentHoldTasks;
 use factory_engine::outbound::document_task_directory::DocumentTaskDirectory;
 use factory_engine::outbound::document_task_notes::DocumentTaskNotes;
+use factory_engine::outbound::document_task_thread::DocumentTaskThread;
 use factory_engine::outbound::fast_gate_model::FastGateModel;
 use factory_engine::outbound::github_pull_requests::GithubPullRequests;
 use factory_engine::outbound::ingress_gate_notifier::IngressGateNotifier;
@@ -50,7 +51,9 @@ use macro_authorization::{
     PgUserApiKeyAuthorizer,
 };
 use macro_entrypoint::{MacroEntrypoint, shutdown_signal};
-use macro_service_urls::{AgentHarnessServiceUrl, AuthServiceUrl, DocumentStorageServiceUrl};
+use macro_service_urls::{
+    AgentHarnessServiceUrl, AppServiceUrl, AuthServiceUrl, DocumentStorageServiceUrl,
+};
 use macro_tower_layers::MacroRequestIdAndTracingLayer;
 use notification::domain::ports::NoopNotificationRealtimePublisher;
 use notification::domain::service::{
@@ -164,7 +167,10 @@ async fn run() -> Result<(), rootcause::Report> {
             documents.clone(),
         ),
         hold_tasks: DocumentHoldTasks::new(documents.clone()),
-        task_notes: DocumentTaskNotes::new(documents),
+        task_notes: DocumentTaskNotes::new(documents.clone()),
+        // A Run whose task thread section is on posts its updates to its
+        // task as its owner.
+        task_thread: DocumentTaskThread::new(documents, AppServiceUrl::new()?.as_ref()),
         // A Gate left for a person tells the Run's owner through the
         // notification ingress, as every Macro producer notifies; once it
         // is answered, the notifications' reader marks it done and clears
@@ -238,6 +244,7 @@ struct Parts {
     tasks: DocumentTaskDirectory<EntityAccessServiceImpl<PgAccessRepository>>,
     hold_tasks: DocumentHoldTasks,
     task_notes: DocumentTaskNotes,
+    task_thread: DocumentTaskThread,
     gate_notifier: IngressGateNotifier<SqsNotificationIngress<SqsQueue>, NotificationReader>,
     client: Client,
     authorization_state: MacroAuthorizationState<Authorization>,
@@ -274,15 +281,20 @@ async fn serve<A: StepAgent + Clone>(
         parts.repo.clone(),
         parts.github.clone(),
         parts.tasks.clone(),
-    );
+    )
+    .with_task_thread(parts.task_thread.clone());
     let worker = factory_engine::inbound::temporal::worker(
         &runtime,
         parts.client.clone(),
         WorkerServices {
             steps: StepServiceImpl::new(parts.repo.clone(), steps.clone())
-                .with_owner_gates(parts.gate_notifier.clone(), parts.task_notes),
+                .with_owner_gates(parts.gate_notifier.clone(), parts.task_notes)
+                .with_task_thread(parts.task_thread.clone()),
             reviews,
-            gates: parts.gates.with_notifier(parts.gate_notifier),
+            gates: parts
+                .gates
+                .with_notifier(parts.gate_notifier)
+                .with_task_thread(parts.task_thread),
             watches: MainWatchServiceImpl::new(
                 parts.repo.clone(),
                 parts.github.clone(),

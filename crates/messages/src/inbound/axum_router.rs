@@ -18,6 +18,9 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
 
+#[cfg(test)]
+mod test;
+
 /// Composition state for shared messages.
 pub struct MessagesRouterState<A, Auth> {
     /// Shared message domain service.
@@ -234,12 +237,35 @@ fn path_id(path: &ParentPath) -> Result<Uuid, MessageHttpError> {
         .ok_or_else(|| MessageError::Invalid("message id required").into())
 }
 
+/// How a trusted internal caller asks a post to notify, such as a service
+/// posting updates as a person that should notify no one. Other callers
+/// cannot choose: their posts notify as usual.
+#[derive(Debug, Default, Deserialize)]
+pub struct PostQuery {
+    /// The notification behavior an internal caller chose.
+    #[serde(default)]
+    pub notification_policy: Option<PostMessageNotificationPolicy>,
+}
+
+/// The notification behavior of a post by `principal`, which asked for
+/// `requested`: only an internal caller's request is honoured.
+fn post_notification_policy(
+    principal: &MacroAuthorization,
+    requested: Option<PostMessageNotificationPolicy>,
+) -> PostMessageNotificationPolicy {
+    match (principal, requested) {
+        (MacroAuthorization::Internal(_), Some(policy)) => policy,
+        _ => PostMessageNotificationPolicy::Default,
+    }
+}
+
 #[utoipa::path(operation_id = "entity_message_create", post, path = "/messages/{parent_type}/{parent_id}", params(("parent_type" = String, Path), ("parent_id" = String, Path)), request_body = PostMessage, responses((status = 200, body = Message)))]
 /// Create a root message or reply.
 pub async fn create<A, Auth>(
     State(state): State<MessagesRouterState<A, Auth>>,
     user: MacroAuthorizationExtractor<Auth, AnyPrincipal>,
     Path(path): Path<ParentPath>,
+    Query(query): Query<PostQuery>,
     Json(mut input): Json<PostMessage>,
 ) -> Result<Json<Message>, MessageHttpError>
 where
@@ -247,6 +273,8 @@ where
     Auth: MacroAuthorizationService,
 {
     input.attribution = sender_attribution(&user.authorization);
+    input.notification_policy =
+        post_notification_policy(&user.authorization, query.notification_policy);
     Ok(Json(
         state
             .service

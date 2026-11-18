@@ -11,7 +11,9 @@ use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
 use crate::domain::flow::{StepName, StepUse};
-use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening, GateRuling, ReplyGate};
+use crate::domain::gate::{
+    AnswerGate, GateAnswered, GateOpening, GateRuling, GateTelling, ReplyGate,
+};
 use crate::domain::gate_owner::{GateNotice, OwnerNote};
 use crate::domain::main_hold::{HoldTask, MainLook, MainWatch};
 use crate::domain::models::{
@@ -22,6 +24,7 @@ use crate::domain::models::{
 };
 use crate::domain::review_rounds::{ChangedFile, ReviewRoundClosing, ReviewRoundOpening};
 use crate::domain::standing_rules::RuleAnswer;
+use crate::domain::task_thread::ThreadComment;
 use factory_records::domain::standing_rules::OrchestratorDefinition;
 
 /// What a Run's workflow did with an answer it was sent.
@@ -372,6 +375,74 @@ pub trait TaskNotes: Send + Sync + 'static {
         owner: &MacroUserIdStr<'static>,
         since: chrono::DateTime<chrono::Utc>,
     ) -> impl Future<Output = Result<Vec<OwnerNote>, Self::Err>> + Send;
+}
+
+/// Whether a comment on a Run's task was posted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThreadPosted {
+    /// It is posted, now or before.
+    Posted,
+    /// The task, or the thread it replies to, is not there for the Run's
+    /// owner.
+    NoThread,
+}
+
+/// Posts a Run's updates on its task, as its owner.
+pub trait TaskThread: Send + Sync + 'static {
+    /// The error type returned when a comment cannot be posted.
+    type Err: std::error::Error + Send + Sync + 'static;
+
+    /// Post `comment` on the task document `task_id` as `owner`, notifying
+    /// no one. Posting a comment again, by its id, posts nothing more.
+    fn post(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        task_id: Uuid,
+        comment: &ThreadComment,
+    ) -> impl Future<Output = Result<ThreadPosted, Self::Err>> + Send;
+
+    /// The first comment of the thread on the task document `task_id` that
+    /// the factory posted as `owner` and that names `marker`; none when
+    /// there is none.
+    fn find_thread(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        task_id: Uuid,
+        marker: &str,
+    ) -> impl Future<Output = Result<Option<Uuid>, Self::Err>> + Send;
+
+    /// The link that opens the Run `run_id` in Macro.
+    fn run_link(&self, run_id: RunId) -> String;
+}
+
+/// The task thread where nothing serves it: no update is posted.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoTaskThread;
+
+impl TaskThread for NoTaskThread {
+    type Err = std::convert::Infallible;
+
+    async fn post(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _task_id: Uuid,
+        _comment: &ThreadComment,
+    ) -> Result<ThreadPosted, Self::Err> {
+        Ok(ThreadPosted::Posted)
+    }
+
+    async fn find_thread(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _task_id: Uuid,
+        _marker: &str,
+    ) -> Result<Option<Uuid>, Self::Err> {
+        Ok(None)
+    }
+
+    fn run_link(&self, run_id: RunId) -> String {
+        format!("/app/factory/runs/{run_id}")
+    }
 }
 
 /// The owner section's ports where nothing serves them: no Gate notifies
@@ -737,6 +808,13 @@ pub trait StepService: Send + Sync + 'static {
     /// when the Run's owner section is on and nothing answered it yet.
     /// Telling them again is the same notification.
     fn notify_gate(&self, key: StepKey) -> impl Future<Output = Result<(), StepError>> + Send;
+
+    /// Tell the Run's owner what a notify-only Gate says, when the Run's
+    /// owner section is on, and post it to the task's thread, when its
+    /// task thread section is on; the Run goes on either way. Telling them
+    /// again is the same notification and the same comment.
+    fn tell_gate(&self, telling: GateTelling)
+    -> impl Future<Output = Result<(), StepError>> + Send;
 
     /// Record how a Run ended.
     fn end_run(&self, finish: RunFinish) -> impl Future<Output = Result<(), StepError>> + Send;

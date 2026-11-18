@@ -10,7 +10,7 @@ use temporalio_common::error::ApplicationFailure;
 use temporalio_macros::activities;
 use temporalio_sdk::activities::{ActivityContext, ActivityError};
 
-use crate::domain::gate::{GateAnswered, GateOpening, GateRuling};
+use crate::domain::gate::{GateAnswered, GateOpening, GateRuling, GateTelling};
 use crate::domain::models::{RunFinish, StepEnding, StepError, StepReport, StepRequest, StepStart};
 use crate::domain::ports::{ReviewService, StepService};
 use crate::domain::review_rounds::{ReviewRoundClosing, ReviewRoundOpening};
@@ -45,6 +45,8 @@ trait DynStepService: Send + Sync {
     async fn rule_gate(&self, ruling: GateRuling) -> Result<Option<RuleAnswer>, StepError>;
 
     async fn notify_gate(&self, key: StepKey) -> Result<(), StepError>;
+
+    async fn tell_gate(&self, telling: GateTelling) -> Result<(), StepError>;
 
     async fn end_run(&self, finish: RunFinish) -> Result<(), StepError>;
 }
@@ -85,6 +87,10 @@ impl<T: StepService> DynStepService for T {
 
     async fn notify_gate(&self, key: StepKey) -> Result<(), StepError> {
         StepService::notify_gate(self, key).await
+    }
+
+    async fn tell_gate(&self, telling: GateTelling) -> Result<(), StepError> {
+        StepService::tell_gate(self, telling).await
     }
 
     async fn end_run(&self, finish: RunFinish) -> Result<(), StepError> {
@@ -296,6 +302,17 @@ impl FactoryActivities {
         key: StepKey,
     ) -> Result<(), ActivityError> {
         self.steps.notify_gate(key).await.map_err(failure)
+    }
+
+    /// Tell the Run's owner what a notify-only Gate says, and post it to
+    /// the task's thread, as the Run's sections say; the Run goes on.
+    #[activity(name = "factory_tell_gate")]
+    pub async fn tell_gate(
+        self: Arc<Self>,
+        _ctx: ActivityContext,
+        telling: GateTelling,
+    ) -> Result<(), ActivityError> {
+        self.steps.tell_gate(telling).await.map_err(failure)
     }
 
     /// Record the review round a review panel starts, before its

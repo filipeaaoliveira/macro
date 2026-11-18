@@ -594,7 +594,16 @@ async fn an_open_gate_s_notification_is_done_once_its_run_ends() {
             .await
             .expect("end");
 
-        let done = notifier.done.lock().expect("done").clone();
+        // The waiting Gates' notifications, apart from the notify-only
+        // notices every Run's end marks done.
+        let done: Vec<_> = notifier
+            .done
+            .lock()
+            .expect("done")
+            .iter()
+            .copied()
+            .filter(|id| (1..=10).any(|seq| *id == notice_id(run_id, seq)))
+            .collect();
         if owner_gates {
             assert_eq!(done, [notice_id(run_id, 2)]);
         } else {

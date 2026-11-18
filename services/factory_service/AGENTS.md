@@ -75,7 +75,8 @@ worker that walks each Run's Flow, in one process.
   turns the stand-in on for those kinds of Gate; left out, it is off), `{"definition": null}` goes back to the default, and `PUT
   /settings/standing-rules/projects/<initiative id>` sets or removes a
   Project's own, the same way; `"ownerGates": true` in a definition turns
-  its owner section on. `GET /runs/waiting` lists the caller's Runs
+  its owner section on, and `"taskThread": true` its task thread section
+  (each Run on a task posts its updates to one comment thread on it). `GET /runs/waiting` lists the caller's Runs
   waiting at a Gate.
 
 ## Gotchas
@@ -182,7 +183,10 @@ worker that walks each Run's Flow, in one process.
   needs `sqs:SendMessage` there too; the owner's
   comments on the Run's task are read through document storage's
   `/messages/document/{id}` routes with `DOCUMENT_STORAGE_SERVICE_AUTH_KEY`,
-  as the owner. Deploy `notification_service` and `document_storage_service`
+  as the owner, and a Run whose task thread section is on posts its
+  updates through `POST /messages/document/{id}` the same way, notifying
+  no one, finds its thread again through the same read routes, and links
+  the Run in the app at `AppServiceUrl` (`OVERRIDE_APP_SERVICE_URL` overrides it). Deploy `notification_service` and `document_storage_service`
   with the `factory_gate_waiting` kind before a factory that sends it.
 - An operator clears a Main Hold no look can clear: `POST
   http://localhost:8113/internal/main-holds/clear` with the
