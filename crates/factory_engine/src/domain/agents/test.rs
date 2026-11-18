@@ -1,7 +1,10 @@
+use bot_id::BotId;
 use factory_records::domain::models::{AgentName, Role};
+use factory_records::domain::standing_acts::{StandingAct, StandingRoleName};
 use serde_json::json;
+use uuid::Uuid;
 
-use super::{AgentDefinition, AgentDefinitionError};
+use super::{AgentDefinition, AgentDefinitionError, StandingCheck};
 
 fn role(name: &str) -> Role {
     Role::try_from(name.to_string()).expect("valid role")
@@ -230,5 +233,190 @@ fn the_reviewer_stays_required_for_runs_in_flight() {
     assert_eq!(
         definition.fills_built_in_flows(),
         Err(AgentDefinitionError::UnfilledRole(role("reviewer")))
+    );
+}
+
+fn standing_role(name: &str) -> StandingRoleName {
+    StandingRoleName::try_from(name.to_string()).expect("valid standing role")
+}
+
+fn bot(id: &str) -> BotId {
+    BotId::new_from_uuid(Uuid::parse_str(id).expect("bot id"))
+}
+
+const PRIMARY_BOT: &str = "00000000-0000-0000-0000-00000000c1a0";
+const BACKUP_BOT: &str = "00000000-0000-0000-0000-00000000c0de";
+const OTHER_BOT: &str = "00000000-0000-0000-0000-0000000000ff";
+
+/// A definition with `standing` as its Standing Roles, and the Agents
+/// `primary` and `backup`.
+fn with_standing(standing: serde_json::Value) -> Result<AgentDefinition, String> {
+    read(json!({
+        "agents": {
+            "primary": { "bot": PRIMARY_BOT },
+            "backup": { "bot": BACKUP_BOT }
+        },
+        "roles": { "planner": ["primary"] },
+        "standing": standing
+    }))
+}
+
+/// One Agent may fill every Standing Role, or each Standing Role its own;
+/// a bot does an act only through a Standing Role that allows it, and a
+/// definition with no `standing` section leaves every act open.
+#[test]
+fn a_bot_does_an_act_only_through_a_standing_role_that_allows_it() {
+    let one_agent = with_standing(json!({
+        "intake": { "acts": ["start", "link"], "agents": ["primary"] },
+        "gatekeeper": { "acts": ["answer_plan", "answer_blockers"], "agents": ["primary"] },
+        "operator": { "acts": ["cancel"], "agents": ["primary"] }
+    }))
+    .expect("one agent in every standing role");
+    let own_agents = with_standing(json!({
+        "intake": {
+            "description": "Starts runs from requests",
+            "acts": ["start", "link"],
+            "agents": ["backup"]
+        },
+        "gatekeeper": { "acts": ["answer_plan"], "agents": ["primary"] }
+    }))
+    .expect("an agent per standing role");
+    let open = read(json!({
+        "agents": { "primary": { "bot": PRIMARY_BOT } },
+        "roles": { "planner": ["primary"] }
+    }))
+    .expect("no standing section");
+
+    assert_eq!(
+        one_agent.standing_check(StandingAct::Cancel, Some(bot(PRIMARY_BOT))),
+        StandingCheck::Filled {
+            role: standing_role("operator"),
+            agent: agent("primary"),
+        }
+    );
+    assert_eq!(
+        own_agents.standing_check(StandingAct::AnswerPlan, Some(bot(PRIMARY_BOT))),
+        StandingCheck::Filled {
+            role: standing_role("gatekeeper"),
+            agent: agent("primary"),
+        }
+    );
+    assert_eq!(
+        own_agents.standing_check(StandingAct::AnswerPlan, Some(bot(BACKUP_BOT))),
+        StandingCheck::Refused {
+            allowing: vec![standing_role("gatekeeper")],
+        }
+    );
+    assert_eq!(
+        own_agents.standing_check(StandingAct::Start, Some(bot(OTHER_BOT))),
+        StandingCheck::Refused {
+            allowing: vec![standing_role("intake")],
+        }
+    );
+    assert_eq!(
+        own_agents.standing_check(StandingAct::Cancel, Some(bot(PRIMARY_BOT))),
+        StandingCheck::Refused { allowing: vec![] }
+    );
+    assert_eq!(
+        own_agents.standing_check(StandingAct::AnswerPlan, None),
+        StandingCheck::Refused {
+            allowing: vec![standing_role("gatekeeper")],
+        }
+    );
+    assert_eq!(
+        open.standing_check(StandingAct::AnswerPlan, Some(bot(OTHER_BOT))),
+        StandingCheck::Open
+    );
+}
+
+/// The check refuses an unknown act, any merge, a Standing Role no Agent
+/// fills, an Agent the definition does not have, and an act or an Agent
+/// listed twice, naming the Standing Role and the problem.
+#[test]
+fn standing_roles_that_do_not_hold_together_are_refused() {
+    let refused = [
+        (
+            json!({ "intake": { "acts": ["start", "deploy"], "agents": ["primary"] } }),
+            "standing role intake names act \"deploy\", which is not one of",
+        ),
+        (
+            json!({ "release": { "acts": ["merge"], "agents": ["primary"] } }),
+            "standing role release names act \"merge\": no standing role merges",
+        ),
+        (
+            json!({ "gatekeeper": { "acts": ["answer_merge"], "agents": ["primary"] } }),
+            "standing role gatekeeper names act \"answer_merge\": no standing role merges",
+        ),
+        (
+            json!({ "intake": { "acts": [], "agents": ["primary"] } }),
+            "standing role intake allows no act",
+        ),
+        (
+            json!({ "intake": { "acts": ["start"], "agents": [] } }),
+            "standing role intake lists no agent",
+        ),
+        (
+            json!({ "intake": { "acts": ["start"], "agents": ["stranger"] } }),
+            "standing role intake lists agent stranger, which the definition does not have",
+        ),
+        (
+            json!({ "intake": { "acts": ["start", "start"], "agents": ["primary"] } }),
+            "standing role intake names act start twice",
+        ),
+        (
+            json!({ "intake": { "acts": ["start"], "agents": ["primary", "primary"] } }),
+            "standing role intake lists agent primary twice",
+        ),
+        (
+            json!({ "intake": { "acts": ["start"], "agents": ["primary"], "bots": [] } }),
+            "unknown field `bots`",
+        ),
+    ];
+
+    for (standing, why) in refused {
+        let error = with_standing(standing).expect_err(why);
+        assert!(error.contains(why), "{error}");
+    }
+}
+
+/// A Run keeps its Definition's Standing Roles as written, and reads them
+/// back the same.
+#[test]
+fn standing_roles_read_back_as_kept() {
+    let definition = with_standing(json!({
+        "gatekeeper": {
+            "description": "Approves plans",
+            "acts": ["answer_plan", "answer_blockers"],
+            "agents": ["backup", "primary"]
+        }
+    }))
+    .expect("a definition");
+
+    let kept = serde_json::to_value(&definition).expect("kept");
+    let read_back: AgentDefinition = serde_json::from_value(kept).expect("read back");
+
+    assert_eq!(read_back, definition);
+}
+
+/// Standing Roles are read only from a Factory Definition: the
+/// deployment's `FACTORY_AGENTS` with a `standing` section is refused, as
+/// no Run without a Definition would check it.
+#[test]
+fn the_deployments_agents_take_no_standing_roles() {
+    let definition = read(json!({
+        "agents": { "primary": { "bot": PRIMARY_BOT } },
+        "roles": {
+            "planner": ["primary"],
+            "writer": ["primary"],
+            "reviewer": ["primary"],
+            "fixer": ["primary"]
+        },
+        "standing": { "operator": { "acts": ["cancel"], "agents": ["primary"] } }
+    }))
+    .expect("a definition");
+
+    assert_eq!(
+        AgentDefinition::configured(Some(definition), None),
+        Err(AgentDefinitionError::StandingOutsideDefinition)
     );
 }

@@ -3,6 +3,7 @@
 //! it, in order. The first is the Role's default; each later one takes a
 //! Step the one before it could not start for lack of quota.
 
+mod standing;
 #[cfg(test)]
 mod test;
 
@@ -10,7 +11,11 @@ use std::collections::BTreeMap;
 
 use bot_id::BotId;
 use factory_records::domain::models::{AgentName, Role};
+use factory_records::domain::standing_acts::{StandingAct, StandingRoleName};
 use serde::{Deserialize, Serialize};
+
+pub use self::standing::{StandingCheck, StandingRole};
+use self::standing::StandingRoleFields;
 
 use crate::domain::built_in_flows::built_in_roles;
 use crate::domain::flow::FlowError;
@@ -59,6 +64,11 @@ pub struct Agent {
 pub struct AgentDefinition {
     agents: BTreeMap<AgentName, Agent>,
     roles: BTreeMap<Role, Vec<AgentName>>,
+    /// The Standing Roles, which say which Agents' bots may do which acts
+    /// for a Run's owner; none when the definition has no `standing`
+    /// section, so any agent of the owner does every act.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    standing: Option<BTreeMap<StandingRoleName, StandingRole>>,
 }
 
 /// An [`AgentDefinition`] as written, before its checks.
@@ -67,6 +77,8 @@ pub struct AgentDefinition {
 struct AgentDefinitionFields {
     agents: BTreeMap<AgentName, Agent>,
     roles: BTreeMap<Role, Vec<AgentName>>,
+    #[serde(default)]
+    standing: Option<BTreeMap<StandingRoleName, StandingRoleFields>>,
 }
 
 /// What is wrong with an agent definition.
@@ -105,6 +117,65 @@ pub enum AgentDefinitionError {
     /// A built-in Flow does not read.
     #[error(transparent)]
     Flow(#[from] FlowError),
+    /// A Standing Role allows no act.
+    #[error("standing role {0} allows no act")]
+    StandingNoAct(StandingRoleName),
+    /// A Standing Role names an act the factory does not have.
+    #[error(
+        "standing role {role} names act {act:?}, which is not one of \
+         start, cancel, link, answer_plan, answer_blockers"
+    )]
+    StandingUnknownAct {
+        /// The Standing Role.
+        role: StandingRoleName,
+        /// The act it names.
+        act: String,
+    },
+    /// A Standing Role names a merge.
+    #[error(
+        "standing role {role} names act {act:?}: no standing role merges; \
+         a person merges, or the merge_when_green standing rule"
+    )]
+    StandingMergeAct {
+        /// The Standing Role.
+        role: StandingRoleName,
+        /// The act it names.
+        act: String,
+    },
+    /// A Standing Role names one act twice.
+    #[error("standing role {role} names act {act} twice")]
+    StandingDuplicateAct {
+        /// The Standing Role.
+        role: StandingRoleName,
+        /// The act.
+        act: StandingAct,
+    },
+    /// No Agent fills a Standing Role.
+    #[error("standing role {0} lists no agent")]
+    StandingNoAgent(StandingRoleName),
+    /// A Standing Role lists an Agent the definition does not have.
+    #[error("standing role {role} lists agent {agent}, which the definition does not have")]
+    StandingUnknownAgent {
+        /// The Standing Role.
+        role: StandingRoleName,
+        /// The Agent it lists.
+        agent: AgentName,
+    },
+    /// A Standing Role lists one Agent twice.
+    #[error("standing role {role} lists agent {agent} twice")]
+    StandingDuplicateAgent {
+        /// The Standing Role.
+        role: StandingRoleName,
+        /// The Agent.
+        agent: AgentName,
+    },
+    /// `FACTORY_AGENTS` has a `standing` section, which only a Factory
+    /// Definition's Runs keep and check.
+    #[error(
+        "FACTORY_AGENTS has a standing section: standing roles are read only \
+         from a factory definition's agents.json"
+    )]
+    StandingOutsideDefinition,
     /// Only the retired `FACTORY_AGENT_ID` is set.
     #[error(
         "FACTORY_AGENT_ID is no longer read: set FACTORY_AGENTS to the agent definition \
@@ -138,9 +209,22 @@ impl TryFrom<AgentDefinitionFields> for AgentDefinition {
             }
         }
 
+        let standing = match fields.standing {
+            None => None,
+            Some(written) => {
+                let mut standing = BTreeMap::new();
+                for (name, role) in written {
+                    let role = role.check(&name, |agent| fields.agents.contains_key(agent))?;
+                    standing.insert(name, role);
+                }
+                Some(standing)
+            }
+        };
+
         Ok(Self {
             agents: fields.agents,
             roles: fields.roles,
+            standing,
         })
     }
 }
@@ -169,6 +253,46 @@ impl AgentDefinition {
         self.agents.get(name)
     }
 
+    /// Whether the definition has a `standing` section, so an agent acting
+    /// for a Run's owner does only the acts its bot's Standing Roles allow.
+    pub fn has_standing_roles(&self) -> bool {
+        self.standing.is_some()
+    }
+
+    /// Whether the bot `bot` of the calling agent session may do `act` for
+    /// a Run's owner, by the definition's Standing Roles: the first
+    /// Standing Role, by name, that allows the act and lists an Agent of
+    /// that bot fills it. A session with no bot of the owner's (`None`)
+    /// fills none.
+    pub fn standing_check(&self, act: StandingAct, bot: Option<BotId>) -> StandingCheck {
+        let Some(standing) = &self.standing else {
+            return StandingCheck::Open;
+        };
+
+        let mut allowing = Vec::new();
+        for (name, role) in standing {
+            if !role.acts.contains(&act) {
+                continue;
+            }
+            let filled_by = role
+                .agents
+                .iter()
+                .find(|agent| {
+                    self.agents
+                        .get(*agent)
+                        .is_some_and(|known| Some(known.bot) == bot)
+                });
+            if let Some(agent) = filled_by {
+                return StandingCheck::Filled {
+                    role: name.clone(),
+                    agent: agent.clone(),
+                };
+            }
+            allowing.push(name.clone());
+        }
+        StandingCheck::Refused { allowing }
+    }
+
     /// The definition the service runs its agent Steps with: `agents`, from
     /// `FACTORY_AGENTS`, once it fills every Role of the built-in Flows.
     /// None when it is unset, so the Steps run on the stand-in, unless the
@@ -180,6 +304,9 @@ impl AgentDefinition {
     ) -> Result<Option<Self>, AgentDefinitionError> {
         match (agents, retired_agent_id) {
             (Some(agents), _) => {
+                if agents.standing.is_some() {
+                    return Err(AgentDefinitionError::StandingOutsideDefinition);
+                }
                 agents.fills_built_in_flows()?;
                 Ok(Some(agents))
             }

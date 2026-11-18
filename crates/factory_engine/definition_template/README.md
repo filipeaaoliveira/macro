@@ -29,7 +29,7 @@ its built-in Flows or the team's own settings. Team settings say why.
 | --- | --- |
 | `factory.json` | The format's `version` (1), a `description`, and the Flows, by name. |
 | `flows/{name}.json` | Each Flow `factory.json` names, in the factory's Flow format. |
-| `agents.json` | The Agents (`bot`, optional `model` and `instructions`) and, for each Role, the Agents that fill it, in order. It must fill every Role a Flow names. |
+| `agents.json` | The Agents (`bot`, optional `model` and `instructions`) and, for each Role, the Agents that fill it, in order. It must fill every Role a Flow names. Optional `standing`: the Standing Roles (below). |
 | `rules.json` | Optional. `standingRules`: which Gates the factory answers on its own. `controlFiles`: the Control File patterns, which replace the factory's default whole; this template lists the default and this Definition's own files. Each left out takes the factory's default. |
 | `scorers.json` | Optional. The team's Scorers, Experiments and Benchmarks, in the factory's evaluation format (below). Left out, the team has none. |
 | `.macro/checks.json` | The check a Run on this repository runs: it validates the Definition. |
@@ -82,6 +82,48 @@ write, asking no one), which no Flow here may be named: with Benchmarks,
 the Scorers it started with, as it keeps the commit. Every judgment is a
 model call: this template's Scorer judges no Run (`samplePercent` 0) until
 you raise it.
+
+## Standing Roles
+
+An agent you chat with in Macro can act on your Runs for you from its code:
+start a Run, cancel one, link one to a task, and answer a plan or Blockers
+Gate where `rules.json` lets it. This template has no `standing` section,
+so any of your agents may do each of these.
+
+To say which agents may do which, add a `standing` section to
+`agents.json`. Each Standing Role names the acts it allows (`acts`) and the
+Agents whose bots fill it (`agents`). An agent whose bot fills no Standing
+Role that allows an act is refused that act, and the refusal names the
+Standing Roles that allow it. For example, beside `agents` and `roles`:
+
+```json
+"standing": {
+  "intake": {
+    "description": "Starts runs from requests and links them to tasks.",
+    "acts": ["start", "link"],
+    "agents": ["primary"]
+  },
+  "gatekeeper": {
+    "description": "Approves plans and sends Blockers to be fixed.",
+    "acts": ["answer_plan", "answer_blockers"],
+    "agents": ["backup"]
+  },
+  "operator": { "acts": ["cancel"], "agents": ["primary", "backup"] }
+}
+```
+
+The acts are `start`, `cancel`, `link`, `answer_plan` and
+`answer_blockers`, and no others. None merges, and a Definition cannot add
+one: a person approves each merge Gate, or the `merge` Standing Rule merges
+once the checks pass. Steering a running Step stays yours, in person. A
+Standing Role decides which agent may answer a kind of Gate; `rules.json`
+still decides whether an agent may approve that kind at all. Each Run keeps
+the Standing Roles it started with, and shows which agent did each act, as
+which Standing Role.
+
+The check refuses an act not in that list, any act that names a merge, a
+Standing Role with no act or no Agent, an Agent `agents` does not define,
+and a name given twice.
 
 ## Check the Definition
 
