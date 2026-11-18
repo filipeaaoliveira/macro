@@ -58,7 +58,10 @@ const ready = {
   },
 } as unknown as GithubPullRequestEntity;
 
-function mount(takeMerge?: (review: GithubPullRequestEntity) => boolean) {
+function mount(
+  takeMerge?: (review: GithubPullRequestEntity) => boolean,
+  mergeWarning?: (review: GithubPullRequestEntity) => string | undefined
+) {
   render(() => (
     <ReviewsBoard
       reviews={[ready]}
@@ -74,6 +77,7 @@ function mount(takeMerge?: (review: GithubPullRequestEntity) => boolean) {
       onLoadMore={() => {}}
       onOpen={() => {}}
       takeMerge={takeMerge}
+      mergeWarning={mergeWarning}
     />
   ));
   const onMove = board.onMove;
@@ -114,5 +118,28 @@ describe('ReviewsBoard', () => {
       repo: 'shop',
       number: 7,
     });
+  });
+
+  it('asks the taker again once the confirmation closes, and merges nothing it takes then', async () => {
+    // Unknown when the card was dropped, the pull request's Run is read
+    // while the person confirms.
+    const takeMerge = vi.fn().mockReturnValueOnce(false).mockReturnValue(true);
+    const move = mount(takeMerge);
+
+    expect(await move(toMerged)).toBe(false);
+    expect(confirmMergePullRequest).toHaveBeenCalledOnce();
+    expect(takeMerge).toHaveBeenCalledTimes(2);
+    expect(board.merge).not.toHaveBeenCalled();
+  });
+
+  it('carries the taker’s warning into the confirmation', async () => {
+    const move = mount(
+      () => false,
+      () => 'Its run stopped'
+    );
+
+    await move(toMerged);
+    const [target] = vi.mocked(confirmMergePullRequest).mock.calls[0] ?? [];
+    expect(target?.warning).toBe('Its run stopped');
   });
 });

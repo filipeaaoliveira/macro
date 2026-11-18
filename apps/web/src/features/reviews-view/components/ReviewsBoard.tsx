@@ -86,6 +86,8 @@ export function ReviewsBoard(props: {
    * then stays where GitHub has it.
    */
   takeMerge?: (review: GithubPullRequestEntity) => boolean;
+  /** What to say before GitHub merges a pull request, if anything. */
+  mergeWarning?: (review: GithubPullRequestEntity) => string | undefined;
 }) {
   const owner = getOwner();
   const merge = useMergeGithubPullRequestMutation();
@@ -170,11 +172,17 @@ export function ReviewsBoard(props: {
     if (
       action === 'merge' &&
       !(await confirmMergePullRequest(
-        { ...target, title: review.metadata.name },
+        {
+          ...target,
+          title: review.metadata.name,
+          warning: props.mergeWarning?.(review),
+        },
         owner
       ))
     )
       return false;
+    // The taker may have learned more while the dialog was open.
+    if (action === 'merge' && props.takeMerge?.(review)) return false;
 
     updateSet(review.id, true);
     updatePending(review.id, { stage: toStage, updatedAt: review.updatedAt });
