@@ -3704,7 +3704,7 @@
             "items": {
               "type": "string"
             },
-            "description": "The pull requests, as the lookup named them, whose Runs were not all\nread, as more Runs matched than one lookup reads: whether a Run the\ncaller sees opened one is not known, so it must not read as none."
+            "description": "The pull requests, as the lookup named them, whose Runs were not all\nread, as more of its own Runs matched than a lookup reads for one\npull request: whether a Run the caller sees opened one is not known,\nso it must not read as none."
           }
         }
       },
