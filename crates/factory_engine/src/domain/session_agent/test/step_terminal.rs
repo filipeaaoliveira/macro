@@ -36,6 +36,8 @@ struct ScriptedSessions {
     follow_ups: Arc<Mutex<Vec<PromptRoutineSession>>>,
     cancels: Arc<Mutex<Vec<RoutineSessionAction>>>,
     refuse: Option<RoutineSessionError>,
+    /// What the agent said in each prompt's turn.
+    replies: Arc<Mutex<HashMap<Uuid, String>>>,
 }
 
 impl ScriptedSessions {
@@ -44,6 +46,13 @@ impl ScriptedSessions {
             .lock()
             .expect("statuses")
             .insert(action, status);
+    }
+
+    fn said(&self, action: Uuid, words: &str) {
+        self.replies
+            .lock()
+            .expect("replies")
+            .insert(action, words.to_string());
     }
 
     fn cancels(&self) -> usize {
@@ -122,6 +131,18 @@ impl RoutineSessions for ScriptedSessions {
     async fn cancel(&self, command: RoutineSessionAction) -> Result<(), RoutineSessionError> {
         self.cancels.lock().expect("cancels").push(command);
         Ok(())
+    }
+
+    async fn reply(
+        &self,
+        command: RoutineSessionAction,
+    ) -> Result<Option<String>, RoutineSessionError> {
+        Ok(self
+            .replies
+            .lock()
+            .expect("replies")
+            .get(&command.action_id.as_uuid())
+            .cloned())
     }
 
     async fn delete(&self, _command: RoutineSessionAction) -> Result<(), RoutineSessionError> {
@@ -527,4 +548,88 @@ impl PauseNotices for Told {
         self.0.lock().expect("told").push((key, ends_by));
         Box::pin(async {})
     }
+}
+
+/// The reminder of an agent whose turn ended without a result is a factory
+/// prompt, sent out of sight, after which the owner steers the Step again:
+/// the wait follows their note sent during the reminder's turn, and an
+/// agent that hands nothing back in it either stops with what it said in
+/// the note's turn, its last.
+#[tokio::test(start_paused = true)]
+async fn the_owner_steers_the_reminder_and_the_note_has_the_last_words() {
+    let repo = FakeRepo::default();
+    let sessions = ScriptedSessions::default();
+    let working = working(&repo, &sessions).await;
+
+    sessions.set(working.session.action_id, RoutineActionStatus::Succeeded);
+    tokio::time::sleep(Duration::from_secs(60)).await;
+    let sent = sessions.follow_ups.lock().expect("follow-ups").clone();
+    assert_eq!(sent.len(), 1, "the agent is reminded once");
+    let reminder = sent[0].action.action_id.as_uuid();
+    assert!(
+        sent[0]
+            .prompt
+            .starts_with("## Your turn ended without a result")
+    );
+    assert!(sent[0].out_of_sight, "a factory prompt follows no one");
+    sessions.set(
+        reminder,
+        RoutineActionStatus::Pending(RoutinePendingReason::Running),
+    );
+
+    let note = working.note(&repo, "Say what blocks you").await;
+    sessions.said(reminder, "Still looking.");
+    sessions.set(reminder, RoutineActionStatus::Succeeded);
+    tokio::time::sleep(Duration::from_secs(60)).await;
+    assert!(
+        !working.work.is_finished(),
+        "the reminder's turn is not the end while a note follows it"
+    );
+
+    sessions.said(note, "I need the API key.");
+    sessions.set(note, RoutineActionStatus::Succeeded);
+    let ended = working.work.await.expect("joined");
+
+    match ended {
+        Err(SessionAgentError::StoppedWithoutResult(said)) => {
+            assert_eq!(said, "I need the API key.");
+        }
+        other => panic!("the agent stopped without a result: {other:?}"),
+    }
+}
+
+/// A pause during the reminder's turn holds the Step, which no ending turn
+/// ends meanwhile; the owner's stop then ends it as stopped by them, not as
+/// an agent that stopped without a result, so no Gate asks them about it.
+#[tokio::test(start_paused = true)]
+async fn a_reminded_step_pauses_and_stops_as_its_owner_says() {
+    let repo = FakeRepo::default();
+    let sessions = ScriptedSessions::default();
+    let working = working(&repo, &sessions).await;
+
+    sessions.set(working.session.action_id, RoutineActionStatus::Succeeded);
+    tokio::time::sleep(Duration::from_secs(60)).await;
+    let reminder = sessions.follow_ups.lock().expect("follow-ups")[0]
+        .action
+        .action_id
+        .as_uuid();
+    working
+        .steer(&repo, NewSteer::Pause, SessionSteer::Interrupt)
+        .await;
+    sessions.set(reminder, RoutineActionStatus::Succeeded);
+    tokio::time::sleep(Duration::from_secs(600)).await;
+    assert!(
+        !working.work.is_finished(),
+        "the turn the pause stopped is not the step's end"
+    );
+
+    working
+        .steer(&repo, NewSteer::Stop, SessionSteer::Interrupt)
+        .await;
+    let stopped = working.work.await.expect("joined");
+
+    assert!(
+        matches!(stopped, Err(SessionAgentError::StoppedByOwner)),
+        "{stopped:?}"
+    );
 }
