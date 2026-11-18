@@ -496,6 +496,126 @@
         }
       }
     },
+    "/benchmarks/{benchmark}/suites": {
+      "post": {
+        "tags": ["factory"],
+        "summary": "Start a suite of a Benchmark: one trial Run, owned by the caller, of\neach of its frozen tasks, on the configuration the body gives, each from\nthe commit its task pins or the default branch's head as the suite\nstarts. Each trial keeps a score and the tokens its agents used once its\nRun ends, and its branch is then deleted. A suite of the same Benchmark\nof the caller's that still runs, or more running trials than the caller\nmay have, refuse it (409). A trial whose Run is refused stops the suite:\nthe trials before it go on, and `refused` names it; when none started,\nthe error is returned and nothing is kept.",
+        "operationId": "start_factory_benchmark_suite",
+        "parameters": [
+          {
+            "name": "benchmark",
+            "in": "path",
+            "description": "The Benchmark's name.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartSuiteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuiteStarted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/flows": {
       "get": {
         "tags": ["factory"],
@@ -679,6 +799,105 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/RunInsights"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/insights/evaluation": {
+      "get": {
+        "tags": ["factory"],
+        "summary": "How the caller's own Runs were judged and compared over a period: each\nScorer's judgments of a sample of them, each Experiment's arms with\ntheir Runs' outcomes and scores, the Benchmarks one may replay, and the\nsuites the caller started, with each trial's score and tokens. Benchmark\ntrials are never counted with the live Runs.",
+        "operationId": "get_factory_evaluation",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "description": "The period's first day, `YYYY-MM-DD`.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Its last day, included. The period lasts at most 366 days.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "timeZone",
+            "in": "query",
+            "description": "The IANA time zone the days are in, such as `Europe/Lisbon`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "flow",
+            "in": "query",
+            "description": "A built-in Flow's name, to read only its Runs.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvaluationInsights"
                 }
               }
             }
@@ -2675,6 +2894,88 @@
           }
         }
       },
+      "ArmInsight": {
+        "type": "object",
+        "description": "How one arm's Runs did.",
+        "required": [
+          "name",
+          "agents",
+          "runs",
+          "ended",
+          "succeeded",
+          "fellBack",
+          "scores"
+        ],
+        "properties": {
+          "agents": {
+            "type": "object",
+            "description": "The Agents it gives Roles, by Role; empty for the arm that keeps the\nagent definition's.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "ended": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many of them ended.",
+            "minimum": 0
+          },
+          "fellBack": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many had a Step the arm's Agent could not start, which another\nAgent of its Role took: their results are not the arm's alone.",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name."
+          },
+          "runs": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many of the period's Runs took it.",
+            "minimum": 0
+          },
+          "scores": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ArmScoreInsight"
+            },
+            "description": "The Scorers' judgments of its Runs."
+          },
+          "succeeded": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many ended `success`.",
+            "minimum": 0
+          }
+        }
+      },
+      "ArmScoreInsight": {
+        "type": "object",
+        "description": "One Scorer's judgments of one arm's Runs.",
+        "required": ["scorer", "judged", "meanScore"],
+        "properties": {
+          "judged": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many of the arm's Runs it judged.",
+            "minimum": 0
+          },
+          "meanScore": {
+            "type": "number",
+            "format": "double",
+            "description": "Their mean score, from 0 to 1."
+          },
+          "scorer": {
+            "type": "string",
+            "description": "The Scorer."
+          }
+        }
+      },
       "AskedBack": {
         "type": "object",
         "description": "A reply the factory could not read as one of a Gate's answers, so it\nasked the person back.",
@@ -2902,6 +3203,31 @@
             "type": ["string", "null"],
             "format": "uuid",
             "description": "The team; none when the person is on no team, and so has none."
+          }
+        }
+      },
+      "BenchmarkSummary": {
+        "type": "object",
+        "description": "A Benchmark one may start a suite of.",
+        "required": ["name", "tasks", "scorers"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Its name."
+          },
+          "scorers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The Scorers that judge each trial."
+          },
+          "tasks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Its frozen tasks, by name."
           }
         }
       },
@@ -3334,6 +3660,93 @@
           "message": {
             "type": "string",
             "description": "Message to explain failure"
+          }
+        }
+      },
+      "EvaluationInsights": {
+        "type": "object",
+        "description": "The evaluation insights of a period.",
+        "required": [
+          "from",
+          "to",
+          "timeZone",
+          "scorers",
+          "experiments",
+          "benchmarks",
+          "suites"
+        ],
+        "properties": {
+          "benchmarks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BenchmarkSummary"
+            },
+            "description": "The Benchmarks one may start a suite of."
+          },
+          "experiments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExperimentInsight"
+            },
+            "description": "Each Experiment, defined or with Runs in the period."
+          },
+          "flow": {
+            "type": ["string", "null"],
+            "description": "The Flow the Runs were read for; none for every Flow."
+          },
+          "from": {
+            "type": "string",
+            "format": "date",
+            "description": "The period's first day."
+          },
+          "scorers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScorerInsight"
+            },
+            "description": "Each Scorer, defined or with judgments in the period."
+          },
+          "suites": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SuiteInsight"
+            },
+            "description": "The suites started in the period, newest first."
+          },
+          "timeZone": {
+            "type": "string",
+            "description": "The time zone its days are in."
+          },
+          "to": {
+            "type": "string",
+            "format": "date",
+            "description": "Its last day, included."
+          }
+        }
+      },
+      "ExperimentInsight": {
+        "type": "object",
+        "description": "An Experiment and how its arms did over the period.",
+        "required": ["name", "running", "arms"],
+        "properties": {
+          "arms": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ArmInsight"
+            },
+            "description": "Its arms, as defined, then any no longer defined that took Runs."
+          },
+          "flow": {
+            "type": ["string", "null"],
+            "description": "The Flow whose Runs it splits; none for one no longer defined."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name."
+          },
+          "running": {
+            "type": "boolean",
+            "description": "Whether it still assigns new Runs."
           }
         }
       },
@@ -3980,6 +4393,21 @@
             "type": "string",
             "format": "uuid",
             "description": "The Project: an initiative's id."
+          }
+        }
+      },
+      "RefusedTrial": {
+        "type": "object",
+        "description": "A trial whose Run was refused.",
+        "required": ["task", "reason"],
+        "properties": {
+          "reason": {
+            "type": "string",
+            "description": "Why its Run was refused."
+          },
+          "task": {
+            "type": "string",
+            "description": "The frozen task."
           }
         }
       },
@@ -4687,6 +5115,51 @@
           }
         }
       },
+      "ScorerInsight": {
+        "type": "object",
+        "description": "A Scorer and its live judgments of the period's Runs.",
+        "required": ["name", "flows", "judged", "passed"],
+        "properties": {
+          "flows": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The Flows whose Runs it judges; every Flow when empty."
+          },
+          "instructions": {
+            "type": ["string", "null"],
+            "description": "What it judges; none for a Scorer no longer defined whose\njudgments remain."
+          },
+          "judged": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many of the period's Runs it judged.",
+            "minimum": 0
+          },
+          "meanScore": {
+            "type": ["number", "null"],
+            "format": "double",
+            "description": "Their mean score, from 0 to 1; none when it judged none."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name."
+          },
+          "passed": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many of them scored half or more.",
+            "minimum": 0
+          },
+          "samplePercent": {
+            "type": ["integer", "null"],
+            "format": "int32",
+            "description": "The percentage of those Runs it judges; none when no longer defined.",
+            "minimum": 0
+          }
+        }
+      },
       "SessionStepRef": {
         "type": "object",
         "description": "The factory Step an agent session works in, as its owner reads it.",
@@ -4842,6 +5315,23 @@
             "description": "The team whose rules they are; none when the person is on no team."
           }
         }
+      },
+      "StartSuiteRequest": {
+        "type": "object",
+        "description": "The configuration a suite's trials run on.",
+        "properties": {
+          "agents": {
+            "type": "object",
+            "description": "The Agent of the agent definition each Role takes in place of its\nfirst, by Role; a Role left out takes the definition's.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
       },
       "Steer": {
         "type": "object",
@@ -5033,6 +5523,100 @@
           }
         }
       },
+      "SuiteInsight": {
+        "type": "object",
+        "description": "One suite: a Benchmark replayed on one configuration.",
+        "required": [
+          "id",
+          "benchmark",
+          "agents",
+          "createdAt",
+          "trials",
+          "scored",
+          "tokens"
+        ],
+        "properties": {
+          "agents": {
+            "type": "object",
+            "description": "The Agents its configuration gave Roles, by Role.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "benchmark": {
+            "type": "string",
+            "description": "The Benchmark it replayed."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it started."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The suite."
+          },
+          "meanScore": {
+            "type": ["number", "null"],
+            "format": "double",
+            "description": "Their mean score; none until one has."
+          },
+          "scored": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many trials have their result.",
+            "minimum": 0
+          },
+          "tokens": {
+            "$ref": "#/components/schemas/TokenCounts",
+            "description": "The tokens of the trials that have their result."
+          },
+          "trials": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrialInsight"
+            },
+            "description": "Its trials, by task."
+          }
+        }
+      },
+      "SuiteStarted": {
+        "type": "object",
+        "description": "A suite that started.",
+        "required": ["id", "runs"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The suite."
+          },
+          "refused": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RefusedTrial",
+                "description": "The task whose Run was refused, and why: the suite stopped there,\nand the trials before it go on. None when every trial started."
+              }
+            ]
+          },
+          "runs": {
+            "type": "object",
+            "description": "Its trials' Runs, by task.",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/RunId"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "TaskRunsResponse": {
         "type": "object",
         "description": "A task's Runs, as the caller sees them.",
@@ -5075,6 +5659,71 @@
             "format": "int64",
             "description": "Output tokens.",
             "minimum": 0
+          }
+        }
+      },
+      "TrialInsight": {
+        "type": "object",
+        "description": "One trial of a suite.",
+        "required": ["task", "runId", "scores"],
+        "properties": {
+          "runId": {
+            "$ref": "#/components/schemas/RunId",
+            "description": "Its Run."
+          },
+          "runOutcome": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RunOutcome",
+                "description": "How its Run ended; none while it goes."
+              }
+            ]
+          },
+          "score": {
+            "type": ["number", "null"],
+            "format": "double",
+            "description": "Its mechanical score, from 0 to 1: 1 when its checks went green, 0.5\nwhen they stayed red, 0 otherwise; none until its Run ended."
+          },
+          "scores": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrialScore"
+            },
+            "description": "Its Benchmark's Scorers' judgments."
+          },
+          "task": {
+            "type": "string",
+            "description": "The frozen task."
+          },
+          "tokens": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TokenCounts",
+                "description": "The tokens its agents used; none until its Run ended."
+              }
+            ]
+          }
+        }
+      },
+      "TrialScore": {
+        "type": "object",
+        "description": "A Scorer's judgment of one trial.",
+        "required": ["scorer", "score"],
+        "properties": {
+          "score": {
+            "type": "number",
+            "format": "double",
+            "description": "From 0 to 1."
+          },
+          "scorer": {
+            "type": "string",
+            "description": "The Scorer."
           }
         }
       },

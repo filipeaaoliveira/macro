@@ -16,9 +16,11 @@ import type {
   CreateRunRequest,
   DefinitionSettings,
   ErrorResponse,
+  EvaluationInsights,
   FiringResult,
   FlawRunRequest,
   FlowsResponse,
+  GetFactoryEvaluationParams,
   GetFactoryInsightsParams,
   HandBackRequest,
   LinkTaskRequest,
@@ -37,6 +39,8 @@ import type {
   SetDefinitionRequest,
   SetStandingRulesRequest,
   StandingRulesSettings,
+  StartSuiteRequest,
+  SuiteStarted,
   TaskRunsResponse,
   WaitingRunsResponse,
 } from './schemas';
@@ -530,6 +534,111 @@ export const callFactoryAutomationWebhook = async (
 };
 
 /**
+ * @summary Start a suite of a Benchmark: one trial Run, owned by the caller, of
+each of its frozen tasks, on the configuration the body gives, each from
+the commit its task pins or the default branch's head as the suite
+starts. Each trial keeps a score and the tokens its agents used once its
+Run ends, and its branch is then deleted. A suite of the same Benchmark
+of the caller's that still runs, or more running trials than the caller
+may have, refuse it (409). A trial whose Run is refused stops the suite:
+the trials before it go on, and `refused` names it; when none started,
+the error is returned and nothing is kept.
+ */
+export type startFactoryBenchmarkSuiteResponse201 = {
+  data: SuiteStarted;
+  status: 201;
+};
+
+export type startFactoryBenchmarkSuiteResponse400 = {
+  data: ErrorResponse;
+  status: 400;
+};
+
+export type startFactoryBenchmarkSuiteResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type startFactoryBenchmarkSuiteResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type startFactoryBenchmarkSuiteResponse404 = {
+  data: ErrorResponse;
+  status: 404;
+};
+
+export type startFactoryBenchmarkSuiteResponse409 = {
+  data: ErrorResponse;
+  status: 409;
+};
+
+export type startFactoryBenchmarkSuiteResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type startFactoryBenchmarkSuiteResponse502 = {
+  data: ErrorResponse;
+  status: 502;
+};
+
+export type startFactoryBenchmarkSuiteResponse503 = {
+  data: ErrorResponse;
+  status: 503;
+};
+
+export type startFactoryBenchmarkSuiteResponseSuccess =
+  startFactoryBenchmarkSuiteResponse201 & {
+    headers: Headers;
+  };
+export type startFactoryBenchmarkSuiteResponseError = (
+  | startFactoryBenchmarkSuiteResponse400
+  | startFactoryBenchmarkSuiteResponse401
+  | startFactoryBenchmarkSuiteResponse403
+  | startFactoryBenchmarkSuiteResponse404
+  | startFactoryBenchmarkSuiteResponse409
+  | startFactoryBenchmarkSuiteResponse500
+  | startFactoryBenchmarkSuiteResponse502
+  | startFactoryBenchmarkSuiteResponse503
+) & {
+  headers: Headers;
+};
+
+export type startFactoryBenchmarkSuiteResponse =
+  | startFactoryBenchmarkSuiteResponseSuccess
+  | startFactoryBenchmarkSuiteResponseError;
+
+export const getStartFactoryBenchmarkSuiteUrl = (benchmark: string) => {
+  return `/benchmarks/${benchmark}/suites`;
+};
+
+export const startFactoryBenchmarkSuite = async (
+  benchmark: string,
+  startSuiteRequest: StartSuiteRequest,
+  options?: RequestInit
+): Promise<startFactoryBenchmarkSuiteResponse> => {
+  const res = await fetch(getStartFactoryBenchmarkSuiteUrl(benchmark), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(startSuiteRequest),
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: startFactoryBenchmarkSuiteResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as startFactoryBenchmarkSuiteResponse;
+};
+
+/**
  * @summary List the Flows the caller can start a Run of, by name: their team's
 Factory Definition's, read at its default branch's head, when the team
 names one (400 `unreachableDefinition` or `invalidDefinition` when it
@@ -759,6 +868,94 @@ export const getFactoryInsights = async (
     status: res.status,
     headers: res.headers,
   } as getFactoryInsightsResponse;
+};
+
+/**
+ * @summary How the caller's own Runs were judged and compared over a period: each
+Scorer's judgments of a sample of them, each Experiment's arms with
+their Runs' outcomes and scores, the Benchmarks one may replay, and the
+suites the caller started, with each trial's score and tokens. Benchmark
+trials are never counted with the live Runs.
+ */
+export type getFactoryEvaluationResponse200 = {
+  data: EvaluationInsights;
+  status: 200;
+};
+
+export type getFactoryEvaluationResponse400 = {
+  data: ErrorResponse;
+  status: 400;
+};
+
+export type getFactoryEvaluationResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type getFactoryEvaluationResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type getFactoryEvaluationResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type getFactoryEvaluationResponseSuccess =
+  getFactoryEvaluationResponse200 & {
+    headers: Headers;
+  };
+export type getFactoryEvaluationResponseError = (
+  | getFactoryEvaluationResponse400
+  | getFactoryEvaluationResponse401
+  | getFactoryEvaluationResponse403
+  | getFactoryEvaluationResponse500
+) & {
+  headers: Headers;
+};
+
+export type getFactoryEvaluationResponse =
+  | getFactoryEvaluationResponseSuccess
+  | getFactoryEvaluationResponseError;
+
+export const getGetFactoryEvaluationUrl = (
+  params: GetFactoryEvaluationParams
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/insights/evaluation?${stringifiedParams}`
+    : `/insights/evaluation`;
+};
+
+export const getFactoryEvaluation = async (
+  params: GetFactoryEvaluationParams,
+  options?: RequestInit
+): Promise<getFactoryEvaluationResponse> => {
+  const res = await fetch(getGetFactoryEvaluationUrl(params), {
+    ...options,
+    method: 'GET',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: getFactoryEvaluationResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as getFactoryEvaluationResponse;
 };
 
 /**
