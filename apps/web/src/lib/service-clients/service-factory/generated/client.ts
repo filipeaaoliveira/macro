@@ -22,6 +22,8 @@ import type {
   LinkTaskRequest,
   ListFactoryBoardParams,
   NoteStepRequest,
+  PullRequestRuns,
+  PullRequestUrls,
   ReplyToGateRequest,
   ResumeStepRequest,
   RoutineFiring,
@@ -914,6 +916,82 @@ export const createFactoryRun = async (
     status: res.status,
     headers: res.headers,
   } as createFactoryRunResponse;
+};
+
+/**
+ * @summary Find the Runs that opened some pull requests: for each one, the newest
+Run the caller can see on their team's board (theirs, or a team
+member's on a task they can see), with its Steps, where it is, and the
+merge Gate it waits on. A pull request no such Run opened is left out,
+whether no Run opened it or one the caller cannot see did.
+ */
+export type findPullRequestRunsResponse200 = {
+  data: PullRequestRuns;
+  status: 200;
+};
+
+export type findPullRequestRunsResponse400 = {
+  data: ErrorResponse;
+  status: 400;
+};
+
+export type findPullRequestRunsResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type findPullRequestRunsResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type findPullRequestRunsResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type findPullRequestRunsResponseSuccess =
+  findPullRequestRunsResponse200 & {
+    headers: Headers;
+  };
+export type findPullRequestRunsResponseError = (
+  | findPullRequestRunsResponse400
+  | findPullRequestRunsResponse401
+  | findPullRequestRunsResponse403
+  | findPullRequestRunsResponse500
+) & {
+  headers: Headers;
+};
+
+export type findPullRequestRunsResponse =
+  | findPullRequestRunsResponseSuccess
+  | findPullRequestRunsResponseError;
+
+export const getFindPullRequestRunsUrl = () => {
+  return `/runs/by-pull-requests`;
+};
+
+export const findPullRequestRuns = async (
+  pullRequestUrls: PullRequestUrls,
+  options?: RequestInit
+): Promise<findPullRequestRunsResponse> => {
+  const res = await fetch(getFindPullRequestRunsUrl(), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(pullRequestUrls),
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: findPullRequestRunsResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as findPullRequestRunsResponse;
 };
 
 /**
