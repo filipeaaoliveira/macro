@@ -9,6 +9,7 @@ import type { ReviewRound } from './reviewRound';
 import type { Run } from './run';
 import type { RunDetailBaseRequiredChecks } from './runDetailBaseRequiredChecks';
 import type { RunDetailMainHold } from './runDetailMainHold';
+import type { StandingActRecord } from './standingActRecord';
 import type { Step } from './step';
 
 /**
@@ -21,6 +22,10 @@ export interface RunDetail {
   reviewRounds: ReviewRound[];
   /** The Run. */
   run: Run;
+  /** What agents did to it under its Factory Definition's Standing
+Roles, in order: who started, cancelled or linked it, and answered
+its Gates. */
+  standingActs: StandingActRecord[];
   /** Its Steps, in the order they started. */
   steps: Step[];
 }
