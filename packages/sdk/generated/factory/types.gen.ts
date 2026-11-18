@@ -39,6 +39,7 @@ export type AskedBack = {
      * When the factory asked back.
      */
     at: string;
+    reading?: null | GateModelReading;
     /**
      * The person's words.
      */
@@ -523,6 +524,7 @@ export type Gate = {
      */
     question: string;
     standIn?: null | StandInAnswer;
+    standInDeclined?: null | GateModelReading;
 };
 
 /**
@@ -592,6 +594,24 @@ export type GateInsight = {
  * Who asks a Gate's question, which says how it is answered.
  */
 export type GateKind = 'flow' | 'question';
+
+/**
+ * How the Gate model read a Gate when what it said decided nothing: its
+ * pick, how sure it was and why, so the owner can tell why the factory
+ * asked back or the stand-in left the Gate to them.
+ */
+export type GateModelReading = {
+    /**
+     * How sure it was, in percent; none when it did not answer: its call
+     * failed or took too long.
+     */
+    confidence?: number | null;
+    pick?: null | Outcome;
+    /**
+     * Why, in its words; empty when it did not answer.
+     */
+    reason: string;
+};
 
 /**
  * The GitHub delivery that fired a repository event's Automation.

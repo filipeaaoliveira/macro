@@ -4,6 +4,7 @@
  * factory_engine
  * OpenAPI spec version: 0.1.0
  */
+import type { AskedBackReading } from './askedBackReading';
 
 /**
  * A reply the factory could not read as one of a Gate's answers, so it
@@ -12,6 +13,7 @@ asked the person back.
 export interface AskedBack {
   /** When the factory asked back. */
   at: string;
+  reading?: AskedBackReading;
   /** The person's words. */
   reply: string;
 }

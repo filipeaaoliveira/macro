@@ -8,6 +8,7 @@ import type { GateAnswerProperty } from './gateAnswerProperty';
 import type { GateAskedBack } from './gateAskedBack';
 import type { GateKind } from './gateKind';
 import type { GateStandIn } from './gateStandIn';
+import type { GateStandInDeclined } from './gateStandInDeclined';
 import type { Outcome } from './outcome';
 
 /**
@@ -25,4 +26,5 @@ export interface Gate {
   /** The question. */
   question: string;
   standIn?: GateStandIn;
+  standInDeclined?: GateStandInDeclined;
 }
