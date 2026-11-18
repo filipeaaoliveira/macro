@@ -588,7 +588,10 @@ fn answerer(
 /// internal caller, an API key or token, an agent's or a routine's program.
 /// An agent's account signs in as a person does; the service, which reads
 /// accounts, refuses it.
-fn is_in_person(authorization: &UserOrInternalAuthorization, headers: &HeaderMap) -> bool {
+pub(crate) fn is_in_person(
+    authorization: &UserOrInternalAuthorization,
+    headers: &HeaderMap,
+) -> bool {
     authorization.caller == UserOrInternalCaller::User
         && authorization.user.is_human_session()
         && !is_program_run(authorization.user.attribution(), headers)
@@ -737,16 +740,26 @@ impl FactoryError {
             | FactoryError::ControlFilesNotApproved
             | FactoryError::UnknownProject
             | FactoryError::InvalidQueueLimit { .. }
-            | FactoryError::InvalidControlFiles(_) => StatusCode::BAD_REQUEST,
+            | FactoryError::InvalidControlFiles(_)
+            | FactoryError::NoTeam
+            | FactoryError::InvalidAutomation(_)
+            | FactoryError::InvalidFiring(_)
+            | FactoryError::TriggerRefused(_) => StatusCode::BAD_REQUEST,
+            FactoryError::BadSignature => StatusCode::UNAUTHORIZED,
             FactoryError::NotTheOwner
             | FactoryError::NotAPerson
             | FactoryError::NotATeamAdmin
-            | FactoryError::ReservedForAPerson(_) => StatusCode::FORBIDDEN,
-            FactoryError::QueueFull { .. } => StatusCode::CONFLICT,
+            | FactoryError::ReservedForAPerson(_)
+            | FactoryError::NotTheAutomationOwner
+            | FactoryError::NotARoutine => StatusCode::FORBIDDEN,
             FactoryError::NotFound | FactoryError::TaskNotFound => StatusCode::NOT_FOUND,
-            FactoryError::RunEnded | FactoryError::AnswerRefused(_) | FactoryError::StepEnded => {
-                StatusCode::CONFLICT
-            }
+            FactoryError::RunEnded
+            | FactoryError::QueueFull { .. }
+            | FactoryError::AnswerRefused(_)
+            | FactoryError::StepEnded
+            | FactoryError::TaskBusy
+            | FactoryError::FiringRepeated => StatusCode::CONFLICT,
+            FactoryError::TriggerUnavailable => StatusCode::BAD_GATEWAY,
             FactoryError::Upstream(upstream) => upstream.status_code(),
             FactoryError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }

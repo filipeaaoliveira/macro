@@ -23,6 +23,7 @@ use crate::domain::ports::{
     StepService,
 };
 
+mod automations;
 mod control_files;
 mod gate_owner;
 mod orchestrator;
@@ -254,12 +255,15 @@ async fn julia_s_run(repo: &FakeRepo) -> RunId {
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
+            automation: None,
         })
         .await
         .expect("insert")
     {
         RunInsert::Inserted(run) => run.id,
-        RunInsert::NoSuchTask => panic!("a run with no task is kept"),
+        RunInsert::NoSuchTask | RunInsert::TaskBusy | RunInsert::FiringStarted => {
+            panic!("a run with no task is kept")
+        }
     }
 }
 
@@ -1124,12 +1128,15 @@ async fn a_task_s_list_holds_its_owner_s_fifty_newest_runs() {
                 control_file_patterns: &[],
                 control_files_team_id: None,
                 standing_rules: RunRules::DEFAULT,
+                automation: None,
             })
             .await
             .expect("insert")
         {
             RunInsert::Inserted(run) => started.push(run.id),
-            RunInsert::NoSuchTask => panic!("the task exists"),
+            RunInsert::NoSuchTask | RunInsert::TaskBusy | RunInsert::FiringStarted => {
+                panic!("the task exists")
+            }
         }
     }
 

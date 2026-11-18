@@ -25,6 +25,9 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `src/outbound/pg_run_repository/standing_rules.rs`:
   `StandingRulesRepository`, teams' and Projects' Standing Rules, and the
   Gate kinds, rules and Orchestrator Definition they are made of.
+- `src/domain/automations.rs` and
+  `src/outbound/pg_run_repository/automations.rs`: `AutomationRepository`,
+  teams' Automations and each time one fired.
 - `src/domain/gate_replies.rs` and
   `src/outbound/pg_run_repository/gate_replies.rs`: `GateReplyRepository`,
   a person's answer read from their words, the factory asking back, the
@@ -35,8 +38,9 @@ the Gates they asked people in MacroDB, and defines the names Flows use
 
 - Owns: the `factory_run`, `factory_step`, `factory_gate`,
   `factory_check_round`, `factory_team_settings`, `factory_merge`,
-  `factory_main_hold`, `factory_review_round`, `factory_review_finding` and
-  `factory_project_rules` tables
+  `factory_main_hold`, `factory_review_round`, `factory_review_finding`,
+  `factory_project_rules`, `factory_automation` and
+  `factory_automation_firing` tables
   (`crates/macro_db_client/migrations/20261116083957_factory.sql`,
   `20261117093000_factory_check_round.sql`,
   `20261117104713_factory_step_agent.sql`,
@@ -58,6 +62,7 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261118130000_factory_task_thread.sql`,
   `20261118131500_factory_queue_limit.sql`,
   `20261118141500_factory_orchestrator_answers.sql`,
+  `20261118143000_factory_automation.sql`,
   `20261118150000_factory_standing_rules_names.sql`).
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
 
@@ -230,6 +235,22 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   stand-in's), with the Run's plan, for the offline replay measure only.
   Run insights leave out the stand-in's answers, as they do Rule
   Answers.
+
+- Automations (`20261118143000_factory_automation.sql`): a
+  `factory_automation` belongs to its team and goes with it, and with its
+  creator's account; its trigger is kept as JSON beside its kind, and a
+  webhook's secret only for a webhook (`factory_automation_webhook`).
+  `claim_firing` claims a firing's key once, at the database's time, unless
+  one that never ended is older than `FIRING_CLAIM_STALE_AFTER`: then it
+  first looks for a Run started under the key, and ends the firing with it;
+  `end_firing` keeps the first end. `factory_run.automation_id`,
+  `automation_name`, `automation_trigger` and `automation_firing_key` are
+  set once, by `insert_run` (`NewRun::automation`), and are a record, not a
+  reference: they outlive the Automation. `factory_run_automation_firing_idx`
+  refuses a second Run of one firing (`RunInsert::FiringStarted`). `factory_run_automation_task_open_idx` refuses a second
+  open Run an Automation started on a task, which `insert_run` answers as
+  `RunInsert::TaskBusy`; `running_run_on_task` reads any open Run on a task
+  through `factory_run_task_owner_idx`.
 
 - `factory_merge` keeps one row per Run that merged (`record_merge`, safe
   to repeat), with the base it merged into and the time on the worker's

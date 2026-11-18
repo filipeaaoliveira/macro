@@ -52,6 +52,7 @@ async fn code_run(repo: &FakeRepo) -> RunId {
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
+            automation: None,
         })
         .await
         .expect("insert")

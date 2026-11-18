@@ -1,4 +1,5 @@
 import type {
+  FiringSkip,
   FlowSummary,
   HandBackRequest,
 } from '../../../generated/factory/types.gen';
@@ -7,12 +8,39 @@ import type { MacroClient } from '../../utils/client';
 import type { Task } from '../tasks/task';
 import { FactoryRun } from './run';
 
+/** What fired a factory Automation, from a run of its routine. */
+export interface AutomationFiring {
+  /** The routine run that fires it: a retried run fires once. */
+  run: { id: string };
+  /** The task a Task event is about: the Run works on it. */
+  task?: Task;
+  /**
+   * The GitHub delivery a repository event is, with the branch it is
+   * about, so a factory Run's own pushes and pull request start nothing.
+   */
+  github?: { event: string; action?: string; branch?: string };
+}
+
+/** What firing a factory Automation came to. */
+export interface AutomationFired {
+  /** Whether it started a Run. */
+  started: boolean;
+  /**
+   * Why it started none: the Automation is switched off, a Run already
+   * runs on the task, the queue is full, or the factory refused the Run.
+   */
+  skipped?: FiringSkip;
+  /** Whether this routine run fired it before, so it started nothing more. */
+  repeated: boolean;
+}
+
 /**
  * The software factory: Runs of its Flows, which agents work on and people
  * decide at Gates. Every call acts as the signed-in person, with their own
- * access, and reaches only their own Runs.
+ * access, and reaches only their own Runs. A factory Automation's routine
+ * fires its Automation through it too.
  *
- * @routing Use when starting, steering or answering software factory Runs, reading the Gates and questions waiting on the person, or when a factory Run's prompt asks you to hand back its Step's result; not for coding sessions or tasks outside the factory.
+ * @routing Use when starting, steering or answering software factory Runs, reading the Gates and questions waiting on the person, when a factory Run's prompt asks you to hand back its Step's result, or in the code step of a factory Automation's routine; not for coding sessions or tasks outside the factory.
  *
  * @agent
  * Follow the Orchestrate Factory Runs skill. Start a Run only when the person
@@ -119,5 +147,33 @@ export class FactoryNamespace {
    */
   async handBack(result: HandBackRequest): Promise<void> {
     unwrap(await this.client.factory.handBackFactoryStep({ body: result }));
+  }
+
+  /**
+   * Fire the factory Automation whose routine this run is: it starts a Run
+   * of the Automation's Flow as the routine's owner, once per routine run,
+   * unless the Automation is switched off or a Run already runs on the
+   * task. Only the code step of an Automation's routine may call it.
+   *
+   * @example
+   * await macro.factory.fireAutomation({ run });
+   *
+   * @mcp-exclude only a run of a factory Automation's routine fires it
+   */
+  async fireAutomation(firing: AutomationFiring): Promise<AutomationFired> {
+    const fired = unwrap(
+      await this.client.factory.fireFactoryAutomation({
+        body: {
+          firing: firing.run.id,
+          taskId: firing.task?.id,
+          github: firing.github,
+        },
+      }),
+    );
+    return {
+      started: fired.runId !== undefined && fired.runId !== null,
+      skipped: fired.skipped ?? undefined,
+      repeated: fired.repeated,
+    };
   }
 }

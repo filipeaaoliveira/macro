@@ -1,0 +1,89 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                id, team_id, created_by, name, trigger_kind,\n                trigger AS \"trigger: Json<serde_json::Value>\", flow, repo_url, request_template,\n                enabled, routine_id, created_at\n            FROM factory_automation\n            WHERE team_id = $1\n            ORDER BY created_at DESC, id DESC\n            LIMIT $2\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "team_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "created_by",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "trigger_kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "trigger: Json<serde_json::Value>",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 6,
+        "name": "flow",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "repo_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "request_template",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 10,
+        "name": "routine_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 11,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "f5e4250f70aa0197344f96d97aeed6702880455899e5fb8c16a2baf179636f49"
+}

@@ -208,6 +208,7 @@ async fn a_run_keeps_the_rules_it_was_created_with(pool: PgPool) {
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: rules,
+            automation: None,
         })
         .await
         .expect("insert")
@@ -374,6 +375,7 @@ async fn kept_everywhere(pool: PgPool, definition: OrchestratorDefinition) {
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: rules,
+            automation: None,
         })
         .await
         .expect("insert")

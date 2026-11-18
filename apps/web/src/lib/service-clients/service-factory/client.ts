@@ -8,21 +8,29 @@ import { statusError } from '@core/util/safeFetch';
 import {
   getAnswerFactoryGateUrl,
   getCancelFactoryRunUrl,
+  getCreateFactoryAutomationUrl,
   getCreateFactoryRunUrl,
+  getDeleteFactoryAutomationUrl,
   getGetFactoryControlFilesUrl,
   getGetFactoryInsightsUrl,
   getGetFactoryRunUrl,
   getGetFactoryStandingRulesUrl,
+  getListFactoryAutomationsUrl,
   getListFactoryFlowsUrl,
   getListFactoryTaskRunsUrl,
   getListFactoryWaitingRunsUrl,
   getReplyToFactoryGateUrl,
+  getSetFactoryAutomationEnabledUrl,
   getSetFactoryControlFilesUrl,
   getSetFactoryStandingRulesUrl,
 } from './generated/client';
 import type {
   AnswerGateRequest,
+  Automation,
+  AutomationRequest,
+  AutomationsSettings,
   ControlFilesSettings,
+  CreatedAutomation,
   CreateRunRequest,
   FlowsResponse,
   GetFactoryInsightsParams,
@@ -239,6 +247,57 @@ export const factoryClient = {
         errorResponseHandler: refusal,
       }
     );
+  },
+
+  /**
+   * The person's team's Automations, newest first, and whether they
+   * administer the team.
+   */
+  listAutomations(signal?: AbortSignal) {
+    return fetchWithToken<AutomationsSettings>(
+      `${host()}${getListFactoryAutomationsUrl()}`,
+      { method: 'GET', signal }
+    );
+  },
+
+  /**
+   * Makes an Automation of the person's team, acting as them. A webhook's
+   * secret is in the answer, once. A refusal (a schedule, a repository or a
+   * trigger the factory or its scheduler won't take) carries the service's
+   * message.
+   */
+  createAutomation(request: AutomationRequest) {
+    return fetchWithToken<CreatedAutomation>(
+      `${host()}${getCreateFactoryAutomationUrl()}`,
+      {
+        method: 'POST',
+        body: JSON.stringify(request),
+        errorResponseHandler: refusal,
+      }
+    );
+  },
+
+  /**
+   * Switches an Automation on or off: the person's own, or any for a team
+   * admin (`FORBIDDEN` otherwise, with the service's message).
+   */
+  setAutomationEnabled(id: string, enabled: boolean) {
+    return fetchWithToken<Automation>(
+      `${host()}${getSetFactoryAutomationEnabledUrl(encodeURIComponent(id))}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ enabled }),
+        errorResponseHandler: refusal,
+      }
+    );
+  },
+
+  /** Deletes an Automation, as for switching it off (204, no body). */
+  deleteAutomation(id: string) {
+    return fetchWithToken<Record<string, never>>(
+      `${host()}${getDeleteFactoryAutomationUrl(encodeURIComponent(id))}`,
+      { method: 'DELETE', errorResponseHandler: refusal }
+    ).then((result) => result.map(() => undefined));
   },
 
   /**

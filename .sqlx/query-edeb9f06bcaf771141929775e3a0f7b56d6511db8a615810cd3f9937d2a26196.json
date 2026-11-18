@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE factory_automation_firing\n            SET run_id = $3, skipped = $4\n            WHERE automation_id = $1 AND firing_key = $2 AND run_id IS NULL AND skipped IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "edeb9f06bcaf771141929775e3a0f7b56d6511db8a615810cd3f9937d2a26196"
+}

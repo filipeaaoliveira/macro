@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO factory_automation_firing (automation_id, firing_key)\n            VALUES ($1, $2)\n            ON CONFLICT (automation_id, firing_key) DO UPDATE\n                SET fired_at = now()\n                WHERE factory_automation_firing.run_id IS NULL\n                    AND factory_automation_firing.skipped IS NULL\n                    AND factory_automation_firing.fired_at < now() - $3::interval\n            RETURNING true AS \"claimed!\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "claimed!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Interval"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "04b8d00c7fe4f24519009903d88695f657a3728986dbeb25d88f9a07e0be7ae0"
+}

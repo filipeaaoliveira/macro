@@ -1,5 +1,6 @@
 //! In-memory stand-ins for the factory's records, for the domain's tests.
 
+mod automations;
 mod gate_owner;
 mod gate_replies;
 mod main_hold;
@@ -15,6 +16,7 @@ use std::sync::{Arc, Mutex};
 
 use agent_session::domain::session_task::TaskDocumentId;
 use chrono::Utc;
+use factory_records::domain::automations::{Automation, FiringEnd};
 use factory_records::domain::models::{
     CheckResult, CheckRound, CheckRoundEnd, CheckRoundOutcome, CheckRoundStart, ClaimedSession,
     ControlFileChanges, EntryId, Gate, GateAnswer, GateKind, HandBack, HandedBack, NewRun, Outcome,
@@ -176,7 +178,18 @@ pub(crate) struct FakeRepo {
     pub(crate) failing: Arc<Mutex<BTreeMap<&'static str, (usize, usize)>>>,
     /// The prompt each reviewer's Step was asked again in.
     pub(crate) reasks: Arc<Mutex<Vec<(StepKey, Uuid)>>>,
+    /// The Automations kept, by id, with their webhook's secret.
+    pub(crate) automations: Arc<Mutex<BTreeMap<Uuid, KeptAutomation>>>,
+    /// Each Automation's firings, by its id and the firing's key, with what
+    /// they came to.
+    pub(crate) firings: Arc<Mutex<BTreeMap<FiringKey, Option<FiringEnd>>>>,
 }
+
+/// A firing: its Automation and its key.
+pub(crate) type FiringKey = (Uuid, String);
+
+/// An Automation kept, with its webhook's secret.
+pub(crate) type KeptAutomation = (Automation, Option<String>);
 
 /// Everyone has an account but `macro|nobody@example.com`.
 impl UserDirectory for FakeRepo {
@@ -373,12 +386,26 @@ impl RunRepository for FakeRepo {
             control_file_patterns,
             control_files_team_id,
             standing_rules,
+            automation,
             ..
         } = new;
         if let Some(task_id) = task_id
             && !self.tasks.lock().expect("tasks").contains(&task_id)
         {
             return Ok(RunInsert::NoSuchTask);
+        }
+        // As the database's index: an Automation starts no Run on a task
+        // while a Run an Automation started runs there.
+        if automation.is_some()
+            && task_id.is_some()
+            && self
+                .runs
+                .lock()
+                .expect("runs")
+                .values()
+                .any(|run| run.task_id == task_id && run.automation.is_some() && run.end.is_none())
+        {
+            return Ok(RunInsert::TaskBusy);
         }
         let run = Run {
             id,
@@ -392,6 +419,7 @@ impl RunRepository for FakeRepo {
             control_files_team_id,
             control_files: None,
             standing_rules: Some(standing_rules),
+            automation: automation.map(|start| start.automation.clone()),
             end: None,
         };
         self.runs.lock().expect("runs").insert(id, run.clone());

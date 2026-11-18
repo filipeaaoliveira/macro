@@ -43,6 +43,7 @@ fn run(owner_gates: bool) -> Run {
             source: RulesSource::Team,
             project_id: None,
         }),
+        automation: None,
         end: None,
     }
 }

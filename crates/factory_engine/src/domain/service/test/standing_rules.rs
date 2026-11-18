@@ -60,6 +60,7 @@ async fn run_with(repo: &FakeRepo, rules: RunRules) -> StepKey {
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: rules,
+            automation: None,
         })
         .await
         .expect("insert")
@@ -349,6 +350,7 @@ async fn a_rule_never_answers_an_agents_question() {
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: team_rules(EVERY_RULE),
+            automation: None,
         })
         .await
         .expect("insert")

@@ -9,6 +9,7 @@ use std::num::NonZeroU8;
 
 use agent_session::domain::session_task::TaskDocumentId;
 use chrono::Utc;
+use factory_records::domain::automations::{Automation, AutomationStart, RunAutomation};
 use factory_records::domain::main_hold::{BaseState, MainHoldRepository};
 use factory_records::domain::models::{
     EntryId, HandBack, MAX_NOTE_BYTES, MAX_OUTPUT_BYTES, MAX_QUESTION_BYTES, MAX_REQUEST_BYTES,
@@ -74,6 +75,18 @@ pub const WAITING_RUNS_LISTED: u16 = 50;
 /// How old a Run with no Step and no workflow must be before it counts as
 /// one whose workflow never started.
 const UNSTARTED_AFTER: chrono::TimeDelta = chrono::TimeDelta::minutes(5);
+
+/// A Run to record and start: what [`FactoryService::create_run`] takes,
+/// and the Automation that starts it, if one does.
+struct RunOrder<'a> {
+    actor: MacroUserIdStr<'static>,
+    flow: String,
+    request: String,
+    task_id: Option<Uuid>,
+    repo_url: Option<String>,
+    in_person: bool,
+    automation: Option<AutomationStart<'a>>,
+}
 
 /// The Run API, over the Run records, the Runs' workflows, the worker that
 /// says which Steps it serves, the people and tasks Runs name, and GitHub,
@@ -531,62 +544,20 @@ where
         Ok(())
     }
 
-    /// Remove a Run whose workflow did not start, unless it did after all:
-    /// a start that failed after the server took it leaves a workflow
-    /// behind, which needs its Run.
-    async fn forget_unstarted(&self, run_id: RunId) {
-        match self.workflows.exists(run_id).await {
-            Ok(false) => {
-                if let Err(cleanup) = self.repo.delete_run(run_id).await {
-                    tracing::error!(error = ?cleanup, "failed to remove a run whose workflow did not start");
-                }
-            }
-            Ok(true) => {}
-            Err(error) => {
-                tracing::error!(
-                    ?error,
-                    "could not tell whether a run's workflow started; the run is kept"
-                );
-            }
-        }
-    }
-}
-
-impl<R, W, E, U, T, G> FactoryService for FactoryServiceImpl<R, W, E, U, T, G>
-where
-    R: RunRepository + MainHoldRepository + ReviewRoundRepository + StandingRulesRepository,
-    W: RunWorkflows,
-    E: StepExecutor,
-    U: UserDirectory,
-    T: TaskDirectory,
-    G: PullRequests,
-{
-    fn list_flows(&self) -> Vec<FlowSummary> {
-        // A Flow that names a Step the worker does not serve yet is not
-        // offered: a Run of it would be refused.
-        BUILT_IN_FLOWS
-            .into_iter()
-            .filter_map(|flow| {
-                let read = flow.read(|step| self.executor.serves(step)).ok()?;
-                Some(FlowSummary {
-                    name: flow.name.to_string(),
-                    description: read.description,
-                    repository: read.repository,
-                })
-            })
-            .collect()
-    }
-
+    /// Record the Run `order` asks for and start it, as
+    /// [`FactoryService::create_run`] does, keeping the Automation that
+    /// starts it if one does.
     #[tracing::instrument(skip_all, fields(run_id = tracing::field::Empty))]
-    async fn create_run(
-        &self,
-        actor: MacroUserIdStr<'static>,
-        flow: String,
-        request: String,
-        task_id: Option<Uuid>,
-        repo_url: Option<String>,
-        in_person: bool,
-    ) -> Result<RunDetail, FactoryError> {
+    async fn start_run(&self, order: RunOrder<'_>) -> Result<RunDetail, FactoryError> {
+        let RunOrder {
+            actor,
+            flow,
+            request,
+            task_id,
+            repo_url,
+            in_person,
+            automation,
+        } = order;
         let built_in = BuiltInFlow::named(&flow).ok_or(FactoryError::UnknownFlow)?;
         let mut flow = built_in.read(|step| self.executor.serves(step))?;
         if let Some(rounds) = self.review_rounds {
@@ -651,12 +622,15 @@ where
                 control_file_patterns: &control_file_patterns,
                 control_files_team_id,
                 standing_rules,
+                automation,
             })
             .await
             .map_err(internal)?
         {
             RunInsert::Inserted(run) => *run,
             RunInsert::NoSuchTask => return Err(FactoryError::UnknownTask),
+            RunInsert::TaskBusy => return Err(FactoryError::TaskBusy),
+            RunInsert::FiringStarted => return Err(FactoryError::FiringRepeated),
         };
 
         // The Run is recorded before its workflow starts, so the workflow can
@@ -668,6 +642,122 @@ where
         }
 
         self.detail(run, Vec::new(), Vec::new()).await
+    }
+
+    /// Remove a Run whose workflow did not start, unless it did after all:
+    /// a start that failed after the server took it leaves a workflow
+    /// behind, which needs its Run.
+    async fn forget_unstarted(&self, run_id: RunId) {
+        match self.workflows.exists(run_id).await {
+            Ok(false) => {
+                if let Err(cleanup) = self.repo.delete_run(run_id).await {
+                    tracing::error!(error = ?cleanup, "failed to remove a run whose workflow did not start");
+                }
+            }
+            Ok(true) => {}
+            Err(error) => {
+                tracing::error!(
+                    ?error,
+                    "could not tell whether a run's workflow started; the run is kept"
+                );
+            }
+        }
+    }
+}
+
+impl<R, W, E, U, T, G> FactoryService for FactoryServiceImpl<R, W, E, U, T, G>
+where
+    R: RunRepository + MainHoldRepository + ReviewRoundRepository + StandingRulesRepository,
+    W: RunWorkflows,
+    E: StepExecutor,
+    U: UserDirectory,
+    T: TaskDirectory,
+    G: PullRequests,
+{
+    fn list_flows(&self) -> Vec<FlowSummary> {
+        // A Flow that names a Step the worker does not serve yet is not
+        // offered: a Run of it would be refused.
+        BUILT_IN_FLOWS
+            .into_iter()
+            .filter_map(|flow| {
+                let read = flow.read(|step| self.executor.serves(step)).ok()?;
+                Some(FlowSummary {
+                    name: flow.name.to_string(),
+                    description: read.description,
+                    repository: read.repository,
+                })
+            })
+            .collect()
+    }
+
+    async fn create_run(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        flow: String,
+        request: String,
+        task_id: Option<Uuid>,
+        repo_url: Option<String>,
+        in_person: bool,
+    ) -> Result<RunDetail, FactoryError> {
+        self.start_run(RunOrder {
+            actor,
+            flow,
+            request,
+            task_id,
+            repo_url,
+            in_person,
+            automation: None,
+        })
+        .await
+    }
+
+    async fn check_run_order(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        flow: &str,
+        repo_url: Option<&str>,
+    ) -> Result<(), FactoryError> {
+        let built_in = BuiltInFlow::named(flow).ok_or(FactoryError::UnknownFlow)?;
+        let flow = built_in.read(|step| self.executor.serves(step))?;
+        match (flow.repository, repo_url) {
+            (true, None) => return Err(FactoryError::RepositoryRequired),
+            (false, Some(_)) => return Err(FactoryError::RepositoryNotUsed),
+            _ => {}
+        }
+        self.known(actor).await?;
+        if let Some(repo_url) = repo_url {
+            self.reachable_repository(actor, repo_url).await?;
+        }
+        Ok(())
+    }
+
+    async fn create_automation_run(
+        &self,
+        automation: &Automation,
+        firing_key: &str,
+        request: String,
+        task_id: Option<Uuid>,
+    ) -> Result<RunDetail, FactoryError> {
+        let started_by = RunAutomation {
+            id: automation.id,
+            name: automation.name.clone(),
+            trigger: automation.trigger.kind(),
+        };
+        // An Automation acts as its creator, never in their signed-in
+        // session: its request names no Control File.
+        self.start_run(RunOrder {
+            actor: automation.created_by.clone(),
+            flow: automation.flow.clone(),
+            request,
+            task_id,
+            repo_url: automation.repo_url.clone(),
+            in_person: false,
+            automation: Some(AutomationStart {
+                automation: &started_by,
+                firing_key,
+            }),
+        })
+        .await
     }
 
     #[tracing::instrument(skip(self, actor))]

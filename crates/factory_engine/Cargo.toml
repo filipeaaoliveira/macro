@@ -27,6 +27,7 @@ factory_records = { path = "../factory_records" }
 futures = { workspace = true }
 github = { path = "../github", default-features = false, features = ["link", "outbound"] }
 glob = { workspace = true }
+hex = { workspace = true }
 macro_authorization = { path = "../macro_authorization", default-features = false, features = ["axum"] }
 macro_user_id = { path = "../macro_user_id", features = ["schema"] }
 # The discussions on a Run's task: their page and query live with its ports.
@@ -37,9 +38,12 @@ model_notifications = { path = "../model_notifications" }
 models_properties = { path = "../models_properties" }
 # The ports and the ingress; Kafka stays out of the factory.
 notification = { path = "../notification", default-features = false }
+rand = { workspace = true }
+reqwest = { workspace = true }
 rootcause = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 system_properties = { path = "../system_properties" }
 temporalio-client = { workspace = true }
 temporalio-common = { workspace = true }
@@ -54,6 +58,7 @@ tracing = { workspace = true }
 upstream_error = { path = "../upstream_error", default-features = false, features = ["axum"] }
 utoipa = { workspace = true }
 uuid = { workspace = true }
+webhook_signature = { path = "../webhook_signature" }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]

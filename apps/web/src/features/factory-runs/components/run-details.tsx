@@ -3,6 +3,7 @@ import { t } from '@app/lib/i18n';
 import { Button } from '@ui';
 import { createSignal, createUniqueId, Show } from 'solid-js';
 import {
+  type AutomationTriggerKind,
   type BaseRequiredChecks,
   type MainHold,
   type ReviewRound,
@@ -14,11 +15,18 @@ import {
 import { RunStatusDot, runStatusLabel } from './run-status';
 import { RunTimeline } from './run-timeline';
 
+const AUTOMATION_TRIGGERS = {
+  schedule: 'factoryRuns.automationTriggerSchedule',
+  repository_event: 'factoryRuns.automationTriggerRepositoryEvent',
+  webhook: 'factoryRuns.automationTriggerWebhook',
+  task_event: 'factoryRuns.automationTriggerTaskEvent',
+} as const satisfies Record<AutomationTriggerKind, string>;
+
 /**
  * Where the Run is, when it started and ended, the repository it works on,
- * and what its request says past the title. The status line takes focus
- * when the control a person used goes away (an answered Gate, a cancelled
- * Run).
+ * the Automation that started it, and what its request says past the
+ * title. The status line takes focus when the control a person used goes
+ * away (an answered Gate, a cancelled Run).
  */
 export function RunSummary(props: {
   run: Run;
@@ -64,6 +72,21 @@ export function RunSummary(props: {
               {t('factoryRuns.repositoryFrom', {
                 repository: repositoryLabel(repository().url),
                 branch: repository().baseBranch,
+              })}
+            </p>
+          </section>
+        )}
+      </Show>
+      <Show when={props.run.automation}>
+        {(automation) => (
+          <section class="flex flex-col gap-1.5">
+            <h3 class="text-xs font-medium text-ink-muted">
+              {t('factoryRuns.startedBy')}
+            </h3>
+            <p class="text-sm leading-5 [overflow-wrap:anywhere]">
+              {t('factoryRuns.startedByAutomation', {
+                name: automation().name,
+                trigger: t(AUTOMATION_TRIGGERS[automation().trigger]),
               })}
             </p>
           </section>

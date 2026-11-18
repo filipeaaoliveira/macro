@@ -82,6 +82,7 @@ async fn run_at_plan_gate(
                 source: RulesSource::Team,
                 project_id: None,
             },
+            automation: None,
         })
         .await
         .expect("insert")

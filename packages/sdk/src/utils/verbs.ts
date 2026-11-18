@@ -115,6 +115,7 @@ const methods: Record<string, Partial<Record<SdkVerb, string>>> = {
     created: 'createFactoryRun',
     cancelled: 'cancelFactoryRun',
     linked: 'linkFactoryRunTask',
+    ran: 'fireFactoryAutomation',
   },
   auth: {
     read: 'macroApiToken getReferralCode getTeam getUserInfo postProfilePictures',

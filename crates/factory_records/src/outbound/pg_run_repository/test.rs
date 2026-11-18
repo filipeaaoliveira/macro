@@ -52,12 +52,15 @@ pub(super) async fn insert(repo: &PgRunRepository, id: RunId, request: &str) -> 
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
+            automation: None,
         })
         .await
         .expect("insert")
     {
         RunInsert::Inserted(run) => *run,
-        RunInsert::NoSuchTask => panic!("a run with no task has no task to miss"),
+        RunInsert::NoSuchTask | RunInsert::TaskBusy | RunInsert::FiringStarted => {
+            panic!("a run with no task has no task to miss")
+        }
     }
 }
 
@@ -367,6 +370,7 @@ async fn a_run_keeps_its_repository_and_the_commit_it_asks_to_merge(pool: PgPool
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
+            automation: None,
         })
         .await
         .expect("insert");
@@ -412,6 +416,7 @@ async fn a_run_is_kept_with_its_task_in_one_write(pool: PgPool) {
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
+            automation: None,
         })
         .await
         .expect("insert");
@@ -427,6 +432,7 @@ async fn a_run_is_kept_with_its_task_in_one_write(pool: PgPool) {
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
+            automation: None,
         })
         .await
         .expect("insert for a missing task");
@@ -1197,12 +1203,15 @@ async fn insert_on_task(
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
+            automation: None,
         })
         .await
         .expect("insert")
     {
         RunInsert::Inserted(run) => run.id,
-        RunInsert::NoSuchTask => panic!("the task exists"),
+        RunInsert::NoSuchTask | RunInsert::TaskBusy | RunInsert::FiringStarted => {
+            panic!("the task exists")
+        }
     }
 }
 

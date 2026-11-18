@@ -513,6 +513,14 @@ export const factoryExcluded = [
   'getFactoryControlFiles',
   'getFactoryInsights',
   'getFactoryStandingRules',
+  // Only the person in their own session makes an Automation, which starts
+  // Runs as them later, or switches one on; a webhook's calls come from
+  // outside Macro, signed with its secret.
+  'callFactoryAutomationWebhook',
+  'createFactoryAutomation',
+  'deleteFactoryAutomation',
+  'listFactoryAutomations',
+  'setFactoryAutomationEnabled',
   // A reply is a Gate's answer in words: only the person, in their own
   // session, gives it.
   'replyToFactoryGate',

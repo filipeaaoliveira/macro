@@ -235,6 +235,7 @@ async fn plan_run(repo: &FakeRepo) -> RunStart {
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
+            automation: None,
         })
         .await
         .expect("insert")
@@ -928,6 +929,7 @@ where
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: walk.rules,
+            automation: None,
         })
         .await
         .expect("insert")
@@ -1410,6 +1412,7 @@ async fn watching(repo: &FakeRepo) -> (MainWatch, Repository) {
         control_file_patterns: &[],
         control_files_team_id: None,
         standing_rules: RunRules::DEFAULT,
+        automation: None,
     })
     .await
     .expect("insert");
