@@ -525,6 +525,39 @@ async fn nothing_but_a_merge_gate_s_approval_falls_into_the_merge() {
     assert_eq!(flow_error(next), unguarded());
 }
 
+/// A Definition's Flow ends at the merge: the Steps that ran after it are
+/// served by no worker for it.
+#[tokio::test]
+async fn a_definition_s_flow_runs_no_post_merge_step() {
+    let deploy = r#"{ "entries": [{ "id": "deploy", "step": "deploy", "on": {} }] }"#;
+    let verify =
+        r#"{ "entries": [{ "id": "verify", "step": "verify", "role": "verifier", "on": {} }] }"#;
+
+    let deployed = read(with("flows/reply.json", deploy)).await;
+    let verified = read(with("flows/reply.json", verify)).await;
+
+    assert!(
+        matches!(
+            &deployed,
+            Err(DefinitionError::Flow {
+                error: FlowError::UnknownStep { .. },
+                ..
+            })
+        ),
+        "{deployed:?}"
+    );
+    assert!(
+        matches!(
+            &verified,
+            Err(DefinitionError::Flow {
+                error: FlowError::UnknownStep { .. },
+                ..
+            })
+        ),
+        "{verified:?}"
+    );
+}
+
 /// A token glued to what precedes it, as in a URL's query, is a secret all
 /// the same; only `sk-` needs the start of a word, so `task-` is none.
 #[tokio::test]

@@ -60,6 +60,9 @@ pub const DEFINITION_FILE_PATTERNS: [&str; 5] = [
     SCORERS_FILE,
 ];
 
+/// The Steps that ran after a merge, which a Definition's Flow never runs.
+const POST_MERGE_STEPS: [&str; 2] = ["deploy", "verify"];
+
 /// The format of the Definition this factory reads.
 pub const DEFINITION_VERSION: u32 = 1;
 
@@ -86,25 +89,25 @@ const SECRET_PREFIXES: [&str; 19] = [
     "glpat-",
     "sk-ant-",
     "sk-proj-",
-    "sk-",
-    "xoxb-",
-    "xoxp-",
     "sk_live_",
     "rk_live_",
-    "xapp-",
+    "sk-",
     "npm_",
+    "xoxb-",
+    "xoxp-",
+    "xapp-",
     "AKIA",
     "AIza",
-];
-
-/// How many token characters after a prefix make it a secret.
     // A JSON Web Token's header, `{"`, encoded.
     "eyJ",
-const SECRET_TAIL: usize = 16;
+];
 
 /// The prefixes that end ordinary words (`task-`): they count only at the
 /// start of a word.
 const WORD_START_PREFIXES: [&str; 1] = ["sk-"];
+
+/// How many token characters after a prefix make it a secret.
+const SECRET_TAIL: usize = 16;
 
 /// What begins a private key in a file.
 const PRIVATE_KEY: &str = "-----BEGIN";
@@ -375,6 +378,14 @@ pub async fn read_definition<F: DefinitionFiles>(
     files: &F,
     serves: impl Fn(&StepName) -> Option<StepUse>,
 ) -> Result<FactoryDefinition, DefinitionReadError<F::Err>> {
+    // A Run ends at its merge: a Definition's Flow runs none of the Steps
+    // that waited for a deploy or checked the merged change.
+    let serves = |step: &StepName| {
+        if POST_MERGE_STEPS.contains(&step.as_str()) {
+            return None;
+        }
+        serves(step)
+    };
     let manifest: Manifest = required(files, MANIFEST_FILE).await?;
     if manifest.version != DEFINITION_VERSION {
         return Err(DefinitionError::Version(manifest.version).into());
