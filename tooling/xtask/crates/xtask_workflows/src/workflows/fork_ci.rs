@@ -159,13 +159,15 @@ fn rust() -> Job {
         .add_env(("SCCACHE_IDLE_TIMEOUT", "0"))
         .add_service("postgres", code_check_cloud_storage::postgres_service())
         .add_service("redis", code_check_cloud_storage::redis_service())
-        .add_step(steps::checkout(false, false))
+        .add_step(steps::checkout(false, false).add_with(("fetch-depth", 2)))
+        // Before the dev shell, as in `web`.
+        .add_step(changed_files_on_pull_request())
         .add_step(steps::setup_nix())
         .add_step(steps::setup_dev_shell().timeout_minutes(vars::DEV_SHELL_TIMEOUT_MINUTES))
         .add_step(use_runner_cache())
         .add_step(steps::start_sccache_server())
         .add_step(steps::code_mode_assets())
-        .add_step(Step::new("fmt").run("cargo fmt --check"))
+        .add_step(cargo_fmt())
         .add_step(Step::new("unused dependencies").run("cargo shear --format github"))
         .add_step(cargo_clippy())
         .add_step(
@@ -186,14 +188,17 @@ fn web() -> Job {
         // builds write, and mold links them.
         .add_env(("CARGO_PROFILE_DEV_DEBUG", "0"))
         .add_env(("RUSTFLAGS", "-C link-arg=-fuse-ld=mold"))
-        .add_step(steps::checkout(false, false).add_with(("fetch-depth", 2)))
-        // Before the dev shell: its LD_LIBRARY_PATH points the runner's
-        // git-remote-https at Nix's glibc, which aborts `git fetch`. A manual
-        // run has no base revision, so it checks every file.
+        // Full history, as `Web App Pr Checks`' Typecheck: the entity icon check
+        // reads every committed list of icon names. Without blobs, which git
+        // fetches as it reads them.
         .add_step(
-            compute_changed_files()
-                .if_condition(Expression::new("github.event_name == 'pull_request'")),
+            steps::checkout(false, false)
+                .add_with(("fetch-depth", 0))
+                .add_with(("filter", "blob:none")),
         )
+        // Before the dev shell: its LD_LIBRARY_PATH points the runner's
+        // git-remote-https at Nix's glibc, which aborts `git fetch`.
+        .add_step(changed_files_on_pull_request())
         .add_step(steps::setup_nix())
         .add_step(
             steps::setup_reqs_web("Setup Prereqs", false)
@@ -317,6 +322,54 @@ fn compute_nextest_filter() -> Step<Run> {
         .id("nextest-filter")
         .add_env(("FILTER_CACHE_DIR", FILTER_CACHE_DIR.as_str()))
         .shell("bash")
+}
+
+/// [`compute_changed_files`] for a pull request. A manual run has no base
+/// revision, so its checks cover every file.
+fn changed_files_on_pull_request() -> Step<Run> {
+    compute_changed_files().if_condition(Expression::new("github.event_name == 'pull_request'"))
+}
+
+/// `cargo fmt --check` on the packages that own a changed Rust file, so a file
+/// this repository left unformatted fails only the pull request that changes
+/// its package. A manual run checks the whole workspace, as upstream does.
+fn cargo_fmt() -> Step<Run> {
+    Step::new("fmt").run(indoc::indoc! {r#"
+        set -euo pipefail
+
+        if [ ! -f /tmp/base-revision ]; then
+          cargo fmt --check
+          exit 0
+        fi
+
+        # The package of each changed Rust file: the name in the nearest
+        # manifest above it that has a [package] table.
+        packages=()
+        while read -r file; do
+          [ -f "$file" ] || continue
+          dir=$(dirname "$file")
+          while [ "$dir" != . ]; do
+            name=$(sed -n '/^\[package\]/,/^\[/s/^name *= *"\(.*\)"/\1/p' "$dir/Cargo.toml" 2>/dev/null || true)
+            if [ -n "$name" ]; then
+              packages+=("$name")
+              break
+            fi
+            dir=$(dirname "$dir")
+          done
+        done < <(grep -E '\.rs$' /tmp/changed-files || true)
+
+        if [ "${#packages[@]}" -eq 0 ]; then
+          echo "No changed Rust files"
+          exit 0
+        fi
+
+        args=()
+        for name in $(printf '%s\n' "${packages[@]}" | sort -u); do
+          args+=(-p "$name")
+        done
+        echo "fmt: ${args[*]}"
+        cargo fmt --check "${args[@]}"
+    "#})
 }
 
 /// Keep build output in the runner's cache directory when it has one
