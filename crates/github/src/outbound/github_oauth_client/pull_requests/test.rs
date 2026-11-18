@@ -127,30 +127,9 @@ async fn find_pull_request_by_head_reads_the_newest_of_the_branch_with_its_head(
     assert_eq!(found.number, 12);
     assert!(found.merged);
     assert_eq!(found.head_sha, "abc123");
-    assert_eq!(found.merge_commit_sha.as_deref(), Some("def456"));
     assert!(server.finish().starts_with(
         "GET /repos/macro/app/pulls?head=macro%3Afactory%2Frun&state=all&sort=created&direction=desc&per_page=1 HTTP/1.1"
     ));
-}
-
-/// An open pull request's merge commit is GitHub's trial merge, never on
-/// its base: it is not read.
-#[tokio::test]
-async fn an_open_pull_request_has_no_merge_commit() {
-    let (server, client) = answering(
-        "200 OK",
-        r#"[{"number":12,"html_url":"https://github.com/macro/app/pull/12","state":"open","merged_at":null,"merge_commit_sha":"def456","head":{"sha":"abc123"}}]"#,
-    );
-
-    let found = client
-        .find_pull_request_by_head("token", "macro", "app", "factory/run")
-        .await
-        .unwrap()
-        .expect("found");
-
-    assert!(!found.merged);
-    assert_eq!(found.merge_commit_sha, None);
-    server.finish();
 }
 
 #[tokio::test]

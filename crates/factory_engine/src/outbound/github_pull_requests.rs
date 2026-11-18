@@ -249,7 +249,6 @@ fn pull_request(found: GithubPullRequestHead) -> PullRequest {
         url: found.html_url,
         state,
         head_sha: found.head_sha,
-        merge_commit: found.merge_commit_sha,
     }
 }
 

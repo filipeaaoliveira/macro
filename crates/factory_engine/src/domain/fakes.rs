@@ -1558,9 +1558,6 @@ impl FakeGithub {
     /// The commit an opened pull request's head is at.
     pub(crate) const HEAD: &str = "1111111111111111111111111111111111111111";
 
-    /// The commit merging the pull request makes on its base.
-    pub(crate) const MERGED: &str = "2222222222222222222222222222222222222222";
-
     /// GitHub's id of the CI app whose runs [`ci`] makes.
     pub(crate) const ACTIONS: u64 = 15368;
 
@@ -1577,7 +1574,6 @@ impl FakeGithub {
             url: "https://github.com/macro/app/pull/7".to_string(),
             state: PullRequestState::Open,
             head_sha: Self::HEAD.to_string(),
-            merge_commit: None,
         });
         github.state().checks = [checks].into();
         github
@@ -1817,7 +1813,6 @@ impl PullRequests for FakeGithub {
             url: format!("{}/pull/7", repository.url()),
             state: PullRequestState::Open,
             head_sha: Self::HEAD.to_string(),
-            merge_commit: None,
         });
         Ok(Opening::Opened)
     }
@@ -1841,7 +1836,6 @@ impl PullRequests for FakeGithub {
             return Ok(Merging::HeadChanged);
         }
         pull_request.state = PullRequestState::Merged;
-        pull_request.merge_commit = Some(Self::MERGED.to_string());
         Ok(Merging::Merged)
     }
 

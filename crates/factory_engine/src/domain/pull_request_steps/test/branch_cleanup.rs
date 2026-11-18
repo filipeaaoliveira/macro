@@ -31,7 +31,6 @@ async fn agreed(repo: &FakeRepo) -> RunId {
 fn merged_on_github(github: &FakeGithub) {
     if let Some(pull_request) = github.state().pull_request.as_mut() {
         pull_request.state = PullRequestState::Merged;
-        pull_request.merge_commit = Some(FakeGithub::MERGED.to_string());
     }
 }
 
