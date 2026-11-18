@@ -352,6 +352,69 @@ fn secret_in(text: &str) -> Option<&'static str> {
     })
 }
 
+/// A JSON document whose every object names each key once: serde reads a
+/// key named twice as the last, which would let a file say one thing to a
+/// reader and another to the factory.
+struct UniqueKeys;
+
+impl<'de> Deserialize<'de> for UniqueKeys {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_any(UniqueKeysVisitor)
+    }
+}
+
+struct UniqueKeysVisitor;
+
+impl<'de> serde::de::Visitor<'de> for UniqueKeysVisitor {
+    type Value = UniqueKeys;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("JSON")
+    }
+
+    fn visit_bool<E>(self, _: bool) -> Result<UniqueKeys, E> {
+        Ok(UniqueKeys)
+    }
+
+    fn visit_i64<E>(self, _: i64) -> Result<UniqueKeys, E> {
+        Ok(UniqueKeys)
+    }
+
+    fn visit_u64<E>(self, _: u64) -> Result<UniqueKeys, E> {
+        Ok(UniqueKeys)
+    }
+
+    fn visit_f64<E>(self, _: f64) -> Result<UniqueKeys, E> {
+        Ok(UniqueKeys)
+    }
+
+    fn visit_str<E>(self, _: &str) -> Result<UniqueKeys, E> {
+        Ok(UniqueKeys)
+    }
+
+    fn visit_unit<E>(self) -> Result<UniqueKeys, E> {
+        Ok(UniqueKeys)
+    }
+
+    fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<UniqueKeys, A::Error> {
+        while seq.next_element::<UniqueKeys>()?.is_some() {}
+        Ok(UniqueKeys)
+    }
+
+    fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<UniqueKeys, A::Error> {
+        let mut seen = BTreeSet::new();
+        while let Some(key) = map.next_key::<String>()? {
+            if !seen.insert(key.clone()) {
+                return Err(serde::de::Error::custom(format!(
+                    "key {key:?} appears twice"
+                )));
+            }
+            map.next_value::<UniqueKeys>()?;
+        }
+        Ok(UniqueKeys)
+    }
+}
+
 /// How the first secret a string of `value` holds begins, keys included.
 fn secret_in_value(value: &serde_json::Value) -> Option<&'static str> {
     match value {
@@ -399,6 +462,7 @@ async fn json<F: DefinitionFiles, T: serde::de::DeserializeOwned>(
         path: path.to_string(),
         error: error.to_string(),
     };
+    serde_json::from_str::<UniqueKeys>(&text).map_err(unreadable)?;
     let value: serde_json::Value = serde_json::from_str(&text).map_err(unreadable)?;
     // JSON escapes (`\u005f`) hide a token from the text: its strings are
     // checked again once decoded.
@@ -483,6 +547,9 @@ pub async fn read_definition<F: DefinitionFiles>(
     if let Some(patterns) = &rules.control_files {
         ControlFiles::parse(patterns).map_err(DefinitionError::ControlFiles)?;
     }
+        if patterns.len() > MAX_DEFINITION_CONTROL_FILES {
+            return Err(DefinitionError::TooManyControlFiles.into());
+        }
     let queue_limit = rules
         .standing_rules
         .and_then(|standing_rules| standing_rules.queue_limit);
@@ -515,6 +582,3 @@ pub async fn read_definition<F: DefinitionFiles>(
         scorers,
     })
 }
-        if patterns.len() > MAX_DEFINITION_CONTROL_FILES {
-            return Err(DefinitionError::TooManyControlFiles.into());
-        }

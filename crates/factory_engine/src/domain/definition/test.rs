@@ -616,6 +616,20 @@ async fn a_definition_s_control_files_leave_room_for_its_own() {
     assert_eq!(full, Err(DefinitionError::TooManyControlFiles));
 }
 
+/// A key named twice in an object does not read: serde would take the
+/// last, which a person reading the file may not.
+#[tokio::test]
+async fn a_key_named_twice_does_not_read() {
+    let manifest = r#"{ "version": 1, "flows": ["reply", "plan"], "flows": ["reply"] }"#;
+
+    let read = read(with("factory.json", manifest)).await;
+
+    assert!(
+        matches!(&read, Err(DefinitionError::Unreadable { path, error }) if path == "factory.json" && error.contains("twice")),
+        "{read:?}"
+    );
+}
+
 /// Slack, Google, webhook and cloud secrets, and a password in a URL, do
 /// not read; npm's settings and a public certificate do.
 #[tokio::test]
