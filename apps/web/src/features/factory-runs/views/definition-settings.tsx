@@ -95,6 +95,11 @@ export function DefinitionSettings() {
                     </p>
                   )}
                 </Show>
+                <Show when={settings().requiresPullRequest === true}>
+                  <p class="text-xs text-ink-muted">
+                    {t('factoryRuns.definitionPullRequestRequired')}
+                  </p>
+                </Show>
                 <Show when={settings().requiresPullRequest === false}>
                   <p class="text-xs text-failure" role="alert">
                     {t('factoryRuns.definitionNoPullRequest')}

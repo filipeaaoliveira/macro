@@ -177,6 +177,8 @@ export default {
     'Runs take their flows, agents, rules and control files from this repository’s default branch, and keep the commit they read. Change it by pull request; the settings below no longer apply.',
   definitionNoPullRequest:
     'Its default branch doesn’t require a pull request: a push changes your factory’s rules unreviewed. Protect the branch on GitHub.',
+  definitionPullRequestRequired:
+    'GitHub asks for a pull request on its default branch. Anyone allowed to bypass that rule can still push to it.',
   definitionPullRequestUnknown:
     'Couldn’t tell whether its default branch requires a pull request: only its admins can read that. Make sure it does.',
   definitionAdminsOnly: 'Only team admins can change it.',
