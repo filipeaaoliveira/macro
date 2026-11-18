@@ -19,6 +19,22 @@ what each `CI gate` state means, re-runs, and fork PRs. The workflows are
 generated from Rust; see the
 [workflows rule](../../.agents/rules/infra/github-workflows.md).
 
+## CI in a fork
+
+A fork has no Namespace runners, so `PR CI`'s checks queue there forever.
+`Fork CI` (`fork_ci.rs`) runs a smaller set of them on every pull request to
+`main` or `feat/factory`, and on a manual run, on a self-hosted runner labelled
+`macro-fork`: fmt, unused dependencies, clippy with `SQLX_OFFLINE=true`, and
+nextest against Postgres and Redis for the Rust packages the pull request
+affects; Biome, the app's types and the affected Vitest tests for the web app.
+`changes` picks them with `PR CI`'s own path filters and nextest package filter.
+The runner may set `CI_CACHE_DIR` to a directory kept between jobs, for target
+directories and wasm packages.
+
+Only branches pushed to the fork reach the runner. `Fork CI gate` is the check
+to require: it fails for a pull request from another repository, and when any
+check failed or was cancelled. A check its filter skipped counts as passed.
+
 ## Email end-to-end suites
 
 `PR CI` does not run the email end-to-end suites, and `CI gate` does not
