@@ -616,18 +616,23 @@ Once its pull request merged, the Run's branch `factory/{run id}` is
 deleted, as GitHub's "delete branch after merge" does: by `merge` after
 its merge, and by `ready_to_merge` or `merge` when they find the pull
 request merged outside the Run, unless the repository has GitHub delete
-merged branches itself (`delete_branch_on_merge`). Only the Run's own
-branch is deleted, and only while it is at the commit merged: a branch
-pushed to since keeps its commits. That check is best effort: GitHub's
-API deletes a branch on no condition, so a push in the moment between the
-read of its head and the deletion is lost with the branch. A branch an open pull request is
-based on is kept too: deleting it through the API would close that pull
-request, where GitHub's own deletion moves it to the base. The deletion
-is best effort: a failure
-is logged, never the Step's. A Run that ends without merging (cancelled,
-failed, closed, refused, or ended for a person) keeps its branch, for a
-person to look at; nothing deletes it later, nor the branch of a pull
-request merged after its Run ended.
+merged branches itself (`delete_branch_on_merge`) or can no longer be
+read. The deletion is best effort: a failure is logged, never the Step's.
+
+Only the Run's own branch is deleted (the GitHub adapter refuses any
+other), and only while it is at the commit merged and no open pull
+request is based on it: a branch pushed to since keeps its commits, and
+deleting a branch through the API closes the pull requests based on it,
+where GitHub's own deletion moves them to its base. Both checks read
+GitHub before the deletion, which GitHub makes on no condition, so they
+race it: a push, or a pull request based on the branch, made in the
+moment between the reads and the deletion is lost with the branch, or
+closed.
+
+A Run that ends without merging (cancelled, failed, closed, refused, or
+ended for a person) keeps its branch, for a person to look at; nothing
+deletes it later, nor the branch of a pull request merged after its Run
+ended.
 
 Control Files (`src/domain/control_files.rs`) are the files that decide
 whether a repository's checks pass: tests and what they compare against
