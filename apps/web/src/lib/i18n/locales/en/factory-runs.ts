@@ -183,7 +183,7 @@ export default {
   // The person's Runs that wait on them, on the insights page.
   waitingOnYou: 'Waiting on you',
   waitingOnYouHint:
-    'Runs stopped at a gate only you can answer, and runs yet to ask you anything. Each holds a place in your queue.',
+    'Runs stopped at a gate or a question only you can answer, and runs yet to ask you anything. Each holds a place in your queue.',
   holdingAPlace: 'Yet to ask you anything',
   holdingAPlaceHint:
     'Each holds the place it will ask for. Cancel one you no longer need to free its place.',
