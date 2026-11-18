@@ -176,6 +176,7 @@ async fn all_commands_use_internal_auth_and_domain_wire_contract_at_both_prefixe
                     schedule: "cron `0 0 9 * * *` in UTC".into(),
                 },
             })),
+            out_of_sight: false,
         };
         let server = server(vec![
             Reply::json(200, json!({"managed":false})),
@@ -293,6 +294,7 @@ async fn malformed_and_ambiguous_prompt_responses_never_replay() {
                 action: identity(),
                 prompt: "task".into(),
                 context: None,
+                out_of_sight: false,
             })
             .await
             .unwrap_err();
@@ -316,6 +318,7 @@ async fn a_follow_up_is_sent_once_to_its_route() {
         action: action.clone(),
         prompt: "run the checks".into(),
         context: None,
+        out_of_sight: false,
     };
 
     let accepted = client.follow_up(command.clone()).await.unwrap();
@@ -425,6 +428,7 @@ async fn a_prompt_the_harness_never_connected_for_was_not_delivered() {
             action: identity(),
             prompt: "task".into(),
             context: None,
+            out_of_sight: false,
         })
         .await
         .unwrap_err();
@@ -499,6 +503,7 @@ async fn status_and_prompt_requests_have_bounded_timeouts() {
                         action: identity(),
                         prompt: "task".into(),
                         context: None,
+                        out_of_sight: false,
                     })
                     .await
                     .map(|_| ())

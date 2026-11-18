@@ -183,9 +183,12 @@ impl QueuedEntry {
     /// thread carries its origin (`announce`), and a runtime forwarding a
     /// triggered prompt carries its `context`; neither counts. A tool that
     /// prompts on a person's behalf with no trigger counts as theirs.
-    /// Following a session is what lists a hidden one for this person.
+    /// Following a session is what lists a hidden one for this person. A
+    /// prompt sent for its owner by work that runs out of sight, as a
+    /// software factory Step's (`AgentPromptAction::out_of_sight`), is no
+    /// one's typed prompt.
     pub fn direct_prompter(&self) -> Option<&MacroUserIdStr<'static>> {
-        let typed = matches!(self.action, AgentAction::Prompt(_))
+        let typed = matches!(&self.action, AgentAction::Prompt(prompt) if !prompt.out_of_sight())
             && self.prompter_kind() == PrompterKind::User
             && self.announce.is_none()
             && self.context.is_none();

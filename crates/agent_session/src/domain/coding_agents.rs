@@ -273,6 +273,7 @@ impl<Directory: CodingAgentDirectory, Sessions: RoutineSessions, Updates: Coding
                     // Dispatch moves onto the trigger topic separately, and
                     // takes its context from there.
                     context: None,
+                    out_of_sight: false,
                 })
                 .await
                 .map_err(failed)?;

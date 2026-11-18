@@ -630,6 +630,7 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
                 action: action.clone(),
                 prompt: prompt(&task.prompt, &task.outcomes),
                 context: None,
+                out_of_sight: true,
             })
             .await;
         if let Err(error) = self.prompt_once(&action, prompted).await {
@@ -767,6 +768,7 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
                 action: action.clone(),
                 prompt: prompt(&task.prompt, &task.outcomes),
                 context: None,
+                out_of_sight: true,
             })
             .await;
         self.prompt_once(&action, prompted).await?;
@@ -964,6 +966,7 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
                 action: action.clone(),
                 prompt: prompt(&turn.prompt, &turn.outcomes),
                 context: None,
+                out_of_sight: true,
             })
             .await;
         self.prompt_once(&action, prompted).await?;
@@ -1115,6 +1118,7 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
                         },
                         prompt,
                         context: None,
+                        out_of_sight: true,
                     })
                     .await;
                 match prompted {

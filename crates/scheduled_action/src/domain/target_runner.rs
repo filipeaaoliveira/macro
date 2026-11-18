@@ -133,6 +133,7 @@ impl<Sessions: RoutineSessions> RoutineAgents for TargetRunner<Sessions> {
                 action: identity.clone(),
                 prompt,
                 context,
+                out_of_sight: false,
             })
             .await?;
         if accepted.action_id != identity.action_id {

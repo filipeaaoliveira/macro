@@ -1746,9 +1746,6 @@ where
             // another replica.
             // A prompt typed into the session itself also follows it for its
             // sender, which lists a session started from a thread for them.
-            // A background session runs out of sight, as a factory Step's or
-            // a routine draft's: prompting it follows it for no one, so no
-            // list shows it.
             let recorded = async {
                 self.sessions
                     .set_turn_prompter(
@@ -1761,7 +1758,7 @@ where
                         },
                     )
                     .await?;
-                if let Some(user) = entry.direct_prompter().filter(|_| !session.is_background()) {
+                if let Some(user) = entry.direct_prompter() {
                     self.sessions.add_follower(session_id, user).await?;
                 }
                 Ok::<_, AgentSessionError>(())

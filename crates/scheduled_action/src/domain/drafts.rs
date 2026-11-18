@@ -668,6 +668,7 @@ impl<Code: RoutineCode, Sessions: RoutineSessions> RoutineDrafts<Code, Sessions>
                 action: action.clone(),
                 prompt: brief.prompt,
                 context: None,
+                out_of_sight: false,
             })
             .await?;
         progress.report(DraftMilestone::Writing);

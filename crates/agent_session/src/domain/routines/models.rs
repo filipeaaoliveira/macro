@@ -103,6 +103,11 @@ pub struct PromptRoutineSession {
     /// What made the routine fire, rendered ahead of the prompt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<trigger_context::TriggerContext>,
+    /// Whether the prompt comes from work its owner runs out of sight, as
+    /// a software factory Step's do: it follows the session for no one, so
+    /// no list shows the session for it. Older callers omit it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub out_of_sight: bool,
 }
 
 /// A command to run in a session's checkout, beside its agent, and how

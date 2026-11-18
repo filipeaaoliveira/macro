@@ -1,5 +1,4 @@
 use super::*;
-use agent_session::domain::model::{SessionSource, SessionVisibility};
 
 fn other_person() -> MacroUserIdStr<'static> {
     MacroUserIdStr::try_from_email("editor@example.com").expect("a valid user id")
@@ -104,33 +103,28 @@ async fn a_typed_prompt_records_its_tab_on_the_turn() {
     }
 }
 
-/// A background session runs out of sight, as a factory Step's does: a
-/// prompt its owner sends it from no thread, as the factory's are, follows
-/// it for no one, so no list shows it.
+/// A prompt sent for its owner by work that runs out of sight, as a
+/// software factory Step's are, follows the session for no one, so no list
+/// shows it; the same person's typed prompt still follows it.
 #[tokio::test]
-async fn prompts_to_a_background_session_follow_it_for_no_one() {
+async fn an_out_of_sight_prompt_follows_the_session_for_no_one() {
     let ((service, repo, containers, _announcer, _runtimes), mut turns) =
         harness_with_signals(PromptContextMock::default(), PromptComposerMock::default());
     let id = AgentSessionId::new();
     let container = live_session(&service, &containers, id).await;
     let agent = container.agent();
     turns.settled(id).await;
-    let mut session = repo.get(id).await.expect("persisted");
-    let owner = session.owner_user().expect("a person owns it").clone();
-    session.source = SessionSource::User;
-    session.visibility = SessionVisibility::Hidden;
-    session.thread_id = None;
-    session.originating_message_id = None;
-    session.origin = trigger_context::TriggerOrigin::Requested { by: owner.clone() };
-    assert!(session.is_background());
-    repo.insert_session(session);
 
+    let mut out_of_sight = AgentAction::prompt("go on with the step");
+    if let AgentAction::Prompt(prompt) = &mut out_of_sight {
+        prompt.set_out_of_sight();
+    }
     let prompted = service.control_event(
         id,
         ControlEvent {
-            action: AgentAction::prompt("go on with the step"),
+            action: out_of_sight,
             action_id: None,
-            actor: Some(owner),
+            actor: Some(sender()),
             context: None,
             client: None,
         },
@@ -138,9 +132,23 @@ async fn prompts_to_a_background_session_follow_it_for_no_one() {
     let (result, ()) = tokio::join!(prompted, agent.completes_prompt());
     result.expect("the prompt should deliver");
     turns.settled(id).await;
-
     assert!(
         repo.followers(id).is_empty(),
-        "a background session is followed by no one"
+        "an out-of-sight prompt follows the session for no one"
     );
+
+    let typed = service.control_event(
+        id,
+        ControlEvent {
+            action: AgentAction::prompt("typed into the session"),
+            action_id: None,
+            actor: Some(sender()),
+            context: None,
+            client: None,
+        },
+    );
+    let (result, ()) = tokio::join!(typed, agent.completes_prompt());
+    result.expect("a direct prompt should deliver");
+    turns.settled(id).await;
+    assert_eq!(repo.followers(id), vec![sender()]);
 }

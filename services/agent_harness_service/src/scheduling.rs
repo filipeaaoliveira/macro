@@ -299,6 +299,7 @@ where
                 action: action.clone(),
                 prompt: prompt.to_owned(),
                 context: None,
+                out_of_sight: false,
             })
             .await
         {

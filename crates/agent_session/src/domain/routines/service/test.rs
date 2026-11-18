@@ -518,6 +518,7 @@ async fn every_subsequent_operation_checks_owner_and_persona_before_controls_or_
                     action,
                     prompt: "task".into(),
                     context: None,
+                    out_of_sight: false,
                 })
                 .await
                 .unwrap_err(),
@@ -538,6 +539,7 @@ async fn prompt_and_cancel_only_emit_attributed_prompt_and_stop_controls() {
             action: action.clone(),
             prompt: "routine guidance and task".into(),
             context: None,
+            out_of_sight: false,
         })
         .await
         .unwrap();
@@ -567,6 +569,7 @@ async fn ambiguous_prompt_failure_is_not_replayed() {
                 action: fx.action(),
                 prompt: "task".into(),
                 context: None,
+                out_of_sight: false,
             })
             .await
             .unwrap_err(),
@@ -612,6 +615,7 @@ async fn refuses_known_prompt_replays_even_after_completion() {
                 action,
                 prompt: "retry".into(),
                 context: None,
+                out_of_sight: false,
             })
             .await
             .unwrap_err(),
@@ -636,6 +640,7 @@ async fn queued_prompt_prevents_second_submission() {
                 action,
                 prompt: "retry".into(),
                 context: None,
+                out_of_sight: false,
             })
             .await
             .unwrap_err(),
@@ -680,6 +685,7 @@ async fn a_follow_up_goes_on_in_the_session_under_its_own_id() {
             action: later.clone(),
             prompt: "run the checks".into(),
             context: None,
+            out_of_sight: false,
         })
         .await
         .unwrap();
@@ -692,6 +698,34 @@ async fn a_follow_up_goes_on_in_the_session_under_its_own_id() {
     assert_eq!(events[0].actor, Some(later.owner));
 }
 
+/// A prompt marked out of sight reaches the session marked so, which
+/// follows it for no one; an unmarked one does not carry the mark.
+#[tokio::test]
+async fn an_out_of_sight_follow_up_is_marked_so() {
+    let fx = Fixture::new(true);
+    let first = fx.action();
+    log_prompt(&fx, &first, "write the change");
+
+    for out_of_sight in [true, false] {
+        fx.service
+            .follow_up(PromptRoutineSession {
+                action: fx.action(),
+                prompt: "run the checks".into(),
+                context: None,
+                out_of_sight,
+            })
+            .await
+            .unwrap();
+    }
+
+    let events = fx.controls.events.lock().unwrap();
+    let marked: Vec<bool> = events
+        .iter()
+        .map(|event| matches!(&event.action, AgentAction::Prompt(prompt) if prompt.out_of_sight()))
+        .collect();
+    assert_eq!(marked, [true, false]);
+}
+
 #[tokio::test]
 async fn a_follow_up_needs_a_session_that_took_its_first_prompt() {
     let fx = Fixture::new(true);
@@ -702,6 +736,7 @@ async fn a_follow_up_needs_a_session_that_took_its_first_prompt() {
             action: fx.action(),
             prompt: "run the checks".into(),
             context: None,
+            out_of_sight: false,
         })
         .await
         .unwrap_err();
@@ -730,6 +765,7 @@ async fn a_follow_up_the_session_already_holds_is_refused() {
                 action,
                 prompt: "again".into(),
                 context: None,
+                out_of_sight: false,
             })
             .await
             .unwrap_err();
