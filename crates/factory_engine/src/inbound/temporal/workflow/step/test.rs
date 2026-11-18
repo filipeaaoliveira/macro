@@ -37,6 +37,8 @@ struct Script {
     /// The answers a person gives the Gates the walk asks, in order; the
     /// first a Gate offers once these run out.
     answers: RefCell<Vec<Outcome>>,
+    /// What each Gate the walk asked says of its Standing Rule, in order.
+    asked_with: RefCell<Vec<Option<Asking>>>,
     /// The Run's Standing Rules; none for a Run created before Runs kept
     /// them.
     rules: Option<OrchestratorDefinition>,
@@ -113,6 +115,7 @@ impl Work for Script {
     }
 
     async fn ask(&self, opening: GateOpening, rule: Option<Asking>) -> Result<Outcome, Failed> {
+        self.asked_with.borrow_mut().push(rule);
         // As the worker does: a Flow's Gate of a kind goes to the Run's
         // Standing Rules first, and only one they leave waits for a person.
         if let Some(asking) = rule
@@ -708,4 +711,62 @@ async fn a_run_cancelled_at_a_step_without_a_result_holds_its_session() {
 
     assert_eq!(walked, Ok(Round::Ended(RunOutcome::Cancelled)));
     assert_eq!(held, [1]);
+}
+
+/// The Gate of a Step without a result is no Flow's Gate: no kind for a
+/// Standing Rule or the stand-in to read, and kept for a person.
+#[tokio::test]
+async fn the_gate_of_a_step_without_a_result_has_no_kind() {
+    let script = Script {
+        ends: [(1, "no_result")].into(),
+        answers: RefCell::new(vec![Outcome::stop()]),
+        ..Script::default()
+    };
+
+    walk(&script, &plan(false), asking(0), 10)
+        .await
+        .0
+        .expect("walked");
+
+    assert_eq!(
+        *script.asked_with.borrow(),
+        [Some(Asking {
+            kind: None,
+            person_only: true,
+            fix_rounds: 0,
+            fix_limit: 0,
+        })]
+    );
+}
+
+/// An entry whose Gate opens after `failed`: once its Step's owner
+/// answered `stop` to the Gate of an agent that stopped without a result,
+/// the Flow routes `failed` without asking the entry's Gate, since the
+/// Step already had its one Gate.
+#[tokio::test]
+async fn stopping_a_step_without_a_result_never_asks_the_entry_s_gate_after_failed() {
+    let flow = Flow::parse(
+        json!({ "entries": [{
+            "id": "plan", "step": "plan", "role": "planner",
+            "gate": { "question": "Try again?", "answers": ["again", "give_up"], "after": "failed" }
+        }] }),
+        |_| Some(StepUse::Agent),
+    )
+    .expect("valid flow");
+    let script = Script {
+        ends: [(1, "no_result")].into(),
+        answers: RefCell::new(vec![Outcome::stop()]),
+        ..Script::default()
+    };
+
+    let (walked, held) = walk(&script, &flow.entries[0], asking(0), 10).await;
+
+    assert_eq!(walked, Ok(Round::Routed(Outcome::failed())));
+    assert!(held.is_empty());
+    let asked = asked_briefly(&script);
+    assert!(
+        !asked.iter().any(|asked| asked.contains("Try again?")),
+        "{asked:?}"
+    );
+    assert_eq!(asked.last().map(String::as_str), Some("stop 1"));
 }

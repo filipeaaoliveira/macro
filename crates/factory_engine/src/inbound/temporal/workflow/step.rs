@@ -76,7 +76,7 @@ pub(super) async fn walk_step<W: Work>(
             Err(_) => (failure(), true),
         };
         let stopped = report.outcome == Outcome::no_result();
-        let mut reported = report.outcome.clone();
+        let reported = report.outcome.clone();
         let question = questions.asked(&request, &report);
         let last_words = report.output.clone();
         if let Err(error) = work.end(StepEnding { key, report }).await {
@@ -146,8 +146,8 @@ pub(super) async fn walk_step<W: Work>(
         // An agent that stopped without a result, even once reminded, goes
         // to the Run's owner on a Gate showing its last message: `retry`
         // has the same Role go on in a Step of its own, at the next place,
-        // in the same session; `stop` stops its agent and fails the Step,
-        // for the Flow to route `failed`. No Standing Rule or stand-in
+        // in the same session; `stop` stops its agent, and the Flow routes
+        // `failed` while the Step stays `no_result`. No Standing Rule or stand-in
         // answers it: it is no Flow's Gate, of no kind.
         if stopped {
             let opening = GateOpening {
@@ -181,7 +181,9 @@ pub(super) async fn walk_step<W: Work>(
             for stopping in std::mem::take(held).iter().rev() {
                 work.stop(stopping).await;
             }
-            reported = Outcome::failed();
+            // The Step had its Gate: the entry's own, even one after
+            // `failed`, never opens on it, as a Step keeps one Gate.
+            return Ok(Round::Routed(Outcome::failed()));
         }
 
         // The entry's Gate opens on the outcome it names (`done` unless it
