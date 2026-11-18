@@ -1979,6 +1979,10 @@
           "standIn": {
             "$ref": "#/components/schemas/StandInKinds",
             "description": "The kinds of Gate the stand-in answers for the Run's owner, after\nthe rules and before the person; off for every kind when left out."
+          },
+          "taskThread": {
+            "type": "boolean",
+            "description": "The task thread section: a Run on a task posts its main updates\n(its start, each Step's end, its Gates, its pull request, its merge\nand how it ended) to one comment thread on the task, as its owner.\nOff, as when a definition is sent without it, a Run posts nothing."
           }
         },
         "additionalProperties": false

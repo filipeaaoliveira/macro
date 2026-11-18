@@ -544,6 +544,13 @@ export type OrchestratorDefinition = {
      * the rules and before the person; off for every kind when left out.
      */
     standIn?: StandInKinds;
+    /**
+     * The task thread section: a Run on a task posts its main updates
+     * (its start, each Step's end, its Gates, its pull request, its merge
+     * and how it ended) to one comment thread on the task, as its owner.
+     * Off, as when a definition is sent without it, a Run posts nothing.
+     */
+    taskThread?: boolean;
 };
 
 /**
