@@ -1,16 +1,26 @@
 import { throwOnErr } from '@core/util/result';
 import { factoryClient } from '@service-factory/client';
 import type { DefinitionSettings } from '@service-factory/generated/schemas';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/solid-query';
+import {
+  queryOptions,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/solid-query';
 import { factoryRunKeys } from './keys';
 
-/** The Factory Definition the person's team names, read at its head. */
-export function useDefinitionQuery() {
-  return useQuery(() => ({
+/** How the team's Factory Definition is read. */
+export function definitionOptions() {
+  return queryOptions({
     queryKey: factoryRunKeys.definition.queryKey,
     queryFn: ({ signal }) =>
       throwOnErr(() => factoryClient.getDefinition(signal)),
-  }));
+  });
+}
+
+/** The Factory Definition the person's team names, read at its head. */
+export function useDefinitionQuery() {
+  return useQuery(() => definitionOptions());
 }
 
 /**
