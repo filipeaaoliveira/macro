@@ -17,6 +17,7 @@ caller cannot see. */
   runs: BoardRun[];
   /** Whether the board stopped reading past Runs the caller cannot see
 before the Runs ran out (some 250 of them in a row): older Runs they
-see may be there, which no next page reaches. */
+see may be there, which no next page reaches. Only on a board no
+filter or search narrows. */
   stoppedEarly: boolean;
 }

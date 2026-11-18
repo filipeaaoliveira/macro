@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AnswerFactoryGateData, AnswerFactoryGateErrors, AnswerFactoryGateResponses, CallFactoryAutomationWebhookData, CallFactoryAutomationWebhookErrors, CallFactoryAutomationWebhookResponses, CancelFactoryRunData, CancelFactoryRunErrors, CancelFactoryRunResponses, CreateFactoryAutomationData, CreateFactoryAutomationErrors, CreateFactoryAutomationResponses, CreateFactoryRunData, CreateFactoryRunErrors, CreateFactoryRunResponses, DeleteFactoryAutomationData, DeleteFactoryAutomationErrors, DeleteFactoryAutomationResponses, FireFactoryAutomationData, FireFactoryAutomationErrors, FireFactoryAutomationResponses, FlawFactoryRunData, FlawFactoryRunErrors, FlawFactoryRunResponses, GetFactoryControlFilesData, GetFactoryControlFilesErrors, GetFactoryControlFilesResponses, GetFactoryInsightsData, GetFactoryInsightsErrors, GetFactoryInsightsResponses, GetFactoryRunData, GetFactoryRunErrors, GetFactoryRunResponses, GetFactorySessionStepData, GetFactorySessionStepErrors, GetFactorySessionStepResponses, GetFactoryStandingRulesData, GetFactoryStandingRulesErrors, GetFactoryStandingRulesResponses, HandBackFactoryStepData, HandBackFactoryStepErrors, HandBackFactoryStepResponses, LinkFactoryRunTaskData, LinkFactoryRunTaskErrors, LinkFactoryRunTaskResponses, ListFactoryAutomationsData, ListFactoryAutomationsErrors, ListFactoryAutomationsResponses, ListFactoryFlowsData, ListFactoryFlowsErrors, ListFactoryFlowsResponses, ListFactoryTaskRunsData, ListFactoryTaskRunsErrors, ListFactoryTaskRunsResponses, ListFactoryWaitingRunsData, ListFactoryWaitingRunsErrors, ListFactoryWaitingRunsResponses, NoteFactoryStepData, NoteFactoryStepErrors, NoteFactoryStepResponses, PauseFactoryStepData, PauseFactoryStepErrors, PauseFactoryStepResponses, ReplyToFactoryGateData, ReplyToFactoryGateErrors, ReplyToFactoryGateResponses, ResumeFactoryStepData, ResumeFactoryStepErrors, ResumeFactoryStepResponses, SetFactoryAutomationEnabledData, SetFactoryAutomationEnabledErrors, SetFactoryAutomationEnabledResponses, SetFactoryControlFilesData, SetFactoryControlFilesErrors, SetFactoryControlFilesResponses, SetFactoryProjectStandingRulesData, SetFactoryProjectStandingRulesErrors, SetFactoryProjectStandingRulesResponses, SetFactoryStandingRulesData, SetFactoryStandingRulesErrors, SetFactoryStandingRulesResponses, StopFactoryStepData, StopFactoryStepErrors, StopFactoryStepResponses } from './types.gen';
+import type { AnswerFactoryGateData, AnswerFactoryGateErrors, AnswerFactoryGateResponses, CallFactoryAutomationWebhookData, CallFactoryAutomationWebhookErrors, CallFactoryAutomationWebhookResponses, CancelFactoryRunData, CancelFactoryRunErrors, CancelFactoryRunResponses, CreateFactoryAutomationData, CreateFactoryAutomationErrors, CreateFactoryAutomationResponses, CreateFactoryRunData, CreateFactoryRunErrors, CreateFactoryRunResponses, DeleteFactoryAutomationData, DeleteFactoryAutomationErrors, DeleteFactoryAutomationResponses, FireFactoryAutomationData, FireFactoryAutomationErrors, FireFactoryAutomationResponses, FlawFactoryRunData, FlawFactoryRunErrors, FlawFactoryRunResponses, GetFactoryControlFilesData, GetFactoryControlFilesErrors, GetFactoryControlFilesResponses, GetFactoryDefinitionData, GetFactoryDefinitionErrors, GetFactoryDefinitionResponses, GetFactoryInsightsData, GetFactoryInsightsErrors, GetFactoryInsightsResponses, GetFactoryRunData, GetFactoryRunErrors, GetFactoryRunResponses, GetFactorySessionStepData, GetFactorySessionStepErrors, GetFactorySessionStepResponses, GetFactoryStandingRulesData, GetFactoryStandingRulesErrors, GetFactoryStandingRulesResponses, HandBackFactoryStepData, HandBackFactoryStepErrors, HandBackFactoryStepResponses, LinkFactoryRunTaskData, LinkFactoryRunTaskErrors, LinkFactoryRunTaskResponses, ListFactoryAutomationsData, ListFactoryAutomationsErrors, ListFactoryAutomationsResponses, ListFactoryBoardData, ListFactoryBoardErrors, ListFactoryBoardResponses, ListFactoryFlowsData, ListFactoryFlowsErrors, ListFactoryFlowsResponses, ListFactoryTaskRunsData, ListFactoryTaskRunsErrors, ListFactoryTaskRunsResponses, ListFactoryWaitingRunsData, ListFactoryWaitingRunsErrors, ListFactoryWaitingRunsResponses, NoteFactoryStepData, NoteFactoryStepErrors, NoteFactoryStepResponses, PauseFactoryStepData, PauseFactoryStepErrors, PauseFactoryStepResponses, ReplyToFactoryGateData, ReplyToFactoryGateErrors, ReplyToFactoryGateResponses, ResumeFactoryStepData, ResumeFactoryStepErrors, ResumeFactoryStepResponses, SetFactoryAutomationEnabledData, SetFactoryAutomationEnabledErrors, SetFactoryAutomationEnabledResponses, SetFactoryControlFilesData, SetFactoryControlFilesErrors, SetFactoryControlFilesResponses, SetFactoryDefinitionData, SetFactoryDefinitionErrors, SetFactoryDefinitionResponses, SetFactoryProjectStandingRulesData, SetFactoryProjectStandingRulesErrors, SetFactoryProjectStandingRulesResponses, SetFactoryStandingRulesData, SetFactoryStandingRulesErrors, SetFactoryStandingRulesResponses, StopFactoryStepData, StopFactoryStepErrors, StopFactoryStepResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -151,7 +151,10 @@ export class Sdk extends HeyApiClient {
     }
 
     /**
-     * List the built-in Flows a Run can be started of, by name.
+     * List the Flows the caller can start a Run of, by name: their team's
+     * Factory Definition's, read at its default branch's head, when the team
+     * names one (400 `unreachableDefinition` or `invalidDefinition` when it
+     * does not read), else the built-in Flows.
      */
     public listFactoryFlows<ThrowOnError extends boolean = false>(options?: Options<ListFactoryFlowsData, ThrowOnError>): RequestResult<ListFactoryFlowsResponses, ListFactoryFlowsErrors, ThrowOnError> {
         return (options?.client ?? this.client).get<ListFactoryFlowsResponses, ListFactoryFlowsErrors, ThrowOnError>({ url: '/flows', ...options });
@@ -181,6 +184,16 @@ export class Sdk extends HeyApiClient {
      */
     public getFactoryInsights<ThrowOnError extends boolean = false>(options: Options<GetFactoryInsightsData, ThrowOnError>): RequestResult<GetFactoryInsightsResponses, GetFactoryInsightsErrors, ThrowOnError> {
         return (options.client ?? this.client).get<GetFactoryInsightsResponses, GetFactoryInsightsErrors, ThrowOnError>({ url: '/insights', ...options });
+    }
+
+    /**
+     * List a page of the factory's board: the Runs the caller can see,
+     * theirs or their team's, newest first, each with its Steps and where it
+     * is (`running`, `waiting` on its owner at a Gate, `held` by a Main Hold,
+     * `stopped` for a person, or `finished`). Read the next page with `next`.
+     */
+    public listFactoryBoard<ThrowOnError extends boolean = false>(options?: Options<ListFactoryBoardData, ThrowOnError>): RequestResult<ListFactoryBoardResponses, ListFactoryBoardErrors, ThrowOnError> {
+        return (options?.client ?? this.client).get<ListFactoryBoardResponses, ListFactoryBoardErrors, ThrowOnError>({ url: '/runs', ...options });
     }
 
     /**
@@ -394,6 +407,35 @@ export class Sdk extends HeyApiClient {
     public setFactoryControlFiles<ThrowOnError extends boolean = false>(options: Options<SetFactoryControlFilesData, ThrowOnError>): RequestResult<SetFactoryControlFilesResponses, SetFactoryControlFilesErrors, ThrowOnError> {
         return (options.client ?? this.client).put<SetFactoryControlFilesResponses, SetFactoryControlFilesErrors, ThrowOnError>({
             url: '/settings/control-files',
+            ...options,
+            headers: {
+                'Content-Type': 'application/json',
+                ...options.headers
+            }
+        });
+    }
+
+    /**
+     * The Factory Definition the caller's team names, and whether it reads at
+     * its default branch's head as the caller reaches it on GitHub.
+     */
+    public getFactoryDefinition<ThrowOnError extends boolean = false>(options?: Options<GetFactoryDefinitionData, ThrowOnError>): RequestResult<GetFactoryDefinitionResponses, GetFactoryDefinitionErrors, ThrowOnError> {
+        return (options?.client ?? this.client).get<GetFactoryDefinitionResponses, GetFactoryDefinitionErrors, ThrowOnError>({ url: '/settings/definition', ...options });
+    }
+
+    /**
+     * Name the repository whose files the caller's team's Runs take their
+     * Flows, Agents, rules and Scorers from, or name none. The Definition must
+     * read at its default branch's head as the caller reaches it (400
+     * `unreachableDefinition` or `invalidDefinition`, naming the file and the
+     * problem). Only an admin or the owner of the team names it, in their own
+     * signed-in session (403 otherwise). While one is named, the team's
+     * Control File and Standing Rules settings are refused (409
+     * `definitionNamed`): the Definition's pull requests change them.
+     */
+    public setFactoryDefinition<ThrowOnError extends boolean = false>(options: Options<SetFactoryDefinitionData, ThrowOnError>): RequestResult<SetFactoryDefinitionResponses, SetFactoryDefinitionErrors, ThrowOnError> {
+        return (options.client ?? this.client).put<SetFactoryDefinitionResponses, SetFactoryDefinitionErrors, ThrowOnError>({
+            url: '/settings/definition',
             ...options,
             headers: {
                 'Content-Type': 'application/json',
