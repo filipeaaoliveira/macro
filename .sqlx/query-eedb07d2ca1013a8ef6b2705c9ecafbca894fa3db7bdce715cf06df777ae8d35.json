@@ -1,0 +1,88 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                g.run_id,\n                g.seq,\n                s.entry,\n                r.user_id AS owner,\n                r.request,\n                s.outcome,\n                s.output AS \"output?\",\n                g.question,\n                g.answers,\n                g.answer AS \"answer!\",\n                g.note,\n                g.answered_at AS \"answered_at!\"\n            FROM factory_gate g\n            JOIN factory_step s ON s.run_id = g.run_id AND s.seq = g.seq\n            JOIN factory_run r ON r.id = g.run_id\n            WHERE g.answer IS NOT NULL AND g.user_id IS NOT NULL AND g.rule IS NULL\n                AND NOT g.by_stand_in\n            ORDER BY g.answered_at, g.run_id, g.seq\n            LIMIT $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "run_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "seq",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "entry",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "owner",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "request",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "outcome",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "output?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "question",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "answers",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 9,
+        "name": "answer!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "note",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "answered_at!",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "eedb07d2ca1013a8ef6b2705c9ecafbca894fa3db7bdce715cf06df777ae8d35"
+}

@@ -10,6 +10,10 @@ fn outcome(name: &str) -> Outcome {
 }
 
 const EVERY_RULE: OrchestratorDefinition = OrchestratorDefinition {
+    stand_in: factory_records::domain::standing_rules::StandInKinds {
+        plan: false,
+        blockers: false,
+    },
     plan: true,
     blockers: true,
     merge: true,
@@ -81,6 +85,10 @@ fn a_kind_its_definition_leaves_off_waits_for_a_person() {
         assert_eq!(rule_answer(Some(none), &facts(kind), &offered), None);
     }
     let merge_only = OrchestratorDefinition {
+        stand_in: factory_records::domain::standing_rules::StandInKinds {
+            plan: false,
+            blockers: false,
+        },
         merge: true,
         ..none
     };

@@ -1086,6 +1086,10 @@ async fn a_run_whose_rules_decide_every_gate_merges_with_no_person_asked() {
     let repo = FakeRepo::default();
     let rules = RunRules {
         definition: OrchestratorDefinition {
+            stand_in: factory_records::domain::standing_rules::StandInKinds {
+                plan: false,
+                blockers: false,
+            },
             plan: true,
             blockers: true,
             merge: true,
@@ -1136,6 +1140,10 @@ async fn a_gate_of_no_kind_waits_for_a_person_whatever_the_rules() {
     let repo = FakeRepo::default();
     let rules = RunRules {
         definition: OrchestratorDefinition {
+            stand_in: factory_records::domain::standing_rules::StandInKinds {
+                plan: false,
+                blockers: false,
+            },
             plan: true,
             blockers: true,
             merge: true,

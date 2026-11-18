@@ -9,8 +9,8 @@ use super::super::test::{insert, julia, key, outcome};
 use crate::domain::models::{NewRun, RunId, RunInsert};
 use crate::domain::ports::RunRepository;
 use crate::domain::standing_rules::{
-    OrchestratorDefinition, ProjectRules, ProjectRulesSet, RulesSource, RunRules, StandingRule,
-    StandingRulesRepository,
+    OrchestratorDefinition, ProjectRules, ProjectRulesSet, RulesSource, RunRules, StandInKinds,
+    StandingRule, StandingRulesRepository,
 };
 use crate::outbound::pg_run_repository::PgRunRepository;
 
@@ -25,6 +25,10 @@ const PLAN_AND_MERGE: OrchestratorDefinition = OrchestratorDefinition {
     plan: true,
     blockers: false,
     merge: true,
+    stand_in: StandInKinds {
+        plan: false,
+        blockers: true,
+    },
 };
 
 /// A team's rules and its Control Files share its settings: setting or

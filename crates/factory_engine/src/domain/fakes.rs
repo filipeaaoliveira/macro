@@ -600,6 +600,8 @@ impl RunRepository for FakeRepo {
         self.with_step(key, |step| {
             let kind = GateKind::of(step.end.as_ref().map(|end| &end.outcome));
             step.gate.get_or_insert_with(|| Gate {
+                asked_back: None,
+                stand_in: None,
                 kind,
                 question: question.to_string(),
                 answers: answers.to_vec(),
@@ -624,6 +626,8 @@ impl RunRepository for FakeRepo {
                 && gate.answer.is_none()
             {
                 gate.answer = Some(GateAnswer {
+                    reply_confidence: None,
+                    by_stand_in: false,
                     answer: answer.clone(),
                     note: note.map(str::to_string),
                     user_id: Some(user_id.clone()),
@@ -651,6 +655,8 @@ impl RunRepository for FakeRepo {
             let gate = step.gate.as_mut()?;
             if gate.answer.is_none() {
                 gate.answer = Some(GateAnswer {
+                    reply_confidence: None,
+                    by_stand_in: false,
                     answer: answer.clone(),
                     note: None,
                     user_id: None,

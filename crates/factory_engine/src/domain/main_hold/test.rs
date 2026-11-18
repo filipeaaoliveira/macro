@@ -763,11 +763,15 @@ fn approved_merge_gate(approved: &[&str]) -> Step {
             ended_at: Utc::now(),
         }),
         gate: Some(Gate {
+            asked_back: None,
+            stand_in: None,
             kind: GateKind::Flow,
             question: "Merge?".to_string(),
             answers: vec![approve.clone()],
             opened_at: Utc::now(),
             answer: Some(GateAnswer {
+                reply_confidence: None,
+                by_stand_in: false,
                 answer: approve,
                 note: None,
                 user_id: None,

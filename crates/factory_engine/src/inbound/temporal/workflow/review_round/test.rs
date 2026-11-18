@@ -499,6 +499,10 @@ async fn a_round_cancelled_while_a_reviewer_goes_on_holds_the_asking_step() {
 
 /// Every Standing Rule on.
 const EVERY_RULE: OrchestratorDefinition = OrchestratorDefinition {
+    stand_in: factory_records::domain::standing_rules::StandInKinds {
+        plan: false,
+        blockers: false,
+    },
     plan: true,
     blockers: true,
     merge: true,

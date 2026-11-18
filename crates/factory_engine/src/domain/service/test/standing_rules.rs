@@ -23,6 +23,10 @@ fn outcome(name: &str) -> Outcome {
 }
 
 const EVERY_RULE: OrchestratorDefinition = OrchestratorDefinition {
+    stand_in: factory_records::domain::standing_rules::StandInKinds {
+        plan: false,
+        blockers: false,
+    },
     plan: true,
     blockers: true,
     merge: true,
@@ -293,6 +297,8 @@ async fn a_gate_a_person_answered_first_is_not_taken_as_ruled() {
         .for_each(|(_, step)| {
             if let Some(gate) = step.gate.as_mut() {
                 gate.answer = Some(factory_records::domain::models::GateAnswer {
+                    reply_confidence: None,
+                    by_stand_in: false,
                     answer: outcome("revise"),
                     note: None,
                     user_id: Some(julia()),

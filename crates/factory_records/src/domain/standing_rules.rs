@@ -83,9 +83,10 @@ pub enum StandingRule {
 }
 
 /// A workspace's Orchestrator Definition: which kinds of Gate the factory
-/// decides on its own. A kind left off waits for a person, as every Gate
-/// did before Standing Rules. Whatever it says, a Tampered Run's Gates and
-/// a merge through a Main Hold stay a person's.
+/// decides on its own, and which the stand-in answers for the Run's owner
+/// when no rule does. A kind left off waits for a person, as every Gate did
+/// before Standing Rules. Whatever it says, a Tampered Run's Gates and a
+/// merge through a Main Hold stay a person's.
 #[derive(
     Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, utoipa::ToSchema,
 )]
@@ -100,7 +101,33 @@ pub struct OrchestratorDefinition {
     /// Merge once CI is green, nothing is Tampered and the base branch has
     /// no Main Hold (`merge_when_green`).
     pub merge: bool,
+    /// The kinds of Gate the stand-in answers for the Run's owner, after
+    /// the rules and before the person; off for every kind when left out.
+    #[serde(default)]
+    pub stand_in: StandInKinds,
 }
+
+/// The kinds of Gate the stand-in answers for the Run's owner: a small
+/// model that answers as the owner would, which the owner may override for
+/// a short while. It never answers a merge Gate, so it has no setting for
+/// one.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, utoipa::ToSchema,
+)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StandInKinds {
+    /// Answer the plan Gate.
+    pub plan: bool,
+    /// Answer a review round's Blockers Gate.
+    pub blockers: bool,
+}
+
+/// How a definition keeps that the stand-in answers the plan Gate, beside
+/// the kinds its rules decide.
+const STAND_IN_PLAN: &str = "stand_in_plan";
+
+/// How a definition keeps that the stand-in answers the Blockers Gate.
+const STAND_IN_BLOCKERS: &str = "stand_in_blockers";
 
 impl OrchestratorDefinition {
     /// The definition that applies when a team set none: the review's
@@ -110,6 +137,10 @@ impl OrchestratorDefinition {
         plan: false,
         blockers: true,
         merge: false,
+        stand_in: StandInKinds {
+            plan: false,
+            blockers: false,
+        },
     };
 
     /// Whether the rule of `kind` decides its Gates.
@@ -121,28 +152,50 @@ impl OrchestratorDefinition {
         }
     }
 
-    /// The kinds its rules decide, as stored.
+    /// Whether the stand-in answers Gates of `kind` for the Run's owner.
+    /// It never answers a merge Gate.
+    pub fn stands_in(self, kind: RuleGateKind) -> bool {
+        match kind {
+            RuleGateKind::Plan => self.stand_in.plan,
+            RuleGateKind::Blockers => self.stand_in.blockers,
+            RuleGateKind::Merge => false,
+        }
+    }
+
+    /// The kinds its rules decide, then the kinds the stand-in answers
+    /// (`stand_in_plan`, `stand_in_blockers`), as stored.
     pub fn kinds(self) -> Vec<String> {
-        [
+        let ruled = [
             RuleGateKind::Plan,
             RuleGateKind::Blockers,
             RuleGateKind::Merge,
         ]
         .into_iter()
         .filter(|kind| self.decides(*kind))
-        .map(|kind| kind.to_string())
-        .collect()
+        .map(|kind| kind.to_string());
+        let stood_in = [
+            (self.stand_in.plan, STAND_IN_PLAN),
+            (self.stand_in.blockers, STAND_IN_BLOCKERS),
+        ]
+        .into_iter()
+        .filter(|(on, _)| *on)
+        .map(|(_, kind)| kind.to_string());
+        ruled.chain(stood_in).collect()
     }
 
-    /// The definition whose rules decide the stored `kinds`; none when one
-    /// is not a kind this code knows.
+    /// The definition stored as `kinds`; none when one is not a kind this
+    /// code knows.
     pub fn from_kinds(kinds: &[String]) -> Option<Self> {
         let mut definition = Self::default();
         for kind in kinds {
-            match kind.parse::<RuleGateKind>().ok()? {
-                RuleGateKind::Plan => definition.plan = true,
-                RuleGateKind::Blockers => definition.blockers = true,
-                RuleGateKind::Merge => definition.merge = true,
+            match kind.as_str() {
+                STAND_IN_PLAN => definition.stand_in.plan = true,
+                STAND_IN_BLOCKERS => definition.stand_in.blockers = true,
+                _ => match kind.parse::<RuleGateKind>().ok()? {
+                    RuleGateKind::Plan => definition.plan = true,
+                    RuleGateKind::Blockers => definition.blockers = true,
+                    RuleGateKind::Merge => definition.merge = true,
+                },
             }
         }
         Some(definition)

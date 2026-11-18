@@ -1,6 +1,7 @@
 //! PostgreSQL implementation of the [`RunRepository`] port.
 
 mod check_rounds;
+mod gate_replies;
 mod insights;
 mod main_hold;
 mod review_rounds;
@@ -16,10 +17,11 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::domain::models::{
-    AgentName, CheckResult, CheckRound, CheckRoundOutcome, CheckRoundStart, ClaimedSession,
-    ControlFileChanges, EntryId, Gate, GateAnswer, GateKind, HandBack, HandedBack, InvalidName,
-    NewRun, Outcome, PassedOver, Repository, Role, Run, RunEnd, RunId, RunInsert, RunOutcome,
-    SessionStep, Step, StepEnd, StepKey, StepSession, StoppingSession, TaskLink, TeamMembership,
+    AgentName, AskedBack, CheckResult, CheckRound, CheckRoundOutcome, CheckRoundStart,
+    ClaimedSession, ControlFileChanges, EntryId, Gate, GateAnswer, GateKind, HandBack, HandedBack,
+    InvalidName, NewRun, Outcome, PassedOver, Repository, Role, Run, RunEnd, RunId, RunInsert,
+    RunOutcome, SessionStep, StandInAnswer, Step, StepEnd, StepKey, StepSession, StoppingSession,
+    TaskLink, TeamMembership,
 };
 use crate::domain::ports::RunRepository;
 use crate::domain::standing_rules::{OrchestratorDefinition, RulesSource, RunRules, StandingRule};
@@ -40,6 +42,56 @@ impl PgRunRepository {
     /// Create a repository backed by the provided pool.
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
+    }
+
+    /// The answer the Gate of `key` keeps; none when the Gate is not
+    /// recorded or has no answer.
+    pub(crate) async fn kept_answer(
+        &self,
+        key: StepKey,
+    ) -> Result<Option<GateAnswer>, PgRunRepositoryErr> {
+        let stored = sqlx::query!(
+            r#"
+            SELECT answer, note, user_id, rule, approved_control_files, reply_confidence,
+                by_stand_in, answered_at
+            FROM factory_gate
+            WHERE run_id = $1 AND seq = $2
+            "#,
+            key.run_id.as_uuid(),
+            i32::from(key.seq),
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some(stored) = stored else {
+            return Ok(None);
+        };
+        let (answer, answered_at) = match (stored.answer, stored.answered_at) {
+            (Some(answer), Some(answered_at)) => (answer, answered_at),
+            (None, None) => return Ok(None),
+            _ => return Err(PgRunRepositoryErr::PartialGate),
+        };
+        Ok(Some(GateAnswer {
+            answer: Outcome::try_from(answer)?,
+            note: stored.note,
+            user_id: stored
+                .user_id
+                .map(|id| {
+                    MacroUserIdStr::try_from(id.clone())
+                        .map_err(|_| PgRunRepositoryErr::InvalidUserId(id))
+                })
+                .transpose()?,
+            rule: stored
+                .rule
+                .map(|rule| {
+                    rule.parse::<StandingRule>()
+                        .map_err(|_| PgRunRepositoryErr::UnknownStandingRules(vec![rule]))
+                })
+                .transpose()?,
+            approved_control_files: stored.approved_control_files,
+            reply_confidence: stored.reply_confidence.map(percent).transpose()?,
+            by_stand_in: stored.by_stand_in,
+            answered_at,
+        }))
     }
 
     /// Whether a factory Step works, or worked, in the agent session
@@ -230,6 +282,14 @@ struct StepRow {
     user_id: Option<String>,
     approved_control_files: Option<Vec<String>>,
     rule: Option<String>,
+    reply_confidence: Option<i16>,
+    by_stand_in: Option<bool>,
+    asked_back_reply: Option<String>,
+    asked_back_at: Option<DateTime<Utc>>,
+    stand_in_answer: Option<String>,
+    stand_in_reason: Option<String>,
+    stand_in_confidence: Option<i16>,
+    stand_in_until: Option<DateTime<Utc>>,
     answered_at: Option<DateTime<Utc>>,
     role: Option<String>,
     agent: Option<String>,
@@ -261,9 +321,31 @@ impl StepRow {
                             .map_err(|_| PgRunRepositoryErr::UnknownStandingRules(vec![rule]))
                     })
                     .transpose()?,
+                reply_confidence: self.reply_confidence.map(percent).transpose()?,
+                by_stand_in: self.by_stand_in.unwrap_or(false),
                 answered_at,
             }),
             (None, None) => None,
+            _ => return Err(PgRunRepositoryErr::PartialGate),
+        };
+        let asked_back = match (self.asked_back_reply.take(), self.asked_back_at) {
+            (Some(reply), Some(at)) => Some(AskedBack { reply, at }),
+            (None, None) => None,
+            _ => return Err(PgRunRepositoryErr::PartialGate),
+        };
+        let stand_in = match (
+            self.stand_in_answer.take(),
+            self.stand_in_reason.take(),
+            self.stand_in_confidence,
+            self.stand_in_until,
+        ) {
+            (Some(answer), Some(reason), Some(confidence), Some(until)) => Some(StandInAnswer {
+                answer: Outcome::try_from(answer)?,
+                reason,
+                confidence: percent(confidence)?,
+                until,
+            }),
+            (None, None, None, None) => None,
             _ => return Err(PgRunRepositoryErr::PartialGate),
         };
 
@@ -283,11 +365,18 @@ impl StepRow {
                     .collect::<Result<_, _>>()?,
                 opened_at,
                 answer,
+                asked_back,
+                stand_in,
             })),
             (None, None, None) if answer.is_none() => Ok(None),
             _ => Err(PgRunRepositoryErr::PartialGate),
         }
     }
+}
+
+/// A stored confidence, which the schema keeps between 0 and 100 percent.
+fn percent(stored: i16) -> Result<u8, PgRunRepositoryErr> {
+    u8::try_from(stored).map_err(|_| PgRunRepositoryErr::OutOfRange(i32::from(stored)))
 }
 
 /// A stored visit or place, which the schema keeps between 1 and 65535.
@@ -580,6 +669,14 @@ impl RunRepository for PgRunRepository {
                 g.user_id,
                 g.approved_control_files,
                 g.rule,
+                g.reply_confidence,
+                g.by_stand_in AS "by_stand_in?",
+                g.asked_back_reply,
+                g.asked_back_at,
+                g.stand_in_answer,
+                g.stand_in_reason,
+                g.stand_in_confidence,
+                g.stand_in_until,
                 g.answered_at,
                 s.role,
                 s.agent,
@@ -667,6 +764,14 @@ impl RunRepository for PgRunRepository {
                 g.user_id,
                 g.approved_control_files,
                 g.rule,
+                g.reply_confidence,
+                g.by_stand_in AS "by_stand_in?",
+                g.asked_back_reply,
+                g.asked_back_at,
+                g.stand_in_answer,
+                g.stand_in_reason,
+                g.stand_in_confidence,
+                g.stand_in_until,
                 g.answered_at,
                 s.role,
                 s.agent,
@@ -784,43 +889,7 @@ impl RunRepository for PgRunRepository {
         }
 
         // What the Gate keeps is read back, whichever answer that is.
-        let stored = sqlx::query!(
-            r#"
-            SELECT answer, note, user_id, rule, approved_control_files, answered_at
-            FROM factory_gate
-            WHERE run_id = $1 AND seq = $2
-            "#,
-            key.run_id.as_uuid(),
-            i32::from(key.seq),
-        )
-        .fetch_optional(&self.pool)
-        .await?;
-        let Some(stored) = stored else {
-            return Ok(None);
-        };
-        let (Some(answer), Some(answered_at)) = (stored.answer, stored.answered_at) else {
-            return Err(PgRunRepositoryErr::PartialGate);
-        };
-        Ok(Some(GateAnswer {
-            answer: Outcome::try_from(answer)?,
-            note: stored.note,
-            user_id: stored
-                .user_id
-                .map(|id| {
-                    MacroUserIdStr::try_from(id.clone())
-                        .map_err(|_| PgRunRepositoryErr::InvalidUserId(id))
-                })
-                .transpose()?,
-            rule: stored
-                .rule
-                .map(|rule| {
-                    rule.parse::<StandingRule>()
-                        .map_err(|_| PgRunRepositoryErr::UnknownStandingRules(vec![rule]))
-                })
-                .transpose()?,
-            approved_control_files: stored.approved_control_files,
-            answered_at,
-        }))
+        self.kept_answer(key).await
     }
 
     #[tracing::instrument(err, skip(self, note, user_id), fields(answer = %answer))]
