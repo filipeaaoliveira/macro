@@ -304,15 +304,21 @@ whose workflow never started ends it `infrastructure` once it is five minutes
 old. A Temporal outage answers 503 (or 502 for an unusable answer), never 500.
 
 A Run ends `infrastructure`, not `failed`, when it fails for a machine, quota
-or network reason rather than its work: a Step whose work failed for good
-because its attempts ran out of time (`STEP_TOTAL`), or because every Agent
-of its Role was out of quota (`StepError::OutOfQuota`, an activity failure of
-type `FactoryInfrastructure`), ends `failed` and the Flow routes `failed` as
-before; when the Run then ends `failed` right on it, the workflow records
-`infrastructure`, behind the `factory-infrastructure-outcome` marker. A
-review round counts so only when every reviewer that failed did so for
-infrastructure. A Gate's answer to such a Step is a person's, and routes as
-any answer.
+or network reason rather than its work. Only what is surely the factory's
+counts; when unsure, the failure is the work's. A Step's work failed for
+infrastructure when its attempts ran out of time (`STEP_TOTAL`), unless the
+last of them failed as its agent was still at work on a later prompt
+(`StepError::Overdue`, type `FactoryAgentOverdue`, the work's), or when every
+Agent of its Role was out of quota (`StepError::OutOfQuota`, type
+`FactoryInfrastructure`). Such a Step ends `failed` and the Flow routes
+`failed` as before. When that `failed` takes the Run straight to a `failed`
+end, with no Step after it, the workflow records `infrastructure` instead,
+behind the `factory-infrastructure-outcome` marker; a Run that walks on
+past it and fails later ends as that later failure does. A review round
+counts only when every reviewer that failed did so for infrastructure and
+none ended without a review (`pass` or `changes`). A Gate's answer to such
+a Step is a person's, and routes as any answer. A Flow may not end a Run
+`infrastructure` or `flawed` itself (`FlowError::ReservedEnd`).
 
 A Run that ended `success` can be marked `flawed` afterwards
 (`src/domain/flaws.rs`, `mark_flawed`): its result was found wrong, by a
@@ -1385,6 +1391,21 @@ every Run in flight replays as before.
 - A worker older than `GateDefinition::after` cannot read a Flow that has
   it, and one older than `factory_rule_gate` fails that activity: deploy
   every worker before the API starts Runs on the new `code` Flow.
+- Removing the `factory-infrastructure-outcome` patch breaks the replay of
+  Runs that ended `infrastructure` (`plan_infrastructure_after_marker`); a
+  Run that ended `failed` on such a Step before it
+  (`plan_infrastructure_before_marker`) replays without it.
+- Deploy the workers and the API together with the outcome kinds: an older
+  API, or an older worker reading Runs, does not read a Run that ended
+  `infrastructure` or `flawed`. Rolling back past them needs those Runs set
+  back first (`infrastructure` to `failed`, `flawed` to `success` with its
+  flaw columns cleared), or the older code fails to read them.
+- Known limits of `infrastructure`: an agent whose provider's usage limit
+  ends its turn mid-way (`SessionAgentError::TurnFailed`) cannot be told
+  from any other failed turn, and a round of checks that ends red because
+  the fixer's quota ran out (`Red::QuotaRanOut`) is the Step's outcome, not
+  a failure of its work: both still end the Run `failed` when the Flow
+  routes them there.
 - Removing the `factory-notify-only-gates` patch breaks the replay of Runs
   that passed a notify-only Gate (`code_notify_only_plan_with_thread`). A
   worker older than `notify_only` cannot read a Flow that has it, so deploy
