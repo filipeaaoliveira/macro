@@ -119,6 +119,23 @@ export class FactoryNamespace {
   }
 
   /**
+   * The caller's Runs that hold a place in their Queue before asking them
+   * anything: Runs of a Flow with a Gate that have not reached one yet,
+   * newest first, at most 50. With the Runs in `queue()`, they are what a
+   * Queue limit counts; cancelling one frees its place.
+   *
+   * @readonly
+   */
+  async starting(): Promise<FactoryRun[]> {
+    const { starting } = unwrap(
+      await this.client.factory.listFactoryWaitingRuns(),
+    );
+    return starting.map((detail) =>
+      FactoryRun.byId(this.client, detail.run.id),
+    );
+  }
+
+  /**
    * The caller's Runs on `task`, newest first, at most 50.
    *
    * @readonly

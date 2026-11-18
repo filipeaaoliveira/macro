@@ -115,3 +115,21 @@ test('an answer the factory keeps for the person is refused', async () => {
     factoryRun.answer(waiting, { answer: 'approve' }),
   ).rejects.toThrow();
 });
+
+test('the queue and the runs yet to ask anything are read apart', async () => {
+  const STARTING = '01960000-0000-7000-8000-000000000002';
+  const requests = serve({
+    runs: [run([step(1, open)])],
+    starting: [{ ...run([]), run: { ...run([]).run, id: STARTING } }],
+  });
+
+  const queue = await macro().factory.queue();
+  const starting = await macro().factory.starting();
+
+  expect(queue.map((waiting) => waiting.id)).toEqual([RUN]);
+  expect(starting.map((held) => held.id)).toEqual([STARTING]);
+  expect(requests.map((request) => new URL(request.url).pathname)).toEqual([
+    '/runs/waiting',
+    '/runs/waiting',
+  ]);
+});
