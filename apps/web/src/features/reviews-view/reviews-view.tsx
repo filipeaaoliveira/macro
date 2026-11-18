@@ -10,6 +10,7 @@ import {
 import { CollectionPanes } from '@app/components/view-shell/CollectionPanes';
 import { ListHeaderSearch } from '@app/components/view-shell/ListHeader';
 import { ViewCreateMenu } from '@app/features/command/view-create-menu';
+import { useFactoryReviews } from '@app/features/factory-runs/factory-runs';
 import {
   createSearchParams,
   SplitRouter,
@@ -300,6 +301,11 @@ function ReviewsRoot() {
         : [],
     boardVisible
   );
+  // The factory's Runs behind the board's pull requests: their marks, and
+  // merges through a Run's merge Gate.
+  const factory = useFactoryReviews(() =>
+    boardVisible() ? source.reviews().map((review) => review.metadata.url) : []
+  );
   const loadMore = async () => {
     if (source.isLoadingMore() || !source.hasMore()) return;
     try {
@@ -469,6 +475,7 @@ function ReviewsRoot() {
               </div>
             </Match>
             <Match when={true}>
+              {factory.gate()}
               <ReviewsBoard
                 reviews={reviews()}
                 mergeability={mergeability.mergeability}
@@ -482,6 +489,8 @@ function ReviewsRoot() {
                 isLoadingMore={source.isLoadingMore()}
                 onLoadMore={() => fireAndForget(loadMore(), 'reviews-view')}
                 onOpen={openReview}
+                cardAddon={(review) => factory.mark(review.metadata.url)}
+                takeMerge={(review) => factory.merge(review.metadata.url)}
               />
             </Match>
           </Switch>

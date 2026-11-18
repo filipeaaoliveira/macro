@@ -29,7 +29,7 @@ import { soupKeys } from '@queries/soup/keys';
 import { useSetGithubPullRequestDraftMutation } from '@queries/storage/pr-draft';
 import { useMergeGithubPullRequestMutation } from '@queries/storage/pr-merge';
 import { Button } from '@ui/components/Button';
-import { createMemo, createSignal, getOwner, Show } from 'solid-js';
+import { createMemo, createSignal, getOwner, type JSX, Show } from 'solid-js';
 import { match } from 'ts-pattern';
 import {
   isReviewsBoardStage,
@@ -79,6 +79,13 @@ export function ReviewsBoard(props: {
   isLoadingMore: boolean;
   onLoadMore: () => void;
   onOpen: (foreignEntityId: string, newSplit: boolean) => void;
+  /** More a card shows of its pull request, under the rest. */
+  cardAddon?: (review: GithubPullRequestEntity) => JSX.Element;
+  /**
+   * Takes a merge in place of GitHub's, returning whether it did: the card
+   * then stays where GitHub has it.
+   */
+  takeMerge?: (review: GithubPullRequestEntity) => boolean;
 }) {
   const owner = getOwner();
   const merge = useMergeGithubPullRequestMutation();
@@ -154,6 +161,7 @@ export function ReviewsBoard(props: {
     const found = actionFor(request);
     if (!found) return false;
     const { review, action, toStage } = found;
+    if (action === 'merge' && props.takeMerge?.(review)) return false;
     const target = {
       owner: review.metadata.owner,
       repo: review.metadata.repo,
@@ -253,6 +261,7 @@ export function ReviewsBoard(props: {
                               review={review()}
                               links={props.links}
                               onOpen={props.onOpen}
+                              addon={props.cardAddon?.(review())}
                             />
                           </ContextMenuTrigger>
                           <ReviewContextMenuContent
@@ -289,6 +298,7 @@ function ReviewsBoardCard(props: {
   review: GithubPullRequestEntity;
   links: ReviewsListLinks;
   onOpen: (foreignEntityId: string, newSplit: boolean) => void;
+  addon?: JSX.Element;
 }) {
   const links = () => props.links.linksFor(props.review);
   return (
@@ -346,6 +356,9 @@ function ReviewsBoardCard(props: {
           pillClass="max-w-40"
         />
         <PrAgentSessionsChip url={props.review.metadata.url} />
+      </div>
+      <div data-kanban-no-drag class="min-w-0 empty:hidden">
+        {props.addon}
       </div>
     </div>
   );

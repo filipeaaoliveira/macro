@@ -1,5 +1,6 @@
 import { ViewBreadcrumbs, ViewShell } from '@app/components/view-shell';
 import { ChangesSplit } from '@app/features/changes/changes';
+import { useFactoryReviews } from '@app/features/factory-runs/factory-runs';
 import { useAnalytics } from '@app/lib/analytics/analytics-context';
 import { useRouteParams } from '@app/lib/split-router';
 import { reviewsPrRoute } from '@app/routes/routes';
@@ -23,7 +24,8 @@ import {
 import { SplitPanel } from '@components/app/split-panel';
 import { Permissions } from '@core/component/SharePermissions';
 import { fireAndForget } from '@core/util/fireAndForget';
-import { onMount } from 'solid-js';
+import { onMount, Show } from 'solid-js';
+import { withMergeTaker } from '../core/reviews-merge';
 
 function ReviewsPrBreadcrumb(props: {
   foreignEntityId: string;
@@ -70,7 +72,20 @@ function ReviewsPrBreadcrumb(props: {
 export function ReviewsPrDetail(props: { foreignEntityId: string }) {
   const analytics = useAnalytics();
   const detail = usePrDetail(() => props.foreignEntityId);
-  const actions = createPrActions(detail.data, confirmMergePullRequest);
+  const githubUrl = () => {
+    const data = detail.data();
+    return data ? (data.pullRequest.url ?? prHtmlUrl(data.prRef)) : undefined;
+  };
+  // A factory Run's pull request merges through the Run's merge Gate.
+  const factory = useFactoryReviews(() => {
+    const url = githubUrl();
+    return url ? [url] : [];
+  });
+  const actions = withMergeTaker(
+    createPrActions(detail.data, confirmMergePullRequest),
+    githubUrl,
+    factory
+  );
   const operations = usePrFileOperations(detail.data, actions);
   const name = () => {
     const data = detail.data();
@@ -78,10 +93,6 @@ export function ReviewsPrDetail(props: { foreignEntityId: string }) {
       data?.pullRequest.name ??
       (data ? prDisplayName(data.prRef) : 'Pull request')
     );
-  };
-  const githubUrl = () => {
-    const data = detail.data();
-    return data ? (data.pullRequest.url ?? prHtmlUrl(data.prRef)) : undefined;
   };
   onMount(() => {
     analytics.pageView('pr');
@@ -99,6 +110,9 @@ export function ReviewsPrDetail(props: { foreignEntityId: string }) {
         pullRequestTitle={detail.data()?.pullRequest.name ?? undefined}
         pullRequestChangeCounts={detail.changeCounts()}
       >
+        {/* The Run's section goes above Checks (20). */}
+        <Show when={githubUrl()}>{(url) => factory.section(url(), 15)}</Show>
+        {factory.gate()}
         <ReviewsPrBreadcrumb
           foreignEntityId={props.foreignEntityId}
           name={name()}
