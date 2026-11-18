@@ -1183,6 +1183,7 @@ async fn a_run_whose_rules_decide_every_gate_merges_with_no_person_asked() {
         &agent,
         &github,
         &repo,
+            task_thread: false,
         CodeWalk {
             rules,
             ..CodeWalk::default()
@@ -1238,6 +1239,7 @@ async fn a_gate_of_no_kind_waits_for_a_person_whatever_the_rules() {
             "entries": [{
                 "id": "plan",
                 "step": "plan",
+            task_thread: false,
                 "role": "planner",
                 "gate": { "question": "Approve?", "answers": ["approve", "revise"] },
                 "on": {

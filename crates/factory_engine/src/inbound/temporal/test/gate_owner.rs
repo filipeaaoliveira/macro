@@ -82,6 +82,7 @@ fn owner_and_stand_in() -> RunRules {
     RunRules {
         definition: OrchestratorDefinition {
             owner_gates: true,
+            task_thread: false,
             stand_in: StandInKinds {
                 plan: true,
                 blockers: false,

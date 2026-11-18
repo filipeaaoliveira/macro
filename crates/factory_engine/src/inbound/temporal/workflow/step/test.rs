@@ -447,6 +447,7 @@ const EVERY_RULE: OrchestratorDefinition = OrchestratorDefinition {
     blockers: true,
     merge: true,
     owner_gates: false,
+    task_thread: false,
 };
 
 /// A `plan` entry whose Gate is of the `plan` kind, as the built-in Flows

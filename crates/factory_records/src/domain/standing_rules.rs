@@ -4,7 +4,8 @@
 //! team may give one Project (an initiative) a definition of its own. A Run
 //! keeps the definition it was created with. Its owner section says what
 //! happens to the Gates no rule answers: with it on, they go to the Run's
-//! owner (`owner_gates`).
+//! owner (`owner_gates`). Its task thread section says whether a Run posts
+//! its updates to its task's comments (`task_thread`).
 
 #[cfg(test)]
 mod test;
@@ -87,6 +88,10 @@ pub enum StandingRule {
 /// The name the owner section is stored under, beside the Gate kinds.
 pub const OWNER_GATES: &str = "owner_gates";
 
+/// The name the task thread section is stored under, beside the Gate
+/// kinds.
+pub const TASK_THREAD: &str = "task_thread";
+
 /// A workspace's Orchestrator Definition: which kinds of Gate the factory
 /// decides on its own, whether the Gates it leaves go to the Run's owner,
 /// and which the stand-in answers for the Run's owner when no rule does. A
@@ -116,6 +121,12 @@ pub struct OrchestratorDefinition {
     /// before. A definition sent without it has it off.
     #[serde(default)]
     pub owner_gates: bool,
+    /// The task thread section: a Run on a task posts its main updates
+    /// (its start, each Step's end, its Gates, its pull request, its merge
+    /// and how it ended) to one comment thread on the task, as its owner.
+    /// Off, as when a definition is sent without it, a Run posts nothing.
+    #[serde(default)]
+    pub task_thread: bool,
     /// The kinds of Gate the stand-in answers for the Run's owner, after
     /// the rules and before the person; off for every kind when left out.
     #[serde(default)]
@@ -153,6 +164,7 @@ impl OrchestratorDefinition {
         blockers: true,
         merge: false,
         owner_gates: false,
+        task_thread: false,
         stand_in: StandInKinds {
             plan: false,
             blockers: false,
@@ -180,7 +192,8 @@ impl OrchestratorDefinition {
 
     /// The kinds its rules decide, then [`OWNER_GATES`] when its owner
     /// section is on, then the kinds the stand-in answers
-    /// (`stand_in_plan`, `stand_in_blockers`): what is stored of it.
+    /// (`stand_in_plan`, `stand_in_blockers`), then [`TASK_THREAD`] when
+    /// its task thread section is on: what is stored of it.
     pub fn kinds(self) -> Vec<String> {
         let ruled = [
             RuleGateKind::Plan,
@@ -198,7 +211,8 @@ impl OrchestratorDefinition {
         .into_iter()
         .filter(|(on, _)| *on)
         .map(|(_, kind)| kind.to_string());
-        ruled.chain(owner).chain(stood_in).collect()
+        let thread = self.task_thread.then(|| TASK_THREAD.to_string());
+        ruled.chain(owner).chain(stood_in).chain(thread).collect()
     }
 
     /// The definition stored as `kinds` ([`Self::kinds`]); none when one is
@@ -208,6 +222,7 @@ impl OrchestratorDefinition {
         for kind in kinds {
             match kind.as_str() {
                 OWNER_GATES => definition.owner_gates = true,
+                TASK_THREAD => definition.task_thread = true,
                 STAND_IN_PLAN => definition.stand_in.plan = true,
                 STAND_IN_BLOCKERS => definition.stand_in.blockers = true,
                 _ => match kind.parse::<RuleGateKind>().ok()? {

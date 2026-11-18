@@ -20,6 +20,7 @@ const EVERY_RULE: OrchestratorDefinition = OrchestratorDefinition {
     blockers: true,
     merge: true,
     owner_gates: false,
+    task_thread: false,
 };
 
 fn facts(kind: RuleGateKind) -> GateFacts {

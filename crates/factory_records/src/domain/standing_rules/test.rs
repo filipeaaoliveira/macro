@@ -7,6 +7,7 @@ fn a_definition_is_stored_as_the_kinds_its_rules_decide() {
         blockers: false,
         merge: true,
         owner_gates: false,
+        task_thread: false,
         stand_in: StandInKinds::default(),
     };
     assert_eq!(definition.kinds(), ["plan", "merge"]);
@@ -27,6 +28,7 @@ fn the_owner_section_is_stored_beside_the_kinds() {
         blockers: true,
         merge: false,
         owner_gates: true,
+        task_thread: false,
         stand_in: StandInKinds::default(),
     };
     assert_eq!(definition.kinds(), ["blockers", "owner_gates"]);
@@ -89,6 +91,7 @@ fn the_kinds_the_stand_in_answers_are_stored_beside_the_rules() {
         blockers: true,
         merge: false,
         owner_gates: false,
+        task_thread: false,
         stand_in: StandInKinds {
             plan: true,
             blockers: false,
@@ -110,6 +113,7 @@ fn the_stand_in_never_answers_a_merge_and_is_off_by_default() {
         blockers: true,
         merge: true,
         owner_gates: false,
+        task_thread: false,
         stand_in: StandInKinds {
             plan: true,
             blockers: true,
@@ -136,6 +140,7 @@ fn the_owner_section_and_the_stand_in_are_stored_together() {
         blockers: false,
         merge: false,
         owner_gates: true,
+        task_thread: false,
         stand_in: StandInKinds {
             plan: false,
             blockers: true,
@@ -149,4 +154,28 @@ fn the_owner_section_and_the_stand_in_are_stored_together() {
         OrchestratorDefinition::from_kinds(&definition.kinds()),
         Some(definition)
     );
+}
+
+#[test]
+fn the_task_thread_section_is_stored_beside_the_kinds_and_off_by_default() {
+    let definition = OrchestratorDefinition {
+        task_thread: true,
+        ..OrchestratorDefinition::DEFAULT
+    };
+    assert_eq!(definition.kinds(), ["blockers", "task_thread"]);
+    assert_eq!(
+        OrchestratorDefinition::from_kinds(&definition.kinds()),
+        Some(definition)
+    );
+    assert_eq!(OrchestratorDefinition::DEFAULT.kinds(), ["blockers"]);
+    let sent: OrchestratorDefinition = serde_json::from_str(
+        r#"{"plan": false, "blockers": true, "merge": false, "ownerGates": true}"#,
+    )
+    .expect("a definition without the section reads");
+    assert!(!sent.task_thread);
+    let on: OrchestratorDefinition = serde_json::from_str(
+        r#"{"plan": false, "blockers": true, "merge": false, "taskThread": true}"#,
+    )
+    .expect("a definition with the section reads");
+    assert!(on.task_thread);
 }
