@@ -634,12 +634,18 @@ async fn a_list_of_runs_reads_their_flows_at_once() {
     let repo = FakeRepo::default();
     let workflows = FakeWorkflows::default();
     let service = code_service(&repo, &workflows, &FakeGithub::default());
+    let mut runs = Vec::new();
     for _ in 0..3 {
-        waiting_at(&repo, "merge-gate", "done", &["approve", "revise"]).await;
+        runs.push(waiting_at(&repo, "merge-gate", "done", &["approve", "revise"]).await);
     }
 
     let waiting = service.list_waiting_runs(&julia()).await.expect("waiting");
 
     assert_eq!(waiting.len(), 3);
     assert_eq!(*repo.flow_reads.lock().expect("flow reads"), 0);
+    let mut reads = repo.runs_flows_reads.lock().expect("reads").clone();
+    assert_eq!(reads.len(), 1, "the flows are read at once");
+    reads[0].sort();
+    runs.sort();
+    assert_eq!(reads[0], runs);
 }

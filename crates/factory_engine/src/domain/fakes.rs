@@ -151,6 +151,8 @@ pub(crate) struct FakeRepo {
     pub(crate) team_definitions: Arc<Mutex<BTreeMap<Uuid, String>>>,
     /// How many times one Run's Flow was read on its own.
     pub(crate) flow_reads: Arc<Mutex<usize>>,
+    /// The Runs each read of several Runs' Flows asked for, in order.
+    pub(crate) runs_flows_reads: Arc<Mutex<Vec<Vec<RunId>>>>,
     /// The Flow each Run kept, and whether it asks, by Run.
     pub(crate) kept_flows: Arc<Mutex<BTreeMap<RunId, (serde_json::Value, bool)>>>,
     /// The Agents of the Definition each Run started under, as kept.
@@ -660,6 +662,10 @@ impl RunRepository for FakeRepo {
     }
 
     async fn runs_flows(&self, ids: &[RunId]) -> Result<BTreeMap<RunId, RunFlow>, FakeError> {
+        self.runs_flows_reads
+            .lock()
+            .expect("runs flows reads")
+            .push(ids.to_vec());
         let names = self.flows.lock().expect("flows").clone();
         let kept = self.kept_flows.lock().expect("kept flows").clone();
         Ok(ids
@@ -1480,14 +1486,14 @@ pub(crate) struct FakeGithubState {
     pub(crate) requires_pull_request: Option<bool>,
     /// The paths of the files read, in order.
     pub(crate) file_reads: Vec<String>,
+    /// The paths of the files GitHub will not give, as one over 1 MB.
+    pub(crate) refused_files: BTreeSet<String>,
 }
 
 /// GitHub in memory, for one Run's branch: opening its pull request makes
 /// it listed, open, at [`FakeGithub::HEAD`], and merging it merges it.
 #[derive(Clone, Default)]
 pub(crate) struct FakeGithub {
-    /// The paths of the files GitHub will not give, as one over 1 MB.
-    pub(crate) refused_files: BTreeSet<String>,
     pub(crate) state: Arc<Mutex<FakeGithubState>>,
     /// Told each time the pull request is looked for.
     pub(crate) read: Arc<tokio::sync::Notify>,
@@ -1673,15 +1679,15 @@ impl PullRequests for FakeGithub {
         let file = (branch.to_string(), path.to_string());
         let mut state = self.state();
         state.file_reads.push(path.to_string());
+        if state.refused_files.contains(path) {
+            return Err(FakeGithubError::Refused);
+        }
         Ok(state.files.get(&file).cloned())
     }
 
     async fn changed_paths(
         &self,
         _owner: &MacroUserIdStr<'static>,
-        if state.refused_files.contains(path) {
-            return Err(FakeGithubError::Refused);
-        }
         _repository: &CodeRepository,
         _base: &str,
         branch: &str,
