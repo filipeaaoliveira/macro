@@ -68,9 +68,10 @@ pub struct BoardQuery {
     /// Only Runs whose request, or whose task's name, has these words in
     /// it, in any case.
     pub search: Option<String>,
-    /// The Flow entries that merge a Run's change: a Run whose latest Step
-    /// is one of them is held while its base is.
-    pub merge_entries: Vec<String>,
+    /// The built-in Flows' entries that merge a Run's change, for a Run
+    /// that kept no Flow of its own. A Run whose latest Step is at its
+    /// merge (by its kept Flow, else by these) is held while its base is.
+    pub built_in_merge_entries: Vec<String>,
     /// Where the page starts; none for the first.
     pub after: Option<BoardCursor>,
     /// The most Runs read.

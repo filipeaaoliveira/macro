@@ -10,7 +10,7 @@ use uuid::Uuid;
 use super::super::test::{entry, julia, key, outcome, teo};
 use crate::domain::board::{BoardCursor, BoardQuery, BoardState, RunBoardRepository};
 use crate::domain::main_hold::MainHoldRepository;
-use crate::domain::models::{NewRun, Repository, RunId, RunInsert, RunOutcome};
+use crate::domain::models::{KeptFlow, NewRun, Repository, RunId, RunInsert, RunOutcome};
 use crate::domain::ports::RunRepository;
 use crate::domain::standing_rules::RunRules;
 use crate::outbound::pg_run_repository::PgRunRepository;
@@ -28,6 +28,9 @@ struct Kept<'a> {
     task_id: Option<&'a str>,
     project_id: Option<&'a str>,
     repo_url: Option<&'a str>,
+    /// The Flow it kept when it started; none for a Run kept before Runs
+    /// kept theirs.
+    kept_flow: Option<&'a serde_json::Value>,
 }
 
 impl<'a> Kept<'a> {
@@ -39,6 +42,7 @@ impl<'a> Kept<'a> {
             task_id: None,
             project_id: None,
             repo_url: None,
+            kept_flow: None,
         }
     }
 }
@@ -68,7 +72,10 @@ async fn keep(repo: &PgRunRepository, kept: Kept<'_>) -> RunId {
             standing_rules: RunRules::DEFAULT,
             automation: None,
             definition: None,
-            kept_flow: None,
+            kept_flow: kept.kept_flow.map(|definition| KeptFlow {
+                definition,
+                asks: false,
+            }),
         })
         .await
         .expect("insert");
@@ -85,7 +92,7 @@ fn query(team_id: Option<&str>) -> BoardQuery {
         repo_url: None,
         project_id: None,
         search: None,
-        merge_entries: vec!["merge".to_string()],
+        built_in_merge_entries: vec!["merge".to_string()],
         after: None,
         limit: 50,
     }
@@ -195,6 +202,70 @@ async fn each_run_is_where_it_is(pool: PgPool) {
         ..query(None)
     };
     assert!(read(&repo, &held_now).await.is_empty());
+}
+
+/// A Run that kept its Flow is held at its merge by that Flow's entries, not
+/// the built-in Flows': a Definition's merge entry `land` is held, and its
+/// entry `merge`, which writes, goes on.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn a_kept_flow_says_where_its_merge_is(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let flow = serde_json::json!({
+        "repository": true,
+        "entries": [
+            { "id": "merge", "step": "write", "role": "writer" },
+            { "id": "land", "step": "merge" }
+        ]
+    });
+    let landing = keep(
+        &repo,
+        Kept {
+            flow: "ship",
+            repo_url: Some(REPO),
+            kept_flow: Some(&flow),
+            ..Kept::julias("Add the coupon field")
+        },
+    )
+    .await;
+    repo.start_step(key(landing, 1), &entry("land"), 1)
+        .await
+        .expect("start");
+    let writing = keep(
+        &repo,
+        Kept {
+            flow: "ship",
+            repo_url: Some(REPO),
+            kept_flow: Some(&flow),
+            ..Kept::julias("Rename the cart")
+        },
+    )
+    .await;
+    repo.start_step(key(writing, 1), &entry("merge"), 1)
+        .await
+        .expect("start");
+    let base = Repository {
+        url: REPO.to_string(),
+        base_branch: "main".to_string(),
+    };
+    repo.hold_main(&base, &"a".repeat(40), "build: failed", Utc::now())
+        .await
+        .expect("hold");
+
+    assert_eq!(
+        read(&repo, &query(None)).await,
+        [
+            (writing, BoardState::Running),
+            (landing, BoardState::Held),
+        ]
+    );
+    let held = BoardQuery {
+        state: Some(BoardState::Held),
+        ..query(None)
+    };
+    assert_eq!(read(&repo, &held).await, [(landing, BoardState::Held)]);
 }
 
 /// A person's board lists their own Runs; their team's lists the team

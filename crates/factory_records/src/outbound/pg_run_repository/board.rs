@@ -108,7 +108,8 @@ impl RunBoardRepository for PgRunRepository {
         // for the states of Runs that go, until each has the page's limit;
         // the owners' Runs are then merged newest first and cut to it. Where
         // a Run is reads its Gates, its base's Main Hold, its latest Step and
-        // its task's name by primary key. A first page starts past the
+        // its task's name by primary key; whether that Step is at the merge
+        // reads the Flow the Run kept, in its own row. A first page starts past the
         // latest time there is. The timeout bounds the read all the same.
         let state = query.state.map(|state| state.as_ref().to_string());
         let open_only = matches!(
@@ -197,11 +198,23 @@ impl RunBoardRepository for PgRunRepository {
                                 AND h.base_branch = r.base_branch
                                 AND h.held_since IS NOT NULL
                         ) AND (
-                            SELECT s.entry FROM factory_step s
+                            SELECT CASE
+                                WHEN r.flow_definition IS NULL
+                                    THEN s.entry = ANY($3::text[])
+                                ELSE EXISTS (
+                                    SELECT 1
+                                    FROM jsonb_array_elements(
+                                        r.flow_definition -> 'entries'
+                                    ) e
+                                    WHERE e ->> 'id' = s.entry
+                                        AND e ->> 'step' IN ('ready_to_merge', 'merge')
+                                )
+                            END
+                            FROM factory_step s
                             WHERE s.run_id = r.id
                             ORDER BY s.seq DESC
                             LIMIT 1
-                        ) = ANY($3::text[]) THEN 'held'
+                        ) THEN 'held'
                         ELSE 'running'
                     END AS state
                 ) place
@@ -225,7 +238,7 @@ impl RunBoardRepository for PgRunRepository {
             "#,
                 query.user_id.as_ref(),
                 query.team_id,
-                &query.merge_entries,
+                &query.built_in_merge_entries,
                 created_before,
                 id_before,
                 state,
@@ -299,11 +312,23 @@ impl RunBoardRepository for PgRunRepository {
                                 AND h.base_branch = r.base_branch
                                 AND h.held_since IS NOT NULL
                         ) AND (
-                            SELECT s.entry FROM factory_step s
+                            SELECT CASE
+                                WHEN r.flow_definition IS NULL
+                                    THEN s.entry = ANY($3::text[])
+                                ELSE EXISTS (
+                                    SELECT 1
+                                    FROM jsonb_array_elements(
+                                        r.flow_definition -> 'entries'
+                                    ) e
+                                    WHERE e ->> 'id' = s.entry
+                                        AND e ->> 'step' IN ('ready_to_merge', 'merge')
+                                )
+                            END
+                            FROM factory_step s
                             WHERE s.run_id = r.id
                             ORDER BY s.seq DESC
                             LIMIT 1
-                        ) = ANY($3::text[]) THEN 'held'
+                        ) THEN 'held'
                         ELSE 'running'
                     END AS state
                 ) place
@@ -326,7 +351,7 @@ impl RunBoardRepository for PgRunRepository {
             "#,
                 query.user_id.as_ref(),
                 query.team_id,
-                &query.merge_entries,
+                &query.built_in_merge_entries,
                 created_before,
                 id_before,
                 state,

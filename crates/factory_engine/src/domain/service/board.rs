@@ -53,8 +53,10 @@ where
     G: PullRequests,
 {
     /// The entries of the built-in Flows the worker serves that merge a
-    /// Run's change: those that run `ready_to_merge` or `merge`.
-    pub(super) fn merge_entries(&self) -> Vec<String> {
+    /// Run's change: those that run `ready_to_merge` or `merge`. Only a Run
+    /// that kept no Flow of its own is read against them; the others are
+    /// read against their own.
+    pub(super) fn built_in_merge_entries(&self) -> Vec<String> {
         BUILT_IN_FLOWS
             .into_iter()
             .filter_map(|flow| flow.read(|step| self.executor.serves(step)).ok())
@@ -147,7 +149,7 @@ where
             repo_url: filter.repo_url,
             project_id: filter.project_id,
             search: filter.search,
-            merge_entries: self.merge_entries(),
+            built_in_merge_entries: self.built_in_merge_entries(),
             after: filter.after.map(|after| BoardCursor {
                 created_at: after.created_at,
                 id: after.id,
