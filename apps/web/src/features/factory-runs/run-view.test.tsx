@@ -548,7 +548,7 @@ describe('RunView', () => {
         },
       ],
     });
-    expect(await screen.findByText('The model didn’t answer.')).toBeTruthy();
+    expect(await screen.findByText('It didn’t answer.')).toBeTruthy();
   });
 
   it('says when the stand-in answered, and when an answer was read from a reply', async () => {

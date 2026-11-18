@@ -129,7 +129,7 @@ export default {
   modelLeaned: 'It leaned to {{answer}} ({{confidence}}% sure).',
   modelCouldNotTell:
     'It couldn’t tell which answer fits ({{confidence}}% sure).',
-  modelDidNotAnswer: 'The model didn’t answer.',
+  modelDidNotAnswer: 'It didn’t answer.',
   ruleApprovePlan: 'Approve plans',
   ruleFixBlockers: 'Fix review blockers',
   ruleMergeWhenGreen: 'Merge when CI is green',
