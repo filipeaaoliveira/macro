@@ -15,6 +15,7 @@ import {
   getGetFactoryStandingRulesUrl,
   getListFactoryFlowsUrl,
   getListFactoryTaskRunsUrl,
+  getReplyToFactoryGateUrl,
   getSetFactoryControlFilesUrl,
   getSetFactoryStandingRulesUrl,
 } from './generated/client';
@@ -24,6 +25,7 @@ import type {
   CreateRunRequest,
   FlowsResponse,
   GetFactoryInsightsParams,
+  ReplyToGateRequest,
   RunDetail,
   RunErrorCode,
   RunInsights,
@@ -152,6 +154,17 @@ export const factoryClient = {
     return fetchWithToken<Record<string, never>>(
       `${host()}${getAnswerFactoryGateUrl(encodeURIComponent(runId), seq)}`,
       { method: 'POST', body: JSON.stringify(answer) }
+    ).then((result) => result.map(() => undefined));
+  },
+
+  /**
+   * Gives the Gate of the Run's Step `seq` the person's words, which the
+   * factory reads as one of its answers or asks back on.
+   */
+  replyToGate(runId: string, seq: number, reply: ReplyToGateRequest) {
+    return fetchWithToken<Record<string, never>>(
+      `${host()}${getReplyToFactoryGateUrl(encodeURIComponent(runId), seq)}`,
+      { method: 'POST', body: JSON.stringify(reply) }
     ).then((result) => result.map(() => undefined));
   },
 

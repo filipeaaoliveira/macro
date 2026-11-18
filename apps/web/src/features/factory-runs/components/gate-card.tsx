@@ -9,7 +9,7 @@ import QuestionIcon from '@icon/system/regular/question.svg';
 import { Button, Checkbox, cn, Item, TextField, Card as UiCard } from '@ui';
 import { For, type JSX, Show } from 'solid-js';
 import { flowWordLabel } from '../core/flow-words';
-import { type ControlFileChanges, isTampered } from '../core/run';
+import { type ControlFileChanges, type Gate, isTampered } from '../core/run';
 
 /**
  * The Gate's header and its question, in a block nested in the card. An
@@ -249,6 +249,84 @@ export function GateAnswers(props: {
   );
 }
 
+/**
+ * Sends the note as the person's words in place of an answer: the factory
+ * reads which answer they give, or asks back. Only a Flow's Gate takes
+ * words this way; an agent's question takes the note as its answer.
+ */
+export function GateReply(props: {
+  /** Whether there are words to send. */
+  ready: boolean;
+  locked: boolean;
+  replying: boolean;
+  onReply: () => Promise<boolean>;
+}) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      class="mr-auto"
+      disabled={props.locked || !props.ready}
+      loading={props.replying}
+      onClick={() => fireAndForget(props.onReply(), 'factory-runs')}
+    >
+      {t('factoryRuns.sendReply')}
+    </Button>
+  );
+}
+
+/**
+ * What the factory did with the Gate so far, while it waits: the stand-in's
+ * answer for the owner, which they may override until its window ends, or
+ * words it couldn't read as an answer.
+ */
+export function GateStatus(props: {
+  gate: Pick<Gate, 'askedBack' | 'standIn'>;
+  /** A time, as the view shows it. */
+  time: (value: string) => string;
+}) {
+  return (
+    <Show when={props.gate.standIn ?? props.gate.askedBack}>
+      <UiCard
+        variant="filled"
+        offset={1}
+        role="status"
+        class="flex flex-col gap-1 px-3 py-2.5 text-sm leading-5 [overflow-wrap:anywhere]"
+      >
+        <Show
+          when={props.gate.standIn}
+          fallback={
+            <Show when={props.gate.askedBack}>
+              {(asked) => (
+                <p>{t('factoryRuns.askedBack', { reply: asked().reply })}</p>
+              )}
+            </Show>
+          }
+        >
+          {(standIn) => (
+            <>
+              <p class="font-medium">
+                {t('factoryRuns.standInAnswered', {
+                  answer: flowWordLabel(standIn().answer),
+                  confidence: standIn().confidence,
+                })}
+              </p>
+              <p class="whitespace-pre-wrap text-ink-muted">
+                {standIn().reason}
+              </p>
+              <p class="text-ink-muted">
+                {t('factoryRuns.standInWindow', {
+                  time: props.time(standIn().until),
+                })}
+              </p>
+            </>
+          )}
+        </Show>
+      </UiCard>
+    </Show>
+  );
+}
+
 /** A named group around a Gate's parts, wherever a view places them. */
 export function GateGroup(props: {
   children: JSX.Element;
@@ -279,6 +357,9 @@ export function GateCard(props: {
   /** The Role of the agent that asks, for an agent's question. */
   asker?: string;
   answers: readonly string[];
+  /** What the factory did with the Gate so far: asked back, or stood in. */
+  gate: Pick<Gate, 'askedBack' | 'standIn'>;
+  time: (value: string) => string;
   /** The Control Files the Run's branch changed, if any. */
   controlFiles?: ControlFileChanges;
   approveControlFiles: boolean;
@@ -289,11 +370,16 @@ export function GateCard(props: {
   locked: boolean;
   answering?: string;
   onAnswer: (answer: string) => Promise<boolean>;
+  replying: boolean;
+  onReply: () => Promise<boolean>;
 }) {
   return (
     <GateGroup>
       <Card width="wide">
         <GateQuestion question={props.question} asker={props.asker} capped />
+        <div class="px-3 pb-2 empty:hidden">
+          <GateStatus gate={props.gate} time={props.time} />
+        </div>
         <Show when={props.controlFiles}>
           {(changes) => (
             <div class="px-3 pb-2">
@@ -315,6 +401,14 @@ export function GateCard(props: {
           />
         </div>
         <CardFooter class="justify-end">
+          <Show when={props.asker === undefined}>
+            <GateReply
+              ready={props.note.trim() !== ''}
+              locked={props.locked}
+              replying={props.replying}
+              onReply={props.onReply}
+            />
+          </Show>
           <GateAnswers
             answers={props.answers}
             held={props.held}

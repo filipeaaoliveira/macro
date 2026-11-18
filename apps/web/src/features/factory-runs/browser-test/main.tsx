@@ -284,6 +284,28 @@ function createFixtureContext(): RunsContext {
       }
       return answer(input);
     },
+    async replyToGate(input) {
+      // The factory can't tell which answer these words give: it asks back
+      // on the Gate, which waits on.
+      update(input.runId, (current) => ({
+        ...current,
+        steps: current.steps.map((step) =>
+          step.seq === input.step.seq && step.gate
+            ? {
+                ...step,
+                gate: {
+                  ...step.gate,
+                  askedBack: {
+                    reply: input.reply,
+                    at: new Date().toISOString(),
+                  },
+                },
+              }
+            : step
+        ),
+      }));
+      return { ok: true, value: undefined };
+    },
     async cancelRun(runId) {
       const run = runs().find((candidate) => candidate.id === runId);
       if (run?.end) return { ok: false, reason: 'conflict' };

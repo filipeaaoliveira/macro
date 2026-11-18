@@ -9,6 +9,8 @@ import {
   GateGroup,
   GateNote,
   GateQuestion,
+  GateReply,
+  GateStatus,
 } from '../../components/gate-card';
 import { gateAsker, runTitle } from '../../core/run';
 import { createFocusRescue } from '../../primitives/focus-rescue';
@@ -18,6 +20,7 @@ import {
   RunCancel,
   RunContent,
   RunLoadFailed,
+  replyToGate,
 } from '../shared/run-parts';
 import { formatRunTime } from '../shared/run-time';
 
@@ -101,6 +104,19 @@ export function MobileRunSheet(props: {
                           }
                         />
                         <div class="flex flex-wrap items-center justify-end gap-2">
+                          <Show
+                            when={
+                              gateAsker(waiting().step, waiting().gate) ===
+                              undefined
+                            }
+                          >
+                            <GateReply
+                              ready={props.controller.note().trim() !== ''}
+                              locked={props.controller.gateLocked()}
+                              replying={props.controller.replying()}
+                              onReply={() => replyToGate(props.controller)}
+                            />
+                          </Show>
                           <GateAnswers
                             answers={waiting().gate.answers}
                             held={props.controller.heldAnswers()}
@@ -143,6 +159,12 @@ export function MobileRunSheet(props: {
                               question={waiting().gate.question}
                               asker={gateAsker(waiting().step, waiting().gate)}
                             />
+                            <div class="px-3 pb-3 empty:hidden">
+                              <GateStatus
+                                gate={waiting().gate}
+                                time={formatRunTime}
+                              />
+                            </div>
                           </Card>
                         )}
                       </Show>

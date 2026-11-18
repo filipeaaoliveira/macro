@@ -9,7 +9,10 @@ export type RunOutcome =
 /** A Standing Rule: an answer the factory gives a kind of Gate on its own. */
 export type StandingRule = 'approve_plan' | 'fix_blockers' | 'merge_when_green';
 
-/** The answer to a Gate: a person's, or a Standing Rule's (a Rule Answer). */
+/**
+ * The answer to a Gate: a person's, a Standing Rule's (a Rule Answer), or
+ * the stand-in's for the Run's owner.
+ */
 export type GateAnswer = {
   answer: string;
   note?: string;
@@ -17,7 +20,26 @@ export type GateAnswer = {
   rule?: StandingRule;
   /** The Run's Tampered files the answer approved. */
   approvedControlFiles?: string[];
+  /**
+   * For an answer the factory read from the person's words (its note), how
+   * sure it was, in percent.
+   */
+  replyConfidence?: number;
+  /** Whether the stand-in gave it, and the owner let it stand. */
+  byStandIn?: boolean;
   answeredAt: string;
+};
+
+/**
+ * The stand-in's answer to a Gate for the Run's owner: why, how sure it was,
+ * and until when the owner may override it.
+ */
+export type StandInAnswer = {
+  answer: string;
+  reason: string;
+  /** In percent. */
+  confidence: number;
+  until: string;
 };
 
 /**
@@ -35,6 +57,10 @@ export type Gate = {
   answers: string[];
   openedAt: string;
   answer?: GateAnswer;
+  /** The person's latest words the factory couldn't read as an answer. */
+  askedBack?: { reply: string; at: string };
+  /** The stand-in's answer, while the owner may override it and after. */
+  standIn?: StandInAnswer;
 };
 
 /**

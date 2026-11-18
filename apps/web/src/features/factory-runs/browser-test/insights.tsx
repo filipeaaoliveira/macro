@@ -392,6 +392,7 @@ function createFixtureRuns(): RunsContext {
     repositories: () => ready(() => []),
     startRun: async () => ({ ok: false, reason: 'failed' }),
     answerGate: async () => ({ ok: false, reason: 'failed' }),
+    replyToGate: async () => ({ ok: false, reason: 'failed' }),
     cancelRun: async () => ({ ok: false, reason: 'failed' }),
   };
 }

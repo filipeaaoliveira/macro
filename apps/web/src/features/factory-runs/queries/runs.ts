@@ -67,9 +67,14 @@ function toRun(detail: RunDetail): Run {
                   rule: step.gate.answer.rule ?? undefined,
                   approvedControlFiles:
                     step.gate.answer.approvedControlFiles ?? undefined,
+                  replyConfidence:
+                    step.gate.answer.replyConfidence ?? undefined,
+                  byStandIn: step.gate.answer.byStandIn,
                   answeredAt: step.gate.answer.answeredAt,
                 }
               : undefined,
+            askedBack: step.gate.askedBack ?? undefined,
+            standIn: step.gate.standIn ?? undefined,
           }
         : undefined,
       role: step.role ?? undefined,
@@ -281,6 +286,32 @@ export function createAppRunsContext(client: QueryClient): RunsContext {
       const refused = failure(result.error);
       // A refused answer resolves once the Run is read again, so the caller
       // sees whether the Gate it answered is still the one the Run waits on.
+      if (refused.reason === 'conflict') {
+        await reads.catch(() => undefined);
+      } else {
+        fireAndForget(reads, 'factory-runs');
+      }
+      return refused;
+    },
+
+    async replyToGate(input) {
+      const result = await factoryClient.replyToGate(
+        input.runId,
+        input.step.seq,
+        { reply: input.reply }
+      );
+      // Read the Run again, whether the words answered the Gate or were
+      // asked back.
+      const reads = refreshRun(
+        client,
+        input.runId,
+        taskOfRun(client, input.runId)
+      );
+      if (result.isOk()) {
+        fireAndForget(reads, 'factory-runs');
+        return { ok: true, value: undefined };
+      }
+      const refused = failure(result.error);
       if (refused.reason === 'conflict') {
         await reads.catch(() => undefined);
       } else {

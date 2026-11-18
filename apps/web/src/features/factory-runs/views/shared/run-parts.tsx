@@ -19,6 +19,17 @@ function notifyAnswer(result: RunActionResult | undefined) {
   toast.failure(t('factoryRuns.answerFailed'));
 }
 
+function notifyReply(result: RunActionResult | undefined) {
+  if (!result || result.ok) return;
+  if (result.reason === 'conflict') {
+    toast.alert(t('factoryRuns.answerConflict'), {
+      subtext: t('factoryRuns.answerConflictDescription'),
+    });
+    return;
+  }
+  toast.failure(t('factoryRuns.replyFailed'));
+}
+
 function notifyCancel(result: RunActionResult | undefined) {
   if (!result || result.ok) return;
   if (result.reason === 'conflict') {
@@ -70,6 +81,16 @@ export async function answerGate(
 ): Promise<boolean> {
   const result = await controller.answer(value);
   notifyAnswer(result);
+  return result === undefined || result.ok;
+}
+
+/**
+ * Sends the person's words to the Gate and says what went wrong, if
+ * anything. Resolves whether they went through.
+ */
+export async function replyToGate(controller: RunController): Promise<boolean> {
+  const result = await controller.reply();
+  notifyReply(result);
   return result === undefined || result.ok;
 }
 
