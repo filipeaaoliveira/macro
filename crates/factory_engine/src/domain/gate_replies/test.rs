@@ -516,7 +516,7 @@ async fn the_model_is_billed_for_the_run_it_reads() {
 
     assert_eq!(
         *model.runs.lock().expect("runs"),
-        vec![key.run_id, key.run_id]
+        vec![Some(key.run_id), Some(key.run_id)]
     );
 }
 

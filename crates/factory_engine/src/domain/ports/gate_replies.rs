@@ -38,12 +38,13 @@ pub trait GateModel: Send + Sync + 'static {
     /// Why a call failed.
     type Err: std::error::Error + Send + Sync + 'static;
 
-    /// Ask the model `question` about a Gate of the Run `run_id`, billed to
-    /// `owner`, the Run's owner; its usage names the Run.
+    /// Ask the model `question` about a Gate of the Run `run_id`, its usage
+    /// recorded against `owner`, the Run's owner, and naming the Run; none
+    /// for a replay of a Gate long answered, whose usage is no Run's.
     fn pick(
         &self,
         owner: &MacroUserIdStr<'static>,
-        run_id: RunId,
+        run_id: Option<RunId>,
         question: &ModelQuestion,
     ) -> impl Future<Output = Result<ModelPick, Self::Err>> + Send;
 }

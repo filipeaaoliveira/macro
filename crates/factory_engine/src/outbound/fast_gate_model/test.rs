@@ -17,7 +17,7 @@ fn a_calls_usage_names_its_run() {
     let owner = MacroUserIdStr::try_from("macro|julia@example.com".to_string()).expect("user");
     let run_id = RunId::from_uuid(Uuid::from_u128(0x5eed));
 
-    let event = usage_context(&owner, run_id).into_event(
+    let event = usage_context(&owner, Some(run_id)).into_event(
         "anthropic/claude-haiku-5-5".to_string(),
         UsageAmount::Tokens {
             input: 900,
@@ -57,7 +57,7 @@ async fn a_pick_writes_no_prompt_cache_and_names_its_run() {
     let pick = model
         .pick(
             &owner,
-            run_id,
+            Some(run_id),
             &ModelQuestion {
                 instructions: "Pick an answer.",
                 prompt: "{}".to_string(),

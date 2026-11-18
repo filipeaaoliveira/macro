@@ -143,7 +143,7 @@ impl<C: StructuredCompletion> GateModel for FastGateModel<C> {
     async fn pick(
         &self,
         owner: &MacroUserIdStr<'static>,
-        run_id: RunId,
+        run_id: Option<RunId>,
         question: &ModelQuestion,
     ) -> Result<ModelPick, GateModelError> {
         let mut choices: Vec<&str> = question.choices.iter().map(Outcome::as_str).collect();
@@ -188,7 +188,9 @@ impl<C: StructuredCompletion> GateModel for FastGateModel<C> {
 }
 
 /// What a Gate model call's usage is recorded as: the factory's Gate model,
-/// billed to `owner`, about the Run `run_id`, whose usage it adds to.
-fn usage_context(owner: &MacroUserIdStr<'static>, run_id: RunId) -> UsageContext {
-    UsageContext::new(AiFeature::FactoryGate, owner.clone()).with_entity(Some(run_id.as_uuid()))
+/// recorded against `owner`, about the Run `run_id`, whose usage it adds
+/// to; a replay's names no Run.
+fn usage_context(owner: &MacroUserIdStr<'static>, run_id: Option<RunId>) -> UsageContext {
+    UsageContext::new(AiFeature::FactoryGate, owner.clone())
+        .with_entity(run_id.map(|id| id.as_uuid()))
 }

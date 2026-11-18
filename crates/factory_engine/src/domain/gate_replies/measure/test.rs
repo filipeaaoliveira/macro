@@ -120,6 +120,10 @@ async fn the_threshold_is_the_lowest_with_no_wrong_pick() {
     assert_eq!(report.replies.threshold(), Some(80));
     assert_eq!(report.stand_in.failed, ENOUGH_GATES);
     assert_eq!(report.stand_in.threshold(), None);
+    // A replay's usage is no Run's: every call names none.
+    let runs = model.runs.lock().expect("runs").clone();
+    assert_eq!(runs.len(), 2 * ENOUGH_GATES);
+    assert!(runs.iter().all(Option::is_none), "{runs:?}");
 }
 
 /// Only a built-in Flow's plan and Blockers Gates are measured for the

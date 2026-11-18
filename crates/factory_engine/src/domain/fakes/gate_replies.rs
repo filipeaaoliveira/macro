@@ -186,8 +186,8 @@ impl GateReplyRepository for FakeRepo {
 pub(crate) struct FakeGateModel {
     pub(crate) picks: Arc<Mutex<VecDeque<Result<ModelPick, FakeError>>>>,
     pub(crate) asked: Arc<Mutex<Vec<ModelQuestion>>>,
-    /// The Runs each call was about, in order.
-    pub(crate) runs: Arc<Mutex<Vec<RunId>>>,
+    /// The Runs each call was about, in order; none for a replay.
+    pub(crate) runs: Arc<Mutex<Vec<Option<RunId>>>>,
     /// Never answers, as a model that hangs.
     pub(crate) hangs: bool,
 }
@@ -228,7 +228,7 @@ impl GateModel for FakeGateModel {
     async fn pick(
         &self,
         _owner: &MacroUserIdStr<'static>,
-        run_id: RunId,
+        run_id: Option<RunId>,
         question: &ModelQuestion,
     ) -> Result<ModelPick, FakeError> {
         self.asked.lock().expect("asked").push(question.clone());

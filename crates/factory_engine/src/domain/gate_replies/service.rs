@@ -180,7 +180,7 @@ where
     async fn pick(&self, run: &Run, question: &ModelQuestion) -> Option<ModelPick> {
         let called = tokio::time::timeout(
             MODEL_TIMEOUT,
-            self.model.pick(&run.user_id, run.id, question),
+            self.model.pick(&run.user_id, Some(run.id), question),
         );
         match called.await {
             Ok(Ok(pick)) => Some(pick),
