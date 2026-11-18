@@ -489,6 +489,15 @@ where
         if gate.kind.answered_only_by_a_person() {
             return Err(PersonOnly::Question.into());
         }
+        // Nor the Gate of an agent that stopped without a result: whether
+        // to try again is the owner's call.
+        if step
+            .end
+            .as_ref()
+            .is_some_and(|end| end.outcome == Outcome::no_result())
+        {
+            return Err(PersonOnly::PersonsGate.into());
+        }
         let (kind, max_visits) = self
             .agent_answerable_entry(&step.entry)
             .filter(|(kind, _)| offers_kind_answers(*kind, &gate.answers))

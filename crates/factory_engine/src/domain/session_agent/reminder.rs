@@ -102,24 +102,32 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
             .await
         {
             Err(SessionAgentError::NothingHandedBack) => Err(
-                SessionAgentError::StoppedWithoutResult(self.last_words(&reminder).await),
+                SessionAgentError::StoppedWithoutResult(self.last_words(action, &reminder).await),
             ),
             handed => handed,
         }
     }
 
-    /// The agent's last message in its turn on `action`, for the Run's
-    /// owner. One that cannot be read says so: the owner decides all the
-    /// same.
-    async fn last_words(&self, action: &RoutineSessionAction) -> String {
-        match self.sessions.reply(action.clone()).await {
-            Ok(Some(said)) => said,
-            Ok(None) => SAID_NOTHING.to_string(),
-            Err(error) => {
-                tracing::warn!(?error, "a factory step's agent's last message was not read");
-                UNREAD_LAST_WORDS.to_string()
+    /// The agent's last message, for the Run's owner: what it said in its
+    /// turn on the `reminder`, else in its turn on the first prompt,
+    /// `action`. One that cannot be read says so: the owner decides all
+    /// the same.
+    async fn last_words(
+        &self,
+        action: &RoutineSessionAction,
+        reminder: &RoutineSessionAction,
+    ) -> String {
+        for turn in [reminder, action] {
+            match self.sessions.reply(turn.clone()).await {
+                Ok(Some(said)) => return said,
+                Ok(None) => {}
+                Err(error) => {
+                    tracing::warn!(?error, "a factory step's agent's last message was not read");
+                    return UNREAD_LAST_WORDS.to_string();
+                }
             }
         }
+        SAID_NOTHING.to_string()
     }
 }
 

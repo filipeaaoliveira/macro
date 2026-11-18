@@ -134,3 +134,20 @@ async fn a_retry_after_the_reminder_reads_its_answer() {
     assert_eq!(retried, first);
     assert_eq!(retried.text, "The plan, handed back once reminded");
 }
+
+/// An agent that said nothing once reminded is shown what it said last in
+/// its first turn.
+#[tokio::test]
+async fn an_agent_silent_once_reminded_is_shown_with_its_first_turn_s_words() {
+    let repo = FakeRepo::default();
+    let mut sessions = FakeSessions::new(&repo, None, RoutineActionStatus::Succeeded);
+    sessions.first_words = Some("The settings page has no toggle yet.".to_string());
+
+    let failed = agent(&sessions, &repo).answer(plan_task(&repo).await).await;
+
+    assert!(matches!(
+        failed,
+        Err(SessionAgentError::StoppedWithoutResult(said))
+            if said == "The settings page has no toggle yet."
+    ));
+}

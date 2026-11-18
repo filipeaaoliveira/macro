@@ -122,17 +122,23 @@ an id made from the first prompt's, so a retry records and sends the same
 one, which the session refuses as one it holds, and waits on it. A
 reminder that ends with nothing handed back too is the agent stopping
 without a result (`StoppedWithoutResult`), with its last message, read
-from the session (`RoutineSessions::reply`). Its Step ends `no_result`
+from the session (`RoutineSessions::reply`): what it said in the
+reminder's turn, else in its first turn. Its Step ends `no_result`
 (`src/domain/no_result.rs`), that message its output, and keeps its
 session; the workflow (behind the `factory-no-result-gates` patch marker)
 opens a Gate at once, of no kind, that shows the message and offers
 `retry` and `stop`, and tells the owner as any Gate left to them. No
-Standing Rule or stand-in answers it, and an agent may not (no Flow's
-Gate asks those answers); the owner's words are read to one of them. On
+Standing Rule or stand-in answers it, and the service refuses an agent's
+answer to it (`PersonOnly::PersonsGate`); the owner's words are read to
+one of them, and it is no past answer the stand-in reads. On
 `retry` the same Role goes on in a Step of its own, at the next place, in
 that session, told the owner asks for the result
 (`no_result::retry_prompt`), as a question's answer goes on; on `stop` its
-agent is stopped and the Flow routes `failed`, as a Step whose work failed.
+agent is stopped and the Flow routes `failed`, as a Step whose work failed,
+while the Step stays `no_result`; the entry's own Gate, even one `after`
+`failed`, does not open, since the Step had its Gate. Insights count a
+retried Step and the one that goes on from it as one visit, a stopped one
+as `failed`, and neither Gate nor its answer.
 A reviewer's Step that stops so fails, as before: its round asks no one. A
 Step that ends `no_result` without the marker fails the same way. The task
 thread names the Role that stopped, not its words. No Flow's Gate opens

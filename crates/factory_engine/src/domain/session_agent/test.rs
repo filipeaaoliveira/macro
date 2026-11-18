@@ -100,8 +100,11 @@ struct FakeSessions {
     /// session is deleted.
     follow_up_loses: bool,
     lost: Arc<Mutex<bool>>,
-    /// What the agent last said in a turn, as the session reads it.
+    /// What the agent last said in a later prompt's turn, as the session
+    /// reads it.
     last_words: Option<String>,
+    /// What the agent last said in its first prompt's turn.
+    first_words: Option<String>,
 }
 
 impl FakeSessions {
@@ -134,6 +137,7 @@ impl FakeSessions {
             follow_up_loses: false,
             lost: Arc::default(),
             last_words: None,
+            first_words: None,
         }
     }
 
@@ -384,9 +388,19 @@ impl RoutineSessions for FakeSessions {
 
     async fn reply(
         &self,
-        _command: RoutineSessionAction,
+        command: RoutineSessionAction,
     ) -> Result<Option<String>, RoutineSessionError> {
-        Ok(self.last_words.clone())
+        let later = self
+            .follow_up_calls
+            .lock()
+            .expect("follow-ups")
+            .iter()
+            .any(|sent| sent.action.action_id == command.action_id);
+        if later {
+            Ok(self.last_words.clone())
+        } else {
+            Ok(self.first_words.clone())
+        }
     }
 
     async fn delete(&self, command: RoutineSessionAction) -> Result<(), RoutineSessionError> {

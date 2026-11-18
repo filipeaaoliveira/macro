@@ -509,12 +509,8 @@ fn last_words(
     let text = messages
         .iter()
         .filter(|message| message.id == prompt.id && matches!(message.author, Author::Agent))
-        .flat_map(|message| message.parts.iter())
-        .filter_map(|part| match part {
-            agent_fold::domain::model::MessagePart::Text { text } => Some(text.trim()),
-            _ => None,
-        })
-        .rfind(|text| !text.is_empty())?;
+        .rev()
+        .find_map(|message| message.last_text())?;
     let mut start = text.len().saturating_sub(MAX_REPLY_BYTES);
     while !text.is_char_boundary(start) {
         start += 1;
