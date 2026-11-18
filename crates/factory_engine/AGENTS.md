@@ -1241,6 +1241,16 @@ every Run in flight replays as before.
   viewable_documents`, entity access's batch receipts), and each answer is
   kept 30 s. Only the owner's read of a Run whose workflow never started
   ends it.
+  `POST /runs/by-pull-requests` (`{"urls"}`, at most `PULL_REQUESTS_MAX`,
+  100, else 400) finds the Runs that opened some pull requests, by the
+  page each Run keeps (`pull_request_url`), in any case: for each, the
+  newest Run on the caller's team board they see (theirs, or a team
+  member's on a task they can see, as above), with where it is and
+  `mergeGateSeq`, the Step whose merge Gate it waits on (its latest Step,
+  at a merge entry, with a Flow's Gate no one answered, while it goes). A
+  pull request only a hidden Run opened is left out, as one no Run opened.
+  Macro's Reviews page reads it to mark a factory Run's pull request, and
+  merges one only through that Gate (`POST /runs/{id}/steps/{seq}/answer`).
 - `flows/`: the built-in Flows, each named for its file
   (`src/domain/built_in_flows.rs`). `GET /flows` lists those whose Steps the
   worker serves, with their `description` and whether they work on a

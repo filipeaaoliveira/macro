@@ -16,7 +16,7 @@ use uuid::Uuid;
 use crate::domain::automations::{
     AutomationRequest, AutomationsSettings, CreatedAutomation, FiringResult, RoutineFiring,
 };
-use crate::domain::board::{BoardFilter, BoardPage};
+use crate::domain::board::{BoardFilter, BoardPage, PullRequestRuns};
 use crate::domain::flow::{StepName, StepUse};
 use crate::domain::gate::{
     AnswerGate, GateAnswered, GateOpening, GateRuling, GateTelling, ReplyGate,
@@ -751,6 +751,18 @@ pub trait FactoryService: Send + Sync + 'static {
         actor: &MacroUserIdStr<'static>,
         filter: BoardFilter,
     ) -> impl Future<Output = Result<BoardPage, FactoryError>> + Send;
+
+    /// The Runs that opened the pull requests at `urls`, as the board shows
+    /// them: for each pull request, the newest such Run `actor` can see on
+    /// their team's board, in `urls`' order. A Run `actor` cannot see reads
+    /// as no Run. At most [`PULL_REQUESTS_MAX`] pull requests.
+    ///
+    /// [`PULL_REQUESTS_MAX`]: crate::domain::board::PULL_REQUESTS_MAX
+    fn pull_request_runs(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        urls: Vec<String>,
+    ) -> impl Future<Output = Result<PullRequestRuns, FactoryError>> + Send;
 
     /// Link `actor`'s Run to the task document `task_id`, replacing any task
     /// it had. The actor must see the task.

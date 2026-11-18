@@ -108,3 +108,30 @@ pub struct BoardPage {
     /// filter or search narrows.
     pub stopped_early: bool,
 }
+
+/// The most pull requests one lookup of their Runs names.
+pub const PULL_REQUESTS_MAX: usize = 100;
+
+/// The Run that opened a pull request, as the board shows it.
+#[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestRun {
+    /// The pull request's page, as the lookup named it.
+    pub url: String,
+    /// The Step whose merge Gate the Run waits on, by its place among the
+    /// Run's Steps: approving it is how the pull request merges. None while
+    /// the Run is anywhere else.
+    pub merge_gate_seq: Option<u16>,
+    /// The Run, where it is, and its task's name.
+    pub listed: BoardRun,
+}
+
+/// The Runs that opened some pull requests.
+#[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestRuns {
+    /// One for each pull request a Run the caller can see opened, its
+    /// newest such Run, in the lookup's order; none for a pull request no
+    /// such Run opened.
+    pub runs: Vec<PullRequestRun>,
+}

@@ -1,4 +1,5 @@
-//! `GET /runs`: the factory's board, a page at a time.
+//! `GET /runs`: the factory's board, a page at a time; and
+//! `POST /runs/by-pull-requests`: the Runs that opened some pull requests.
 
 use axum::Json;
 use axum::extract::{Query, State};
@@ -8,10 +9,11 @@ use factory_records::domain::models::RunId;
 use macro_authorization::{MacroAuthorizationExtractor, MacroAuthorizationService, UserOrInternal};
 use model_error_response::ErrorResponse;
 use serde::Deserialize;
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 use super::FactoryRouterState;
-use crate::domain::board::{BoardFilter, BoardNext, BoardPage, BoardScope};
+use crate::domain::board::{BoardFilter, BoardNext, BoardPage, BoardScope, PullRequestRuns};
 use crate::domain::models::FactoryError;
 use crate::domain::ports::FactoryService;
 
@@ -100,4 +102,48 @@ where
         limit: BoardFilter::page_size(params.limit),
     };
     Ok(Json(state.service.board(&actor, filter).await?))
+}
+
+/// GitHub pull requests, by their pages.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestUrls {
+    /// The pull requests' pages, such as
+    /// `https://github.com/owner/repo/pull/12`: at most 100.
+    pub urls: Vec<String>,
+}
+
+/// Find the Runs that opened some pull requests: for each one, the newest
+/// Run the caller can see on their team's board (theirs, or a team
+/// member's on a task they can see), with its Steps, where it is, and the
+/// merge Gate it waits on. A pull request no such Run opened is left out,
+/// whether no Run opened it or one the caller cannot see did.
+#[utoipa::path(
+    post,
+    tag = "factory",
+    operation_id = "find_pull_request_runs",
+    path = "/runs/by-pull-requests",
+    request_body = PullRequestUrls,
+    responses(
+        (status = 200, body = PullRequestRuns),
+        (status = 400, body = ErrorResponse),
+        (status = 401, body = ErrorResponse),
+        (status = 403, body = ErrorResponse),
+        (status = 500, body = ErrorResponse),
+    )
+)]
+#[tracing::instrument(skip_all)]
+pub async fn pull_request_runs_handler<S, Auth>(
+    State(state): State<FactoryRouterState<S, Auth>>,
+    caller: MacroAuthorizationExtractor<Auth, UserOrInternal>,
+    Json(body): Json<PullRequestUrls>,
+) -> Result<Json<PullRequestRuns>, FactoryError>
+where
+    S: FactoryService,
+    Auth: MacroAuthorizationService,
+{
+    let actor = caller.authorization.user.macro_user_id;
+    Ok(Json(
+        state.service.pull_request_runs(&actor, body.urls).await?,
+    ))
 }

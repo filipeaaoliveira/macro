@@ -91,6 +91,9 @@ worker that walks each Run's Flow, in one process.
   its `state` (`running`, `waiting`, `held`, `stopped`, `finished`);
   `state`, `flow`, `repoUrl`, `projectId` and `search` narrow it, and
   `afterCreatedAt` with `afterId` (the page's `next`) reads the next page.
+  `POST /runs/by-pull-requests` (`{"urls"}`, at most 100) finds the Run
+  that opened each pull request, among those the caller's team board
+  shows, with the merge Gate it waits on (`mergeGateSeq`).
 
 ## Gotchas
 

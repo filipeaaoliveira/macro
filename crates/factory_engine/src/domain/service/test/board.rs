@@ -1,6 +1,8 @@
 //! The board: a person's own Runs, their team's on tasks they can see, the
 //! pages, and who may read a team member's Run.
 
+mod pull_requests;
+
 use factory_records::domain::board::BoardState;
 use factory_records::domain::models::{
     EntryId, NewRun, RunId, RunInsert, RunOutcome, StepKey, TeamMembership,
