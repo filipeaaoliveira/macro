@@ -1424,6 +1424,64 @@ post-merge Steps in `code`; `primary` and `backup` Agents whose bots must be
 replaced; a person merges), which a test reads; `factory_definition_check`
 (`services/factory_service`) checks one in a folder.
 
+Self-improvement (`src/domain/self_improvement.rs`): a team's Definition
+learns from the Runs that failed under it. A failure is a live Scorer's
+judgment below `PASS_SCORE` (0.5), or a Run its owner marked flawed, of a
+Run that started under the Definition the team names now and is not itself
+a self-improvement Run (`collect`). Each is kept once per Run and source
+(`factory_improvement_failure`), pending until a self-improvement Run takes
+it. The scoring activity the workflow already calls once a Run ends
+(`factory_score_run`) runs the Scorers, then `SelfImprovement::after_run_end`
+(`ImprovingScoring`): it keeps the Run's failures, settles the team's open
+self-improvement Run, and, unless the team's last one was refused less than
+`REFUSED_PAUSE` (a day) ago, starts one when the pending failures reach the
+Definition's `selfImprovement` thresholds in `scorers.json` (`failures`, 25,
+or the oldest `oldestDays`, 7, old; `enabled`, on; the Run's kept
+`scorers.json` gives them). `POST /runs/{id}/flaw` keeps the flaw at once;
+it counts at the next Run's end. A team that names no Definition keeps and
+starts nothing, and neither do Runs of any other team. Nothing in the
+workflow changed, so Runs in flight replay as before; a failed
+self-improvement step fails the scoring attempt, which is retried with it.
+
+The Run (`create_improvement_run`) walks the built-in `improve` Flow
+(`flows/improve.json`: `code` without `accept`, which has no task to verify)
+on the Definition's repository, owned by the admin who named the Definition
+(`factory_team_definition.named_by_user_id`) while they are on the team;
+none starts for a Definition with no namer kept (named before this), which
+Insights says. It is created as an Automation's Run is, not in person, and
+counts in its owner's Queue. A team has at most one starting or open
+(`factory_improvement_open_idx`): it claims the oldest
+`MAX_GROUPED_FAILURES` (50) pending failures and is kept as starting before
+its Run is recorded, and the Run is linked to it before its workflow
+starts. Its request (`improvement_request`, after `self_improvement/request.md`)
+names how many Runs failed on its first line, the pull request's title,
+then lists them under "Regressions addressed", by Scorer and then the
+flawed Runs, each linking its Run in the app (`/app/factory/runs/{id}`)
+and the Scorers' judgments (`/app/factory/insights`), each reason on one
+line; `publish` puts the request in the pull request's description, so the
+section is there. A Run refused (its Agents do not fill the Flow's Roles,
+`DefinitionError::ImprovementAgents`; no push access; a full Queue) is kept
+`refused` with why, and its failures go back. One kept starting longer
+than `STARTING_STALE_AFTER` (10 minutes) is refused the same way. Only
+the factory starts one: `improve` is never listed or started by name
+(`UnknownFlow`), and a Definition names no Flow `improve`
+(`ReservedFlow`).
+
+A person merges it: the Run is on its team's Definition repository, so the
+Definition's files are its Control Files and any change to one is Tampered
+(`ControlFiles::changes_guarding`), which no Standing Rule, stand-in or
+Orchestrator approves on its plan or merge Gate. Once its Run ends, the next
+`after_run_end` of the team settles it: a Run that ended `success` (its
+`merge` merged) or `flawed` addressed its failures (`merged`); otherwise
+its pull request is read as its owner: merged addresses them, open keeps
+the Run open (no other starts), and closed, or none, sends them back to
+pending (`closed`). A pull request a person merges or closes after its Run
+ended is seen only at the team's next Run's end. `GET
+/insights/evaluation` shows the team's self-improvement
+(`selfImprovement`: thresholds, pending failures by source, whether a
+namer is kept, and the last Run with its state), none for a team with no
+Definition.
+
 ## Start here
 
 - `src/domain/flow.rs`: the Flow model and the checks a definition must pass.
@@ -1524,6 +1582,9 @@ replaced; a person merges), which a test reads; `factory_definition_check`
   (`STEP_TOTAL`, 2 hours), and then fails as usual. Until the write lands,
   or if it never does, the pull request is open on GitHub and the guard
   cannot see it, so it merges as no Run's.
+- `src/domain/self_improvement.rs`: self-improvement: the failures a
+  Run's end keeps, when a self-improvement Run starts, its request, and how
+  it is settled.
 - `src/domain/evaluation.rs`: Scorers, Experiments and Benchmarks, their
   sampling and arm assignment; `evaluation/service.rs` scores a Run that
   ended; `evaluation/insights.rs` the evaluation insights and suites.
@@ -1531,7 +1592,8 @@ replaced; a person merges), which a test reads; `factory_definition_check`
   (`src/domain/built_in_flows.rs`). `GET /flows` lists those whose Steps the
   worker serves, with their `description` and whether they work on a
   `repository`: `code`, `plan` and `reply`; for a team that names a Factory
-  Definition, its Flows instead.
+  Definition, its Flows instead. `benchmark` and `improve` run only as a
+  suite's trial and a self-improvement Run.
 
 ## Scope
 
@@ -1742,3 +1804,12 @@ replaced; a person merges), which a test reads; `factory_definition_check`
   leaves such a Run's next Step failing for good, and the Run `manual`.
 - `#[activities]` takes no generic type, so `FactoryActivities` holds the Step
   service as a trait object.
+- Self-improvement runs only in the scoring activity, behind the
+  `factory-scoring` marker: a Run that ended before the marker is never
+  scored, so its failures are never kept. A Definition named before
+  `named_by_user_id` starts no self-improvement Run until an admin names it
+  again. Thresholds are checked only when a team's Run ends: a team whose
+  Runs stop starts none, however old its failures.
+- A worker older than `selfImprovement` in `scorers.json` cannot read a
+  Definition that sets it (`deny_unknown_fields`); one that leaves the
+  defaults keeps the JSON it kept before.
