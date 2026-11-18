@@ -1,0 +1,12 @@
+{
+  "description": "Replies to the Run's request in one Step.",
+  "entries": [
+    {
+      "id": "reply",
+      "step": "reply",
+      "on": {
+        "done": [{ "to": { "kind": "end", "outcome": "success" } }]
+      }
+    }
+  ]
+}

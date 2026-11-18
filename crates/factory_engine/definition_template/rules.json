@@ -1,0 +1,9 @@
+{
+  "standingRules": {
+    "plan": false,
+    "blockers": true,
+    "merge": false,
+    "ownerGates": true,
+    "taskThread": true
+  }
+}

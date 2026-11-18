@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "description": "A starter Factory Definition: the code, plan and reply Flows, two Agents, and rules that leave every merge to a person.",
+  "flows": ["code", "plan", "reply"]
+}
