@@ -4,6 +4,14 @@ import { fireAndForget } from '@core/util/fireAndForget';
 import { Button, TextField } from '@ui';
 import { createSignal, createUniqueId, Show } from 'solid-js';
 import { useRunsContext } from '../context/runs-context';
+
+/** The most bytes a flaw's reason holds, as the factory keeps it. */
+const MAX_REASON_BYTES = 4096;
+
+function reasonBytes(reason: string): number {
+  return new TextEncoder().encode(reason.trim()).length;
+}
+
 import type { RunFlaw } from '../core/run';
 
 /** Why a flawed Run is flawed, and who marked it when. */
@@ -50,9 +58,10 @@ export function MarkRunFlawed(props: { runId: string }) {
     queueMicrotask(() => markButton?.focus());
   };
 
+  const tooLong = () => reasonBytes(reason()) > MAX_REASON_BYTES;
   const mark = async () => {
     const words = reason().trim();
-    if (!words || marking()) return;
+    if (!words || tooLong() || marking()) return;
     setMarking(true);
     const result = await context.markRunFlawed({
       runId: props.runId,
@@ -91,6 +100,7 @@ export function MarkRunFlawed(props: { runId: string }) {
           onChange={setReason}
           disabled={marking()}
           required
+          validationState={tooLong() ? 'invalid' : 'valid'}
         >
           <TextField.Label class="sr-only">
             {t('factoryRuns.flawReason')}
@@ -103,6 +113,9 @@ export function MarkRunFlawed(props: { runId: string }) {
             aria-describedby={messageId}
             placeholder={t('factoryRuns.flawReason')}
           />
+          <TextField.ErrorMessage>
+            {t('factoryRuns.flawReasonTooLong', { max: MAX_REASON_BYTES })}
+          </TextField.ErrorMessage>
         </TextField>
         <div class="flex flex-wrap items-center justify-end gap-2">
           <Button
@@ -117,7 +130,7 @@ export function MarkRunFlawed(props: { runId: string }) {
             type="button"
             variant="danger"
             loading={marking()}
-            disabled={!reason().trim()}
+            disabled={!reason().trim() || tooLong()}
             onClick={() => fireAndForget(mark(), 'factory-runs')}
           >
             {t('factoryRuns.markFlawed')}

@@ -1222,6 +1222,31 @@ describe('RunView', () => {
     );
   });
 
+  it('refuses a reason longer than the factory keeps', async () => {
+    const markRunFlawed = vi.fn(async () => DONE);
+    const { setRun } = mount({ markRunFlawed });
+    setRun({
+      ...waitingRun,
+      end: { outcome: 'success', endedAt: '2026-11-16T09:10:00Z' },
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Mark flawed' }));
+    fireEvent.input(
+      screen.getByRole('textbox', { name: 'What’s wrong with the result' }),
+      { target: { value: 'é'.repeat(2049) } }
+    );
+    const confirm = screen
+      .getAllByRole('button', { name: 'Mark flawed' })
+      .find((button) => button.getAttribute('data-variant') === 'danger');
+    if (!confirm) throw new Error('No confirm button');
+    fireEvent.click(confirm);
+
+    expect(
+      await screen.findByText(/Keep the reason under 4,?096 bytes/)
+    ).toBeTruthy();
+    expect(markRunFlawed).not.toHaveBeenCalled();
+  });
+
   it('offers no flaw mark for a run that did not end done', async () => {
     const { setRun } = mount({});
     setRun({

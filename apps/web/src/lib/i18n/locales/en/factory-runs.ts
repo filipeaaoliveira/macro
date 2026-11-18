@@ -22,7 +22,8 @@ export default {
   markFlawed: 'Mark flawed',
   markFlawedTitle: 'Mark this run flawed?',
   markFlawedBody:
-    'Its result is wrong even though it ended done. Insights count it as flawed.',
+    'Its result is wrong even though it ended done. Insights count it as flawed. A flawed mark can’t be taken back.',
+  flawReasonTooLong: 'Keep the reason under {{max}} bytes.',
   flawReason: 'What’s wrong with the result',
   keepDone: 'Keep as done',
   markFlawedFailed: 'Couldn’t mark the run flawed',
