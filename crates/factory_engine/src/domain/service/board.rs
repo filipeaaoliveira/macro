@@ -127,6 +127,14 @@ where
                 .map_err(internal)?
                 .map(|team| team.team_id),
         };
+        // A page says it stopped early only on a board narrowed by no
+        // filter: under a search or a filter, the flag would tell how many
+        // hidden Runs match it.
+        let unfiltered = filter.state.is_none()
+            && filter.flow.is_none()
+            && filter.repo_url.is_none()
+            && filter.project_id.is_none()
+            && filter.search.is_none();
         let limit = usize::from(filter.limit);
         let batch = filter.limit.saturating_add(1).max(BOARD_BATCH_MIN);
         let mut query = BoardQuery {
@@ -211,7 +219,7 @@ where
         Ok(BoardPage {
             runs,
             next,
-            stopped_early: stopped_early && !more,
+            stopped_early: unfiltered && stopped_early && !more,
         })
     }
 

@@ -1233,7 +1233,9 @@ every Run in flight replays as before.
   Runs, until it has one Run the caller sees past the page; `next` names
   the last Run listed, and only while such a Run follows, so a page of
   hidden Runs alone reads as no Run. Past five rounds of hidden Runs in a
-  row (some 250) the page ends there, with no next page. A team member's
+  row (some 250) the page ends there, with no next page, and says it
+  stopped early (`stoppedEarly`) only on a board no filter or search
+  narrows, so the flag never tells how many hidden Runs match a filter. A team member's
   Run on a task that is not a live task is hidden without asking; the
   others' tasks are asked in one check a round (`TaskDirectory::
   viewable_documents`, entity access's batch receipts), and each answer is

@@ -310,6 +310,21 @@ async fn the_rounds_end_a_page_past_some_250_hidden_runs() {
     assert!(page.next.is_none());
     // It says older Runs may be there.
     assert!(page.stopped_early);
+
+    // Under a search, or any filter, it says nothing of the hidden Runs.
+    let searched = service
+        .board(
+            &julia(),
+            BoardFilter {
+                limit: 1,
+                search: Some("Plan".to_string()),
+                ..filter(BoardScope::Team)
+            },
+        )
+        .await
+        .expect("board");
+    assert!(searched.runs.is_empty());
+    assert!(!searched.stopped_early);
 }
 
 /// A page that read every Run there is did not stop early.
