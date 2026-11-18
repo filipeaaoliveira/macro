@@ -8,7 +8,7 @@ use factory_records::domain::models::{
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::standing_rules::{
-    GateKind, OrchestratorDefinition, RulesSource, RunRules, StandingRule,
+    OrchestratorDefinition, RuleGateKind, RulesSource, RunRules, StandingRule,
 };
 
 use super::{FakeExecutor, julia};
@@ -78,7 +78,7 @@ fn team_rules(definition: OrchestratorDefinition) -> RunRules {
 fn merge_ruling(key: StepKey) -> GateRuling {
     GateRuling {
         key,
-        kind: GateKind::Merge,
+        kind: RuleGateKind::Merge,
         fix_rounds: 0,
         fix_limit: 0,
         answers: vec![outcome("approve"), outcome("revise")],
@@ -200,7 +200,7 @@ async fn blockers_after_two_rule_fixes_wait_for_a_person() {
     let repo = FakeRepo::default();
     let ruling = |key, fix_rounds| GateRuling {
         key,
-        kind: GateKind::Blockers,
+        kind: RuleGateKind::Blockers,
         fix_rounds,
         fix_limit: MAX_RULE_FIX_ROUNDS,
         answers: vec![outcome("fix"), outcome("stop")],
@@ -245,7 +245,7 @@ async fn a_tampered_run_s_blockers_go_to_a_fix_and_its_merge_to_a_person() {
     .expect("keep");
     let blockers = GateRuling {
         key,
-        kind: GateKind::Blockers,
+        kind: RuleGateKind::Blockers,
         fix_rounds: 0,
         fix_limit: MAX_RULE_FIX_ROUNDS,
         answers: vec![outcome("fix"), outcome("stop")],
@@ -361,7 +361,7 @@ async fn a_rule_never_answers_an_agents_question() {
     let ruled = steps(&repo)
         .rule_gate(GateRuling {
             key,
-            kind: GateKind::Plan,
+            kind: RuleGateKind::Plan,
             fix_rounds: 0,
             fix_limit: 0,
             answers: vec![outcome("approve"), outcome("revise")],

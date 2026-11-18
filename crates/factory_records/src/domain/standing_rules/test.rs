@@ -29,16 +29,16 @@ fn a_stored_kind_this_code_does_not_know_does_not_read() {
 #[test]
 fn the_default_fixes_blockers_and_leaves_the_plan_and_the_merge_to_a_person() {
     let default = OrchestratorDefinition::DEFAULT;
-    assert!(default.decides(GateKind::Blockers));
-    assert!(!default.decides(GateKind::Plan));
-    assert!(!default.decides(GateKind::Merge));
+    assert!(default.decides(RuleGateKind::Blockers));
+    assert!(!default.decides(RuleGateKind::Plan));
+    assert!(!default.decides(RuleGateKind::Merge));
 }
 
 #[test]
 fn each_kind_of_gate_has_its_own_rule() {
-    assert_eq!(GateKind::Plan.rule(), StandingRule::ApprovePlan);
-    assert_eq!(GateKind::Blockers.rule(), StandingRule::FixBlockers);
-    assert_eq!(GateKind::Merge.rule(), StandingRule::MergeWhenGreen);
+    assert_eq!(RuleGateKind::Plan.rule(), StandingRule::ApprovePlan);
+    assert_eq!(RuleGateKind::Blockers.rule(), StandingRule::FixBlockers);
+    assert_eq!(RuleGateKind::Merge.rule(), StandingRule::MergeWhenGreen);
     assert_eq!(StandingRule::MergeWhenGreen.to_string(), "merge_when_green");
     assert_eq!(
         "fix_blockers".parse::<StandingRule>().ok(),

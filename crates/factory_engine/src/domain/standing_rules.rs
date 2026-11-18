@@ -21,7 +21,7 @@
 mod test;
 
 use factory_records::domain::models::Outcome;
-use factory_records::domain::standing_rules::{GateKind, OrchestratorDefinition, StandingRule};
+use factory_records::domain::standing_rules::{OrchestratorDefinition, RuleGateKind, StandingRule};
 use serde::{Deserialize, Serialize};
 
 /// The most fix rounds in a row the `fix_blockers` rule sends; Blockers a
@@ -44,16 +44,16 @@ pub fn rule_fix_limit(max_visits: Option<std::num::NonZeroU8>) -> u16 {
 
 /// The answers a Gate of `kind` must offer, exactly, for its rule to
 /// answer it: the first is the rule's answer.
-pub fn kind_answers(kind: GateKind) -> [&'static str; 2] {
+pub fn kind_answers(kind: RuleGateKind) -> [&'static str; 2] {
     match kind {
-        GateKind::Plan | GateKind::Merge => ["approve", "revise"],
-        GateKind::Blockers => ["fix", "stop"],
+        RuleGateKind::Plan | RuleGateKind::Merge => ["approve", "revise"],
+        RuleGateKind::Blockers => ["fix", "stop"],
     }
 }
 
 /// Whether `offered` is exactly the answers a Gate of `kind` offers, in
 /// any order.
-pub fn offers_kind_answers(kind: GateKind, offered: &[Outcome]) -> bool {
+pub fn offers_kind_answers(kind: RuleGateKind, offered: &[Outcome]) -> bool {
     let expected = kind_answers(kind);
     offered.len() == expected.len()
         && expected
@@ -65,7 +65,7 @@ pub fn offers_kind_answers(kind: GateKind, offered: &[Outcome]) -> bool {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GateFacts {
     /// The Gate's kind.
-    pub kind: GateKind,
+    pub kind: RuleGateKind,
     /// The fix rounds in a row its review panel's Blockers went to since
     /// the panel's visits last started; nought for other Gates.
     pub fix_rounds: u16,
@@ -99,15 +99,15 @@ pub fn rule_answer(
         return None;
     }
     let answer = match facts.kind {
-        GateKind::Plan | GateKind::Merge if facts.tampered => return None,
-        GateKind::Plan => "approve",
-        GateKind::Blockers if facts.fix_rounds >= facts.fix_limit => return None,
-        GateKind::Blockers => "fix",
+        RuleGateKind::Plan | RuleGateKind::Merge if facts.tampered => return None,
+        RuleGateKind::Plan => "approve",
+        RuleGateKind::Blockers if facts.fix_rounds >= facts.fix_limit => return None,
+        RuleGateKind::Blockers => "fix",
         // The merge Gate opens only once `ready_to_merge` found the pull
         // request's head still the commit `ci` called green, with its
         // checks still passing.
-        GateKind::Merge if facts.held => return None,
-        GateKind::Merge => "approve",
+        RuleGateKind::Merge if facts.held => return None,
+        RuleGateKind::Merge => "approve",
     };
     let answer = Outcome::try_from(answer.to_string()).ok()?;
     offered.contains(&answer).then(|| RuleAnswer {

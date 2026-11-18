@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, VecDeque};
 use std::num::NonZeroU8;
 
 use factory_records::domain::models::{EntryId, Outcome, Role, RunId, RunOutcome};
-use factory_records::domain::standing_rules::{GateKind, OrchestratorDefinition};
+use factory_records::domain::standing_rules::{OrchestratorDefinition, RuleGateKind};
 
 use super::{Panel, Round, review_round};
 use crate::domain::flow::{Entry, GateDefinition, StepName};
@@ -514,7 +514,7 @@ fn gated_panel() -> Entry {
                 .map(|answer| Outcome::try_from(answer.to_string()).expect("valid"))
                 .to_vec(),
             after: Some(Outcome::try_from("changes".to_string()).expect("valid")),
-            kind: Some(GateKind::Blockers),
+            kind: Some(RuleGateKind::Blockers),
         }),
         ..panel_entry(3)
     }

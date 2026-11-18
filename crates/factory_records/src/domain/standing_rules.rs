@@ -29,7 +29,7 @@ use uuid::Uuid;
 )]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
-pub enum GateKind {
+pub enum RuleGateKind {
     /// The plan Gate: approve the plan, or send it back.
     Plan,
     /// The Blockers Gate of a review panel: send a round's Blockers to be
@@ -40,7 +40,7 @@ pub enum GateKind {
     Merge,
 }
 
-impl GateKind {
+impl RuleGateKind {
     /// The rule that decides a Gate of this kind.
     pub fn rule(self) -> StandingRule {
         match self {
@@ -113,21 +113,25 @@ impl OrchestratorDefinition {
     };
 
     /// Whether the rule of `kind` decides its Gates.
-    pub fn decides(self, kind: GateKind) -> bool {
+    pub fn decides(self, kind: RuleGateKind) -> bool {
         match kind {
-            GateKind::Plan => self.plan,
-            GateKind::Blockers => self.blockers,
-            GateKind::Merge => self.merge,
+            RuleGateKind::Plan => self.plan,
+            RuleGateKind::Blockers => self.blockers,
+            RuleGateKind::Merge => self.merge,
         }
     }
 
     /// The kinds its rules decide, as stored.
     pub fn kinds(self) -> Vec<String> {
-        [GateKind::Plan, GateKind::Blockers, GateKind::Merge]
-            .into_iter()
-            .filter(|kind| self.decides(*kind))
-            .map(|kind| kind.to_string())
-            .collect()
+        [
+            RuleGateKind::Plan,
+            RuleGateKind::Blockers,
+            RuleGateKind::Merge,
+        ]
+        .into_iter()
+        .filter(|kind| self.decides(*kind))
+        .map(|kind| kind.to_string())
+        .collect()
     }
 
     /// The definition whose rules decide the stored `kinds`; none when one
@@ -135,10 +139,10 @@ impl OrchestratorDefinition {
     pub fn from_kinds(kinds: &[String]) -> Option<Self> {
         let mut definition = Self::default();
         for kind in kinds {
-            match kind.parse::<GateKind>().ok()? {
-                GateKind::Plan => definition.plan = true,
-                GateKind::Blockers => definition.blockers = true,
-                GateKind::Merge => definition.merge = true,
+            match kind.parse::<RuleGateKind>().ok()? {
+                RuleGateKind::Plan => definition.plan = true,
+                RuleGateKind::Blockers => definition.blockers = true,
+                RuleGateKind::Merge => definition.merge = true,
             }
         }
         Some(definition)

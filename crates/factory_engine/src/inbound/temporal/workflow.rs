@@ -57,7 +57,7 @@ use temporalio_sdk::{
     WorkflowTermination,
 };
 
-use factory_records::domain::standing_rules::GateKind;
+use factory_records::domain::standing_rules::RuleGateKind;
 
 use crate::domain::flow::Flow;
 use crate::domain::gate::{
@@ -291,7 +291,7 @@ fn is_cancelled(ctx: &WorkflowContext<FlowWorkflow>) -> bool {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct Asking {
     /// The Gate's kind, from its Flow; none for a Gate no rule decides.
-    pub(super) kind: Option<GateKind>,
+    pub(super) kind: Option<RuleGateKind>,
     /// For a review panel's Gate, the fix rounds in a row its Blockers
     /// went to.
     pub(super) fix_rounds: u16,

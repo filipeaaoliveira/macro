@@ -1,5 +1,5 @@
 use factory_records::domain::models::Outcome;
-use factory_records::domain::standing_rules::{GateKind, OrchestratorDefinition, StandingRule};
+use factory_records::domain::standing_rules::{OrchestratorDefinition, RuleGateKind, StandingRule};
 use serde_json::json;
 
 use super::{GateFacts, MAX_RULE_FIX_ROUNDS, RuleAnswer, rule_answer, rule_fix_limit};
@@ -15,7 +15,7 @@ const EVERY_RULE: OrchestratorDefinition = OrchestratorDefinition {
     merge: true,
 };
 
-fn facts(kind: GateKind) -> GateFacts {
+fn facts(kind: RuleGateKind) -> GateFacts {
     GateFacts {
         kind,
         fix_rounds: 0,
@@ -38,7 +38,7 @@ fn each_rule_answers_its_own_kind_of_gate() {
     assert_eq!(
         rule_answer(
             Some(EVERY_RULE),
-            &facts(GateKind::Plan),
+            &facts(RuleGateKind::Plan),
             &approve_or_revise()
         ),
         Some(RuleAnswer {
@@ -49,7 +49,7 @@ fn each_rule_answers_its_own_kind_of_gate() {
     assert_eq!(
         rule_answer(
             Some(EVERY_RULE),
-            &facts(GateKind::Merge),
+            &facts(RuleGateKind::Merge),
             &approve_or_revise()
         ),
         Some(RuleAnswer {
@@ -58,7 +58,11 @@ fn each_rule_answers_its_own_kind_of_gate() {
         })
     );
     assert_eq!(
-        rule_answer(Some(EVERY_RULE), &facts(GateKind::Blockers), &fix_or_stop()),
+        rule_answer(
+            Some(EVERY_RULE),
+            &facts(RuleGateKind::Blockers),
+            &fix_or_stop()
+        ),
         Some(RuleAnswer {
             rule: StandingRule::FixBlockers,
             answer: outcome("fix"),
@@ -70,9 +74,9 @@ fn each_rule_answers_its_own_kind_of_gate() {
 fn a_kind_its_definition_leaves_off_waits_for_a_person() {
     let none = OrchestratorDefinition::default();
     for (kind, offered) in [
-        (GateKind::Plan, approve_or_revise()),
-        (GateKind::Merge, approve_or_revise()),
-        (GateKind::Blockers, fix_or_stop()),
+        (RuleGateKind::Plan, approve_or_revise()),
+        (RuleGateKind::Merge, approve_or_revise()),
+        (RuleGateKind::Blockers, fix_or_stop()),
     ] {
         assert_eq!(rule_answer(Some(none), &facts(kind), &offered), None);
     }
@@ -83,7 +87,7 @@ fn a_kind_its_definition_leaves_off_waits_for_a_person() {
     assert_eq!(
         rule_answer(
             Some(merge_only),
-            &facts(GateKind::Plan),
+            &facts(RuleGateKind::Plan),
             &approve_or_revise()
         ),
         None
@@ -95,7 +99,7 @@ fn a_kind_its_definition_leaves_off_waits_for_a_person() {
 #[test]
 fn a_run_with_no_rules_waits_for_a_person() {
     assert_eq!(
-        rule_answer(None, &facts(GateKind::Plan), &approve_or_revise()),
+        rule_answer(None, &facts(RuleGateKind::Plan), &approve_or_revise()),
         None
     );
 }
@@ -104,7 +108,7 @@ fn a_run_with_no_rules_waits_for_a_person() {
 /// approves its plan or its merge.
 #[test]
 fn no_rule_approves_a_tampered_run_s_plan_or_merge() {
-    for kind in [GateKind::Plan, GateKind::Merge] {
+    for kind in [RuleGateKind::Plan, RuleGateKind::Merge] {
         let tampered = GateFacts {
             tampered: true,
             ..facts(kind)
@@ -122,7 +126,7 @@ fn no_rule_approves_a_tampered_run_s_plan_or_merge() {
 fn a_tampered_run_s_blockers_still_go_to_a_fix() {
     let tampered = GateFacts {
         tampered: true,
-        ..facts(GateKind::Blockers)
+        ..facts(RuleGateKind::Blockers)
     };
     assert_eq!(
         rule_answer(Some(EVERY_RULE), &tampered, &fix_or_stop()),
@@ -137,7 +141,7 @@ fn a_tampered_run_s_blockers_still_go_to_a_fix() {
 fn no_rule_merges_through_a_main_hold() {
     let held = GateFacts {
         held: true,
-        ..facts(GateKind::Merge)
+        ..facts(RuleGateKind::Merge)
     };
     assert_eq!(
         rule_answer(Some(EVERY_RULE), &held, &approve_or_revise()),
@@ -151,7 +155,7 @@ fn no_rule_merges_through_a_main_hold() {
 fn blockers_after_two_fix_rounds_go_to_a_person() {
     let after = |fix_rounds| GateFacts {
         fix_rounds,
-        ..facts(GateKind::Blockers)
+        ..facts(RuleGateKind::Blockers)
     };
     assert!(rule_answer(Some(EVERY_RULE), &after(1), &fix_or_stop()).is_some());
     assert_eq!(MAX_RULE_FIX_ROUNDS, 2);
@@ -178,7 +182,7 @@ fn a_panel_s_rounds_bound_the_rule_s_fixes() {
     let one_fix = GateFacts {
         fix_rounds: 1,
         fix_limit: rule_fix_limit(rounds(2)),
-        ..facts(GateKind::Blockers)
+        ..facts(RuleGateKind::Blockers)
     };
     assert_eq!(
         rule_answer(Some(EVERY_RULE), &one_fix, &fix_or_stop()),
@@ -196,12 +200,12 @@ fn a_rule_answers_only_a_gate_offering_its_kind_s_answers() {
         fix_or_stop(),
     ] {
         assert_eq!(
-            rule_answer(Some(EVERY_RULE), &facts(GateKind::Plan), &offered),
+            rule_answer(Some(EVERY_RULE), &facts(RuleGateKind::Plan), &offered),
             None
         );
     }
     let reordered = [outcome("revise"), outcome("approve")];
-    assert!(rule_answer(Some(EVERY_RULE), &facts(GateKind::Plan), &reordered).is_some());
+    assert!(rule_answer(Some(EVERY_RULE), &facts(RuleGateKind::Plan), &reordered).is_some());
 }
 
 /// A Gate's kind is what its Flow names, never the work of its entry: a
@@ -226,7 +230,7 @@ fn a_gate_s_kind_is_what_its_flow_names() {
             .expect("valid flow");
     assert_eq!(
         named.entries[0].gate.as_ref().and_then(|gate| gate.kind),
-        Some(GateKind::Plan)
+        Some(RuleGateKind::Plan)
     );
     let wrong_answers =
         parse(json!({ "kind": "plan", "question": "Approve?", "answers": ["approve", "skip"] }));
@@ -241,7 +245,7 @@ fn a_gate_s_kind_is_what_its_flow_names() {
 /// The built-in Flows name each Gate a rule may answer.
 #[test]
 fn the_built_in_flows_name_their_gates_kinds() {
-    let kinds = |name: &str| -> Vec<(String, Option<GateKind>)> {
+    let kinds = |name: &str| -> Vec<(String, Option<RuleGateKind>)> {
         crate::domain::built_in_flows::BuiltInFlow::named(name)
             .expect("built in")
             .read(|_| Some(StepUse::Work))
@@ -258,10 +262,13 @@ fn the_built_in_flows_name_their_gates_kinds() {
     assert_eq!(
         kinds("code"),
         [
-            ("plan".to_string(), Some(GateKind::Plan)),
-            ("review".to_string(), Some(GateKind::Blockers)),
-            ("merge-gate".to_string(), Some(GateKind::Merge)),
+            ("plan".to_string(), Some(RuleGateKind::Plan)),
+            ("review".to_string(), Some(RuleGateKind::Blockers)),
+            ("merge-gate".to_string(), Some(RuleGateKind::Merge)),
         ]
     );
-    assert_eq!(kinds("plan"), [("plan".to_string(), Some(GateKind::Plan))]);
+    assert_eq!(
+        kinds("plan"),
+        [("plan".to_string(), Some(RuleGateKind::Plan))]
+    );
 }

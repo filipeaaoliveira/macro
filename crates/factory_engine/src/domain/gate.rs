@@ -4,7 +4,7 @@
 mod test;
 
 use factory_records::domain::models::{Outcome, StepKey};
-use factory_records::domain::standing_rules::GateKind;
+use factory_records::domain::standing_rules::RuleGateKind;
 use macro_user_id::user_id::MacroUserIdStr;
 use serde::{Deserialize, Serialize};
 
@@ -62,7 +62,7 @@ pub struct GateRuling {
     /// The Step that asked.
     pub key: StepKey,
     /// The Gate's kind, whose rule may answer it.
-    pub kind: GateKind,
+    pub kind: RuleGateKind,
     /// For a review panel's Gate, the fix rounds in a row its Blockers went
     /// to since the panel's visits last started; nought for others.
     pub fix_rounds: u16,

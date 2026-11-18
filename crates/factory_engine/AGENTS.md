@@ -682,7 +682,7 @@ for the owner, whatever the ruling names.
   (`built_in_steps.rs`).
 - Change the default Control Files: `DEFAULT_CONTROL_FILES` in
   `src/domain/control_files.rs`, and its test.
-- Add a Standing Rule: a `GateKind` and its `StandingRule` in
+- Add a Standing Rule: a `RuleGateKind` and its `StandingRule` in
   `factory_records`' `domain/standing_rules.rs` (and the migration's checks
   of the stored names), the kind's field on `OrchestratorDefinition`,
   `kind_answers` and `rule_answer` in `src/domain/standing_rules.rs`, the

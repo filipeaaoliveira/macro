@@ -17,7 +17,7 @@ use factory_records::domain::models::{
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::{ReviewRound, ReviewRoundRepository};
 use factory_records::domain::standing_rules::{
-    GateKind, OrchestratorDefinition, ProjectRulesSet, RulesSource, RunRules,
+    OrchestratorDefinition, ProjectRulesSet, RuleGateKind, RulesSource, RunRules,
     StandingRulesRepository,
 };
 use macro_user_id::user_id::MacroUserIdStr;
@@ -1083,7 +1083,7 @@ where
             return Ok(None);
         };
         let held = match (&run.repository, ruling.kind) {
-            (Some(base), GateKind::Merge) => {
+            (Some(base), RuleGateKind::Merge) => {
                 self.repo.main_hold(base).await.map_err(internal)?.is_some()
             }
             _ => false,

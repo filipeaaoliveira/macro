@@ -11,7 +11,7 @@ use std::num::NonZeroU8;
 use factory_records::domain::models::{
     EntryId, InvalidName, MAX_QUESTION_BYTES, Outcome, Role, RunOutcome, checked_name,
 };
-use factory_records::domain::standing_rules::GateKind;
+use factory_records::domain::standing_rules::RuleGateKind;
 
 use crate::domain::standing_rules::{kind_answers, offers_kind_answers};
 use serde::{Deserialize, Serialize};
@@ -160,7 +160,7 @@ pub struct GateDefinition {
     /// Gate no rule answers. A Gate of a kind offers exactly its kind's
     /// answers. Left out of a Flow that has none, as `after` is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub kind: Option<GateKind>,
+    pub kind: Option<RuleGateKind>,
 }
 
 impl GateDefinition {
@@ -302,7 +302,7 @@ pub enum FlowError {
         /// The entry.
         entry: EntryId,
         /// The Gate's kind.
-        kind: GateKind,
+        kind: RuleGateKind,
         /// The answers a Gate of the kind offers.
         answers: [&'static str; 2],
     },
