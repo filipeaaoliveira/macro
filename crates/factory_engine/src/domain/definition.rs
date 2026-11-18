@@ -328,8 +328,7 @@ fn is_name(name: &str) -> bool {
 /// How the first secret `text` holds begins, if it holds one.
 fn secret_in(text: &str) -> Option<&'static str> {
     // A certificate or a public key is public: only a private key's block
-    // (`-----BEGIN RSA PRIVATE KEY-----`, `-----BEGIN PGP PRIVATE KEY
-    // BLOCK-----`) is a secret.
+    // (an RSA, EC or PGP one, whose label holds `PRIVATE KEY`) is a secret.
     let private_block = text.match_indices(PEM_BEGIN).any(|(at, _)| {
         // The block's label, up to the dashes that close it.
         let label = &text[at + PEM_BEGIN.len()..];

@@ -276,7 +276,11 @@ async fn scorers_need_distinct_names() {
 #[tokio::test]
 async fn a_file_holding_a_secret_does_not_read() {
     let agents = AGENTS.replace("large-model", concat!("ghp_", "0123456789abcdefABCDEF0123"));
-    let key = r#"{ "scorers": [{ "name": "speed", "settings": { "key": "-----BEGIN PRIVATE KEY-----" } }] }"#;
+    // Split so the repository's own secret scan does not read the fake key.
+    let key = concat!(
+        r#"{ "scorers": [{ "name": "speed", "settings": { "key": "-----BEGIN "#,
+        r#"PRIVATE KEY-----" } }] }"#
+    );
 
     assert_eq!(
         read(with("agents.json", &agents)).await,
@@ -670,8 +674,9 @@ async fn more_secret_shapes_do_not_read_and_public_text_does() {
         }
     };
 
+    // Split so the repository's own secret scan does not read the fake token.
     assert_eq!(
-        kind(concat!("xoxs-", "0123456789abcdefABCDEF")).await,
+        kind(concat!("xoxs", "-0123456789abcdefABCDEF")).await,
         Some("xoxs-")
     );
     assert_eq!(
@@ -686,7 +691,7 @@ async fn more_secret_shapes_do_not_read_and_public_text_does() {
     );
     assert_eq!(kind("AccountKey=abc;").await, Some("accountkey="));
     assert_eq!(
-        kind("postgres://admin:hunter2@db.internal/app").await,
+        kind("postgres://admin:hunter2@db.test/app").await,
         Some("://user:password@")
     );
     assert_eq!(kind("npm_config_registry_settings_value").await, None);
@@ -697,7 +702,7 @@ async fn more_secret_shapes_do_not_read_and_public_text_does() {
         Some("PRIVATE KEY")
     );
     assert_eq!(
-        kind("redis://:hunter2@cache.internal:6379").await,
+        kind("redis://:hunter2@cache.test:6379").await,
         Some("://user:password@")
     );
     assert_eq!(kind("xoxe-0123456789abcdefABCDEF").await, Some("xoxe-"));
