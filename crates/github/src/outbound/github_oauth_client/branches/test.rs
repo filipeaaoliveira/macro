@@ -295,15 +295,39 @@ async fn two_commits_merge_base_is_read_from_their_comparison() {
         "200 OK",
         r#"{"status":"diverged","merge_base_commit":{"sha":"3333333333333333333333333333333333333333"}}"#,
     );
+    let main_head = "1111111111111111111111111111111111111111";
+    let trial_head = "2222222222222222222222222222222222222222";
     let base = client
-        .merge_base("token", "macro", "app", "main-head", "trial-head")
+        .merge_base("token", "macro", "app", main_head, trial_head)
         .await
         .unwrap();
-    assert_eq!(base, "3333333333333333333333333333333333333333");
-    assert!(
-        server
-            .finish()
-            .starts_with("GET /repos/macro/app/compare/main-head...trial-head?per_page=1 HTTP/1.1")
+    assert_eq!(
+        base.as_deref(),
+        Some("3333333333333333333333333333333333333333")
+    );
+    assert!(server.finish().starts_with(&format!(
+        "GET /repos/macro/app/compare/{main_head}...{trial_head}?per_page=1 HTTP/1.1"
+    )));
+
+    // Commits sharing no history, or one GitHub does not have: no base.
+    let (unrelated, client) = answering("404 Not Found", r#"{"message":"No common ancestor"}"#);
+    assert_eq!(
+        client
+            .merge_base("token", "macro", "app", main_head, trial_head)
+            .await
+            .unwrap(),
+        None
+    );
+    unrelated.finish();
+
+    // An id that is not a full commit id is never sent.
+    let (_unused, client) = answering("200 OK", "{}");
+    assert_eq!(
+        client
+            .merge_base("token", "macro", "app", "main", trial_head)
+            .await
+            .unwrap(),
+        None
     );
 }
 

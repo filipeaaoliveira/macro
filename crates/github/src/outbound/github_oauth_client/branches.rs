@@ -356,8 +356,10 @@ impl GithubOauthImpl {
         Ok(matches!(compared.status.as_str(), "ahead" | "identical"))
     }
 
-    /// The best common ancestor of the commits `base` and `head`: the
-    /// newest commit both contain.
+    /// The best common ancestor of the commits `base` and `head`, both full
+    /// commit ids: the newest commit both contain. `None` when they share
+    /// no history, or one is not in the repository (GitHub answers 404),
+    /// and for an id that is not a full commit id.
     #[tracing::instrument(skip(self, access_token), err)]
     pub async fn merge_base(
         &self,
@@ -366,15 +368,22 @@ impl GithubOauthImpl {
         repo: &str,
         base: &str,
         head: &str,
-    ) -> Result<String, GithubError> {
-        let compared: CompareMergeBase = self
+    ) -> Result<Option<String>, GithubError> {
+        if !is_commit_id(base) || !is_commit_id(head) {
+            return Ok(None);
+        }
+        let compared: Result<CompareMergeBase, GithubError> = self
             .read(
                 access_token,
                 &format!("/repos/{owner}/{repo}/compare/{base}...{head}"),
                 &[("per_page", "1")],
                 "failed to compare commits",
             )
-            .await?;
-        Ok(compared.merge_base_commit.sha)
+            .await;
+        match compared {
+            Ok(compared) => Ok(Some(compared.merge_base_commit.sha)),
+            Err(GithubError::RepositoryUnavailable) => Ok(None),
+            Err(error) => Err(error),
+        }
     }
 }
