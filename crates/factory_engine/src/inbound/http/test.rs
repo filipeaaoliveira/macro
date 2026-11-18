@@ -423,7 +423,10 @@ async fn alice_s_run(repo: &FakeRepo) -> RunId {
         .expect("insert")
     {
         RunInsert::Inserted(run) => run.id,
-        RunInsert::NoSuchTask | RunInsert::TaskBusy | RunInsert::FiringStarted => {
+        RunInsert::NoSuchTask
+        | RunInsert::TaskBusy
+        | RunInsert::FiringStarted
+        | RunInsert::QueueFull => {
             panic!("a run with no task is kept")
         }
     }

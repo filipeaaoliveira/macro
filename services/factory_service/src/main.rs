@@ -25,7 +25,7 @@ use factory_engine::domain::gate_replies::GateReplySettings;
 use factory_engine::domain::gate_replies::service::GateRepliesImpl;
 use factory_engine::domain::insights::InsightsServiceImpl;
 use factory_engine::domain::main_hold::MainWatchServiceImpl;
-use factory_engine::domain::ports::{NoQueue, StepAgent};
+use factory_engine::domain::ports::StepAgent;
 use factory_engine::domain::pull_request_steps::PullRequestSteps;
 use factory_engine::domain::review_rounds::ReviewRoundsImpl;
 use factory_engine::domain::service::{FactoryServiceImpl, StepServiceImpl};
@@ -333,13 +333,12 @@ async fn serve<A: StepAgent + Clone>(
         service = service.with_questions(questions);
     }
     let service = Arc::new(service);
-    // Automations start their Runs through the Run API, as their creators.
-    // The Queue limit is not in yet: every firing's Run is taken.
+    // Automations start their Runs through the Run API, as their creators,
+    // which holds each creator's Queue to its limit.
     let automations = Arc::new(AutomationServiceImpl::new(
         parts.repo.clone(),
         service.clone(),
         parts.automation_triggers,
-        NoQueue,
     ));
     let api = factory_router(FactoryRouterState::new(
         service,

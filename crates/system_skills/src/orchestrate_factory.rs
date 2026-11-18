@@ -33,7 +33,7 @@ A routine's run and a factory Step's own agent session never answer a Gate: if a
 
 ## The Queue limit
 
-A team may set a Queue limit in its Orchestrator Definition, and a Project may set its own. The Queue counts every Gate and question waiting on the person, across all their Projects, against the limit of the Project the new Run would start in. Above it, no new Run starts there, for the person or for you: the start is refused with the code `queueFull`, and the Runs under way go on. Do not retry. Tell the person how many Gates wait on them, list them from `macro.factory.queue()`, and start the Run once they have answered some.
+A team may set a Queue limit in its Orchestrator Definition, and a Project may set its own. The Queue counts every Gate and question waiting on the person, and every Run of theirs that has not asked anything yet, across all their Projects, against the limit of the Project the new Run would start in. Above it, no new Run starts there, for the person, for you or for an Automation: the start is refused with the code `queueFull`, and the Runs under way go on. Do not retry. Tell the person how many Gates wait on them, list them from `macro.factory.queue()`, and start the Run once they have answered some.
 
 ## Report
 

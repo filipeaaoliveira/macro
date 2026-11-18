@@ -74,8 +74,9 @@ export class FactoryNamespace {
   /**
    * Start a Run of the built-in Flow `flow` for `request`, owned by the
    * caller. A Flow that works on a repository, such as `code`, needs its
-   * `repository` URL. Refused with code `queueFull` while more Gates and
-   * questions wait on the caller than the Project's Queue limit.
+   * `repository` URL. Refused with code `queueFull` while more of the
+   * caller's Runs wait on them, or have yet to ask them anything, than the
+   * Project's Queue limit.
    *
    * @example
    * const run = await macro.factory.start({

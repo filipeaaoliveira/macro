@@ -163,12 +163,16 @@ A person's Queue is their Runs waiting on them at a Gate or an agent's
 question (`GET /runs/waiting`, Insights' "Waiting on you"). A team's
 Orchestrator Definition, or a Project's own, may set a Queue limit
 (`queueLimit`, 0 to 1000; none by default). `POST /runs` counts the owner's
-Queue (`queue_size`: their open Runs at an unanswered Gate the stand-in has
-not answered) across all their Projects, against the limit of the rules the
-Run would start under, and refuses the Run while more than the limit wait
-(409 `queueFull`, naming the team's or the Project's rules), for the person
-and an agent alike; Runs under way go on. Two starts at once may both pass,
-and a Gate in the seconds before its rule or the stand-in decides counts:
+Queue across all their Projects, against the limit of the rules the Run
+would start under, and refuses the Run while the owner holds more places
+than the limit (409 `queueFull`, naming the team's or the Project's rules),
+for the person, an agent for them and an Automation alike; Runs under way
+go on. A place is an open Run at an unanswered Gate the stand-in has not
+answered, or an open Run that has not reached a Gate yet, which holds the
+place it will ask for (`queue_size`). The count and the new Run are kept in
+one transaction behind a lock on the owner's Queue (`insert_run`,
+`RunInsert::QueueFull`), so two starts at once are counted one after the
+other. A Gate in the seconds before its rule or the stand-in decides counts:
 the limit holds the Queue back, not to the exact count.
 
 `GET /insights?from=&to=&timeZone=&flow=` (`inbound/insights.rs`,
@@ -939,9 +943,9 @@ Automation), never started again. A firing starts nothing, and records why
 repository event about a Run's own branch (`own_branch`), its creator is
 no longer on its team (`creator_left_team`) or their account is an
 agent's (`agent_account`), the queue takes no more of the creator's Runs
-(`queue_full`, the `RunQueue` port: the Queue limit plugs in there, and
-until it does `NoQueue` takes every Run; it must reserve the place it
-admits atomically, or two firings at once both pass a full queue), a Run already runs on its task,
+(`queue_full`: the Run API refuses the Run with `QueueFull` under the
+limit of the rules it would start under, the one the creator's own starts
+meet, counted as the Run is kept), a Run already runs on its task,
 whoever started it (`task_busy`: checked before the Run is created, and
 held by the unique index `factory_run_automation_task_open_idx` between
 two firings that race; a person's Run started in the same instant can still

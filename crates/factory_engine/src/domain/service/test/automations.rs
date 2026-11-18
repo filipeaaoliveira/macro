@@ -8,6 +8,7 @@ use factory_records::domain::automations::{
 };
 use factory_records::domain::models::{RunOutcome, TeamMembership};
 use factory_records::domain::ports::RunRepository;
+use factory_records::domain::standing_rules::OrchestratorDefinition;
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
@@ -17,7 +18,7 @@ use crate::domain::automations::{AutomationRequest, GithubFiring, RoutineFiring}
 use crate::domain::fakes::{FakeGithub, FakeRepo};
 use crate::domain::models::FactoryError;
 use crate::domain::ports::{
-    AutomationService, AutomationTriggerError, AutomationTriggers, NoQueue, RunQueue,
+    AutomationService, AutomationTriggerError, AutomationTriggers, FactoryService,
 };
 use crate::domain::service::FactoryServiceImpl;
 
@@ -73,15 +74,6 @@ impl AutomationTriggers for FakeTriggers {
     }
 }
 
-/// A queue that takes no more Runs.
-struct FullQueue;
-
-impl RunQueue for FullQueue {
-    async fn admits(&self, _owner: &MacroUserIdStr<'static>) -> Result<bool, rootcause::Report> {
-        Ok(false)
-    }
-}
-
 type Runs =
     FactoryServiceImpl<FakeRepo, FakeWorkflows, FakeExecutor, FakeRepo, FakeRepo, FakeGithub>;
 
@@ -109,13 +101,12 @@ fn team_repo() -> FakeRepo {
     repo
 }
 
-fn automations<Q: RunQueue>(
+fn automations(
     repo: &FakeRepo,
     runs: Runs,
     triggers: &FakeTriggers,
-    queue: Q,
-) -> AutomationServiceImpl<FakeRepo, Runs, FakeTriggers, Q> {
-    AutomationServiceImpl::new(repo.clone(), Arc::new(runs), triggers.clone(), queue)
+) -> AutomationServiceImpl<FakeRepo, Runs, FakeTriggers> {
+    AutomationServiceImpl::new(repo.clone(), Arc::new(runs), triggers.clone())
 }
 
 fn reply_automation(trigger: AutomationTrigger) -> AutomationRequest {
@@ -152,7 +143,7 @@ async fn a_schedule_starts_a_run_each_time_its_routine_runs() {
     let repo = team_repo();
     let workflows = FakeWorkflows::default();
     let triggers = FakeTriggers::default();
-    let automations = automations(&repo, service(&repo, &workflows), &triggers, NoQueue);
+    let automations = automations(&repo, service(&repo, &workflows), &triggers);
 
     let created = automations
         .create_automation(
@@ -210,7 +201,7 @@ async fn a_task_event_starts_one_run_on_its_task_at_a_time() {
     let repo = team_repo();
     let workflows = FakeWorkflows::default();
     let triggers = FakeTriggers::default();
-    let automations = automations(&repo, service(&repo, &workflows), &triggers, NoQueue);
+    let automations = automations(&repo, service(&repo, &workflows), &triggers);
     automations
         .create_automation(julia(), true, reply_automation(status_in_progress()))
         .await
@@ -258,7 +249,6 @@ async fn a_repository_event_starts_a_run_on_its_repository() {
         &repo,
         code_service(&repo, &workflows, &github),
         &triggers,
-        NoQueue,
     );
     let request = AutomationRequest {
         name: "Review new pull requests".to_string(),
@@ -344,7 +334,7 @@ async fn a_signed_webhook_call_starts_a_run_once() {
     let repo = team_repo();
     let workflows = FakeWorkflows::default();
     let triggers = FakeTriggers::default();
-    let automations = automations(&repo, service(&repo, &workflows), &triggers, NoQueue);
+    let automations = automations(&repo, service(&repo, &workflows), &triggers);
     let created = automations
         .create_automation(julia(), true, reply_automation(AutomationTrigger::Webhook))
         .await
@@ -419,7 +409,7 @@ async fn only_its_creator_makes_and_fires_an_automation() {
         .insert(teo().to_string());
     let workflows = FakeWorkflows::default();
     let triggers = FakeTriggers::default();
-    let automations = automations(&repo, service(&repo, &workflows), &triggers, NoQueue);
+    let automations = automations(&repo, service(&repo, &workflows), &triggers);
     let loner = MacroUserIdStr::try_from("macro|loner@example.com".to_string()).expect("valid");
 
     let by_program = automations
@@ -454,7 +444,7 @@ async fn an_automation_switched_off_starts_nothing() {
     let repo = team_repo();
     let workflows = FakeWorkflows::default();
     let triggers = FakeTriggers::default();
-    let automations = automations(&repo, service(&repo, &workflows), &triggers, NoQueue);
+    let automations = automations(&repo, service(&repo, &workflows), &triggers);
     let created = automations
         .create_automation(julia(), true, reply_automation(status_in_progress()))
         .await
@@ -498,13 +488,79 @@ async fn an_automation_switched_off_starts_nothing() {
     );
 }
 
-/// A full queue holds a firing back, and says so.
+/// A full Queue holds a firing back, and says so: the creator's Queue
+/// limit, the one their own starts meet, counting the places their Runs
+/// hold, the Run an earlier firing just started among them.
 #[tokio::test]
 async fn a_full_queue_starts_no_run() {
     let repo = team_repo();
+    repo.team_rules.lock().expect("rules").insert(
+        TEAM,
+        OrchestratorDefinition {
+            queue_limit: Some(1),
+            ..OrchestratorDefinition::DEFAULT
+        },
+    );
     let workflows = FakeWorkflows::default();
     let triggers = FakeTriggers::default();
-    let automations = automations(&repo, service(&repo, &workflows), &triggers, FullQueue);
+    let automations = automations(&repo, service(&repo, &workflows), &triggers);
+    let own = service(&repo, &workflows);
+    let own_start = || {
+        own.create_run(
+            julia(),
+            "reply".to_string(),
+            "Say hello".to_string(),
+            None,
+            None,
+            false,
+        )
+    };
+    automations
+        .create_automation(
+            julia(),
+            true,
+            reply_automation(AutomationTrigger::Schedule {
+                cron: "0 0 9 * * Mon-Fri".to_string(),
+                timezone: "Europe/Lisbon".to_string(),
+            }),
+        )
+        .await
+        .expect("created");
+
+    own_start().await.expect("her own run holds one place");
+    let fired = automations
+        .fire_from_routine(&julia(), ROUTINE, routine_firing("run-1", None))
+        .await
+        .expect("fired");
+    assert!(fired.run_id.is_some(), "at the limit, not above: {fired:?}");
+
+    let held = automations
+        .fire_from_routine(&julia(), ROUTINE, routine_firing("run-2", None))
+        .await
+        .expect("fired");
+    assert_eq!(held.skipped, Some(FiringSkip::QueueFull));
+    assert_eq!(held.run_id, None);
+    assert_eq!(workflows.started.lock().expect("started").len(), 2);
+    let refused = own_start().await;
+    assert!(
+        matches!(refused, Err(FactoryError::QueueFull { limit: 1, .. })),
+        "the firing's run holds its place against her own starts too: {refused:?}"
+    );
+}
+
+/// An Automation acts as its creator, so a task they cannot see, someone
+/// else's, gets no Run, and so no thread posted in their name: the firing
+/// is refused as the Run API would refuse them.
+#[tokio::test]
+async fn a_task_its_creator_cannot_see_gets_no_run() {
+    let repo = team_repo();
+    repo.hidden
+        .lock()
+        .expect("hidden")
+        .insert((julia().to_string(), TASK));
+    let workflows = FakeWorkflows::default();
+    let triggers = FakeTriggers::default();
+    let automations = automations(&repo, service(&repo, &workflows), &triggers);
     automations
         .create_automation(julia(), true, reply_automation(status_in_progress()))
         .await
@@ -515,8 +571,10 @@ async fn a_full_queue_starts_no_run() {
         .await
         .expect("fired");
 
-    assert_eq!(fired.skipped, Some(FiringSkip::QueueFull));
+    assert_eq!(fired.skipped, Some(FiringSkip::Refused));
+    assert_eq!(fired.run_id, None);
     assert!(workflows.started.lock().expect("started").is_empty());
+    assert!(repo.runs.lock().expect("runs").is_empty());
 }
 
 /// A routine the scheduler refuses takes its Automation with it, and the
@@ -529,7 +587,7 @@ async fn a_refused_routine_keeps_no_automation() {
         refusal: Some("event-trigger management is not enabled"),
         ..FakeTriggers::default()
     };
-    let automations = automations(&repo, service(&repo, &workflows), &triggers, NoQueue);
+    let automations = automations(&repo, service(&repo, &workflows), &triggers);
 
     let refused = automations
         .create_automation(julia(), true, reply_automation(status_in_progress()))
@@ -550,7 +608,7 @@ async fn only_its_creator_switches_an_automation_on() {
     let repo = team_repo();
     let workflows = FakeWorkflows::default();
     let triggers = FakeTriggers::default();
-    let automations = automations(&repo, service(&repo, &workflows), &triggers, NoQueue);
+    let automations = automations(&repo, service(&repo, &workflows), &triggers);
     let id = automations
         .create_automation(teo(), true, reply_automation(status_in_progress()))
         .await
@@ -589,7 +647,7 @@ async fn an_automation_whose_creator_left_starts_nothing() {
     let repo = team_repo();
     let workflows = FakeWorkflows::default();
     let triggers = FakeTriggers::default();
-    let automations = automations(&repo, service(&repo, &workflows), &triggers, NoQueue);
+    let automations = automations(&repo, service(&repo, &workflows), &triggers);
     automations
         .create_automation(teo(), true, reply_automation(status_in_progress()))
         .await
@@ -622,7 +680,7 @@ async fn the_routine_of_a_deleted_automation_is_switched_off() {
     let repo = team_repo();
     let workflows = FakeWorkflows::default();
     let triggers = FakeTriggers::default();
-    let automations = automations(&repo, service(&repo, &workflows), &triggers, NoQueue);
+    let automations = automations(&repo, service(&repo, &workflows), &triggers);
     automations
         .create_automation(julia(), true, reply_automation(status_in_progress()))
         .await

@@ -329,6 +329,7 @@ async fn the_queue_limit_is_kept_with_the_rules(pool: PgPool) {
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: rules,
+            automation: None,
         })
         .await
         .expect("insert")

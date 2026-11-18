@@ -7,7 +7,7 @@ use chrono::Utc;
 use factory_records::domain::gate_replies::GateReplyRepository as _;
 use factory_records::domain::models::{
     AgentName, ControlFileChanges, EntryId, NewRun, Outcome, Repository, Role, RunId, RunInsert,
-    StandInAnswer, StepKey, StepSession, TeamMembership,
+    RunOutcome, StandInAnswer, StepKey, StepSession, TeamMembership,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::standing_rules::{
@@ -75,6 +75,7 @@ async fn waiting_with(
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: rules,
+            automation: None,
         })
         .await
         .expect("insert")
@@ -374,9 +375,10 @@ fn julia_s_team(repo: &FakeRepo, definition: OrchestratorDefinition) -> Uuid {
     team_id
 }
 
-/// Above the Queue limit no new Run starts, whoever asks, and says why;
-/// a Run already going goes on, and once the Queue is back at its limit
-/// Runs start again. A Project's own limit replaces the team's.
+/// Above the Queue limit no new Run starts, whoever asks, and says why; a
+/// Run just started holds the place it will ask for; a Run already going
+/// goes on, and once the Queue is back at its limit Runs start again. A
+/// Project's own limit replaces the team's.
 #[tokio::test]
 async fn above_the_queue_limit_no_new_run_starts() {
     let repo = FakeRepo::default();
@@ -401,16 +403,19 @@ async fn above_the_queue_limit_no_new_run_starts() {
     };
 
     let first = waiting_at(&repo, "plan", "done", &["approve", "revise"]).await;
-    start().await.expect("one waits: at the limit, not above");
+    let started = start()
+        .await
+        .expect("one waits: at the limit, not above")
+        .run
+        .id;
 
-    waiting_at(&repo, "plan", "done", &["approve", "revise"]).await;
+    // The Run just started has not asked anything yet, but holds its place.
     let refused = start().await;
     assert!(
         matches!(refused, Err(FactoryError::QueueFull { limit: 1, .. })),
         "{refused:?}"
     );
-    let started = workflows.started.lock().expect("started").len();
-    assert_eq!(started, 1);
+    assert_eq!(workflows.started.lock().expect("started").len(), 1);
 
     // The Runs under way go on: their Gates still take answers.
     service
@@ -438,7 +443,12 @@ async fn above_the_queue_limit_no_new_run_starts() {
     )
     .await
     .expect("recorded");
-    start().await.expect("back at the limit");
+    let again = start().await.expect("back at the limit").run.id;
+    for run in [started, again] {
+        repo.end_run(run, RunOutcome::Cancelled)
+            .await
+            .expect("ended");
+    }
 
     // A Gate the stand-in answered, which the owner may still override,
     // does not wait on them in person.
@@ -457,6 +467,7 @@ async fn above_the_queue_limit_no_new_run_starts() {
     )
     .await
     .expect("stand in");
+    waiting_at(&repo, "plan", "done", &["approve", "revise"]).await;
     start().await.expect("a stood-in gate is not in the queue");
 
     // A Project's own rules, with no limit, replace the team's.
@@ -471,7 +482,6 @@ async fn above_the_queue_limit_no_new_run_starts() {
         .lock()
         .expect("rules")
         .insert((team_id, project), OrchestratorDefinition::DEFAULT);
-    waiting_at(&repo, "plan", "done", &["approve", "revise"]).await;
     assert!(matches!(
         start().await,
         Err(FactoryError::QueueFull { limit: 1, .. })

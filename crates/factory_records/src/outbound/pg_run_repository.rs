@@ -419,6 +419,50 @@ impl StepRow {
 }
 
 /// A stored confidence, which the schema keeps between 0 and 100 percent.
+/// The places `user_id` holds in their Queue, counted up to `limit`: their
+/// Runs that have not ended and either wait on them in person at a Gate
+/// (not one the stand-in answered, while the owner may still override it)
+/// or have not reached a Gate yet, so a Run just started holds the place it
+/// will ask for. As `list_waiting_runs`: the person's open Runs through
+/// `factory_run_user_open_idx`, each checked by the Gates' primary key, up
+/// to the limit, under a timeout that also bounds the rest of the
+/// transaction.
+async fn queue_places(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    user_id: &MacroUserIdStr<'static>,
+    limit: u16,
+) -> Result<u16, PgRunRepositoryErr> {
+    sqlx::query!("SET LOCAL statement_timeout = '5s'")
+        .execute(&mut **transaction)
+        .await?;
+    let size = sqlx::query_scalar!(
+        r#"
+        SELECT count(*) AS "size!"
+        FROM (
+            SELECT 1
+            FROM factory_run r
+            WHERE r.user_id = $1
+                AND r.ended_at IS NULL
+                AND (
+                    EXISTS (
+                        SELECT 1 FROM factory_gate g
+                        WHERE g.run_id = r.id AND g.answer IS NULL
+                            AND g.stand_in_answer IS NULL
+                    )
+                    OR NOT EXISTS (SELECT 1 FROM factory_gate g WHERE g.run_id = r.id)
+                )
+            LIMIT $2
+        ) places
+        "#,
+        user_id.as_ref(),
+        i64::from(limit),
+    )
+    .fetch_one(&mut **transaction)
+    .await?;
+    u16::try_from(size)
+        .map_err(|_| PgRunRepositoryErr::OutOfRange(i32::try_from(size).unwrap_or(i32::MAX)))
+}
+
 fn percent(stored: i16) -> Result<u8, PgRunRepositoryErr> {
     u8::try_from(stored).map_err(|_| PgRunRepositoryErr::OutOfRange(i32::from(stored)))
 }
@@ -476,6 +520,23 @@ impl RunRepository for PgRunRepository {
 
     #[tracing::instrument(err, skip_all, fields(id = %run.id))]
     async fn insert_run(&self, run: NewRun<'_>) -> Result<RunInsert, Self::Err> {
+        let mut transaction = self.pool.begin().await?;
+        // Under a Queue limit, the places the owner holds are counted and
+        // the Run kept in one transaction, behind a lock on the owner's
+        // Queue: two starts at once, a person's or an Automation's, are
+        // counted one after the other, the second with the first's place.
+        if let Some(limit) = run.standing_rules.definition.queue_limit {
+            sqlx::query!(
+                "SELECT pg_advisory_xact_lock(hashtextextended('factory_queue:' || $1, 0))",
+                run.user_id.as_ref(),
+            )
+            .execute(&mut *transaction)
+            .await?;
+            let held = queue_places(&mut transaction, run.user_id, limit.saturating_add(1)).await?;
+            if held > limit {
+                return Ok(RunInsert::QueueFull);
+            }
+        }
         let inserted = sqlx::query_as!(
             RunRow,
             r#"
@@ -513,11 +574,15 @@ impl RunRepository for PgRunRepository {
             run.automation.map(|start| start.automation.trigger.as_ref()),
             run.automation.map(|start| start.firing_key),
         )
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *transaction)
         .await;
 
         match inserted {
-            Ok(row) => Ok(RunInsert::Inserted(Box::new(Run::try_from(row)?))),
+            Ok(row) => {
+                let run = Run::try_from(row)?;
+                transaction.commit().await?;
+                Ok(RunInsert::Inserted(Box::new(run)))
+            }
             Err(sqlx::Error::Database(error)) if error.constraint() == Some(TASK_FOREIGN_KEY) => {
                 Ok(RunInsert::NoSuchTask)
             }
@@ -590,7 +655,6 @@ impl RunRepository for PgRunRepository {
     }
 
     #[tracing::instrument(err, skip(self, user_id))]
-    #[tracing::instrument(err, skip(self, user_id))]
     async fn display_name(
         &self,
         user_id: &MacroUserIdStr<'static>,
@@ -609,6 +673,7 @@ impl RunRepository for PgRunRepository {
         Ok(row.and_then(|row| display_name(row.first_name.as_deref(), row.last_name.as_deref())))
     }
 
+    #[tracing::instrument(err, skip(self, user_id))]
     async fn is_agent_account(&self, user_id: &MacroUserIdStr<'static>) -> Result<bool, Self::Err> {
         let is_agent = sqlx::query_scalar!(
             r#"SELECT "isAgent" FROM "User" WHERE id = $1"#,
@@ -869,37 +934,10 @@ impl RunRepository for PgRunRepository {
         user_id: &MacroUserIdStr<'static>,
         limit: u16,
     ) -> Result<u16, Self::Err> {
-        // As `list_waiting_runs`: the person's open Runs through
-        // `factory_run_user_open_idx`, each checked by the Gates' primary
-        // key, up to the limit, under a timeout.
         let mut transaction = self.pool.begin().await?;
-        sqlx::query!("SET LOCAL statement_timeout = '5s'")
-            .execute(&mut *transaction)
-            .await?;
-        let size = sqlx::query_scalar!(
-            r#"
-            SELECT count(*) AS "size!"
-            FROM (
-                SELECT 1
-                FROM factory_run r
-                WHERE r.user_id = $1
-                    AND r.ended_at IS NULL
-                    AND EXISTS (
-                        SELECT 1 FROM factory_gate g
-                        WHERE g.run_id = r.id AND g.answer IS NULL
-                            AND g.stand_in_answer IS NULL
-                    )
-                LIMIT $2
-            ) waiting
-            "#,
-            user_id.as_ref(),
-            i64::from(limit),
-        )
-        .fetch_one(&mut *transaction)
-        .await?;
+        let size = queue_places(&mut transaction, user_id, limit).await?;
         transaction.commit().await?;
-        u16::try_from(size)
-            .map_err(|_| PgRunRepositoryErr::OutOfRange(i32::try_from(size).unwrap_or(i32::MAX)))
+        Ok(size)
     }
 
     #[tracing::instrument(err, skip(self, ids), fields(runs = ids.len()))]

@@ -435,7 +435,9 @@ pub struct NewRun<'a> {
     pub control_file_patterns: &'a [String],
     /// The team those patterns came from; none when they are the default.
     pub control_files_team_id: Option<Uuid>,
-    /// The Standing Rules that answer its Gates.
+    /// The Standing Rules that answer its Gates. Their Queue limit is not
+    /// kept: it holds the Run back while its owner holds more places in
+    /// their Queue than it, counted as the Run is kept.
     pub standing_rules: RunRules,
     /// The Automation that starts it, if one does: then no other Run an
     /// Automation started may be running on its task.
@@ -455,6 +457,9 @@ pub enum RunInsert {
     TaskBusy,
     /// A Run of the same Automation's firing is kept already.
     FiringStarted,
+    /// The owner holds more places in their Queue than the Queue limit of
+    /// the Run's rules, counted with the Run kept, so nothing was kept.
+    QueueFull,
 }
 
 /// Whether a Run was linked to a task.

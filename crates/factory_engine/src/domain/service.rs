@@ -517,33 +517,6 @@ where
         Ok(())
     }
 
-    /// Fails when more Gates and questions wait on `user_id` than the Queue
-    /// limit of `rules`, which a new Run of theirs would start under. Runs
-    /// already going are not touched.
-    async fn queue_has_room(
-        &self,
-        user_id: &MacroUserIdStr<'static>,
-        rules: &RunRules,
-    ) -> Result<(), FactoryError> {
-        let Some(limit) = rules.definition.queue_limit else {
-            return Ok(());
-        };
-        // Each Run waits on at most one Gate at a time; counting one past
-        // the limit is enough to tell.
-        let size = self
-            .repo
-            .queue_size(user_id, limit.saturating_add(1))
-            .await
-            .map_err(internal)?;
-        if size > limit {
-            return Err(FactoryError::QueueFull {
-                limit,
-                set_by: rules.source,
-            });
-        }
-        Ok(())
-    }
-
     /// Record the Run `order` asks for and start it, as
     /// [`FactoryService::create_run`] does, keeping the Automation that
     /// starts it if one does.
@@ -601,12 +574,13 @@ where
         // team's or the Project's rules, or a task linked later, does not
         // change which of its Gates a rule answers.
         let standing_rules = self.run_rules(&actor, team, task_id).await?;
-        // Above the Queue limit of the rules it would start under, no new
-        // Run starts, whoever asks: the person, or an agent for them.
-        self.queue_has_room(&actor, &standing_rules).await?;
-
         // The Run and its task are kept in one write, so a task deleted
-        // since it was checked leaves nothing behind.
+        // since it was checked leaves nothing behind. Above the Queue limit
+        // of the rules it would start under, counted in the same write, no
+        // new Run starts, whoever asks: the person, an agent for them, or
+        // an Automation; two starts at once are counted one after the other.
+        let queue_limit = standing_rules.definition.queue_limit;
+        let rules_source = standing_rules.source;
         let run_id = RunId::generate();
         tracing::Span::current().record("run_id", tracing::field::display(run_id));
         let run = match self
@@ -631,6 +605,12 @@ where
             RunInsert::NoSuchTask => return Err(FactoryError::UnknownTask),
             RunInsert::TaskBusy => return Err(FactoryError::TaskBusy),
             RunInsert::FiringStarted => return Err(FactoryError::FiringRepeated),
+            RunInsert::QueueFull => {
+                return Err(FactoryError::QueueFull {
+                    limit: queue_limit.unwrap_or_default(),
+                    set_by: rules_source,
+                });
+            }
         };
 
         // The Run is recorded before its workflow starts, so the workflow can

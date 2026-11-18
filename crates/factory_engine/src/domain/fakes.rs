@@ -407,6 +407,15 @@ impl RunRepository for FakeRepo {
         {
             return Ok(RunInsert::TaskBusy);
         }
+        // As the database: the places the owner holds are counted with the
+        // Run kept, and its Queue limit is not kept.
+        if let Some(limit) = standing_rules.definition.queue_limit
+            && self.queue_size(user_id, limit.saturating_add(1)).await? > limit
+        {
+            return Ok(RunInsert::QueueFull);
+        }
+        let mut standing_rules = standing_rules;
+        standing_rules.definition.queue_limit = None;
         let run = Run {
             id,
             request: request.to_string(),
@@ -623,10 +632,15 @@ impl RunRepository for FakeRepo {
         user_id: &MacroUserIdStr<'static>,
         limit: u16,
     ) -> Result<u16, FakeError> {
-        let waiting: BTreeSet<RunId> = self
-            .steps
-            .lock()
-            .expect("steps")
+        // As the database: a Run waiting at a Gate the stand-in has not
+        // answered, or one that has not reached a Gate yet.
+        let steps = self.steps.lock().expect("steps");
+        let gated: BTreeSet<RunId> = steps
+            .iter()
+            .filter(|(_, step)| step.gate.is_some())
+            .map(|(run, _)| *run)
+            .collect();
+        let waiting: BTreeSet<RunId> = steps
             .iter()
             .filter(|(_, step)| {
                 step.gate
@@ -635,12 +649,17 @@ impl RunRepository for FakeRepo {
             })
             .map(|(run, _)| *run)
             .collect();
+        drop(steps);
         let size = self
             .runs
             .lock()
             .expect("runs")
             .values()
-            .filter(|run| run.user_id == *user_id && run.end.is_none() && waiting.contains(&run.id))
+            .filter(|run| {
+                run.user_id == *user_id
+                    && run.end.is_none()
+                    && (waiting.contains(&run.id) || !gated.contains(&run.id))
+            })
             .count()
             .min(usize::from(limit));
         Ok(u16::try_from(size).unwrap_or(limit))

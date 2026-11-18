@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT count(*) AS \"size!\"\n        FROM (\n            SELECT 1\n            FROM factory_run r\n            WHERE r.user_id = $1\n                AND r.ended_at IS NULL\n                AND (\n                    EXISTS (\n                        SELECT 1 FROM factory_gate g\n                        WHERE g.run_id = r.id AND g.answer IS NULL\n                            AND g.stand_in_answer IS NULL\n                    )\n                    OR NOT EXISTS (SELECT 1 FROM factory_gate g WHERE g.run_id = r.id)\n                )\n            LIMIT $2\n        ) places\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "size!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "2dcc2523538e5e6579a62afe709eba3bbc358fd249a0f6d5e3d08c14b4b8cfd1"
+}

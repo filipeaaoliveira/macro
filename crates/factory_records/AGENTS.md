@@ -198,9 +198,13 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   (`factory_gate.agent_session_id`, only with a person's answer, never a
   rule's or the stand-in's); `past_answers`, `answered_gates` and Run
   insights leave such answers out, as they do the stand-in's.
-  `queue_size` counts one owner's open Runs at an unanswered Gate the
-  stand-in has not answered, through `factory_run_user_open_idx`, up to its
-  limit.
+  `queue_size` counts the places one owner holds in their Queue: their
+  open Runs at an unanswered Gate the stand-in has not answered, and those
+  that have not reached a Gate yet, through `factory_run_user_open_idx`, up
+  to its limit. Under a Queue limit, `insert_run` counts them and keeps the
+  Run in one transaction behind a transaction-scoped advisory lock on the
+  owner (`factory_queue:<user id>`), and keeps nothing above the limit
+  (`RunInsert::QueueFull`).
 - `factory_run.standing_rules`, `standing_rules_source` and
   `standing_rules_project_id` are set once, by `insert_run`; all null for
   a Run created before Runs kept rules. `answer_gate_by_rule` records a

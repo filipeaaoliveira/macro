@@ -58,7 +58,10 @@ pub(super) async fn insert(repo: &PgRunRepository, id: RunId, request: &str) -> 
         .expect("insert")
     {
         RunInsert::Inserted(run) => *run,
-        RunInsert::NoSuchTask | RunInsert::TaskBusy | RunInsert::FiringStarted => {
+        RunInsert::NoSuchTask
+        | RunInsert::TaskBusy
+        | RunInsert::FiringStarted
+        | RunInsert::QueueFull => {
             panic!("a run with no task has no task to miss")
         }
     }
@@ -1209,7 +1212,10 @@ async fn insert_on_task(
         .expect("insert")
     {
         RunInsert::Inserted(run) => run.id,
-        RunInsert::NoSuchTask | RunInsert::TaskBusy | RunInsert::FiringStarted => {
+        RunInsert::NoSuchTask
+        | RunInsert::TaskBusy
+        | RunInsert::FiringStarted
+        | RunInsert::QueueFull => {
             panic!("the task exists")
         }
     }

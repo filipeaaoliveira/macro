@@ -63,10 +63,11 @@ pub trait RunRepository: Send + Sync + 'static {
         limit: u16,
     ) -> impl Future<Output = Result<Vec<Run>, Self::Err>> + Send;
 
-    /// The size of `user_id`'s Queue, counted up to `limit`: their Runs
-    /// that have not ended and wait on them in person at a Gate, leaving
-    /// out a Gate the stand-in answered, while the owner may still
-    /// override it.
+    /// The places `user_id` holds in their Queue, counted up to `limit`:
+    /// their Runs that have not ended and wait on them in person at a Gate,
+    /// leaving out a Gate the stand-in answered, while the owner may still
+    /// override it, and those that have not reached a Gate yet, which hold
+    /// the place they will ask for.
     fn queue_size(
         &self,
         user_id: &MacroUserIdStr<'static>,

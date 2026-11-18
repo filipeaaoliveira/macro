@@ -8410,6 +8410,7 @@ name = "factory_records"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "futures",
  "lazy-regex",
  "macro_db_migrator",
  "macro_user_id",

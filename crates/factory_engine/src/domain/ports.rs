@@ -809,29 +809,6 @@ pub enum AutomationTriggerError {
     Unavailable(rootcause::Report),
 }
 
-/// The queue of Runs an Automation's firing joins.
-///
-/// The factory's Queue limit plugs in here: a queue that takes no more of
-/// `owner`'s Runs now has the firing skipped as `queue_full`, recorded on
-/// the firing. Until the Queue lands, [`NoQueue`] takes every Run.
-pub trait RunQueue: Send + Sync + 'static {
-    /// Whether the queue takes another Run of `owner`'s now.
-    fn admits(
-        &self,
-        owner: &MacroUserIdStr<'static>,
-    ) -> impl Future<Output = Result<bool, rootcause::Report>> + Send;
-}
-
-/// A queue with no limit: it takes every Run.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct NoQueue;
-
-impl RunQueue for NoQueue {
-    async fn admits(&self, _owner: &MacroUserIdStr<'static>) -> Result<bool, rootcause::Report> {
-        Ok(true)
-    }
-}
-
 /// Inbound service port: a team's Automations and their firings.
 pub trait AutomationService: Send + Sync + 'static {
     /// `actor`'s team's Automations.

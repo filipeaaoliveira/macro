@@ -21,7 +21,7 @@ use super::{
 };
 use crate::domain::models::FactoryError;
 use crate::domain::ports::{
-    AutomationService, AutomationTriggerError, AutomationTriggers, FactoryService, RunQueue,
+    AutomationService, AutomationTriggerError, AutomationTriggers, FactoryService,
 };
 
 fn internal(error: impl std::error::Error + Send + Sync + 'static) -> FactoryError {
@@ -50,29 +50,26 @@ fn webhook_secret() -> String {
 
 /// Keeps a team's Automations, makes the routines that fire them, and
 /// starts their Runs through the Run API, as their creators.
-pub struct AutomationServiceImpl<R, F, T, Q> {
+pub struct AutomationServiceImpl<R, F, T> {
     repo: R,
     runs: Arc<F>,
     triggers: T,
-    queue: Q,
 }
 
-impl<R, F, T, Q> AutomationServiceImpl<R, F, T, Q>
+impl<R, F, T> AutomationServiceImpl<R, F, T>
 where
     R: AutomationRepository + RunRepository,
     F: FactoryService,
     T: AutomationTriggers,
-    Q: RunQueue,
 {
     /// Create the Automation service over the records, the Run API (shared
-    /// with its router), the routines that fire Automations, and the queue
-    /// their Runs join.
-    pub fn new(repo: R, runs: Arc<F>, triggers: T, queue: Q) -> Self {
+    /// with its router, and holding each creator's Queue to its limit) and
+    /// the routines that fire Automations.
+    pub fn new(repo: R, runs: Arc<F>, triggers: T) -> Self {
         Self {
             repo,
             runs,
             triggers,
-            queue,
         }
     }
 
@@ -164,14 +161,6 @@ where
         if team.is_none_or(|team| team.team_id != automation.team_id) {
             return Ok(FiringEnd::Skipped(FiringSkip::CreatorLeftTeam));
         }
-        if !self
-            .queue
-            .admits(&automation.created_by)
-            .await
-            .map_err(FactoryError::Internal)?
-        {
-            return Ok(FiringEnd::Skipped(FiringSkip::QueueFull));
-        }
         // Never a second Run on a task while one runs there, whoever
         // started it. Two firings that race past this check are held to
         // one by the Runs' index (`TaskBusy` below).
@@ -194,6 +183,11 @@ where
         {
             Ok(detail) => Ok(FiringEnd::Started(detail.run.id)),
             Err(FactoryError::TaskBusy) => Ok(FiringEnd::Skipped(FiringSkip::TaskBusy)),
+            // The Run API holds the creator's Queue to the limit of the
+            // rules the Run would start under, shared with their own starts
+            // and the Orchestrator's, and counts two firings at once one
+            // after the other.
+            Err(FactoryError::QueueFull { .. }) => Ok(FiringEnd::Skipped(FiringSkip::QueueFull)),
             Err(
                 error @ (FactoryError::Upstream(_)
                 | FactoryError::Internal(_)
@@ -249,12 +243,11 @@ fn result(end: FiringEnd, repeated: bool) -> FiringResult {
     }
 }
 
-impl<R, F, T, Q> AutomationService for AutomationServiceImpl<R, F, T, Q>
+impl<R, F, T> AutomationService for AutomationServiceImpl<R, F, T>
 where
     R: AutomationRepository + RunRepository,
     F: FactoryService,
     T: AutomationTriggers,
-    Q: RunQueue,
 {
     #[tracing::instrument(skip_all)]
     async fn automations(

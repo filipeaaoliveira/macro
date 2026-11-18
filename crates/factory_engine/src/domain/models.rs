@@ -798,10 +798,12 @@ pub enum FactoryError {
     /// for the owner in person.
     #[error(transparent)]
     ReservedForAPerson(#[from] PersonOnly),
-    /// More Gates and questions wait on the person than the Queue limit of
-    /// the rules a new Run of theirs would start under.
+    /// The person holds more places in their Queue (Runs waiting on them
+    /// at a Gate or a question, and Runs that have not reached one yet)
+    /// than the Queue limit of the rules a new Run of theirs would start
+    /// under.
     #[error(
-        "more than {limit} gates and questions wait on you, the queue limit {} sets: answer some before a new run starts; runs under way go on",
+        "more than {limit} of your runs wait on you or have yet to ask you anything, the queue limit {} sets: answer some before a new run starts; runs under way go on",
         queue_limit_source(*set_by)
     )]
     QueueFull {
