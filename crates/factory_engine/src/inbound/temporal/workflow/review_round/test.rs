@@ -57,6 +57,10 @@ impl Work for Script {
         self.cancelled
     }
 
+    fn asks_on_no_result(&self) -> bool {
+        true
+    }
+
     async fn open(&self, opening: ReviewRoundOpening) -> Result<bool, Failed> {
         self.note(format!("open {}", opening.seq));
         match &self.opened {

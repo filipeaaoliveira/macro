@@ -115,6 +115,29 @@ any Gate: whatever answers Gates for a person must leave it alone
 opens `after` `question` (`FlowError::GateAfterQuestion`). A cancelled Run, or one that ends
 while a Step holds its session for a question, has that session stopped.
 
+An agent whose turn ends with nothing handed back is reminded once
+(`session_agent/reminder.rs`): a later prompt in the same session
+(`session_agent/remind.md`), at place 1 of the Step's later prompts, under
+an id made from the first prompt's, so a retry records and sends the same
+one, which the session refuses as one it holds, and waits on it. A
+reminder that ends with nothing handed back too is the agent stopping
+without a result (`StoppedWithoutResult`), with its last message, read
+from the session (`RoutineSessions::reply`). Its Step ends `no_result`
+(`src/domain/no_result.rs`), that message its output, and keeps its
+session; the workflow (behind the `factory-no-result-gates` patch marker)
+opens a Gate at once, of no kind, that shows the message and offers
+`retry` and `stop`, and tells the owner as any Gate left to them. No
+Standing Rule or stand-in answers it, and an agent may not (no Flow's
+Gate asks those answers); the owner's words are read to one of them. On
+`retry` the same Role goes on in a Step of its own, at the next place, in
+that session, told the owner asks for the result
+(`no_result::retry_prompt`), as a question's answer goes on; on `stop` its
+agent is stopped and the Flow routes `failed`, as a Step whose work failed.
+A reviewer's Step that stops so fails, as before: its round asks no one. A
+Step that ends `no_result` without the marker fails the same way. The task
+thread names the Role that stopped, not its words. No Flow's Gate opens
+`after` `no_result` (`FlowError::GateAfterNoResult`).
+
 People call the Run API with their own login (`UserOrInternal`), and internal
 services for an acting user (the internal key's identity headers). A Run starts
 only of a built-in Flow, by name: no caller sends a Flow definition. The acting
@@ -246,7 +269,9 @@ fails the Step for good. The prompt asks the agent to hand back its result with
 /hand-backs` as the Run's owner; the correlation layer names the session
 (`agent_correlation::context::current_session`), and the hand back must offer
 one of the Step's outcomes. When the session's first turn ends, the latest hand
-back is the Step's outcome and output; none fails the Step. `LocalAgent` does no
+back is the Step's outcome and output; with none, the agent is reminded
+once, and a Step it still hands nothing back for waits for the Run's owner
+(above). `LocalAgent` does no
 work and hands back the prompt it was given: the tests' stand-in, and the
 service's when no agent is configured.
 
@@ -1145,6 +1170,11 @@ every Run in flight replays as before.
   that passed a notify-only Gate (`code_notify_only_plan_with_thread`). A
   worker older than `notify_only` cannot read a Flow that has it, so deploy
   every worker before the API starts Runs on one.
+- Removing the `factory-no-result-gates` patch breaks the replay of Runs
+  that asked their owner about a Step whose agent stopped without a
+  result. A worker older than `StoppedWithoutResult` fails such a Step for
+  good, and an older harness answers `reply` as not found, so the Gate
+  then says the last message could not be read: deploy the harness first.
 - Removing the `factory-gate-owner` patch breaks the replay of Runs that
   told their owner of a Gate; the histories recorded before it
   (`code_rules_fixed_then_merged`, `code_waiting_at_plan_gate_with_rules`,

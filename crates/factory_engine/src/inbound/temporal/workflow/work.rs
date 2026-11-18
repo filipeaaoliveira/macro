@@ -11,8 +11,9 @@ use temporalio_sdk::{
 };
 
 use super::{
-    Asking, CLOSE_ROUND_TIMEOUT, CLOSE_ROUND_TOTAL, FlowWorkflow, NOTIFY_ONLY_PATCH,
-    OPEN_ROUND_TIMEOUT, STEP_HEARTBEAT_TIMEOUT, ask, is_cancelled, notify_options, stop,
+    Asking, CLOSE_ROUND_TIMEOUT, CLOSE_ROUND_TOTAL, FlowWorkflow, NO_RESULT_PATCH,
+    NOTIFY_ONLY_PATCH, OPEN_ROUND_TIMEOUT, STEP_HEARTBEAT_TIMEOUT, ask, is_cancelled,
+    notify_options, stop,
 };
 use crate::domain::gate::{GateOpening, GateTelling};
 use crate::domain::models::{StepEnding, StepReport, StepRequest, StepStart};
@@ -27,6 +28,11 @@ pub(super) trait Work {
 
     /// Whether the Run's workflow was cancelled.
     fn cancelled(&self) -> bool;
+
+    /// Whether a Step whose agent stopped without a result asks the Run's
+    /// owner, rather than fail: false only for a Run whose history passed
+    /// such a Step before the workflow asked.
+    fn asks_on_no_result(&self) -> bool;
 
     /// Open the round: whether it opened.
     async fn open(&self, opening: ReviewRoundOpening) -> Result<bool, Self::Failure>;
@@ -80,6 +86,10 @@ impl Work for TemporalWork<'_> {
 
     fn cancelled(&self) -> bool {
         is_cancelled(self.ctx)
+    }
+
+    fn asks_on_no_result(&self) -> bool {
+        self.ctx.patched(NO_RESULT_PATCH)
     }
 
     async fn open(&self, opening: ReviewRoundOpening) -> Result<bool, Self::Failure> {

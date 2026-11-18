@@ -21,6 +21,7 @@ use super::{Asking, FAILED_STEP_OUTPUT, Questions};
 use crate::domain::flow::Entry;
 use crate::domain::gate::{GateOpening, GateTelling};
 use crate::domain::models::{StepEnding, StepReport, StepRequest, StepStart};
+use crate::domain::no_result::gate_question;
 
 /// Walk the Step `request` of `entry`, and the Steps that go on from its
 /// agent's questions, and return the outcome the Flow routes, or how the
@@ -56,21 +57,28 @@ pub(super) async fn walk_step<W: Work>(
         // stopped by cancelling the Run ends the Run.
         *held = asking.clone();
         held.push(request.clone());
+        let failure = || StepReport {
+            outcome: Outcome::failed(),
+            output: FAILED_STEP_OUTPUT.to_string(),
+        };
         let (report, failed) = match work.run(&request).await {
+            // An agent that stopped without a result waits for the Run's
+            // owner, behind the marker: no worker before it ended a Step
+            // so, so a Run's history replays as before, and a Step that
+            // ends so without it fails as it did then.
+            Ok(report) if report.outcome == Outcome::no_result() && !work.asks_on_no_result() => {
+                (failure(), true)
+            }
             Ok(report) => (report, false),
             Err(_) if work.cancelled() => return Ok(Round::Ended(RunOutcome::Cancelled)),
             // The owner reads the output; why the work failed is internal
             // detail, which the worker logged.
-            Err(_) => (
-                StepReport {
-                    outcome: Outcome::failed(),
-                    output: FAILED_STEP_OUTPUT.to_string(),
-                },
-                true,
-            ),
+            Err(_) => (failure(), true),
         };
-        let reported = report.outcome.clone();
+        let stopped = report.outcome == Outcome::no_result();
+        let mut reported = report.outcome.clone();
         let question = questions.asked(&request, &report);
+        let last_words = report.output.clone();
         if let Err(error) = work.end(StepEnding { key, report }).await {
             if work.cancelled() {
                 return Ok(Round::Ended(RunOutcome::Cancelled));
@@ -82,17 +90,18 @@ pub(super) async fn walk_step<W: Work>(
         // end is recorded, so the Step reads as failed meanwhile, and an
         // entry that fixes or retries it never runs beside it; the Steps it
         // went on from too, as it may have failed before it claimed their
-        // session. A Step that asked a question keeps its session for the
-        // Step that goes on with the answer. Otherwise no attempt of the
-        // Step's work comes once its end is recorded, so its agent lets go
-        // of the Step's session.
+        // session. A Step that asked a question, or whose agent stopped
+        // without a result, keeps its session for the Step that goes on
+        // with the owner's answer. Otherwise no attempt of the Step's work
+        // comes once its end is recorded, so its agent lets go of the
+        // Step's session.
         if failed {
             held.clear();
             work.stop(&request).await;
             for asked in asking.iter().rev() {
                 work.stop(asked).await;
             }
-        } else if question.is_none() {
+        } else if question.is_none() && !stopped {
             let taken = std::mem::take(held);
             if let Err(error) = work.release(request.clone()).await {
                 if work.cancelled() {
@@ -132,6 +141,47 @@ pub(super) async fn walk_step<W: Work>(
             );
             asking.push(std::mem::replace(&mut request, next));
             continue;
+        }
+
+        // An agent that stopped without a result, even once reminded, goes
+        // to the Run's owner on a Gate showing its last message: `retry`
+        // has the same Role go on in a Step of its own, at the next place,
+        // in the same session; `stop` stops its agent and fails the Step,
+        // for the Flow to route `failed`. No Standing Rule or stand-in
+        // answers it: it is no Flow's Gate, of no kind.
+        if stopped {
+            let opening = GateOpening {
+                key,
+                question: gate_question(&last_words),
+                answers: vec![Outcome::retry(), Outcome::stop()],
+            };
+            let person = Asking {
+                kind: None,
+                person_only: true,
+                fix_rounds: 0,
+                fix_limit: 0,
+            };
+            let Some(answer) = ask(work, opening, Some(person), held).await? else {
+                return Ok(Round::Ended(RunOutcome::Cancelled));
+            };
+            if answer == Outcome::retry() {
+                let Some(seq) = resume() else {
+                    return Ok(Round::Ended(RunOutcome::Blocked));
+                };
+                let next = questions.offer(
+                    request.going_on(StepKey {
+                        run_id: key.run_id,
+                        seq,
+                    }),
+                    asked,
+                );
+                asking.push(std::mem::replace(&mut request, next));
+                continue;
+            }
+            for stopping in std::mem::take(held).iter().rev() {
+                work.stop(stopping).await;
+            }
+            reported = Outcome::failed();
         }
 
         // The entry's Gate opens on the outcome it names (`done` unless it

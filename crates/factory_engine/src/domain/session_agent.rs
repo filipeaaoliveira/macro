@@ -7,6 +7,8 @@
 #[cfg(test)]
 mod test;
 
+mod reminder;
+
 use std::time::Duration;
 
 use agent_runtime_protocol::domain::action::AgentActionId;
@@ -126,6 +128,12 @@ pub enum SessionAgentError {
     /// The session's turn ended with nothing handed back.
     #[error("the agent's turn ended without handing back a result")]
     NothingHandedBack,
+    /// The session's turn ended with nothing handed back, and so did its
+    /// turn on the reminder that followed: the agent stopped without a
+    /// result. It holds what the Run's owner is shown: the agent's last
+    /// message.
+    #[error("the agent stopped without handing back a result")]
+    StoppedWithoutResult(String),
     /// Another attempt took the Step on to a later prompt while this one
     /// waited on its own, or before this one sent it: its hand back is not
     /// the prompt's, and a retry goes on from where the Step is now.
@@ -177,6 +185,7 @@ impl Retryable for SessionAgentError {
             | SessionAgentError::UnfilledRole(_)
             | SessionAgentError::UnknownAgent(_)
             | SessionAgentError::NothingHandedBack
+            | SessionAgentError::StoppedWithoutResult(_)
             | SessionAgentError::NoSession
             | SessionAgentError::PromptUnsettled
             | SessionAgentError::Released
@@ -189,6 +198,13 @@ impl Retryable for SessionAgentError {
 impl AgentFailure for SessionAgentError {
     fn out_of_quota(&self) -> bool {
         matches!(self, SessionAgentError::NoQuota(_))
+    }
+
+    fn stopped_without_result(&self) -> Option<&str> {
+        match self {
+            SessionAgentError::StoppedWithoutResult(last_words) => Some(last_words),
+            _ => None,
+        }
     }
 }
 
@@ -691,7 +707,7 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
             .await;
         self.prompt_once(&action, prompted).await?;
         self.finished_or_lost(&action, deadline).await?;
-        self.handed_back(task.key, action.action_id.as_uuid()).await
+        self.answer_or_remind(task, &action, deadline).await
     }
 
     /// Do the Step `task` afresh in `session`, a new session it claimed in
@@ -839,7 +855,7 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
 
         // The session stays until the Step's end is recorded: a retry of an
         // attempt whose answer Temporal lost goes on in it.
-        self.handed_back(task.key, action.action_id.as_uuid()).await
+        self.answer_or_remind(task, &action, deadline).await
     }
 }
 

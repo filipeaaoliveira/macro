@@ -20,6 +20,7 @@ use crate::domain::agents::REVIEWER_ROLES;
 use crate::domain::flow::{StepName, StepUse};
 use crate::domain::gate_owner::owner_notes_brief;
 use crate::domain::models::{AgentTask, StepInput, StepReport, run_branch};
+use crate::domain::no_result::retry_prompt;
 use crate::domain::ports::{
     AgentFailure, MainWatches, PullRequests, Retryable, StepAgent, StepExecutor,
 };
@@ -249,11 +250,14 @@ where
             outcomes.push(Outcome::question());
         }
         // A Step that goes on from its agent's question prompts the session
-        // the agent asked in with the owner's answer: the agent has the
-        // Step's instructions and its work so far there.
+        // the agent asked in with the owner's answer, and one that goes on
+        // from a Step whose agent stopped without a result with the owner's
+        // ask to try again: the agent has the Step's instructions and its
+        // work so far there.
         let asked_prompt = match input.resumes {
             Some(asked) => {
                 let answered = going_on_prompt(input.earlier, asked, input.questions_left)
+                    .or_else(|| retry_prompt(input.earlier, asked))
                     .ok_or(BuiltInStepError::Unanswered(asked))?;
                 format!("{answered}{}", owner_notes_brief(input.owner_notes))
             }
@@ -281,11 +285,24 @@ where
                 )
             }),
         };
-        let answer = self
-            .agent
-            .answer(task)
-            .await
-            .map_err(BuiltInStepError::agent)?;
+        let answer = match self.agent.answer(task).await {
+            Ok(answer) => answer,
+            // An agent that stopped without a result, even once reminded,
+            // ends the Step `no_result`, its last message the output, for
+            // the workflow to ask the Run's owner. A reviewer's fails the
+            // Step as before: its review round asks no one.
+            Err(error) => {
+                if !input.reviewer
+                    && let Some(last_words) = error.stopped_without_result()
+                {
+                    return Ok(StepReport {
+                        outcome: Outcome::no_result(),
+                        output: last_words.to_string(),
+                    });
+                }
+                return Err(BuiltInStepError::agent(error));
+            }
+        };
 
         if !outcomes.contains(&answer.outcome) {
             return Err(BuiltInStepError::UnexpectedOutcome {

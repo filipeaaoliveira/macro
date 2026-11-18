@@ -171,6 +171,26 @@ impl Outcome {
         Self("answer".to_string())
     }
 
+    /// The outcome of an agent Step whose agent stopped without handing back
+    /// a result, even once reminded: the Step ends with the agent's last
+    /// message as its output, and a Gate asks the Run's owner to `retry` or
+    /// `stop`. The Flow never routes it.
+    pub fn no_result() -> Self {
+        Self("no_result".to_string())
+    }
+
+    /// The answer to a `no_result` Step's Gate that has its Role go on in
+    /// the same session.
+    pub fn retry() -> Self {
+        Self("retry".to_string())
+    }
+
+    /// The answer to a `no_result` Step's Gate that fails the Step, for its
+    /// Flow to route `failed`.
+    pub fn stop() -> Self {
+        Self("stop".to_string())
+    }
+
     /// The outcome as written in the Flow.
     pub fn as_str(&self) -> &str {
         &self.0

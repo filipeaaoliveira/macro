@@ -30,6 +30,7 @@ use crate::domain::ports::{Retryable, StepAgent};
 
 mod follow_up;
 mod going_on;
+mod reminder;
 mod run_check;
 
 /// What happens to one call: it works, or fails with this error. A call
@@ -98,6 +99,8 @@ struct FakeSessions {
     /// session is deleted.
     follow_up_loses: bool,
     lost: Arc<Mutex<bool>>,
+    /// What the agent last said in a turn, as the session reads it.
+    last_words: Option<String>,
 }
 
 impl FakeSessions {
@@ -129,6 +132,7 @@ impl FakeSessions {
             exec_calls: Arc::default(),
             follow_up_loses: false,
             lost: Arc::default(),
+            last_words: None,
         }
     }
 
@@ -375,6 +379,13 @@ impl RoutineSessions for FakeSessions {
         }
         self.cancelled.lock().expect("cancelled").push(command);
         Ok(())
+    }
+
+    async fn reply(
+        &self,
+        _command: RoutineSessionAction,
+    ) -> Result<Option<String>, RoutineSessionError> {
+        Ok(self.last_words.clone())
     }
 
     async fn delete(&self, command: RoutineSessionAction) -> Result<(), RoutineSessionError> {
@@ -730,20 +741,6 @@ async fn a_prompt_of_unknown_delivery_that_arrived_is_not_sent_again() {
 
     assert_eq!(answer.outcome, Outcome::done());
     assert_eq!(sessions.prompts(), 1);
-}
-
-#[tokio::test]
-async fn a_turn_that_ends_with_nothing_handed_back_fails_the_step_for_good() {
-    let repo = FakeRepo::default();
-    let sessions = FakeSessions::new(&repo, None, RoutineActionStatus::Succeeded);
-
-    let failed = agent(&sessions, &repo).answer(plan_task(&repo).await).await;
-
-    let Err(error) = failed else {
-        panic!("nothing was handed back");
-    };
-    assert!(matches!(error, SessionAgentError::NothingHandedBack));
-    assert!(!error.retryable());
 }
 
 #[tokio::test]

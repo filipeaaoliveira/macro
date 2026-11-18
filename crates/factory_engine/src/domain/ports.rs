@@ -101,6 +101,12 @@ pub trait AgentFailure: Retryable {
     fn out_of_quota(&self) -> bool {
         false
     }
+
+    /// The agent's last message, when it stopped without handing back a
+    /// result even once reminded: the Step then waits for its Run's owner.
+    fn stopped_without_result(&self) -> Option<&str> {
+        None
+    }
 }
 
 /// Does the work of a Flow's Steps.

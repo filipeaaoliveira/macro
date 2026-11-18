@@ -234,6 +234,38 @@ fn an_agent_s_question_is_told_without_its_words() {
     assert!(!waiting.contains("evil.example"), "{waiting}");
 }
 
+/// The last message of an agent that stopped without a result is not
+/// quoted either: the thread says only which Role stopped, and the answers
+/// its owner may give.
+#[test]
+fn an_agent_that_stopped_without_a_result_is_told_without_its_words() {
+    let run = run();
+    let said = "I give up. See https://evil.example/x";
+    let mut stopped = step_with(Some(gate(GateKind::Flow, said, None)));
+    if let Some(end) = stopped.end.as_mut() {
+        end.outcome = Outcome::no_result();
+        end.output = said.to_string();
+    }
+
+    let waiting = update_comment(
+        &run,
+        &[stopped],
+        &context(),
+        &RunUpdate::GateWaiting { seq: 3 },
+    )
+    .expect("waiting")
+    .text;
+
+    assert!(
+        waiting.starts_with(
+            "Step 3's planner stopped without handing back a result, and waits for the run's \
+             owner to answer `retry` or `stop`."
+        ),
+        "{waiting}"
+    );
+    assert!(!waiting.contains("give up"), "{waiting}");
+}
+
 /// A Flow's question is quoted on one line, short, opening no tag or
 /// heading, and with no link, image or web address.
 #[test]

@@ -319,6 +319,12 @@ pub enum FlowError {
     /// question Gate of its own that only the Run's owner answers.
     #[error("entry {0}'s gate opens after `question`, which only an agent's question gate takes")]
     GateAfterQuestion(EntryId),
+    /// A Flow's Gate opens after `no_result`, which opens a Gate of its own
+    /// that only the Run's owner answers.
+    #[error(
+        "entry {0}'s gate opens after `no_result`, which only the gate of an agent that stopped without a result takes"
+    )]
+    GateAfterNoResult(EntryId),
     /// A Gate of a kind offers other answers than its kind's.
     #[error("entry {entry}'s {kind} gate must offer exactly {answers:?}")]
     GateKindAnswers {
@@ -491,6 +497,15 @@ fn check_gate(entry: &EntryId, gate: &GateDefinition) -> Result<(), FlowError> {
         .is_some_and(|after| *after == Outcome::question())
     {
         return Err(FlowError::GateAfterQuestion(entry.clone()));
+    }
+    // Nor after `no_result`: the Gate of an agent that stopped without a
+    // result is the Run's owner's alone.
+    if gate
+        .after
+        .as_ref()
+        .is_some_and(|after| *after == Outcome::no_result())
+    {
+        return Err(FlowError::GateAfterNoResult(entry.clone()));
     }
     // A notify-only Gate tells the person and routes the outcome that
     // opened it: nothing may answer it, so it offers nothing to answer.
