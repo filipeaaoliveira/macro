@@ -208,9 +208,7 @@ describe('createAppRunsContext', () => {
       ok(answered('01960000-0000-7000-8000-000000000009'))
     );
     const byAgent = await context.startRun(input);
-    vi.mocked(factoryClient.startRun).mockResolvedValueOnce(
-      ok(answered(null))
-    );
+    vi.mocked(factoryClient.startRun).mockResolvedValueOnce(ok(answered(null)));
     const byPerson = await context.startRun(input);
 
     const answerOf = (result: typeof byAgent) =>
