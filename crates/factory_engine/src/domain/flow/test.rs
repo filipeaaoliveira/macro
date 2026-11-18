@@ -74,6 +74,18 @@ fn a_flow_may_not_end_a_run_infrastructure_or_flawed() {
             matches!(next, Err(FlowError::ReservedEnd { .. })),
             "{outcome}"
         );
+        let exhausted = parse(json!({
+            "entries": [{
+                "id": "reply",
+                "step": "reply",
+                "max_visits": 2,
+                "on_exhausted": [{ "to": { "kind": "end", "outcome": outcome } }]
+            }]
+        }));
+        assert!(
+            matches!(exhausted, Err(FlowError::ReservedEnd { .. })),
+            "{outcome}"
+        );
     }
     let failed = parse(json!({
         "entries": [{
