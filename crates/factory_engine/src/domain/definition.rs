@@ -585,7 +585,7 @@ pub async fn read_definition<F: DefinitionFiles>(
     if !evaluation.benchmarks().is_empty() {
         let benchmark = BuiltInFlow::named(BENCHMARK_FLOW)
             .ok_or_else(|| FlowError::Unreadable(format!("no built-in flow {BENCHMARK_FLOW}")))
-            .and_then(|built_in| built_in.read(&serves))
+            .and_then(|built_in| built_in.read(serves))
             .map_err(|error| DefinitionError::Flow {
                 path: BENCHMARK_FLOW.to_string(),
                 error,

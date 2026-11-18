@@ -718,26 +718,27 @@ async fn a_suite_of_a_definition_s_benchmark_walks_the_benchmark_flow() {
     let repo = team_repo();
     let github = github_at(FIRST);
     definition_files(&github, FIRST, "Notes.", None);
-    let mut state = github.state();
-    state.files.insert(
-        (FIRST.to_string(), "agents.json".to_string()),
-        r#"{
-            "agents": { "primary": { "bot": "00000000-0000-0000-0000-00000000c1a0" } },
-            "roles": { "planner": ["primary"], "writer": ["primary"] }
-        }"#
-        .to_string(),
-    );
-    state.files.insert(
-        (FIRST.to_string(), "scorers.json".to_string()),
-        r#"{
-            "benchmarks": [{
-                "name": "core", "repository": "https://github.com/macro/widgets",
-                "tasks": [{ "name": "typo", "request": "Fix the typo." }]
-            }]
-        }"#
-        .to_string(),
-    );
-    drop(state);
+    {
+        let mut state = github.state();
+        state.files.insert(
+            (FIRST.to_string(), "agents.json".to_string()),
+            r#"{
+                "agents": { "primary": { "bot": "00000000-0000-0000-0000-00000000c1a0" } },
+                "roles": { "planner": ["primary"], "writer": ["primary"] }
+            }"#
+            .to_string(),
+        );
+        state.files.insert(
+            (FIRST.to_string(), "scorers.json".to_string()),
+            r#"{
+                "benchmarks": [{
+                    "name": "core", "repository": "https://github.com/macro/widgets",
+                    "tasks": [{ "name": "typo", "request": "Fix the typo." }]
+                }]
+            }"#
+            .to_string(),
+        );
+    }
     let deployment_agents: AgentDefinition = serde_json::from_value(serde_json::json!({
         "agents": { "elsewhere": { "bot": "00000000-0000-0000-0000-00000000c0de" } },
         "roles": { "planner": ["elsewhere"], "writer": ["elsewhere"] }
