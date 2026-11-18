@@ -645,7 +645,11 @@ where
         // A Run on its team's Definition repository changes the factory's
         // own rules: those files are Control Files too, whatever the list.
         let on_definition = definition.as_ref().zip(repository.as_ref());
-        if on_definition.is_some_and(|(pinned, repository)| pinned.repo_url == repository.url) {
+        // GitHub names a repository whatever the case of its owner and name.
+        let same = |(pinned, repository): (&PinnedDefinition, &Repository)| {
+            pinned.repo_url.eq_ignore_ascii_case(&repository.url)
+        };
+        if on_definition.is_some_and(same) {
             for pattern in DEFINITION_FILE_PATTERNS {
                 if !control_file_patterns.iter().any(|kept| kept == pattern) {
                     control_file_patterns.push(pattern.to_string());

@@ -377,7 +377,7 @@ async fn a_run_on_the_definition_repository_guards_its_files() {
             "change".to_string(),
             "Change the rules".to_string(),
             None,
-            Some(DEFINITION_REPO.to_string()),
+            Some("https://github.com/Macro/Factory-Definition".to_string()),
             true,
         )
         .await
