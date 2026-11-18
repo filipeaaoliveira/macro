@@ -525,3 +525,26 @@ async fn a_trashed_task_s_name_is_not_read(pool: PgPool) {
     assert!(!read[0].task_live);
     assert_eq!(read[0].task_name, None);
 }
+
+/// A Run on a document that is not a task reads as on no live task, with
+/// no name.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "tasks"))
+)]
+async fn a_document_that_is_not_a_task_is_not_named(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    keep(
+        &repo,
+        Kept {
+            task_id: Some(LOGIN_TASK),
+            ..Kept::julias("Look into it")
+        },
+    )
+    .await;
+
+    let read = repo.board_runs(&query(None)).await.expect("board");
+
+    assert!(!read[0].task_live);
+    assert_eq!(read[0].task_name, None);
+}
