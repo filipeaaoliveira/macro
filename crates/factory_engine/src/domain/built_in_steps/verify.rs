@@ -243,9 +243,11 @@ where
                 Some(end_by),
             )
             .await?;
-        // A question goes to the Run's owner; the Step that goes on from
-        // the answer verifies.
-        if answer.outcome == Outcome::question() {
+        // A question goes to the Run's owner, as does a verifier that
+        // stopped without a result (`no_result`): the Step that goes on
+        // from the answer, or from the owner's retry, verifies. Neither is
+        // a verdict on the change, so no check runs on it.
+        if answer.outcome == Outcome::question() || answer.outcome == Outcome::no_result() {
             return Ok(answer);
         }
 

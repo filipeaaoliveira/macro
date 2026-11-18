@@ -230,6 +230,36 @@ async fn a_failed_acceptance_check_before_the_merge_goes_back_as_blockers() {
     assert!(report.output.contains("expected dark, got light"), "{}", report.output);
 }
 
+/// A verifier that stopped without a result, even once reminded, ends its
+/// Step `no_result` with its last message, before the merge and after it,
+/// for the workflow to ask the Run's owner: it is no verdict, so no
+/// acceptance check runs and the Step neither goes back as `blockers` nor
+/// fails the change.
+#[tokio::test]
+async fn a_verifier_that_stopped_without_a_result_asks_its_owner() {
+    for (step, github, commit) in [
+        ("accept", github(None, None), HEAD),
+        ("verify", merged(None), FakeGithub::MERGED),
+    ] {
+        let agent = verifier("stopped", vec![ran(0, "1 passed")], commit);
+        let repo = FakeRepo::default();
+        let earlier = planned(PLAN);
+        let input = StepInput {
+            earlier: &earlier,
+            ..input()
+        };
+
+        let report = run(&agent, &github, &repo, step, input)
+            .await
+            .expect(step);
+
+        assert_eq!(report.outcome, Outcome::no_result(), "{step}: {}", report.output);
+        assert_eq!(report.output, "I stopped before checking.", "{step}");
+        assert!(commands(&agent).is_empty(), "{step}");
+        assert!(rounds(&repo, input).await.is_empty(), "{step}");
+    }
+}
+
 /// After the merge, every check runs on the merge commit, told where the
 /// change is deployed; a verifier that finds a clause not met fails the
 /// Step, though every check passed.

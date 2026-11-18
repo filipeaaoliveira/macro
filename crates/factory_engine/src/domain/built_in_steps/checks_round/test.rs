@@ -27,25 +27,41 @@ mod verified;
 #[error("the agent's session failed")]
 struct SessionFailed {
     out_of_quota: bool,
+    /// The agent's last message, when it stopped without a result.
+    last_words: Option<&'static str>,
 }
 
 /// A failure a retry may get past.
 const FAILED: SessionFailed = SessionFailed {
     out_of_quota: false,
+    last_words: None,
 };
 
 /// The agent's quota ran out: asking again does not help.
-const NO_QUOTA: SessionFailed = SessionFailed { out_of_quota: true };
+const NO_QUOTA: SessionFailed = SessionFailed {
+    out_of_quota: true,
+    last_words: None,
+};
+
+/// The agent stopped without a result, even once reminded.
+const STOPPED: SessionFailed = SessionFailed {
+    out_of_quota: false,
+    last_words: Some("I stopped before checking."),
+};
 
 impl Retryable for SessionFailed {
     fn retryable(&self) -> bool {
-        !self.out_of_quota
+        !self.out_of_quota && self.last_words.is_none()
     }
 }
 
 impl AgentFailure for SessionFailed {
     fn out_of_quota(&self) -> bool {
         self.out_of_quota
+    }
+
+    fn stopped_without_result(&self) -> Option<&str> {
+        self.last_words
     }
 }
 
@@ -119,6 +135,9 @@ impl StepAgent for ScriptedAgent {
                 age(repo, key);
             }
             return Err(FAILED);
+        }
+        if self.work == "stopped" {
+            return Err(STOPPED);
         }
         Ok(AgentAnswer {
             outcome: outcome(self.work),
