@@ -296,6 +296,10 @@ pub enum FlowError {
     /// A review panel's Gate opens after an outcome no round ends with.
     #[error("entry {0}'s gate opens after an outcome no review round ends with")]
     GateAfterNoRoundOutcome(EntryId),
+    /// A Flow's Gate opens after an agent's question, which opens a
+    /// question Gate of its own that only the Run's owner answers.
+    #[error("entry {0}'s gate opens after `question`, which only an agent's question gate takes")]
+    GateAfterQuestion(EntryId),
     /// A Gate of a kind offers other answers than its kind's.
     #[error("entry {entry}'s {kind} gate must offer exactly {answers:?}")]
     GateKindAnswers {
@@ -458,6 +462,17 @@ fn check_reviewers(entry: &Entry) -> Result<(), FlowError> {
 const ROUND_OUTCOMES: [&str; 4] = ["pass", "changes", "unresolved", "failed"];
 
 fn check_gate(entry: &EntryId, gate: &GateDefinition) -> Result<(), FlowError> {
+    // A Step that ends `question` opens a question Gate, which only the
+    // Run's owner answers: a Flow's Gate after it would put the agent's
+    // question to whatever answers the Flow's Gates, Standing Rules
+    // included.
+    if gate
+        .after
+        .as_ref()
+        .is_some_and(|after| *after == Outcome::question())
+    {
+        return Err(FlowError::GateAfterQuestion(entry.clone()));
+    }
     if let Some(kind) = gate.kind
         && !offers_kind_answers(kind, &gate.answers)
     {

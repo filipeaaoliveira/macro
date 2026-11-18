@@ -91,7 +91,8 @@ places, its findings recorded on the round), and the round closes on every
 reviewer's result; a reviewer past its questions closes the round failed and
 ends the Run `manual`. Only the owner answers a question Gate, in person, as
 any Gate: whatever answers Gates for a person must leave it alone
-(`GateKind::answered_only_by_a_person`, which the answer path checks). A cancelled Run, or one that ends
+(`GateKind::answered_only_by_a_person`, which the answer path checks). No Flow's Gate
+opens `after` `question` (`FlowError::GateAfterQuestion`). A cancelled Run, or one that ends
 while a Step holds its session for a question, has that session stopped.
 
 People call the Run API with their own login (`UserOrInternal`), and internal

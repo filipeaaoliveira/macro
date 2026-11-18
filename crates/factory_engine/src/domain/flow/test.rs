@@ -216,6 +216,37 @@ fn a_review_panel_s_gate_opens_after_a_round_s_outcome() {
     ));
 }
 
+/// No Flow's Gate opens after an agent's question, on a Step or a review
+/// panel: the question has a Gate of its own, which only the Run's owner
+/// answers.
+#[test]
+fn a_gate_after_a_question_is_refused() {
+    let on_a_step = parse(json!({
+        "entries": [{
+            "id": "write",
+            "step": "write",
+            "role": "writer",
+            "gate": { "question": "Go on?", "answers": ["approve", "revise"], "after": "question" }
+        }]
+    }));
+    let on_a_panel = parse(json!({
+        "entries": [{
+            "id": "review",
+            "step": "write",
+            "reviewers": ["tests"],
+            "gate": { "question": "Fix?", "answers": ["fix", "stop"], "after": "question" }
+        }]
+    }));
+
+    assert!(matches!(on_a_step, Err(FlowError::GateAfterQuestion(_))));
+    // A round never ends `question`, so a panel's is refused as any Gate
+    // after an outcome no round ends with.
+    assert!(matches!(
+        on_a_panel,
+        Err(FlowError::GateAfterNoRoundOutcome(_))
+    ));
+}
+
 /// A deployment's bound on review rounds replaces the `max_visits` of each
 /// review panel, and changes nothing else.
 #[test]
