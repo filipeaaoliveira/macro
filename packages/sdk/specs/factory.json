@@ -3690,7 +3690,7 @@
       "PullRequestRuns": {
         "type": "object",
         "description": "The Runs that opened some pull requests.",
-        "required": ["runs"],
+        "required": ["runs", "unknown"],
         "properties": {
           "runs": {
             "type": "array",
@@ -3698,6 +3698,13 @@
               "$ref": "#/components/schemas/PullRequestRun"
             },
             "description": "One for each pull request a Run the caller can see opened, its\nnewest such Run, in the lookup's order; none for a pull request no\nsuch Run opened."
+          },
+          "unknown": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The pull requests, as the lookup named them, whose Runs were not all\nread, as more Runs matched than one lookup reads: whether a Run the\ncaller sees opened one is not known, so it must not read as none."
           }
         }
       },

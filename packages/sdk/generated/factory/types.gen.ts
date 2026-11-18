@@ -956,6 +956,12 @@ export type PullRequestRuns = {
      * such Run opened.
      */
     runs: Array<PullRequestRun>;
+    /**
+     * The pull requests, as the lookup named them, whose Runs were not all
+     * read, as more Runs matched than one lookup reads: whether a Run the
+     * caller sees opened one is not known, so it must not read as none.
+     */
+    unknown: Array<string>;
 };
 
 /**
