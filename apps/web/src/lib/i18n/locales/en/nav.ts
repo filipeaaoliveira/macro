@@ -15,6 +15,7 @@ export default {
   customers: 'Customers',
   calls: 'Calls',
   reviews: 'Reviews',
+  factory: 'Factory',
   scheduling: 'Scheduling',
   external: 'External',
   activity: 'Activity',

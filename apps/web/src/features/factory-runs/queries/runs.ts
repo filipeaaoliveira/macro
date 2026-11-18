@@ -39,13 +39,18 @@ function taskRunsPollMs(runs: Run[] | undefined): number | false {
   return running ? LIVE_POLL_MS : WAITING_POLL_MS;
 }
 
-function toRun(detail: RunDetail): Run {
+export function toRun(detail: RunDetail): Run {
   const { run } = detail;
   return {
     id: run.id,
     request: run.request,
     createdAt: run.createdAt,
+    ownerId: run.userId,
+    flow: run.flow ?? undefined,
+    createdInPerson: run.createdInPerson,
     taskId: run.taskId ?? undefined,
+    projectId: run.projectId ?? undefined,
+    pullRequestUrl: run.pullRequestUrl ?? undefined,
     repository: run.repository ?? undefined,
     automation: run.automation ?? undefined,
     controlFiles: run.controlFiles ?? undefined,
@@ -245,7 +250,10 @@ function startFailure(
   return 'failed';
 }
 
-/** Reads the Run, and its task's list, again; resolves once they are read. */
+/**
+ * Reads the Run, its task's list, the Queue and the board again; resolves
+ * once they are read.
+ */
 function refreshRun(
   client: QueryClient,
   runId: string,
@@ -254,6 +262,7 @@ function refreshRun(
   const reads = [
     client.invalidateQueries({ queryKey: factoryRunKeys.run(runId).queryKey }),
     client.invalidateQueries({ queryKey: factoryRunKeys.waiting.queryKey }),
+    client.invalidateQueries({ queryKey: factoryRunKeys.board._def }),
   ];
   if (taskId) {
     reads.push(
@@ -269,7 +278,10 @@ function taskOfRun(client: QueryClient, runId: string) {
   return client.getQueryData<Run>(factoryRunKeys.run(runId).queryKey)?.taskId;
 }
 
-/** The Runs context on the factory service, cached in `client`. */
+/**
+ * The Runs context on the factory service, cached in `client`; the app's
+ * entry points add the signed-in person's id.
+ */
 export function createAppRunsContext(client: QueryClient): RunsContext {
   return {
     taskRuns: (taskId: Accessor<string>) =>

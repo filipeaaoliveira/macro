@@ -1,7 +1,7 @@
 import { useRouteParams } from '@app/lib/split-router';
 import { factoryRunRoute } from '@app/routes/routes';
 import { withAuth } from '@components/app/split-layout/split-router/app-route-shell';
-import { FactoryInsights } from './factory-runs';
+import { FactoryBoard, FactoryInsights } from './factory-runs';
 
 export const FactoryInsightsRouteView = withAuth(() => <FactoryInsights />);
 
@@ -10,3 +10,6 @@ export const FactoryRunRouteView = withAuth(() => {
   const params = useRouteParams(factoryRunRoute);
   return <FactoryInsights openRunId={params.runId} />;
 });
+
+/** The factory's board: every Run the person can see. */
+export const FactoryBoardRouteView = withAuth(() => <FactoryBoard />);

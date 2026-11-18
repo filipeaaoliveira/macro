@@ -782,6 +782,12 @@ export const externalRoute = defineRoute({
   externalSearch: ['whatsappPairing'],
 });
 
+/** Every factory Run the person can see, behind the factory Runs flag. */
+export const factoryBoardRoute = defineRoute({
+  id: 'view-factory',
+  path: 'factory',
+});
+
 /** How the person's factory Runs went, behind the factory Runs flag. */
 export const factoryInsightsRoute = defineRoute({
   id: 'view-factory-insights',

@@ -126,14 +126,16 @@ export function RunDialog(props: {
                     }}
                   />
                 </ActionDialogShell.Body>
-                <Show when={props.controller.waiting()}>
+                <Show
+                  when={props.controller.owned() && props.controller.waiting()}
+                >
                   {/* Pinned; its question and note scroll inside past a few
                       lines, so the answers stay in reach. */}
                   <div class="shrink-0 border-t border-edge-divider px-5 pt-3">
                     <RunGate controller={props.controller} />
                   </div>
                 </Show>
-                <Show when={!run().end}>
+                <Show when={props.controller.owned() && !run().end}>
                   <ActionDialogShell.Footer>
                     <RunCancel controller={props.controller} />
                   </ActionDialogShell.Footer>

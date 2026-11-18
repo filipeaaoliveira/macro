@@ -17,6 +17,7 @@ import {
   getGetFactorySessionStepUrl,
   getGetFactoryStandingRulesUrl,
   getListFactoryAutomationsUrl,
+  getListFactoryBoardUrl,
   getListFactoryFlowsUrl,
   getListFactoryTaskRunsUrl,
   getListFactoryWaitingRunsUrl,
@@ -34,11 +35,13 @@ import type {
   Automation,
   AutomationRequest,
   AutomationsSettings,
+  BoardPage,
   ControlFilesSettings,
   CreatedAutomation,
   CreateRunRequest,
   FlowsResponse,
   GetFactoryInsightsParams,
+  ListFactoryBoardParams,
   NoteStepRequest,
   ReplyToGateRequest,
   ResumeStepRequest,
@@ -111,8 +114,8 @@ async function refusal(
 }
 
 /**
- * The software factory's Runs, as the signed-in person sees them: their own
- * Runs only. The routes and shapes are the service's generated client's.
+ * The software factory's Runs, as the signed-in person sees them: their own,
+ * and on the board and a Run's page their team's on tasks they can see. The routes and shapes are the service's generated client's.
  */
 export const factoryClient = {
   /** The caller's Runs of a task, newest first; the service returns 50 at most. */
@@ -131,6 +134,18 @@ export const factoryClient = {
   listWaitingRuns(signal?: AbortSignal) {
     return fetchWithToken<WaitingRunsResponse>(
       `${host()}${getListFactoryWaitingRunsUrl()}`,
+      { method: 'GET', signal }
+    );
+  },
+
+  /**
+   * A page of the board: the caller's Runs, or their team's on tasks they
+   * can see, newest first, each with where it is; `next` starts the page
+   * after.
+   */
+  listBoard(params: ListFactoryBoardParams, signal?: AbortSignal) {
+    return fetchWithToken<BoardPage>(
+      `${host()}${getListFactoryBoardUrl(params)}`,
       { method: 'GET', signal }
     );
   },

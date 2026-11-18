@@ -288,7 +288,17 @@ export type Run = {
   id: string;
   request: string;
   createdAt: string;
+  /** Its owner, by user id: the person its agent Steps run as. */
+  ownerId?: string;
+  /** The built-in Flow it walks, by name. */
+  flow?: string;
+  /** Whether its owner started it in their own signed-in session. */
+  createdInPerson?: boolean;
   taskId?: string;
+  /** The Project its task was in when it started. */
+  projectId?: string;
+  /** The page of the pull request its branch proposes its change in. */
+  pullRequestUrl?: string;
   repository?: RunRepository;
   /** The Automation that started it; none for a Run a person started. */
   automation?: RunAutomation;

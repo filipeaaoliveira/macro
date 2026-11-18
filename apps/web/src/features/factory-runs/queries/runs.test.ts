@@ -119,6 +119,8 @@ describe('createAppRunsContext', () => {
       id: 'run-2',
       request: 'Add a due date column',
       createdAt: '2026-11-16T09:00:00Z',
+      ownerId: 'macro|owner@example.com',
+      createdInPerson: true,
       taskId: 'task-1',
       end: undefined,
       steps: [

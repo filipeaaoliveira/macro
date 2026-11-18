@@ -20,6 +20,9 @@ vi.mock('@queries/client', () => ({ queryClient: {} }));
 vi.mock('@core/constant/SettingsState', () => ({
   useSettingsState: () => ({ openSettings: vi.fn() }),
 }));
+vi.mock('@core/context/user', () => ({
+  useUserId: () => () => 'macro|julia@example.com',
+}));
 vi.mock('./queries/runs', () => ({ createAppRunsContext: vi.fn(() => ({})) }));
 vi.mock('./views/task-runs-section', () => ({
   TaskRunsSection: (props: { taskId: string }) => (

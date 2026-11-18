@@ -4,18 +4,27 @@ import { PaneContext } from '@app/lib/split-router/solid/context';
 import { factoryInsightsRoute } from '@app/routes/routes';
 import { enableFactoryRuns } from '@core/constant/featureFlags';
 import { useSettingsState } from '@core/constant/SettingsState';
+import { useUserId } from '@core/context/user';
 import { fireAndForget } from '@core/util/fireAndForget';
 import { queryClient } from '@queries/client';
 import { useContext } from 'solid-js';
+import { FactoryBoardView } from './board-view';
+import { BoardProvider } from './context/board-context';
 import { InsightsProvider } from './context/insights-context';
 import { RunsProvider } from './context/runs-context';
 import { RunInsightsView } from './insights-view';
+import { createAppBoardContext } from './queries/board';
 import { createAppInsightsContext } from './queries/insights';
 import { createAppRunsContext } from './queries/runs';
 import { AutomationsSettings } from './views/automations-settings';
 import { ControlFilesSettings } from './views/control-files-settings';
 import { StandingRulesSettings } from './views/standing-rules-settings';
 import { TaskRunsSection } from './views/task-runs-section';
+
+/** The Runs context on the factory service, for the signed-in person. */
+function appRunsContext() {
+  return { ...createAppRunsContext(queryClient), viewerId: useUserId() };
+}
 
 /**
  * Opens Run insights in a new pane beside the one asking; none outside the
@@ -43,7 +52,7 @@ export function TaskRuns(props: { taskId: string; order: number }) {
 
   return (
     <ShowFeatureFlag flag={enableFactoryRuns}>
-      <RunsProvider value={createAppRunsContext(queryClient)}>
+      <RunsProvider value={appRunsContext()}>
         <TaskRunsSection
           taskId={props.taskId}
           order={props.order}
@@ -86,7 +95,7 @@ export function TeamAutomations() {
 export function FactoryInsights(props: { openRunId?: string }) {
   return (
     <ShowFeatureFlag flag={enableFactoryRuns}>
-      <RunsProvider value={createAppRunsContext(queryClient)}>
+      <RunsProvider value={appRunsContext()}>
         <InsightsProvider value={createAppInsightsContext()}>
           <RunInsightsView
             timeZone={Intl.DateTimeFormat().resolvedOptions().timeZone}
@@ -94,6 +103,22 @@ export function FactoryInsights(props: { openRunId?: string }) {
             openRunId={props.openRunId}
           />
         </InsightsProvider>
+      </RunsProvider>
+    </ShowFeatureFlag>
+  );
+}
+
+/**
+ * Every Run the person can see, theirs or their team's, as a page of its
+ * own, with the Run `openRunId` opened over it when a link names one.
+ */
+export function FactoryBoard(props: { openRunId?: string }) {
+  return (
+    <ShowFeatureFlag flag={enableFactoryRuns}>
+      <RunsProvider value={appRunsContext()}>
+        <BoardProvider value={createAppBoardContext(queryClient)}>
+          <FactoryBoardView openRunId={props.openRunId} />
+        </BoardProvider>
       </RunsProvider>
     </ShowFeatureFlag>
   );
