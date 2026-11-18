@@ -143,6 +143,17 @@ A reviewer's Step that stops so fails, as before: its round asks no one. A
 Step that ends `no_result` without the marker fails the same way. The task
 thread names the Role that stopped, not its words. No Flow's Gate opens
 `after` `no_result` (`FlowError::GateAfterNoResult`).
+The reminder is a prompt of the factory's: it is sent out of sight, opens
+the Step Terminal's steering again (`begin_turn`), and its wait follows the
+owner's note, pause, resume and stop as any prompt's does; the agent's last
+message is read from the last turn the wait followed, an owner's note's
+when there was one. A Step its owner stops ends `failed`
+(`StoppedByOwner`), never `no_result`. A verifier (`accept`, `verify`)
+stopping without a result ends its Step `no_result` as any agent does,
+before any acceptance check runs, so its Gate is the only one the Step
+opens: never `accept`'s Blockers Gate too. The Step that goes on from a
+`retry` is the same visit, so a Blockers Gate it then opens counts the
+fixes of the visits before it, not the retried Step.
 
 People call the Run API with their own login (`UserOrInternal`), and internal
 services for an acting user (the internal key's identity headers). A Run starts
