@@ -818,7 +818,7 @@ jobs:
         biome ci "${changed[@]}" --no-errors-on-unmatched --error-on-warnings
       working-directory: packages/collaboration
     - name: Check Types
-      run: bun run type-check
+      run: bun run type-check --checkers 2
       working-directory: apps/web
     - name: Build WASM for tests
       run: |-

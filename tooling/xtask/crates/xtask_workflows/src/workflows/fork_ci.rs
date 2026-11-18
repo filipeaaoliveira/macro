@@ -210,9 +210,11 @@ fn web() -> Job {
             "Run Collaboration Package Biome",
             xtask_paths::repo_dir!("packages/collaboration"),
         ))
+        // Two checkers, not the compiler's default four: with four, it held the
+        // runner's whole 9Gi and stalled for twenty minutes.
         .add_step(
             Step::new("Check Types")
-                .run("bun run type-check")
+                .run("bun run type-check --checkers 2")
                 .working_directory(xtask_paths::repo_dir!("apps/web")),
         )
         .add_step(
