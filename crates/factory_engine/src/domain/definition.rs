@@ -84,7 +84,7 @@ pub const MAX_FILE_BYTES: usize = 256 * 1024;
 /// a file holding one, followed by [`SECRET_TAIL`] or more characters of a
 /// token, does not read, wherever it is, glued to a URL's query or not.
 /// The more specific come first, so the error names them.
-const SECRET_PREFIXES: [&str; 19] = [
+const SECRET_PREFIXES: [&str; 24] = [
     "ghp_",
     "gho_",
     "ghu_",
@@ -98,9 +98,14 @@ const SECRET_PREFIXES: [&str; 19] = [
     "rk_live_",
     "sk-",
     "npm_",
+    "xoxa-",
     "xoxb-",
     "xoxp-",
+    "xoxr-",
+    "xoxs-",
     "xapp-",
+    "ya29.",
+    "whsec_",
     "AKIA",
     "AIza",
     // A JSON Web Token's header, `{"`, encoded.
@@ -115,7 +120,35 @@ const WORD_START_PREFIXES: [&str; 1] = ["sk-"];
 const SECRET_TAIL: usize = 16;
 
 /// What begins a private key in a file.
-const PRIVATE_KEY: &str = "-----BEGIN";
+const PRIVATE_KEY: &str = "PRIVATE KEY-----";
+
+/// What only a secret is written beside, whatever follows it, in any case:
+/// a Slack webhook, an AWS secret key's name, an Azure storage key.
+const SECRET_MARKERS: [&str; 3] = [
+    "hooks.slack.com/services/",
+    "aws_secret_access_key",
+    "accountkey=",
+];
+
+/// Where a prefix begins an ordinary name, not a token: npm's settings.
+const NOT_SECRETS: [&str; 1] = ["npm_config_"];
+
+/// Whether `text` holds a URL with a user's password in it
+/// (`scheme://user:password@host`).
+fn credentials_in_url(text: &str) -> bool {
+    text.match_indices("://").any(|(at, _)| {
+        let authority = &text[at + 3..];
+        let end = authority
+            .find(|c: char| c.is_whitespace() || "/?#\"'".contains(c))
+            .unwrap_or(authority.len());
+        let Some((user_info, _)) = authority[..end].rsplit_once('@') else {
+            return false;
+        };
+        user_info
+            .split_once(':')
+            .is_some_and(|(user, password)| !user.is_empty() && !password.is_empty())
+    })
+}
 
 /// The files of a Definition, read at one commit of its repository.
 pub trait DefinitionFiles: Send + Sync {
@@ -240,6 +273,12 @@ pub enum DefinitionError {
     /// The Control File patterns do not hold together.
     #[error("{RULES_FILE}: {0}")]
     ControlFiles(ControlFilesError),
+    /// The Control File patterns leave no room for the Definition's own
+    /// files, which a Run on its repository adds.
+    #[error(
+        "{RULES_FILE}: at most {MAX_DEFINITION_CONTROL_FILES} control file patterns, as a run on the definition's repository adds its own files"
+    )]
+    TooManyControlFiles,
     /// The Queue limit is out of range.
     #[error("{RULES_FILE}: queueLimit must be from {MIN_QUEUE_LIMIT} to {MAX_QUEUE_LIMIT}")]
     QueueLimit,
@@ -273,20 +312,28 @@ fn is_name(name: &str) -> bool {
             .bytes()
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"-_".contains(&byte))
 }
-    /// The Control File patterns leave no room for the Definition's own
-    /// files, which a Run on its repository adds.
-    #[error(
-        "{RULES_FILE}: at most {MAX_DEFINITION_CONTROL_FILES} control file patterns, as a run on the definition's repository adds its own files"
-    )]
-    TooManyControlFiles,
 
 /// How the first secret `text` holds begins, if it holds one.
 fn secret_in(text: &str) -> Option<&'static str> {
+    // A certificate is public: only a private key's block is a secret.
     if text.contains(PRIVATE_KEY) {
         return Some(PRIVATE_KEY);
     }
+    let lower = text.to_ascii_lowercase();
+    if let Some(marker) = SECRET_MARKERS
+        .into_iter()
+        .find(|marker| lower.contains(marker))
+    {
+        return Some(marker);
+    }
+    if credentials_in_url(text) {
+        return Some("://user:password@");
+    }
     SECRET_PREFIXES.into_iter().find(|prefix| {
         text.match_indices(prefix).any(|(at, _)| {
+            if NOT_SECRETS.iter().any(|name| text[at..].starts_with(name)) {
+                return false;
+            }
             // `task-` holds no `sk-` token: those prefixes count only at
             // the start of a word.
             let word_start = !WORD_START_PREFIXES.contains(prefix)

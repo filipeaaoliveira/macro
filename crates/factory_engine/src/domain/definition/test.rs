@@ -616,3 +616,40 @@ async fn a_definition_s_control_files_leave_room_for_its_own() {
     assert_eq!(full, Err(DefinitionError::TooManyControlFiles));
 }
 
+/// Slack, Google, webhook and cloud secrets, and a password in a URL, do
+/// not read; npm's settings and a public certificate do.
+#[tokio::test]
+async fn more_secret_shapes_do_not_read_and_public_text_does() {
+    let kind = |value: &str| {
+        let agents = AGENTS.replace("large-model", value);
+        async move {
+            match read(with("agents.json", &agents)).await {
+                Err(DefinitionError::Secret { kind, .. }) => Some(kind),
+                _ => None,
+            }
+        }
+    };
+
+    assert_eq!(
+        kind(concat!("xoxs-", "0123456789abcdefABCDEF")).await,
+        Some("xoxs-")
+    );
+    assert_eq!(
+        kind("https://hooks.slack.com/services/T000/B000/XXXX").await,
+        Some("hooks.slack.com/services/")
+    );
+    assert_eq!(kind("ya29.0123456789abcdefABCDEF").await, Some("ya29."));
+    assert_eq!(kind("whsec_0123456789abcdefABCDEF").await, Some("whsec_"));
+    assert_eq!(
+        kind("AWS_SECRET_ACCESS_KEY=abc").await,
+        Some("aws_secret_access_key")
+    );
+    assert_eq!(kind("AccountKey=abc;").await, Some("accountkey="));
+    assert_eq!(
+        kind("postgres://admin:hunter2@db.internal/app").await,
+        Some("://user:password@")
+    );
+    assert_eq!(kind("npm_config_registry_settings_value").await, None);
+    assert_eq!(kind("-----BEGIN CERTIFICATE-----").await, None);
+    assert_eq!(kind("https://github.com/macro/app").await, None);
+}
