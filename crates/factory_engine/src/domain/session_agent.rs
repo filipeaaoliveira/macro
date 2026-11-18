@@ -289,21 +289,29 @@ impl<S: RoutineSessions, R: RunRepository + EvaluationRepository> SessionAgent<S
     /// Role first, then the agent definition's, which take the Step when
     /// one cannot start for lack of quota. A Benchmark trial takes only its
     /// first, so every trial runs on its suite's configuration: one that
-    /// cannot start fails. A choice the definition no longer has is passed
-    /// over, and logged.
+    /// cannot start, or that the definition no longer has, fails. An arm's
+    /// choice the definition no longer has is passed over, and logged.
     async fn role_agents(&self, task: &AgentTask) -> Result<Vec<AgentName>, SessionAgentError> {
         let run = self
             .repo
             .run_agents(task.key.run_id)
             .await
             .map_err(Self::records)?;
+        // A trial runs on its suite's configuration or not at all: an Agent
+        // it chose that the definition no longer has fails the Step.
+        if run.trial
+            && let Some(agent) = run.choices.get(&task.role)
+            && self.agents.agent(agent).is_none()
+        {
+            return Err(SessionAgentError::UnknownAgent(agent.clone()));
+        }
         let chosen = run.choices.get(&task.role).filter(|agent| {
             let defined = self.agents.agent(agent).is_some();
             if !defined {
                 tracing::warn!(
                     agent = %agent,
                     role = %task.role,
-                    "the agent a run's arm or suite chose is no longer defined"
+                    "the agent a run's arm chose is no longer defined"
                 );
             }
             defined

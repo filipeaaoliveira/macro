@@ -1322,6 +1322,46 @@ async fn a_trial_s_agent_out_of_quota_fails_its_step() {
     assert_eq!(bots, [SPARE]);
 }
 
+/// A trial whose suite chose an Agent the definition no longer has fails
+/// its Step: no other Agent of its Role stands in.
+#[tokio::test]
+async fn a_trial_s_agent_no_longer_defined_fails_its_step() {
+    use factory_records::domain::evaluation::{EvaluationRepository, NewSuite, TrialKey};
+
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
+    let task = plan_task(&repo).await;
+    let suite_id = Uuid::from_u128(600);
+    let configuration = [(planner(), name("gone"))].into_iter().collect();
+    repo.insert_suite(&NewSuite {
+        id: suite_id,
+        user_id: &julia(),
+        benchmark: "core",
+        agents: &configuration,
+        trials: 1,
+    })
+    .await
+    .expect("suite");
+    repo.insert_trial(
+        &TrialKey {
+            suite_id,
+            task: "typo".to_string(),
+        },
+        task.key.run_id,
+        "1111111111111111111111111111111111111111",
+    )
+    .await
+    .expect("trial");
+
+    let failed = agent(&sessions, &repo).answer(task).await;
+
+    assert!(
+        matches!(&failed, Err(SessionAgentError::UnknownAgent(agent)) if *agent == name("gone")),
+        "{failed:?}"
+    );
+    assert!(sessions.prepared_calls.lock().expect("prepared").is_empty());
+}
+
 /// An Agent refused its prompt for lack of quota opened a session that did
 /// no work: it is deleted, and the next Agent takes the Step.
 #[tokio::test]
