@@ -706,6 +706,17 @@ export type NamedCount = {
 };
 
 /**
+ * Request body for a note to a running Step's agent.
+ */
+export type NoteStepRequest = {
+    /**
+     * The owner's words, for the agent to take into account: at most 4096
+     * bytes, not blank.
+     */
+    note: string;
+};
+
+/**
  * A workspace's Orchestrator Definition: which kinds of Gate the factory
  * decides on its own, whether the Gates it leaves go to the Run's owner,
  * which the stand-in answers for the Run's owner when no rule does, and
@@ -881,6 +892,17 @@ export type Repository = {
  * Why a base branch's required checks decide nothing.
  */
 export type RequiredChecksState = 'unread' | 'none';
+
+/**
+ * Request body for resuming a paused Step.
+ */
+export type ResumeStepRequest = {
+    /**
+     * The owner's words for the agent as it goes on, if any: at most 4096
+     * bytes; a blank note is left out.
+     */
+    note?: string | null;
+};
 
 /**
  * A finding as its round keeps it.
@@ -1351,6 +1373,34 @@ export type StandingRulesSettings = {
 };
 
 /**
+ * One thing the Run's owner did to a running Step.
+ */
+export type Steer = {
+    /**
+     * What they did.
+     */
+    action: SteerAction;
+    /**
+     * When they did it.
+     */
+    at: string;
+    /**
+     * Their note to the agent, for a note or a resume that has one.
+     */
+    note?: string | null;
+    /**
+     * Whether the agent's session refused the note or the resume, so the
+     * agent never read it.
+     */
+    undelivered: boolean;
+};
+
+/**
+ * What the Run's owner did to a running Step from its Step Terminal.
+ */
+export type SteerAction = 'note' | 'pause' | 'resume' | 'stop';
+
+/**
  * One visit of one of a Run's entries.
  */
 export type Step = {
@@ -1381,6 +1431,11 @@ export type Step = {
      */
     startedAt: string;
     /**
+     * Its Step Terminal: the session its owner may watch, and how they
+     * steered it.
+     */
+    terminal: StepTerminal;
+    /**
      * Which visit of the entry it is, from 1.
      */
     visit: number;
@@ -1402,6 +1457,32 @@ export type StepEnd = {
      * What the Step produced, for a person to read.
      */
     output: string;
+};
+
+/**
+ * A running agent Step as its owner watches and steers it, from the Run
+ * view: the agent session to watch, whether it is paused or asked to stop,
+ * and what the owner did, oldest first.
+ */
+export type StepTerminal = {
+    /**
+     * Since when the owner paused the Step, while it is paused.
+     */
+    pausedAt?: string | null;
+    /**
+     * The agent session the Step works in, while it runs in one: none for a
+     * Step that ended, let go of its session, or does no agent work.
+     */
+    sessionId?: string | null;
+    /**
+     * What the owner did, oldest first.
+     */
+    steers: Array<Steer>;
+    /**
+     * When the owner asked the Step to stop; it ends `failed` once its
+     * agent's turn stops.
+     */
+    stopAskedAt?: string | null;
 };
 
 /**
@@ -1886,6 +1967,69 @@ export type AnswerFactoryGateResponses = {
     202: unknown;
 };
 
+export type NoteFactoryStepData = {
+    body: NoteStepRequest;
+    path: {
+        /**
+         * The Run's id.
+         */
+        id: RunId;
+        /**
+         * The place, among the Run's Steps, of the Step whose Gate it answers.
+         */
+        seq: number;
+    };
+    query?: never;
+    url: '/runs/{id}/steps/{seq}/note';
+};
+
+export type NoteFactoryStepErrors = {
+    400: ErrorResponse;
+    401: ErrorResponse;
+    403: ErrorResponse;
+    404: ErrorResponse;
+    409: ErrorResponse;
+    500: ErrorResponse;
+    502: ErrorResponse;
+};
+
+export type NoteFactoryStepError = NoteFactoryStepErrors[keyof NoteFactoryStepErrors];
+
+export type NoteFactoryStepResponses = {
+    202: unknown;
+};
+
+export type PauseFactoryStepData = {
+    body?: never;
+    path: {
+        /**
+         * The Run's id.
+         */
+        id: RunId;
+        /**
+         * The place, among the Run's Steps, of the Step whose Gate it answers.
+         */
+        seq: number;
+    };
+    query?: never;
+    url: '/runs/{id}/steps/{seq}/pause';
+};
+
+export type PauseFactoryStepErrors = {
+    400: ErrorResponse;
+    401: ErrorResponse;
+    403: ErrorResponse;
+    404: ErrorResponse;
+    409: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type PauseFactoryStepError = PauseFactoryStepErrors[keyof PauseFactoryStepErrors];
+
+export type PauseFactoryStepResponses = {
+    202: unknown;
+};
+
 export type ReplyToFactoryGateData = {
     body: ReplyToGateRequest;
     path: {
@@ -1916,6 +2060,69 @@ export type ReplyToFactoryGateErrors = {
 export type ReplyToFactoryGateError = ReplyToFactoryGateErrors[keyof ReplyToFactoryGateErrors];
 
 export type ReplyToFactoryGateResponses = {
+    202: unknown;
+};
+
+export type ResumeFactoryStepData = {
+    body: ResumeStepRequest;
+    path: {
+        /**
+         * The Run's id.
+         */
+        id: RunId;
+        /**
+         * The place, among the Run's Steps, of the Step whose Gate it answers.
+         */
+        seq: number;
+    };
+    query?: never;
+    url: '/runs/{id}/steps/{seq}/resume';
+};
+
+export type ResumeFactoryStepErrors = {
+    400: ErrorResponse;
+    401: ErrorResponse;
+    403: ErrorResponse;
+    404: ErrorResponse;
+    409: ErrorResponse;
+    500: ErrorResponse;
+    502: ErrorResponse;
+};
+
+export type ResumeFactoryStepError = ResumeFactoryStepErrors[keyof ResumeFactoryStepErrors];
+
+export type ResumeFactoryStepResponses = {
+    202: unknown;
+};
+
+export type StopFactoryStepData = {
+    body?: never;
+    path: {
+        /**
+         * The Run's id.
+         */
+        id: RunId;
+        /**
+         * The place, among the Run's Steps, of the Step whose Gate it answers.
+         */
+        seq: number;
+    };
+    query?: never;
+    url: '/runs/{id}/steps/{seq}/stop';
+};
+
+export type StopFactoryStepErrors = {
+    400: ErrorResponse;
+    401: ErrorResponse;
+    403: ErrorResponse;
+    404: ErrorResponse;
+    409: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type StopFactoryStepError = StopFactoryStepErrors[keyof StopFactoryStepErrors];
+
+export type StopFactoryStepResponses = {
     202: unknown;
 };
 

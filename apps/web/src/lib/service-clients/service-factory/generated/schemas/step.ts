@@ -12,6 +12,7 @@ import type { StepAgent } from './stepAgent';
 import type { StepEndProperty } from './stepEndProperty';
 import type { StepGate } from './stepGate';
 import type { StepRole } from './stepRole';
+import type { StepTerminal } from './stepTerminal';
 
 /**
  * One visit of one of a Run's entries.
@@ -36,6 +37,9 @@ why. */
   seq: number;
   /** When the Step started. */
   startedAt: string;
+  /** Its Step Terminal: the session its owner may watch, and how they
+steered it. */
+  terminal: StepTerminal;
   /**
    * Which visit of the entry it is, from 1.
    * @minimum 0

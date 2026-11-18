@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AnswerFactoryGateData, AnswerFactoryGateErrors, AnswerFactoryGateResponses, CallFactoryAutomationWebhookData, CallFactoryAutomationWebhookErrors, CallFactoryAutomationWebhookResponses, CancelFactoryRunData, CancelFactoryRunErrors, CancelFactoryRunResponses, CreateFactoryAutomationData, CreateFactoryAutomationErrors, CreateFactoryAutomationResponses, CreateFactoryRunData, CreateFactoryRunErrors, CreateFactoryRunResponses, DeleteFactoryAutomationData, DeleteFactoryAutomationErrors, DeleteFactoryAutomationResponses, FireFactoryAutomationData, FireFactoryAutomationErrors, FireFactoryAutomationResponses, GetFactoryControlFilesData, GetFactoryControlFilesErrors, GetFactoryControlFilesResponses, GetFactoryInsightsData, GetFactoryInsightsErrors, GetFactoryInsightsResponses, GetFactoryRunData, GetFactoryRunErrors, GetFactoryRunResponses, GetFactoryStandingRulesData, GetFactoryStandingRulesErrors, GetFactoryStandingRulesResponses, HandBackFactoryStepData, HandBackFactoryStepErrors, HandBackFactoryStepResponses, LinkFactoryRunTaskData, LinkFactoryRunTaskErrors, LinkFactoryRunTaskResponses, ListFactoryAutomationsData, ListFactoryAutomationsErrors, ListFactoryAutomationsResponses, ListFactoryFlowsData, ListFactoryFlowsErrors, ListFactoryFlowsResponses, ListFactoryTaskRunsData, ListFactoryTaskRunsErrors, ListFactoryTaskRunsResponses, ListFactoryWaitingRunsData, ListFactoryWaitingRunsErrors, ListFactoryWaitingRunsResponses, ReplyToFactoryGateData, ReplyToFactoryGateErrors, ReplyToFactoryGateResponses, SetFactoryAutomationEnabledData, SetFactoryAutomationEnabledErrors, SetFactoryAutomationEnabledResponses, SetFactoryControlFilesData, SetFactoryControlFilesErrors, SetFactoryControlFilesResponses, SetFactoryProjectStandingRulesData, SetFactoryProjectStandingRulesErrors, SetFactoryProjectStandingRulesResponses, SetFactoryStandingRulesData, SetFactoryStandingRulesErrors, SetFactoryStandingRulesResponses } from './types.gen';
+import type { AnswerFactoryGateData, AnswerFactoryGateErrors, AnswerFactoryGateResponses, CallFactoryAutomationWebhookData, CallFactoryAutomationWebhookErrors, CallFactoryAutomationWebhookResponses, CancelFactoryRunData, CancelFactoryRunErrors, CancelFactoryRunResponses, CreateFactoryAutomationData, CreateFactoryAutomationErrors, CreateFactoryAutomationResponses, CreateFactoryRunData, CreateFactoryRunErrors, CreateFactoryRunResponses, DeleteFactoryAutomationData, DeleteFactoryAutomationErrors, DeleteFactoryAutomationResponses, FireFactoryAutomationData, FireFactoryAutomationErrors, FireFactoryAutomationResponses, GetFactoryControlFilesData, GetFactoryControlFilesErrors, GetFactoryControlFilesResponses, GetFactoryInsightsData, GetFactoryInsightsErrors, GetFactoryInsightsResponses, GetFactoryRunData, GetFactoryRunErrors, GetFactoryRunResponses, GetFactoryStandingRulesData, GetFactoryStandingRulesErrors, GetFactoryStandingRulesResponses, HandBackFactoryStepData, HandBackFactoryStepErrors, HandBackFactoryStepResponses, LinkFactoryRunTaskData, LinkFactoryRunTaskErrors, LinkFactoryRunTaskResponses, ListFactoryAutomationsData, ListFactoryAutomationsErrors, ListFactoryAutomationsResponses, ListFactoryFlowsData, ListFactoryFlowsErrors, ListFactoryFlowsResponses, ListFactoryTaskRunsData, ListFactoryTaskRunsErrors, ListFactoryTaskRunsResponses, ListFactoryWaitingRunsData, ListFactoryWaitingRunsErrors, ListFactoryWaitingRunsResponses, NoteFactoryStepData, NoteFactoryStepErrors, NoteFactoryStepResponses, PauseFactoryStepData, PauseFactoryStepErrors, PauseFactoryStepResponses, ReplyToFactoryGateData, ReplyToFactoryGateErrors, ReplyToFactoryGateResponses, ResumeFactoryStepData, ResumeFactoryStepErrors, ResumeFactoryStepResponses, SetFactoryAutomationEnabledData, SetFactoryAutomationEnabledErrors, SetFactoryAutomationEnabledResponses, SetFactoryControlFilesData, SetFactoryControlFilesErrors, SetFactoryControlFilesResponses, SetFactoryProjectStandingRulesData, SetFactoryProjectStandingRulesErrors, SetFactoryProjectStandingRulesResponses, SetFactoryStandingRulesData, SetFactoryStandingRulesErrors, SetFactoryStandingRulesResponses, StopFactoryStepData, StopFactoryStepErrors, StopFactoryStepResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -254,6 +254,40 @@ export class Sdk extends HeyApiClient {
     }
 
     /**
+     * Send the agent of the running Step `seq` of one of the caller's Runs a
+     * note, from its Step Terminal. The agent reads it once its turn ends, or
+     * at once when it works on none, and the Step waits for it to answer: it
+     * ends with the agent's latest hand back. Only the Run's owner, in their
+     * own signed-in session, steers a Step (403 otherwise). A Step that ended
+     * (409), or takes no steering now: paused, asked to stop, between its
+     * agent's turns, or with no agent session (409). A blank note, or one
+     * past 4096 bytes, is refused (400); a session that did not take it is
+     * 502.
+     */
+    public noteFactoryStep<ThrowOnError extends boolean = false>(options: Options<NoteFactoryStepData, ThrowOnError>): RequestResult<NoteFactoryStepResponses, NoteFactoryStepErrors, ThrowOnError> {
+        return (options.client ?? this.client).post<NoteFactoryStepResponses, NoteFactoryStepErrors, ThrowOnError>({
+            url: '/runs/{id}/steps/{seq}/note',
+            ...options,
+            headers: {
+                'Content-Type': 'application/json',
+                ...options.headers
+            }
+        });
+    }
+
+    /**
+     * Pause the running Step `seq` of one of the caller's Runs: its agent's
+     * turn stops, and the Step holds until it is resumed or stopped. The time
+     * it is paused does not count against the Step's wait for its agent, but
+     * a Step still paused when its two hours run out ends `failed`. As for a
+     * note: only the owner in person (403), a Step that ended or takes no
+     * steering now, such as one already paused (409).
+     */
+    public pauseFactoryStep<ThrowOnError extends boolean = false>(options: Options<PauseFactoryStepData, ThrowOnError>): RequestResult<PauseFactoryStepResponses, PauseFactoryStepErrors, ThrowOnError> {
+        return (options.client ?? this.client).post<PauseFactoryStepResponses, PauseFactoryStepErrors, ThrowOnError>({ url: '/runs/{id}/steps/{seq}/pause', ...options });
+    }
+
+    /**
      * Reply, as the caller, in words to the Gate one of their Runs waits on.
      * The factory reads the words as one of the Gate's answers, kept as its
      * note, or asks back on the Gate, which then still waits; an agent's
@@ -269,6 +303,35 @@ export class Sdk extends HeyApiClient {
                 ...options.headers
             }
         });
+    }
+
+    /**
+     * Resume the paused Step `seq` of one of the caller's Runs: its agent is
+     * told to go on where it left off, with the owner's note if they wrote
+     * one, and the Step follows that turn. As for a note: only the owner in
+     * person (403), a Step that ended or is not paused (409), a note past 4096
+     * bytes (400), a session that did not take it (502), which leaves the
+     * Step paused.
+     */
+    public resumeFactoryStep<ThrowOnError extends boolean = false>(options: Options<ResumeFactoryStepData, ThrowOnError>): RequestResult<ResumeFactoryStepResponses, ResumeFactoryStepErrors, ThrowOnError> {
+        return (options.client ?? this.client).post<ResumeFactoryStepResponses, ResumeFactoryStepErrors, ThrowOnError>({
+            url: '/runs/{id}/steps/{seq}/resume',
+            ...options,
+            headers: {
+                'Content-Type': 'application/json',
+                ...options.headers
+            }
+        });
+    }
+
+    /**
+     * Stop the running Step `seq` of one of the caller's Runs: its agent's
+     * turn stops, and the Step ends `failed`, its session stopped for good;
+     * the Flow routes the failure. As for a note: only the owner in person
+     * (403), a Step that ended or takes no steering now (409).
+     */
+    public stopFactoryStep<ThrowOnError extends boolean = false>(options: Options<StopFactoryStepData, ThrowOnError>): RequestResult<StopFactoryStepResponses, StopFactoryStepErrors, ThrowOnError> {
+        return (options.client ?? this.client).post<StopFactoryStepResponses, StopFactoryStepErrors, ThrowOnError>({ url: '/runs/{id}/steps/{seq}/stop', ...options });
     }
 
     /**

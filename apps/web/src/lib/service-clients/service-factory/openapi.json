@@ -1171,6 +1171,214 @@
         }
       }
     },
+    "/runs/{id}/steps/{seq}/note": {
+      "post": {
+        "tags": ["factory"],
+        "summary": "Send the agent of the running Step `seq` of one of the caller's Runs a\nnote, from its Step Terminal. The agent reads it once its turn ends, or\nat once when it works on none, and the Step waits for it to answer: it\nends with the agent's latest hand back. Only the Run's owner, in their\nown signed-in session, steers a Step (403 otherwise). A Step that ended\n(409), or takes no steering now: paused, asked to stop, between its\nagent's turns, or with no agent session (409). A blank note, or one\npast 4096 bytes, is refused (400); a session that did not take it is\n502.",
+        "operationId": "note_factory_step",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The Run's id.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/RunId"
+            }
+          },
+          {
+            "name": "seq",
+            "in": "path",
+            "description": "The place, among the Run's Steps, of the Step whose Gate it answers.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NoteStepRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/{id}/steps/{seq}/pause": {
+      "post": {
+        "tags": ["factory"],
+        "summary": "Pause the running Step `seq` of one of the caller's Runs: its agent's\nturn stops, and the Step holds until it is resumed or stopped. The time\nit is paused does not count against the Step's wait for its agent, but\na Step still paused when its two hours run out ends `failed`. As for a\nnote: only the owner in person (403), a Step that ended or takes no\nsteering now, such as one already paused (409).",
+        "operationId": "pause_factory_step",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The Run's id.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/RunId"
+            }
+          },
+          {
+            "name": "seq",
+            "in": "path",
+            "description": "The place, among the Run's Steps, of the Step whose Gate it answers.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/runs/{id}/steps/{seq}/reply": {
       "post": {
         "tags": ["factory"],
@@ -1283,6 +1491,214 @@
             }
           },
           "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/{id}/steps/{seq}/resume": {
+      "post": {
+        "tags": ["factory"],
+        "summary": "Resume the paused Step `seq` of one of the caller's Runs: its agent is\ntold to go on where it left off, with the owner's note if they wrote\none, and the Step follows that turn. As for a note: only the owner in\nperson (403), a Step that ended or is not paused (409), a note past 4096\nbytes (400), a session that did not take it (502), which leaves the\nStep paused.",
+        "operationId": "resume_factory_step",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The Run's id.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/RunId"
+            }
+          },
+          {
+            "name": "seq",
+            "in": "path",
+            "description": "The place, among the Run's Steps, of the Step whose Gate it answers.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResumeStepRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/{id}/steps/{seq}/stop": {
+      "post": {
+        "tags": ["factory"],
+        "summary": "Stop the running Step `seq` of one of the caller's Runs: its agent's\nturn stops, and the Step ends `failed`, its session stopped for good;\nthe Flow routes the failure. As for a note: only the owner in person\n(403), a Step that ended or takes no steering now (409).",
+        "operationId": "stop_factory_step",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The Run's id.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/RunId"
+            }
+          },
+          {
+            "name": "seq",
+            "in": "path",
+            "description": "The place, among the Run's Steps, of the Step whose Gate it answers.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
             "description": "",
             "content": {
               "application/json": {
@@ -2737,6 +3153,17 @@
           }
         }
       },
+      "NoteStepRequest": {
+        "type": "object",
+        "description": "Request body for a note to a running Step's agent.",
+        "required": ["note"],
+        "properties": {
+          "note": {
+            "type": "string",
+            "description": "The owner's words, for the agent to take into account: at most 4096\nbytes, not blank."
+          }
+        }
+      },
       "OrchestratorDefinition": {
         "type": "object",
         "description": "A workspace's Orchestrator Definition: which kinds of Gate the factory\ndecides on its own, whether the Gates it leaves go to the Run's owner,\nwhich the stand-in answers for the Run's owner when no rule does, and\nthe Queue limit above which no new Run starts. A kind left off waits for\na person, as every Gate did before Standing\nRules. Whatever it says, a Tampered Run's Gates and a merge through a\nMain Hold stay a person's.",
@@ -2910,6 +3337,16 @@
         "type": "string",
         "description": "Why a base branch's required checks decide nothing.",
         "enum": ["unread", "none"]
+      },
+      "ResumeStepRequest": {
+        "type": "object",
+        "description": "Request body for resuming a paused Step.",
+        "properties": {
+          "note": {
+            "type": ["string", "null"],
+            "description": "The owner's words for the agent as it goes on, if any: at most 4096\nbytes; a blank note is left out."
+          }
+        }
       },
       "ReviewFinding": {
         "type": "object",
@@ -3612,6 +4049,35 @@
           }
         }
       },
+      "Steer": {
+        "type": "object",
+        "description": "One thing the Run's owner did to a running Step.",
+        "required": ["action", "undelivered", "at"],
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/SteerAction",
+            "description": "What they did."
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When they did it."
+          },
+          "note": {
+            "type": ["string", "null"],
+            "description": "Their note to the agent, for a note or a resume that has one."
+          },
+          "undelivered": {
+            "type": "boolean",
+            "description": "Whether the agent's session refused the note or the resume, so the\nagent never read it."
+          }
+        }
+      },
+      "SteerAction": {
+        "type": "string",
+        "description": "What the Run's owner did to a running Step from its Step Terminal.",
+        "enum": ["note", "pause", "resume", "stop"]
+      },
       "Step": {
         "type": "object",
         "description": "One visit of one of a Run's entries.",
@@ -3621,7 +4087,8 @@
           "visit",
           "startedAt",
           "passedOver",
-          "checks"
+          "checks",
+          "terminal"
         ],
         "properties": {
           "agent": {
@@ -3697,6 +4164,10 @@
             "format": "date-time",
             "description": "When the Step started."
           },
+          "terminal": {
+            "$ref": "#/components/schemas/StepTerminal",
+            "description": "Its Step Terminal: the session its owner may watch, and how they\nsteered it."
+          },
           "visit": {
             "type": "integer",
             "format": "int32",
@@ -3722,6 +4193,35 @@
           "output": {
             "type": "string",
             "description": "What the Step produced, for a person to read."
+          }
+        }
+      },
+      "StepTerminal": {
+        "type": "object",
+        "description": "A running agent Step as its owner watches and steers it, from the Run\nview: the agent session to watch, whether it is paused or asked to stop,\nand what the owner did, oldest first.",
+        "required": ["steers"],
+        "properties": {
+          "pausedAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "Since when the owner paused the Step, while it is paused."
+          },
+          "sessionId": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "The agent session the Step works in, while it runs in one: none for a\nStep that ended, let go of its session, or does no agent work."
+          },
+          "steers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Steer"
+            },
+            "description": "What the owner did, oldest first."
+          },
+          "stopAskedAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When the owner asked the Step to stop; it ends `failed` once its\nagent's turn stops."
           }
         }
       },
