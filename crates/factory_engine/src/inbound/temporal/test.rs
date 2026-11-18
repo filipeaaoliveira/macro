@@ -564,10 +564,10 @@ async fn a_step_whose_worker_shuts_down_goes_on_at_once_on_the_next() {
 /// The agent of a `code` Run: it ends each Step it is asked for `done`, but
 /// a reviewer's with the next of `reviews` (`pass` once they run out:
 /// `changes` hands back a Blocker in the change, `outside` one in a file it
-/// does not touch), and a CI fix by pushing a commit whose checks pass. With
-/// `together`, the reviewers of a round answer only once all of them were
-/// asked. It says when it is asked for a Step, and keeps the Steps it was
-/// asked for, by name.
+/// does not touch), a CI fix by pushing a commit whose checks pass, and a
+/// verifier's with `pass`. With `together`, the reviewers of a round answer
+/// only once all of them were asked. It says when it is asked for a Step,
+/// and keeps the Steps it was asked for, by name.
 #[derive(Clone)]
 struct CodeAgent {
     github: FakeGithub,
@@ -652,6 +652,8 @@ impl StepAgent for CodeAgent {
                 github.checks = [ci(Some("success"))].into();
                 "done"
             }
+            // The verifier finds the change does what the request asks.
+            "accept" | "verify" => "pass",
             _ => "done",
         };
         Ok(AgentAnswer {
@@ -1045,9 +1047,13 @@ async fn a_code_run_merges_its_pull_request_once_a_person_approves() {
     .await;
 
     assert!(matches!(ended, Ok(RunOutcome::Success)), "{ended:?}");
+    // The verifier checks the change before the pull request, and the
+    // merged change once its deploy is not needed.
     assert_eq!(
         agent.steps(),
-        ["plan", "write", "review", "review", "review"]
+        [
+            "plan", "write", "review", "review", "review", "accept", "verify"
+        ]
     );
     let github = github.state();
     assert_eq!(github.opened, 1);
@@ -1080,7 +1086,8 @@ async fn red_ci_is_fixed_and_the_fixed_commit_merges() {
     assert_eq!(
         agent.steps(),
         [
-            "plan", "write", "review", "review", "review", "ci_fix", "review", "review", "review"
+            "plan", "write", "review", "review", "review", "accept", "ci_fix", "review", "review",
+            "review", "accept", "verify"
         ]
     );
     let github = github.state();
@@ -1112,7 +1119,8 @@ async fn revising_or_cancelling_at_the_merge_question_merges_nothing() {
     assert_eq!(
         agent.steps(),
         [
-            "plan", "write", "review", "review", "review", "fix", "review", "review", "review"
+            "plan", "write", "review", "review", "review", "accept", "fix", "review", "review",
+            "review", "accept"
         ]
     );
     let github = github.state();

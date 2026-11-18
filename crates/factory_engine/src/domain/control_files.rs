@@ -1,6 +1,6 @@
 //! Control Files: the files that decide whether a repository's checks pass,
 //! such as its tests, lint and test configuration, CI workflows, package
-//! scripts, agent instructions and its checks file.
+//! scripts, agent instructions, its checks file and its verify file.
 //!
 //! An agent that changes one can make failing work pass, so a `code` Run
 //! whose branch changes a Control File its request does not ask for is
@@ -41,8 +41,10 @@ pub const DEFAULT_CONTROL_FILES: &[&str] = &[
     ".github/actions/**",
     ".gitlab-ci.yml",
     ".circleci/**",
-    // The repository's own checks, which the factory's checks rounds run.
+    // The repository's own checks, which the factory's checks rounds run,
+    // and its verify Phase, which a change could turn off.
     ".macro/checks.json",
+    ".macro/verify.json",
     // Agent instructions and their tools' settings.
     "**/AGENTS.md",
     "**/CLAUDE.md",
