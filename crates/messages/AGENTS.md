@@ -70,6 +70,11 @@ the post as that client's ("Claude Code · Agent · from <user>"). It is a displ
 label only. Over HTTP the label comes only from the signed `agent_via` claim of
 a code-mode token, never from the request body.
 
+`POST /messages/{parent_type}/{parent_id}` takes `?notification_policy=`
+(`Default`, `MentionsOnly`, `Silent`) from an internal caller only, such as
+a service posting updates as a user that should notify no one; any other
+caller's post notifies as usual, whatever it asks.
+
 New posts use the message sender receipt to retain signed code-mode agent
 attribution. All other operations use the caller receipt so attribution cannot
 grant users another agent invocation's edit, deletion, or reaction authority.

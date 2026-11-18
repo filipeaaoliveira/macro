@@ -82,5 +82,6 @@ workspace-hack = { version = "0.1", path = "../workspace-hack" }
 initiative = { path = "../initiative", default-features = false, features = ["postgres"] }
 macro_db_migrator = { path = "../macro_db_migrator" }
 macro_uuid = { path = "../macro_uuid" }
+model_user = { path = "../model_user" }
 models_permissions = { path = "../models_permissions" }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
