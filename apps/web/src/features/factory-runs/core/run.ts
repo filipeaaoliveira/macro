@@ -79,7 +79,7 @@ export type Gate = {
     reply: string;
     at: string;
     reading?: GateModelReading;
-    refusedTampered?: boolean;
+    refusedTampered: boolean;
   };
   /** The stand-in's answer, while the owner may override it and after. */
   standIn?: StandInAnswer;

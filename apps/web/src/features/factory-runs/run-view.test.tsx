@@ -452,7 +452,11 @@ describe('RunView', () => {
           ...first,
           gate: {
             ...first.gate,
-            askedBack: { reply: 'Hmm', at: '2026-11-16T09:02:00Z' },
+            askedBack: {
+              reply: 'Hmm',
+              at: '2026-11-16T09:02:00Z',
+              refusedTampered: false,
+            },
           },
         },
       ],
@@ -513,6 +517,7 @@ describe('RunView', () => {
             askedBack: {
               reply: 'Hmm',
               at: '2026-11-16T09:02:00Z',
+              refusedTampered: false,
               reading: {
                 confidence: 40,
                 reason: 'The reply asks a question back.',
@@ -599,6 +604,7 @@ describe('RunView', () => {
             askedBack: {
               reply: 'Hmm',
               at: '2026-11-16T09:05:00Z',
+              refusedTampered: false,
               reading: {
                 pick: 'revise',
                 confidence: 70,

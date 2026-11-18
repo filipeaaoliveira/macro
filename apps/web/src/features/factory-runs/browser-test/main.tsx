@@ -299,6 +299,7 @@ function createFixtureContext(): RunsContext {
                   askedBack: {
                     reply: input.reply,
                     at: new Date().toISOString(),
+                    refusedTampered: false,
                   },
                 },
               }
