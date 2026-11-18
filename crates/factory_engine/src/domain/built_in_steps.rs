@@ -533,7 +533,7 @@ const CUT_NOTE: &str = "\n\n(The rest of this step is left out: the prompt has n
 
 /// The longest start of `text` at most `max` bytes long, cut between two
 /// characters.
-fn cut(text: &str, max: usize) -> &str {
+pub(crate) fn cut(text: &str, max: usize) -> &str {
     let mut end = max.min(text.len());
     while !text.is_char_boundary(end) {
         end -= 1;

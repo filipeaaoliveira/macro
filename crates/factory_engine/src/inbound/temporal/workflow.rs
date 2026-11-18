@@ -51,23 +51,26 @@ use std::time::Duration;
 use factory_records::domain::models::{Outcome, RunOutcome, StepKey};
 use temporalio_common::error::ApplicationFailure;
 use temporalio_macros::{workflow, workflow_methods};
+use temporalio_sdk::workflows::select;
 use temporalio_sdk::{
-    ActivityCancellationType, ActivityCloseTimeouts, ActivityOptions, SyncWorkflowContext,
-    WorkflowCancellationToken, WorkflowContext, WorkflowContextView, WorkflowResult,
-    WorkflowTermination,
+    ActivityCancellationType, ActivityCloseTimeouts, ActivityOptions, CancellableFuture,
+    SyncWorkflowContext, WorkflowCancellationToken, WorkflowContext, WorkflowContextView,
+    WorkflowResult, WorkflowTermination,
 };
 
 use factory_records::domain::standing_rules::RuleGateKind;
 
 use crate::domain::flow::Flow;
 use crate::domain::gate::{
-    AnswerGate, GateAnswered, GateOpening, GateRuling, OpenGate, check_answer,
+    AnswerGate, CommentsReading, GateAnswered, GateOpening, GateRuling, OpenGate, ReplyGate,
+    ReplyRead, ReplyReading, StandInAsking, check_answer, check_reply,
 };
 use crate::domain::interpreter::{Interpreter, NextStep};
 use crate::domain::models::{RunFinish, RunStart, StepReport, StepRequest};
 use crate::domain::questions::gate_question;
 use crate::inbound::temporal::activities::FactoryActivities;
-use crate::temporal::{ANSWER_GATE_UPDATE, FLOW_WORKFLOW};
+use crate::inbound::temporal::gate_activities::GateActivities;
+use crate::temporal::{ANSWER_GATE_UPDATE, FLOW_WORKFLOW, REPLY_GATE_UPDATE};
 use review_round::{Panel, Round, review_round};
 use step::walk_step;
 use work::TemporalWork;
@@ -117,6 +120,12 @@ const STOP_TOTAL: Duration = Duration::from_secs(15 * 60);
 /// Gate it opens. Renaming it breaks the replay of Runs that passed it.
 pub(crate) const STANDING_RULES_PATCH: &str = "factory-standing-rules";
 
+/// The marker of the workflow that asks the stand-in about each Flow's
+/// Gate no rule answered, takes a person's words as a reply, and looks at
+/// the Run's task for its owner's comments while a Gate waits. Renaming it
+/// breaks the replay of Runs that passed it.
+pub(crate) const GATE_REPLIES_PATCH: &str = "factory-gate-replies";
+
 /// The workflow of one Run.
 #[workflow]
 #[derive(Default)]
@@ -125,6 +134,8 @@ pub struct FlowWorkflow {
     open: Option<OpenGate>,
     /// The answer to it, once a person gave one the Gate takes.
     answer: Option<AnswerGate>,
+    /// A person's words on it, once they gave some the Gate takes.
+    reply: Option<ReplyGate>,
 }
 
 #[workflow_methods]
@@ -257,7 +268,28 @@ impl FlowWorkflow {
         _ctx: &WorkflowContextView,
         answer: &AnswerGate,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        check_answer(self.open.as_ref(), self.answer.is_some(), answer).map_err(Into::into)
+        let taken = self.answer.is_some() || self.reply.is_some();
+        check_answer(self.open.as_ref(), taken, answer).map_err(Into::into)
+    }
+
+    /// Give a person's words to the Gate the Run waits on, for the worker
+    /// to read as one of its answers.
+    #[update(name = REPLY_GATE_UPDATE)]
+    pub fn reply_gate(&mut self, _ctx: &mut SyncWorkflowContext<Self>, reply: ReplyGate) {
+        self.reply = Some(reply);
+    }
+
+    /// Refuse words on a Gate the Run does not wait on, words after an
+    /// answer or other words it has not read yet, and words on a Gate
+    /// opened before replies.
+    #[update_validator(reply_gate)]
+    fn check_reply_gate(
+        &self,
+        _ctx: &WorkflowContextView,
+        reply: &ReplyGate,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let taken = self.answer.is_some() || self.reply.is_some();
+        check_reply(self.open.as_ref(), taken, reply).map_err(Into::into)
     }
 }
 
@@ -292,6 +324,9 @@ fn is_cancelled(ctx: &WorkflowContext<FlowWorkflow>) -> bool {
 pub(super) struct Asking {
     /// The Gate's kind, from its Flow; none for a Gate no rule decides.
     pub(super) kind: Option<RuleGateKind>,
+    /// Whether its Flow keeps it for a person only: the stand-in never
+    /// answers it.
+    pub(super) person_only: bool,
     /// For a review panel's Gate, the fix rounds in a row its Blockers
     /// went to.
     pub(super) fix_rounds: u16,
@@ -301,9 +336,10 @@ pub(super) struct Asking {
 }
 
 /// Open the Gate `opening`; for a Flow's Gate (`rule`), ask the Run's
-/// Standing Rules about it and return their Rule Answer; otherwise, or
-/// when no rule answers, wait for a person's answer, record it, and return
-/// it. Either way the answer is the outcome the Run goes on with.
+/// Standing Rules about it and return their Rule Answer, then ask the
+/// stand-in; otherwise, or when neither answers, wait for a person's
+/// answer, record it, and return it. Either way the answer is the outcome
+/// the Run goes on with.
 async fn ask(
     ctx: &WorkflowContext<FlowWorkflow>,
     opening: GateOpening,
@@ -342,41 +378,206 @@ async fn ask(
         }
     }
 
-    // Answers are taken only once the Gate is recorded, so a person never
-    // answers a Gate the Run's records do not show.
-    ctx.state_mut(|workflow| {
-        workflow.open = Some(OpenGate {
-            seq: key.seq,
-            answers,
-        });
-        workflow.answer = None;
-    });
-
-    // The Gate closes in the same change that takes its answer, so no
-    // second answer slips in between.
-    let answer = loop {
-        ctx.wait_condition(|workflow| workflow.answer.is_some())
-            .await?;
-        let taken = ctx.state_mut(|workflow| {
-            let answer = workflow.answer.take();
-            if answer.is_some() {
-                workflow.open = None;
-            }
-            answer
-        });
-        if let Some(answer) = taken {
-            break answer;
-        }
+    // A Gate opened before the marker takes only a person's answer, as
+    // before: no stand-in, no reply and no look at the task's comments. Its
+    // history replays without them.
+    let replies = ctx.patched(GATE_REPLIES_PATCH);
+    let gate = Waiting {
+        key,
+        question: rule.is_none(),
+        answers,
+        replies,
     };
 
-    let outcome = answer.answer.clone();
-    ctx.execute_activity(
-        FactoryActivities::answer_gate,
-        GateAnswered { key, answer },
-        record_options,
-    )
-    .await?;
-    Ok(outcome)
+    // The stand-in answers only a Flow's Gate of a kind, once no rule did.
+    // Its answer stands once the owner let the window pass; an answer or a
+    // reply of theirs in the window goes as any other.
+    let mut overridden = None;
+    if replies
+        && let Some(asking) = rule
+        && let Some(kind) = asking.kind
+    {
+        let standing = ctx
+            .execute_activity(
+                GateActivities::stand_in_gate,
+                StandInAsking {
+                    key,
+                    kind,
+                    person_only: asking.person_only,
+                    answers: gate.answers.clone(),
+                },
+                record_options.clone(),
+            )
+            .await?;
+        if let Some(standing) = standing {
+            gate.open(ctx);
+            let mut window = ctx.timer(Duration::from_secs(u64::from(standing.window_secs)));
+            let woke = select! {
+                waited = ctx.wait_condition(|workflow| workflow.answer.is_some() || workflow.reply.is_some()) => {
+                    waited?;
+                    true
+                }
+                _ = window => false,
+            };
+            if !woke {
+                // Closed first, so no answer slips in once the stand-in's
+                // is the one the Run goes on with.
+                gate.close(ctx);
+                let kept = ctx
+                    .execute_activity(GateActivities::keep_stand_in, key, record_options)
+                    .await?;
+                return Ok(kept);
+            }
+            window.cancel();
+            overridden = gate.take(ctx);
+        }
+    }
+
+    // Answers are taken only once the Gate is recorded, so a person never
+    // answers a Gate the Run's records do not show. An owner who overrode
+    // the stand-in already gave theirs.
+    if overridden.is_none() {
+        gate.open(ctx);
+    }
+    let mut comments_after = None;
+    loop {
+        let taken = if let Some(taken) = overridden.take() {
+            Some(taken)
+        } else if replies {
+            // While it waits, the Gate looks at the Run's task for its
+            // owner's comments every so often: the newest one is a reply.
+            let mut look = ctx.timer(COMMENTS_EVERY);
+            let woke = select! {
+                waited = ctx.wait_condition(|workflow| workflow.answer.is_some() || workflow.reply.is_some()) => {
+                    waited?;
+                    true
+                }
+                _ = look => false,
+            };
+            if woke {
+                look.cancel();
+                gate.take(ctx)
+            } else {
+                let read = ctx
+                    .execute_activity(
+                        GateActivities::read_gate_comments,
+                        CommentsReading {
+                            key,
+                            after: comments_after,
+                        },
+                        record_options.clone(),
+                    )
+                    .await?;
+                comments_after = read.read_until;
+                match read.reply {
+                    // A person who answered or replied meanwhile goes
+                    // first; the comment is read past.
+                    Some(reply) => gate.take(ctx).or(Some(Taken::Reply(reply))),
+                    None => gate.take(ctx),
+                }
+            }
+        } else {
+            ctx.wait_condition(|workflow| workflow.answer.is_some())
+                .await?;
+            gate.take(ctx)
+        };
+
+        match taken {
+            None => {}
+            Some(Taken::Answer(answer)) => {
+                let outcome = answer.answer.clone();
+                ctx.execute_activity(
+                    FactoryActivities::answer_gate,
+                    GateAnswered { key, answer },
+                    record_options,
+                )
+                .await?;
+                return Ok(outcome);
+            }
+            Some(Taken::Reply(reply)) => {
+                gate.close(ctx);
+                let reading = ReplyReading {
+                    key,
+                    question: gate.question,
+                    reply: reply.reply,
+                    user_id: reply.user_id,
+                };
+                let read = ctx
+                    .execute_activity(
+                        GateActivities::read_gate_reply,
+                        reading,
+                        record_options.clone(),
+                    )
+                    .await?;
+                match read {
+                    ReplyRead::Answered(outcome) => return Ok(outcome),
+                    // The factory asked back on the Gate, which waits
+                    // again for an answer or another reply.
+                    ReplyRead::AskedBack => gate.open(ctx),
+                }
+            }
+        }
+    }
+}
+
+/// How often a waiting Gate looks at the Run's task for its owner's
+/// comments.
+const COMMENTS_EVERY: Duration = Duration::from_secs(5 * 60);
+
+/// The Gate a Run waits on, as the workflow keeps it.
+struct Waiting {
+    /// The Step that asked.
+    key: StepKey,
+    /// Whether it is an agent's question.
+    question: bool,
+    /// The answers it offers.
+    answers: Vec<Outcome>,
+    /// Whether it takes replies: false for a Gate opened before them.
+    replies: bool,
+}
+
+/// What a person gave a waiting Gate.
+enum Taken {
+    /// One of its answers.
+    Answer(AnswerGate),
+    /// Their words.
+    Reply(ReplyGate),
+}
+
+impl Waiting {
+    /// Take answers and replies to the Gate.
+    fn open(&self, ctx: &WorkflowContext<FlowWorkflow>) {
+        ctx.state_mut(|workflow| {
+            workflow.open = Some(OpenGate {
+                seq: self.key.seq,
+                answers: self.answers.clone(),
+                replies: self.replies,
+            });
+            workflow.answer = None;
+            workflow.reply = None;
+        });
+    }
+
+    /// Take no more answers or replies.
+    fn close(&self, ctx: &WorkflowContext<FlowWorkflow>) {
+        ctx.state_mut(|workflow| workflow.open = None);
+    }
+
+    /// The answer or the reply the Gate took, if any. The Gate closes in
+    /// the same change that takes it, so no second one slips in between.
+    fn take(&self, ctx: &WorkflowContext<FlowWorkflow>) -> Option<Taken> {
+        ctx.state_mut(|workflow| {
+            let taken = match (workflow.answer.take(), workflow.reply.take()) {
+                (Some(answer), _) => Some(Taken::Answer(answer)),
+                (None, Some(reply)) => Some(Taken::Reply(reply)),
+                (None, None) => None,
+            };
+            if taken.is_some() {
+                workflow.open = None;
+            }
+            taken
+        })
+    }
 }
 
 /// Whether a Run's agents may ask its owner questions, and how many each

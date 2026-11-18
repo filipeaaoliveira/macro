@@ -25,7 +25,7 @@ use uuid::Uuid;
 
 use crate::domain::built_in_flows::{BUILT_IN_FLOWS, BuiltInFlow};
 use crate::domain::control_files::ControlFiles;
-use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening, GateRuling};
+use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening, GateRuling, ReplyGate};
 use crate::domain::models::{
     CodeRepository, ControlFilesSettings, FactoryError, FlowSummary, RunDetail, RunFinish,
     RunStart, StandingRulesSettings, StepEnding, StepError, StepInput, StepReport, StepRequest,
@@ -590,6 +590,61 @@ where
             TaskLink::Linked => self.get_run(actor, id).await,
             TaskLink::NoSuchRun => Err(FactoryError::NotFound),
             TaskLink::NoSuchTask => Err(FactoryError::UnknownTask),
+        }
+    }
+
+    #[tracing::instrument(skip(self, actor, reply))]
+    async fn reply_to_gate(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        id: RunId,
+        seq: u16,
+        reply: String,
+    ) -> Result<(), FactoryError> {
+        let reply = reply.trim().to_string();
+        if reply.is_empty() {
+            return Err(FactoryError::AnswerMissing);
+        }
+        if reply.len() > MAX_NOTE_BYTES {
+            return Err(FactoryError::NoteTooLarge {
+                max: MAX_NOTE_BYTES,
+            });
+        }
+        self.known(&actor).await?;
+        self.not_an_agent(&actor).await?;
+        let run = self.owned_run(&actor, id).await?;
+        if run.end.is_some() {
+            return Err(FactoryError::RunEnded);
+        }
+
+        // An agent's question takes the owner's words as its answer, as
+        // the answer path does, on any worker; a Flow's Gate has them read.
+        let steps = self.repo.list_steps(id).await.map_err(internal)?;
+        let question = steps
+            .iter()
+            .find(|step| step.seq == seq)
+            .and_then(|step| step.gate.as_ref())
+            .is_some_and(|gate| gate.kind.answered_only_by_a_person());
+        let delivered = if question {
+            let answer = AnswerGate {
+                seq,
+                answer: Outcome::answer(),
+                note: Some(reply),
+                user_id: actor,
+                approved_control_files: None,
+            };
+            self.workflows.answer(id, &answer).await?
+        } else {
+            let reply = ReplyGate {
+                seq,
+                reply,
+                user_id: actor,
+            };
+            self.workflows.reply(id, &reply).await?
+        };
+        match delivered {
+            AnswerDelivery::Taken => Ok(()),
+            AnswerDelivery::Refused(why) => Err(FactoryError::AnswerRefused(why)),
         }
     }
 

@@ -161,6 +161,11 @@ pub struct GateDefinition {
     /// answers. Left out of a Flow that has none, as `after` is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<RuleGateKind>,
+    /// Whether only a person answers it: the stand-in never does, whatever
+    /// the Run's Orchestrator Definition says. Left out of a Flow that has
+    /// none, as `after` is.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub person_only: bool,
 }
 
 impl GateDefinition {

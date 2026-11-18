@@ -35,4 +35,17 @@ fn the_review_rounds_and_questions_are_read() {
     assert_eq!(bounded.factory_questions, Some(0));
     assert_eq!(unset.factory_questions, None);
     assert!(zero.is_err());
+
+    let gates = read(
+        r#","FACTORY_GATE_MODEL":"claude-haiku-4-5","FACTORY_GATE_REPLY_THRESHOLD":"80","FACTORY_STAND_IN_THRESHOLD":"95","FACTORY_STAND_IN_WINDOW_SECS":"300""#,
+    )
+    .expect("reads");
+    assert_eq!(
+        gates.factory_gate_model.as_deref(),
+        Some("claude-haiku-4-5")
+    );
+    assert_eq!(gates.factory_gate_reply_threshold, Some(80));
+    assert_eq!(gates.factory_stand_in_threshold, Some(95));
+    assert_eq!(gates.factory_stand_in_window_secs, Some(300));
+    assert_eq!(unset.factory_gate_model, None);
 }

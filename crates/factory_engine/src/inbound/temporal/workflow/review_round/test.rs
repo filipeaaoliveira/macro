@@ -519,6 +519,7 @@ fn gated_panel() -> Entry {
                 .to_vec(),
             after: Some(Outcome::try_from("changes".to_string()).expect("valid")),
             kind: Some(RuleGateKind::Blockers),
+            person_only: false,
         }),
         ..panel_entry(3)
     }

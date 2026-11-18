@@ -1,7 +1,9 @@
 //! In-memory stand-ins for the factory's records, for the domain's tests.
 
+mod gate_replies;
 mod main_hold;
 
+pub(crate) use gate_replies::{FakeComments, FakeGateModel};
 pub(crate) use main_hold::{FakeHoldTasks, FakeMain, FakeWatches};
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};

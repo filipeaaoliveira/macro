@@ -1,7 +1,7 @@
 //! What the worker (`crate::inbound::temporal`) and the client that starts,
 //! answers and cancels Runs (`crate::outbound::temporal_run_workflows`) and
 //! starts the watches of base branches (`crate::outbound::temporal_main_watches`)
-//! agree on: the task queue, and the workflows' and the update's names and
+//! agree on: the task queue, and the workflows' and the updates' names and
 //! types.
 //! Renaming any of them strands the Runs in flight.
 
@@ -10,7 +10,7 @@ use temporalio_common::{
     HasWorkflowDefinition, SignalDefinition, UpdateDefinition, WorkflowDefinition,
 };
 
-use crate::domain::gate::AnswerGate;
+use crate::domain::gate::{AnswerGate, ReplyGate};
 use crate::domain::main_hold::MainWatch;
 use crate::domain::models::RunStart;
 
@@ -22,6 +22,10 @@ pub const FLOW_WORKFLOW: &str = "factory_flow";
 
 /// The update that gives a person's answer to the Gate a Run waits on.
 pub const ANSWER_GATE_UPDATE: &str = "factory_answer_gate";
+
+/// The update that gives a person's words to the Gate a Run waits on, in
+/// place of one of its answers.
+pub const REPLY_GATE_UPDATE: &str = "factory_reply_gate";
 
 /// The workflow that watches a base branch Runs merge to.
 pub const MAIN_WATCH_WORKFLOW: &str = "factory_main_watch";
@@ -56,6 +60,20 @@ impl UpdateDefinition for AnswerGateUpdate {
 
     fn name(&self) -> &str {
         ANSWER_GATE_UPDATE
+    }
+}
+
+/// The update that gives a person's words to the Gate a Run waits on, as
+/// its sender sees it. The workflow refuses words it does not take.
+pub struct ReplyGateUpdate;
+
+impl UpdateDefinition for ReplyGateUpdate {
+    type Workflow = FlowWorkflowDefinition;
+    type Input = ReplyGate;
+    type Output = ();
+
+    fn name(&self) -> &str {
+        REPLY_GATE_UPDATE
     }
 }
 

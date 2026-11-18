@@ -16,8 +16,8 @@ use axum::{
     routing::{get, post, put},
 };
 use factory_records::domain::models::{
-    ControlFileChanges, EntryId, Gate, GateAnswer, HandBack, Outcome, Run, RunEnd, RunId,
-    RunOutcome, Step, StepEnd,
+    AskedBack, ControlFileChanges, EntryId, Gate, GateAnswer, HandBack, Outcome, Run, RunEnd,
+    RunId, RunOutcome, StandInAnswer, Step, StepEnd,
 };
 use macro_authorization::{
     MacroAuthorizationExtractor, MacroAuthorizationService, MacroAuthorizationState, UserOnly,
@@ -33,7 +33,7 @@ use crate::domain::models::{
 };
 use crate::domain::ports::FactoryService;
 use factory_records::domain::standing_rules::{
-    OrchestratorDefinition, ProjectRules, RulesSource, RunRules, StandingRule,
+    OrchestratorDefinition, ProjectRules, RulesSource, RunRules, StandInKinds, StandingRule,
 };
 
 /// Router state for the Run API.
@@ -85,6 +85,8 @@ impl<S, Auth> FromRef<FactoryRouterState<S, Auth>> for MacroAuthorizationState<A
 /// - `GET /runs/{id}` — read a Run and the Steps it took.
 /// - `POST /runs/{id}/steps/{seq}/answer` — answer the Gate of the Run's
 ///   Step `seq`.
+/// - `POST /runs/{id}/steps/{seq}/reply` — reply to it in words, which the
+///   factory reads as one of its answers or asks back.
 /// - `POST /runs/{id}/cancel` — cancel a Run.
 /// - `PUT /runs/{id}/task` — link a Run to the Macro task it works on.
 /// - `POST /hand-backs` — an agent Step's session hands back its result.
@@ -117,6 +119,10 @@ where
         .route(
             "/runs/{id}/steps/{seq}/answer",
             post(answer_gate_handler::<S, Auth>),
+        )
+        .route(
+            "/runs/{id}/steps/{seq}/reply",
+            post(reply_to_gate_handler::<S, Auth>),
         )
         .route("/runs/{id}/cancel", post(cancel_run_handler::<S, Auth>))
         .route("/runs/{id}/task", put(link_task_handler::<S, Auth>))
@@ -223,6 +229,14 @@ pub struct AnswerGateRequest {
     /// must be exactly its `controlFiles.tampered` (empty when `unlisted`).
     #[serde(default)]
     pub approved_control_files: Option<Vec<String>>,
+}
+
+/// Request body for replying to a Gate in words.
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplyToGateRequest {
+    /// The person's words, in place of one of the Gate's answers.
+    pub reply: String,
 }
 
 /// Request body for handing back an agent Step's result.
@@ -421,6 +435,52 @@ where
             body.note,
             body.approved_control_files,
         )
+        .await?;
+    Ok(StatusCode::ACCEPTED)
+}
+
+/// Reply, as the caller, in words to the Gate one of their Runs waits on.
+/// The factory reads the words as one of the Gate's answers, kept as its
+/// note, or asks back on the Gate, which then still waits; an agent's
+/// question takes them as the answer. Reading the Run shows which. Only
+/// the owner's own signed-in session replies (403 otherwise).
+#[utoipa::path(
+    post,
+    tag = "factory",
+    operation_id = "reply_to_factory_gate",
+    path = "/runs/{id}/steps/{seq}/reply",
+    params(AnswerGateParams),
+    request_body = ReplyToGateRequest,
+    responses(
+        (status = 202),
+        (status = 400, body = ErrorResponse),
+        (status = 401, body = ErrorResponse),
+        (status = 403, body = ErrorResponse),
+        (status = 404, body = ErrorResponse),
+        (status = 409, body = ErrorResponse),
+        (status = 500, body = ErrorResponse),
+        (status = 502, body = ErrorResponse),
+        (status = 503, body = ErrorResponse),
+    )
+)]
+#[tracing::instrument(skip_all, fields(run_id = %params.id, seq = params.seq))]
+pub async fn reply_to_gate_handler<S, Auth>(
+    State(state): State<FactoryRouterState<S, Auth>>,
+    caller: MacroAuthorizationExtractor<Auth, UserOrInternal>,
+    headers: HeaderMap,
+    Path(params): Path<AnswerGateParams>,
+    Json(body): Json<ReplyToGateRequest>,
+) -> Result<StatusCode, FactoryError>
+where
+    S: FactoryService,
+    Auth: MacroAuthorizationService,
+{
+    // As for an answer: an agent works as the Run's owner, and its words
+    // would answer its own Gate.
+    let actor = in_person(caller.authorization, &headers)?;
+    state
+        .service
+        .reply_to_gate(actor, params.id, params.seq, body.reply)
         .await?;
     Ok(StatusCode::ACCEPTED)
 }
@@ -674,6 +734,7 @@ impl IntoResponse for FactoryError {
         create_run_handler,
         get_run_handler,
         answer_gate_handler,
+        reply_to_gate_handler,
         cancel_run_handler,
         link_task_handler,
         hand_back_handler,
@@ -689,6 +750,7 @@ impl IntoResponse for FactoryError {
         TaskRunsResponse,
         CreateRunRequest,
         AnswerGateRequest,
+        ReplyToGateRequest,
         LinkTaskRequest,
         HandBackRequest,
         RunDetail,
@@ -699,11 +761,14 @@ impl IntoResponse for FactoryError {
         StepEnd,
         Gate,
         GateAnswer,
+        AskedBack,
+        StandInAnswer,
         ControlFileChanges,
         ControlFilesSettings,
         control_files::SetControlFilesRequest,
         StandingRulesSettings,
         OrchestratorDefinition,
+        StandInKinds,
         ProjectRules,
         RunRules,
         RulesSource,

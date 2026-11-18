@@ -50,6 +50,20 @@ pub struct Config {
     /// (`FACTORY_QUESTIONS`): the next one ends the Run for a person. Two
     /// when unset; zero offers agents no question.
     pub factory_questions: Option<u8>,
+    /// The model that reads a person's words on a Gate and stands in for
+    /// the owner at routine Gates (`FACTORY_GATE_MODEL`), a model id Macro's
+    /// model router knows; its fast model when unset.
+    pub factory_gate_model: Option<String>,
+    /// How sure the Gate model must be, in percent, before a person's words
+    /// answer a Gate (`FACTORY_GATE_REPLY_THRESHOLD`); the engine's default
+    /// when unset.
+    pub factory_gate_reply_threshold: Option<u8>,
+    /// How sure the stand-in must be, in percent, before it answers a Gate
+    /// (`FACTORY_STAND_IN_THRESHOLD`); the engine's default when unset.
+    pub factory_stand_in_threshold: Option<u8>,
+    /// How long, in seconds, the owner may override the stand-in's answer
+    /// (`FACTORY_STAND_IN_WINDOW_SECS`); ten minutes when unset.
+    pub factory_stand_in_window_secs: Option<u64>,
     /// The retired `FACTORY_AGENT_ID`, read only to refuse it: set without
     /// `FACTORY_AGENTS`, the service does not start, and its error names
     /// `FACTORY_AGENTS`.

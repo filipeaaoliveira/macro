@@ -6979,7 +6979,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bot_id",
+ "chrono",
  "macro_tower_layers",
+ "messages",
  "model",
  "model_owner",
  "models_bulk_upload",
@@ -8347,6 +8349,7 @@ dependencies = [
 name = "factory_engine"
 version = "0.1.0"
 dependencies = [
+ "agent",
  "agent_correlation",
  "agent_runtime_protocol",
  "agent_session",
@@ -8369,6 +8372,7 @@ dependencies = [
  "macro_authorization",
  "macro_env_var",
  "macro_user_id",
+ "messages",
  "model-error-response",
  "model_user",
  "models_properties",

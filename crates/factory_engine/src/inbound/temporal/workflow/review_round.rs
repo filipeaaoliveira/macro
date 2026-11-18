@@ -94,6 +94,7 @@ pub(super) async fn review_round<W: Work>(
     // The rounds before this one each sent their Blockers to a fix.
     let rule = Asking {
         kind: gate.kind,
+        person_only: gate.person_only,
         fix_rounds: panel.visit.saturating_sub(1),
         fix_limit: rule_fix_limit(panel.entry.max_visits),
     };

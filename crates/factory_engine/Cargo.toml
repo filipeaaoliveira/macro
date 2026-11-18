@@ -5,6 +5,8 @@ publish = false
 version = "0.1.0"
 
 [dependencies]
+# The model router the Gate model calls a small model through.
+agent = { path = "../agent" }
 agent_correlation = { path = "../agent_correlation" }
 agent_runtime_protocol = { path = "../agent_runtime_protocol", default-features = false }
 # `admission` names the refusal of an agent whose owner's quota is used up.
@@ -27,6 +29,7 @@ github = { path = "../github", default-features = false, features = ["link", "ou
 glob = { workspace = true }
 macro_authorization = { path = "../macro_authorization", default-features = false, features = ["axum"] }
 macro_user_id = { path = "../macro_user_id", features = ["schema"] }
+messages = { path = "../messages" }
 model-error-response = { path = "../model-error-response" }
 models_properties = { path = "../models_properties" }
 rootcause = { workspace = true }
