@@ -576,6 +576,47 @@ async fn delete_branch_encodes_each_part_of_the_name() {
             .finish()
             .starts_with("DELETE /repos/macro/app/git/refs/heads/factory/%C3%BC%231 HTTP/1.1")
     );
+
+    // An encoded dot stays text: GitHub never reads it as `..`.
+    let (server, client) = answering("204 No Content", "");
+    client
+        .delete_branch("token", "macro", "app", "factory/%2e%2e")
+        .await
+        .unwrap();
+    assert!(
+        server
+            .finish()
+            .starts_with("DELETE /repos/macro/app/git/refs/heads/factory/%252e%252e HTTP/1.1")
+    );
+}
+
+/// An owner or repository name GitHub would not take is refused before any
+/// request, as `..` would move the deletion off the repository.
+#[tokio::test]
+async fn delete_branch_refuses_an_owner_or_repository_github_would_not_take() {
+    // Nothing listens here: a request sent would fail as an outage.
+    let client = GithubOauthImpl::with_api_base_url("http://127.0.0.1:9".to_string());
+
+    for (owner, repo) in [
+        ("..", "app"),
+        (".", "app"),
+        ("macro", ".."),
+        ("macro", "."),
+        ("", "app"),
+        ("macro", ""),
+        ("macro/x", "app"),
+        ("macro", "app?x"),
+        ("macro", "app#x"),
+        ("macro", "a%2e"),
+    ] {
+        let refused = client
+            .delete_branch("token", owner, repo, "factory/run")
+            .await;
+        assert!(
+            matches!(refused, Err(GithubError::Internal(_))),
+            "{owner:?}/{repo:?}: {refused:?}"
+        );
+    }
 }
 
 /// A name git would not take for a branch is refused before any request:

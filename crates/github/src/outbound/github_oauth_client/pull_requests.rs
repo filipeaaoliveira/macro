@@ -62,6 +62,16 @@ fn is_branch_name(branch: &str) -> bool {
         && !refused_part
 }
 
+/// Whether `part` can be a GitHub owner's or repository's name: letters,
+/// digits, `-`, `_` and `.`, and neither `.` nor `..`, which URL parsing
+/// would fold.
+fn is_repository_part(part: &str) -> bool {
+    let allowed = part
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+    allowed && !part.is_empty() && part != "." && part != ".."
+}
+
 /// What a refused read is, once throttling is ruled out.
 fn refusal(status: StatusCode) -> Option<GithubError> {
     match status {
@@ -445,8 +455,10 @@ impl GithubOauthImpl {
     }
 
     /// Whether an open pull request of the repository is based on `base`,
-    /// so merging it would merge into that branch.
-    #[tracing::instrument(skip(self, access_token), err)]
+    /// so merging it would merge into that branch. The caller logs a
+    /// failure; only the shared helpers (`unexpected`, `transport_error`)
+    /// log an outage's own line.
+    #[tracing::instrument(skip(self, access_token))]
     pub async fn has_open_pull_request_onto(
         &self,
         access_token: &str,
@@ -729,7 +741,9 @@ impl GithubOauthImpl {
     /// Deletes `branch` as the user, or finds it missing, as when it was
     /// deleted already. GitHub refusing it, as for a protected branch, is
     /// an error, and so is a name git would not take for a branch, which is
-    /// never sent. The caller logs a failure.
+    /// never sent, as is an owner or repository name GitHub would not take.
+    /// The caller logs a failure; only the shared helpers (`unexpected`,
+    /// `transport_error`) log an outage's own line.
     #[tracing::instrument(skip(self, access_token))]
     pub async fn delete_branch(
         &self,
@@ -743,6 +757,11 @@ impl GithubOauthImpl {
         if !is_branch_name(branch) {
             return Err(GithubError::Internal(anyhow::anyhow!(
                 "not a branch name: {branch:?}"
+            )));
+        }
+        if !is_repository_part(owner) || !is_repository_part(repo) {
+            return Err(GithubError::Internal(anyhow::anyhow!(
+                "not a repository: {owner:?}/{repo:?}"
             )));
         }
 
