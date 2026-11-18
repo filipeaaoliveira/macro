@@ -175,7 +175,13 @@ fn a_file_holding_a_secret_does_not_read() {
 
 #[test]
 fn an_env_name_that_says_it_holds_a_secret_does_not_read() {
-    for name in ["NPM_TOKEN", "db_password", "MY_API_KEY", "AWS_SECRET"] {
+    for name in [
+        "NPM_TOKEN",
+        "db_password",
+        "MY_API_KEY",
+        "AWS_SECRET",
+        "SECRET_ACCESS_KEY",
+    ] {
         let text = format!(r#"{{"env":{{"{name}":"x"}}}}"#);
         assert_eq!(
             RepositorySetup::parse(&text),
@@ -183,6 +189,17 @@ fn an_env_name_that_says_it_holds_a_secret_does_not_read() {
             "{name}"
         );
     }
+}
+
+/// A word of a name only holds a secret whole: these are plain values.
+#[test]
+fn an_env_name_holding_a_secret_word_only_in_part_reads() {
+    let setup = RepositorySetup::parse(
+        r#"{"env":{"TOKENIZERS_PARALLELISM":"false","GOOGLE_APPLICATION_CREDENTIALS":"/etc/sa.json","KEYBOARD":"us"}}"#,
+    )
+    .expect("parse");
+
+    assert_eq!(setup.env.len(), 3);
 }
 
 /// What a failed setup shows of its output: both streams, each line that

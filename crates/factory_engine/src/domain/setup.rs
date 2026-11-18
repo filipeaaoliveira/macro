@@ -51,15 +51,20 @@ const MAX_ENV: usize = 32;
 /// The longest value in `env`, in bytes.
 const MAX_ENV_VALUE_BYTES: usize = 1024;
 
-/// What an `env` name holds when it names a secret, in any case.
-const SECRET_NAMES: [&str; 7] = [
-    "TOKEN",
-    "SECRET",
-    "PASSWORD",
-    "PASSWD",
-    "API_KEY",
-    "PRIVATE_KEY",
-    "CREDENTIAL",
+/// The words of an `env` name that says it holds a secret, in any case.
+/// Each is one or more whole words of the name, between `_`, so
+/// `TOKENIZERS_PARALLELISM` and `GOOGLE_APPLICATION_CREDENTIALS` (a path)
+/// are plain values.
+const SECRET_NAMES: [&[&str]; 9] = [
+    &["TOKEN"],
+    &["SECRET"],
+    &["PASSWORD"],
+    &["PASSWD"],
+    &["APIKEY"],
+    &["API", "KEY"],
+    &["PRIVATE", "KEY"],
+    &["ACCESS", "KEY"],
+    &["CREDENTIAL"],
 ];
 
 /// The `env` names a setup may not set: those that change what
@@ -213,7 +218,11 @@ impl RepositorySetup {
                 return Err(SetupFileError::EnvName(name.clone()));
             }
             let upper = name.to_ascii_uppercase();
-            if SECRET_NAMES.iter().any(|secret| upper.contains(secret)) {
+            let words: Vec<&str> = upper.split('_').collect();
+            if SECRET_NAMES
+                .iter()
+                .any(|secret| words.windows(secret.len()).any(|at| at == *secret))
+            {
                 return Err(SetupFileError::SecretEnv(name.clone()));
             }
             if value.len() > MAX_ENV_VALUE_BYTES || value.chars().any(char::is_control) {
