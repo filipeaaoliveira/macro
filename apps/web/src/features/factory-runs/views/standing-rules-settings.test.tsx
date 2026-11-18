@@ -59,6 +59,7 @@ describe('StandingRulesSettings', () => {
           plan: false,
           blockers: true,
           merge: false,
+          ownerGates: false,
           standIn: { plan: true, blockers: false },
         },
         isDefault: false,
@@ -77,6 +78,7 @@ describe('StandingRulesSettings', () => {
         plan: false,
         blockers: true,
         merge: false,
+        ownerGates: false,
         standIn: { plan: true, blockers: false },
       })
     );
