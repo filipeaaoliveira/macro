@@ -455,7 +455,9 @@ impl GithubOauthImpl {
     }
 
     /// Whether an open pull request of the repository is based on `base`,
-    /// so merging it would merge into that branch. The caller logs a
+    /// so merging it would merge into that branch. An owner or repository
+    /// name GitHub would not take is refused before any request. The
+    /// caller logs a
     /// failure; only the shared helpers (`unexpected`, `transport_error`)
     /// log an outage's own line.
     #[tracing::instrument(skip(self, access_token))]
@@ -466,6 +468,12 @@ impl GithubOauthImpl {
         repo: &str,
         base: &str,
     ) -> Result<bool, GithubError> {
+        if !is_repository_part(owner) || !is_repository_part(repo) {
+            return Err(GithubError::Internal(anyhow::anyhow!(
+                "not a repository: {owner:?}/{repo:?}"
+            )));
+        }
+
         let open: Vec<serde::de::IgnoredAny> = self
             .read(
                 access_token,

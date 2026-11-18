@@ -681,3 +681,26 @@ async fn an_open_pull_request_onto_a_branch_is_found() {
     assert!(!found);
     none.finish();
 }
+
+/// An owner or repository name GitHub would not take is refused before the
+/// pull requests onto a branch are listed.
+#[tokio::test]
+async fn pull_requests_onto_a_branch_refuse_an_owner_or_repository_github_would_not_take() {
+    // Nothing listens here: a request sent would fail as an outage.
+    let client = GithubOauthImpl::with_api_base_url("http://127.0.0.1:9".to_string());
+
+    for (owner, repo) in [
+        ("..", "app"),
+        ("macro", ".."),
+        ("macro/x", "app"),
+        ("macro", ""),
+    ] {
+        let refused = client
+            .has_open_pull_request_onto("token", owner, repo, "factory/run")
+            .await;
+        assert!(
+            matches!(refused, Err(GithubError::Internal(_))),
+            "{owner:?}/{repo:?}: {refused:?}"
+        );
+    }
+}
