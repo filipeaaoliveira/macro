@@ -1268,6 +1268,20 @@ export type RunTokens = {
 };
 
 /**
+ * The factory Step an agent session works in, as its owner reads it.
+ */
+export type SessionStepRef = {
+    /**
+     * The Run the Step belongs to.
+     */
+    runId: RunId;
+    /**
+     * The Step's place among the Run's Steps.
+     */
+    seq: number;
+};
+
+/**
  * Request body for switching an Automation on or off.
  */
 export type SetAutomationEnabledRequest = {
@@ -1465,6 +1479,21 @@ export type StepEnd = {
  * and what the owner did, oldest first.
  */
 export type StepTerminal = {
+    /**
+     * Whether its agent works on no turn the Step waits on now, as while
+     * the factory runs the repository's checks itself: the Step takes no
+     * steering until the factory's next prompt.
+     */
+    betweenTurns: boolean;
+    /**
+     * When a paused Step ends, failed, unless it is resumed first: its
+     * work's time runs out then. Set by the Run API while it is paused.
+     */
+    endsBy?: string | null;
+    /**
+     * When its work ended it because it stayed paused past its time.
+     */
+    pauseRanOutAt?: string | null;
     /**
      * Since when the owner paused the Step, while it is paused.
      */
@@ -2153,6 +2182,33 @@ export type LinkFactoryRunTaskResponses = {
 };
 
 export type LinkFactoryRunTaskResponse = LinkFactoryRunTaskResponses[keyof LinkFactoryRunTaskResponses];
+
+export type GetFactorySessionStepData = {
+    body?: never;
+    path: {
+        /**
+         * The agent session's id.
+         */
+        session_id: string;
+    };
+    query?: never;
+    url: '/sessions/{session_id}/step';
+};
+
+export type GetFactorySessionStepErrors = {
+    401: ErrorResponse;
+    403: ErrorResponse;
+    404: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type GetFactorySessionStepError = GetFactorySessionStepErrors[keyof GetFactorySessionStepErrors];
+
+export type GetFactorySessionStepResponses = {
+    200: SessionStepRef;
+};
+
+export type GetFactorySessionStepResponse = GetFactorySessionStepResponses[keyof GetFactorySessionStepResponses];
 
 export type GetFactoryControlFilesData = {
     body?: never;

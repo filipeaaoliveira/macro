@@ -27,6 +27,7 @@ import type {
   RunErrorResponse,
   RunId,
   RunInsights,
+  SessionStepRef,
   SetAutomationEnabledRequest,
   SetControlFilesRequest,
   SetStandingRulesRequest,
@@ -1711,6 +1712,78 @@ export const linkFactoryRunTask = async (
     status: res.status,
     headers: res.headers,
   } as linkFactoryRunTaskResponse;
+};
+
+/**
+ * @summary The Step of one of the caller's Runs that works, or worked, in an agent
+session: the session's view tells the person to steer it from its Run.
+A session no Step of theirs works in is not found (404).
+ */
+export type getFactorySessionStepResponse200 = {
+  data: SessionStepRef;
+  status: 200;
+};
+
+export type getFactorySessionStepResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type getFactorySessionStepResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type getFactorySessionStepResponse404 = {
+  data: ErrorResponse;
+  status: 404;
+};
+
+export type getFactorySessionStepResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type getFactorySessionStepResponseSuccess =
+  getFactorySessionStepResponse200 & {
+    headers: Headers;
+  };
+export type getFactorySessionStepResponseError = (
+  | getFactorySessionStepResponse401
+  | getFactorySessionStepResponse403
+  | getFactorySessionStepResponse404
+  | getFactorySessionStepResponse500
+) & {
+  headers: Headers;
+};
+
+export type getFactorySessionStepResponse =
+  | getFactorySessionStepResponseSuccess
+  | getFactorySessionStepResponseError;
+
+export const getGetFactorySessionStepUrl = (sessionId: string) => {
+  return `/sessions/${sessionId}/step`;
+};
+
+export const getFactorySessionStep = async (
+  sessionId: string,
+  options?: RequestInit
+): Promise<getFactorySessionStepResponse> => {
+  const res = await fetch(getGetFactorySessionStepUrl(sessionId), {
+    ...options,
+    method: 'GET',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: getFactorySessionStepResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as getFactorySessionStepResponse;
 };
 
 /**

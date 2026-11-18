@@ -1801,6 +1801,77 @@
         }
       }
     },
+    "/sessions/{session_id}/step": {
+      "get": {
+        "tags": ["factory"],
+        "summary": "The Step of one of the caller's Runs that works, or worked, in an agent\nsession: the session's view tells the person to steer it from its Run.\nA session no Step of theirs works in is not found (404).",
+        "operationId": "get_factory_session_step",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "description": "The agent session's id.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionStepRef"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/settings/control-files": {
       "get": {
         "tags": ["factory"],
@@ -3930,6 +4001,23 @@
           }
         }
       },
+      "SessionStepRef": {
+        "type": "object",
+        "description": "The factory Step an agent session works in, as its owner reads it.",
+        "required": ["runId", "seq"],
+        "properties": {
+          "runId": {
+            "$ref": "#/components/schemas/RunId",
+            "description": "The Run the Step belongs to."
+          },
+          "seq": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The Step's place among the Run's Steps.",
+            "minimum": 0
+          }
+        }
+      },
       "SetAutomationEnabledRequest": {
         "type": "object",
         "description": "Request body for switching an Automation on or off.",
@@ -4199,8 +4287,22 @@
       "StepTerminal": {
         "type": "object",
         "description": "A running agent Step as its owner watches and steers it, from the Run\nview: the agent session to watch, whether it is paused or asked to stop,\nand what the owner did, oldest first.",
-        "required": ["steers"],
+        "required": ["betweenTurns", "steers"],
         "properties": {
+          "betweenTurns": {
+            "type": "boolean",
+            "description": "Whether its agent works on no turn the Step waits on now, as while\nthe factory runs the repository's checks itself: the Step takes no\nsteering until the factory's next prompt."
+          },
+          "endsBy": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When a paused Step ends, failed, unless it is resumed first: its\nwork's time runs out then. Set by the Run API while it is paused."
+          },
+          "pauseRanOutAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When its work ended it because it stayed paused past its time."
+          },
           "pausedAt": {
             "type": ["string", "null"],
             "format": "date-time",

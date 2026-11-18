@@ -6,7 +6,9 @@
  */
 
 import type { Steer } from './steer';
+import type { StepTerminalEndsBy } from './stepTerminalEndsBy';
 import type { StepTerminalPausedAt } from './stepTerminalPausedAt';
+import type { StepTerminalPauseRanOutAt } from './stepTerminalPauseRanOutAt';
 import type { StepTerminalSessionId } from './stepTerminalSessionId';
 import type { StepTerminalStopAskedAt } from './stepTerminalStopAskedAt';
 
@@ -16,6 +18,15 @@ view: the agent session to watch, whether it is paused or asked to stop,
 and what the owner did, oldest first.
  */
 export interface StepTerminal {
+  /** Whether its agent works on no turn the Step waits on now, as while
+the factory runs the repository's checks itself: the Step takes no
+steering until the factory's next prompt. */
+  betweenTurns: boolean;
+  /** When a paused Step ends, failed, unless it is resumed first: its
+work's time runs out then. Set by the Run API while it is paused. */
+  endsBy?: StepTerminalEndsBy;
+  /** When its work ended it because it stayed paused past its time. */
+  pauseRanOutAt?: StepTerminalPauseRanOutAt;
   /** Since when the owner paused the Step, while it is paused. */
   pausedAt?: StepTerminalPausedAt;
   /** The agent session the Step works in, while it runs in one: none for a
