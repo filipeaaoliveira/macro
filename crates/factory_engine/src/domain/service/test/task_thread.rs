@@ -296,6 +296,15 @@ async fn a_thread_that_cannot_be_posted_to_fails_nothing() {
 async fn an_update_without_its_thread_starts_the_thread_first() {
     let repo = FakeRepo::default();
     let (run_id, _) = run_on_task(&repo, rules(true, false)).await;
+    // The new thread's first comment is stamped now, the one updates reply
+    // to at the Run's creation: within one millisecond the two ids are the
+    // same and the second update finds its thread without looking.
+    repo.runs
+        .lock()
+        .expect("runs")
+        .get_mut(&run_id)
+        .expect("run")
+        .created_at = Utc::now() - TimeDelta::minutes(1);
     let thread = FakeTaskThread::default();
     let steps = service(&repo, &FakeNotifier::default(), &thread);
     for seq in [1, 2] {
