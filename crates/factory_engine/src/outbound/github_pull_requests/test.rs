@@ -64,6 +64,36 @@ async fn an_owner_with_no_link_fails_for_good() {
     assert_eq!(tokens.reads.load(Ordering::SeqCst), 3);
 }
 
+/// A branch that is no Run's branch is never deleted: it is refused before
+/// the owner's token is read or GitHub asked.
+#[tokio::test]
+async fn only_a_run_s_branch_is_deleted() {
+    let tokens = Tokens {
+        linked: Some("token"),
+        ..Tokens::default()
+    };
+    let github = GithubPullRequests::new(tokens.clone());
+
+    for branch in [
+        "main",
+        "feature/x",
+        "factory/",
+        "factory/not-a-run",
+        "factory",
+    ] {
+        let refused = github.delete_branch(&julia(), &repository(), branch).await;
+        let Err(error) = refused else {
+            panic!("{branch:?} is deleted");
+        };
+        assert!(
+            matches!(error, GithubPullRequestsErr::NotRunBranch(_)),
+            "{branch:?}: {error:?}"
+        );
+        assert!(!error.retryable());
+    }
+    assert_eq!(tokens.reads.load(Ordering::SeqCst), 0);
+}
+
 /// GitHub failing or throttling, and a token that could not be read, are
 /// tried again; a token GitHub no longer takes, a refusal, and a repository
 /// out of reach are not.

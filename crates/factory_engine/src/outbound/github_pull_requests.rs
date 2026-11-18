@@ -17,7 +17,7 @@ use macro_user_id::user_id::MacroUserIdStr;
 use crate::domain::models::{
     BranchDeletion, Check, CheckState, CheckSuite, CodeRepository, CommitStatus, Deployment,
     DeploymentState, HeadChecks, Merging, OpenPullRequest, Opening, PullRequest, PullRequestState,
-    RepositoryAccess, RequiredCheck, RequiredChecks,
+    RepositoryAccess, RequiredCheck, RequiredChecks, is_run_branch,
 };
 use crate::domain::ports::{PullRequests, Retryable};
 use crate::domain::review_rounds::ChangedFile;
@@ -37,6 +37,10 @@ pub enum GithubPullRequestsErr {
     /// GitHub did not answer, or refused.
     #[error("github failed: {0}")]
     Github(#[from] GithubError),
+    /// A branch to delete that is no Run's branch: the factory deletes only
+    /// the branches it made.
+    #[error("not a run's branch: {0:?}")]
+    NotRunBranch(String),
 }
 
 /// An outage passes: GitHub throttling or failing, a request that got no
@@ -48,7 +52,7 @@ impl Retryable for GithubPullRequestsErr {
     fn retryable(&self) -> bool {
         match self {
             Self::Token(_) | Self::Github(GithubError::Upstream(_)) => true,
-            Self::NotLinked | Self::Github(_) => false,
+            Self::NotLinked | Self::Github(_) | Self::NotRunBranch(_) => false,
         }
     }
 }
@@ -558,7 +562,8 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
         })
     }
 
-    #[tracing::instrument(err, skip(self, owner))]
+    /// The Step that asks logs a failure, so it is not logged here too.
+    #[tracing::instrument(skip(self, owner))]
     async fn has_open_pull_request_onto(
         &self,
         owner: &MacroUserIdStr<'static>,
@@ -572,7 +577,9 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
             .await?)
     }
 
-    /// The Step that asks logs a failure, so it is not logged here too.
+    /// Only a Run's branch is deleted: any other is refused before GitHub
+    /// is asked. The Step that asks logs a failure, so it is not logged
+    /// here too.
     #[tracing::instrument(skip(self, owner))]
     async fn delete_branch(
         &self,
@@ -580,6 +587,9 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
         repository: &CodeRepository,
         branch: &str,
     ) -> Result<BranchDeletion, GithubPullRequestsErr> {
+        if !is_run_branch(branch) {
+            return Err(GithubPullRequestsErr::NotRunBranch(branch.to_string()));
+        }
         let token = self.token(owner).await?;
         let deletion = self
             .github

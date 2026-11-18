@@ -42,7 +42,7 @@ use crate::domain::main_hold::{MainWatch, held_note};
 use crate::domain::models::{
     BranchDeletion, CheckState, CheckSuite, CodeRepository, HeadChecks, Merging, OpenPullRequest,
     Opening, PullRequest, PullRequestState, RequiredCheck, RequiredChecks, StepInput, StepReport,
-    is_run_branch, run_branch,
+    run_branch,
 };
 use crate::domain::ports::{MainWatches, PullRequests, Retryable};
 
@@ -571,7 +571,6 @@ where
     /// that pull request, where GitHub's own deletion moves it to the base.
     async fn delete_merged_branch(&self, input: &StepInput<'_>, merged_head: &str, merger: Merger) {
         let branch = run_branch(input.key.run_id);
-        debug_assert!(is_run_branch(&branch), "{branch} is not a run's branch");
         let _ = self
             .delete_branch_at(input, &branch, merged_head, merger)
             .await
