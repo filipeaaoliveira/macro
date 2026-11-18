@@ -38,6 +38,7 @@ fn planned(output: &str) -> Vec<Step> {
         }),
         gate: None,
         checks: Vec::new(),
+        terminal: Default::default(),
     }]
 }
 

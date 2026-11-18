@@ -117,4 +117,34 @@ describe('factoryClient routes', () => {
       body: undefined,
     });
   });
+
+  it('steers a running Step from its Step Terminal', async () => {
+    await factoryClient.noteStep('run-1', 2, { note: 'Use the tokens' });
+    expect(lastCall()).toEqual({
+      url: 'https://factory.example.com/runs/run-1/steps/2/note',
+      method: 'POST',
+      body: { note: 'Use the tokens' },
+    });
+
+    await factoryClient.pauseStep('run-1', 2);
+    expect(lastCall()).toEqual({
+      url: 'https://factory.example.com/runs/run-1/steps/2/pause',
+      method: 'POST',
+      body: undefined,
+    });
+
+    await factoryClient.resumeStep('run-1', 2, {});
+    expect(lastCall()).toEqual({
+      url: 'https://factory.example.com/runs/run-1/steps/2/resume',
+      method: 'POST',
+      body: {},
+    });
+
+    await factoryClient.stopStep('run-1', 2);
+    expect(lastCall()).toEqual({
+      url: 'https://factory.example.com/runs/run-1/steps/2/stop',
+      method: 'POST',
+      body: undefined,
+    });
+  });
 });

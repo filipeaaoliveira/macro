@@ -29,7 +29,8 @@ const UNREAD_LAST_WORDS: &str = "The agent's last message could not be read.";
 
 impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
     /// What the agent handed back for the Step `task`'s prompt `action`,
-    /// whose turn ended; when nothing, what it hands back once reminded.
+    /// whose turn ended, or the turn of the owner's prompt `last` the Step
+    /// followed after it; when nothing, what it hands back once reminded.
     /// The prompt reads as superseded once an earlier attempt reminded the
     /// agent, the only later prompt before the Step's answer: this attempt
     /// then waits on that reminder.
@@ -37,11 +38,12 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
         &self,
         task: &AgentTask,
         action: &RoutineSessionAction,
+        last: AgentActionId,
         deadline: tokio::time::Instant,
     ) -> Result<AgentAnswer, SessionAgentError> {
         match self.handed_back(task.key, action.action_id.as_uuid()).await {
             Err(SessionAgentError::NothingHandedBack | SessionAgentError::Superseded) => {
-                self.remind(task, action, deadline).await
+                self.remind(task, action, last, deadline).await
             }
             handed => handed,
         }
@@ -55,11 +57,14 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
     /// back since, and sends it again, which the session refuses as one it
     /// holds; then it waits on that turn. A reminder that also ends with
     /// nothing handed back is the agent stopping without a result, with its
-    /// last message.
+    /// last message. The reminder is the factory's prompt: the owner's
+    /// steering before it is done with (`begin_turn` clears it), and the
+    /// wait follows what they send after it, as on any prompt.
     async fn remind(
         &self,
         task: &AgentTask,
         action: &RoutineSessionAction,
+        last: AgentActionId,
         deadline: tokio::time::Instant,
     ) -> Result<AgentAnswer, SessionAgentError> {
         let session_id = action.session_id.as_uuid();
@@ -92,33 +97,43 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
                 action: reminder.clone(),
                 prompt: prompt(REMINDER, &task.outcomes),
                 context: None,
+                out_of_sight: true,
             })
             .await;
         self.prompt_once(&reminder, prompted).await?;
-        self.finished(&reminder, deadline).await?;
+        let reminded_last = self.finished(task.key, &reminder, deadline).await?;
 
         match self
             .handed_back(task.key, reminder.action_id.as_uuid())
             .await
         {
-            Err(SessionAgentError::NothingHandedBack) => Err(
-                SessionAgentError::StoppedWithoutResult(self.last_words(action, &reminder).await),
-            ),
+            Err(SessionAgentError::NothingHandedBack) => {
+                let turns = [reminded_last, reminder.action_id, last, action.action_id];
+                Err(SessionAgentError::StoppedWithoutResult(
+                    self.last_words(action, &turns).await,
+                ))
+            }
             handed => handed,
         }
     }
 
-    /// The agent's last message, for the Run's owner: what it said in its
-    /// turn on the `reminder`, else in its turn on the first prompt,
-    /// `action`. One that cannot be read says so: the owner decides all
-    /// the same.
-    async fn last_words(
-        &self,
-        action: &RoutineSessionAction,
-        reminder: &RoutineSessionAction,
-    ) -> String {
-        for turn in [reminder, action] {
-            match self.sessions.reply(turn.clone()).await {
+    /// The agent's last message, for the Run's owner: what it said in the
+    /// first of `turns` (prompts of `action`'s session, the latest first)
+    /// whose turn says anything: the reminder's, or the owner's last note
+    /// after it, before the first prompt's. One that cannot be read says
+    /// so: the owner decides all the same.
+    async fn last_words(&self, action: &RoutineSessionAction, turns: &[AgentActionId]) -> String {
+        let mut read: Vec<AgentActionId> = Vec::with_capacity(turns.len());
+        for &turn in turns {
+            if read.contains(&turn) {
+                continue;
+            }
+            read.push(turn);
+            let turn = RoutineSessionAction {
+                action_id: turn,
+                ..action.clone()
+            };
+            match self.sessions.reply(turn).await {
                 Ok(Some(said)) => return said,
                 Ok(None) => {}
                 Err(error) => {

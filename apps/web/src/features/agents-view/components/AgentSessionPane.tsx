@@ -22,6 +22,7 @@ import {
   ChangesToggle,
   ReviewNotesDock,
 } from '@app/features/changes/changes';
+import { StepSessionComposerGate } from '@app/features/factory-runs/components/step-session-gate';
 import { useBlockEntityCommands } from '@app/features/next-soup/actions';
 import { SessionAgentRuntime } from '@app/features/runtime-sharing/views/SessionAgentRuntime';
 import { LocalRuntimePrompt } from '@app/features/settings/components/local-runtime-prompt';
@@ -350,11 +351,13 @@ function SessionContent(props: {
                           <SessionAgentRuntime botId={botId()} class="px-1" />
                         )}
                       </Show>
-                      <AgentComposer
-                        autofocus={!searchTarget()}
-                        input={ChatSessionInput}
-                        modelSelector={SessionModelSelector}
-                      />
+                      <StepSessionComposerGate sessionId={sessionId()}>
+                        <AgentComposer
+                          autofocus={!searchTarget()}
+                          input={ChatSessionInput}
+                          modelSelector={SessionModelSelector}
+                        />
+                      </StepSessionComposerGate>
                     </Show>
                   </div>
                 </SessionClearance>

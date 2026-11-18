@@ -68,6 +68,7 @@ fn reviewed(seq: u16, entry: &str) -> Step {
         agent: None,
         passed_over: Vec::new(),
         checks: Vec::new(),
+        terminal: Default::default(),
     }
 }
 
@@ -107,6 +108,7 @@ fn fixed(seq: u16, rule: Option<StandingRule>) -> Step {
         agent: None,
         passed_over: Vec::new(),
         checks: Vec::new(),
+        terminal: Default::default(),
     }
 }
 

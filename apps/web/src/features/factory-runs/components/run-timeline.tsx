@@ -19,11 +19,15 @@ import {
   type RunStep,
   reviewsAfresh,
   roundStartingAt,
+  type Steer,
+  type SteerAction,
+  steerableSession,
+  terminalState,
   WHOLE_CHANGE,
 } from '../core/run';
 import { RULE_NAMES } from '../core/standing-rules';
 
-function stepLabel(step: Pick<RunStep, 'entry' | 'visit'>): string {
+export function stepLabel(step: Pick<RunStep, 'entry' | 'visit'>): string {
   const entry = flowWordLabel(step.entry);
   if (step.visit <= 1) return entry;
   return t('factoryRuns.stepVisit', { entry, visit: step.visit });
@@ -47,6 +51,8 @@ export function RunTimeline(props: {
   /** Whether a Step's output starts open, e.g. the plan a Gate asks about. */
   outputOpen: (step: RunStep) => boolean;
   time: (value: string) => string;
+  /** Opens a running Step's Step Terminal; none where it can't open. */
+  onWatch?: (step: RunStep) => void;
 }) {
   return (
     <ol class="-ml-2 flex flex-col" aria-label={t('factoryRuns.steps')}>
@@ -69,6 +75,7 @@ export function RunTimeline(props: {
             baseBranch={props.baseBranch}
             defaultOpen={props.outputOpen(step)}
             time={props.time}
+            onWatch={props.onWatch}
           />
         )}
       </For>
@@ -87,6 +94,7 @@ function TimelineStep(props: {
   baseBranch?: string;
   defaultOpen: boolean;
   time: (value: string) => string;
+  onWatch?: (step: RunStep) => void;
 }) {
   // Follows `defaultOpen` until the person toggles it: a Step that ends at a
   // Gate while the dialog is open shows the output the Gate asks about.
@@ -131,7 +139,14 @@ function TimelineStep(props: {
           when={props.step.end}
           fallback={
             <span class="text-xs text-ink-subtle">
-              {t('factoryRuns.stepRunning')}
+              <Switch fallback={t('factoryRuns.stepRunning')}>
+                <Match when={terminalState(props.step) === 'paused'}>
+                  {t('factoryRuns.stepPaused')}
+                </Match>
+                <Match when={terminalState(props.step) === 'stopping'}>
+                  {t('factoryRuns.stepStopping')}
+                </Match>
+              </Switch>
             </span>
           }
         >
@@ -150,6 +165,19 @@ function TimelineStep(props: {
         <span class="ml-auto shrink-0 text-xs tabular-nums text-ink-subtle">
           {props.time(props.step.end?.endedAt ?? props.step.startedAt)}
         </span>
+        <Show when={props.onWatch && steerableSession(props.step)}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            aria-label={t('factoryRuns.watchStepLabel', {
+              step: stepLabel(props.step),
+            })}
+            onClick={() => props.onWatch?.(props.step)}
+          >
+            {t('factoryRuns.watchStep')}
+          </Button>
+        </Show>
         <Show
           when={details()}
           fallback={
@@ -263,6 +291,9 @@ function TimelineStep(props: {
           </StepNote>
         )}
       </Show>
+      <For each={props.step.terminal?.steers}>
+        {(steer) => <SteerNote steer={steer} />}
+      </For>
       <For each={rounds()}>
         {(round) => (
           <CheckRoundNote round={round} stepEnded={Boolean(props.step.end)} />
@@ -542,6 +573,31 @@ function FindingNote(props: { finding: ReviewFinding }) {
         <span class="block text-ink-muted">
           {t('factoryRuns.findingFoundAgain')}
         </span>
+      </Show>
+    </StepNote>
+  );
+}
+
+const STEERS = {
+  note: 'factoryRuns.steerNote',
+  pause: 'factoryRuns.steerPause',
+  resume: 'factoryRuns.steerResume',
+  stop: 'factoryRuns.steerStop',
+} as const satisfies Record<SteerAction, string>;
+
+/** What the Run's owner did to the Step from its Step Terminal. */
+function SteerNote(props: { steer: Steer }) {
+  return (
+    <StepNote>
+      {t(STEERS[props.steer.action])}
+      <Show when={props.steer.undelivered}>
+        {' · '}
+        {t('factoryRuns.steerUndelivered')}
+      </Show>
+      <Show when={props.steer.note}>
+        {(note) => (
+          <span class="block whitespace-pre-wrap text-ink-muted">{note()}</span>
+        )}
       </Show>
     </StepNote>
   );

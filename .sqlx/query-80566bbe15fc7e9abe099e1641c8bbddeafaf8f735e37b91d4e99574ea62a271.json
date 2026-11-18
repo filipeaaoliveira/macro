@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                s.run_id,\n                s.seq,\n                s.entry,\n                s.visit,\n                s.started_at,\n                s.outcome,\n                s.output,\n                s.ended_at,\n                g.question AS \"question?\",\n                g.answers AS \"answers?\",\n                g.opened_at AS \"opened_at?\",\n                g.answer,\n                g.note,\n                g.user_id,\n                g.approved_control_files,\n                g.rule,\n                g.reply_confidence,\n                g.by_stand_in AS \"by_stand_in?\",\n                g.agent_session_id AS \"agent_session_id?\",\n                g.asked_back_reply,\n                g.asked_back_at,\n                g.stand_in_answer,\n                g.stand_in_reason,\n                g.stand_in_confidence,\n                g.stand_in_until,\n                g.answered_at,\n                s.role,\n                s.agent,\n                s.passed_over,\n                s.pass_reasons\n            FROM factory_step s\n            LEFT JOIN factory_gate g ON g.run_id = s.run_id AND g.seq = s.seq\n            WHERE s.run_id = $1\n            ORDER BY s.seq\n            ",
+  "query": "\n            SELECT\n                s.run_id,\n                s.seq,\n                s.entry,\n                s.visit,\n                s.started_at,\n                s.outcome,\n                s.output,\n                s.ended_at,\n                g.question AS \"question?\",\n                g.answers AS \"answers?\",\n                g.opened_at AS \"opened_at?\",\n                g.answer,\n                g.note,\n                g.user_id,\n                g.approved_control_files,\n                g.rule,\n                g.reply_confidence,\n                g.by_stand_in AS \"by_stand_in?\",\n                g.agent_session_id AS \"agent_session_id?\",\n                g.asked_back_reply,\n                g.asked_back_at,\n                g.stand_in_answer,\n                g.stand_in_reason,\n                g.stand_in_confidence,\n                g.stand_in_until,\n                g.answered_at,\n                s.role,\n                s.agent,\n                s.passed_over,\n                s.pass_reasons,\n                CASE WHEN s.ended_at IS NULL AND s.session_released_at IS NULL\n                    THEN s.session_id END AS terminal_session_id,\n                s.paused_at,\n                s.stop_asked_at,\n                s.steer_closed AND s.ended_at IS NULL AS \"between_turns!\",\n                s.pause_ran_out_at\n            FROM factory_step s\n            LEFT JOIN factory_gate g ON g.run_id = s.run_id AND g.seq = s.seq\n            WHERE s.run_id = $1\n            ORDER BY s.seq\n            ",
   "describe": {
     "columns": [
       {
@@ -152,6 +152,31 @@
         "ordinal": 29,
         "name": "pass_reasons",
         "type_info": "TextArray"
+      },
+      {
+        "ordinal": 30,
+        "name": "terminal_session_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 31,
+        "name": "paused_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 32,
+        "name": "stop_asked_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 33,
+        "name": "between_turns!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 34,
+        "name": "pause_ran_out_at",
+        "type_info": "Timestamptz"
       }
     ],
     "parameters": {
@@ -189,8 +214,13 @@
       true,
       true,
       false,
-      false
+      false,
+      null,
+      true,
+      true,
+      null,
+      true
     ]
   },
-  "hash": "214193d230c32f91f249eeaaab77bcfda4df6035fa2b5e89b14790ca96503881"
+  "hash": "80566bbe15fc7e9abe099e1641c8bbddeafaf8f735e37b91d4e99574ea62a271"
 }

@@ -70,6 +70,7 @@ fn merge_gate(seq: u16, approved: Option<&[&str]>) -> Step {
             }),
         }),
         checks: Vec::new(),
+        terminal: Default::default(),
     }
 }
 

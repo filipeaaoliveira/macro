@@ -65,6 +65,7 @@ fn step_with(gate: Option<Gate>) -> Step {
         agent: None,
         passed_over: Vec::new(),
         checks: Vec::new(),
+        terminal: Default::default(),
     }
 }
 
@@ -314,4 +315,33 @@ fn the_first_comment_links_the_run() {
         "{}",
         first.text
     );
+}
+
+/// A paused Step whose time runs out is told once per pause, with when it
+/// ends; a Step not paused, or that ended, tells nothing.
+#[test]
+fn a_paused_step_running_out_of_time_is_told_once_per_pause() {
+    let run = run();
+    let mut step = step_with(None);
+    step.end = None;
+    let ends_by = at(50);
+    let update = RunUpdate::PauseRunningOut { seq: 3, ends_by };
+    assert!(update_comment(&run, &[step.clone()], &context(), &update).is_none());
+
+    step.terminal.paused_at = Some(at(10));
+    let told = update_comment(&run, &[step.clone()], &context(), &update).expect("told");
+    assert!(told.text.contains("Step 3 is paused"));
+    assert!(
+        told.text
+            .contains(&ends_by.format("%Y-%m-%d %H:%M").to_string())
+    );
+    assert_eq!(told.id, comment_id(run.id, "pause:3", at(10)));
+    assert!(is_factory_comment(&told.text));
+
+    step.end = Some(StepEnd {
+        outcome: outcome("failed"),
+        output: "Stopped".to_string(),
+        ended_at: at(51),
+    });
+    assert!(update_comment(&run, &[step], &context(), &update).is_none());
 }

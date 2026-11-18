@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO factory_step_steer (run_id, seq, place, action, note, prompt_id)\n            SELECT $1, $2, COALESCE(MAX(place), 0) + 1, $3, $4, $5\n            FROM factory_step_steer\n            WHERE run_id = $1 AND seq = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Text",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "846696f717fa231e6a7cae71f43c4ac34db2c20dac62701c5326ff697c7a4fdd"
+}

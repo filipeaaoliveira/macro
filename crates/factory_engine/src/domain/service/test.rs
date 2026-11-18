@@ -15,8 +15,8 @@ use crate::domain::fakes::{FakeGithub, FakeRepo};
 use crate::domain::flow::{StepName, StepUse};
 use crate::domain::gate::{AnswerGate, ReplyGate};
 use crate::domain::models::{
-    Answerer, FactoryError, RunFinish, RunStart, StepEnding, StepError, StepInput, StepReport,
-    StepRequest, StepStart,
+    Answerer, FactoryError, RunFinish, RunStart, SessionSteer, StepEnding, StepError, StepInput,
+    StepReport, StepRequest, StepStart,
 };
 use crate::domain::ports::{
     AnswerDelivery, FactoryService, Retryable, RunWorkflows, RunWorkflowsError, StepExecutor,
@@ -28,6 +28,7 @@ mod control_files;
 mod gate_owner;
 mod orchestrator;
 mod standing_rules;
+mod step_terminal;
 mod task_thread;
 
 /// Keeps what it was sent. Refuses every answer when `refuse` is set; a
@@ -108,6 +109,10 @@ struct FakeExecutor {
     noted: Arc<Mutex<Vec<Vec<String>>>>,
     /// Whether it serves every Step, not only `reply`.
     serves_all: bool,
+    /// What the Step Terminal asked of the sessions Steps work in, in order.
+    steered: Arc<Mutex<Vec<(StepKey, Uuid, SessionSteer)>>>,
+    /// Whether the sessions refuse it.
+    steer_refused: bool,
 }
 
 impl Default for FakeExecutor {
@@ -118,6 +123,8 @@ impl Default for FakeExecutor {
             given: Arc::default(),
             noted: Arc::default(),
             serves_all: false,
+            steered: Arc::default(),
+            steer_refused: false,
         }
     }
 }
@@ -177,6 +184,24 @@ impl StepExecutor for FakeExecutor {
         _key: StepKey,
         _owner: &MacroUserIdStr<'static>,
     ) -> Result<(), WorkFailure> {
+        Ok(())
+    }
+
+    async fn steer(
+        &self,
+        _role: &Role,
+        key: StepKey,
+        _owner: &MacroUserIdStr<'static>,
+        session: &StepSession,
+        steer: SessionSteer,
+    ) -> Result<(), WorkFailure> {
+        if self.steer_refused {
+            return Err(WorkFailure { retryable: false });
+        }
+        self.steered
+            .lock()
+            .expect("steered")
+            .push((key, session.session_id, steer));
         Ok(())
     }
 }

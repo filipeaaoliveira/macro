@@ -13,6 +13,7 @@ import {
   type Run,
   type RunStep,
   runStatus,
+  type SteerAction,
 } from '../core/run';
 
 /** Whether `run` merges only once a person approves its Control Files. */
@@ -36,7 +37,7 @@ function gateKey(step: Pick<RunStep, 'seq'>): number {
 export function createRunController(
   context: Pick<
     RunsContext,
-    'run' | 'answerGate' | 'replyToGate' | 'cancelRun'
+    'run' | 'answerGate' | 'replyToGate' | 'cancelRun' | 'steerStep'
   >,
   runId: () => string
 ) {
@@ -56,6 +57,12 @@ export function createRunController(
   // This person's own answer or cancel went through, so the control they
   // used goes away once the Run is read past it.
   const [rescue, setRescue] = createSignal<'answer' | 'cancel'>();
+  // The Step whose Step Terminal is open, by its place, and the note the
+  // person writes its agent there.
+  const [terminalSeq, setTerminalSeq] = createSignal<number>();
+  const [terminalNote, setTerminalNote] = createSignal('');
+  // The steer on the wire, which locks the Terminal's controls.
+  const [steering, setSteering] = createSignal<SteerAction>();
   const [now, setNow] = createSignal(Date.now());
   const clock = setInterval(() => setNow(Date.now()), CLOCK_MS);
   onCleanup(() => clearInterval(clock));
@@ -158,6 +165,37 @@ export function createRunController(
     return result;
   };
 
+  const terminalStep = createMemo(() => {
+    const seq = terminalSeq();
+    if (seq === undefined) return undefined;
+    return source.data()?.steps.find((step) => step.seq === seq);
+  });
+
+  // A note goes with a pause's resume: while paused, the agent reads it
+  // only once it goes on.
+  const steer = async (
+    action: SteerAction
+  ): Promise<RunActionResult | undefined> => {
+    const run = source.data();
+    const step = terminalStep();
+    if (!run || !step || step.end || steering()) return undefined;
+    const note = terminalNote().trim();
+    if (action === 'note' && !note) return undefined;
+    setSteering(action);
+    const result = await context.steerStep(
+      action === 'note'
+        ? { runId: run.id, step, action, note }
+        : action === 'resume'
+          ? { runId: run.id, step, action, note: note || undefined }
+          : { runId: run.id, step, action }
+    );
+    setSteering(undefined);
+    if (result.ok && (action === 'note' || action === 'resume')) {
+      setTerminalNote('');
+    }
+    return result;
+  };
+
   return {
     source,
     status,
@@ -207,6 +245,18 @@ export function createRunController(
     answer,
     reply,
     cancel,
+    /** The Step whose Step Terminal is open, as last read. */
+    terminalStep,
+    openTerminal: (step: Pick<RunStep, 'seq'>) => {
+      setTerminalNote('');
+      setTerminalSeq(step.seq);
+    },
+    closeTerminal: () => setTerminalSeq(undefined),
+    terminalNote,
+    setTerminalNote,
+    /** The steer on the wire, if one is. */
+    steering,
+    steer,
     /** Whose control a coming read takes away: this person's answer or cancel. */
     rescue,
     clearRescue: () => setRescue(undefined),

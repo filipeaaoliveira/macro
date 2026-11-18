@@ -19,12 +19,15 @@ import type {
   GetFactoryInsightsParams,
   HandBackRequest,
   LinkTaskRequest,
+  NoteStepRequest,
   ReplyToGateRequest,
+  ResumeStepRequest,
   RoutineFiring,
   RunDetail,
   RunErrorResponse,
   RunId,
   RunInsights,
+  SessionStepRef,
   SetAutomationEnabledRequest,
   SetControlFilesRequest,
   SetStandingRulesRequest,
@@ -1175,6 +1178,188 @@ export const answerFactoryGate = async (
 };
 
 /**
+ * @summary Send the agent of the running Step `seq` of one of the caller's Runs a
+note, from its Step Terminal. The agent reads it once its turn ends, or
+at once when it works on none, and the Step waits for it to answer: it
+ends with the agent's latest hand back. Only the Run's owner, in their
+own signed-in session, steers a Step (403 otherwise). A Step that ended
+(409), or takes no steering now: paused, asked to stop, between its
+agent's turns, or with no agent session (409). A blank note, or one
+past 4096 bytes, is refused (400); a session that did not take it is
+502.
+ */
+export type noteFactoryStepResponse202 = {
+  data: void;
+  status: 202;
+};
+
+export type noteFactoryStepResponse400 = {
+  data: ErrorResponse;
+  status: 400;
+};
+
+export type noteFactoryStepResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type noteFactoryStepResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type noteFactoryStepResponse404 = {
+  data: ErrorResponse;
+  status: 404;
+};
+
+export type noteFactoryStepResponse409 = {
+  data: ErrorResponse;
+  status: 409;
+};
+
+export type noteFactoryStepResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type noteFactoryStepResponse502 = {
+  data: ErrorResponse;
+  status: 502;
+};
+
+export type noteFactoryStepResponseSuccess = noteFactoryStepResponse202 & {
+  headers: Headers;
+};
+export type noteFactoryStepResponseError = (
+  | noteFactoryStepResponse400
+  | noteFactoryStepResponse401
+  | noteFactoryStepResponse403
+  | noteFactoryStepResponse404
+  | noteFactoryStepResponse409
+  | noteFactoryStepResponse500
+  | noteFactoryStepResponse502
+) & {
+  headers: Headers;
+};
+
+export type noteFactoryStepResponse =
+  | noteFactoryStepResponseSuccess
+  | noteFactoryStepResponseError;
+
+export const getNoteFactoryStepUrl = (id: RunId, seq: number) => {
+  return `/runs/${id}/steps/${seq}/note`;
+};
+
+export const noteFactoryStep = async (
+  id: RunId,
+  seq: number,
+  noteStepRequest: NoteStepRequest,
+  options?: RequestInit
+): Promise<noteFactoryStepResponse> => {
+  const res = await fetch(getNoteFactoryStepUrl(id, seq), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(noteStepRequest),
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: noteFactoryStepResponse['data'] = body ? JSON.parse(body) : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as noteFactoryStepResponse;
+};
+
+/**
+ * @summary Pause the running Step `seq` of one of the caller's Runs: its agent's
+turn stops, and the Step holds until it is resumed or stopped. The time
+it is paused does not count against the Step's wait for its agent, but
+a Step still paused when its two hours run out ends `failed`. As for a
+note: only the owner in person (403), a Step that ended or takes no
+steering now, such as one already paused (409).
+ */
+export type pauseFactoryStepResponse202 = {
+  data: void;
+  status: 202;
+};
+
+export type pauseFactoryStepResponse400 = {
+  data: ErrorResponse;
+  status: 400;
+};
+
+export type pauseFactoryStepResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type pauseFactoryStepResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type pauseFactoryStepResponse404 = {
+  data: ErrorResponse;
+  status: 404;
+};
+
+export type pauseFactoryStepResponse409 = {
+  data: ErrorResponse;
+  status: 409;
+};
+
+export type pauseFactoryStepResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type pauseFactoryStepResponseSuccess = pauseFactoryStepResponse202 & {
+  headers: Headers;
+};
+export type pauseFactoryStepResponseError = (
+  | pauseFactoryStepResponse400
+  | pauseFactoryStepResponse401
+  | pauseFactoryStepResponse403
+  | pauseFactoryStepResponse404
+  | pauseFactoryStepResponse409
+  | pauseFactoryStepResponse500
+) & {
+  headers: Headers;
+};
+
+export type pauseFactoryStepResponse =
+  | pauseFactoryStepResponseSuccess
+  | pauseFactoryStepResponseError;
+
+export const getPauseFactoryStepUrl = (id: RunId, seq: number) => {
+  return `/runs/${id}/steps/${seq}/pause`;
+};
+
+export const pauseFactoryStep = async (
+  id: RunId,
+  seq: number,
+  options?: RequestInit
+): Promise<pauseFactoryStepResponse> => {
+  const res = await fetch(getPauseFactoryStepUrl(id, seq), {
+    ...options,
+    method: 'POST',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: pauseFactoryStepResponse['data'] = body ? JSON.parse(body) : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as pauseFactoryStepResponse;
+};
+
+/**
  * @summary Reply, as the caller, in words to the Gate one of their Runs waits on.
 The factory reads the words as one of the Gate's answers, kept as its
 note, or asks back on the Gate, which then still waits; an agent's
@@ -1275,6 +1460,183 @@ export const replyToFactoryGate = async (
 };
 
 /**
+ * @summary Resume the paused Step `seq` of one of the caller's Runs: its agent is
+told to go on where it left off, with the owner's note if they wrote
+one, and the Step follows that turn. As for a note: only the owner in
+person (403), a Step that ended or is not paused (409), a note past 4096
+bytes (400), a session that did not take it (502), which leaves the
+Step paused.
+ */
+export type resumeFactoryStepResponse202 = {
+  data: void;
+  status: 202;
+};
+
+export type resumeFactoryStepResponse400 = {
+  data: ErrorResponse;
+  status: 400;
+};
+
+export type resumeFactoryStepResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type resumeFactoryStepResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type resumeFactoryStepResponse404 = {
+  data: ErrorResponse;
+  status: 404;
+};
+
+export type resumeFactoryStepResponse409 = {
+  data: ErrorResponse;
+  status: 409;
+};
+
+export type resumeFactoryStepResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type resumeFactoryStepResponse502 = {
+  data: ErrorResponse;
+  status: 502;
+};
+
+export type resumeFactoryStepResponseSuccess = resumeFactoryStepResponse202 & {
+  headers: Headers;
+};
+export type resumeFactoryStepResponseError = (
+  | resumeFactoryStepResponse400
+  | resumeFactoryStepResponse401
+  | resumeFactoryStepResponse403
+  | resumeFactoryStepResponse404
+  | resumeFactoryStepResponse409
+  | resumeFactoryStepResponse500
+  | resumeFactoryStepResponse502
+) & {
+  headers: Headers;
+};
+
+export type resumeFactoryStepResponse =
+  | resumeFactoryStepResponseSuccess
+  | resumeFactoryStepResponseError;
+
+export const getResumeFactoryStepUrl = (id: RunId, seq: number) => {
+  return `/runs/${id}/steps/${seq}/resume`;
+};
+
+export const resumeFactoryStep = async (
+  id: RunId,
+  seq: number,
+  resumeStepRequest: ResumeStepRequest,
+  options?: RequestInit
+): Promise<resumeFactoryStepResponse> => {
+  const res = await fetch(getResumeFactoryStepUrl(id, seq), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(resumeStepRequest),
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: resumeFactoryStepResponse['data'] = body ? JSON.parse(body) : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as resumeFactoryStepResponse;
+};
+
+/**
+ * @summary Stop the running Step `seq` of one of the caller's Runs: its agent's
+turn stops, and the Step ends `failed`, its session stopped for good;
+the Flow routes the failure. As for a note: only the owner in person
+(403), a Step that ended or takes no steering now (409).
+ */
+export type stopFactoryStepResponse202 = {
+  data: void;
+  status: 202;
+};
+
+export type stopFactoryStepResponse400 = {
+  data: ErrorResponse;
+  status: 400;
+};
+
+export type stopFactoryStepResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type stopFactoryStepResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type stopFactoryStepResponse404 = {
+  data: ErrorResponse;
+  status: 404;
+};
+
+export type stopFactoryStepResponse409 = {
+  data: ErrorResponse;
+  status: 409;
+};
+
+export type stopFactoryStepResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type stopFactoryStepResponseSuccess = stopFactoryStepResponse202 & {
+  headers: Headers;
+};
+export type stopFactoryStepResponseError = (
+  | stopFactoryStepResponse400
+  | stopFactoryStepResponse401
+  | stopFactoryStepResponse403
+  | stopFactoryStepResponse404
+  | stopFactoryStepResponse409
+  | stopFactoryStepResponse500
+) & {
+  headers: Headers;
+};
+
+export type stopFactoryStepResponse =
+  | stopFactoryStepResponseSuccess
+  | stopFactoryStepResponseError;
+
+export const getStopFactoryStepUrl = (id: RunId, seq: number) => {
+  return `/runs/${id}/steps/${seq}/stop`;
+};
+
+export const stopFactoryStep = async (
+  id: RunId,
+  seq: number,
+  options?: RequestInit
+): Promise<stopFactoryStepResponse> => {
+  const res = await fetch(getStopFactoryStepUrl(id, seq), {
+    ...options,
+    method: 'POST',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: stopFactoryStepResponse['data'] = body ? JSON.parse(body) : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as stopFactoryStepResponse;
+};
+
+/**
  * @summary Link one of the caller's Runs to a Macro task they can see,
 replacing any task it had.
  */
@@ -1350,6 +1712,78 @@ export const linkFactoryRunTask = async (
     status: res.status,
     headers: res.headers,
   } as linkFactoryRunTaskResponse;
+};
+
+/**
+ * @summary The Step of one of the caller's Runs that works, or worked, in an agent
+session: the session's view tells the person to steer it from its Run.
+A session no Step of theirs works in is not found (404).
+ */
+export type getFactorySessionStepResponse200 = {
+  data: SessionStepRef;
+  status: 200;
+};
+
+export type getFactorySessionStepResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type getFactorySessionStepResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type getFactorySessionStepResponse404 = {
+  data: ErrorResponse;
+  status: 404;
+};
+
+export type getFactorySessionStepResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type getFactorySessionStepResponseSuccess =
+  getFactorySessionStepResponse200 & {
+    headers: Headers;
+  };
+export type getFactorySessionStepResponseError = (
+  | getFactorySessionStepResponse401
+  | getFactorySessionStepResponse403
+  | getFactorySessionStepResponse404
+  | getFactorySessionStepResponse500
+) & {
+  headers: Headers;
+};
+
+export type getFactorySessionStepResponse =
+  | getFactorySessionStepResponseSuccess
+  | getFactorySessionStepResponseError;
+
+export const getGetFactorySessionStepUrl = (sessionId: string) => {
+  return `/sessions/${sessionId}/step`;
+};
+
+export const getFactorySessionStep = async (
+  sessionId: string,
+  options?: RequestInit
+): Promise<getFactorySessionStepResponse> => {
+  const res = await fetch(getGetFactorySessionStepUrl(sessionId), {
+    ...options,
+    method: 'GET',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: getFactorySessionStepResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as getFactorySessionStepResponse;
 };
 
 /**

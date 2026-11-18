@@ -4,6 +4,7 @@ mod automations;
 mod gate_owner;
 mod gate_replies;
 mod main_hold;
+mod steering;
 mod task_thread;
 
 pub(crate) use gate_owner::{FakeNotifier, FakeTaskNotes};
@@ -11,7 +12,7 @@ pub(crate) use gate_replies::FakeGateModel;
 pub(crate) use main_hold::{FakeHoldTasks, FakeMain, FakeWatches};
 pub(crate) use task_thread::FakeTaskThread;
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use agent_session::domain::session_task::TaskDocumentId;
@@ -19,9 +20,10 @@ use chrono::Utc;
 use factory_records::domain::automations::{Automation, FiringEnd};
 use factory_records::domain::models::{
     CheckResult, CheckRound, CheckRoundEnd, CheckRoundOutcome, CheckRoundStart, ClaimedSession,
-    ControlFileChanges, EntryId, Gate, GateAnswer, GateKind, HandBack, HandedBack, NewRun, Outcome,
-    PassedOver, QueueHold, QueuePlaces, Role, Run, RunEnd, RunId, RunInsert, RunOutcome,
-    SessionStep, Step, StepEnd, StepKey, StepSession, StoppingSession, TaskLink, TeamMembership,
+    ControlFileChanges, EntryId, Gate, GateAnswer, GateKind, HandBack, HandedBack, NewRun,
+    NewSteer, Outcome, PassedOver, QueueHold, QueuePlaces, Role, Run, RunEnd, RunId, RunInsert,
+    RunOutcome, SessionStep, SteerRefusal, Steered, Step, StepEnd, StepKey, StepSession,
+    StepSteering, StoppingSession, TaskLink, TeamMembership,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::standing_rules::{
@@ -117,6 +119,8 @@ pub(crate) struct FakeRepo {
     pub(crate) steps: Arc<Mutex<Vec<(RunId, Step)>>>,
     /// Each agent Step's session, what it offers, and its latest hand back.
     pub(crate) sessions: Arc<Mutex<Vec<FakeSession>>>,
+    /// Each Step's steering by its owner.
+    pub(crate) steering: Arc<Mutex<HashMap<StepKey, steering::FakeSteering>>>,
     /// Each Step's rounds of checks, in order.
     pub(crate) check_rounds: Arc<Mutex<Vec<(StepKey, CheckRound)>>>,
     /// The task documents that exist.
@@ -624,6 +628,7 @@ impl RunRepository for FakeRepo {
                 seq: step.seq,
             };
             step.checks = self.rounds_of(key);
+            step.terminal = self.terminal_of(key, step.end.is_some());
         }
         Ok(steps)
     }
@@ -748,6 +753,7 @@ impl RunRepository for FakeRepo {
                 agent: None,
                 passed_over: Vec::new(),
                 checks: Vec::new(),
+                terminal: Default::default(),
             },
         ));
         Ok(())
@@ -910,6 +916,7 @@ impl RunRepository for FakeRepo {
             claimed.session = to.clone();
             claimed.prepared_at = None;
             claimed.opened = false;
+            self.open_steering(key);
         }
         self.with_step(key, |step| {
             step.role.get_or_insert_with(|| role.clone());
@@ -1109,13 +1116,55 @@ impl RunRepository for FakeRepo {
         if claimed.session.session_id != session_id || ended {
             return Ok(false);
         }
+        let mut recorded_now = false;
         if claimed.turn_place.is_none_or(|recorded| recorded < place) {
             claimed.turn = Some(action_id);
             claimed.turn_place = Some(place);
             claimed.offered = offered.to_vec();
             claimed.handed = None;
+            recorded_now = true;
         }
-        Ok(claimed.turn == Some(action_id))
+        let began = claimed.turn == Some(action_id);
+        drop(sessions);
+        if recorded_now {
+            self.open_steering(key);
+        }
+        Ok(began)
+    }
+
+    async fn steer(
+        &self,
+        key: StepKey,
+        steer: &NewSteer,
+    ) -> Result<Result<Steered, SteerRefusal>, FakeError> {
+        self.record_steer(key, steer)
+    }
+
+    async fn unsteer(
+        &self,
+        key: StepKey,
+        prompt_id: Uuid,
+        previous: Option<Uuid>,
+    ) -> Result<(), FakeError> {
+        self.undo_steer(key, prompt_id, previous);
+        Ok(())
+    }
+
+    async fn steering(&self, key: StepKey) -> Result<StepSteering, FakeError> {
+        Ok(self.read_steering(key))
+    }
+
+    async fn pause_ran_out(&self, key: StepKey) -> Result<(), FakeError> {
+        self.record_pause_ran_out(key);
+        Ok(())
+    }
+
+    async fn close_steering(
+        &self,
+        key: StepKey,
+        followed: Option<Uuid>,
+    ) -> Result<bool, FakeError> {
+        Ok(self.stop_steering(key, followed))
     }
 
     async fn check_rounds(&self, key: StepKey) -> Result<Vec<CheckRound>, FakeError> {

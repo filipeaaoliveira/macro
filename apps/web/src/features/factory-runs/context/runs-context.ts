@@ -69,6 +69,16 @@ export type ReplyToGateInput = {
   reply: string;
 };
 
+/** What the Run's owner does to a running Step from its Step Terminal. */
+export type SteerStepInput = {
+  runId: string;
+  step: Pick<RunStep, 'seq'>;
+} & (
+  | { action: 'note'; note: string }
+  | { action: 'resume'; note?: string }
+  | { action: 'pause' | 'stop' }
+);
+
 /** What the Runs views need from the factory. */
 export type RunsContext = {
   /** The task's Runs, newest first; kept current while any of them runs. */
@@ -91,6 +101,12 @@ export type RunsContext = {
    */
   replyToGate: (input: ReplyToGateInput) => Promise<RunActionResult>;
   cancelRun: (runId: string) => Promise<RunActionResult>;
+  /**
+   * Sends a running Step's agent a note, pauses, resumes or stops the Step.
+   * `conflict` means the Step takes no such steering now: it ended, is
+   * paused (for a note), or its agent works on no turn.
+   */
+  steerStep: (input: SteerStepInput) => Promise<RunActionResult>;
 };
 
 const Context = createContext<RunsContext>();

@@ -6,7 +6,7 @@ mod test;
 use chrono::{DateTime, Utc};
 use factory_records::domain::main_hold::{MainHold, RequiredChecksState};
 use factory_records::domain::models::{
-    EntryId, Outcome, Repository, Role, Run, RunId, RunOutcome, Step, StepKey,
+    EntryId, Outcome, Repository, Role, Run, RunId, RunOutcome, SteerRefusal, Step, StepKey,
 };
 use factory_records::domain::review_rounds::ReviewRound;
 use factory_records::domain::standing_rules::{OrchestratorDefinition, ProjectRules, RulesSource};
@@ -197,6 +197,22 @@ pub struct AgentTask {
     /// owner's answers in it: what a new session is prompted with when the
     /// asking Step's cannot be resumed.
     pub afresh: Option<String>,
+}
+
+/// What the Run's owner's Step Terminal asks of the agent session a Step
+/// works in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionSteer {
+    /// Send the session `prompt` as the prompt `prompt_id`: the agent reads
+    /// it once its turn ends, or at once when it works on none.
+    Prompt {
+        /// The prompt's id, a UUIDv7 the Step keeps.
+        prompt_id: Uuid,
+        /// What it says.
+        prompt: String,
+    },
+    /// Stop the agent's turn.
+    Interrupt,
 }
 
 /// A later prompt an agent is asked to work on, in the session it did its
@@ -577,6 +593,16 @@ pub struct RunFinish {
     pub outcome: RunOutcome,
 }
 
+/// The factory Step an agent session works in, as its owner reads it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionStepRef {
+    /// The Run the Step belongs to.
+    pub run_id: RunId,
+    /// The Step's place among the Run's Steps.
+    pub seq: u16,
+}
+
 /// A Run and the Steps it took.
 #[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -829,6 +855,16 @@ pub enum FactoryError {
     /// again.
     #[error("the run has ended")]
     RunEnded,
+    /// A note to a Step's agent carries no words.
+    #[error("a note must not be empty")]
+    EmptyNote,
+    /// The Step takes no steering now, and says why.
+    #[error("the step takes no steering now: {}", steer_refusal_message(*.0))]
+    NotSteerable(SteerRefusal),
+    /// The Step's agent session did not take the owner's note or resume:
+    /// the agent never read it.
+    #[error("the step's agent session did not take it; try again")]
+    SessionUnreachable,
     /// The note on an answer is larger than a Gate keeps.
     #[error("the note must be at most {max} bytes")]
     NoteTooLarge {
@@ -911,6 +947,18 @@ pub enum FactoryError {
     /// Any other internal error.
     #[error("internal factory error: {0:?}")]
     Internal(rootcause::Report),
+}
+
+/// Why a Step takes no steering, for a person.
+fn steer_refusal_message(refusal: SteerRefusal) -> &'static str {
+    match refusal {
+        SteerRefusal::Ended => "it has ended",
+        SteerRefusal::NoSession => "no agent works on it in a session",
+        SteerRefusal::NotWorking => "its agent works on no turn now",
+        SteerRefusal::Paused => "it is paused; resume it first",
+        SteerRefusal::NotPaused => "it is not paused",
+        SteerRefusal::Stopping => "its owner asked it to stop",
+    }
 }
 
 impl From<rootcause::Report> for FactoryError {

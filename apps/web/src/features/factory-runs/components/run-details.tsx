@@ -118,6 +118,8 @@ export function RunSteps(props: {
   reviewRounds?: ReviewRound[];
   status: RunStatus;
   time: (value: string) => string;
+  /** Opens a running Step's Step Terminal. */
+  onWatch?: (step: RunStep) => void;
 }) {
   return (
     <section class="flex flex-col gap-1.5">
@@ -137,6 +139,7 @@ export function RunSteps(props: {
           baseBranch={props.baseBranch}
           reviewRounds={props.reviewRounds}
           time={props.time}
+          onWatch={props.onWatch}
           outputOpen={(step) =>
             props.status.kind === 'waiting' &&
             props.status.step.seq === step.seq

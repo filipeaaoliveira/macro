@@ -190,12 +190,29 @@ pub struct AgentPromptAction {
     /// Raw user text used for a visible session name when `prompt` is enriched.
     #[serde(skip)]
     name_source: Option<String>,
+    /// Sent for its owner by work that runs out of sight, as a software
+    /// factory Step's prompts are: it follows the session for no one.
+    #[cfg_attr(feature = "utoipa", schema(ignore))]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    out_of_sight: bool,
 }
 
 impl AgentPromptAction {
     /// Keep the un-enriched user text for visible session naming.
     pub fn set_name_source(&mut self, source: impl Into<String>) {
         self.name_source = Some(source.into());
+    }
+
+    /// Mark the prompt as sent by work that runs out of sight: it follows
+    /// the session for no one.
+    pub fn set_out_of_sight(&mut self) {
+        self.out_of_sight = true;
+    }
+
+    /// Whether work that runs out of sight sent the prompt.
+    #[must_use]
+    pub fn out_of_sight(&self) -> bool {
+        self.out_of_sight
     }
 
     /// Text suitable for deriving a visible session name.
@@ -471,6 +488,7 @@ impl AgentAction {
             attachments,
             notifications: None,
             name_source: None,
+            out_of_sight: false,
         })
     }
 

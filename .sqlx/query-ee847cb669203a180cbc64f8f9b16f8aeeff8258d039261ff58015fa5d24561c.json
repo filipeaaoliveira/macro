@@ -1,0 +1,89 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                s.session_id, s.action_id, s.agent, s.bot_id, s.role,\n                s.ended_at, s.session_released_at, s.paused_at, s.stop_asked_at,\n                s.steer_action_id, s.steer_closed, r.ended_at AS run_ended_at\n            FROM factory_step s\n            JOIN factory_run r ON r.id = s.run_id\n            WHERE s.run_id = $1 AND s.seq = $2\n            FOR UPDATE OF s\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "session_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "action_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "agent",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "bot_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "role",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "ended_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "session_released_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "paused_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "stop_asked_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "steer_action_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 10,
+        "name": "steer_closed",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 11,
+        "name": "run_ended_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "ee847cb669203a180cbc64f8f9b16f8aeeff8258d039261ff58015fa5d24561c"
+}

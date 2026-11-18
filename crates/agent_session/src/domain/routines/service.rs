@@ -275,7 +275,7 @@ where
             .control_event(
                 action.session_id,
                 ControlEvent {
-                    action: AgentAction::prompt(command.prompt),
+                    action: prompt_action(command.prompt, command.out_of_sight),
                     action_id: Some(action.action_id),
                     actor: Some(action.owner),
                     context: command.context,
@@ -345,7 +345,7 @@ where
             .control_event(
                 action.session_id,
                 ControlEvent {
-                    action: AgentAction::prompt(command.prompt),
+                    action: prompt_action(command.prompt, command.out_of_sight),
                     action_id: Some(action.action_id),
                     actor: Some(action.owner),
                     context: command.context,
@@ -565,3 +565,13 @@ fn session_error(error: AgentSessionError) -> RoutineSessionError {
 
 #[cfg(test)]
 mod test;
+
+/// The prompt `text`, marked as sent by work that runs out of sight when
+/// it is (`PromptRoutineSession::out_of_sight`).
+fn prompt_action(text: String, out_of_sight: bool) -> AgentAction {
+    let mut action = AgentAction::prompt(text);
+    if out_of_sight && let AgentAction::Prompt(prompt) = &mut action {
+        prompt.set_out_of_sight();
+    }
+    action
+}

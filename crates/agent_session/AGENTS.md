@@ -140,6 +140,10 @@ agent) is `hidden`. The harness calls `add_follower` beside `set_turn_prompter`
 for a prompt typed into the session itself (`QueuedEntry::direct_prompter`: a
 human prompt with no `announce` origin and no trigger `context`), recording an
 `agent_session_follower` row; Soup lists hidden sessions for their followers.
+A prompt marked out of sight (`AgentPromptAction::out_of_sight`, which a
+routine sessions caller sets with `PromptRoutineSession::out_of_sight`, as
+the software factory does for every prompt of a Step's session) follows it
+for no one, so no list shows a hidden session for it.
 Thread mentions, runtime-forwarded triggers, system and bot turns record
 nothing. Following never grants access.
 

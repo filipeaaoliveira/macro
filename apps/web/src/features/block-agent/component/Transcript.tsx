@@ -27,7 +27,14 @@ import { WorkingLine } from '../ui/WorkingLine';
 import { Message } from './AgentMessage';
 import { ReplyToSelection } from './ReplyToSelection';
 
-export function Transcript(props: { searchTarget?: AgentMessageTarget }) {
+export function Transcript(props: {
+  searchTarget?: AgentMessageTarget;
+  /**
+   * Whether selected text offers "Reply to this", which quotes it into the
+   * composer; off where the transcript has no composer.
+   */
+  replies?: boolean;
+}) {
   const {
     messages,
     metadata,
@@ -226,7 +233,9 @@ export function Transcript(props: { searchTarget?: AgentMessageTarget }) {
           navigation()?.scrollToLatest(behavior);
         }}
       />
-      <ReplyToSelection container={transcriptEl()} onReply={quoteSelection} />
+      <Show when={props.replies ?? true}>
+        <ReplyToSelection container={transcriptEl()} onReply={quoteSelection} />
+      </Show>
     </div>
   );
 }

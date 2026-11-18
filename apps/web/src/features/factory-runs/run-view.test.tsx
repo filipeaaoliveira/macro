@@ -99,6 +99,7 @@ function mount(options: {
     answerGate: options.answerGate ?? vi.fn(async () => DONE),
     replyToGate: options.replyToGate ?? vi.fn(async () => DONE),
     cancelRun: options.cancelRun ?? vi.fn(async () => DONE),
+    steerStep: vi.fn(async () => DONE),
   };
   render(() => (
     <RunsProvider value={context}>

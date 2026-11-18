@@ -23,6 +23,7 @@ fn sharing(
         repo: repo.clone(),
         agents: agents(),
         quota: earlier.quota.clone(),
+        pause_notices: None,
     }
 }
 

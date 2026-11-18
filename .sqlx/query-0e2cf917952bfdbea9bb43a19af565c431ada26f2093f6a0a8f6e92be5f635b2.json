@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE factory_step\n            SET pause_ran_out_at = now()\n            WHERE run_id = $1 AND seq = $2\n                AND paused_at IS NOT NULL AND pause_ran_out_at IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0e2cf917952bfdbea9bb43a19af565c431ada26f2093f6a0a8f6e92be5f635b2"
+}

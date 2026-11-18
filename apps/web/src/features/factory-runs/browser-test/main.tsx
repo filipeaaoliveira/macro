@@ -321,6 +321,41 @@ function createFixtureContext(): RunsContext {
       );
       return { ok: true, value: undefined };
     },
+    async steerStep(input) {
+      // The service keeps what the owner did on the Step; a pause holds it
+      // until a resume.
+      const at = new Date().toISOString();
+      update(input.runId, (current) => ({
+        ...current,
+        steps: current.steps.map((step) => {
+          if (step.seq !== input.step.seq || !step.terminal) return step;
+          const terminal = step.terminal;
+          return {
+            ...step,
+            terminal: {
+              ...terminal,
+              pausedAt:
+                input.action === 'pause'
+                  ? at
+                  : input.action === 'resume'
+                    ? undefined
+                    : terminal.pausedAt,
+              stopAskedAt: input.action === 'stop' ? at : terminal.stopAskedAt,
+              steers: [
+                ...terminal.steers,
+                {
+                  action: input.action,
+                  note: 'note' in input ? input.note : undefined,
+                  undelivered: false,
+                  at,
+                },
+              ],
+            },
+          };
+        }),
+      }));
+      return { ok: true, value: undefined };
+    },
   };
 }
 

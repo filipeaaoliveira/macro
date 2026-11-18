@@ -33,6 +33,7 @@ mod going_on;
 mod quota_memory;
 mod reminder;
 mod run_check;
+mod step_terminal;
 
 /// What happens to one call: it works, or fails with this error. A call
 /// that fails ambiguously may still take effect (`lands`).

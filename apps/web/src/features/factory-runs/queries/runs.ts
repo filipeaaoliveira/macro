@@ -83,6 +83,23 @@ function toRun(detail: RunDetail): Run {
       role: step.role ?? undefined,
       agent: step.agent ?? undefined,
       passedOver: step.passedOver,
+      // A service older than the Step Terminal sends none.
+      terminal: step.terminal
+        ? {
+            sessionId: step.terminal.sessionId ?? undefined,
+            pausedAt: step.terminal.pausedAt ?? undefined,
+            stopAskedAt: step.terminal.stopAskedAt ?? undefined,
+            betweenTurns: step.terminal.betweenTurns,
+            endsBy: step.terminal.endsBy ?? undefined,
+            pauseRanOutAt: step.terminal.pauseRanOutAt ?? undefined,
+            steers: step.terminal.steers.map((steer) => ({
+              action: steer.action,
+              note: steer.note ?? undefined,
+              undelivered: steer.undelivered,
+              at: steer.at,
+            })),
+          }
+        : undefined,
       checks: step.checks.map((round) => ({
         round: round.round,
         checks: round.checks,
@@ -346,6 +363,31 @@ export function createAppRunsContext(client: QueryClient): RunsContext {
         fireAndForget(reads, 'factory-runs');
       }
       return refused;
+    },
+
+    async steerStep(input) {
+      const runId = input.runId;
+      const seq = input.step.seq;
+      const result = await (() => {
+        switch (input.action) {
+          case 'note':
+            return factoryClient.noteStep(runId, seq, { note: input.note });
+          case 'pause':
+            return factoryClient.pauseStep(runId, seq);
+          case 'resume':
+            return factoryClient.resumeStep(runId, seq, { note: input.note });
+          case 'stop':
+            return factoryClient.stopStep(runId, seq);
+        }
+      })();
+      // Read the Run again either way: it shows what the owner did, or what
+      // the Step did instead.
+      fireAndForget(
+        refreshRun(client, runId, taskOfRun(client, runId)),
+        'factory-runs'
+      );
+      if (result.isErr()) return failure(result.error);
+      return { ok: true, value: undefined };
     },
 
     async cancelRun(runId) {

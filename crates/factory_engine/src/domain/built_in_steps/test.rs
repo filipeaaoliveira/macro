@@ -282,6 +282,7 @@ async fn a_write_is_given_the_plan_an_earlier_step_produced() {
         }),
         gate: None,
         checks: Vec::new(),
+        terminal: Default::default(),
     }];
 
     let report = steps
@@ -358,6 +359,7 @@ async fn a_plan_reads_what_a_person_answered_the_last_one() {
             }),
         }),
         checks: Vec::new(),
+        terminal: Default::default(),
     }];
 
     steps
@@ -387,6 +389,7 @@ fn ended(seq: u16, entry: &str, visit: u16, output: &str) -> Step {
         }),
         gate: None,
         checks: Vec::new(),
+        terminal: Default::default(),
     }
 }
 
@@ -945,6 +948,7 @@ async fn a_retried_step_tells_the_agent_to_go_on() {
         agent: None,
         passed_over: Vec::new(),
         checks: Vec::new(),
+        terminal: Default::default(),
     }];
 
     steps

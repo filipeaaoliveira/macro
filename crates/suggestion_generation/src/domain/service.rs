@@ -1145,6 +1145,7 @@ where
                 action: action.clone(),
                 prompt: brief,
                 context: None,
+                out_of_sight: false,
             })
             .await?;
         // The session has no completion signal to wait on: read its status,
