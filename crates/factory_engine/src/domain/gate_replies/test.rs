@@ -132,6 +132,8 @@ fn plan_keeping(key: StepKey) -> StandInKeeping {
         key,
         kind: RuleGateKind::Plan,
         person_only: false,
+        fix_rounds: 0,
+        fix_limit: 0,
     }
 }
 
@@ -149,6 +151,8 @@ fn plan_asking(key: StepKey) -> StandInAsking {
         key,
         kind: RuleGateKind::Plan,
         person_only: false,
+        fix_rounds: 0,
+        fix_limit: 0,
         answers: plan_answers(),
     }
 }

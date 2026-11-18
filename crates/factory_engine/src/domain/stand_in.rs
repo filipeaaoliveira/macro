@@ -18,6 +18,9 @@
 //! - a Gate its Flow marks for a person only (`person_only`);
 //! - a Gate of a Tampered Run, or of a Run whose base branch has a Main
 //!   Hold;
+//! - a Blockers Gate past the fix rounds the `fix_blockers` rule may send
+//!   in a row, or, with the owner section on, one whose round found the
+//!   round before's Blockers again after a fix: those are the owner's;
 //! - a Gate of a Run created before Runs kept rules.
 
 #[cfg(test)]
@@ -72,6 +75,16 @@ pub struct StandInFacts {
     pub tampered: bool,
     /// Whether the base branch the Run merges to has a Main Hold.
     pub held: bool,
+    /// For a review panel's Gate, the fix rounds in a row its Blockers
+    /// went to; nought for other Gates.
+    pub fix_rounds: u16,
+    /// The fix rounds in a row the `fix_blockers` rule may send
+    /// ([`rule_fix_limit`](crate::domain::standing_rules::rule_fix_limit)).
+    pub fix_limit: u16,
+    /// For a review panel's Gate, whether its round's Blockers are the
+    /// round before's, unchanged after a fix
+    /// ([`repeated_blockers`](crate::domain::standing_rules::repeated_blockers)).
+    pub repeated_blockers: bool,
 }
 
 /// Whether the stand-in may answer a Gate that offers `offered`, given the
@@ -85,11 +98,17 @@ pub fn may_stand_in(
     let Some(rules) = rules else {
         return false;
     };
+    // A Blockers Gate the rule would leave to the owner is the owner's:
+    // past the fix rounds the rule may send, and, with the owner section
+    // on, Blockers found again unchanged after a fix.
+    let owners_blockers = facts.kind == RuleGateKind::Blockers
+        && (facts.fix_rounds >= facts.fix_limit || (rules.owner_gates && facts.repeated_blockers));
     rules.stands_in(facts.kind)
         && offers_kind_answers(facts.kind, offered)
         && !facts.person_only
         && !facts.tampered
         && !facts.held
+        && !owners_blockers
 }
 
 /// What the stand-in reads to answer a Gate.

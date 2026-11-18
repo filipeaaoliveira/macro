@@ -8,13 +8,15 @@ use factory_records::domain::models::{EntryId, NewRun, Outcome, Role, RunId, Run
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::{FindingKind, Lines, ReviewFinding, ReviewRound};
 use factory_records::domain::standing_rules::{
-    OrchestratorDefinition, RuleGateKind, RulesSource, RunRules, StandingRule,
+    OrchestratorDefinition, RuleGateKind, RulesSource, RunRules, StandInKinds, StandingRule,
 };
 use uuid::Uuid;
 
 use super::{FakeExecutor, julia, reply_step};
 use crate::domain::fakes::{FakeGateModel, FakeNotifier, FakeRepo, FakeTaskNotes};
-use crate::domain::gate::{AnswerGate, GateAnswered, GateRuling, ReplyRead, ReplyReading};
+use crate::domain::gate::{
+    AnswerGate, GateAnswered, GateRuling, ReplyRead, ReplyReading, StandInAsking,
+};
 use crate::domain::gate_owner::{OwnerNote, factory_signed, notice_id};
 use crate::domain::gate_replies::GateReplySettings;
 use crate::domain::gate_replies::service::GateRepliesImpl;
@@ -304,8 +306,8 @@ fn round(visit: u16, seq: u16, findings: Vec<ReviewFinding>) -> ReviewRound {
 /// A Run whose first review round (Step 1) found a Blocker the rule sent
 /// to a fix (Step 2), and whose second round (Step 3) found `again`, at
 /// its Blockers Gate.
-async fn second_round_finding(repo: &FakeRepo, owner_gates: bool, again: ReviewFinding) -> StepKey {
-    let (run_id, _task) = run_on_task(repo, rules(owner_gates)).await;
+async fn second_round_finding(repo: &FakeRepo, rules: RunRules, again: ReviewFinding) -> StepKey {
+    let (run_id, _task) = run_on_task(repo, rules).await;
     let first = StepKey { run_id, seq: 1 };
     gate_at(repo, first, "review", "changes", &["fix", "stop"]).await;
     repo.answer_gate_by_rule(first, &outcome("fix"), StandingRule::FixBlockers)
@@ -354,7 +356,7 @@ async fn repeated_blockers_after_a_rule_fix_wait_for_the_owner() {
     });
 
     let repo = FakeRepo::default();
-    let key = second_round_finding(&repo, true, same()).await;
+    let key = second_round_finding(&repo, rules(true), same()).await;
     let steps = StepServiceImpl::new(repo.clone(), FakeExecutor::default());
     assert_eq!(
         steps.rule_gate(blockers_ruling(key)).await.expect("rule"),
@@ -362,7 +364,7 @@ async fn repeated_blockers_after_a_rule_fix_wait_for_the_owner() {
     );
 
     let repo = FakeRepo::default();
-    let key = second_round_finding(&repo, false, same()).await;
+    let key = second_round_finding(&repo, rules(false), same()).await;
     let steps = StepServiceImpl::new(repo.clone(), FakeExecutor::default());
     assert_eq!(
         steps.rule_gate(blockers_ruling(key)).await.expect("rule"),
@@ -371,7 +373,7 @@ async fn repeated_blockers_after_a_rule_fix_wait_for_the_owner() {
 
     let repo = FakeRepo::default();
     let elsewhere = blocker(3, "correctness-reviewer", "src/b.rs", (12, 16));
-    let key = second_round_finding(&repo, true, elsewhere).await;
+    let key = second_round_finding(&repo, rules(true), elsewhere).await;
     let steps = StepServiceImpl::new(repo.clone(), FakeExecutor::default());
     assert_eq!(
         steps.rule_gate(blockers_ruling(key)).await.expect("rule"),
@@ -484,4 +486,77 @@ async fn owner_notes_and_a_reply_on_a_gate_do_not_mix() {
         answer.note.as_deref(),
         Some("Go ahead, but keep the old index")
     );
+}
+
+/// Rules that fix Blockers and stand in for the owner at the Blockers
+/// Gate, with the owner section `owner_gates`.
+fn standing_in_at_blockers(owner_gates: bool) -> RunRules {
+    RunRules {
+        definition: OrchestratorDefinition {
+            owner_gates,
+            stand_in: StandInKinds {
+                plan: false,
+                blockers: true,
+            },
+            ..OrchestratorDefinition::DEFAULT
+        },
+        source: RulesSource::Team,
+        project_id: None,
+    }
+}
+
+fn blockers_asking(key: StepKey, fix_rounds: u16) -> StandInAsking {
+    StandInAsking {
+        key,
+        kind: RuleGateKind::Blockers,
+        person_only: false,
+        fix_rounds,
+        fix_limit: 2,
+        answers: vec![outcome("fix"), outcome("stop")],
+    }
+}
+
+/// The stand-in leaves to the owner the Blockers Gates the rule leaves to
+/// them: Blockers found again unchanged after a fix, with the owner section
+/// on, and Blockers past the fix rounds the rule may send. It asks the
+/// model about neither; Blockers that changed it answers as before.
+#[tokio::test]
+async fn the_stand_in_leaves_the_owner_s_blockers_to_the_owner() {
+    let same = || blocker(3, "correctness-reviewer", "src/a.rs", (12, 16));
+    let elsewhere = || blocker(3, "correctness-reviewer", "src/b.rs", (12, 16));
+    let stands_in = |repo: &FakeRepo, model: &FakeGateModel| {
+        GateRepliesImpl::new(repo.clone(), model.clone(), GateReplySettings::default())
+    };
+
+    // Repeated, with the owner section on: the owner's.
+    let repo = FakeRepo::default();
+    let key = second_round_finding(&repo, standing_in_at_blockers(true), same()).await;
+    let model = FakeGateModel::picking(Some("fix"), 0.99);
+    let stood = stands_in(&repo, &model)
+        .stand_in(blockers_asking(key, 1))
+        .await
+        .expect("stand in");
+    assert_eq!(stood, None);
+    assert!(model.asked().is_empty());
+
+    // Past the rule's fix rounds: the owner's, whatever they found.
+    let repo = FakeRepo::default();
+    let key = second_round_finding(&repo, standing_in_at_blockers(true), elsewhere()).await;
+    let model = FakeGateModel::picking(Some("fix"), 0.99);
+    let stood = stands_in(&repo, &model)
+        .stand_in(blockers_asking(key, 2))
+        .await
+        .expect("stand in");
+    assert_eq!(stood, None);
+    assert!(model.asked().is_empty());
+
+    // Changed Blockers within the fix rounds: the stand-in answers.
+    let repo = FakeRepo::default();
+    let key = second_round_finding(&repo, standing_in_at_blockers(true), elsewhere()).await;
+    let model = FakeGateModel::picking(Some("fix"), 0.99);
+    let stood = stands_in(&repo, &model)
+        .stand_in(blockers_asking(key, 1))
+        .await
+        .expect("stand in");
+    assert_eq!(stood.map(|stood| stood.answer), Some(outcome("fix")));
 }

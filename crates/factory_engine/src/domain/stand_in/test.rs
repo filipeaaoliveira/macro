@@ -16,6 +16,9 @@ fn blockers_facts() -> StandInFacts {
         person_only: false,
         tampered: false,
         held: false,
+        fix_rounds: 0,
+        fix_limit: 2,
+        repeated_blockers: false,
     }
 }
 
@@ -104,4 +107,55 @@ fn the_question_gives_the_gate_the_plan_and_the_past_answers_as_json_data() {
         data["past_answers"],
         serde_json::json!([{ "question": "Blockers?", "answer": "fix", "note": "always fix" }])
     );
+}
+
+#[test]
+fn the_stand_in_leaves_blockers_past_the_rule_s_fix_rounds_to_the_owner() {
+    let fix_or_stop = [outcome("fix"), outcome("stop")];
+    let at_the_limit = StandInFacts {
+        fix_rounds: 2,
+        fix_limit: 2,
+        ..blockers_facts()
+    };
+    assert!(!may_stand_in(Some(BLOCKERS), &at_the_limit, &fix_or_stop));
+    let below = StandInFacts {
+        fix_rounds: 1,
+        ..at_the_limit
+    };
+    assert!(may_stand_in(Some(BLOCKERS), &below, &fix_or_stop));
+    // The limit reads only for a Blockers Gate.
+    let plan_rules = OrchestratorDefinition {
+        stand_in: StandInKinds {
+            plan: true,
+            blockers: false,
+        },
+        ..BLOCKERS
+    };
+    let plan = StandInFacts {
+        kind: RuleGateKind::Plan,
+        fix_limit: 0,
+        ..blockers_facts()
+    };
+    assert!(may_stand_in(
+        Some(plan_rules),
+        &plan,
+        &[outcome("approve"), outcome("revise")]
+    ));
+}
+
+#[test]
+fn with_the_owner_section_on_repeated_blockers_are_the_owner_s() {
+    let fix_or_stop = [outcome("fix"), outcome("stop")];
+    let repeated = StandInFacts {
+        fix_rounds: 1,
+        repeated_blockers: true,
+        ..blockers_facts()
+    };
+    let owner_gates = OrchestratorDefinition {
+        owner_gates: true,
+        ..BLOCKERS
+    };
+    assert!(!may_stand_in(Some(owner_gates), &repeated, &fix_or_stop));
+    // Without the owner section, the stand-in reads them as the rule does.
+    assert!(may_stand_in(Some(BLOCKERS), &repeated, &fix_or_stop));
 }

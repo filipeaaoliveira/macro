@@ -6,6 +6,7 @@ use factory_records::domain::gate_replies::GateReplyRepository;
 use factory_records::domain::main_hold::MainHoldRepository;
 use factory_records::domain::models::{Gate, MAX_NOTE_BYTES, Outcome, Run, Step, StepKey};
 use factory_records::domain::ports::RunRepository;
+use factory_records::domain::review_rounds::ReviewRoundRepository;
 
 use super::{Decision, GateReplySettings, MODEL_TIMEOUT, decide, reply_question};
 use crate::domain::built_in_steps::cut;
@@ -20,6 +21,7 @@ use crate::domain::ports::{
 use crate::domain::stand_in::{
     PAST_ANSWERS_READ, StandInContext, StandInFacts, may_stand_in, stand_in_question,
 };
+use crate::domain::standing_rules::repeated_blockers;
 
 /// The answer that agrees to what a Gate asks, which on a Tampered Run
 /// also approves its Control Files: a person approves those with the
@@ -47,7 +49,7 @@ pub struct GateRepliesImpl<R, M, N = NoOwnerGates> {
 
 impl<R, M> GateRepliesImpl<R, M>
 where
-    R: RunRepository + GateReplyRepository + MainHoldRepository,
+    R: RunRepository + GateReplyRepository + MainHoldRepository + ReviewRoundRepository,
     M: GateModel,
 {
     /// Create the service, set as `settings` say, which marks no
@@ -75,17 +77,17 @@ where
 
 impl<R, M, N> GateRepliesImpl<R, M, N>
 where
-    R: RunRepository + GateReplyRepository + MainHoldRepository,
+    R: RunRepository + GateReplyRepository + MainHoldRepository + ReviewRoundRepository,
     M: GateModel,
     N: GateNotifier,
 {
-    /// Whether the stand-in may answer a Gate of `kind` (kept for a person
-    /// when `person_only`) offering `answers`, as `run` reads now.
+    /// Whether the stand-in may answer the Gate `asked` of `run`, whose
+    /// Steps are `steps`, offering `answers`, as the Run reads now.
     async fn may_stand_in_now(
         &self,
         run: &Run,
-        kind: RuleGateKind,
-        person_only: bool,
+        steps: &[Step],
+        asked: Asked,
         answers: &[Outcome],
     ) -> Result<bool, StepError> {
         if run.end.is_some() {
@@ -95,14 +97,32 @@ where
             Some(base) => self.repo.main_hold(base).await.map_err(internal)?.is_some(),
             None => false,
         };
+        // Whether a review round found its round before's Blockers again
+        // matters only with the owner section on, as for the rule.
+        let owner_gates = run
+            .standing_rules
+            .is_some_and(|rules| rules.definition.owner_gates);
+        let repeated = if asked.kind == RuleGateKind::Blockers && owner_gates {
+            let rounds = self
+                .repo
+                .review_rounds(asked.key.run_id)
+                .await
+                .map_err(internal)?;
+            repeated_blockers(&rounds, steps, asked.key.seq)
+        } else {
+            false
+        };
         let facts = StandInFacts {
-            kind,
-            person_only,
+            kind: asked.kind,
+            person_only: asked.person_only,
             tampered: run
                 .control_files
                 .as_ref()
                 .is_some_and(|changes| changes.is_tampered()),
             held,
+            fix_rounds: asked.fix_rounds,
+            fix_limit: asked.fix_limit,
+            repeated_blockers: repeated,
         };
         let rules = run.standing_rules.map(|rules| rules.definition);
         Ok(may_stand_in(rules, &facts, answers))
@@ -172,6 +192,40 @@ where
     }
 }
 
+/// What the stand-in reads of the Gate the workflow asks about.
+#[derive(Debug, Clone, Copy)]
+struct Asked {
+    key: StepKey,
+    kind: RuleGateKind,
+    person_only: bool,
+    fix_rounds: u16,
+    fix_limit: u16,
+}
+
+impl From<&StandInAsking> for Asked {
+    fn from(asking: &StandInAsking) -> Self {
+        Self {
+            key: asking.key,
+            kind: asking.kind,
+            person_only: asking.person_only,
+            fix_rounds: asking.fix_rounds,
+            fix_limit: asking.fix_limit,
+        }
+    }
+}
+
+impl From<&StandInKeeping> for Asked {
+    fn from(keeping: &StandInKeeping) -> Self {
+        Self {
+            key: keeping.key,
+            kind: keeping.kind,
+            person_only: keeping.person_only,
+            fix_rounds: keeping.fix_rounds,
+            fix_limit: keeping.fix_limit,
+        }
+    }
+}
+
 /// The Gate of the Step at `seq` among `steps`, which must be recorded.
 fn gate_of(steps: &[Step], seq: u16) -> Result<&Gate, StepError> {
     steps
@@ -183,7 +237,7 @@ fn gate_of(steps: &[Step], seq: u16) -> Result<&Gate, StepError> {
 
 impl<R, M, N> GateReplyService for GateRepliesImpl<R, M, N>
 where
-    R: RunRepository + GateReplyRepository + MainHoldRepository,
+    R: RunRepository + GateReplyRepository + MainHoldRepository + ReviewRoundRepository,
     M: GateModel,
     N: GateNotifier,
 {
@@ -253,7 +307,7 @@ where
 
         let run = self.run(key).await?;
         if !self
-            .may_stand_in_now(&run, asking.kind, asking.person_only, &asking.answers)
+            .may_stand_in_now(&run, &steps, Asked::from(&asking), &asking.answers)
             .await?
         {
             return Ok(None);
@@ -328,7 +382,7 @@ where
         // Hold, or a Run that ended give the Gate back to the person.
         let run = self.run(key).await?;
         if !self
-            .may_stand_in_now(&run, keeping.kind, keeping.person_only, &gate.answers)
+            .may_stand_in_now(&run, &steps, Asked::from(&keeping), &gate.answers)
             .await?
         {
             self.repo.withdraw_stand_in(key).await.map_err(internal)?;

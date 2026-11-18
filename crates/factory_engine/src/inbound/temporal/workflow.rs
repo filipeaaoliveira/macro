@@ -420,6 +420,8 @@ async fn ask(
                     key,
                     kind,
                     person_only: asking.person_only,
+                    fix_rounds: asking.fix_rounds,
+                    fix_limit: asking.fix_limit,
                     answers: gate.answers.clone(),
                 },
                 record_options.clone(),
@@ -448,6 +450,8 @@ async fn ask(
                     key,
                     kind,
                     person_only: asking.person_only,
+                    fix_rounds: asking.fix_rounds,
+                    fix_limit: asking.fix_limit,
                 };
                 let kept = ctx
                     .execute_activity(

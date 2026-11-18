@@ -122,6 +122,14 @@ pub struct StandInAsking {
     pub kind: RuleGateKind,
     /// Whether its Flow keeps it for a person only.
     pub person_only: bool,
+    /// For a review panel's Gate, the fix rounds in a row its Blockers
+    /// went to; nought for other Gates.
+    #[serde(default)]
+    pub fix_rounds: u16,
+    /// The fix rounds in a row the `fix_blockers` rule may send; nought,
+    /// which leaves a Blockers Gate to the owner, when not given.
+    #[serde(default)]
+    pub fix_limit: u16,
     /// The answers it offers.
     pub answers: Vec<Outcome>,
 }
@@ -136,6 +144,12 @@ pub struct StandInKeeping {
     pub kind: RuleGateKind,
     /// Whether its Flow keeps it for a person only.
     pub person_only: bool,
+    /// As for [`StandInAsking::fix_rounds`].
+    #[serde(default)]
+    pub fix_rounds: u16,
+    /// As for [`StandInAsking::fix_limit`].
+    #[serde(default)]
+    pub fix_limit: u16,
 }
 
 /// The stand-in's answer to a Gate, as the workflow goes on with it.
