@@ -141,6 +141,7 @@ async fn second_round(repo: &FakeRepo, blockers: &[&str], fix_diff: bool) -> (Ru
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
             automation: None,
+            definition: None,
         })
         .await
         .expect("insert")

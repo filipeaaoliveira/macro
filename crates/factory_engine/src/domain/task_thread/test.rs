@@ -33,6 +33,7 @@ fn run() -> Run {
         control_files: None,
         standing_rules: None,
         automation: None,
+        definition: None,
         end: None,
     }
 }

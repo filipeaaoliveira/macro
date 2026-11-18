@@ -25,6 +25,7 @@ use crate::domain::ports::{
 
 mod automations;
 mod control_files;
+mod definition;
 mod gate_owner;
 mod orchestrator;
 mod standing_rules;
@@ -281,6 +282,7 @@ async fn julia_s_run(repo: &FakeRepo) -> RunId {
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
             automation: None,
+            definition: None,
         })
         .await
         .expect("insert")
@@ -1123,9 +1125,12 @@ async fn reading_a_run_whose_workflow_never_started_ends_it() {
 
 /// Only the Flows whose Steps the worker serves are offered: this one
 /// serves `reply` alone.
-#[test]
-fn only_the_flows_the_worker_runs_are_offered() {
-    let flows = service(&FakeRepo::default(), &FakeWorkflows::default()).list_flows();
+#[tokio::test]
+async fn only_the_flows_the_worker_runs_are_offered() {
+    let flows = service(&FakeRepo::default(), &FakeWorkflows::default())
+        .list_flows(&julia())
+        .await
+        .expect("flows");
 
     let names: Vec<&str> = flows.iter().map(|flow| flow.name.as_str()).collect();
     assert_eq!(names, ["reply"]);
@@ -1157,6 +1162,7 @@ async fn a_task_s_list_holds_its_owner_s_fifty_newest_runs() {
                 control_files_team_id: None,
                 standing_rules: RunRules::DEFAULT,
                 automation: None,
+                definition: None,
             })
             .await
             .expect("insert")

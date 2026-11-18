@@ -1,6 +1,7 @@
 //! The factory's use cases: starting and reading Runs, and running their
 //! Steps.
 
+mod definition;
 #[cfg(test)]
 mod test;
 
@@ -27,7 +28,7 @@ use factory_records::domain::standing_rules::{
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
-use crate::domain::built_in_flows::{BUILT_IN_FLOWS, BuiltInFlow};
+use crate::domain::built_in_flows::BUILT_IN_FLOWS;
 use crate::domain::control_files::ControlFiles;
 use crate::domain::gate::{
     AnswerGate, GateAnswered, GateOpening, GateRuling, GateTelling, ReplyGate,
@@ -36,9 +37,9 @@ use crate::domain::gate_owner::{
     OwnerNote, gate_notice, gate_told, is_factory_comment, notes_since, notice_id, told_id,
 };
 use crate::domain::models::{
-    Answerer, CodeRepository, ControlFilesSettings, FactoryError, FlowSummary, PersonOnly,
-    RunDetail, RunFinish, RunStart, SessionSteer, SessionStepRef, StandingRulesSettings,
-    StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
+    Answerer, CodeRepository, ControlFilesSettings, DefinitionSettings, FactoryError, FlowSummary,
+    PersonOnly, RunDetail, RunFinish, RunStart, SessionSteer, SessionStepRef,
+    StandingRulesSettings, StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
 };
 use crate::domain::ports::{
     AnswerDelivery, FactoryService, GateNotifier, NoOwnerGates, NoTaskThread, PullRequests,
@@ -54,6 +55,7 @@ use crate::domain::step_terminal::{
     resume_prompt,
 };
 use crate::domain::task_thread::{RunUpdate, post_update};
+use definition::PinnedDefinition;
 
 fn internal(error: impl std::error::Error + Send + Sync + 'static) -> rootcause::Report {
     rootcause::Report::new(error).into_dynamic()
@@ -229,15 +231,30 @@ where
     }
 
     /// The Standing Rules a Run of `user_id`'s on the task `task_id` is
-    /// created with: the Project's own, when its owner's team set rules
-    /// for the Project the task is in, else the team's, else the
-    /// factory's default.
+    /// created with: its team's Factory Definition's when the team names
+    /// one; else the Project's own, when its owner's team set rules for the
+    /// Project the task is in, else the team's, else the factory's default.
     async fn run_rules(
         &self,
         user_id: &MacroUserIdStr<'static>,
         team: Option<TeamMembership>,
         task_id: Option<Uuid>,
+        definition: Option<&PinnedDefinition>,
     ) -> Result<RunRules, FactoryError> {
+        // A team's Factory Definition holds its rules: neither the team's
+        // settings nor a Project's own apply, as they change without a
+        // pull request.
+        if let Some(pinned) = definition {
+            return Ok(RunRules {
+                definition: pinned
+                    .definition
+                    .rules
+                    .standing_rules
+                    .unwrap_or(OrchestratorDefinition::DEFAULT),
+                source: RulesSource::Definition,
+                project_id: None,
+            });
+        }
         let Some(team) = team else {
             return Ok(RunRules::DEFAULT);
         };
@@ -574,12 +591,13 @@ where
             in_person,
             automation,
         } = order;
-        let built_in = BuiltInFlow::named(&flow).ok_or(FactoryError::UnknownFlow)?;
-        let mut flow = built_in.read(|step| self.executor.serves(step))?;
-        if let Some(rounds) = self.review_rounds {
-            flow.bound_review_rounds(rounds);
-        }
-        flow.allow_questions(self.questions);
+        // A team that names a Factory Definition starts its Runs of the
+        // Definition's Flows, read at its default branch's head now: the Run
+        // keeps that commit, and the Definition's Agents.
+        let team = self.repo.team_of(&actor).await.map_err(internal)?;
+        let definition = self.team_definition(&actor, team).await?;
+        let flow_name = flow;
+        let flow = self.flow_named(&flow_name, definition.as_ref())?;
         if request.trim().is_empty() {
             return Err(FactoryError::EmptyRequest);
         }
@@ -624,7 +642,15 @@ where
         // its owner's team has them now, so a change to the team's list,
         // whoever makes it, does not change a Run under way. An agent's
         // account is never its owner in person.
-        let (team, own) = self.team_control_files(&actor).await?;
+        let own = match (&definition, team) {
+            (Some(pinned), _) => pinned.definition.rules.control_files.clone(),
+            (None, Some(team)) => self
+                .repo
+                .team_control_files(team.team_id)
+                .await
+                .map_err(internal)?,
+            (None, None) => None,
+        };
         let control_files_team_id = team.filter(|_| own.is_some()).map(|team| team.team_id);
         let control_file_patterns = own.unwrap_or_else(ControlFiles::default_patterns);
         let created_in_person =
@@ -632,14 +658,24 @@ where
         // The Run keeps its Standing Rules the same way: a change to the
         // team's or the Project's rules, or a task linked later, does not
         // change which of its Gates a rule answers.
-        let standing_rules = self.run_rules(&actor, team, task_id).await?;
+        let standing_rules = self
+            .run_rules(&actor, team, task_id, definition.as_ref())
+            .await?;
         // The Run and its task are kept in one write, so a task deleted
         // since it was checked leaves nothing behind. Once the owner holds
         // as many places as the Queue limit of the rules it would start
         // under, counted in the same write, no new Run starts, whoever
         // asks: the person, an agent for them, or an Automation; starts at
         // the same time are counted one after the other.
-        let asking_flows = self.asking_flows();
+        let mut asking_flows: Vec<&str> = self.asking_flows();
+        if let Some(pinned) = &definition {
+            let asking = pinned.definition.flows.iter().filter(|(name, flow)| {
+                !asking_flows.contains(&name.as_str())
+                    && flow.entries.iter().any(|entry| entry.gate.is_some())
+            });
+            let asking: Vec<&str> = asking.map(|(name, _)| name.as_str()).collect();
+            asking_flows.extend(asking);
+        }
         let hold = QueueHold {
             limit: standing_rules.definition.queue_limit,
             asking_flows: &asking_flows,
@@ -652,7 +688,7 @@ where
             .insert_run_in_queue(
                 NewRun {
                     id: run_id,
-                    flow: built_in.name,
+                    flow: &flow_name,
                     request: &request,
                     user_id: &actor,
                     task_id,
@@ -662,6 +698,7 @@ where
                     control_files_team_id,
                     standing_rules,
                     automation,
+                    definition: definition.as_ref().map(PinnedDefinition::kept),
                 },
                 hold,
             )
@@ -727,10 +764,25 @@ where
     T: TaskDirectory,
     G: PullRequests,
 {
-    fn list_flows(&self) -> Vec<FlowSummary> {
+    async fn list_flows(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+    ) -> Result<Vec<FlowSummary>, FactoryError> {
+        let team = self.repo.team_of(actor).await.map_err(internal)?;
+        if let Some(pinned) = self.team_definition(actor, team).await? {
+            let flows = pinned.definition.flows.into_iter();
+            return Ok(flows
+                .map(|(name, flow)| FlowSummary {
+                    name,
+                    description: flow.description,
+                    repository: flow.repository,
+                })
+                .collect());
+        }
+
         // A Flow that names a Step the worker does not serve yet is not
         // offered: a Run of it would be refused.
-        BUILT_IN_FLOWS
+        Ok(BUILT_IN_FLOWS
             .into_iter()
             .filter_map(|flow| {
                 let read = flow.read(|step| self.executor.serves(step)).ok()?;
@@ -740,7 +792,7 @@ where
                     repository: read.repository,
                 })
             })
-            .collect()
+            .collect())
     }
 
     async fn create_run(
@@ -770,8 +822,9 @@ where
         flow: &str,
         repo_url: Option<&str>,
     ) -> Result<(), FactoryError> {
-        let built_in = BuiltInFlow::named(flow).ok_or(FactoryError::UnknownFlow)?;
-        let flow = built_in.read(|step| self.executor.serves(step))?;
+        let team = self.repo.team_of(actor).await.map_err(internal)?;
+        let definition = self.team_definition(actor, team).await?;
+        let flow = self.flow_named(flow, definition.as_ref())?;
         match (flow.repository, repo_url) {
             (true, None) => return Err(FactoryError::RepositoryRequired),
             (false, Some(_)) => return Err(FactoryError::RepositoryNotUsed),
@@ -1238,11 +1291,14 @@ where
         actor: &MacroUserIdStr<'static>,
     ) -> Result<ControlFilesSettings, FactoryError> {
         let (team, own) = self.team_control_files(actor).await?;
+        // A team's Factory Definition holds its Control Files: these change
+        // nothing while it names one.
+        let named = self.named_definition(team).await?.is_some();
         Ok(ControlFilesSettings {
             is_default: own.is_none(),
             patterns: own.unwrap_or_else(ControlFiles::default_patterns),
             team_id: team.map(|team| team.team_id),
-            can_edit: team.is_some_and(|team| team.admin),
+            can_edit: !named && team.is_some_and(|team| team.admin),
         })
     }
 
@@ -1255,12 +1311,29 @@ where
         if let Some(patterns) = &patterns {
             ControlFiles::parse(patterns)?;
         }
-        let team = self.administered_team(&actor).await?;
+        let team = self.settings_team(&actor).await?;
         self.repo
             .set_team_control_files(team.team_id, patterns.as_deref())
             .await
             .map_err(internal)?;
         self.control_files(&actor).await
+    }
+
+    #[tracing::instrument(skip(self, actor))]
+    async fn definition(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+    ) -> Result<DefinitionSettings, FactoryError> {
+        self.definition_settings(actor).await
+    }
+
+    #[tracing::instrument(skip(self, actor))]
+    async fn set_definition(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        repo_url: Option<String>,
+    ) -> Result<DefinitionSettings, FactoryError> {
+        self.name_definition(actor, repo_url).await
     }
 
     #[tracing::instrument(skip(self, actor))]
@@ -1281,12 +1354,15 @@ where
             ),
             None => (None, Vec::new()),
         };
+        // A team's Factory Definition holds its rules: these change nothing
+        // while it names one.
+        let named = self.named_definition(team).await?.is_some();
         Ok(StandingRulesSettings {
             is_default: own.is_none(),
             definition: own.unwrap_or(OrchestratorDefinition::DEFAULT),
             projects,
             team_id: team.map(|team| team.team_id),
-            can_edit: !agent && team.is_some_and(|team| team.admin),
+            can_edit: !agent && !named && team.is_some_and(|team| team.admin),
         })
     }
 
@@ -1297,7 +1373,7 @@ where
         definition: Option<OrchestratorDefinition>,
     ) -> Result<StandingRulesSettings, FactoryError> {
         valid_queue_limit(definition.as_ref())?;
-        let team = self.administered_team(&actor).await?;
+        let team = self.settings_team(&actor).await?;
         self.repo
             .set_team_rules(team.team_id, definition)
             .await
@@ -1313,7 +1389,7 @@ where
         definition: Option<OrchestratorDefinition>,
     ) -> Result<StandingRulesSettings, FactoryError> {
         valid_queue_limit(definition.as_ref())?;
-        let team = self.administered_team(&actor).await?;
+        let team = self.settings_team(&actor).await?;
         // A Project the admin may not edit is not theirs to give rules: it
         // reads as one that does not exist.
         if !self

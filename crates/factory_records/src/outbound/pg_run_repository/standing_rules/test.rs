@@ -209,6 +209,7 @@ async fn a_run_keeps_the_rules_it_was_created_with(pool: PgPool) {
             control_files_team_id: None,
             standing_rules: rules,
             automation: None,
+            definition: None,
         })
         .await
         .expect("insert")
@@ -330,6 +331,7 @@ async fn the_queue_limit_is_kept_with_the_rules(pool: PgPool) {
             control_files_team_id: None,
             standing_rules: rules,
             automation: None,
+            definition: None,
         })
         .await
         .expect("insert")
@@ -377,6 +379,7 @@ async fn kept_everywhere(pool: PgPool, definition: OrchestratorDefinition) {
             control_files_team_id: None,
             standing_rules: rules,
             automation: None,
+            definition: None,
         })
         .await
         .expect("insert")

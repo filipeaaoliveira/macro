@@ -61,6 +61,7 @@ async fn run_by(
             automation,
             firing_key,
         }),
+        definition: None,
     })
     .await
     .expect("insert run")

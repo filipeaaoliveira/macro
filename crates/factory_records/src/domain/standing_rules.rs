@@ -340,6 +340,8 @@ pub enum RulesSource {
     Team,
     /// Its owner's team's for the Project its task was in.
     Project,
+    /// Its owner's team's Factory Definition's, at the commit the Run read.
+    Definition,
 }
 
 /// The Standing Rules a Run keeps from when it was created.

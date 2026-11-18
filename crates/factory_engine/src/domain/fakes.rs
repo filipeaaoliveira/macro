@@ -21,8 +21,8 @@ use factory_records::domain::automations::{Automation, FiringEnd};
 use factory_records::domain::models::{
     CheckResult, CheckRound, CheckRoundEnd, CheckRoundOutcome, CheckRoundStart, ClaimedSession,
     ControlFileChanges, EntryId, Gate, GateAnswer, GateKind, HandBack, HandedBack, NewRun,
-    NewSteer, Outcome, PassedOver, QueueHold, QueuePlaces, Role, Run, RunEnd, RunId, RunInsert,
-    RunOutcome, SessionStep, SteerRefusal, Steered, Step, StepEnd, StepKey, StepSession,
+    NewSteer, Outcome, PassedOver, QueueHold, QueuePlaces, Role, Run, RunDefinition, RunEnd, RunId,
+    RunInsert, RunOutcome, SessionStep, SteerRefusal, Steered, Step, StepEnd, StepKey, StepSession,
     StepSteering, StoppingSession, TaskLink, TeamMembership,
 };
 use factory_records::domain::ports::RunRepository;
@@ -147,6 +147,10 @@ pub(crate) struct FakeRepo {
     pub(crate) teams: Arc<Mutex<BTreeMap<String, TeamMembership>>>,
     /// The Control File patterns each team set.
     pub(crate) control_files: Arc<Mutex<BTreeMap<Uuid, Vec<String>>>>,
+    /// The Factory Definition each team names, by its repository's URL.
+    pub(crate) team_definitions: Arc<Mutex<BTreeMap<Uuid, String>>>,
+    /// The Agents of the Definition each Run started under, as kept.
+    pub(crate) definition_agents: Arc<Mutex<BTreeMap<RunId, serde_json::Value>>>,
     /// The Standing Rules each team set.
     pub(crate) team_rules: Arc<Mutex<BTreeMap<Uuid, OrchestratorDefinition>>>,
     /// The Standing Rules each team set for a Project, by team and Project.
@@ -442,7 +446,7 @@ impl RunRepository for FakeRepo {
             control_files_team_id,
             standing_rules,
             automation,
-            ..
+            definition,
         } = new;
         if let Some(task_id) = task_id
             && !self.tasks.lock().expect("tasks").contains(&task_id)
@@ -478,8 +482,18 @@ impl RunRepository for FakeRepo {
             control_files: None,
             standing_rules: Some(standing_rules),
             automation: automation.map(|start| start.automation.clone()),
+            definition: definition.map(|definition| RunDefinition {
+                repo_url: definition.repo_url.to_string(),
+                commit: definition.commit.to_string(),
+            }),
             end: None,
         };
+        if let Some(definition) = definition {
+            self.definition_agents
+                .lock()
+                .expect("definition agents")
+                .insert(id, definition.agents.clone());
+        }
         self.runs.lock().expect("runs").insert(id, run.clone());
         self.flows
             .lock()
@@ -597,6 +611,40 @@ impl RunRepository for FakeRepo {
             .lock()
             .expect("control files")
             .get(&team_id)
+            .cloned())
+    }
+
+    async fn team_definition(&self, team_id: Uuid) -> Result<Option<String>, FakeError> {
+        Ok(self
+            .team_definitions
+            .lock()
+            .expect("team definitions")
+            .get(&team_id)
+            .cloned())
+    }
+
+    async fn set_team_definition(
+        &self,
+        team_id: Uuid,
+        repo_url: Option<&str>,
+    ) -> Result<(), FakeError> {
+        let mut kept = self.team_definitions.lock().expect("team definitions");
+        match repo_url {
+            Some(repo_url) => kept.insert(team_id, repo_url.to_string()),
+            None => kept.remove(&team_id),
+        };
+        Ok(())
+    }
+
+    async fn run_definition_agents(
+        &self,
+        id: RunId,
+    ) -> Result<Option<serde_json::Value>, FakeError> {
+        Ok(self
+            .definition_agents
+            .lock()
+            .expect("definition agents")
+            .get(&id)
             .cloned())
     }
 

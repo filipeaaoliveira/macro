@@ -1,0 +1,247 @@
+//! The Run API's side of the Factory Definition: reading a team's at the
+//! head of its repository's default branch, as the person who asks, and
+//! the Flow a Run of it starts with.
+
+use factory_records::domain::automations::AutomationRepository;
+use factory_records::domain::main_hold::MainHoldRepository;
+use factory_records::domain::models::{NewRunDefinition, TeamMembership};
+use factory_records::domain::ports::RunRepository;
+use factory_records::domain::review_rounds::ReviewRoundRepository;
+use factory_records::domain::standing_rules::StandingRulesRepository;
+use macro_user_id::user_id::MacroUserIdStr;
+
+use super::{FactoryServiceImpl, internal};
+use crate::domain::built_in_flows::BuiltInFlow;
+use crate::domain::definition::{
+    DefinitionFiles, DefinitionReadError, FactoryDefinition, read_definition,
+};
+use crate::domain::flow::Flow;
+use crate::domain::models::{CodeRepository, DefinitionSettings, FactoryError};
+use crate::domain::ports::{
+    PullRequests, RunWorkflows, StepExecutor, TaskDirectory, UserDirectory,
+};
+
+/// A Factory Definition read at one commit of its repository: what a Run
+/// started under it keeps.
+#[derive(Debug, Clone)]
+pub(super) struct PinnedDefinition {
+    /// The repository's `https://github.com/owner/name` URL.
+    pub(super) repo_url: String,
+    /// The commit it was read at.
+    pub(super) commit: String,
+    /// What it holds.
+    pub(super) definition: FactoryDefinition,
+    /// Its Agents, as a Run keeps them.
+    pub(super) agents: serde_json::Value,
+}
+
+impl PinnedDefinition {
+    /// What a new Run keeps of it.
+    pub(super) fn kept(&self) -> NewRunDefinition<'_> {
+        NewRunDefinition {
+            repo_url: &self.repo_url,
+            commit: &self.commit,
+            agents: &self.agents,
+        }
+    }
+}
+
+/// The files of a Definition's repository at one commit, read on GitHub as
+/// one person.
+struct RepositoryFiles<'a, G> {
+    github: &'a G,
+    reader: &'a MacroUserIdStr<'static>,
+    repository: &'a CodeRepository,
+    commit: &'a str,
+}
+
+impl<G: PullRequests> DefinitionFiles for RepositoryFiles<'_, G> {
+    type Err = G::Err;
+
+    async fn read(&self, path: &str) -> Result<Option<String>, G::Err> {
+        self.github
+            .file_text(self.reader, self.repository, self.commit, path)
+            .await
+    }
+}
+
+/// Whether `commit` is a full commit id, as GitHub names a branch's head.
+fn is_commit_id(commit: &str) -> bool {
+    commit.len() == 40
+        && commit
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+impl<R, W, E, U, T, G> FactoryServiceImpl<R, W, E, U, T, G>
+where
+    R: RunRepository
+        + MainHoldRepository
+        + ReviewRoundRepository
+        + StandingRulesRepository
+        + AutomationRepository,
+    W: RunWorkflows,
+    E: StepExecutor,
+    U: UserDirectory,
+    T: TaskDirectory,
+    G: PullRequests,
+{
+    /// The repository `team` names as its Factory Definition; none when it
+    /// names none, or there is no team.
+    pub(super) async fn named_definition(
+        &self,
+        team: Option<TeamMembership>,
+    ) -> Result<Option<String>, FactoryError> {
+        let Some(team) = team else {
+            return Ok(None);
+        };
+        Ok(self
+            .repo
+            .team_definition(team.team_id)
+            .await
+            .map_err(internal)?)
+    }
+
+    /// The Factory Definition in `repo_url`, read and checked at the commit
+    /// its default branch is at now, as `reader` reaches it on GitHub. A
+    /// Run keeps that commit, so a change merged after it starts, or the
+    /// Run's own branch, never changes what it runs under.
+    pub(super) async fn definition_at_head(
+        &self,
+        reader: &MacroUserIdStr<'static>,
+        repo_url: &str,
+    ) -> Result<PinnedDefinition, FactoryError> {
+        let repository = CodeRepository::parse(repo_url).ok_or(FactoryError::InvalidRepository)?;
+        let access = self
+            .github
+            .repository_access(reader, &repository)
+            .await
+            .map_err(internal)?
+            .ok_or(FactoryError::UnreachableDefinition)?;
+        let commit = self
+            .github
+            .branch_head(reader, &repository, &access.default_branch)
+            .await
+            .map_err(internal)?
+            .filter(|commit| is_commit_id(commit))
+            .ok_or(FactoryError::UnreachableDefinition)?;
+        let files = RepositoryFiles {
+            github: &self.github,
+            reader,
+            repository: &repository,
+            commit: &commit,
+        };
+        let definition = read_definition(&files, |step| self.executor.serves(step))
+            .await
+            .map_err(|error| match error {
+                DefinitionReadError::Files(error) => FactoryError::Internal(internal(error)),
+                DefinitionReadError::Invalid(error) => FactoryError::InvalidDefinition(error),
+            })?;
+        let agents = serde_json::to_value(&definition.agents)
+            .map_err(|error| FactoryError::Internal(internal(error)))?;
+        Ok(PinnedDefinition {
+            repo_url: repository.url(),
+            commit,
+            definition,
+            agents,
+        })
+    }
+
+    /// The Factory Definition `team` names, read at its default branch's
+    /// head as `actor`; none when it names none, so the team's settings and
+    /// the built-in Flows and Agents apply.
+    pub(super) async fn team_definition(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        team: Option<TeamMembership>,
+    ) -> Result<Option<PinnedDefinition>, FactoryError> {
+        match self.named_definition(team).await? {
+            Some(repo_url) => Ok(Some(self.definition_at_head(actor, &repo_url).await?)),
+            None => Ok(None),
+        }
+    }
+
+    /// The Flow named `name` a Run starts with: `definition`'s when there
+    /// is one, else the built-in Flow, as this service bounds it.
+    pub(super) fn flow_named(
+        &self,
+        name: &str,
+        definition: Option<&PinnedDefinition>,
+    ) -> Result<Flow, FactoryError> {
+        let mut flow = match definition {
+            Some(pinned) => pinned
+                .definition
+                .flows
+                .get(name)
+                .cloned()
+                .ok_or(FactoryError::UnknownFlow)?,
+            None => BuiltInFlow::named(name)
+                .ok_or(FactoryError::UnknownFlow)?
+                .read(|step| self.executor.serves(step))?,
+        };
+        if let Some(rounds) = self.review_rounds {
+            flow.bound_review_rounds(rounds);
+        }
+        flow.allow_questions(self.questions);
+        Ok(flow)
+    }
+
+    /// The team's Factory Definition, as `actor` sees it: read at its
+    /// head, saying why when it does not read.
+    pub(super) async fn definition_settings(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+    ) -> Result<DefinitionSettings, FactoryError> {
+        let team = self.repo.team_of(actor).await.map_err(internal)?;
+        let agent = self.repo.is_agent_account(actor).await.map_err(internal)?;
+        let repo_url = self.named_definition(team).await?;
+        let (commit, problem) = match &repo_url {
+            Some(repo_url) => match self.definition_at_head(actor, repo_url).await {
+                Ok(pinned) => (Some(pinned.commit), None),
+                Err(FactoryError::Internal(report)) => return Err(FactoryError::Internal(report)),
+                Err(refused) => (None, Some(refused.to_string())),
+            },
+            None => (None, None),
+        };
+        Ok(DefinitionSettings {
+            repo_url,
+            commit,
+            problem,
+            team_id: team.map(|team| team.team_id),
+            can_edit: !agent && team.is_some_and(|team| team.admin),
+        })
+    }
+
+    /// Name `repo_url` as `actor`'s team's Factory Definition once it reads
+    /// as they reach it, or name none.
+    pub(super) async fn name_definition(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        repo_url: Option<String>,
+    ) -> Result<DefinitionSettings, FactoryError> {
+        let team = self.administered_team(&actor).await?;
+        let repo_url = match repo_url {
+            Some(repo_url) => Some(self.definition_at_head(&actor, &repo_url).await?.repo_url),
+            None => None,
+        };
+        self.repo
+            .set_team_definition(team.team_id, repo_url.as_deref())
+            .await
+            .map_err(internal)?;
+        self.definition_settings(&actor).await
+    }
+
+    /// The team `actor` administers, to change a setting a Factory
+    /// Definition holds: refused while the team names one, whose
+    /// repository's pull requests change it.
+    pub(super) async fn settings_team(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+    ) -> Result<TeamMembership, FactoryError> {
+        let team = self.administered_team(actor).await?;
+        if self.named_definition(Some(team)).await?.is_some() {
+            return Err(FactoryError::DefinitionNamed);
+        }
+        Ok(team)
+    }
+}

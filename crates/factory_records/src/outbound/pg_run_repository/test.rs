@@ -13,6 +13,7 @@ use crate::domain::models::{
 use crate::domain::ports::RunRepository;
 
 mod control_files;
+mod definition;
 mod waiting;
 
 const LOGIN_TASK: &str = "00000000-0000-7000-8000-000000000101";
@@ -53,6 +54,7 @@ pub(super) async fn insert(repo: &PgRunRepository, id: RunId, request: &str) -> 
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
             automation: None,
+            definition: None,
         })
         .await
         .expect("insert")
@@ -374,6 +376,7 @@ async fn a_run_keeps_its_repository_and_the_commit_it_asks_to_merge(pool: PgPool
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
             automation: None,
+            definition: None,
         })
         .await
         .expect("insert");
@@ -420,6 +423,7 @@ async fn a_run_is_kept_with_its_task_in_one_write(pool: PgPool) {
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
             automation: None,
+            definition: None,
         })
         .await
         .expect("insert");
@@ -436,6 +440,7 @@ async fn a_run_is_kept_with_its_task_in_one_write(pool: PgPool) {
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
             automation: None,
+            definition: None,
         })
         .await
         .expect("insert for a missing task");
@@ -1207,6 +1212,7 @@ async fn insert_on_task(
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
             automation: None,
+            definition: None,
         })
         .await
         .expect("insert")

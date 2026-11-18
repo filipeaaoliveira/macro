@@ -23,9 +23,9 @@ use crate::domain::models::{
     AgentName, AskedBack, CheckResult, CheckRound, CheckRoundOutcome, CheckRoundStart,
     ClaimedSession, ControlFileChanges, EntryId, Gate, GateAnswer, GateKind, HandBack, HandedBack,
     InvalidName, NewRun, NewSteer, Outcome, PassedOver, QueueHold, QueuePlaces, Repository, Role,
-    Run, RunEnd, RunId, RunInsert, RunOutcome, SessionStep, StandInAnswer, SteerRefusal, Steered,
-    Step, StepEnd, StepKey, StepSession, StepSteering, StepTerminal, StoppingSession, TaskLink,
-    TeamMembership,
+    Run, RunDefinition, RunEnd, RunId, RunInsert, RunOutcome, SessionStep, StandInAnswer,
+    SteerRefusal, Steered, Step, StepEnd, StepKey, StepSession, StepSteering, StepTerminal,
+    StoppingSession, TaskLink, TeamMembership,
 };
 use crate::domain::ports::RunRepository;
 use crate::domain::standing_rules::{OrchestratorDefinition, RulesSource, RunRules, StandingRule};
@@ -210,6 +210,9 @@ pub enum PgRunRepositoryErr {
     /// A pull request number does not fit its column or its type.
     #[error("a pull request number is out of range")]
     NumberOutOfRange,
+    /// A stored Run has only part of its Factory Definition.
+    #[error("a stored run has only part of its factory definition")]
+    PartialDefinition,
 }
 
 struct RunRow {
@@ -232,6 +235,8 @@ struct RunRow {
     automation_id: Option<Uuid>,
     automation_name: Option<String>,
     automation_trigger: Option<String>,
+    definition_repo_url: Option<String>,
+    definition_commit: Option<String>,
     outcome: Option<String>,
     ended_at: Option<DateTime<Utc>>,
 }
@@ -307,6 +312,11 @@ impl TryFrom<RunRow> for Run {
             },
             standing_rules,
             automation,
+            definition: match (row.definition_repo_url, row.definition_commit) {
+                (Some(repo_url), Some(commit)) => Some(RunDefinition { repo_url, commit }),
+                (None, None) => None,
+                _ => return Err(PgRunRepositoryErr::PartialDefinition),
+            },
             end,
         })
     }
@@ -600,16 +610,18 @@ impl RunRepository for PgRunRepository {
                 id, flow, request, user_id, task_id, repo_url, base_branch, created_in_person,
                 control_file_patterns, control_files_team_id, standing_rules, standing_rules_source,
                 standing_rules_project_id, automation_id, automation_name, automation_trigger,
-            automation_firing_key
+                automation_firing_key, definition_repo_url, definition_commit, definition_agents
             )
             VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
+                $19, $20
             )
             RETURNING
                 id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,
                 control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,
                 standing_rules, standing_rules_source, standing_rules_project_id,
-                automation_id, automation_name, automation_trigger, outcome, ended_at
+                automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,
+                outcome, ended_at
             "#,
             run.id.as_uuid(),
             run.flow,
@@ -629,6 +641,9 @@ impl RunRepository for PgRunRepository {
             run.automation.map(|start| start.automation.name.as_str()),
             run.automation.map(|start| start.automation.trigger.as_ref()),
             run.automation.map(|start| start.firing_key),
+            run.definition.map(|definition| definition.repo_url),
+            run.definition.map(|definition| definition.commit),
+            run.definition.map(|definition| definition.agents),
         )
         .fetch_one(&mut *transaction)
         .await;
@@ -776,6 +791,62 @@ impl RunRepository for PgRunRepository {
         Ok(patterns.flatten())
     }
 
+    async fn team_definition(&self, team_id: Uuid) -> Result<Option<String>, Self::Err> {
+        let repo_url = sqlx::query_scalar!(
+            "SELECT repo_url FROM factory_team_definition WHERE team_id = $1",
+            team_id,
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(repo_url)
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn set_team_definition(
+        &self,
+        team_id: Uuid,
+        repo_url: Option<&str>,
+    ) -> Result<(), Self::Err> {
+        match repo_url {
+            Some(repo_url) => {
+                sqlx::query!(
+                    r#"
+                    INSERT INTO factory_team_definition (team_id, repo_url)
+                    VALUES ($1, $2)
+                    ON CONFLICT (team_id)
+                    DO UPDATE SET repo_url = EXCLUDED.repo_url, updated_at = now()
+                    "#,
+                    team_id,
+                    repo_url,
+                )
+                .execute(&self.pool)
+                .await?;
+            }
+            None => {
+                sqlx::query!(
+                    "DELETE FROM factory_team_definition WHERE team_id = $1",
+                    team_id,
+                )
+                .execute(&self.pool)
+                .await?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn run_definition_agents(
+        &self,
+        id: RunId,
+    ) -> Result<Option<serde_json::Value>, Self::Err> {
+        let agents = sqlx::query_scalar!(
+            "SELECT definition_agents FROM factory_run WHERE id = $1",
+            id.as_uuid(),
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(agents.flatten())
+    }
+
     // The row also keeps the team's Standing Rules: going back to the
     // default patterns clears them from it, and removes a row left with
     // neither setting.
@@ -839,7 +910,8 @@ impl RunRepository for PgRunRepository {
                 id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,
                 control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,
                 standing_rules, standing_rules_source, standing_rules_project_id,
-                automation_id, automation_name, automation_trigger, outcome, ended_at
+                automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,
+                outcome, ended_at
             FROM factory_run
             WHERE id = $1
             "#,
@@ -935,7 +1007,8 @@ impl RunRepository for PgRunRepository {
                 id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,
                 control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,
                 standing_rules, standing_rules_source, standing_rules_project_id,
-                automation_id, automation_name, automation_trigger, outcome, ended_at
+                automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,
+                outcome, ended_at
             FROM factory_run
             WHERE task_id = $1 AND user_id = $2
             ORDER BY created_at DESC, id DESC
@@ -972,7 +1045,8 @@ impl RunRepository for PgRunRepository {
                 id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,
                 control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,
                 standing_rules, standing_rules_source, standing_rules_project_id,
-                automation_id, automation_name, automation_trigger, outcome, ended_at
+                automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,
+                outcome, ended_at
             FROM factory_run r
             WHERE r.user_id = $1
                 AND r.ended_at IS NULL
@@ -1017,7 +1091,8 @@ impl RunRepository for PgRunRepository {
                 id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,
                 control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,
                 standing_rules, standing_rules_source, standing_rules_project_id,
-                automation_id, automation_name, automation_trigger, outcome, ended_at
+                automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,
+                outcome, ended_at
             FROM factory_run r
             WHERE r.user_id = $1
                 AND r.ended_at IS NULL

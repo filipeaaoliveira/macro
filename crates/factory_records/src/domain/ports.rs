@@ -441,6 +441,28 @@ pub trait RunRepository: Send + Sync + 'static {
         patterns: Option<&[String]>,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
+    /// The repository the team `team_id` names as its Factory Definition,
+    /// by its `https://github.com/owner/name` URL; none when it names none.
+    fn team_definition(
+        &self,
+        team_id: Uuid,
+    ) -> impl Future<Output = Result<Option<String>, Self::Err>> + Send;
+
+    /// Name `repo_url` as the team `team_id`'s Factory Definition; none
+    /// names none, so its Runs go back to the team's settings.
+    fn set_team_definition(
+        &self,
+        team_id: Uuid,
+        repo_url: Option<&str>,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// The Agents of the Factory Definition the Run `id` started under, as
+    /// it kept them; none when it started under none.
+    fn run_definition_agents(
+        &self,
+        id: RunId,
+    ) -> impl Future<Output = Result<Option<serde_json::Value>, Self::Err>> + Send;
+
     /// The commit the Run last asked a person to merge, if any.
     fn merge_head(
         &self,

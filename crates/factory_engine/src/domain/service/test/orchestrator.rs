@@ -76,6 +76,7 @@ async fn waiting_with(
             control_files_team_id: None,
             standing_rules: rules,
             automation: None,
+            definition: None,
         })
         .await
         .expect("insert")

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,\n                standing_rules, standing_rules_source, standing_rules_project_id,\n                automation_id, automation_name, automation_trigger, outcome, ended_at\n            FROM factory_run r\n            WHERE r.user_id = $1\n                AND r.ended_at IS NULL\n                AND EXISTS (\n                    SELECT 1 FROM factory_gate g\n                    WHERE g.run_id = r.id AND g.answer IS NULL\n                )\n            ORDER BY r.created_at DESC, r.id DESC\n            LIMIT $2\n            ",
+  "query": "\n            SELECT\n                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,\n                standing_rules, standing_rules_source, standing_rules_project_id,\n                automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,\n                outcome, ended_at\n            FROM factory_run\n            WHERE id = $1\n            ",
   "describe": {
     "columns": [
       {
@@ -100,19 +100,28 @@
       },
       {
         "ordinal": 19,
-        "name": "outcome",
+        "name": "definition_repo_url",
         "type_info": "Text"
       },
       {
         "ordinal": 20,
+        "name": "definition_commit",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 21,
+        "name": "outcome",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 22,
         "name": "ended_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Text",
-        "Int8"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -136,8 +145,10 @@
       true,
       true,
       true,
+      true,
+      true,
       true
     ]
   },
-  "hash": "1f6d22c69239b18730ed594091f4c9bbeb4612a7484024c81157a4f0957f8943"
+  "hash": "422bda8b0ab8be2fe5c49fd69e247551d3b543a0ce231ec608b782e7c67d736a"
 }

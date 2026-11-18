@@ -60,6 +60,7 @@ async fn run_on_task(repo: &FakeRepo, rules: RunRules) -> (RunId, Uuid) {
             control_files_team_id: None,
             standing_rules: rules,
             automation: None,
+            definition: None,
         })
         .await
         .expect("insert")

@@ -57,6 +57,7 @@ async fn a_run_waits_on_its_owner_while_its_gate_is_open(pool: PgPool) {
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
             automation: None,
+            definition: None,
         })
         .await
         .expect("insert")
@@ -195,6 +196,7 @@ async fn a_run_holds_its_place_in_the_queue_before_its_first_gate(pool: PgPool) 
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
             automation: None,
+            definition: None,
         })
         .await
         .expect("insert")
@@ -272,6 +274,7 @@ async fn starts_at_the_same_time_are_held_to_the_queue_limit(pool: PgPool) {
                 control_files_team_id: None,
                 standing_rules: RunRules::DEFAULT,
                 automation: None,
+                definition: None,
             },
             hold,
         )

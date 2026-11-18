@@ -39,8 +39,8 @@ the Gates they asked people in MacroDB, and defines the names Flows use
 - Owns: the `factory_run`, `factory_step`, `factory_gate`,
   `factory_check_round`, `factory_team_settings`, `factory_merge`,
   `factory_main_hold`, `factory_review_round`, `factory_review_finding`,
-  `factory_project_rules`, `factory_automation` and
-  `factory_automation_firing` tables
+  `factory_project_rules`, `factory_automation`,
+  `factory_automation_firing` and `factory_team_definition` tables
   (`crates/macro_db_client/migrations/20261116083957_factory.sql`,
   `20261117093000_factory_check_round.sql`,
   `20261117104713_factory_step_agent.sql`,
@@ -64,7 +64,8 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261118141500_factory_orchestrator_answers.sql`,
   `20261118143000_factory_automation.sql`,
   `20261118150000_factory_standing_rules_names.sql`,
-  `20261118170000_factory_step_terminal.sql`), and `factory_step_steer`.
+  `20261118170000_factory_step_terminal.sql`,
+  `20261118213000_factory_definition.sql`), and `factory_step_steer`.
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
 
 ## Boundaries

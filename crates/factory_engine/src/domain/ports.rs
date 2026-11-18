@@ -22,10 +22,10 @@ use crate::domain::gate_owner::{GateNotice, OwnerNote};
 use crate::domain::main_hold::{HoldTask, MainLook, MainWatch};
 use crate::domain::models::{
     AgentAnswer, AgentCommand, AgentTask, AgentTurn, Answerer, CodeRepository,
-    ControlFilesSettings, Deployment, FactoryError, FlowSummary, HeadChecks, Merging,
-    OpenPullRequest, Opening, PullRequest, RepositoryAccess, RequiredChecks, RunDetail, RunFinish,
-    RunStart, SessionSteer, SessionStepRef, StandingRulesSettings, StepEnding, StepError,
-    StepInput, StepReport, StepRequest, StepStart,
+    ControlFilesSettings, DefinitionSettings, Deployment, FactoryError, FlowSummary, HeadChecks,
+    Merging, OpenPullRequest, Opening, PullRequest, RepositoryAccess, RequiredChecks, RunDetail,
+    RunFinish, RunStart, SessionSteer, SessionStepRef, StandingRulesSettings, StepEnding,
+    StepError, StepInput, StepReport, StepRequest, StepStart,
 };
 use crate::domain::review_rounds::{ChangedFile, ReviewRoundClosing, ReviewRoundOpening};
 use crate::domain::standing_rules::RuleAnswer;
@@ -669,11 +669,16 @@ pub struct FollowUpTask {
 /// Inbound service port: the Run API used by drivers (HTTP). Every call but
 /// a hand back is made for an acting user, and reaches only that user's Runs.
 pub trait FactoryService: Send + Sync + 'static {
-    /// The built-in Flows a Run can be started of: those that name only
-    /// Steps the worker serves.
-    fn list_flows(&self) -> Vec<FlowSummary>;
+    /// The Flows `actor` can start a Run of: their team's Factory
+    /// Definition's, read at its default branch's head, when the team names
+    /// one; else the built-in Flows that name only Steps the worker serves.
+    fn list_flows(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+    ) -> impl Future<Output = Result<Vec<FlowSummary>, FactoryError>> + Send;
 
-    /// Record `actor`'s new Run of the built-in Flow named `flow` for
+    /// Record `actor`'s new Run of the Flow named `flow` (their team's
+    /// Factory Definition's when it names one, else a built-in Flow) for
     /// `request`, working on the task document `task_id` if one is given,
     /// and on the GitHub repository `repo_url` if the Flow works on one,
     /// and start it. The actor must have an account, see the task, and
@@ -806,6 +811,22 @@ pub trait FactoryService: Send + Sync + 'static {
         actor: MacroUserIdStr<'static>,
         patterns: Option<Vec<String>>,
     ) -> impl Future<Output = Result<ControlFilesSettings, FactoryError>> + Send;
+
+    /// The Factory Definition `actor`'s team names, and whether it reads at
+    /// its default branch's head as `actor` reaches it.
+    fn definition(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+    ) -> impl Future<Output = Result<DefinitionSettings, FactoryError>> + Send;
+
+    /// Name `repo_url` as the Factory Definition of `actor`'s team, once it
+    /// reads at its default branch's head as `actor` reaches it; none names
+    /// none. The actor must administer the team.
+    fn set_definition(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        repo_url: Option<String>,
+    ) -> impl Future<Output = Result<DefinitionSettings, FactoryError>> + Send;
 
     /// The Standing Rules `actor`'s Runs are created with: their team's
     /// Orchestrator Definition, or the factory's default, and the team's

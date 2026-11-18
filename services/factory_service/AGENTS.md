@@ -26,6 +26,10 @@ worker that walks each Run's Flow, in one process.
   how sure, in percent, the model must be before words answer a Gate, 85,
   and before the stand-in answers one, 90), `FACTORY_STAND_IN_WINDOW_SECS`
   (optional: how long the owner may override the stand-in, 600).
+- `src/definition_check.rs`: the `factory_definition_check [folder]`
+  command, which reads a Factory Definition from a checkout of its
+  repository as a Run would, and prints the first problem it finds with
+  its file (exit 1). A Definition repository's checks run it.
 - `src/gate_replay.rs`: the `factory_gate_replay` command, which replays
   the Gate model over the Gates people answered in `DATABASE_URL`'s
   records (`FACTORY_GATE_REPLAY_LIMIT`, 500 by default) and prints how
@@ -126,6 +130,12 @@ worker that walks each Run's Flow, in one process.
   Role until the Runs started before have ended: a Step that opened its
   session before Steps recorded their Agent and bot is stopped, deleted or
   retried as the first Agent of its Role.
+
+  A team that names a Factory Definition (`crates/factory_engine`'s
+  `domain/definition.rs`) gives its Runs the Agents in its `agents.json`,
+  which each Run keeps: `FACTORY_AGENTS` is then the fallback for the Runs
+  of teams that name none. The agent Steps still run on `LocalAgent` when it
+  is unset, Definition or not, so a deployment that runs agents sets it.
 
   Unset, the agent Steps run on `LocalAgent`, which does no work, unless the
   retired `FACTORY_AGENT_ID` is set: then the service refuses to start and

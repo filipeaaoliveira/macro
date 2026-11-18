@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            INSERT INTO factory_run (\n                id, flow, request, user_id, task_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, standing_rules, standing_rules_source,\n                standing_rules_project_id, automation_id, automation_name, automation_trigger,\n            automation_firing_key\n            )\n            VALUES (\n                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17\n            )\n            RETURNING\n                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,\n                standing_rules, standing_rules_source, standing_rules_project_id,\n                automation_id, automation_name, automation_trigger, outcome, ended_at\n            ",
+  "query": "\n            SELECT\n                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,\n                standing_rules, standing_rules_source, standing_rules_project_id,\n                automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,\n                outcome, ended_at\n            FROM factory_run r\n            WHERE r.user_id = $1\n                AND r.ended_at IS NULL\n                AND r.flow = ANY($2)\n                AND NOT EXISTS (SELECT 1 FROM factory_gate g WHERE g.run_id = r.id)\n            ORDER BY r.created_at DESC, r.id DESC\n            LIMIT $3\n            ",
   "describe": {
     "columns": [
       {
@@ -100,34 +100,30 @@
       },
       {
         "ordinal": 19,
-        "name": "outcome",
+        "name": "definition_repo_url",
         "type_info": "Text"
       },
       {
         "ordinal": 20,
+        "name": "definition_commit",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 21,
+        "name": "outcome",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 22,
         "name": "ended_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
         "Text",
-        "Text",
-        "Text",
-        "Text",
-        "Text",
-        "Text",
-        "Bool",
         "TextArray",
-        "Uuid",
-        "TextArray",
-        "Text",
-        "Uuid",
-        "Uuid",
-        "Text",
-        "Text",
-        "Text"
+        "Int8"
       ]
     },
     "nullable": [
@@ -151,8 +147,10 @@
       true,
       true,
       true,
+      true,
+      true,
       true
     ]
   },
-  "hash": "f19fafc87f566c2a7aba1dd63ca38b4c3fc50c48135f1a97de46ad5172f37c4c"
+  "hash": "0f1249bcc8c2bfd42e23152bd3446087748d904990d490365c95de64e8a7b91c"
 }

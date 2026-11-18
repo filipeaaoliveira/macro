@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::domain::control_files::ControlFilesError;
+use crate::domain::definition::DefinitionError;
 use crate::domain::flow::{Entry, Flow, FlowError, StepName};
 use crate::domain::gate_owner::OwnerNote;
 
@@ -641,6 +642,27 @@ pub struct ControlFilesSettings {
     pub can_edit: bool,
 }
 
+/// The Factory Definition a person's team names: the repository whose
+/// files its Runs take their Flows, Agents and rules from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DefinitionSettings {
+    /// The repository's `https://github.com/owner/name` URL; none when the
+    /// team names none, so its Runs take the team's settings and the
+    /// factory's built-in Flows and Agents.
+    pub repo_url: Option<String>,
+    /// The commit of its default branch a Run started now would read,
+    /// when the Definition reads there as the person reaches it.
+    pub commit: Option<String>,
+    /// Why it does not read now, when it does not: the person cannot reach
+    /// it, or a file of it is wrong.
+    pub problem: Option<String>,
+    /// The team; none when the person is on no team.
+    pub team_id: Option<Uuid>,
+    /// Whether the person may change it: they administer the team.
+    pub can_edit: bool,
+}
+
 /// The Standing Rules a person's Runs are created with: their team's
 /// Orchestrator Definition, or the factory's default, and the team's
 /// Projects' own, which replace it for a Run whose task is in one.
@@ -732,6 +754,7 @@ pub enum PersonOnly {
 fn queue_limit_source(source: RulesSource) -> &'static str {
     match source {
         RulesSource::Project => "the project's standing rules",
+        RulesSource::Definition => "your team's factory definition",
         RulesSource::Team | RulesSource::Default => "your team's standing rules",
     }
 }
@@ -781,6 +804,23 @@ pub enum FactoryError {
     /// The Run's owner may read the repository, but not push to it.
     #[error("the run's owner must be able to push to the repository")]
     NoPushAccess,
+    /// The team names a Factory Definition whose repository the caller
+    /// cannot read with their GitHub account, has not connected one for, or
+    /// that has no branch yet.
+    #[error(
+        "the team's factory definition must be in a repository the caller reaches with the GitHub account they connected to Macro"
+    )]
+    UnreachableDefinition,
+    /// The team's Factory Definition does not read at its default branch's
+    /// head.
+    #[error("the team's factory definition does not read: {0}")]
+    InvalidDefinition(DefinitionError),
+    /// The team names a Factory Definition, which sets what was to be
+    /// changed: it changes by pull request to its repository.
+    #[error(
+        "the team's factory definition sets this: change it by a pull request to the definition's repository"
+    )]
+    DefinitionNamed,
     /// The Gate does not offer the answer.
     #[error("the gate offers {offered:?}")]
     AnswerNotOffered {

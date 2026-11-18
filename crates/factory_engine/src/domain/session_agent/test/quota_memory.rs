@@ -139,10 +139,10 @@ async fn a_retried_step_goes_on_with_its_agent_however_lately_refused() {
         .expect("the first step");
     let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
     let task = plan_task(&repo).await;
-    let earlier = SessionAgent::new(sessions.clone(), repo.clone(), agents());
     repo.claim_session(
         task.key,
-        earlier.new_session(&name("primary")).expect("a session"),
+        SessionAgent::<FakeSessions, FakeRepo>::new_session(&agents(), &name("primary"))
+            .expect("a session"),
         &planner(),
         &task.outcomes,
     )

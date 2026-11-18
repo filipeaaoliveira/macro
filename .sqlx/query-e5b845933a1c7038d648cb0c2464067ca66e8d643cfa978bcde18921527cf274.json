@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,\n                standing_rules, standing_rules_source, standing_rules_project_id,\n                automation_id, automation_name, automation_trigger, outcome, ended_at\n            FROM factory_run\n            WHERE task_id = $1 AND user_id = $2\n            ORDER BY created_at DESC, id DESC\n            LIMIT $3\n            ",
+  "query": "\n            SELECT\n                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,\n                standing_rules, standing_rules_source, standing_rules_project_id,\n                automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,\n                outcome, ended_at\n            FROM factory_run\n            WHERE task_id = $1 AND user_id = $2\n            ORDER BY created_at DESC, id DESC\n            LIMIT $3\n            ",
   "describe": {
     "columns": [
       {
@@ -100,11 +100,21 @@
       },
       {
         "ordinal": 19,
-        "name": "outcome",
+        "name": "definition_repo_url",
         "type_info": "Text"
       },
       {
         "ordinal": 20,
+        "name": "definition_commit",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 21,
+        "name": "outcome",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 22,
         "name": "ended_at",
         "type_info": "Timestamptz"
       }
@@ -137,8 +147,10 @@
       true,
       true,
       true,
+      true,
+      true,
       true
     ]
   },
-  "hash": "ca22557750f6b117c4fe2e9a327ed0ad0300e5a6211a5b36eff9ffdf598dc041"
+  "hash": "e5b845933a1c7038d648cb0c2464067ca66e8d643cfa978bcde18921527cf274"
 }

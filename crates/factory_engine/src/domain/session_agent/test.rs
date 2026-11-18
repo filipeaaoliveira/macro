@@ -440,6 +440,7 @@ async fn plan_task(repo: &FakeRepo) -> AgentTask {
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
             automation: None,
+            definition: None,
         })
         .await
         .expect("insert");
@@ -591,6 +592,39 @@ async fn a_step_runs_in_a_session_of_its_owner_and_returns_what_the_agent_handed
             .prompt
             .contains("leave nothing running in the background")
     );
+}
+
+/// A Step of a Run started under a Factory Definition runs in a session of
+/// the Agents the Run kept from it, not the deployment's.
+#[tokio::test]
+async fn a_step_of_a_run_under_a_definition_takes_the_agents_it_kept() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
+    let task = plan_task(&repo).await;
+    let key = task.key;
+    let kept = serde_json::json!({
+        "agents": {
+            "lead": { "bot": Uuid::from_u128(0x1ead), "model": "definition-model" }
+        },
+        "roles": { "planner": ["lead"] }
+    });
+    repo.definition_agents
+        .lock()
+        .expect("definition agents")
+        .insert(key.run_id, kept);
+
+    agent(&sessions, &repo).answer(task).await.expect("answer");
+
+    let prepared = sessions.prepared_calls.lock().expect("prepared");
+    assert_eq!(
+        prepared[0].selection.bot_id,
+        BotId::new_from_uuid(Uuid::from_u128(0x1ead))
+    );
+    assert_eq!(
+        prepared[0].selection.model.as_deref(),
+        Some("definition-model")
+    );
+    assert_eq!(recorded(&repo, key).1, Some(name("lead")));
 }
 
 /// A Step of a Run that works on a repository opens its session in it, so
