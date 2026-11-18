@@ -271,9 +271,11 @@ head (kept on the trial, read into the prompt as `StepInput::base_commit`;
 the agent is told to branch from it; scoring checks the pushed branch
 contains it and took nothing of the base branch after it (the merge base
 of the base branch's head and the branch's head is the pin or older),
-scoring a trial that fails this 0. A GitHub failure while checking fails
-the scoring attempt; its last attempt scores the trial unchecked and logs
-it. A cancelled trial's pin is not checked).
+scoring a trial that fails this 0; GitHub unable to compare the commits
+(no shared history, a commit it lacks) fails it too. Any other GitHub
+failure while checking fails the scoring attempt; its last attempt
+scores the trial unchecked and logs it. A trial scoring 0 anyway, a
+cancelled one among them, is not checked).
 The Flow is `unattended`: its agents ask no question, a Step whose agent
 stops without a result fails, and it runs only as a trial, left out of
 `GET /flows`, live insights and live Scorers. A trial runs on its
@@ -282,12 +284,13 @@ of its Role taking it. One running suite of a Benchmark per person, and
 `MAX_OPEN_TRIALS` running trials per person, hold new suites (409); a
 trial whose Run is refused stops the suite, which reports it (`refused`)
 and plans only the trials it started, and a suite none of whose trials
-started is deleted. A suite still starting counts the trials it planned. Once a trial's Run
-ends it keeps its score (1 when write ended `done`, 0.5 `red`, 0
-otherwise) and its agents' tokens, its Run's own `factory/<run>` branch is
-deleted as its owner (best effort, `PullRequests::delete_branch`), and,
-unless it was cancelled, the Scorers its Benchmark names judge it into the
-trial's own record. `GET /insights/evaluation` (same
+started is deleted. A suite still starting counts the trials it
+planned. Once a trial's Run ends it keeps its score (1 when write ended
+`done`, 0.5 `red`, 0 otherwise) and its agents' tokens, its Run's own
+`factory/<run>` branch is deleted as its owner (best effort,
+`PullRequests::delete_branch`), and, unless it was cancelled, the Scorers
+its Benchmark names judge it into the trial's own record.
+`GET /insights/evaluation` (same
 params as `/insights`) shows each Scorer's judgments, each Experiment's
 arms with their Runs' outcomes and scores, the Benchmarks and the caller's
 suites of the period.

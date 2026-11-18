@@ -509,7 +509,7 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
         repository: &CodeRepository,
         base: &str,
         head: &str,
-    ) -> Result<String, GithubPullRequestsErr> {
+    ) -> Result<Option<String>, GithubPullRequestsErr> {
         let token = self.token(owner).await?;
         Ok(self
             .github

@@ -1734,20 +1734,22 @@ impl PullRequests for FakeGithub {
         _repository: &CodeRepository,
         base: &str,
         head: &str,
-    ) -> Result<String, FakeGithubError> {
+    ) -> Result<Option<String>, FakeGithubError> {
         let state = self.state();
         let (base, head) = (base.to_string(), head.to_string());
         if base == head || state.descendants.contains(&(base.clone(), head.clone())) {
-            return Ok(base);
+            return Ok(Some(base));
         }
         if state.descendants.contains(&(head.clone(), base.clone())) {
-            return Ok(head);
+            return Ok(Some(head));
         }
+        // Commits neither of which contains the other share only the base
+        // registered for them, or no history.
         Ok(state
             .merge_bases
-            .get(&(base.clone(), head))
-            .cloned()
-            .unwrap_or(base))
+            .get(&(base.clone(), head.clone()))
+            .or_else(|| state.merge_bases.get(&(head, base)))
+            .cloned())
     }
 }
 

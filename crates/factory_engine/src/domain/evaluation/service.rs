@@ -205,12 +205,20 @@ where
         base_branch: &str,
         pin: &str,
     ) -> Result<bool, G::Err> {
+        // Once the trial's head is read, a comparison GitHub cannot make
+        // (no shared history, a commit it does not have) is a fact about
+        // the branch, never an outage: the pin is not kept.
         let owner = &subject.user_id;
         let branch = run_branch(subject.run_id);
         let Some(head) = self.github.branch_head(owner, repository, &branch).await? else {
             return Ok(true);
         };
-        if !self.github.contains(owner, repository, pin, &head).await? {
+        // The head contains the pin: their merge base is the pin.
+        let from_pin = self
+            .github
+            .merge_base(owner, repository, pin, &head)
+            .await?;
+        if from_pin.as_deref() != Some(pin) {
             return Ok(false);
         }
         let Some(base_head) = self
@@ -220,11 +228,20 @@ where
         else {
             return Ok(true);
         };
-        let shared = self
+        // What the head shares with the base branch is the pin or older:
+        // the pin contains it, so their merge base is it.
+        let Some(shared) = self
             .github
             .merge_base(owner, repository, &base_head, &head)
+            .await?
+        else {
+            return Ok(false);
+        };
+        let older = self
+            .github
+            .merge_base(owner, repository, &shared, pin)
             .await?;
-        self.github.contains(owner, repository, &shared, pin).await
+        Ok(older.as_deref() == Some(shared.as_str()))
     }
 
     /// Ask `scorer` about `subject`. A call that fails or takes longer than
@@ -308,15 +325,13 @@ where
                 tokens.cache_write += used.cache_write;
             }
             // A trial whose branch did not start from its pinned commit
-            // replayed other code: it scores nothing. A cancelled trial
-            // scores nothing anyway, and GitHub is not asked.
-            let cancelled = subject.outcome == Some(RunOutcome::Cancelled);
-            let score = if cancelled || self.started_from_pin(subject, last_attempt).await? {
-                trial_score(subject)
-            } else {
+            // replayed other code: it scores nothing. A trial that scores
+            // nothing anyway, a cancelled one among them, is not checked.
+            let mut score = trial_score(subject);
+            if score > 0.0 && !self.started_from_pin(subject, last_attempt).await? {
                 tracing::warn!(run_id = %subject.run_id, "a trial's branch left its pinned commit");
-                0.0
-            };
+                score = 0.0;
+            }
             let result = TrialResult { score, tokens };
             self.repo
                 .record_trial_result(&trial.key, &result)

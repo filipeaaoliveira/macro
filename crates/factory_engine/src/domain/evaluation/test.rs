@@ -515,13 +515,14 @@ struct PinCase {
     head: Option<&'static str>,
     /// The commits each of which the second contains, besides itself.
     descendants: &'static [(&'static str, &'static str)],
-    /// The merge base of the base branch's head and the trial's head.
-    merge_base: Option<&'static str>,
+    /// The merge base of two commits neither contains the other of.
+    merge_bases: &'static [(&'static str, &'static str, &'static str)],
 }
 
 const PIN: &str = "1111111111111111111111111111111111111111";
 const NEWER_MAIN: &str = "2222222222222222222222222222222222222222";
 const TRIAL_HEAD: &str = "3333333333333333333333333333333333333333";
+const OLDER: &str = "4444444444444444444444444444444444444444";
 
 /// Score a trial on `case`, its write ended `done`, `last_attempt` or not.
 async fn score_pinned(case: &PinCase, fails: bool, last_attempt: bool) -> Option<f64> {
@@ -555,11 +556,10 @@ async fn score_pinned(case: &PinCase, fails: bool, last_attempt: bool) -> Option
                 .descendants
                 .insert((ancestor.to_string(), descendant.to_string()));
         }
-        if let Some(shared) = case.merge_base {
-            state.merge_bases.insert(
-                (NEWER_MAIN.to_string(), TRIAL_HEAD.to_string()),
-                shared.to_string(),
-            );
+        for (base, head, shared) in case.merge_bases {
+            state
+                .merge_bases
+                .insert((base.to_string(), head.to_string()), shared.to_string());
         }
         state.branch_reads_fail = fails;
     }
@@ -588,16 +588,25 @@ async fn a_trial_scores_only_from_its_pinned_commit() {
     let from_pin = PinCase {
         head: Some(TRIAL_HEAD),
         descendants: &[(PIN, TRIAL_HEAD), (PIN, NEWER_MAIN)],
-        merge_base: Some(PIN),
+        merge_bases: &[(NEWER_MAIN, TRIAL_HEAD, PIN)],
     };
     assert_eq!(score_pinned(&from_pin, false, false).await, Some(1.0));
-    // Not containing the pin: it replayed other code.
+    // Branched from an older commit, beside the pin: it replayed other
+    // code, though it took nothing of main after the pin.
     let elsewhere = PinCase {
         head: Some(TRIAL_HEAD),
-        descendants: &[],
-        merge_base: None,
+        descendants: &[(OLDER, PIN), (OLDER, TRIAL_HEAD), (OLDER, NEWER_MAIN)],
+        merge_bases: &[(PIN, TRIAL_HEAD, OLDER), (NEWER_MAIN, TRIAL_HEAD, OLDER)],
     };
     assert_eq!(score_pinned(&elsewhere, false, false).await, Some(0.0));
+    // Sharing no history with the pin: GitHub cannot compare them, which
+    // is a fact, not an outage.
+    let unrelated = PinCase {
+        head: Some(TRIAL_HEAD),
+        descendants: &[],
+        merge_bases: &[],
+    };
+    assert_eq!(score_pinned(&unrelated, false, false).await, Some(0.0));
     // From a newer main, which contains the pin: it took main's later work.
     let from_newer_main = PinCase {
         head: Some(TRIAL_HEAD),
@@ -606,7 +615,7 @@ async fn a_trial_scores_only_from_its_pinned_commit() {
             (NEWER_MAIN, TRIAL_HEAD),
             (PIN, TRIAL_HEAD),
         ],
-        merge_base: None,
+        merge_bases: &[],
     };
     assert_eq!(
         score_pinned(&from_newer_main, false, false).await,
@@ -616,7 +625,7 @@ async fn a_trial_scores_only_from_its_pinned_commit() {
     let never_pushed = PinCase {
         head: None,
         descendants: &[],
-        merge_base: None,
+        merge_bases: &[],
     };
     assert_eq!(score_pinned(&never_pushed, false, false).await, Some(1.0));
 }
@@ -629,7 +638,7 @@ async fn a_pin_github_cannot_check_is_tried_again_then_scored_unchecked() {
     let case = PinCase {
         head: Some(TRIAL_HEAD),
         descendants: &[],
-        merge_base: None,
+        merge_bases: &[],
     };
     assert_eq!(score_pinned(&case, true, false).await, None);
     assert_eq!(score_pinned(&case, true, true).await, Some(1.0));
@@ -663,11 +672,14 @@ async fn a_cancelled_trial_keeps_a_zero_score_and_is_not_judged() {
     .await
     .expect("trial");
     let judge = Arc::new(FakeJudge::default());
+    // GitHub is down: a cancelled trial does not ask it about its pin.
+    let github = FakeGithub::default();
+    github.state().branch_reads_fail = true;
     let scoring = ScoringServiceImpl::new(
         repo.clone(),
         judge.clone(),
         usage(session),
-        FakeGithub::default(),
+        github,
         Arc::new(definition()),
     );
 

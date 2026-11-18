@@ -373,14 +373,15 @@ pub trait PullRequests: Send + Sync + 'static {
         head: &str,
     ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
 
-    /// The newest commit both `base` and `head` of `repository` contain.
+    /// The newest commit both `base` and `head` of `repository` contain;
+    /// none when they share no history or one is not in the repository.
     fn merge_base(
         &self,
         owner: &MacroUserIdStr<'static>,
         repository: &CodeRepository,
         base: &str,
         head: &str,
-    ) -> impl Future<Output = Result<String, Self::Err>> + Send;
+    ) -> impl Future<Output = Result<Option<String>, Self::Err>> + Send;
 
     /// Ask GitHub to open `pull_request` in `repository`.
     fn open(
