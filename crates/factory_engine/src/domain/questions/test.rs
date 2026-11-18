@@ -26,6 +26,7 @@ fn asked(seq: u16, role: &str, question: &str, answer: Option<&str>) -> Step {
         gate: Some(Gate {
             asked_back: None,
             stand_in: None,
+            stand_in_declined: None,
             kind: GateKind::Question,
             question: question.to_string(),
             answers: vec![Outcome::answer()],

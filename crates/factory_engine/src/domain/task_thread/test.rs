@@ -78,6 +78,7 @@ fn gate(kind: GateKind, question: &str, answer: Option<GateAnswer>) -> Gate {
         answer,
         asked_back: None,
         stand_in: None,
+        stand_in_declined: None,
     }
 }
 

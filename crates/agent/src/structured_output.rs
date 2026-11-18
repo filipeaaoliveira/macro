@@ -4,6 +4,7 @@ use rig_core::message::Message;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use crate::completion::PromptCache;
 use crate::model::router::{ModelRouter, RoutedModel};
 
 #[cfg(test)]
@@ -120,7 +121,54 @@ pub async fn dynamic_structured_completion_thinking<M: ToString>(
 ) -> anyhow::Result<serde_json::Value> {
     let model = model.to_string();
     let validator = validate_schema(&schema)?;
-    let structured_prompt = format!(
+    let structured_prompt = structured_prompt(system_prompt, &schema)?;
+    let params = thinking.params(&model);
+    let response = crate::completion::complete_with_history_and_params(
+        model,
+        &structured_prompt,
+        messages,
+        params,
+        recorder,
+        ctx,
+    )
+    .await?;
+
+    parse_and_validate(&response, &validator)
+}
+
+/// [`dynamic_structured_completion`], writing the prompt to the prompt
+/// cache as `cache` says: [`PromptCache::Skip`] for a one-shot prompt no
+/// later call shares a prefix with, whose write would cost more than plain
+/// input and never be read back.
+#[tracing::instrument(skip(model, system_prompt, messages, schema, recorder, ctx), err)]
+pub async fn dynamic_structured_completion_with_cache<M: ToString>(
+    model: M,
+    system_prompt: &str,
+    messages: Vec<Message>,
+    schema: DynamicSchema,
+    cache: PromptCache,
+    recorder: &dyn ai_usage::UsageRecorder,
+    ctx: ai_usage::UsageContext,
+) -> anyhow::Result<serde_json::Value> {
+    let validator = validate_schema(&schema)?;
+    let structured_prompt = structured_prompt(system_prompt, &schema)?;
+    let response = crate::completion::complete_with_history_params_and_cache(
+        model,
+        &structured_prompt,
+        messages,
+        None,
+        cache,
+        recorder,
+        ctx,
+    )
+    .await?;
+
+    parse_and_validate(&response, &validator)
+}
+
+/// `system_prompt` followed by the instruction to answer in `schema` only.
+fn structured_prompt(system_prompt: &str, schema: &DynamicSchema) -> anyhow::Result<String> {
+    Ok(format!(
         "{system_prompt}\n\n\
          You MUST respond with ONLY a valid JSON value matching this schema.\n\
          Schema name: {name}\n\
@@ -134,20 +182,7 @@ pub async fn dynamic_structured_completion_thinking<M: ToString>(
             .map(|d| format!("{d}\n"))
             .unwrap_or_default(),
         schema_json = serde_json::to_string_pretty(&schema.schema)?,
-    );
-
-    let params = thinking.params(&model);
-    let response = crate::completion::complete_with_history_and_params(
-        model,
-        &structured_prompt,
-        messages,
-        params,
-        recorder,
-        ctx,
-    )
-    .await?;
-
-    parse_and_validate(&response, &validator)
+    ))
 }
 
 fn parse_and_validate(

@@ -452,7 +452,11 @@ describe('RunView', () => {
           ...first,
           gate: {
             ...first.gate,
-            askedBack: { reply: 'Hmm', at: '2026-11-16T09:02:00Z' },
+            askedBack: {
+              reply: 'Hmm',
+              at: '2026-11-16T09:02:00Z',
+              refusedTampered: false,
+            },
           },
         },
       ],
@@ -492,6 +496,133 @@ describe('RunView', () => {
     expect(
       screen.getByRole('button', { name: 'Revise' }).hasAttribute('disabled')
     ).toBe(false);
+  });
+
+  it('says why the stand-in left a Gate, and how the words asked back on were read', async () => {
+    const { setRun } = mount({});
+    const [first] = waitingRun.steps;
+    if (!first?.gate) throw new Error('No first Gate');
+    setRun({
+      ...waitingRun,
+      steps: [
+        {
+          ...first,
+          gate: {
+            ...first.gate,
+            standInDeclined: {
+              pick: 'approve',
+              confidence: 62,
+              reason: 'The plan leaves the migration out.',
+            },
+            askedBack: {
+              reply: 'Hmm',
+              at: '2026-11-16T09:02:00Z',
+              refusedTampered: false,
+              reading: {
+                confidence: 40,
+                reason: 'The reply asks a question back.',
+              },
+            },
+          },
+        },
+      ],
+    });
+    expect(
+      await screen.findByText('The stand-in left this one to you.')
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        'It leaned toward Approve (62% sure). The plan leaves the migration out.'
+      )
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        'It couldn’t tell which answer fits. The reply asks a question back.'
+      )
+    ).toBeTruthy();
+
+    setRun({
+      ...waitingRun,
+      steps: [
+        {
+          ...first,
+          gate: {
+            ...first.gate,
+            standInDeclined: { reason: '' },
+          },
+        },
+      ],
+    });
+    expect(await screen.findByText('It didn’t answer.')).toBeTruthy();
+  });
+
+  it('says why words approving a Tampered Run were asked back', async () => {
+    const { setRun } = mount({});
+    const [first] = waitingRun.steps;
+    if (!first?.gate) throw new Error('No first Gate');
+    setRun({
+      ...waitingRun,
+      steps: [
+        {
+          ...first,
+          gate: {
+            ...first.gate,
+            askedBack: {
+              reply: 'Approve',
+              at: '2026-11-16T09:05:00Z',
+              reading: { pick: 'approve', confidence: 98, reason: 'Clear.' },
+              refusedTampered: true,
+            },
+          },
+        },
+      ],
+    });
+    expect(
+      await screen.findByText(
+        'This run changed its Control Files, so approving it needs the Approve button, which lists them.'
+      )
+    ).toBeTruthy();
+  });
+
+  it('shows words asked back on in the stand-in’s window, not the window', async () => {
+    const { setRun } = mount({});
+    const [first] = waitingRun.steps;
+    if (!first?.gate) throw new Error('No first Gate');
+    setRun({
+      ...waitingRun,
+      steps: [
+        {
+          ...first,
+          gate: {
+            ...first.gate,
+            standIn: {
+              answer: 'approve',
+              reason: 'You approved every plan like this one.',
+              confidence: 93,
+              until: '2026-11-16T09:11:00Z',
+            },
+            askedBack: {
+              reply: 'Hmm',
+              at: '2026-11-16T09:05:00Z',
+              refusedTampered: false,
+              reading: {
+                pick: 'revise',
+                confidence: 70,
+                reason: 'The reply doubts the plan.',
+              },
+            },
+          },
+        },
+      ],
+    });
+    expect(
+      await screen.findByText(
+        'It leaned toward Revise (70% sure). The reply doubts the plan.'
+      )
+    ).toBeTruthy();
+    expect(
+      screen.queryByText('The stand-in answered Approve for you (93% sure)')
+    ).toBeNull();
   });
 
   it('says when the stand-in answered, and when an answer was read from a reply', async () => {

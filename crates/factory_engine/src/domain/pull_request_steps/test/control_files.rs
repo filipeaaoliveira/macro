@@ -53,6 +53,7 @@ fn merge_gate(seq: u16, approved: Option<&[&str]>) -> Step {
         gate: Some(Gate {
             asked_back: None,
             stand_in: None,
+            stand_in_declined: None,
             kind: GateKind::Flow,
             question: "Merge?".to_string(),
             answers: vec![approve.clone()],

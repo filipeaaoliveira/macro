@@ -6,7 +6,9 @@ use sqlx::PgPool;
 
 use super::super::test::{entry, insert, julia, key, outcome};
 use crate::domain::gate_replies::GateReplyRepository;
-use crate::domain::models::{GateKind, NewRun, RunId, RunInsert, StandInAnswer, StepKey};
+use crate::domain::models::{
+    GateKind, GateModelReading, NewRun, RunId, RunInsert, StandInAnswer, StepKey,
+};
 use crate::domain::ports::RunRepository;
 use crate::domain::standing_rules::RunRules;
 use crate::outbound::pg_run_repository::PgRunRepository;
@@ -19,6 +21,15 @@ async fn open_plan_gate(repo: &PgRunRepository, key: StepKey) {
     repo.open_gate(key, "Approve?", &[outcome("approve"), outcome("revise")])
         .await
         .expect("open");
+}
+
+/// The model leaned to `pick` at `confidence` percent, short of deciding.
+fn leaning(pick: Option<&str>, confidence: Option<u8>) -> GateModelReading {
+    GateModelReading {
+        pick: pick.map(outcome),
+        confidence,
+        reason: "The reply asks a question back.".to_string(),
+    }
 }
 
 fn stand_in(answer: &str) -> StandInAnswer {
@@ -43,18 +54,25 @@ async fn a_reply_is_asked_back_or_answers_the_gate_once(pool: PgPool) {
     insert(&repo, run_id, "Fix it").await;
     open_plan_gate(&repo, key(run_id, 1)).await;
 
-    assert!(repo.ask_back(key(run_id, 1), "hmm").await.expect("ask"));
+    let unclear = leaning(None, Some(40));
     assert!(
-        repo.ask_back(key(run_id, 1), "not sure yet")
+        repo.ask_back(key(run_id, 1), "hmm", &unclear, true)
+            .await
+            .expect("ask")
+    );
+    let approve = leaning(Some("approve"), Some(70));
+    assert!(
+        repo.ask_back(key(run_id, 1), "not sure yet", &approve, false)
             .await
             .expect("ask again")
     );
     let steps = repo.list_steps(run_id).await.expect("steps");
     let gate = steps[0].gate.as_ref().expect("gate");
-    assert_eq!(
-        gate.asked_back.as_ref().map(|asked| asked.reply.as_str()),
-        Some("not sure yet")
-    );
+    let asked = gate.asked_back.as_ref().expect("asked back");
+    assert_eq!(asked.reply, "not sure yet");
+    // The latest words' reading replaces the one before.
+    assert_eq!(asked.reading, Some(approve));
+    assert!(!asked.refused_tampered);
     assert_eq!(gate.answer, None);
 
     let kept = repo
@@ -87,9 +105,113 @@ async fn a_reply_is_asked_back_or_answers_the_gate_once(pool: PgPool) {
     assert_eq!(again.answer, outcome("approve"));
     assert!(
         !repo
-            .ask_back(key(run_id, 1), "late")
+            .ask_back(key(run_id, 1), "late", &unclear, false)
             .await
             .expect("ask late")
+    );
+}
+
+/// Words that approved a Tampered Run are kept as asked back on for it,
+/// with the longest reason the model may give.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn words_refused_on_a_tampered_run_keep_a_full_reason(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let run_id = RunId::generate();
+    insert(&repo, run_id, "Fix it").await;
+    open_plan_gate(&repo, key(run_id, 1)).await;
+    let longest = GateModelReading {
+        pick: Some(outcome("approve")),
+        confidence: Some(97),
+        reason: "x".repeat(4096),
+    };
+
+    assert!(
+        repo.ask_back(key(run_id, 1), "Approve", &longest, true)
+            .await
+            .expect("ask")
+    );
+
+    let steps = repo.list_steps(run_id).await.expect("steps");
+    let asked = steps[0]
+        .gate
+        .as_ref()
+        .and_then(|gate| gate.asked_back.clone())
+        .expect("asked back");
+    assert!(asked.refused_tampered);
+    assert_eq!(asked.reading, Some(longest));
+}
+
+/// The stand-in that left a Gate to its owner keeps how the model read it
+/// on the Gate, a model that did not answer too; an answer of the
+/// stand-in's on a retry clears it, and a Gate already answered keeps none.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn a_declining_stand_in_keeps_the_models_reading(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let run_id = RunId::generate();
+    insert(&repo, run_id, "Fix it").await;
+    open_plan_gate(&repo, key(run_id, 1)).await;
+    open_plan_gate(&repo, key(run_id, 2)).await;
+    open_plan_gate(&repo, key(run_id, 3)).await;
+
+    let unsure = leaning(Some("revise"), Some(64));
+    repo.decline_stand_in(key(run_id, 1), &unsure)
+        .await
+        .expect("decline");
+    let silent = GateModelReading {
+        pick: None,
+        confidence: None,
+        reason: String::new(),
+    };
+    repo.decline_stand_in(key(run_id, 2), &silent)
+        .await
+        .expect("decline without a reading");
+    let steps = repo.list_steps(run_id).await.expect("steps");
+    let declined = |seq: usize| {
+        steps[seq]
+            .gate
+            .as_ref()
+            .expect("gate")
+            .stand_in_declined
+            .clone()
+    };
+    assert_eq!(declined(0), Some(unsure.clone()));
+    assert_eq!(declined(1), Some(silent));
+    assert_eq!(declined(2), None);
+
+    // A retry whose model answers keeps the answer, not the decline.
+    repo.stand_in(key(run_id, 1), &stand_in("approve"))
+        .await
+        .expect("stand in")
+        .expect("kept");
+    let steps = repo.list_steps(run_id).await.expect("steps");
+    let gate = steps[0].gate.as_ref().expect("gate");
+    assert_eq!(gate.stand_in_declined, None);
+    assert!(gate.stand_in.is_some());
+
+    // A Gate the owner answered keeps no decline.
+    repo.answer_gate(
+        key(run_id, 3),
+        &outcome("approve"),
+        None,
+        &julia(),
+        None,
+        None,
+    )
+    .await
+    .expect("answer");
+    repo.decline_stand_in(key(run_id, 3), &unsure)
+        .await
+        .expect("decline late");
+    let steps = repo.list_steps(run_id).await.expect("steps");
+    assert_eq!(
+        steps[2].gate.as_ref().expect("gate").stand_in_declined,
+        None
     );
 }
 

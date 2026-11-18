@@ -264,6 +264,58 @@ async fn claude_haiku_5_5_usage_is_priced(pool: PgPool) {
     assert!((total - 0.735).abs() < 1e-4, "{total}");
 }
 
+/// A Gate's usage recorded before Claude Haiku 5.5 was priced is priced by
+/// the backfill, about its Run as it was; a row already priced keeps its
+/// price.
+#[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
+async fn claude_haiku_5_5_usage_recorded_unpriced_is_priced(pool: PgPool) {
+    let run = macro_uuid::Uuid::from_u128(0x5eed);
+    // The first row was recorded unpriced; the second at a price of its own.
+    for (id, price) in [(1_u128, None), (2, Some(4.5_f32))] {
+        sqlx::query!(
+            r#"
+            INSERT INTO ai_usage (
+                id, feature, user_id, entity, model, input_tokens, output_tokens,
+                cache_read_input_tokens, cache_write_input_tokens,
+                price_per_million_in, price_per_million_out, total
+            )
+            VALUES (
+                $1, 'factory_gate', 'macro|owner@example.com', $2, 'claude-haiku-5-5',
+                1000000, 1000000, 0, 0, $3, $3, $4
+            )
+            "#,
+            macro_uuid::Uuid::from_u128(id),
+            run,
+            price,
+            price.map(|price| price * 2.0),
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    sqlx::raw_sql(include_str!(
+        "../../../../macro_db_client/migrations/20261118200100_price_unpriced_claude_haiku_5_5_usage.sql"
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let rows = PgUsageRepo::new(pool)
+        .query_usage(&UsageApiParams::default())
+        .await
+        .unwrap();
+    let mut totals: Vec<f32> = rows
+        .iter()
+        .map(|row| row.cost.price.as_ref().expect("priced").total)
+        .collect();
+    totals.sort_by(f32::total_cmp);
+    // $0.10 in and $0.50 out.
+    assert!((totals[0] - 0.6).abs() < 1e-4, "{totals:?}");
+    assert!((totals[1] - 9.0).abs() < 1e-4, "{totals:?}");
+    assert!(rows.iter().all(|row| row.entity == Some(run)));
+}
+
 #[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
 async fn gemini_3_8_flash_is_priced_like_deepseek_v4p1_flash(pool: PgPool) {
     let repo = PgUsageRepo::new(pool);

@@ -587,6 +587,28 @@ pub struct AskedBack {
     pub reply: String,
     /// When the factory asked back.
     pub at: DateTime<Utc>,
+    /// How the Gate model read the words; none for a reply asked back
+    /// before the factory kept it.
+    pub reading: Option<GateModelReading>,
+    /// Whether the words approved a Tampered Run, which only the Approve
+    /// button approves, since it lists the Run's changed Control Files.
+    pub refused_tampered: bool,
+}
+
+/// How the Gate model read a Gate when what it said decided nothing: its
+/// pick, how sure it was and why, so the owner can tell why the factory
+/// asked back or the stand-in left the Gate to them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GateModelReading {
+    /// The answer it picked; none when it could not tell (`unclear`), or
+    /// did not answer.
+    pub pick: Option<Outcome>,
+    /// How sure it was, in percent; none when it did not answer: its call
+    /// failed or took too long.
+    pub confidence: Option<u8>,
+    /// Why, in its words; empty when it did not answer.
+    pub reason: String,
 }
 
 /// The stand-in's answer to a Gate, for the Run's owner: the answer it
@@ -657,6 +679,9 @@ pub struct Gate {
     /// The stand-in's answer for the Run's owner, while the owner may
     /// override it and after; none when the stand-in did not answer.
     pub stand_in: Option<StandInAnswer>,
+    /// How the Gate model read the Gate when the stand-in, asked, left it
+    /// to the owner; none when it was not asked, or answered.
+    pub stand_in_declined: Option<GateModelReading>,
 }
 
 /// The most Steps a Run takes; past it the Run ends `blocked`, so a Flow

@@ -168,7 +168,7 @@ pub async fn replay<M: GateModel>(model: &M, gates: &[AnsweredGate]) -> ReplayRe
             && gate.answers.len() > 1
         {
             let question = reply_question(&gate.question, &gate.answers, note);
-            let pick = model.pick(&gate.owner, &question).await.ok();
+            let pick = model.pick(&gate.owner, None, &question).await.ok();
             replies.count(pick.as_ref(), &gate.answer);
         }
 
@@ -184,7 +184,7 @@ pub async fn replay<M: GateModel>(model: &M, gates: &[AnsweredGate]) -> ReplayRe
                 past: earlier,
             };
             let pick = model
-                .pick(&gate.owner, &stand_in_question(&context))
+                .pick(&gate.owner, None, &stand_in_question(&context))
                 .await
                 .ok();
             stand_in.count(pick.as_ref(), &gate.answer);

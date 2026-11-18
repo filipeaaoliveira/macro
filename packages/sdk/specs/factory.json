@@ -2298,12 +2298,27 @@
       "AskedBack": {
         "type": "object",
         "description": "A reply the factory could not read as one of a Gate's answers, so it\nasked the person back.",
-        "required": ["reply", "at"],
+        "required": ["reply", "at", "refusedTampered"],
         "properties": {
           "at": {
             "type": "string",
             "format": "date-time",
             "description": "When the factory asked back."
+          },
+          "reading": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/GateModelReading",
+                "description": "How the Gate model read the words; none for a reply asked back\nbefore the factory kept it."
+              }
+            ]
+          },
+          "refusedTampered": {
+            "type": "boolean",
+            "description": "Whether the words approved a Tampered Run, which only the Approve\nbutton approves, since it lists the Run's changed Control Files."
           },
           "reply": {
             "type": "string",
@@ -2988,6 +3003,17 @@
                 "description": "The stand-in's answer for the Run's owner, while the owner may\noverride it and after; none when the stand-in did not answer."
               }
             ]
+          },
+          "standInDeclined": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/GateModelReading",
+                "description": "How the Gate model read the Gate when the stand-in, asked, left it\nto the owner; none when it was not asked, or answered."
+              }
+            ]
           }
         }
       },
@@ -3096,6 +3122,34 @@
         "type": "string",
         "description": "Who asks a Gate's question, which says how it is answered.",
         "enum": ["flow", "question"]
+      },
+      "GateModelReading": {
+        "type": "object",
+        "description": "How the Gate model read a Gate when what it said decided nothing: its\npick, how sure it was and why, so the owner can tell why the factory\nasked back or the stand-in left the Gate to them.",
+        "required": ["reason"],
+        "properties": {
+          "confidence": {
+            "type": ["integer", "null"],
+            "format": "int32",
+            "description": "How sure it was, in percent; none when it did not answer: its call\nfailed or took too long.",
+            "minimum": 0
+          },
+          "pick": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Outcome",
+                "description": "The answer it picked; none when it could not tell (`unclear`), or\ndid not answer."
+              }
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why, in its words; empty when it did not answer."
+          }
+        }
       },
       "GithubFiring": {
         "type": "object",

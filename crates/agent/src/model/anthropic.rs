@@ -1,3 +1,4 @@
+use crate::completion::PromptCache;
 use crate::hook::ToolLoads;
 use crate::model::ReasoningEffort;
 use crate::model::anthropic_prompt_layout::{PROMPT_LAYOUT_KEY, PromptLayout, ToolReferences};
@@ -92,6 +93,25 @@ impl<'a, H: HttpClientExt + Clone + Default + 'static> AnthropicModel<'a, H> {
             .completion_model(self.model.name().to_string())
             .with_prompt_caching()
             .with_automatic_caching()
+    }
+
+    /// The rig completion model for this id with no cache breakpoint, for a
+    /// one-shot prompt no later call shares a prefix with: Anthropic charges
+    /// a cache write more than plain input, and nothing would read it back.
+    pub(crate) fn uncached_completion(&self) -> anthropic::completion::CompletionModel<H> {
+        self.client.completion_model(self.model.name().to_string())
+    }
+
+    /// The rig completion model for this id that writes the prompt to the
+    /// prompt cache as `cache` says.
+    pub(crate) fn completion_for(
+        &self,
+        cache: PromptCache,
+    ) -> anthropic::completion::CompletionModel<H> {
+        match cache {
+            PromptCache::Write => self.completion(),
+            PromptCache::Skip => self.uncached_completion(),
+        }
     }
 
     /// Best-effort extended-thinking config for the configured model, flattened

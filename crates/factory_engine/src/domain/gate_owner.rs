@@ -19,6 +19,10 @@
 //! With it off, as for a Run created before it, none of this happens:
 //! every Gate a rule leaves waits for a person, as before.
 //!
+//! The stand-in's answer, which the owner may change while its window is
+//! open, tells the owner too ([`stand_in_notice`]), whatever the section
+//! says, the same light way as a notify-only Gate's notice.
+//!
 //! A notify-only Gate tells the owner what it says ([`gate_told`])
 //! whatever the section says, since it exists only to tell them: with the
 //! same kind of notification, lighter: one per entry and Run, not pushed to
@@ -31,7 +35,7 @@
 mod test;
 
 use chrono::{DateTime, Utc};
-use factory_records::domain::models::{EntryId, GateKind, Run, RunId, Step};
+use factory_records::domain::models::{EntryId, GateKind, Outcome, Run, RunId, Step};
 use macro_user_id::user_id::MacroUserIdStr;
 use model_notifications::FactoryGateWaitingMetadata;
 use uuid::Uuid;
@@ -170,6 +174,80 @@ pub fn gate_told(run: &Run, step: &Step, question: &str) -> Option<GateNotice> {
         },
         push: false,
     })
+}
+
+/// The id of the notice that the stand-in answered the Gate of the Step
+/// `seq` of the Run `run_id`: one per Gate, however often it is sent, and
+/// apart from the Gate's waiting notice ([`notice_id`]), which the Gate
+/// sends if the stand-in's answer is taken back. It is how the notice is
+/// marked done once the window closes.
+pub fn stand_in_id(run_id: RunId, seq: u16) -> Uuid {
+    let name = format!("{run_id}:{seq}:stand-in");
+    Uuid::new_v5(&NOTICE_NAMESPACE, name.as_bytes())
+}
+
+/// The notice that the stand-in answered the Gate of `step`, of `run`,
+/// with `answer`, which the owner may change while its window is open (the
+/// Run view says until when, in the viewer's time): none once the
+/// Run ended, or when it works on no task, which Macro notifies about. It
+/// is sent whatever the owner section says, since the stand-in answers in
+/// the owner's name. Like a notify-only Gate's notice it is news while the
+/// Run goes on, lighter than a waiting Gate's: flagged `notify_only`, not
+/// pushed, one per Gate ([`stand_in_id`]), and marked done once the window
+/// closes or the Gate is answered.
+pub fn stand_in_notice(run: &Run, step: &Step, answer: &Outcome) -> Option<GateNotice> {
+    if run.end.is_some() {
+        return None;
+    }
+    let gate = step.gate.as_ref()?;
+    let task_id = run.task_id?;
+    let told = format!(
+        "The stand-in answered {} for you; you can change it in the run until its window \
+         closes. {}",
+        answer_label(answer),
+        gate.question
+    );
+    Some(GateNotice {
+        notification_id: stand_in_id(run.id, step.seq),
+        owner: run.user_id.clone(),
+        task_id,
+        metadata: FactoryGateWaitingMetadata {
+            run_id: run.id.as_uuid(),
+            seq: step.seq,
+            task_id: task_id.to_string(),
+            request: FactoryGateWaitingMetadata::excerpt(&run.request),
+            question: FactoryGateWaitingMetadata::excerpt(&told),
+            asker: None,
+            notify_only: true,
+        },
+        push: false,
+    })
+}
+
+/// Words Flows use that people write in capitals.
+const ACRONYMS: [&str; 3] = ["ai", "ci", "pr"];
+
+/// A Flow's answer as the Run view labels it: `Approve`, `CI fix`. It
+/// mirrors the web app's `flowWordLabel`: keep the two alike.
+fn answer_label(answer: &Outcome) -> String {
+    let words: Vec<String> = answer
+        .as_str()
+        .split(['-', '_'])
+        .filter(|word| !word.is_empty())
+        .map(|word| {
+            if ACRONYMS.contains(&word) {
+                word.to_uppercase()
+            } else {
+                word.to_string()
+            }
+        })
+        .collect();
+    let label = words.join(" ");
+    let mut chars = label.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => label,
+    }
 }
 
 /// A comment the Run's owner left on the Run's task.

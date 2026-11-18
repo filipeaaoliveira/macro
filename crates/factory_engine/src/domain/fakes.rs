@@ -788,6 +788,7 @@ impl RunRepository for FakeRepo {
             step.gate.get_or_insert_with(|| Gate {
                 asked_back: None,
                 stand_in: None,
+                stand_in_declined: None,
                 kind,
                 question: question.to_string(),
                 answers: answers.to_vec(),

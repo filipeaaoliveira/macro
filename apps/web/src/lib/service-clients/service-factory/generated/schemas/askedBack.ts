@@ -4,6 +4,7 @@
  * factory_engine
  * OpenAPI spec version: 0.1.0
  */
+import type { AskedBackReading } from './askedBackReading';
 
 /**
  * A reply the factory could not read as one of a Gate's answers, so it
@@ -12,6 +13,10 @@ asked the person back.
 export interface AskedBack {
   /** When the factory asked back. */
   at: string;
+  reading?: AskedBackReading;
+  /** Whether the words approved a Tampered Run, which only the Approve
+button approves, since it lists the Run's changed Control Files. */
+  refusedTampered: boolean;
   /** The person's words. */
   reply: string;
 }

@@ -4,8 +4,9 @@
 //! with the section off.
 
 use chrono::{TimeDelta, Utc};
+use factory_records::domain::gate_replies::GateReplyRepository;
 use factory_records::domain::models::{
-    EntryId, NewRun, Outcome, Role, RunId, RunInsert, RunOutcome, StepKey,
+    EntryId, NewRun, Outcome, Role, RunId, RunInsert, RunOutcome, StandInAnswer, StepKey,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::{FindingKind, Lines, ReviewFinding, ReviewRound};
@@ -19,7 +20,7 @@ use crate::domain::fakes::{FakeGateModel, FakeNotifier, FakeRepo, FakeTaskNotes}
 use crate::domain::gate::{
     AnswerGate, GateAnswered, GateRuling, ReplyRead, ReplyReading, StandInAsking,
 };
-use crate::domain::gate_owner::{OwnerNote, factory_signed, notice_id};
+use crate::domain::gate_owner::{OwnerNote, factory_signed, notice_id, stand_in_id};
 use crate::domain::gate_replies::GateReplySettings;
 use crate::domain::gate_replies::service::GateRepliesImpl;
 use crate::domain::models::{RunFinish, StepEnding, StepError, StepReport};
@@ -616,4 +617,71 @@ async fn an_open_gate_s_notification_is_done_once_its_run_ends() {
             assert!(done.is_empty());
         }
     }
+}
+
+/// The notice that the stand-in answered is done once its window closes
+/// early: the owner answers in it, or the Run ends; a Gate the stand-in
+/// never answered marks none.
+#[tokio::test]
+async fn the_stand_in_s_notice_is_done_when_its_window_closes_early() {
+    let repo = FakeRepo::default();
+    let (run_id, _task) = run_on_task(&repo, rules(false)).await;
+    let overridden = StepKey { run_id, seq: 1 };
+    gate_at(&repo, overridden, "plan", "done", &["approve", "revise"]).await;
+    let open = StepKey { run_id, seq: 2 };
+    gate_at(&repo, open, "plan", "done", &["approve", "revise"]).await;
+    let plain = StepKey { run_id, seq: 3 };
+    gate_at(&repo, plain, "plan", "done", &["approve", "revise"]).await;
+    for key in [overridden, open] {
+        repo.stand_in(
+            key,
+            &StandInAnswer {
+                answer: outcome("approve"),
+                reason: "The plan matches the request.".to_string(),
+                confidence: 95,
+                until: Utc::now() + TimeDelta::minutes(10),
+            },
+        )
+        .await
+        .expect("stand in");
+    }
+    let notifier = FakeNotifier::default();
+    let steps = service(
+        &repo,
+        &FakeExecutor::default(),
+        &notifier,
+        &FakeTaskNotes::default(),
+    );
+    let answer = |key: StepKey| GateAnswered {
+        key,
+        answer: AnswerGate {
+            seq: key.seq,
+            answer: outcome("revise"),
+            note: None,
+            user_id: julia(),
+            approved_control_files: None,
+            agent_session: None,
+        },
+    };
+
+    steps
+        .answer_gate(answer(overridden))
+        .await
+        .expect("override");
+    steps.answer_gate(answer(plain)).await.expect("answer");
+    assert_eq!(
+        *notifier.done.lock().expect("done"),
+        [stand_in_id(run_id, 1)]
+    );
+
+    steps
+        .end_run(RunFinish {
+            run_id,
+            outcome: RunOutcome::Cancelled,
+        })
+        .await
+        .expect("end");
+    let done = notifier.done.lock().expect("done").clone();
+    assert!(done.contains(&stand_in_id(run_id, 2)), "{done:?}");
+    assert!(!done.contains(&stand_in_id(run_id, 3)), "{done:?}");
 }
