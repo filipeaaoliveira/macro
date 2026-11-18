@@ -143,18 +143,30 @@ fn the_code_flow_s_steps_are_served() {
         "ready_to_merge",
         "merge",
         "accept",
-        "deploy",
-        "verify",
     ] {
         assert!(steps.serves(&step(name)).is_some(), "{name}");
     }
     assert!(steps.serves(&step("release")).is_none());
-    // A verifier, an agent, checks the change before the merge. `deploy`
-    // and `verify` are served for the Runs whose Flow still names them;
-    // `verify` keeps its verifier, so a session it held is let go.
+    // A verifier, an agent, checks the change before the merge.
     assert_eq!(steps.serves(&step("accept")), Some(StepUse::Agent));
-    assert_eq!(steps.serves(&step("verify")), Some(StepUse::Agent));
-    assert_eq!(steps.serves(&step("deploy")), Some(StepUse::Work));
+}
+
+/// A new Flow may not name `deploy` or `verify`, which once followed a
+/// merge: only a Run whose Flow already names them runs them.
+#[test]
+fn a_new_flow_may_not_name_the_steps_past_a_merge() {
+    let steps = BuiltInSteps::new(FakeAgent::ending_with("done"), pull_requests());
+
+    for name in ["deploy", "verify"] {
+        assert_eq!(steps.serves(&step(name)), None, "{name}");
+        let read = Flow::parse(
+            serde_json::json!({
+                "entries": [{ "id": name, "step": name, "role": "verifier" }]
+            }),
+            |step| steps.serves(step),
+        );
+        assert!(read.is_err(), "{name}");
+    }
 }
 
 /// A Run ends at its merge: one whose Flow still goes on to `deploy` or

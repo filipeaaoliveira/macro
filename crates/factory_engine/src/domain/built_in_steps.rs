@@ -392,6 +392,12 @@ where
 
     fn serves(&self, step: &StepName) -> Option<StepUse> {
         let built_in = BuiltInStep::named(step)?;
+        // A new Flow may not name the Steps past a merge: only a Run whose
+        // Flow, in its workflow's input, still names them runs them, and
+        // that Flow is never read again.
+        if matches!(built_in, BuiltInStep::Deploy | BuiltInStep::Verify) {
+            return None;
+        }
         if built_in.agent_role().is_some() {
             Some(StepUse::Agent)
         } else {
