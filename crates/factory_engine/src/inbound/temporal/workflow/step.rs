@@ -19,7 +19,7 @@ use super::review_round::Round;
 use super::work::Work;
 use super::{Asking, FAILED_STEP_OUTPUT, Questions};
 use crate::domain::flow::Entry;
-use crate::domain::gate::GateOpening;
+use crate::domain::gate::{GateOpening, GateTelling};
 use crate::domain::models::{StepEnding, StepReport, StepRequest, StepStart};
 
 /// Walk the Step `request` of `entry`, and the Steps that go on from its
@@ -136,8 +136,17 @@ pub(super) async fn walk_step<W: Work>(
 
         // The entry's Gate opens on the outcome it names (`done` unless it
         // says otherwise), and its kind, from the Flow, is what the Run's
-        // Standing Rules may answer.
+        // Standing Rules may answer. A notify-only Gate tells the Run's
+        // owner and lets the Run go on with that outcome.
         let outcome = match &entry.gate {
+            Some(gate) if reported == gate.opened_by() && gate.notify_only => {
+                let telling = GateTelling {
+                    key,
+                    question: gate.question.clone(),
+                };
+                work.tell(telling).await;
+                reported
+            }
             Some(gate) if reported == gate.opened_by() => {
                 let opening = GateOpening {
                     key,

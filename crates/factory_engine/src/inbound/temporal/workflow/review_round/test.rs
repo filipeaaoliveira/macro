@@ -10,7 +10,7 @@ use factory_records::domain::standing_rules::{OrchestratorDefinition, RuleGateKi
 
 use super::{Panel, Round, review_round};
 use crate::domain::flow::{Entry, GateDefinition, StepName};
-use crate::domain::gate::GateOpening;
+use crate::domain::gate::{GateOpening, GateTelling};
 use crate::domain::models::{StepEnding, StepReport, StepRequest, StepStart};
 use crate::domain::review_rounds::{ReviewRoundClosing, ReviewRoundOpening};
 use crate::domain::standing_rules::{GateFacts, rule_answer};
@@ -140,6 +140,10 @@ impl Work for Script {
         }
         self.note(format!("ask {} {}", opening.key.seq, opening.question));
         Ok(opening.answers[0].clone())
+    }
+
+    async fn tell(&self, telling: GateTelling) {
+        self.note(format!("tell {} {}", telling.key.seq, telling.question));
     }
 
     async fn close(&self, closing: ReviewRoundClosing) -> Result<Outcome, Failed> {
@@ -523,6 +527,7 @@ fn gated_panel() -> Entry {
             after: Some(Outcome::try_from("changes".to_string()).expect("valid")),
             kind: Some(RuleGateKind::Blockers),
             person_only: false,
+            notify_only: false,
         }),
         ..panel_entry(3)
     }
@@ -631,5 +636,41 @@ async fn a_blockers_gate_past_the_rule_s_fixes_waits_for_a_person() {
     assert_eq!(
         script.asked().last().map(String::as_str),
         Some("ask 5 Blockers?")
+    );
+}
+
+/// A notify-only Gate on a review panel tells the Run's owner, on the
+/// round's last Step, once the round ends with the outcome it names, and
+/// the Flow routes that outcome without asking anyone.
+#[tokio::test]
+async fn a_notify_only_gate_on_a_panel_tells_and_routes_the_round_s_outcome() {
+    let told_panel = Entry {
+        gate: Some(GateDefinition {
+            question: "The review found Blockers.".to_string(),
+            answers: Vec::new(),
+            after: Some(Outcome::try_from("changes".to_string()).expect("valid")),
+            kind: None,
+            person_only: false,
+            notify_only: true,
+        }),
+        ..panel_entry(3)
+    };
+    let script = Script {
+        closed: Some(Outcome::try_from("changes".to_string()).expect("valid")),
+        ..Script::default()
+    };
+
+    let (round, _) = walk_entry(&script, &told_panel, 1).await;
+
+    assert_eq!(
+        round,
+        Ok(Round::Routed(
+            Outcome::try_from("changes".to_string()).expect("valid")
+        ))
+    );
+    let asked = script.asked();
+    assert_eq!(
+        &asked[asked.len() - 2..],
+        ["close 3", "tell 5 The review found Blockers."]
     );
 }

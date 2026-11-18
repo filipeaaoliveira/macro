@@ -50,6 +50,22 @@ Run's owner answers its Gates, in their own signed-in session: an internal
 caller, a user API key or Macro API token, and an agent's program acting for
 them are refused (403).
 
+A Gate the Flow marks `notify_only` (`GateDefinition::notify_only`) only
+tells the person: it offers no answers, has no kind and is not
+`person_only` (`FlowError::NotifyOnlyGateAnswers`), and once its Step (or
+its review round) ends with the outcome that opens it, the workflow calls
+`factory_tell_gate` (behind the `factory-notify-only-gates` patch marker;
+tried for at most five minutes, its failure ignored) and routes that
+outcome, so the entry's `on` routes `done` (or the round's outcome) as if
+there were no Gate. No Gate is recorded: the Run never waits on it, is not
+listed as waiting, and insights count none. The worker tells the owner
+with the waiting Gate's notification kind (`factory_gate_waiting`, its
+question starting "For your information, the run goes on: "), lighter: not
+pushed to their phone and never marked done for them, and only with the
+owner section on (`gate_owner::gate_told`), as for a waiting Gate; it also
+posts the notice to the task thread when that section is on. No built-in
+Flow has one.
+
 An agent may ask the Run's owner a question mid-Step (`src/domain/questions.rs`)
 when its Flow says how many (`questions`, which the service writes into the
 Flow a Run starts with: `FACTORY_QUESTIONS`, two by default; zero offers
@@ -674,12 +690,12 @@ one comment thread per Run, whose first comment is the Run's start, and one
 reply per update: each Step's end (a `publish` or `merge` Step's names its
 pull request), a Gate left for a person, a Gate's answer and who or what
 gave it (the owner, read from their words or not, the Standing Rule, or
-the stand-in), and the Run's end. A Run with
+the stand-in), a notify-only Gate's notice, and the Run's end. A Run with
 no task posts nothing. The worker posts each from the activity that
 records what it tells, once that record is written: `factory_start_step`
 (the first Step), `factory_end_step`, `factory_notify_gate`,
 `factory_answer_gate`, `factory_rule_gate`, `factory_keep_stand_in`,
-`factory_read_gate_reply` and `factory_end_run`, so
+`factory_read_gate_reply`, `factory_tell_gate` and `factory_end_run`, so
 the thread adds no command to the workflow and Runs in flight replay as
 before. Each comment's id is a UUIDv7 of when its update happened, whose
 other bytes come from the Run and the update (`task_thread::comment_id`):
@@ -829,7 +845,8 @@ owner's note.
 - `src/domain/standing_rules.rs`: which Gates a Standing Rule answers, and
   what it never answers.
 - `src/domain/gate_owner.rs`: the owner section: the notice a waiting Gate
-  sends, and the owner's notes a Step reads. Project rules are set through the API only: team
+  sends, a notify-only Gate's lighter one, and the owner's notes a Step
+  reads. Project rules are set through the API only: team
   settings show how many Projects have their own.
 - `src/domain/task_thread.rs`: the task thread: the comment each update of
   a Run posts to its task, and its id.
@@ -963,6 +980,10 @@ owner's note.
 - A worker older than `GateDefinition::after` cannot read a Flow that has
   it, and one older than `factory_rule_gate` fails that activity: deploy
   every worker before the API starts Runs on the new `code` Flow.
+- Removing the `factory-notify-only-gates` patch breaks the replay of Runs
+  that passed a notify-only Gate (`code_notify_only_plan_with_thread`). A
+  worker older than `notify_only` cannot read a Flow that has it, so deploy
+  every worker before the API starts Runs on one.
 - Removing the `factory-gate-owner` patch breaks the replay of Runs that
   told their owner of a Gate; the histories recorded before it
   (`code_rules_fixed_then_merged`, `code_waiting_at_plan_gate_with_rules`,

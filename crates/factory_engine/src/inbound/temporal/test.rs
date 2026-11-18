@@ -11,6 +11,7 @@ mod gate_replies;
 mod questions;
 mod replay;
 mod review_panel;
+mod task_thread;
 
 use factory_records::domain::standing_rules::{
     OrchestratorDefinition, RulesSource, RunRules, StandingRule,

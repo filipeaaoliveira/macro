@@ -277,3 +277,36 @@ fn a_bounded_review_panel_routes_unresolved() {
 
     assert!(matches!(refused, Err(FlowError::NoUnresolvedRoute(_))));
 }
+
+#[test]
+fn a_notify_only_gate_offers_no_answer_and_keeps_its_question() {
+    let gate = |gate: serde_json::Value| {
+        parse(json!({
+            "entries": [{ "id": "reply", "step": "reply", "gate": gate }]
+        }))
+    };
+
+    let told = gate(json!({ "question": "The reply is out.", "notify_only": true }))
+        .expect("a notify-only gate with a question reads");
+    let read = told.entries[0].gate.as_ref().expect("gate");
+    assert!(read.notify_only);
+    assert!(read.answers.is_empty());
+    assert_eq!(
+        serde_json::to_value(read).expect("written"),
+        json!({ "question": "The reply is out.", "answers": [], "notify_only": true })
+    );
+
+    let answered = gate(json!({
+        "question": "The reply is out.",
+        "answers": ["approve"],
+        "notify_only": true
+    }));
+    assert!(matches!(answered, Err(FlowError::NotifyOnlyGateAnswers(_))));
+    let kept =
+        gate(json!({ "question": "The reply is out.", "notify_only": true, "person_only": true }));
+    assert!(matches!(kept, Err(FlowError::NotifyOnlyGateAnswers(_))));
+    let silent = gate(json!({ "question": " ", "notify_only": true }));
+    assert!(matches!(silent, Err(FlowError::IncompleteGate(_))));
+    let unanswerable = gate(json!({ "question": "Go on?" }));
+    assert!(matches!(unanswerable, Err(FlowError::IncompleteGate(_))));
+}

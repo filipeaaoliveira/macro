@@ -11,7 +11,9 @@ use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
 use crate::domain::flow::{StepName, StepUse};
-use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening, GateRuling, ReplyGate};
+use crate::domain::gate::{
+    AnswerGate, GateAnswered, GateOpening, GateRuling, GateTelling, ReplyGate,
+};
 use crate::domain::gate_owner::{GateNotice, OwnerNote};
 use crate::domain::main_hold::{HoldTask, MainLook, MainWatch};
 use crate::domain::models::{
@@ -780,6 +782,13 @@ pub trait StepService: Send + Sync + 'static {
     /// when the Run's owner section is on and nothing answered it yet.
     /// Telling them again is the same notification.
     fn notify_gate(&self, key: StepKey) -> impl Future<Output = Result<(), StepError>> + Send;
+
+    /// Tell the Run's owner what a notify-only Gate says, when the Run's
+    /// owner section is on, and post it to the task's thread, when its
+    /// task thread section is on; the Run goes on either way. Telling them
+    /// again is the same notification and the same comment.
+    fn tell_gate(&self, telling: GateTelling)
+    -> impl Future<Output = Result<(), StepError>> + Send;
 
     /// Record how a Run ended.
     fn end_run(&self, finish: RunFinish) -> impl Future<Output = Result<(), StepError>> + Send;

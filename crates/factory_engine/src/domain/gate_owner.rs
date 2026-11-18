@@ -14,7 +14,11 @@
 //!   posted as the owner carry [`FACTORY_SIGNATURE`] and are not their
 //!   notes;
 //! - a notified Gate's notification is marked done once the Gate is
-//!   answered.
+//!   answered;
+//! - a notify-only Gate tells the owner what it says ([`gate_told`]), with
+//!   the same kind of notification, lighter: it is not pushed to their
+//!   phone, says the Run goes on, and is never marked done for them, since
+//!   nothing answers it.
 //!
 //! With it off, as for a Run created before it, none of this happens:
 //! every Gate a rule leaves waits for a person, as before.
@@ -83,6 +87,9 @@ pub struct GateNotice {
     pub task_id: Uuid,
     /// What the notification carries.
     pub metadata: FactoryGateWaitingMetadata,
+    /// Whether it is pushed to the owner's phone: a Gate that waits on
+    /// them is, a notify-only Gate's notice is not.
+    pub push: bool,
 }
 
 /// The notice the Gate of `step`, of the Run `run`, warrants: none unless
@@ -121,6 +128,39 @@ pub fn gate_notice(run: &Run, step: &Step) -> Option<GateNotice> {
             question: FactoryGateWaitingMetadata::excerpt(&gate.question),
             asker,
         },
+        push: true,
+    })
+}
+
+/// What a notify-only Gate's notice to its owner starts with, so it reads
+/// as news rather than a question to answer.
+pub const TOLD_PREFIX: &str = "For your information, the run goes on: ";
+
+/// The notice the notify-only Gate of the Step `seq` of `run`, which says
+/// `question`, warrants: none unless the Run's owner section is on, the
+/// Run has not ended, and it works on a task. The notice is the waiting
+/// Gate's kind, lighter: it is not pushed, and says the Run goes on.
+pub fn gate_told(run: &Run, seq: u16, question: &str) -> Option<GateNotice> {
+    let owner_gates = run
+        .standing_rules
+        .is_some_and(|rules| rules.definition.owner_gates);
+    if !owner_gates || run.end.is_some() {
+        return None;
+    }
+    let task_id = run.task_id?;
+    Some(GateNotice {
+        notification_id: notice_id(run.id, seq),
+        owner: run.user_id.clone(),
+        task_id,
+        metadata: FactoryGateWaitingMetadata {
+            run_id: run.id.as_uuid(),
+            seq,
+            task_id: task_id.to_string(),
+            request: FactoryGateWaitingMetadata::excerpt(&run.request),
+            question: FactoryGateWaitingMetadata::excerpt(&format!("{TOLD_PREFIX}{question}")),
+            asker: None,
+        },
+        push: false,
     })
 }
 

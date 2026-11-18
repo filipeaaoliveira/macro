@@ -14,8 +14,8 @@ use uuid::Uuid;
 
 use super::{FakeExecutor, julia, reply_step};
 use crate::domain::fakes::{FakeNotifier, FakeRepo, FakeTaskNotes, FakeTaskThread};
-use crate::domain::gate::{AnswerGate, GateAnswered, GateRuling};
-use crate::domain::gate_owner::FACTORY_SIGNATURE;
+use crate::domain::gate::{AnswerGate, GateAnswered, GateRuling, GateTelling};
+use crate::domain::gate_owner::{FACTORY_SIGNATURE, TOLD_PREFIX};
 use crate::domain::models::{RunFinish, StepEnding, StepReport};
 use crate::domain::ports::StepService;
 use crate::domain::service::StepServiceImpl;
@@ -325,4 +325,63 @@ async fn a_rule_answer_is_posted_with_its_rule() {
             "Step 1's gate was answered `fix` by the `fix_blockers` Standing Rule.\n\n{FACTORY_SIGNATURE}"
         )
     );
+}
+
+/// A notify-only Gate is posted, and told to the owner with the section
+/// on, with the waiting Gate's kind of notification, not pushed and
+/// saying the Run goes on.
+#[tokio::test]
+async fn a_notify_only_gate_is_posted_and_told_without_a_push() {
+    let repo = FakeRepo::default();
+    let (run_id, task) = run_on_task(&repo, rules(true, true)).await;
+    let notifier = FakeNotifier::default();
+    let thread = FakeTaskThread::default();
+    let steps = service(&repo, &notifier, &thread);
+    steps
+        .start_step(reply_step(run_id, 1))
+        .await
+        .expect("start");
+    steps
+        .end_step(ending(run_id, 1, "done", "Planned"))
+        .await
+        .expect("end");
+
+    let telling = GateTelling {
+        key: StepKey { run_id, seq: 1 },
+        question: "The plan is ready.".to_string(),
+    };
+    steps.tell_gate(telling.clone()).await.expect("told");
+    steps.tell_gate(telling).await.expect("told again");
+
+    let sent = notifier.sent.lock().expect("sent").clone();
+    assert_eq!(sent.len(), 2);
+    assert_eq!(sent[0], sent[1]);
+    assert!(!sent[0].push);
+    assert_eq!(sent[0].task_id, task);
+    assert_eq!(
+        sent[0].metadata.question,
+        format!("{TOLD_PREFIX}The plan is ready.")
+    );
+    let texts = thread.texts();
+    assert_eq!(texts.len(), 3, "{texts:?}");
+    assert_eq!(
+        texts[2],
+        format!(
+            "Step 1 tells the run's owner, and the run goes on.\n\n> The plan is ready.\n\n{FACTORY_SIGNATURE}"
+        )
+    );
+
+    // With the owner section off, the owner is not notified.
+    let (quiet_run, _) = run_on_task(&repo, rules(true, false)).await;
+    steps
+        .tell_gate(GateTelling {
+            key: StepKey {
+                run_id: quiet_run,
+                seq: 1,
+            },
+            question: "The plan is ready.".to_string(),
+        })
+        .await
+        .expect("told");
+    assert_eq!(notifier.sent.lock().expect("sent").len(), 2);
 }

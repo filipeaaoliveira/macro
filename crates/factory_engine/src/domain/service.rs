@@ -26,9 +26,11 @@ use uuid::Uuid;
 
 use crate::domain::built_in_flows::{BUILT_IN_FLOWS, BuiltInFlow};
 use crate::domain::control_files::ControlFiles;
-use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening, GateRuling, ReplyGate};
+use crate::domain::gate::{
+    AnswerGate, GateAnswered, GateOpening, GateRuling, GateTelling, ReplyGate,
+};
 use crate::domain::gate_owner::{
-    OwnerNote, gate_notice, is_factory_comment, notes_since, notice_id,
+    OwnerNote, gate_notice, gate_told, is_factory_comment, notes_since, notice_id,
 };
 use crate::domain::models::{
     CodeRepository, ControlFilesSettings, FactoryError, FlowSummary, RunDetail, RunFinish,
@@ -1363,6 +1365,26 @@ where
         }
         self.post(key.run_id, RunUpdate::GateWaiting { seq: key.seq })
             .await;
+        Ok(())
+    }
+
+    #[tracing::instrument(err, skip_all, fields(run_id = %telling.key.run_id, seq = telling.key.seq))]
+    async fn tell_gate(&self, telling: GateTelling) -> Result<(), StepError> {
+        let key = telling.key;
+        let run = self
+            .repo
+            .get_run(key.run_id)
+            .await
+            .map_err(internal)?
+            .ok_or(StepError::NoSuchRun)?;
+        if let Some(notice) = gate_told(&run, key.seq, &telling.question) {
+            self.notifier.notify(notice).await;
+        }
+        let told = RunUpdate::GateTold {
+            seq: key.seq,
+            question: telling.question,
+        };
+        self.post(key.run_id, told).await;
         Ok(())
     }
 

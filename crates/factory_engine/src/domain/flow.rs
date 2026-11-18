@@ -142,13 +142,16 @@ impl Transition {
 /// A question an entry puts to a person once its Step ends `done`, or, for
 /// a review panel, once a round ends with the outcome it names. The Run
 /// waits for the answer, unless a Standing Rule gives it, and the answer
-/// is the outcome the Flow routes.
+/// is the outcome the Flow routes. A notify-only Gate (`notify_only`) only
+/// tells the person: the Run does not wait, and the Flow routes the
+/// outcome that opened it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GateDefinition {
     /// The question, shown with the Step's output.
     pub question: String,
-    /// The answers a person may give.
+    /// The answers a person may give; none for a notify-only Gate.
+    #[serde(default)]
     pub answers: Vec<Outcome>,
     /// The outcome that opens it: `done` when absent. A review panel's Gate
     /// names the round's outcome it asks about, such as `changes`. Left
@@ -166,6 +169,11 @@ pub struct GateDefinition {
     /// none, as `after` is.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub person_only: bool,
+    /// Whether it only tells the person its question and lets the Run go
+    /// on: it offers no answers, has no kind and is not `person_only`.
+    /// Left out of a Flow that has none, as `after` is.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub notify_only: bool,
 }
 
 impl GateDefinition {
@@ -273,6 +281,12 @@ pub enum FlowError {
         /// The fact it names.
         fact: FactName,
     },
+    /// A notify-only Gate offers answers, names a kind or is kept for a
+    /// person: it takes no answer.
+    #[error(
+        "entry {0}'s notify-only gate offers answers, a kind or person_only: it takes no answer"
+    )]
+    NotifyOnlyGateAnswers(EntryId),
     /// A Gate has no question, a question too long to keep, or no answers.
     #[error(
         "entry {0} has a gate with no question, a question over {MAX_QUESTION_BYTES} bytes, or no answers"
@@ -477,6 +491,18 @@ fn check_gate(entry: &EntryId, gate: &GateDefinition) -> Result<(), FlowError> {
         .is_some_and(|after| *after == Outcome::question())
     {
         return Err(FlowError::GateAfterQuestion(entry.clone()));
+    }
+    // A notify-only Gate tells the person and routes the outcome that
+    // opened it: nothing may answer it, so it offers nothing to answer.
+    if gate.notify_only {
+        if !gate.answers.is_empty() || gate.kind.is_some() || gate.person_only {
+            return Err(FlowError::NotifyOnlyGateAnswers(entry.clone()));
+        }
+        let question = gate.question.trim();
+        if question.is_empty() || gate.question.len() > MAX_QUESTION_BYTES {
+            return Err(FlowError::IncompleteGate(entry.clone()));
+        }
+        return Ok(());
     }
     if let Some(kind) = gate.kind
         && !offers_kind_answers(kind, &gate.answers)

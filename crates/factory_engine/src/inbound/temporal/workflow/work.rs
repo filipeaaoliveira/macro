@@ -11,10 +11,10 @@ use temporalio_sdk::{
 };
 
 use super::{
-    Asking, CLOSE_ROUND_TIMEOUT, CLOSE_ROUND_TOTAL, FlowWorkflow, OPEN_ROUND_TIMEOUT,
-    STEP_HEARTBEAT_TIMEOUT, ask, is_cancelled, stop,
+    Asking, CLOSE_ROUND_TIMEOUT, CLOSE_ROUND_TOTAL, FlowWorkflow, NOTIFY_ONLY_PATCH,
+    OPEN_ROUND_TIMEOUT, STEP_HEARTBEAT_TIMEOUT, ask, is_cancelled, notify_options, stop,
 };
-use crate::domain::gate::GateOpening;
+use crate::domain::gate::{GateOpening, GateTelling};
 use crate::domain::models::{StepEnding, StepReport, StepRequest, StepStart};
 use crate::domain::review_rounds::{ReviewRoundClosing, ReviewRoundOpening};
 use crate::inbound::temporal::activities::FactoryActivities;
@@ -59,6 +59,10 @@ pub(super) trait Work {
         opening: GateOpening,
         rule: Option<Asking>,
     ) -> Result<Outcome, Self::Failure>;
+
+    /// Tell the Run's owner what a notify-only Gate says, without waiting
+    /// on them. Telling them may fail: the Run goes on all the same.
+    async fn tell(&self, telling: GateTelling);
 
     /// Close the round, and return its outcome.
     async fn close(&self, closing: ReviewRoundClosing) -> Result<Outcome, Self::Failure>;
@@ -159,6 +163,18 @@ impl Work for TemporalWork<'_> {
         rule: Option<Asking>,
     ) -> Result<Outcome, Self::Failure> {
         ask(self.ctx, opening, rule).await
+    }
+
+    async fn tell(&self, telling: GateTelling) {
+        // Only a Flow with a notify-only Gate comes here, and no Run in
+        // flight before notify-only Gates carries one; the marker keeps
+        // the rule that every new command of the workflow is patched in.
+        if self.ctx.patched(NOTIFY_ONLY_PATCH) {
+            let _ = self
+                .ctx
+                .execute_activity(FactoryActivities::tell_gate, telling, notify_options())
+                .await;
+        }
     }
 
     async fn close(&self, closing: ReviewRoundClosing) -> Result<Outcome, Self::Failure> {

@@ -36,6 +36,13 @@
 //! nothing the workflow decides. A Run whose
 //! history waited on a Gate before the marker replays without it.
 //!
+//! A notify-only Gate (`GateDefinition::notify_only`) never waits: once
+//! its Step, or its review round, ends with the outcome that opens it, the
+//! workflow asks the worker to tell the Run's owner (`factory_tell_gate`,
+//! behind the [`NOTIFY_ONLY_PATCH`] marker, its failure ignored) and routes
+//! that outcome. Only a Flow with such a Gate takes that path, so Runs on
+//! a Flow without one replay as before.
+//!
 //! A Step whose agent asks the Run's owner a question (only one whose Flow
 //! says how many, `questions`) keeps its session; the workflow opens a
 //! question Gate, waits for the answer, and has the same Role go on in a
@@ -142,6 +149,11 @@ pub(crate) const GATE_OWNER_PATCH: &str = "factory-gate-owner";
 /// Gate no rule answered, and takes a person's words as a reply. Renaming
 /// it breaks the replay of Runs that passed it.
 pub(crate) const GATE_REPLIES_PATCH: &str = "factory-gate-replies";
+
+/// The marker of the workflow that tells the Run's owner of each
+/// notify-only Gate it passes. Renaming it breaks the replay of Runs that
+/// passed it.
+pub(crate) const NOTIFY_ONLY_PATCH: &str = "factory-notify-only-gates";
 
 /// The workflow of one Run.
 #[workflow]
@@ -544,16 +556,20 @@ async fn ask(
 /// marker existed replays without telling.
 async fn tell_owner(ctx: &WorkflowContext<FlowWorkflow>, key: StepKey) {
     if ctx.patched(GATE_OWNER_PATCH) {
-        let options =
-            ActivityOptions::with_close_timeouts(ActivityCloseTimeouts::ScheduleAndStartToClose {
-                schedule_to_close: NOTIFY_TOTAL,
-                start_to_close: RECORD_TIMEOUT,
-            })
-            .build();
         let _ = ctx
-            .execute_activity(FactoryActivities::notify_gate, key, options)
+            .execute_activity(FactoryActivities::notify_gate, key, notify_options())
             .await;
     }
+}
+
+/// How telling a Run's owner of a Gate is tried: for at most
+/// [`NOTIFY_TOTAL`], each attempt as long as a record may take.
+fn notify_options() -> ActivityOptions {
+    ActivityOptions::with_close_timeouts(ActivityCloseTimeouts::ScheduleAndStartToClose {
+        schedule_to_close: NOTIFY_TOTAL,
+        start_to_close: RECORD_TIMEOUT,
+    })
+    .build()
 }
 
 /// The Gate a Run waits on, as the workflow keeps it.

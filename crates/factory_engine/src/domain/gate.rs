@@ -50,6 +50,16 @@ pub struct GateOpening {
     pub answers: Vec<Outcome>,
 }
 
+/// A notify-only Gate a Run's workflow passed, for its worker to tell the
+/// Run's owner of: the Run does not wait on it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GateTelling {
+    /// The Step whose end opened it.
+    pub key: StepKey,
+    /// What it tells, from the Flow.
+    pub question: String,
+}
+
 /// An answer a Run's workflow took, for its worker to record.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GateAnswered {

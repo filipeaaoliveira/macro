@@ -22,7 +22,7 @@ use super::step::ask;
 use super::work::Work;
 use super::{Asking, FAILED_STEP_OUTPUT, Question, Questions};
 use crate::domain::flow::Entry;
-use crate::domain::gate::GateOpening;
+use crate::domain::gate::{GateOpening, GateTelling};
 use crate::domain::models::{StepEnding, StepReport, StepRequest, StepStart};
 use crate::domain::review_rounds::{ReviewRoundClosing, ReviewRoundOpening};
 use crate::domain::standing_rules::rule_fix_limit;
@@ -82,6 +82,20 @@ pub(super) async fn review_round<W: Work>(
     else {
         return Ok(Round::Routed(outcome));
     };
+
+    // A notify-only Gate tells the Run's owner of the round's outcome,
+    // which the Flow routes without waiting.
+    if gate.notify_only {
+        let telling = GateTelling {
+            key: StepKey {
+                run_id: panel.run_id,
+                seq: latest,
+            },
+            question: gate.question.clone(),
+        };
+        work.tell(telling).await;
+        return Ok(Round::Routed(outcome));
+    }
 
     let opening = GateOpening {
         key: StepKey {

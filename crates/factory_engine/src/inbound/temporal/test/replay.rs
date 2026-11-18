@@ -51,6 +51,13 @@
 //! - `code_words_asked_back_on_told_gate`: words on a Gate the owner was
 //!   told of are asked back, and they are not told again.
 //!
+//! Recorded with the notify-only Gates' marker (`factory-notify-only-gates`)
+//! too, and the task thread section on, whose comments the worker posts in
+//! the activities it already had (`task_thread.rs`):
+//! - `code_notify_only_plan_with_thread`: a `code` Run whose plan Gate only
+//!   tells the owner goes on to write without an answer; the owner answers
+//!   the merge Gate.
+//!
 //! Before changing what the workflow decides, record the histories it
 //! makes now beside these, so the change is checked against both.
 
@@ -210,6 +217,15 @@ async fn a_run_whose_told_gate_had_words_asked_back_replays() {
     replays(
         "code_words_asked_back_on_told_gate",
         include_bytes!("histories/code_words_asked_back_on_told_gate.json"),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_run_whose_notify_only_gate_told_its_owner_replays() {
+    replays(
+        "code_notify_only_plan_with_thread",
+        include_bytes!("histories/code_notify_only_plan_with_thread.json"),
     )
     .await;
 }
