@@ -409,11 +409,7 @@ async fn at_the_queue_limit_no_new_run_starts() {
     start_flow("reply").await.expect("and another");
 
     let first = waiting_at(&repo, "plan", "done", &["approve", "revise"]).await;
-    let started = start()
-        .await
-        .expect("one waits: under the limit")
-        .run
-        .id;
+    let started = start().await.expect("one waits: under the limit").run.id;
 
     // The Run just started has not asked anything yet, but holds its place.
     let refused = start().await;

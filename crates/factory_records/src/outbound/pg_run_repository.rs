@@ -568,13 +568,8 @@ impl RunRepository for PgRunRepository {
         .execute(&mut *transaction)
         .await?;
         if let Some(limit) = hold.limit {
-            let places = queue_places(
-                &mut transaction,
-                run.user_id,
-                hold.asking_flows,
-                limit,
-            )
-            .await?;
+            let places =
+                queue_places(&mut transaction, run.user_id, hold.asking_flows, limit).await?;
             if places.held() >= limit {
                 return Ok(RunInsert::QueueFull(places));
             }
