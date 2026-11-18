@@ -19,7 +19,9 @@ use super::{
 use crate::domain::gate::{GateOpening, GateTelling};
 use crate::domain::models::{StepEnding, StepReport, StepRequest, StepStart};
 use crate::domain::review_rounds::{ReviewRoundClosing, ReviewRoundOpening};
-use crate::inbound::temporal::activities::{FactoryActivities, INFRASTRUCTURE_FAILURE};
+use crate::inbound::temporal::activities::{
+    AGENT_OVERDUE_FAILURE, FactoryActivities, INFRASTRUCTURE_FAILURE,
+};
 
 /// Why a Step's work failed for good, as the workflow reads it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,10 +37,20 @@ pub(super) enum WorkFailure {
 
 /// Why the activity of a Step's work failed for good, read from its
 /// failure, which the workflow's history keeps, so a replay reads it the
-/// same way.
-fn work_failure(error: &ActivityExecutionError) -> WorkFailure {
-    if error.as_timeout().is_some() {
-        return WorkFailure::Infrastructure;
+/// same way. Only what is surely the factory's counts as infrastructure:
+/// attempts that ran out of time, unless the last of them failed as the
+/// agent was still at work, and agents out of quota. Anything else is the
+/// work's.
+pub(super) fn work_failure(error: &ActivityExecutionError) -> WorkFailure {
+    if let Some(timeout) = error.as_timeout() {
+        return match timeout.cause() {
+            Some(IncomingError::Application(last))
+                if last.type_name() == Some(AGENT_OVERDUE_FAILURE) =>
+            {
+                WorkFailure::Work
+            }
+            _ => WorkFailure::Infrastructure,
+        };
     }
     match error.cause() {
         Some(IncomingError::Application(failure))
@@ -233,3 +245,6 @@ impl Work for TemporalWork<'_> {
             .await?)
     }
 }
+
+#[cfg(test)]
+mod test;

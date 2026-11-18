@@ -1000,6 +1000,11 @@ pub enum StepError {
     /// The Step's work failed in a way trying again would repeat.
     #[error("the step's work failed for good: {0:?}")]
     Final(rootcause::Report),
+    /// The Step's agent was still at work on its turn when the wait for it
+    /// ended: a retry waits on the same turn. Past the Step's time it is the
+    /// work's failure, not the factory's.
+    #[error("the step's agent was still at work when the wait ended: {0:?}")]
+    Overdue(rootcause::Report),
     /// The quota of the Agents that fill the Step's Role ran out: trying
     /// again would repeat the refusal, and the work never started.
     #[error("the step's agents are out of quota: {0:?}")]

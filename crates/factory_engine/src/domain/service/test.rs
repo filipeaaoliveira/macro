@@ -135,6 +135,7 @@ impl Default for FakeExecutor {
 struct WorkFailure {
     retryable: bool,
     out_of_quota: bool,
+    overdue: bool,
 }
 
 impl Retryable for WorkFailure {
@@ -146,6 +147,10 @@ impl Retryable for WorkFailure {
 impl AgentFailure for WorkFailure {
     fn out_of_quota(&self) -> bool {
         self.out_of_quota
+    }
+
+    fn overdue(&self) -> bool {
+        self.overdue
     }
 }
 
@@ -206,6 +211,7 @@ impl StepExecutor for FakeExecutor {
             return Err(WorkFailure {
                 retryable: false,
                 out_of_quota: false,
+                overdue: false,
             });
         }
         self.steered
@@ -974,6 +980,7 @@ async fn work_that_fails_for_good_is_not_retried_and_other_failures_are() {
             failure: Some(WorkFailure {
                 retryable: false,
                 out_of_quota: false,
+                overdue: false,
             }),
             ..FakeExecutor::default()
         },
@@ -984,6 +991,18 @@ async fn work_that_fails_for_good_is_not_retried_and_other_failures_are() {
             failure: Some(WorkFailure {
                 retryable: true,
                 out_of_quota: false,
+                overdue: false,
+            }),
+            ..FakeExecutor::default()
+        },
+    );
+    let overdue = StepServiceImpl::new(
+        repo.clone(),
+        FakeExecutor {
+            failure: Some(WorkFailure {
+                retryable: true,
+                out_of_quota: false,
+                overdue: true,
             }),
             ..FakeExecutor::default()
         },
@@ -994,6 +1013,7 @@ async fn work_that_fails_for_good_is_not_retried_and_other_failures_are() {
             failure: Some(WorkFailure {
                 retryable: false,
                 out_of_quota: true,
+                overdue: false,
             }),
             ..FakeExecutor::default()
         },
@@ -1002,6 +1022,7 @@ async fn work_that_fails_for_good_is_not_retried_and_other_failures_are() {
     let final_failure = for_good.run_step(reply_step(run_id, 1)).await;
     let passing_failure = for_now.run_step(reply_step(run_id, 1)).await;
     let quota_failure = out_of_quota.run_step(reply_step(run_id, 1)).await;
+    let overdue_failure = overdue.run_step(reply_step(run_id, 1)).await;
 
     assert!(matches!(
         final_failure,
@@ -1015,6 +1036,11 @@ async fn work_that_fails_for_good_is_not_retried_and_other_failures_are() {
     assert!(matches!(
         quota_failure,
         Err(crate::domain::models::StepError::OutOfQuota(_))
+    ));
+    // An agent still at work when the wait ended is the work's, retried.
+    assert!(matches!(
+        overdue_failure,
+        Err(crate::domain::models::StepError::Overdue(_))
     ));
 }
 

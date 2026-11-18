@@ -9,7 +9,7 @@ use factory_records::domain::models::{EntryId, Role, RunId, StepKey};
 use temporalio_sdk::activities::ActivityError;
 use tokio::sync::{Notify, watch};
 
-use super::{FactoryActivities, INFRASTRUCTURE_FAILURE, Liveness};
+use super::{AGENT_OVERDUE_FAILURE, FactoryActivities, INFRASTRUCTURE_FAILURE, Liveness};
 use crate::domain::fakes::{FakeGithub, FakeRepo};
 use crate::domain::flow::StepName;
 use crate::domain::gate::{GateAnswered, GateOpening, GateTelling};
@@ -208,4 +208,18 @@ fn a_quota_that_ran_out_fails_as_infrastructure() {
     };
     assert!(for_good.is_non_retryable());
     assert_eq!(for_good.type_name(), None);
+}
+
+/// An agent still at work when the wait for it ended is retried, and its
+/// failure says so, for a Step whose time runs out on it to read as the
+/// work's.
+#[test]
+fn an_overdue_agent_is_retried_as_the_work_s() {
+    let overdue = super::failure(StepError::Overdue(rootcause::report!("still at work")));
+
+    let ActivityError::Application(overdue) = overdue else {
+        panic!("not an application failure: {overdue:?}");
+    };
+    assert!(!overdue.is_non_retryable());
+    assert_eq!(overdue.type_name(), Some(AGENT_OVERDUE_FAILURE));
 }

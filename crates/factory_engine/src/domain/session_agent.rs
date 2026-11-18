@@ -215,6 +215,10 @@ impl AgentFailure for SessionAgentError {
         matches!(self, SessionAgentError::NoQuota(_))
     }
 
+    fn overdue(&self) -> bool {
+        matches!(self, SessionAgentError::Overdue)
+    }
+
     fn stopped_without_result(&self) -> Option<&str> {
         match self {
             SessionAgentError::StoppedWithoutResult(last_words) => Some(last_words),

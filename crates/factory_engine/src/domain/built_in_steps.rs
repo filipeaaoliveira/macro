@@ -176,6 +176,8 @@ pub enum BuiltInStepError {
         retryable: bool,
         /// Whether the agent's quota ran out.
         out_of_quota: bool,
+        /// Whether the agent was still at work when the wait for it ended.
+        overdue: bool,
     },
     /// The agent ended the Step with an outcome the Step does not have.
     #[error("the agent ended step {step} with {outcome}, which it does not end with")]
@@ -199,6 +201,7 @@ impl BuiltInStepError {
         BuiltInStepError::Agent {
             retryable: error.retryable(),
             out_of_quota: error.out_of_quota(),
+            overdue: error.overdue(),
             report: rootcause::Report::new(error).into_dynamic(),
         }
     }
@@ -222,6 +225,18 @@ impl AgentFailure for BuiltInStepError {
     fn out_of_quota(&self) -> bool {
         match self {
             BuiltInStepError::Agent { out_of_quota, .. } => *out_of_quota,
+            BuiltInStepError::UnknownStep(_)
+            | BuiltInStepError::NotAnAgentStep(_)
+            | BuiltInStepError::NoRepository(_)
+            | BuiltInStepError::UnexpectedOutcome { .. }
+            | BuiltInStepError::PullRequest(_)
+            | BuiltInStepError::Unanswered(_) => false,
+        }
+    }
+
+    fn overdue(&self) -> bool {
+        match self {
+            BuiltInStepError::Agent { overdue, .. } => *overdue,
             BuiltInStepError::UnknownStep(_)
             | BuiltInStepError::NotAnAgentStep(_)
             | BuiltInStepError::NoRepository(_)

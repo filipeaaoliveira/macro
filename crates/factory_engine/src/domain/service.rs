@@ -1602,10 +1602,13 @@ where
             .await
             .map_err(|error| {
                 let out_of_quota = error.out_of_quota();
+                let overdue = error.overdue();
                 let final_failure = !error.retryable();
                 let report = internal(error);
                 if out_of_quota {
                     StepError::OutOfQuota(report)
+                } else if overdue {
+                    StepError::Overdue(report)
                 } else if final_failure {
                     StepError::Final(report)
                 } else {

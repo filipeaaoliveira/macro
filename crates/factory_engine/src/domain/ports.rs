@@ -104,6 +104,12 @@ pub trait AgentFailure: Retryable {
         false
     }
 
+    /// Whether the agent was still at work on its turn when the wait for it
+    /// ended: its own slowness, which a retry waits on, not the factory's.
+    fn overdue(&self) -> bool {
+        false
+    }
+
     /// The agent's last message, when it stopped without handing back a
     /// result even once reminded: the Step then waits for its Run's owner.
     fn stopped_without_result(&self) -> Option<&str> {
