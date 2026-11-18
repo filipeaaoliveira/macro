@@ -11,7 +11,9 @@ import {
   createEffect,
   createMemo,
   createSignal,
+  on,
   onCleanup,
+  untrack,
 } from 'solid-js';
 
 type FactoryModule = typeof import('./factory-runs');
@@ -38,8 +40,12 @@ export const factoryMergeGuard: PrMergeGuardSource = (
       if (live) setFactory(() => loaded);
     });
   });
-  // The factory's hooks run once its code is here, in this caller's scope.
-  const reviews = createMemo(() => factory()?.useFactoryReviews(urls));
+  // The factory's hooks run once its code is here, in this caller's scope,
+  // and only then: they read `urls` as they set up, and a memo tracking that
+  // would rebuild them, closing an open Gate, whenever the list changed.
+  const reviews = createMemo(
+    on(factory, (loaded) => untrack(() => loaded?.useFactoryReviews(urls)))
+  );
   // Off for this person: no Run guards a pull request.
   const off = () => !flag().loading && !flag().enabled;
   const checking = () => t('factoryBoard.mergeChecking');
