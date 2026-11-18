@@ -1047,6 +1047,106 @@
         }
       }
     },
+    "/runs/{id}/flaw": {
+      "post": {
+        "tags": ["factory"],
+        "summary": "Mark one of the caller's Runs flawed: it ended `success`, and they\nfound its result wrong. The Run then reads `flawed`, with who marked it,\nwhy and when. Marking a flawed Run again keeps its first mark. Only the\nRun's owner marks it, in their own signed-in session: an agent's code,\nan API key or token and an internal caller are refused (403).",
+        "operationId": "flaw_factory_run",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The Run's id.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/RunId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlawRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/runs/{id}/steps/{seq}/answer": {
       "post": {
         "tags": ["factory"],
@@ -2883,6 +2983,52 @@
           "agent_account"
         ]
       },
+      "FlawMarker": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "A person: the Run's owner.",
+            "required": ["userId", "kind"],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["person"]
+              },
+              "userId": {
+                "$ref": "#/components/schemas/MacroUserIdStr",
+                "description": "Their user id."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A Scorer, by its name.",
+            "required": ["name", "kind"],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["scorer"]
+              },
+              "name": {
+                "type": "string",
+                "description": "The Scorer's name."
+              }
+            }
+          }
+        ],
+        "description": "Who marked a Run flawed."
+      },
+      "FlawRunRequest": {
+        "type": "object",
+        "description": "Request body for marking a Run flawed.",
+        "required": ["reason"],
+        "properties": {
+          "reason": {
+            "type": "string",
+            "description": "Why its result is wrong: 1 to 4096 bytes once trimmed."
+          }
+        }
+      },
       "FlowInsight": {
         "type": "object",
         "description": "The Runs of one Flow.",
@@ -3307,7 +3453,9 @@
           "manual",
           "blocked",
           "failed",
-          "cancelled"
+          "cancelled",
+          "infrastructure",
+          "flawed"
         ],
         "properties": {
           "blocked": {
@@ -3325,7 +3473,19 @@
           "failed": {
             "type": "integer",
             "format": "int32",
-            "description": "Runs that ended failed.",
+            "description": "Runs that ended failed for their work.",
+            "minimum": 0
+          },
+          "flawed": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Runs that succeeded, and whose result a Scorer or a person found\nwrong afterwards.",
+            "minimum": 0
+          },
+          "infrastructure": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Runs that failed for a machine, quota or network reason: the\nfactory's plumbing, not its work.",
             "minimum": 0
           },
           "manual": {
@@ -3801,6 +3961,17 @@
             "format": "date-time",
             "description": "When it ended."
           },
+          "flaw": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RunFlaw",
+                "description": "Who found its result wrong, and why: only for a `flawed` Run."
+              }
+            ]
+          },
           "outcome": {
             "$ref": "#/components/schemas/RunOutcome",
             "description": "How the Run ended."
@@ -3837,6 +4008,26 @@
           "message": {
             "type": "string",
             "description": "What went wrong, in words."
+          }
+        }
+      },
+      "RunFlaw": {
+        "type": "object",
+        "description": "Why a Run's result was found wrong, by whom, and when.",
+        "required": ["by", "reason", "markedAt"],
+        "properties": {
+          "by": {
+            "$ref": "#/components/schemas/FlawMarker",
+            "description": "Who marked the Run flawed."
+          },
+          "markedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When they marked it."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why, in their words."
           }
         }
       },
@@ -3965,7 +4156,15 @@
       "RunOutcome": {
         "type": "string",
         "description": "How a Run ended.",
-        "enum": ["success", "manual", "blocked", "failed", "cancelled"]
+        "enum": [
+          "success",
+          "manual",
+          "blocked",
+          "failed",
+          "cancelled",
+          "infrastructure",
+          "flawed"
+        ]
       },
       "RunRules": {
         "type": "object",

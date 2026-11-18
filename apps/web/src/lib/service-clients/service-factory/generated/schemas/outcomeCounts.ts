@@ -20,10 +20,22 @@ export interface OutcomeCounts {
    */
   cancelled: number;
   /**
-   * Runs that ended failed.
+   * Runs that ended failed for their work.
    * @minimum 0
    */
   failed: number;
+  /**
+   * Runs that succeeded, and whose result a Scorer or a person found
+wrong afterwards.
+   * @minimum 0
+   */
+  flawed: number;
+  /**
+   * Runs that failed for a machine, quota or network reason: the
+factory's plumbing, not its work.
+   * @minimum 0
+   */
+  infrastructure: number;
   /**
    * Runs that ended for a person to take over.
    * @minimum 0
