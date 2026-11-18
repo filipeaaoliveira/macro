@@ -58,6 +58,14 @@
 //! and routes `failed`. No worker before the marker ended a Step so, so
 //! Runs in flight replay as before.
 //!
+//! A Step whose work failed for good for a machine, quota or network
+//! reason (its attempts ran out of time, or its agents' quota ran out, as
+//! the activity's failure says) ends `failed` like any other, and the Flow
+//! routes `failed`; a Run that ends `failed` right on it ends
+//! `infrastructure`, behind the [`INFRASTRUCTURE_PATCH`] marker, so a Run
+//! whose history ended before it replays `failed`. A review round fails so
+//! only when every reviewer that failed did so for infrastructure.
+//!
 //! Cancelling the workflow cancels the running Step, whose activity drops
 //! its work before the cancellation completes, or the wait for an answer.
 //! The workflow then stops the Step's agent, which only it can tell was
@@ -67,6 +75,7 @@
 //! recorded.
 
 mod review_round;
+mod run_end;
 mod step;
 mod work;
 
@@ -96,6 +105,7 @@ use crate::inbound::temporal::activities::FactoryActivities;
 use crate::inbound::temporal::gate_activities::GateActivities;
 use crate::temporal::{ANSWER_GATE_UPDATE, FLOW_WORKFLOW, REPLY_GATE_UPDATE};
 use review_round::{Panel, Round, review_round};
+use run_end::RunEnding;
 use step::walk_step;
 use work::TemporalWork;
 
@@ -168,6 +178,11 @@ pub(crate) const NOTIFY_ONLY_PATCH: &str = "factory-notify-only-gates";
 /// the replay of Runs that passed it.
 pub(crate) const NO_RESULT_PATCH: &str = "factory-no-result-gates";
 
+/// The marker of the workflow that ends a Run `infrastructure`, rather than
+/// `failed`, when the work it failed on failed for a machine, quota or
+/// network reason. Renaming it breaks the replay of Runs that passed it.
+pub(crate) const INFRASTRUCTURE_PATCH: &str = "factory-infrastructure-outcome";
+
 /// The workflow of one Run.
 #[workflow]
 #[derive(Default)]
@@ -215,6 +230,9 @@ impl FlowWorkflow {
         // started before them carries, never takes their path, so its
         // history replays as before.
         let questions = Questions::of(&start.flow);
+        // Whether the Run ends `infrastructure`, from the rounds the Flow
+        // routes.
+        let mut ending = RunEnding::default();
         let outcome = loop {
             let next = match interpreter.next_step(&mut state) {
                 Ok(next) => next,
@@ -255,15 +273,27 @@ impl FlowWorkflow {
                 };
                 review_round(&temporal, &panel, &mut held, &mut resume).await?
             };
-            match walked {
-                Round::Routed(outcome) => {
-                    if let Err(error) = interpreter.record(&mut state, &outcome) {
-                        stopped = Some(error);
-                        break RunOutcome::Failed;
-                    }
-                }
-                Round::Ended(outcome) => break outcome,
+            let routed = match &walked {
+                Round::Routed(outcome) => outcome.clone(),
+                Round::FailedForInfrastructure => Outcome::failed(),
+                Round::Ended(outcome) => break *outcome,
+            };
+            if let Err(error) = interpreter.record(&mut state, &routed) {
+                stopped = Some(error);
+                break RunOutcome::Failed;
             }
+            ending.routed(&walked, &state);
+        };
+
+        // A Run that ends `failed` right on work that failed for a machine,
+        // quota or network reason ends `infrastructure`, behind the marker:
+        // a Run whose history ended before it replays `failed`.
+        let outcome = if ending.infrastructure(outcome, stopped.is_some())
+            && ctx.patched(INFRASTRUCTURE_PATCH)
+        {
+            RunOutcome::Infrastructure
+        } else {
+            outcome
         };
 
         // A cancelled workflow records its end on a token of its own, which

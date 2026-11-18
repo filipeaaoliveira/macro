@@ -1,6 +1,7 @@
 //! In-memory stand-ins for the factory's records, for the domain's tests.
 
 mod automations;
+mod flaws;
 mod gate_owner;
 mod gate_replies;
 mod main_hold;
@@ -1296,6 +1297,7 @@ impl RunRepository for FakeRepo {
             run.end = Some(RunEnd {
                 outcome,
                 ended_at: Utc::now(),
+                flaw: None,
             });
             // A cancelled Run's open Steps end with it.
             if outcome == RunOutcome::Cancelled {

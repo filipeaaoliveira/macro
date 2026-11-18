@@ -36,6 +36,7 @@ use crate::domain::service::FactoryServiceImpl;
 use crate::outbound::local_agent::LocalAgent;
 
 mod control_files;
+mod flaws;
 mod orchestrator;
 mod standing_rules;
 mod step_terminal;
@@ -332,6 +333,15 @@ impl FactoryService for FakeService {
         actor: &MacroUserIdStr<'static>,
         _id: RunId,
     ) -> Result<(), FactoryError> {
+        Err(self.refusing(actor))
+    }
+
+    async fn mark_run_flawed(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        _id: RunId,
+        _reason: &str,
+    ) -> Result<RunDetail, FactoryError> {
         Err(self.refusing(actor))
     }
 

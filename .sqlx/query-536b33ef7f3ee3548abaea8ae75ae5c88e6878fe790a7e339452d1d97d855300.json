@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,\n                standing_rules, standing_rules_source, standing_rules_project_id,\n                automation_id, automation_name, automation_trigger, outcome, ended_at\n            FROM factory_run\n            WHERE id = $1\n            ",
+  "query": "\n            INSERT INTO factory_run (\n                id, flow, request, user_id, task_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, standing_rules, standing_rules_source,\n                standing_rules_project_id, automation_id, automation_name, automation_trigger,\n            automation_firing_key\n            )\n            VALUES (\n                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17\n            )\n            RETURNING\n                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,\n                standing_rules, standing_rules_source, standing_rules_project_id,\n                automation_id, automation_name, automation_trigger, outcome, ended_at,\n                flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason\n            ",
   "describe": {
     "columns": [
       {
@@ -107,11 +107,47 @@
         "ordinal": 20,
         "name": "ended_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 21,
+        "name": "flawed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 22,
+        "name": "flawed_by_user_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 23,
+        "name": "flawed_by_scorer",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 24,
+        "name": "flaw_reason",
+        "type_info": "Text"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Bool",
+        "TextArray",
+        "Uuid",
+        "TextArray",
+        "Text",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text"
       ]
     },
     "nullable": [
@@ -135,8 +171,12 @@
       true,
       true,
       true,
+      true,
+      true,
+      true,
+      true,
       true
     ]
   },
-  "hash": "2d2afbfcb380af64df959a5da58bb1565ae0bcae42739bdf0e00d9b54d1622e2"
+  "hash": "536b33ef7f3ee3548abaea8ae75ae5c88e6878fe790a7e339452d1d97d855300"
 }

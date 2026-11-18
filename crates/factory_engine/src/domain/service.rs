@@ -12,11 +12,12 @@ use chrono::Utc;
 use factory_records::domain::automations::{
     Automation, AutomationRepository, AutomationStart, RunAutomation,
 };
+use factory_records::domain::flaws::FlawRepository;
 use factory_records::domain::main_hold::{BaseState, MainHoldRepository};
 use factory_records::domain::models::{
-    EntryId, HandBack, MAX_NOTE_BYTES, MAX_OUTPUT_BYTES, MAX_QUESTION_BYTES, MAX_REQUEST_BYTES,
-    NewRun, NewSteer, Outcome, QueueHold, Repository, Run, RunId, RunInsert, RunOutcome,
-    SteerRefusal, Step, StepKey, TaskLink, TeamMembership,
+    EntryId, FlawMarker, HandBack, MAX_NOTE_BYTES, MAX_OUTPUT_BYTES, MAX_QUESTION_BYTES,
+    MAX_REQUEST_BYTES, NewRun, NewSteer, Outcome, QueueHold, Repository, Run, RunId, RunInsert,
+    RunOutcome, SteerRefusal, Step, StepKey, TaskLink, TeamMembership,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::{ReviewRound, ReviewRoundRepository};
@@ -29,6 +30,7 @@ use uuid::Uuid;
 
 use crate::domain::built_in_flows::{BUILT_IN_FLOWS, BuiltInFlow};
 use crate::domain::control_files::ControlFiles;
+use crate::domain::flaws::mark_flawed;
 use crate::domain::gate::{
     AnswerGate, GateAnswered, GateOpening, GateRuling, GateTelling, ReplyGate,
 };
@@ -42,9 +44,9 @@ use crate::domain::models::{
     StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
 };
 use crate::domain::ports::{
-    AnswerDelivery, FactoryService, GateNotifier, NoOwnerGates, NoTaskThread, PullRequests,
-    Retryable, RunWorkflows, RunWorkflowsError, StepExecutor, StepService, TaskAccess,
-    TaskDirectory, TaskNotes, TaskThread, UserDirectory,
+    AgentFailure, AnswerDelivery, FactoryService, GateNotifier, NoOwnerGates, NoTaskThread,
+    PullRequests, Retryable, RunWorkflows, RunWorkflowsError, StepExecutor, StepService,
+    TaskAccess, TaskDirectory, TaskNotes, TaskThread, UserDirectory,
 };
 use crate::domain::standing_rules::{
     GateFacts, RuleAnswer, kind_answers, offers_kind_answers, repeated_blockers, rule_answer,
@@ -126,7 +128,8 @@ where
         + MainHoldRepository
         + ReviewRoundRepository
         + StandingRulesRepository
-        + AutomationRepository,
+        + AutomationRepository
+        + FlawRepository,
     W: RunWorkflows,
     E: StepExecutor,
     U: UserDirectory,
@@ -721,7 +724,8 @@ where
         + MainHoldRepository
         + ReviewRoundRepository
         + StandingRulesRepository
-        + AutomationRepository,
+        + AutomationRepository
+        + FlawRepository,
     W: RunWorkflows,
     E: StepExecutor,
     U: UserDirectory,
@@ -826,7 +830,8 @@ where
         // A Run kept when its workflow's start could not be checked, and
         // whose workflow never came, would wait forever: once it is old
         // enough that a started workflow would have taken a Step, and
-        // Temporal says it has no workflow, it ends failed.
+        // Temporal says it has no workflow, it ends `infrastructure`, as
+        // nothing of its work ever ran.
         let stale = Utc::now() - run.created_at > UNSTARTED_AFTER;
         if run.end.is_none()
             && steps.is_empty()
@@ -834,7 +839,7 @@ where
             && let Ok(false) = self.workflows.exists(id).await
         {
             self.repo
-                .end_run(id, RunOutcome::Failed)
+                .end_run(id, RunOutcome::Infrastructure)
                 .await
                 .map_err(internal)?;
             run = self.owned_run(actor, id).await?;
@@ -1376,6 +1381,21 @@ where
             Some(_) => Err(FactoryError::RunEnded),
         }
     }
+
+    #[tracing::instrument(skip(self, actor, reason))]
+    async fn mark_run_flawed(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        id: RunId,
+        reason: &str,
+    ) -> Result<RunDetail, FactoryError> {
+        self.owned_run(actor, id).await?;
+        let by = FlawMarker::Person {
+            user_id: actor.clone(),
+        };
+        mark_flawed(&self.repo, id, by, reason).await?;
+        self.get_run(actor, id).await
+    }
 }
 
 /// Fails when `definition` sets a Queue limit below [`MIN_QUEUE_LIMIT`] or
@@ -1582,9 +1602,15 @@ where
             .run(&request.step, input)
             .await
             .map_err(|error| {
+                let out_of_quota = error.out_of_quota();
+                let overdue = error.overdue();
                 let final_failure = !error.retryable();
                 let report = internal(error);
-                if final_failure {
+                if out_of_quota {
+                    StepError::OutOfQuota(report)
+                } else if overdue {
+                    StepError::Overdue(report)
+                } else if final_failure {
                     StepError::Final(report)
                 } else {
                     StepError::Internal(report)

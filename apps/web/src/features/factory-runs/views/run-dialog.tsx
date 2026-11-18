@@ -4,6 +4,7 @@ import XIcon from '@icon/system/regular/x.svg';
 import { ActionDialogShell, Button, Dialog } from '@ui';
 import { createSignal, Match, Show, Switch } from 'solid-js';
 import { GateCard } from '../components/gate-card';
+import { MarkRunFlawed } from '../components/run-flaw';
 import { gateAsker, runTitle } from '../core/run';
 import { createFocusRescue } from '../primitives/focus-rescue';
 import type { RunController } from '../primitives/run-controller';
@@ -136,6 +137,11 @@ export function RunDialog(props: {
                 <Show when={!run().end}>
                   <ActionDialogShell.Footer>
                     <RunCancel controller={props.controller} />
+                  </ActionDialogShell.Footer>
+                </Show>
+                <Show when={run().end?.outcome === 'success'}>
+                  <ActionDialogShell.Footer>
+                    <MarkRunFlawed runId={run().id} />
                   </ActionDialogShell.Footer>
                 </Show>
               </>

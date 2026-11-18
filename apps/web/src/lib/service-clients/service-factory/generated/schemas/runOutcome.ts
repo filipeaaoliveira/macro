@@ -17,4 +17,6 @@ export const RunOutcome = {
   blocked: 'blocked',
   failed: 'failed',
   cancelled: 'cancelled',
+  infrastructure: 'infrastructure',
+  flawed: 'flawed',
 } as const;

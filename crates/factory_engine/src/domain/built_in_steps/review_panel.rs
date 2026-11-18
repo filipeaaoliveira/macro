@@ -129,7 +129,7 @@ where
 }
 
 /// The outcomes a reviewer ends with.
-fn review_outcomes() -> Vec<Outcome> {
+pub(crate) fn review_outcomes() -> Vec<Outcome> {
     outcomes(&["pass", "changes"])
 }
 

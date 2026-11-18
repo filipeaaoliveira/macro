@@ -9,6 +9,8 @@ export const INSIGHT_OUTCOME_COLORS: Record<InsightOutcome, string> = {
   blocked: 'var(--color-warning)',
   failed: 'var(--color-failure)',
   cancelled: 'var(--color-ink-muted)',
+  infrastructure: 'var(--color-teal)',
+  flawed: 'var(--color-pink)',
   running: 'var(--color-purple)',
 };
 

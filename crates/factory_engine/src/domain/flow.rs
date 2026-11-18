@@ -273,6 +273,16 @@ pub enum FlowError {
         /// The entry it names.
         to: EntryId,
     },
+    /// A transition ends the Run with an outcome no Flow gives: only the
+    /// workflow ends a Run `infrastructure`, and a Run turns `flawed` only
+    /// once it succeeded.
+    #[error("entry {entry} ends the run {outcome}, which no flow ends it with")]
+    ReservedEnd {
+        /// The entry.
+        entry: EntryId,
+        /// The outcome.
+        outcome: RunOutcome,
+    },
     /// A condition or a transition names a fact the Flow does not declare.
     #[error("entry {entry} names fact {fact}, which the flow does not declare")]
     UnknownFact {
@@ -422,8 +432,19 @@ impl Flow {
             targets.extend(&entry.next);
             let mut named: Vec<&EntryId> = transitions.clone().flat_map(|t| &t.reset).collect();
             for target in targets {
-                if let Target::Entry { entry } = target {
-                    named.push(entry);
+                match target {
+                    Target::Entry { entry } => named.push(entry),
+                    // Only the workflow ends a Run `infrastructure`, and only
+                    // a Scorer or a person marks one `flawed`.
+                    Target::End { outcome }
+                        if matches!(outcome, RunOutcome::Infrastructure | RunOutcome::Flawed) =>
+                    {
+                        return Err(FlowError::ReservedEnd {
+                            entry: entry.id.clone(),
+                            outcome: *outcome,
+                        });
+                    }
+                    Target::End { .. } => {}
                 }
             }
             if let Some(unknown) = named.into_iter().find(|id| !ids.contains(id)) {

@@ -21,7 +21,20 @@ export default {
   totalRunsDefinition: 'Runs you started in this period, of the chosen flow.',
   successRate: 'Success rate',
   successRateDefinition:
-    'Runs that reached their flow’s end, of those that ended on their own. Runs still going and runs you cancelled are left out.',
+    'Runs that reached their flow’s end and weren’t found flawed, of those that ended on their own. Runs still going, runs you cancelled and runs that failed for infrastructure are left out.',
+  // Quality apart from plumbing.
+  outcomeKinds: 'Quality and infrastructure',
+  outcomeKindsDescription:
+    'Failures of the work apart from failures of the factory’s machines, quota or network, and results found wrong after the run succeeded.',
+  flawedRate: 'Flawed',
+  flawedRateDefinition:
+    'Runs that reached their flow’s end but whose result a scorer or a person marked flawed, of all runs that reached their end.',
+  infrastructureRate: 'Infrastructure failures',
+  infrastructureRateDefinition:
+    'Runs that failed for a machine, quota or network reason rather than their work, of those that ended on their own.',
+  failedForWork: 'Failed for the work',
+  failedForInfrastructure: 'Failed for infrastructure',
+  flawedRuns: 'Flawed runs',
   medianRunTime: 'Median run time',
   medianRunTimeDefinition:
     'Half of the runs that ended took less than this, from start to end, waiting for your answers included.',

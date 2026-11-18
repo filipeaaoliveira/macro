@@ -9,6 +9,7 @@ pub mod checks;
 pub mod control_files;
 #[cfg(test)]
 pub(crate) mod fakes;
+pub mod flaws;
 pub mod flow;
 pub mod gate;
 pub mod gate_owner;

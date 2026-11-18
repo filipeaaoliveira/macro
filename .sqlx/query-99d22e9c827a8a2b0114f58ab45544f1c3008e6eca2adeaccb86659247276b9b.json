@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,\n                standing_rules, standing_rules_source, standing_rules_project_id,\n                automation_id, automation_name, automation_trigger, outcome, ended_at\n            FROM factory_run r\n            WHERE r.user_id = $1\n                AND r.ended_at IS NULL\n                AND r.flow = ANY($2)\n                AND NOT EXISTS (SELECT 1 FROM factory_gate g WHERE g.run_id = r.id)\n            ORDER BY r.created_at DESC, r.id DESC\n            LIMIT $3\n            ",
+  "query": "\n            SELECT\n                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,\n                standing_rules, standing_rules_source, standing_rules_project_id,\n                automation_id, automation_name, automation_trigger, outcome, ended_at,\n                flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason\n            FROM factory_run r\n            WHERE r.user_id = $1\n                AND r.ended_at IS NULL\n                AND r.flow = ANY($2)\n                AND NOT EXISTS (SELECT 1 FROM factory_gate g WHERE g.run_id = r.id)\n            ORDER BY r.created_at DESC, r.id DESC\n            LIMIT $3\n            ",
   "describe": {
     "columns": [
       {
@@ -107,6 +107,26 @@
         "ordinal": 20,
         "name": "ended_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 21,
+        "name": "flawed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 22,
+        "name": "flawed_by_user_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 23,
+        "name": "flawed_by_scorer",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 24,
+        "name": "flaw_reason",
+        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -137,8 +157,12 @@
       true,
       true,
       true,
+      true,
+      true,
+      true,
+      true,
       true
     ]
   },
-  "hash": "7ce2d461696131ce6fa2af45024e5bd7cf3cb2429de8f908db7dcdf6b3deb965"
+  "hash": "99d22e9c827a8a2b0114f58ab45544f1c3008e6eca2adeaccb86659247276b9b"
 }

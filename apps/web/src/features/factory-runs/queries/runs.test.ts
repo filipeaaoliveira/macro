@@ -21,6 +21,7 @@ vi.mock('@service-factory/client', () => ({
     startRun: vi.fn(),
     answerGate: vi.fn(),
     cancelRun: vi.fn(),
+    flawRun: vi.fn(),
     steerStep: vi.fn(),
   },
 }));
@@ -357,6 +358,28 @@ describe('createAppRunsContext', () => {
     });
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: factoryRunKeys.task('task-1').queryKey,
+    });
+  });
+
+  it('reads the Run again before it answers a flaw mark the server refused', async () => {
+    const client = new QueryClient();
+    client.setQueryData(factoryRunKeys.run('run-2').queryKey, {
+      ...older,
+      id: 'run-2',
+    });
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+    vi.mocked(factoryClient.flawRun).mockResolvedValue(
+      err([{ code: 'CONFLICT', message: 'Resource conflict' }])
+    );
+
+    expect(
+      await createAppRunsContext(client).markRunFlawed({
+        runId: 'run-2',
+        reason: 'Wrong column',
+      })
+    ).toEqual({ ok: false, reason: 'conflict' });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: factoryRunKeys.run('run-2').queryKey,
     });
   });
 

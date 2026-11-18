@@ -22,9 +22,11 @@ export type InsightOutcome = keyof OutcomeCounts;
 /** Every state, in the order charts stack and legends list them. */
 export const INSIGHT_OUTCOMES: readonly InsightOutcome[] = [
   'success',
+  'flawed',
   'manual',
   'blocked',
   'failed',
+  'infrastructure',
   'cancelled',
   'running',
 ];
@@ -58,14 +60,48 @@ export function runCount(counts: OutcomeCounts): number {
 }
 
 /**
- * The share of Runs that reached their Flow's end, among those that ended
- * on their own: Runs still going and Runs a person cancelled are left out.
- * None while no Run ended that way.
+ * The share of Runs that reached their Flow's end with a result no one
+ * found wrong, among those whose work ended on its own: Runs still going,
+ * Runs a person cancelled and Runs that failed for infrastructure are left
+ * out, so the rate measures the factory's work, not its plumbing. A flawed
+ * Run counts against it. None while no Run ended that way.
  */
 export function successRate(counts: OutcomeCounts): number | undefined {
-  const ended = counts.success + counts.manual + counts.blocked + counts.failed;
+  const ended =
+    counts.success +
+    counts.flawed +
+    counts.manual +
+    counts.blocked +
+    counts.failed;
   if (ended === 0) return undefined;
   return counts.success / ended;
+}
+
+/**
+ * Of the Runs that ended on their own, the share that failed for
+ * infrastructure: a machine, quota or network reason. None while no Run
+ * ended that way.
+ */
+export function infrastructureRate(counts: OutcomeCounts): number | undefined {
+  const ended =
+    counts.success +
+    counts.flawed +
+    counts.manual +
+    counts.blocked +
+    counts.failed +
+    counts.infrastructure;
+  if (ended === 0) return undefined;
+  return counts.infrastructure / ended;
+}
+
+/**
+ * Of the Runs that reached their Flow's end, the share whose result a
+ * Scorer or a person found wrong afterwards. None while none succeeded.
+ */
+export function flawedRate(counts: OutcomeCounts): number | undefined {
+  const finished = counts.success + counts.flawed;
+  if (finished === 0) return undefined;
+  return counts.flawed / finished;
 }
 
 /**

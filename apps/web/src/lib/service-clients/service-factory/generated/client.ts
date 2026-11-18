@@ -15,6 +15,7 @@ import type {
   CreateRunRequest,
   ErrorResponse,
   FiringResult,
+  FlawRunRequest,
   FlowsResponse,
   GetFactoryInsightsParams,
   HandBackRequest,
@@ -1070,6 +1071,92 @@ export const cancelFactoryRun = async (
     status: res.status,
     headers: res.headers,
   } as cancelFactoryRunResponse;
+};
+
+/**
+ * @summary Mark one of the caller's Runs flawed: it ended `success`, and they
+found its result wrong. The Run then reads `flawed`, with who marked it,
+why and when. Marking a flawed Run again keeps its first mark. Only the
+Run's owner marks it, in their own signed-in session: an agent's code,
+an API key or token and an internal caller are refused (403).
+ */
+export type flawFactoryRunResponse200 = {
+  data: RunDetail;
+  status: 200;
+};
+
+export type flawFactoryRunResponse400 = {
+  data: ErrorResponse;
+  status: 400;
+};
+
+export type flawFactoryRunResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type flawFactoryRunResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type flawFactoryRunResponse404 = {
+  data: ErrorResponse;
+  status: 404;
+};
+
+export type flawFactoryRunResponse409 = {
+  data: ErrorResponse;
+  status: 409;
+};
+
+export type flawFactoryRunResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type flawFactoryRunResponseSuccess = flawFactoryRunResponse200 & {
+  headers: Headers;
+};
+export type flawFactoryRunResponseError = (
+  | flawFactoryRunResponse400
+  | flawFactoryRunResponse401
+  | flawFactoryRunResponse403
+  | flawFactoryRunResponse404
+  | flawFactoryRunResponse409
+  | flawFactoryRunResponse500
+) & {
+  headers: Headers;
+};
+
+export type flawFactoryRunResponse =
+  | flawFactoryRunResponseSuccess
+  | flawFactoryRunResponseError;
+
+export const getFlawFactoryRunUrl = (id: RunId) => {
+  return `/runs/${id}/flaw`;
+};
+
+export const flawFactoryRun = async (
+  id: RunId,
+  flawRunRequest: FlawRunRequest,
+  options?: RequestInit
+): Promise<flawFactoryRunResponse> => {
+  const res = await fetch(getFlawFactoryRunUrl(id), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(flawRunRequest),
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: flawFactoryRunResponse['data'] = body ? JSON.parse(body) : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as flawFactoryRunResponse;
 };
 
 /**

@@ -104,6 +104,12 @@ pub trait AgentFailure: Retryable {
         false
     }
 
+    /// Whether the agent was still at work on its turn when the wait for it
+    /// ended: its own slowness, which a retry waits on, not the factory's.
+    fn overdue(&self) -> bool {
+        false
+    }
+
     /// The agent's last message, when it stopped without handing back a
     /// result even once reminded: the Step then waits for its Run's owner.
     fn stopped_without_result(&self) -> Option<&str> {
@@ -114,7 +120,7 @@ pub trait AgentFailure: Retryable {
 /// Does the work of a Flow's Steps.
 pub trait StepExecutor: Send + Sync + 'static {
     /// The error type returned when a Step's work fails.
-    type Err: std::error::Error + Retryable + Send + Sync + 'static;
+    type Err: std::error::Error + AgentFailure + Send + Sync + 'static;
 
     /// How it does `step`'s work, if it does.
     fn serves(&self, step: &StepName) -> Option<StepUse>;
@@ -847,6 +853,16 @@ pub trait FactoryService: Send + Sync + 'static {
         actor: &MacroUserIdStr<'static>,
         id: RunId,
     ) -> impl Future<Output = Result<(), FactoryError>> + Send;
+
+    /// Mark `actor`'s Run flawed, for `reason`, in their own name: it
+    /// ended `success`, and its result was found wrong afterwards. Marking
+    /// a flawed Run again keeps its first mark.
+    fn mark_run_flawed(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        id: RunId,
+        reason: &str,
+    ) -> impl Future<Output = Result<RunDetail, FactoryError>> + Send;
 
     /// Check that `actor` could start a Run of the built-in Flow named
     /// `flow` on the repository `repo_url`, as [`Self::create_run`] checks:

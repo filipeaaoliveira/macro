@@ -64,7 +64,13 @@ function toRun(detail: RunDetail): Run {
     repository: run.repository ?? undefined,
     automation: run.automation ?? undefined,
     controlFiles: run.controlFiles ?? undefined,
-    end: run.end ?? undefined,
+    end: run.end
+      ? {
+          outcome: run.end.outcome,
+          endedAt: run.end.endedAt,
+          flaw: run.end.flaw ?? undefined,
+        }
+      : undefined,
     steps: detail.steps.map((step) => ({
       seq: step.seq,
       entry: step.entry,
@@ -420,6 +426,29 @@ export function createAppRunsContext(client: QueryClient): RunsContext {
         'factory-runs'
       );
       if (result.isErr()) return failure(result.error);
+      return { ok: true, value: undefined };
+    },
+
+    async markRunFlawed({ runId, reason }) {
+      const result = await factoryClient.flawRun(runId, { reason });
+      if (result.isErr()) {
+        const refused = failure(result.error);
+        // A Run that did not end in success has moved on from what this
+        // person saw: it resolves once the Run is read again.
+        const reads = refreshRun(client, runId, taskOfRun(client, runId));
+        if (refused.reason === 'conflict') await reads.catch(() => undefined);
+        else fireAndForget(reads, 'factory-runs');
+        return refused;
+      }
+      seedRun(client, toRun(result.value));
+      // A flawed Run counts apart in insights.
+      fireAndForget(
+        Promise.all([
+          refreshRun(client, runId, taskOfRun(client, runId)),
+          client.invalidateQueries({ queryKey: factoryRunKeys.insights._def }),
+        ]),
+        'factory-runs'
+      );
       return { ok: true, value: undefined };
     },
   };

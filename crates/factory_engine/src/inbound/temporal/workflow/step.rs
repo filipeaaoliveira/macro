@@ -17,7 +17,7 @@ use factory_records::domain::models::{Outcome, RunOutcome, StepKey};
 use factory_records::domain::standing_rules::RuleGateKind;
 
 use super::review_round::Round;
-use super::work::Work;
+use super::work::{Work, WorkFailure};
 use super::{Asking, FAILED_STEP_OUTPUT, Questions};
 use crate::domain::flow::Entry;
 use crate::domain::gate::{GateOpening, GateTelling};
@@ -69,14 +69,15 @@ pub(super) async fn walk_step<W: Work>(
             // so, so a Run's history replays as before, and a Step that
             // ends so without it fails as it did then.
             Ok(report) if report.outcome == Outcome::no_result() && !work.asks_on_no_result() => {
-                (failure(), true)
+                (failure(), Some(WorkFailure::Work))
             }
-            Ok(report) => (report, false),
+            Ok(report) => (report, None),
             Err(_) if work.cancelled() => return Ok(Round::Ended(RunOutcome::Cancelled)),
             // The owner reads the output; why the work failed is internal
             // detail, which the worker logged.
-            Err(_) => (failure(), true),
+            Err(why) => (failure(), Some(why)),
         };
+        let infrastructure = failed == Some(WorkFailure::Infrastructure);
         let stopped = report.outcome == Outcome::no_result();
         let reported = report.outcome.clone();
         let question = questions.asked(&request, &report);
@@ -97,7 +98,7 @@ pub(super) async fn walk_step<W: Work>(
         // with the owner's answer. Otherwise no attempt of the Step's work
         // comes once its end is recorded, so its agent lets go of the
         // Step's session.
-        if failed {
+        if failed.is_some() {
             held.clear();
             work.stop(&request).await;
             for asked in asking.iter().rev() {
@@ -199,7 +200,7 @@ pub(super) async fn walk_step<W: Work>(
                     question: gate.question.clone(),
                 };
                 work.tell(telling).await;
-                reported
+                return Ok(Round::routed(reported, infrastructure));
             }
             Some(gate) if reported == gate.opened_by() => {
                 let opening = GateOpening {
@@ -229,7 +230,9 @@ pub(super) async fn walk_step<W: Work>(
                     None => return Ok(Round::Ended(RunOutcome::Cancelled)),
                 }
             }
-            _ => reported,
+            // Work that failed for infrastructure, and that no Gate
+            // answered, is routed as such.
+            _ => return Ok(Round::routed(reported, infrastructure)),
         };
         return Ok(Round::Routed(outcome));
     }

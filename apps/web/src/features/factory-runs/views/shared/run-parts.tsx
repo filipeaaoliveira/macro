@@ -4,6 +4,7 @@ import { fireAndForget } from '@core/util/fireAndForget';
 import { Button } from '@ui';
 import { Show } from 'solid-js';
 import { CancelRun, RunSteps, RunSummary } from '../../components/run-details';
+import { RunFlawNote } from '../../components/run-flaw';
 import type { RunActionResult } from '../../context/runs-context';
 import type { Run } from '../../core/run';
 import type { RunController } from '../../primitives/run-controller';
@@ -56,6 +57,9 @@ export function RunContent(props: {
             time={props.time}
             statusRef={props.statusRef}
           />
+          <Show when={props.run.end?.flaw}>
+            {(flaw) => <RunFlawNote flaw={flaw()} time={props.time} />}
+          </Show>
           <RunSteps
             steps={props.run.steps}
             mainHold={props.run.mainHold}

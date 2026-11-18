@@ -58,6 +58,18 @@
 //!   tells the owner goes on to write without an answer; the owner answers
 //!   the merge Gate.
 //!
+//! Recorded on a `plan` Run whose Step's agents were all out of quota
+//! (`a_step_out_of_quota_ends_the_run_infrastructure`):
+//! - `plan_infrastructure_before_marker`: by the workflow with its
+//!   `factory-infrastructure-outcome` marker taken out, as a worker before
+//!   it ends such a Run: `failed`, with no marker;
+//! - `plan_infrastructure_after_marker`: by the workflow with it: the Run
+//!   ends `infrastructure`.
+//!
+//! Whether the workflow asks for that marker follows from `work_failure`'s
+//! reading of the Step's failure, so changing that reading changes how
+//! these histories replay: record them again.
+//!
 //! Before changing what the workflow decides, record the histories it
 //! makes now beside these, so the change is checked against both.
 
@@ -226,6 +238,24 @@ async fn a_run_whose_notify_only_gate_told_its_owner_replays() {
     replays(
         "code_notify_only_plan_with_thread",
         include_bytes!("histories/code_notify_only_plan_with_thread.json"),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_run_that_failed_for_infrastructure_before_its_marker_replays() {
+    replays(
+        "plan_infrastructure_before_marker",
+        include_bytes!("histories/plan_infrastructure_before_marker.json"),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_run_that_ended_infrastructure_replays() {
+    replays(
+        "plan_infrastructure_after_marker",
+        include_bytes!("histories/plan_infrastructure_after_marker.json"),
     )
     .await;
 }

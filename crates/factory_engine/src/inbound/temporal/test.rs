@@ -29,8 +29,8 @@ use macro_user_id::user_id::MacroUserIdStr;
 use serde_json::json;
 use temporalio_client::errors::WorkflowGetResultError;
 use temporalio_client::{
-    Client, ClientOptions, ConnectionOptions, Url, WorkflowCancelOptions, WorkflowGetResultOptions,
-    WorkflowStartOptions,
+    Client, ClientOptions, ConnectionOptions, Url, WorkflowCancelOptions,
+    WorkflowFetchHistoryOptions, WorkflowGetResultOptions, WorkflowStartOptions,
 };
 use temporalio_sdk::Runtime;
 use tokio::sync::Notify;
@@ -82,6 +82,8 @@ enum Work {
     Ends,
     /// Fails in a way asking again would repeat.
     FailsForGood,
+    /// Fails as its quota ran out, with no other Agent to pass the Step to.
+    OutOfQuota,
     /// Works until stopped.
     Works,
     /// Works until stopped the first given number of times it is asked,
@@ -90,8 +92,12 @@ enum Work {
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("the agent failed for good")]
-struct AgentFailed;
+enum AgentFailed {
+    #[error("the agent failed for good")]
+    ForGood,
+    #[error("the agent's quota ran out")]
+    OutOfQuota,
+}
 
 impl Retryable for AgentFailed {
     fn retryable(&self) -> bool {
@@ -99,7 +105,11 @@ impl Retryable for AgentFailed {
     }
 }
 
-impl AgentFailure for AgentFailed {}
+impl AgentFailure for AgentFailed {
+    fn out_of_quota(&self) -> bool {
+        matches!(self, AgentFailed::OutOfQuota)
+    }
+}
 
 /// An agent that does `work`, says when a task reaches it, and counts the
 /// times it was asked, stopped and let go, and the Steps it was asked for.
@@ -142,7 +152,8 @@ impl StepAgent for Agent {
         };
         match self.work {
             Work::Ends => Ok(ends),
-            Work::FailsForGood => Err(AgentFailed),
+            Work::FailsForGood => Err(AgentFailed::ForGood),
+            Work::OutOfQuota => Err(AgentFailed::OutOfQuota),
             Work::Works => std::future::pending().await,
             Work::WorksThenEnds(works) if asked <= works => std::future::pending().await,
             Work::WorksThenEnds(_) => Ok(ends),
@@ -151,7 +162,7 @@ impl StepAgent for Agent {
 
     /// The Runs here work on no repository, so no Step runs checks.
     async fn follow_up(&self, _turn: AgentTurn) -> Result<AgentAnswer, AgentFailed> {
-        Err(AgentFailed)
+        Err(AgentFailed::ForGood)
     }
 
     async fn run_check(
@@ -341,6 +352,22 @@ where
     (ended, repo, run_id)
 }
 
+/// Keep the history of `run_id`'s workflow as `name`, for the replay
+/// tests, when `FACTORY_RECORD_HISTORY` names the folder to keep it in.
+async fn record_history(run_id: RunId, name: &str) {
+    let Some(folder) = macro_env_var::maybe_read_env("FACTORY_RECORD_HISTORY") else {
+        return;
+    };
+    let history = client()
+        .await
+        .get_workflow_handle::<FlowWorkflowDefinition>(run_id.to_string())
+        .fetch_history(WorkflowFetchHistoryOptions::default())
+        .to_json()
+        .await
+        .expect("the history reads");
+    std::fs::write(format!("{folder}/{name}.json"), history).expect("the history is written");
+}
+
 /// Wait until a task reached `agent`.
 async fn asked(agent: &Agent) {
     tokio::time::timeout(PATIENCE, agent.asked.notified())
@@ -447,6 +474,28 @@ async fn a_step_that_fails_for_good_has_its_agent_stopped() {
     let end = steps[0].end.as_ref().expect("ended");
     assert_eq!(end.outcome, Outcome::failed());
     assert!(!end.output.contains("agent failed"));
+}
+
+/// A Step that fails as its agents' quota ran out fails the Run for
+/// infrastructure, not for its work: the Run ends `infrastructure`.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "Temporal doesn't exist in CI"]
+async fn a_step_out_of_quota_ends_the_run_infrastructure() {
+    let agent = Agent::doing(Work::OutOfQuota);
+
+    let (ended, repo, run_id) = walk(&agent, |_, _| async {}).await;
+    record_history(run_id, "plan_infrastructure_after_marker").await;
+
+    assert!(matches!(ended, Ok(RunOutcome::Infrastructure)), "{ended:?}");
+    assert_eq!(agent.stops.load(Ordering::SeqCst), 1);
+    let run = repo.get_run(run_id).await.expect("read").expect("kept");
+    assert_eq!(
+        run.end.map(|end| end.outcome),
+        Some(RunOutcome::Infrastructure)
+    );
+    let steps = repo.list_steps(run_id).await.expect("read");
+    let end = steps[0].end.as_ref().expect("ended");
+    assert_eq!(end.outcome, Outcome::failed());
 }
 
 /// A Step that ended has its agent let go once its end is recorded, and is
@@ -675,7 +724,7 @@ impl StepAgent for CodeAgent {
 
     /// Its repository declares no checks, so no Step asks.
     async fn follow_up(&self, _turn: AgentTurn) -> Result<AgentAnswer, AgentFailed> {
-        Err(AgentFailed)
+        Err(AgentFailed::ForGood)
     }
 
     async fn run_check(

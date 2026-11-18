@@ -16,6 +16,9 @@ the Gates they asked people in MacroDB, and defines the names Flows use
 - `src/domain/review_rounds.rs` and
   `src/outbound/pg_run_repository/review_rounds.rs`: `ReviewRoundRepository`,
   a Run's review rounds and what their reviewers found.
+- `src/domain/flaws.rs` and `src/outbound/pg_run_repository/flaws.rs`:
+  `FlawRepository`, which marks a Run that ended `success` flawed, keeping
+  who marked it (its owner, or a Scorer by name), why and when.
 - `src/domain/insights.rs` and `src/outbound/pg_run_repository/insights.rs`:
   `RunInsightsRepository`, the reads behind Run insights.
 - `src/domain/main_hold.rs` and `src/outbound/pg_run_repository/main_hold.rs`:
@@ -65,7 +68,8 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261118141500_factory_orchestrator_answers.sql`,
   `20261118143000_factory_automation.sql`,
   `20261118150000_factory_standing_rules_names.sql`,
-  `20261118170000_factory_step_terminal.sql`), and `factory_step_steer`.
+  `20261118170000_factory_step_terminal.sql`,
+  `20261118220000_factory_run_outcome_kinds.sql`), and `factory_step_steer`.
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
 
 ## Boundaries

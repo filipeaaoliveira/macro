@@ -11,6 +11,7 @@ import {
   getCreateFactoryAutomationUrl,
   getCreateFactoryRunUrl,
   getDeleteFactoryAutomationUrl,
+  getFlawFactoryRunUrl,
   getGetFactoryControlFilesUrl,
   getGetFactoryInsightsUrl,
   getGetFactoryRunUrl,
@@ -37,6 +38,7 @@ import type {
   ControlFilesSettings,
   CreatedAutomation,
   CreateRunRequest,
+  FlawRunRequest,
   FlowsResponse,
   GetFactoryInsightsParams,
   NoteStepRequest,
@@ -368,5 +370,17 @@ export const factoryClient = {
       `${host()}${getCancelFactoryRunUrl(encodeURIComponent(runId))}`,
       { method: 'POST' }
     ).then((result) => result.map(() => undefined));
+  },
+
+  /**
+   * Marks one of the caller's Runs that ended in success flawed, with why:
+   * it reads `flawed` after, with who marked it. 409 when it did not end in
+   * success.
+   */
+  flawRun(runId: string, body: FlawRunRequest) {
+    return fetchWithToken<RunDetail>(
+      `${host()}${getFlawFactoryRunUrl(encodeURIComponent(runId))}`,
+      { method: 'POST', body: JSON.stringify(body) }
+    );
   },
 };

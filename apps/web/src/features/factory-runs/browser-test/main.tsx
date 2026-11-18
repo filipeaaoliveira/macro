@@ -322,6 +322,26 @@ function createFixtureContext(): RunsContext {
       );
       return { ok: true, value: undefined };
     },
+    async markRunFlawed(input) {
+      const run = runs().find((candidate) => candidate.id === input.runId);
+      if (run?.end?.outcome !== 'success') {
+        return { ok: false, reason: 'conflict' };
+      }
+      const at = new Date().toISOString();
+      update(input.runId, (current) => ({
+        ...current,
+        end: {
+          outcome: 'flawed',
+          endedAt: current.end?.endedAt ?? at,
+          flaw: {
+            by: { kind: 'person', userId: 'macro|you@example.com' },
+            reason: input.reason,
+            markedAt: at,
+          },
+        },
+      }));
+      return { ok: true, value: undefined };
+    },
     async steerStep(input) {
       // The service keeps what the owner did on the Step; a pause holds it
       // until a resume.

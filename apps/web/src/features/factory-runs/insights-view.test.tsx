@@ -90,6 +90,8 @@ const outcomes = (
   blocked: 0,
   failed: 0,
   cancelled: 0,
+  infrastructure: 0,
+  flawed: 0,
   ...changes,
 });
 
@@ -199,6 +201,7 @@ function mount(options: {
     answerGate: vi.fn(),
     replyToGate: vi.fn(),
     cancelRun: vi.fn(),
+    markRunFlawed: vi.fn(),
     steerStep: vi.fn(),
   };
   render(() => (
@@ -265,6 +268,56 @@ describe('RunInsightsView', () => {
         ?.textContent
     ).toContain('50');
     expect(screen.queryByText(/No runs match this period/)).toBeNull();
+  });
+
+  it('splits failures of the work from infrastructure, and flawed runs from done', () => {
+    mount({
+      insights: {
+        ...november,
+        totals: outcomes({
+          success: 3,
+          flawed: 1,
+          failed: 2,
+          infrastructure: 2,
+        }),
+      },
+    });
+
+    const outcomesList = screen.getByRole('list', { name: 'Run outcomes' });
+    expect(
+      within(outcomesList).getByText('Infrastructure failure').nextSibling
+        ?.textContent
+    ).toBe('2');
+    expect(
+      within(outcomesList).getByText('Flawed').nextSibling?.textContent
+    ).toBe('1');
+    const kinds = screen
+      .getByRole('heading', { name: 'Quality and infrastructure' })
+      .closest('section');
+    if (!kinds) throw new Error('No quality and infrastructure section');
+    // One flawed of the four that reached their end: 25%. Two of the eight
+    // that ended on their own failed for infrastructure: 25%.
+    expect(
+      within(kinds).getByText('Failed for the work').nextSibling?.textContent
+    ).toBe('2');
+    expect(
+      within(kinds).getByText('Failed for infrastructure').nextSibling
+        ?.textContent
+    ).toBe('2');
+    const figure = (label: string) =>
+      within(kinds)
+        .getByText(label)
+        .closest('div')
+        ?.parentElement?.querySelector('p')?.textContent;
+    expect(figure('Flawed')).toBe('25%');
+    expect(figure('Infrastructure failures')).toBe('25%');
+    // The success rate leaves the infrastructure failures out: 3 of 6.
+    expect(
+      screen
+        .getByText('Success rate')
+        .closest('div')
+        ?.parentElement?.querySelector('p')?.textContent
+    ).toBe('50%');
   });
 
   it('says there is nothing to show for a period with no runs', () => {

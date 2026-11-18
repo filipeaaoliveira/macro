@@ -481,6 +481,8 @@ impl crate::domain::ports::Retryable for StepFailure {
     }
 }
 
+impl crate::domain::ports::AgentFailure for StepFailure {}
+
 /// A reviewer's Step reads the round it reviews in, and a Step after the
 /// round reads it once it ended, for its Blockers.
 #[tokio::test]

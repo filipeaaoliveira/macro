@@ -16,8 +16,9 @@ use axum::{
     routing::{get, post, put},
 };
 use factory_records::domain::models::{
-    AskedBack, ControlFileChanges, EntryId, Gate, GateAnswer, GateModelReading, HandBack, Outcome,
-    Run, RunEnd, RunId, RunOutcome, StandInAnswer, Steer, SteerAction, Step, StepEnd, StepTerminal,
+    AskedBack, ControlFileChanges, EntryId, FlawMarker, Gate, GateAnswer, GateModelReading, HandBack,
+    Outcome, Run, RunEnd, RunFlaw, RunId, RunOutcome, StandInAnswer, Steer, SteerAction, Step,
+    StepEnd, StepTerminal,
 };
 use macro_authorization::{
     MacroAuthorizationExtractor, MacroAuthorizationService, MacroAuthorizationState, UserOnly,
@@ -103,6 +104,8 @@ impl<S, Auth> FromRef<FactoryRouterState<S, Auth>> for MacroAuthorizationState<A
 ///   without.
 /// - `POST /runs/{id}/steps/{seq}/stop` — stop it: it ends `failed`.
 /// - `POST /runs/{id}/cancel` — cancel a Run.
+/// - `POST /runs/{id}/flaw` — mark a Run that ended `success` flawed, with
+///   why.
 /// - `PUT /runs/{id}/task` — link a Run to the Macro task it works on.
 /// - `POST /hand-backs` — an agent Step's session hands back its result.
 /// - `GET /settings/control-files` — the Control File patterns the caller's
@@ -161,6 +164,7 @@ where
             post(stop_step_handler::<S, Auth>),
         )
         .route("/runs/{id}/cancel", post(cancel_run_handler::<S, Auth>))
+        .route("/runs/{id}/flaw", post(flaw_run_handler::<S, Auth>))
         .route("/runs/{id}/task", put(link_task_handler::<S, Auth>))
         .route("/hand-backs", post(hand_back_handler::<S, Auth>))
         .route(
@@ -304,6 +308,14 @@ pub struct ResumeStepRequest {
     /// bytes; a blank note is left out.
     #[serde(default)]
     pub note: Option<String>,
+}
+
+/// Request body for marking a Run flawed.
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FlawRunRequest {
+    /// Why its result is wrong: 1 to 4096 bytes once trimmed.
+    pub reason: String,
 }
 
 /// Request body for handing back an agent Step's result.
@@ -936,6 +948,48 @@ where
     Ok(StatusCode::ACCEPTED)
 }
 
+/// Mark one of the caller's Runs flawed: it ended `success`, and they
+/// found its result wrong. The Run then reads `flawed`, with who marked it,
+/// why and when. Marking a flawed Run again keeps its first mark. Only the
+/// Run's owner marks it, in their own signed-in session: an agent's code,
+/// an API key or token and an internal caller are refused (403).
+#[utoipa::path(
+    post,
+    tag = "factory",
+    operation_id = "flaw_factory_run",
+    path = "/runs/{id}/flaw",
+    params(GetRunParams),
+    request_body = FlawRunRequest,
+    responses(
+        (status = 200, body = RunDetail),
+        (status = 400, body = ErrorResponse),
+        (status = 401, body = ErrorResponse),
+        (status = 403, body = ErrorResponse),
+        (status = 404, body = ErrorResponse),
+        (status = 409, body = ErrorResponse),
+        (status = 500, body = ErrorResponse),
+    )
+)]
+#[tracing::instrument(skip_all, fields(run_id = %params.id))]
+pub async fn flaw_run_handler<S, Auth>(
+    State(state): State<FactoryRouterState<S, Auth>>,
+    caller: MacroAuthorizationExtractor<Auth, UserOrInternal>,
+    headers: HeaderMap,
+    Path(params): Path<GetRunParams>,
+    Json(body): Json<FlawRunRequest>,
+) -> Result<Json<RunDetail>, FactoryError>
+where
+    S: FactoryService,
+    Auth: MacroAuthorizationService,
+{
+    let actor = in_person(caller.authorization, &headers)?;
+    let detail = state
+        .service
+        .mark_run_flawed(&actor, params.id, &body.reason)
+        .await?;
+    Ok(Json(detail))
+}
+
 /// Link one of the caller's Runs to a Macro task they can see,
 /// replacing any task it had.
 #[utoipa::path(
@@ -1026,6 +1080,8 @@ impl FactoryError {
             | FactoryError::RequestTooLarge { .. }
             | FactoryError::NoteTooLarge { .. }
             | FactoryError::EmptyNote
+            | FactoryError::FlawReasonSize { .. }
+            | FactoryError::InvalidScorer(_)
             | FactoryError::UnknownTask
             | FactoryError::NotATask
             | FactoryError::UnknownUser
@@ -1063,6 +1119,7 @@ impl FactoryError {
             | FactoryError::StepEnded
             | FactoryError::NotSteerable(_)
             | FactoryError::TaskBusy
+            | FactoryError::NotSucceeded
             | FactoryError::FiringRepeated => StatusCode::CONFLICT,
             FactoryError::TriggerUnavailable | FactoryError::SessionUnreachable => {
                 StatusCode::BAD_GATEWAY
@@ -1161,6 +1218,7 @@ impl IntoResponse for FactoryError {
         resume_step_handler,
         stop_step_handler,
         cancel_run_handler,
+        flaw_run_handler,
         link_task_handler,
         hand_back_handler,
         control_files::get_control_files_handler,
@@ -1182,10 +1240,13 @@ impl IntoResponse for FactoryError {
         SessionStepRef,
         LinkTaskRequest,
         HandBackRequest,
+        FlawRunRequest,
         RunDetail,
         Run,
         RunEnd,
         RunOutcome,
+        RunFlaw,
+        FlawMarker,
         Step,
         StepEnd,
         StepTerminal,

@@ -19,8 +19,8 @@ use crate::domain::models::{
     StepReport, StepRequest, StepStart,
 };
 use crate::domain::ports::{
-    AnswerDelivery, FactoryService, Retryable, RunWorkflows, RunWorkflowsError, StepExecutor,
-    StepService,
+    AgentFailure, AnswerDelivery, FactoryService, Retryable, RunWorkflows, RunWorkflowsError,
+    StepExecutor, StepService,
 };
 
 mod automations;
@@ -134,11 +134,23 @@ impl Default for FakeExecutor {
 #[error("the work failed")]
 struct WorkFailure {
     retryable: bool,
+    out_of_quota: bool,
+    overdue: bool,
 }
 
 impl Retryable for WorkFailure {
     fn retryable(&self) -> bool {
         self.retryable
+    }
+}
+
+impl AgentFailure for WorkFailure {
+    fn out_of_quota(&self) -> bool {
+        self.out_of_quota
+    }
+
+    fn overdue(&self) -> bool {
+        self.overdue
     }
 }
 
@@ -196,7 +208,11 @@ impl StepExecutor for FakeExecutor {
         steer: SessionSteer,
     ) -> Result<(), WorkFailure> {
         if self.steer_refused {
-            return Err(WorkFailure { retryable: false });
+            return Err(WorkFailure {
+                retryable: false,
+                out_of_quota: false,
+                overdue: false,
+            });
         }
         self.steered
             .lock()
@@ -961,20 +977,52 @@ async fn work_that_fails_for_good_is_not_retried_and_other_failures_are() {
     let for_good = StepServiceImpl::new(
         repo.clone(),
         FakeExecutor {
-            failure: Some(WorkFailure { retryable: false }),
+            failure: Some(WorkFailure {
+                retryable: false,
+                out_of_quota: false,
+                overdue: false,
+            }),
             ..FakeExecutor::default()
         },
     );
     let for_now = StepServiceImpl::new(
         repo.clone(),
         FakeExecutor {
-            failure: Some(WorkFailure { retryable: true }),
+            failure: Some(WorkFailure {
+                retryable: true,
+                out_of_quota: false,
+                overdue: false,
+            }),
+            ..FakeExecutor::default()
+        },
+    );
+    let overdue = StepServiceImpl::new(
+        repo.clone(),
+        FakeExecutor {
+            failure: Some(WorkFailure {
+                retryable: true,
+                out_of_quota: false,
+                overdue: true,
+            }),
+            ..FakeExecutor::default()
+        },
+    );
+    let out_of_quota = StepServiceImpl::new(
+        repo.clone(),
+        FakeExecutor {
+            failure: Some(WorkFailure {
+                retryable: false,
+                out_of_quota: true,
+                overdue: false,
+            }),
             ..FakeExecutor::default()
         },
     );
 
     let final_failure = for_good.run_step(reply_step(run_id, 1)).await;
     let passing_failure = for_now.run_step(reply_step(run_id, 1)).await;
+    let quota_failure = out_of_quota.run_step(reply_step(run_id, 1)).await;
+    let overdue_failure = overdue.run_step(reply_step(run_id, 1)).await;
 
     assert!(matches!(
         final_failure,
@@ -983,6 +1031,16 @@ async fn work_that_fails_for_good_is_not_retried_and_other_failures_are() {
     assert!(matches!(
         passing_failure,
         Err(crate::domain::models::StepError::Internal(_))
+    ));
+    // A quota that ran out is infrastructure's, which the workflow reads.
+    assert!(matches!(
+        quota_failure,
+        Err(crate::domain::models::StepError::OutOfQuota(_))
+    ));
+    // An agent still at work when the wait ended is the work's, retried.
+    assert!(matches!(
+        overdue_failure,
+        Err(crate::domain::models::StepError::Overdue(_))
     ));
 }
 
@@ -1098,8 +1156,9 @@ async fn a_step_of_a_run_that_ended_does_no_work() {
 }
 
 /// A Run kept when Temporal could not say whether its workflow started,
-/// and whose workflow never came, ends failed once it is old enough; a new
-/// Run waiting for its first Step is left alone.
+/// and whose workflow never came, ends `infrastructure` once it is old
+/// enough, as none of its work ran; a new Run waiting for its first Step
+/// is left alone.
 #[tokio::test]
 async fn reading_a_run_whose_workflow_never_started_ends_it() {
     let repo = FakeRepo::default();
@@ -1116,7 +1175,7 @@ async fn reading_a_run_whose_workflow_never_started_ends_it() {
 
     assert_eq!(
         stuck.run.end.map(|end| end.outcome),
-        Some(RunOutcome::Failed)
+        Some(RunOutcome::Infrastructure)
     );
     assert_eq!(new.run.end, None);
 }

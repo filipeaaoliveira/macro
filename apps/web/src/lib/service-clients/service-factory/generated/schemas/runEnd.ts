@@ -4,6 +4,7 @@
  * factory_engine
  * OpenAPI spec version: 0.1.0
  */
+import type { RunEndFlaw } from './runEndFlaw';
 import type { RunOutcome } from './runOutcome';
 
 /**
@@ -12,6 +13,7 @@ import type { RunOutcome } from './runOutcome';
 export interface RunEnd {
   /** When it ended. */
   endedAt: string;
+  flaw?: RunEndFlaw;
   /** How the Run ended. */
   outcome: RunOutcome;
 }

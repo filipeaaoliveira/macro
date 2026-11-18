@@ -317,6 +317,12 @@ pub enum RunOutcome {
     Failed,
     /// A person cancelled the Run.
     Cancelled,
+    /// A Step's work failed for a machine, quota or network reason, not
+    /// for the work itself, with nowhere to go.
+    Infrastructure,
+    /// The Run ended `success`, and a Scorer or a person found its result
+    /// wrong afterwards.
+    Flawed,
 }
 
 /// A Run that has ended: how, and when.
@@ -327,6 +333,37 @@ pub struct RunEnd {
     pub outcome: RunOutcome,
     /// When it ended.
     pub ended_at: DateTime<Utc>,
+    /// Who found its result wrong, and why: only for a `flawed` Run.
+    pub flaw: Option<RunFlaw>,
+}
+
+/// Who marked a Run flawed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum FlawMarker {
+    /// A person: the Run's owner.
+    #[serde(rename_all = "camelCase")]
+    Person {
+        /// Their user id.
+        user_id: MacroUserIdStr<'static>,
+    },
+    /// A Scorer, by its name.
+    Scorer {
+        /// The Scorer's name.
+        name: String,
+    },
+}
+
+/// Why a Run's result was found wrong, by whom, and when.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RunFlaw {
+    /// Who marked the Run flawed.
+    pub by: FlawMarker,
+    /// Why, in their words.
+    pub reason: String,
+    /// When they marked it.
+    pub marked_at: DateTime<Utc>,
 }
 
 /// One Run of a Flow.

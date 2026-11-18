@@ -6,7 +6,8 @@ mod test;
 use chrono::{DateTime, Utc};
 use factory_records::domain::main_hold::{MainHold, RequiredChecksState};
 use factory_records::domain::models::{
-    EntryId, Outcome, Repository, Role, Run, RunId, RunOutcome, SteerRefusal, Step, StepKey,
+    EntryId, InvalidName, Outcome, Repository, Role, Run, RunId, RunOutcome, SteerRefusal, Step,
+    StepKey,
 };
 use factory_records::domain::review_rounds::ReviewRound;
 use factory_records::domain::standing_rules::{OrchestratorDefinition, ProjectRules, RulesSource};
@@ -833,6 +834,19 @@ pub enum FactoryError {
     /// A note to a Step's agent carries no words.
     #[error("a note must not be empty")]
     EmptyNote,
+    /// Why a Run is flawed is empty, or larger than a Run keeps.
+    #[error("why the run is flawed must not be empty, and must be at most {max} bytes")]
+    FlawReasonSize {
+        /// The most bytes a reason may hold.
+        max: usize,
+    },
+    /// The Scorer marking a Run flawed is not named as a Flow names things.
+    #[error(transparent)]
+    InvalidScorer(InvalidName),
+    /// The Run did not end `success`, so it cannot be flawed: it still
+    /// runs, or ended another way.
+    #[error("only a run that ended in success can be marked flawed")]
+    NotSucceeded,
     /// The Step takes no steering now, and says why.
     #[error("the step takes no steering now: {}", steer_refusal_message(*.0))]
     NotSteerable(SteerRefusal),
@@ -961,6 +975,15 @@ pub enum StepError {
     /// The Step's work failed in a way trying again would repeat.
     #[error("the step's work failed for good: {0:?}")]
     Final(rootcause::Report),
+    /// The Step's agent was still at work on its turn when the wait for it
+    /// ended: a retry waits on the same turn. Past the Step's time it is the
+    /// work's failure, not the factory's.
+    #[error("the step's agent was still at work when the wait ended: {0:?}")]
+    Overdue(rootcause::Report),
+    /// The quota of the Agents that fill the Step's Role ran out: trying
+    /// again would repeat the refusal, and the work never started.
+    #[error("the step's agents are out of quota: {0:?}")]
+    OutOfQuota(rootcause::Report),
     /// Any other internal error.
     #[error("internal step error: {0:?}")]
     Internal(rootcause::Report),

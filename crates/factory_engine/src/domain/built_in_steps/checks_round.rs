@@ -141,6 +141,7 @@ pub(super) fn lost(why: &str) -> BuiltInStepError {
         report: rootcause::report!("{why}").into_dynamic(),
         retryable: false,
         out_of_quota: false,
+        overdue: false,
     }
 }
 
@@ -814,6 +815,7 @@ fn retry(why: String) -> BuiltInStepError {
         report: rootcause::report!("{why}").into_dynamic(),
         retryable: true,
         out_of_quota: false,
+        overdue: false,
     }
 }
 

@@ -464,6 +464,33 @@ export type FiringResult = {
 export type FiringSkip = 'disabled' | 'task_busy' | 'queue_full' | 'refused' | 'own_branch' | 'creator_left_team' | 'agent_account';
 
 /**
+ * Who marked a Run flawed.
+ */
+export type FlawMarker = {
+    kind: 'person';
+    /**
+     * Their user id.
+     */
+    userId: MacroUserIdStr;
+} | {
+    kind: 'scorer';
+    /**
+     * The Scorer's name.
+     */
+    name: string;
+};
+
+/**
+ * Request body for marking a Run flawed.
+ */
+export type FlawRunRequest = {
+    /**
+     * Why its result is wrong: 1 to 4096 bytes once trimmed.
+     */
+    reason: string;
+};
+
+/**
  * The Runs of one Flow.
  */
 export type FlowInsight = {
@@ -843,9 +870,19 @@ export type OutcomeCounts = {
      */
     cancelled: number;
     /**
-     * Runs that ended failed.
+     * Runs that ended failed for their work.
      */
     failed: number;
+    /**
+     * Runs that succeeded, and whose result a Scorer or a person found
+     * wrong afterwards.
+     */
+    flawed: number;
+    /**
+     * Runs that failed for a machine, quota or network reason: the
+     * factory's plumbing, not its work.
+     */
+    infrastructure: number;
     /**
      * Runs that ended for a person to take over.
      */
@@ -1156,6 +1193,7 @@ export type RunEnd = {
      * When it ended.
      */
     endedAt: string;
+    flaw?: null | RunFlaw;
     /**
      * How the Run ended.
      */
@@ -1177,6 +1215,24 @@ export type RunErrorResponse = {
      * What went wrong, in words.
      */
     message: string;
+};
+
+/**
+ * Why a Run's result was found wrong, by whom, and when.
+ */
+export type RunFlaw = {
+    /**
+     * Who marked the Run flawed.
+     */
+    by: FlawMarker;
+    /**
+     * When they marked it.
+     */
+    markedAt: string;
+    /**
+     * Why, in their words.
+     */
+    reason: string;
 };
 
 /**
@@ -1258,7 +1314,7 @@ export type RunLink = {
 /**
  * How a Run ended.
  */
-export type RunOutcome = 'success' | 'manual' | 'blocked' | 'failed' | 'cancelled';
+export type RunOutcome = 'success' | 'manual' | 'blocked' | 'failed' | 'cancelled' | 'infrastructure' | 'flawed';
 
 /**
  * The Standing Rules a Run keeps from when it was created.
@@ -1988,6 +2044,35 @@ export type CancelFactoryRunError = CancelFactoryRunErrors[keyof CancelFactoryRu
 export type CancelFactoryRunResponses = {
     202: unknown;
 };
+
+export type FlawFactoryRunData = {
+    body: FlawRunRequest;
+    path: {
+        /**
+         * The Run's id.
+         */
+        id: RunId;
+    };
+    query?: never;
+    url: '/runs/{id}/flaw';
+};
+
+export type FlawFactoryRunErrors = {
+    400: ErrorResponse;
+    401: ErrorResponse;
+    403: ErrorResponse;
+    404: ErrorResponse;
+    409: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type FlawFactoryRunError = FlawFactoryRunErrors[keyof FlawFactoryRunErrors];
+
+export type FlawFactoryRunResponses = {
+    200: RunDetail;
+};
+
+export type FlawFactoryRunResponse = FlawFactoryRunResponses[keyof FlawFactoryRunResponses];
 
 export type AnswerFactoryGateData = {
     body: AnswerGateRequest;
