@@ -6,6 +6,7 @@
  */
 import type { BenchmarkSummary } from './benchmarkSummary';
 import type { EvaluationInsightsFlow } from './evaluationInsightsFlow';
+import type { EvaluationInsightsSelfImprovement } from './evaluationInsightsSelfImprovement';
 import type { ExperimentInsight } from './experimentInsight';
 import type { ScorerInsight } from './scorerInsight';
 import type { SuiteInsight } from './suiteInsight';
@@ -24,6 +25,7 @@ export interface EvaluationInsights {
   from: string;
   /** Each Scorer, defined or with judgments in the period. */
   scorers: ScorerInsight[];
+  selfImprovement?: EvaluationInsightsSelfImprovement;
   /** The suites started in the period, newest first. */
   suites: SuiteInsight[];
   /** The time zone its days are in. */

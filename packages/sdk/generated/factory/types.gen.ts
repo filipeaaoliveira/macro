@@ -646,6 +646,7 @@ export type EvaluationInsights = {
      * Each Scorer, defined or with judgments in the period.
      */
     scorers: Array<ScorerInsight>;
+    selfImprovement?: null | SelfImprovementInsight;
     /**
      * The suites started in the period, newest first.
      */
@@ -921,6 +922,38 @@ export type HandBackRequest = {
 };
 
 /**
+ * A team's latest self-improvement Run.
+ */
+export type ImprovementInsight = {
+    /**
+     * When it began.
+     */
+    createdAt: string;
+    /**
+     * How many failures it groups.
+     */
+    failures: number;
+    /**
+     * Why its Run could not start, when refused.
+     */
+    refusal?: string | null;
+    runId?: null | RunId;
+    /**
+     * When it was settled.
+     */
+    settledAt?: string | null;
+    /**
+     * Where it is.
+     */
+    state: ImprovementState;
+};
+
+/**
+ * Where a self-improvement Run is.
+ */
+export type ImprovementState = 'starting' | 'open' | 'merged' | 'closed' | 'refused';
+
+/**
  * The Runs created on one day of the period.
  */
 export type InsightDay = {
@@ -1152,6 +1185,20 @@ export type PassedOver = {
      * Why it could not start, as a code such as `ai_allowance_exhausted`.
      */
     reason: string;
+};
+
+/**
+ * How many of a team's pending failures come from one source.
+ */
+export type PendingSource = {
+    /**
+     * How many.
+     */
+    count: number;
+    /**
+     * The Scorer's name, or `flawed` for the Runs marked flawed.
+     */
+    source: string;
 };
 
 /**
@@ -1720,6 +1767,48 @@ export type ScorerInsight = {
      * The percentage of those Runs it judges; none when no longer defined.
      */
     samplePercent?: number | null;
+};
+
+/**
+ * A team's self-improvement against its Factory Definition: the failures
+ * waiting for a Run, what starts one, and the latest one.
+ */
+export type SelfImprovementInsight = {
+    /**
+     * Whether the Definition improves itself.
+     */
+    enabled: boolean;
+    /**
+     * How many pending failures start a Run.
+     */
+    failuresThreshold: number;
+    /**
+     * Whether someone is kept as naming the Definition: its
+     * self-improvement Runs are theirs, and none starts without them.
+     */
+    hasOwner: boolean;
+    last?: null | ImprovementInsight;
+    /**
+     * How many days old the oldest pending failure is before a Run starts
+     * with fewer.
+     */
+    oldestDays: number;
+    /**
+     * When the oldest was kept.
+     */
+    oldestPendingAt?: string | null;
+    /**
+     * How many failures wait.
+     */
+    pending: number;
+    /**
+     * How many wait from each source, most first.
+     */
+    pendingBySource: Array<PendingSource>;
+    /**
+     * The Definition's repository.
+     */
+    repoUrl: string;
 };
 
 /**
