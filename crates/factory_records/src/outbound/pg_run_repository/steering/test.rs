@@ -577,3 +577,32 @@ async fn an_old_turn_s_end_leaves_a_later_turn_steerable(pool: PgPool) {
         Err(SteerRefusal::NotWorking)
     );
 }
+
+/// A Step whose pause ran out is ending failed: a resume, or anything
+/// else, is refused as for an ended Step, never written over its record.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn a_step_whose_pause_ran_out_takes_no_resume(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let (key, _) = writing(&repo).await;
+    repo.steer(key, &NewSteer::Pause)
+        .await
+        .expect("steer")
+        .expect("a pause");
+    repo.pause_ran_out(key).await.expect("ran out");
+
+    let resume = NewSteer::Resume {
+        note: Some("Go on".to_string()),
+        prompt_id: Uuid::now_v7(),
+    };
+    for steer in [resume, NewSteer::Stop] {
+        assert_eq!(
+            repo.steer(key, &steer).await.expect("no constraint broken"),
+            Err(SteerRefusal::Ended)
+        );
+    }
+    let steering = repo.steering(key).await.expect("read");
+    assert!(steering.paused && steering.pause_ran_out);
+}

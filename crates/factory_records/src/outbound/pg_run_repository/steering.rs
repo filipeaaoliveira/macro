@@ -32,7 +32,8 @@ impl PgRunRepository {
             SELECT
                 s.session_id, s.action_id, s.agent, s.bot_id, s.role,
                 s.ended_at, s.session_released_at, s.paused_at, s.stop_asked_at,
-                s.steer_action_id, s.steer_closed, r.ended_at AS run_ended_at
+                s.steer_action_id, s.steer_closed, s.pause_ran_out_at,
+                r.ended_at AS run_ended_at
             FROM factory_step s
             JOIN factory_run r ON r.id = s.run_id
             WHERE s.run_id = $1 AND s.seq = $2
@@ -46,7 +47,12 @@ impl PgRunRepository {
         let Some(row) = row else {
             return Ok(Err(SteerRefusal::Ended));
         };
-        if row.ended_at.is_some() || row.session_released_at.is_some() || row.run_ended_at.is_some()
+        // A Step whose pause ran out is ending failed: its work recorded so,
+        // and a resume could no longer reach it.
+        if row.ended_at.is_some()
+            || row.session_released_at.is_some()
+            || row.run_ended_at.is_some()
+            || row.pause_ran_out_at.is_some()
         {
             return Ok(Err(SteerRefusal::Ended));
         }

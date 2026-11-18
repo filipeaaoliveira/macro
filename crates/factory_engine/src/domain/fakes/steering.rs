@@ -91,7 +91,9 @@ impl FakeRepo {
         };
         Ok(self.with_steering(key, |steering| {
             let paused = steering.paused_at.is_some();
-            let refusal = if steering.stop_asked_at.is_some() {
+            let refusal = if steering.pause_ran_out_at.is_some() {
+                Some(SteerRefusal::Ended)
+            } else if steering.stop_asked_at.is_some() {
                 Some(SteerRefusal::Stopping)
             } else {
                 match steer {

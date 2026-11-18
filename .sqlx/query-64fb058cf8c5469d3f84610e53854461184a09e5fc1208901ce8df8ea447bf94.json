@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                s.session_id, s.action_id, s.agent, s.bot_id, s.role,\n                s.ended_at, s.session_released_at, s.paused_at, s.stop_asked_at,\n                s.steer_action_id, s.steer_closed, r.ended_at AS run_ended_at\n            FROM factory_step s\n            JOIN factory_run r ON r.id = s.run_id\n            WHERE s.run_id = $1 AND s.seq = $2\n            FOR UPDATE OF s\n            ",
+  "query": "\n            SELECT\n                s.session_id, s.action_id, s.agent, s.bot_id, s.role,\n                s.ended_at, s.session_released_at, s.paused_at, s.stop_asked_at,\n                s.steer_action_id, s.steer_closed, s.pause_ran_out_at,\n                r.ended_at AS run_ended_at\n            FROM factory_step s\n            JOIN factory_run r ON r.id = s.run_id\n            WHERE s.run_id = $1 AND s.seq = $2\n            FOR UPDATE OF s\n            ",
   "describe": {
     "columns": [
       {
@@ -60,6 +60,11 @@
       },
       {
         "ordinal": 11,
+        "name": "pause_ran_out_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
         "name": "run_ended_at",
         "type_info": "Timestamptz"
       }
@@ -82,8 +87,9 @@
       true,
       true,
       false,
+      true,
       true
     ]
   },
-  "hash": "ee847cb669203a180cbc64f8f9b16f8aeeff8258d039261ff58015fa5d24561c"
+  "hash": "64fb058cf8c5469d3f84610e53854461184a09e5fc1208901ce8df8ea447bf94"
 }
