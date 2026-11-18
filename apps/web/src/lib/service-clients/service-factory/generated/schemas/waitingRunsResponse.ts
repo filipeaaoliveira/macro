@@ -7,10 +7,14 @@
 import type { RunDetail } from './runDetail';
 
 /**
- * The caller's Runs that wait on them.
+ * The caller's Runs that hold a place in their Queue.
  */
 export interface WaitingRunsResponse {
   /** The caller's Runs that have not ended and wait on a Gate no one
 answered yet, newest first: at most the newest 50. */
   runs: RunDetail[];
+  /** The caller's Runs of a Flow with a Gate that have not ended or
+reached a Gate yet, newest first, at most the newest 50: each holds
+the place it will ask for. Cancelling one frees it. */
+  starting: RunDetail[];
 }

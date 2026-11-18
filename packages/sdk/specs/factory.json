@@ -709,7 +709,7 @@
     "/runs": {
       "post": {
         "tags": ["factory"],
-        "summary": "Create a Run of a built-in Flow, owned by the caller, and start its\nworkflow. Above the Queue limit of the Project it would start in, it is\nrefused (409 `queueFull`): more Gates and questions wait on the caller\nthan the limit, and the Runs under way go on.",
+        "summary": "Create a Run of a built-in Flow, owned by the caller, and start its\nworkflow. Above the Queue limit of the Project it would start in, it is\nrefused (409 `queueFull`, its message counting both): the caller holds\nmore places in their Queue than the limit, a place being a Run waiting\non them at a Gate or a question, or a Run of a Flow with a Gate that has\nnot reached one yet (`GET /runs/waiting` lists both). The Runs under\nway go on.",
         "operationId": "create_factory_run",
         "requestBody": {
           "content": {
@@ -808,7 +808,7 @@
     "/runs/waiting": {
       "get": {
         "tags": ["factory"],
-        "summary": "List the caller's Runs that wait on them at a Gate no one answered\nyet, a Flow's Gate no Standing Rule answered or an agent's question,\nnewest first, each with the Steps it took.",
+        "summary": "List the caller's Runs that wait on them at a Gate no one answered\nyet, a Flow's Gate no Standing Rule answered or an agent's question,\nnewest first, each with the Steps it took; and, apart, those that hold\na place in their Queue before asking anything (`starting`).",
         "operationId": "list_factory_waiting_runs",
         "responses": {
           "200": {
@@ -2765,7 +2765,7 @@
           "queueLimit": {
             "type": ["integer", "null"],
             "format": "int32",
-            "description": "The Queue limit: the most Gates and questions that may wait on a\nperson (their Queue) for a new Run of theirs to start under this\ndefinition. Above it, no new Run starts; Runs already going go on.\nNone, and a definition sent without it, sets no limit. At most\n[`MAX_QUEUE_LIMIT`]. A Run does not keep it: it decides only\nwhether a Run starts, so a Run's rules read with none.",
+            "description": "The Queue limit: the most places a person may hold in their Queue\nfor a new Run of theirs to start under this definition. A place is\na Run of theirs waiting on them at a Gate or a question, or a Run\nof a Flow with a Gate that has not reached one yet. Above it, no new Run starts; Runs already going go on.\nNone, and a definition sent without it, sets no limit. At most\n[`MAX_QUEUE_LIMIT`]. A Run does not keep it: it decides only\nwhether a Run starts, so a Run's rules read with none.",
             "minimum": 0
           },
           "standIn": {
@@ -3840,8 +3840,8 @@
       },
       "WaitingRunsResponse": {
         "type": "object",
-        "description": "The caller's Runs that wait on them.",
-        "required": ["runs"],
+        "description": "The caller's Runs that hold a place in their Queue.",
+        "required": ["runs", "starting"],
         "properties": {
           "runs": {
             "type": "array",
@@ -3849,6 +3849,13 @@
               "$ref": "#/components/schemas/RunDetail"
             },
             "description": "The caller's Runs that have not ended and wait on a Gate no one\nanswered yet, newest first: at most the newest 50."
+          },
+          "starting": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunDetail"
+            },
+            "description": "The caller's Runs of a Flow with a Gate that have not ended or\nreached a Gate yet, newest first, at most the newest 50: each holds\nthe place it will ask for. Cancelling one frees it."
           }
         }
       },

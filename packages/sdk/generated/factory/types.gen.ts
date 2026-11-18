@@ -748,9 +748,10 @@ export type OrchestratorDefinition = {
      */
     plan: boolean;
     /**
-     * The Queue limit: the most Gates and questions that may wait on a
-     * person (their Queue) for a new Run of theirs to start under this
-     * definition. Above it, no new Run starts; Runs already going go on.
+     * The Queue limit: the most places a person may hold in their Queue
+     * for a new Run of theirs to start under this definition. A place is
+     * a Run of theirs waiting on them at a Gate or a question, or a Run
+     * of a Flow with a Gate that has not reached one yet. Above it, no new Run starts; Runs already going go on.
      * None, and a definition sent without it, sets no limit. At most
      * [`MAX_QUEUE_LIMIT`]. A Run does not keep it: it decides only
      * whether a Run starts, so a Run's rules read with none.
@@ -1486,7 +1487,7 @@ export type UsageInsight = {
 };
 
 /**
- * The caller's Runs that wait on them.
+ * The caller's Runs that hold a place in their Queue.
  */
 export type WaitingRunsResponse = {
     /**
@@ -1494,6 +1495,12 @@ export type WaitingRunsResponse = {
      * answered yet, newest first: at most the newest 50.
      */
     runs: Array<RunDetail>;
+    /**
+     * The caller's Runs of a Flow with a Gate that have not ended or
+     * reached a Gate yet, newest first, at most the newest 50: each holds
+     * the place it will ask for. Cancelling one frees it.
+     */
+    starting: Array<RunDetail>;
 };
 
 /**

@@ -741,8 +741,11 @@ export const getFactoryInsights = async (
 /**
  * @summary Create a Run of a built-in Flow, owned by the caller, and start its
 workflow. Above the Queue limit of the Project it would start in, it is
-refused (409 `queueFull`): more Gates and questions wait on the caller
-than the limit, and the Runs under way go on.
+refused (409 `queueFull`, its message counting both): the caller holds
+more places in their Queue than the limit, a place being a Run waiting
+on them at a Gate or a question, or a Run of a Flow with a Gate that has
+not reached one yet (`GET /runs/waiting` lists both). The Runs under
+way go on.
  */
 export type createFactoryRunResponse201 = {
   data: RunDetail;
@@ -831,7 +834,8 @@ export const createFactoryRun = async (
 /**
  * @summary List the caller's Runs that wait on them at a Gate no one answered
 yet, a Flow's Gate no Standing Rule answered or an agent's question,
-newest first, each with the Steps it took.
+newest first, each with the Steps it took; and, apart, those that hold
+a place in their Queue before asking anything (`starting`).
  */
 export type listFactoryWaitingRunsResponse200 = {
   data: WaitingRunsResponse;
