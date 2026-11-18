@@ -709,7 +709,7 @@
     "/runs": {
       "post": {
         "tags": ["factory"],
-        "summary": "Create a Run of a built-in Flow, owned by the caller, and start its\nworkflow. Above the Queue limit of the Project it would start in, it is\nrefused (409 `queueFull`, its message counting both): the caller holds\nmore places in their Queue than the limit, a place being a Run waiting\non them at a Gate or a question, or a Run of a Flow with a Gate that has\nnot reached one yet (`GET /runs/waiting` lists both). The Runs under\nway go on.",
+        "summary": "Create a Run of a built-in Flow, owned by the caller, and start its\nworkflow. At the Queue limit of the Project it would start in, it is\nrefused (409 `queueFull`, its message counting both): the caller holds\nas many places in their Queue as the limit, a place being a Run waiting\non them at a Gate or a question, or a Run of a Flow with a Gate that has\nnot reached one yet (`GET /runs/waiting` lists both). The Runs under\nway go on.",
         "operationId": "create_factory_run",
         "requestBody": {
           "content": {
@@ -2739,7 +2739,7 @@
       },
       "OrchestratorDefinition": {
         "type": "object",
-        "description": "A workspace's Orchestrator Definition: which kinds of Gate the factory\ndecides on its own, whether the Gates it leaves go to the Run's owner,\nwhich the stand-in answers for the Run's owner when no rule does, and\nthe Queue limit above which no new Run starts. A kind left off waits for\na person, as every Gate did before Standing\nRules. Whatever it says, a Tampered Run's Gates and a merge through a\nMain Hold stay a person's.",
+        "description": "A workspace's Orchestrator Definition: which kinds of Gate the factory\ndecides on its own, whether the Gates it leaves go to the Run's owner,\nwhich the stand-in answers for the Run's owner when no rule does, and\nthe Queue limit at which no new Run starts. A kind left off waits for\na person, as every Gate did before Standing\nRules. Whatever it says, a Tampered Run's Gates and a merge through a\nMain Hold stay a person's.",
         "required": ["plan", "blockers", "merge"],
         "properties": {
           "blockers": {
@@ -2765,7 +2765,7 @@
           "queueLimit": {
             "type": ["integer", "null"],
             "format": "int32",
-            "description": "The Queue limit: the most places a person may hold in their Queue\nfor a new Run of theirs to start under this definition. A place is\na Run of theirs waiting on them at a Gate or a question, or a Run\nof a Flow with a Gate that has not reached one yet. Above it, no new Run starts; Runs already going go on.\nNone, and a definition sent without it, sets no limit. At most\n[`MAX_QUEUE_LIMIT`]. A Run does not keep it: it decides only\nwhether a Run starts, so a Run's rules read with none.",
+            "description": "The Queue limit: the most places a person may hold in their Queue\nfor a new Run of theirs to start under this definition. A place is\na Run of theirs waiting on them at a Gate or a question, or a Run\nof a Flow with a Gate that has not reached one yet. Once they hold\nthat many, no new Run starts; Runs already going go on.\nNone, and a definition sent without it, sets no limit. At most\n[`MAX_QUEUE_LIMIT`]. A Run does not keep it: it decides only\nwhether a Run starts, so a Run's rules read with none.",
             "minimum": 0
           },
           "standIn": {
