@@ -134,7 +134,15 @@ export function getNotificationAction(n: UnifiedNotification): string {
           ? "couldn't be set up"
           : 'could not be set up';
       })
-      .with('factory_gate_waiting', () => 'waits on your answer in')
+      // A notify-only Gate tells the owner something while the Run goes
+      // on; any other waits on their answer.
+      .with('factory_gate_waiting', () => {
+        const meta = n.notification_metadata;
+        if (meta.tag === 'factory_gate_waiting' && meta.content.notifyOnly) {
+          return 'for your information — the run goes on in';
+        }
+        return 'waits on your answer in';
+      })
       .exhaustive(() => 'notified you about')
   );
 }
