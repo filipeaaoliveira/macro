@@ -108,7 +108,14 @@ const methods: Record<string, Partial<Record<SdkVerb, string>>> = {
     restored: 'restoreSuggestion',
   },
   unfurl: { read: 'getUnfurl getUnfurlBulk' },
-  factory: { submitted: 'handBackFactoryStep' },
+  factory: {
+    submitted: 'handBackFactoryStep answerFactoryGate',
+    read: 'getFactoryRun',
+    listed: 'listFactoryFlows listFactoryWaitingRuns listFactoryTaskRuns',
+    created: 'createFactoryRun',
+    cancelled: 'cancelFactoryRun',
+    linked: 'linkFactoryRunTask',
+  },
   auth: {
     read: 'macroApiToken getReferralCode getTeam getUserInfo postProfilePictures',
     listed:

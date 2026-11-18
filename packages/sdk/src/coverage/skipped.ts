@@ -508,18 +508,11 @@ export const unfurlExcluded = [
 export const unfurlBacklog = [] as const satisfies readonly (keyof UnfurlSdk)[];
 
 export const factoryExcluded = [
-  // People use the Run API from the web app; an agent session reaches the
-  // factory only to hand back its Step's result, and may not answer a Gate.
-  'answerFactoryGate',
-  'cancelFactoryRun',
-  'createFactoryRun',
+  // The factory's settings are the person's: only their own session
+  // changes them, and the web app reads them.
   'getFactoryControlFiles',
   'getFactoryInsights',
-  'getFactoryRun',
   'getFactoryStandingRules',
-  'linkFactoryRunTask',
-  'listFactoryFlows',
-  'listFactoryTaskRuns',
   // A reply is a Gate's answer in words: only the person, in their own
   // session, gives it.
   'replyToFactoryGate',
