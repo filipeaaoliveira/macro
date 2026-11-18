@@ -290,6 +290,24 @@ async fn a_commit_contains_those_it_comes_after() {
 }
 
 #[tokio::test]
+async fn two_commits_merge_base_is_read_from_their_comparison() {
+    let (server, client) = answering(
+        "200 OK",
+        r#"{"status":"diverged","merge_base_commit":{"sha":"3333333333333333333333333333333333333333"}}"#,
+    );
+    let base = client
+        .merge_base("token", "macro", "app", "main-head", "trial-head")
+        .await
+        .unwrap();
+    assert_eq!(base, "3333333333333333333333333333333333333333");
+    assert!(
+        server
+            .finish()
+            .starts_with("GET /repos/macro/app/compare/main-head...trial-head?per_page=1 HTTP/1.1")
+    );
+}
+
+#[tokio::test]
 async fn deleting_a_branch_deletes_its_ref_and_a_missing_branch_is_gone_already() {
     let (server, client) = answering("204 No Content", "");
     let deleted = client

@@ -54,6 +54,11 @@ fn is_commit_id(text: &str) -> bool {
 }
 
 #[derive(serde::Deserialize)]
+struct CompareMergeBase {
+    merge_base_commit: BranchCommit,
+}
+
+#[derive(serde::Deserialize)]
 struct CompareResponse {
     #[serde(default)]
     files: Option<Vec<CompareFile>>,
@@ -349,5 +354,27 @@ impl GithubOauthImpl {
             )
             .await?;
         Ok(matches!(compared.status.as_str(), "ahead" | "identical"))
+    }
+
+    /// The best common ancestor of the commits `base` and `head`: the
+    /// newest commit both contain.
+    #[tracing::instrument(skip(self, access_token), err)]
+    pub async fn merge_base(
+        &self,
+        access_token: &str,
+        owner: &str,
+        repo: &str,
+        base: &str,
+        head: &str,
+    ) -> Result<String, GithubError> {
+        let compared: CompareMergeBase = self
+            .read(
+                access_token,
+                &format!("/repos/{owner}/{repo}/compare/{base}...{head}"),
+                &[("per_page", "1")],
+                "failed to compare commits",
+            )
+            .await?;
+        Ok(compared.merge_base_commit.sha)
     }
 }
