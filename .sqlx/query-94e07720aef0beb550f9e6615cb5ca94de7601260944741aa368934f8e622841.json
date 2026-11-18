@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT setup_passed AS \"setup_passed!\"\n            FROM factory_step\n            WHERE run_id = $1 AND seq = $2 AND setup_session_id = $3\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "setup_passed!",
+        "type_info": "Int2"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "94e07720aef0beb550f9e6615cb5ca94de7601260944741aa368934f8e622841"
+}

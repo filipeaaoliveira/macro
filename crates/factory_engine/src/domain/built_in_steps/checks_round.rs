@@ -52,6 +52,7 @@ use crate::domain::checks::{
     CHECKS_FILE, DEFAULT_CHECK_TIMEOUT_SECS, RepositoryCheck, RepositoryChecks,
 };
 use crate::domain::flow::StepName;
+use crate::domain::setup::{RepositorySetup, SETUP_FILE};
 use crate::domain::models::{AgentCommand, AgentTurn, StepInput, StepReport};
 use crate::domain::ports::{MainWatches, PullRequests, StepAgent};
 use crate::domain::pull_request_steps::PullRequestStepError;
@@ -375,10 +376,37 @@ where
                 output: work_output.to_string(),
             }));
         }
+        let setup = match self.round_setup(input).await? {
+            Ok(setup) => setup,
+            Err(error) => {
+                return Ok(Some(StepReport {
+                    outcome: red(),
+                    output: fit(
+                        &format!("The repository's checks could not run: {error}"),
+                        work_output,
+                    ),
+                }));
+            }
+        };
 
-        self.record_round(input, 1, work_output, &checks, text)
+        self.record_round(input, 1, work_output, &checks, text, setup)
             .await?;
         Ok(None)
+    }
+
+    /// The text of the setup file the Run's base declares, which a round
+    /// keeps and runs in its worktree before its checks: none when the base
+    /// declares none, or one that asks for nothing; why when it does not
+    /// read.
+    pub(super) async fn round_setup(
+        &self,
+        input: StepInput<'_>,
+    ) -> Result<Result<Option<String>, crate::domain::setup::SetupFileError>, BuiltInStepError>
+    {
+        let Some(text) = self.pull_requests.declared_setup(&input).await? else {
+            return Ok(Ok(None));
+        };
+        Ok(RepositorySetup::parse(&text).map(|setup| (!setup.is_empty()).then_some(text)))
     }
 
     pub(super) async fn record_round(
@@ -388,6 +416,7 @@ where
         work_output: &str,
         checks: &[&RepositoryCheck],
         declared: String,
+        setup: Option<String>,
     ) -> Result<(), BuiltInStepError> {
         let start = CheckRoundStart {
             round,
@@ -395,6 +424,7 @@ where
             checks: checks.iter().map(|check| check.name.clone()).collect(),
             commands: checks.iter().map(|check| check.run.clone()).collect(),
             declared,
+            setup,
             check_action_id: Uuid::now_v7(),
         };
         self.pull_requests
@@ -541,6 +571,82 @@ where
             )));
         }
 
+        // The repository's setup, as the round read it from the base,
+        // prepares the worktree before the checks, each attempt: a command
+        // that fails ends the round as a check that failed, and no check
+        // runs.
+        let setup = round
+            .setup
+            .as_deref()
+            .map(RepositorySetup::parse)
+            .transpose()
+            .map_err(|_| lost("a recorded setup file does not read"))?
+            .unwrap_or_default();
+        let to_run = round
+            .checks
+            .iter()
+            .any(|name| !results.iter().any(|result| &result.name == name));
+        for command in setup.setup.iter().filter(|_| to_run) {
+            let timeout = Duration::from_secs(command.timeout);
+            let run_for = timeout + worktree::RUN_MARGIN;
+            if until(answer_by) < run_for {
+                let (outcome, report) = verified_end(round, &results);
+                repo.end_check_round(input.key, round.round, outcome, &report)
+                    .await
+                    .map_err(records)?;
+                self.remove_worktree(input, &role, round_id).await;
+                return Ok(Verify::OutOfTime);
+            }
+            if checks_until.saturating_duration_since(Instant::now()) < run_for {
+                return Err(retry(format!(
+                    "this attempt has no time left for setup command {}",
+                    command.name
+                )));
+            }
+            let ran = self
+                .in_checkout(
+                    input,
+                    &role,
+                    worktree::check_command(
+                        round_id,
+                        &format!("{}{}", setup.exports(), command.run),
+                        command.timeout,
+                        worktree::LOCK_WAIT_SECS,
+                    ),
+                    run_for,
+                )
+                .await?;
+            let Some(output) = ran else {
+                return self.no_command(&results);
+            };
+            if output.exit_code == worktree::LOCK_BUSY_STATUS
+                && (output.stderr.contains(worktree::LOCK_BUSY)
+                    || output.stdout.contains(worktree::LOCK_BUSY))
+            {
+                return Err(retry(format!(
+                    "another run of setup command {} still holds the round's lock",
+                    command.name
+                )));
+            }
+            if output.exit_code != 0 {
+                let result = CheckResult {
+                    name: format!("{SETUP_RESULT}{}", command.name),
+                    exit_code: output.exit_code,
+                    output: check_output(&output, timeout),
+                };
+                repo.record_check_result(input.key, round.round, &commit, &result)
+                    .await
+                    .map_err(records)?;
+                results.push(result);
+                let report = setup_failed_report(round, &setup, &results);
+                repo.end_check_round(input.key, round.round, CheckRoundOutcome::Failed, &report)
+                    .await
+                    .map_err(records)?;
+                self.remove_worktree(input, &role, round_id).await;
+                return Ok(Verify::Ended);
+            }
+        }
+
         for (name, run) in round.checks.iter().zip(&round.commands) {
             if results.iter().any(|result| &result.name == name) {
                 continue;
@@ -573,7 +679,7 @@ where
                     &role,
                     worktree::check_command(
                         round_id,
-                        &format!("{}{run}", target.environment()),
+                        &format!("{}{}{run}", setup.exports(), target.environment()),
                         timeout.as_secs(),
                         worktree::LOCK_WAIT_SECS,
                     ),
@@ -751,6 +857,7 @@ where
             &answer.text,
             &checks,
             failed.declared.clone(),
+            failed.setup.clone(),
         )
         .await
     }
@@ -914,6 +1021,20 @@ fn how_run(round: &CheckRound) -> &'static str {
 /// the agent's fix reads, holds only the checks that failed or did not
 /// run, each with the end of its output.
 fn verified_end(round: &CheckRound, results: &[CheckResult]) -> (CheckRoundOutcome, String) {
+    if results
+        .iter()
+        .any(|result| result.name.starts_with(SETUP_RESULT) && result.exit_code != 0)
+    {
+        let setup = round
+            .setup
+            .as_deref()
+            .and_then(|text| RepositorySetup::parse(text).ok())
+            .unwrap_or_default();
+        return (
+            CheckRoundOutcome::Failed,
+            setup_failed_report(round, &setup, results),
+        );
+    }
     let failed: Vec<&CheckResult> = results
         .iter()
         .filter(|result| result.exit_code != 0)
@@ -961,6 +1082,44 @@ fn verified_end(round: &CheckRound, results: &[CheckResult]) -> (CheckRoundOutco
         CheckRoundOutcome::Failed,
         cut(&report, MAX_OUTPUT_BYTES).to_string(),
     )
+}
+
+/// What begins the name of a setup command's run among a verified round's
+/// results: no check's name holds a `:`, so none is taken for a check.
+pub(super) const SETUP_RESULT: &str = "setup:";
+
+/// The report of a verified round whose setup failed in its worktree, for
+/// the agent's fix: each setup command that failed, with the end of its
+/// output, and the checks that did not run.
+fn setup_failed_report(
+    round: &CheckRound,
+    setup: &RepositorySetup,
+    results: &[CheckResult],
+) -> String {
+    let mut report = format!(
+        "The factory ran the repository's setup (`{SETUP_FILE}` on the base branch) on the commit you pushed, from the repository's root, before the checks, and it failed:\n",
+    );
+    for result in results
+        .iter()
+        .filter(|result| result.name.starts_with(SETUP_RESULT) && result.exit_code != 0)
+    {
+        let name = &result.name[SETUP_RESULT.len()..];
+        let command = setup
+            .setup
+            .iter()
+            .find(|command| command.name == name)
+            .map_or("", |command| command.run.as_str());
+        report.push_str(&format!(
+            "\n### setup `{name}`: `{command}` exited with status {}\n\n```\n{}\n```\n",
+            result.exit_code,
+            result.output.trim_end()
+        ));
+    }
+    report.push_str(&format!(
+        "\nSo these checks did not run: {}.\n",
+        round.checks.join(", ")
+    ));
+    cut(&report, MAX_OUTPUT_BYTES).to_string()
 }
 
 /// What a verified round keeps of a check's run: the end of its output,

@@ -21,6 +21,7 @@ use crate::domain::ports::{AgentFailure, Retryable, StepAgent, StepExecutor};
 use crate::domain::pull_request_steps::PullRequestSteps;
 
 mod acceptance;
+mod setup;
 mod verified;
 
 #[derive(Debug, Clone, thiserror::Error)]
@@ -29,29 +30,42 @@ struct SessionFailed {
     out_of_quota: bool,
     /// The agent's last message, when it stopped without a result.
     last_words: Option<&'static str>,
+    /// What the owner is shown, when the repository's setup failed in the
+    /// session before its first prompt.
+    setup: Option<&'static str>,
 }
 
 /// A failure a retry may get past.
 const FAILED: SessionFailed = SessionFailed {
     out_of_quota: false,
     last_words: None,
+    setup: None,
 };
 
 /// The agent's quota ran out: asking again does not help.
 const NO_QUOTA: SessionFailed = SessionFailed {
     out_of_quota: true,
     last_words: None,
+    setup: None,
 };
 
 /// The agent stopped without a result, even once reminded.
 const STOPPED: SessionFailed = SessionFailed {
     out_of_quota: false,
     last_words: Some("I stopped before checking."),
+    setup: None,
+};
+
+/// The repository's setup failed in the session before its first prompt.
+const SETUP_FAILED: SessionFailed = SessionFailed {
+    out_of_quota: false,
+    last_words: None,
+    setup: Some("`install` (`bun install`) exited with status 1."),
 };
 
 impl Retryable for SessionFailed {
     fn retryable(&self) -> bool {
-        !self.out_of_quota && self.last_words.is_none()
+        !self.out_of_quota && self.last_words.is_none() && self.setup.is_none()
     }
 }
 
@@ -62,6 +76,10 @@ impl AgentFailure for SessionFailed {
 
     fn stopped_without_result(&self) -> Option<&str> {
         self.last_words
+    }
+
+    fn setup_failed(&self) -> Option<&str> {
+        self.setup
     }
 }
 
@@ -138,6 +156,9 @@ impl StepAgent for ScriptedAgent {
         }
         if self.work == "stopped" {
             return Err(STOPPED);
+        }
+        if self.work == "setup_failed" {
+            return Err(SETUP_FAILED);
         }
         Ok(AgentAnswer {
             outcome: outcome(self.work),

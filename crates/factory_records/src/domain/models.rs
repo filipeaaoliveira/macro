@@ -1104,6 +1104,11 @@ pub struct CheckRound {
     /// which every round goes by.
     #[serde(skip)]
     pub declared: String,
+    /// The repository's setup file as the Step's first round read it,
+    /// which every round runs in its worktree before the checks; none when
+    /// the base declared no setup.
+    #[serde(skip)]
+    pub setup: Option<String>,
     /// The prompt that asks the agent to run the checks.
     #[serde(skip)]
     pub check_action_id: Uuid,
@@ -1130,6 +1135,9 @@ pub struct CheckRoundStart {
     pub commands: Vec<String>,
     /// The repository's checks file as the Step's first round read it.
     pub declared: String,
+    /// The repository's setup file as the Step's first round read it, if
+    /// the base declared one.
+    pub setup: Option<String>,
     /// The prompt, a UUIDv7, that asks the agent to run them.
     pub check_action_id: Uuid,
 }

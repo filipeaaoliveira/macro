@@ -273,8 +273,22 @@ where
                     .collect::<Vec<_>>(),
             });
             let checks: Vec<&RepositoryCheck> = runs.iter().collect();
-            self.record_round(input, 1, verifier_report, &checks, declared.to_string())
-                .await?;
+            // The verifier's session ran the same setup, so a file that
+            // does not read ended the Step before.
+            let setup = self.round_setup(input).await?.map_err(|error| {
+                BuiltInStepError::Setup(format!(
+                    "The repository's setup could not run, so the acceptance checks did not: {error}"
+                ))
+            })?;
+            self.record_round(
+                input,
+                1,
+                verifier_report,
+                &checks,
+                declared.to_string(),
+                setup,
+            )
+            .await?;
         }
 
         loop {

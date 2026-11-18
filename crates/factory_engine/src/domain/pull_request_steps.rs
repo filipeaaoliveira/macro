@@ -32,6 +32,7 @@ use factory_records::domain::ports::RunRepository;
 use github::domain::models::MacroTaskId;
 
 use crate::domain::checks::CHECKS_FILE;
+use crate::domain::setup::SETUP_FILE;
 use crate::domain::control_files::{ControlFiles, ControlFilesError};
 use crate::domain::definition::DEFINITION_FILE_PATTERNS;
 use crate::domain::main_hold::{MainWatch, held_note};
@@ -449,6 +450,19 @@ where
         let (repository, recorded) = Self::repository(input)?;
         self.github
             .file_text(input.owner, &repository, &recorded.base_branch, CHECKS_FILE)
+            .await
+            .map_err(PullRequestStepError::github)
+    }
+
+    /// The text of [`SETUP_FILE`] on the Run's base branch, which the
+    /// agent's branch cannot change; none when the base declares no setup.
+    pub(crate) async fn declared_setup(
+        &self,
+        input: &StepInput<'_>,
+    ) -> Result<Option<String>, PullRequestStepError> {
+        let (repository, recorded) = Self::repository(input)?;
+        self.github
+            .file_text(input.owner, &repository, &recorded.base_branch, SETUP_FILE)
             .await
             .map_err(PullRequestStepError::github)
     }

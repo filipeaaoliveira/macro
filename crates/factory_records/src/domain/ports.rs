@@ -206,6 +206,25 @@ pub trait RunRepository: Send + Sync + 'static {
         session_id: Uuid,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
+    /// How many of its repository's setup commands passed, in order, in
+    /// the Step `key`'s session `session_id`: none for a session that ran
+    /// none, as one the Step went on to.
+    fn setup_passed(
+        &self,
+        key: StepKey,
+        session_id: Uuid,
+    ) -> impl Future<Output = Result<u16, Self::Err>> + Send;
+
+    /// Record that the first `passed` of its repository's setup commands
+    /// passed in the Step `key`'s session `session_id`, while the Step
+    /// holds it. False when it no longer does.
+    fn record_setup_passed(
+        &self,
+        key: StepKey,
+        session_id: Uuid,
+        passed: u16,
+    ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
+
     /// The session the Step `key` claimed, as a stop sees it: whether it
     /// opened, and whether a prepare sent less than `lands_within` ago may
     /// still open it.

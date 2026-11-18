@@ -63,6 +63,8 @@ pub(crate) struct FakeSession {
     /// When an attempt last asked for the session to be opened.
     pub(crate) prepared_at: Option<chrono::DateTime<Utc>>,
     pub(crate) opened: bool,
+    /// The session whose setup commands passed, and how many of them.
+    pub(crate) setup: Option<(Uuid, u16)>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -1047,6 +1049,7 @@ impl RunRepository for FakeRepo {
             released: false,
             prepared_at: None,
             opened: false,
+            setup: None,
         });
         Ok(ClaimedSession { session, new: true })
     }
@@ -1149,6 +1152,33 @@ impl RunRepository for FakeRepo {
             claimed.opened = true;
         }
         Ok(())
+    }
+
+    async fn setup_passed(&self, key: StepKey, session_id: Uuid) -> Result<u16, FakeError> {
+        let sessions = self.sessions.lock().expect("sessions");
+        Ok(sessions
+            .iter()
+            .find(|claimed| claimed.key == key)
+            .and_then(|claimed| claimed.setup)
+            .filter(|(session, _)| *session == session_id)
+            .map_or(0, |(_, passed)| passed))
+    }
+
+    async fn record_setup_passed(
+        &self,
+        key: StepKey,
+        session_id: Uuid,
+        passed: u16,
+    ) -> Result<bool, FakeError> {
+        if !self.holds_session(key, session_id).await? {
+            return Ok(false);
+        }
+        let mut sessions = self.sessions.lock().expect("sessions");
+        let Some(claimed) = sessions.iter_mut().find(|claimed| claimed.key == key) else {
+            return Ok(false);
+        };
+        claimed.setup = Some((session_id, passed));
+        Ok(true)
     }
 
     async fn stopping_session(
@@ -1345,6 +1375,7 @@ impl RunRepository for FakeRepo {
                     checks: start.checks.clone(),
                     commands: start.commands.clone(),
                     declared: start.declared.clone(),
+                    setup: start.setup.clone(),
                     started_at: Utc::now(),
                     end: None,
                     work_output: start.work_output.clone(),

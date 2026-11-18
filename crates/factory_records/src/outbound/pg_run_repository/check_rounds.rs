@@ -23,6 +23,7 @@ struct CheckRoundRow {
     checks: Vec<String>,
     commands: Vec<String>,
     declared: String,
+    setup: Option<String>,
     check_action_id: Uuid,
     started_at: DateTime<Utc>,
     outcome: Option<String>,
@@ -66,6 +67,7 @@ impl TryFrom<CheckRoundRow> for CheckRound {
             checks: row.checks,
             commands: row.commands,
             declared: row.declared,
+            setup: row.setup,
             started_at: row.started_at,
             end,
             work_output: row.work_output,
@@ -86,8 +88,8 @@ impl PgRunRepository {
             CheckRoundRow,
             r#"
             SELECT
-                run_id, seq, round, work_output, checks, commands, declared, check_action_id,
-                started_at,
+                run_id, seq, round, work_output, checks, commands, declared, setup,
+                check_action_id, started_at,
                 outcome, report, ended_at, fix_action_id, quota_ran_out, verified, results,
                 checked_commit
             FROM factory_check_round
@@ -118,8 +120,8 @@ impl PgRunRepository {
             CheckRoundRow,
             r#"
             SELECT
-                run_id, seq, round, work_output, checks, commands, declared, check_action_id,
-                started_at,
+                run_id, seq, round, work_output, checks, commands, declared, setup,
+                check_action_id, started_at,
                 outcome, report, ended_at, fix_action_id, quota_ran_out, verified, results,
                 checked_commit
             FROM factory_check_round
@@ -194,8 +196,9 @@ impl PgRunRepository {
         sqlx::query!(
             r#"
             INSERT INTO factory_check_round
-                (run_id, seq, round, work_output, checks, commands, declared, check_action_id)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                (run_id, seq, round, work_output, checks, commands, declared, check_action_id,
+                setup)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             ON CONFLICT (run_id, seq, round) DO NOTHING
             "#,
             key.run_id.as_uuid(),
@@ -206,6 +209,7 @@ impl PgRunRepository {
             &start.commands,
             start.declared,
             start.check_action_id,
+            start.setup,
         )
         .execute(&self.pool)
         .await?;

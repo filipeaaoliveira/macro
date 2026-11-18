@@ -19,6 +19,7 @@ use crate::domain::control_files::ControlFilesError;
 use crate::domain::definition::DefinitionError;
 use crate::domain::flow::{Entry, Flow, FlowError, StepName};
 use crate::domain::gate_owner::OwnerNote;
+use crate::domain::setup::RepositorySetup;
 
 /// What a Run's workflow starts with. The Run's request stays in its
 /// records, so a Run's history carries ids, not its text.
@@ -205,6 +206,10 @@ pub struct AgentTask {
     /// owner's answers in it: what a new session is prompted with when the
     /// asking Step's cannot be resumed.
     pub afresh: Option<String>,
+    /// The repository's setup, read from the Run's base, which each new
+    /// session of the Step runs before its first prompt; none when the Run
+    /// works on no repository or its base declares no setup.
+    pub setup: Option<RepositorySetup>,
 }
 
 /// What the Run's owner's Step Terminal asks of the agent session a Step
