@@ -155,7 +155,8 @@ function TimelineStep(props: {
               variant="outline"
               size="xs"
               class={cn(
-                fellShort(end().outcome) && 'border-failure/30 text-failure'
+                fellShort(end().outcome, props.step.gate?.answer?.answer) &&
+                  'border-failure/30 text-failure'
               )}
             >
               {flowWordLabel(end().outcome)}

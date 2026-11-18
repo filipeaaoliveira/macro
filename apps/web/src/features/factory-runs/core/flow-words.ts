@@ -34,7 +34,13 @@ const SHORT_OUTCOMES = new Set([
   'unresolved',
 ]);
 
-/** Whether a Step's `outcome` says its work fell short. */
-export function fellShort(outcome: string): boolean {
+/**
+ * Whether a Step's `outcome` says its work fell short. A Step whose agent
+ * stopped without a result (`no_result`) fell short once its owner
+ * answered its Gate `stop` (`answer`), as insights count it; retried, or
+ * still waiting on them, it did not.
+ */
+export function fellShort(outcome: string, answer?: string): boolean {
+  if (outcome === 'no_result') return answer === 'stop';
   return SHORT_OUTCOMES.has(outcome);
 }

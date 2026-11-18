@@ -28,4 +28,10 @@ describe('flow words', () => {
       expect(fellShort(outcome)).toBe(false);
     }
   });
+
+  it('names a step without a result short only once its owner stopped it', () => {
+    expect(fellShort('no_result', 'stop')).toBe(true);
+    expect(fellShort('no_result', 'retry')).toBe(false);
+    expect(fellShort('no_result')).toBe(false);
+  });
 });
