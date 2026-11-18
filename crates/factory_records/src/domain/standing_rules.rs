@@ -4,7 +4,9 @@
 //! team may give one Project (an initiative) a definition of its own. A Run
 //! keeps the definition it was created with. Its owner section says what
 //! happens to the Gates no rule answers: with it on, they go to the Run's
-//! owner (`owner_gates`). Its task thread section says whether a Run posts
+//! owner (`owner_gates`). A Gate that waits on the Run's owner notifies
+//! them unless the definition turns that off (`quiet_gates`). Its task
+//! thread section says whether a Run posts
 //! its updates to its task's comments (`task_thread`). Its Queue limit says
 //! how many places a person may hold in their Queue (Runs waiting on them
 //! at a Gate or a question, and Runs of a Flow with a Gate yet to reach
@@ -92,6 +94,12 @@ pub enum StandingRule {
 /// The name the owner section is stored under, beside the Gate kinds.
 pub const OWNER_GATES: &str = "owner_gates";
 
+/// The name a definition that turns off the owner's Gate notifications is
+/// stored under, beside the Gate kinds. It is an opt-out: a definition
+/// without it notifies, so a team or Project that never set it, and the
+/// factory's default, do.
+pub const QUIET_GATES: &str = "quiet_gates";
+
 /// The name the task thread section is stored under, beside the Gate
 /// kinds.
 pub const TASK_THREAD: &str = "task_thread";
@@ -124,15 +132,23 @@ pub struct OrchestratorDefinition {
     /// Merge once CI is green, nothing is Tampered and the base branch has
     /// no Main Hold (`merge_when_green`).
     pub merge: bool,
-    /// The owner section: a Gate no rule answers goes to the Run's owner.
-    /// They are notified, and the Gate is listed as waiting on them; a
-    /// review round whose Blockers are the round before's, unchanged after
-    /// a rule sent those to a fix, waits for them rather than another fix;
-    /// and what they comment on the Run's task once a Gate opened reaches
-    /// the next agent Step. Off, the factory leaves those Gates waiting as
-    /// before. A definition sent without it has it off.
+    /// The owner section: a review round whose Blockers are the round
+    /// before's, unchanged after a rule sent those to a fix, waits for the
+    /// Run's owner rather than another fix; and what they comment on the
+    /// Run's task once a Gate opened reaches the next agent Step. Off, the
+    /// factory fixes those Blockers again, and the Steps read no comment. A
+    /// definition sent without it has it off.
     #[serde(default)]
     pub owner_gates: bool,
+    /// Whether the Run's owner is left unnotified when a Gate waits on
+    /// them: off, as when a definition is sent without it, every Gate no
+    /// rule or stand-in answers (a Flow's Gate or an agent's question)
+    /// notifies them, pushed to their phone, whether or not the Run has a
+    /// task. On, they are not notified; the Gate still waits on them and
+    /// is listed as waiting. A notify-only Gate's notice and the
+    /// stand-in's are sent either way.
+    #[serde(default)]
+    pub quiet_gates: bool,
     /// The task thread section: a Run on a task posts its main updates
     /// (its start, each Step's end, its Gates, its pull request, its merge
     /// and how it ended) to one comment thread on the task, as its owner.
@@ -213,6 +229,7 @@ impl OrchestratorDefinition {
         blockers: true,
         merge: false,
         owner_gates: false,
+        quiet_gates: false,
         task_thread: false,
         queue_limit: None,
         stand_in: StandInKinds {
@@ -255,7 +272,8 @@ impl OrchestratorDefinition {
     }
 
     /// The kinds its rules decide, then [`OWNER_GATES`] when its owner
-    /// section is on, then the kinds the stand-in answers
+    /// section is on, then [`QUIET_GATES`] when its Gates notify no one,
+    /// then the kinds the stand-in answers
     /// (`stand_in_plan`, `stand_in_blockers`), then those the Orchestrator
     /// may approve (`orchestrator_plan`, `orchestrator_blockers`), then
     /// [`TASK_THREAD`] when its task thread section is on: what is stored of
@@ -270,6 +288,7 @@ impl OrchestratorDefinition {
         .filter(|kind| self.decides(*kind))
         .map(|kind| kind.to_string());
         let owner = self.owner_gates.then(|| OWNER_GATES.to_string());
+        let quiet = self.quiet_gates.then(|| QUIET_GATES.to_string());
         let stood_in = [
             (self.stand_in.plan, STAND_IN_PLAN),
             (self.stand_in.blockers, STAND_IN_BLOCKERS),
@@ -287,6 +306,7 @@ impl OrchestratorDefinition {
         let thread = self.task_thread.then(|| TASK_THREAD.to_string());
         ruled
             .chain(owner)
+            .chain(quiet)
             .chain(stood_in)
             .chain(orchestrated)
             .chain(thread)
@@ -300,6 +320,7 @@ impl OrchestratorDefinition {
         for kind in kinds {
             match kind.as_str() {
                 OWNER_GATES => definition.owner_gates = true,
+                QUIET_GATES => definition.quiet_gates = true,
                 TASK_THREAD => definition.task_thread = true,
                 STAND_IN_PLAN => definition.stand_in.plan = true,
                 STAND_IN_BLOCKERS => definition.stand_in.blockers = true,

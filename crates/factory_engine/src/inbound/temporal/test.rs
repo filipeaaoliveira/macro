@@ -1386,6 +1386,7 @@ async fn failed_acceptance_goes_to_the_blockers_rule_and_is_fixed() {
             blockers: true,
             merge: true,
             owner_gates: false,
+            quiet_gates: false,
             task_thread: false,
             queue_limit: None,
             orchestrator: factory_records::domain::standing_rules::OrchestratorKinds {
@@ -1455,6 +1456,7 @@ async fn a_run_whose_rules_decide_every_gate_merges_with_no_person_asked() {
             blockers: true,
             merge: true,
             owner_gates: false,
+            quiet_gates: false,
             task_thread: false,
             queue_limit: None,
             orchestrator: factory_records::domain::standing_rules::OrchestratorKinds {
@@ -1516,6 +1518,7 @@ async fn a_gate_of_no_kind_waits_for_a_person_whatever_the_rules() {
             blockers: true,
             merge: true,
             owner_gates: false,
+            quiet_gates: false,
             task_thread: false,
             queue_limit: None,
             orchestrator: factory_records::domain::standing_rules::OrchestratorKinds {
