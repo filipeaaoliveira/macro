@@ -635,7 +635,9 @@ A repository prepares a fresh checkout for the factory in `.macro/setup.json`
 on its base branch (`src/domain/setup.rs`): `setup`, a list of commands, each
 a `name`, a `run` from the repository's root and an optional `timeout`
 (seconds, 1 to 1200, default 600), at most 16; and `env`, at most 32 plain
-values (`export`ed before each command and each check). It is read as the
+values, `export`ed inside the script `bash` runs for each command and each
+check (never before `timeout` or `bash`), single-quoted and so never
+expanded: `$PATH` in a value stays that text. It is read as the
 checks file is, from the Run's recorded base branch, never the Run's branch,
 and is a default Control File. A file that does not read (over 16 KiB, not
 JSON, a key named twice or not known, a bad name, command or timeout, an

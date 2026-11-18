@@ -16,7 +16,9 @@
 //! `bash --noprofile --norc`, under its own `timeout` (seconds, 1 to 1200,
 //! 600 when left out): before the first prompt of each new agent session of
 //! a Step, and in a checks round's worktree before its checks. `env` holds
-//! plain values every command, and every check, runs with. Secrets never
+//! plain values every command, and every check, runs with, exported inside
+//! the script `bash` runs. A value is taken as it is written, never
+//! expanded: `"$HOME/cache"` is that text, not a path under the home. Secrets never
 //! live here: a file holding something shaped like a key or a token, or an
 //! `env` name that says it holds one, does not read.
 
@@ -211,7 +213,8 @@ impl RepositorySetup {
     }
 
     /// Its `env` as shell that exports each value, one line each; nothing
-    /// when it holds none.
+    /// when it holds none. A value is single-quoted: never expanded, so
+    /// `$PATH` in one stays those five characters.
     pub fn exports(&self) -> String {
         self.env
             .iter()
@@ -220,13 +223,14 @@ impl RepositorySetup {
     }
 
     /// The shell that runs `command` from the directory it runs in, with
-    /// the setup's `env`, under the command's timeout.
+    /// the setup's `env`, under the command's timeout. The values are
+    /// exported inside the script `bash` runs, so none reaches `timeout`
+    /// or `bash` themselves.
     pub fn shell(&self, command: &SetupCommand) -> String {
         format!(
-            "{}timeout --kill-after=10 {} bash --noprofile --norc -c {}",
-            self.exports(),
+            "timeout --kill-after=10 {} bash --noprofile --norc -c {}",
             command.timeout,
-            shell_quote(&command.run)
+            shell_quote(&format!("{}{}", self.exports(), command.run))
         )
     }
 }

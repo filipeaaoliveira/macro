@@ -32,16 +32,18 @@ fn an_empty_setup_asks_for_nothing() {
     assert_eq!(setup.exports(), "");
 }
 
+/// The values are exported inside the script `bash` runs, never before
+/// `timeout` or `bash`, and single-quoted, so they are never expanded.
 #[test]
 fn a_command_runs_with_the_env_under_its_timeout() {
     let setup = RepositorySetup::parse(
-        r#"{"setup":[{"name":"install","run":"echo 'hi' && make"}],"env":{"A":"it's"}}"#,
+        r#"{"setup":[{"name":"install","run":"make"}],"env":{"PATH":"$PATH:/opt/bin"}}"#,
     )
     .expect("parse");
 
     assert_eq!(
         setup.shell(&setup.setup[0]),
-        "export A='it'\\''s'\ntimeout --kill-after=10 600 bash --noprofile --norc -c 'echo '\\''hi'\\'' && make'"
+        "timeout --kill-after=10 600 bash --noprofile --norc -c 'export PATH='\\''$PATH:/opt/bin'\\''\nmake'"
     );
 }
 

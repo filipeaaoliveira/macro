@@ -66,8 +66,8 @@ async fn a_new_session_runs_the_setup_before_its_first_prompt() {
     assert_eq!(
         commands(&sessions),
         [
-            "export CACHE_DIR='/tmp/cache'\ntimeout --kill-after=10 600 bash --noprofile --norc -c 'bun install'",
-            "export CACHE_DIR='/tmp/cache'\ntimeout --kill-after=10 300 bash --noprofile --norc -c 'just generate'",
+            "timeout --kill-after=10 600 bash --noprofile --norc -c 'export CACHE_DIR='\\''/tmp/cache'\\''\nbun install'",
+            "timeout --kill-after=10 300 bash --noprofile --norc -c 'export CACHE_DIR='\\''/tmp/cache'\\''\njust generate'",
         ]
     );
     let calls = sessions.exec_calls.lock().expect("execs");
@@ -139,7 +139,7 @@ async fn a_retry_in_the_same_session_skips_the_setup_that_passed() {
     agent.answer(task.clone()).await.expect("retried");
     let ran = commands(&sessions);
     assert_eq!(ran.len(), 3);
-    assert!(ran[2].ends_with("'just generate'"), "{}", ran[2]);
+    assert!(ran[2].ends_with("just generate'"), "{}", ran[2]);
     assert_eq!(sessions.prompts(), 1);
 
     agent.answer(task).await.expect("retried again");
