@@ -59,6 +59,11 @@ const MAX_TEXT_BYTES: usize = 2048;
 /// stays within what a check runs.
 const MAX_RUN_BYTES: usize = 1024;
 
+/// Why a check a recorded plan marked `deployed` is checked by hand: it
+/// needed the deployed change, and the factory ends a Run at its merge.
+const DEPLOYED_BY_HAND: &str = "its check needed the deployed change, which the factory no longer \
+     waits for: check it as far as the branch shows";
+
 /// What opens and closes a fenced block.
 const FENCE: &str = "```";
 
@@ -116,10 +121,11 @@ struct WrittenClause {
     timeout: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     none: Option<String>,
-    /// Read and ignored: a plan recorded before Runs ended at their merge
-    /// may mark a check as one of the deployed change. Never written.
-    #[serde(default, rename = "deployed", skip_serializing)]
-    _deployed: serde::de::IgnoredAny,
+    /// Read, never written: a plan recorded before Runs ended at their
+    /// merge may mark a check as one of the deployed change, which nothing
+    /// deploys now. Such a check is checked by hand.
+    #[serde(default, skip_serializing)]
+    deployed: bool,
 }
 
 /// Why a plan's acceptance checks do not read.
@@ -196,7 +202,11 @@ impl AcceptanceChecks {
                     if timeout == 0 || timeout > MAX_CHECK_TIMEOUT_SECS {
                         return Err(AcceptanceError::Timeout(number));
                     }
-                    AcceptanceCheck::Run { run, timeout }
+                    if written.deployed {
+                        AcceptanceCheck::None(DEPLOYED_BY_HAND.to_string())
+                    } else {
+                        AcceptanceCheck::Run { run, timeout }
+                    }
                 }
                 (None, Some(why), None) if usable(&why, MAX_TEXT_BYTES) => {
                     AcceptanceCheck::None(why.trim().to_string())
@@ -217,9 +227,19 @@ impl AcceptanceChecks {
             .iter()
             .rev()
             .find(|step| step.entry.as_str() == PLAN_STEP && step.end.is_some());
-        match plan.and_then(|plan| plan.end.as_ref()) {
-            Some(end) => Self::from_plan(&end.output),
-            None => Ok(None),
+        let Some(end) = plan.and_then(|plan| plan.end.as_ref()) else {
+            return Ok(None);
+        };
+        // Checks too large to keep were dropped with their block: the note
+        // the plan kept in their place says so.
+        match Self::from_plan(&end.output)? {
+            None if end
+                .output
+                .contains(&unreadable_note(&AcceptanceError::TooLarge)) =>
+            {
+                Err(AcceptanceError::TooLarge)
+            }
+            checks => Ok(checks),
         }
     }
 
@@ -264,7 +284,7 @@ impl AcceptanceChecks {
                         run,
                         timeout,
                         none,
-                        _deployed: serde::de::IgnoredAny,
+                        deployed: false,
                     }
                 })
                 .collect(),

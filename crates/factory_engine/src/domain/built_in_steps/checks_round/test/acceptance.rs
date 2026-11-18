@@ -470,10 +470,16 @@ async fn a_plan_on_a_repository_keeps_its_acceptance_checks() {
 }
 
 /// A plan recorded before Runs ended at their merge may mark a check
-/// `deployed`: the Run keeps every check, and `accept` runs both.
+/// `deployed`: nothing deploys the change now, so `accept` never runs that
+/// check, which would fail, and lists its clause for the verifier to check
+/// by hand. The other check runs.
 #[tokio::test]
-async fn a_recorded_plan_s_deployed_check_still_runs() {
-    let agent = verifier("pass", vec![ran(0, "ok"), ran(0, "ok")], HEAD);
+async fn a_recorded_plan_s_deployed_check_is_checked_by_hand() {
+    let agent = verifier(
+        "pass",
+        vec![ran(0, "ok"), ran(7, "MACRO_DEPLOY_URL is not set")],
+        HEAD,
+    );
     let github = github(None, None);
     let repo = FakeRepo::default();
     let earlier = recorded(
@@ -482,7 +488,7 @@ async fn a_recorded_plan_s_deployed_check_still_runs() {
 ```json
 {"acceptance": [
   {"clause": "The toggle switches the theme", "run": "bun test toggle"},
-  {"clause": "The live page serves it", "run": "bun test live", "deployed": true}
+  {"clause": "The live page serves it", "run": "curl -f \"$MACRO_DEPLOY_URL/toggle\"", "deployed": true}
 ]}
 ```"#,
     );
@@ -496,9 +502,16 @@ async fn a_recorded_plan_s_deployed_check_still_runs() {
         .expect("accept");
 
     assert_eq!(report.outcome.as_str(), "pass", "{}", report.output);
-    assert_eq!(
-        rounds(&repo, input).await[0].checks,
-        ["acceptance-1", "acceptance-2"]
+    let commands = commands(&agent);
+    assert_eq!(commands.len(), 1, "{commands:?}");
+    assert!(commands[0].ends_with("bun test toggle"), "{}", commands[0]);
+    assert_eq!(rounds(&repo, input).await[0].checks, ["acceptance-1"]);
+    assert!(
+        report
+            .output
+            .contains("- The live page serves it: no check (its check needed the deployed change"),
+        "{}",
+        report.output
     );
     assert!(!report.output.contains("did not read"), "{}", report.output);
 }

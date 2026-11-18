@@ -1,4 +1,5 @@
-use factory_records::domain::models::MAX_OUTPUT_BYTES;
+use chrono::Utc;
+use factory_records::domain::models::{EntryId, MAX_OUTPUT_BYTES, Outcome, Step, StepEnd};
 
 use super::{Acceptance, AcceptanceCheck, AcceptanceChecks, AcceptanceError, plan_output};
 
@@ -169,10 +170,10 @@ fn a_clause_is_shown_as_data() {
 }
 
 /// A plan recorded before Runs ended at their merge may mark a check
-/// `deployed`: the mark is read and ignored, so the Run keeps every check,
-/// and the factory never writes it back.
+/// `deployed`: nothing deploys the change now, so that check is never run,
+/// and its clause is checked by hand. The mark is never written back.
 #[test]
-fn a_recorded_plan_s_deployed_mark_is_ignored() {
+fn a_recorded_plan_s_deployed_check_is_checked_by_hand() {
     let plan = r#"```json
 {"acceptance": [
   {"clause": "A", "run": "bun test a"},
@@ -187,8 +188,52 @@ fn a_recorded_plan_s_deployed_mark_is_ignored() {
 
     assert_eq!(checks.clauses.len(), 3);
     assert!(matches!(
-        checks.clauses[1].check,
-        AcceptanceCheck::Run { ref run, .. } if run.starts_with("curl")
+        checks.clauses[0].check,
+        AcceptanceCheck::Run { .. }
     ));
-    assert!(!checks.block().contains("deployed"), "{}", checks.block());
+    assert!(matches!(
+        checks.clauses[1].check,
+        AcceptanceCheck::None(ref why) if why.starts_with("its check needed the deployed change")
+    ));
+    assert_eq!(
+        checks.clauses[2].check,
+        AcceptanceCheck::None("only a person sees it".to_string())
+    );
+    assert!(!checks.block().contains("deployed\""), "{}", checks.block());
+}
+
+/// Checks too large for the plan to keep were dropped with their block:
+/// the Run's checks then do not read, rather than reading as none.
+#[test]
+fn checks_dropped_for_their_size_do_not_read() {
+    let clauses: Vec<String> = (0..16)
+        .map(|n| format!(r#"{{"clause": "{n} {}", "run": "true"}}"#, "x".repeat(1500)))
+        .collect();
+    let plan = format!(
+        "Change it.\n\n```json\n{{\"acceptance\": [{}]}}\n```",
+        clauses.join(",")
+    );
+    let kept = plan_output(&plan);
+    let step = Step {
+        seq: 1,
+        entry: EntryId::try_from("plan".to_string()).expect("valid"),
+        visit: 1,
+        started_at: Utc::now(),
+        role: None,
+        agent: None,
+        passed_over: Vec::new(),
+        end: Some(StepEnd {
+            outcome: Outcome::done(),
+            output: kept,
+            ended_at: Utc::now(),
+        }),
+        gate: None,
+        checks: Vec::new(),
+        terminal: Default::default(),
+    };
+
+    assert_eq!(
+        AcceptanceChecks::of_run(&[step]),
+        Err(AcceptanceError::TooLarge)
+    );
 }
