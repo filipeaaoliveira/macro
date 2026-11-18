@@ -11,8 +11,6 @@
 export interface BenchmarkSummary {
   /** Its name. */
   name: string;
-  /** The repository its trials work on. */
-  repository: string;
   /** The Scorers that judge each trial. */
   scorers: string[];
   /** Its frozen tasks, by name. */

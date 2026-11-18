@@ -152,8 +152,14 @@ export class Sdk extends HeyApiClient {
 
     /**
      * Start a suite of a Benchmark: one trial Run, owned by the caller, of
-     * each of its frozen tasks, on the configuration the body gives. Each trial
-     * keeps a score and the tokens its agents used once its Run ends.
+     * each of its frozen tasks, on the configuration the body gives, each from
+     * the commit its task pins or the default branch's head as the suite
+     * starts. Each trial keeps a score and the tokens its agents used once its
+     * Run ends, and its branch is then deleted. A suite of the same Benchmark
+     * of the caller's that still runs, or more running trials than the caller
+     * may have, refuse it (409). A trial whose Run is refused stops the suite:
+     * the trials before it go on, and `refused` names it; when none started,
+     * the error is returned and nothing is kept.
      */
     public startFactoryBenchmarkSuite<ThrowOnError extends boolean = false>(options: Options<StartFactoryBenchmarkSuiteData, ThrowOnError>): RequestResult<StartFactoryBenchmarkSuiteResponses, StartFactoryBenchmarkSuiteErrors, ThrowOnError> {
         return (options.client ?? this.client).post<StartFactoryBenchmarkSuiteResponses, StartFactoryBenchmarkSuiteErrors, ThrowOnError>({

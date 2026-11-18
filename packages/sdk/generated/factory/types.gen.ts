@@ -46,6 +46,11 @@ export type ArmInsight = {
      */
     ended: number;
     /**
+     * How many had a Step the arm's Agent could not start, which another
+     * Agent of its Role took: their results are not the arm's alone.
+     */
+    fellBack: number;
+    /**
      * Its name.
      */
     name: string;
@@ -245,10 +250,6 @@ export type BenchmarkSummary = {
      * Its name.
      */
     name: string;
-    /**
-     * The repository its trials work on.
-     */
-    repository: string;
     /**
      * The Scorers that judge each trial.
      */
@@ -998,6 +999,20 @@ export type ProjectRules = {
 };
 
 /**
+ * A trial whose Run was refused.
+ */
+export type RefusedTrial = {
+    /**
+     * Why its Run was refused.
+     */
+    reason: string;
+    /**
+     * The frozen task.
+     */
+    task: string;
+};
+
+/**
  * Request body for replying to a Gate in words.
  */
 export type ReplyToGateRequest = {
@@ -1744,6 +1759,7 @@ export type SuiteStarted = {
      * The suite.
      */
     id: string;
+    refused?: null | RefusedTrial;
     /**
      * Its trials' Runs, by task.
      */

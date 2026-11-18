@@ -499,7 +499,7 @@
     "/benchmarks/{benchmark}/suites": {
       "post": {
         "tags": ["factory"],
-        "summary": "Start a suite of a Benchmark: one trial Run, owned by the caller, of\neach of its frozen tasks, on the configuration the body gives. Each trial\nkeeps a score and the tokens its agents used once its Run ends.",
+        "summary": "Start a suite of a Benchmark: one trial Run, owned by the caller, of\neach of its frozen tasks, on the configuration the body gives, each from\nthe commit its task pins or the default branch's head as the suite\nstarts. Each trial keeps a score and the tokens its agents used once its\nRun ends, and its branch is then deleted. A suite of the same Benchmark\nof the caller's that still runs, or more running trials than the caller\nmay have, refuse it (409). A trial whose Run is refused stops the suite:\nthe trials before it go on, and `refused` names it; when none started,\nthe error is returned and nothing is kept.",
         "operationId": "start_factory_benchmark_suite",
         "parameters": [
           {
@@ -2517,7 +2517,15 @@
       "ArmInsight": {
         "type": "object",
         "description": "How one arm's Runs did.",
-        "required": ["name", "agents", "runs", "ended", "succeeded", "scores"],
+        "required": [
+          "name",
+          "agents",
+          "runs",
+          "ended",
+          "succeeded",
+          "fellBack",
+          "scores"
+        ],
         "properties": {
           "agents": {
             "type": "object",
@@ -2533,6 +2541,12 @@
             "type": "integer",
             "format": "int32",
             "description": "How many of them ended.",
+            "minimum": 0
+          },
+          "fellBack": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many had a Step the arm's Agent could not start, which another\nAgent of its Role took: their results are not the arm's alone.",
             "minimum": 0
           },
           "name": {
@@ -2800,15 +2814,11 @@
       "BenchmarkSummary": {
         "type": "object",
         "description": "A Benchmark one may start a suite of.",
-        "required": ["name", "repository", "tasks", "scorers"],
+        "required": ["name", "tasks", "scorers"],
         "properties": {
           "name": {
             "type": "string",
             "description": "Its name."
-          },
-          "repository": {
-            "type": "string",
-            "description": "The repository its trials work on."
           },
           "scorers": {
             "type": "array",
@@ -3779,6 +3789,21 @@
             "type": "string",
             "format": "uuid",
             "description": "The Project: an initiative's id."
+          }
+        }
+      },
+      "RefusedTrial": {
+        "type": "object",
+        "description": "A trial whose Run was refused.",
+        "required": ["task", "reason"],
+        "properties": {
+          "reason": {
+            "type": "string",
+            "description": "Why its Run was refused."
+          },
+          "task": {
+            "type": "string",
+            "description": "The frozen task."
           }
         }
       },
@@ -4863,6 +4888,17 @@
             "type": "string",
             "format": "uuid",
             "description": "The suite."
+          },
+          "refused": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RefusedTrial",
+                "description": "The task whose Run was refused, and why: the suite stopped there,\nand the trials before it go on. None when every trial started."
+              }
+            ]
           },
           "runs": {
             "type": "object",

@@ -19,6 +19,12 @@ agent definition's. */
    * @minimum 0
    */
   ended: number;
+  /**
+   * How many had a Step the arm's Agent could not start, which another
+Agent of its Role took: their results are not the arm's alone.
+   * @minimum 0
+   */
+  fellBack: number;
   /** Its name. */
   name: string;
   /**

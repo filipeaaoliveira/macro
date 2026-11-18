@@ -4,6 +4,7 @@
  * factory_engine
  * OpenAPI spec version: 0.1.0
  */
+import type { SuiteStartedRefused } from './suiteStartedRefused';
 import type { SuiteStartedRuns } from './suiteStartedRuns';
 
 /**
@@ -12,6 +13,7 @@ import type { SuiteStartedRuns } from './suiteStartedRuns';
 export interface SuiteStarted {
   /** The suite. */
   id: string;
+  refused?: SuiteStartedRefused;
   /** Its trials' Runs, by task. */
   runs: SuiteStartedRuns;
 }
