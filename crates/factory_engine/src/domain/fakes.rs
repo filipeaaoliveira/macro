@@ -1381,6 +1381,13 @@ pub(crate) struct FakeGithubState {
     pub(crate) delete_fails: bool,
     /// Whether an open pull request is based on the Run's branch.
     pub(crate) based_on_branch: bool,
+    /// Whether asking for pull requests based on a branch fails, as GitHub
+    /// down does.
+    pub(crate) onto_fails: bool,
+    /// The branches pull requests based on them were asked for, in order.
+    pub(crate) onto_asked: Vec<String>,
+    /// How many times what the owner may do with the repository was read.
+    pub(crate) access_reads: usize,
 }
 
 /// GitHub in memory, for one Run's branch: opening its pull request makes
@@ -1492,7 +1499,8 @@ impl PullRequests for FakeGithub {
         _owner: &MacroUserIdStr<'static>,
         _repository: &CodeRepository,
     ) -> Result<Option<RepositoryAccess>, FakeGithubError> {
-        let state = self.state();
+        let mut state = self.state();
+        state.access_reads += 1;
         Ok((!state.unreachable).then(|| RepositoryAccess {
             default_branch: "main".to_string(),
             can_push: !state.read_only,
@@ -1663,9 +1671,14 @@ impl PullRequests for FakeGithub {
         &self,
         _owner: &MacroUserIdStr<'static>,
         _repository: &CodeRepository,
-        _branch: &str,
+        branch: &str,
     ) -> Result<bool, FakeGithubError> {
-        Ok(self.state().based_on_branch)
+        let mut state = self.state();
+        state.onto_asked.push(branch.to_string());
+        if state.onto_fails {
+            return Err(FakeGithubError::Down);
+        }
+        Ok(state.based_on_branch)
     }
 
     /// Deleting the Run's branch leaves it not there for later reads.

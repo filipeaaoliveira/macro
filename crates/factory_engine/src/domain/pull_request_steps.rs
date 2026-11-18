@@ -560,15 +560,19 @@ where
     /// Delete the Run's branch once its pull request merged at
     /// `merged_head`, as GitHub's "delete branch after merge" does. It is
     /// best effort: the pull request is merged either way, so a failure is
-    /// logged, never the Step's. Only the Run's own branch is deleted, and
-    /// only while it is at the commit merged: one pushed to since is kept.
-    /// That check is best effort too: GitHub deletes a branch on no
-    /// condition, so a push between the read of its head and the deletion
-    /// is lost with the branch.
+    /// logged, never the Step's.
+    ///
+    /// Only the Run's own branch is deleted, and only while it is at the
+    /// commit merged, so one pushed to since is kept, and while no open
+    /// pull request is based on it, as deleting it through the API would
+    /// close that pull request, where GitHub's own deletion moves it to the
+    /// base. GitHub deletes a branch on no condition, so both checks race
+    /// the deletion: a push, or a pull request based on the branch, made
+    /// between the reads and the deletion is lost with it, or closed.
+    ///
     /// A pull request a person merged leaves its branch to GitHub when the
-    /// repository deletes merged branches itself. A branch an open pull
-    /// request is based on is kept: deleting it through the API would close
-    /// that pull request, where GitHub's own deletion moves it to the base.
+    /// repository deletes merged branches itself, or when the repository
+    /// can no longer be read.
     async fn delete_merged_branch(&self, input: &StepInput<'_>, merged_head: &str, merger: Merger) {
         let branch = run_branch(input.key.run_id);
         let _ = self
@@ -595,8 +599,11 @@ where
                 .repository_access(input.owner, &repository)
                 .await
                 .map_err(PullRequestStepError::github)?;
-            let left_to_github = access.is_none_or(|access| access.deletes_merged_branches);
-            if left_to_github {
+            let Some(access) = access else {
+                tracing::info!(%branch, "kept the merged run's branch: no access to its repository");
+                return Ok(());
+            };
+            if access.deletes_merged_branches {
                 return Ok(());
             }
         }

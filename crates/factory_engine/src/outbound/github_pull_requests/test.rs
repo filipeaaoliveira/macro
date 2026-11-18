@@ -72,7 +72,11 @@ async fn only_a_run_s_branch_is_deleted() {
         linked: Some("token"),
         ..Tokens::default()
     };
-    let github = GithubPullRequests::new(tokens.clone());
+    // Nothing listens here: GitHub asked would fail as an outage.
+    let github = GithubPullRequests::with_client(
+        tokens.clone(),
+        GithubOauthImpl::with_api_base_url("http://127.0.0.1:9".to_string()),
+    );
 
     for branch in [
         "main",

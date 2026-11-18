@@ -53,6 +53,10 @@ async fn merging_deletes_the_run_s_branch() {
         [format!("factory/{run_id}")]
     );
 
+    // Pull requests based on the Run's branch were looked for, not on its
+    // base.
+    assert_eq!(github.state().onto_asked, [format!("factory/{run_id}")]);
+
     let again = steps(&github, &repo)
         .merge(input(run_id))
         .await
@@ -78,6 +82,7 @@ async fn merging_deletes_the_branch_without_reading_the_repository_s_setting() {
         .await
         .expect("merge");
 
+    assert_eq!(github.state().access_reads, 0);
     assert_eq!(
         github.state().deleted_branches,
         [format!("factory/{run_id}")]
@@ -162,6 +167,44 @@ async fn a_branch_another_pull_request_is_based_on_is_kept() {
         .merge(input(run_id))
         .await
         .expect("merge");
+
+    assert_eq!(outcome(&report), "merged");
+    assert!(github.state().deleted_branches.is_empty());
+}
+
+/// A branch whose pull requests could not be looked for is kept, and the
+/// merge stands.
+#[tokio::test]
+async fn a_branch_whose_pull_requests_cannot_be_read_is_kept() {
+    let github = github();
+    github.state().onto_fails = true;
+    let repo = FakeRepo::default();
+    let run_id = agreed(&repo).await;
+
+    let report = steps(&github, &repo)
+        .merge(input(run_id))
+        .await
+        .expect("merge");
+
+    assert_eq!(outcome(&report), "merged");
+    assert_eq!(github.state().merges, [FakeGithub::HEAD]);
+    assert!(github.state().deleted_branches.is_empty());
+}
+
+/// A pull request merged outside the Run, in a repository the owner can no
+/// longer read, keeps its branch.
+#[tokio::test]
+async fn a_repository_out_of_reach_keeps_the_branch() {
+    let github = github();
+    merged_on_github(&github);
+    github.state().unreachable = true;
+    let repo = FakeRepo::default();
+    let run_id = agreed(&repo).await;
+
+    let report = steps(&github, &repo)
+        .ready_to_merge(input(run_id))
+        .await
+        .expect("ready");
 
     assert_eq!(outcome(&report), "merged");
     assert!(github.state().deleted_branches.is_empty());
