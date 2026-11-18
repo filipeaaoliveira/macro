@@ -1,0 +1,43 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id, benchmark, agents AS \"agents: Json<serde_json::Value>\", created_at\n            FROM factory_benchmark_suite\n            WHERE user_id = $1 AND created_at >= $2 AND created_at < $3\n            ORDER BY created_at DESC, id DESC\n            LIMIT $4\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "benchmark",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "agents: Json<serde_json::Value>",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 3,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz",
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "2784aeb471c3031a42dd0e0b7a4a664bb93f2cc463f03715a4463942b0956352"
+}

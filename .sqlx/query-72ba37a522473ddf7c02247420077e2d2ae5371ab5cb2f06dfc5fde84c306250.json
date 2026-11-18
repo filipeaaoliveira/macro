@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT a.experiment, a.arm,\n                   (array_agg(a.agents ORDER BY r.created_at DESC))[1]\n                       AS \"agents!: Json<serde_json::Value>\",\n                   count(*) AS \"runs!\",\n                   count(r.outcome) AS \"ended!\",\n                   count(*) FILTER (WHERE r.outcome = 'success') AS \"succeeded!\"\n            FROM factory_run_arm a\n            JOIN factory_run r ON r.id = a.run_id\n            WHERE a.run_id = ANY($1)\n            GROUP BY a.experiment, a.arm\n            ORDER BY a.experiment, a.arm\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "experiment",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "arm",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "agents!: Json<serde_json::Value>",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 3,
+        "name": "runs!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "ended!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "succeeded!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "72ba37a522473ddf7c02247420077e2d2ae5371ab5cb2f06dfc5fde84c306250"
+}

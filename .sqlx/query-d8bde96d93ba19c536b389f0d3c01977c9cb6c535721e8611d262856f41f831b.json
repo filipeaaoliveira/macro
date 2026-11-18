@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO factory_run_score (run_id, scorer, score, reason, model)\n            VALUES ($1, $2, $3, $4, $5)\n            ON CONFLICT (run_id, scorer) DO NOTHING\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Float8",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d8bde96d93ba19c536b389f0d3c01977c9cb6c535721e8611d262856f41f831b"
+}

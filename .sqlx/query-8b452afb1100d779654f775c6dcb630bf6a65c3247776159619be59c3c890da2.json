@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT suite_id, task, scorer, score\n            FROM factory_benchmark_trial_score\n            WHERE suite_id = ANY($1)\n            ORDER BY suite_id, task, scorer\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "suite_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "task",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "scorer",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "score",
+        "type_info": "Float8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "8b452afb1100d779654f775c6dcb630bf6a65c3247776159619be59c3c890da2"
+}

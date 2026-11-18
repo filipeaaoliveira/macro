@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                    SELECT scorer FROM factory_benchmark_trial_score\n                    WHERE suite_id = $1 AND task = $2\n                    ORDER BY scorer\n                    ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "scorer",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "83181215958840d7bce3c97ca062f19f67fae2811b0af7b50fc357c3257ed1df"
+}

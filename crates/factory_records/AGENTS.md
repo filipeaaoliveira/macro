@@ -28,6 +28,9 @@ the Gates they asked people in MacroDB, and defines the names Flows use
 - `src/domain/automations.rs` and
   `src/outbound/pg_run_repository/automations.rs`: `AutomationRepository`,
   teams' Automations and each time one fired.
+- `src/domain/evaluation.rs` and
+  `src/outbound/pg_run_repository/evaluation.rs`: `EvaluationRepository`,
+  Experiment arms, Scorers' judgments, Benchmark suites and trials.
 - `src/domain/gate_replies.rs` and
   `src/outbound/pg_run_repository/gate_replies.rs`: `GateReplyRepository`,
   a person's answer read from their words, the factory asking back, the
@@ -64,7 +67,10 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261118141500_factory_orchestrator_answers.sql`,
   `20261118143000_factory_automation.sql`,
   `20261118150000_factory_standing_rules_names.sql`,
-  `20261118170000_factory_step_terminal.sql`), and `factory_step_steer`.
+  `20261118170000_factory_step_terminal.sql`,
+  `20261118210000_factory_evaluation.sql`), `factory_step_steer`,
+  `factory_run_score`, `factory_run_arm`, `factory_benchmark_suite`,
+  `factory_benchmark_trial` and `factory_benchmark_trial_score`.
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
 
 ## Boundaries
@@ -171,6 +177,9 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   and Gates by primary key, in one read-only
   snapshot under a 5 s timeout. Keep its first `WHERE` and `ORDER BY` on that
   index, and every later read on the Runs' ids.
+- A trial's judgments (`factory_benchmark_trial_score`) never go in
+  `factory_run_score`, and `read_insights` and `read_evaluation` leave Runs
+  of the `benchmark` Flow out, so a Benchmark moves no live number.
 - A Run's or Step's end columns are all null or all set (`factory_*_end`
   checks); the row mappings refuse anything else.
 - A Run that works on code keeps its repository and base branch together
