@@ -136,6 +136,12 @@ where
     /// trial opens no pull request, so the branch is of no more use. A
     /// branch found missing is gone all the same. A failure is logged and
     /// leaves the branch.
+    ///
+    /// Unlike a merged Run's branch, it is deleted without reading its head
+    /// or the pull requests based on it: a trial replays a task already
+    /// done from a pinned past commit, is never offered for merge, and is
+    /// deleted as its Run ends, so nothing is meant to be pushed to it or
+    /// based on it after.
     async fn delete_trial_branch(&self, subject: &ScoringSubject, trial: &SubjectTrial) {
         let Some(repository) = subject.repo_url.as_deref().and_then(CodeRepository::parse) else {
             return;

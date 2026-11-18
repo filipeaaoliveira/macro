@@ -304,7 +304,11 @@ name; one found missing counts as deleted), and, unless it was cancelled, the Sc
 its Benchmark names judge it into the trial's own record. A trial whose Run
 ended `infrastructure` never had its work run: it keeps no score or tokens,
 no Scorer judges it, and its suite counts it apart (`infrastructure`) and
-leaves it out of its score, even one kept before such trials kept none.
+leaves it out of its score, even one kept before such trials kept none. Unlike a merged
+Run's branch, a trial's is deleted without reading its head or the pull
+requests based on it: it replays a task already done from a pinned past
+commit, is never offered for merge, and is deleted as its Run ends, so
+nothing is meant to be pushed to it or based on it after.
 `GET /insights/evaluation` (same
 params as `/insights`) shows each Scorer's judgments, each Experiment's
 arms with their Runs' outcomes and scores, the Benchmarks and the caller's
