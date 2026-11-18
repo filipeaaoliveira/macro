@@ -4,14 +4,14 @@
 
 use std::time::Duration;
 
-use factory_records::domain::models::{ControlFileChanges, RunOutcome};
+use factory_records::domain::models::{ControlFileChanges, RunId, RunOutcome};
 use factory_records::domain::standing_rules::{
     OrchestratorDefinition, RulesSource, RunRules, StandInKinds,
 };
 
 use super::{CodeAgent, CodeWalk, PATIENCE, walk_code_with};
 use crate::domain::fakes::{FakeGateModel, FakeGithub, FakeNotifier, FakeRepo, ci};
-use crate::domain::gate_owner::notice_id;
+use crate::domain::gate_owner::{GateNotice, notice_id, stand_in_id};
 use crate::domain::gate_replies::GateReplySettings;
 
 fn rules(owner_gates: bool) -> RunRules {
@@ -144,14 +144,9 @@ async fn a_gate_the_stand_in_answers_is_not_told_to_the_owner() {
     .await;
 
     assert!(matches!(ended, Ok(RunOutcome::Success)), "{ended:?}");
-    let told: Vec<u16> = notifier
-        .sent
-        .lock()
-        .expect("sent")
-        .iter()
-        .map(|notice| notice.metadata.seq)
-        .collect();
+    let told = told(&notifier);
     assert_eq!(told, [merge_gate.expect("the merge gate opened")]);
+    assert_eq!(stand_in_told(&notifier), [1], "the stand-in's answer is told");
 }
 
 /// A stand-in's answer taken back when the window ends (the branch turned
@@ -188,7 +183,7 @@ async fn a_gate_whose_stand_in_answer_is_taken_back_is_told_to_the_owner() {
                     tokio::time::sleep(Duration::from_millis(50)).await;
                 }
                 // Nothing is told while the stand-in's answer may stand.
-                assert!(notifier.sent.lock().expect("sent").is_empty());
+                assert!(told(&notifier).is_empty());
                 run.repo
                     .control_file_changes
                     .lock()
@@ -212,13 +207,7 @@ async fn a_gate_whose_stand_in_answer_is_taken_back_is_told_to_the_owner() {
 
     assert!(matches!(ended, Ok(RunOutcome::Success)), "{ended:?}");
     let run_id = run_id.expect("walked");
-    let told: Vec<u16> = notifier
-        .sent
-        .lock()
-        .expect("sent")
-        .iter()
-        .map(|notice| notice.metadata.seq)
-        .collect();
+    let told = told(&notifier);
     assert_eq!(
         told.iter().filter(|seq| **seq == 1).count(),
         1,
@@ -289,15 +278,34 @@ async fn a_reply_that_answers_a_told_gate_marks_its_notification_done() {
     );
 }
 
-/// The places of the Gates `notifier` told the owner of, in order.
+/// The places of the Gates `notifier` told the owner wait for them, in
+/// order: not the notices that the stand-in answered one.
 fn told(notifier: &FakeNotifier) -> Vec<u16> {
+    notices(notifier, |notice| !by_stand_in(notice))
+}
+
+/// The Steps whose Gate the owner was told the stand-in answered for them.
+fn stand_in_told(notifier: &FakeNotifier) -> Vec<u16> {
+    notices(notifier, by_stand_in)
+}
+
+/// The Steps of the notices `notifier` was sent that `keep` keeps, in order.
+fn notices(notifier: &FakeNotifier, keep: impl Fn(&GateNotice) -> bool) -> Vec<u16> {
     notifier
         .sent
         .lock()
         .expect("sent")
         .iter()
+        .filter(|notice| keep(notice))
         .map(|notice| notice.metadata.seq)
         .collect()
+}
+
+/// Whether `notice` tells the owner the stand-in answered a Gate for them,
+/// which it does apart from the Gate's own notice.
+fn by_stand_in(notice: &GateNotice) -> bool {
+    let run_id = RunId::from_uuid(notice.metadata.run_id);
+    notice.notification_id == stand_in_id(run_id, notice.metadata.seq)
 }
 
 /// Words the owner gives in the stand-in's window, which the factory asks
@@ -332,7 +340,7 @@ async fn words_asked_back_in_the_stand_in_s_window_tell_the_owner() {
                 while run.gate(plan).await.stand_in.is_none() {
                     tokio::time::sleep(Duration::from_millis(50)).await;
                 }
-                assert!(notifier.sent.lock().expect("sent").is_empty());
+                assert!(told(&notifier).is_empty());
                 run.reply(plan, "Hmm, what about the tests?").await;
                 tokio::time::timeout(PATIENCE, async {
                     while told(&notifier).is_empty() {
