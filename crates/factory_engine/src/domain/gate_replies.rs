@@ -11,6 +11,7 @@
 //! let it stand, and looks at the Run's task for the owner's comments, a
 //! reply as any other.
 
+pub mod measure;
 pub mod service;
 #[cfg(test)]
 mod test;

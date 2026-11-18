@@ -34,6 +34,9 @@ pub struct AnsweredGate {
     pub entry: EntryId,
     /// The Run's owner.
     pub owner: MacroUserIdStr<'static>,
+    /// The built-in Flow the Run walked; none for a Run recorded before
+    /// Runs kept it.
+    pub flow: Option<String>,
     /// The Run's request.
     pub request: String,
     /// Who asked: the Flow, or the Step's agent.

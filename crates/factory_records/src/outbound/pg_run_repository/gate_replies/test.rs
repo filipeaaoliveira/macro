@@ -225,4 +225,5 @@ async fn past_answers_are_the_owner_s_own(pool: PgPool) {
     );
     assert_eq!(answered[0].kind, GateKind::Flow);
     assert_eq!(answered[0].request, "Older");
+    assert_eq!(answered[0].flow.as_deref(), Some("plan"));
 }
