@@ -143,11 +143,15 @@ const CLOSE_ROUND_TOTAL: Duration = Duration::from_secs(2 * 60 * 60);
 const SCORE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 /// How long scoring a Run may take in all, across its attempts, before it
-/// is given up on.
+/// is given up on. It must leave room for [`SCORE_ATTEMPTS`] attempts of
+/// [`SCORE_TIMEOUT`] with their backoff (here 3 × 5 minutes and seconds of
+/// backoff in 30 minutes), or an attempt that sees itself as last never
+/// runs, and what it would keep unchecked is never kept.
 const SCORE_TOTAL: Duration = Duration::from_secs(30 * 60);
 
 /// How many times scoring a Run is tried: a judge that keeps failing is
-/// given up on, rather than called again for half an hour.
+/// given up on, rather than called again for half an hour. The scoring
+/// activity's last attempt is the one numbered this.
 pub(crate) const SCORE_ATTEMPTS: u32 = 3;
 
 /// How long one attempt to stop a Step's agent may take: past the agent's

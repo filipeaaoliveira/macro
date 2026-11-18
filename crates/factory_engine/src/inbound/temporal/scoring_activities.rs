@@ -51,10 +51,30 @@ impl ScoringActivities {
         ctx: ActivityContext,
         run_id: RunId,
     ) -> Result<(), ActivityError> {
-        let last_attempt = ctx.info().attempt >= SCORE_ATTEMPTS;
+        let last_attempt = is_last_attempt(ctx.info().attempt);
         self.scoring
             .score_run(run_id, last_attempt)
             .await
             .map_err(failure)
+    }
+}
+
+/// Whether attempt `attempt` (counted from 1) of scoring is its last: the
+/// workflow allows [`SCORE_ATTEMPTS`]. Its `SCORE_TOTAL` must leave room for
+/// all of them, or Temporal stops the activity before its last attempt and
+/// this never holds.
+fn is_last_attempt(attempt: u32) -> bool {
+    attempt >= SCORE_ATTEMPTS
+}
+
+#[cfg(test)]
+mod test {
+    use super::is_last_attempt;
+
+    #[test]
+    fn only_the_third_attempt_is_the_last() {
+        assert!(!is_last_attempt(1));
+        assert!(!is_last_attempt(2));
+        assert!(is_last_attempt(3));
     }
 }
