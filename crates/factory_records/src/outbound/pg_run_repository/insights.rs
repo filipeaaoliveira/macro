@@ -143,7 +143,10 @@ impl RunInsightsRepository for PgRunRepository {
         // Gate, which the owner answers in words, is left out of the Gates'
         // counts and waits. So is a Step whose agent stopped without a
         // result and its Gate: its owner's `retry` goes on in the same
-        // visit, and their `stop` fails it, as its Flow routes it.
+        // visit, and their `stop` fails it, as its Flow routes it. A Step
+        // fails its entry when it failed for good, or its owner stopped it
+        // so, or a verifier failed a merged change (`fail`) or its deploy
+        // failed (`deploy_failed`).
         let entries = sqlx::query!(
             r#"
             WITH steps AS (

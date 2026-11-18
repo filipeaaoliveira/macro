@@ -719,3 +719,117 @@ async fn a_failed_verify_or_deploy_is_a_failed_step(pool: PgPool) {
     assert!(failed.contains(&("verify".to_string(), 1)), "{failed:?}");
     assert!(failed.contains(&("deploy".to_string(), 1)), "{failed:?}");
 }
+
+/// A verifier that stopped without a result counts as the Flow routes its
+/// owner's answer, beside the verifier's own failures: retried, it is one
+/// visit with the Step that went on and failed (`fail`); stopped, it is a
+/// `failed` Step. Both fail their entry, each Run once, and neither Gate
+/// nor its answer counts.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn a_verifier_without_a_result_counts_with_the_verifier_s_failures(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let julia = user("macro|julia@example.com");
+    let outcome = |name: &str| {
+        crate::domain::models::Outcome::try_from(name.to_string()).expect("valid outcome")
+    };
+    // Each Run's Steps of `verify`: what each ended with, and the owner's
+    // answer to a Step without a result.
+    let runs: [&[(&str, Option<&str>)]; 2] = [
+        &[("no_result", Some("retry")), ("fail", None)],
+        &[("no_result", Some("stop"))],
+    ];
+    let mut ids = Vec::new();
+    for steps in runs {
+        let id = RunId::generate();
+        let RunInsert::Inserted(_) = repo
+            .insert_run(NewRun {
+                id,
+                flow: "code",
+                request: "Ship the toggle",
+                user_id: &julia,
+                task_id: None,
+                repository: None,
+                created_in_person: false,
+                control_file_patterns: &[],
+                control_files_team_id: None,
+                standing_rules: RunRules::DEFAULT,
+                automation: None,
+            })
+            .await
+            .expect("insert")
+        else {
+            panic!("a run with no task is kept");
+        };
+        for (place, (ended, answer)) in steps.iter().enumerate() {
+            let key = crate::domain::models::StepKey {
+                run_id: id,
+                seq: u16::try_from(place + 1).expect("few steps"),
+            };
+            repo.start_step(key, &entry("verify"), 1)
+                .await
+                .expect("start");
+            repo.end_step(key, &outcome(ended), "The verifier's words")
+                .await
+                .expect("end");
+            if let Some(answer) = answer {
+                repo.open_gate(key, "Retry or stop?", &[outcome("retry"), outcome("stop")])
+                    .await
+                    .expect("open");
+                repo.answer_gate(key, &outcome(answer), None, &julia, None, None)
+                    .await
+                    .expect("answer");
+            }
+        }
+        ids.push(id);
+    }
+
+    let records = repo
+        .read_insights(&InsightsScope {
+            user_id: julia,
+            from: at("2000-01-01T00:00:00Z"),
+            to: at("2100-01-01T00:00:00Z"),
+            flow: None,
+            cap: 1000,
+        })
+        .await
+        .expect("read");
+
+    let verify = records
+        .entries
+        .iter()
+        .find(|summary| summary.entry == entry("verify"))
+        .expect("verify");
+    assert_eq!(
+        (
+            verify.steps,
+            verify.runs,
+            verify.revisited_runs,
+            verify.failed_runs,
+            verify.troubled_runs
+        ),
+        (3, 2, 0, 2, 2)
+    );
+    assert_eq!((verify.gates_opened, verify.gates_answered), (0, 0));
+    let counted: Vec<(EntryCountKind, &str, u32)> = records
+        .counts
+        .iter()
+        .map(|count| (count.kind, count.value.as_str(), count.count))
+        .collect();
+    assert_eq!(
+        counted,
+        [
+            (EntryCountKind::Outcome, "fail", 1),
+            (EntryCountKind::Outcome, "failed", 1)
+        ]
+    );
+    let mut trouble: Vec<(RunId, bool, u32)> = records
+        .trouble
+        .iter()
+        .map(|trouble| (trouble.run_id, trouble.failed, trouble.visits))
+        .collect();
+    trouble.sort_by_key(|(id, ..)| ids.iter().position(|run| run == id));
+    assert_eq!(trouble, [(ids[0], true, 1), (ids[1], true, 1)]);
+}
