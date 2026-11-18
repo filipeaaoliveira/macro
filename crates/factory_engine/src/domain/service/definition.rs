@@ -146,6 +146,18 @@ where
             .await
             .map_err(internal)?
             .ok_or(FactoryError::UnreachableDefinition)?;
+        // GitHub follows a renamed or transferred repository: the team
+        // names the Definition where it is now.
+        let asked = format!("{}/{}", repository.owner(), repository.name());
+        if let Some(moved) = access
+            .full_name
+            .as_deref()
+            .filter(|now| !now.eq_ignore_ascii_case(&asked))
+        {
+            return Err(FactoryError::InvalidDefinition(DefinitionError::Moved(
+                moved.to_string(),
+            )));
+        }
         let commit = self
             .github
             .branch_head(reader, &repository, &access.default_branch)

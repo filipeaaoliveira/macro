@@ -47,6 +47,8 @@ fn refusal(status: StatusCode) -> Option<GithubError> {
 #[derive(serde::Deserialize)]
 struct RepositoryResponse {
     #[serde(default)]
+    full_name: Option<String>,
+    #[serde(default)]
     default_branch: Option<String>,
     #[serde(default)]
     permissions: Option<RepositoryPermissions>,
@@ -459,6 +461,7 @@ impl GithubOauthImpl {
             .await;
         match read {
             Ok(repository) => Ok(Some(GithubRepositoryAccess {
+                full_name: repository.full_name,
                 default_branch: repository.default_branch,
                 push: repository
                     .permissions

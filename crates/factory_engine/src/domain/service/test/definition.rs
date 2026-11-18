@@ -544,3 +544,46 @@ async fn a_file_github_will_not_give_is_the_definition_s_problem() {
         "{refused:?}"
     );
 }
+
+/// GitHub follows a renamed or transferred repository: a Definition named
+/// by its old name is refused, saying where it is now.
+#[tokio::test]
+async fn a_definition_repository_github_moved_is_named_where_it_is() {
+    let repo = team_repo();
+    let workflows = FakeWorkflows::default();
+    let github = github_at(FIRST);
+    definition_files(&github, FIRST, "Notes.", None);
+    github.state().full_name = Some("macro/rules".to_string());
+    let service = code_service(&repo, &workflows, &github);
+
+    let moved = service
+        .create_run(
+            teo(),
+            "notes".to_string(),
+            "Hi".to_string(),
+            None,
+            None,
+            true,
+        )
+        .await;
+    github.state().full_name = Some("Macro/Factory-Definition".to_string());
+    let same = service
+        .create_run(
+            teo(),
+            "notes".to_string(),
+            "Hi".to_string(),
+            None,
+            None,
+            true,
+        )
+        .await;
+
+    assert!(
+        matches!(
+            &moved,
+            Err(FactoryError::InvalidDefinition(DefinitionError::Moved(now))) if now == "macro/rules"
+        ),
+        "{moved:?}"
+    );
+    assert!(same.is_ok(), "{same:?}");
+}

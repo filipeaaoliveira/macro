@@ -281,6 +281,10 @@ pub enum DefinitionError {
     /// The Control File patterns do not hold together.
     #[error("{RULES_FILE}: {0}")]
     ControlFiles(ControlFilesError),
+    /// GitHub answers the repository the team names under another name:
+    /// it was renamed or transferred.
+    #[error("the definition's repository is now {0}: name it there")]
+    Moved(String),
     /// The Control File patterns leave no room for the Definition's own
     /// files, which a Run on its repository adds.
     #[error(

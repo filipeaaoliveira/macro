@@ -796,6 +796,9 @@ pub enum GithubOpenPullRequestOutcome {
 /// What a user may do with a repository, as GitHub says.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GithubRepositoryAccess {
+    /// Its `owner/name` as GitHub names it now: another than the one asked
+    /// for when GitHub followed a renamed or transferred repository.
+    pub full_name: Option<String>,
     /// The branch a clone checks out, absent for a repository with no
     /// commits.
     pub default_branch: Option<String>,

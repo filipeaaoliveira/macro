@@ -286,6 +286,7 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
             .await?;
         Ok(access.and_then(|access| {
             Some(RepositoryAccess {
+                full_name: access.full_name,
                 default_branch: access.default_branch?,
                 can_push: access.push,
             })

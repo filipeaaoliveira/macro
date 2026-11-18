@@ -27,7 +27,7 @@ fn open_request() -> GithubOpenPullRequest {
 async fn repository_access_reads_the_default_branch_and_push_permission() {
     let (server, client) = answering(
         "200 OK",
-        r#"{"default_branch":"trunk","permissions":{"admin":false,"push":true,"pull":true}}"#,
+        r#"{"full_name":"macro/app","default_branch":"trunk","permissions":{"admin":false,"push":true,"pull":true}}"#,
     );
 
     let access = client
@@ -38,6 +38,7 @@ async fn repository_access_reads_the_default_branch_and_push_permission() {
     assert_eq!(
         access,
         Some(GithubRepositoryAccess {
+            full_name: Some("macro/app".to_string()),
             default_branch: Some("trunk".to_string()),
             push: true,
         })

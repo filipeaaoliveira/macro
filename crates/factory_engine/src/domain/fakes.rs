@@ -1488,6 +1488,8 @@ pub(crate) struct FakeGithubState {
     pub(crate) requires_pull_request: Option<bool>,
     /// The paths of the files read, in order.
     pub(crate) file_reads: Vec<String>,
+    /// The `owner/name` GitHub answers a repository with, when it says.
+    pub(crate) full_name: Option<String>,
     /// The paths of the files GitHub will not give, as one over 1 MB.
     pub(crate) refused_files: BTreeSet<String>,
 }
@@ -1594,8 +1596,6 @@ pub(crate) fn ci(conclusion: Option<&str>) -> HeadChecks {
 }
 
 impl PullRequests for FakeGithub {
-    type Err = FakeGithubError;
-
     fn file_refusal(error: &FakeGithubError) -> Option<FileRefusal> {
         match error {
             FakeGithubError::TooLarge => Some(FileRefusal::TooLarge),
@@ -1604,6 +1604,8 @@ impl PullRequests for FakeGithub {
         }
     }
 
+    type Err = FakeGithubError;
+
     async fn repository_access(
         &self,
         _owner: &MacroUserIdStr<'static>,
@@ -1611,6 +1613,7 @@ impl PullRequests for FakeGithub {
     ) -> Result<Option<RepositoryAccess>, FakeGithubError> {
         let state = self.state();
         Ok((!state.unreachable).then(|| RepositoryAccess {
+            full_name: state.full_name.clone(),
             default_branch: "main".to_string(),
             can_push: !state.read_only,
         }))

@@ -332,6 +332,10 @@ pub fn is_run_branch(branch: &str) -> bool {
 /// What a Run's owner may do with a repository on GitHub.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RepositoryAccess {
+    /// Its `owner/name` as GitHub names it now, when GitHub says: another
+    /// than the one asked for when it followed a renamed or transferred
+    /// repository.
+    pub full_name: Option<String>,
     /// The branch it checks out by default.
     pub default_branch: String,
     /// Whether the owner may push to it.
