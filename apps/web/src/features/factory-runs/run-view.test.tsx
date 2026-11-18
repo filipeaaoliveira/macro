@@ -552,6 +552,32 @@ describe('RunView', () => {
     ).toBeTruthy();
   });
 
+  it('says when the Orchestrator answered', async () => {
+    const { setRun } = mount({});
+    const [first] = waitingRun.steps;
+    if (!first?.gate) throw new Error('No first Gate');
+    setRun({
+      ...waitingRun,
+      steps: [
+        {
+          ...first,
+          gate: {
+            ...first.gate,
+            answer: {
+              answer: 'revise',
+              byOrchestrator: true,
+              answeredAt: '2026-11-16T09:11:00Z',
+            },
+          },
+        },
+      ],
+    });
+
+    expect(
+      await screen.findByText('Answered by your Orchestrator: Revise')
+    ).toBeTruthy();
+  });
+
   it('says so when someone else answered first', async () => {
     mount({
       answerGate: vi.fn(async () => ({

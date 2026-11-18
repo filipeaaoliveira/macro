@@ -24,12 +24,20 @@ export type OrchestratorDefinition = {
    * person, no new Run of theirs starts. None sets no limit.
    */
   queueLimit?: number | null;
+  /** The kinds of Gate the Orchestrator may approve for the Run's owner. */
+  orchestrator?: OrchestratorKinds;
+};
+
+/** The kinds of Gate the Orchestrator may approve: never the merge. */
+export type OrchestratorKinds = {
+  plan: boolean;
+  blockers: boolean;
 };
 
 /** A kind of Gate a rule decides. */
 export type GateKind = Exclude<
   keyof OrchestratorDefinition,
-  'ownerGates' | 'standIn' | 'queueLimit'
+  'ownerGates' | 'standIn' | 'queueLimit' | 'orchestrator'
 >;
 
 /** The Queue limit a team starts from when it turns the limit on. */

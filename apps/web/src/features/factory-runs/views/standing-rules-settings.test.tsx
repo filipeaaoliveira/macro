@@ -193,6 +193,36 @@ describe('StandingRulesSettings', () => {
     );
   });
 
+  it('lets the Orchestrator approve plans, keeping the rules', async () => {
+    vi.mocked(factoryClient.setStandingRules).mockResolvedValueOnce(
+      ok({
+        ...teamDefault,
+        definition: {
+          ...teamDefault.definition,
+          orchestrator: { plan: true, blockers: false },
+        },
+        isDefault: false,
+      })
+    );
+    mount(teamDefault);
+
+    const plan = await screen.findByRole('checkbox', {
+      name: 'Let the Orchestrator approve plans you approve in chat',
+    });
+    expect((plan as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(plan);
+
+    await waitFor(() =>
+      expect(factoryClient.setStandingRules).toHaveBeenCalledWith({
+        plan: false,
+        blockers: true,
+        merge: false,
+        ownerGates: false,
+        orchestrator: { plan: true, blockers: false },
+      })
+    );
+  });
+
   it('shows a member the team’s rules without letting them change them', async () => {
     mount({ ...teamDefault, canEdit: false });
 

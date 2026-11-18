@@ -175,6 +175,50 @@ describe('createAppRunsContext', () => {
     );
   });
 
+  it('reads a Gate the Orchestrator answered as its answer', async () => {
+    const answered = (agentSessionId: string | null): RunDetail => ({
+      ...started,
+      steps: [
+        {
+          seq: 1,
+          entry: 'plan',
+          visit: 1,
+          startedAt: '2026-11-16T09:00:01Z',
+          passedOver: [],
+          checks: [],
+          gate: {
+            kind: 'flow',
+            question: 'Approve the plan?',
+            answers: ['approve', 'revise'],
+            openedAt: '2026-11-16T09:01:00Z',
+            answer: {
+              answer: 'revise',
+              answeredAt: '2026-11-16T09:02:00Z',
+              byStandIn: false,
+              agentSessionId,
+            },
+          },
+        },
+      ],
+    });
+    const context = createAppRunsContext(new QueryClient());
+    const input = { taskId: 'task-1', flow: 'plan', request: 'Plan it' };
+
+    vi.mocked(factoryClient.startRun).mockResolvedValueOnce(
+      ok(answered('01960000-0000-7000-8000-000000000009'))
+    );
+    const byAgent = await context.startRun(input);
+    vi.mocked(factoryClient.startRun).mockResolvedValueOnce(
+      ok(answered(null))
+    );
+    const byPerson = await context.startRun(input);
+
+    const answerOf = (result: typeof byAgent) =>
+      result.ok ? result.value.steps[0]?.gate?.answer : undefined;
+    expect(answerOf(byAgent)?.byOrchestrator).toBe(true);
+    expect(answerOf(byPerson)?.byOrchestrator).toBe(false);
+  });
+
   it('starts a Run on the repository it names and keeps it on the Run', async () => {
     const repository = {
       url: 'https://github.com/macro-inc/app',

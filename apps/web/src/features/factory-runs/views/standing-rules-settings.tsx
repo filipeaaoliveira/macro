@@ -10,6 +10,7 @@ import {
   type GateKind,
   MAX_QUEUE_LIMIT,
   type OrchestratorDefinition,
+  type OrchestratorKinds,
   RULE_NAMES,
   STAND_IN_KINDS,
   type StandInKinds,
@@ -29,6 +30,14 @@ const STAND_IN_NAMES = {
   plan: 'factoryRuns.standInPlan',
   blockers: 'factoryRuns.standInBlockers',
 } as const satisfies Record<keyof StandInKinds, string>;
+
+const ORCHESTRATOR_NAMES = {
+  plan: 'factoryRuns.orchestratorPlan',
+  blockers: 'factoryRuns.orchestratorBlockers',
+} as const satisfies Record<keyof OrchestratorKinds, string>;
+
+/** The Orchestrator approves no kind a definition leaves out. */
+const NO_ORCHESTRATOR: OrchestratorKinds = { plan: false, blockers: false };
 
 /** The stand-in is off for every kind a definition leaves out. */
 const NO_STAND_IN: StandInKinds = { plan: false, blockers: false };
@@ -87,7 +96,7 @@ export function StandingRulesSettings() {
           const toggle = (
             kind: Exclude<
               keyof OrchestratorDefinition,
-              'standIn' | 'queueLimit'
+              'standIn' | 'queueLimit' | 'orchestrator'
             >,
             on: boolean
           ) =>
@@ -96,6 +105,19 @@ export function StandingRulesSettings() {
               'factory-runs'
             );
           const standIn = () => definition().standIn ?? NO_STAND_IN;
+          const orchestrator = () =>
+            definition().orchestrator ?? NO_ORCHESTRATOR;
+          const toggleOrchestrator = (
+            kind: keyof OrchestratorKinds,
+            on: boolean
+          ) =>
+            fireAndForget(
+              save({
+                ...definition(),
+                orchestrator: { ...orchestrator(), [kind]: on },
+              }),
+              'factory-runs'
+            );
           const queueLimit = () => definition().queueLimit ?? null;
           const setQueueLimit = (limit: number | null) =>
             fireAndForget(
@@ -220,6 +242,27 @@ export function StandingRulesSettings() {
               </For>
               <p class="text-xs text-ink-muted">
                 {t('factoryRuns.standInHint')}
+              </p>
+              <p class="pt-1 text-sm font-medium">
+                {t('factoryRuns.orchestratorTitle')}
+              </p>
+              <For each={STAND_IN_KINDS}>
+                {(kind) => (
+                  <Checkbox
+                    size="sm"
+                    checked={orchestrator()[kind]}
+                    onChange={(on: boolean) => toggleOrchestrator(kind, on)}
+                    disabled={locked()}
+                  >
+                    <Checkbox.Control />
+                    <Checkbox.Label class="text-sm">
+                      {t(ORCHESTRATOR_NAMES[kind])}
+                    </Checkbox.Label>
+                  </Checkbox>
+                )}
+              </For>
+              <p class="text-xs text-ink-muted">
+                {t('factoryRuns.orchestratorHint')}
               </p>
               <p class="text-xs text-ink-muted">
                 {settings().isDefault

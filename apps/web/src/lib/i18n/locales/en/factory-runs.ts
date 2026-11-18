@@ -113,6 +113,7 @@ export default {
   answered: 'Answered: {{answer}}',
   answeredByRule: 'Answered by the standing rule “{{rule}}”: {{answer}}',
   answeredByStandIn: 'Answered for you by the stand-in: {{answer}}',
+  answeredByOrchestrator: 'Answered by your Orchestrator: {{answer}}',
   answeredFromReply:
     'Answered from your reply ({{confidence}}% sure): {{answer}}',
   sendReply: 'Send as reply',
@@ -195,6 +196,12 @@ export default {
     'Above this many gates and questions waiting on a person, no new run of theirs starts. Runs under way go on.',
   queueLimitLabel: 'Queue limit',
   queueLimitUnit: 'waiting',
+  orchestratorTitle: 'Orchestrator',
+  orchestratorPlan: 'Let the Orchestrator approve plans you approve in chat',
+  orchestratorBlockers:
+    'Let the Orchestrator send review blockers to a fix you ask for in chat',
+  orchestratorHint:
+    'The Orchestrator is your agent in chat. It can always send work back. It never approves a merge, a run that changes control files, or blockers the rules leave to you.',
   standingRulesSaved: 'Standing rules saved',
   standingRulesSaveFailed: 'Couldn’t save the standing rules',
 };

@@ -211,6 +211,11 @@ function TimelineStep(props: {
                       answer: flowWordLabel(answer().answer),
                     })}
                   >
+                    <Match when={answer().byOrchestrator}>
+                      {t('factoryRuns.answeredByOrchestrator', {
+                        answer: flowWordLabel(answer().answer),
+                      })}
+                    </Match>
                     <Match when={answer().byStandIn}>
                       {t('factoryRuns.answeredByStandIn', {
                         answer: flowWordLabel(answer().answer),
