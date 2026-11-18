@@ -5,8 +5,9 @@ use macro_db_migrator::MACRO_DB_MIGRATIONS;
 use sqlx::PgPool;
 
 use super::{entry, insert, julia, key, outcome, teo};
-use crate::domain::models::{RunId, RunOutcome};
+use crate::domain::models::{NewRun, RunId, RunInsert, RunOutcome};
 use crate::domain::ports::RunRepository;
+use crate::domain::standing_rules::RunRules;
 use crate::outbound::pg_run_repository::PgRunRepository;
 
 /// A Run waits on its owner from when its Gate opens until it is
@@ -17,7 +18,7 @@ use crate::outbound::pg_run_repository::PgRunRepository;
     fixtures(path = "../fixtures", scripts("people"))
 )]
 async fn a_run_waits_on_its_owner_while_its_gate_is_open(pool: PgPool) {
-    let repo = PgRunRepository::new(pool.clone());
+    let repo = PgRunRepository::new(pool);
     let answers = [outcome("approve"), outcome("revise")];
 
     let older = RunId::generate();
@@ -38,15 +39,24 @@ async fn a_run_waits_on_its_owner_while_its_gate_is_open(pool: PgPool) {
     }
     // Someone else's Run waiting on its Gate is theirs to list.
     let theirs = RunId::generate();
-    insert(&repo, theirs, "Plan the cutover").await;
-    let teo = teo();
-    // Checked at run time: a test query keeps no offline metadata.
-    sqlx::query("UPDATE factory_run SET user_id = $1 WHERE id = $2")
-        .bind(teo.as_ref())
-        .bind(theirs.as_uuid())
-        .execute(&pool)
+    let RunInsert::Inserted(_) = repo
+        .insert_run(NewRun {
+            id: theirs,
+            flow: "plan",
+            request: "Plan the cutover",
+            user_id: &teo(),
+            task_id: None,
+            repository: None,
+            created_in_person: false,
+            control_file_patterns: &[],
+            control_files_team_id: None,
+            standing_rules: RunRules::DEFAULT,
+        })
         .await
-        .expect("hand the run to teo");
+        .expect("insert")
+    else {
+        panic!("a run with no task is kept");
+    };
     repo.start_step(key(theirs, 1), &entry("plan"), 1)
         .await
         .expect("start");
