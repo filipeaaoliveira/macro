@@ -328,6 +328,13 @@ pub trait RunRepository: Send + Sync + 'static {
         changes: Option<&ControlFileChanges>,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
+    /// The name `user_id` shows others, from the first and last name they
+    /// set; none when they set neither, or have no account.
+    fn display_name(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+    ) -> impl Future<Output = Result<Option<String>, Self::Err>> + Send;
+
     /// Whether `user_id`'s account is an agent's (`"User"."isAgent"`): it
     /// signs in as any person does, yet is never one in person.
     fn is_agent_account(
