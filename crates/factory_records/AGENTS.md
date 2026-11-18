@@ -31,8 +31,9 @@ the Gates they asked people in MacroDB, and defines the names Flows use
 - `src/domain/gate_replies.rs` and
   `src/outbound/pg_run_repository/gate_replies.rs`: `GateReplyRepository`,
   a person's answer read from their words, the factory asking back, the
-  stand-in's answer, the owner's past answers and the answered Gates a
-  replay measures the model on.
+  stand-in's answer or why it left the Gate to the owner (the Gate model's
+  reading, as for asking back), the owner's past answers and the answered
+  Gates a replay measures the model on.
 
 ## Scope
 

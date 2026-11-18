@@ -33,7 +33,8 @@ use crate::domain::gate::{
     AnswerGate, GateAnswered, GateOpening, GateRuling, GateTelling, ReplyGate,
 };
 use crate::domain::gate_owner::{
-    OwnerNote, gate_notice, gate_told, is_factory_comment, notes_since, notice_id, told_id,
+    OwnerNote, gate_notice, gate_told, is_factory_comment, notes_since, notice_id, stand_in_id,
+    told_id,
 };
 use crate::domain::models::{
     Answerer, CodeRepository, ControlFilesSettings, FactoryError, FlowSummary, PersonOnly,
@@ -1691,6 +1692,21 @@ where
             let id = notice_id(answered.key.run_id, answered.key.seq);
             self.notifier.answered(&run.user_id, id).await;
         }
+        // An answer in the stand-in's window closes it, and so the notice
+        // that the stand-in answered.
+        let stood_in = self
+            .repo
+            .list_steps(answered.key.run_id)
+            .await
+            .map_err(internal)?
+            .into_iter()
+            .find(|step| step.seq == answered.key.seq)
+            .and_then(|step| step.gate)
+            .is_some_and(|gate| gate.stand_in.is_some());
+        if stood_in {
+            let id = stand_in_id(answered.key.run_id, answered.key.seq);
+            self.notifier.answered(&run.user_id, id).await;
+        }
         let update = RunUpdate::GateAnswered {
             seq: answered.key.seq,
         };
@@ -1872,6 +1888,20 @@ where
                     let id = notice_id(finish.run_id, step.seq);
                     self.notifier.answered(&run.user_id, id).await;
                 }
+            }
+        }
+
+        // A Run that ends in a stand-in's window closes it: the notice
+        // that the stand-in answered is done, as the window closing would
+        // make it.
+        for step in &steps {
+            let in_window = step
+                .gate
+                .as_ref()
+                .is_some_and(|gate| gate.answer.is_none() && gate.stand_in.is_some());
+            if in_window {
+                let id = stand_in_id(finish.run_id, step.seq);
+                self.notifier.answered(&run.user_id, id).await;
             }
         }
 

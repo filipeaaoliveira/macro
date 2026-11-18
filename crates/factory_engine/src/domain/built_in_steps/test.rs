@@ -342,6 +342,7 @@ async fn a_plan_reads_what_a_person_answered_the_last_one() {
         gate: Some(Gate {
             asked_back: None,
             stand_in: None,
+            stand_in_declined: None,
             kind: GateKind::Flow,
             question: "Approve the plan?".to_string(),
             answers: vec![Outcome::done(), revise.clone()],
@@ -597,6 +598,7 @@ fn asked(seq: u16, entry: &str, question: &str, answer: &str) -> Step {
         gate: Some(Gate {
             asked_back: None,
             stand_in: None,
+            stand_in_declined: None,
             kind: GateKind::Question,
             question: question.to_string(),
             answers: vec![Outcome::answer()],
@@ -928,6 +930,7 @@ async fn a_retried_step_tells_the_agent_to_go_on() {
         gate: Some(Gate {
             asked_back: None,
             stand_in: None,
+            stand_in_declined: None,
             kind: GateKind::Flow,
             question: "Retry?".to_string(),
             answers: vec![Outcome::retry(), Outcome::stop()],

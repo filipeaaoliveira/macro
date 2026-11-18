@@ -24,6 +24,7 @@ fn stopped(seq: u16, outcome: Outcome, answer: Option<(Outcome, Option<&str>)>) 
         gate: Some(Gate {
             asked_back: None,
             stand_in: None,
+            stand_in_declined: None,
             kind: GateKind::Flow,
             question: gate_question("I ran out of ideas."),
             answers: vec![Outcome::retry(), Outcome::stop()],

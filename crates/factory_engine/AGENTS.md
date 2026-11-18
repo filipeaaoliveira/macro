@@ -996,15 +996,19 @@ and for a Gate opened before replies) and asks the worker to read them
 (`factory_read_gate_reply`): a small model (the `GateModel` port; on
 Macro's model router in `outbound/fast_gate_model.rs`, Claude Haiku 5.5
 (`DEFAULT_GATE_MODEL`) unless `FACTORY_GATE_MODEL` names another,
-`AiFeature::FactoryGate`, billed to no one) picks one of the Gate's answers
-or `unclear`, with how sure it is. The question, its answers and the words
+`AiFeature::FactoryGate`, billed to no one; each call's usage row names the
+Run as its entity and is priced from `ai_pricing`, and its prompt, which no
+later call shares, is written to no prompt cache) picks one of the Gate's
+answers or `unclear`, with how sure it is. The question, its answers and the words
 reach the model as one JSON object, so the words open no section of their
 own. At or above the reply threshold (`DEFAULT_REPLY_THRESHOLD`, 85
 percent, or `FACTORY_GATE_REPLY_THRESHOLD`) the Gate is answered with it as
 the person's answer, the words kept as its note and the confidence beside
 it; below it, `unclear`, an answer the Gate does not offer, a call that
 fails or takes longer than `MODEL_TIMEOUT` (30 s), the factory asks back on
-the Gate (`asked_back`), which waits on and takes an answer or new words.
+the Gate (`asked_back`, with how the model read the words: its pick, how
+sure it was and why, none of them when it did not answer), which waits on
+and takes an answer or new words.
 Words never approve a Tampered Run: its Control Files are approved with the
 button, which lists them. An agent's question takes the words as its
 answer, with no model (the API sends them as the Gate's `answer`, so any
@@ -1046,9 +1050,18 @@ it still lets the stand-in answer, the stand-in's answer becomes the Gate's
 (`by_stand_in`, with no author); when it no longer does (the branch turned
 Tampered, the base is held, the Run ended), the stand-in's answer is taken
 back and the Gate waits for the owner. Below the
-threshold, unsure, or failing, it keeps nothing, and the Gate waits for the
-person. A retry returns the answer kept first, with what is left of its
-window. Run insights count neither its answers nor Rule Answers.
+threshold, unsure, or failing, it keeps no answer, and the Gate waits for
+the person, keeping how the model read it (`stand_in_declined`: its pick,
+how sure it was and why, none of them when it did not answer), which the
+Run view shows the owner. A retry returns the answer kept first, with what
+is left of its window. While the window is open the owner is told, lightly,
+whatever the owner section says (`gate_owner::stand_in_notice`): a
+notification about the Run's task, of the waiting Gate's kind flagged
+`notifyOnly` as a notify-only Gate's, not pushed to their phone, saying
+what the stand-in answered and for how many minutes they can change it,
+one per Gate (`gate_owner::stand_in_id`, apart from the Gate's waiting
+notice); it is marked done once the window closes, the owner answers in
+it, or the Run ends. A Run with no task tells no one. Run insights count neither its answers nor Rule Answers.
 
 The model calls are activities, so a replay reads their results from the
 history. The stand-in and replies are behind the `factory-gate-replies`
@@ -1076,7 +1089,8 @@ The workflow asks about a Flow's Gate in this order, once it is recorded:
 the Standing Rules (`factory-standing-rules`), then the stand-in
 (`factory-gate-replies`), then, only once the Gate waits for a person, the
 owner's notice (`factory-gate-owner`). A Gate the stand-in answers, or the
-owner answers in its window, tells no one; one whose stand-in answer is
+owner answers in its window, is told to no one as a waiting Gate (only the
+stand-in's light notice above); one whose stand-in answer is
 taken back, or whose owner's words in the window are asked back, waits for
 the owner and tells them then, once: words asked back on a Gate they were
 already told of tell them nothing more. The stand-in never answers a

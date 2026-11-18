@@ -4,16 +4,18 @@
 use chrono::Utc;
 use factory_records::domain::gate_replies::GateReplyRepository;
 use factory_records::domain::main_hold::MainHoldRepository;
-use factory_records::domain::models::{Gate, MAX_NOTE_BYTES, Outcome, Run, Step, StepKey};
+use factory_records::domain::models::{
+    Gate, GateModelReading, MAX_NOTE_BYTES, Outcome, Run, StandInAnswer, Step, StepKey,
+};
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::ReviewRoundRepository;
 
-use super::{Decision, GateReplySettings, MODEL_TIMEOUT, decide, reply_question};
+use super::{Decision, GateReplySettings, MODEL_TIMEOUT, decide, percent, reply_question};
 use crate::domain::built_in_steps::cut;
 use factory_records::domain::standing_rules::RuleGateKind;
 
 use crate::domain::gate::{ReplyRead, ReplyReading, StandInAsking, StandInKeeping, StandingIn};
-use crate::domain::gate_owner::notice_id;
+use crate::domain::gate_owner::{notice_id, stand_in_id, stand_in_notice};
 use crate::domain::models::StepError;
 use crate::domain::ports::{
     GateModel, GateNotifier, GateReplyService, ModelPick, ModelQuestion, NoOwnerGates,
@@ -171,7 +173,10 @@ where
     /// the call failed or took longer than [`MODEL_TIMEOUT`], which decides
     /// nothing.
     async fn pick(&self, run: &Run, question: &ModelQuestion) -> Option<ModelPick> {
-        let called = tokio::time::timeout(MODEL_TIMEOUT, self.model.pick(&run.user_id, question));
+        let called = tokio::time::timeout(
+            MODEL_TIMEOUT,
+            self.model.pick(&run.user_id, run.id, question),
+        );
         match called.await {
             Ok(Ok(pick)) => Some(pick),
             Ok(Err(error)) => {
@@ -186,13 +191,15 @@ where
     }
 
     /// Answer the Gate of `key` with `answer`, read from `reading`'s words,
-    /// and return the answer it keeps.
+    /// and return the answer it keeps. `stood_in` says whether the
+    /// stand-in had answered the Gate, whose window the answer closes.
     async fn answer_from_reply(
         &self,
         key: StepKey,
         answer: &Outcome,
         reading: &ReplyReading,
         confidence: Option<u8>,
+        stood_in: bool,
     ) -> Result<ReplyRead, StepError> {
         let kept = self
             .repo
@@ -200,14 +207,15 @@ where
             .await
             .map_err(internal)?
             .ok_or_else(|| StepError::Internal(rootcause::report!("the gate is not recorded")))?;
-        self.answered(key).await?;
+        self.answered(key, stood_in).await?;
         Ok(ReplyRead::Answered(kept.answer))
     }
 
     /// The Gate of `key` is answered: the notification its owner was told
-    /// of it by is done, when the Run's owner section is on, and the answer
-    /// is posted to its task thread, when that section is on.
-    async fn answered(&self, key: StepKey) -> Result<(), StepError> {
+    /// of it by is done, when the Run's owner section is on, so is the
+    /// notice that the stand-in answered, when it had (`stood_in`), and the
+    /// answer is posted to its task thread, when that section is on.
+    async fn answered(&self, key: StepKey, stood_in: bool) -> Result<(), StepError> {
         let run = self.run(key).await?;
         if run
             .standing_rules
@@ -216,8 +224,32 @@ where
             let id = notice_id(key.run_id, key.seq);
             self.notifier.answered(&run.user_id, id).await;
         }
+        if stood_in {
+            self.window_closed(&run, key).await;
+        }
         self.post_answered(key).await;
         Ok(())
+    }
+
+    /// The stand-in's window on the Gate of `key` closed: the notice that
+    /// the stand-in answered, if one was sent, is done. Marking a notice
+    /// never sent changes nothing.
+    async fn window_closed(&self, run: &Run, key: StepKey) {
+        let id = stand_in_id(key.run_id, key.seq);
+        self.notifier.answered(&run.user_id, id).await;
+    }
+
+    /// Tell the owner of `run` that the stand-in answered the Gate of
+    /// `key` with `kept`, which they may change until its window closes,
+    /// in the minutes left of it.
+    async fn tell_stand_in(&self, run: &Run, steps: &[Step], key: StepKey, kept: &StandInAnswer) {
+        let Some(step) = steps.iter().find(|step| step.seq == key.seq) else {
+            return;
+        };
+        let minutes = seconds_until(kept.until, Utc::now()).div_ceil(60);
+        if let Some(notice) = stand_in_notice(run, step, &kept.answer, minutes) {
+            self.notifier.notify(notice).await;
+        }
     }
 }
 
@@ -278,13 +310,14 @@ where
         let gate = gate_of(&steps, key.seq)?;
         // An earlier attempt may have answered the Gate before its result
         // was lost: that answer stands.
+        let stood_in = gate.stand_in.is_some();
         if let Some(answer) = &gate.answer {
-            self.answered(key).await?;
+            self.answered(key, stood_in).await?;
             return Ok(ReplyRead::Answered(answer.answer.clone()));
         }
         if reading.question {
             return self
-                .answer_from_reply(key, &Outcome::answer(), &reading, None)
+                .answer_from_reply(key, &Outcome::answer(), &reading, None, stood_in)
                 .await;
         }
 
@@ -303,12 +336,12 @@ where
                 if !(tampered && answer.as_str() == APPROVE) =>
             {
                 tracing::info!(%answer, confidence, "a reply answered a gate");
-                self.answer_from_reply(key, &answer, &reading, Some(confidence))
+                self.answer_from_reply(key, &answer, &reading, Some(confidence), stood_in)
                     .await
             }
             _ => {
                 self.repo
-                    .ask_back(key, &reading.reply)
+                    .ask_back(key, &reading.reply, &model_reading(pick.as_ref()))
                     .await
                     .map_err(internal)?;
                 tracing::info!("the factory asked back on a gate");
@@ -327,15 +360,17 @@ where
             return Ok(None);
         }
         let now = Utc::now();
-        // An earlier attempt's answer stands, with the window it set.
+        let run = self.run(key).await?;
+        // An earlier attempt's answer stands, with the window it set; its
+        // notice is sent again, which makes one notification.
         if let Some(kept) = &gate.stand_in {
+            self.tell_stand_in(&run, &steps, key, kept).await;
             return Ok(Some(StandingIn {
                 answer: kept.answer.clone(),
                 window_secs: seconds_until(kept.until, now),
             }));
         }
 
-        let run = self.run(key).await?;
         if !self
             .may_stand_in_now(&run, &steps, Asked::from(&asking), &asking.answers)
             .await?
@@ -376,25 +411,31 @@ where
             &gate.answers,
             self.settings.stand_in_threshold,
         ) else {
+            // The owner reads on the Gate why it is theirs.
+            self.repo
+                .decline_stand_in(key, &model_reading(pick.as_ref()))
+                .await
+                .map_err(internal)?;
             tracing::info!("the stand-in left a gate to its owner");
             return Ok(None);
         };
         let reason = pick.map(|pick| pick.reason).unwrap_or_default();
         let window = chrono::TimeDelta::from_std(self.settings.stand_in_window)
             .map_err(|error| StepError::Final(rootcause::report!("{error}")))?;
-        let proposed = factory_records::domain::models::StandInAnswer {
+        let proposed = StandInAnswer {
             answer,
             reason: cut(reason.trim(), MAX_NOTE_BYTES).to_string(),
             confidence,
             until: now + window,
         };
-        let kept = self.repo.stand_in(key, &proposed).await.map_err(internal)?;
-        Ok(kept.map(|kept| {
-            tracing::info!(answer = %kept.answer, confidence = kept.confidence, "the stand-in answered a gate");
-            StandingIn {
-                answer: kept.answer,
-                window_secs: seconds_until(kept.until, now),
-            }
+        let Some(kept) = self.repo.stand_in(key, &proposed).await.map_err(internal)? else {
+            return Ok(None);
+        };
+        tracing::info!(answer = %kept.answer, confidence = kept.confidence, "the stand-in answered a gate");
+        self.tell_stand_in(&run, &steps, key, &kept).await;
+        Ok(Some(StandingIn {
+            answer: kept.answer,
+            window_secs: seconds_until(kept.until, now),
         }))
     }
 
@@ -405,13 +446,14 @@ where
         let gate = gate_of(&steps, key.seq)?;
         // An earlier attempt kept it, or the owner answered first: that
         // answer stands, and posting it again posts it once.
+        let run = self.run(key).await?;
+        self.window_closed(&run, key).await;
         if let Some(answer) = &gate.answer {
             self.post_answered(key).await;
             return Ok(Some(answer.answer.clone()));
         }
         // The Run may have changed in the window: a Tampered branch, a Main
         // Hold, or a Run that ended give the Gate back to the person.
-        let run = self.run(key).await?;
         if !self
             .may_stand_in_now(&run, &steps, Asked::from(&keeping), &gate.answers)
             .await?
@@ -432,6 +474,23 @@ where
             })?;
         self.post_answered(key).await;
         Ok(Some(kept.answer))
+    }
+}
+
+/// How the Gate model read a Gate, from its `pick`: none when its call
+/// failed or took too long, which leaves no pick, confidence or reason.
+fn model_reading(pick: Option<&ModelPick>) -> GateModelReading {
+    match pick {
+        Some(pick) => GateModelReading {
+            pick: pick.choice.clone(),
+            confidence: Some(percent(pick.confidence)),
+            reason: cut(pick.reason.trim(), MAX_NOTE_BYTES).to_string(),
+        },
+        None => GateModelReading {
+            pick: None,
+            confidence: None,
+            reason: String::new(),
+        },
     }
 }
 

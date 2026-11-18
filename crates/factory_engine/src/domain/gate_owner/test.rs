@@ -84,6 +84,7 @@ fn gated(seq: u16, kind: GateKind, opened_at: u32, answer: Option<&str>) -> Step
             }),
             asked_back: None,
             stand_in: None,
+            stand_in_declined: None,
         }),
         role: Some(Role::try_from("planner".to_string()).expect("valid role")),
         agent: None,

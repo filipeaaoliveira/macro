@@ -2,7 +2,7 @@
 //! person's words or answers for them, and the activities a Run's
 //! workflow asks of its worker.
 
-use factory_records::domain::models::Outcome;
+use factory_records::domain::models::{Outcome, RunId};
 use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::gate::{ReplyRead, ReplyReading, StandInAsking, StandInKeeping, StandingIn};
@@ -38,10 +38,12 @@ pub trait GateModel: Send + Sync + 'static {
     /// Why a call failed.
     type Err: std::error::Error + Send + Sync + 'static;
 
-    /// Ask the model `question`, billed to `owner`, the Run's owner.
+    /// Ask the model `question` about a Gate of the Run `run_id`, billed to
+    /// `owner`, the Run's owner; its usage names the Run.
     fn pick(
         &self,
         owner: &MacroUserIdStr<'static>,
+        run_id: RunId,
         question: &ModelQuestion,
     ) -> impl Future<Output = Result<ModelPick, Self::Err>> + Send;
 }

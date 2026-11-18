@@ -21,11 +21,11 @@ use uuid::Uuid;
 use crate::domain::automations::{RunAutomation, TriggerKind};
 use crate::domain::models::{
     AgentName, AskedBack, CheckResult, CheckRound, CheckRoundOutcome, CheckRoundStart,
-    ClaimedSession, ControlFileChanges, EntryId, Gate, GateAnswer, GateKind, HandBack, HandedBack,
-    InvalidName, NewRun, NewSteer, Outcome, PassedOver, QueueHold, QueuePlaces, Repository, Role,
-    Run, RunEnd, RunId, RunInsert, RunOutcome, SessionStep, StandInAnswer, SteerRefusal, Steered,
-    Step, StepEnd, StepKey, StepSession, StepSteering, StepTerminal, StoppingSession, TaskLink,
-    TeamMembership,
+    ClaimedSession, ControlFileChanges, EntryId, Gate, GateAnswer, GateKind, GateModelReading,
+    HandBack, HandedBack, InvalidName, NewRun, NewSteer, Outcome, PassedOver, QueueHold,
+    QueuePlaces, Repository, Role, Run, RunEnd, RunId, RunInsert, RunOutcome, SessionStep,
+    StandInAnswer, SteerRefusal, Steered, Step, StepEnd, StepKey, StepSession, StepSteering,
+    StepTerminal, StoppingSession, TaskLink, TeamMembership,
 };
 use crate::domain::ports::RunRepository;
 use crate::domain::standing_rules::{OrchestratorDefinition, RulesSource, RunRules, StandingRule};
@@ -338,6 +338,12 @@ struct StepRow {
     stand_in_reason: Option<String>,
     stand_in_confidence: Option<i16>,
     stand_in_until: Option<DateTime<Utc>>,
+    stand_in_declined_pick: Option<String>,
+    stand_in_declined_confidence: Option<i16>,
+    stand_in_declined_reason: Option<String>,
+    asked_back_pick: Option<String>,
+    asked_back_confidence: Option<i16>,
+    asked_back_reason: Option<String>,
     answered_at: Option<DateTime<Utc>>,
     role: Option<String>,
     agent: Option<String>,
@@ -382,8 +388,17 @@ impl StepRow {
             (None, None) => None,
             _ => return Err(PgRunRepositoryErr::PartialGate),
         };
+        let asked_back_reading = reading(
+            self.asked_back_pick.take(),
+            self.asked_back_confidence,
+            self.asked_back_reason.take(),
+        )?;
         let asked_back = match (self.asked_back_reply.take(), self.asked_back_at) {
-            (Some(reply), Some(at)) => Some(AskedBack { reply, at }),
+            (Some(reply), Some(at)) => Some(AskedBack {
+                reply,
+                at,
+                reading: asked_back_reading,
+            }),
             (None, None) => None,
             _ => return Err(PgRunRepositoryErr::PartialGate),
         };
@@ -402,6 +417,11 @@ impl StepRow {
             (None, None, None, None) => None,
             _ => return Err(PgRunRepositoryErr::PartialGate),
         };
+        let stand_in_declined = reading(
+            self.stand_in_declined_pick.take(),
+            self.stand_in_declined_confidence,
+            self.stand_in_declined_reason.take(),
+        )?;
 
         match (self.question.take(), self.answers.take(), self.opened_at) {
             (Some(question), Some(answers), Some(opened_at)) => Ok(Some(Gate {
@@ -421,6 +441,7 @@ impl StepRow {
                 answer,
                 asked_back,
                 stand_in,
+                stand_in_declined,
             })),
             (None, None, None) if answer.is_none() => Ok(None),
             _ => Err(PgRunRepositoryErr::PartialGate),
@@ -498,6 +519,24 @@ async fn queue_places(
 /// A stored confidence, which the schema keeps between 0 and 100 percent.
 fn percent(stored: i16) -> Result<u8, PgRunRepositoryErr> {
     u8::try_from(stored).map_err(|_| PgRunRepositoryErr::OutOfRange(i32::from(stored)))
+}
+
+/// The Gate model's stored reading of a Gate: kept when it has a reason,
+/// which is empty when the model did not answer.
+fn reading(
+    pick: Option<String>,
+    confidence: Option<i16>,
+    reason: Option<String>,
+) -> Result<Option<GateModelReading>, PgRunRepositoryErr> {
+    match (pick, confidence, reason) {
+        (pick, confidence, Some(reason)) => Ok(Some(GateModelReading {
+            pick: pick.map(Outcome::try_from).transpose()?,
+            confidence: confidence.map(percent).transpose()?,
+            reason,
+        })),
+        (None, None, None) => Ok(None),
+        _ => Err(PgRunRepositoryErr::PartialGate),
+    }
 }
 
 /// A stored visit or place, which the schema keeps between 1 and 65535.
@@ -881,6 +920,12 @@ impl RunRepository for PgRunRepository {
                 g.stand_in_reason,
                 g.stand_in_confidence,
                 g.stand_in_until,
+                g.stand_in_declined_pick,
+                g.stand_in_declined_confidence,
+                g.stand_in_declined_reason,
+                g.asked_back_pick,
+                g.asked_back_confidence,
+                g.asked_back_reason,
                 g.answered_at,
                 s.role,
                 s.agent,
@@ -1071,6 +1116,12 @@ impl RunRepository for PgRunRepository {
                 g.stand_in_reason,
                 g.stand_in_confidence,
                 g.stand_in_until,
+                g.stand_in_declined_pick,
+                g.stand_in_declined_confidence,
+                g.stand_in_declined_reason,
+                g.asked_back_pick,
+                g.asked_back_confidence,
+                g.asked_back_reason,
                 g.answered_at,
                 s.role,
                 s.agent,

@@ -103,6 +103,7 @@ fn fixed(seq: u16, rule: Option<StandingRule>) -> Step {
             }),
             asked_back: None,
             stand_in: None,
+            stand_in_declined: None,
         }),
         role: None,
         agent: None,

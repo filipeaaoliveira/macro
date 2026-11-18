@@ -1,13 +1,19 @@
 //! The Gate model on Macro's model router: one structured completion per
 //! reply or stand-in question, on a small, cheap model, with its usage
-//! recorded against the Run's owner.
+//! recorded against the Run's owner and naming the Run. Each prompt is
+//! read once (the Gate, the Run and the words differ from call to call), so
+//! none is written to the prompt cache, whose write costs more than plain
+//! input and would never be read back.
+
+#[cfg(test)]
+mod test;
 
 use std::sync::Arc;
 
 use agent::Message;
-use agent::structured_output::{DynamicSchema, dynamic_structured_completion};
+use agent::structured_output::{DynamicSchema, dynamic_structured_completion_uncached};
 use ai_usage::{AiFeature, UsageContext, UsageRecorder};
-use factory_records::domain::models::Outcome;
+use factory_records::domain::models::{Outcome, RunId};
 use macro_user_id::user_id::MacroUserIdStr;
 use serde::Deserialize;
 use serde_json::json;
@@ -57,6 +63,7 @@ impl GateModel for FastGateModel {
     async fn pick(
         &self,
         owner: &MacroUserIdStr<'static>,
+        run_id: RunId,
         question: &ModelQuestion,
     ) -> Result<ModelPick, GateModelError> {
         let mut choices: Vec<&str> = question.choices.iter().map(Outcome::as_str).collect();
@@ -75,13 +82,13 @@ impl GateModel for FastGateModel {
                 }
             }),
         };
-        let value = dynamic_structured_completion(
+        let value = dynamic_structured_completion_uncached(
             self.model.as_str(),
             question.instructions,
             vec![Message::user(question.prompt.clone())],
             schema,
             self.recorder.as_ref(),
-            UsageContext::new(AiFeature::FactoryGate, owner.clone()),
+            usage_context(owner, run_id),
         )
         .await
         .map_err(|error| GateModelError::Call(error.to_string()))?;
@@ -98,4 +105,10 @@ impl GateModel for FastGateModel {
             reason: picked.reason,
         })
     }
+}
+
+/// What a Gate model call's usage is recorded as: the factory's Gate model,
+/// billed to `owner`, about the Run `run_id`, whose usage it adds to.
+fn usage_context(owner: &MacroUserIdStr<'static>, run_id: RunId) -> UsageContext {
+    UsageContext::new(AiFeature::FactoryGate, owner.clone()).with_entity(Some(run_id.as_uuid()))
 }

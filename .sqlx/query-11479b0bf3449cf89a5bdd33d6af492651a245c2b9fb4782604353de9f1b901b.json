@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE factory_gate\n            SET stand_in_declined_pick = $3, stand_in_declined_confidence = $4,\n                stand_in_declined_reason = $5\n            WHERE run_id = $1 AND seq = $2 AND answer IS NULL AND stand_in_answer IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Text",
+        "Int2",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "11479b0bf3449cf89a5bdd33d6af492651a245c2b9fb4782604353de9f1b901b"
+}
