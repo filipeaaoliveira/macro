@@ -288,8 +288,9 @@ and plans only the trials it started, and a suite none of whose trials
 started is deleted. A suite still starting counts the trials it
 planned. Once a trial's Run ends it keeps its score (1 when write ended
 `done`, 0.5 `red`, 0 otherwise) and its agents' tokens, its Run's own
-`factory/<run>` branch is deleted as its owner (best effort,
-`PullRequests::delete_branch`), and, unless it was cancelled, the Scorers
+`factory/<run>` branch is deleted as its owner (best effort, through
+`PullRequests::delete_run_branch`, which takes the Run, never a branch
+name; one found missing counts as deleted), and, unless it was cancelled, the Scorers
 its Benchmark names judge it into the trial's own record.
 `GET /insights/evaluation` (same
 params as `/insights`) shows each Scorer's judgments, each Experiment's
