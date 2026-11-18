@@ -1,6 +1,7 @@
 //! In-memory stand-ins for the factory's records, for the domain's tests.
 
 mod automations;
+mod flaws;
 mod gate_owner;
 mod gate_replies;
 mod main_hold;

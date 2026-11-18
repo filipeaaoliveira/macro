@@ -12,11 +12,12 @@ use chrono::Utc;
 use factory_records::domain::automations::{
     Automation, AutomationRepository, AutomationStart, RunAutomation,
 };
+use factory_records::domain::flaws::FlawRepository;
 use factory_records::domain::main_hold::{BaseState, MainHoldRepository};
 use factory_records::domain::models::{
-    EntryId, HandBack, MAX_NOTE_BYTES, MAX_OUTPUT_BYTES, MAX_QUESTION_BYTES, MAX_REQUEST_BYTES,
-    NewRun, NewSteer, Outcome, QueueHold, Repository, Run, RunId, RunInsert, RunOutcome,
-    SteerRefusal, Step, StepKey, TaskLink, TeamMembership,
+    EntryId, FlawMarker, HandBack, MAX_NOTE_BYTES, MAX_OUTPUT_BYTES, MAX_QUESTION_BYTES,
+    MAX_REQUEST_BYTES, NewRun, NewSteer, Outcome, QueueHold, Repository, Run, RunId, RunInsert,
+    RunOutcome, SteerRefusal, Step, StepKey, TaskLink, TeamMembership,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::{ReviewRound, ReviewRoundRepository};
@@ -29,6 +30,7 @@ use uuid::Uuid;
 
 use crate::domain::built_in_flows::{BUILT_IN_FLOWS, BuiltInFlow};
 use crate::domain::control_files::ControlFiles;
+use crate::domain::flaws::mark_flawed;
 use crate::domain::gate::{
     AnswerGate, GateAnswered, GateOpening, GateRuling, GateTelling, ReplyGate,
 };
@@ -125,7 +127,8 @@ where
         + MainHoldRepository
         + ReviewRoundRepository
         + StandingRulesRepository
-        + AutomationRepository,
+        + AutomationRepository
+        + FlawRepository,
     W: RunWorkflows,
     E: StepExecutor,
     U: UserDirectory,
@@ -720,7 +723,8 @@ where
         + MainHoldRepository
         + ReviewRoundRepository
         + StandingRulesRepository
-        + AutomationRepository,
+        + AutomationRepository
+        + FlawRepository,
     W: RunWorkflows,
     E: StepExecutor,
     U: UserDirectory,
@@ -1375,6 +1379,21 @@ where
             Some(RunOutcome::Cancelled) => Ok(()),
             Some(_) => Err(FactoryError::RunEnded),
         }
+    }
+
+    #[tracing::instrument(skip(self, actor, reason))]
+    async fn mark_run_flawed(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        id: RunId,
+        reason: &str,
+    ) -> Result<RunDetail, FactoryError> {
+        self.owned_run(actor, id).await?;
+        let by = FlawMarker::Person {
+            user_id: actor.clone(),
+        };
+        mark_flawed(&self.repo, id, by, reason).await?;
+        self.get_run(actor, id).await
     }
 }
 

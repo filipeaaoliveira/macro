@@ -314,6 +314,16 @@ review round counts so only when every reviewer that failed did so for
 infrastructure. A Gate's answer to such a Step is a person's, and routes as
 any answer.
 
+A Run that ended `success` can be marked `flawed` afterwards
+(`src/domain/flaws.rs`, `mark_flawed`): its result was found wrong, by a
+Scorer (by its name) or by its owner. The Run keeps who, why (1 to 4096
+bytes, trimmed) and when; marking a flawed Run again keeps its first mark,
+and a Run that did not end `success` is refused (409). `POST
+/runs/{id}/flaw` (`{"reason"}`) marks it for its owner in their own
+signed-in session, as a Step Terminal's steer is (403 otherwise), and
+answers the Run. Insights count `infrastructure` and `flawed` Runs apart
+from `failed` and `success`.
+
 The built-in Steps (`src/domain/built_in_steps.rs`) are `reply`, which
 acknowledges the request; `plan`, `write`, `review`, `fix` and `ci_fix`, which
 hand an agent a prompt built from the Step's instructions

@@ -6,7 +6,8 @@ mod test;
 use chrono::{DateTime, Utc};
 use factory_records::domain::main_hold::{MainHold, RequiredChecksState};
 use factory_records::domain::models::{
-    EntryId, Outcome, Repository, Role, Run, RunId, RunOutcome, SteerRefusal, Step, StepKey,
+    EntryId, InvalidName, Outcome, Repository, Role, Run, RunId, RunOutcome, SteerRefusal, Step,
+    StepKey,
 };
 use factory_records::domain::review_rounds::ReviewRound;
 use factory_records::domain::standing_rules::{OrchestratorDefinition, ProjectRules, RulesSource};
@@ -858,6 +859,19 @@ pub enum FactoryError {
     /// A note to a Step's agent carries no words.
     #[error("a note must not be empty")]
     EmptyNote,
+    /// Why a Run is flawed is empty, or larger than a Run keeps.
+    #[error("why the run is flawed must not be empty, and must be at most {max} bytes")]
+    FlawReasonSize {
+        /// The most bytes a reason may hold.
+        max: usize,
+    },
+    /// The Scorer marking a Run flawed is not named as a Flow names things.
+    #[error(transparent)]
+    InvalidScorer(InvalidName),
+    /// The Run did not end `success`, so it cannot be flawed: it still
+    /// runs, or ended another way.
+    #[error("only a run that ended in success can be marked flawed")]
+    NotSucceeded,
     /// The Step takes no steering now, and says why.
     #[error("the step takes no steering now: {}", steer_refusal_message(*.0))]
     NotSteerable(SteerRefusal),

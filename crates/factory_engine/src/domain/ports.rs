@@ -860,6 +860,16 @@ pub trait FactoryService: Send + Sync + 'static {
         id: RunId,
     ) -> impl Future<Output = Result<(), FactoryError>> + Send;
 
+    /// Mark `actor`'s Run flawed, for `reason`, in their own name: it
+    /// ended `success`, and its result was found wrong afterwards. Marking
+    /// a flawed Run again keeps its first mark.
+    fn mark_run_flawed(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        id: RunId,
+        reason: &str,
+    ) -> impl Future<Output = Result<RunDetail, FactoryError>> + Send;
+
     /// Check that `actor` could start a Run of the built-in Flow named
     /// `flow` on the repository `repo_url`, as [`Self::create_run`] checks:
     /// the Flow exists, takes a repository exactly when one is given, and
