@@ -201,6 +201,7 @@ function mount(options: {
     answerGate: vi.fn(),
     replyToGate: vi.fn(),
     cancelRun: options.cancelRun ?? vi.fn(),
+    markRunFlawed: vi.fn(),
     steerStep: vi.fn(),
   };
   render(() => (
