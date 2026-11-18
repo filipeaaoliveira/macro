@@ -74,6 +74,11 @@ export function ControlFilesSettings() {
           </Button>
         </div>
       </Match>
+      <Match when={query.data?.definitionNamed}>
+        <p class="p-3 text-sm text-ink-muted">
+          {t('factoryRuns.controlFilesFromDefinition')}
+        </p>
+      </Match>
       <Match when={query.data}>
         {(settings) => {
           const text = () => draft() ?? settings().patterns.join('\n');

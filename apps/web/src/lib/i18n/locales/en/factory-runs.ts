@@ -175,11 +175,19 @@ export default {
   definitionProblem: 'It doesn’t read: {{problem}}',
   definitionHowTo:
     'Runs take their flows, agents, rules and control files from this repository’s default branch, and keep the commit they read. Change it by pull request; the settings below no longer apply.',
+  definitionNoPullRequest:
+    'Its default branch doesn’t require a pull request: a push changes your factory’s rules unreviewed. Protect the branch on GitHub.',
+  definitionPullRequestUnknown:
+    'Couldn’t tell whether its default branch requires a pull request: only its admins can read that. Make sure it does.',
   definitionAdminsOnly: 'Only team admins can change it.',
   definitionSave: 'Save',
   definitionRemove: 'Stop using it',
   definitionSaved: 'Factory definition saved',
   definitionSaveFailed: 'Couldn’t save the factory definition',
+  controlFilesFromDefinition:
+    'Your team’s factory definition sets the control files its runs are checked against, in its rules.json. Change them by pull request there.',
+  standingRulesFromDefinition:
+    'Your team’s factory definition sets the standing rules its runs start with, in its rules.json. Change them by pull request there.',
   // A team's Standing Rules, in team settings.
   standingRulesLoading: 'Loading standing rules…',
   standingRulesLoadFailed: 'Standing rules couldn’t be loaded',

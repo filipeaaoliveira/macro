@@ -95,6 +95,20 @@ export function DefinitionSettings() {
                     </p>
                   )}
                 </Show>
+                <Show when={settings().requiresPullRequest === false}>
+                  <p class="text-xs text-failure" role="alert">
+                    {t('factoryRuns.definitionNoPullRequest')}
+                  </p>
+                </Show>
+                <Show
+                  when={
+                    settings().commit && settings().requiresPullRequest === null
+                  }
+                >
+                  <p class="text-xs text-ink-muted">
+                    {t('factoryRuns.definitionPullRequestUnknown')}
+                  </p>
+                </Show>
                 <p class="text-xs text-ink-muted">
                   {t('factoryRuns.definitionHowTo')}
                 </p>

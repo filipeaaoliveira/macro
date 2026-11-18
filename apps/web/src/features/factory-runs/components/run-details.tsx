@@ -24,9 +24,10 @@ const AUTOMATION_TRIGGERS = {
 
 /**
  * Where the Run is, when it started and ended, the repository it works on,
- * the Factory Definition commit it read, the Automation that started it, and what its request says past the
- * title. The status line takes focus when the control a person used goes
- * away (an answered Gate, a cancelled Run).
+ * the Factory Definition commit it read, the Automation that started it,
+ * and what its request says past the title. The status line takes focus
+ * when the control a person used goes away (an answered Gate, a cancelled
+ * Run).
  */
 export function RunSummary(props: {
   run: Run;
