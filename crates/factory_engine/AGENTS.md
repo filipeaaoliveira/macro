@@ -615,6 +615,77 @@ the rules: the workflow asks `factory_rule_gate` only about a Flow's Gate
 worker answers none for a Gate `GateKind::answered_only_by_a_person` keeps
 for the owner, whatever the ruling names.
 
+Gate replies (`src/domain/gate_replies.rs`, `gate_replies/service.rs`):
+a person may answer a Gate in words rather than with a button, with `POST
+/runs/{id}/steps/{seq}/reply` (`{"reply"}`, 1 to 4096 bytes, else 400), in
+their own signed-in session as for an answer, or by commenting on the Run's
+task while the Gate waits. The workflow takes the words with the
+`factory_reply_gate` update (refused, as an answer is, for a Gate the Run
+does not wait on, after an answer or other words it has not read, and for a
+Gate opened before replies) and asks the worker to read them
+(`factory_read_gate_reply`): a small model (the `GateModel` port; on Macro's
+model router in `outbound/fast_gate_model.rs`, `AiFeature::FactoryGate`,
+billed to no one) picks one of the Gate's answers or `unclear`, with how
+sure it is. At or above the reply threshold (`DEFAULT_REPLY_THRESHOLD`, 85
+percent, or `FACTORY_GATE_REPLY_THRESHOLD`) the Gate is answered with it as
+the person's answer, the words kept as its note and the confidence beside
+it; below it, `unclear`, an answer the Gate does not offer, a call that
+fails or takes longer than `MODEL_TIMEOUT` (30 s), the factory asks back on
+the Gate (`asked_back`), which waits on and takes an answer or new words.
+Words never approve a Tampered Run: its Control Files are approved with the
+button, which lists them. An agent's question takes the words as its
+answer, with no model (the API sends them as the Gate's `answer`, so any
+worker takes them). While a Gate waits, the workflow looks at the Run's task
+every `COMMENTS_EVERY` (5 minutes, a timer and `factory_read_gate_comments`):
+the owner's newest comment since the last look (`outbound/
+document_task_comments.rs`: an unanchored discussion's comment or a reply in
+its preview, written by the owner themselves, not by a program, an agent or
+a bot for them) is read as a reply; an answer or words given meanwhile go
+first. A Run with no task looks at nothing.
+
+The stand-in (`src/domain/stand_in.rs`) answers a routine Gate for the
+Run's owner once no Standing Rule did, and before the person: a team turns
+it on per kind of Gate in its Orchestrator Definition (`standIn`: `plan`,
+`blockers`; it has no setting for a merge Gate), a Project's own replacing
+it, and a Run keeps it with its rules; it is off by default. The workflow
+asks the worker (`factory_stand_in_gate`) about a Flow's Gate of a kind;
+the worker answers none for a merge Gate, an agent's question, a Gate its
+Flow keeps for a person (`GateDefinition::person_only`), a Gate of a
+Tampered Run or under a Main Hold of its base, and a Run created before
+Runs kept rules. It asks the model with the Gate, the Run's request, the
+asking Step's output, the plan (the latest planner's Step before it) and
+the owner's last `PAST_ANSWERS_READ` answers to the same entry's Gates, as
+data. At or above the stand-in threshold (`DEFAULT_STAND_IN_THRESHOLD`, 90
+percent, or `FACTORY_STAND_IN_THRESHOLD`) its answer, reason and confidence
+are kept on the Gate with the end of its window (`DEFAULT_STAND_IN_WINDOW`,
+10 minutes, or `FACTORY_STAND_IN_WINDOW_SECS`), and the Gate takes the
+owner's answers and words meanwhile: one in the window is the Gate's
+answer, as any other, with the stand-in's kept beside it. Once the window's
+timer fires the Gate closes and the stand-in's answer becomes its answer
+(`factory_keep_stand_in`, `by_stand_in`, with no author). Below the
+threshold, unsure, or failing, it keeps nothing, and the Gate waits for the
+person. A retry returns the answer kept first, with what is left of its
+window. Run insights count neither its answers nor Rule Answers.
+
+The model calls are activities, so a replay reads their results from the
+history. The stand-in, replies and the looks at the task are behind the
+`factory-gate-replies` patch marker, asked once per Gate after its rules:
+a Gate opened before the marker takes only an answer, as before, and
+replays without them. The thresholds come from the replay measure
+(`gate_replies/measure.rs`, the `factory_gate_replay` command of
+`services/factory_service`), which runs the model over the Gates people
+answered themselves: each Flow's Gate answered with a note, its note read
+as the reply, and each built-in Flow's plan and Blockers Gate, asked as the
+stand-in would be with the owner's earlier answers, and reports at each
+threshold how many the model would have answered, agreed on and picked
+wrong. It sets a threshold only from `ENOUGH_GATES` (30) Gates. On
+2026-11-18 the factory's records on the test bench held 48 Gates people
+answered, from 27 Runs: 12 answered with a note and 12 built-in plan
+Gates, too few to set a threshold from (and no model key was at hand to
+call the model), so the conservative defaults stand: 85 percent for
+replies and 90 for the stand-in. Run the command again once the records
+hold more answered Gates, before lowering either.
+
 ## Start here
 
 - `src/domain/flow.rs`: the Flow model and the checks a definition must pass.
@@ -639,6 +710,9 @@ for the owner, whatever the ruling names.
   what makes a Run Tampered.
 - `src/domain/main_hold.rs` and `src/inbound/temporal/main_watch.rs`: the
   Main Hold, its looks at a base branch and the watch that makes them.
+- `src/domain/gate_replies.rs` and `src/domain/stand_in.rs`: a person's
+  words on a Gate, the stand-in, and what it never answers;
+  `gate_replies/measure.rs`: the replay measure that sets their thresholds.
 - `src/domain/standing_rules.rs`: which Gates a Standing Rule answers, and
   what it never answers. Project rules are set through the API only: team
   settings show how many Projects have their own.
@@ -660,7 +734,9 @@ for the owner, whatever the ruling names.
 
 ## Boundaries
 
-- Depends on: `factory_records`, `ai_usage` (agent sessions' usage),
+- Depends on: `factory_records`, `ai_usage` (agent sessions' usage, and
+  the Gate model's), `agent` (the model router the Gate model calls),
+  `messages` (the discussions on a Run's task),
   `agent_session` (the routine sessions port),
   `agent_correlation`, `macro_authorization`, `macro_user_id`,
   `entity_access` (ports), `document_storage_service_client`,
@@ -683,6 +759,10 @@ for the owner, whatever the ruling names.
   (`built_in_steps.rs`).
 - Change the default Control Files: `DEFAULT_CONTROL_FILES` in
   `src/domain/control_files.rs`, and its test.
+- Let the stand-in answer another kind of Gate: its field on
+  `StandInKinds` and its stored name (`stand_in_*`) in `factory_records`'
+  `domain/standing_rules.rs` and the migration's checks, `stands_in`, and
+  their tests; never a kind whose answer approves Control Files or merges.
 - Add a Standing Rule: a `RuleGateKind` and its `StandingRule` in
   `factory_records`' `domain/standing_rules.rs` (and the migration's checks
   of the stored names), the kind's field on `OrchestratorDefinition`,
@@ -765,9 +845,9 @@ for the owner, whatever the ruling names.
 - A worker older than `GateDefinition::after` cannot read a Flow that has
   it, and one older than `factory_rule_gate` fails that activity: deploy
   every worker before the API starts Runs on the new `code` Flow.
-- Removing the `factory-standing-rules` patch, or asking anything new
-  between recording a Gate and waiting on it without a patch of its own,
-  breaks the replay of Runs in flight: `inbound/temporal/test/replay.rs`
+- Removing the `factory-standing-rules` or `factory-gate-replies` patch,
+  or asking anything new between recording a Gate and waiting on it
+  without a patch of its own, breaks the replay of Runs in flight: `inbound/temporal/test/replay.rs`
   replays recorded histories, and gets new ones recorded beside them when
   the workflow changes.
 - Renaming or removing an Agent while its Steps run fails their retries
