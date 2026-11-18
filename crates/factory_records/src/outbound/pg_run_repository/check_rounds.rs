@@ -151,13 +151,15 @@ impl PgRunRepository {
         // Two attempts that record the same prompt at once may both find it
         // not recorded yet, and the one whose update then changes nothing
         // reads false: it fails as superseded and its retry goes on, which
-        // costs that retry.
+        // costs that retry. The owner may steer the Step again while its
+        // agent works on the prompt, which the Step follows from now on.
         let recorded = sqlx::query_scalar!(
             r#"
             WITH turned AS (
                 UPDATE factory_step
                 SET turn_action_id = $4, turn_place = $6, offered = $5,
-                    handed_outcome = NULL, handed_output = NULL, handed_at = NULL
+                    handed_outcome = NULL, handed_output = NULL, handed_at = NULL,
+                    steer_action_id = NULL, steer_closed = false
                 WHERE run_id = $1 AND seq = $2
                     AND session_id = $3 AND ended_at IS NULL
                     AND (turn_place IS NULL OR turn_place < $6)

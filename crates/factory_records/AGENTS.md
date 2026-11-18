@@ -63,7 +63,8 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261118131500_factory_queue_limit.sql`,
   `20261118141500_factory_orchestrator_answers.sql`,
   `20261118143000_factory_automation.sql`,
-  `20261118150000_factory_standing_rules_names.sql`).
+  `20261118150000_factory_standing_rules_names.sql`,
+  `20261118170000_factory_step_terminal.sql`), and `factory_step_steer`.
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
 
 ## Boundaries
@@ -110,6 +111,17 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   with a later prompt's answer. `pass_session` leaves a Step that took a
   later prompt alone, so its checks rounds stay in the session that did the
   work. `stopping_session` reads the latest prompt's action.
+- The Step Terminal (`src/outbound/pg_run_repository/steering.rs`): `steer`
+  keeps what the owner did on a running Step (`factory_step_steer`, in
+  order) and the steering its work reads (`paused_at`, `stop_asked_at`,
+  `steer_action_id`, the prompt it follows), under the Step's row lock,
+  only while the Step and its Run have not ended, it holds its session and
+  its steering is open (`steer_closed`). `close_steering` closes it only
+  while the Step follows the prompt the work names and is neither paused
+  nor asked to stop; `begin_turn` opens it again and drops the prompt it
+  followed. `unsteer` marks a refused prompt undelivered and goes back to
+  the one before. A note keeps the hand back. `list_steps` reads a running
+  Step's session (`terminal.session_id`), none once it ended or let go of it.
 - A Step that goes on after its agent's question claims the asking Step's
   session, so a session can have several Steps, one after another: at most
   one of them running (`factory_step_running_session_idx`), and the asking

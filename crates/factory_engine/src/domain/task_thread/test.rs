@@ -65,6 +65,7 @@ fn step_with(gate: Option<Gate>) -> Step {
         agent: None,
         passed_over: Vec::new(),
         checks: Vec::new(),
+        terminal: Default::default(),
     }
 }
 

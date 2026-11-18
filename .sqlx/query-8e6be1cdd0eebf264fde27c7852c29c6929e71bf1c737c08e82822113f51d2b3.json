@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE factory_step_steer\n            SET undelivered = true\n            WHERE run_id = $1 AND seq = $2 AND prompt_id = $3\n            RETURNING action = 'resume' AS \"resumed!\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "resumed!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "8e6be1cdd0eebf264fde27c7852c29c6929e71bf1c737c08e82822113f51d2b3"
+}

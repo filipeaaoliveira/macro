@@ -7,9 +7,9 @@ use uuid::Uuid;
 
 use crate::domain::models::{
     CheckResult, CheckRound, CheckRoundOutcome, CheckRoundStart, ClaimedSession,
-    ControlFileChanges, EntryId, GateAnswer, HandBack, HandedBack, NewRun, Outcome, PassedOver,
-    QueueHold, Role, Run, RunId, RunInsert, RunOutcome, SessionStep, Step, StepKey, StepSession,
-    StoppingSession, TaskLink, TeamMembership,
+    ControlFileChanges, EntryId, GateAnswer, HandBack, HandedBack, NewRun, NewSteer, Outcome,
+    PassedOver, QueueHold, Role, Run, RunId, RunInsert, RunOutcome, SessionStep, Step, StepKey,
+    StepSession, StepSteering, SteerRefusal, Steered, StoppingSession, TaskLink, TeamMembership,
 };
 use crate::domain::standing_rules::StandingRule;
 
@@ -257,11 +257,54 @@ pub trait RunRepository: Send + Sync + 'static {
         action_id: Uuid,
     ) -> impl Future<Output = Result<HandedBack, Self::Err>> + Send;
 
+    /// Record that the Run's owner steers the running Step `key` with
+    /// `steer`, and return its session, or why it takes no steering now.
+    /// Only a Step that has not ended and holds its own session takes it,
+    /// while its work waits on its agent's turn (see
+    /// [`Self::close_steering`]); a stop asked refuses everything after
+    /// it. A note goes to a Step that is not paused, a pause to one that is
+    /// not, and a resume to one that is: a resume ends the pause. A note or a
+    /// resume becomes the prompt the Step's work follows.
+    fn steer(
+        &self,
+        key: StepKey,
+        steer: &NewSteer,
+    ) -> impl Future<Output = Result<Result<Steered, SteerRefusal>, Self::Err>> + Send;
+
+    /// Record that the session refused the prompt `prompt_id` a note or a
+    /// resume of the Step `key` sent: the steer is marked undelivered, the
+    /// Step follows `previous` again, and a refused resume pauses the Step
+    /// again. Changes nothing once the Step follows another prompt.
+    fn unsteer(
+        &self,
+        key: StepKey,
+        prompt_id: Uuid,
+        previous: Option<Uuid>,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// The owner's steering of the Step `key`, as its work reads it while
+    /// it waits on its agent.
+    fn steering(&self, key: StepKey) -> impl Future<Output = Result<StepSteering, Self::Err>> + Send;
+
+    /// Stop the Step `key` taking its owner's steering, once its agent's
+    /// turn ended and its work follows `followed`, the prompt of the
+    /// owner's steering it read last (none when it followed none), and the
+    /// Step is neither paused nor asked to stop. Whether it stopped: false
+    /// when the owner steered it since, so the work reads the steering
+    /// again. A later prompt of the factory's ([`Self::begin_turn`]) lets
+    /// the owner steer it again.
+    fn close_steering(
+        &self,
+        key: StepKey,
+        followed: Option<Uuid>,
+    ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
+
     /// Record that the agent of the Step `key` works on a later prompt of
     /// its session `session_id`, `action_id`, and may hand back one of
     /// `offered`: the hand back of the prompt before is cleared, and a stop
-    /// reads this prompt's progress. Recording the same prompt again changes
-    /// nothing, so its hand back stays. `place` orders the Step's later
+    /// reads this prompt's progress; the owner may steer the Step again, and
+    /// it follows this prompt rather than their latest. Recording the same
+    /// prompt again changes nothing, so its hand back stays. `place` orders the Step's later
     /// prompts: a Step that ended, works in no session or another one, or
     /// already works on a prompt at `place` or later is left alone. Whether
     /// the Step works on the prompt now: false when it was left alone.

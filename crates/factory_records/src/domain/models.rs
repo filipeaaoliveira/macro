@@ -679,6 +679,175 @@ pub struct Step {
     /// The rounds of the repository's checks it ran, in order: none for a
     /// Step that runs no checks.
     pub checks: Vec<CheckRound>,
+    /// Its Step Terminal: the session its owner may watch, and how they
+    /// steered it.
+    pub terminal: StepTerminal,
+}
+
+/// A running agent Step as its owner watches and steers it, from the Run
+/// view: the agent session to watch, whether it is paused or asked to stop,
+/// and what the owner did, oldest first.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct StepTerminal {
+    /// The agent session the Step works in, while it runs in one: none for a
+    /// Step that ended, let go of its session, or does no agent work.
+    pub session_id: Option<Uuid>,
+    /// Since when the owner paused the Step, while it is paused.
+    pub paused_at: Option<DateTime<Utc>>,
+    /// When the owner asked the Step to stop; it ends `failed` once its
+    /// agent's turn stops.
+    pub stop_asked_at: Option<DateTime<Utc>>,
+    /// What the owner did, oldest first.
+    pub steers: Vec<Steer>,
+}
+
+/// What the Run's owner did to a running Step from its Step Terminal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SteerAction {
+    /// Sent its agent a note, which the agent reads once its turn ends.
+    Note,
+    /// Stopped its agent's turn, and held the Step until a resume.
+    Pause,
+    /// Told its agent to go on, with a note or without.
+    Resume,
+    /// Stopped its agent's turn, and ended the Step `failed`.
+    Stop,
+}
+
+impl SteerAction {
+    /// The word the action is kept as.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Note => "note",
+            Self::Pause => "pause",
+            Self::Resume => "resume",
+            Self::Stop => "stop",
+        }
+    }
+}
+
+impl FromStr for SteerAction {
+    type Err = UnknownSteerAction;
+
+    fn from_str(name: &str) -> Result<Self, Self::Err> {
+        match name {
+            "note" => Ok(Self::Note),
+            "pause" => Ok(Self::Pause),
+            "resume" => Ok(Self::Resume),
+            "stop" => Ok(Self::Stop),
+            _ => Err(UnknownSteerAction(name.to_string())),
+        }
+    }
+}
+
+/// A stored steer whose action this build does not know.
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[error("unknown steer action {0:?}")]
+pub struct UnknownSteerAction(pub String);
+
+/// One thing the Run's owner did to a running Step.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Steer {
+    /// What they did.
+    pub action: SteerAction,
+    /// Their note to the agent, for a note or a resume that has one.
+    pub note: Option<String>,
+    /// Whether the agent's session refused the note or the resume, so the
+    /// agent never read it.
+    pub undelivered: bool,
+    /// When they did it.
+    pub at: DateTime<Utc>,
+}
+
+/// What the Run's owner asks of a running Step, as the Step keeps it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NewSteer {
+    /// Send its agent `note`, as the prompt `prompt_id`.
+    Note {
+        /// The owner's words.
+        note: String,
+        /// The prompt, a UUIDv7 the factory makes, that carries them.
+        prompt_id: Uuid,
+    },
+    /// Stop its agent's turn and hold the Step.
+    Pause,
+    /// Tell its agent to go on, as the prompt `prompt_id`, with `note`.
+    Resume {
+        /// The owner's words, if any.
+        note: Option<String>,
+        /// The prompt, a UUIDv7 the factory makes, that tells the agent.
+        prompt_id: Uuid,
+    },
+    /// Stop its agent's turn and end the Step.
+    Stop,
+}
+
+impl NewSteer {
+    /// What the owner does.
+    pub fn action(&self) -> SteerAction {
+        match self {
+            Self::Note { .. } => SteerAction::Note,
+            Self::Pause => SteerAction::Pause,
+            Self::Resume { .. } => SteerAction::Resume,
+            Self::Stop => SteerAction::Stop,
+        }
+    }
+
+    /// The prompt it sends the agent's session, for a note or a resume.
+    pub fn prompt_id(&self) -> Option<Uuid> {
+        match self {
+            Self::Note { prompt_id, .. } | Self::Resume { prompt_id, .. } => Some(*prompt_id),
+            Self::Pause | Self::Stop => None,
+        }
+    }
+}
+
+/// Why a running Step takes no steering now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SteerRefusal {
+    /// The Step ended, or let go of its session.
+    Ended,
+    /// No agent works on the Step in a session of its own.
+    NoSession,
+    /// Its agent works on no turn the Step waits on: it is between prompts,
+    /// as while the factory runs the repository's checks itself.
+    NotWorking,
+    /// The Step is paused: only a resume or a stop goes to it.
+    Paused,
+    /// The Step is not paused, so there is nothing to resume.
+    NotPaused,
+    /// The owner asked the Step to stop.
+    Stopping,
+}
+
+/// A steer the Step recorded: the session to act on, of the Agent filling
+/// `role`, and the prompt the owner's steering sent the session before
+/// this one, for [`crate::domain::ports::RunRepository::unsteer`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Steered {
+    /// The session the Step works in.
+    pub session: StepSession,
+    /// The Role its agent fills.
+    pub role: Role,
+    /// The prompt of the owner's steering the Step's work followed before.
+    pub previous_prompt: Option<Uuid>,
+}
+
+/// What the Step's work reads of its owner's steering while it waits on its
+/// agent.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct StepSteering {
+    /// Whether the Step is paused.
+    pub paused: bool,
+    /// Whether the owner asked it to stop.
+    pub stop_asked: bool,
+    /// The prompt the owner's latest note or resume sent, which the Step
+    /// follows once the turn before it ends; none once the factory sent a
+    /// prompt of its own after it.
+    pub prompt: Option<Uuid>,
 }
 
 /// The most rounds of checks a Step runs.

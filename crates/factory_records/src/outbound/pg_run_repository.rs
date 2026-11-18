@@ -7,6 +7,7 @@ mod insights;
 mod main_hold;
 mod review_rounds;
 mod standing_rules;
+mod steering;
 #[cfg(test)]
 mod test;
 
@@ -22,8 +23,9 @@ use crate::domain::models::{
     AgentName, AskedBack, CheckResult, CheckRound, CheckRoundOutcome, CheckRoundStart,
     ClaimedSession, ControlFileChanges, EntryId, Gate, GateAnswer, GateKind, HandBack, HandedBack,
     InvalidName, NewRun, Outcome, PassedOver, QueueHold, QueuePlaces, Repository, Role, Run,
-    RunEnd, RunId, RunInsert, RunOutcome, SessionStep, StandInAnswer, Step, StepEnd, StepKey,
-    StepSession, StoppingSession, TaskLink, TeamMembership,
+    NewSteer, RunEnd, RunId, RunInsert, RunOutcome, SessionStep, StandInAnswer, Step, StepEnd,
+    StepKey, StepSession, StepSteering, StepTerminal, SteerRefusal, Steered, StoppingSession,
+    TaskLink, TeamMembership,
 };
 use crate::domain::ports::RunRepository;
 use crate::domain::standing_rules::{OrchestratorDefinition, RulesSource, RunRules, StandingRule};
@@ -186,6 +188,9 @@ pub enum PgRunRepositoryErr {
     /// The Step does not exist.
     #[error("the step does not exist")]
     NoSuchStep,
+    /// A stored steer's action is not one this code knows.
+    #[error(transparent)]
+    UnknownSteerAction(#[from] crate::domain::models::UnknownSteerAction),
     /// A stored task id is not a UUID.
     #[error("stored task id {0:?} is not a UUID")]
     InvalidTaskId(String),
@@ -338,6 +343,9 @@ struct StepRow {
     agent: Option<String>,
     passed_over: Vec<String>,
     pass_reasons: Vec<String>,
+    terminal_session_id: Option<Uuid>,
+    paused_at: Option<DateTime<Utc>>,
+    stop_asked_at: Option<DateTime<Utc>>,
 }
 
 impl StepRow {
@@ -534,6 +542,12 @@ impl TryFrom<StepRow> for Step {
             agent: row.agent.map(AgentName::try_from).transpose()?,
             passed_over,
             checks: Vec::new(),
+            terminal: StepTerminal {
+                session_id: row.terminal_session_id,
+                paused_at: row.paused_at,
+                stop_asked_at: row.stop_asked_at,
+                steers: Vec::new(),
+            },
         })
     }
 }
@@ -871,7 +885,11 @@ impl RunRepository for PgRunRepository {
                 s.role,
                 s.agent,
                 s.passed_over,
-                s.pass_reasons
+                s.pass_reasons,
+                CASE WHEN s.ended_at IS NULL AND s.session_released_at IS NULL
+                    THEN s.session_id END AS terminal_session_id,
+                s.paused_at,
+                s.stop_asked_at
             FROM factory_step s
             LEFT JOIN factory_gate g ON g.run_id = s.run_id AND g.seq = s.seq
             WHERE s.run_id = $1
@@ -882,11 +900,13 @@ impl RunRepository for PgRunRepository {
         .fetch_all(&self.pool)
         .await?;
         let mut rounds = self.runs_check_rounds(&[id.as_uuid()]).await?;
+        let mut steers = self.runs_steers(&[id.as_uuid()]).await?;
 
         let mut steps = Vec::with_capacity(rows.len());
         for row in rows {
             let mut step = Step::try_from(row)?;
             step.checks = rounds.remove(&(id, step.seq)).unwrap_or_default();
+            step.terminal.steers = steers.remove(&(id, step.seq)).unwrap_or_default();
             steps.push(step);
         }
         Ok(steps)
@@ -1053,7 +1073,11 @@ impl RunRepository for PgRunRepository {
                 s.role,
                 s.agent,
                 s.passed_over,
-                s.pass_reasons
+                s.pass_reasons,
+                CASE WHEN s.ended_at IS NULL AND s.session_released_at IS NULL
+                    THEN s.session_id END AS terminal_session_id,
+                s.paused_at,
+                s.stop_asked_at
             FROM factory_step s
             LEFT JOIN factory_gate g ON g.run_id = s.run_id AND g.seq = s.seq
             WHERE s.run_id = ANY($1)
@@ -1064,12 +1088,14 @@ impl RunRepository for PgRunRepository {
         .fetch_all(&self.pool)
         .await?;
         let mut rounds = self.runs_check_rounds(&ids).await?;
+        let mut steers = self.runs_steers(&ids).await?;
 
         let mut steps: BTreeMap<RunId, Vec<Step>> = BTreeMap::new();
         for row in rows {
             let run_id = RunId::from_uuid(row.run_id);
             let mut step = Step::try_from(row)?;
             step.checks = rounds.remove(&(run_id, step.seq)).unwrap_or_default();
+            step.terminal.steers = steers.remove(&(run_id, step.seq)).unwrap_or_default();
             steps.entry(run_id).or_default().push(step);
         }
         Ok(steps)
@@ -1595,6 +1621,35 @@ impl RunRepository for PgRunRepository {
     ) -> Result<bool, Self::Err> {
         self.record_turn(key, session_id, action_id, place, offered)
             .await
+    }
+
+    #[tracing::instrument(err, skip(self, steer), fields(action = steer.action().as_str()))]
+    async fn steer(
+        &self,
+        key: StepKey,
+        steer: &NewSteer,
+    ) -> Result<Result<Steered, SteerRefusal>, Self::Err> {
+        self.record_steer(key, steer).await
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn unsteer(
+        &self,
+        key: StepKey,
+        prompt_id: Uuid,
+        previous: Option<Uuid>,
+    ) -> Result<(), Self::Err> {
+        self.undo_steer(key, prompt_id, previous).await
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn steering(&self, key: StepKey) -> Result<StepSteering, Self::Err> {
+        self.read_steering(key).await
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn close_steering(&self, key: StepKey, followed: Option<Uuid>) -> Result<bool, Self::Err> {
+        self.stop_steering(key, followed).await
     }
 
     #[tracing::instrument(err, skip(self))]

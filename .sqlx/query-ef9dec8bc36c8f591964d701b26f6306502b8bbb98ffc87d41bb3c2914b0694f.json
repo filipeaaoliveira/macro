@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE factory_step\n            SET steer_action_id = $4,\n                paused_at = CASE WHEN $5 THEN COALESCE(paused_at, now()) ELSE paused_at END\n            WHERE run_id = $1 AND seq = $2 AND steer_action_id = $3 AND ended_at IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Uuid",
+        "Uuid",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ef9dec8bc36c8f591964d701b26f6306502b8bbb98ffc87d41bb3c2914b0694f"
+}

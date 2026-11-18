@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE factory_step\n            SET paused_at = CASE $3\n                    WHEN 'pause' THEN now()\n                    WHEN 'resume' THEN NULL\n                    ELSE paused_at\n                END,\n                stop_asked_at = CASE WHEN $3 = 'stop' THEN now() ELSE stop_asked_at END,\n                steer_action_id = COALESCE($4, steer_action_id)\n            WHERE run_id = $1 AND seq = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bec92031b2f6e8668fef1d1cb7310f69d79371adfec641aa5c62787b6a33ff21"
+}

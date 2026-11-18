@@ -89,6 +89,7 @@ fn gated(seq: u16, kind: GateKind, opened_at: u32, answer: Option<&str>) -> Step
         agent: None,
         passed_over: Vec::new(),
         checks: Vec::new(),
+        terminal: Default::default(),
     }
 }
 
