@@ -250,7 +250,7 @@ where
         let Some(step) = steps.iter().find(|step| step.seq == key.seq) else {
             return;
         };
-        if let Some(notice) = stand_in_notice(run, step, &kept.answer, kept.until) {
+        if let Some(notice) = stand_in_notice(run, step, &kept.answer) {
             self.notifier.notify(notice).await;
         }
     }

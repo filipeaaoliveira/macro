@@ -187,28 +187,24 @@ pub fn stand_in_id(run_id: RunId, seq: u16) -> Uuid {
 }
 
 /// The notice that the stand-in answered the Gate of `step`, of `run`,
-/// with `answer`, which the owner may change until `until`: none once the
+/// with `answer`, which the owner may change while its window is open (the
+/// Run view says until when, in the viewer's time): none once the
 /// Run ended, or when it works on no task, which Macro notifies about. It
 /// is sent whatever the owner section says, since the stand-in answers in
 /// the owner's name. Like a notify-only Gate's notice it is news while the
 /// Run goes on, lighter than a waiting Gate's: flagged `notify_only`, not
 /// pushed, one per Gate ([`stand_in_id`]), and marked done once the window
 /// closes or the Gate is answered.
-pub fn stand_in_notice(
-    run: &Run,
-    step: &Step,
-    answer: &Outcome,
-    until: DateTime<Utc>,
-) -> Option<GateNotice> {
+pub fn stand_in_notice(run: &Run, step: &Step, answer: &Outcome) -> Option<GateNotice> {
     if run.end.is_some() {
         return None;
     }
     let gate = step.gate.as_ref()?;
     let task_id = run.task_id?;
     let told = format!(
-        "The stand-in answered {} for you; you can change it in the run until {}. {}",
+        "The stand-in answered {} for you; you can change it in the run until its window \
+         closes. {}",
         answer_label(answer),
-        until.format("%H:%M UTC"),
         gate.question
     );
     Some(GateNotice {
