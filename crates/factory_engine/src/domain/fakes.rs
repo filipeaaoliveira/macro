@@ -1478,6 +1478,8 @@ pub(crate) struct FakeGithubState {
     /// Whether the default branch takes changes only through a pull
     /// request; none when that cannot be told.
     pub(crate) requires_pull_request: Option<bool>,
+    /// The paths of the files read, in order.
+    pub(crate) file_reads: Vec<String>,
 }
 
 /// GitHub in memory, for one Run's branch: opening its pull request makes
@@ -1667,7 +1669,9 @@ impl PullRequests for FakeGithub {
         path: &str,
     ) -> Result<Option<String>, FakeGithubError> {
         let file = (branch.to_string(), path.to_string());
-        Ok(self.state().files.get(&file).cloned())
+        let mut state = self.state();
+        state.file_reads.push(path.to_string());
+        Ok(state.files.get(&file).cloned())
     }
 
     async fn changed_paths(

@@ -295,10 +295,18 @@ async fn naming_a_definition_checks_it_and_holds_the_team_s_settings() {
         "{member:?}"
     );
 
+    github.state().file_reads.clear();
     let named = service
         .set_definition(julia(), Some(DEFINITION_REPO.to_string()))
         .await
         .expect("named");
+    let manifests = github
+        .state()
+        .file_reads
+        .iter()
+        .filter(|path| path.as_str() == "factory.json")
+        .count();
+    assert_eq!(manifests, 1, "the definition is read once");
     assert_eq!(named.repo_url.as_deref(), Some(DEFINITION_REPO));
     assert_eq!(named.commit.as_deref(), Some(FIRST));
     assert_eq!(named.problem, None);
@@ -381,7 +389,7 @@ async fn a_run_on_the_definition_repository_guards_its_files() {
             true,
         )
         .await
-        .expect("a run on the definition repository");
+        .expect("a run on the definition repository, named in another case");
     let elsewhere = service
         .create_run(
             teo(),

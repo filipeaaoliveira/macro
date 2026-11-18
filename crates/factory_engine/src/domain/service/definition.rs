@@ -222,13 +222,11 @@ where
     /// service bounds the Flows it starts.
     fn bounded(&self, kept: RunFlow) -> Option<Flow> {
         let built_in = kept.definition.is_none();
-        let Some(mut flow) = walked_flow(kept) else {
-            return Ok(None);
-        };
+        let mut flow = walked_flow(kept)?;
         if built_in && let Some(rounds) = self.review_rounds {
             flow.bound_review_rounds(rounds);
         }
-        Ok(Some(flow))
+        Some(flow)
     }
 
     /// The team's Factory Definition, as `actor` sees it: read at its
@@ -240,12 +238,30 @@ where
         let team = self.repo.team_of(actor).await.map_err(internal)?;
         let agent = self.repo.is_agent_account(actor).await.map_err(internal)?;
         let repo_url = self.named_definition(team).await?;
-        let (pinned, problem) = match &repo_url {
-            Some(repo_url) => match self.definition_at_head(actor, repo_url).await {
-                Ok(pinned) => (Some(pinned), None),
-                Err(FactoryError::Internal(report)) => return Err(FactoryError::Internal(report)),
-                Err(refused) => (None, Some(refused.to_string())),
-            },
+        let read = match &repo_url {
+            Some(repo_url) => Some(self.definition_at_head(actor, repo_url).await),
+            None => None,
+        };
+        self.settings_of(actor, team, !agent, repo_url, read).await
+    }
+
+    /// The settings of `team`'s Definition `repo_url`, from `read`, what
+    /// reading it at its head came to; `editor` when the person is not an
+    /// agent's account.
+    async fn settings_of(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        team: Option<TeamMembership>,
+        editor: bool,
+        repo_url: Option<String>,
+        read: Option<Result<PinnedDefinition, FactoryError>>,
+    ) -> Result<DefinitionSettings, FactoryError> {
+        let (pinned, problem) = match read {
+            Some(Ok(pinned)) => (Some(pinned), None),
+            Some(Err(FactoryError::Internal(report))) => {
+                return Err(FactoryError::Internal(report));
+            }
+            Some(Err(refused)) => (None, Some(refused.to_string())),
             None => (None, None),
         };
         // A change reaches the Definition by pull request only where its
@@ -261,7 +277,7 @@ where
             problem,
             requires_pull_request,
             team_id: team.map(|team| team.team_id),
-            can_edit: !agent && team.is_some_and(|team| team.admin),
+            can_edit: editor && team.is_some_and(|team| team.admin),
         })
     }
 
@@ -298,15 +314,20 @@ where
         repo_url: Option<String>,
     ) -> Result<DefinitionSettings, FactoryError> {
         let team = self.administered_team(&actor).await?;
-        let repo_url = match repo_url {
-            Some(repo_url) => Some(self.definition_at_head(&actor, &repo_url).await?.repo_url),
+        // The Definition is read once: to check it, and for the settings
+        // that answer.
+        let pinned = match repo_url {
+            Some(repo_url) => Some(self.definition_at_head(&actor, &repo_url).await?),
             None => None,
         };
+        let repo_url = pinned.as_ref().map(|pinned| pinned.repo_url.clone());
         self.repo
             .set_team_definition(team.team_id, repo_url.as_deref())
             .await
             .map_err(internal)?;
-        self.definition_settings(&actor).await
+        // An administered team's admin is never an agent's account.
+        self.settings_of(&actor, Some(team), true, repo_url, pinned.map(Ok))
+            .await
     }
 
     /// The team `actor` administers, to change a setting a Factory
