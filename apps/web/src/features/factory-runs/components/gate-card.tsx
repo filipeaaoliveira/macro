@@ -285,9 +285,7 @@ function ModelReadingLine(props: { reading: GateModelReading }) {
   const said = () => {
     const { pick, confidence } = props.reading;
     if (confidence === undefined) return t('factoryRuns.modelDidNotAnswer');
-    if (pick === undefined) {
-      return t('factoryRuns.modelCouldNotTell', { confidence });
-    }
+    if (pick === undefined) return t('factoryRuns.modelCouldNotTell');
     return t('factoryRuns.modelLeaned', {
       answer: flowWordLabel(pick),
       confidence,

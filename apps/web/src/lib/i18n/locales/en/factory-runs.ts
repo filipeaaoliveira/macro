@@ -126,9 +126,8 @@ export default {
   standInWindow:
     'The run goes on with it at {{time}}, unless you answer first.',
   standInDeclined: 'The stand-in left this one to you.',
-  modelLeaned: 'It leaned to {{answer}} ({{confidence}}% sure).',
-  modelCouldNotTell:
-    'It couldn’t tell which answer fits ({{confidence}}% sure).',
+  modelLeaned: 'It leaned toward {{answer}} ({{confidence}}% sure).',
+  modelCouldNotTell: 'It couldn’t tell which answer fits.',
   askedBackTampered:
     'This run changed its Control Files, so approving it needs the Approve button, which lists them.',
   modelDidNotAnswer: 'It didn’t answer.',

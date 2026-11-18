@@ -527,12 +527,12 @@ describe('RunView', () => {
     ).toBeTruthy();
     expect(
       screen.getByText(
-        'It leaned to Approve (62% sure). The plan leaves the migration out.'
+        'It leaned toward Approve (62% sure). The plan leaves the migration out.'
       )
     ).toBeTruthy();
     expect(
       screen.getByText(
-        'It couldn’t tell which answer fits (40% sure). The reply asks a question back.'
+        'It couldn’t tell which answer fits. The reply asks a question back.'
       )
     ).toBeTruthy();
 
@@ -611,7 +611,7 @@ describe('RunView', () => {
     });
     expect(
       await screen.findByText(
-        'It leaned to Revise (70% sure). The reply doubts the plan.'
+        'It leaned toward Revise (70% sure). The reply doubts the plan.'
       )
     ).toBeTruthy();
     expect(
