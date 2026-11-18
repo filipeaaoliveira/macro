@@ -211,6 +211,12 @@ export type BoardPage = {
      * caller cannot see.
      */
     runs: Array<BoardRun>;
+    /**
+     * Whether the board stopped reading past Runs the caller cannot see
+     * before the Runs ran out (some 250 of them in a row): older Runs they
+     * see may be there, which no next page reaches.
+     */
+    stoppedEarly: boolean;
 };
 
 /**

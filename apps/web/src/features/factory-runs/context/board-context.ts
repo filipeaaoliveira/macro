@@ -9,6 +9,11 @@ export type BoardSource = RunsSource<BoardRun[]> & {
   hasMore: Accessor<boolean>;
   loadingMore: Accessor<boolean>;
   loadMore: () => void;
+  /**
+   * The last page read stopped past many Runs the person can't see: older
+   * Runs they see may be there, which no page reaches.
+   */
+  stoppedEarly: Accessor<boolean>;
 };
 
 /** A Project the person can filter the board by. */

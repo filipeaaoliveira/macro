@@ -1494,7 +1494,10 @@ beside the board; a team member's Run opens without its Gate's answers,
 Cancel run or the Step Terminal, which stay its owner's. Above the list, the
 person's Queue (places held against its limit) and the Runs waiting on
 them. The board is read again every 15 seconds while a Run it shows goes,
-every minute otherwise.
+every minute otherwise. A team member's Runs on tasks the person can't see
+are left out; past some 250 of them in a row, a page stops there with no
+**Show more**, and the board says older runs may be missing. A Run whose
+task was trashed shows its request as its title.
 
 Team settings' **Standing rules** section also has **Send undecided gates
 to the run's owner** (off by default). With it on, a Gate no rule answers,

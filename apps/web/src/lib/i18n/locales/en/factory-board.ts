@@ -54,4 +54,6 @@ export default {
   // A group's count while more Runs follow than are loaded.
   loadedCount: '{{count}}+',
   loadMore: 'Show more',
+  stoppedEarly:
+    'Older runs may be missing: the board stopped past many runs you can’t see.',
 };

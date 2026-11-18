@@ -326,6 +326,11 @@ export function BoardView(props: {
                   </section>
                 )}
               </For>
+              <Show when={props.source.stoppedEarly()}>
+                <p class="px-2 text-xs text-ink-muted" data-board-stopped>
+                  {t('factoryBoard.stoppedEarly')}
+                </p>
+              </Show>
               <Show when={props.source.hasMore()}>
                 <div class="flex justify-center">
                   <Button

@@ -39,11 +39,14 @@ function toPage(page: BoardPageResponse): BoardPage {
       run: toRun(listed.detail),
     })),
     next: page.next ?? undefined,
+    stoppedEarly: page.stoppedEarly,
   };
 }
 
 /** The Runs of loaded pages in order, each once: a page read again can repeat one. */
-export function flattenBoardPages(pages: readonly BoardPage[]): BoardRun[] {
+export function flattenBoardPages(
+  pages: readonly Pick<BoardPage, 'runs'>[]
+): BoardRun[] {
   const seen = new Set<string>();
   return pages.flatMap((page) =>
     page.runs.filter((listed) => {
@@ -113,6 +116,10 @@ export function createAppBoardContext(_client: QueryClient): BoardContext {
         retry: () => fireAndForget(query.refetch(), 'factory-runs'),
         hasMore: () => query.hasNextPage,
         loadingMore: () => query.isFetchingNextPage,
+        stoppedEarly: () =>
+          query.isPending || query.isLoadingError
+            ? false
+            : (query.data.pages.at(-1)?.stoppedEarly ?? false),
         loadMore: () => {
           if (!query.hasNextPage || query.isFetchingNextPage) return;
           fireAndForget(query.fetchNextPage(), 'factory-runs');

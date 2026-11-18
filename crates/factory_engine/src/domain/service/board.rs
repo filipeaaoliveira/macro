@@ -150,7 +150,9 @@ where
         // leave out, so a person's own board takes one round.
         let mut seen: BTreeMap<Uuid, bool> = BTreeMap::new();
         let mut listed = Vec::with_capacity(limit + 1);
-        for _ in 0..BOARD_ROUNDS {
+        // Whether the rounds ran out with Runs left to read.
+        let mut stopped_early = false;
+        for round in 0..BOARD_ROUNDS {
             let read = self.repo.board_runs(&query).await.map_err(internal)?;
             let exhausted = read.len() < usize::from(batch);
             let Some(last) = read.last() else {
@@ -177,6 +179,7 @@ where
             if listed.len() > limit || exhausted {
                 break;
             }
+            stopped_early = round + 1 == BOARD_ROUNDS;
         }
 
         let more = listed.len() > limit;
@@ -205,7 +208,11 @@ where
                 detail,
             })
             .collect();
-        Ok(BoardPage { runs, next })
+        Ok(BoardPage {
+            runs,
+            next,
+            stopped_early: stopped_early && !more,
+        })
     }
 
     /// Whether the caller can see each live task of a team member's Run in
@@ -260,30 +267,51 @@ where
 /// How long a task view decided for the board is kept.
 const TASK_VIEW_KEPT: Duration = Duration::from_secs(30);
 
-/// The most task views kept; past it they are all dropped.
+/// The most task views kept; past it the expired ones are dropped, and if
+/// none has, all of them.
 const TASK_VIEWS_KEPT: usize = 10_000;
 
 /// Whether a person can see a task, as the board last asked, each kept for
 /// [`TASK_VIEW_KEPT`]: a board read again every few seconds does not ask
 /// again for every Run of its team. A view that changed shows within that
-/// time.
-#[derive(Debug, Clone, Default)]
-pub(super) struct TaskViews(Arc<Mutex<HashMap<ViewKey, (bool, Instant)>>>);
+/// time. Views are kept per person.
+#[derive(Debug, Clone)]
+pub(super) struct TaskViews {
+    views: Arc<Mutex<HashMap<ViewKey, (bool, Instant)>>>,
+    kept: Duration,
+}
 
 /// Whose view of which task: the person's user id and the task's.
 type ViewKey = (String, Uuid);
 
+impl Default for TaskViews {
+    fn default() -> Self {
+        Self::kept_for(TASK_VIEW_KEPT)
+    }
+}
+
 impl TaskViews {
+    /// Views kept for `kept` each.
+    pub(super) fn kept_for(kept: Duration) -> Self {
+        Self {
+            views: Arc::default(),
+            kept,
+        }
+    }
+
     fn get(&self, actor: &MacroUserIdStr<'static>, task_id: Uuid) -> Option<bool> {
-        let views = self.0.lock().ok()?;
+        let views = self.views.lock().ok()?;
         let (visible, at) = views.get(&(actor.as_ref().to_string(), task_id))?;
-        (at.elapsed() < TASK_VIEW_KEPT).then_some(*visible)
+        (at.elapsed() < self.kept).then_some(*visible)
     }
 
     fn keep(&self, actor: &MacroUserIdStr<'static>, task_id: Uuid, visible: bool) {
-        let Ok(mut views) = self.0.lock() else {
+        let Ok(mut views) = self.views.lock() else {
             return;
         };
+        if views.len() >= TASK_VIEWS_KEPT {
+            views.retain(|_, (_, at)| at.elapsed() < self.kept);
+        }
         if views.len() >= TASK_VIEWS_KEPT {
             views.clear();
         }

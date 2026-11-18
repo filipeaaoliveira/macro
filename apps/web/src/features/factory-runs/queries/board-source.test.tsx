@@ -18,6 +18,7 @@ vi.mock('@core/context/user', () => ({
 
 function page(steps: number): BoardPage {
   return {
+    stoppedEarly: false,
     runs: [
       {
         state: 'running',

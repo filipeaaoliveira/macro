@@ -134,6 +134,7 @@ const board: BoardRun[] = [
 
 function mount(options: {
   onOpenRun?: (runId: string) => void;
+  stoppedEarly?: boolean;
   runs?: BoardRun[];
   hasMore?: boolean;
   queue?: RunsQueue;
@@ -152,6 +153,7 @@ function mount(options: {
         hasMore: () => options.hasMore ?? false,
         loadingMore: () => false,
         loadMore,
+        stoppedEarly: () => options.stoppedEarly ?? false,
       };
       return source;
     },
@@ -337,6 +339,19 @@ describe('FactoryBoardView', () => {
 
     expect(onOpenRun).toHaveBeenCalledWith('run-code');
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('says older runs may be missing when the board stopped early', () => {
+    mount({ stoppedEarly: true });
+
+    expect(
+      screen.getByText(
+        'Older runs may be missing: the board stopped past many runs you can’t see.'
+      )
+    ).toBeTruthy();
+    cleanup();
+    mount({});
+    expect(document.querySelector('[data-board-stopped]')).toBeNull();
   });
 
   it('says when no run is there', () => {

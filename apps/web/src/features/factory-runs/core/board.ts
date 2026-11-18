@@ -50,8 +50,15 @@ export type BoardRun = {
 /** Where the board's next page starts. */
 export type BoardCursor = { createdAt: string; id: string };
 
-/** A page of the board, newest first. */
-export type BoardPage = { runs: BoardRun[]; next?: BoardCursor };
+/**
+ * A page of the board, newest first. `stoppedEarly` when it stopped past
+ * many Runs the person can't see, with no next page.
+ */
+export type BoardPage = {
+  runs: BoardRun[];
+  next?: BoardCursor;
+  stoppedEarly: boolean;
+};
 
 /** Who started a Run. */
 export type StartedBy =

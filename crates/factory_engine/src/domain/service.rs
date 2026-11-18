@@ -152,6 +152,13 @@ where
         }
     }
 
+    /// Keep the board's task views for `kept` each, in place of 30 s.
+    #[cfg(test)]
+    pub(crate) fn with_task_views_kept(mut self, kept: std::time::Duration) -> Self {
+        self.task_views = board::TaskViews::kept_for(kept);
+        self
+    }
+
     /// Let each agent Step of the Runs it starts ask the Run's owner up to
     /// `questions` questions, in place of [`DEFAULT_QUESTIONS`]. The bound
     /// is kept in the Flow each Run starts with, as the review rounds'.

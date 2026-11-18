@@ -308,6 +308,78 @@ async fn the_rounds_end_a_page_past_some_250_hidden_runs() {
 
     assert!(page.runs.is_empty());
     assert!(page.next.is_none());
+    // It says older Runs may be there.
+    assert!(page.stopped_early);
+}
+
+/// A page that read every Run there is did not stop early.
+#[tokio::test]
+async fn a_page_that_read_every_run_did_not_stop_early() {
+    let repo = FakeRepo::default();
+    let service = service(&repo, &FakeWorkflows::default());
+    on_team(&repo, &julia());
+    on_team(&repo, &teo());
+    let hidden_task = task(&repo);
+    hide(&repo, &julia(), hidden_task);
+    for _ in 0..60 {
+        keep(&repo, &teo(), Some(hidden_task)).await;
+    }
+
+    let page = service
+        .board(&julia(), filter(BoardScope::Team))
+        .await
+        .expect("board");
+
+    assert!(page.runs.is_empty());
+    assert!(!page.stopped_early);
+}
+
+/// Two people reading the board within the views' time each get their own
+/// view of a task: one sees it, the other does not.
+#[tokio::test]
+async fn task_views_are_kept_per_person() {
+    let repo = FakeRepo::default();
+    let service = service(&repo, &FakeWorkflows::default());
+    let ana = ana();
+    on_team(&repo, &julia());
+    on_team(&repo, &teo());
+    on_team(&repo, &ana);
+    let shared_task = task(&repo);
+    hide(&repo, &ana, shared_task);
+    let teos = keep(&repo, &teo(), Some(shared_task)).await;
+
+    let julia_s = service
+        .board(&julia(), filter(BoardScope::Team))
+        .await
+        .expect("board");
+    let ana_s = service
+        .board(&ana, filter(BoardScope::Team))
+        .await
+        .expect("board");
+
+    assert_eq!(ids(&julia_s), [teos]);
+    assert!(ana_s.runs.is_empty());
+}
+
+/// A task view kept past its time is asked again.
+#[tokio::test]
+async fn a_task_view_past_its_time_is_asked_again() {
+    let repo = FakeRepo::default();
+    let service =
+        service(&repo, &FakeWorkflows::default()).with_task_views_kept(std::time::Duration::ZERO);
+    on_team(&repo, &julia());
+    on_team(&repo, &teo());
+    let shared_task = task(&repo);
+    keep(&repo, &teo(), Some(shared_task)).await;
+
+    for _ in 0..2 {
+        service
+            .board(&julia(), filter(BoardScope::Team))
+            .await
+            .expect("board");
+    }
+
+    assert_eq!(*repo.view_checks.lock().expect("checks"), 2);
 }
 
 /// A board read again soon after asks no task view again.

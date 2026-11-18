@@ -2673,7 +2673,7 @@
       "BoardPage": {
         "type": "object",
         "description": "A page of the board.",
-        "required": ["runs"],
+        "required": ["runs", "stoppedEarly"],
         "properties": {
           "next": {
             "oneOf": [
@@ -2692,6 +2692,10 @@
               "$ref": "#/components/schemas/BoardRun"
             },
             "description": "The Runs, newest first: never a team member's Run on a task the\ncaller cannot see."
+          },
+          "stoppedEarly": {
+            "type": "boolean",
+            "description": "Whether the board stopped reading past Runs the caller cannot see\nbefore the Runs ran out (some 250 of them in a row): older Runs they\nsee may be there, which no next page reaches."
           }
         }
       },
