@@ -5,7 +5,7 @@ use factory_records::domain::gate_replies::AnsweredGate;
 use factory_records::domain::models::{EntryId, GateKind, Outcome, RunId};
 use macro_user_id::user_id::MacroUserIdStr;
 
-use super::{AtThreshold, ENOUGH_GATES, Measure, describe, replay};
+use super::{AtThreshold, ENOUGH_DECIDED, ENOUGH_GATES, Measure, describe, replay};
 use crate::domain::fakes::FakeGateModel;
 
 fn outcome(name: &str) -> Outcome {
@@ -25,6 +25,7 @@ fn plan_gate(answer: &str, note: Option<&str>, kind: GateKind) -> AnsweredGate {
         question: "Approve this plan?".to_string(),
         answers: vec![outcome("approve"), outcome("revise")],
         output: "The plan".to_string(),
+        plan: Some("Change the session check.".to_string()),
         answer: outcome(answer),
         note: note.map(str::to_string),
         answered_at: Utc::now(),
@@ -84,6 +85,8 @@ async fn picks_count_as_agreed_or_wrong_at_each_threshold_they_reach() {
     let asked = model.asked();
     assert_eq!(asked.len(), 4);
     assert!(asked[3].prompt.contains("Looks right, go ahead."));
+    // The stand-in is asked with the Run's plan, as in a Run.
+    assert!(asked[1].prompt.contains("Change the session check."));
     // Too few Gates set no threshold.
     assert_eq!(report.replies.threshold(), None);
     assert!(describe(&report).contains("Too few gates"));
@@ -139,4 +142,28 @@ fn the_stand_in_is_measured_on_routine_gates_only() {
     );
     assert_eq!(super::stand_in_kind(&merge), None);
     assert_eq!(super::stand_in_kind(&unknown), None);
+}
+
+/// A threshold with no wrong pick is set only from enough Gates the model
+/// answered at it.
+#[tokio::test]
+async fn a_threshold_needs_enough_gates_answered_at_it() {
+    let gates: Vec<AnsweredGate> = (0..ENOUGH_GATES)
+        .map(|_| plan_gate("approve", Some("Go ahead"), GateKind::Flow))
+        .collect();
+    let model = FakeGateModel::default();
+    for index in 0..ENOUGH_GATES {
+        if index < ENOUGH_DECIDED - 1 {
+            model.then(Some("approve"), 0.95);
+        } else {
+            model.then(None, 0.95);
+        }
+        model.then(None, 0.95);
+    }
+
+    let report = replay(&model, &gates).await;
+
+    assert_eq!(row(&report.replies, 95).decided, ENOUGH_DECIDED - 1);
+    assert_eq!(row(&report.replies, 95).wrong, 0);
+    assert_eq!(report.replies.threshold(), None);
 }

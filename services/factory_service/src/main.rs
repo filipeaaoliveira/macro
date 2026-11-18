@@ -34,7 +34,6 @@ use factory_engine::inbound::insights::{InsightsApiDoc, InsightsRouterState, ins
 use factory_engine::inbound::temporal::WorkerServices;
 use factory_engine::outbound::auth_user_directory::AuthUserDirectory;
 use factory_engine::outbound::document_hold_tasks::DocumentHoldTasks;
-use factory_engine::outbound::document_task_comments::DocumentTaskComments;
 use factory_engine::outbound::document_task_directory::DocumentTaskDirectory;
 use factory_engine::outbound::fast_gate_model::FastGateModel;
 use factory_engine::outbound::github_pull_requests::GithubPullRequests;
@@ -139,7 +138,6 @@ async fn run() -> Result<(), rootcause::Report> {
     let gates = GateRepliesImpl::new(
         repo.clone(),
         FastGateModel::new(config.factory_gate_model.clone(), recorder),
-        DocumentTaskComments::new(documents.clone()),
         gate_settings,
     );
     let parts = Parts {
@@ -192,7 +190,7 @@ async fn run() -> Result<(), rootcause::Report> {
 /// What serving takes besides the Steps.
 struct Parts {
     port: u16,
-    gates: GateRepliesImpl<PgRunRepository, FastGateModel, DocumentTaskComments>,
+    gates: GateRepliesImpl<PgRunRepository, FastGateModel>,
     review_rounds: Option<std::num::NonZeroU8>,
     questions: Option<u8>,
     repo: PgRunRepository,

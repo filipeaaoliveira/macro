@@ -2,7 +2,7 @@
 //! or is asked back, the stand-in answers a routine Gate or leaves it to
 //! its owner, and a comment on the Run's task is a reply.
 
-use chrono::{TimeDelta, Utc};
+use chrono::Utc;
 use factory_records::domain::main_hold::MainHoldRepository;
 use factory_records::domain::models::{
     ControlFileChanges, EntryId, NewRun, Outcome, Repository, Role, RunId, RunInsert, StepKey,
@@ -16,8 +16,8 @@ use uuid::Uuid;
 
 use super::service::GateRepliesImpl;
 use super::{Decision, GateReplySettings, GateReplySettingsError, decide, percent};
-use crate::domain::fakes::{FakeComments, FakeGateModel, FakeRepo};
-use crate::domain::gate::{CommentsReading, ReplyRead, ReplyReading, StandInAsking, StandingIn};
+use crate::domain::fakes::{FakeGateModel, FakeRepo};
+use crate::domain::gate::{ReplyRead, ReplyReading, StandInAsking, StandInKeeping, StandingIn};
 use crate::domain::ports::{GateReplyService, ModelPick};
 
 fn outcome(name: &str) -> Outcome {
@@ -122,17 +122,16 @@ async fn run_at_plan_gate(
     key
 }
 
-fn gates(
-    repo: &FakeRepo,
-    model: &FakeGateModel,
-    comments: &FakeComments,
-) -> GateRepliesImpl<FakeRepo, FakeGateModel, FakeComments> {
-    GateRepliesImpl::new(
-        repo.clone(),
-        model.clone(),
-        comments.clone(),
-        GateReplySettings::default(),
-    )
+fn gates(repo: &FakeRepo, model: &FakeGateModel) -> GateRepliesImpl<FakeRepo, FakeGateModel> {
+    GateRepliesImpl::new(repo.clone(), model.clone(), GateReplySettings::default())
+}
+
+fn plan_keeping(key: StepKey) -> StandInKeeping {
+    StandInKeeping {
+        key,
+        kind: RuleGateKind::Plan,
+        person_only: false,
+    }
 }
 
 fn reading(key: StepKey, words: &str) -> ReplyReading {
@@ -178,6 +177,19 @@ fn settings_left_out_keep_their_defaults_and_a_threshold_is_a_percent() {
         GateReplySettings::configured(Some(101), None, None),
         Err(GateReplySettingsError::NotAPercent(101))
     );
+    // A window shorter than a minute, or longer than a day, is refused.
+    assert_eq!(
+        GateReplySettings::configured(None, None, Some(std::time::Duration::from_secs(59))),
+        Err(GateReplySettingsError::WindowOutOfRange(59))
+    );
+    assert_eq!(
+        GateReplySettings::configured(None, None, Some(std::time::Duration::from_secs(86_401))),
+        Err(GateReplySettingsError::WindowOutOfRange(86_401))
+    );
+    assert!(
+        GateReplySettings::configured(None, None, Some(std::time::Duration::from_secs(86_400)))
+            .is_ok()
+    );
 }
 
 #[test]
@@ -219,7 +231,7 @@ async fn a_reply_read_at_or_above_the_threshold_answers_the_gate() {
     let key = run_at_plan_gate(&repo, Some(OrchestratorDefinition::DEFAULT), None).await;
     let model = FakeGateModel::picking(Some("approve"), 0.85);
 
-    let read = gates(&repo, &model, &FakeComments::default())
+    let read = gates(&repo, &model)
         .read_reply(reading(key, "Looks right, go ahead."))
         .await
         .expect("read");
@@ -244,7 +256,7 @@ async fn a_reply_below_the_threshold_or_unclear_is_asked_back() {
         let key = run_at_plan_gate(&repo, Some(OrchestratorDefinition::DEFAULT), None).await;
         let model = FakeGateModel::picking(choice, confidence);
 
-        let read = gates(&repo, &model, &FakeComments::default())
+        let read = gates(&repo, &model)
             .read_reply(reading(key, "Hmm, maybe?"))
             .await
             .expect("read");
@@ -272,7 +284,7 @@ async fn a_failed_or_timed_out_call_asks_back() {
         let repo = FakeRepo::default();
         let key = run_at_plan_gate(&repo, Some(OrchestratorDefinition::DEFAULT), None).await;
 
-        let read = gates(&repo, &model, &FakeComments::default())
+        let read = gates(&repo, &model)
             .read_reply(reading(key, "Approve it"))
             .await
             .expect("read");
@@ -298,7 +310,7 @@ async fn words_never_approve_a_tampered_run() {
     );
     let model = FakeGateModel::picking(Some("approve"), 0.99);
 
-    let read = gates(&repo, &model, &FakeComments::default())
+    let read = gates(&repo, &model)
         .read_reply(reading(key, "Approve"))
         .await
         .expect("read");
@@ -313,7 +325,7 @@ async fn a_question_gate_takes_the_words_as_the_answer() {
     let repo = FakeRepo::default();
     let key = run_at_plan_gate(&repo, Some(OrchestratorDefinition::DEFAULT), None).await;
     let model = FakeGateModel::default();
-    let service = gates(&repo, &model, &FakeComments::default());
+    let service = gates(&repo, &model);
     let question = ReplyReading {
         question: true,
         ..reading(key, "Use the session cookie.")
@@ -349,7 +361,7 @@ async fn the_stand_in_answers_a_routine_gate_at_or_above_its_threshold() {
     let key = run_at_plan_gate(&repo, Some(STAND_IN_ONLY), None).await;
     let model = FakeGateModel::picking(Some("approve"), 0.9);
 
-    let standing = gates(&repo, &model, &FakeComments::default())
+    let standing = gates(&repo, &model)
         .stand_in(plan_asking(key))
         .await
         .expect("stand in")
@@ -381,7 +393,7 @@ async fn below_its_threshold_the_stand_in_leaves_the_gate_to_its_owner() {
         let repo = FakeRepo::default();
         let key = run_at_plan_gate(&repo, Some(STAND_IN_ONLY), None).await;
 
-        let standing = gates(&repo, &model, &FakeComments::default())
+        let standing = gates(&repo, &model)
             .stand_in(plan_asking(key))
             .await
             .expect("stand in");
@@ -482,7 +494,7 @@ async fn the_stand_in_never_answers_what_stays_a_person_s() {
         }
         let model = FakeGateModel::picking(Some("approve"), 0.99);
 
-        let standing = gates(&repo, &model, &FakeComments::default())
+        let standing = gates(&repo, &model)
             .stand_in((case.asking)(key))
             .await
             .expect("stand in");
@@ -509,7 +521,7 @@ async fn the_stand_in_never_answers_an_agent_s_question() {
     }
     let model = FakeGateModel::picking(Some("approve"), 0.99);
 
-    let standing = gates(&repo, &model, &FakeComments::default())
+    let standing = gates(&repo, &model)
         .stand_in(plan_asking(key))
         .await
         .expect("stand in");
@@ -528,7 +540,7 @@ async fn an_override_in_the_window_replaces_the_stand_in_s_answer() {
     let left = run_at_plan_gate(&repo, Some(STAND_IN_ONLY), None).await;
     let model = FakeGateModel::picking(Some("approve"), 0.95);
     model.then(Some("approve"), 0.95);
-    let service = gates(&repo, &model, &FakeComments::default());
+    let service = gates(&repo, &model);
     for key in [overridden, left] {
         service
             .stand_in(plan_asking(key))
@@ -540,13 +552,19 @@ async fn an_override_in_the_window_replaces_the_stand_in_s_answer() {
     repo.answer_gate(overridden, &outcome("revise"), None, &julia(), None)
         .await
         .expect("override");
-    let kept = service.keep_stand_in(overridden).await.expect("keep");
-    assert_eq!(kept, outcome("revise"));
+    let kept = service
+        .keep_stand_in(plan_keeping(overridden))
+        .await
+        .expect("keep");
+    assert_eq!(kept, Some(outcome("revise")));
     let answer = gate(&repo, overridden).await.answer.expect("answered");
     assert!(!answer.by_stand_in);
 
-    let kept = service.keep_stand_in(left).await.expect("keep");
-    assert_eq!(kept, outcome("approve"));
+    let kept = service
+        .keep_stand_in(plan_keeping(left))
+        .await
+        .expect("keep");
+    assert_eq!(kept, Some(outcome("approve")));
     assert!(
         gate(&repo, left)
             .await
@@ -563,7 +581,7 @@ async fn a_retried_stand_in_returns_the_answer_kept_first() {
     let repo = FakeRepo::default();
     let key = run_at_plan_gate(&repo, Some(STAND_IN_ONLY), None).await;
     let model = FakeGateModel::picking(Some("approve"), 0.95);
-    let service = gates(&repo, &model, &FakeComments::default());
+    let service = gates(&repo, &model);
     let first = service.stand_in(plan_asking(key)).await.expect("stand in");
 
     let again = service.stand_in(plan_asking(key)).await.expect("again");
@@ -575,81 +593,147 @@ async fn a_retried_stand_in_returns_the_answer_kept_first() {
     assert_eq!(model.asked().len(), 1);
 }
 
-/// The owner's newest comment on the Run's task since the Gate opened is a
-/// reply; someone else's, and the owner's from before, are not.
+/// When the window ends on a Run that no longer lets the stand-in answer
+/// (its branch now Tampered, its base under a Main Hold), the stand-in's
+/// answer is taken back and the Gate waits for its owner.
 #[tokio::test]
-async fn the_owner_s_newest_comment_on_the_task_is_a_reply() {
-    let repo = FakeRepo::default();
-    let task_id = Uuid::now_v7();
-    repo.tasks.lock().expect("tasks").insert(task_id);
-    let key = run_at_plan_gate(&repo, Some(OrchestratorDefinition::DEFAULT), Some(task_id)).await;
-    let comments = FakeComments::default();
-    let now = Utc::now();
-    comments.comment(
-        task_id,
-        julia().as_ref(),
-        "Old thought",
-        now - TimeDelta::hours(1),
-    );
-    comments.comment(
-        task_id,
-        "macro|teo@example.com",
-        "Approve it",
-        now + TimeDelta::seconds(1),
-    );
-    let service = gates(&repo, &FakeGateModel::default(), &comments);
+async fn a_run_that_changed_in_the_window_gives_the_gate_back_to_its_owner() {
+    for change in ["tampered", "held"] {
+        let repo = FakeRepo::default();
+        let key = run_at_plan_gate(&repo, Some(STAND_IN_ONLY), None).await;
+        let model = FakeGateModel::picking(Some("approve"), 0.95);
+        let service = gates(&repo, &model);
+        service
+            .stand_in(plan_asking(key))
+            .await
+            .expect("stand in")
+            .expect("it answers");
+        if change == "tampered" {
+            repo.control_file_changes.lock().expect("changes").insert(
+                key.run_id,
+                ControlFileChanges {
+                    tampered: vec!["AGENTS.md".to_string()],
+                    named: Vec::new(),
+                    unlisted: false,
+                },
+            );
+        } else {
+            repo.hold_main(&base(), "abc", "- test (failure)", Utc::now())
+                .await
+                .expect("hold");
+        }
 
-    let nothing = service
-        .read_comments(CommentsReading { key, after: None })
-        .await
-        .expect("look");
-    assert_eq!(nothing.reply, None);
+        let kept = service
+            .keep_stand_in(plan_keeping(key))
+            .await
+            .expect("keep");
 
-    comments.comment(
-        task_id,
-        julia().as_ref(),
-        "Hmm",
-        now + TimeDelta::seconds(2),
-    );
-    comments.comment(
-        task_id,
-        julia().as_ref(),
-        "Go ahead",
-        now + TimeDelta::seconds(3),
-    );
-    let read = service
-        .read_comments(CommentsReading {
-            key,
-            after: nothing.read_until,
-        })
-        .await
-        .expect("look");
-    assert_eq!(
-        read.reply.map(|reply| reply.reply),
-        Some("Go ahead".to_string())
-    );
-    assert_eq!(read.read_until, Some(now + TimeDelta::seconds(3)));
-
-    let next = service
-        .read_comments(CommentsReading {
-            key,
-            after: read.read_until,
-        })
-        .await
-        .expect("look");
-    assert_eq!(next.reply, None);
+        assert_eq!(kept, None, "{change}");
+        let gate = gate(&repo, key).await;
+        assert_eq!(gate.answer, None, "{change}");
+        assert_eq!(gate.stand_in, None, "{change}");
+    }
 }
 
-/// A Run with no task has no comments to read.
+/// A Gate its Flow keeps for a person is given back when the window ends,
+/// whatever the stand-in kept.
 #[tokio::test]
-async fn a_run_with_no_task_reads_no_comments() {
+async fn a_person_only_gate_is_never_kept_for_the_stand_in() {
     let repo = FakeRepo::default();
-    let key = run_at_plan_gate(&repo, Some(OrchestratorDefinition::DEFAULT), None).await;
-
-    let read = gates(&repo, &FakeGateModel::default(), &FakeComments::default())
-        .read_comments(CommentsReading { key, after: None })
+    let key = run_at_plan_gate(&repo, Some(STAND_IN_ONLY), None).await;
+    let model = FakeGateModel::picking(Some("approve"), 0.95);
+    let service = gates(&repo, &model);
+    service
+        .stand_in(plan_asking(key))
         .await
-        .expect("look");
+        .expect("stand in")
+        .expect("it answers");
 
-    assert_eq!(read.reply, None);
+    let kept = service
+        .keep_stand_in(StandInKeeping {
+            person_only: true,
+            ..plan_keeping(key)
+        })
+        .await
+        .expect("keep");
+
+    assert_eq!(kept, None);
+    assert_eq!(gate(&repo, key).await.answer, None);
+}
+
+/// The stand-in reads the owner's past answers to the same Flow's entry,
+/// not an agent's question asked there, nor another Flow's.
+#[tokio::test]
+async fn the_stand_in_reads_past_answers_of_the_same_flow_and_kind() {
+    let repo = FakeRepo::default();
+    let earlier = run_at_plan_gate(&repo, Some(STAND_IN_ONLY), None).await;
+    repo.answer_gate(
+        earlier,
+        &outcome("revise"),
+        Some("Same flow"),
+        &julia(),
+        None,
+    )
+    .await
+    .expect("past answer");
+    // A Run of another Flow, at the same entry.
+    let other = run_at_plan_gate(&repo, Some(STAND_IN_ONLY), None).await;
+    repo.flows
+        .lock()
+        .expect("flows")
+        .insert(other.run_id, "plan".to_string());
+    repo.answer_gate(
+        other,
+        &outcome("approve"),
+        Some("Other flow"),
+        &julia(),
+        None,
+    )
+    .await
+    .expect("other flow's answer");
+    // An agent's question asked at the entry.
+    {
+        let mut steps = repo.steps.lock().expect("steps");
+        if let Some((_, step)) = steps
+            .iter_mut()
+            .find(|(id, step)| *id == earlier.run_id && step.seq == 1)
+        {
+            step.end = Some(factory_records::domain::models::StepEnd {
+                outcome: outcome("question"),
+                output: "Which column?".to_string(),
+                ended_at: Utc::now(),
+            });
+            step.entry = EntryId::try_from("plan-review".to_string()).expect("valid");
+            step.gate = Some(factory_records::domain::models::Gate {
+                kind: factory_records::domain::models::GateKind::Question,
+                question: "Which column?".to_string(),
+                answers: vec![outcome("answer")],
+                opened_at: Utc::now(),
+                answer: Some(factory_records::domain::models::GateAnswer {
+                    answer: outcome("answer"),
+                    note: Some("A question's answer".to_string()),
+                    user_id: Some(julia()),
+                    rule: None,
+                    approved_control_files: None,
+                    reply_confidence: None,
+                    by_stand_in: false,
+                    answered_at: Utc::now(),
+                }),
+                asked_back: None,
+                stand_in: None,
+            });
+        }
+    }
+    let key = run_at_plan_gate(&repo, Some(STAND_IN_ONLY), None).await;
+    let model = FakeGateModel::picking(Some("approve"), 0.95);
+
+    gates(&repo, &model)
+        .stand_in(plan_asking(key))
+        .await
+        .expect("stand in");
+
+    let prompt = &model.asked()[0].prompt;
+    assert!(prompt.contains("Same flow"));
+    assert!(!prompt.contains("Other flow"));
+    assert!(!prompt.contains("A question's answer"));
 }

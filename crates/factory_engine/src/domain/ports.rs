@@ -2,9 +2,7 @@
 
 mod gate_replies;
 
-pub use gate_replies::{
-    GateModel, GateReplyService, ModelPick, ModelQuestion, TaskComment, TaskComments,
-};
+pub use gate_replies::{GateModel, GateReplyService, ModelPick, ModelQuestion};
 
 use agent_session::domain::session_command::SessionCommandOutput;
 use agent_session::domain::session_task::TaskDocumentId;

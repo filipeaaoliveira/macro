@@ -190,11 +190,16 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   none, so an owner's override in the window stands. Every write keeps the
   Gate's first answer. The stand-in's kinds are kept in the same
   `standing_rules` arrays as the rules (`stand_in_plan`,
-  `stand_in_blockers`; it has none for a merge Gate). `past_answers` reads
-  the owner's own answers to an entry's Gates through their newest Runs
-  (`factory_run_user_created_idx`); `answered_gates` reads every Gate a
-  person answered, for the offline replay measure only. Run insights leave
-  out the stand-in's answers, as they do Rule Answers.
+  `stand_in_blockers`; it has none for a merge Gate). `withdraw_stand_in`
+  takes the stand-in's answer back while the Gate has no answer, when the
+  Run no longer lets it stand. `past_answers` reads the owner's own
+  answers to an entry's Gates through their newest Runs
+  (`factory_run_user_created_idx`), in Runs of the same Flow only, never
+  an agent's question asked at the entry; `answered_gates` reads every
+  Gate a person answered with a button (no answer read from words, nor the
+  stand-in's), with the Run's plan, for the offline replay measure only.
+  Run insights leave out the stand-in's answers, as they do Rule
+  Answers.
 
 - `factory_merge` keeps one row per Run that merged (`record_merge`, safe
   to repeat), with the base it merged into and the time on the worker's

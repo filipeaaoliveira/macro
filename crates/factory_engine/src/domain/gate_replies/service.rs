@@ -1,5 +1,5 @@
 //! What a Run's worker does for Gate replies and the stand-in, over the
-//! Run records, the Gate model and the comments on the Run's task.
+//! Run records and the Gate model.
 
 use chrono::Utc;
 use factory_records::domain::gate_replies::GateReplyRepository;
@@ -9,11 +9,11 @@ use factory_records::domain::ports::RunRepository;
 
 use super::{Decision, GateReplySettings, MODEL_TIMEOUT, decide, reply_question};
 use crate::domain::built_in_steps::cut;
-use crate::domain::gate::{
-    CommentsRead, CommentsReading, ReplyGate, ReplyRead, ReplyReading, StandInAsking, StandingIn,
-};
+use factory_records::domain::standing_rules::RuleGateKind;
+
+use crate::domain::gate::{ReplyRead, ReplyReading, StandInAsking, StandInKeeping, StandingIn};
 use crate::domain::models::StepError;
-use crate::domain::ports::{GateModel, GateReplyService, ModelPick, ModelQuestion, TaskComments};
+use crate::domain::ports::{GateModel, GateReplyService, ModelPick, ModelQuestion};
 use crate::domain::stand_in::{
     PAST_ANSWERS_READ, StandInContext, StandInFacts, may_stand_in, stand_in_question,
 };
@@ -30,30 +30,56 @@ fn internal(error: impl std::error::Error + Send + Sync + 'static) -> StepError 
     StepError::Internal(rootcause::Report::new(error).into_dynamic())
 }
 
-/// Gate replies and the stand-in, over the Run records `repo`, the small
-/// model `model` and the Run tasks' `comments`.
+/// Gate replies and the stand-in, over the Run records `repo` and the
+/// small model `model`.
 #[derive(Debug, Clone)]
-pub struct GateRepliesImpl<R, M, C> {
+pub struct GateRepliesImpl<R, M> {
     repo: R,
     model: M,
-    comments: C,
     settings: GateReplySettings,
 }
 
-impl<R, M, C> GateRepliesImpl<R, M, C>
+impl<R, M> GateRepliesImpl<R, M>
 where
     R: RunRepository + GateReplyRepository + MainHoldRepository,
     M: GateModel,
-    C: TaskComments,
 {
     /// Create the service, set as `settings` say.
-    pub fn new(repo: R, model: M, comments: C, settings: GateReplySettings) -> Self {
+    pub fn new(repo: R, model: M, settings: GateReplySettings) -> Self {
         Self {
             repo,
             model,
-            comments,
             settings,
         }
+    }
+
+    /// Whether the stand-in may answer a Gate of `kind` (kept for a person
+    /// when `person_only`) offering `answers`, as `run` reads now.
+    async fn may_stand_in_now(
+        &self,
+        run: &Run,
+        kind: RuleGateKind,
+        person_only: bool,
+        answers: &[Outcome],
+    ) -> Result<bool, StepError> {
+        if run.end.is_some() {
+            return Ok(false);
+        }
+        let held = match &run.repository {
+            Some(base) => self.repo.main_hold(base).await.map_err(internal)?.is_some(),
+            None => false,
+        };
+        let facts = StandInFacts {
+            kind,
+            person_only,
+            tampered: run
+                .control_files
+                .as_ref()
+                .is_some_and(|changes| changes.is_tampered()),
+            held,
+        };
+        let rules = run.standing_rules.map(|rules| rules.definition);
+        Ok(may_stand_in(rules, &facts, answers))
     }
 
     async fn run(&self, key: StepKey) -> Result<Run, StepError> {
@@ -114,11 +140,10 @@ fn gate_of(steps: &[Step], seq: u16) -> Result<&Gate, StepError> {
         .ok_or_else(|| StepError::Internal(rootcause::report!("the gate is not recorded")))
 }
 
-impl<R, M, C> GateReplyService for GateRepliesImpl<R, M, C>
+impl<R, M> GateReplyService for GateRepliesImpl<R, M>
 where
     R: RunRepository + GateReplyRepository + MainHoldRepository,
     M: GateModel,
-    C: TaskComments,
 {
     #[tracing::instrument(err, skip_all, fields(run_id = %reading.key.run_id, seq = reading.key.seq))]
     async fn read_reply(&self, reading: ReplyReading) -> Result<ReplyRead, StepError> {
@@ -184,24 +209,10 @@ where
         }
 
         let run = self.run(key).await?;
-        if run.end.is_some() {
-            return Ok(None);
-        }
-        let held = match &run.repository {
-            Some(base) => self.repo.main_hold(base).await.map_err(internal)?.is_some(),
-            None => false,
-        };
-        let facts = StandInFacts {
-            kind: asking.kind,
-            person_only: asking.person_only,
-            tampered: run
-                .control_files
-                .as_ref()
-                .is_some_and(|changes| changes.is_tampered()),
-            held,
-        };
-        let rules = run.standing_rules.map(|rules| rules.definition);
-        if !may_stand_in(rules, &facts, &asking.answers) {
+        if !self
+            .may_stand_in_now(&run, asking.kind, asking.person_only, &asking.answers)
+            .await?
+        {
             return Ok(None);
         }
 
@@ -260,8 +271,27 @@ where
         }))
     }
 
-    #[tracing::instrument(err, skip_all, fields(run_id = %key.run_id, seq = key.seq))]
-    async fn keep_stand_in(&self, key: StepKey) -> Result<Outcome, StepError> {
+    #[tracing::instrument(err, skip_all, fields(run_id = %keeping.key.run_id, seq = keeping.key.seq))]
+    async fn keep_stand_in(&self, keeping: StandInKeeping) -> Result<Option<Outcome>, StepError> {
+        let key = keeping.key;
+        let steps = self.steps(key).await?;
+        let gate = gate_of(&steps, key.seq)?;
+        // An earlier attempt kept it, or the owner answered first: that
+        // answer stands.
+        if let Some(answer) = &gate.answer {
+            return Ok(Some(answer.answer.clone()));
+        }
+        // The Run may have changed in the window: a Tampered branch, a Main
+        // Hold, or a Run that ended give the Gate back to the person.
+        let run = self.run(key).await?;
+        if !self
+            .may_stand_in_now(&run, keeping.kind, keeping.person_only, &gate.answers)
+            .await?
+        {
+            self.repo.withdraw_stand_in(key).await.map_err(internal)?;
+            tracing::info!("the run no longer lets the stand-in answer: the gate is its owner's");
+            return Ok(None);
+        }
         let kept = self
             .repo
             .answer_gate_by_stand_in(key)
@@ -272,64 +302,7 @@ where
                     "the gate has no answer of the stand-in's to keep"
                 ))
             })?;
-        Ok(kept.answer)
-    }
-
-    #[tracing::instrument(err, skip_all, fields(run_id = %reading.key.run_id, seq = reading.key.seq))]
-    async fn read_comments(&self, reading: CommentsReading) -> Result<CommentsRead, StepError> {
-        let key = reading.key;
-        let run = self.run(key).await?;
-        let nothing = CommentsRead {
-            reply: None,
-            read_until: reading.after,
-        };
-        let Some(task_id) = run.task_id else {
-            return Ok(nothing);
-        };
-        if run.end.is_some() {
-            return Ok(nothing);
-        }
-        let after = match reading.after {
-            Some(after) => after,
-            None => {
-                let steps = self.steps(key).await?;
-                gate_of(&steps, key.seq)?.opened_at
-            }
-        };
-
-        // A task the comments cannot be read from now is looked at again
-        // at the next look.
-        let comments = match self
-            .comments
-            .owner_comments_after(&run.user_id, task_id, after)
-            .await
-        {
-            Ok(comments) => comments,
-            Err(error) => {
-                tracing::warn!(?error, "the run task's comments could not be read");
-                return Ok(CommentsRead {
-                    reply: None,
-                    read_until: Some(after),
-                });
-            }
-        };
-        // The newest comment is the owner's latest word; the ones before it
-        // are read past.
-        let Some(newest) = comments.iter().max_by_key(|comment| comment.created_at) else {
-            return Ok(CommentsRead {
-                reply: None,
-                read_until: Some(after),
-            });
-        };
-        let reply = cut(newest.text.trim(), MAX_NOTE_BYTES).to_string();
-        Ok(CommentsRead {
-            reply: (!reply.is_empty()).then(|| ReplyGate {
-                seq: key.seq,
-                reply,
-                user_id: run.user_id.clone(),
-            }),
-            read_until: Some(newest.created_at),
-        })
+        Ok(Some(kept.answer))
     }
 }
 

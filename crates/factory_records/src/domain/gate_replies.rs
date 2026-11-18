@@ -47,6 +47,9 @@ pub struct AnsweredGate {
     pub answers: Vec<Outcome>,
     /// What the Step that asked produced, which the Gate is about.
     pub output: String,
+    /// The Run's plan: what the latest planner's Step before the Gate
+    /// produced, if one did.
+    pub plan: Option<String>,
     /// The person's answer.
     pub answer: Outcome,
     /// What they wrote with it.
@@ -105,18 +108,25 @@ pub trait GateReplyRepository: Send + Sync + 'static {
         key: StepKey,
     ) -> impl Future<Output = Result<Option<GateAnswer>, Self::Err>> + Send;
 
-    /// `owner`'s own answers to the Gates of `entry` in their newest Runs,
-    /// newest first, at most `limit`, leaving out the Run `except`.
+    /// Take back the stand-in's answer on the Gate of `key`, while the
+    /// Gate has no answer, so the Gate is the person's again.
+    fn withdraw_stand_in(&self, key: StepKey)
+    -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// `owner`'s own answers to the Gates of `entry` in their newest other
+    /// Runs of the Flow the Run `of` walks, newest first, at most `limit`,
+    /// leaving out the agents' questions asked at the entry.
     fn past_answers(
         &self,
         owner: &MacroUserIdStr<'static>,
         entry: &EntryId,
-        except: RunId,
+        of: RunId,
         limit: u16,
     ) -> impl Future<Output = Result<Vec<PastAnswer>, Self::Err>> + Send;
 
-    /// The Gates people answered themselves, oldest first, at most
-    /// `limit`: no Rule Answer and no stand-in's.
+    /// The Gates people answered themselves, with a button, oldest first,
+    /// at most `limit`: no Rule Answer, no stand-in's, and none read from a
+    /// person's words, which the model itself decided.
     fn answered_gates(
         &self,
         limit: u32,

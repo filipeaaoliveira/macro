@@ -3,7 +3,6 @@
 #[cfg(test)]
 mod test;
 
-use chrono::{DateTime, Utc};
 use factory_records::domain::models::{Outcome, StepKey};
 use factory_records::domain::standing_rules::RuleGateKind;
 use macro_user_id::user_id::MacroUserIdStr;
@@ -127,6 +126,18 @@ pub struct StandInAsking {
     pub answers: Vec<Outcome>,
 }
 
+/// A Gate whose stand-in answer's window ended, for its worker to keep
+/// the answer, unless the Run now forbids the stand-in to answer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StandInKeeping {
+    /// The Step that asked.
+    pub key: StepKey,
+    /// The Gate's kind, from its Flow.
+    pub kind: RuleGateKind,
+    /// Whether its Flow keeps it for a person only.
+    pub person_only: bool,
+}
+
 /// The stand-in's answer to a Gate, as the workflow goes on with it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StandingIn {
@@ -135,25 +146,6 @@ pub struct StandingIn {
     /// How long, in seconds, the owner may override it before the Run goes
     /// on with it.
     pub window_secs: u32,
-}
-
-/// A look at the Run's task for its owner's comments while a Gate waits.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CommentsReading {
-    /// The Step whose Gate waits.
-    pub key: StepKey,
-    /// The time the comments were read up to; none at the first look,
-    /// which reads from when the Gate opened.
-    pub after: Option<DateTime<Utc>>,
-}
-
-/// What a look at the Run's task found.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CommentsRead {
-    /// The owner's newest comment since the last look, as their reply.
-    pub reply: Option<ReplyGate>,
-    /// The time the comments were read up to, for the next look.
-    pub read_until: Option<DateTime<Utc>>,
 }
 
 /// Why a Run does not take an answer.

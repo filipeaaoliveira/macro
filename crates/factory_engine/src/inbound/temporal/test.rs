@@ -37,7 +37,7 @@ use uuid::Uuid;
 use super::{WorkerServices, worker_on};
 use crate::domain::built_in_flows::BuiltInFlow;
 use crate::domain::built_in_steps::BuiltInSteps;
-use crate::domain::fakes::{FakeComments, FakeGateModel};
+use crate::domain::fakes::FakeGateModel;
 use crate::domain::fakes::{FakeGithub, FakeHoldTasks, FakeRepo, FakeWatches, ci};
 use crate::domain::flow::Flow;
 use crate::domain::gate::{AnswerGate, ReplyGate};
@@ -58,12 +58,11 @@ use crate::outbound::temporal_run_workflows::TemporalRunWorkflows;
 use crate::temporal::{FlowWorkflowDefinition, MainWatchWorkflowDefinition};
 
 /// Gate replies and the stand-in over `repo`, with a model that fails, so
-/// no reply answers a Gate and the stand-in answers none, and no comments.
-pub(super) fn gates(repo: &FakeRepo) -> GateRepliesImpl<FakeRepo, FakeGateModel, FakeComments> {
+/// no reply answers a Gate and the stand-in answers none.
+pub(super) fn gates(repo: &FakeRepo) -> GateRepliesImpl<FakeRepo, FakeGateModel> {
     GateRepliesImpl::new(
         repo.clone(),
         FakeGateModel::default(),
-        FakeComments::default(),
         GateReplySettings::default(),
     )
 }
@@ -950,9 +949,7 @@ where
         PullRequestSteps::new(github.clone(), repo.clone(), FakeWatches::default()),
     );
     let gate_replies = match walk.gates {
-        Some((model, settings)) => {
-            GateRepliesImpl::new(repo.clone(), model, FakeComments::default(), settings)
-        }
+        Some((model, settings)) => GateRepliesImpl::new(repo.clone(), model, settings),
         None => gates(&repo),
     };
     let worker = worker_on(

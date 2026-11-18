@@ -11,9 +11,13 @@
 //!
 //! A pick counts at a threshold when the model was at least that sure:
 //! it agrees when it is the person's answer, and is wrong otherwise. The
-//! threshold to set is the lowest with no wrong pick, once enough Gates
-//! were read; with too few, the measure says so, and the conservative
-//! defaults stay.
+//! threshold to set is the lowest with no wrong pick among enough Gates the
+//! model answered at it, once enough Gates were read; otherwise the measure
+//! says so, and the conservative defaults stay. Only Gates a person
+//! answered with a button are read: an answer the model read from their
+//! words, or the stand-in's, is the model's own, not the truth to measure
+//! it against. The stand-in is asked with the Run's plan, as it is when it
+//! answers.
 
 #[cfg(test)]
 mod test;
@@ -36,6 +40,10 @@ pub const THRESHOLDS: [u8; 7] = [50, 60, 70, 80, 85, 90, 95];
 
 /// The fewest Gates a measure reads before its threshold is trusted.
 pub const ENOUGH_GATES: usize = 30;
+
+/// The fewest Gates the model must have answered at a threshold for that
+/// threshold to be set from: no wrong pick among a handful says little.
+pub const ENOUGH_DECIDED: usize = 20;
 
 /// How the model did at one threshold.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -63,15 +71,15 @@ pub struct Measure {
 
 impl Measure {
     /// The lowest threshold at which the model picked nothing wrong and
-    /// answered something, once [`ENOUGH_GATES`] were read; none when too
-    /// few were, or every threshold picked wrong.
+    /// answered at least [`ENOUGH_DECIDED`] Gates, once [`ENOUGH_GATES`]
+    /// were read; none when too few were, or no threshold qualifies.
     pub fn threshold(&self) -> Option<u8> {
         if self.gates < ENOUGH_GATES {
             return None;
         }
         self.thresholds
             .iter()
-            .find(|at| at.wrong == 0 && at.decided > 0)
+            .find(|at| at.wrong == 0 && at.decided >= ENOUGH_DECIDED)
             .map(|at| at.threshold)
     }
 
@@ -172,7 +180,7 @@ pub async fn replay<M: GateModel>(model: &M, gates: &[AnsweredGate]) -> ReplayRe
                 answers: &gate.answers,
                 request: &gate.request,
                 output: &gate.output,
-                plan: None,
+                plan: gate.plan.as_deref(),
                 past: earlier,
             };
             let pick = model
@@ -221,12 +229,10 @@ pub fn describe(report: &ReplayReport) -> String {
                 "  Too few gates to set a threshold from (fewer than {ENOUGH_GATES}): keep the \
                  conservative default.\n\n"
             )),
-            None if measure.thresholds.iter().all(|at| at.decided == 0) => {
-                text.push_str("  No pick reached a threshold: keep the conservative default.\n\n")
-            }
-            None => text.push_str(
-                "  Every threshold picked wrong at least once: keep the conservative default.\n\n",
-            ),
+            None => text.push_str(&format!(
+                "  No threshold had no wrong pick among at least {ENOUGH_DECIDED} answered \
+                 gates: keep the conservative default.\n\n"
+            )),
         }
     }
     text

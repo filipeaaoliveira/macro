@@ -1,15 +1,11 @@
 //! Ports of Gate replies and the stand-in: the small model that reads a
-//! person's words or answers for them, the comments on a Run's task, and
-//! the activities a Run's workflow asks of its worker.
+//! person's words or answers for them, and the activities a Run's
+//! workflow asks of its worker.
 
-use chrono::{DateTime, Utc};
-use factory_records::domain::models::{Outcome, StepKey};
+use factory_records::domain::models::Outcome;
 use macro_user_id::user_id::MacroUserIdStr;
-use uuid::Uuid;
 
-use crate::domain::gate::{
-    CommentsRead, CommentsReading, ReplyRead, ReplyReading, StandInAsking, StandingIn,
-};
+use crate::domain::gate::{ReplyRead, ReplyReading, StandInAsking, StandInKeeping, StandingIn};
 use crate::domain::models::StepError;
 
 /// What a Gate's model is asked: to pick one of `choices`, or none, from
@@ -50,30 +46,6 @@ pub trait GateModel: Send + Sync + 'static {
     ) -> impl Future<Output = Result<ModelPick, Self::Err>> + Send;
 }
 
-/// A comment on a task, as a reply to a Gate reads it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TaskComment {
-    /// What it says.
-    pub text: String,
-    /// When it was written.
-    pub created_at: DateTime<Utc>,
-}
-
-/// The comments on the task a Run works on.
-pub trait TaskComments: Send + Sync + 'static {
-    /// Why a read failed.
-    type Err: std::error::Error + Send + Sync + 'static;
-
-    /// The comments `owner` wrote themselves on the task `task_id` after
-    /// `after`, oldest first: none an agent or a program wrote for them.
-    fn owner_comments_after(
-        &self,
-        owner: &MacroUserIdStr<'static>,
-        task_id: Uuid,
-        after: DateTime<Utc>,
-    ) -> impl Future<Output = Result<Vec<TaskComment>, Self::Err>> + Send;
-}
-
 /// What a Run's worker does for Gate replies and the stand-in, each safe
 /// to repeat: a retry finds what an earlier attempt recorded.
 pub trait GateReplyService: Send + Sync + 'static {
@@ -91,16 +63,13 @@ pub trait GateReplyService: Send + Sync + 'static {
         asking: StandInAsking,
     ) -> impl Future<Output = Result<Option<StandingIn>, StepError>> + Send;
 
-    /// Answer the Gate of `key` with the stand-in's answer, once the owner
-    /// let it stand, and return the answer the Gate keeps.
+    /// Answer the Gate with the stand-in's answer once the owner let it
+    /// stand, and return the answer the Gate keeps; none when the Run now
+    /// forbids the stand-in to answer (Tampered, under a Main Hold, rules
+    /// that no longer let it), which takes its answer back, so the Gate
+    /// waits for the person.
     fn keep_stand_in(
         &self,
-        key: StepKey,
-    ) -> impl Future<Output = Result<Outcome, StepError>> + Send;
-
-    /// Look at the Run's task for its owner's comments since the last look.
-    fn read_comments(
-        &self,
-        reading: CommentsReading,
-    ) -> impl Future<Output = Result<CommentsRead, StepError>> + Send;
+        keeping: StandInKeeping,
+    ) -> impl Future<Output = Result<Option<Outcome>, StepError>> + Send;
 }

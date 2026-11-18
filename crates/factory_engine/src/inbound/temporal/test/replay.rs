@@ -18,7 +18,9 @@
 //!   answers the Gate;
 //! - `code_stand_in_answered`: the stand-in's answer to the plan Gate stands
 //!   once its window passes;
-//! - `code_stand_in_overridden`: the owner overrides it in the window.
+//! - `code_stand_in_overridden`: the owner overrides it in the window;
+//! - `code_stand_in_taken_back`: the branch turns Tampered in the window,
+//!   so the stand-in's answer is taken back and the owner answers.
 //!
 //! Before changing what the workflow decides, record the histories it
 //! makes now beside these, so the change is checked against both.
@@ -107,6 +109,15 @@ async fn a_run_whose_owner_overrode_the_stand_in_replays() {
     replays(
         "code_stand_in_overridden",
         include_bytes!("histories/code_stand_in_overridden.json"),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_run_whose_stand_in_answer_was_taken_back_replays() {
+    replays(
+        "code_stand_in_taken_back",
+        include_bytes!("histories/code_stand_in_taken_back.json"),
     )
     .await;
 }

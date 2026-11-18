@@ -6979,9 +6979,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bot_id",
- "chrono",
  "macro_tower_layers",
- "messages",
  "model",
  "model_owner",
  "models_bulk_upload",
@@ -8372,7 +8370,6 @@ dependencies = [
  "macro_authorization",
  "macro_env_var",
  "macro_user_id",
- "messages",
  "model-error-response",
  "model_user",
  "models_properties",

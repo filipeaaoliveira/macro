@@ -1408,8 +1408,7 @@ the note as the person's words in place of a button: the factory reads
 which answer they give, and the Run goes on with it (its Step then says
 **Answered from your reply (N% sure)**), or it asks back on the Gate,
 which says it **Couldn't tell which answer** the words give and still
-takes an answer. A comment the Run's owner writes on the task while a
-Gate waits is read the same way, within five minutes. When the team turns
+takes an answer. A comment on the task never answers a Gate. When the team turns
 the stand-in on for a kind of Gate (**Stand-in** under the standing rules
 in team settings), the Gate shows **The stand-in answered … for you**
 with its reason and when the Run goes on with it; any answer before then

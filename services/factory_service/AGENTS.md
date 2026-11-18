@@ -136,9 +136,8 @@ worker that walks each Run's Flow, in one process.
   names). Without them every call fails: the factory then asks back on
   every reply and the stand-in answers nothing, so Gates wait for a person
   as before. Its usage is recorded against each Run's owner
-  (`AiFeature::FactoryGate`, not billable). A comment on a Run's task is
-  read through document storage's `GET /messages/document/{id}` as the
-  owner, with the internal key.
+  (`AiFeature::FactoryGate`, not billable). A comment on a Run's task
+  never answers a Gate (`crates/factory_engine/AGENTS.md` says why).
 - The service tells which accounts exist with the authentication service's
   `POST /internal/get_existing_users`, so it requires the auth service's fix
   that serves that route as POST: before it, the route answered only GET,

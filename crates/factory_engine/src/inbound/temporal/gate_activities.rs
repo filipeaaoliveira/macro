@@ -4,14 +4,12 @@
 
 use std::sync::Arc;
 
-use factory_records::domain::models::{Outcome, StepKey};
+use factory_records::domain::models::Outcome;
 use temporalio_macros::activities;
 use temporalio_sdk::activities::{ActivityContext, ActivityError};
 
 use super::activities::failure;
-use crate::domain::gate::{
-    CommentsRead, CommentsReading, ReplyRead, ReplyReading, StandInAsking, StandingIn,
-};
+use crate::domain::gate::{ReplyRead, ReplyReading, StandInAsking, StandInKeeping, StandingIn};
 use crate::domain::models::StepError;
 use crate::domain::ports::GateReplyService;
 
@@ -23,9 +21,7 @@ trait DynGateReplyService: Send + Sync {
 
     async fn stand_in(&self, asking: StandInAsking) -> Result<Option<StandingIn>, StepError>;
 
-    async fn keep_stand_in(&self, key: StepKey) -> Result<Outcome, StepError>;
-
-    async fn read_comments(&self, reading: CommentsReading) -> Result<CommentsRead, StepError>;
+    async fn keep_stand_in(&self, keeping: StandInKeeping) -> Result<Option<Outcome>, StepError>;
 }
 
 #[async_trait::async_trait]
@@ -38,12 +34,8 @@ impl<T: GateReplyService> DynGateReplyService for T {
         GateReplyService::stand_in(self, asking).await
     }
 
-    async fn keep_stand_in(&self, key: StepKey) -> Result<Outcome, StepError> {
-        GateReplyService::keep_stand_in(self, key).await
-    }
-
-    async fn read_comments(&self, reading: CommentsReading) -> Result<CommentsRead, StepError> {
-        GateReplyService::read_comments(self, reading).await
+    async fn keep_stand_in(&self, keeping: StandInKeeping) -> Result<Option<Outcome>, StepError> {
+        GateReplyService::keep_stand_in(self, keeping).await
     }
 }
 
@@ -86,23 +78,14 @@ impl GateActivities {
     }
 
     /// Answer a Gate with the stand-in's answer, once its owner let it
-    /// stand.
+    /// stand, unless the Run now forbids it: then none, and the Gate is the
+    /// owner's again.
     #[activity(name = "factory_keep_stand_in")]
     pub async fn keep_stand_in(
         self: Arc<Self>,
         _ctx: ActivityContext,
-        key: StepKey,
-    ) -> Result<Outcome, ActivityError> {
-        self.gates.keep_stand_in(key).await.map_err(failure)
-    }
-
-    /// Look at the Run's task for its owner's comments while a Gate waits.
-    #[activity(name = "factory_read_gate_comments")]
-    pub async fn read_gate_comments(
-        self: Arc<Self>,
-        _ctx: ActivityContext,
-        reading: CommentsReading,
-    ) -> Result<CommentsRead, ActivityError> {
-        self.gates.read_comments(reading).await.map_err(failure)
+        keeping: StandInKeeping,
+    ) -> Result<Option<Outcome>, ActivityError> {
+        self.gates.keep_stand_in(keeping).await.map_err(failure)
     }
 }

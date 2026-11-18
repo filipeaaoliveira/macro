@@ -1,5 +1,5 @@
-//! In-memory stand-ins for Gate replies: the records, a scripted Gate
-//! model, and a Run task's comments.
+//! In-memory stand-ins for Gate replies: the records and a scripted Gate
+//! model.
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -10,10 +10,9 @@ use factory_records::domain::models::{
     AskedBack, EntryId, GateAnswer, Outcome, RunId, StandInAnswer, StepKey,
 };
 use macro_user_id::user_id::MacroUserIdStr;
-use uuid::Uuid;
 
 use super::{FakeError, FakeRepo};
-use crate::domain::ports::{GateModel, ModelPick, ModelQuestion, TaskComment, TaskComments};
+use crate::domain::ports::{GateModel, ModelPick, ModelQuestion};
 
 impl GateReplyRepository for FakeRepo {
     type Err = FakeError;
@@ -95,16 +94,25 @@ impl GateReplyRepository for FakeRepo {
         &self,
         owner: &MacroUserIdStr<'static>,
         entry: &EntryId,
-        except: RunId,
+        of: RunId,
         limit: u16,
     ) -> Result<Vec<PastAnswer>, FakeError> {
         let runs = self.runs.lock().expect("runs");
+        let flows = self.flows.lock().expect("flows");
+        let flow = flows.get(&of);
         let steps = self.steps.lock().expect("steps");
         let mut past: Vec<(DateTime<Utc>, PastAnswer)> = steps
             .iter()
             .filter(|(run, step)| {
-                *run != except
+                let question = step
+                    .end
+                    .as_ref()
+                    .is_some_and(|end| end.outcome == Outcome::question());
+                *run != of
+                    && flow.is_some()
+                    && flows.get(run) == flow
                     && step.entry == *entry
+                    && !question
                     && runs.get(run).is_some_and(|run| run.user_id == *owner)
             })
             .filter_map(|(_, step)| {
@@ -129,6 +137,17 @@ impl GateReplyRepository for FakeRepo {
             .take(usize::from(limit))
             .map(|(_, past)| past)
             .collect())
+    }
+
+    async fn withdraw_stand_in(&self, key: StepKey) -> Result<(), FakeError> {
+        self.with_step(key, |step| {
+            if let Some(gate) = step.gate.as_mut()
+                && gate.answer.is_none()
+            {
+                gate.stand_in = None;
+            }
+        });
+        Ok(())
     }
 
     async fn answered_gates(&self, _limit: u32) -> Result<Vec<AnsweredGate>, FakeError> {
@@ -190,49 +209,5 @@ impl GateModel for FakeGateModel {
         }
         let next = self.picks.lock().expect("picks").pop_front();
         next.unwrap_or(Err(FakeError))
-    }
-}
-
-/// The comments on Run tasks: by task, with their author and time.
-#[derive(Clone, Default)]
-pub(crate) struct FakeComments {
-    pub(crate) comments: Arc<Mutex<Vec<(Uuid, String, TaskComment)>>>,
-}
-
-impl FakeComments {
-    /// `author` comments `text` on `task_id` at `at`.
-    pub(crate) fn comment(&self, task_id: Uuid, author: &str, text: &str, at: DateTime<Utc>) {
-        self.comments.lock().expect("comments").push((
-            task_id,
-            author.to_string(),
-            TaskComment {
-                text: text.to_string(),
-                created_at: at,
-            },
-        ));
-    }
-}
-
-impl TaskComments for FakeComments {
-    type Err = FakeError;
-
-    async fn owner_comments_after(
-        &self,
-        owner: &MacroUserIdStr<'static>,
-        task_id: Uuid,
-        after: DateTime<Utc>,
-    ) -> Result<Vec<TaskComment>, FakeError> {
-        let mut found: Vec<TaskComment> = self
-            .comments
-            .lock()
-            .expect("comments")
-            .iter()
-            .filter(|(task, author, comment)| {
-                *task == task_id && author == owner.as_ref() && comment.created_at > after
-            })
-            .map(|(_, _, comment)| comment.clone())
-            .collect();
-        found.sort_by_key(|comment| comment.created_at);
-        Ok(found)
     }
 }

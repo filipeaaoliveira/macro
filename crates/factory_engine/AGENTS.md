@@ -618,15 +618,16 @@ for the owner, whatever the ruling names.
 Gate replies (`src/domain/gate_replies.rs`, `gate_replies/service.rs`):
 a person may answer a Gate in words rather than with a button, with `POST
 /runs/{id}/steps/{seq}/reply` (`{"reply"}`, 1 to 4096 bytes, else 400), in
-their own signed-in session as for an answer, or by commenting on the Run's
-task while the Gate waits. The workflow takes the words with the
-`factory_reply_gate` update (refused, as an answer is, for a Gate the Run
-does not wait on, after an answer or other words it has not read, and for a
-Gate opened before replies) and asks the worker to read them
-(`factory_read_gate_reply`): a small model (the `GateModel` port; on Macro's
-model router in `outbound/fast_gate_model.rs`, `AiFeature::FactoryGate`,
-billed to no one) picks one of the Gate's answers or `unclear`, with how
-sure it is. At or above the reply threshold (`DEFAULT_REPLY_THRESHOLD`, 85
+their own signed-in session as for an answer. The workflow takes the words
+with the `factory_reply_gate` update (refused, as an answer is, for a Gate
+the Run does not wait on, after an answer or other words it has not read,
+and for a Gate opened before replies) and asks the worker to read them
+(`factory_read_gate_reply`): a small model (the `GateModel` port; on
+Macro's model router in `outbound/fast_gate_model.rs`,
+`AiFeature::FactoryGate`, billed to no one) picks one of the Gate's answers
+or `unclear`, with how sure it is. The question, its answers and the words
+reach the model as one JSON object, so the words open no section of their
+own. At or above the reply threshold (`DEFAULT_REPLY_THRESHOLD`, 85
 percent, or `FACTORY_GATE_REPLY_THRESHOLD`) the Gate is answered with it as
 the person's answer, the words kept as its note and the confidence beside
 it; below it, `unclear`, an answer the Gate does not offer, a call that
@@ -635,13 +636,17 @@ the Gate (`asked_back`), which waits on and takes an answer or new words.
 Words never approve a Tampered Run: its Control Files are approved with the
 button, which lists them. An agent's question takes the words as its
 answer, with no model (the API sends them as the Gate's `answer`, so any
-worker takes them). While a Gate waits, the workflow looks at the Run's task
-every `COMMENTS_EVERY` (5 minutes, a timer and `factory_read_gate_comments`):
-the owner's newest comment since the last look (`outbound/
-document_task_comments.rs`: an unanchored discussion's comment or a reply in
-its preview, written by the owner themselves, not by a program, an agent or
-a bot for them) is read as a reply; an answer or words given meanwhile go
-first. A Run with no task looks at nothing.
+worker takes them).
+
+A comment on the Run's task never answers a Gate. A comment that an agent's
+session, a user API key or a routine posts as the owner reads, in the
+message service, the same as one the owner wrote: messages only mark a bot
+as the sender (`triggered_by`, `triggered_via` and `bot_profile` are a
+bot's), so a comment could approve a plan or a merge, or answer an agent's
+question, in the owner's name. Reading comments as replies needs the
+message service to record how the session that posted each comment
+authenticated (in person, or a program acting for the person), as the
+Run API's `is_in_person` does for an answer.
 
 The stand-in (`src/domain/stand_in.rs`) answers a routine Gate for the
 Run's owner once no Standing Rule did, and before the person: a team turns
@@ -654,31 +659,40 @@ Flow keeps for a person (`GateDefinition::person_only`), a Gate of a
 Tampered Run or under a Main Hold of its base, and a Run created before
 Runs kept rules. It asks the model with the Gate, the Run's request, the
 asking Step's output, the plan (the latest planner's Step before it) and
-the owner's last `PAST_ANSWERS_READ` answers to the same entry's Gates, as
-data. At or above the stand-in threshold (`DEFAULT_STAND_IN_THRESHOLD`, 90
+the owner's last `PAST_ANSWERS_READ` answers to the same entry's Gates in
+Runs of the same Flow (never an agent's question asked there), as one JSON
+object, so nothing an agent or the request wrote can pass for a section of
+its own, such as a past answer. At or above the stand-in threshold (`DEFAULT_STAND_IN_THRESHOLD`, 90
 percent, or `FACTORY_STAND_IN_THRESHOLD`) its answer, reason and confidence
 are kept on the Gate with the end of its window (`DEFAULT_STAND_IN_WINDOW`,
-10 minutes, or `FACTORY_STAND_IN_WINDOW_SECS`), and the Gate takes the
-owner's answers and words meanwhile: one in the window is the Gate's
-answer, as any other, with the stand-in's kept beside it. Once the window's
-timer fires the Gate closes and the stand-in's answer becomes its answer
-(`factory_keep_stand_in`, `by_stand_in`, with no author). Below the
+10 minutes, or `FACTORY_STAND_IN_WINDOW_SECS`, from 60 seconds to a day,
+else the service does not start), and the Gate takes the owner's answers
+and words meanwhile: one in the window is the Gate's answer, as any other,
+with the stand-in's kept beside it. Once the window's timer fires the Gate
+closes and the worker reads the Run again (`factory_keep_stand_in`): when
+it still lets the stand-in answer, the stand-in's answer becomes the Gate's
+(`by_stand_in`, with no author); when it no longer does (the branch turned
+Tampered, the base is held, the Run ended), the stand-in's answer is taken
+back and the Gate waits for the owner. Below the
 threshold, unsure, or failing, it keeps nothing, and the Gate waits for the
 person. A retry returns the answer kept first, with what is left of its
 window. Run insights count neither its answers nor Rule Answers.
 
 The model calls are activities, so a replay reads their results from the
-history. The stand-in, replies and the looks at the task are behind the
-`factory-gate-replies` patch marker, asked once per Gate after its rules:
+history. The stand-in and replies are behind the `factory-gate-replies`
+patch marker, asked once per Gate after its rules:
 a Gate opened before the marker takes only an answer, as before, and
 replays without them. The thresholds come from the replay measure
 (`gate_replies/measure.rs`, the `factory_gate_replay` command of
 `services/factory_service`), which runs the model over the Gates people
-answered themselves: each Flow's Gate answered with a note, its note read
-as the reply, and each built-in Flow's plan and Blockers Gate, asked as the
-stand-in would be with the owner's earlier answers, and reports at each
-threshold how many the model would have answered, agreed on and picked
-wrong. It sets a threshold only from `ENOUGH_GATES` (30) Gates. On
+answered themselves with a button (never an answer read from words, nor
+the stand-in's, which are the model's own): each Flow's Gate answered with
+a note, its note read as the reply, and each built-in Flow's plan and
+Blockers Gate, asked as the stand-in would be with the Run's plan and the
+owner's earlier answers, and reports at each threshold how many the model
+would have answered, agreed on and picked wrong. It sets a threshold only
+from `ENOUGH_GATES` (30) Gates read, and only one with no wrong pick among
+at least `ENOUGH_DECIDED` (20) Gates the model answered at it. On
 2026-11-18 the factory's records on the test bench held 48 Gates people
 answered, from 27 Runs: 12 answered with a note and 12 built-in plan
 Gates, too few to set a threshold from (and no model key was at hand to
@@ -736,7 +750,6 @@ hold more answered Gates, before lowering either.
 
 - Depends on: `factory_records`, `ai_usage` (agent sessions' usage, and
   the Gate model's), `agent` (the model router the Gate model calls),
-  `messages` (the discussions on a Run's task),
   `agent_session` (the routine sessions port),
   `agent_correlation`, `macro_authorization`, `macro_user_id`,
   `entity_access` (ports), `document_storage_service_client`,

@@ -3,7 +3,7 @@
 mod gate_replies;
 mod main_hold;
 
-pub(crate) use gate_replies::{FakeComments, FakeGateModel};
+pub(crate) use gate_replies::FakeGateModel;
 pub(crate) use main_hold::{FakeHoldTasks, FakeMain, FakeWatches};
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -105,6 +105,8 @@ pub(crate) struct FollowUpComment {
 #[derive(Clone, Default)]
 pub(crate) struct FakeRepo {
     pub(crate) runs: Arc<Mutex<BTreeMap<RunId, Run>>>,
+    /// The built-in Flow each Run walks.
+    pub(crate) flows: Arc<Mutex<BTreeMap<RunId, String>>>,
     pub(crate) steps: Arc<Mutex<Vec<(RunId, Step)>>>,
     /// Each agent Step's session, what it offers, and its latest hand back.
     pub(crate) sessions: Arc<Mutex<Vec<FakeSession>>>,
@@ -356,6 +358,7 @@ impl RunRepository for FakeRepo {
     async fn insert_run(&self, new: NewRun<'_>) -> Result<RunInsert, FakeError> {
         let NewRun {
             id,
+            flow,
             request,
             user_id,
             task_id,
@@ -386,6 +389,10 @@ impl RunRepository for FakeRepo {
             end: None,
         };
         self.runs.lock().expect("runs").insert(id, run.clone());
+        self.flows
+            .lock()
+            .expect("flows")
+            .insert(id, flow.to_string());
         Ok(RunInsert::Inserted(Box::new(run)))
     }
 

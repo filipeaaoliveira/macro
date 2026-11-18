@@ -29,7 +29,6 @@ github = { path = "../github", default-features = false, features = ["link", "ou
 glob = { workspace = true }
 macro_authorization = { path = "../macro_authorization", default-features = false, features = ["axum"] }
 macro_user_id = { path = "../macro_user_id", features = ["schema"] }
-messages = { path = "../messages" }
 model-error-response = { path = "../model-error-response" }
 models_properties = { path = "../models_properties" }
 rootcause = { workspace = true }

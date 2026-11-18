@@ -7,8 +7,6 @@ version = "0.1.0"
 [dependencies]
 macro_tower_layers = { path = "../macro_tower_layers" }
 anyhow = { workspace = true }
-chrono = { workspace = true }
-messages = { path = "../messages", features = ["ports"] }
 model = { path = "../model" }
 model_owner = { path = "../model_owner" }
 models_bulk_upload = { path = "../models_bulk_upload" }

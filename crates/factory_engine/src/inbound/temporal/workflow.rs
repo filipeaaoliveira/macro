@@ -62,8 +62,8 @@ use factory_records::domain::standing_rules::RuleGateKind;
 
 use crate::domain::flow::Flow;
 use crate::domain::gate::{
-    AnswerGate, CommentsReading, GateAnswered, GateOpening, GateRuling, OpenGate, ReplyGate,
-    ReplyRead, ReplyReading, StandInAsking, check_answer, check_reply,
+    AnswerGate, GateAnswered, GateOpening, GateRuling, OpenGate, ReplyGate, ReplyRead,
+    ReplyReading, StandInAsking, StandInKeeping, check_answer, check_reply,
 };
 use crate::domain::interpreter::{Interpreter, NextStep};
 use crate::domain::models::{RunFinish, RunStart, StepReport, StepRequest};
@@ -121,9 +121,8 @@ const STOP_TOTAL: Duration = Duration::from_secs(15 * 60);
 pub(crate) const STANDING_RULES_PATCH: &str = "factory-standing-rules";
 
 /// The marker of the workflow that asks the stand-in about each Flow's
-/// Gate no rule answered, takes a person's words as a reply, and looks at
-/// the Run's task for its owner's comments while a Gate waits. Renaming it
-/// breaks the replay of Runs that passed it.
+/// Gate no rule answered, and takes a person's words as a reply. Renaming
+/// it breaks the replay of Runs that passed it.
 pub(crate) const GATE_REPLIES_PATCH: &str = "factory-gate-replies";
 
 /// The workflow of one Run.
@@ -379,8 +378,7 @@ async fn ask(
     }
 
     // A Gate opened before the marker takes only a person's answer, as
-    // before: no stand-in, no reply and no look at the task's comments. Its
-    // history replays without them.
+    // before: no stand-in and no reply. Its history replays without them.
     let replies = ctx.patched(GATE_REPLIES_PATCH);
     let gate = Waiting {
         key,
@@ -419,17 +417,31 @@ async fn ask(
                 }
                 _ = window => false,
             };
-            if !woke {
+            if woke {
+                window.cancel();
+                overridden = gate.take(ctx);
+            } else {
                 // Closed first, so no answer slips in once the stand-in's
-                // is the one the Run goes on with.
+                // is the one the Run goes on with. A Run that now forbids
+                // the stand-in (Tampered, under a Main Hold) gives the Gate
+                // back to the person.
                 gate.close(ctx);
+                let keeping = StandInKeeping {
+                    key,
+                    kind,
+                    person_only: asking.person_only,
+                };
                 let kept = ctx
-                    .execute_activity(GateActivities::keep_stand_in, key, record_options)
+                    .execute_activity(
+                        GateActivities::keep_stand_in,
+                        keeping,
+                        record_options.clone(),
+                    )
                     .await?;
-                return Ok(kept);
+                if let Some(kept) = kept {
+                    return Ok(kept);
+                }
             }
-            window.cancel();
-            overridden = gate.take(ctx);
         }
     }
 
@@ -439,43 +451,13 @@ async fn ask(
     if overridden.is_none() {
         gate.open(ctx);
     }
-    let mut comments_after = None;
     loop {
         let taken = if let Some(taken) = overridden.take() {
             Some(taken)
         } else if replies {
-            // While it waits, the Gate looks at the Run's task for its
-            // owner's comments every so often: the newest one is a reply.
-            let mut look = ctx.timer(COMMENTS_EVERY);
-            let woke = select! {
-                waited = ctx.wait_condition(|workflow| workflow.answer.is_some() || workflow.reply.is_some()) => {
-                    waited?;
-                    true
-                }
-                _ = look => false,
-            };
-            if woke {
-                look.cancel();
-                gate.take(ctx)
-            } else {
-                let read = ctx
-                    .execute_activity(
-                        GateActivities::read_gate_comments,
-                        CommentsReading {
-                            key,
-                            after: comments_after,
-                        },
-                        record_options.clone(),
-                    )
-                    .await?;
-                comments_after = read.read_until;
-                match read.reply {
-                    // A person who answered or replied meanwhile goes
-                    // first; the comment is read past.
-                    Some(reply) => gate.take(ctx).or(Some(Taken::Reply(reply))),
-                    None => gate.take(ctx),
-                }
-            }
+            ctx.wait_condition(|workflow| workflow.answer.is_some() || workflow.reply.is_some())
+                .await?;
+            gate.take(ctx)
         } else {
             ctx.wait_condition(|workflow| workflow.answer.is_some())
                 .await?;
@@ -519,10 +501,6 @@ async fn ask(
         }
     }
 }
-
-/// How often a waiting Gate looks at the Run's task for its owner's
-/// comments.
-const COMMENTS_EVERY: Duration = Duration::from_secs(5 * 60);
 
 /// The Gate a Run waits on, as the workflow keeps it.
 struct Waiting {
