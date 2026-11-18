@@ -147,8 +147,15 @@ The reminder is a prompt of the factory's: it is sent out of sight, opens
 the Step Terminal's steering again (`begin_turn`), and its wait follows the
 owner's note, pause, resume and stop as any prompt's does; the agent's last
 message is read from the last turn the wait followed, an owner's note's
-when there was one. A Step its owner stops ends `failed`
-(`StoppedByOwner`), never `no_result`. A verifier (`accept`, `verify`)
+when there was one. The reminder's wait keeps the time the Step was
+paused before it, and one still going when the attempt's time runs out is
+`Overdue`, which a retry waits on. A wait closes the steering only of the
+prompt it waits on (`close_steering` names it): an attempt retried late,
+once the Step went on to the reminder, waits on the reminder rather than
+the first prompt, and never closes the reminder's steering. A Step its
+owner stops ends `failed` (`StoppedByOwner`), never `no_result`, as does
+one whose stop is recorded before its reminder is sent; one whose pause
+ran out takes no more steering (409). A verifier (`accept`, `verify`)
 stopping without a result ends its Step `no_result` as any agent does,
 before any acceptance check runs, so its Gate is the only one the Step
 opens: never `accept`'s Blockers Gate too. The Step that goes on from a
