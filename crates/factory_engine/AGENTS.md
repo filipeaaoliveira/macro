@@ -618,7 +618,10 @@ its merge, and by `ready_to_merge` or `merge` when they find the pull
 request merged outside the Run, unless the repository has GitHub delete
 merged branches itself (`delete_branch_on_merge`). Only the Run's own
 branch is deleted, and only while it is at the commit merged: a branch
-pushed to since keeps its commits. The deletion is best effort: a failure
+pushed to since keeps its commits. A branch an open pull request is
+based on is kept too: deleting it through the API would close that pull
+request, where GitHub's own deletion moves it to the base. The deletion
+is best effort: a failure
 is logged, never the Step's. A Run that ends without merging (cancelled,
 failed, closed, refused, or ended for a person) keeps its branch, for a
 person to look at; nothing deletes it later, nor the branch of a pull

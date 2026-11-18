@@ -1379,6 +1379,8 @@ pub(crate) struct FakeGithubState {
     pub(crate) deleted_branches: Vec<String>,
     /// Whether deleting a branch fails, as GitHub down does.
     pub(crate) delete_fails: bool,
+    /// Whether an open pull request is based on the Run's branch.
+    pub(crate) based_on_branch: bool,
 }
 
 /// GitHub in memory, for one Run's branch: opening its pull request makes
@@ -1655,6 +1657,15 @@ impl PullRequests for FakeGithub {
         pull_request.state = PullRequestState::Merged;
         pull_request.merge_commit = Some(Self::MERGED.to_string());
         Ok(Merging::Merged)
+    }
+
+    async fn has_open_pull_request_onto(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        _branch: &str,
+    ) -> Result<bool, FakeGithubError> {
+        Ok(self.state().based_on_branch)
     }
 
     /// Deleting the Run's branch leaves it not there for later reads.

@@ -444,6 +444,27 @@ impl GithubOauthImpl {
         }
     }
 
+    /// Whether an open pull request of the repository is based on `base`,
+    /// so merging it would merge into that branch.
+    #[tracing::instrument(skip(self, access_token), err)]
+    pub async fn has_open_pull_request_onto(
+        &self,
+        access_token: &str,
+        owner: &str,
+        repo: &str,
+        base: &str,
+    ) -> Result<bool, GithubError> {
+        let open: Vec<serde::de::IgnoredAny> = self
+            .read(
+                access_token,
+                &format!("/repos/{owner}/{repo}/pulls"),
+                &[("base", base), ("state", "open"), ("per_page", "1")],
+                "failed to list pull requests onto a branch",
+            )
+            .await?;
+        Ok(!open.is_empty())
+    }
+
     /// The newest pull request, open or closed, from the repository's own
     /// branch `head`, with its head commit.
     #[tracing::instrument(skip(self, access_token), err)]

@@ -558,6 +558,20 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
         })
     }
 
+    #[tracing::instrument(err, skip(self, owner))]
+    async fn has_open_pull_request_onto(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        branch: &str,
+    ) -> Result<bool, GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        Ok(self
+            .github
+            .has_open_pull_request_onto(&token, repository.owner(), repository.name(), branch)
+            .await?)
+    }
+
     /// The Step that asks logs a failure, so it is not logged here too.
     #[tracing::instrument(skip(self, owner))]
     async fn delete_branch(

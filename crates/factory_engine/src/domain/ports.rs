@@ -379,6 +379,14 @@ pub trait PullRequests: Send + Sync + 'static {
         head_sha: &str,
     ) -> impl Future<Output = Result<Merging, Self::Err>> + Send;
 
+    /// Whether an open pull request of `repository` is based on `branch`.
+    fn has_open_pull_request_onto(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        branch: &str,
+    ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
+
     /// Ask GitHub to delete `branch` of `repository`, or find it missing.
     fn delete_branch(
         &self,

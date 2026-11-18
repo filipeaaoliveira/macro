@@ -149,6 +149,24 @@ async fn a_branch_that_moved_since_its_merge_is_kept() {
     assert!(github.state().deleted_branches.is_empty());
 }
 
+/// A branch an open pull request is based on is kept: deleting it through
+/// the API would close that pull request.
+#[tokio::test]
+async fn a_branch_another_pull_request_is_based_on_is_kept() {
+    let github = github();
+    github.state().based_on_branch = true;
+    let repo = FakeRepo::default();
+    let run_id = agreed(&repo).await;
+
+    let report = steps(&github, &repo)
+        .merge(input(run_id))
+        .await
+        .expect("merge");
+
+    assert_eq!(outcome(&report), "merged");
+    assert!(github.state().deleted_branches.is_empty());
+}
+
 /// A branch GitHub does not delete leaves the merge as it is: merged and
 /// recorded, the Step done.
 #[tokio::test]

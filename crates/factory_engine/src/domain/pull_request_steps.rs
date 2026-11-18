@@ -563,7 +563,9 @@ where
     /// logged, never the Step's. Only the Run's own branch is deleted, and
     /// only while it is at the commit merged: one pushed to since is kept.
     /// A pull request a person merged leaves its branch to GitHub when the
-    /// repository deletes merged branches itself.
+    /// repository deletes merged branches itself. A branch an open pull
+    /// request is based on is kept: deleting it through the API would close
+    /// that pull request, where GitHub's own deletion moves it to the base.
     async fn delete_merged_branch(&self, input: &StepInput<'_>, merged_head: &str, merger: Merger) {
         let branch = run_branch(input.key.run_id);
         let _ = self
@@ -607,6 +609,16 @@ where
             if head.is_some() {
                 tracing::info!(%branch, "kept the merged run's branch: it moved since");
             }
+            return Ok(());
+        }
+
+        let based_on = self
+            .github
+            .has_open_pull_request_onto(input.owner, &repository, branch)
+            .await
+            .map_err(PullRequestStepError::github)?;
+        if based_on {
+            tracing::info!(%branch, "kept the merged run's branch: a pull request is based on it");
             return Ok(());
         }
 

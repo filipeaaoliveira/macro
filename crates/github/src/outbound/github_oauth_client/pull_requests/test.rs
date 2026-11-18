@@ -616,3 +616,27 @@ async fn delete_branch_refuses_a_name_git_would_not_take() {
         );
     }
 }
+
+/// An open pull request based on a branch is found by its base.
+#[tokio::test]
+async fn an_open_pull_request_onto_a_branch_is_found() {
+    let (based, client) = answering("200 OK", r#"[{"number":14}]"#);
+    let found = client
+        .has_open_pull_request_onto("token", "macro", "app", "factory/run")
+        .await
+        .unwrap();
+    assert!(found);
+    assert!(
+        based
+            .finish()
+            .starts_with("GET /repos/macro/app/pulls?base=factory%2Frun&state=open&per_page=1 ")
+    );
+
+    let (none, client) = answering("200 OK", "[]");
+    let found = client
+        .has_open_pull_request_onto("token", "macro", "app", "factory/run")
+        .await
+        .unwrap();
+    assert!(!found);
+    none.finish();
+}
