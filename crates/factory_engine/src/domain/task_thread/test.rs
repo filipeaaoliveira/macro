@@ -5,7 +5,8 @@ use factory_records::domain::models::{
 use factory_records::domain::standing_rules::StandingRule;
 use macro_user_id::user_id::MacroUserIdStr;
 
-use super::{RunUpdate, comment_id, first_comment, update_comment};
+use super::comments::without_links;
+use super::{RunUpdate, UpdateContext, comment_id, first_comment, update_comment};
 use crate::domain::gate_owner::is_factory_comment;
 
 fn outcome(name: &str) -> Outcome {
@@ -32,6 +33,17 @@ fn run() -> Run {
         control_files: None,
         standing_rules: None,
         end: None,
+    }
+}
+
+const LINK: &str = "https://macro.test/app/factory/runs/0193a1e8-a9d0-7c1d-b114-175185b044c8";
+
+/// The context of a Run with no review round and no named answerer.
+fn context() -> UpdateContext<'static> {
+    UpdateContext {
+        run_link: LINK,
+        rounds: &[],
+        answerer_name: None,
     }
 }
 
@@ -106,8 +118,9 @@ fn an_update_s_comment_id_is_fixed_by_its_run_its_update_and_its_time() {
 fn every_update_replies_to_the_run_s_first_comment_and_is_signed() {
     let run = run();
     let steps = [step_with(None)];
-    let root = first_comment(&run);
-    let ended = update_comment(&run, &steps, &RunUpdate::StepEnded { seq: 3 }).expect("ended");
+    let root = first_comment(&run, LINK);
+    let ended =
+        update_comment(&run, &steps, &context(), &RunUpdate::StepEnded { seq: 3 }).expect("ended");
 
     assert_eq!(root.thread_id, None);
     assert_eq!(ended.thread_id, Some(root.id));
@@ -120,71 +133,139 @@ fn every_update_replies_to_the_run_s_first_comment_and_is_signed() {
     );
     // A Step that is not recorded, or has not ended, posts nothing.
     assert_eq!(
-        update_comment(&run, &steps, &RunUpdate::StepEnded { seq: 4 }),
+        update_comment(&run, &steps, &context(), &RunUpdate::StepEnded { seq: 4 }),
         None
     );
-    assert_eq!(update_comment(&run, &steps, &RunUpdate::Ended), None);
+    assert_eq!(
+        update_comment(&run, &steps, &context(), &RunUpdate::Ended),
+        None
+    );
 }
 
 /// An answer names who or what gave it: a Standing Rule, the stand-in,
-/// or the person, from a button or their words.
+/// or the person by the name they show others, from a button or their
+/// words; a person with no name set is the run's owner.
 #[test]
 fn an_answer_names_who_or_what_gave_it() {
     let run = run();
-    let answered = |given: GateAnswer| {
+    let julia = MacroUserIdStr::try_from("macro|julia@example.com".to_string()).expect("valid");
+    let answered = |given: GateAnswer, name: Option<&str>| {
         let steps = [step_with(Some(gate(
             GateKind::Flow,
             "Approve?",
             Some(given),
         )))];
-        update_comment(&run, &steps, &RunUpdate::GateAnswered { seq: 3 })
+        let context = UpdateContext {
+            answerer_name: name,
+            ..context()
+        };
+        update_comment(&run, &steps, &context, &RunUpdate::GateAnswered { seq: 3 })
             .expect("answered")
             .text
     };
-    let julia = MacroUserIdStr::try_from("macro|julia@example.com".to_string()).expect("valid");
 
-    let by_rule = answered(answer(|answer| {
-        answer.rule = Some(StandingRule::ApprovePlan)
-    }));
+    let by_rule = answered(
+        answer(|answer| answer.rule = Some(StandingRule::ApprovePlan)),
+        None,
+    );
     assert!(
         by_rule.starts_with(
             "Step 3's gate was answered `approve` by the `approve_plan` Standing Rule."
         ),
         "{by_rule}"
     );
-    let by_stand_in = answered(answer(|answer| answer.by_stand_in = true));
+    let by_stand_in = answered(answer(|answer| answer.by_stand_in = true), None);
     assert!(
         by_stand_in.contains("by the stand-in, for the run's owner."),
         "{by_stand_in}"
     );
-    let by_button = answered(answer(|answer| answer.user_id = Some(julia.clone())));
-    assert!(by_button.contains("by julia@example.com."), "{by_button}");
-    let by_words = answered(answer(|answer| {
-        answer.user_id = Some(julia.clone());
-        answer.reply_confidence = Some(92);
-    }));
+    let by_button = answered(
+        answer(|answer| answer.user_id = Some(julia.clone())),
+        Some("Julia Ruiz"),
+    );
+    assert!(by_button.contains("by Julia Ruiz."), "{by_button}");
+    assert!(!by_button.contains("julia@example.com"), "{by_button}");
+    let by_words = answered(
+        answer(|answer| {
+            answer.user_id = Some(julia.clone());
+            answer.reply_confidence = Some(92);
+        }),
+        Some("Julia Ruiz"),
+    );
     assert!(
-        by_words.contains("by julia@example.com, read from their words."),
+        by_words.contains("by Julia Ruiz, read from their words."),
         "{by_words}"
     );
+    let unnamed = answered(answer(|answer| answer.user_id = Some(julia.clone())), None);
+    assert!(unnamed.contains("by the run's owner."), "{unnamed}");
 }
 
-/// A Gate's question is quoted on one line, short, and opens no tag or
-/// heading: an agent may have written it.
+/// An agent's question is not quoted: the thread says only which Role
+/// asks.
 #[test]
-fn a_waiting_question_is_quoted_as_data() {
+fn an_agent_s_question_is_told_without_its_words() {
     let run = run();
-    let asked = "<m-user-mention user-id=\"macro|teo@example.com\"/>\n# Ship it?";
+    let asked = "Should I drop the users table? See https://evil.example/x";
     let steps = [step_with(Some(gate(GateKind::Question, asked, None)))];
 
-    let waiting = update_comment(&run, &steps, &RunUpdate::GateWaiting { seq: 3 })
+    let waiting = update_comment(&run, &steps, &context(), &RunUpdate::GateWaiting { seq: 3 })
         .expect("waiting")
         .text;
 
     assert!(
-        waiting.starts_with("Step 3: the planner asks the run's owner a question."),
+        waiting.starts_with("Step 3's planner asks the run's owner a question."),
         "{waiting}"
     );
+    assert!(!waiting.contains("users table"), "{waiting}");
+    assert!(!waiting.contains("evil.example"), "{waiting}");
+}
+
+/// A Flow's question is quoted on one line, short, opening no tag or
+/// heading, and with no link, image or web address.
+#[test]
+fn a_flow_s_question_is_quoted_without_links() {
+    let run = run();
+    let asked = "<b>Ship</b> it? ![shot](https://img.example/a.png) [the plan](https://x.example/p)\n# then https://y.example/q done";
+    let steps = [step_with(Some(gate(GateKind::Flow, asked, None)))];
+
+    let waiting = update_comment(&run, &steps, &context(), &RunUpdate::GateWaiting { seq: 3 })
+        .expect("waiting")
+        .text;
+
     assert!(!waiting.contains('<'), "{waiting}");
-    assert!(waiting.contains("> &lt;m-user-mention"), "{waiting}");
+    assert!(!waiting.contains("example"), "{waiting}");
+    assert!(
+        waiting.contains("> &lt;b&gt;Ship&lt;/b&gt; it? shot the plan # then (link left out) done"),
+        "{waiting}"
+    );
+    assert_eq!(
+        without_links("See [docs](https://a.example) and HTTPS://B.example/x."),
+        "See docs and (link left out)"
+    );
+}
+
+/// The first comment links the Run, and names neither its repository nor
+/// its id otherwise.
+#[test]
+fn the_first_comment_links_the_run() {
+    let mut run = run();
+    run.repository = Some(factory_records::domain::models::Repository {
+        url: "https://github.com/acme/secret".to_string(),
+        base_branch: "main".to_string(),
+    });
+
+    let first = first_comment(&run, LINK);
+
+    assert!(
+        first.text.contains(&format!("[Open the run]({LINK})")),
+        "{}",
+        first.text
+    );
+    assert!(!first.text.contains("acme/secret"), "{}", first.text);
+    assert_eq!(
+        first.text.matches(&run.id.to_string()).count(),
+        1,
+        "{}",
+        first.text
+    );
 }

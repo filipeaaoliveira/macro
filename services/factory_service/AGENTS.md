@@ -184,7 +184,9 @@ worker that walks each Run's Flow, in one process.
   comments on the Run's task are read through document storage's
   `/messages/document/{id}` routes with `DOCUMENT_STORAGE_SERVICE_AUTH_KEY`,
   as the owner, and a Run whose task thread section is on posts its
-  updates through `POST /messages/document/{id}` the same way. Deploy `notification_service` and `document_storage_service`
+  updates through `POST /messages/document/{id}` the same way, notifying
+  no one, finds its thread again through the same read routes, and links
+  the Run in the app at `AppServiceUrl` (`OVERRIDE_APP_SERVICE_URL` overrides it). Deploy `notification_service` and `document_storage_service`
   with the `factory_gate_waiting` kind before a factory that sends it.
 - An operator clears a Main Hold no look can clear: `POST
   http://localhost:8113/internal/main-holds/clear` with the

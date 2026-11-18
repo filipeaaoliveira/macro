@@ -2,35 +2,46 @@
 //! comment thread on its task, when the task thread section of its
 //! Orchestrator Definition is on (`task_thread`, off by default).
 //!
-//! The Run's start is the thread's first comment; each later update is one
-//! reply: each Step's end (a pull request Step's names its pull request,
-//! and the merge's the merged one), a Gate that waits for a person, a
-//! Gate's answer and who or what gave it (the owner, a Standing Rule or the
+//! The Run's start is the thread's first comment, which links the Run;
+//! each later update is one reply: each Step's end (a pull request Step's
+//! names its pull request), each review round as one comment with its
+//! reviewers' results, a Gate that waits for a person, a Gate's answer and
+//! who or what gave it (the owner by name, a Standing Rule or the
 //! stand-in), a notify-only Gate's notice, and the Run's end. One thread
-//! per Run keeps the task's comments to one discussion a Run, however many
-//! Steps it takes.
+//! per Run keeps the task's comments to one discussion a Run.
 //!
 //! Every comment is signed as the factory's ([`factory_signed`]), so the
-//! owner's notes leave it out. Each has an id derived from its Run, its
-//! update and when the update happened, so posting it again, as a retried
-//! activity does, is refused as a conflict and posts nothing more. Posting
-//! never fails or holds a Run: an update that cannot be posted within
-//! [`POST_TIMEOUT`] is logged and dropped.
+//! owner's notes leave it out, and posted so it notifies no one: the
+//! factory tells people of what waits on them with its own notifications.
+//! Each has an id derived from its Run, its update and when the update
+//! happened, so posting it again, as a retried activity does, is refused
+//! as a conflict and posts nothing more. Posting never fails or holds a
+//! Run: an update that cannot be posted within [`POST_TIMEOUT`] is logged
+//! and dropped.
+//!
+//! Macro takes a comment's own id only within a day of the time in it, so
+//! a first comment that was never posted cannot be posted under its first
+//! id once its Run is a day old. A reply whose thread is not there looks
+//! for the Run's thread on the task first (its first comment links the
+//! Run), and only when there is none posts a new first comment, with an id
+//! of the current time; the next reply finds that one the same way.
 
 #[cfg(test)]
 mod test;
 
+mod comments;
+
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use factory_records::domain::models::{GateAnswer, GateKind, Run, RunId, Step};
+use factory_records::domain::models::{Run, RunId};
 use factory_records::domain::ports::RunRepository;
-use model_notifications::FactoryGateWaitingMetadata;
+use factory_records::domain::review_rounds::ReviewRoundRepository;
 use uuid::Uuid;
 
-use crate::domain::gate_owner::factory_signed;
 use crate::domain::ports::{TaskThread, ThreadPosted};
-use crate::domain::review_rounds::escape;
+
+pub use comments::{UpdateContext, first_comment, update_comment};
 
 /// The namespace an update's comment id takes its fixed bytes from, by its
 /// Run and its update. Fixed forever.
@@ -41,18 +52,20 @@ const THREAD_NAMESPACE: Uuid = Uuid::from_u128(0x6661_6374_6f72_792d_7468_7265_6
 /// Run first and must not wait on its comments.
 pub const POST_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// The outcomes of the pull request Steps whose output names the pull
-/// request: `publish`'s and `merge`'s.
-const PULL_REQUEST_OUTCOMES: [&str; 2] = ["published", "merged"];
-
 /// What happened in a Run that its task's thread is told.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunUpdate {
     /// The Run started: its first Step started.
     Started,
-    /// The Step `seq` ended.
+    /// The Step `seq` ended. A review panel's Steps are told with their
+    /// round instead.
     StepEnded {
         /// Its place among the Run's Steps.
+        seq: u16,
+    },
+    /// The review round whose first Step is at `seq` closed.
+    RoundClosed {
+        /// The place of its first Step.
         seq: u16,
     },
     /// The Gate of the Step `seq` waits for a person.
@@ -94,7 +107,7 @@ pub struct ThreadComment {
 /// be read or posted is logged and dropped, so a Run never waits on it.
 pub async fn post_update<R, P>(repo: &R, thread: &P, run_id: RunId, update: RunUpdate)
 where
-    R: RunRepository,
+    R: RunRepository + ReviewRoundRepository,
     P: TaskThread,
 {
     let posting = post(repo, thread, run_id, &update);
@@ -106,47 +119,23 @@ where
 /// [`post_update`], without its time limit.
 async fn post<R, P>(repo: &R, thread: &P, run_id: RunId, update: &RunUpdate)
 where
-    R: RunRepository,
+    R: RunRepository + ReviewRoundRepository,
     P: TaskThread,
 {
-    let run = match repo.get_run(run_id).await {
-        Ok(Some(run)) => run,
+    let read = read_update(repo, thread, run_id, update).await;
+    let (run, task_id, comment) = match read {
+        Ok(Some(read)) => read,
         Ok(None) => return,
         Err(error) => {
-            tracing::warn!(?error, %run_id, "a run update was not posted: the run did not read");
+            tracing::warn!(error = %error, %run_id, ?update, "a run update was not posted: the run did not read");
             return;
         }
-    };
-    let on = run
-        .standing_rules
-        .is_some_and(|rules| rules.definition.task_thread);
-    let Some(task_id) = run.task_id.filter(|_| on) else {
-        return;
-    };
-    let steps = match repo.list_steps(run_id).await {
-        Ok(steps) => steps,
-        Err(error) => {
-            tracing::warn!(?error, %run_id, "a run update was not posted: its steps did not read");
-            return;
-        }
-    };
-    let Some(comment) = update_comment(&run, &steps, update) else {
-        return;
     };
 
-    // A reply whose thread is not there, as when the Run's first comment
-    // was never posted, posts the first comment, then the reply again. A
-    // task the owner no longer sees takes neither.
     let posted = thread.post(&run.user_id, task_id, &comment).await;
     let posted = match (posted, comment.thread_id) {
         (Ok(ThreadPosted::NoThread), Some(_)) => {
-            match thread
-                .post(&run.user_id, task_id, &first_comment(&run))
-                .await
-            {
-                Ok(ThreadPosted::Posted) => thread.post(&run.user_id, task_id, &comment).await,
-                other => other,
-            }
+            reply_in_another_thread(thread, &run, task_id, &comment).await
         }
         (posted, _) => posted,
     };
@@ -161,6 +150,89 @@ where
     }
 }
 
+/// The Run `run_id`, its task, and the comment that posts `update`: none
+/// when the Run has its task thread section off, works on no task, or what
+/// the update tells is not recorded.
+async fn read_update<R, P>(
+    repo: &R,
+    thread: &P,
+    run_id: RunId,
+    update: &RunUpdate,
+) -> Result<Option<(Run, Uuid, ThreadComment)>, String>
+where
+    R: RunRepository + ReviewRoundRepository,
+    P: TaskThread,
+{
+    let Some(run) = repo.get_run(run_id).await.map_err(|e| e.to_string())? else {
+        return Ok(None);
+    };
+    let on = run
+        .standing_rules
+        .is_some_and(|rules| rules.definition.task_thread);
+    let Some(task_id) = run.task_id.filter(|_| on) else {
+        return Ok(None);
+    };
+    let steps = repo.list_steps(run_id).await.map_err(|e| e.to_string())?;
+    let rounds = repo
+        .review_rounds(run_id)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // An answer is told with the name its person shows others.
+    let answerer = match update {
+        RunUpdate::GateAnswered { seq } => steps
+            .iter()
+            .find(|step| step.seq == *seq)
+            .and_then(|step| step.gate.as_ref())
+            .and_then(|gate| gate.answer.as_ref())
+            .and_then(|answer| answer.user_id.clone()),
+        _ => None,
+    };
+    let answerer_name = match &answerer {
+        Some(user) => repo.display_name(user).await.map_err(|e| e.to_string())?,
+        None => None,
+    };
+
+    let run_link = thread.run_link(run_id);
+    let context = UpdateContext {
+        run_link: &run_link,
+        rounds: &rounds,
+        answerer_name: answerer_name.as_deref(),
+    };
+    Ok(update_comment(&run, &steps, &context, update).map(|comment| (run, task_id, comment)))
+}
+
+/// Post `comment`, whose thread is not there, in the Run's thread on the
+/// task: the one its first comment, found by the link to the Run, starts;
+/// or, when there is none, a new one, whose first comment has an id of the
+/// current time, as Macro takes only a recent one.
+async fn reply_in_another_thread<P: TaskThread>(
+    thread: &P,
+    run: &Run,
+    task_id: Uuid,
+    comment: &ThreadComment,
+) -> Result<ThreadPosted, P::Err> {
+    let run_link = thread.run_link(run.id);
+    let root = match thread.find_thread(&run.user_id, task_id, &run_link).await? {
+        Some(root) => root,
+        None => {
+            let first = ThreadComment {
+                id: comment_id(run.id, "start", Utc::now()),
+                ..first_comment(run, &run_link)
+            };
+            match thread.post(&run.user_id, task_id, &first).await? {
+                ThreadPosted::Posted => first.id,
+                ThreadPosted::NoThread => return Ok(ThreadPosted::NoThread),
+            }
+        }
+    };
+    let reply = ThreadComment {
+        thread_id: Some(root),
+        ..comment.clone()
+    };
+    thread.post(&run.user_id, task_id, &reply).await
+}
+
 /// The id of the comment that posts the update `event` of the Run
 /// `run_id`, which happened at `at`: a UUIDv7 of that time, as Macro takes
 /// a comment's own id, whose other bytes are fixed by the Run and the
@@ -172,139 +244,4 @@ pub fn comment_id(run_id: RunId, event: &str, at: DateTime<Utc>) -> Uuid {
     bytes.copy_from_slice(&fixed.as_bytes()[6..16]);
     let millis = u64::try_from(at.timestamp_millis()).unwrap_or(0);
     uuid::Builder::from_unix_timestamp_millis(millis, &bytes).into_uuid()
-}
-
-/// The thread's first comment: the Run started.
-pub fn first_comment(run: &Run) -> ThreadComment {
-    let on = run
-        .repository
-        .as_ref()
-        .map(|repository| format!(" on {} (`{}`)", repository.url, repository.base_branch))
-        .unwrap_or_default();
-    ThreadComment {
-        id: comment_id(run.id, "start", run.created_at),
-        thread_id: None,
-        text: factory_signed(&format!(
-            "**A factory run started**{on}. Its updates follow in this thread.\n\nRun `{}`.",
-            run.id
-        )),
-    }
-}
-
-/// The comment that posts `update` of `run`, whose Steps are `steps`: none
-/// when what it tells is not recorded, as a Step that has not ended.
-pub fn update_comment(run: &Run, steps: &[Step], update: &RunUpdate) -> Option<ThreadComment> {
-    let step_at = |seq: u16| steps.iter().find(|step| step.seq == seq);
-    let reply = |event: String, at: DateTime<Utc>, text: String| ThreadComment {
-        id: comment_id(run.id, &event, at),
-        thread_id: Some(first_comment(run).id),
-        text: factory_signed(&text),
-    };
-
-    match update {
-        RunUpdate::Started => Some(first_comment(run)),
-        RunUpdate::StepEnded { seq } => {
-            let step = step_at(*seq)?;
-            let end = step.end.as_ref()?;
-            let mut text = format!(
-                "Step {seq}, `{}`{}, ended `{}`.",
-                step.entry,
-                worked_by(step),
-                end.outcome
-            );
-            // A pull request Step's output starts by naming its pull
-            // request; any other Step's output stays on the Run.
-            if PULL_REQUEST_OUTCOMES.contains(&end.outcome.as_str())
-                && let Some(named) = end.output.lines().next()
-            {
-                text.push_str(&format!("\n\n{named}"));
-            }
-            Some(reply(format!("step:{seq}"), end.ended_at, text))
-        }
-        RunUpdate::GateWaiting { seq } => {
-            let step = step_at(*seq)?;
-            let gate = step.gate.as_ref()?;
-            let question = quoted(&gate.question);
-            let text = match gate.kind {
-                GateKind::Question => {
-                    let role = step
-                        .role
-                        .as_ref()
-                        .map_or_else(|| "agent".to_string(), ToString::to_string);
-                    format!(
-                        "Step {seq}: the {role} asks the run's owner a question.\n\n> {question}"
-                    )
-                }
-                GateKind::Flow => {
-                    let answers: Vec<String> = gate
-                        .answers
-                        .iter()
-                        .map(|answer| format!("`{answer}`"))
-                        .collect();
-                    format!(
-                        "Step {seq} waits for the run's owner to answer {}.\n\n> {question}",
-                        answers.join(" or ")
-                    )
-                }
-            };
-            Some(reply(format!("waiting:{seq}"), gate.opened_at, text))
-        }
-        RunUpdate::GateAnswered { seq } => {
-            let gate = step_at(*seq)?.gate.as_ref()?;
-            let answer = gate.answer.as_ref()?;
-            let text = format!(
-                "Step {seq}'s gate was answered `{}` {}.",
-                answer.answer,
-                answered_by(answer)
-            );
-            Some(reply(format!("answer:{seq}"), answer.answered_at, text))
-        }
-        RunUpdate::GateTold { seq, question } => {
-            let end = step_at(*seq)?.end.as_ref()?;
-            let text = format!(
-                "Step {seq} tells the run's owner, and the run goes on.\n\n> {}",
-                quoted(question)
-            );
-            Some(reply(format!("notice:{seq}"), end.ended_at, text))
-        }
-        RunUpdate::Ended => {
-            let end = run.end.as_ref()?;
-            let text = format!("**The factory run ended** `{}`.", end.outcome);
-            Some(reply("end".to_string(), end.ended_at, text))
-        }
-    }
-}
-
-/// The start of `text`, on one line, as a comment quotes it: an agent may
-/// have written it, so it opens no tag, mention or code block.
-fn quoted(text: &str) -> String {
-    escape(&FactoryGateWaitingMetadata::excerpt(text))
-}
-
-/// Who did `step`'s work, as a comment names them after its entry: its
-/// Role and Agent, when it had them.
-fn worked_by(step: &Step) -> String {
-    match (&step.role, &step.agent) {
-        (Some(role), Some(agent)) => format!(" ({role}, {agent})"),
-        (Some(role), None) => format!(" ({role})"),
-        _ => String::new(),
-    }
-}
-
-/// Who or what gave `answer`, as a comment names them.
-fn answered_by(answer: &GateAnswer) -> String {
-    if let Some(rule) = answer.rule {
-        return format!("by the `{rule}` Standing Rule");
-    }
-    if answer.by_stand_in {
-        return "by the stand-in, for the run's owner".to_string();
-    }
-    let person = answer.user_id.as_ref().map_or_else(
-        || "a person".to_string(),
-        |user| user.email_str().to_string(),
-    );
-    match answer.reply_confidence {
-        Some(_) => format!("by {person}, read from their words"),
-        None => format!("by {person}"),
-    }
 }

@@ -51,7 +51,9 @@ use macro_authorization::{
     PgUserApiKeyAuthorizer,
 };
 use macro_entrypoint::{MacroEntrypoint, shutdown_signal};
-use macro_service_urls::{AgentHarnessServiceUrl, AuthServiceUrl, DocumentStorageServiceUrl};
+use macro_service_urls::{
+    AgentHarnessServiceUrl, AppServiceUrl, AuthServiceUrl, DocumentStorageServiceUrl,
+};
 use macro_tower_layers::MacroRequestIdAndTracingLayer;
 use notification::domain::ports::NoopNotificationRealtimePublisher;
 use notification::domain::service::{
@@ -168,7 +170,7 @@ async fn run() -> Result<(), rootcause::Report> {
         task_notes: DocumentTaskNotes::new(documents.clone()),
         // A Run whose task thread section is on posts its updates to its
         // task as its owner.
-        task_thread: DocumentTaskThread::new(documents),
+        task_thread: DocumentTaskThread::new(documents, AppServiceUrl::new()?.as_ref()),
         // A Gate left for a person tells the Run's owner through the
         // notification ingress, as every Macro producer notifies; once it
         // is answered, the notifications' reader marks it done and clears
@@ -279,7 +281,8 @@ async fn serve<A: StepAgent + Clone>(
         parts.repo.clone(),
         parts.github.clone(),
         parts.tasks.clone(),
-    );
+    )
+    .with_task_thread(parts.task_thread.clone());
     let worker = factory_engine::inbound::temporal::worker(
         &runtime,
         parts.client.clone(),

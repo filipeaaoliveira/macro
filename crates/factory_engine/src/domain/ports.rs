@@ -392,14 +392,27 @@ pub trait TaskThread: Send + Sync + 'static {
     /// The error type returned when a comment cannot be posted.
     type Err: std::error::Error + Send + Sync + 'static;
 
-    /// Post `comment` on the task document `task_id` as `owner`. Posting a
-    /// comment again, by its id, posts nothing more.
+    /// Post `comment` on the task document `task_id` as `owner`, notifying
+    /// no one. Posting a comment again, by its id, posts nothing more.
     fn post(
         &self,
         owner: &MacroUserIdStr<'static>,
         task_id: Uuid,
         comment: &ThreadComment,
     ) -> impl Future<Output = Result<ThreadPosted, Self::Err>> + Send;
+
+    /// The first comment of the thread on the task document `task_id` that
+    /// the factory posted as `owner` and that names `marker`; none when
+    /// there is none.
+    fn find_thread(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        task_id: Uuid,
+        marker: &str,
+    ) -> impl Future<Output = Result<Option<Uuid>, Self::Err>> + Send;
+
+    /// The link that opens the Run `run_id` in Macro.
+    fn run_link(&self, run_id: RunId) -> String;
 }
 
 /// The task thread where nothing serves it: no update is posted.
@@ -416,6 +429,19 @@ impl TaskThread for NoTaskThread {
         _comment: &ThreadComment,
     ) -> Result<ThreadPosted, Self::Err> {
         Ok(ThreadPosted::Posted)
+    }
+
+    async fn find_thread(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _task_id: Uuid,
+        _marker: &str,
+    ) -> Result<Option<Uuid>, Self::Err> {
+        Ok(None)
+    }
+
+    fn run_link(&self, run_id: RunId) -> String {
+        format!("/app/factory/runs/{run_id}")
     }
 }
 

@@ -104,9 +104,16 @@ async fn a_notify_only_plan_gate_tells_the_owner_and_the_run_goes_on() {
 
     let texts = thread.texts();
     assert!(texts.iter().all(|text| text.ends_with(FACTORY_SIGNATURE)));
-    assert!(texts[0].starts_with("**A factory run started** on https://github.com/macro/app"));
+    assert!(texts[0].starts_with(
+        "**A factory run started.** [Open the run](https://macro.test/app/factory/runs/"
+    ));
     let has = |start: &str| texts.iter().filter(|text| text.starts_with(start)).count();
     assert_eq!(has("Step 1, `plan`"), 1, "{texts:#?}");
+    assert_eq!(has("Review round 1 ended `pass`"), 1, "{texts:#?}");
+    assert!(
+        !texts.iter().any(|text| text.contains(", `review`")),
+        "a reviewer's Step is told with its round: {texts:#?}"
+    );
     assert_eq!(
         has("Step 1 tells the run's owner, and the run goes on."),
         1,
@@ -116,7 +123,7 @@ async fn a_notify_only_plan_gate_tells_the_owner_and_the_run_goes_on() {
     let merge_gate = sent[1].metadata.seq;
     assert_eq!(
         has(&format!(
-            "Step {merge_gate}'s gate was answered `approve` by julia@example.com."
+            "Step {merge_gate}'s gate was answered `approve` by the run's owner."
         )),
         1,
         "{texts:#?}"

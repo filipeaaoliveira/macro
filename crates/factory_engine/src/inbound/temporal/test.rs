@@ -980,7 +980,8 @@ where
             steps: StepServiceImpl::new(repo.clone(), steps)
                 .with_owner_gates(notifier.clone(), FakeTaskNotes::default())
                 .with_task_thread(thread.clone()),
-            reviews: ReviewRoundsImpl::new(repo.clone(), github.clone(), repo.clone()),
+            reviews: ReviewRoundsImpl::new(repo.clone(), github.clone(), repo.clone())
+                .with_task_thread(thread.clone()),
             gates: gate_replies
                 .with_notifier(notifier)
                 .with_task_thread(thread),

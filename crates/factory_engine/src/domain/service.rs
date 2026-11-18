@@ -4,7 +4,7 @@
 #[cfg(test)]
 mod test;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU8;
 
 use agent_session::domain::session_task::TaskDocumentId;
@@ -30,7 +30,7 @@ use crate::domain::gate::{
     AnswerGate, GateAnswered, GateOpening, GateRuling, GateTelling, ReplyGate,
 };
 use crate::domain::gate_owner::{
-    OwnerNote, gate_notice, gate_told, is_factory_comment, notes_since, notice_id,
+    OwnerNote, gate_notice, gate_told, is_factory_comment, notes_since, notice_id, told_id,
 };
 use crate::domain::models::{
     CodeRepository, ControlFilesSettings, FactoryError, FlowSummary, RunDetail, RunFinish,
@@ -1377,7 +1377,12 @@ where
             .await
             .map_err(internal)?
             .ok_or(StepError::NoSuchRun)?;
-        if let Some(notice) = gate_told(&run, key.seq, &telling.question) {
+        let steps = self.repo.list_steps(key.run_id).await.map_err(internal)?;
+        let told = steps
+            .iter()
+            .find(|step| step.seq == key.seq)
+            .and_then(|step| gate_told(&run, step, &telling.question));
+        if let Some(notice) = told {
             self.notifier.notify(notice).await;
         }
         let told = RunUpdate::GateTold {
@@ -1408,18 +1413,28 @@ where
         let owner_gates = run
             .standing_rules
             .is_some_and(|rules| rules.definition.owner_gates);
+        let steps = self
+            .repo
+            .list_steps(finish.run_id)
+            .await
+            .map_err(internal)?;
         if owner_gates {
-            let steps = self
-                .repo
-                .list_steps(finish.run_id)
-                .await
-                .map_err(internal)?;
-            for step in steps {
+            for step in &steps {
                 if step.gate.as_ref().is_some_and(|gate| gate.answer.is_none()) {
                     let id = notice_id(finish.run_id, step.seq);
                     self.notifier.answered(&run.user_id, id).await;
                 }
             }
+        }
+
+        // A notify-only Gate's notice is news of a Run under way: once the
+        // Run ends it is done. No record says which entries told, and
+        // marking a notice never sent changes nothing, so each entry's is
+        // marked, whatever the owner section says, as the notice was sent.
+        let entries: BTreeSet<_> = steps.iter().map(|step| &step.entry).collect();
+        for entry in entries {
+            let id = told_id(finish.run_id, entry);
+            self.notifier.answered(&run.user_id, id).await;
         }
         self.post(finish.run_id, RunUpdate::Ended).await;
         Ok(())
