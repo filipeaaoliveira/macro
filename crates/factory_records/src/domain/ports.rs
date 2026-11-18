@@ -55,6 +55,14 @@ pub trait RunRepository: Send + Sync + 'static {
         limit: u16,
     ) -> impl Future<Output = Result<Vec<Run>, Self::Err>> + Send;
 
+    /// The newest `limit` Runs of `user_id` that have not ended and wait on
+    /// a Gate no one answered yet, newest first.
+    fn list_waiting_runs(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        limit: u16,
+    ) -> impl Future<Output = Result<Vec<Run>, Self::Err>> + Send;
+
     /// The Steps of the Runs `ids`, each Run's in order. A Run with no Steps
     /// has no entry.
     fn list_runs_steps(

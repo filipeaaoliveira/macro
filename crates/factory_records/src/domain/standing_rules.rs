@@ -2,7 +2,9 @@
 //! Answer, instead of waiting for a person. A team's Orchestrator
 //! Definition says, for each kind of Gate, whether its rule decides it; a
 //! team may give one Project (an initiative) a definition of its own. A Run
-//! keeps the definition it was created with.
+//! keeps the definition it was created with. Its owner section says what
+//! happens to the Gates no rule answers: with it on, they go to the Run's
+//! owner (`owner_gates`).
 
 #[cfg(test)]
 mod test;
@@ -82,10 +84,14 @@ pub enum StandingRule {
     MergeWhenGreen,
 }
 
+/// The name the owner section is stored under, beside the Gate kinds.
+pub const OWNER_GATES: &str = "owner_gates";
+
 /// A workspace's Orchestrator Definition: which kinds of Gate the factory
-/// decides on its own. A kind left off waits for a person, as every Gate
-/// did before Standing Rules. Whatever it says, a Tampered Run's Gates and
-/// a merge through a Main Hold stay a person's.
+/// decides on its own, and whether the Gates it leaves go to the Run's
+/// owner. A kind left off waits for a person, as every Gate did before
+/// Standing Rules. Whatever it says, a Tampered Run's Gates and a merge
+/// through a Main Hold stay a person's.
 #[derive(
     Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, utoipa::ToSchema,
 )]
@@ -100,6 +106,15 @@ pub struct OrchestratorDefinition {
     /// Merge once CI is green, nothing is Tampered and the base branch has
     /// no Main Hold (`merge_when_green`).
     pub merge: bool,
+    /// The owner section: a Gate no rule answers goes to the Run's owner.
+    /// They are notified, and the Gate is listed as waiting on them; a
+    /// review round whose Blockers are the round before's, unchanged after
+    /// a rule sent those to a fix, waits for them rather than another fix;
+    /// and what they comment on the Run's task once a Gate opened reaches
+    /// the next agent Step. Off, the factory leaves those Gates waiting as
+    /// before. A definition sent without it has it off.
+    #[serde(default)]
+    pub owner_gates: bool,
 }
 
 impl OrchestratorDefinition {
@@ -110,6 +125,7 @@ impl OrchestratorDefinition {
         plan: false,
         blockers: true,
         merge: false,
+        owner_gates: false,
     };
 
     /// Whether the rule of `kind` decides its Gates.
@@ -121,9 +137,10 @@ impl OrchestratorDefinition {
         }
     }
 
-    /// The kinds its rules decide, as stored.
+    /// The kinds its rules decide, then [`OWNER_GATES`] when its owner
+    /// section is on: what is stored of it.
     pub fn kinds(self) -> Vec<String> {
-        [
+        let mut kinds: Vec<String> = [
             RuleGateKind::Plan,
             RuleGateKind::Blockers,
             RuleGateKind::Merge,
@@ -131,14 +148,22 @@ impl OrchestratorDefinition {
         .into_iter()
         .filter(|kind| self.decides(*kind))
         .map(|kind| kind.to_string())
-        .collect()
+        .collect();
+        if self.owner_gates {
+            kinds.push(OWNER_GATES.to_string());
+        }
+        kinds
     }
 
-    /// The definition whose rules decide the stored `kinds`; none when one
-    /// is not a kind this code knows.
+    /// The definition stored as `kinds` ([`Self::kinds`]); none when one is
+    /// not a name this code knows.
     pub fn from_kinds(kinds: &[String]) -> Option<Self> {
         let mut definition = Self::default();
         for kind in kinds {
+            if kind == OWNER_GATES {
+                definition.owner_gates = true;
+                continue;
+            }
             match kind.parse::<RuleGateKind>().ok()? {
                 RuleGateKind::Plan => definition.plan = true,
                 RuleGateKind::Blockers => definition.blockers = true,

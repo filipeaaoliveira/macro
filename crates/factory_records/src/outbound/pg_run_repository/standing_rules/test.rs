@@ -25,6 +25,14 @@ const PLAN_AND_MERGE: OrchestratorDefinition = OrchestratorDefinition {
     plan: true,
     blockers: false,
     merge: true,
+    owner_gates: false,
+};
+
+const OWNER_GATES_ON: OrchestratorDefinition = OrchestratorDefinition {
+    plan: false,
+    blockers: true,
+    merge: false,
+    owner_gates: true,
 };
 
 /// A team's rules and its Control Files share its settings: setting or
@@ -183,6 +191,58 @@ async fn a_run_keeps_the_rules_it_was_created_with(pool: PgPool) {
     .expect("forget");
     let read = repo.get_run(before.id).await.expect("get").expect("kept");
     assert_eq!(read.standing_rules, None);
+}
+
+/// The owner section is kept with the rules it sits beside: a team's, a
+/// Project's, and those a Run is created with.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "team", "project"))
+)]
+async fn the_owner_section_is_kept_with_the_rules(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let (team, project) = (id(TEAM), id(PROJECT));
+    repo.set_team_rules(team, Some(OWNER_GATES_ON))
+        .await
+        .expect("set the team's");
+    assert_eq!(
+        repo.team_rules(team).await.expect("read"),
+        Some(OWNER_GATES_ON)
+    );
+    repo.set_project_rules(team, project, Some(OWNER_GATES_ON))
+        .await
+        .expect("set the project's");
+    assert_eq!(
+        repo.project_rules(team, project).await.expect("read"),
+        Some(OWNER_GATES_ON)
+    );
+
+    let rules = RunRules {
+        definition: OWNER_GATES_ON,
+        source: RulesSource::Team,
+        project_id: None,
+    };
+    let run_id = RunId::generate();
+    let RunInsert::Inserted(_) = repo
+        .insert_run(NewRun {
+            id: run_id,
+            flow: "code",
+            request: "Fix it",
+            user_id: &julia(),
+            task_id: None,
+            repository: None,
+            created_in_person: true,
+            control_file_patterns: &[],
+            control_files_team_id: None,
+            standing_rules: rules,
+        })
+        .await
+        .expect("insert")
+    else {
+        panic!("a run with no task is kept");
+    };
+    let read = repo.get_run(run_id).await.expect("get").expect("kept");
+    assert_eq!(read.standing_rules, Some(rules));
 }
 
 /// A Rule Answer names its rule, has no author, and, like a person's, does
