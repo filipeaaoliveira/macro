@@ -14,6 +14,9 @@ export interface AskedBack {
   /** When the factory asked back. */
   at: string;
   reading?: AskedBackReading;
+  /** Whether the words approved a Tampered Run, which only the Approve
+button approves, since it lists the Run's changed Control Files. */
+  refusedTampered: boolean;
   /** The person's words. */
   reply: string;
 }

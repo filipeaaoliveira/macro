@@ -41,6 +41,11 @@ export type AskedBack = {
     at: string;
     reading?: null | GateModelReading;
     /**
+     * Whether the words approved a Tampered Run, which only the Approve
+     * button approves, since it lists the Run's changed Control Files.
+     */
+    refusedTampered: boolean;
+    /**
      * The person's words.
      */
     reply: string;

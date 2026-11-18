@@ -2298,7 +2298,7 @@
       "AskedBack": {
         "type": "object",
         "description": "A reply the factory could not read as one of a Gate's answers, so it\nasked the person back.",
-        "required": ["reply", "at"],
+        "required": ["reply", "at", "refusedTampered"],
         "properties": {
           "at": {
             "type": "string",
@@ -2315,6 +2315,10 @@
                 "description": "How the Gate model read the words; none for a reply asked back\nbefore the factory kept it."
               }
             ]
+          },
+          "refusedTampered": {
+            "type": "boolean",
+            "description": "Whether the words approved a Tampered Run, which only the Approve\nbutton approves, since it lists the Run's changed Control Files."
           },
           "reply": {
             "type": "string",
