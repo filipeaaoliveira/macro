@@ -756,10 +756,18 @@ the Standing Rules (`factory-standing-rules`), then the stand-in
 owner's notice (`factory-gate-owner`). A Gate the stand-in answers, or the
 owner answers in its window, tells no one; one whose stand-in answer is
 taken back, or whose owner's words in the window are asked back, waits for
-the owner and tells them then. An answer read from a person's words marks
-the owner's notification done, as a button's answer does. The owner's
-notes are their comments on the Run's task; a person's words on a Gate are
-kept as that Gate's note and reach no agent as an owner's note.
+the owner and tells them then, once: words asked back on a Gate they were
+already told of tell them nothing more. The stand-in never answers a
+Blockers Gate the rule leaves to the owner: past the fix rounds the rule
+may send in a row, or, with the owner section on, Blockers found again
+unchanged after a fix (`standing_rules::repeated_blockers`); that Gate
+waits for the owner, who is told of it. A Run that ends while a Gate
+waits (cancelled, or ended for a person) marks that Gate's notification
+done in `factory_end_run`, as an answer would. An answer read from a
+person's words marks the owner's notification done, as a button's answer
+does. The owner's notes are their comments on the Run's task; a person's
+words on a Gate are kept as that Gate's note and reach no agent as an
+owner's note.
 
 ## Start here
 

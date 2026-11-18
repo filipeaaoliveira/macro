@@ -9,7 +9,7 @@ use factory_records::domain::standing_rules::{
     OrchestratorDefinition, RulesSource, RunRules, StandInKinds,
 };
 
-use super::{CodeAgent, CodeWalk, walk_code_with};
+use super::{CodeAgent, CodeWalk, PATIENCE, walk_code_with};
 use crate::domain::fakes::{FakeGateModel, FakeGithub, FakeNotifier, FakeRepo, ci};
 use crate::domain::gate_owner::notice_id;
 use crate::domain::gate_replies::GateReplySettings;
@@ -213,7 +213,11 @@ async fn a_gate_whose_stand_in_answer_is_taken_back_is_told_to_the_owner() {
         .iter()
         .map(|notice| notice.metadata.seq)
         .collect();
-    assert_eq!(told.first(), Some(&1), "the plan's Gate: {told:?}");
+    assert_eq!(
+        told.iter().filter(|seq| **seq == 1).count(),
+        1,
+        "the plan's Gate, told once: {told:?}"
+    );
     assert!(
         notifier
             .done
@@ -277,4 +281,120 @@ async fn a_reply_that_answers_a_told_gate_marks_its_notification_done() {
             .expect("done")
             .contains(&notice_id(run_id, 1))
     );
+}
+
+/// The places of the Gates `notifier` told the owner of, in order.
+fn told(notifier: &FakeNotifier) -> Vec<u16> {
+    notifier
+        .sent
+        .lock()
+        .expect("sent")
+        .iter()
+        .map(|notice| notice.metadata.seq)
+        .collect()
+}
+
+/// Words the owner gives in the stand-in's window, which the factory asks
+/// back on, leave the Gate waiting for them: they are told of it then,
+/// once, and not while the stand-in's answer could stand.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "Temporal doesn't exist in CI"]
+async fn words_asked_back_in_the_stand_in_s_window_tell_the_owner() {
+    let github = FakeGithub::default();
+    github.state().checks = [ci(Some("success"))].into();
+    let agent = CodeAgent::new(&github);
+    let repo = FakeRepo::default();
+    let notifier = FakeNotifier::default();
+    // The stand-in approves; the owner's words then read as unclear.
+    let model = FakeGateModel::picking(Some("approve"), 0.95);
+    model.then(None, 0.9);
+
+    let ended = walk_code_with(
+        &agent,
+        &github,
+        &repo,
+        CodeWalk {
+            rules: owner_and_stand_in(),
+            notifier: Some(notifier.clone()),
+            gates: Some((model, window(3_600))),
+            ..CodeWalk::default()
+        },
+        |run| {
+            let notifier = notifier.clone();
+            async move {
+                let plan = run.next_gate().await;
+                while run.gate(plan).await.stand_in.is_none() {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+                assert!(notifier.sent.lock().expect("sent").is_empty());
+                run.reply(plan, "Hmm, what about the tests?").await;
+                tokio::time::timeout(PATIENCE, async {
+                    while told(&notifier).is_empty() {
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                    }
+                })
+                .await
+                .expect("the owner is told");
+                assert!(run.gate(plan).await.asked_back.is_some());
+                run.answer(plan, "approve").await;
+                let merge = run.next_gate().await;
+                run.answer(merge, "approve").await;
+            }
+        },
+    )
+    .await;
+
+    assert!(matches!(ended, Ok(RunOutcome::Success)), "{ended:?}");
+    let told = told(&notifier);
+    assert_eq!(told.iter().filter(|seq| **seq == 1).count(), 1, "{told:?}");
+}
+
+/// Words asked back on a Gate the owner was already told of tell them
+/// nothing more: the Gate's notification stays the one.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "Temporal doesn't exist in CI"]
+async fn words_asked_back_on_a_told_gate_do_not_tell_the_owner_again() {
+    let github = FakeGithub::default();
+    github.state().checks = [ci(Some("success"))].into();
+    let agent = CodeAgent::new(&github);
+    let repo = FakeRepo::default();
+    let notifier = FakeNotifier::default();
+    let model = FakeGateModel::picking(None, 0.9);
+
+    let ended = walk_code_with(
+        &agent,
+        &github,
+        &repo,
+        CodeWalk {
+            rules: rules(true),
+            notifier: Some(notifier.clone()),
+            gates: Some((model, GateReplySettings::default())),
+            ..CodeWalk::default()
+        },
+        |run| {
+            let notifier = notifier.clone();
+            async move {
+                let plan = run.next_gate().await;
+                tokio::time::timeout(PATIENCE, async {
+                    while told(&notifier).is_empty() {
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                    }
+                })
+                .await
+                .expect("the owner is told");
+                run.reply(plan, "Hmm, what about the tests?").await;
+                while run.gate(plan).await.asked_back.is_none() {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+                run.answer(plan, "approve").await;
+                let merge = run.next_gate().await;
+                run.answer(merge, "approve").await;
+            }
+        },
+    )
+    .await;
+
+    assert!(matches!(ended, Ok(RunOutcome::Success)), "{ended:?}");
+    let told = told(&notifier);
+    assert_eq!(told.iter().filter(|seq| **seq == 1).count(), 1, "{told:?}");
 }
