@@ -210,15 +210,17 @@ impl AcceptanceChecks {
 
     /// The acceptance checks of the Run's plan: those of its latest `plan`
     /// Step that ended, among `earlier`, the plan a person approved when
-    /// the plan has a Gate. None when there is no plan, or it names none
-    /// or they do not read.
-    pub fn of_run(earlier: &[Step]) -> Option<Self> {
+    /// the plan has a Gate. None when there is no plan, or it names none;
+    /// why, when they do not read.
+    pub fn of_run(earlier: &[Step]) -> Result<Option<Self>, AcceptanceError> {
         let plan = earlier
             .iter()
             .rev()
-            .find(|step| step.entry.as_str() == PLAN_STEP && step.end.is_some())?;
-        let output = &plan.end.as_ref()?.output;
-        Self::from_plan(output).ok().flatten()
+            .find(|step| step.entry.as_str() == PLAN_STEP && step.end.is_some());
+        match plan.and_then(|plan| plan.end.as_ref()) {
+            Some(end) => Self::from_plan(&end.output),
+            None => Ok(None),
+        }
     }
 
     /// The checks as a person reads them at the plan's Gate: each clause,

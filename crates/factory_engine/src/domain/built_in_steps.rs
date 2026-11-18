@@ -35,7 +35,7 @@ use crate::domain::questions::{
     SESSION_LOST_NOTE, answers_brief, ask_instructions, going_on_prompt,
 };
 use crate::domain::review_rounds::{blockers_brief, escape, fenced_review};
-use crate::domain::verification::VerifyFile;
+use crate::domain::verification::{VerifyFile, VerifyFileError};
 
 /// What a `deploy` or `verify` Step reports: a Run ends at its merge, and
 /// one whose Flow still names them goes no further.
@@ -423,7 +423,7 @@ where
                 let file = self.pull_requests.base_verify_file(&input).await?;
                 let instructions = format!(
                     "{PLAN_INSTRUCTIONS}{PLAN_ACCEPTANCE_INSTRUCTIONS}{}",
-                    verify_note(file.as_ref().ok())
+                    verify_note(&file)
                 );
                 let plan = self
                     .ask_agent(step, &instructions, vec![Outcome::done()], input)
@@ -538,14 +538,16 @@ where
 }
 
 /// What the planner is told when the repository's verify file turns
-/// acceptance off; nothing otherwise.
-fn verify_note(file: Option<&VerifyFile>) -> &'static str {
+/// acceptance off, or does not read; nothing otherwise.
+fn verify_note(file: &Result<VerifyFile, VerifyFileError>) -> String {
     match file {
-        Some(file) if !file.verify => {
+        Ok(file) if !file.verify => {
             "\nThe repository turns its verify phase off: the factory runs \
              none of these checks, but write them for the person who reads the plan.\n"
+                .to_string()
         }
-        _ => "",
+        Ok(_) => String::new(),
+        Err(error) => format!("\n{}: the change is checked.\n", escape(&error.to_string())),
     }
 }
 

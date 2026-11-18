@@ -121,9 +121,14 @@ where
         }
 
         // The base branch holds the verify file as the Run found it. A
-        // file that does not read turns nothing off: the change is checked.
+        // file that does not read turns nothing off: the change is checked,
+        // and the report says why the file was not followed.
         let commit = self.pushed_commit(input).await?;
         let file = self.pull_requests.base_verify_file(&input).await?;
+        let mut unread = Vec::new();
+        if let Err(error) = &file {
+            unread.push(format!("{error}: the change is checked."));
+        }
         if file.as_ref().is_ok_and(|file| !file.verify) {
             return Ok(StepReport {
                 outcome: outcome(OFF),
@@ -134,9 +139,20 @@ where
         }
         let target = Target { commit };
 
-        let checks = AcceptanceChecks::of_run(input.earlier).unwrap_or_default();
+        // Checks that do not read leave every clause to the verifier, and
+        // the report says so: the Run never loses them unseen.
+        let checks = match AcceptanceChecks::of_run(input.earlier) {
+            Ok(checks) => checks.unwrap_or_default(),
+            Err(error) => {
+                tracing::warn!(run_id = %input.key.run_id, %error, "the plan's acceptance checks do not read");
+                unread.push(format!(
+                    "The plan's acceptance checks do not read ({error}): the verifier checks each Done-when clause by hand."
+                ));
+                AcceptanceChecks::default()
+            }
+        };
         let end_by = self.rounds_end_by(input).await?;
-        let instructions = accept_instructions(&target, &checks);
+        let instructions = accept_instructions(&target, &checks, &unread);
         let answer = self
             .ask_agent_by(
                 step,
@@ -194,6 +210,7 @@ where
         Ok(verdict(
             &target,
             &checks,
+            &unread,
             &answer,
             round.as_ref(),
             last_visit,
@@ -302,7 +319,7 @@ fn accept_visits() -> Option<u16> {
 /// What the verifier is told: the Step's instructions, where the change
 /// is, and how each Done-when clause the plan names is checked, as the
 /// plan wrote them (escaped: they are the planner's words).
-fn accept_instructions(target: &Target, checks: &AcceptanceChecks) -> String {
+fn accept_instructions(target: &Target, checks: &AcceptanceChecks, unread: &[String]) -> String {
     let mut text = format!(
         "{ACCEPT_INSTRUCTIONS}\n## The change under check\n\n{}.\n",
         target.place()
@@ -310,6 +327,9 @@ fn accept_instructions(target: &Target, checks: &AcceptanceChecks) -> String {
     text.push_str(
         "\nIt is not merged yet. What you find goes back to the writer as blockers to fix.\n",
     );
+    for note in unread {
+        text.push_str(&format!("\n{}\n", escape(note)));
+    }
     if checks.clauses.is_empty() {
         text.push_str(
             "\nThe plan wrote no acceptance checks: check each Done-when clause of the request by hand.\n",
@@ -357,6 +377,7 @@ fn acceptance_prompt(runs: &[RepositoryCheck], target: &Target) -> String {
 fn verdict(
     target: &Target,
     checks: &AcceptanceChecks,
+    unread: &[String],
     answer: &StepReport,
     round: Option<&CheckRound>,
     last_visit: bool,
@@ -404,6 +425,16 @@ fn verdict(
     };
 
     let mut body = String::new();
+    if !unread.is_empty() {
+        body.push_str(&format!(
+            "## What did not read\n\n{}\n\n",
+            unread
+                .iter()
+                .map(|note| format!("- {}", escape(note).replace('\n', " ")))
+                .collect::<Vec<_>>()
+                .join("\n")
+        ));
+    }
     if let (Some(round), Some(end)) = (round, round_end) {
         let how = if round.verified {
             "run by the factory"

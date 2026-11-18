@@ -8,18 +8,25 @@ use factory_records::domain::models::{Step, StepEnd};
 use super::*;
 use crate::domain::verification::VERIFY_FILE;
 
-/// A plan whose acceptance checks are a test and a clause with none.
+/// A plan whose acceptance checks are two tests and a clause with none.
 const PLAN: &str = r#"Add the toggle.
 
 ```json
 {"acceptance": [
   {"clause": "The toggle switches the theme", "run": "bun test toggle", "timeout": 120},
+  {"clause": "The page loads", "run": "bun test page"},
   {"clause": "It looks right on a phone", "none": "only a person on a phone sees it"}
 ]}
 ```"#;
 
 /// The Run's earlier Steps: its plan, as the `plan` Step keeps it.
 fn planned(output: &str) -> Vec<Step> {
+    recorded(&crate::domain::acceptance::plan_output(output))
+}
+
+/// The Run's earlier Steps: a plan Step that ended with `output`, as it was
+/// recorded.
+fn recorded(output: &str) -> Vec<Step> {
     vec![Step {
         seq: 1,
         entry: EntryId::try_from("plan".to_string()).expect("valid"),
@@ -30,7 +37,7 @@ fn planned(output: &str) -> Vec<Step> {
         passed_over: Vec::new(),
         end: Some(StepEnd {
             outcome: Outcome::done(),
-            output: crate::domain::acceptance::plan_output(output),
+            output: output.to_string(),
             ended_at: Utc::now(),
         }),
         gate: None,
@@ -142,7 +149,7 @@ fn declaring(verify: Option<&str>) -> FakeGithub {
 /// both pass, so the Step does.
 #[tokio::test]
 async fn accept_runs_the_plan_s_checks_on_the_branch_and_passes() {
-    let agent = verifier("pass", vec![ran(0, "1 passed")], HEAD);
+    let agent = verifier("pass", vec![ran(0, "1 passed"), ran(0, "2 passed")], HEAD);
     let github = github(None, None);
     let repo = FakeRepo::default();
     let earlier = planned(PLAN);
@@ -157,19 +164,20 @@ async fn accept_runs_the_plan_s_checks_on_the_branch_and_passes() {
 
     assert_eq!(report.outcome.as_str(), "pass", "{}", report.output);
     let commands = commands(&agent);
-    assert_eq!(commands.len(), 1, "{commands:?}");
-    assert!(
-        commands[0].starts_with(&format!("export MACRO_VERIFY_COMMIT={HEAD}; "))
-            && commands[0].ends_with("bun test toggle"),
-        "{}",
-        commands[0]
-    );
+    assert_eq!(commands.len(), 2, "{commands:?}");
+    for (command, run) in commands.iter().zip(["bun test toggle", "bun test page"]) {
+        assert!(
+            command.starts_with(&format!("export MACRO_VERIFY_COMMIT={HEAD}; "))
+                && command.ends_with(run),
+            "{command}"
+        );
+    }
     let rounds = rounds(&repo, input).await;
     assert_eq!(rounds.len(), 1);
     assert!(rounds[0].verified);
-    assert_eq!(rounds[0].checks, ["acceptance-1"]);
+    assert_eq!(rounds[0].checks, ["acceptance-1", "acceptance-2"]);
     // The round keeps and shows the command as the plan wrote it.
-    assert_eq!(rounds[0].commands, ["bun test toggle"]);
+    assert_eq!(rounds[0].commands, ["bun test toggle", "bun test page"]);
     assert_eq!(rounds[0].checked_commit.as_deref(), Some(HEAD));
 
     let tasks = agent.tasks.lock().expect("tasks");
@@ -182,8 +190,12 @@ async fn accept_runs_the_plan_s_checks_on_the_branch_and_passes() {
         "{prompt}"
     );
     assert!(
+        prompt.contains("2. The page loads: the factory runs `acceptance-2`"),
+        "{prompt}"
+    );
+    assert!(
         prompt
-            .contains("2. It looks right on a phone: no check (only a person on a phone sees it)"),
+            .contains("3. It looks right on a phone: no check (only a person on a phone sees it)"),
         "{prompt}"
     );
     assert!(
@@ -204,7 +216,11 @@ async fn accept_runs_the_plan_s_checks_on_the_branch_and_passes() {
 /// `blockers`, whatever the verifier found, with the check's output.
 #[tokio::test]
 async fn a_failed_acceptance_check_before_the_merge_goes_back_as_blockers() {
-    let agent = verifier("pass", vec![ran(1, "expected dark, got light")], HEAD);
+    let agent = verifier(
+        "pass",
+        vec![ran(1, "expected dark, got light"), ran(0, "ok")],
+        HEAD,
+    );
     let github = github(None, None);
     let repo = FakeRepo::default();
     let earlier = planned(PLAN);
@@ -260,7 +276,7 @@ async fn a_verifier_that_stopped_without_a_result_asks_its_owner() {
 /// check.
 #[tokio::test]
 async fn acceptance_that_keeps_failing_is_unresolved_at_the_last_visit() {
-    let agent = verifier("fail", vec![ran(0, "ok")], HEAD);
+    let agent = verifier("fail", vec![ran(0, "ok"), ran(0, "ok")], HEAD);
     let github = github(None, None);
     let repo = FakeRepo::default();
     let earlier = planned(PLAN);
@@ -307,11 +323,9 @@ async fn where_the_session_runs_no_command_the_verifier_runs_the_checks() {
         "{}",
         turns[0].prompt
     );
-    assert!(
-        turns[0].prompt.contains("bun test toggle"),
-        "{}",
-        turns[0].prompt
-    );
+    for run in ["bun test toggle", "bun test page"] {
+        assert!(turns[0].prompt.contains(run), "{}", turns[0].prompt);
+    }
     assert!(!rounds(&repo, input).await[0].verified);
     assert!(
         report.output.contains("run by the verifier"),
@@ -369,7 +383,7 @@ async fn with_no_acceptance_checks_the_verifier_decides() {
 /// do not run again.
 #[tokio::test]
 async fn a_retried_step_goes_on_with_its_round() {
-    let agent = verifier("pass", vec![ran(1, "failed once")], HEAD);
+    let agent = verifier("pass", vec![ran(1, "failed once"), ran(0, "ok")], HEAD);
     let github = github(None, None);
     let repo = FakeRepo::default();
     let earlier = planned(PLAN);
@@ -385,7 +399,7 @@ async fn a_retried_step_goes_on_with_its_round() {
         .expect("accept again");
 
     assert_eq!(again.outcome, first.outcome);
-    assert_eq!(commands(&agent).len(), 1);
+    assert_eq!(commands(&agent).len(), 2);
     assert_eq!(rounds(&repo, input).await.len(), 1);
 }
 
@@ -420,18 +434,25 @@ async fn a_plan_on_a_repository_keeps_its_acceptance_checks() {
     let checks = crate::domain::acceptance::AcceptanceChecks::from_plan(&report.output)
         .expect("reads")
         .expect("kept");
-    assert_eq!(checks.clauses.len(), 2);
+    assert_eq!(checks.clauses.len(), 3);
     assert!(
         agent.tasks.lock().expect("tasks")[0]
             .prompt
             .contains("End the plan with a fenced `json` block of acceptance checks")
     );
-    // Nothing runs after the merge, so the planner is told of no deploy.
+    // The planner is told what each check is told, and that the checks
+    // run before the merge; nothing runs after it, so no deploy is named.
+    let prompt = agent.tasks.lock().expect("tasks")[0].prompt.clone();
     assert!(
-        !agent.tasks.lock().expect("tasks")[0]
-            .prompt
-            .contains("deploy")
+        prompt.contains("`$MACRO_VERIFY_COMMIT` names\nthe commit under check"),
+        "{prompt}"
     );
+    assert!(
+        prompt.contains("Before the merge, the factory runs every check on the run's branch"),
+        "{prompt}"
+    );
+    assert!(!prompt.contains("deploy"), "{prompt}");
+    assert!(!prompt.contains("does not read"), "{prompt}");
 
     let no_repository = StepInput {
         repository: None,
@@ -446,4 +467,108 @@ async fn a_plan_on_a_repository_keeps_its_acceptance_checks() {
             .prompt
             .contains("acceptance checks")
     );
+}
+
+/// A plan recorded before Runs ended at their merge may mark a check
+/// `deployed`: the Run keeps every check, and `accept` runs both.
+#[tokio::test]
+async fn a_recorded_plan_s_deployed_check_still_runs() {
+    let agent = verifier("pass", vec![ran(0, "ok"), ran(0, "ok")], HEAD);
+    let github = github(None, None);
+    let repo = FakeRepo::default();
+    let earlier = recorded(
+        r#"Add the toggle.
+
+```json
+{"acceptance": [
+  {"clause": "The toggle switches the theme", "run": "bun test toggle"},
+  {"clause": "The live page serves it", "run": "bun test live", "deployed": true}
+]}
+```"#,
+    );
+    let input = StepInput {
+        earlier: &earlier,
+        ..input()
+    };
+
+    let report = run(&agent, &github, &repo, "accept", input)
+        .await
+        .expect("accept");
+
+    assert_eq!(report.outcome.as_str(), "pass", "{}", report.output);
+    assert_eq!(
+        rounds(&repo, input).await[0].checks,
+        ["acceptance-1", "acceptance-2"]
+    );
+    assert!(!report.output.contains("did not read"), "{}", report.output);
+}
+
+/// Acceptance checks that do not read leave every clause to the verifier,
+/// and the Step's report says so.
+#[tokio::test]
+async fn checks_that_do_not_read_are_reported() {
+    let agent = verifier("pass", Vec::new(), HEAD);
+    let github = github(None, None);
+    let repo = FakeRepo::default();
+    let earlier =
+        recorded("Add the toggle.\n\n```json\n{\"acceptance\": [{\"clause\": \"A\"}]}\n```");
+    let input = StepInput {
+        earlier: &earlier,
+        ..input()
+    };
+
+    let report = run(&agent, &github, &repo, "accept", input)
+        .await
+        .expect("accept");
+
+    assert_eq!(report.outcome.as_str(), "pass", "{}", report.output);
+    assert!(rounds(&repo, input).await.is_empty());
+    assert!(
+        report
+            .output
+            .contains("The plan's acceptance checks do not read (clause 1 of the acceptance block"),
+        "{}",
+        report.output
+    );
+}
+
+/// A verify file that does not read, such as one still naming a deploy,
+/// turns nothing off: the change is checked, and both the Step's report
+/// and the planner say why the file was not followed.
+#[tokio::test]
+async fn a_verify_file_that_does_not_read_is_reported_and_the_change_checked() {
+    let file = r#"{"verify": false, "deploy": {"environment": "production"}}"#;
+    let note = "`.macro/verify.json` does not read (unknown field `deploy`";
+    let agent = verifier("pass", vec![ran(0, "ok"), ran(0, "ok")], HEAD);
+    let github = declaring(Some(file));
+    let repo = FakeRepo::default();
+    let earlier = planned(PLAN);
+    let accepting = StepInput {
+        earlier: &earlier,
+        ..input()
+    };
+
+    let report = run(&agent, &github, &repo, "accept", accepting)
+        .await
+        .expect("accept");
+
+    assert_eq!(report.outcome.as_str(), "pass", "{}", report.output);
+    assert_eq!(commands(&agent).len(), 2);
+    assert!(report.output.contains(note), "{}", report.output);
+    assert!(
+        report.output.contains("): the change is checked."),
+        "{}",
+        report.output
+    );
+
+    let planner = ScriptedAgent {
+        work_text: PLAN.to_string(),
+        ..ScriptedAgent::new("done", Vec::new())
+    };
+    run(&planner, &github, &FakeRepo::default(), "plan", input())
+        .await
+        .expect("plan");
+    let prompt = planner.tasks.lock().expect("tasks")[0].prompt.clone();
+    assert!(prompt.contains(note), "{prompt}");
+    assert!(prompt.contains("): the change is checked."), "{prompt}");
 }

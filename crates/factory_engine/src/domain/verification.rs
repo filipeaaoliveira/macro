@@ -51,10 +51,10 @@ impl Default for VerifyFile {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum VerifyFileError {
     /// The file is not the verify Phase's JSON.
-    #[error("{VERIFY_FILE} does not read: {0}")]
+    #[error("`{VERIFY_FILE}` does not read ({0})")]
     Unreadable(String),
     /// The file is larger than one is read.
-    #[error("{VERIFY_FILE} is over {MAX_FILE_BYTES} bytes")]
+    #[error("`{VERIFY_FILE}` does not read (it is over {MAX_FILE_BYTES} bytes)")]
     TooLarge,
 }
 
