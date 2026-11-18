@@ -45,6 +45,46 @@ fn a_target_must_name_an_entry_of_the_flow() {
     assert!(matches!(refused, Err(FlowError::UnknownEntry { .. })));
 }
 
+/// Only the workflow ends a Run `infrastructure`, and a Run turns `flawed`
+/// only once it succeeded: a Flow that ends one so is refused, wherever it
+/// does.
+#[test]
+fn a_flow_may_not_end_a_run_infrastructure_or_flawed() {
+    for outcome in ["infrastructure", "flawed"] {
+        let on_done = parse(json!({
+            "entries": [{
+                "id": "reply",
+                "step": "reply",
+                "on": { "done": [{ "to": { "kind": "end", "outcome": outcome } }] }
+            }]
+        }));
+        let next = parse(json!({
+            "entries": [{
+                "id": "reply",
+                "step": "reply",
+                "next": { "kind": "end", "outcome": outcome }
+            }]
+        }));
+
+        assert!(
+            matches!(on_done, Err(FlowError::ReservedEnd { .. })),
+            "{outcome}"
+        );
+        assert!(
+            matches!(next, Err(FlowError::ReservedEnd { .. })),
+            "{outcome}"
+        );
+    }
+    let failed = parse(json!({
+        "entries": [{
+            "id": "reply",
+            "step": "reply",
+            "on": { "done": [{ "to": { "kind": "end", "outcome": "failed" } }] }
+        }]
+    }));
+    assert!(failed.is_ok(), "{failed:?}");
+}
+
 #[test]
 fn a_reset_must_name_an_entry_of_the_flow() {
     let refused = parse(json!({
