@@ -272,16 +272,23 @@ async fn claude_haiku_5_5_usage_recorded_unpriced_is_priced(pool: PgPool) {
     let run = macro_uuid::Uuid::from_u128(0x5eed);
     // The first row was recorded unpriced; the second at a price of its own.
     for (id, price) in [(1_u128, None), (2, Some(4.5_f32))] {
-        sqlx::query(
-            "INSERT INTO ai_usage (id, feature, user_id, entity, model, input_tokens, \
-             output_tokens, cache_read_input_tokens, cache_write_input_tokens, \
-             price_per_million_in, price_per_million_out, total) \
-             VALUES ($1, 'factory_gate', 'macro|owner@example.com', $2, \
-             'claude-haiku-5-5', 1000000, 1000000, 0, 0, $3, $3, $3 * 2)",
+        sqlx::query!(
+            r#"
+            INSERT INTO ai_usage (
+                id, feature, user_id, entity, model, input_tokens, output_tokens,
+                cache_read_input_tokens, cache_write_input_tokens,
+                price_per_million_in, price_per_million_out, total
+            )
+            VALUES (
+                $1, 'factory_gate', 'macro|owner@example.com', $2, 'claude-haiku-5-5',
+                1000000, 1000000, 0, 0, $3, $3, $4
+            )
+            "#,
+            macro_uuid::Uuid::from_u128(id),
+            run,
+            price,
+            price.map(|price| price * 2.0),
         )
-        .bind(macro_uuid::Uuid::from_u128(id))
-        .bind(run)
-        .bind(price)
         .execute(&pool)
         .await
         .unwrap();
