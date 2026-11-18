@@ -482,3 +482,46 @@ async fn the_starter_s_control_files_keep_the_default_and_its_own_files() {
         assert!(patterns.iter().any(|kept| kept == pattern), "{pattern}");
     }
 }
+
+/// A merge Gate opens only after `done`, the head whose checks passed: one
+/// after `changed` would ask about a red head and let `done` fall down
+/// into the merge. No skip, exhausted visit or `next` leads into it either.
+#[tokio::test]
+async fn nothing_but_a_merge_gate_s_approval_falls_into_the_merge() {
+    let entry = |id: &str| EntryId::try_from(id.to_string()).expect("valid");
+    let unguarded = || FlowError::UnguardedMerge {
+        from: entry("merge-gate"),
+        to: entry("merge"),
+    };
+
+    let mut after_changed = merge_gate("merge-gate", "merge", to("merge"));
+    after_changed["gate"]["after"] = serde_json::json!("changed");
+    let after_changed = read(shipping(serde_json::json!([after_changed, merge_step()]))).await;
+    assert_eq!(
+        flow_error(after_changed),
+        FlowError::MergeGateAfter(entry("merge-gate"))
+    );
+
+    let mut skipped = merge_gate("merge-gate", "merge", to("merge"));
+    skipped["when"] = serde_json::json!([{ "fact": "ready", "equals": true }]);
+    let flow = serde_json::json!({
+        "repository": true,
+        "facts": { "ready": false },
+        "entries": [skipped, merge_step()]
+    });
+    let mut files = shipping(serde_json::json!([]));
+    files.insert("flows/ship.json".to_string(), flow.to_string());
+    assert_eq!(flow_error(read(files).await), unguarded());
+
+    let mut exhausted = merge_gate("merge-gate", "merge", to("merge"));
+    exhausted["max_visits"] = serde_json::json!(2);
+    exhausted["on_exhausted"] = to("merge");
+    let exhausted = read(shipping(serde_json::json!([exhausted, merge_step()]))).await;
+    assert_eq!(flow_error(exhausted), unguarded());
+
+    let mut next = merge_gate("merge-gate", "merge", end("manual"));
+    next["next"] = serde_json::json!({ "kind": "entry", "entry": "merge" });
+    let next = read(shipping(serde_json::json!([next, merge_step()]))).await;
+    assert_eq!(flow_error(next), unguarded());
+}
+

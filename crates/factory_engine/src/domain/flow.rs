@@ -351,6 +351,11 @@ pub enum FlowError {
         "entry {0}: a gate on ready_to_merge or merge must be of kind merge, and a merge gate must be on ready_to_merge"
     )]
     MergeGateKind(EntryId),
+    /// A merge Gate opens after another outcome than `done`: it would ask
+    /// to merge a head whose checks did not pass, and leave `done`, which
+    /// nothing routes, to fall down into the merge.
+    #[error("entry {0}'s merge gate must open after `done`")]
+    MergeGateAfter(EntryId),
     /// A way into an entry that runs `merge` does not go through a merge
     /// Gate's approval: every merge needs a person's, or the merge rule's,
     /// answer first.
@@ -509,6 +514,15 @@ impl Flow {
             let wrong_kind = at_merge && entry.gate.is_some() && !merge_gate;
             if wrong_kind || (merge_gate && !runs(entry, READY_TO_MERGE_STEP)) {
                 return Err(FlowError::MergeGateKind(entry.id.clone()));
+            }
+            // `ready_to_merge` ends `done` on the head whose checks passed:
+            // only then may a merge Gate ask, as its rule assumes.
+            let opens_after_done = entry
+                .gate
+                .as_ref()
+                .is_none_or(|gate| gate.opened_by() == Outcome::done());
+            if merge_gate && !opens_after_done {
+                return Err(FlowError::MergeGateAfter(entry.id.clone()));
             }
             let unguarded = |to: &EntryId| FlowError::UnguardedMerge {
                 from: entry.id.clone(),
