@@ -102,10 +102,10 @@ const SECRET_PREFIXES: [&str; 25] = [
     "sk-",
     "npm_",
     "xoxa-",
+    "xoxe-",
     "xoxb-",
     "xoxp-",
     "xoxr-",
-    "xoxe-",
     "xoxs-",
     "xapp-",
     "ya29.",
@@ -151,10 +151,10 @@ fn credentials_in_url(text: &str) -> bool {
         let Some((user_info, _)) = authority[..end].rsplit_once('@') else {
             return false;
         };
+        // `redis://:password@host` names no user: a password all the same.
         user_info
             .split_once(':')
             .is_some_and(|(_, password)| !password.is_empty())
-        // `redis://:password@host` names no user: a password all the same.
     })
 }
 
@@ -566,10 +566,10 @@ pub async fn read_definition<F: DefinitionFiles>(
 
     let rules: DefinitionRules = json(files, RULES_FILE).await?.unwrap_or_default();
     if let Some(patterns) = &rules.control_files {
-        ControlFiles::parse(patterns).map_err(DefinitionError::ControlFiles)?;
         if patterns.len() > MAX_DEFINITION_CONTROL_FILES {
             return Err(DefinitionError::TooManyControlFiles.into());
         }
+        ControlFiles::parse(patterns).map_err(DefinitionError::ControlFiles)?;
     }
     let queue_limit = rules
         .standing_rules

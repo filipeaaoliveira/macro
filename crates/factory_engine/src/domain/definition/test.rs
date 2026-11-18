@@ -612,8 +612,16 @@ async fn a_definition_s_control_files_leave_room_for_its_own() {
     ))
     .await;
 
+    let over = read(with(
+        "rules.json",
+        &list(crate::domain::control_files::MAX_PATTERNS + 1),
+    ))
+    .await;
+
     assert!(room.is_ok(), "{room:?}");
     assert_eq!(full, Err(DefinitionError::TooManyControlFiles));
+    // A list past what any Run keeps says the same, not the generic limit.
+    assert_eq!(over, Err(DefinitionError::TooManyControlFiles));
 }
 
 /// A key named twice in an object does not read: serde would take the
@@ -683,8 +691,6 @@ async fn more_secret_shapes_do_not_read_and_public_text_does() {
     );
     assert_eq!(kind("npm_config_registry_settings_value").await, None);
     assert_eq!(kind("-----BEGIN CERTIFICATE-----").await, None);
-    assert_eq!(kind("https://github.com/macro/app").await, None);
-}
     assert_eq!(kind("-----BEGIN PUBLIC KEY-----").await, None);
     assert_eq!(
         kind("-----BEGIN PGP PRIVATE KEY BLOCK-----").await,
@@ -695,3 +701,5 @@ async fn more_secret_shapes_do_not_read_and_public_text_does() {
         Some("://user:password@")
     );
     assert_eq!(kind("xoxe-0123456789abcdefABCDEF").await, Some("xoxe-"));
+    assert_eq!(kind("https://github.com/macro/app").await, None);
+}
