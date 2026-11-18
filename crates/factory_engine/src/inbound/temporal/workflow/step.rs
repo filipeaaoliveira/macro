@@ -67,8 +67,12 @@ pub(super) async fn walk_step<W: Work>(
             // An agent that stopped without a result waits for the Run's
             // owner, behind the marker: no worker before it ended a Step
             // so, so a Run's history replays as before, and a Step that
-            // ends so without it fails as it did then.
-            Ok(report) if report.outcome == Outcome::no_result() && !work.asks_on_no_result() => {
+            // ends so without it fails as it did then. On an unattended
+            // Flow no one is asked: the Step fails.
+            Ok(report)
+                if report.outcome == Outcome::no_result()
+                    && (!work.asks_on_no_result() || !questions.owner_answers) =>
+            {
                 (failure(), Some(WorkFailure::Work))
             }
             Ok(report) => (report, None),

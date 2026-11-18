@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH suites AS (\n                SELECT\n                    s.benchmark,\n                    (\n                        SELECT count(*)\n                        FROM factory_benchmark_trial t\n                        JOIN factory_run r ON r.id = t.run_id\n                        WHERE t.suite_id = s.id AND r.ended_at IS NULL\n                    ) AS running_trials,\n                    CASE\n                        WHEN s.created_at > now() - make_interval(secs => $3) THEN greatest(\n                            s.planned_trials - (\n                                SELECT count(*) FROM factory_benchmark_trial t WHERE t.suite_id = s.id\n                            ),\n                            0\n                        )\n                        ELSE 0\n                    END AS starting_trials\n                FROM factory_benchmark_suite s\n                WHERE s.user_id = $1\n            )\n            SELECT\n                coalesce(sum(running_trials + starting_trials), 0)::bigint AS \"open_trials!\",\n                coalesce(\n                    bool_or(benchmark = $2 AND running_trials + starting_trials > 0),\n                    false\n                ) AS \"running!\"\n            FROM suites\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "open_trials!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "running!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Float8"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "f8623fa59ddda4105c0773c65091f32fe655a416e5d019839cfb2305e183a430"
+}

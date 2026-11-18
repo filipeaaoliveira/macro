@@ -2,6 +2,7 @@
 
 pub mod automations;
 pub mod board;
+pub mod evaluation;
 pub mod flaws;
 pub mod gate_replies;
 pub mod insights;

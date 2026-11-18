@@ -4,6 +4,7 @@
 
 use factory_records::domain::automations::AutomationRepository;
 use factory_records::domain::board::RunBoardRepository;
+use factory_records::domain::evaluation::EvaluationRepository;
 use factory_records::domain::flaws::FlawRepository;
 use factory_records::domain::main_hold::MainHoldRepository;
 use std::collections::BTreeMap;
@@ -111,7 +112,8 @@ where
         + StandingRulesRepository
         + AutomationRepository
         + FlawRepository
-        + RunBoardRepository,
+        + RunBoardRepository
+        + EvaluationRepository,
     W: RunWorkflows,
     E: StepExecutor,
     U: UserDirectory,

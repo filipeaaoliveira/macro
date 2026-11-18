@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT entry, outcome, output, session_id\n            FROM factory_step\n            WHERE run_id = $1\n            ORDER BY seq\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "entry",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "outcome",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "output",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "session_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "29fa907765376742b9536ef11f8d7befc32d27c906c2381afa42992230a86f0b"
+}

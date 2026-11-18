@@ -21,6 +21,7 @@ import emailViews from './en/email-views';
 import entityActions from './en/entity-actions';
 import entityIcons from './en/entity-icons';
 import factoryBoard from './en/factory-board';
+import factoryEvaluation from './en/factory-evaluation';
 import factoryInsights from './en/factory-insights';
 import factoryRuns from './en/factory-runs';
 import importJobs from './en/import-jobs';
@@ -75,6 +76,7 @@ export default {
   entityActions,
   entityIcons,
   factoryBoard,
+  factoryEvaluation,
   factoryInsights,
   factoryRuns,
   importJobs,

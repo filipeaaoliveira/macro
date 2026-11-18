@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM factory_benchmark_suite s\n            WHERE s.id = $1\n              AND NOT EXISTS (SELECT 1 FROM factory_benchmark_trial t WHERE t.suite_id = s.id)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "79eb2759a46df8a0f5dbdc6914fb05ab3ef96b902817a956e22cfe6701cf637e"
+}

@@ -227,6 +227,7 @@ where
             reviews: ReviewRoundsImpl::new(repo.clone(), FakeGithub::default(), repo.clone()),
             gates: gates(&repo),
             watches: watches(&repo),
+            scoring: super::scoring(&repo),
         },
     )
     .expect("worker");

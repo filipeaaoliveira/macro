@@ -659,7 +659,7 @@ fn prompt(instructions: &str, outcomes: &[Outcome], input: StepInput<'_>) -> Str
     };
     let workplace = input
         .repository
-        .map(|repository| workplace(repository, &run_branch(input.key.run_id)))
+        .map(|repository| workplace(repository, &run_branch(input.key.run_id), input.base_commit))
         .unwrap_or_default();
     format!(
         "{instructions}\nEnd the step with one of these outcomes: {outcomes}.\n{ask}{workplace}\n\
@@ -672,12 +672,18 @@ fn prompt(instructions: &str, outcomes: &[Outcome], input: StepInput<'_>) -> Str
 }
 
 /// Where the agent works: a checkout of the Run's repository, on the Run's
-/// branch `branch`.
-fn workplace(repository: &Repository, branch: &str) -> String {
+/// branch `branch`, made from `base_commit` when the Run pins one, else
+/// from its base branch.
+fn workplace(repository: &Repository, branch: &str, base_commit: Option<&str>) -> String {
+    let start = match base_commit {
+        Some(commit) => format!("commit `{commit}` (fetch it if your checkout lacks it)"),
+        None => format!("`origin/{}`", repository.base_branch),
+    };
     format!(
         "\n{}",
         REPOSITORY_INSTRUCTIONS
             .replace("{branch}", branch)
+            .replace("{start}", &start)
             .replace("{base}", &repository.base_branch)
             .replace("{repository}", &repository.url)
     )

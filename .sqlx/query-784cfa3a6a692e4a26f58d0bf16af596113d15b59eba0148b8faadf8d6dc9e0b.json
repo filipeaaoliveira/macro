@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE factory_benchmark_trial\n            SET score = $3, input_tokens = $4, output_tokens = $5,\n                cache_read_tokens = $6, cache_write_tokens = $7, scored_at = now()\n            WHERE suite_id = $1 AND task = $2 AND scored_at IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Float8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "784cfa3a6a692e4a26f58d0bf16af596113d15b59eba0148b8faadf8d6dc9e0b"
+}

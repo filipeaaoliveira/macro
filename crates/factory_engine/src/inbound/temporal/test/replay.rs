@@ -70,6 +70,16 @@
 //! reading of the Step's failure, so changing that reading changes how
 //! these histories replay: record them again.
 //!
+//! Recorded with the markers above but the infrastructure one, and the
+//! scoring marker (`factory-scoring`), from
+//! `a_run_whose_scorer_s_judge_fails_ends_as_it_would_have` in `test.rs`
+//! with `FACTORY_RECORD_HISTORY` set:
+//! - `plan_scored_judge_failed`: a `plan` Run ends `success`, then a
+//!   sampled Scorer's judge fails on each of its three attempts, and the
+//!   Run ends as it would have. The file written was then stripped of its
+//!   null fields (recursively, with a JSON tool), which the history reads
+//!   as their defaults.
+//!
 //! Before changing what the workflow decides, record the histories it
 //! makes now beside these, so the change is checked against both.
 
@@ -256,6 +266,15 @@ async fn a_run_that_ended_infrastructure_replays() {
     replays(
         "plan_infrastructure_after_marker",
         include_bytes!("histories/plan_infrastructure_after_marker.json"),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_run_scored_once_it_ended_replays() {
+    replays(
+        "plan_scored_judge_failed",
+        include_bytes!("histories/plan_scored_judge_failed.json"),
     )
     .await;
 }

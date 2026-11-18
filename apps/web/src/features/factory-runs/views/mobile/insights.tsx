@@ -3,6 +3,7 @@ import { MobileHeader } from '@components/app/mobile-header/mobile-header';
 import type { RunsSource } from '../../context/runs-context';
 import type { RunInsights } from '../../core/insights';
 import type { InsightsState } from '../../primitives/insights-state';
+import { EvaluationPanel } from '../shared/evaluation-panel';
 import { InsightsBody } from '../shared/insights-body';
 import { InsightsFilters } from '../shared/insights-filters';
 import { WaitingRuns } from '../shared/waiting-runs';
@@ -31,6 +32,10 @@ export function MobileInsightsView(props: {
               <InsightsFilters state={props.state} flows={props.flows} />
             </div>
           }
+        />
+        <EvaluationPanel
+          params={props.state.params}
+          onOpenRun={props.state.setOpenRunId}
         />
       </div>
     </>

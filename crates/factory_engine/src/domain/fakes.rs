@@ -2,6 +2,7 @@
 
 mod automations;
 mod board;
+mod evaluation;
 mod flaws;
 mod gate_owner;
 mod gate_replies;
@@ -9,6 +10,7 @@ mod main_hold;
 mod steering;
 mod task_thread;
 
+pub(crate) use evaluation::{FakeEvaluation, FakeJudge};
 pub(crate) use gate_owner::{FakeNotifier, FakeTaskNotes};
 pub(crate) use gate_replies::FakeGateModel;
 pub(crate) use main_hold::{FakeHoldTasks, FakeMain, FakeWatches};
@@ -204,6 +206,8 @@ pub(crate) struct FakeRepo {
     /// Each Automation's firings, by its id and the firing's key, with what
     /// they came to.
     pub(crate) firings: Arc<Mutex<BTreeMap<FiringKey, Option<FiringEnd>>>>,
+    /// Experiment arms, Scorers' judgments and Benchmark suites.
+    pub(crate) evaluation: Arc<Mutex<FakeEvaluation>>,
 }
 
 /// A firing: its Automation and its key.
@@ -1541,6 +1545,12 @@ pub(crate) struct FakeGithubState {
     pub(crate) full_name: Option<String>,
     /// The paths of the files GitHub will not give, as one over 1 MB.
     pub(crate) refused_files: BTreeSet<String>,
+    /// The pairs of commits whose second contains the first.
+    pub(crate) descendants: BTreeSet<(String, String)>,
+    /// The trial branches deleted, by repository and branch, in order.
+    pub(crate) deleted_trial_branches: Vec<(String, String)>,
+    /// The merge base of two commits neither contains the other of.
+    pub(crate) merge_bases: BTreeMap<(String, String), String>,
 }
 
 /// GitHub in memory, for one Run's branch: opening its pull request makes
@@ -1785,6 +1795,22 @@ impl PullRequests for FakeGithub {
         Ok(head.flatten())
     }
 
+    async fn delete_branch(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        branch: &str,
+    ) -> Result<bool, FakeGithubError> {
+        let mut state = self.state();
+        if state.unreachable {
+            return Err(FakeGithubError::Refused);
+        }
+        state
+            .deleted_trial_branches
+            .push((repository.url(), branch.to_string()));
+        Ok(true)
+    }
+
     async fn changed_files(
         &self,
         _owner: &MacroUserIdStr<'static>,
@@ -1876,6 +1902,30 @@ impl PullRequests for FakeGithub {
         }
         state.deleted_branches.push(run_branch(run_id));
         Ok(BranchDeletion::Deleted)
+    }
+
+    async fn merge_base(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        base: &str,
+        head: &str,
+    ) -> Result<Option<String>, FakeGithubError> {
+        let state = self.state();
+        let (base, head) = (base.to_string(), head.to_string());
+        if base == head || state.descendants.contains(&(base.clone(), head.clone())) {
+            return Ok(Some(base));
+        }
+        if state.descendants.contains(&(head.clone(), base.clone())) {
+            return Ok(Some(head));
+        }
+        // Commits neither of which contains the other share only the base
+        // registered for them, or no history.
+        Ok(state
+            .merge_bases
+            .get(&(base.clone(), head.clone()))
+            .or_else(|| state.merge_bases.get(&(head, base)))
+            .cloned())
     }
 }
 

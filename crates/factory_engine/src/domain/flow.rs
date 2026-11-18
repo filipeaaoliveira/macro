@@ -251,6 +251,13 @@ pub struct Flow {
     /// before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub questions: Option<u8>,
+    /// Whether a Run of it asks no person anything: it has no Gate, its
+    /// agents are offered no question, and a Step whose agent stops without
+    /// a result fails rather than wait for the owner. Only a Benchmark
+    /// trial's Flow is; a Flow without it, as every other Run carries,
+    /// replays as before.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unattended: bool,
 }
 
 /// What is wrong with a Flow definition.
@@ -262,6 +269,9 @@ pub enum FlowError {
     /// The Flow has no entries.
     #[error("the flow has no entries")]
     NoEntries,
+    /// An unattended Flow's entry asks a Gate, which no person would answer.
+    #[error("entry {0} asks a gate, but the flow is unattended")]
+    UnattendedGate(EntryId),
     /// Two entries share an id.
     #[error("entry {0} appears twice")]
     DuplicateEntry(EntryId),
@@ -406,9 +416,11 @@ impl Flow {
     }
 
     /// Let its agent Steps ask the Run's owner up to `questions` questions
-    /// each.
+    /// each, unless it is unattended: then they ask none.
     pub fn allow_questions(&mut self, questions: u8) {
-        self.questions = Some(questions);
+        if !self.unattended {
+            self.questions = Some(questions);
+        }
     }
 
     /// Bound each review panel to `rounds` rounds, in place of the
@@ -432,6 +444,9 @@ impl Flow {
         for entry in &self.entries {
             if !ids.insert(&entry.id) {
                 return Err(FlowError::DuplicateEntry(entry.id.clone()));
+            }
+            if self.unattended && entry.gate.is_some() {
+                return Err(FlowError::UnattendedGate(entry.id.clone()));
             }
         }
 

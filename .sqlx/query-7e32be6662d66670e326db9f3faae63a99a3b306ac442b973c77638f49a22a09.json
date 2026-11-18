@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT scorer FROM factory_run_score WHERE run_id = $1 ORDER BY scorer",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "scorer",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "7e32be6662d66670e326db9f3faae63a99a3b306ac442b973c77638f49a22a09"
+}

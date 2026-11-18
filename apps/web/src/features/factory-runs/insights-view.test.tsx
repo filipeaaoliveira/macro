@@ -17,6 +17,7 @@ import {
   RunsProvider,
   type RunsQueue,
 } from './context/runs-context';
+import type { EvaluationInsights } from './core/evaluation';
 import type { InsightsParams, RunInsights } from './core/insights';
 import type { Run } from './core/run';
 import { RunInsightsView } from './insights-view';
@@ -153,9 +154,84 @@ const november: RunInsights = {
   },
 };
 
+const judged: EvaluationInsights = {
+  from: '2026-10-13',
+  to: '2026-11-11',
+  timeZone: 'Europe/Lisbon',
+  scorers: [
+    {
+      name: 'correctness',
+      instructions: 'Does the change do what the request asks?',
+      flows: [],
+      samplePercent: 20,
+      judged: 4,
+      passed: 3,
+      meanScore: 0.7,
+    },
+  ],
+  experiments: [
+    {
+      name: 'writer-agent',
+      flow: 'code',
+      running: true,
+      arms: [
+        {
+          name: 'control',
+          agents: {},
+          runs: 3,
+          ended: 2,
+          succeeded: 1,
+          fellBack: 0,
+          scores: [],
+        },
+        {
+          name: 'backup',
+          agents: { writer: 'backup' },
+          runs: 2,
+          ended: 2,
+          succeeded: 2,
+          fellBack: 1,
+          scores: [{ scorer: 'correctness', judged: 2, meanScore: 0.9 }],
+        },
+      ],
+    },
+  ],
+  benchmarks: [
+    {
+      name: 'core',
+      tasks: ['typo'],
+      scorers: ['correctness'],
+    },
+  ],
+  suites: [
+    {
+      id: 'suite-1',
+      benchmark: 'core',
+      agents: { writer: 'backup' },
+      createdAt: '2026-11-10T09:00:00Z',
+      scored: 1,
+      meanScore: 0.5,
+      tokens: { input: 1200, output: 300, cacheRead: 0, cacheWrite: 0 },
+      trials: [
+        {
+          task: 'typo',
+          runId: failedImport.id,
+          runOutcome: 'manual',
+          score: 0.5,
+          tokens: { input: 1200, output: 300, cacheRead: 0, cacheWrite: 0 },
+          scores: [{ scorer: 'correctness', score: 0.25 }],
+        },
+      ],
+    },
+  ],
+};
+
 function mount(options: {
   state?: Accessor<'pending' | 'error' | 'ready'>;
   insights?: RunInsights;
+  evaluation?: EvaluationInsights;
+  evaluationState?: Accessor<'pending' | 'error' | 'ready'>;
+  evaluationRetry?: () => void;
   retry?: () => void;
   queue?: RunsQueue;
 }) {
@@ -171,6 +247,14 @@ function mount(options: {
         updating: () => false,
       };
     },
+    evaluation: () => ({
+      state:
+        options.evaluationState ??
+        (() => (options.evaluation ? 'ready' : 'pending')),
+      data: () => options.evaluation,
+      retry: options.evaluationRetry ?? vi.fn(),
+      updating: () => false,
+    }),
     flowNames: () => ({
       state: () => 'ready',
       data: () => ['plan', 'reply'],
@@ -385,4 +469,49 @@ describe('RunInsightsView', () => {
     expect(screen.getByText('Waiting on you')).toBeTruthy();
     expect(screen.getByText('Plan the archive')).toBeTruthy();
   });
+
+  it('shows each scorer, each experiment’s arms and each benchmark suite’s trials', async () => {
+    mount({ insights: november, evaluation: judged });
+
+    const scorers = screen.getByRole('heading', { name: 'Scorers' })
+      .parentElement?.parentElement?.parentElement as HTMLElement;
+    expect(within(scorers).getByText('correctness')).toBeTruthy();
+    expect(within(scorers).getByText('0.70')).toBeTruthy();
+    expect(within(scorers).getByText('75%')).toBeTruthy();
+
+    const backup = screen.getByRole('rowheader', { name: /backup/ });
+    expect(backup.parentElement?.textContent).toContain('0.90');
+    expect(backup.textContent).toContain('writer: backup');
+    expect(backup.textContent).toContain('1 run fell back to another agent');
+
+    const trials = screen.getByRole('list', { name: 'Trial' });
+    const trial = within(trials).getByRole('button', { name: /typo/ });
+    expect(trial.textContent).toContain('0.25');
+    expect(trial.textContent).toContain('0.50');
+
+    fireEvent.click(trial);
+    expect(await screen.findByText('No steps yet')).toBeTruthy();
+  });
+
+  it('holds a placeholder while the evaluation loads, and reads it again on Retry', () => {
+    mount({ insights: november });
+    expect(
+      screen.getByLabelText('Loading scorers, experiments and benchmarks…')
+    ).toBeTruthy();
+    cleanup();
+
+    const retry = vi.fn();
+    mount({
+      insights: november,
+      evaluationState: () => 'error',
+      evaluationRetry: retry,
+    });
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toContain(
+      'Scorers, experiments and benchmarks couldn’t be loaded'
+    );
+    fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }));
+    expect(retry).toHaveBeenCalledOnce();
+  });
+
 });

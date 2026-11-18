@@ -3,6 +3,7 @@
 mod automations;
 mod board;
 mod check_rounds;
+mod evaluation;
 mod flaws;
 mod gate_replies;
 mod insights;
@@ -188,6 +189,9 @@ pub enum PgRunRepositoryErr {
     /// A stored Automation's trigger does not read.
     #[error("a stored automation's trigger does not read: {0}")]
     UnreadableTrigger(serde_json::Error),
+    /// Stored Agents of an arm or a suite do not read as Roles and Agents.
+    #[error("stored agents do not read: {0}")]
+    UnreadableAgents(serde_json::Error),
     /// A stored firing has neither a Run nor a reason it started none, or
     /// a reason this code does not know.
     #[error("a stored automation firing ended without a run or a known reason")]

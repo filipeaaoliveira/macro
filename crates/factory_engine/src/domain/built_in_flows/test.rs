@@ -73,12 +73,12 @@ fn the_built_in_steps_run_every_built_in_flow() {
         .map(|flow| flow.name)
         .collect();
 
-    assert_eq!(runnable, ["code", "plan", "reply"]);
+    assert_eq!(runnable, ["code", "plan", "reply", "benchmark"]);
 }
 
-/// Only `code` works on a repository.
+/// Only `code`, and the Benchmark trials' Flow, work on a repository.
 #[test]
-fn only_the_code_flow_works_on_a_repository() {
+fn only_the_code_and_benchmark_flows_work_on_a_repository() {
     let on_repository: Vec<&str> = BUILT_IN_FLOWS
         .into_iter()
         .filter(|flow| {
@@ -88,7 +88,7 @@ fn only_the_code_flow_works_on_a_repository() {
         .map(|flow| flow.name)
         .collect();
 
-    assert_eq!(on_repository, ["code"]);
+    assert_eq!(on_repository, ["code", "benchmark"]);
 }
 
 #[test]

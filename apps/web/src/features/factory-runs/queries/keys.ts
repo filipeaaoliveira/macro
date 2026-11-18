@@ -25,4 +25,7 @@ export const factoryRunKeys = createQueryKeys('factoryRuns', {
   insights: (params: InsightsParams) => ({
     queryKey: [params.from, params.to, params.timeZone, params.flow ?? ''],
   }),
+  evaluation: (params: InsightsParams) => ({
+    queryKey: [params.from, params.to, params.timeZone, params.flow ?? ''],
+  }),
 });

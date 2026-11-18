@@ -256,10 +256,7 @@ async fn a_kept_flow_says_where_its_merge_is(pool: PgPool) {
 
     assert_eq!(
         read(&repo, &query(None)).await,
-        [
-            (writing, BoardState::Running),
-            (landing, BoardState::Held),
-        ]
+        [(writing, BoardState::Running), (landing, BoardState::Held),]
     );
     let held = BoardQuery {
         state: Some(BoardState::Held),

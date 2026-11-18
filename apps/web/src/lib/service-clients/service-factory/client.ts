@@ -14,6 +14,7 @@ import {
   getFlawFactoryRunUrl,
   getGetFactoryControlFilesUrl,
   getGetFactoryDefinitionUrl,
+  getGetFactoryEvaluationUrl,
   getGetFactoryInsightsUrl,
   getGetFactoryRunUrl,
   getGetFactorySessionStepUrl,
@@ -44,7 +45,9 @@ import type {
   CreateRunRequest,
   DefinitionSettings,
   FlawRunRequest,
+  EvaluationInsights,
   FlowsResponse,
+  GetFactoryEvaluationParams,
   GetFactoryInsightsParams,
   ListFactoryBoardParams,
   NoteStepRequest,
@@ -172,6 +175,17 @@ export const factoryClient = {
   getInsights(params: GetFactoryInsightsParams, signal?: AbortSignal) {
     return fetchWithToken<RunInsights>(
       `${host()}${getGetFactoryInsightsUrl(params)}`,
+      { method: 'GET', signal }
+    );
+  },
+
+  /**
+   * How the caller's own Runs over a period were judged by the Scorers and
+   * split by the Experiments, and the Benchmark suites they started.
+   */
+  getEvaluation(params: GetFactoryEvaluationParams, signal?: AbortSignal) {
+    return fetchWithToken<EvaluationInsights>(
+      `${host()}${getGetFactoryEvaluationUrl(params)}`,
       { method: 'GET', signal }
     );
   },

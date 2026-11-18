@@ -103,6 +103,7 @@ fn input(run_id: RunId) -> StepInput<'static> {
         questions_left: 0,
         resumes: None,
         owner_notes: &[],
+        base_commit: None,
     }
 }
 

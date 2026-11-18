@@ -146,6 +146,12 @@ impl Outcome {
         Self("done".to_string())
     }
 
+    /// The outcome of a write or fix Step whose repository's checks never
+    /// passed.
+    pub fn red() -> Self {
+        Self("red".to_string())
+    }
+
     /// The outcome of a Step that found nothing to change.
     pub fn unchanged() -> Self {
         Self("unchanged".to_string())

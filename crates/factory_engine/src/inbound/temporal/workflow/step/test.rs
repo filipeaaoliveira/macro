@@ -176,6 +176,7 @@ fn asking(most: u8) -> Questions {
     Questions {
         may_ask: most > 0,
         most,
+        owner_answers: true,
     }
 }
 
@@ -904,5 +905,35 @@ async fn work_that_failed_for_infrastructure_is_routed_as_such() {
         Ok(Round::Routed(
             Outcome::try_from("again".to_string()).expect("valid")
         ))
+    );
+}
+
+/// On an unattended Flow, a Benchmark trial's, an agent that stopped
+/// without a result asks no one: the Step fails, its agent is stopped, and
+/// the Flow routes `failed`.
+#[tokio::test]
+async fn an_unattended_step_without_a_result_fails_and_asks_no_one() {
+    let unattended = Questions::of(
+        &Flow::parse(
+            json!({
+                "unattended": true,
+                "entries": [{ "id": "plan", "step": "plan", "role": "planner" }]
+            }),
+            |_| Some(StepUse::Agent),
+        )
+        .expect("valid flow"),
+    );
+    let script = Script {
+        ends: [(1, "no_result")].into(),
+        ..Script::default()
+    };
+
+    let (walked, held) = walk(&script, &plan(false), unattended, 10).await;
+
+    assert_eq!(walked, Ok(Round::Routed(Outcome::failed())));
+    assert!(held.is_empty());
+    assert_eq!(
+        script.asked(),
+        ["start 1", "run 1", "end 1 failed", "stop 1"]
     );
 }

@@ -222,6 +222,7 @@ fn reviewing<'a>(run_id: RunId, round: &'a ReviewRound) -> StepInput<'a> {
         control_file_patterns: None,
         definition_repo: None,
         owner_notes: &[],
+        base_commit: None,
     }
 }
 

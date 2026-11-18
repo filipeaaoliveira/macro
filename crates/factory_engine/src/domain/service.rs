@@ -8,6 +8,7 @@ mod test;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU8;
+use std::sync::Arc;
 
 use agent_session::domain::session_task::TaskDocumentId;
 use chrono::Utc;
@@ -15,6 +16,7 @@ use factory_records::domain::automations::{
     Automation, AutomationRepository, AutomationStart, RunAutomation,
 };
 use factory_records::domain::board::RunBoardRepository;
+use factory_records::domain::evaluation::{BENCHMARK_FLOW, EvaluationRepository, TrialKey};
 use factory_records::domain::flaws::FlawRepository;
 use factory_records::domain::main_hold::{BaseState, MainHoldRepository};
 use factory_records::domain::models::{
@@ -35,6 +37,7 @@ use crate::domain::board::{BoardFilter, BoardPage};
 use crate::domain::built_in_flows::BUILT_IN_FLOWS;
 use crate::domain::control_files::ControlFiles;
 use crate::domain::definition::DEFINITION_FILE_PATTERNS;
+use crate::domain::evaluation::EvaluationDefinition;
 use crate::domain::flaws::mark_flawed;
 use crate::domain::flow::Flow;
 use crate::domain::gate::{
@@ -112,6 +115,9 @@ struct RunOrder<'a> {
     repo_url: Option<String>,
     in_person: bool,
     automation: Option<AutomationStart<'a>>,
+    /// The Benchmark trial it is, if a suite starts it, and the commit its
+    /// write starts from.
+    trial: Option<(TrialKey, String)>,
 }
 
 /// The Run API, over the Run records, the Runs' workflows, the worker that
@@ -128,6 +134,7 @@ pub struct FactoryServiceImpl<R, W, E, U, T, G> {
     review_rounds: Option<NonZeroU8>,
     questions: u8,
     task_views: board::TaskViews,
+    evaluation: Arc<EvaluationDefinition>,
 }
 
 impl<R, W, E, U, T, G> FactoryServiceImpl<R, W, E, U, T, G>
@@ -138,7 +145,8 @@ where
         + StandingRulesRepository
         + AutomationRepository
         + FlawRepository
-        + RunBoardRepository,
+        + RunBoardRepository
+        + EvaluationRepository,
     W: RunWorkflows,
     E: StepExecutor,
     U: UserDirectory,
@@ -157,6 +165,7 @@ where
             review_rounds: None,
             questions: DEFAULT_QUESTIONS,
             task_views: board::TaskViews::default(),
+            evaluation: Arc::default(),
         }
     }
 
@@ -164,6 +173,13 @@ where
     #[cfg(test)]
     pub(crate) fn with_task_views_kept(mut self, kept: std::time::Duration) -> Self {
         self.task_views = board::TaskViews::kept_for(kept);
+        self
+    }
+
+    /// Assign the Runs it starts to the arms of `evaluation`'s
+    /// Experiments, in place of none.
+    pub fn with_evaluation(mut self, evaluation: Arc<EvaluationDefinition>) -> Self {
+        self.evaluation = evaluation;
         self
     }
 
@@ -643,7 +659,13 @@ where
             repo_url,
             in_person,
             automation,
+            trial,
         } = order;
+        // A Benchmark's Flow runs only as a suite's trial, and a trial only
+        // on it.
+        if (flow == BENCHMARK_FLOW) != trial.is_some() {
+            return Err(FactoryError::UnknownFlow);
+        }
         // A team that names a Factory Definition starts its Runs of the
         // Definition's Flows, read at its default branch's head now: the Run
         // keeps that commit, and the Definition's Agents.
@@ -790,6 +812,21 @@ where
             }
         };
 
+        // The Run keeps its trial, or the arms of its Flow's Experiments,
+        // before its workflow starts, so its first Step already runs on
+        // their Agents. A Run that cannot keep them does not start.
+        let kept = match &trial {
+            Some((trial, base_commit)) => self.repo.insert_trial(trial, run_id, base_commit).await,
+            None => {
+                let arms = self.evaluation.assign_arms(&flow_name, task_id);
+                self.repo.record_arms(run_id, &arms).await
+            }
+        };
+        if let Err(error) = kept {
+            self.forget_unstarted(run_id).await;
+            return Err(FactoryError::Internal(internal(error)));
+        }
+
         // The Run is recorded before its workflow starts, so the workflow can
         // record its Steps against it.
         let start = RunStart { run_id, flow };
@@ -830,7 +867,8 @@ where
         + StandingRulesRepository
         + AutomationRepository
         + FlawRepository
-        + RunBoardRepository,
+        + RunBoardRepository
+        + EvaluationRepository,
     W: RunWorkflows,
     E: StepExecutor,
     U: UserDirectory,
@@ -857,6 +895,7 @@ where
         // offered: a Run of it would be refused.
         Ok(BUILT_IN_FLOWS
             .into_iter()
+            .filter(|flow| flow.name != BENCHMARK_FLOW)
             .filter_map(|flow| {
                 let read = flow.read(|step| self.executor.serves(step)).ok()?;
                 Some(FlowSummary {
@@ -885,6 +924,44 @@ where
             repo_url,
             in_person,
             automation: None,
+            trial: None,
+        })
+        .await
+    }
+
+    async fn benchmark_base(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        repo_url: &str,
+    ) -> Result<String, FactoryError> {
+        self.known(actor).await?;
+        let repository = self.reachable_repository(actor, repo_url).await?;
+        let code = CodeRepository::parse(repo_url).ok_or(FactoryError::InvalidRepository)?;
+        self.github
+            .branch_head(actor, &code, &repository.base_branch)
+            .await
+            .map_err(internal)?
+            .ok_or(FactoryError::UnreachableRepository)
+    }
+
+    async fn create_trial_run(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        flow: String,
+        request: String,
+        repo_url: String,
+        trial: TrialKey,
+        base_commit: String,
+    ) -> Result<RunDetail, FactoryError> {
+        self.start_run(RunOrder {
+            actor,
+            flow,
+            request,
+            task_id: None,
+            repo_url: Some(repo_url),
+            in_person: false,
+            automation: None,
+            trial: Some((trial, base_commit)),
         })
         .await
     }
@@ -895,6 +972,9 @@ where
         flow: &str,
         repo_url: Option<&str>,
     ) -> Result<(), FactoryError> {
+        if flow == BENCHMARK_FLOW {
+            return Err(FactoryError::UnknownFlow);
+        }
         let team = self.repo.team_of(actor).await.map_err(internal)?;
         let definition = self.team_definition(actor, team).await?;
         let flow = self.flow_named(flow, definition.as_ref())?;
@@ -935,6 +1015,7 @@ where
                 automation: &started_by,
                 firing_key,
             }),
+            trial: None,
         })
         .await
     }
@@ -1591,7 +1672,7 @@ pub struct StepServiceImpl<R, E, N = NoOwnerGates, T = NoOwnerGates, P = NoTaskT
 
 impl<R, E> StepServiceImpl<R, E>
 where
-    R: RunRepository + ReviewRoundRepository + MainHoldRepository,
+    R: RunRepository + ReviewRoundRepository + MainHoldRepository + EvaluationRepository,
     E: StepExecutor,
 {
     /// Create the Step service, which tells no owner of a waiting Gate,
@@ -1610,7 +1691,7 @@ where
 
 impl<R, E, N, T, P> StepServiceImpl<R, E, N, T, P>
 where
-    R: RunRepository + ReviewRoundRepository + MainHoldRepository,
+    R: RunRepository + ReviewRoundRepository + MainHoldRepository + EvaluationRepository,
     E: StepExecutor,
     N: GateNotifier,
     T: TaskNotes,
@@ -1688,7 +1769,7 @@ where
 
 impl<R, E, N, T, P> StepService for StepServiceImpl<R, E, N, T, P>
 where
-    R: RunRepository + ReviewRoundRepository + MainHoldRepository,
+    R: RunRepository + ReviewRoundRepository + MainHoldRepository + EvaluationRepository,
     E: StepExecutor,
     N: GateNotifier,
     T: TaskNotes,
@@ -1737,6 +1818,13 @@ where
             .map_err(internal)?;
         let review = review_of(&rounds, &request)?;
         let owner_notes = self.owner_notes(&run, &earlier).await?;
+        // A Benchmark trial's branch starts from the commit its suite
+        // pinned, so every trial of a task replays the same code.
+        let base_commit = self
+            .repo
+            .trial_base_commit(request.key.run_id)
+            .await
+            .map_err(internal)?;
         let input = StepInput {
             key: request.key,
             role: request.role.as_ref(),
@@ -1757,6 +1845,7 @@ where
             questions_left: request.questions_left,
             resumes: request.resumes,
             owner_notes: &owner_notes,
+            base_commit: base_commit.as_deref(),
         };
         let report = self
             .executor

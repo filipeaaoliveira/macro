@@ -2,13 +2,16 @@
 
 use std::collections::BTreeSet;
 
+mod evaluation;
 mod gate_replies;
 
+pub use evaluation::{JudgeQuestion, JudgeVerdict, RunJudge, ScoringService};
 pub use gate_replies::{GateModel, GateReplyService, ModelPick, ModelQuestion};
 
 use agent_session::domain::session_command::SessionCommandOutput;
 use agent_session::domain::session_task::TaskDocumentId;
 use factory_records::domain::automations::Automation;
+use factory_records::domain::evaluation::TrialKey;
 use factory_records::domain::models::{HandBack, Outcome, Role, RunId, StepKey, StepSession};
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
@@ -342,6 +345,15 @@ pub trait PullRequests: Send + Sync + 'static {
         branch: &str,
     ) -> impl Future<Output = Result<Option<Vec<String>>, Self::Err>> + Send;
 
+    /// Delete `branch` of `repository` as `owner`: true once it is gone,
+    /// deleted now or gone already.
+    fn delete_branch(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        branch: &str,
+    ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
+
     /// The commit `branch` of `repository` is at; none when the branch is
     /// not there.
     fn branch_head(
@@ -361,6 +373,16 @@ pub trait PullRequests: Send + Sync + 'static {
         base: &str,
         head: &str,
     ) -> impl Future<Output = Result<Option<Vec<ChangedFile>>, Self::Err>> + Send;
+
+    /// The newest commit both `base` and `head` of `repository` contain;
+    /// none when they share no history or one is not in the repository.
+    fn merge_base(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        base: &str,
+        head: &str,
+    ) -> impl Future<Output = Result<Option<String>, Self::Err>> + Send;
 
     /// Ask GitHub to open `pull_request` in `repository`.
     fn open(
@@ -952,6 +974,31 @@ pub trait FactoryService: Send + Sync + 'static {
         firing_key: &str,
         request: String,
         task_id: Option<Uuid>,
+    ) -> impl Future<Output = Result<RunDetail, FactoryError>> + Send;
+
+    /// The commit a Benchmark's trials on `repo_url` start from unless a
+    /// task pins one: the head of its default branch, read as `actor`, who
+    /// must reach the repository and may push to it, as each trial's Run
+    /// checks again.
+    fn benchmark_base(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        repo_url: &str,
+    ) -> impl Future<Output = Result<String, FactoryError>> + Send;
+
+    /// Record and start a Benchmark trial's Run of the built-in Flow
+    /// `flow`, owned by `actor`, who started its suite: as
+    /// [`Self::create_run`] for a Run on no task, kept as `trial` before
+    /// its workflow starts, so its Steps run on the suite's configuration
+    /// and its write starts from `base_commit`.
+    fn create_trial_run(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        flow: String,
+        request: String,
+        repo_url: String,
+        trial: TrialKey,
+        base_commit: String,
     ) -> impl Future<Output = Result<RunDetail, FactoryError>> + Send;
 }
 
