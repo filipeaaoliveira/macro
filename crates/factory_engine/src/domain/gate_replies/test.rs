@@ -347,6 +347,15 @@ async fn words_never_approve_a_tampered_run() {
         .expect("read");
 
     assert_eq!(read, ReplyRead::AskedBack);
+    // The reading says why the factory asked back on a clear approval.
+    let asked = gate(&repo, key).await.asked_back.expect("asked back");
+    let reading = asked.reading.expect("reading");
+    assert_eq!(reading.pick, Some(outcome("approve")));
+    assert_eq!(
+        reading.reason,
+        "The run changed its Control Files, so approving it takes the button, which lists \
+         them. The owner approved every plan like this one."
+    );
 }
 
 /// An agent's question takes the words as its answer, with no model; a

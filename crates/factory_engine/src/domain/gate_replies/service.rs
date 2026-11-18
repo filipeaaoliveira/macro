@@ -32,6 +32,11 @@ use crate::domain::task_thread::{RunUpdate, post_update};
 /// button, which lists them, never in words.
 const APPROVE: &str = "approve";
 
+/// Why words that approve a Tampered Run are asked back, ahead of the
+/// model's reason.
+const TAMPERED_APPROVAL: &str = "The run changed its Control Files, so approving it takes the \
+button, which lists them.";
+
 /// The Role whose Step makes a Run's plan.
 const PLANNER: &str = "planner";
 
@@ -331,28 +336,34 @@ where
             .control_files
             .as_ref()
             .is_some_and(|changes| changes.is_tampered());
-        match decision {
-            Decision::Decided { answer, confidence }
-                if !(tampered && answer.as_str() == APPROVE) =>
-            {
+        let refused_approval = match &decision {
+            Decision::Decided { answer, confidence } if !tampered || answer.as_str() != APPROVE => {
                 tracing::info!(%answer, confidence, "a reply answered a gate");
-                self.answer_from_reply(key, &answer, &reading, Some(confidence), stood_in)
-                    .await
+                return self
+                    .answer_from_reply(key, answer, &reading, Some(*confidence), stood_in)
+                    .await;
             }
-            _ => {
-                self.repo
-                    .ask_back(key, &reading.reply, &model_reading(pick.as_ref()))
-                    .await
-                    .map_err(internal)?;
-                // Words in the stand-in's window end it, whatever they say:
-                // the Gate is the owner's again.
-                if stood_in {
-                    self.window_closed(&run, key).await;
-                }
-                tracing::info!("the factory asked back on a gate");
-                Ok(ReplyRead::AskedBack)
-            }
+            Decision::Decided { .. } => true,
+            Decision::Undecided => false,
+        };
+
+        let mut asked = model_reading(pick.as_ref());
+        if refused_approval {
+            asked.reason = format!("{TAMPERED_APPROVAL} {}", asked.reason)
+                .trim_end()
+                .to_string();
         }
+        self.repo
+            .ask_back(key, &reading.reply, &asked)
+            .await
+            .map_err(internal)?;
+        // Words in the stand-in's window end it, whatever they say: the
+        // Gate is the owner's again.
+        if stood_in {
+            self.window_closed(&run, key).await;
+        }
+        tracing::info!("the factory asked back on a gate");
+        Ok(ReplyRead::AskedBack)
     }
 
     #[tracing::instrument(err, skip_all, fields(run_id = %asking.key.run_id, seq = asking.key.seq, kind = %asking.kind))]
