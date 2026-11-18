@@ -371,6 +371,21 @@ function createFixtureInsights(): InsightsContext {
       createEffect(() => read(params()));
       return source;
     },
+    // No Scorer, Experiment or Benchmark is set up in the fixture.
+    evaluation: (params) => ({
+      state: () => 'ready',
+      data: () => ({
+        from: params().from,
+        to: params().to,
+        timeZone: params().timeZone,
+        scorers: [],
+        experiments: [],
+        benchmarks: [],
+        suites: [],
+      }),
+      updating: () => false,
+      retry: () => {},
+    }),
     flowNames: () => ({
       state: () => 'ready',
       data: () => ['plan', 'reply'],

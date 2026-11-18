@@ -12,6 +12,7 @@ import {
   getCreateFactoryRunUrl,
   getDeleteFactoryAutomationUrl,
   getGetFactoryControlFilesUrl,
+  getGetFactoryEvaluationUrl,
   getGetFactoryInsightsUrl,
   getGetFactoryRunUrl,
   getGetFactorySessionStepUrl,
@@ -37,7 +38,9 @@ import type {
   ControlFilesSettings,
   CreatedAutomation,
   CreateRunRequest,
+  EvaluationInsights,
   FlowsResponse,
+  GetFactoryEvaluationParams,
   GetFactoryInsightsParams,
   NoteStepRequest,
   ReplyToGateRequest,
@@ -149,6 +152,17 @@ export const factoryClient = {
   getInsights(params: GetFactoryInsightsParams, signal?: AbortSignal) {
     return fetchWithToken<RunInsights>(
       `${host()}${getGetFactoryInsightsUrl(params)}`,
+      { method: 'GET', signal }
+    );
+  },
+
+  /**
+   * How the caller's own Runs over a period were judged by the Scorers and
+   * split by the Experiments, and the Benchmark suites they started.
+   */
+  getEvaluation(params: GetFactoryEvaluationParams, signal?: AbortSignal) {
+    return fetchWithToken<EvaluationInsights>(
+      `${host()}${getGetFactoryEvaluationUrl(params)}`,
       { method: 'GET', signal }
     );
   },
