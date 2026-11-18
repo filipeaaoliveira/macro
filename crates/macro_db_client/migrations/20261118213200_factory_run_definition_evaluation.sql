@@ -5,10 +5,11 @@
 -- Null for a Run whose team named no Definition, which the deployment's
 -- Scorers judge, and for every Run created before this.
 --
--- Adding a nullable column rewrites no rows. The check is added NOT VALID,
--- which takes the ACCESS EXCLUSIVE lock only briefly, and validated
--- after under a lock that lets reads and writes go on. Give up rather than
--- queue behind a long transaction.
+-- Adding a nullable column rewrites no rows. The check is added NOT VALID
+-- and validated in the same migration, so in one transaction: the ACCESS
+-- EXCLUSIVE lock the ALTERs take is held while the validation reads every
+-- row of factory_run, each of which has the new column null and passes.
+-- Give up rather than queue behind a long transaction.
 SET LOCAL lock_timeout = '5s';
 
 ALTER TABLE factory_run
