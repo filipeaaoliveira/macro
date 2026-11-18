@@ -4,7 +4,9 @@
  * factory_engine
  * OpenAPI spec version: 0.1.0
  */
+
 import type { OrchestratorDefinitionQueueLimit } from './orchestratorDefinitionQueueLimit';
+import type { OrchestratorKinds } from './orchestratorKinds';
 import type { StandInKinds } from './standInKinds';
 
 /**
@@ -24,6 +26,11 @@ person. */
   /** Merge once CI is green, nothing is Tampered and the base branch has
 no Main Hold (`merge_when_green`). */
   merge: boolean;
+  /** The kinds of Gate the Orchestrator, the owner's agent in Macro chat,
+may give the approving answer to for them (`approve`, `fix`); off
+for every kind when left out. It may always send work back, and
+never approves a merge. */
+  orchestrator?: OrchestratorKinds;
   /** The owner section: a Gate no rule answers goes to the Run's owner.
 They are notified, and the Gate is listed as waiting on them; a
 review round whose Blockers are the round before's, unchanged after

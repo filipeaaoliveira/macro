@@ -356,6 +356,12 @@ export type Gate = {
  */
 export type GateAnswer = {
     /**
+     * The agent session that gave the answer for the owner, when the
+     * Orchestrator did rather than the owner in person; it is then not
+     * counted among the owner's own answers.
+     */
+    agentSessionId?: string | null;
+    /**
      * The answer, one the Gate offered: the outcome the Flow routes.
      */
     answer: Outcome;
@@ -527,6 +533,13 @@ export type OrchestratorDefinition = {
      */
     merge: boolean;
     /**
+     * The kinds of Gate the Orchestrator, the owner's agent in Macro chat,
+     * may give the approving answer to for them (`approve`, `fix`); off
+     * for every kind when left out. It may always send work back, and
+     * never approves a merge.
+     */
+    orchestrator?: OrchestratorKinds;
+    /**
      * The owner section: a Gate no rule answers goes to the Run's owner.
      * They are notified, and the Gate is listed as waiting on them; a
      * review round whose Blockers are the round before's, unchanged after
@@ -554,6 +567,22 @@ export type OrchestratorDefinition = {
      * the rules and before the person; off for every kind when left out.
      */
     standIn?: StandInKinds;
+};
+
+/**
+ * The kinds of Gate the Orchestrator may give the approving answer to for
+ * the Run's owner. It never approves a merge, so it has no setting for
+ * one.
+ */
+export type OrchestratorKinds = {
+    /**
+     * Send a review round's Blockers to be fixed.
+     */
+    blockers: boolean;
+    /**
+     * Approve the plan Gate.
+     */
+    plan: boolean;
 };
 
 /**

@@ -139,9 +139,11 @@ export class Sdk extends HeyApiClient {
      * signed-in session answers it, and an agent session they work with
      * (such as the Orchestrator in Macro chat), from its code, answers only
      * what a Standing Rule could: never an agent's question, a Gate its Flow
-     * keeps for a person, a Tampered Run's approval or a merge Gate under a
-     * Main Hold (403 `reservedForAPerson`), and never from a factory Step's
-     * own session. Any other caller is refused (403).
+     * keeps for a person, approving a merge or a Tampered Run, nor an
+     * approving answer the Run's Orchestrator Definition does not allow
+     * (403 `reservedForAPerson`); only from a chat, never from a routine's
+     * run or a factory Step's own session. A Gate answered since is a
+     * conflict (409). Any other caller is refused (403).
      */
     public answerFactoryGate<ThrowOnError extends boolean = false>(options: Options<AnswerFactoryGateData, ThrowOnError>): RequestResult<AnswerFactoryGateResponses, AnswerFactoryGateErrors, ThrowOnError> {
         return (options.client ?? this.client).post<AnswerFactoryGateResponses, AnswerFactoryGateErrors, ThrowOnError>({
