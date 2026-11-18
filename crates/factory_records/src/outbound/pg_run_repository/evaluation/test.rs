@@ -434,6 +434,41 @@ async fn a_suite_still_starting_counts_the_trials_it_plans_and_keeps_them(pool: 
     repo.insert_trial(&trial, run(TYPO_TRIAL), BASE)
         .await
         .expect("trial");
+    // Its recorded trial runs and its 14 others are still starting: 15,
+    // with the other suite's 5, and none counted twice.
+    assert_eq!(
+        repo.insert_suite(&suite(4, "third", 1))
+            .await
+            .expect("suite"),
+        SuiteInsert::TooManyTrials(20)
+    );
+    // A suite that stopped at a refused trial plans only those it started.
+    repo.set_planned_trials(Uuid::from_u128(3), 0)
+        .await
+        .expect("planned");
+    assert_eq!(
+        repo.insert_suite(&suite(4, "third", 5))
+            .await
+            .expect("suite"),
+        SuiteInsert::Inserted
+    );
+    // Once the suites started long ago, only the running trial counts.
+    sqlx::query("UPDATE factory_benchmark_suite SET created_at = now() - interval '10 minutes'")
+        .execute(&pool)
+        .await
+        .expect("backdated");
+    assert_eq!(
+        repo.insert_suite(&suite(5, "fifth", 19))
+            .await
+            .expect("suite"),
+        SuiteInsert::Inserted
+    );
+    assert_eq!(
+        repo.insert_suite(&suite(6, "sixth", 1))
+            .await
+            .expect("suite"),
+        SuiteInsert::TooManyTrials(20)
+    );
     repo.delete_suite(Uuid::from_u128(1)).await.expect("delete");
     assert_eq!(
         repo.trial_of(run(TYPO_TRIAL))
@@ -461,6 +496,36 @@ async fn an_arm_counts_its_runs_whose_chosen_agent_was_replaced_as_fallen_back(p
     .bind(Uuid::parse_str(IMPORT).expect("valid run id"))
     .bind(Uuid::from_u128(0x711))
     .bind(Uuid::from_u128(0x712))
+    .execute(&pool)
+    .await
+    .expect("step recorded");
+
+    let read = repo.read_evaluation(&november()).await.expect("read");
+    let fell_back: Vec<_> = read
+        .arms
+        .iter()
+        .map(|arm| (arm.arm.as_str(), arm.fell_back))
+        .collect();
+    assert_eq!(fell_back, vec![("backup", 1), ("control", 0)]);
+}
+
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "evaluation"))
+)]
+async fn an_arm_counts_its_runs_whose_chosen_agent_was_passed_over_with_none_after(pool: PgPool) {
+    let repo = PgRunRepository::new(pool.clone());
+    // The arm chose `backup` for the writer; it was passed over and no other
+    // Agent was left: the Step keeps it as both its Agent and passed over.
+    sqlx::query(
+        "INSERT INTO factory_step (run_id, seq, entry, visit, started_at, outcome, output, ended_at, \
+             session_id, action_id, offered, role, agent, passed_over, pass_reasons) \
+         VALUES ($1, 1, 'write', 1, '2026-11-11 09:00Z', 'failed', 'No quota', '2026-11-11 09:30Z', \
+             $2, $3, '{done}', 'writer', 'backup', '{backup}', '{ai_allowance_exhausted}')",
+    )
+    .bind(Uuid::parse_str(IMPORT).expect("valid run id"))
+    .bind(Uuid::from_u128(0x721))
+    .bind(Uuid::from_u128(0x722))
     .execute(&pool)
     .await
     .expect("step recorded");

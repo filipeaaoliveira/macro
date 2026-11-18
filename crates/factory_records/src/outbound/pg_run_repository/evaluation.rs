@@ -171,6 +171,18 @@ impl EvaluationRepository for PgRunRepository {
     }
 
     #[tracing::instrument(err, skip(self))]
+    async fn set_planned_trials(&self, suite_id: Uuid, trials: u16) -> Result<(), Self::Err> {
+        sqlx::query!(
+            "UPDATE factory_benchmark_suite SET planned_trials = $2 WHERE id = $1",
+            suite_id,
+            i32::from(trials),
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    #[tracing::instrument(err, skip(self))]
     async fn delete_suite(&self, suite_id: Uuid) -> Result<(), Self::Err> {
         sqlx::query!(
             r#"
@@ -189,7 +201,7 @@ impl EvaluationRepository for PgRunRepository {
     async fn scoring_subject(&self, run_id: RunId) -> Result<Option<ScoringSubject>, Self::Err> {
         let Some(run) = sqlx::query!(
             r#"
-            SELECT r.user_id, r.flow, r.request, r.repo_url, r.outcome
+            SELECT r.user_id, r.flow, r.request, r.repo_url, r.base_branch, r.outcome
             FROM factory_run r
             WHERE r.id = $1
             "#,
@@ -257,6 +269,7 @@ impl EvaluationRepository for PgRunRepository {
             flow: run.flow,
             request: run.request,
             repo_url: run.repo_url,
+            base_branch: run.base_branch,
             outcome: run_outcome(run.outcome)?,
             steps,
             trial,
@@ -497,8 +510,9 @@ impl EvaluationRepository for PgRunRepository {
         // An arm's Agents are the same for each of its Runs while the
         // Experiment is unchanged; the newest Run's are shown. A Run fell
         // back when one of its Steps of a Role the arm chooses for was
-        // taken by another Agent: the chosen one could not start, or the
-        // agent definition no longer has it.
+        // taken by another Agent (the chosen one could not start, or the
+        // agent definition no longer has it), or passed over the chosen one
+        // and no Agent took it.
         let arms = sqlx::query!(
             r#"
             SELECT a.experiment, a.arm,
@@ -512,7 +526,10 @@ impl EvaluationRepository for PgRunRepository {
                            SELECT 1
                            FROM factory_step st
                            WHERE st.run_id = a.run_id
-                             AND (a.agents ->> st.role) <> st.agent
+                             AND (
+                                 (a.agents ->> st.role) <> st.agent
+                                 OR (a.agents ->> st.role) = ANY (st.passed_over)
+                             )
                        )
                    ) AS "fell_back!"
             FROM factory_run_arm a

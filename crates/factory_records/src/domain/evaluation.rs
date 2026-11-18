@@ -136,6 +136,9 @@ pub struct ScoringSubject {
     pub request: String,
     /// The GitHub repository it worked on, if any.
     pub repo_url: Option<String>,
+    /// The branch it started from and proposed its change to, with the
+    /// repository.
+    pub base_branch: Option<String>,
     /// How it ended; none while it goes.
     pub outcome: Option<RunOutcome>,
     /// Its Steps, in order.
@@ -318,6 +321,14 @@ pub trait EvaluationRepository: Send + Sync + 'static {
     fn record_branch_deleted(
         &self,
         trial: &TrialKey,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// Keep `trials` as the number of trials a suite plans, once it stopped
+    /// at a refused one, so the trials it never starts hold no place.
+    fn set_planned_trials(
+        &self,
+        suite_id: Uuid,
+        trials: u16,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// Delete a suite none of whose trials started, so it is not listed; a
