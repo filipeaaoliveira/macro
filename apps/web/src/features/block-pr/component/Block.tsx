@@ -20,13 +20,13 @@ export default function PrBlock() {
   );
   return (
     <div class="size-full overflow-hidden flex flex-col relative">
-      {guard?.gate()}
+      {guard.gate()}
       <SidePanel.Layout floating headerToggle={!isTouchDevice()}>
         <PrSidePanelSections
           enrichment={detail.data()?.pullRequest}
           status={detail.query.status}
         />
-        <Show when={url()}>{(at) => guard?.section(at())}</Show>
+        <Show when={url()}>{(at) => guard.section(at())}</Show>
         <div class="flex flex-col size-full min-w-0">
           <Show when={detail.data()}>
             {(data) => <PrSplitHeader detail={data()} actions={actions} />}

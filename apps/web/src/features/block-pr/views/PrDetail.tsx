@@ -286,8 +286,8 @@ export function StandalonePrDetail(props: { foreignEntityId: string }) {
   };
   return (
     <SidePanel.Root floating persistKey={`pr:${props.foreignEntityId}`}>
-      <Show when={githubUrl()}>{(url) => guard?.section(url())}</Show>
-      {guard?.gate()}
+      <Show when={githubUrl()}>{(url) => guard.section(url())}</Show>
+      {guard.gate()}
       <PrChangesProvider
         foreignEntityId={props.foreignEntityId}
         pullRequestUrl={githubUrl()}

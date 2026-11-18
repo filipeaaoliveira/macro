@@ -1,3 +1,7 @@
+import { useFeatureFlag } from '@app/lib/analytics/posthog';
+import { t } from '@app/lib/i18n';
+import { toast } from '@core/component/Toast/Toast';
+import { enableFactoryRuns } from '@core/constant/featureFlags';
 import { type Accessor, createContext, type JSX, useContext } from 'solid-js';
 
 /**
@@ -34,11 +38,40 @@ const Context = createContext<PrMergeGuardSource>();
 export const PrMergeGuardProvider = Context.Provider;
 
 /**
- * The merge guard for the pull requests at `urls`; none outside a provider,
- * where GitHub merges every pull request as before.
+ * The guard outside any provider, where no one can say whether a factory
+ * Run owns a pull request's merge: for a person who may have the factory
+ * (its flag on, or not read yet) it merges nothing, rather than let GitHub
+ * merge past a Run's merge Gate; for one without it, GitHub merges as
+ * before. A view rendered outside the app's providers is a bug, and this
+ * keeps it from becoming a bypass.
+ */
+function unprovidedMergeGuard(): PrMergeGuard {
+  const flag = useFeatureFlag(enableFactoryRuns);
+  const off = () => !flag().loading && !flag().enabled;
+  const refusal = () => t('factoryBoard.mergeUnguarded');
+  return {
+    mark: () => null,
+    section: () => null,
+    merge: () => {
+      if (off()) return false;
+      toast.failure(refusal());
+      return true;
+    },
+    mergeRefusal: () => (off() ? undefined : refusal()),
+    mergeWarning: () => undefined,
+    gate: () => null,
+  };
+}
+
+/**
+ * The merge guard for the pull requests at `urls`. Outside a provider, a
+ * person who may have the factory merges nothing; one without it merges on
+ * GitHub as before.
  */
 export function usePrMergeGuard(
   urls: Accessor<readonly string[]>
-): PrMergeGuard | undefined {
-  return useContext(Context)?.(urls);
+): PrMergeGuard {
+  const source = useContext(Context);
+  if (!source) return unprovidedMergeGuard();
+  return source(urls);
 }

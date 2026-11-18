@@ -475,7 +475,7 @@ function ReviewsRoot() {
               </div>
             </Match>
             <Match when={true}>
-              {guard?.gate()}
+              {guard.gate()}
               <ReviewsBoard
                 reviews={reviews()}
                 mergeability={mergeability.mergeability}
@@ -489,12 +489,10 @@ function ReviewsRoot() {
                 isLoadingMore={source.isLoadingMore()}
                 onLoadMore={() => fireAndForget(loadMore(), 'reviews-view')}
                 onOpen={openReview}
-                cardAddon={(review) => guard?.mark(review.metadata.url)}
-                takeMerge={(review) =>
-                  guard?.merge(review.metadata.url) ?? false
-                }
+                cardAddon={(review) => guard.mark(review.metadata.url)}
+                takeMerge={(review) => guard.merge(review.metadata.url)}
                 mergeWarning={(review) =>
-                  guard?.mergeWarning(review.metadata.url)
+                  guard.mergeWarning(review.metadata.url)
                 }
               />
             </Match>

@@ -83,12 +83,12 @@ export function MergePullRequestButton(props: {
   // Someone else may own this merge (a factory Run's merge Gate): it takes
   // the merge, or says why it doesn't merge now.
   const guard = usePrMergeGuard(() => [url()]);
-  const refusal = () => guard?.mergeRefusal(url());
+  const refusal = () => guard.mergeRefusal(url());
   const action = createMergePullRequestAction({
     onMerged: props.onMerged,
     confirm: (target) =>
       confirmMergePullRequest(
-        { ...target, warning: guard?.mergeWarning(url()) },
+        { ...target, warning: guard.mergeWarning(url()) },
         owner
       ),
   });
@@ -112,7 +112,7 @@ export function MergePullRequestButton(props: {
         data-merge-pull-request={props.target.number}
         on:click={(event) => {
           event.stopPropagation();
-          if (guard?.merge(url())) return;
+          if (guard.merge(url())) return;
           fireAndForget(action.merge(props.target), 'pr-merge');
         }}
       >
@@ -121,7 +121,7 @@ export function MergePullRequestButton(props: {
           <span>{label()}</span>
         </Show>
       </Control>
-      {guard?.gate()}
+      {guard.gate()}
     </Show>
   );
 }

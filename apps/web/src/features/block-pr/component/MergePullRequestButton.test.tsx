@@ -16,6 +16,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   type PrMergeGuard,
   PrMergeGuardProvider,
+  usePrMergeGuard,
 } from '../primitives/pr-merge-guard-context';
 import type { PullRequestCheck } from '../primitives/pull-request-ready-to-merge';
 import { MergePullRequestButton } from './MergePullRequestButton';
@@ -23,6 +24,15 @@ import { MergePullRequestButton } from './MergePullRequestButton';
 const mocks = vi.hoisted(() => ({
   success: vi.fn(),
   failure: vi.fn(),
+}));
+// The factory flag: off unless a test turns it on, so GitHub merges.
+const flag = vi.hoisted(() => ({ enabled: false, loading: false }));
+
+vi.mock('@app/lib/analytics/posthog', () => ({
+  useFeatureFlag: () => () => ({
+    enabled: flag.enabled,
+    loading: flag.loading,
+  }),
 }));
 
 vi.mock('@queries/client', async () => {
@@ -44,6 +54,8 @@ vi.mock('@service-auth/client', () => ({
 vi.mock('@core/component/Toast/Toast', () => ({
   toast: { success: mocks.success, failure: mocks.failure },
 }));
+
+const PR_URL = 'https://github.com/macro-inc/macro/pull/6369';
 
 const target = {
   owner: 'macro-inc',
@@ -79,6 +91,8 @@ afterEach(() => {
   cleanup();
   queryClient.clear();
   vi.clearAllMocks();
+  flag.enabled = false;
+  flag.loading = false;
 });
 
 describe('MergePullRequestButton', () => {
@@ -205,6 +219,46 @@ describe('MergePullRequestButton', () => {
     expect(
       screen.getByRole('button', { name: 'Merge pull request #6369' })
     ).toBeTruthy();
+  });
+
+  describe('outside any merge guard provider', () => {
+    const REFUSAL = 'Open this pull request in Macro’s Reviews to merge it';
+
+    it('merges nothing for a person who has the factory', () => {
+      flag.enabled = true;
+      renderButton({ status: 'open' });
+
+      const button = screen.getByRole('button', {
+        name: 'Merge pull request #6369',
+      }) as HTMLButtonElement;
+      expect(button.disabled).toBe(true);
+    });
+
+    it('merges nothing while the factory flag is not read yet', () => {
+      flag.enabled = true;
+      flag.loading = true;
+      renderButton({ status: 'open' });
+
+      const button = screen.getByRole('button', {
+        name: 'Merge pull request #6369',
+      }) as HTMLButtonElement;
+      expect(button.disabled).toBe(true);
+    });
+
+    it('says why, and never asks GitHub, when asked to merge anyway', async () => {
+      flag.enabled = true;
+      let guard: PrMergeGuard | undefined;
+      render(() => {
+        guard = usePrMergeGuard(() => [PR_URL]);
+        return null;
+      });
+      if (!guard) throw new Error('not mounted');
+
+      expect(guard.mergeRefusal(PR_URL)).toBe(REFUSAL);
+      expect(guard.merge(PR_URL)).toBe(true);
+      expect(mocks.failure).toHaveBeenCalledWith(REFUSAL);
+      expect(authServiceClient.mergeGithubPullRequest).not.toHaveBeenCalled();
+    });
   });
 
   describe('with a merge guard', () => {

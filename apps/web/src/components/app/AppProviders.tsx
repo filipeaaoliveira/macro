@@ -141,16 +141,15 @@ export function AppProviders(props: ParentProps) {
         <MutationUndoProvider>
           <SearchProvider>
             <IncomingMeetingInvitationsProvider>
-              {/* Ownerless dialogs inherit app state, not a transient menu owner. */}
-              <ImperativeDialogHost />
-              <AgentNavigationProvider>
-                <RoutineDraftsHost>
-                  {/* A factory Run's pull request merges through its Run. */}
-                  <PrMergeGuardProvider value={factoryMergeGuard}>
-                    {props.children}
-                  </PrMergeGuardProvider>
-                </RoutineDraftsHost>
-              </AgentNavigationProvider>
+              {/* A factory Run's pull request merges through its Run, in
+                  ownerless dialogs too. */}
+              <PrMergeGuardProvider value={factoryMergeGuard}>
+                {/* Ownerless dialogs inherit app state, not a transient menu owner. */}
+                <ImperativeDialogHost />
+                <AgentNavigationProvider>
+                  <RoutineDraftsHost>{props.children}</RoutineDraftsHost>
+                </AgentNavigationProvider>
+              </PrMergeGuardProvider>
             </IncomingMeetingInvitationsProvider>
           </SearchProvider>
         </MutationUndoProvider>

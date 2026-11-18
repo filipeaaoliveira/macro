@@ -14,9 +14,8 @@ import { type PrMergeGuard, usePrMergeGuard } from './pr-merge-guard-context';
 export function withMergeGuard(
   actions: PrActions,
   url: Accessor<string | undefined>,
-  guard: Pick<PrMergeGuard, 'merge' | 'mergeRefusal'> | undefined
+  guard: Pick<PrMergeGuard, 'merge' | 'mergeRefusal'>
 ): PrActions {
-  if (!guard) return actions;
   const all = () =>
     actions.all().map((action) => {
       const at = url();
@@ -67,7 +66,7 @@ export function createGuardedPrActions(
   });
   const warning = () => {
     const at = url();
-    return at ? guard?.mergeWarning(at) : undefined;
+    return at ? guard.mergeWarning(at) : undefined;
   };
   const actions = withMergeGuard(
     createPrActions(detail, (target, owner) =>

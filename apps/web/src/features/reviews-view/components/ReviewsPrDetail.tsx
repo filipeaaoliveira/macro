@@ -101,8 +101,8 @@ export function ReviewsPrDetail(props: { foreignEntityId: string }) {
         pullRequestTitle={detail.data()?.pullRequest.name ?? undefined}
         pullRequestChangeCounts={detail.changeCounts()}
       >
-        <Show when={githubUrl()}>{(url) => guard?.section(url())}</Show>
-        {guard?.gate()}
+        <Show when={githubUrl()}>{(url) => guard.section(url())}</Show>
+        {guard.gate()}
         <ReviewsPrBreadcrumb
           foreignEntityId={props.foreignEntityId}
           name={name()}

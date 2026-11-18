@@ -49,12 +49,6 @@ describe('withMergeGuard', () => {
     expect(github).not.toHaveBeenCalled();
   });
 
-  it('leaves the actions as they were with no guard', () => {
-    const github = vi.fn();
-    const plain = actions(github, vi.fn());
-    expect(withMergeGuard(plain, () => PR_URL, undefined)).toBe(plain);
-  });
-
   it('disables Merge with the reason the taker refuses it, and keeps the rest', () => {
     const close = vi.fn();
     const taken = withMergeGuard(actions(vi.fn(), close), () => PR_URL, {
