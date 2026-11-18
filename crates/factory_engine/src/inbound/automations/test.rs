@@ -112,6 +112,7 @@ impl AutomationService for FakeAutomations {
     async fn set_automation_enabled(
         &self,
         _actor: &MacroUserIdStr<'static>,
+        _in_person: bool,
         _id: Uuid,
         _enabled: bool,
     ) -> Result<Automation, FactoryError> {

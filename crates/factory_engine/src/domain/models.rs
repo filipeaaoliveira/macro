@@ -296,7 +296,17 @@ impl CodeRepository {
 /// every Step of it, and every retry of a Step, finds the same branch and the
 /// same pull request.
 pub fn run_branch(run_id: RunId) -> String {
-    format!("factory/{run_id}")
+    format!("{RUN_BRANCH_PREFIX}{run_id}")
+}
+
+/// What every Run's branch starts with, before its Run's id.
+pub const RUN_BRANCH_PREFIX: &str = "factory/";
+
+/// Whether `branch` is a Run's branch: the prefix, then a Run's id.
+pub fn is_run_branch(branch: &str) -> bool {
+    branch
+        .strip_prefix(RUN_BRANCH_PREFIX)
+        .is_some_and(|id| Uuid::parse_str(id).is_ok())
 }
 
 /// What a Run's owner may do with a repository on GitHub.

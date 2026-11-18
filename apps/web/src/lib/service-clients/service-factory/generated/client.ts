@@ -265,8 +265,8 @@ export const fireFactoryAutomation = async (
 };
 
 /**
- * @summary Delete an Automation of the caller's team, as for switching it off, and
-its routine. The Runs it started keep the record of it.
+ * @summary Delete an Automation of the caller's team, its creator's or, for an
+admin of the team, any, and its routine. The Runs it started keep the record of it.
  */
 export type deleteFactoryAutomationResponse204 = {
   data: void;
@@ -348,8 +348,10 @@ export const deleteFactoryAutomation = async (
 };
 
 /**
- * @summary Switch an Automation of the caller's team on or off: their own, or any
-for an admin of the team (403 otherwise). Its routine follows.
+ * @summary Switch an Automation of the caller's team on or off. Only its creator
+switches it on, in their own signed-in session, as for making it; its
+creator or an admin of the team switches it off (403 otherwise). Its
+routine follows.
  */
 export type setFactoryAutomationEnabledResponse200 = {
   data: Automation;
@@ -438,8 +440,9 @@ export const setFactoryAutomationEnabled = async (
 the Automation's secret, as Macro signs its own webhooks
 (`x-macro-signature: v1=<hex>`, an HMAC-SHA256 of
 `"{x-macro-timestamp}.{body}"`), at a timestamp (Unix seconds) within
-five minutes of now (401 otherwise). A call received before is refused
-(409), so a replay starts nothing. The body is empty, or JSON naming the
+five minutes of now (401 otherwise, as for an id no webhook has). The
+same timestamp and body received before is refused (409), however its
+digest is spelled, so a replay starts nothing. The body is empty, or JSON naming the
 task the Run works on.
  */
 export type callFactoryAutomationWebhookResponse202 = {

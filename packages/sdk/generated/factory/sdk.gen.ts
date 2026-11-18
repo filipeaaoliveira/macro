@@ -105,16 +105,18 @@ export class Sdk extends HeyApiClient {
     }
 
     /**
-     * Delete an Automation of the caller's team, as for switching it off, and
-     * its routine. The Runs it started keep the record of it.
+     * Delete an Automation of the caller's team, its creator's or, for an
+     * admin of the team, any, and its routine. The Runs it started keep the record of it.
      */
     public deleteFactoryAutomation<ThrowOnError extends boolean = false>(options: Options<DeleteFactoryAutomationData, ThrowOnError>): RequestResult<DeleteFactoryAutomationResponses, DeleteFactoryAutomationErrors, ThrowOnError> {
         return (options.client ?? this.client).delete<DeleteFactoryAutomationResponses, DeleteFactoryAutomationErrors, ThrowOnError>({ url: '/automations/{id}', ...options });
     }
 
     /**
-     * Switch an Automation of the caller's team on or off: their own, or any
-     * for an admin of the team (403 otherwise). Its routine follows.
+     * Switch an Automation of the caller's team on or off. Only its creator
+     * switches it on, in their own signed-in session, as for making it; its
+     * creator or an admin of the team switches it off (403 otherwise). Its
+     * routine follows.
      */
     public setFactoryAutomationEnabled<ThrowOnError extends boolean = false>(options: Options<SetFactoryAutomationEnabledData, ThrowOnError>): RequestResult<SetFactoryAutomationEnabledResponses, SetFactoryAutomationEnabledErrors, ThrowOnError> {
         return (options.client ?? this.client).put<SetFactoryAutomationEnabledResponses, SetFactoryAutomationEnabledErrors, ThrowOnError>({
@@ -132,8 +134,9 @@ export class Sdk extends HeyApiClient {
      * the Automation's secret, as Macro signs its own webhooks
      * (`x-macro-signature: v1=<hex>`, an HMAC-SHA256 of
      * `"{x-macro-timestamp}.{body}"`), at a timestamp (Unix seconds) within
-     * five minutes of now (401 otherwise). A call received before is refused
-     * (409), so a replay starts nothing. The body is empty, or JSON naming the
+     * five minutes of now (401 otherwise, as for an id no webhook has). The
+     * same timestamp and body received before is refused (409), however its
+     * digest is spelled, so a replay starts nothing. The body is empty, or JSON naming the
      * task the Run works on.
      */
     public callFactoryAutomationWebhook<ThrowOnError extends boolean = false>(options: Options<CallFactoryAutomationWebhookData, ThrowOnError>): RequestResult<CallFactoryAutomationWebhookResponses, CallFactoryAutomationWebhookErrors, ThrowOnError> {

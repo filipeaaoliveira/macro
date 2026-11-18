@@ -12,8 +12,11 @@ export interface AutomationFiring {
   run: { id: string };
   /** The task a Task event is about: the Run works on it. */
   task?: Task;
-  /** The GitHub delivery a repository event is. */
-  github?: { event: string; action?: string };
+  /**
+   * The GitHub delivery a repository event is, with the branch it is
+   * about, so a factory Run's own pushes and pull request start nothing.
+   */
+  github?: { event: string; action?: string; branch?: string };
 }
 
 /** What firing a factory Automation came to. */

@@ -5,6 +5,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { GithubFiringAction } from './githubFiringAction';
+import type { GithubFiringBranch } from './githubFiringBranch';
 
 /**
  * The GitHub delivery that fired a repository event's Automation.
@@ -12,6 +13,9 @@ import type { GithubFiringAction } from './githubFiringAction';
 export interface GithubFiring {
   /** Its payload's action, such as `opened`. */
   action?: GithubFiringAction;
+  /** The branch it is about: a push's, a pull request's head, or a
+workflow run's or check suite's head branch. */
+  branch?: GithubFiringBranch;
   /** Its event, such as `pull_request`. */
   event: string;
 }

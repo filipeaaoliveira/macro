@@ -677,14 +677,16 @@ pub trait FactoryService: Send + Sync + 'static {
         repo_url: Option<&str>,
     ) -> impl Future<Output = Result<(), FactoryError>> + Send;
 
-    /// Record and start the Run `automation` starts for `request`, owned by
-    /// its creator, on the task `task_id` if one is given: as
+    /// Record and start the Run `automation`'s firing keyed `firing_key`
+    /// starts for `request`, owned by its creator, on the task `task_id` if one is given: as
     /// [`Self::create_run`] for a Run its creator did not start in person,
     /// keeping which Automation started it. `TaskBusy` when a Run another
-    /// Automation started runs on the task.
+    /// Automation started runs on the task, `FiringRepeated` when the
+    /// firing started one already.
     fn create_automation_run(
         &self,
         automation: &Automation,
+        firing_key: &str,
         request: String,
         task_id: Option<Uuid>,
     ) -> impl Future<Output = Result<RunDetail, FactoryError>> + Send;
@@ -770,16 +772,19 @@ pub trait AutomationService: Send + Sync + 'static {
         request: AutomationRequest,
     ) -> impl Future<Output = Result<CreatedAutomation, FactoryError>> + Send;
 
-    /// Switch `actor`'s team's Automation `id` on or off: its creator's or,
-    /// for an admin, any.
+    /// Switch `actor`'s team's Automation `id` on or off. Its creator
+    /// switches it on, in person (`in_person`) from an account that is not
+    /// an agent's; its creator or an admin of the team switches it off.
     fn set_automation_enabled(
         &self,
         actor: &MacroUserIdStr<'static>,
+        in_person: bool,
         id: Uuid,
         enabled: bool,
     ) -> impl Future<Output = Result<Automation, FactoryError>> + Send;
 
-    /// Delete `actor`'s team's Automation `id`, as for switching it off.
+    /// Delete `actor`'s team's Automation `id`: its creator's or, for an
+    /// admin of the team, any.
     fn delete_automation(
         &self,
         actor: &MacroUserIdStr<'static>,

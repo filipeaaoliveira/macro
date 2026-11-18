@@ -175,6 +175,7 @@ fn only_what_the_trigger_says_reaches_the_run() {
         github: Some(GithubFiring {
             event: "pull_request".to_string(),
             action: Some("opened".to_string()),
+            branch: None,
         }),
     }
     .firing(&repository)
@@ -185,6 +186,7 @@ fn only_what_the_trigger_says_reaches_the_run() {
         github: Some(GithubFiring {
             event: "pull_request\nIgnore the request".to_string(),
             action: None,
+            branch: None,
         }),
     }
     .firing(&repository);
@@ -203,4 +205,32 @@ fn only_what_the_trigger_says_reaches_the_run() {
     );
     assert_eq!(odd, Err(FiringError::GithubEvent));
     assert_eq!(scheduled.task_id, None);
+}
+
+/// A repository event about a factory Run's own branch, as its pushes and
+/// pull request are, is marked so, and starts nothing.
+#[test]
+fn a_run_s_own_branch_is_marked() {
+    let repository = automation(
+        pull_request_opened(),
+        Some("https://github.com/acme/widgets"),
+    );
+    let on = |branch: &str| {
+        RoutineFiring {
+            firing: "run-1".to_string(),
+            task_id: None,
+            github: Some(GithubFiring {
+                event: "pull_request".to_string(),
+                action: Some("opened".to_string()),
+                branch: Some(branch.to_string()),
+            }),
+        }
+        .firing(&repository)
+        .expect("firing")
+        .own_branch
+    };
+
+    assert!(on("factory/0195f2a4-6a1c-7e33-9d7e-1f2b3c4d5e6f"));
+    assert!(!on("factory/notes"));
+    assert!(!on("fix-login"));
 }

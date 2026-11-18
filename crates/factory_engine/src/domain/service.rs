@@ -9,7 +9,7 @@ use std::num::NonZeroU8;
 
 use agent_session::domain::session_task::TaskDocumentId;
 use chrono::Utc;
-use factory_records::domain::automations::{Automation, RunAutomation};
+use factory_records::domain::automations::{Automation, AutomationStart, RunAutomation};
 use factory_records::domain::main_hold::{BaseState, MainHoldRepository};
 use factory_records::domain::models::{
     HandBack, MAX_NOTE_BYTES, MAX_OUTPUT_BYTES, MAX_QUESTION_BYTES, MAX_REQUEST_BYTES, NewRun,
@@ -79,7 +79,7 @@ struct RunOrder<'a> {
     task_id: Option<Uuid>,
     repo_url: Option<String>,
     in_person: bool,
-    automation: Option<&'a RunAutomation>,
+    automation: Option<AutomationStart<'a>>,
 }
 
 /// The Run API, over the Run records, the Runs' workflows, the worker that
@@ -468,6 +468,7 @@ where
             RunInsert::Inserted(run) => *run,
             RunInsert::NoSuchTask => return Err(FactoryError::UnknownTask),
             RunInsert::TaskBusy => return Err(FactoryError::TaskBusy),
+            RunInsert::FiringStarted => return Err(FactoryError::FiringRepeated),
         };
 
         // The Run is recorded before its workflow starts, so the workflow can
@@ -571,6 +572,7 @@ where
     async fn create_automation_run(
         &self,
         automation: &Automation,
+        firing_key: &str,
         request: String,
         task_id: Option<Uuid>,
     ) -> Result<RunDetail, FactoryError> {
@@ -588,7 +590,10 @@ where
             task_id,
             repo_url: automation.repo_url.clone(),
             in_person: false,
-            automation: Some(&started_by),
+            automation: Some(AutomationStart {
+                automation: &started_by,
+                firing_key,
+            }),
         })
         .await
     }

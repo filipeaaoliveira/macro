@@ -11,6 +11,7 @@ use factory_records::domain::automations::{
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
 use rand::Rng;
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use super::{
@@ -75,13 +76,15 @@ where
         }
     }
 
-    /// The Automation `id` of `actor`'s team, when `actor` may change it:
-    /// its creator, or an admin of its team. Another team's reads as
-    /// missing.
+    /// The Automation `id` of `actor`'s team, when `actor` may change it
+    /// as `change` does: its creator for anything, an admin of its team only
+    /// to stop it (switch it off, or delete it), since switching one on has
+    /// it start Runs as its creator. Another team's reads as missing.
     async fn managed(
         &self,
         actor: &MacroUserIdStr<'static>,
         id: Uuid,
+        change: Change,
     ) -> Result<Automation, FactoryError> {
         let team = <R as RunRepository>::team_of(&self.repo, actor)
             .await
@@ -94,7 +97,8 @@ where
             .map_err(internal)?
             .filter(|automation| automation.team_id == team.team_id)
             .ok_or(FactoryError::NotFound)?;
-        if automation.created_by != *actor && !team.admin {
+        let allowed = automation.created_by == *actor || (team.admin && change == Change::Stop);
+        if !allowed {
             return Err(FactoryError::NotTheAutomationOwner);
         }
         Ok(automation)
@@ -143,6 +147,23 @@ where
         if !automation.enabled {
             return Ok(FiringEnd::Skipped(FiringSkip::Disabled));
         }
+        if firing.own_branch {
+            return Ok(FiringEnd::Skipped(FiringSkip::OwnBranch));
+        }
+        // The Automation acts as its creator only while they could make it
+        // now: a person on its team.
+        if <R as RunRepository>::is_agent_account(&self.repo, &automation.created_by)
+            .await
+            .map_err(internal)?
+        {
+            return Ok(FiringEnd::Skipped(FiringSkip::AgentAccount));
+        }
+        let team = <R as RunRepository>::team_of(&self.repo, &automation.created_by)
+            .await
+            .map_err(internal)?;
+        if team.is_none_or(|team| team.team_id != automation.team_id) {
+            return Ok(FiringEnd::Skipped(FiringSkip::CreatorLeftTeam));
+        }
         if !self
             .queue
             .admits(&automation.created_by)
@@ -168,7 +189,7 @@ where
         let request = run_request(automation, firing);
         match self
             .runs
-            .create_automation_run(automation, request, firing.task_id)
+            .create_automation_run(automation, &firing.key, request, firing.task_id)
             .await
         {
             Ok(detail) => Ok(FiringEnd::Started(detail.run.id)),
@@ -176,7 +197,8 @@ where
             Err(
                 error @ (FactoryError::Upstream(_)
                 | FactoryError::Internal(_)
-                | FactoryError::TriggerUnavailable),
+                | FactoryError::TriggerUnavailable
+                | FactoryError::FiringRepeated),
             ) => Err(error),
             Err(error) => {
                 tracing::warn!(
@@ -188,6 +210,27 @@ where
             }
         }
     }
+}
+
+/// What a change to an Automation does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Change {
+    /// It has the Automation start Runs again.
+    Start,
+    /// It stops the Automation starting Runs: switching it off or deleting
+    /// it.
+    Stop,
+}
+
+/// The key of a webhook call's firing: the SHA-256 of the timestamp and
+/// body its signature covers, so the same call signed in another spelling
+/// of its digest (any letter case) is the same firing.
+fn webhook_firing_key(timestamp: &str, body: &[u8]) -> String {
+    let mut digest = Sha256::new();
+    digest.update(timestamp.as_bytes());
+    digest.update(b".");
+    digest.update(body);
+    format!("sha256:{}", hex::encode(digest.finalize()))
 }
 
 /// What a firing's end answers.
@@ -316,10 +359,25 @@ where
     async fn set_automation_enabled(
         &self,
         actor: &MacroUserIdStr<'static>,
+        in_person: bool,
         id: Uuid,
         enabled: bool,
     ) -> Result<Automation, FactoryError> {
-        let mut automation = self.managed(actor, id).await?;
+        // Switching one on has it start Runs as its creator again: only the
+        // creator, in person, as for making it.
+        let change = if enabled {
+            if !in_person
+                || <R as RunRepository>::is_agent_account(&self.repo, actor)
+                    .await
+                    .map_err(internal)?
+            {
+                return Err(FactoryError::NotAPerson);
+            }
+            Change::Start
+        } else {
+            Change::Stop
+        };
+        let mut automation = self.managed(actor, id, change).await?;
         // The routine is switched first: an Automation switched on whose
         // routine stayed off would never fire.
         if let Some(routine_id) = automation.routine_id {
@@ -341,7 +399,7 @@ where
         actor: &MacroUserIdStr<'static>,
         id: Uuid,
     ) -> Result<(), FactoryError> {
-        let automation = self.managed(actor, id).await?;
+        let automation = self.managed(actor, id, Change::Stop).await?;
         if let Some(routine_id) = automation.routine_id {
             self.triggers
                 .delete(&automation.created_by, routine_id)
@@ -362,9 +420,23 @@ where
             .repo
             .automation_of_routine(routine_id)
             .await
-            .map_err(internal)?
-            .filter(|automation| automation.created_by == *actor)
-            .ok_or(FactoryError::NotFound)?;
+            .map_err(internal)?;
+        let Some(automation) = automation else {
+            // Its Automation is gone, as with its team: the routine is
+            // switched off, as the caller whose routine it is, so it stops
+            // firing. It is left for its owner to delete.
+            if let Err(error) = self.triggers.set_enabled(actor, routine_id, false).await {
+                tracing::warn!(
+                    %routine_id,
+                    error = %error,
+                    "could not switch off the routine of a deleted automation"
+                );
+            }
+            return Err(FactoryError::NotFound);
+        };
+        if automation.created_by != *actor {
+            return Err(FactoryError::NotFound);
+        }
         let firing = firing.firing(&automation)?;
         self.fire(&automation, firing).await
     }
@@ -377,24 +449,20 @@ where
         signature: &str,
         body: &[u8],
     ) -> Result<FiringResult, FactoryError> {
-        let automation = self
-            .repo
-            .automation(id)
-            .await
-            .map_err(internal)?
-            .filter(|automation| automation.trigger == AutomationTrigger::Webhook)
-            .ok_or(FactoryError::NotFound)?;
+        // One read before the signature is checked, and the same answer
+        // for an id no webhook has as for a bad signature, so a caller
+        // without the secret learns nothing of which ids exist.
         let secret = self
             .repo
             .webhook_secret(id)
             .await
             .map_err(internal)?
-            .ok_or(FactoryError::NotFound)?;
+            .ok_or(FactoryError::BadSignature)?;
 
         // The signature covers the timestamp and the body. A call is taken
-        // only within the tolerance of now, and its signature keys the
-        // firing: a replay inside the tolerance finds it claimed, and one
-        // past it is refused here.
+        // only within the tolerance of now, and what it signs keys the
+        // firing: a replay inside the tolerance, however its digest is
+        // spelled, finds it claimed, and one past it is refused here.
         let fresh = timestamp.parse::<i64>().is_ok_and(|seconds| {
             (Utc::now().timestamp() - seconds).abs() <= WEBHOOK_TOLERANCE_SECS
         });
@@ -404,6 +472,13 @@ where
         {
             return Err(FactoryError::BadSignature);
         }
+        let automation = self
+            .repo
+            .automation(id)
+            .await
+            .map_err(internal)?
+            .filter(|automation| automation.trigger == AutomationTrigger::Webhook)
+            .ok_or(FactoryError::BadSignature)?;
 
         let call: WebhookFiring = if body.iter().all(u8::is_ascii_whitespace) {
             WebhookFiring::default()
@@ -412,9 +487,10 @@ where
                 .map_err(|_| FactoryError::InvalidFiring(super::FiringError::Body))?
         };
         let firing = Firing {
-            key: signature.to_string(),
+            key: webhook_firing_key(timestamp, body),
             task_id: call.task_id,
             cause: "a call to its webhook".to_string(),
+            own_branch: false,
         };
         let result = self.fire(&automation, firing).await?;
         if result.repeated {

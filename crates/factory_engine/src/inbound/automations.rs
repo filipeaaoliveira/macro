@@ -192,8 +192,10 @@ where
     Ok((StatusCode::CREATED, Json(created)))
 }
 
-/// Switch an Automation of the caller's team on or off: their own, or any
-/// for an admin of the team (403 otherwise). Its routine follows.
+/// Switch an Automation of the caller's team on or off. Only its creator
+/// switches it on, in their own signed-in session, as for making it; its
+/// creator or an admin of the team switches it off (403 otherwise). Its
+/// routine follows.
 #[utoipa::path(
     put,
     tag = "factory",
@@ -215,6 +217,7 @@ where
 pub async fn set_automation_enabled_handler<S, Auth>(
     State(state): State<AutomationsRouterState<S, Auth>>,
     caller: MacroAuthorizationExtractor<Auth, UserOrInternal>,
+    headers: HeaderMap,
     Path(params): Path<AutomationParams>,
     Json(body): Json<SetAutomationEnabledRequest>,
 ) -> Result<Json<Automation>, FactoryError>
@@ -222,17 +225,18 @@ where
     S: AutomationService,
     Auth: MacroAuthorizationService,
 {
+    let in_person = is_in_person(&caller.authorization, &headers);
     let actor = caller.authorization.user.macro_user_id;
     Ok(Json(
         state
             .service
-            .set_automation_enabled(&actor, params.id, body.enabled)
+            .set_automation_enabled(&actor, in_person, params.id, body.enabled)
             .await?,
     ))
 }
 
-/// Delete an Automation of the caller's team, as for switching it off, and
-/// its routine. The Runs it started keep the record of it.
+/// Delete an Automation of the caller's team, its creator's or, for an
+/// admin of the team, any, and its routine. The Runs it started keep the record of it.
 #[utoipa::path(
     delete,
     tag = "factory",
@@ -312,8 +316,9 @@ where
 /// the Automation's secret, as Macro signs its own webhooks
 /// (`x-macro-signature: v1=<hex>`, an HMAC-SHA256 of
 /// `"{x-macro-timestamp}.{body}"`), at a timestamp (Unix seconds) within
-/// five minutes of now (401 otherwise). A call received before is refused
-/// (409), so a replay starts nothing. The body is empty, or JSON naming the
+/// five minutes of now (401 otherwise, as for an id no webhook has). The
+/// same timestamp and body received before is refused (409), however its
+/// digest is spelled, so a replay starts nothing. The body is empty, or JSON naming the
 /// task the Run works on.
 #[utoipa::path(
     post,

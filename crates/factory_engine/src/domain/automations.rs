@@ -27,7 +27,7 @@ use factory_records::domain::models::{MAX_REQUEST_BYTES, RunId};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::domain::models::CodeRepository;
+use crate::domain::models::{CodeRepository, is_run_branch};
 
 /// The most Automations a team's list holds: its newest.
 pub const TEAM_AUTOMATIONS_LISTED: u16 = 100;
@@ -179,6 +179,10 @@ pub struct GithubFiring {
     /// Its payload's action, such as `opened`.
     #[serde(default)]
     pub action: Option<String>,
+    /// The branch it is about: a push's, a pull request's head, or a
+    /// workflow run's or check suite's head branch.
+    #[serde(default)]
+    pub branch: Option<String>,
 }
 
 /// What a webhook call may carry, as its JSON body; an empty body carries
@@ -201,6 +205,10 @@ pub struct Firing {
     pub task_id: Option<Uuid>,
     /// What fired it, in a line its Run's request ends with.
     pub cause: String,
+    /// Whether it is a repository event about a factory Run's own branch,
+    /// as the Run's pushes and pull request are: it starts nothing, or an
+    /// Automation would start a Run on each of its own Runs' changes.
+    pub own_branch: bool,
 }
 
 /// Why a firing is refused before anything is recorded.
@@ -229,6 +237,11 @@ impl RoutineFiring {
         if self.firing.is_empty() || self.firing.len() > 200 {
             return Err(FiringError::Key);
         }
+        let own_branch = self
+            .github
+            .as_ref()
+            .and_then(|github| github.branch.as_deref())
+            .is_some_and(is_run_branch);
         let (task_id, cause) = match &automation.trigger {
             AutomationTrigger::TaskEvent { .. } => {
                 let task_id = self.task_id.ok_or(FiringError::NoTask)?;
@@ -261,6 +274,7 @@ impl RoutineFiring {
             key: self.firing,
             task_id,
             cause,
+            own_branch,
         })
     }
 }

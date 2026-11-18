@@ -415,7 +415,7 @@ impl RunRepository for FakeRepo {
             control_files_team_id,
             control_files: None,
             standing_rules: Some(standing_rules),
-            automation: automation.cloned(),
+            automation: automation.map(|start| start.automation.clone()),
             end: None,
         };
         self.runs.lock().expect("runs").insert(id, run.clone());

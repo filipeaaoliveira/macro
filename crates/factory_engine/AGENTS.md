@@ -799,32 +799,60 @@ triggers:
   routine the scheduler refuses (an invalid cron, event routines the
   creator may not have, no linked GitHub account) takes its Automation
   with it, and the refusal says why (400). Only people's actions start
-  event routines, so a task an agent moves starts nothing.
+  event routines, so a task an agent moves starts nothing. A Run's own
+  pushes and pull request are made with its owner's GitHub token, so
+  GitHub names the owner, not a bot, as their sender: the code step hands
+  over the branch a delivery is about (a push's, a pull request's head, a
+  workflow run's or check suite's head branch), and one about a Run's
+  branch (`factory/{run id}`, `is_run_branch`) starts nothing
+  (`own_branch`). A delivery that names no branch, such as a comment, is
+  not told apart. The routine is named and described as managed by the
+  factory; the Routines page still shows and edits it like any other, and
+  an edit there is not read back.
 - `webhook` is fired by `POST /automations/{id}/webhook`, which carries no
   login: the call is signed with the Automation's secret (shown once, when
   it is made) as Macro signs its own webhooks (`webhook_signature`:
   `x-macro-signature: v1=<hex>`, an HMAC-SHA256 of `"{timestamp}.{body}"`,
   and `x-macro-timestamp` in Unix seconds), within `WEBHOOK_TOLERANCE_SECS`
-  of now (401 otherwise). The body is empty or `{"taskId"}`.
+  of now (401 otherwise, the same answer as for an id no webhook has, after
+  one read, so ids cannot be told apart). The body is empty or
+  `{"taskId"}`. The secret is kept in the clear, as Macro's own webhooks
+  keep theirs (`webhook.signing_secret`); encrypting it would follow
+  `agent_api_keys`' KMS cipher, which needs a KMS key the factory does not
+  have yet.
 
 Each firing is keyed (`factory_automation_firing`): by the routine run's id,
-so a retried run starts one Run, or by the webhook call's signature, so a
-replay within the tolerance is refused (409) and one past it fails the
-timestamp check. A claim that never ended is taken over after
-`FIRING_CLAIM_STALE_AFTER` (ten minutes), longer than the tolerance. A
-firing starts nothing, and records why (`skipped`), when the Automation is
-switched off (`disabled`), the queue takes no more of the creator's Runs
+so a retried run starts one Run, or by the SHA-256 of the timestamp and body
+a webhook call signs (never the signature as sent, whose hex digest reads
+in any letter case), so a replay within the tolerance is refused (409) and
+one past it fails the timestamp check. A claim that never ended is taken
+over after `FIRING_CLAIM_STALE_AFTER` (30 minutes, three times the ten
+minutes a signature is taken), and a Run its first worker started under
+the key is found then (`factory_run.automation_firing_key`, unique per
+Automation), never started again. A firing starts nothing, and records why
+(`skipped`), when the Automation is switched off (`disabled`), it is a
+repository event about a Run's own branch (`own_branch`), its creator is
+no longer on its team (`creator_left_team`) or their account is an
+agent's (`agent_account`), the queue takes no more of the creator's Runs
 (`queue_full`, the `RunQueue` port: the Queue limit plugs in there, and
-until it does `NoQueue` takes every Run), a Run already runs on its task,
+until it does `NoQueue` takes every Run; it must reserve the place it
+admits atomically, or two firings at once both pass a full queue), a Run already runs on its task,
 whoever started it (`task_busy`: checked before the Run is created, and
 held by the unique index `factory_run_automation_task_open_idx` between
 two firings that race; a person's Run started in the same instant can still
 overlap one), or the Run API refuses the Run as it would refuse its creator
 (`refused`). An outage leaves the firing claimed, for a retry once the
-claim is stale. A team's members list its Automations (`GET
-/automations`); its creator, or an admin of the team, switches one on or off
+claim is stale. A task a webhook names, or a Task event is about, is
+checked as the creator sees it, not against the Automation's team: tasks
+carry no team to check. A team's members list its Automations (`GET
+/automations`); its creator, or an admin of the team, switches one off
 (`PUT /automations/{id}/enabled`) or deletes it (`DELETE
-/automations/{id}`), and its routine follows, as the creator. The workflow
+/automations/{id}`), and its routine follows, as the creator. Only its
+creator switches it on, in person from an account that is not an agent's,
+as for making it, since it then starts Runs as them again. An Automation
+goes with its team and its creator's account (the tables' cascade); its
+routine, left behind, is switched off the next time it fires and finds no
+Automation, and stays for its owner to delete. The workflow
 is not touched: a Run an Automation starts walks its Flow as any other, so
 every Run in flight replays as before.
 

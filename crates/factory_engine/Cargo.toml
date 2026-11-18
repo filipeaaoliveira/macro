@@ -43,6 +43,7 @@ reqwest = { workspace = true }
 rootcause = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 system_properties = { path = "../system_properties" }
 temporalio-client = { workspace = true }
 temporalio-common = { workspace = true }

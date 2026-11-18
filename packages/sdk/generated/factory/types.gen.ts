@@ -455,7 +455,7 @@ export type FiringResult = {
 /**
  * Why a firing started no Run.
  */
-export type FiringSkip = 'disabled' | 'task_busy' | 'queue_full' | 'refused';
+export type FiringSkip = 'disabled' | 'task_busy' | 'queue_full' | 'refused' | 'own_branch' | 'creator_left_team' | 'agent_account';
 
 /**
  * The Runs of one Flow.
@@ -595,6 +595,11 @@ export type GithubFiring = {
      * Its payload's action, such as `opened`.
      */
     action?: string | null;
+    /**
+     * The branch it is about: a push's, a pull request's head, or a
+     * workflow run's or check suite's head branch.
+     */
+    branch?: string | null;
     /**
      * Its event, such as `pull_request`.
      */

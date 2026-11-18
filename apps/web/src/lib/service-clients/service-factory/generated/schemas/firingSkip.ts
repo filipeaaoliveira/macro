@@ -16,4 +16,7 @@ export const FiringSkip = {
   task_busy: 'task_busy',
   queue_full: 'queue_full',
   refused: 'refused',
+  own_branch: 'own_branch',
+  creator_left_team: 'creator_left_team',
+  agent_account: 'agent_account',
 } as const;

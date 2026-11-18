@@ -285,6 +285,24 @@ async fn a_repository_event_starts_a_run_on_its_repository() {
                 github: Some(GithubFiring {
                     event: "pull_request".to_string(),
                     action: Some("opened".to_string()),
+                    branch: Some("fix-login".to_string()),
+                }),
+            },
+        )
+        .await
+        .expect("fired");
+    // The Run's own pull request, from its branch, starts nothing.
+    let own = automations
+        .fire_from_routine(
+            &julia(),
+            ROUTINE,
+            RoutineFiring {
+                firing: "run-2".to_string(),
+                task_id: None,
+                github: Some(GithubFiring {
+                    event: "pull_request".to_string(),
+                    action: Some("opened".to_string()),
+                    branch: Some(format!("factory/{}", fired.run_id.expect("started"))),
                 }),
             },
         )
@@ -314,6 +332,8 @@ async fn a_repository_event_starts_a_run_on_its_repository() {
         unreachable,
         Err(FactoryError::UnreachableRepository)
     ));
+    assert_eq!(own.skipped, Some(FiringSkip::OwnBranch));
+    assert_eq!(workflows.started.lock().expect("started").len(), 1);
 }
 
 /// A webhook's call must be signed with the secret shown once when it was
@@ -342,6 +362,15 @@ async fn a_signed_webhook_call_starts_a_run_once() {
     let replayed = automations
         .fire_webhook(id, &now, &signature, body.as_bytes())
         .await;
+    // The same call with its digest in upper case verifies too: it is the
+    // same firing.
+    let shouted = format!("v1={}", signature["v1=".len()..].to_uppercase());
+    let replayed_shouting = automations
+        .fire_webhook(id, &now, &shouted, body.as_bytes())
+        .await;
+    let unknown = automations
+        .fire_webhook(Uuid::now_v7(), &now, &signature, body.as_bytes())
+        .await;
     let forged = automations
         .fire_webhook(
             id,
@@ -369,6 +398,11 @@ async fn a_signed_webhook_call_starts_a_run_once() {
         .expect("kept");
     assert_eq!(run.task_id, Some(TASK));
     assert!(matches!(replayed, Err(FactoryError::FiringRepeated)));
+    assert!(matches!(
+        replayed_shouting,
+        Err(FactoryError::FiringRepeated)
+    ));
+    assert!(matches!(unknown, Err(FactoryError::BadSignature)));
     assert!(matches!(forged, Err(FactoryError::BadSignature)));
     assert!(matches!(stale, Err(FactoryError::BadSignature)));
     assert_eq!(workflows.started.lock().expect("started").len(), 1);
@@ -427,9 +461,11 @@ async fn an_automation_switched_off_starts_nothing() {
         .expect("created");
     let id = created.automation.id;
 
-    let by_member = automations.set_automation_enabled(&teo(), id, false).await;
+    let by_member = automations
+        .set_automation_enabled(&teo(), true, id, false)
+        .await;
     automations
-        .set_automation_enabled(&julia(), id, false)
+        .set_automation_enabled(&julia(), true, id, false)
         .await
         .expect("switched off");
     let fired = automations
@@ -504,4 +540,103 @@ async fn a_refused_routine_keeps_no_automation() {
         Err(FactoryError::TriggerRefused(reason)) if reason == "event-trigger management is not enabled"
     ));
     assert!(repo.automations.lock().expect("automations").is_empty());
+}
+
+/// A team admin may stop a member's Automation, but only its creator, in
+/// person, switches it on again: switching one on has it start Runs as
+/// them.
+#[tokio::test]
+async fn only_its_creator_switches_an_automation_on() {
+    let repo = team_repo();
+    let workflows = FakeWorkflows::default();
+    let triggers = FakeTriggers::default();
+    let automations = automations(&repo, service(&repo, &workflows), &triggers, NoQueue);
+    let id = automations
+        .create_automation(teo(), true, reply_automation(status_in_progress()))
+        .await
+        .expect("created")
+        .automation
+        .id;
+
+    automations
+        .set_automation_enabled(&julia(), true, id, false)
+        .await
+        .expect("an admin stops it");
+    let admin_starts = automations
+        .set_automation_enabled(&julia(), true, id, true)
+        .await;
+    let program_starts = automations
+        .set_automation_enabled(&teo(), false, id, true)
+        .await;
+    let creator_starts = automations
+        .set_automation_enabled(&teo(), true, id, true)
+        .await
+        .expect("its creator starts it");
+
+    assert!(matches!(
+        admin_starts,
+        Err(FactoryError::NotTheAutomationOwner)
+    ));
+    assert!(matches!(program_starts, Err(FactoryError::NotAPerson)));
+    assert!(creator_starts.enabled);
+}
+
+/// An Automation acts as its creator only while they are a person on its
+/// team: one whose creator left, or whose account is an agent's, starts
+/// nothing and says why.
+#[tokio::test]
+async fn an_automation_whose_creator_left_starts_nothing() {
+    let repo = team_repo();
+    let workflows = FakeWorkflows::default();
+    let triggers = FakeTriggers::default();
+    let automations = automations(&repo, service(&repo, &workflows), &triggers, NoQueue);
+    automations
+        .create_automation(teo(), true, reply_automation(status_in_progress()))
+        .await
+        .expect("created");
+
+    repo.agent_accounts
+        .lock()
+        .expect("agents")
+        .insert(teo().to_string());
+    let as_agent = automations
+        .fire_from_routine(&teo(), ROUTINE, routine_firing("run-1", Some(TASK)))
+        .await
+        .expect("fired");
+    repo.agent_accounts.lock().expect("agents").clear();
+    repo.teams.lock().expect("teams").remove(&teo().to_string());
+    let after_leaving = automations
+        .fire_from_routine(&teo(), ROUTINE, routine_firing("run-2", Some(TASK)))
+        .await
+        .expect("fired");
+
+    assert_eq!(as_agent.skipped, Some(FiringSkip::AgentAccount));
+    assert_eq!(after_leaving.skipped, Some(FiringSkip::CreatorLeftTeam));
+    assert!(workflows.started.lock().expect("started").is_empty());
+}
+
+/// A routine whose Automation is gone, as with its team, is switched off
+/// when it next fires, and starts nothing.
+#[tokio::test]
+async fn the_routine_of_a_deleted_automation_is_switched_off() {
+    let repo = team_repo();
+    let workflows = FakeWorkflows::default();
+    let triggers = FakeTriggers::default();
+    let automations = automations(&repo, service(&repo, &workflows), &triggers, NoQueue);
+    automations
+        .create_automation(julia(), true, reply_automation(status_in_progress()))
+        .await
+        .expect("created");
+    repo.automations.lock().expect("automations").clear();
+
+    let fired = automations
+        .fire_from_routine(&julia(), ROUTINE, routine_firing("run-1", Some(TASK)))
+        .await;
+
+    assert!(matches!(fired, Err(FactoryError::NotFound)));
+    assert_eq!(
+        *triggers.switched.lock().expect("switched"),
+        vec![(ROUTINE, false)]
+    );
+    assert!(workflows.started.lock().expect("started").is_empty());
 }

@@ -28,13 +28,25 @@ use crate::domain::ports::{AutomationTriggerError, AutomationTriggers};
 
 /// The code step that fires the Automation: the routine run keys the
 /// firing, a Task event names its task and a repository event its GitHub
-/// delivery. A dry run starts nothing.
+/// delivery, with the branch it is about, so a delivery about a factory
+/// Run's own branch starts nothing. A dry run starts nothing.
 const FIRE_STEP: &str = r#"export async function main({ macro, run, trigger }: StepContext) {
   if (run.dryRun) {
     return { started: false, skipped: null };
   }
   const item = trigger.kind === 'event' ? trigger.item : undefined;
   const github = item?.github;
+  const payload = github?.payload;
+  const pushed =
+    typeof payload?.ref === 'string'
+      ? payload.ref.replace(/^refs\/heads\//, '')
+      : undefined;
+  const branch =
+    payload?.pull_request?.head?.ref ??
+    payload?.workflow_run?.head_branch ??
+    payload?.check_suite?.head_branch ??
+    payload?.check_run?.check_suite?.head_branch ??
+    pushed;
   const fired = await macro.factory.fireAutomation({
     run,
     task:
@@ -42,7 +54,11 @@ const FIRE_STEP: &str = r#"export async function main({ macro, run, trigger }: S
         ? macro.tasks.byId(item.entity_id)
         : undefined,
     github: github
-      ? { event: github.event, action: github.action ?? undefined }
+      ? {
+          event: github.event,
+          action: github.action ?? undefined,
+          branch: typeof branch === 'string' ? branch : undefined,
+        }
       : undefined,
   });
   return { started: fired.started, skipped: fired.skipped ?? null };
@@ -198,7 +214,9 @@ fn routine(automation: &Automation) -> Result<Value, AutomationTriggerError> {
     Ok(json!({
         "name": format!("Factory automation: {}", automation.name),
         "description": format!(
-            "Starts a factory run of the {} flow each time it runs, for the automation \"{}\".",
+            "Managed by the factory: starts a run of the {} flow for the automation \"{}\" \
+             each time it runs. Change or delete the automation in team settings, under \
+             Automations; changes made to this routine are not read back.",
             automation.flow, automation.name,
         ),
         "kind": "Agent",

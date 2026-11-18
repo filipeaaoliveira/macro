@@ -315,6 +315,7 @@ impl FactoryService for FakeService {
     async fn create_automation_run(
         &self,
         automation: &factory_records::domain::automations::Automation,
+        _firing_key: &str,
         _request: String,
         _task_id: Option<Uuid>,
     ) -> Result<RunDetail, FactoryError> {
@@ -415,7 +416,9 @@ async fn alice_s_run(repo: &FakeRepo) -> RunId {
         .expect("insert")
     {
         RunInsert::Inserted(run) => run.id,
-        RunInsert::NoSuchTask | RunInsert::TaskBusy => panic!("a run with no task is kept"),
+        RunInsert::NoSuchTask | RunInsert::TaskBusy | RunInsert::FiringStarted => {
+            panic!("a run with no task is kept")
+        }
     }
 }
 

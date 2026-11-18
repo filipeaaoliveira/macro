@@ -217,7 +217,7 @@
     "/automations/{id}": {
       "delete": {
         "tags": ["factory"],
-        "summary": "Delete an Automation of the caller's team, as for switching it off, and\nits routine. The Runs it started keep the record of it.",
+        "summary": "Delete an Automation of the caller's team, its creator's or, for an\nadmin of the team, any, and its routine. The Runs it started keep the record of it.",
         "operationId": "delete_factory_automation",
         "parameters": [
           {
@@ -301,7 +301,7 @@
     "/automations/{id}/enabled": {
       "put": {
         "tags": ["factory"],
-        "summary": "Switch an Automation of the caller's team on or off: their own, or any\nfor an admin of the team (403 otherwise). Its routine follows.",
+        "summary": "Switch an Automation of the caller's team on or off. Only its creator\nswitches it on, in their own signed-in session, as for making it; its\ncreator or an admin of the team switches it off (403 otherwise). Its\nroutine follows.",
         "operationId": "set_factory_automation_enabled",
         "parameters": [
           {
@@ -402,7 +402,7 @@
     "/automations/{id}/webhook": {
       "post": {
         "tags": ["factory"],
-        "summary": "Fire a webhook Automation. The call carries no login: it is signed with\nthe Automation's secret, as Macro signs its own webhooks\n(`x-macro-signature: v1=<hex>`, an HMAC-SHA256 of\n`\"{x-macro-timestamp}.{body}\"`), at a timestamp (Unix seconds) within\nfive minutes of now (401 otherwise). A call received before is refused\n(409), so a replay starts nothing. The body is empty, or JSON naming the\ntask the Run works on.",
+        "summary": "Fire a webhook Automation. The call carries no login: it is signed with\nthe Automation's secret, as Macro signs its own webhooks\n(`x-macro-signature: v1=<hex>`, an HMAC-SHA256 of\n`\"{x-macro-timestamp}.{body}\"`), at a timestamp (Unix seconds) within\nfive minutes of now (401 otherwise, as for an id no webhook has). The\nsame timestamp and body received before is refused (409), however its\ndigest is spelled, so a replay starts nothing. The body is empty, or JSON naming the\ntask the Run works on.",
         "operationId": "call_factory_automation_webhook",
         "parameters": [
           {
@@ -2376,7 +2376,15 @@
       "FiringSkip": {
         "type": "string",
         "description": "Why a firing started no Run.",
-        "enum": ["disabled", "task_busy", "queue_full", "refused"]
+        "enum": [
+          "disabled",
+          "task_busy",
+          "queue_full",
+          "refused",
+          "own_branch",
+          "creator_left_team",
+          "agent_account"
+        ]
       },
       "FlowInsight": {
         "type": "object",
@@ -2595,6 +2603,10 @@
           "action": {
             "type": ["string", "null"],
             "description": "Its payload's action, such as `opened`."
+          },
+          "branch": {
+            "type": ["string", "null"],
+            "description": "The branch it is about: a push's, a pull request's head, or a\nworkflow run's or check suite's head branch."
           },
           "event": {
             "type": "string",

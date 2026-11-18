@@ -73,6 +73,7 @@ export * from './gateStandIn';
 export * from './getFactoryInsightsParams';
 export * from './githubFiring';
 export * from './githubFiringAction';
+export * from './githubFiringBranch';
 export * from './handBackRequest';
 export * from './insightDay';
 export * from './lines';
