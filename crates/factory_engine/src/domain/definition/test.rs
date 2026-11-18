@@ -525,3 +525,36 @@ async fn nothing_but_a_merge_gate_s_approval_falls_into_the_merge() {
     assert_eq!(flow_error(next), unguarded());
 }
 
+/// A token glued to what precedes it, as in a URL's query, is a secret all
+/// the same; only `sk-` needs the start of a word, so `task-` is none.
+#[tokio::test]
+async fn a_token_glued_to_text_is_a_secret() {
+    let glued = concat!(
+        r#"{ "scorers": [{ "name": "s", "settings": { "hook": "https://example.com/hook?auth=Bearer%20ghp_"#,
+        r#"abcdefghijklmnopqrstuvwxyz0123456789" } }] }"#
+    );
+    let stripe = AGENTS.replace("large-model", concat!("rk_live_", "0123456789abcdefABCDEF"));
+    let npm = AGENTS.replace("large-model", "npm_0123456789abcdefABCDEF0123");
+
+    assert_eq!(
+        read(with("scorers.json", glued)).await,
+        Err(DefinitionError::Secret {
+            path: "scorers.json".to_string(),
+            kind: "ghp_",
+        })
+    );
+    assert_eq!(
+        read(with("agents.json", &stripe)).await,
+        Err(DefinitionError::Secret {
+            path: "agents.json".to_string(),
+            kind: "rk_live_",
+        })
+    );
+    assert_eq!(
+        read(with("agents.json", &npm)).await,
+        Err(DefinitionError::Secret {
+            path: "agents.json".to_string(),
+            kind: "npm_",
+        })
+    );
+}

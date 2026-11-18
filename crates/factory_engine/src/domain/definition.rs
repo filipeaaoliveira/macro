@@ -73,10 +73,10 @@ pub const MAX_SCORERS: usize = 64;
 pub const MAX_FILE_BYTES: usize = 256 * 1024;
 
 /// The beginnings of keys and tokens that must never be in a Definition:
-/// a file holding one at the start of a word, followed by [`SECRET_TAIL`]
-/// or more characters of a token, does not read. The more specific come
-/// first, so the error names them.
-const SECRET_PREFIXES: [&str; 15] = [
+/// a file holding one, followed by [`SECRET_TAIL`] or more characters of a
+/// token, does not read, wherever it is, glued to a URL's query or not.
+/// The more specific come first, so the error names them.
+const SECRET_PREFIXES: [&str; 19] = [
     "ghp_",
     "gho_",
     "ghu_",
@@ -89,13 +89,22 @@ const SECRET_PREFIXES: [&str; 15] = [
     "sk-",
     "xoxb-",
     "xoxp-",
+    "sk_live_",
+    "rk_live_",
     "xapp-",
+    "npm_",
     "AKIA",
     "AIza",
 ];
 
 /// How many token characters after a prefix make it a secret.
+    // A JSON Web Token's header, `{"`, encoded.
+    "eyJ",
 const SECRET_TAIL: usize = 16;
+
+/// The prefixes that end ordinary words (`task-`): they count only at the
+/// start of a word.
+const WORD_START_PREFIXES: [&str; 1] = ["sk-"];
 
 /// What begins a private key in a file.
 const PRIVATE_KEY: &str = "-----BEGIN";
@@ -264,11 +273,13 @@ fn secret_in(text: &str) -> Option<&'static str> {
     }
     SECRET_PREFIXES.into_iter().find(|prefix| {
         text.match_indices(prefix).any(|(at, _)| {
-            // Only at the start of a word: `task-` holds no `sk-` token.
-            let word_start = text[..at]
-                .chars()
-                .next_back()
-                .is_none_or(|before| !before.is_ascii_alphanumeric());
+            // `task-` holds no `sk-` token: those prefixes count only at
+            // the start of a word.
+            let word_start = !WORD_START_PREFIXES.contains(prefix)
+                || text[..at]
+                    .chars()
+                    .next_back()
+                    .is_none_or(|before| !before.is_ascii_alphanumeric());
             let tail = &text[at + prefix.len()..];
             word_start
                 && tail
