@@ -1,0 +1,279 @@
+//! How a repository prepares a fresh checkout before the factory works in
+//! it: `.macro/setup.json` at its root, read from the Run's base branch as
+//! the checks file is ([`crate::domain::checks`]).
+//!
+//! ```json
+//! {
+//!   "setup": [
+//!     { "name": "install", "run": "bun install --frozen-lockfile" },
+//!     { "name": "generate", "run": "just generate", "timeout": 300 }
+//!   ],
+//!   "env": { "CARGO_TARGET_DIR": "/tmp/target" }
+//! }
+//! ```
+//!
+//! Each command runs `run` from the repository's root, in order, with
+//! `bash --noprofile --norc`, under its own `timeout` (seconds, 1 to 1200,
+//! 600 when left out): before the first prompt of each new agent session of
+//! a Step, and in a checks round's worktree before its checks. `env` holds
+//! plain values every command, and every check, runs with. Secrets never
+//! live here: a file holding something shaped like a key or a token, or an
+//! `env` name that says it holds one, does not read.
+
+#[cfg(test)]
+mod test;
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use agent_session::domain::session_command::SessionCommandOutput;
+use serde::Deserialize;
+
+use crate::domain::checks::{DEFAULT_CHECK_TIMEOUT_SECS, MAX_CHECK_TIMEOUT_SECS};
+use crate::domain::definition::{UniqueKeys, secret_in, secret_in_value};
+
+/// Where a repository declares its setup, from its root.
+pub const SETUP_FILE: &str = ".macro/setup.json";
+
+/// The largest setup file read, in bytes.
+const MAX_FILE_BYTES: usize = 16 * 1024;
+
+/// The most commands a setup runs.
+const MAX_COMMANDS: usize = 16;
+
+/// The longest command a setup runs, in bytes.
+const MAX_RUN_BYTES: usize = 4096;
+
+/// The most values `env` holds.
+const MAX_ENV: usize = 32;
+
+/// The longest value in `env`, in bytes.
+const MAX_ENV_VALUE_BYTES: usize = 1024;
+
+/// What an `env` name holds when it names a secret, in any case.
+const SECRET_NAMES: [&str; 7] = [
+    "TOKEN",
+    "SECRET",
+    "PASSWORD",
+    "PASSWD",
+    "API_KEY",
+    "PRIVATE_KEY",
+    "CREDENTIAL",
+];
+
+/// The `env` names a setup may not set: those that change what
+/// `bash --noprofile --norc` runs, and the factory's own.
+const RESERVED_NAMES: [&str; 2] = ["BASH_ENV", "ENV"];
+
+/// The prefix of the variables the factory sets itself.
+const RESERVED_PREFIX: &str = "MACRO_";
+
+/// One setup command: a command run from the repository's root.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SetupCommand {
+    /// Its name, unique among the setup's commands.
+    pub name: String,
+    /// The command, run from the repository's root.
+    pub run: String,
+    /// How many seconds it may take.
+    #[serde(default = "default_timeout")]
+    pub timeout: u64,
+}
+
+fn default_timeout() -> u64 {
+    DEFAULT_CHECK_TIMEOUT_SECS
+}
+
+/// A repository's setup.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RepositorySetup {
+    /// The commands, in the order they run.
+    #[serde(default)]
+    pub setup: Vec<SetupCommand>,
+    /// The plain values the commands, and the checks, run with.
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+}
+
+/// Why a repository's setup file does not read.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum SetupFileError {
+    /// The file is not the setup's JSON.
+    #[error("{SETUP_FILE} does not read: {0}")]
+    Unreadable(String),
+    /// The file is larger than the factory reads.
+    #[error("{SETUP_FILE} is over {MAX_FILE_BYTES} bytes")]
+    TooLarge,
+    /// The file holds something shaped like a secret.
+    #[error(
+        "{SETUP_FILE} holds what looks like a secret ({0}…): keep secrets out of the repository's setup"
+    )]
+    Secret(&'static str),
+    /// It declares more commands than a setup runs.
+    #[error("{SETUP_FILE} declares {0} commands; a setup runs at most {MAX_COMMANDS}")]
+    TooMany(usize),
+    /// A command's name is empty, too long, or not of `[a-z0-9_-]`.
+    #[error("{SETUP_FILE} names a command {0:?}; a name is 1 to 64 of a-z, 0-9, _ and -")]
+    Name(String),
+    /// Two commands share a name.
+    #[error("{SETUP_FILE} names two commands {0}")]
+    DuplicateName(String),
+    /// A command is blank or too long.
+    #[error("{SETUP_FILE} gives command {0} a blank run or one over {MAX_RUN_BYTES} bytes")]
+    Run(String),
+    /// A command's timeout is zero or past [`MAX_CHECK_TIMEOUT_SECS`].
+    #[error(
+        "{SETUP_FILE} gives command {0} a timeout outside 1 to {MAX_CHECK_TIMEOUT_SECS} seconds"
+    )]
+    Timeout(String),
+    /// `env` holds more values than a setup takes.
+    #[error("{SETUP_FILE} sets {0} env values; a setup sets at most {MAX_ENV}")]
+    TooManyEnv(usize),
+    /// An `env` name is not a shell variable's, or is one the factory keeps.
+    #[error(
+        "{SETUP_FILE} sets env {0:?}; a name is a shell variable's (A-Z, a-z, 0-9 and _, not first a digit), not BASH_ENV, ENV or one starting MACRO_"
+    )]
+    EnvName(String),
+    /// An `env` name says it holds a secret.
+    #[error("{SETUP_FILE} sets env {0}, whose name says it holds a secret: env holds plain values")]
+    SecretEnv(String),
+    /// An `env` value is too long, or holds a control character.
+    #[error(
+        "{SETUP_FILE} gives env {0} a value over {MAX_ENV_VALUE_BYTES} bytes or with a control character"
+    )]
+    EnvValue(String),
+}
+
+impl RepositorySetup {
+    /// Read the setup from the text of the repository's setup file.
+    pub fn parse(text: &str) -> Result<Self, SetupFileError> {
+        if text.len() > MAX_FILE_BYTES {
+            return Err(SetupFileError::TooLarge);
+        }
+        if let Some(kind) = secret_in(text) {
+            return Err(SetupFileError::Secret(kind));
+        }
+        let unreadable = |error: serde_json::Error| SetupFileError::Unreadable(error.to_string());
+        serde_json::from_str::<UniqueKeys>(text).map_err(unreadable)?;
+        let value: serde_json::Value = serde_json::from_str(text).map_err(unreadable)?;
+        // JSON escapes (`_`) hide a token from the text: its strings
+        // are checked again once decoded.
+        if let Some(kind) = secret_in_value(&value) {
+            return Err(SetupFileError::Secret(kind));
+        }
+        let setup: Self = serde_json::from_value(value).map_err(unreadable)?;
+
+        if setup.setup.len() > MAX_COMMANDS {
+            return Err(SetupFileError::TooMany(setup.setup.len()));
+        }
+        let mut names = BTreeSet::new();
+        for command in &setup.setup {
+            let name_valid = (1..=64).contains(&command.name.len())
+                && command.name.chars().all(|c| {
+                    c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '_' | '-')
+                });
+            if !name_valid {
+                return Err(SetupFileError::Name(command.name.clone()));
+            }
+            if !names.insert(command.name.as_str()) {
+                return Err(SetupFileError::DuplicateName(command.name.clone()));
+            }
+            if command.run.trim().is_empty() || command.run.len() > MAX_RUN_BYTES {
+                return Err(SetupFileError::Run(command.name.clone()));
+            }
+            if command.timeout == 0 || command.timeout > MAX_CHECK_TIMEOUT_SECS {
+                return Err(SetupFileError::Timeout(command.name.clone()));
+            }
+        }
+
+        if setup.env.len() > MAX_ENV {
+            return Err(SetupFileError::TooManyEnv(setup.env.len()));
+        }
+        for (name, value) in &setup.env {
+            if !env_name(name) {
+                return Err(SetupFileError::EnvName(name.clone()));
+            }
+            let upper = name.to_ascii_uppercase();
+            if SECRET_NAMES.iter().any(|secret| upper.contains(secret)) {
+                return Err(SetupFileError::SecretEnv(name.clone()));
+            }
+            if value.len() > MAX_ENV_VALUE_BYTES || value.chars().any(char::is_control) {
+                return Err(SetupFileError::EnvValue(name.clone()));
+            }
+        }
+        Ok(setup)
+    }
+
+    /// Whether it asks for nothing: no command and no value.
+    pub fn is_empty(&self) -> bool {
+        self.setup.is_empty() && self.env.is_empty()
+    }
+
+    /// Its `env` as shell that exports each value, one line each; nothing
+    /// when it holds none.
+    pub fn exports(&self) -> String {
+        self.env
+            .iter()
+            .map(|(name, value)| format!("export {name}={}\n", shell_quote(value)))
+            .collect()
+    }
+
+    /// The shell that runs `command` from the directory it runs in, with
+    /// the setup's `env`, under the command's timeout.
+    pub fn shell(&self, command: &SetupCommand) -> String {
+        format!(
+            "{}timeout --kill-after=10 {} bash --noprofile --norc -c {}",
+            self.exports(),
+            command.timeout,
+            shell_quote(&command.run)
+        )
+    }
+}
+
+/// The most of a setup command's output a failure shows, in bytes.
+pub const MAX_OUTPUT_TAIL_BYTES: usize = 4096;
+
+/// The end of what a setup command printed, both streams, as a failure
+/// shows it: without control characters but line breaks and tabs, and at
+/// most [`MAX_OUTPUT_TAIL_BYTES`], never split inside a character.
+pub fn output_tail(output: &SessionCommandOutput) -> String {
+    let mut text = output.stdout.clone();
+    if !output.stderr.is_empty() {
+        if !text.is_empty() && !text.ends_with('\n') {
+            text.push('\n');
+        }
+        text.push_str(&output.stderr);
+    }
+    let mut kept = Vec::new();
+    let mut size = 0;
+    for character in text.chars().rev() {
+        if character.is_control() && !matches!(character, '\n' | '\t') {
+            continue;
+        }
+        if size + character.len_utf8() > MAX_OUTPUT_TAIL_BYTES {
+            break;
+        }
+        size += character.len_utf8();
+        kept.push(character);
+    }
+    kept.iter().rev().collect()
+}
+
+/// Whether `name` is a shell variable's name the setup may set.
+fn env_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    let starts = chars
+        .next()
+        .is_some_and(|first| first.is_ascii_alphabetic() || first == '_');
+    starts
+        && name.len() <= 128
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+        && !RESERVED_NAMES.contains(&name)
+        && !name.to_ascii_uppercase().starts_with(RESERVED_PREFIX)
+}
+
+/// `text` as one single-quoted shell word.
+fn shell_quote(text: &str) -> String {
+    format!("'{}'", text.replace('\'', r"'\''"))
+}

@@ -26,7 +26,7 @@ fn unlisted() -> Option<ControlFileChanges> {
     })
 }
 
-/// The default list holds CI workflows, the checks and verify files, agent
+/// The default list holds CI workflows, the checks, verify and setup files, agent
 /// instructions and their tools' settings, package and build scripts, test
 /// and lint configuration, and tests with what they compare against, at the
 /// root or in a folder; other code is not a Control File.
@@ -38,6 +38,7 @@ fn the_defaults_name_what_decides_whether_checks_pass() {
         ".github/workflows/ci.yml",
         ".macro/checks.json",
         ".macro/verify.json",
+        ".macro/setup.json",
         "AGENTS.md",
         "apps/web/AGENTS.md",
         "CLAUDE.md",
