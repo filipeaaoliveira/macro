@@ -28,3 +28,18 @@ export function rowEntity(
     ? { ...entity, notifications: read, target: { messageId, threadId } }
     : { ...entity, notifications: read };
 }
+
+/**
+ * The notification a row, or the one picked from its stack, opens at its own
+ * target instead of the row's entity: a factory Run waiting on its owner is
+ * filed under the Run's task but answered on the Run.
+ */
+export function runNotification(
+  row: NotificationInboxRow,
+  notification?: UnifiedNotification
+): UnifiedNotification | undefined {
+  const opened = notification ?? row.content.notifications[0];
+  return opened?.notification_metadata.tag === 'factory_gate_waiting'
+    ? opened
+    : undefined;
+}
