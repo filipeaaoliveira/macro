@@ -387,12 +387,15 @@ pub trait PullRequests: Send + Sync + 'static {
         branch: &str,
     ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
 
-    /// Ask GitHub to delete `branch` of `repository`, or find it missing.
-    fn delete_branch(
+    /// Ask GitHub to delete the branch of the Run `run_id` in
+    /// `repository` ([`run_branch`](crate::domain::models::run_branch)), or
+    /// find it missing. It takes a Run, not a name, so no other branch can
+    /// be deleted through it.
+    fn delete_run_branch(
         &self,
         owner: &MacroUserIdStr<'static>,
         repository: &CodeRepository,
-        branch: &str,
+        run_id: RunId,
     ) -> impl Future<Output = Result<BranchDeletion, Self::Err>> + Send;
 }
 

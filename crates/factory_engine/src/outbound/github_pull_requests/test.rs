@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use factory_records::domain::models::RunId;
 use github::domain::models::GithubError;
 use github::outbound::github_oauth_client::GithubOauthImpl;
 use macro_user_id::user_id::MacroUserIdStr;
@@ -10,7 +11,7 @@ use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::{GithubPullRequests, GithubPullRequestsErr, OwnerTokens};
-use crate::domain::models::{CodeRepository, HeadChecks};
+use crate::domain::models::{BranchDeletion, CodeRepository, HeadChecks};
 use crate::domain::ports::{PullRequests, Retryable};
 
 /// An owner's linked token, or none, counting the reads of it.
@@ -64,38 +65,35 @@ async fn an_owner_with_no_link_fails_for_good() {
     assert_eq!(tokens.reads.load(Ordering::SeqCst), 3);
 }
 
-/// A branch that is no Run's branch is never deleted: it is refused before
-/// the owner's token is read or GitHub asked.
+/// The branch deleted is the Run's, named from its id: no other name
+/// reaches GitHub.
 #[tokio::test]
-async fn only_a_run_s_branch_is_deleted() {
-    let tokens = Tokens {
-        linked: Some("token"),
-        ..Tokens::default()
-    };
-    // Nothing listens here: GitHub asked would fail as an outage.
+async fn a_run_s_branch_is_deleted_by_its_id() {
+    let run_id = RunId::generate();
+    let server = MockServer::start().await;
+    Mock::given(method("DELETE"))
+        .and(path(format!(
+            "/repos/macro/app/git/refs/heads/factory/{run_id}"
+        )))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&server)
+        .await;
     let github = GithubPullRequests::with_client(
-        tokens.clone(),
-        GithubOauthImpl::with_api_base_url("http://127.0.0.1:9".to_string()),
+        Tokens {
+            linked: Some("token"),
+            ..Tokens::default()
+        },
+        GithubOauthImpl::with_api_base_url(server.uri()),
     );
 
-    for branch in [
-        "main",
-        "feature/x",
-        "factory/",
-        "factory/not-a-run",
-        "factory",
-    ] {
-        let refused = github.delete_branch(&julia(), &repository(), branch).await;
-        let Err(error) = refused else {
-            panic!("{branch:?} is deleted");
-        };
-        assert!(
-            matches!(error, GithubPullRequestsErr::NotRunBranch(_)),
-            "{branch:?}: {error:?}"
-        );
-        assert!(!error.retryable());
-    }
-    assert_eq!(tokens.reads.load(Ordering::SeqCst), 0);
+    let deletion = github
+        .delete_run_branch(&julia(), &repository(), run_id)
+        .await
+        .expect("deleted");
+
+    assert_eq!(deletion, BranchDeletion::Deleted);
+    server.verify().await;
 }
 
 /// GitHub failing or throttling, and a token that could not be read, are

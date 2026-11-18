@@ -318,11 +318,14 @@ pub fn run_branch(run_id: RunId) -> String {
 /// What every Run's branch starts with, before its Run's id.
 pub const RUN_BRANCH_PREFIX: &str = "factory/";
 
-/// Whether `branch` is a Run's branch: the prefix, then a Run's id.
+/// Whether `branch` is a Run's branch: the prefix, then a Run's id written
+/// as [`run_branch`] writes it, hyphenated and in lower case. An id written
+/// another way (upper case, no hyphens, braces, a `urn:uuid:` prefix) is
+/// another branch.
 pub fn is_run_branch(branch: &str) -> bool {
     branch
         .strip_prefix(RUN_BRANCH_PREFIX)
-        .is_some_and(|id| Uuid::parse_str(id).is_ok())
+        .is_some_and(|id| Uuid::parse_str(id).is_ok_and(|uuid| uuid.hyphenated().to_string() == id))
 }
 
 /// What a Run's owner may do with a repository on GitHub.

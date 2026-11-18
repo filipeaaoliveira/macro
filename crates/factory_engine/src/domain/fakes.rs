@@ -35,6 +35,7 @@ use uuid::Uuid;
 use crate::domain::models::{
     BranchDeletion, Check, CheckState, CheckSuite, CodeRepository, Deployment, HeadChecks, Merging,
     OpenPullRequest, Opening, PullRequest, PullRequestState, RepositoryAccess, RequiredChecks,
+    run_branch,
 };
 use crate::domain::ports::{
     FollowUpTask, PullRequests, Retryable, TaskAccess, TaskDirectory, UserDirectory,
@@ -1682,11 +1683,11 @@ impl PullRequests for FakeGithub {
     }
 
     /// Deleting the Run's branch leaves it not there for later reads.
-    async fn delete_branch(
+    async fn delete_run_branch(
         &self,
         _owner: &MacroUserIdStr<'static>,
         _repository: &CodeRepository,
-        branch: &str,
+        run_id: RunId,
     ) -> Result<BranchDeletion, FakeGithubError> {
         let mut state = self.state();
         if state.delete_fails {
@@ -1698,7 +1699,7 @@ impl PullRequests for FakeGithub {
         if !there {
             return Ok(BranchDeletion::Missing);
         }
-        state.deleted_branches.push(branch.to_string());
+        state.deleted_branches.push(run_branch(run_id));
         Ok(BranchDeletion::Deleted)
     }
 
