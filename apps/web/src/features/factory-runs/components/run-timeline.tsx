@@ -451,6 +451,32 @@ function MainHoldNote(props: { hold: MainHold; baseBranch: string }) {
 }
 
 /**
+ * A Run's review rounds, oldest first, each with what its reviewers found,
+ * as the Run's timeline shows them under their Steps: for a view that
+ * shows the review apart from the Steps, such as a pull request's.
+ */
+export function ReviewRoundList(props: {
+  rounds: ReviewRound[];
+  steps: Pick<RunStep, 'seq' | 'entry'>[];
+}) {
+  return (
+    <For each={props.rounds}>
+      {(round) => (
+        <>
+          <ReviewRoundNote
+            round={round}
+            afresh={reviewsAfresh(props.rounds, props.steps, round)}
+          />
+          <For each={round.findings}>
+            {(finding) => <FindingNote finding={finding} />}
+          </For>
+        </>
+      )}
+    </For>
+  );
+}
+
+/**
  * A review round: which of the Run's (a fresh review when its entry was
  * reset, as when the change was sent back), the diff it reviews, and once
  * it ended, how, with how many of its findings block and how many became

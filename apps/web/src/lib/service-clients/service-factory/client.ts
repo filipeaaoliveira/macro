@@ -11,6 +11,7 @@ import {
   getCreateFactoryAutomationUrl,
   getCreateFactoryRunUrl,
   getDeleteFactoryAutomationUrl,
+  getFindPullRequestRunsUrl,
   getGetFactoryControlFilesUrl,
   getGetFactoryInsightsUrl,
   getGetFactoryRunUrl,
@@ -43,6 +44,7 @@ import type {
   GetFactoryInsightsParams,
   ListFactoryBoardParams,
   NoteStepRequest,
+  PullRequestRuns,
   ReplyToGateRequest,
   ResumeStepRequest,
   RunDetail,
@@ -147,6 +149,18 @@ export const factoryClient = {
     return fetchWithToken<BoardPage>(
       `${host()}${getListFactoryBoardUrl(params)}`,
       { method: 'GET', signal }
+    );
+  },
+
+  /**
+   * The Runs that opened the pull requests at `urls` (at most 100), among
+   * those the caller's team board shows: a pull request a Run they can't
+   * see opened reads as one no Run opened.
+   */
+  findPullRequestRuns(urls: string[], signal?: AbortSignal) {
+    return fetchWithToken<PullRequestRuns>(
+      `${host()}${getFindPullRequestRunsUrl()}`,
+      { method: 'POST', body: JSON.stringify({ urls }), signal }
     );
   },
 
