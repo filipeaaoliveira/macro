@@ -30,6 +30,7 @@ use uuid::Uuid;
 
 use crate::domain::built_in_flows::BUILT_IN_FLOWS;
 use crate::domain::control_files::ControlFiles;
+use crate::domain::definition::DEFINITION_FILE_PATTERNS;
 use crate::domain::flow::Flow;
 use crate::domain::gate::{
     AnswerGate, GateAnswered, GateOpening, GateRuling, GateTelling, ReplyGate,
@@ -640,7 +641,17 @@ where
             (None, None) => None,
         };
         let control_files_team_id = team.filter(|_| own.is_some()).map(|team| team.team_id);
-        let control_file_patterns = own.unwrap_or_else(ControlFiles::default_patterns);
+        let mut control_file_patterns = own.unwrap_or_else(ControlFiles::default_patterns);
+        // A Run on its team's Definition repository changes the factory's
+        // own rules: those files are Control Files too, whatever the list.
+        let on_definition = definition.as_ref().zip(repository.as_ref());
+        if on_definition.is_some_and(|(pinned, repository)| pinned.repo_url == repository.url) {
+            for pattern in DEFINITION_FILE_PATTERNS {
+                if !control_file_patterns.iter().any(|kept| kept == pattern) {
+                    control_file_patterns.push(pattern.to_string());
+                }
+            }
+        }
         let created_in_person =
             in_person && !self.repo.is_agent_account(&actor).await.map_err(internal)?;
         // The Run keeps its Standing Rules the same way: a change to the

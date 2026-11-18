@@ -5,11 +5,12 @@ use factory_records::domain::models::{AgentName, EntryId, Role};
 use factory_records::domain::standing_rules::OrchestratorDefinition;
 
 use super::{
-    DefinitionError, DefinitionFiles, DefinitionReadError, FactoryDefinition, read_definition,
+    DEFINITION_FILE_PATTERNS, DefinitionError, DefinitionFiles, DefinitionReadError,
+    FactoryDefinition, read_definition,
 };
 use crate::domain::agents::AgentDefinitionError;
 use crate::domain::built_in_steps::built_in_step_use;
-use crate::domain::control_files::ControlFilesError;
+use crate::domain::control_files::{ControlFiles, ControlFilesError};
 use crate::domain::flow::FlowError;
 use crate::outbound::local_definition_files::LocalDefinitionFiles;
 
@@ -438,3 +439,21 @@ async fn a_merge_needs_a_merge_gate_s_approval() {
     );
 }
 
+/// The starter's Control Files are the factory's default and its own
+/// files, so a Run that changes its rules waits for a person.
+#[tokio::test]
+async fn the_starter_s_control_files_keep_the_default_and_its_own_files() {
+    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/definition_template");
+    let definition = read_definition(&LocalDefinitionFiles::new(root), built_in_step_use)
+        .await
+        .expect("the starter definition reads");
+    let patterns = definition.rules.control_files.expect("its own list");
+
+    for pattern in ControlFiles::default_patterns()
+        .iter()
+        .map(String::as_str)
+        .chain(DEFINITION_FILE_PATTERNS)
+    {
+        assert!(patterns.iter().any(|kept| kept == pattern), "{pattern}");
+    }
+}

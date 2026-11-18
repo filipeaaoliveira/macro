@@ -360,6 +360,51 @@ fn asking_definition(github: &FakeGithub, commit: &str) {
     }
 }
 
+/// A Run on its team's Definition repository counts the Definition's own
+/// files as Control Files, beside the list its rules give; a Run on
+/// another repository does not.
+#[tokio::test]
+async fn a_run_on_the_definition_repository_guards_its_files() {
+    let repo = team_repo();
+    let workflows = FakeWorkflows::default();
+    let github = github_at(FIRST);
+    asking_definition(&github, FIRST);
+    let service = code_service(&repo, &workflows, &github);
+
+    let on_definition = service
+        .create_run(
+            teo(),
+            "change".to_string(),
+            "Change the rules".to_string(),
+            None,
+            Some(DEFINITION_REPO.to_string()),
+            true,
+        )
+        .await
+        .expect("a run on the definition repository");
+    let elsewhere = service
+        .create_run(
+            teo(),
+            "change".to_string(),
+            "Change the app".to_string(),
+            None,
+            Some("https://github.com/macro/app".to_string()),
+            true,
+        )
+        .await
+        .expect("a run on another repository");
+
+    let guarded = on_definition.run.control_file_patterns.expect("patterns");
+    assert_eq!(guarded[0], "ci/**");
+    for pattern in crate::domain::definition::DEFINITION_FILE_PATTERNS {
+        assert!(guarded.iter().any(|kept| kept == pattern), "{pattern}");
+    }
+    assert_eq!(
+        elsewhere.run.control_file_patterns,
+        Some(vec!["ci/**".to_string()])
+    );
+}
+
 /// A Run of a Definition's Flow that asks holds a place in its owner's
 /// Queue before its first Gate, by the Flow it kept: the Flows the factory
 /// knows by name never had it.

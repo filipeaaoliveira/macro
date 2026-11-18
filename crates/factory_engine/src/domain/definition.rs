@@ -49,6 +49,17 @@ pub const RULES_FILE: &str = "rules.json";
 /// The file of the Scorers.
 pub const SCORERS_FILE: &str = "scorers.json";
 
+/// The Control File patterns of a Definition's own files: a Run on its
+/// team's Definition repository that changes one is Tampered, so a person
+/// approves every change to the factory's rules a Run makes.
+pub const DEFINITION_FILE_PATTERNS: [&str; 5] = [
+    MANIFEST_FILE,
+    "flows/**",
+    AGENTS_FILE,
+    RULES_FILE,
+    SCORERS_FILE,
+];
+
 /// The format of the Definition this factory reads.
 pub const DEFINITION_VERSION: u32 = 1;
 

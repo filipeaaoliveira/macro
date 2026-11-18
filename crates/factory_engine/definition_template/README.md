@@ -25,7 +25,7 @@ the Definition it started with.
 | `factory.json` | The format's `version` (1), a `description`, and the Flows, by name. |
 | `flows/{name}.json` | Each Flow `factory.json` names, in the factory's Flow format. |
 | `agents.json` | The Agents (`bot`, optional `model` and `instructions`) and, for each Role, the Agents that fill it, in order. It must fill every Role a Flow names. |
-| `rules.json` | Optional. `standingRules`: which Gates the factory answers on its own. `controlFiles`: the Control File patterns. Each left out takes the factory's default. |
+| `rules.json` | Optional. `standingRules`: which Gates the factory answers on its own. `controlFiles`: the Control File patterns, which replace the factory's default whole; this template lists the default and this Definition's own files. Each left out takes the factory's default. |
 | `scorers.json` | Optional. The Scorers, each a `name`, a `description` and its `settings`. |
 | `.macro/checks.json` | The check a Run on this repository runs: it validates the Definition. |
 
@@ -47,6 +47,9 @@ It leaves off:
 - `plan`: a person approves each plan.
 - `merge`: a person merges each pull request. Turn it on only once you trust
   the Flow's checks and review.
+A Run on this repository always counts this Definition's own files as
+Control Files: a person approves every change a Run makes to them.
+
 
 ## Check the Definition
 
