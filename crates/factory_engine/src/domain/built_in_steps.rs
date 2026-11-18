@@ -673,23 +673,35 @@ where
 /// checkout before its first prompt: the commands, and the values they ran
 /// with, which its own commands may need too.
 fn setup_note(setup: &RepositorySetup) -> String {
-    let mut note = format!(
-        "\nThe factory ran the repository's setup (`{SETUP_FILE}`) in your checkout before this prompt"
-    );
+    let mut note = String::from("\n");
     let names: Vec<&str> = setup
         .setup
         .iter()
         .map(|command| command.name.as_str())
         .collect();
-    if names.is_empty() {
-        note.push_str(".\n");
-    } else {
-        note.push_str(&format!(": {}.\n", names.join(", ")));
+    if !names.is_empty() {
+        note.push_str(&format!(
+            "The factory ran the repository's setup (`{SETUP_FILE}`) in your checkout before this prompt: {}.\n",
+            names.join(", ")
+        ));
     }
     if !setup.env.is_empty() {
+        let exports = setup.exports();
+        // A fence longer than any run of backticks in the values, which
+        // therefore cannot close it.
+        let longest = exports
+            .split(|character| character != '`')
+            .map(str::len)
+            .max()
+            .unwrap_or(0);
+        let fence = "`".repeat(longest.max(2) + 1);
+        let said = if names.is_empty() {
+            format!("The repository's setup (`{SETUP_FILE}`) gives these values")
+        } else {
+            "It ran with these values".to_string()
+        };
         note.push_str(&format!(
-            "It ran with these values; run your own commands with them too:\n\n```sh\n{}```\n",
-            setup.exports()
+            "{said}; run your own commands with them too:\n\n{fence}sh\n{exports}{fence}\n"
         ));
     }
     note

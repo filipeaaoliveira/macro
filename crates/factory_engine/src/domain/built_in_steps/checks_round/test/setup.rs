@@ -104,6 +104,30 @@ async fn the_agent_is_handed_the_setup_of_the_run_s_base() {
     assert!(tasks[0].prompt.contains("export CACHE_DIR='/tmp/cache'"));
 }
 
+/// A setup of values alone runs nothing, so the agent is not told one ran;
+/// it is given the values in a fence no value can close.
+#[tokio::test]
+async fn a_setup_of_values_alone_is_told_without_claiming_it_ran() {
+    let agent = ScriptedAgent::new("done", Vec::new());
+    let github = github(None, None);
+    declare_setup(&github, "main", r#"{"env":{"GREETING":"```hi````"}}"#);
+    let repo = FakeRepo::default();
+
+    run(&agent, &github, &repo, "write", input())
+        .await
+        .expect("write");
+
+    let tasks = agent.tasks.lock().expect("tasks");
+    let prompt = &tasks[0].prompt;
+    assert!(!prompt.contains("ran the repository's setup"), "{prompt}");
+    assert!(
+        prompt.contains(
+            "The repository's setup (`.macro/setup.json`) gives these values; run your own commands with them too:\n\n`````sh\nexport GREETING='```hi````'\n`````\n"
+        ),
+        "{prompt}"
+    );
+}
+
 /// A setup that only the Run's own branch declares, or changes, is never
 /// used: the agent could otherwise choose what runs before it.
 #[tokio::test]
