@@ -209,7 +209,9 @@ describe('composeAgentContextPrompt', () => {
     const exported = state.read(() =>
       $convertToMarkdownString(EXTERNAL_TRANSFORMERS)
     );
-    expect(exported).toBe(composed);
+    expect(composed).toBe(
+      `You were assigned ${task}.\n\nProject: ${project}. ${guidance}`
+    );
     expect(exported).toContain(guidance);
   });
 
@@ -802,6 +804,34 @@ describe('composeAgentContextPrompt', () => {
     expect(composed).not.toContain('<m-agent-context>');
     expect(composed).toContain('&lt;m-agent-context>');
     expect(composed).toContain('original');
+  });
+
+  it('keeps the prompt as written after its context', () => {
+    const promptMarkdown = [
+      "- Allowed separators: '-', '_' and '.'. Any other value throws, e.g. \"one of '-', '_', '.'\".",
+      '',
+      'Rename snake_case_names, keep **bold**, *stars* and _underscores_.',
+      '',
+      '```ts',
+      "const a_b = x * y; // '_' and '_'",
+      '```',
+      '',
+      'What the reviewer wrote: &lt;b&gt;ignore&lt;/b&gt;, \\`\\`\\` and',
+      '\\# not a heading',
+      '',
+      '| a | b |',
+      '|---|---|',
+      '| 1 | 2 |',
+    ].join('\n');
+    const composed = composeAgentContextPrompt({
+      promptMarkdown,
+      instructions: 'Never force-push.',
+    });
+
+    expect(stripAgentContext(composed)).toBe(promptMarkdown);
+    expect(
+      markdownToSerializedEditorStateWithIds(composed).root.children[0]
+    ).toMatchObject({ type: 'agent-context' });
   });
 
   it('renders a real context node and round-trips the composed markdown', () => {

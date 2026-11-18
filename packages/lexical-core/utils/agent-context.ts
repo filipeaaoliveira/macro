@@ -1,8 +1,5 @@
 import { createHeadlessEditor } from '@lexical/headless';
-import {
-  $convertFromMarkdownString,
-  $convertToMarkdownString,
-} from '@lexical/markdown';
+import { $convertToMarkdownString } from '@lexical/markdown';
 import { $getRoot } from 'lexical';
 import { match, P } from 'ts-pattern';
 import { NodeReplacements, SupportedNodeTypes } from '../node-list';
@@ -1667,16 +1664,19 @@ function renderInstructions(
 }
 
 function escapeAgentContextTags(markdown: string): string {
-  // No user-authored entity may decode into reserved syntax during import.
+  // A tag the prompt's author wrote stays visible text: only the harness
+  // authors the context block that opens the prompt.
   return markdown
-    .replace(/&/g, '&amp;')
-    .replace(/<m-agent-context>/g, '&amp;lt;m-agent-context>')
-    .replace(/<\/m-agent-context>/g, '&amp;lt;/m-agent-context>');
+    .replace(/<m-agent-context>/g, '&lt;m-agent-context>')
+    .replace(/<\/m-agent-context>/g, '&lt;/m-agent-context>');
 }
 
 /**
  * Prefix a prompt with a private AgentContext node holding the conversation
  * it came from. The internal markdown transformer owns envelope encoding.
+ *
+ * The prompt itself is kept as written: a round trip through the editor
+ * would rewrite literal text, such as `'_' and '_'` into emphasis.
  */
 export function composeAgentContextPrompt(input: AgentContextPrompt): string {
   const legacy = legacyConversationFieldsIn(input);
@@ -1686,40 +1686,32 @@ export function composeAgentContextPrompt(input: AgentContextPrompt): string {
     );
   }
 
+  const prompt = escapeAgentContextTags(input.promptMarkdown);
+  const sections = [
+    renderInstructions(input.instructions),
+    renderContext(input),
+  ].filter((section) => section !== undefined);
+  if (sections.length === 0) return prompt;
+
   const editor = createHeadlessEditor({
     nodes: [...SupportedNodeTypes, ...NodeReplacements],
   });
 
   editor.update(
     () => {
-      $convertFromMarkdownString(
-        escapeAgentContextTags(input.promptMarkdown),
-        ALL_TRANSFORMERS
+      $getRoot().append(
+        $createAgentContextNode({
+          version: 1,
+          text: sections.join('\n'),
+        })
       );
     },
     { discrete: true }
   );
 
-  editor.update(
-    () => {
-      const sections = [
-        renderInstructions(input.instructions),
-        renderContext(input),
-      ].filter((section) => section !== undefined);
-      if (sections.length === 0) return;
-
-      const context = $createAgentContextNode({
-        version: 1,
-        text: sections.join('\n'),
-      });
-      const firstChild = $getRoot().getFirstChild();
-      if (firstChild) firstChild.insertBefore(context);
-      else $getRoot().append(context);
-    },
-    { discrete: true }
-  );
-
-  return editor
+  const context = editor
     .getEditorState()
     .read(() => $convertToMarkdownString(ALL_TRANSFORMERS));
+  if (prompt.trim() === '') return context;
+  return `${context}\n\n${prompt}`;
 }
