@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 use super::{CI_WAIT, PullRequestStepError, PullRequestSteps};
 
+mod branch_cleanup;
 mod control_files;
 use crate::domain::fakes::{FakeGithub, FakeRepo, FakeWatches, ci, suite};
 use crate::domain::models::{

@@ -31,11 +31,11 @@ pub use index::{PullRequestIndexOutcome, PullRequestIndexRecord, PullRequestInde
 pub use key::GithubKey;
 pub use pull_request::{
     EnrichGithubPullRequestsProxyRequest, EnrichGithubPullRequestsResponse,
-    EnrichedGithubPullRequest, GITHUB_PULL_REQUEST_FOREIGN_ENTITY_SOURCE, GithubMergeMethod,
-    GithubMergeOutcome, GithubMergeRejection, GithubOpenPullRequest, GithubOpenPullRequestOutcome,
-    GithubPullRequestCheckRun, GithubPullRequestComment, GithubPullRequestDetails,
-    GithubPullRequestHead, GithubPullRequestLabel, GithubPullRequestMerge,
-    GithubPullRequestMergeability, GithubPullRequestMergeabilityEntry,
+    EnrichedGithubPullRequest, GITHUB_PULL_REQUEST_FOREIGN_ENTITY_SOURCE, GithubBranchDeletion,
+    GithubMergeMethod, GithubMergeOutcome, GithubMergeRejection, GithubOpenPullRequest,
+    GithubOpenPullRequestOutcome, GithubPullRequestCheckRun, GithubPullRequestComment,
+    GithubPullRequestDetails, GithubPullRequestHead, GithubPullRequestLabel,
+    GithubPullRequestMerge, GithubPullRequestMergeability, GithubPullRequestMergeabilityEntry,
     GithubPullRequestMergeabilityRequest, GithubPullRequestMergeabilityResponse,
     GithubPullRequestNumber, GithubPullRequestRef, GithubPullRequestReview,
     GithubPullRequestReviewDecision, GithubPullRequestReviewState, GithubPullRequestStatus,

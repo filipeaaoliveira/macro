@@ -318,11 +318,14 @@ pub fn run_branch(run_id: RunId) -> String {
 /// What every Run's branch starts with, before its Run's id.
 pub const RUN_BRANCH_PREFIX: &str = "factory/";
 
-/// Whether `branch` is a Run's branch: the prefix, then a Run's id.
+/// Whether `branch` is a Run's branch: the prefix, then a Run's id written
+/// as [`run_branch`] writes it, hyphenated and in lower case. An id written
+/// another way (upper case, no hyphens, braces, a `urn:uuid:` prefix) is
+/// another branch.
 pub fn is_run_branch(branch: &str) -> bool {
     branch
         .strip_prefix(RUN_BRANCH_PREFIX)
-        .is_some_and(|id| Uuid::parse_str(id).is_ok())
+        .is_some_and(|id| Uuid::parse_str(id).is_ok_and(|uuid| uuid.hyphenated().to_string() == id))
 }
 
 /// What a Run's owner may do with a repository on GitHub.
@@ -332,6 +335,8 @@ pub struct RepositoryAccess {
     pub default_branch: String,
     /// Whether the owner may push to it.
     pub can_push: bool,
+    /// Whether GitHub deletes a pull request's branch once it merges.
+    pub deletes_merged_branches: bool,
 }
 
 /// A pull request as the Run's owner sees it on GitHub.
@@ -503,6 +508,15 @@ pub enum Opening {
     /// GitHub declined, for this reason: one is already open for the
     /// branch, or the branch has nothing its base lacks.
     Refused(String),
+}
+
+/// What asking GitHub to delete a branch came to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BranchDeletion {
+    /// The branch was deleted.
+    Deleted,
+    /// The repository has no such branch, as when it was deleted already.
+    Missing,
 }
 
 /// What asking GitHub to merge a pull request came to.

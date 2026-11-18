@@ -1,8 +1,8 @@
 use super::super::GithubOauthImpl;
 use super::super::test::{MockResponse, MockServer};
 use crate::domain::models::{
-    GithubError, GithubOpenPullRequest, GithubOpenPullRequestOutcome, GithubRepositoryAccess,
-    GithubRequiredCheck, GithubRequiredChecks, GithubWorkflowRunStatus,
+    GithubBranchDeletion, GithubError, GithubOpenPullRequest, GithubOpenPullRequestOutcome,
+    GithubRepositoryAccess, GithubRequiredCheck, GithubRequiredChecks, GithubWorkflowRunStatus,
 };
 
 fn answering(status: &'static str, body: &str) -> (MockServer, GithubOauthImpl) {
@@ -27,7 +27,7 @@ fn open_request() -> GithubOpenPullRequest {
 async fn repository_access_reads_the_default_branch_and_push_permission() {
     let (server, client) = answering(
         "200 OK",
-        r#"{"default_branch":"trunk","permissions":{"admin":false,"push":true,"pull":true}}"#,
+        r#"{"default_branch":"trunk","permissions":{"admin":false,"push":true,"pull":true},"delete_branch_on_merge":true}"#,
     );
 
     let access = client
@@ -40,6 +40,7 @@ async fn repository_access_reads_the_default_branch_and_push_permission() {
         Some(GithubRepositoryAccess {
             default_branch: Some("trunk".to_string()),
             push: true,
+            delete_branch_on_merge: true,
         })
     );
     assert!(server.finish().starts_with("GET /repos/macro/app HTTP/1.1"));
@@ -56,7 +57,12 @@ async fn repository_access_without_permissions_cannot_push() {
         .await
         .unwrap();
 
-    assert_eq!(access.map(|access| access.push), Some(false));
+    assert_eq!(access.as_ref().map(|access| access.push), Some(false));
+    // A read that does not name the setting reads it as off.
+    assert_eq!(
+        access.map(|access| access.delete_branch_on_merge),
+        Some(false)
+    );
     server.finish();
 }
 
@@ -489,4 +495,212 @@ async fn workflow_runs_are_read_for_the_head_commit() {
             .finish()
             .starts_with("GET /repos/macro/app/actions/runs?head_sha=abc123&per_page=100&page=1 ")
     );
+}
+
+/// A branch is deleted by its ref, its slashes kept as GitHub names it.
+#[tokio::test]
+async fn delete_branch_deletes_the_branch_s_ref() {
+    let (server, client) = answering("204 No Content", "");
+
+    let deleted = client
+        .delete_branch("token", "macro", "app", "factory/run")
+        .await
+        .unwrap();
+
+    assert_eq!(deleted, GithubBranchDeletion::Deleted);
+    assert!(
+        server
+            .finish()
+            .starts_with("DELETE /repos/macro/app/git/refs/heads/factory/run HTTP/1.1")
+    );
+}
+
+/// A branch already gone, as one GitHub deleted on merge, is not deleted
+/// again, and is no error.
+#[tokio::test]
+async fn delete_branch_of_a_branch_already_gone_deletes_nothing() {
+    let (server, client) = answering(
+        "422 Unprocessable Entity",
+        r#"{"message":"Reference does not exist","documentation_url":"https://docs.github.com/rest/git/refs#delete-a-reference","status":"422"}"#,
+    );
+
+    let deleted = client
+        .delete_branch("token", "macro", "app", "factory/run")
+        .await
+        .unwrap();
+
+    assert_eq!(deleted, GithubBranchDeletion::Missing);
+    server.finish();
+}
+
+/// GitHub refusing the deletion, as of a protected branch or by a user who
+/// may not push, is an error, not a branch already gone.
+#[tokio::test]
+async fn delete_branch_refused_is_an_error() {
+    let (protected, client) = answering(
+        "422 Unprocessable Entity",
+        r#"{"message":"Cannot delete this protected branch"}"#,
+    );
+    let refused = client
+        .delete_branch("token", "macro", "app", "factory/run")
+        .await;
+    assert!(
+        matches!(refused, Err(GithubError::Internal(_))),
+        "{refused:?}"
+    );
+    protected.finish();
+
+    let (forbidden, client) = answering("403 Forbidden", r#"{"message":"Forbidden"}"#);
+    let refused = client
+        .delete_branch("token", "macro", "app", "factory/run")
+        .await;
+    assert!(
+        matches!(refused, Err(GithubError::Forbidden)),
+        "{refused:?}"
+    );
+    forbidden.finish();
+}
+
+/// Each part of a branch's name is encoded, its slashes kept.
+#[tokio::test]
+async fn delete_branch_encodes_each_part_of_the_name() {
+    let (server, client) = answering("204 No Content", "");
+
+    client
+        .delete_branch("token", "macro", "app", "factory/ü#1")
+        .await
+        .unwrap();
+
+    assert!(
+        server
+            .finish()
+            .starts_with("DELETE /repos/macro/app/git/refs/heads/factory/%C3%BC%231 HTTP/1.1")
+    );
+
+    // An encoded dot stays text: GitHub never reads it as `..`.
+    let (server, client) = answering("204 No Content", "");
+    client
+        .delete_branch("token", "macro", "app", "factory/%2e%2e")
+        .await
+        .unwrap();
+    assert!(
+        server
+            .finish()
+            .starts_with("DELETE /repos/macro/app/git/refs/heads/factory/%252e%252e HTTP/1.1")
+    );
+}
+
+/// An owner or repository name GitHub would not take is refused before any
+/// request, as `..` would move the deletion off the repository.
+#[tokio::test]
+async fn delete_branch_refuses_an_owner_or_repository_github_would_not_take() {
+    // Nothing listens here: a request sent would fail as an outage.
+    let client = GithubOauthImpl::with_api_base_url("http://127.0.0.1:9".to_string());
+
+    for (owner, repo) in [
+        ("..", "app"),
+        (".", "app"),
+        ("macro", ".."),
+        ("macro", "."),
+        ("", "app"),
+        ("macro", ""),
+        ("macro/x", "app"),
+        ("macro", "app?x"),
+        ("macro", "app#x"),
+        ("macro", "a%2e"),
+    ] {
+        let refused = client
+            .delete_branch("token", owner, repo, "factory/run")
+            .await;
+        assert!(
+            matches!(refused, Err(GithubError::Internal(_))),
+            "{owner:?}/{repo:?}: {refused:?}"
+        );
+    }
+}
+
+/// A name git would not take for a branch is refused before any request:
+/// `..` parts would otherwise move the deletion onto the repository.
+#[tokio::test]
+async fn delete_branch_refuses_a_name_git_would_not_take() {
+    // Nothing listens here: a request sent would fail as an outage.
+    let client = GithubOauthImpl::with_api_base_url("http://127.0.0.1:9".to_string());
+
+    for branch in [
+        "../../..",
+        "factory/..",
+        "factory/./run",
+        "factory//run",
+        "factory/run/",
+        "factory/.hidden",
+        "factory/run.lock",
+        "factory/run.",
+        "-factory",
+        "factory/a..b",
+        "factory/@{1}",
+        "@",
+        "",
+        "factory/a b",
+        "factory/a\tb",
+        "factory/a~1",
+        "factory/a^",
+        "factory/a:b",
+        "factory/a?",
+        "factory/a*",
+        "factory/a[b",
+        "factory\\run",
+    ] {
+        let refused = client.delete_branch("token", "macro", "app", branch).await;
+        assert!(
+            matches!(refused, Err(GithubError::Internal(_))),
+            "{branch:?}: {refused:?}"
+        );
+    }
+}
+
+/// An open pull request based on a branch is found by its base.
+#[tokio::test]
+async fn an_open_pull_request_onto_a_branch_is_found() {
+    let (based, client) = answering("200 OK", r#"[{"number":14}]"#);
+    let found = client
+        .has_open_pull_request_onto("token", "macro", "app", "factory/run")
+        .await
+        .unwrap();
+    assert!(found);
+    assert!(
+        based
+            .finish()
+            .starts_with("GET /repos/macro/app/pulls?base=factory%2Frun&state=open&per_page=1 ")
+    );
+
+    let (none, client) = answering("200 OK", "[]");
+    let found = client
+        .has_open_pull_request_onto("token", "macro", "app", "factory/run")
+        .await
+        .unwrap();
+    assert!(!found);
+    none.finish();
+}
+
+/// An owner or repository name GitHub would not take is refused before the
+/// pull requests onto a branch are listed.
+#[tokio::test]
+async fn pull_requests_onto_a_branch_refuse_an_owner_or_repository_github_would_not_take() {
+    // Nothing listens here: a request sent would fail as an outage.
+    let client = GithubOauthImpl::with_api_base_url("http://127.0.0.1:9".to_string());
+
+    for (owner, repo) in [
+        ("..", "app"),
+        ("macro", ".."),
+        ("macro/x", "app"),
+        ("macro", ""),
+    ] {
+        let refused = client
+            .has_open_pull_request_onto("token", owner, repo, "factory/run")
+            .await;
+        assert!(
+            matches!(refused, Err(GithubError::Internal(_))),
+            "{owner:?}/{repo:?}: {refused:?}"
+        );
+    }
 }

@@ -33,8 +33,9 @@ use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
 use crate::domain::models::{
-    Check, CheckState, CheckSuite, CodeRepository, HeadChecks, Merging, OpenPullRequest, Opening,
-    PullRequest, PullRequestState, RepositoryAccess, RequiredChecks,
+    BranchDeletion, Check, CheckState, CheckSuite, CodeRepository, HeadChecks, Merging,
+    OpenPullRequest, Opening, PullRequest, PullRequestState, RepositoryAccess, RequiredChecks,
+    run_branch,
 };
 use crate::domain::ports::{
     FollowUpTask, PullRequests, Retryable, TaskAccess, TaskDirectory, UserDirectory,
@@ -1366,6 +1367,27 @@ pub(crate) struct FakeGithubState {
     pub(crate) diffs: BTreeMap<(String, String), Vec<ChangedFile>>,
     /// The head commit of the Run's branch; none before it is pushed.
     pub(crate) head: Option<String>,
+    /// Whether GitHub deletes a pull request's branch once it merges.
+    pub(crate) deletes_merged_branches: bool,
+    /// The branches deleted, in order.
+    pub(crate) deleted_branches: Vec<String>,
+    /// Whether deleting a branch fails, as GitHub down does.
+    pub(crate) delete_fails: bool,
+    /// Whether an open pull request is based on the Run's branch.
+    pub(crate) based_on_branch: bool,
+    /// Whether asking for pull requests based on a branch fails, as GitHub
+    /// down does.
+    pub(crate) onto_fails: bool,
+    /// The branches pull requests based on them were asked for, in order.
+    pub(crate) onto_asked: Vec<String>,
+    /// How many times what the owner may do with the repository was read.
+    pub(crate) access_reads: usize,
+    /// Whether reading what the owner may do with the repository fails.
+    pub(crate) access_fails: bool,
+    /// Whether reading the head of the Run's branch fails.
+    pub(crate) branch_head_fails: bool,
+    /// When set, each deletion of a branch waits to be let go.
+    pub(crate) delete_gate: Option<Arc<tokio::sync::Semaphore>>,
 }
 
 /// GitHub in memory, for one Run's branch: opening its pull request makes
@@ -1473,10 +1495,15 @@ impl PullRequests for FakeGithub {
         _owner: &MacroUserIdStr<'static>,
         _repository: &CodeRepository,
     ) -> Result<Option<RepositoryAccess>, FakeGithubError> {
-        let state = self.state();
+        let mut state = self.state();
+        state.access_reads += 1;
+        if state.access_fails {
+            return Err(FakeGithubError::Down);
+        }
         Ok((!state.unreachable).then(|| RepositoryAccess {
             default_branch: "main".to_string(),
             can_push: !state.read_only,
+            deletes_merged_branches: state.deletes_merged_branches,
         }))
     }
 
@@ -1574,6 +1601,9 @@ impl PullRequests for FakeGithub {
         _branch: &str,
     ) -> Result<Option<String>, FakeGithubError> {
         let mut state = self.state();
+        if state.branch_head_fails {
+            return Err(FakeGithubError::Down);
+        }
         if state.branch_heads.is_empty() {
             return Ok(state.head.clone());
         }
@@ -1639,6 +1669,45 @@ impl PullRequests for FakeGithub {
         pull_request.state = PullRequestState::Merged;
         pull_request.merge_commit = Some(Self::MERGED.to_string());
         Ok(Merging::Merged)
+    }
+
+    async fn has_open_pull_request_onto(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        branch: &str,
+    ) -> Result<bool, FakeGithubError> {
+        let mut state = self.state();
+        state.onto_asked.push(branch.to_string());
+        if state.onto_fails {
+            return Err(FakeGithubError::Down);
+        }
+        Ok(state.based_on_branch)
+    }
+
+    /// Deleting the Run's branch leaves it not there for later reads.
+    async fn delete_run_branch(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        run_id: RunId,
+    ) -> Result<BranchDeletion, FakeGithubError> {
+        let gate = self.state().delete_gate.clone();
+        if let Some(gate) = gate {
+            gate.acquire().await.expect("gate").forget();
+        }
+        let mut state = self.state();
+        if state.delete_fails {
+            return Err(FakeGithubError::Down);
+        }
+        let there = state.head.is_some() || state.branch_heads.iter().any(Option::is_some);
+        state.head = None;
+        state.branch_heads = [None].into();
+        if !there {
+            return Ok(BranchDeletion::Missing);
+        }
+        state.deleted_branches.push(run_branch(run_id));
+        Ok(BranchDeletion::Deleted)
     }
 }
 

@@ -1,7 +1,8 @@
 //! Calls that take a branch to a merged pull request as the user: what they
 //! may do with a repository, the pull request from a branch, opening one,
-//! and the checks and statuses on its head. Each read is one request for
-//! only what it needs, as they are read again and again while CI runs.
+//! the checks and statuses on its head, and deleting the branch once
+//! merged. Each read is one request for only what it needs, as they are
+//! read again and again while CI runs.
 //!
 //! A refusal GitHub answers is told apart from an outage: 401 is a token
 //! that no longer works ([`GithubError::ReauthenticationRequired`]), 403
@@ -18,8 +19,8 @@ use super::{
     transport_error, unexpected,
 };
 use crate::domain::models::{
-    GithubCheckRun, GithubCheckSuite, GithubCommitStatus, GithubError, GithubListing,
-    GithubOpenPullRequest, GithubOpenPullRequestOutcome, GithubPullRequestHead,
+    GithubBranchDeletion, GithubCheckRun, GithubCheckSuite, GithubCommitStatus, GithubError,
+    GithubListing, GithubOpenPullRequest, GithubOpenPullRequestOutcome, GithubPullRequestHead,
     GithubRepositoryAccess, GithubRequiredCheck, GithubRequiredChecks, GithubWorkflowRun,
     GithubWorkflowRunStatus,
 };
@@ -33,6 +34,43 @@ const PAGE_SIZE: usize = 100;
 /// The most pages of one list read: past any real commit's checks, so a
 /// list GitHub keeps paging is not read for ever.
 const MAX_PAGES: usize = 10;
+
+/// GitHub's message for a branch it does not have, on a ref's deletion.
+const MISSING_REFERENCE: &str = "Reference does not exist";
+
+/// Whether git takes `branch` as a branch's name, by the rules of
+/// `git check-ref-format --branch`: no empty part and none that starts with
+/// `.` or ends with `.lock`, no `..` or `@{`, no control character, space,
+/// `~`, `^`, `:`, `?`, `*`, `[` or `\`, and not `@`, nor starting with `-`
+/// or ending with `.`.
+fn is_branch_name(branch: &str) -> bool {
+    const REFUSED: &[char] = &[' ', '~', '^', ':', '?', '*', '[', '\\'];
+
+    let refused_char = branch
+        .chars()
+        .any(|c| c.is_ascii_control() || REFUSED.contains(&c));
+    let refused_part = branch
+        .split('/')
+        .any(|part| part.is_empty() || part.starts_with('.') || part.ends_with(".lock"));
+    !branch.is_empty()
+        && branch != "@"
+        && !branch.starts_with('-')
+        && !branch.ends_with('.')
+        && !branch.contains("..")
+        && !branch.contains("@{")
+        && !refused_char
+        && !refused_part
+}
+
+/// Whether `part` can be a GitHub owner's or repository's name: letters,
+/// digits, `-`, `_` and `.`, and neither `.` nor `..`, which URL parsing
+/// would fold.
+fn is_repository_part(part: &str) -> bool {
+    let allowed = part
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+    allowed && !part.is_empty() && part != "." && part != ".."
+}
 
 /// What a refused read is, once throttling is ruled out.
 fn refusal(status: StatusCode) -> Option<GithubError> {
@@ -50,6 +88,8 @@ struct RepositoryResponse {
     default_branch: Option<String>,
     #[serde(default)]
     permissions: Option<RepositoryPermissions>,
+    #[serde(default)]
+    delete_branch_on_merge: bool,
 }
 
 #[derive(serde::Deserialize)]
@@ -405,12 +445,44 @@ impl GithubOauthImpl {
                 push: repository
                     .permissions
                     .is_some_and(|permissions| permissions.push),
+                delete_branch_on_merge: repository.delete_branch_on_merge,
             })),
             // GitHub answers a private repository the user cannot see as
             // missing.
             Err(GithubError::RepositoryUnavailable) => Ok(None),
             Err(error) => Err(error),
         }
+    }
+
+    /// Whether an open pull request of the repository is based on `base`,
+    /// so merging it would merge into that branch. An owner or repository
+    /// name GitHub would not take is refused before any request. The
+    /// caller logs a
+    /// failure; only the shared helpers (`unexpected`, `transport_error`)
+    /// log an outage's own line.
+    #[tracing::instrument(skip(self, access_token))]
+    pub async fn has_open_pull_request_onto(
+        &self,
+        access_token: &str,
+        owner: &str,
+        repo: &str,
+        base: &str,
+    ) -> Result<bool, GithubError> {
+        if !is_repository_part(owner) || !is_repository_part(repo) {
+            return Err(GithubError::Internal(anyhow::anyhow!(
+                "not a repository: {owner:?}/{repo:?}"
+            )));
+        }
+
+        let open: Vec<serde::de::IgnoredAny> = self
+            .read(
+                access_token,
+                &format!("/repos/{owner}/{repo}/pulls"),
+                &[("base", base), ("state", "open"), ("per_page", "1")],
+                "failed to list pull requests onto a branch",
+            )
+            .await?;
+        Ok(!open.is_empty())
     }
 
     /// The newest pull request, open or closed, from the repository's own
@@ -672,5 +744,80 @@ impl GithubOauthImpl {
                 "failed to open pull request",
             )),
         }
+    }
+
+    /// Deletes `branch` as the user, or finds it missing, as when it was
+    /// deleted already. GitHub refusing it, as for a protected branch, is
+    /// an error, and so is a name git would not take for a branch, which is
+    /// never sent, as is an owner or repository name GitHub would not take.
+    /// The caller logs a failure; only the shared helpers (`unexpected`,
+    /// `transport_error`) log an outage's own line.
+    #[tracing::instrument(skip(self, access_token))]
+    pub async fn delete_branch(
+        &self,
+        access_token: &str,
+        owner: &str,
+        repo: &str,
+        branch: &str,
+    ) -> Result<GithubBranchDeletion, GithubError> {
+        // A part such as `..` would survive the encoding below and move the
+        // request off the branch's ref, onto the repository itself.
+        if !is_branch_name(branch) {
+            return Err(GithubError::Internal(anyhow::anyhow!(
+                "not a branch name: {branch:?}"
+            )));
+        }
+        if !is_repository_part(owner) || !is_repository_part(repo) {
+            return Err(GithubError::Internal(anyhow::anyhow!(
+                "not a repository: {owner:?}/{repo:?}"
+            )));
+        }
+
+        // GitHub names a branch's ref by its path: each part is encoded, its
+        // slashes are not.
+        let path = branch
+            .split('/')
+            .map(|part| urlencoding::encode(part).into_owned())
+            .collect::<Vec<_>>()
+            .join("/");
+        let response = self
+            .client
+            .delete(format!(
+                "{}/repos/{owner}/{repo}/git/refs/heads/{path}",
+                self.api_base_url()
+            ))
+            .header("Authorization", format!("Bearer {access_token}"))
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", USER_AGENT)
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .timeout(REQUEST_TIMEOUT)
+            .send()
+            .await
+            .map_err(transport_error)?;
+
+        let status = response.status();
+        if status.is_success() {
+            return Ok(GithubBranchDeletion::Deleted);
+        }
+
+        let headers = response.headers().clone();
+        let body = response_text(response).await;
+        if throttling(status, &headers, &body).is_some() {
+            return Err(unexpected(
+                status,
+                &headers,
+                body,
+                "failed to delete a branch",
+            ));
+        }
+        // GitHub answers a branch that is not there with a 422 of its own.
+        let missing = status == StatusCode::UNPROCESSABLE_ENTITY
+            && serde_json::from_str::<GithubErrorBody>(&body)
+                .is_ok_and(|error| error.message == MISSING_REFERENCE);
+        if missing {
+            return Ok(GithubBranchDeletion::Missing);
+        }
+        Err(refusal(status)
+            .unwrap_or_else(|| unexpected(status, &headers, body, "failed to delete a branch")))
     }
 }

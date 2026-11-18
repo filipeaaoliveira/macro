@@ -50,6 +50,7 @@ use crate::domain::gate_replies::service::GateRepliesImpl;
 use crate::domain::main_hold::{MainWatch, MainWatchServiceImpl};
 use crate::domain::models::{
     AgentAnswer, AgentTask, AgentTurn, PullRequestState, RequiredCheck, RequiredChecks, RunStart,
+    run_branch,
 };
 use crate::domain::ports::{
     AgentFailure, AnswerDelivery, MainWatches, Retryable, RunWorkflows, StepAgent,
@@ -1043,10 +1044,13 @@ async fn a_code_run_merges_its_pull_request_once_a_person_approves() {
     let github = FakeGithub::default();
     github.state().checks = [ci(Some("success"))].into();
     let agent = CodeAgent::new(&github);
+    let walked = Arc::new(Mutex::new(None));
 
     let ended = walk_code(&agent, &github, |run| {
         let github = github.clone();
+        let walked = walked.clone();
         async move {
+            *walked.lock().expect("run") = Some(run.run_id);
             run.answer_next_gate("approve").await;
             let merge_question = run.next_gate().await;
             // The person is asked; nothing merged yet.
@@ -1073,6 +1077,9 @@ async fn a_code_run_merges_its_pull_request_once_a_person_approves() {
             .map(|pull_request| pull_request.state),
         Some(PullRequestState::Merged)
     );
+    // Its branch is deleted once merged.
+    let run_id = walked.lock().expect("run").expect("walked");
+    assert_eq!(github.deleted_branches, [run_branch(run_id)]);
 }
 
 /// A Run started on a `code` Flow that went on past its merge, to `deploy`
@@ -1189,6 +1196,8 @@ async fn revising_or_cancelling_at_the_merge_question_merges_nothing() {
     let github = github.state();
     assert!(github.merges.is_empty());
     assert_eq!(github.opened, 1);
+    // A cancelled Run keeps its branch, for a person to look at.
+    assert!(github.deleted_branches.is_empty());
 }
 
 /// Review rounds that keep finding Blockers stop after three: the Run ends
@@ -1501,6 +1510,7 @@ async fn cancelling_while_ci_waits_ends_the_run_with_nothing_merged() {
         "{ended:?}"
     );
     assert!(github.state().merges.is_empty());
+    assert!(github.state().deleted_branches.is_empty());
 }
 
 /// A head that moves after the person agreed to merge is not merged: the

@@ -793,6 +793,15 @@ pub enum GithubOpenPullRequestOutcome {
     Rejected(String),
 }
 
+/// What deleting a branch did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GithubBranchDeletion {
+    /// The branch was deleted.
+    Deleted,
+    /// The repository has no such branch, as when it was deleted already.
+    Missing,
+}
+
 /// What a user may do with a repository, as GitHub says.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GithubRepositoryAccess {
@@ -801,6 +810,8 @@ pub struct GithubRepositoryAccess {
     pub default_branch: Option<String>,
     /// Whether the user may push to it.
     pub push: bool,
+    /// Whether GitHub deletes a pull request's branch once it merges.
+    pub delete_branch_on_merge: bool,
 }
 
 /// A pull request's number, state and head, from GitHub's pull request

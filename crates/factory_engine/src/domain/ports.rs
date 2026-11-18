@@ -21,11 +21,11 @@ use crate::domain::gate::{
 use crate::domain::gate_owner::{GateNotice, OwnerNote};
 use crate::domain::main_hold::{HoldTask, MainLook, MainWatch};
 use crate::domain::models::{
-    AgentAnswer, AgentCommand, AgentTask, AgentTurn, Answerer, CodeRepository,
-    ControlFilesSettings, FactoryError, FlowSummary, HeadChecks, Merging, OpenPullRequest, Opening,
-    PullRequest, RepositoryAccess, RequiredChecks, RunDetail, RunFinish, RunStart, SessionSteer,
-    SessionStepRef, StandingRulesSettings, StepEnding, StepError, StepInput, StepReport,
-    StepRequest, StepStart,
+    AgentAnswer, AgentCommand, AgentTask, AgentTurn, Answerer, BranchDeletion, CodeRepository,
+    ControlFilesSettings, FactoryError, FlowSummary, HeadChecks, Merging,
+    OpenPullRequest, Opening, PullRequest, RepositoryAccess, RequiredChecks, RunDetail, RunFinish,
+    RunStart, SessionSteer, SessionStepRef, StandingRulesSettings, StepEnding, StepError,
+    StepInput, StepReport, StepRequest, StepStart,
 };
 use crate::domain::review_rounds::{ChangedFile, ReviewRoundClosing, ReviewRoundOpening};
 use crate::domain::standing_rules::RuleAnswer;
@@ -347,6 +347,25 @@ pub trait PullRequests: Send + Sync + 'static {
         number: u64,
         head_sha: &str,
     ) -> impl Future<Output = Result<Merging, Self::Err>> + Send;
+
+    /// Whether an open pull request of `repository` is based on `branch`.
+    fn has_open_pull_request_onto(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        branch: &str,
+    ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
+
+    /// Ask GitHub to delete the branch of the Run `run_id` in
+    /// `repository` ([`run_branch`](crate::domain::models::run_branch)), or
+    /// find it missing. It takes a Run, not a name, so no other branch can
+    /// be deleted through it.
+    fn delete_run_branch(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        run_id: RunId,
+    ) -> impl Future<Output = Result<BranchDeletion, Self::Err>> + Send;
 }
 
 /// Asks the watch of a base branch's checks, which sets and clears its
