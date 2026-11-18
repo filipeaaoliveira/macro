@@ -417,7 +417,6 @@ where
     /// the Run's Orchestrator Definition lets it, for that kind, never for
     /// a merge, never approving a Tampered Run, and never sending Blockers
     /// to a fix the `fix_blockers` rule would leave to the owner.
-    #[expect(clippy::too_many_arguments, reason = "each is a part of one answer")]
     async fn agent_may_answer(
         &self,
         run: &Run,
