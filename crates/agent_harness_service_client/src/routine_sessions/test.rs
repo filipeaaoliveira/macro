@@ -182,6 +182,7 @@ async fn all_commands_use_internal_auth_and_domain_wire_contract_at_both_prefixe
             Reply::json(200, json!({"session_id":identity.session_id})),
             Reply::json(200, json!({"action_id":identity.action_id,"queued":false})),
             Reply::json(200, json!({"state":"succeeded"})),
+            Reply::json(200, json!("I stopped before the tests.")),
             Reply {
                 body: String::new(),
                 ..Reply::json(204, Value::Null)
@@ -202,14 +203,19 @@ async fn all_commands_use_internal_auth_and_domain_wire_contract_at_both_prefixe
             client.status(identity.clone()).await.unwrap(),
             RoutineActionStatus::Succeeded
         );
+        assert_eq!(
+            client.reply(identity.clone()).await.unwrap().as_deref(),
+            Some("I stopped before the tests.")
+        );
         client.cancel(identity.clone()).await.unwrap();
         let requests = server.requests.lock().unwrap();
-        assert_eq!(requests.len(), 5);
+        assert_eq!(requests.len(), 6);
         for (request, (operation, command)) in requests.iter().zip([
             ("validate", serde_json::to_value(selection).unwrap()),
             ("prepare", serde_json::to_value(prepare).unwrap()),
             ("prompt", serde_json::to_value(prompt).unwrap()),
             ("status", serde_json::to_value(&identity).unwrap()),
+            ("reply", serde_json::to_value(&identity).unwrap()),
             ("cancel", serde_json::to_value(&identity).unwrap()),
         ]) {
             assert!(request.head.starts_with(&format!(

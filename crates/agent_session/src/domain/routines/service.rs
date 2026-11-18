@@ -426,6 +426,19 @@ where
         Ok(activity(log.entries))
     }
 
+    async fn reply(
+        &self,
+        command: RoutineSessionAction,
+    ) -> Result<Option<String>, RoutineSessionError> {
+        self.owned_session(&command).await?;
+        let log = self
+            .sessions
+            .session_log(command.session_id)
+            .await
+            .map_err(session_error)?;
+        Ok(last_words(log.entries, command.action_id))
+    }
+
     async fn delete(&self, command: RoutineSessionAction) -> Result<(), RoutineSessionError> {
         // A session that is not there is deleted: a caller whose earlier
         // delete took effect, but whose answer was lost, asks again.
@@ -472,6 +485,41 @@ fn activity(entries: Vec<crate::domain::model::StoredAgentSessionLog>) -> Routin
                 .count(),
         ),
     }
+}
+
+/// The last text of the agent's reply to the prompt `action_id`, in a
+/// session's effective history: its end, at most [`MAX_REPLY_BYTES`], cut
+/// between two characters. None when the prompt is not there or the reply
+/// holds no text.
+fn last_words(
+    entries: Vec<crate::domain::model::StoredAgentSessionLog>,
+    action_id: AgentActionId,
+) -> Option<String> {
+    let mut fold = LifecycleFold::new();
+    for row in entries {
+        let _ = fold.push(row.entry);
+    }
+    let messages = fold.inner().messages();
+    let prompt = messages.iter().find(|message| {
+        matches!(message.author, Author::User { .. }) && message.request_id == Some(action_id)
+    })?;
+
+    // The reply is the agent's message of the prompt's turn; its last text
+    // part is what it said after its last tool call.
+    let text = messages
+        .iter()
+        .filter(|message| message.id == prompt.id && matches!(message.author, Author::Agent))
+        .flat_map(|message| message.parts.iter())
+        .filter_map(|part| match part {
+            agent_fold::domain::model::MessagePart::Text { text } => Some(text.trim()),
+            _ => None,
+        })
+        .rfind(|text| !text.is_empty())?;
+    let mut start = text.len().saturating_sub(MAX_REPLY_BYTES);
+    while !text.is_char_boundary(start) {
+        start += 1;
+    }
+    Some(text[start..].to_string())
 }
 
 /// An agent limited to selected apps also gets the routine's. One that uses

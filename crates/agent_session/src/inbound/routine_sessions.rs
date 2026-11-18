@@ -85,6 +85,7 @@ pub fn routine_sessions_router<Service: RoutineSessions, Auth: MacroAuthorizatio
             .route("/cancel", post(cancel::<Service, Auth>))
             .route("/delete", post(delete::<Service, Auth>))
             .route("/activity", post(activity::<Service, Auth>))
+            .route("/reply", post(reply::<Service, Auth>))
             .layer(DefaultBodyLimit::max(MAX_COMMAND_BYTES))
             .layer(middleware::from_fn(bound_request))
             .with_state(state),
@@ -140,7 +141,8 @@ impl IntoResponse for ApiError {
 async fn bound_request(request: Request, next: Next) -> Response {
     let path = request.uri().path();
     let is_prompt = path.ends_with("/prompt") || path.ends_with("/follow-up");
-    let timeout = if path.ends_with("/status") || path.ends_with("/activity") {
+    let reads = ["/status", "/activity", "/reply"];
+    let timeout = if reads.iter().any(|read| path.ends_with(read)) {
         STATUS_TIMEOUT
     } else if path.ends_with("/exec") {
         EXEC_TIMEOUT
@@ -248,4 +250,12 @@ async fn activity<Service: RoutineSessions, Auth: MacroAuthorizationService>(
     command: Result<Json<RoutineSessionAction>, JsonRejection>,
 ) -> Result<Json<RoutineActivity>, ApiError> {
     Ok(Json(state.service.activity(command?.0).await?))
+}
+
+async fn reply<Service: RoutineSessions, Auth: MacroAuthorizationService>(
+    State(state): State<RoutineSessionsState<Service, Auth>>,
+    _internal: MacroAuthorizationExtractor<Auth, InternalOnly>,
+    command: Result<Json<RoutineSessionAction>, JsonRejection>,
+) -> Result<Json<Option<String>>, ApiError> {
+    Ok(Json(state.service.reply(command?.0).await?))
 }

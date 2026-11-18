@@ -19,7 +19,7 @@ use uuid::Uuid;
 
 const OWNER: &str = "macro|owner@example.com";
 const INTERNAL_KEY: &str = "routine-test-internal";
-const OPERATIONS: [&str; 9] = [
+const OPERATIONS: [&str; 10] = [
     "validate",
     "prepare",
     "prompt",
@@ -29,6 +29,7 @@ const OPERATIONS: [&str; 9] = [
     "cancel",
     "delete",
     "activity",
+    "reply",
 ];
 
 #[derive(Clone)]
@@ -202,6 +203,14 @@ impl RoutineSessions for ServiceSpy {
             turns: 1,
         })
     }
+
+    async fn reply(
+        &self,
+        command: RoutineSessionAction,
+    ) -> Result<Option<String>, RoutineSessionError> {
+        self.record("reply", command)?;
+        Ok(Some("I stopped before the tests.".to_string()))
+    }
 }
 
 fn app(service: Arc<ServiceSpy>) -> Router {
@@ -320,6 +329,8 @@ async fn forwards_explicit_owner_and_complete_command_without_rewriting() {
                 body(response).await,
                 json!({ "exit_code": 1, "stdout": "1 failed", "stderr": "" })
             );
+        } else if operation == "reply" {
+            assert_eq!(body(response).await, json!("I stopped before the tests."));
         }
     }
 }

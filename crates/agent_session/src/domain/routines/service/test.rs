@@ -1122,3 +1122,75 @@ fn activity_counts_tool_calls_and_turns_without_reading_them() {
         }
     );
 }
+
+/// What the agent said in a turn, as its log frames: a text chunk.
+fn said(text: &str) -> crate::domain::model::StoredAgentSessionLog {
+    log_frame(
+        "to_server",
+        serde_json::json!({"method": "session/update", "params": {"sessionId": "s", "update": {
+            "sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": text}
+        }}}),
+    )
+}
+
+/// A prompt under `action`, and its turn's end.
+fn turn(
+    action: AgentActionId,
+    replies: Vec<crate::domain::model::StoredAgentSessionLog>,
+) -> Vec<crate::domain::model::StoredAgentSessionLog> {
+    let mut entries = vec![log_frame(
+        "to_runtime",
+        serde_json::json!({"id": action, "method": "session/prompt", "params": {
+            "sessionId": "s", "prompt": [{"type": "text", "text": "plan the change"}]
+        }}),
+    )];
+    entries.extend(replies);
+    entries.push(log_frame(
+        "to_server",
+        serde_json::json!({"id": action, "result": {"stopReason": "end_turn"}}),
+    ));
+    entries
+}
+
+#[test]
+fn the_reply_is_the_last_thing_the_agent_said_in_the_prompt_s_turn() {
+    let first = AgentActionId::mint();
+    let second = AgentActionId::mint();
+    let tool_call = log_frame(
+        "to_server",
+        serde_json::json!({"method": "session/update", "params": {"sessionId": "s", "update": {
+            "sessionUpdate": "tool_call", "toolCallId": "call-1", "title": "Bash",
+            "kind": "execute", "status": "completed", "rawInput": {}
+        }}}),
+    );
+    let mut entries = turn(
+        first,
+        vec![
+            said("Reading the code."),
+            tool_call,
+            said("The plan is ready."),
+        ],
+    );
+    entries.extend(turn(second, vec![said("I could not hand it back.")]));
+
+    assert_eq!(
+        last_words(entries.clone(), first).as_deref(),
+        Some("The plan is ready.")
+    );
+    assert_eq!(
+        last_words(entries.clone(), second).as_deref(),
+        Some("I could not hand it back.")
+    );
+    assert_eq!(last_words(entries, AgentActionId::mint()), None);
+}
+
+#[test]
+fn a_long_reply_keeps_its_end() {
+    let action = AgentActionId::mint();
+    let long = format!("{}é the end", "a".repeat(MAX_REPLY_BYTES));
+
+    let reply = last_words(turn(action, vec![said(&long)]), action).expect("a reply");
+
+    assert!(reply.len() <= MAX_REPLY_BYTES);
+    assert!(reply.ends_with("é the end"));
+}

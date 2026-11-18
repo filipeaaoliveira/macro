@@ -33,6 +33,7 @@ enum Operation {
     Cancel,
     Delete,
     Activity,
+    Reply,
 }
 
 impl Operation {
@@ -47,12 +48,15 @@ impl Operation {
             Self::Cancel => "internal/routine-sessions/cancel",
             Self::Delete => "internal/routine-sessions/delete",
             Self::Activity => "internal/routine-sessions/activity",
+            Self::Reply => "internal/routine-sessions/reply",
         }
     }
 
     fn timeout(self) -> Duration {
         match self {
-            Self::Status | Self::Cancel | Self::Delete | Self::Activity => SNAPSHOT_TIMEOUT,
+            Self::Status | Self::Cancel | Self::Delete | Self::Activity | Self::Reply => {
+                SNAPSHOT_TIMEOUT
+            }
             Self::Exec => EXEC_TIMEOUT,
             _ => REQUEST_TIMEOUT,
         }
@@ -278,6 +282,13 @@ impl RoutineSessions for AgentSessionClient {
         command: RoutineSessionAction,
     ) -> Result<RoutineActivity, RoutineSessionError> {
         self.command(Operation::Activity, &command).await
+    }
+
+    async fn reply(
+        &self,
+        command: RoutineSessionAction,
+    ) -> Result<Option<String>, RoutineSessionError> {
+        self.command(Operation::Reply, &command).await
     }
 }
 
