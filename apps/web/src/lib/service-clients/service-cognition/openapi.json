@@ -3658,7 +3658,8 @@
           "image_generation",
           "email_focus",
           "web_search",
-          "non_billable_agent_session"
+          "non_billable_agent_session",
+          "factory_gate"
         ]
       },
       "AssistantMessagePart": {

@@ -32,4 +32,5 @@ export const AiFeature = {
   email_focus: 'email_focus',
   web_search: 'web_search',
   non_billable_agent_session: 'non_billable_agent_session',
+  factory_gate: 'factory_gate',
 } as const;
