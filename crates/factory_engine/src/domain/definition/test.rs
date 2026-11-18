@@ -630,6 +630,24 @@ async fn a_key_named_twice_does_not_read() {
     );
 }
 
+/// A Step the worker does itself names no Role or reviewers.
+#[tokio::test]
+async fn a_work_step_names_no_role() {
+    let mut merge = merge_step();
+    merge["role"] = serde_json::json!("writer");
+
+    let read = read(shipping(serde_json::json!([
+        merge_gate("merge-gate", "merge", to("merge")),
+        merge
+    ])))
+    .await;
+
+    assert_eq!(
+        flow_error(read),
+        FlowError::RoleOnWork(EntryId::try_from("merge".to_string()).expect("valid"))
+    );
+}
+
 /// Slack, Google, webhook and cloud secrets, and a password in a URL, do
 /// not read; npm's settings and a public certificate do.
 #[tokio::test]

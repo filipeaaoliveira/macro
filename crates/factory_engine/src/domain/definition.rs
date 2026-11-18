@@ -530,6 +530,7 @@ pub async fn read_definition<F: DefinitionFiles>(
         let definition: serde_json::Value = required(files, &path).await?;
         let flow = Flow::parse(definition, serves)
             .and_then(|flow| flow.check_merges().map(|()| flow))
+            .and_then(|flow| flow.check_work_roles(&serves).map(|()| flow))
             .map_err(|error| DefinitionError::Flow { path, error })?;
         flows.insert(name, flow);
     }
@@ -546,10 +547,10 @@ pub async fn read_definition<F: DefinitionFiles>(
     let rules: DefinitionRules = json(files, RULES_FILE).await?.unwrap_or_default();
     if let Some(patterns) = &rules.control_files {
         ControlFiles::parse(patterns).map_err(DefinitionError::ControlFiles)?;
-    }
         if patterns.len() > MAX_DEFINITION_CONTROL_FILES {
             return Err(DefinitionError::TooManyControlFiles.into());
         }
+    }
     let queue_limit = rules
         .standing_rules
         .and_then(|standing_rules| standing_rules.queue_limit);

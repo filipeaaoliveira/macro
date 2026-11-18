@@ -351,6 +351,9 @@ pub enum FlowError {
         "entry {0}: a gate on ready_to_merge or merge must be of kind merge, and a merge gate must be on ready_to_merge"
     )]
     MergeGateKind(EntryId),
+    /// An entry the worker does itself names a Role or reviewers.
+    #[error("entry {0} runs a step no agent does, and names a role or reviewers")]
+    RoleOnWork(EntryId),
     /// A merge Gate opens after another outcome than `done`: it would ask
     /// to merge a head whose checks did not pass, and leave `done`, which
     /// nothing routes, to fall down into the merge.
@@ -468,6 +471,24 @@ impl Flow {
             }
         }
         Ok(())
+    }
+
+    /// Fails when an entry whose Step a worker does itself (`StepUse::Work`:
+    /// `merge`, `ready_to_merge`, `publish`...) names a Role or a review
+    /// panel, which no agent would fill. A Factory Definition's Flows are
+    /// held to it; Flows read with every Step taken as work are not.
+    pub fn check_work_roles(
+        &self,
+        serves: impl Fn(&StepName) -> Option<StepUse>,
+    ) -> Result<(), FlowError> {
+        let named = self.entries.iter().find(|entry| {
+            let roles = entry.role.is_some() || !entry.reviewers.is_empty();
+            roles && serves(&entry.step) == Some(StepUse::Work)
+        });
+        match named {
+            Some(entry) => Err(FlowError::RoleOnWork(entry.id.clone())),
+            None => Ok(()),
+        }
     }
 
     /// Fails unless only a merge Gate asks to merge, and every way into an
