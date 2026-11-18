@@ -1,22 +1,19 @@
-//! The `accept` and `verify` Steps: a verifier checks the change, and the
-//! plan's acceptance checks run as a round of checks at the commit under
-//! check. And the `plan` Step that writes them.
+//! The `accept` Step: a verifier checks the change, and the plan's
+//! acceptance checks run as a round of checks at the commit under check.
+//! And the `plan` Step that writes them.
 
 use chrono::Utc;
 use factory_records::domain::models::{Step, StepEnd};
 
 use super::*;
-use crate::domain::models::{Deployment, DeploymentState};
 use crate::domain::verification::VERIFY_FILE;
 
-/// A plan whose acceptance checks are a test, a check of the deployed
-/// change, and a clause with none.
+/// A plan whose acceptance checks are a test and a clause with none.
 const PLAN: &str = r#"Add the toggle.
 
 ```json
 {"acceptance": [
   {"clause": "The toggle switches the theme", "run": "bun test toggle", "timeout": 120},
-  {"clause": "The live page serves it", "run": "curl -f \"$MACRO_DEPLOY_URL/toggle\"", "deployed": true},
   {"clause": "It looks right on a phone", "none": "only a person on a phone sees it"}
 ]}
 ```"#;
@@ -126,31 +123,21 @@ fn commands(agent: &ScriptedAgent) -> Vec<String> {
         .collect()
 }
 
-/// GitHub with the Run's branch at [`HEAD`] and its pull request merged
-/// as [`FakeGithub::MERGED`], its base declaring `verify` as its verify
-/// file, now and before the merge.
-fn merged(verify: Option<&str>) -> FakeGithub {
+/// GitHub with the Run's branch at [`HEAD`], its base declaring `verify`
+/// as its verify file.
+fn declaring(verify: Option<&str>) -> FakeGithub {
     let github = github(None, None);
-    github.state().pull_request = Some(crate::domain::models::PullRequest {
-        number: 7,
-        url: "https://github.com/macro/app/pull/7".to_string(),
-        state: crate::domain::models::PullRequestState::Merged,
-        head_sha: HEAD.to_string(),
-        merge_commit: Some(FakeGithub::MERGED.to_string()),
-    });
     if let Some(verify) = verify {
-        for at in ["main", FakeGithub::BASE] {
-            github.state().files.insert(
-                (at.to_string(), VERIFY_FILE.to_string()),
-                verify.to_string(),
-            );
-        }
+        github.state().files.insert(
+            ("main".to_string(), VERIFY_FILE.to_string()),
+            verify.to_string(),
+        );
     }
     github
 }
 
-/// Before the merge, the factory runs the plan's checks that need no
-/// deploy on the head of the Run's branch, told the commit, and the
+/// Before the merge, the factory runs the plan's checks on the head of
+/// the Run's branch, told the commit, and the
 /// verifier, an agent of its own Role, checks the Done-when clauses:
 /// both pass, so the Step does.
 #[tokio::test]
@@ -195,12 +182,8 @@ async fn accept_runs_the_plan_s_checks_on_the_branch_and_passes() {
         "{prompt}"
     );
     assert!(
-        prompt.contains("2. The live page serves it: its check needs the deployed change"),
-        "{prompt}"
-    );
-    assert!(
         prompt
-            .contains("3. It looks right on a phone: no check (only a person on a phone sees it)"),
+            .contains("2. It looks right on a phone: no check (only a person on a phone sees it)"),
         "{prompt}"
     );
     assert!(
@@ -248,50 +231,13 @@ async fn a_failed_acceptance_check_before_the_merge_goes_back_as_blockers() {
 }
 
 /// A verifier that stopped without a result, even once reminded, ends its
-/// Step `no_result` with its last message, before the merge and after it,
-/// for the workflow to ask the Run's owner: it is no verdict, so no
-/// acceptance check runs and the Step neither goes back as `blockers` nor
-/// fails the change.
+/// Step `no_result` with its last message, for the workflow to ask the
+/// Run's owner: it is no verdict, so no acceptance check runs and the Step
+/// does not go back as `blockers`.
 #[tokio::test]
 async fn a_verifier_that_stopped_without_a_result_asks_its_owner() {
-    for (step, github, commit) in [
-        ("accept", github(None, None), HEAD),
-        ("verify", merged(None), FakeGithub::MERGED),
-    ] {
-        let agent = verifier("stopped", vec![ran(0, "1 passed")], commit);
-        let repo = FakeRepo::default();
-        let earlier = planned(PLAN);
-        let input = StepInput {
-            earlier: &earlier,
-            ..input()
-        };
-
-        let report = run(&agent, &github, &repo, step, input).await.expect(step);
-
-        assert_eq!(
-            report.outcome,
-            Outcome::no_result(),
-            "{step}: {}",
-            report.output
-        );
-        assert_eq!(report.output, "I stopped before checking.", "{step}");
-        assert!(commands(&agent).is_empty(), "{step}");
-        assert!(rounds(&repo, input).await.is_empty(), "{step}");
-    }
-}
-
-/// After the merge, every check runs on the merge commit, told where the
-/// change is deployed; a verifier that finds a clause not met fails the
-/// Step, though every check passed.
-#[tokio::test]
-async fn a_merged_change_is_checked_where_it_is_deployed() {
-    let github = merged(Some(r#"{"deploy": {"environment": "production"}}"#));
-    github.state().deployments = [vec![Deployment {
-        commit: FakeGithub::MERGED.to_string(),
-        state: DeploymentState::Succeeded,
-        url: Some("https://app.example.com".to_string()),
-    }]]
-    .into();
+    let agent = verifier("stopped", vec![ran(0, "1 passed")], HEAD);
+    let github = github(None, None);
     let repo = FakeRepo::default();
     let earlier = planned(PLAN);
     let input = StepInput {
@@ -299,98 +245,14 @@ async fn a_merged_change_is_checked_where_it_is_deployed() {
         ..input()
     };
 
-    let agent = verifier("fail", vec![ran(0, "ok"), ran(0, "ok")], FakeGithub::MERGED);
-    let report = run(&agent, &github, &repo, "verify", input)
+    let report = run(&agent, &github, &repo, "accept", input)
         .await
-        .expect("verify");
+        .expect("accept");
 
-    assert_eq!(report.outcome.as_str(), "fail", "{}", report.output);
-    assert!(
-        report
-            .output
-            .contains("the verifier found a Done-when clause not met"),
-        "{}",
-        report.output
-    );
-    let commands = commands(&agent);
-    assert_eq!(commands.len(), 2, "{commands:?}");
-    assert!(
-        commands[1].contains("export MACRO_DEPLOY_URL='https://app.example.com'")
-            && commands[1].contains(FakeGithub::MERGED),
-        "{}",
-        commands[1]
-    );
-    let rounds = rounds(&repo, input).await;
-    assert_eq!(rounds[0].checks, ["acceptance-1", "acceptance-2"]);
-    assert_eq!(
-        rounds[0].checked_commit.as_deref(),
-        Some(FakeGithub::MERGED)
-    );
-    let prompt = &agent.tasks.lock().expect("tasks")[0].prompt;
-    assert!(
-        prompt.contains("deployed to production at https://app.example.com"),
-        "{prompt}"
-    );
-    assert!(
-        prompt.contains("It is merged: nothing goes back"),
-        "{prompt}"
-    );
-}
-
-/// A merged change whose check fails fails the Step. With no deploy
-/// declared, a check of the deployed change has nothing to reach: it is
-/// not run, and the verifier checks its clause by hand.
-#[tokio::test]
-async fn a_failed_check_after_the_merge_fails_the_step() {
-    let github = merged(None);
-    let repo = FakeRepo::default();
-    let earlier = planned(PLAN);
-    let input = StepInput {
-        earlier: &earlier,
-        ..input()
-    };
-
-    let agent = verifier("pass", vec![ran(7, "expected dark")], FakeGithub::MERGED);
-    let report = run(&agent, &github, &repo, "verify", input)
-        .await
-        .expect("verify");
-
-    assert_eq!(report.outcome.as_str(), "fail", "{}", report.output);
-    assert!(report.output.contains("acceptance checks failed"));
-    assert_eq!(commands(&agent).len(), 1);
-    assert_eq!(rounds(&repo, input).await[0].checks, ["acceptance-1"]);
-    assert!(
-        report
-            .output
-            .contains("- The live page serves it: its check needs the deployed change, and no deployment names where it is reached"),
-        "{}",
-        report.output
-    );
-}
-
-/// After the merge the verify file is read as the base had it before the
-/// merge: a Run whose own change turns the phase off is still verified.
-#[tokio::test]
-async fn a_run_cannot_turn_its_own_verification_off() {
-    let github = merged(None);
-    github.state().files.insert(
-        ("main".to_string(), VERIFY_FILE.to_string()),
-        r#"{"verify": false}"#.to_string(),
-    );
-    let repo = FakeRepo::default();
-    let earlier = planned(PLAN);
-    let input = StepInput {
-        earlier: &earlier,
-        ..input()
-    };
-
-    let agent = verifier("pass", vec![ran(0, "ok")], FakeGithub::MERGED);
-    let report = run(&agent, &github, &repo, "verify", input)
-        .await
-        .expect("verify");
-
-    assert_eq!(report.outcome.as_str(), "pass", "{}", report.output);
-    assert_eq!(commands(&agent).len(), 1);
+    assert_eq!(report.outcome, Outcome::no_result(), "{}", report.output);
+    assert_eq!(report.output, "I stopped before checking.");
+    assert!(commands(&agent).is_empty());
+    assert!(rounds(&repo, input).await.is_empty());
 }
 
 /// At the `accept` entry's last visit, a failure ends `unresolved`, so the
@@ -462,7 +324,7 @@ async fn where_the_session_runs_no_command_the_verifier_runs_the_checks() {
 #[tokio::test]
 async fn a_repository_that_turns_the_phase_off_is_not_verified() {
     let agent = verifier("fail", Vec::new(), HEAD);
-    let github = merged(Some(r#"{"verify": false}"#));
+    let github = declaring(Some(r#"{"verify": false}"#));
     let repo = FakeRepo::default();
     let earlier = planned(PLAN);
     let input = StepInput {
@@ -470,10 +332,10 @@ async fn a_repository_that_turns_the_phase_off_is_not_verified() {
         ..input()
     };
 
-    for step in ["accept", "verify"] {
-        let report = run(&agent, &github, &repo, step, input).await.expect("off");
-        assert_eq!(report.outcome.as_str(), "off", "{step}");
-    }
+    let report = run(&agent, &github, &repo, "accept", input)
+        .await
+        .expect("off");
+    assert_eq!(report.outcome.as_str(), "off");
     assert!(agent.tasks.lock().expect("tasks").is_empty());
 }
 
@@ -481,7 +343,7 @@ async fn a_repository_that_turns_the_phase_off_is_not_verified() {
 /// Done-when clauses by hand: its word decides.
 #[tokio::test]
 async fn with_no_acceptance_checks_the_verifier_decides() {
-    let github = merged(None);
+    let github = declaring(None);
     let repo = FakeRepo::default();
     let earlier = planned("Add the toggle.");
     let input = StepInput {
@@ -489,10 +351,10 @@ async fn with_no_acceptance_checks_the_verifier_decides() {
         ..input()
     };
 
-    let agent = verifier("pass", Vec::new(), FakeGithub::MERGED);
-    let report = run(&agent, &github, &repo, "verify", input)
+    let agent = verifier("pass", Vec::new(), HEAD);
+    let report = run(&agent, &github, &repo, "accept", input)
         .await
-        .expect("verify");
+        .expect("accept");
 
     assert_eq!(report.outcome.as_str(), "pass");
     assert!(rounds(&repo, input).await.is_empty());
@@ -558,17 +420,17 @@ async fn a_plan_on_a_repository_keeps_its_acceptance_checks() {
     let checks = crate::domain::acceptance::AcceptanceChecks::from_plan(&report.output)
         .expect("reads")
         .expect("kept");
-    assert_eq!(checks.clauses.len(), 3);
+    assert_eq!(checks.clauses.len(), 2);
     assert!(
         agent.tasks.lock().expect("tasks")[0]
             .prompt
             .contains("End the plan with a fenced `json` block of acceptance checks")
     );
-    // The planner is told whether a deploy runs, to mark checks of it.
+    // Nothing runs after the merge, so the planner is told of no deploy.
     assert!(
-        agent.tasks.lock().expect("tasks")[0]
+        !agent.tasks.lock().expect("tasks")[0]
             .prompt
-            .contains("The repository declares no deploy: mark no check `deployed`")
+            .contains("deploy")
     );
 
     let no_repository = StepInput {

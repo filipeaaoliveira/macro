@@ -505,45 +505,6 @@ pub enum Opening {
     Refused(String),
 }
 
-/// A deployment of a commit to an environment, as GitHub has it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Deployment {
-    /// The commit it deploys.
-    pub commit: String,
-    /// How it went, by its newest status.
-    pub state: DeploymentState,
-    /// Where it is reached, as the newest of its statuses that says so
-    /// names it.
-    pub url: Option<String>,
-}
-
-/// How a deployment went, by its newest status.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DeploymentState {
-    /// It has no status yet, or is queued, pending or in progress.
-    Waiting,
-    /// It succeeded.
-    Succeeded,
-    /// It succeeded, and a later deployment to its environment has since
-    /// replaced it.
-    Replaced,
-    /// It failed, or ended in error.
-    Failed,
-}
-
-impl DeploymentState {
-    /// The state GitHub's newest status `state` names; none, or a state
-    /// GitHub adds later, is still waiting.
-    pub fn of_status(state: Option<&str>) -> Self {
-        match state {
-            Some("success") => Self::Succeeded,
-            Some("inactive") => Self::Replaced,
-            Some("failure" | "error") => Self::Failed,
-            _ => Self::Waiting,
-        }
-    }
-}
-
 /// What asking GitHub to merge a pull request came to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Merging {

@@ -149,10 +149,31 @@ fn the_code_flow_s_steps_are_served() {
         assert!(steps.serves(&step(name)).is_some(), "{name}");
     }
     assert!(steps.serves(&step("release")).is_none());
-    // A verifier, an agent, checks the change; the deploy is waited for.
+    // A verifier, an agent, checks the change before the merge. `deploy`
+    // and `verify` are served for the Runs whose Flow still names them;
+    // `verify` keeps its verifier, so a session it held is let go.
     assert_eq!(steps.serves(&step("accept")), Some(StepUse::Agent));
     assert_eq!(steps.serves(&step("verify")), Some(StepUse::Agent));
     assert_eq!(steps.serves(&step("deploy")), Some(StepUse::Work));
+}
+
+/// A Run ends at its merge: one whose Flow still goes on to `deploy` or
+/// `verify` once merged finds each ends `off` at once, which its Flow
+/// routes to the Run's `success`. Nothing is waited for, read or asked.
+#[tokio::test]
+async fn the_steps_after_a_merge_end_at_once() {
+    let agent = FakeAgent::ending_with("fail");
+    let steps = BuiltInSteps::new(agent.clone(), pull_requests());
+
+    for name in ["deploy", "verify"] {
+        let report = steps
+            .run(&step(name), input(&[]))
+            .await
+            .unwrap_or_else(|error| panic!("{name}: {error}"));
+        assert_eq!(report.outcome.as_str(), "off", "{name}");
+        assert!(report.output.contains("ends at its merge"), "{name}");
+    }
+    assert!(agent.tasks.lock().expect("tasks").is_empty());
 }
 
 /// An agent Step goes to an Agent of the Role its entry names. A Run whose

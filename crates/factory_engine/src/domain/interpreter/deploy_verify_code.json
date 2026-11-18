@@ -1,0 +1,528 @@
+{
+	"description": "Takes a task to a merged pull request in a GitHub repository: plans the change and asks a person to approve the plan, writes it on the run's branch and runs the repository's own checks on it, has a panel of reviewers review it at once and, as a person or the team's standing rules decide, fixes the blockers they find, reviewing each fix's changes again, opens a pull request, waits for its checks and fixes what fails, then asks a person whether to merge the commit that passed, and merges it once the base branch's required checks pass. Before it opens the pull request, a verifier checks the change against the task's done-when clauses and runs the acceptance checks the plan wrote, sending what fails to be fixed as a person or the team's standing rules decide; once merged, the run waits for the deploy the repository declares, and the verifier checks the merged change again: a change that fails then fails the run. A finding outside the changes under review becomes a follow-up task and does not hold the pull request. A review that still finds blockers after three rounds leaves the branch for a person, and checks that still fail after their last round leave the branch for one. A merge waits while the base branch's required checks fail, and asks again if they still fail after its wait.",
+	"repository": true,
+	"entries": [
+		{
+			"id": "plan",
+			"step": "plan",
+			"role": "planner",
+			"max_visits": 3,
+			"on_exhausted": [
+				{
+					"to": {
+						"kind": "end",
+						"outcome": "manual"
+					}
+				}
+			],
+			"gate": {
+				"kind": "plan",
+				"question": "Approve this plan, or send it back with a note on what to change?",
+				"answers": ["approve", "revise"]
+			},
+			"on": {
+				"approve": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "write"
+						}
+					}
+				],
+				"revise": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "plan"
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "write",
+			"step": "write",
+			"role": "writer",
+			"on": {
+				"done": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "review"
+						}
+					}
+				],
+				"unchanged": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				],
+				"red": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "review",
+			"step": "review",
+			"reviewers": ["correctness-reviewer", "scope-reviewer", "tests-reviewer"],
+			"max_visits": 3,
+			"on_exhausted": [
+				{
+					"to": {
+						"kind": "end",
+						"outcome": "manual"
+					}
+				}
+			],
+			"gate": {
+				"kind": "blockers",
+				"after": "changes",
+				"question": "The reviewers found blockers. Send them to be fixed and reviewed again, or stop and leave the branch to you?",
+				"answers": ["fix", "stop"]
+			},
+			"on": {
+				"pass": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "accept"
+						}
+					}
+				],
+				"fix": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "fix"
+						}
+					}
+				],
+				"stop": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				],
+				"unresolved": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				],
+				"failed": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "fix",
+			"step": "fix",
+			"role": "fixer",
+			"next": {
+				"kind": "entry",
+				"entry": "review"
+			},
+			"on": {
+				"red": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "accept",
+			"step": "accept",
+			"role": "verifier",
+			"max_visits": 3,
+			"on_exhausted": [
+				{
+					"to": {
+						"kind": "end",
+						"outcome": "manual"
+					}
+				}
+			],
+			"gate": {
+				"kind": "blockers",
+				"after": "blockers",
+				"question": "The change does not yet do what the task asks: its acceptance checks or the verifier found what fails. Send it to be fixed, reviewed and checked again, or stop and leave the branch to you?",
+				"answers": ["fix", "stop"]
+			},
+			"on": {
+				"pass": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "publish"
+						}
+					}
+				],
+				"off": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "publish"
+						}
+					}
+				],
+				"fix": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "fix"
+						},
+						"reset": ["review"]
+					}
+				],
+				"stop": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				],
+				"unresolved": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				],
+				"failed": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "publish",
+			"step": "publish",
+			"on": {
+				"published": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "ci"
+						}
+					}
+				],
+				"closed": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				],
+				"refused": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "ci",
+			"step": "ci",
+			"on": {
+				"green": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "merge-gate"
+						}
+					}
+				],
+				"red": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "ci-fix"
+						}
+					}
+				],
+				"timeout": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				],
+				"closed": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "ci-fix",
+			"step": "ci_fix",
+			"role": "fixer",
+			"max_visits": 3,
+			"on_exhausted": [
+				{
+					"to": {
+						"kind": "end",
+						"outcome": "manual"
+					}
+				}
+			],
+			"on": {
+				"done": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "review"
+						},
+						"reset": ["review", "accept"]
+					}
+				]
+			}
+		},
+		{
+			"id": "merge-gate",
+			"step": "ready_to_merge",
+			"max_visits": 3,
+			"on_exhausted": [
+				{
+					"to": {
+						"kind": "end",
+						"outcome": "manual"
+					}
+				}
+			],
+			"gate": {
+				"kind": "merge",
+				"question": "Merge this pull request, or send it back with a note on what to change?",
+				"answers": ["approve", "revise"]
+			},
+			"on": {
+				"approve": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "merge"
+						}
+					}
+				],
+				"revise": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "fix"
+						},
+						"reset": ["review", "accept"]
+					}
+				],
+				"changed": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "ci"
+						}
+					}
+				],
+				"merged": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "deploy"
+						}
+					}
+				],
+				"closed": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "merge",
+			"step": "merge",
+			"on": {
+				"merged": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "deploy"
+						}
+					}
+				],
+				"changed": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "ci"
+						}
+					}
+				],
+				"refused": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				],
+				"held": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "merge-gate"
+						},
+						"reset": ["merge-gate"]
+					}
+				],
+				"closed": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "deploy",
+			"step": "deploy",
+			"on": {
+				"deployed": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "verify"
+						}
+					}
+				],
+				"not_needed": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "verify"
+						}
+					}
+				],
+				"off": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "success"
+						}
+					}
+				],
+				"deploy_failed": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "failed"
+						}
+					}
+				],
+				"timeout": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				],
+				"unreadable": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				],
+				"failed": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "verify",
+			"step": "verify",
+			"role": "verifier",
+			"on": {
+				"pass": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "success"
+						}
+					}
+				],
+				"off": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "success"
+						}
+					}
+				],
+				"fail": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "failed"
+						}
+					}
+				],
+				"failed": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				]
+			}
+		}
+	]
+}

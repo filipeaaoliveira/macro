@@ -8,7 +8,7 @@ const PLAN: &str = r#"Change the toggle.
 {"acceptance": [
   {"clause": "The toggle switches the theme", "run": "bun test toggle", "timeout": 120},
   {"clause": "It looks right on a phone", "none": "only a person on a phone sees it"},
-  {"clause": "The live site serves it", "run": "curl -f $MACRO_DEPLOY_URL/toggle", "deployed": true}
+  {"clause": "The page loads", "run": "bun test page"}
 ]}
 ```"#;
 
@@ -26,7 +26,6 @@ fn a_plan_s_last_block_holds_its_acceptance_checks() {
                 check: AcceptanceCheck::Run {
                     run: "bun test toggle".to_string(),
                     timeout: 120,
-                    deployed: false,
                 },
             },
             Acceptance {
@@ -34,24 +33,12 @@ fn a_plan_s_last_block_holds_its_acceptance_checks() {
                 check: AcceptanceCheck::None("only a person on a phone sees it".to_string()),
             },
             Acceptance {
-                clause: "The live site serves it".to_string(),
+                clause: "The page loads".to_string(),
                 check: AcceptanceCheck::Run {
-                    run: "curl -f $MACRO_DEPLOY_URL/toggle".to_string(),
+                    run: "bun test page".to_string(),
                     timeout: 600,
-                    deployed: true,
                 },
             },
-        ]
-    );
-    // Before the merge, a check of the deployed change does not run.
-    let before: Vec<(usize, &str, u64)> = checks.runs(false).collect();
-    assert_eq!(before, [(1, "bun test toggle", 120)]);
-    let after: Vec<(usize, &str, u64)> = checks.runs(true).collect();
-    assert_eq!(
-        after,
-        [
-            (1, "bun test toggle", 120),
-            (3, "curl -f $MACRO_DEPLOY_URL/toggle", 600)
         ]
     );
 }
@@ -97,10 +84,12 @@ fn a_clause_has_a_check_or_why_not() {
         Err(AcceptanceError::Timeout(1))
     );
     assert_eq!(read(""), Err(AcceptanceError::Clauses(0)));
-    assert_eq!(
-        read(r#"{"clause": "A", "none": "no", "deployed": true}"#),
-        Err(AcceptanceError::Check(1))
-    );
+    // Nothing runs after the merge: a check marked for a deploy does not
+    // read.
+    assert!(matches!(
+        read(r#"{"clause": "A", "run": "true", "deployed": true}"#),
+        Err(AcceptanceError::Unreadable(_))
+    ));
     assert!(matches!(
         read(r#"{"clause": "A", "run": "true", "shell": "zsh"}"#),
         Err(AcceptanceError::Unreadable(_))
@@ -129,7 +118,7 @@ fn the_plan_gate_shows_the_checks_the_factory_keeps() {
         "{note}"
     );
     assert!(
-        note.contains("3. The live site serves it: checked once deployed by"),
+        note.contains("3. The page loads: checked by `bun test page`"),
         "{note}"
     );
 

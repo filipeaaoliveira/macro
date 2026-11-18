@@ -1,12 +1,12 @@
 //! Acceptance checks: what the `plan` Step writes for each Done-when clause
-//! of the Run's request, so the `accept` and `verify` Steps can check the
-//! change does what the request asks.
+//! of the Run's request, so the `accept` Step can check the change does
+//! what the request asks before the merge.
 //!
 //! The planner ends its plan with a fenced `json` block:
 //!
 //! ```json
 //! {"acceptance": [
-//!   {"clause": "A merged run waits for the deploy", "run": "cargo test -p app deploy_wait"},
+//!   {"clause": "A merged run ends", "run": "cargo test -p app merged_run_ends"},
 //!   {"clause": "The page shows the new badge", "none": "only a browser shows it"}
 //! ]}
 //! ```
@@ -14,9 +14,8 @@
 //! Each clause has either a check, `run`, a command run from the
 //! repository's root whose exit status says whether the clause holds (with
 //! an optional `timeout` in seconds, as a repository check's), or `none`,
-//! why it has no check: the verifier then checks it by hand. A check marked
-//! `deployed` exercises the deployed change: only `verify`, after the
-//! merge, runs it; `accept`, before the merge, runs every other.
+//! why it has no check: the verifier then checks it by hand. `accept` runs
+//! every check on the head of the Run's branch.
 //!
 //! The `plan` Step reads the block, and keeps the plan with it written out
 //! for the person at its Gate, then the block as the factory read it, last
@@ -89,9 +88,6 @@ pub enum AcceptanceCheck {
         run: String,
         /// How many seconds it may take.
         timeout: u64,
-        /// Whether it exercises the deployed change, so only runs once the
-        /// change is merged.
-        deployed: bool,
     },
     /// The clause has no check, for this reason: the verifier checks it.
     None(String),
@@ -118,8 +114,6 @@ struct WrittenClause {
     run: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     timeout: Option<u64>,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    deployed: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     none: Option<String>,
 }
@@ -198,13 +192,9 @@ impl AcceptanceChecks {
                     if timeout == 0 || timeout > MAX_CHECK_TIMEOUT_SECS {
                         return Err(AcceptanceError::Timeout(number));
                     }
-                    AcceptanceCheck::Run {
-                        run,
-                        timeout,
-                        deployed: written.deployed,
-                    }
+                    AcceptanceCheck::Run { run, timeout }
                 }
-                (None, Some(why), None) if usable(&why, MAX_TEXT_BYTES) && !written.deployed => {
+                (None, Some(why), None) if usable(&why, MAX_TEXT_BYTES) => {
                     AcceptanceCheck::None(why.trim().to_string())
                 }
                 _ => return Err(AcceptanceError::Check(number)),
@@ -227,23 +217,6 @@ impl AcceptanceChecks {
         Self::from_plan(output).ok().flatten()
     }
 
-    /// The clauses with a check run on a change that is `deployed` or
-    /// not, numbered from 1 in the plan's order, each with its command and
-    /// timeout: before the merge, the checks not marked `deployed`.
-    pub fn runs(&self, deployed: bool) -> impl Iterator<Item = (usize, &str, u64)> {
-        self.clauses
-            .iter()
-            .enumerate()
-            .filter_map(move |(index, acceptance)| match &acceptance.check {
-                AcceptanceCheck::Run {
-                    run,
-                    timeout,
-                    deployed: needs_deploy,
-                } if deployed || !needs_deploy => Some((index + 1, run.as_str(), *timeout)),
-                AcceptanceCheck::Run { .. } | AcceptanceCheck::None(_) => None,
-            })
-    }
-
     /// The checks as a person reads them at the plan's Gate: each clause,
     /// numbered, with its command or why it has none. Escaped, as the
     /// planner wrote them.
@@ -252,12 +225,8 @@ impl AcceptanceChecks {
         for (index, acceptance) in self.clauses.iter().enumerate() {
             let clause = escape(&acceptance.clause).replace('\n', " ");
             let how = match &acceptance.check {
-                AcceptanceCheck::Run { run, deployed, .. } => {
-                    let when = if *deployed { " once deployed" } else { "" };
-                    format!(
-                        "checked{when} by `{}`",
-                        run.replace('`', "'").replace('\n', " ")
-                    )
+                AcceptanceCheck::Run { run, .. } => {
+                    format!("checked by `{}`", run.replace('`', "'").replace('\n', " "))
                 }
                 AcceptanceCheck::None(why) => {
                     format!("no check: {}", escape(why).replace('\n', " "))
@@ -278,19 +247,16 @@ impl AcceptanceChecks {
                 .clauses
                 .iter()
                 .map(|acceptance| {
-                    let (run, timeout, deployed, none) = match &acceptance.check {
-                        AcceptanceCheck::Run {
-                            run,
-                            timeout,
-                            deployed,
-                        } => (Some(run.clone()), Some(*timeout), *deployed, None),
-                        AcceptanceCheck::None(why) => (None, None, false, Some(why.clone())),
+                    let (run, timeout, none) = match &acceptance.check {
+                        AcceptanceCheck::Run { run, timeout } => {
+                            (Some(run.clone()), Some(*timeout), None)
+                        }
+                        AcceptanceCheck::None(why) => (None, None, Some(why.clone())),
                     };
                     WrittenClause {
                         clause: acceptance.clause.clone(),
                         run,
                         timeout,
-                        deployed,
                         none,
                     }
                 })
@@ -305,14 +271,14 @@ impl AcceptanceChecks {
 /// Gate sees the acceptance checks the factory keeps, or that it keeps
 /// none and why: the plan without its acceptance block (cut to leave room),
 /// then the checks written out, then the block as the factory read it,
-/// which the `accept` and `verify` Steps read back.
+/// which the `accept` Step reads back.
 pub fn plan_output(output: &str) -> String {
     let (plan, note) = match AcceptanceChecks::split(output) {
         Ok(Some((plan, checks))) => {
             let note = format!(
                 "\n\n## Acceptance checks\n\nThe factory keeps these from the plan: the writer and fixer cannot \
-                 change them. The verifier runs each check before the merge (but those marked once deployed), \
-                 and again on the merged change, and checks by hand each clause without one.\n\n{}\n{}",
+                 change them. The verifier runs each check before the merge, and checks by hand each clause \
+                 without one.\n\n{}\n{}",
                 checks.render(),
                 checks.block()
             );

@@ -3,16 +3,17 @@
 //! `publish`, `ci`, `ready_to_merge` and `merge` take the Run's branch to a
 //! merged pull request on GitHub ([`PullRequestSteps`]).
 //! On a repository, `write` and `fix` then have the agent run the checks
-//! the repository declares, in rounds (`checks_round`). Once merged,
-//! `deploy` waits for the change's deploy; `accept`, before the merge, and
-//! `verify`, after it, have a verifier check the change does what the Run's
-//! request asks (`verify`).
+//! the repository declares, in rounds (`checks_round`). `accept`, before
+//! the merge, has a verifier check the change does what the Run's request
+//! asks (`accept`). A Run ends at its merge: `deploy` and `verify`, which
+//! once followed it, are only served for the Runs whose Flow still names
+//! them, and end at once (`ENDED_AT_MERGE`).
 
+mod accept;
 mod checks_round;
 mod review_panel;
 #[cfg(test)]
 mod test;
-mod verify;
 
 use factory_records::domain::main_hold::MainHoldRepository;
 use factory_records::domain::models::{Outcome, Repository, Role, Step, StepKey, StepSession};
@@ -35,6 +36,11 @@ use crate::domain::questions::{
 };
 use crate::domain::review_rounds::{blockers_brief, escape, fenced_review};
 use crate::domain::verification::VerifyFile;
+
+/// What a `deploy` or `verify` Step reports: a Run ends at its merge, and
+/// one whose Flow still names them goes no further.
+const ENDED_AT_MERGE: &str = "The change is merged, and the run ends at its merge: \
+     the factory no longer waits for a deploy or checks the merged change.";
 
 /// What the agent is told for a `plan` Step.
 const PLAN_INSTRUCTIONS: &str = include_str!("built_in_steps/plan.md");
@@ -104,9 +110,12 @@ enum BuiltInStep {
     /// A verifier checks the head of the Run's branch does what the
     /// request asks, before the merge.
     Accept,
-    /// The merge is waited for to deploy.
+    /// Once waited for the merge to deploy. Only a Run started on a `code`
+    /// Flow that named it reaches it, once merged: it ends `off` at once.
     Deploy,
-    /// A verifier checks the merged change does what the request asks.
+    /// Once had a verifier check the merged change. Only a Run started on
+    /// a `code` Flow that named it reaches it, once merged: it ends `off`
+    /// at once, which ends the Run `success`.
     Verify,
 }
 
@@ -394,7 +403,7 @@ where
                 let file = self.pull_requests.base_verify_file(&input).await?;
                 let instructions = format!(
                     "{PLAN_INSTRUCTIONS}{PLAN_ACCEPTANCE_INSTRUCTIONS}{}",
-                    deploy_note(file.as_ref().ok())
+                    verify_note(file.as_ref().ok())
                 );
                 let plan = self
                     .ask_agent(step, &instructions, vec![Outcome::done()], input)
@@ -448,15 +457,11 @@ where
             BuiltInStep::Ci => Ok(self.pull_requests.ci(input).await?),
             BuiltInStep::ReadyToMerge => Ok(self.pull_requests.ready_to_merge(input).await?),
             BuiltInStep::Merge => Ok(self.pull_requests.merge(input).await?),
-            BuiltInStep::Accept => {
-                self.verify_change(step, input, verify::Phase::BeforeMerge)
-                    .await
-            }
-            BuiltInStep::Deploy => Ok(self.pull_requests.deploy(input).await?),
-            BuiltInStep::Verify => {
-                self.verify_change(step, input, verify::Phase::AfterMerge)
-                    .await
-            }
+            BuiltInStep::Accept => self.accept_change(step, input).await,
+            BuiltInStep::Deploy | BuiltInStep::Verify => Ok(StepReport {
+                outcome: Outcome::try_from("off".to_string()).unwrap_or_else(|_| Outcome::failed()),
+                output: ENDED_AT_MERGE.to_string(),
+            }),
         }
     }
 
@@ -512,31 +517,15 @@ where
     }
 }
 
-/// What the planner is told of the repository's deploy, so it marks a
-/// check `deployed` only where one runs: from the repository's verify file,
-/// none when it does not read.
-fn deploy_note(file: Option<&VerifyFile>) -> String {
+/// What the planner is told when the repository's verify file turns
+/// acceptance off; nothing otherwise.
+fn verify_note(file: Option<&VerifyFile>) -> &'static str {
     match file {
         Some(file) if !file.verify => {
             "\nThe repository turns its verify phase off: the factory runs \
              none of these checks, but write them for the person who reads the plan.\n"
-                .to_string()
         }
-        Some(VerifyFile {
-            deploy: Some(deploy),
-            ..
-        }) => format!(
-            "\nThe repository deploys each merge to the `{}` environment: a check marked \
-             `deployed` reaches the deployed change at `$MACRO_DEPLOY_URL` when the deployment \
-             names its address, and is not run when it names none.\n",
-            escape(&deploy.environment)
-        ),
-        Some(_) => "\nThe repository declares no deploy: mark no check `deployed`, since such a \
-                    check is never run here.\n"
-            .to_string(),
-        None => {
-            "\nThe repository's verify file does not read: mark no check `deployed`.\n".to_string()
-        }
+        _ => "",
     }
 }
 

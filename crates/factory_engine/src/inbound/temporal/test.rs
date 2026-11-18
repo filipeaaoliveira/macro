@@ -656,7 +656,7 @@ impl StepAgent for CodeAgent {
                 "done"
             }
             // The verifier ends with its next verdict.
-            "accept" | "verify" => {
+            "accept" => {
                 let mut verdicts = self.verdicts.lock().expect("verdicts");
                 if verdicts.is_empty() {
                     "pass"
@@ -1057,13 +1057,11 @@ async fn a_code_run_merges_its_pull_request_once_a_person_approves() {
     .await;
 
     assert!(matches!(ended, Ok(RunOutcome::Success)), "{ended:?}");
-    // The verifier checks the change before the pull request, and the
-    // merged change once its deploy is not needed.
+    // The verifier checks the change before the pull request; the Run
+    // ends at its merge.
     assert_eq!(
         agent.steps(),
-        [
-            "plan", "write", "review", "review", "review", "accept", "verify"
-        ]
+        ["plan", "write", "review", "review", "review", "accept"]
     );
     let github = github.state();
     assert_eq!(github.opened, 1);
@@ -1074,6 +1072,61 @@ async fn a_code_run_merges_its_pull_request_once_a_person_approves() {
             .as_ref()
             .map(|pull_request| pull_request.state),
         Some(PullRequestState::Merged)
+    );
+}
+
+/// A Run started on a `code` Flow that went on past its merge, to `deploy`
+/// and `verify`, ends at its merge on this worker: `deploy` ends `off` at
+/// once, which that Flow routes to the Run's `success`, and no verifier
+/// checks the merged change.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "Temporal doesn't exist in CI"]
+async fn a_run_on_a_flow_past_its_merge_ends_at_its_merge() {
+    let github = FakeGithub::default();
+    github.state().checks = [ci(Some("success"))].into();
+    let agent = CodeAgent::new(&github);
+    let repo = FakeRepo::default();
+    let flow = Flow::parse(
+        serde_json::from_str(include_str!(
+            "../../domain/interpreter/deploy_verify_code.json"
+        ))
+        .expect("the flow is JSON"),
+        |_| Some(crate::domain::flow::StepUse::Work),
+    )
+    .expect("valid flow");
+    let run_id = Arc::new(Mutex::new(None));
+
+    let ended = walk_code_with(
+        &agent,
+        &github,
+        &repo,
+        CodeWalk {
+            flow: Some(flow),
+            ..CodeWalk::default()
+        },
+        |run| {
+            let run_id = run_id.clone();
+            async move {
+                *run_id.lock().expect("run") = Some(run.run_id);
+                run.answer_next_gate("approve").await;
+                run.answer_next_gate("approve").await;
+            }
+        },
+    )
+    .await;
+
+    assert!(matches!(ended, Ok(RunOutcome::Success)), "{ended:?}");
+    assert_eq!(
+        agent.steps(),
+        ["plan", "write", "review", "review", "review", "accept"]
+    );
+    let run_id = run_id.lock().expect("run").expect("the run started");
+    let steps = repo.list_steps(run_id).await.expect("read");
+    let last = steps.last().expect("a step");
+    assert_eq!(last.entry.as_str(), "deploy");
+    assert_eq!(
+        last.end.as_ref().map(|end| end.outcome.as_str()),
+        Some("off")
     );
 }
 
@@ -1097,7 +1150,7 @@ async fn red_ci_is_fixed_and_the_fixed_commit_merges() {
         agent.steps(),
         [
             "plan", "write", "review", "review", "review", "accept", "ci_fix", "review", "review",
-            "review", "accept", "verify"
+            "review", "accept"
         ]
     );
     let github = github.state();
@@ -1234,7 +1287,7 @@ async fn failed_acceptance_goes_to_the_blockers_rule_and_is_fixed() {
         agent.steps(),
         [
             "plan", "write", "review", "review", "review", "accept", "fix", "review", "review",
-            "review", "accept", "verify"
+            "review", "accept"
         ]
     );
     let ruled: Vec<StandingRule> = repo

@@ -145,8 +145,9 @@ impl RunInsightsRepository for PgRunRepository {
         // result and its Gate: its owner's `retry` goes on in the same
         // visit, and their `stop` fails it, as its Flow routes it. A Step
         // fails its entry when it failed for good, or its owner stopped it
-        // so, or a verifier failed a merged change (`fail`) or its deploy
-        // failed (`deploy_failed`).
+        // so, or, on a Run recorded before Runs ended at their merge, a
+        // verifier failed a merged change (`fail`) or its deploy failed
+        // (`deploy_failed`).
         let entries = sqlx::query!(
             r#"
             WITH steps AS (
