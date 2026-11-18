@@ -5,12 +5,14 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 
 use factory_records::domain::models::{EntryId, Outcome, RunId, RunOutcome, StepKey};
+use factory_records::domain::standing_rules::OrchestratorDefinition;
 use serde_json::json;
 
 use super::walk_step;
 use crate::domain::flow::{Entry, Flow, StepUse};
 use crate::domain::gate::GateOpening;
 use crate::domain::models::{StepEnding, StepReport, StepRequest, StepStart};
+use crate::domain::standing_rules::{GateFacts, rule_answer};
 use crate::domain::review_rounds::{ReviewRoundClosing, ReviewRoundOpening};
 use crate::inbound::temporal::workflow::review_round::Round;
 use crate::inbound::temporal::workflow::work::Work;
@@ -29,6 +31,9 @@ struct Script {
     cancelled: bool,
     /// Asking a Gate fails, other than by the Run's cancellation.
     ask_fails: bool,
+    /// The Run's Standing Rules; none for a Run created before Runs kept
+    /// them.
+    rules: Option<OrchestratorDefinition>,
     asked: RefCell<Vec<String>>,
     requests: RefCell<Vec<StepRequest>>,
 }
@@ -93,7 +98,24 @@ impl Work for Script {
         self.note(format!("stop {}", request.key.seq));
     }
 
-    async fn ask(&self, opening: GateOpening, _rule: Option<Asking>) -> Result<Outcome, Failed> {
+    async fn ask(&self, opening: GateOpening, rule: Option<Asking>) -> Result<Outcome, Failed> {
+        // As the worker does: a Flow's Gate of a kind goes to the Run's
+        // Standing Rules first, and only one they leave waits for a person.
+        if let Some(asking) = rule
+            && let Some(kind) = asking.kind
+        {
+            let facts = GateFacts {
+                kind,
+                fix_rounds: asking.fix_rounds,
+                fix_limit: asking.fix_limit,
+                tampered: false,
+                held: false,
+            };
+            if let Some(ruled) = rule_answer(self.rules, &facts, &opening.answers) {
+                self.note(format!("rule {} {}", opening.key.seq, ruled.answer));
+                return Ok(ruled.answer);
+            }
+        }
         self.note(format!("ask {} {}", opening.key.seq, opening.question));
         if self.ask_fails {
             return Err(Failed);
@@ -412,4 +434,88 @@ async fn a_run_out_of_steps_at_an_answer_ends_blocked() {
 
     assert_eq!(walked, Ok(Round::Ended(RunOutcome::Blocked)));
     assert_eq!(held, [1]);
+}
+
+/// Every Standing Rule on.
+const EVERY_RULE: OrchestratorDefinition = OrchestratorDefinition {
+    plan: true,
+    blockers: true,
+    merge: true,
+};
+
+/// A `plan` entry whose Gate is of the `plan` kind, as the built-in Flows
+/// name it.
+fn plan_of_kind() -> Entry {
+    let entry = json!({
+        "id": "plan",
+        "step": "plan",
+        "role": "planner",
+        "gate": { "kind": "plan", "question": "Approve?", "answers": ["approve", "revise"] }
+    });
+    let flow =
+        Flow::parse(json!({ "entries": [entry] }), |_| Some(StepUse::Agent)).expect("valid flow");
+    flow.entries[0].clone()
+}
+
+/// With every Standing Rule on, an agent's question still waits for the
+/// Run's owner: a question Gate is never put to the rules. The plan Gate
+/// of the Step that goes on with the answer is the Flow's, and its rule
+/// answers it.
+#[tokio::test]
+async fn a_question_waits_for_a_person_with_every_rule_on() {
+    let script = Script {
+        ends: [(1, "question")].into(),
+        rules: Some(EVERY_RULE),
+        ..Script::default()
+    };
+
+    let (walked, held) = walk(&script, &plan_of_kind(), asking(2), 10).await;
+
+    assert_eq!(
+        walked,
+        Ok(Round::Routed(
+            Outcome::try_from("approve".to_string()).expect("valid")
+        ))
+    );
+    assert!(held.is_empty());
+    assert_eq!(
+        script.asked(),
+        [
+            "start 1",
+            "run 1",
+            "end 1 question",
+            "ask 1 Question of step 1?",
+            "start 2",
+            "run 2",
+            "end 2 done",
+            "release 2",
+            "rule 2 approve"
+        ]
+    );
+}
+
+/// A Gate the Flow names no kind of waits for a person whatever rules
+/// the Run has.
+#[tokio::test]
+async fn a_gate_of_no_kind_waits_for_a_person_with_every_rule_on() {
+    let script = Script {
+        rules: Some(EVERY_RULE),
+        ..Script::default()
+    };
+
+    walk(&script, &plan(true), asking(0), 10)
+        .await
+        .0
+        .expect("walked");
+
+    assert_eq!(
+        script.asked(),
+        [
+            "start 1",
+            "run 1",
+            "end 1 done",
+            "release 1",
+            "ask 1 Approve?"
+        ]
+    );
 }

@@ -6,12 +6,14 @@ use std::collections::{BTreeMap, VecDeque};
 use std::num::NonZeroU8;
 
 use factory_records::domain::models::{EntryId, Outcome, Role, RunId, RunOutcome};
+use factory_records::domain::standing_rules::{GateKind, OrchestratorDefinition};
 
 use super::{Panel, Round, review_round};
-use crate::domain::flow::{Entry, StepName};
+use crate::domain::flow::{Entry, GateDefinition, StepName};
 use crate::domain::gate::GateOpening;
 use crate::domain::models::{StepEnding, StepReport, StepRequest, StepStart};
 use crate::domain::review_rounds::{ReviewRoundClosing, ReviewRoundOpening};
+use crate::domain::standing_rules::{GateFacts, rule_answer};
 use crate::inbound::temporal::workflow::{Asking, Questions};
 use crate::inbound::temporal::workflow::work::Work;
 
@@ -31,6 +33,9 @@ struct Script {
     /// a reviewer that asks the Run's owner.
     ends: BTreeMap<u16, &'static str>,
     closed: Option<Outcome>,
+    /// The Run's Standing Rules; none for a Run created before Runs kept
+    /// them.
+    rules: Option<OrchestratorDefinition>,
     asked: RefCell<Vec<String>>,
     closings: RefCell<Vec<ReviewRoundClosing>>,
 }
@@ -114,9 +119,26 @@ impl Work for Script {
         self.note(format!("stop {}", request.key.seq));
     }
 
-    async fn ask(&self, opening: GateOpening, _rule: Option<Asking>) -> Result<Outcome, Failed> {
+    async fn ask(&self, opening: GateOpening, rule: Option<Asking>) -> Result<Outcome, Failed> {
+        // As the worker does: a Flow's Gate of a kind goes to the Run's
+        // Standing Rules first, and only one they leave waits for a person.
+        if let Some(asking) = rule
+            && let Some(kind) = asking.kind
+        {
+            let facts = GateFacts {
+                kind,
+                fix_rounds: asking.fix_rounds,
+                fix_limit: asking.fix_limit,
+                tampered: false,
+                held: false,
+            };
+            if let Some(ruled) = rule_answer(self.rules, &facts, &opening.answers) {
+                self.note(format!("rule {} {}", opening.key.seq, ruled.answer));
+                return Ok(ruled.answer);
+            }
+        }
         self.note(format!("ask {} {}", opening.key.seq, opening.question));
-        Ok(Outcome::answer())
+        Ok(opening.answers[0].clone())
     }
 
     async fn close(&self, closing: ReviewRoundClosing) -> Result<Outcome, Failed> {
@@ -149,10 +171,18 @@ fn panel_entry(max: u8) -> Entry {
 
 /// Walk the round that starts at Step 3, its entry's `visit`, on `script`.
 async fn walk(script: &Script, visit: u16) -> (Result<Round, Failed>, Vec<u16>) {
-    let entry = panel_entry(3);
+    walk_entry(script, &panel_entry(3), visit).await
+}
+
+/// [`walk`] the round of `entry`.
+async fn walk_entry(
+    script: &Script,
+    entry: &Entry,
+    visit: u16,
+) -> (Result<Round, Failed>, Vec<u16>) {
     let panel = Panel {
         run_id: RunId::generate(),
-        entry: &entry,
+        entry,
         visit,
         seq: 3,
         questions: Questions {
@@ -465,4 +495,130 @@ async fn a_round_cancelled_while_a_reviewer_goes_on_holds_the_asking_step() {
 
     assert_eq!(round, Ok(Round::Ended(RunOutcome::Cancelled)));
     assert_eq!(held, [3, 6]);
+}
+
+/// Every Standing Rule on.
+const EVERY_RULE: OrchestratorDefinition = OrchestratorDefinition {
+    plan: true,
+    blockers: true,
+    merge: true,
+};
+
+/// The review panel of three reviewers, at most three rounds, with the
+/// `code` Flow's Blockers Gate after a round ends `changes`.
+fn gated_panel() -> Entry {
+    Entry {
+        gate: Some(GateDefinition {
+            question: "Blockers?".to_string(),
+            answers: ["fix", "stop"]
+                .map(|answer| Outcome::try_from(answer.to_string()).expect("valid"))
+                .to_vec(),
+            after: Some(Outcome::try_from("changes".to_string()).expect("valid")),
+            kind: Some(GateKind::Blockers),
+        }),
+        ..panel_entry(3)
+    }
+}
+
+/// A round whose reviewer asks the Run's owner, with every Standing Rule
+/// on: the question waits for a person, the round closes only once the
+/// reviewer went on with the answer, and only then the Blockers Gate
+/// opens, on the round's latest Step, and its rule sends them to a fix.
+#[tokio::test]
+async fn a_blockers_gate_after_a_reviewer_s_question_gets_its_rule_answer() {
+    let script = Script {
+        ends: [(4, "question")].into(),
+        closed: Some(Outcome::try_from("changes".to_string()).expect("valid")),
+        rules: Some(EVERY_RULE),
+        ..Script::default()
+    };
+
+    let (round, held) = walk_entry(&script, &gated_panel(), 1).await;
+
+    assert_eq!(
+        round,
+        Ok(Round::Routed(
+            Outcome::try_from("fix".to_string()).expect("valid")
+        ))
+    );
+    assert!(held.is_empty());
+    assert_eq!(
+        script.asked(),
+        [
+            "open 3",
+            "start 3",
+            "start 4",
+            "start 5",
+            "run 3,4,5",
+            "end 3 pass",
+            "release 3",
+            "end 4 question",
+            "end 5 pass",
+            "release 5",
+            "ask 4 Question of step 4?",
+            "start 6",
+            "run 6",
+            "end 6 pass",
+            "release 6",
+            "close 3",
+            "rule 6 fix"
+        ]
+    );
+}
+
+/// Without rules, the Blockers Gate of a round with no question waits for
+/// a person on the round's last reviewer's Step once the round closes, and
+/// a round that ends otherwise asks nothing.
+#[tokio::test]
+async fn a_blockers_gate_waits_for_a_person_once_the_round_closes() {
+    let script = Script {
+        closed: Some(Outcome::try_from("changes".to_string()).expect("valid")),
+        ..Script::default()
+    };
+
+    let (round, _) = walk_entry(&script, &gated_panel(), 1).await;
+
+    assert_eq!(
+        round,
+        Ok(Round::Routed(
+            Outcome::try_from("fix".to_string()).expect("valid")
+        ))
+    );
+    assert_eq!(
+        script.asked().last().map(String::as_str),
+        Some("ask 5 Blockers?")
+    );
+    assert_eq!(script.asked()[script.asked().len() - 2], "close 3");
+
+    let passed = Script {
+        rules: Some(EVERY_RULE),
+        ..Script::default()
+    };
+    let (round, _) = walk_entry(&passed, &gated_panel(), 1).await;
+    assert_eq!(
+        round,
+        Ok(Round::Routed(
+            Outcome::try_from("pass".to_string()).expect("valid")
+        ))
+    );
+    assert_eq!(passed.asked().last().map(String::as_str), Some("close 3"));
+}
+
+/// The Blockers Gate's rule sends no more fixes than the panel's rounds
+/// leave room for: at the third visit of a three-round panel's Gate (two
+/// fixes sent), it waits for a person.
+#[tokio::test]
+async fn a_blockers_gate_past_the_rule_s_fixes_waits_for_a_person() {
+    let script = Script {
+        closed: Some(Outcome::try_from("changes".to_string()).expect("valid")),
+        rules: Some(EVERY_RULE),
+        ..Script::default()
+    };
+
+    walk_entry(&script, &gated_panel(), 3).await.0.expect("walked");
+
+    assert_eq!(
+        script.asked().last().map(String::as_str),
+        Some("ask 5 Blockers?")
+    );
 }
