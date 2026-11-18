@@ -1,25 +1,22 @@
-import type { PrActions } from '@block-pr/primitives/create-pr-actions';
-import type { Accessor } from 'solid-js';
-
-/** Something that may take a pull request's merge in place of GitHub's. */
-export type MergeTaker = {
-  /** Takes the merge of the pull request at `url`, returning whether it did. */
-  merge: (url: string) => boolean;
-  /** Why the pull request at `url` doesn't merge now, if it doesn't. */
-  mergeRefusal: (url: string) => string | undefined;
-};
+import type { Accessor, Owner } from 'solid-js';
+import type { PrForeignEntityData } from '../data/queries';
+import { prHtmlUrl } from '../util/prKey';
+import type { MergePullRequestTarget } from './create-merge-pull-request-action';
+import { createPrActions, type PrActions } from './create-pr-actions';
+import { type PrMergeGuard, usePrMergeGuard } from './pr-merge-guard-context';
 
 /**
- * `actions` with their Merge offered to `taker` first, for the pull request
- * at `url`: disabled with the taker's reason when it refuses one, and
- * GitHub's merge only when the taker doesn't take it. The other actions,
+ * `actions` with their Merge offered to `guard` first, for the pull request
+ * at `url`: disabled with the guard's reason when it refuses one, and
+ * GitHub's merge only when the guard doesn't take it. The other actions,
  * and which one leads, stay as they were.
  */
-export function withMergeTaker(
+export function withMergeGuard(
   actions: PrActions,
   url: Accessor<string | undefined>,
-  taker: MergeTaker
+  guard: Pick<PrMergeGuard, 'merge' | 'mergeRefusal'> | undefined
 ): PrActions {
+  if (!guard) return actions;
   const all = () =>
     actions.all().map((action) => {
       const at = url();
@@ -27,9 +24,9 @@ export function withMergeTaker(
       return {
         ...action,
         run: () => {
-          if (!taker.merge(at)) action.run();
+          if (!guard.merge(at)) action.run();
         },
-        disabledReason: taker.mergeRefusal(at) ?? action.disabledReason,
+        disabledReason: guard.mergeRefusal(at) ?? action.disabledReason,
       };
     });
   const primary = () => {
@@ -46,4 +43,38 @@ export function withMergeTaker(
     },
     pending: actions.pending,
   };
+}
+
+/**
+ * A pull request detail's actions with their Merge offered to the app's
+ * merge guard first, and the confirmation GitHub's merge asks for carrying
+ * the guard's warning; with the guard, for its section and dialogs.
+ */
+export function createGuardedPrActions(
+  detail: Accessor<PrForeignEntityData | undefined>,
+  confirmMerge: (
+    target: MergePullRequestTarget & { warning?: string },
+    owner: Owner | null
+  ) => Promise<boolean>
+) {
+  const url = () => {
+    const data = detail();
+    return data ? (data.pullRequest.url ?? prHtmlUrl(data.prRef)) : undefined;
+  };
+  const guard = usePrMergeGuard(() => {
+    const at = url();
+    return at ? [at] : [];
+  });
+  const warning = () => {
+    const at = url();
+    return at ? guard?.mergeWarning(at) : undefined;
+  };
+  const actions = withMergeGuard(
+    createPrActions(detail, (target, owner) =>
+      confirmMerge({ ...target, warning: warning() }, owner)
+    ),
+    url,
+    guard
+  );
+  return { actions, guard, url };
 }

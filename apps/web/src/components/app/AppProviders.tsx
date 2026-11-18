@@ -1,5 +1,6 @@
 import { useAccessRequestInvalidations } from '@app/features/access-requests/use-access-request-invalidations';
 import { AgentNavigationProvider } from '@app/features/agent-navigation/views/agent-navigation';
+import { factoryMergeGuard } from '@app/features/factory-runs/pr-merge-guard';
 import { IncomingMeetingInvitationsProvider } from '@app/features/meetings/incoming-meeting-invitations';
 import { quietHoursMute } from '@app/features/notification-sounds/core/quiet-hours';
 import { readNotificationSoundSettings } from '@app/features/notification-sounds/primitives/sound-settings';
@@ -17,6 +18,7 @@ import { useInvalidateQueriesOnReconnect } from '@app/lib/queries/invalidate-on-
 import { useSoupBackfills } from '@app/lib/queries/soup/backfill';
 import { MacOSNotificationUpdateRequiredError } from '@app/lib/tauri/notification';
 import { globalSplitManager } from '@app/signal/splitLayout';
+import { PrMergeGuardProvider } from '@block-pr/primitives/pr-merge-guard-context';
 import { GlobalAppStateProvider } from '@components/app/GlobalAppState';
 import { useReactiveFavicon } from '@components/app/useReactiveFavicon';
 import { toast } from '@core/component/Toast/Toast';
@@ -142,7 +144,12 @@ export function AppProviders(props: ParentProps) {
               {/* Ownerless dialogs inherit app state, not a transient menu owner. */}
               <ImperativeDialogHost />
               <AgentNavigationProvider>
-                <RoutineDraftsHost>{props.children}</RoutineDraftsHost>
+                <RoutineDraftsHost>
+                  {/* A factory Run's pull request merges through its Run. */}
+                  <PrMergeGuardProvider value={factoryMergeGuard}>
+                    {props.children}
+                  </PrMergeGuardProvider>
+                </RoutineDraftsHost>
               </AgentNavigationProvider>
             </IncomingMeetingInvitationsProvider>
           </SearchProvider>

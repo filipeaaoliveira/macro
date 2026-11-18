@@ -1,15 +1,14 @@
 import { ViewBreadcrumbs, ViewShell } from '@app/components/view-shell';
 import { ChangesSplit } from '@app/features/changes/changes';
-import { useFactoryReviews } from '@app/features/factory-runs/factory-runs';
 import { useAnalytics } from '@app/lib/analytics/analytics-context';
 import { useRouteParams } from '@app/lib/split-router';
 import { reviewsPrRoute } from '@app/routes/routes';
 import { confirmMergePullRequest } from '@block-pr/component/MergePullRequestButton';
 import { PrChangesProvider } from '@block-pr/component/PrChanges';
 import { PrStatusIcon } from '@block-pr/component/PrStatus';
-import { createPrActions } from '@block-pr/primitives/create-pr-actions';
 import { usePrFileOperations } from '@block-pr/primitives/pr-file-operations';
-import { prDisplayName, prHtmlUrl } from '@block-pr/util/prKey';
+import { createGuardedPrActions } from '@block-pr/primitives/pr-merge-guard';
+import { prDisplayName } from '@block-pr/util/prKey';
 import {
   PrDetailActions,
   PrDetailContent,
@@ -25,7 +24,6 @@ import { SplitPanel } from '@components/app/split-panel';
 import { Permissions } from '@core/component/SharePermissions';
 import { fireAndForget } from '@core/util/fireAndForget';
 import { onMount, Show } from 'solid-js';
-import { withMergeTaker } from '../core/reviews-merge';
 
 function ReviewsPrBreadcrumb(props: {
   foreignEntityId: string;
@@ -72,20 +70,13 @@ function ReviewsPrBreadcrumb(props: {
 export function ReviewsPrDetail(props: { foreignEntityId: string }) {
   const analytics = useAnalytics();
   const detail = usePrDetail(() => props.foreignEntityId);
-  const githubUrl = () => {
-    const data = detail.data();
-    return data ? (data.pullRequest.url ?? prHtmlUrl(data.prRef)) : undefined;
-  };
-  // A factory Run's pull request merges through the Run's merge Gate.
-  const factory = useFactoryReviews(() => {
-    const url = githubUrl();
-    return url ? [url] : [];
-  });
-  const actions = withMergeTaker(
-    createPrActions(detail.data, confirmMergePullRequest),
-    githubUrl,
-    factory
-  );
+  // Someone else may own this pull request's merge: a factory Run's merge
+  // Gate takes it.
+  const {
+    actions,
+    guard,
+    url: githubUrl,
+  } = createGuardedPrActions(detail.data, confirmMergePullRequest);
   const operations = usePrFileOperations(detail.data, actions);
   const name = () => {
     const data = detail.data();
@@ -110,9 +101,8 @@ export function ReviewsPrDetail(props: { foreignEntityId: string }) {
         pullRequestTitle={detail.data()?.pullRequest.name ?? undefined}
         pullRequestChangeCounts={detail.changeCounts()}
       >
-        {/* The Run's section goes above Checks (20). */}
-        <Show when={githubUrl()}>{(url) => factory.section(url(), 15)}</Show>
-        {factory.gate()}
+        <Show when={githubUrl()}>{(url) => guard?.section(url())}</Show>
+        {guard?.gate()}
         <ReviewsPrBreadcrumb
           foreignEntityId={props.foreignEntityId}
           name={name()}

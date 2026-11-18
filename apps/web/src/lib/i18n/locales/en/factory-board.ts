@@ -71,4 +71,9 @@ export default {
   mergeNotAtGateStep:
     'Merges at its run’s merge gate, once the run gets there: it’s at {{step}}',
   noReviewRounds: 'No review rounds yet',
+  mergeChecking: 'Checking for a factory run…',
+  mergeAfterOtherGate:
+    'Merges at its run’s merge gate: the run waits at {{step}} first',
+  mergeRunStopped:
+    'Its run stopped ({{outcome}}): merging skips its merge gate and the checks it held',
 };

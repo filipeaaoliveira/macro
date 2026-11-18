@@ -10,7 +10,6 @@ import {
 import { CollectionPanes } from '@app/components/view-shell/CollectionPanes';
 import { ListHeaderSearch } from '@app/components/view-shell/ListHeader';
 import { ViewCreateMenu } from '@app/features/command/view-create-menu';
-import { useFactoryReviews } from '@app/features/factory-runs/factory-runs';
 import {
   createSearchParams,
   SplitRouter,
@@ -20,6 +19,7 @@ import {
 import { usePending } from '@app/observability/flow';
 import { reviewsPrRoute, reviewsSplitRoute } from '@app/routes/routes';
 import { PR_ORIGIN_TOOLS } from '@block-pr/data/pr-origin';
+import { usePrMergeGuard } from '@block-pr/primitives/pr-merge-guard-context';
 import {
   prLinksTarget,
   usePrLinksQuery,
@@ -301,9 +301,9 @@ function ReviewsRoot() {
         : [],
     boardVisible
   );
-  // The factory's Runs behind the board's pull requests: their marks, and
-  // merges through a Run's merge Gate.
-  const factory = useFactoryReviews(() =>
+  // Whoever else owns some of the board's pull requests' merges (a factory
+  // Run's merge Gate): their marks, and the merges they take.
+  const guard = usePrMergeGuard(() =>
     boardVisible() ? source.reviews().map((review) => review.metadata.url) : []
   );
   const loadMore = async () => {
@@ -475,7 +475,7 @@ function ReviewsRoot() {
               </div>
             </Match>
             <Match when={true}>
-              {factory.gate()}
+              {guard?.gate()}
               <ReviewsBoard
                 reviews={reviews()}
                 mergeability={mergeability.mergeability}
@@ -489,8 +489,13 @@ function ReviewsRoot() {
                 isLoadingMore={source.isLoadingMore()}
                 onLoadMore={() => fireAndForget(loadMore(), 'reviews-view')}
                 onOpen={openReview}
-                cardAddon={(review) => factory.mark(review.metadata.url)}
-                takeMerge={(review) => factory.merge(review.metadata.url)}
+                cardAddon={(review) => guard?.mark(review.metadata.url)}
+                takeMerge={(review) =>
+                  guard?.merge(review.metadata.url) ?? false
+                }
+                mergeWarning={(review) =>
+                  guard?.mergeWarning(review.metadata.url)
+                }
               />
             </Match>
           </Switch>

@@ -1,6 +1,6 @@
 import { t } from '@app/lib/i18n';
 import ArrowSquareOutIcon from '@icon/system/regular/arrow-square-out.svg';
-import { Badge } from '@ui';
+import { Badge, Button } from '@ui';
 import { Show } from 'solid-js';
 import { match } from 'ts-pattern';
 import { currentStep, openBlockers } from '../core/board';
@@ -21,8 +21,17 @@ export function pullRequestMergeNote(
   ownerName: string | undefined
 ): string | undefined {
   return match(merge)
-    .with({ kind: 'github' }, () => undefined)
+    .with({ kind: 'github' }, (github) =>
+      github.stopped
+        ? t('factoryBoard.mergeRunStopped', {
+            outcome: runOutcomeLabel(github.stopped),
+          })
+        : undefined
+    )
     .with({ kind: 'gate' }, () => t('factoryBoard.mergeAtGate'))
+    .with({ kind: 'refused', why: 'checking' }, () =>
+      t('factoryBoard.mergeChecking')
+    )
     .with({ kind: 'refused', why: 'notOwner' }, () =>
       ownerName
         ? t('factoryBoard.mergeOnlyOwner', { owner: ownerName })
@@ -31,13 +40,13 @@ export function pullRequestMergeNote(
     .with({ kind: 'refused', why: 'held' }, (held) =>
       t('factoryBoard.mergeHeld', { branch: held.branch })
     )
-    .with({ kind: 'refused', why: 'notAtGate' }, (refused) =>
-      refused.step
-        ? t('factoryBoard.mergeNotAtGateStep', {
-            step: flowWordLabel(refused.step.entry),
-          })
-        : t('factoryBoard.mergeNotAtGate')
-    )
+    .with({ kind: 'refused', why: 'notAtGate' }, (refused) => {
+      if (!refused.step) return t('factoryBoard.mergeNotAtGate');
+      const step = flowWordLabel(refused.step.entry);
+      return refused.waiting
+        ? t('factoryBoard.mergeAfterOtherGate', { step })
+        : t('factoryBoard.mergeNotAtGateStep', { step });
+    })
     .exhaustive();
 }
 
@@ -108,15 +117,16 @@ export function PullRequestRunMark(props: {
         </Show>
         <Show when={props.onOpenRun}>
           {(openRun) => (
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              class="ml-auto shrink-0"
               aria-label={t('factoryBoard.openRun')}
-              title={t('factoryBoard.openRun')}
-              class="ml-auto flex size-5 shrink-0 items-center justify-center rounded text-ink-subtle hover:bg-active hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+              tooltip={t('factoryBoard.openRun')}
               onClick={() => openRun()(props.found.run.id)}
             >
-              <ArrowSquareOutIcon aria-hidden="true" class="size-3.5" />
-            </button>
+              <ArrowSquareOutIcon class="size-3 touch:size-6 shrink-0 pointer-events-none" />
+            </Button>
           )}
         </Show>
       </div>

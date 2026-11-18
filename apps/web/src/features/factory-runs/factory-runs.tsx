@@ -3,6 +3,7 @@ import { t } from '@app/lib/i18n';
 import { useOptionalSplitRouter } from '@app/lib/split-router';
 import { PaneContext } from '@app/lib/split-router/solid/context';
 import { factoryInsightsRoute, factoryRunRoute } from '@app/routes/routes';
+import type { PrMergeGuard } from '@block-pr/primitives/pr-merge-guard-context';
 import { toast } from '@core/component/Toast/Toast';
 import { enableFactoryRuns } from '@core/constant/featureFlags';
 import { useSettingsState } from '@core/constant/SettingsState';
@@ -17,7 +18,6 @@ import {
   type Accessor,
   createMemo,
   createSignal,
-  type JSX,
   Show,
   useContext,
 } from 'solid-js';
@@ -174,45 +174,45 @@ export function FactoryBoard() {
 }
 
 /**
- * The factory's part of Macro's Reviews page, for the pull requests at
- * `urls`: the mark of each one a Run the person can see opened, its Run's
- * section beside the pull request, and merges that go through the Run's
- * merge Gate. Pull requests no Run opened get nothing and merge as before.
+ * Where a pull request's side panel shows its Run's section: above the
+ * Checks section (20), as what decides the merge.
  */
-export type FactoryReviews = {
-  /** The mark of the Run that opened the pull request at `url`, if one did. */
-  mark: (url: string) => JSX.Element;
-  /** Its Run as a section of the pull request's side panel, if one did. */
-  section: (url: string, order: number) => JSX.Element;
-  /**
-   * Takes a merge of the pull request at `url` when a Run guards it, and
-   * says so: its owner answers the Run's merge Gate, and anyone else is
-   * told why it doesn't merge. False when no Run guards it, so GitHub
-   * merges it as any pull request.
-   */
-  merge: (url: string) => boolean;
-  /** Why merging the pull request at `url` does nothing now, if it doesn't. */
-  mergeRefusal: (url: string) => string | undefined;
-  /** The Run's merge Gate, once a merge opens it. */
-  gate: () => JSX.Element;
-};
+export const PULL_REQUEST_RUN_SECTION_ORDER = 15;
+
+/**
+ * The factory's part of a pull request's views (Reviews, its detail, its
+ * merge button), for the pull requests at `urls`: the mark of each one a
+ * Run the person can see opened, its Run's section beside it, and merges
+ * that go through the Run's merge Gate. Until the factory has said whether
+ * a Run opened one, it does not merge. Pull requests no Run opened get
+ * nothing and merge as before.
+ */
+export type FactoryReviews = PrMergeGuard;
 
 export function useFactoryReviews(
   urls: Accessor<readonly string[]>
 ): FactoryReviews {
   const flag = useFeatureFlag(enableFactoryRuns);
-  const runs = usePullRequestRuns(urls, () => flag().enabled);
+  // Until the flag is read, whether a Run guards a pull request isn't known.
+  const runs = usePullRequestRuns(urls, () =>
+    flag().loading ? undefined : flag().enabled
+  );
   const viewerId = useUserId();
   const openRun = useOpenRun();
   const [gateRunId, setGateRunId] = createSignal<string>();
+  const foundFor = (url: string) => {
+    const lookup = runs.lookup(url);
+    return lookup.kind === 'run' ? lookup.found : undefined;
+  };
   const ownerIds = createMemo(() =>
-    urls().flatMap((url) => runs.runFor(url)?.run.ownerId ?? [])
+    urls().flatMap((url) => foundFor(url)?.run.ownerId ?? [])
   );
   const names = useUserNames({ userIds: ownerIds });
 
-  const ownerName = (found: PullRequestRun) => {
-    const ownerId = found.run.ownerId;
-    if (ownerId && ownerId === viewerId()) return t('factoryBoard.you');
+  const ownerName = (found: PullRequestRun | undefined) => {
+    const ownerId = found?.run.ownerId;
+    if (!ownerId) return undefined;
+    if (ownerId === viewerId()) return t('factoryBoard.you');
     const id = normalizeUserNameQueryId(ownerId);
     const name = names().find(
       (entry) => entry.name && normalizeUserNameQueryId(entry.name.id) === id
@@ -221,17 +221,16 @@ export function useFactoryReviews(
     return full || undefined;
   };
   const mergeOf = (url: string) =>
-    pullRequestMerge(runs.runFor(url), viewerId());
+    pullRequestMerge(runs.lookup(url), viewerId());
   const refusal = (url: string) => {
-    const found = runs.runFor(url);
     const merge = mergeOf(url);
-    if (!found || merge.kind !== 'refused') return undefined;
-    return pullRequestMergeNote(merge, ownerName(found));
+    if (merge.kind !== 'refused') return undefined;
+    return pullRequestMergeNote(merge, ownerName(foundFor(url)));
   };
 
   return {
     mark: (url) => (
-      <Show when={runs.runFor(url)}>
+      <Show when={foundFor(url)}>
         {(found) => (
           <PullRequestRunMark
             found={found()}
@@ -242,14 +241,14 @@ export function useFactoryReviews(
         )}
       </Show>
     ),
-    section: (url, order) => (
-      <Show when={runs.runFor(url)}>
+    section: (url) => (
+      <Show when={foundFor(url)}>
         {(found) => (
           <PullRequestRunSection
             found={found()}
             merge={mergeOf(url)}
             ownerName={ownerName(found())}
-            order={order}
+            order={PULL_REQUEST_RUN_SECTION_ORDER}
             onOpenRun={openRun}
             onAnswerGate={setGateRunId}
           />
@@ -268,6 +267,11 @@ export function useFactoryReviews(
       return true;
     },
     mergeRefusal: refusal,
+    mergeWarning: (url) => {
+      const merge = mergeOf(url);
+      if (merge.kind !== 'github' || !merge.stopped) return undefined;
+      return pullRequestMergeNote(merge, undefined);
+    },
     gate: () => (
       <Show when={gateRunId()} keyed>
         {(runId) => (

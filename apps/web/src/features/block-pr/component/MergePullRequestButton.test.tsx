@@ -13,6 +13,10 @@ import { confirmDialog } from '@ui';
 import { err, ok } from 'neverthrow';
 import { createSignal } from 'solid-js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  type PrMergeGuard,
+  PrMergeGuardProvider,
+} from '../primitives/pr-merge-guard-context';
 import type { PullRequestCheck } from '../primitives/pull-request-ready-to-merge';
 import { MergePullRequestButton } from './MergePullRequestButton';
 
@@ -201,5 +205,57 @@ describe('MergePullRequestButton', () => {
     expect(
       screen.getByRole('button', { name: 'Merge pull request #6369' })
     ).toBeTruthy();
+  });
+
+  describe('with a merge guard', () => {
+    function renderGuarded(guard: PrMergeGuard) {
+      return render(() => (
+        <QueryClientProvider client={queryClient}>
+          <PrMergeGuardProvider value={() => guard}>
+            <MergePullRequestButton
+              target={target}
+              checks={passingChecks}
+              draft={false}
+              status="open"
+            />
+          </PrMergeGuardProvider>
+        </QueryClientProvider>
+      ));
+    }
+    const guard = (overrides: Partial<PrMergeGuard>): PrMergeGuard => ({
+      mark: () => null,
+      section: () => null,
+      merge: () => false,
+      mergeRefusal: () => undefined,
+      mergeWarning: () => undefined,
+      gate: () => null,
+      ...overrides,
+    });
+
+    it('is disabled while the guard refuses the merge', () => {
+      renderGuarded(
+        guard({ mergeRefusal: () => 'Checking for a factory run…' })
+      );
+
+      const button = screen.getByRole('button', {
+        name: 'Merge pull request #6369',
+      }) as HTMLButtonElement;
+      expect(button.disabled).toBe(true);
+    });
+
+    it('leaves a merge the guard takes to it, and never asks GitHub', async () => {
+      const take = vi.fn(() => true);
+      renderGuarded(guard({ merge: take }));
+
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Merge pull request #6369' })
+      );
+
+      expect(take).toHaveBeenCalledWith(
+        'https://github.com/macro-inc/macro/pull/6369'
+      );
+      expect(confirmDialog).not.toHaveBeenCalled();
+      expect(authServiceClient.mergeGithubPullRequest).not.toHaveBeenCalled();
+    });
   });
 });

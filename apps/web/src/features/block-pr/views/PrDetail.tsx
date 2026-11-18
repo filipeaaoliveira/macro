@@ -64,11 +64,9 @@ import {
   usePrForeignEntityQuery,
 } from '../data/queries';
 import { usePrShare } from '../hooks/usePrShare';
-import {
-  createPrActions,
-  type PrActions,
-} from '../primitives/create-pr-actions';
+import type { PrActions } from '../primitives/create-pr-actions';
 import { usePrFileOperations } from '../primitives/pr-file-operations';
+import { createGuardedPrActions } from '../primitives/pr-merge-guard';
 import { githubAvatarUrl, githubDisplayLogin } from '../util/githubMarkdown';
 import type { PrRef } from '../util/prKey';
 import { prDisplayName, prHtmlUrl } from '../util/prKey';
@@ -273,7 +271,11 @@ export function PrDetailActions(props: {
 
 export function StandalonePrDetail(props: { foreignEntityId: string }) {
   const detail = usePrDetail(() => props.foreignEntityId);
-  const actions = createPrActions(detail.data, confirmMergePullRequest);
+  const {
+    actions,
+    guard,
+    url: githubUrl,
+  } = createGuardedPrActions(detail.data, confirmMergePullRequest);
   const operations = usePrFileOperations(detail.data, actions);
   const name = () => {
     const data = detail.data();
@@ -282,12 +284,10 @@ export function StandalonePrDetail(props: { foreignEntityId: string }) {
       (data ? prDisplayName(data.prRef) : 'Pull request')
     );
   };
-  const githubUrl = () => {
-    const data = detail.data();
-    return data ? (data.pullRequest.url ?? prHtmlUrl(data.prRef)) : undefined;
-  };
   return (
     <SidePanel.Root floating persistKey={`pr:${props.foreignEntityId}`}>
+      <Show when={githubUrl()}>{(url) => guard?.section(url())}</Show>
+      {guard?.gate()}
       <PrChangesProvider
         foreignEntityId={props.foreignEntityId}
         pullRequestUrl={githubUrl()}

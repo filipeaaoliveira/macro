@@ -3,10 +3,10 @@ import type {
   PrActions,
 } from '@block-pr/primitives/create-pr-actions';
 import { describe, expect, it, vi } from 'vitest';
-import { withMergeTaker } from './reviews-merge';
+import { withMergeGuard } from './pr-merge-guard';
 
 const icon = () => null;
-const URL = 'https://github.com/acme/shop/pull/7';
+const PR_URL = 'https://github.com/acme/shop/pull/7';
 
 function actions(merge: () => void, close: () => void): PrActions {
   const all = (): PrAction[] => [
@@ -21,10 +21,10 @@ function actions(merge: () => void, close: () => void): PrActions {
   };
 }
 
-describe('withMergeTaker', () => {
+describe('withMergeGuard', () => {
   it('lets GitHub merge a pull request no one takes', () => {
     const github = vi.fn();
-    const taken = withMergeTaker(actions(github, vi.fn()), () => URL, {
+    const taken = withMergeGuard(actions(github, vi.fn()), () => PR_URL, {
       merge: () => false,
       mergeRefusal: () => undefined,
     });
@@ -38,20 +38,26 @@ describe('withMergeTaker', () => {
   it('merges only through the taker when it takes the merge', () => {
     const github = vi.fn();
     const take = vi.fn(() => true);
-    const taken = withMergeTaker(actions(github, vi.fn()), () => URL, {
+    const taken = withMergeGuard(actions(github, vi.fn()), () => PR_URL, {
       merge: take,
       mergeRefusal: () => undefined,
     });
 
     taken.primary()?.run();
 
-    expect(take).toHaveBeenCalledWith(URL);
+    expect(take).toHaveBeenCalledWith(PR_URL);
     expect(github).not.toHaveBeenCalled();
+  });
+
+  it('leaves the actions as they were with no guard', () => {
+    const github = vi.fn();
+    const plain = actions(github, vi.fn());
+    expect(withMergeGuard(plain, () => PR_URL, undefined)).toBe(plain);
   });
 
   it('disables Merge with the reason the taker refuses it, and keeps the rest', () => {
     const close = vi.fn();
-    const taken = withMergeTaker(actions(vi.fn(), close), () => URL, {
+    const taken = withMergeGuard(actions(vi.fn(), close), () => PR_URL, {
       merge: () => true,
       mergeRefusal: () => 'Only Teo can merge this',
     });

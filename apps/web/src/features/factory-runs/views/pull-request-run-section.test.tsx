@@ -92,7 +92,7 @@ describe('PullRequestRunMark', () => {
     render(() => (
       <PullRequestRunMark
         found={atGate}
-        merge={pullRequestMerge(atGate, JULIA)}
+        merge={pullRequestMerge({ kind: 'run', found: atGate }, JULIA)}
         ownerName="you"
         onOpenRun={openRun}
       />
@@ -122,7 +122,7 @@ describe('PullRequestRunMark', () => {
     render(() => (
       <PullRequestRunMark
         found={blocked}
-        merge={pullRequestMerge(blocked, TEO)}
+        merge={pullRequestMerge({ kind: 'run', found: blocked }, TEO)}
         ownerName="Julia Lima"
       />
     ));
@@ -144,7 +144,7 @@ describe('PullRequestRunSection', () => {
     render(() => (
       <PullRequestRunSection
         found={atGate}
-        merge={pullRequestMerge(atGate, JULIA)}
+        merge={pullRequestMerge({ kind: 'run', found: atGate }, JULIA)}
         ownerName="you"
         order={15}
         onAnswerGate={answerGate}
@@ -162,7 +162,7 @@ describe('PullRequestRunSection', () => {
     render(() => (
       <PullRequestRunSection
         found={atGate}
-        merge={pullRequestMerge(atGate, TEO)}
+        merge={pullRequestMerge({ kind: 'run', found: atGate }, TEO)}
         ownerName="Julia Lima"
         order={15}
         onAnswerGate={vi.fn()}

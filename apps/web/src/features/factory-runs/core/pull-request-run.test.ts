@@ -28,11 +28,20 @@ const atGate: PullRequestRun = {
 };
 
 describe('pullRequestMerge', () => {
-  it('leaves a pull request no Run opened to GitHub', () => {
-    expect(pullRequestMerge(undefined, JULIA)).toEqual({ kind: 'github' });
+  it('merges nothing until it is known whether a Run opened it', () => {
+    expect(pullRequestMerge({ kind: 'unknown' }, JULIA)).toEqual({
+      kind: 'refused',
+      why: 'checking',
+    });
   });
 
-  it('leaves a pull request to GitHub once its Run ended', () => {
+  it('leaves a pull request no Run opened to GitHub', () => {
+    expect(pullRequestMerge({ kind: 'none' }, JULIA)).toEqual({
+      kind: 'github',
+    });
+  });
+
+  it('leaves a pull request to GitHub once its Run ended, saying it stopped', () => {
     const ended: PullRequestRun = {
       ...atGate,
       state: 'stopped',
@@ -42,23 +51,28 @@ describe('pullRequestMerge', () => {
         end: { outcome: 'manual', endedAt: '2026-11-18T11:00:00Z' },
       },
     };
-    expect(pullRequestMerge(ended, JULIA)).toEqual({ kind: 'github' });
+    expect(pullRequestMerge({ kind: 'run', found: ended }, JULIA)).toEqual({
+      kind: 'github',
+      stopped: 'manual',
+    });
   });
 
   it('merges through the merge Gate its owner is asked', () => {
-    expect(pullRequestMerge(atGate, JULIA)).toEqual({
+    expect(pullRequestMerge({ kind: 'run', found: atGate }, JULIA)).toEqual({
       kind: 'gate',
       runId: 'run-1',
     });
   });
 
   it('refuses anyone but the owner, even at the merge Gate', () => {
-    expect(pullRequestMerge(atGate, TEO)).toEqual({
+    expect(pullRequestMerge({ kind: 'run', found: atGate }, TEO)).toEqual({
       kind: 'refused',
       why: 'notOwner',
       ownerId: JULIA,
     });
-    expect(pullRequestMerge(atGate, undefined)).toMatchObject({
+    expect(
+      pullRequestMerge({ kind: 'run', found: atGate }, undefined)
+    ).toMatchObject({
       kind: 'refused',
       why: 'notOwner',
     });
@@ -70,7 +84,7 @@ describe('pullRequestMerge', () => {
       state: 'held',
       mergeGateSeq: undefined,
     };
-    expect(pullRequestMerge(held, JULIA)).toEqual({
+    expect(pullRequestMerge({ kind: 'run', found: held }, JULIA)).toEqual({
       kind: 'refused',
       why: 'held',
       branch: 'main',
@@ -94,10 +108,41 @@ describe('pullRequestMerge', () => {
         ],
       },
     };
-    expect(pullRequestMerge(reviewing, JULIA)).toEqual({
+    expect(pullRequestMerge({ kind: 'run', found: reviewing }, JULIA)).toEqual({
       kind: 'refused',
       why: 'notAtGate',
       step: reviewing.run.steps[0],
+      waiting: false,
+    });
+  });
+
+  it('says the Run waits at another Gate before its merge Gate', () => {
+    const asking: PullRequestRun = {
+      ...atGate,
+      mergeGateSeq: undefined,
+      run: {
+        ...atGate.run,
+        steps: [
+          {
+            seq: 2,
+            entry: 'plan',
+            visit: 1,
+            startedAt: '2026-11-18T10:05:00Z',
+            gate: {
+              kind: 'flow',
+              question: 'Approve the plan?',
+              answers: ['approve', 'revise'],
+              openedAt: '2026-11-18T10:06:00Z',
+            },
+          },
+        ],
+      },
+    };
+    expect(pullRequestMerge({ kind: 'run', found: asking }, JULIA)).toEqual({
+      kind: 'refused',
+      why: 'notAtGate',
+      step: asking.run.steps[0],
+      waiting: true,
     });
   });
 });

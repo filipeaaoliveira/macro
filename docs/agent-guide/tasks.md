@@ -816,9 +816,14 @@ While the run goes, the PR merges only through the run's merge gate: dropping
 it on **Merged**, or the PR's Merge button, opens the run's gate for its owner
 while the run waits there (with its Control Files and Main Hold, as in the
 run), and otherwise merges nothing and says why on a toast and on the card
-(**Only … can merge this**, the step the run is at, or the held branch); the
-Merge button is disabled with the same reason. Once the run ended, the PR
-merges as any other. The PR detail's side panel shows a **Factory run**
+(**Only … can merge this**, the step or gate the run is at, or the held
+branch); the Merge button is disabled with the same reason. Until the factory
+has answered for a PR (its flag or code still loading, its lookup pending or
+failed with nothing read yet), no PR merges: **Checking for a factory run…**.
+The same holds for a PR's own page and block and its Merge button elsewhere.
+Once the run ended, the PR merges as any other; when it stopped for a person,
+the card says so and the merge confirmation warns that the merge skips the
+run's merge gate. The PR detail's side panel shows a **Factory run**
 section above Checks: the same mark, **Answer merge gate** for the owner while
 the run waits there, and the run's review rounds with each finding. PRs no run
 opened are unchanged.
