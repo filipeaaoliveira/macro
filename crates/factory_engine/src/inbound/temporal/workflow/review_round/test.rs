@@ -30,7 +30,8 @@ struct Script {
     worked: Vec<Result<(), WorkFailure>>,
     cancelled: bool,
     /// What the Step at a place ends with, when not `pass`: `question` for
-    /// a reviewer that asks the Run's owner.
+    /// a reviewer that asks the Run's owner, `fail` for work that fails for
+    /// good, or `no_result` for a reviewer that ends without a review.
     ends: BTreeMap<u16, &'static str>,
     closed: Option<Outcome>,
     /// The Run's Standing Rules; none for a Run created before Runs kept
@@ -97,6 +98,10 @@ impl Work for Script {
                 match (self.worked.get(index), ends) {
                     (Some(Err(failure)), _) => Err(*failure),
                     (_, Some("fail")) => Err(WorkFailure::Work),
+                    (_, Some("no_result")) => Ok(StepReport {
+                        outcome: Outcome::no_result(),
+                        output: "Stopped here.".to_string(),
+                    }),
                     (_, Some("question")) => Ok(StepReport {
                         outcome: Outcome::question(),
                         output: format!("Question of step {}?", request.key.seq),
@@ -288,6 +293,17 @@ async fn a_round_failed_by_infrastructure_alone_is_routed_as_such() {
         ..Script::default()
     };
     let (round, _) = walk(&mixed, 1).await;
+    assert_eq!(round, Ok(Round::Routed(Outcome::failed())));
+
+    // A reviewer that ended without a review fails the round as its work's,
+    // beside one whose work failed for infrastructure.
+    let unreviewed = Script {
+        worked: vec![Ok(()), Err(WorkFailure::Infrastructure), Ok(())],
+        ends: [(5, "no_result")].into(),
+        closed: Some(Outcome::failed()),
+        ..Script::default()
+    };
+    let (round, _) = walk(&unreviewed, 1).await;
     assert_eq!(round, Ok(Round::Routed(Outcome::failed())));
 }
 

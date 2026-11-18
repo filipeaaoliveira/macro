@@ -10,6 +10,8 @@
 
 mod checks_round;
 mod review_panel;
+
+pub(crate) use review_panel::review_outcomes;
 #[cfg(test)]
 mod test;
 mod verify;

@@ -21,6 +21,7 @@ use factory_records::domain::models::{Outcome, RunId, RunOutcome, StepKey};
 use super::step::ask;
 use super::work::{Work, WorkFailure};
 use super::{Asking, FAILED_STEP_OUTPUT, Question, Questions};
+use crate::domain::built_in_steps::review_outcomes;
 use crate::domain::flow::Entry;
 use crate::domain::gate::{GateOpening, GateTelling};
 use crate::domain::models::{StepEnding, StepReport, StepRequest, StepStart};
@@ -188,18 +189,21 @@ async fn walk_round<W: Work>(
     let worked = work.run_all(&requests).await;
 
     // The round fails for infrastructure only when every reviewer that
-    // failed did so for it.
+    // failed did so for it, and none ended without a review, which fails
+    // the round as its work's.
     let mut any_failed = false;
     let mut work_failed = false;
-    let mut failed = |failure: WorkFailure| {
-        any_failed = true;
-        work_failed |= failure == WorkFailure::Work;
+    let mut ended = |end: Ended| match end {
+        Ended::Done { reviewed } => work_failed |= !reviewed,
+        Ended::Failed(failure) => {
+            any_failed = true;
+            work_failed |= failure == WorkFailure::Work;
+        }
     };
     let mut asking: Vec<(StepRequest, Question)> = Vec::new();
     for (request, worked) in requests.iter().zip(worked) {
         match end_reviewer(work, panel.questions, request, worked, held, &[]).await? {
-            Reviewed::Ended(Ended::Done) => {}
-            Reviewed::Ended(Ended::Failed(failure)) => failed(failure),
+            Reviewed::Ended(end) => ended(end),
             Reviewed::Asked(question) => asking.push((request.clone(), question)),
             Reviewed::RunEnded(outcome) => return Ok(Round::Ended(outcome)),
         }
@@ -253,9 +257,8 @@ async fn walk_round<W: Work>(
             held.push(going_on.clone());
             let worked = work.run(&going_on).await;
             match end_reviewer(work, panel.questions, &going_on, worked, held, &chain).await? {
-                Reviewed::Ended(Ended::Done) => break,
-                Reviewed::Ended(Ended::Failed(failure)) => {
-                    failed(failure);
+                Reviewed::Ended(end) => {
+                    ended(end);
                     break;
                 }
                 Reviewed::Asked(again) => {
@@ -298,8 +301,11 @@ enum Reviewed {
 
 /// How a reviewer's Step that did not ask ended.
 enum Ended {
-    /// With its review.
-    Done,
+    /// It ended: with its review, or with an outcome that is none.
+    Done {
+        /// Whether it ended with a review's outcome.
+        reviewed: bool,
+    },
     /// Its work failed for good, and why.
     Failed(WorkFailure),
 }
@@ -330,6 +336,7 @@ async fn end_reviewer<W: Work>(
         ),
     };
     let question = questions.asked(request, &report);
+    let reviewed = review_outcomes().contains(&report.outcome);
     let ending = StepEnding {
         key: request.key,
         report,
@@ -365,7 +372,7 @@ async fn end_reviewer<W: Work>(
         }
         return Err(error);
     }
-    Ok(Reviewed::Ended(Ended::Done))
+    Ok(Reviewed::Ended(Ended::Done { reviewed }))
 }
 
 /// Close `panel`'s round as failed, as a reviewer's question stopped it,
