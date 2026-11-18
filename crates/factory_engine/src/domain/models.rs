@@ -596,6 +596,48 @@ pub struct FlowSummary {
     pub repository: bool,
 }
 
+/// Who answers a Gate as its Run's owner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Answerer {
+    /// The owner, in their own signed-in session.
+    InPerson,
+    /// An agent session the owner works with, such as the Orchestrator in
+    /// Macro chat, answering from its code with the owner's own access. It
+    /// answers only what a Standing Rule could: never what the factory
+    /// keeps for the person ([`PersonOnly`]).
+    Agent {
+        /// The agent session the call came from.
+        session_id: Uuid,
+    },
+}
+
+/// What the factory keeps for the Run's owner in person, which an agent
+/// answering for them may not do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum PersonOnly {
+    /// The session doing a Step of a Run: it would answer its own work.
+    #[error("a factory step's own agent session never answers a gate")]
+    StepSession,
+    /// An agent's question, which only the owner answers.
+    #[error("only the run's owner, signed in to Macro, answers an agent's question")]
+    Question,
+    /// A Gate its Flow keeps for a person, or one no Standing Rule could
+    /// answer.
+    #[error("only the run's owner, signed in to Macro, answers this gate")]
+    PersonsGate,
+    /// Approving a Tampered Run, whose Control Files only the owner
+    /// approves.
+    #[error(
+        "the run's branch changes control files: only the run's owner, signed in to Macro, approves them"
+    )]
+    ControlFiles,
+    /// A merge while the base branch has a Main Hold.
+    #[error(
+        "the base branch has a main hold: only the run's owner, signed in to Macro, answers its merge gate"
+    )]
+    MainHold,
+}
+
 /// Errors of the factory's Run use cases.
 #[derive(Debug, thiserror::Error)]
 pub enum FactoryError {
@@ -720,6 +762,25 @@ pub enum FactoryError {
     NoteTooLarge {
         /// The most bytes a note may hold.
         max: usize,
+    },
+    /// An agent answering for the Run's owner tried what the factory keeps
+    /// for the owner in person.
+    #[error(transparent)]
+    ReservedForAPerson(#[from] PersonOnly),
+    /// More Gates and questions wait on the person than the Queue limit of
+    /// the rules a new Run of theirs would start under.
+    #[error(
+        "more than {limit} gates and questions wait on you, the queue limit of this project: answer some before a new run starts; runs under way go on"
+    )]
+    QueueFull {
+        /// The Queue limit.
+        limit: u16,
+    },
+    /// A Queue limit above the highest one a definition may set.
+    #[error("the queue limit must be at most {max}")]
+    InvalidQueueLimit {
+        /// The highest Queue limit.
+        max: u16,
     },
     /// The Run's workflow did not take the answer, and said why: it waits
     /// on no Gate of that Step, or the Gate was answered.

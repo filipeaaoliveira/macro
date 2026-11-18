@@ -11,14 +11,14 @@ use agent_session::domain::session_task::TaskDocumentId;
 use chrono::Utc;
 use factory_records::domain::main_hold::{BaseState, MainHoldRepository};
 use factory_records::domain::models::{
-    HandBack, MAX_NOTE_BYTES, MAX_OUTPUT_BYTES, MAX_QUESTION_BYTES, MAX_REQUEST_BYTES, NewRun,
-    Outcome, Repository, Run, RunId, RunInsert, RunOutcome, Step, StepKey, TaskLink,
+    EntryId, HandBack, MAX_NOTE_BYTES, MAX_OUTPUT_BYTES, MAX_QUESTION_BYTES, MAX_REQUEST_BYTES,
+    NewRun, Outcome, Repository, Run, RunId, RunInsert, RunOutcome, Step, StepKey, TaskLink,
     TeamMembership,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::{ReviewRound, ReviewRoundRepository};
 use factory_records::domain::standing_rules::{
-    OrchestratorDefinition, ProjectRulesSet, RuleGateKind, RulesSource, RunRules,
+    MAX_QUEUE_LIMIT, OrchestratorDefinition, ProjectRulesSet, RuleGateKind, RulesSource, RunRules,
     StandingRulesRepository,
 };
 use macro_user_id::user_id::MacroUserIdStr;
@@ -31,16 +31,18 @@ use crate::domain::gate_owner::{
     OwnerNote, gate_notice, is_factory_comment, notes_since, notice_id,
 };
 use crate::domain::models::{
-    CodeRepository, ControlFilesSettings, FactoryError, FlowSummary, RunDetail, RunFinish,
-    RunStart, StandingRulesSettings, StepEnding, StepError, StepInput, StepReport, StepRequest,
-    StepStart,
+    Answerer, CodeRepository, ControlFilesSettings, FactoryError, FlowSummary, PersonOnly,
+    RunDetail, RunFinish, RunStart, StandingRulesSettings, StepEnding, StepError, StepInput,
+    StepReport, StepRequest, StepStart,
 };
 use crate::domain::ports::{
     AnswerDelivery, FactoryService, GateNotifier, NoOwnerGates, PullRequests, Retryable,
     RunWorkflows, RunWorkflowsError, StepExecutor, StepService, TaskAccess, TaskDirectory,
     TaskNotes, UserDirectory,
 };
-use crate::domain::standing_rules::{GateFacts, RuleAnswer, repeated_blockers, rule_answer};
+use crate::domain::standing_rules::{
+    GateFacts, RuleAnswer, offers_kind_answers, repeated_blockers, rule_answer,
+};
 
 fn internal(error: impl std::error::Error + Send + Sync + 'static) -> rootcause::Report {
     rootcause::Report::new(error).into_dynamic()
@@ -372,6 +374,116 @@ where
         Ok(details)
     }
 
+    /// The kind of Gate the entry `entry` asks, by its Flow, when an agent
+    /// answering for the Run's owner may answer it: every built-in Flow
+    /// that has the entry asks the same kind of Gate there, not one kept
+    /// for a person. A Run does not keep its Flow's name, so the entry is
+    /// looked up in each, as for a Run at its merge.
+    fn agent_answerable_kind(&self, entry: &EntryId) -> Option<RuleGateKind> {
+        let mut kinds = BUILT_IN_FLOWS
+            .into_iter()
+            .filter_map(|flow| flow.read(|step| self.executor.serves(step)).ok())
+            .flat_map(|flow| flow.entries)
+            .filter(|asking| asking.id == *entry)
+            .map(|asking| match asking.gate {
+                Some(gate) if !gate.person_only => gate.kind,
+                _ => None,
+            });
+        let first = kinds.next()??;
+        kinds.all(|kind| kind == Some(first)).then_some(first)
+    }
+
+    /// Fails unless an agent answering for the Run's owner from the session
+    /// `session_id` may give `answer` to the Gate of `run`'s Step `seq`: it
+    /// answers only what a Standing Rule could, and never what the factory
+    /// keeps for the owner in person. A factory Step's own session never
+    /// answers a Gate; an agent's question, a Gate its Flow keeps for a
+    /// person or one of no kind, a Tampered Run's approval, and a merge Gate
+    /// while its base branch has a Main Hold are the owner's.
+    async fn agent_may_answer(
+        &self,
+        run: &Run,
+        steps: &[Step],
+        seq: u16,
+        answer: &Outcome,
+        approved_control_files: bool,
+        session_id: Uuid,
+    ) -> Result<(), FactoryError> {
+        // The agents doing a Run's Steps work as its owner too: one could
+        // otherwise approve the plan it wrote.
+        if self
+            .repo
+            .session_step(session_id)
+            .await
+            .map_err(internal)?
+            .is_some()
+        {
+            return Err(PersonOnly::StepSession.into());
+        }
+
+        let Some(step) = steps.iter().find(|step| step.seq == seq) else {
+            return Err(FactoryError::AnswerRefused(
+                "the run waits on no gate of that step".to_string(),
+            ));
+        };
+        let Some(gate) = step.gate.as_ref() else {
+            return Err(FactoryError::AnswerRefused(
+                "the run waits on no gate of that step".to_string(),
+            ));
+        };
+        if gate.kind.answered_only_by_a_person() {
+            return Err(PersonOnly::Question.into());
+        }
+        let kind = self
+            .agent_answerable_kind(&step.entry)
+            .filter(|kind| offers_kind_answers(*kind, &gate.answers))
+            .ok_or(PersonOnly::PersonsGate)?;
+
+        // Only the owner in person approves the Control Files a Tampered
+        // Run's branch changed, as no rule approves its plan or merge.
+        let tampered = run
+            .control_files
+            .as_ref()
+            .is_some_and(|changes| changes.is_tampered());
+        if approved_control_files || (tampered && answer.as_str() == APPROVE) {
+            return Err(PersonOnly::ControlFiles.into());
+        }
+
+        // A merge Gate under a Main Hold is the owner's, as the
+        // `merge_when_green` rule answers none.
+        if kind == RuleGateKind::Merge
+            && let Some(base) = run.repository.as_ref()
+            && self.repo.main_hold(base).await.map_err(internal)?.is_some()
+        {
+            return Err(PersonOnly::MainHold.into());
+        }
+        Ok(())
+    }
+
+    /// Fails when more Gates and questions wait on `user_id` than the Queue
+    /// limit of `rules`, which a new Run of theirs would start under. Runs
+    /// already going are not touched.
+    async fn queue_has_room(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        rules: &RunRules,
+    ) -> Result<(), FactoryError> {
+        let Some(limit) = rules.definition.queue_limit else {
+            return Ok(());
+        };
+        // Each Run waits on at most one Gate at a time, so its waiting Runs
+        // are the person's Queue; one past the limit is enough to tell.
+        let waiting = self
+            .repo
+            .list_waiting_runs(user_id, limit.saturating_add(1))
+            .await
+            .map_err(internal)?;
+        if waiting.len() > usize::from(limit) {
+            return Err(FactoryError::QueueFull { limit });
+        }
+        Ok(())
+    }
+
     /// Remove a Run whose workflow did not start, unless it did after all:
     /// a start that failed after the server took it leaves a workflow
     /// behind, which needs its Run.
@@ -471,6 +583,9 @@ where
         // team's or the Project's rules, or a task linked later, does not
         // change which of its Gates a rule answers.
         let standing_rules = self.run_rules(&actor, team, task_id).await?;
+        // Above the Queue limit of the rules it would start under, no new
+        // Run starts, whoever asks: the person, or an agent for them.
+        self.queue_has_room(&actor, &standing_rules).await?;
 
         // The Run and its task are kept in one write, so a task deleted
         // since it was checked leaves nothing behind.
@@ -684,6 +799,7 @@ where
         answer: Outcome,
         note: Option<String>,
         approved_control_files: Option<Vec<String>>,
+        answerer: Answerer,
     ) -> Result<(), FactoryError> {
         let note_bytes = note.as_ref().map_or(0, String::len);
         if note_bytes > MAX_NOTE_BYTES {
@@ -711,6 +827,17 @@ where
             return Err(FactoryError::AnswerNotOffered {
                 offered: gate.answers.iter().map(|a| a.as_str().to_owned()).collect(),
             });
+        }
+        if let Answerer::Agent { session_id } = answerer {
+            self.agent_may_answer(
+                &run,
+                &steps,
+                seq,
+                &answer,
+                approved_control_files.is_some(),
+                session_id,
+            )
+            .await?;
         }
         // An agent's question is answered in the owner's own words: the
         // agent goes on with them.
@@ -875,6 +1002,7 @@ where
         actor: MacroUserIdStr<'static>,
         definition: Option<OrchestratorDefinition>,
     ) -> Result<StandingRulesSettings, FactoryError> {
+        valid_queue_limit(definition.as_ref())?;
         let team = self.administered_team(&actor).await?;
         self.repo
             .set_team_rules(team.team_id, definition)
@@ -890,6 +1018,7 @@ where
         project_id: Uuid,
         definition: Option<OrchestratorDefinition>,
     ) -> Result<StandingRulesSettings, FactoryError> {
+        valid_queue_limit(definition.as_ref())?;
         let team = self.administered_team(&actor).await?;
         // A Project the admin may not edit is not theirs to give rules: it
         // reads as one that does not exist.
@@ -952,6 +1081,19 @@ where
             Some(_) => Err(FactoryError::RunEnded),
         }
     }
+}
+
+/// Fails when `definition` sets a Queue limit above [`MAX_QUEUE_LIMIT`].
+fn valid_queue_limit(definition: Option<&OrchestratorDefinition>) -> Result<(), FactoryError> {
+    let too_high = definition
+        .and_then(|definition| definition.queue_limit)
+        .is_some_and(|limit| limit > MAX_QUEUE_LIMIT);
+    if too_high {
+        return Err(FactoryError::InvalidQueueLimit {
+            max: MAX_QUEUE_LIMIT,
+        });
+    }
+    Ok(())
 }
 
 /// How many questions an agent Step may ask the Run's owner, unless the

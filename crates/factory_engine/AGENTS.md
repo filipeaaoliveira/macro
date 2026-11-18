@@ -110,6 +110,33 @@ Runs on a task they can see, newest first, at most `TASK_RUNS_LISTED`; other
 people's Runs on it are not listed, and a hidden or missing task, or a document
 that is not a task, is 404.
 
+The Orchestrator, a person's standing agent in Macro chat, uses the same
+Run API from code mode (the SDK's `macro.factory`, its instructions in
+`system_skills`' Orchestrate Factory Runs), as the person and with their
+access only. It starts, reads, links and cancels their Runs as they would.
+`POST /runs/{id}/steps/{seq}/answer` takes an answer from a code-mode call
+of an agent session (the correlation layer's `current_session`, from a
+person's credential, never an internal caller's) as `Answerer::Agent`, and
+the service lets it answer only what a Standing Rule could
+(`agent_may_answer`): a Flow's Gate whose entry asks the same kind of Gate
+(`plan`, `blockers`, `merge`) in every built-in Flow that has it, not kept
+for a person; never an agent's question, approving a Tampered Run or
+sending Control Files, a merge Gate while its base has a Main Hold, nor
+any answer from a session a factory Step works in, which would answer its
+own work (403 `reservedForAPerson`, `PersonOnly`). The answer is recorded
+as the owner's, as theirs from the app is. A reply in words and the
+factory's settings stay the person's own session's. Nothing in the
+workflow changed: the answer reaches it as any other.
+
+A person's Queue is their Runs waiting on them at a Gate or an agent's
+question (`GET /runs/waiting`, Insights' "Waiting on you"). A team's
+Orchestrator Definition, or a Project's own, may set a Queue limit
+(`queueLimit`, 0 to 1000; none by default). `POST /runs` reads the Queue
+of the Run's owner once the rules the Run would start under are known, and
+refuses the Run while more than the limit wait (409 `queueFull`), for the
+person and an agent alike; Runs under way go on. Two starts at once may
+both pass: the limit holds the Queue back, not to the exact count.
+
 `GET /insights?from=&to=&timeZone=&flow=` (`inbound/insights.rs`,
 `domain/insights.rs`) sums up how the caller's own Runs went over a period of
 at most 366 days in a time zone: Runs by day, outcome and Flow, Run and Step

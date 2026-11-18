@@ -27,13 +27,16 @@ use super::{FactoryRouterState, factory_router};
 use crate::domain::built_in_steps::BuiltInSteps;
 use crate::domain::fakes::{FakeGithub, FakeRepo, FakeWatches};
 use crate::domain::gate::{AnswerGate, ReplyGate};
-use crate::domain::models::{ControlFilesSettings, FactoryError, FlowSummary, RunDetail, RunStart};
+use crate::domain::models::{
+    Answerer, ControlFilesSettings, FactoryError, FlowSummary, RunDetail, RunStart,
+};
 use crate::domain::ports::{AnswerDelivery, FactoryService, RunWorkflows, RunWorkflowsError};
 use crate::domain::pull_request_steps::PullRequestSteps;
 use crate::domain::service::FactoryServiceImpl;
 use crate::outbound::local_agent::LocalAgent;
 
 mod control_files;
+mod orchestrator;
 mod standing_rules;
 mod waiting;
 
@@ -167,6 +170,7 @@ async fn body(response: axum::response::Response) -> serde_json::Value {
 struct FakeService {
     answer: fn() -> FactoryError,
     actors: Mutex<Vec<String>>,
+    answerers: Mutex<Vec<Answerer>>,
 }
 
 impl FakeService {
@@ -233,7 +237,9 @@ impl FactoryService for FakeService {
         _answer: Outcome,
         _note: Option<String>,
         _approved_control_files: Option<Vec<String>>,
+        answerer: Answerer,
     ) -> Result<(), FactoryError> {
+        self.answerers.lock().expect("answerers").push(answerer);
         Err(self.refusing(&actor))
     }
 
@@ -316,6 +322,7 @@ fn router(answer: fn() -> FactoryError) -> (Router, Arc<FakeService>) {
     let service = Arc::new(FakeService {
         answer,
         actors: Mutex::new(Vec::new()),
+        answerers: Mutex::new(Vec::new()),
     });
     let state = FactoryRouterState::new(Arc::clone(&service), authorization());
     (factory_router(state), service)
