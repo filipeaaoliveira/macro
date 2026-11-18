@@ -996,13 +996,15 @@ and for a Gate opened before replies) and asks the worker to read them
 (`factory_read_gate_reply`): a small model (the `GateModel` port; on
 Macro's model router in `outbound/fast_gate_model.rs`, Claude Haiku 5.5
 (`DEFAULT_GATE_MODEL`) unless `FACTORY_GATE_MODEL` names another,
-`AiFeature::FactoryGate`, billed to no one; each call's usage row names the
-Run as its entity and is priced from `ai_pricing`, and its prompt, which no
-later call shares, is written to no prompt cache) picks one of the Gate's
-answers or `unclear`, with how sure it is. The question, its answers and the words
-reach the model as one JSON object, so the words open no section of their
-own. At or above the reply threshold (`DEFAULT_REPLY_THRESHOLD`, 85
-percent, or `FACTORY_GATE_REPLY_THRESHOLD`) the Gate is answered with it as
+`AiFeature::FactoryGate`, its usage recorded against the Run's owner but
+not counted toward their allowance; each call's usage row names the Run as
+its entity (a replay's names none) and is priced from `ai_pricing`, and
+its prompt, which no later call shares, is written to no prompt cache)
+picks one of the Gate's answers or `unclear`, with how sure it is. The
+question, its answers and the words reach the model as one JSON object,
+so the words open no section of their own. At or above the reply
+threshold (`DEFAULT_REPLY_THRESHOLD`, 85 percent, or
+`FACTORY_GATE_REPLY_THRESHOLD`) the Gate is answered with it as
 the person's answer, the words kept as its note and the confidence beside
 it; below it, `unclear`, an answer the Gate does not offer, a call that
 fails or takes longer than `MODEL_TIMEOUT` (30 s), the factory asks back on
@@ -1051,9 +1053,9 @@ closes and the worker reads the Run again (`factory_keep_stand_in`): when
 it still lets the stand-in answer, the stand-in's answer becomes the Gate's
 (`by_stand_in`, with no author); when it no longer does (the branch turned
 Tampered, the base is held, the Run ended), the stand-in's answer is taken
-back and the Gate waits for the owner. Below the
-threshold, unsure, or failing, it keeps no answer, and the Gate waits for
-the person, keeping how the model read it (`stand_in_declined`: its pick,
+back and the Gate waits for the owner. Below the threshold, unsure, or
+failing, it keeps no answer, and the Gate waits for the person, keeping
+how the model read it (`stand_in_declined`: its pick,
 how sure it was and why, none of them when it did not answer), which the
 Run view shows the owner. A retry returns the answer kept first, with what
 is left of its window. While the window is open the owner is told, lightly,
@@ -1065,7 +1067,8 @@ change it in the Run until its window closes (the Run view says when),
 one per Gate (`gate_owner::stand_in_id`, apart from the Gate's waiting
 notice); it is marked done once the window closes, the owner answers in
 it or replies in it (words asked back end the window too), or the Run
-ends. A Run with no task tells no one. Run insights count neither its answers nor Rule Answers.
+ends. A Run with no task tells no one. Run insights count neither its
+answers nor Rule Answers.
 
 The model calls are activities, so a replay reads their results from the
 history. The stand-in and replies are behind the `factory-gate-replies`
