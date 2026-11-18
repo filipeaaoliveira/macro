@@ -25,7 +25,10 @@ worker that walks each Run's Flow, in one process.
   `FACTORY_GATE_REPLY_THRESHOLD` and `FACTORY_STAND_IN_THRESHOLD` (optional:
   how sure, in percent, the model must be before words answer a Gate, 85,
   and before the stand-in answers one, 90), `FACTORY_STAND_IN_WINDOW_SECS`
-  (optional: how long the owner may override the stand-in, 600).
+  (optional: how long the owner may override the stand-in, 600),
+  `FACTORY_EVALUATION` (optional: the Scorers, Experiments and Benchmarks,
+  as JSON; none when unset) and `FACTORY_SCORER_MODEL` (optional: the model
+  Scorers judge with, Claude Haiku 5.5 when unset).
 - `src/gate_replay.rs`: the `factory_gate_replay` command, which replays
   the Gate model over the Gates people answered in `DATABASE_URL`'s
   records (`FACTORY_GATE_REPLAY_LIMIT`, 500 by default) and prints how
@@ -34,7 +37,7 @@ worker that walks each Run's Flow, in one process.
 ## Scope
 
 - Owns: wiring `factory_engine` and `factory_records` into a process, and
-  the insights router beside the Run API (its OpenAPI merged into the Run
+  the insights and evaluation routers beside the Run API (its OpenAPI merged into the Run
   API's).
 - Not here: Flows, the workflow and the API's handlers → `crates/factory_engine`;
   the Run tables → `crates/factory_records`.
