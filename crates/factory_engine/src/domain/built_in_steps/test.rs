@@ -2,7 +2,8 @@ use std::sync::{Arc, LazyLock, Mutex};
 
 use chrono::Utc;
 use factory_records::domain::models::{
-    EntryId, Gate, GateAnswer, GateKind, Outcome, Repository, Role, RunId, Step, StepEnd, StepKey,
+    CheckRoundOutcome, CheckRoundStart, EntryId, Gate, GateAnswer, GateKind, Outcome, Repository,
+    Role, RunId, Step, StepEnd, StepKey,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::{FindingKind, Lines, ReviewFinding, ReviewRound};
@@ -209,6 +210,43 @@ async fn the_steps_after_a_merge_end_at_once() {
     assert!(github.file_reads.is_empty());
     assert!(github.compared.is_empty());
     assert!(github.merges.is_empty());
+}
+
+/// An old `verify` whose earlier attempt left its round of acceptance
+/// checks open ends that round, which would otherwise never end.
+#[tokio::test]
+async fn an_old_verify_ends_the_round_it_left_open() {
+    let repo = FakeRepo::default();
+    let steps = BuiltInSteps::new(
+        FakeAgent::ending_with("fail"),
+        PullRequestSteps::new(FakeGithub::default(), repo.clone(), FakeWatches::default()),
+    );
+    let request = input(&[]);
+    let entry = EntryId::try_from("verify".to_string()).expect("valid");
+    repo.start_step(request.key, &entry, 1)
+        .await
+        .expect("start");
+    repo.start_check_round(
+        request.key,
+        &CheckRoundStart {
+            round: 1,
+            work_output: "The verifier's report".to_string(),
+            checks: vec!["acceptance-1".to_string()],
+            commands: vec!["bun test toggle".to_string()],
+            declared: "{}".to_string(),
+            check_action_id: uuid::Uuid::now_v7(),
+        },
+    )
+    .await
+    .expect("round");
+
+    let report = steps.run(&step("verify"), request).await.expect("verify");
+
+    assert_eq!(report.outcome.as_str(), "pass");
+    let rounds = repo.check_rounds(request.key).await.expect("read");
+    let end = rounds[0].end.as_ref().expect("the round ended");
+    assert_eq!(end.outcome, CheckRoundOutcome::Failed);
+    assert!(end.report.contains("ended at its merge"), "{}", end.report);
 }
 
 /// An agent Step goes to an Agent of the Role its entry names. A Run whose

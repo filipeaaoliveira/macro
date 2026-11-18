@@ -16,7 +16,9 @@ mod review_panel;
 mod test;
 
 use factory_records::domain::main_hold::MainHoldRepository;
-use factory_records::domain::models::{Outcome, Repository, Role, Step, StepKey, StepSession};
+use factory_records::domain::models::{
+    CheckRoundOutcome, Outcome, Repository, Role, Step, StepKey, StepSession,
+};
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::{ReviewRound, ReviewRoundRepository};
 use macro_user_id::user_id::MacroUserIdStr;
@@ -41,6 +43,11 @@ use crate::domain::verification::{VerifyFile, VerifyFileError};
 /// one whose Flow still names them goes no further.
 const ENDED_AT_MERGE: &str = "The change is merged, and the run ends at its merge: \
      the factory no longer waits for a deploy or checks the merged change.";
+
+/// How an old `verify` Step ends a round of acceptance checks an earlier
+/// attempt of it left open.
+const ROUND_ENDED_AT_MERGE: &str =
+    "The run ended at its merge: these checks of the merged change no longer run.";
 
 /// The outcome a `deploy` or `verify` Step, of a Run whose Flow still goes
 /// on past its merge, ends with at once: the one every such Flow routes to
@@ -478,10 +485,29 @@ where
             BuiltInStep::ReadyToMerge => Ok(self.pull_requests.ready_to_merge(input).await?),
             BuiltInStep::Merge => Ok(self.pull_requests.merge(input).await?),
             BuiltInStep::Accept => self.accept_change(step, input).await,
-            BuiltInStep::Deploy | BuiltInStep::Verify => Ok(StepReport {
-                outcome: accept::outcome(past_merge_outcome(step.as_str()).unwrap_or("off")),
-                output: ENDED_AT_MERGE.to_string(),
-            }),
+            BuiltInStep::Deploy | BuiltInStep::Verify => {
+                // An earlier attempt of an old `verify` may have left its
+                // round of acceptance checks open: it never ends now.
+                let repo = self.pull_requests.records();
+                let rounds = repo
+                    .check_rounds(input.key)
+                    .await
+                    .map_err(checks_round::records)?;
+                for round in rounds.iter().filter(|round| round.end.is_none()) {
+                    repo.end_check_round(
+                        input.key,
+                        round.round,
+                        CheckRoundOutcome::Failed,
+                        ROUND_ENDED_AT_MERGE,
+                    )
+                    .await
+                    .map_err(checks_round::records)?;
+                }
+                Ok(StepReport {
+                    outcome: accept::outcome(past_merge_outcome(step.as_str()).unwrap_or("off")),
+                    output: ENDED_AT_MERGE.to_string(),
+                })
+            }
         }
     }
 
