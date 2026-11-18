@@ -1053,11 +1053,16 @@ where
         // An earlier attempt may have answered the Gate before its result
         // was lost: that answer stands, whatever the Run reads now.
         let steps = self.repo.list_steps(key.run_id).await.map_err(internal)?;
-        let answered = steps
+        let gate = steps
             .iter()
             .find(|step| step.seq == key.seq)
-            .and_then(|step| step.gate.as_ref())
-            .and_then(|gate| gate.answer.as_ref());
+            .and_then(|step| step.gate.as_ref());
+        // An agent's question is the Run's owner's alone to answer, whatever
+        // the ruling names.
+        if gate.is_some_and(|gate| gate.kind.answered_only_by_a_person()) {
+            return Ok(None);
+        }
+        let answered = gate.and_then(|gate| gate.answer.as_ref());
         if let Some(answer) = answered {
             return Ok(answer.rule.map(|rule| RuleAnswer {
                 rule,

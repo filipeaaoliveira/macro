@@ -316,3 +316,59 @@ async fn a_gate_a_person_answered_first_is_not_taken_as_ruled() {
         .expect("rule");
     assert_eq!(ruled, None);
 }
+
+/// A question Gate an agent opened is never answered by a rule, even by a
+/// ruling that names a kind whose answers it offers: only the Run's owner
+/// answers an agent.
+#[tokio::test]
+async fn a_rule_never_answers_an_agents_question() {
+    let repo = FakeRepo::default();
+    let RunInsert::Inserted(run) = repo
+        .insert_run(NewRun {
+            id: RunId::generate(),
+            flow: "code",
+            request: "Fix the login bug",
+            user_id: &julia(),
+            task_id: None,
+            repository: Some(&base()),
+            created_in_person: true,
+            control_file_patterns: &[],
+            control_files_team_id: None,
+            standing_rules: team_rules(EVERY_RULE),
+        })
+        .await
+        .expect("insert")
+    else {
+        panic!("a run with no task is kept");
+    };
+    let key = StepKey {
+        run_id: run.id,
+        seq: 1,
+    };
+    let entry = EntryId::try_from("plan".to_string()).expect("valid");
+    repo.start_step(key, &entry, 1).await.expect("start");
+    repo.end_step(key, &Outcome::question(), "Approve or revise?")
+        .await
+        .expect("end");
+    repo.open_gate(
+        key,
+        "Approve or revise?",
+        &[outcome("approve"), outcome("revise")],
+    )
+    .await
+    .expect("open");
+
+    let ruled = steps(&repo)
+        .rule_gate(GateRuling {
+            key,
+            kind: GateKind::Plan,
+            fix_rounds: 0,
+            fix_limit: 0,
+            answers: vec![outcome("approve"), outcome("revise")],
+        })
+        .await
+        .expect("rule");
+
+    assert_eq!(ruled, None);
+    assert!(repo.rule_answers.lock().expect("answers").is_empty());
+}

@@ -575,9 +575,13 @@ a Run under way.
 
 The `code` Flow's review panel has a Gate `after` its round ends
 `changes` (`GateDefinition::after`, which must be an outcome a round ends
-with: `pass`, `changes`, `unresolved` or `failed`), on the round's last
-Step: `fix` sends the Blockers to `fix`, `stop` ends the Run `manual`. A
-round at the panel's last visit routes `unresolved`, which asks nothing.
+with: `pass`, `changes`, `unresolved` or `failed`), on the round's latest
+Step (its last reviewer's, or the last that went on from a reviewer's
+question): `fix` sends the Blockers to `fix`, `stop` ends the Run `manual`.
+A round with a reviewer's question waits for the answer, and closes once
+the reviewer went on with it; only then does the Gate open
+(`inbound/temporal/workflow/review_round.rs`). A round at the panel's last
+visit routes `unresolved`, which asks nothing.
 
 Once a Gate is recorded, and before a person may answer it, the workflow
 asks the worker (`factory_rule_gate`, behind the `factory-standing-rules`
@@ -604,7 +608,11 @@ returns that answer, so a retry never decides again. A Gate no rule answers
 waits for a person, as before. A Run created before Runs kept rules has
 none, so no rule answers its Gates; a Gate opened before a worker had the
 marker replays without asking. A rule therefore never answers a Gate opened
-before the rules it would apply were kept.
+before the rules it would apply were kept. A question Gate is never put to
+the rules: the workflow asks `factory_rule_gate` only about a Flow's Gate
+(its kind comes from the Flow alone, and a question Gate has none), and the
+worker answers none for a Gate `GateKind::answered_only_by_a_person` keeps
+for the owner, whatever the ruling names.
 
 ## Start here
 
