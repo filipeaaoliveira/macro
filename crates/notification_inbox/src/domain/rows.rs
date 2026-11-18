@@ -454,7 +454,9 @@ fn place_event(notification: &FeedNotification, now: DateTime<Utc>) -> Option<(S
             (Slot::AccessRemoved(notification.notification_id), true)
         }
         NotifEvent::NewEmail(_) | NotifEvent::Reminder(_) => (Slot::Email, true),
-        NotifEvent::TaskAssigned(_) => (Slot::Task, true),
+        // A factory Run waiting on its owner is about the Run's task, and
+        // shows on the task's row.
+        NotifEvent::TaskAssigned(_) | NotifEvent::FactoryGateWaiting(_) => (Slot::Task, true),
         NotifEvent::CalendarEventReminder(reminder) => {
             (Slot::CalendarEvent, !occurrence_ended(reminder, now))
         }
@@ -541,7 +543,8 @@ fn actor(notification: &FeedNotification) -> Option<InboxActor> {
         ),
         NotifEvent::AiResponse(_)
         | NotifEvent::Reminder(_)
-        | NotifEvent::CalendarEventReminder(_) => Some(InboxActor::Macro),
+        | NotifEvent::CalendarEventReminder(_)
+        | NotifEvent::FactoryGateWaiting(_) => Some(InboxActor::Macro),
         NotifEvent::TaskAssigned(task) => Some(InboxActor::User(task.assigned_by.clone())),
         _ => notification.sender_id.clone().map(InboxActor::User),
     }

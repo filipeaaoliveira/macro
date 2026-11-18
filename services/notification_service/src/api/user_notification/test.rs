@@ -179,6 +179,23 @@ fn to_typed_row_computer_setup() {
 }
 
 #[test]
+fn to_typed_row_factory_gate_waiting() {
+    let metadata = serde_json::json!({
+        "runId": "00000000-0000-0000-0000-000000000001",
+        "seq": 3,
+        "taskId": "00000000-0000-0000-0000-000000000002",
+        "request": "Fix the login bug",
+        "question": "Approve the plan?"
+    });
+    let row = make_row("factory_gate_waiting", metadata);
+    let typed = to_typed_row(row).expect("should deserialize factory_gate_waiting");
+    assert!(matches!(
+        typed.notification_metadata,
+        NotifEvent::FactoryGateWaiting(_)
+    ));
+}
+
+#[test]
 fn to_typed_row_new_email() {
     let metadata = serde_json::json!({
         "sender": "ext@example.com",

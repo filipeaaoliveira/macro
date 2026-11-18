@@ -19,7 +19,7 @@ pub use metadata::{
     ColleagueJoinedMacro, CommentedOnDocumentMetadata, CommonChannelMetadata, ComputerSetupAgent,
     ComputerSetupMetadata, ComputerSetupOutcome, CrmDiscussionMetadata, CrmDiscussionReason,
     DocumentMentionMetadata, EntityAccessGrantedMetadata, EntityAccessRequestedMetadata,
-    ExternalChatMessageMetadata, GithubPrCheckRun, GithubPrCheckRunState, GithubPrComment,
+    ExternalChatMessageMetadata, FactoryGateWaitingMetadata, GithubPrCheckRun, GithubPrCheckRunState, GithubPrComment,
     GithubPrCommentKind, GithubPrEventAction, GithubPrEventStatus, GithubPrMention,
     GithubPrMentionLocation, GithubPrNotificationCommon, GithubPrReview, GithubPrReviewState,
     GithubPrStatusChanged, GithubReviewRequested, InboxReauthRequiredMetadata,
@@ -307,6 +307,8 @@ define_notif_event!(
         /// A runtime's owner removed the user's access to it, and agents of
         /// theirs living there stopped.
         RuntimeAccessRemoved(RuntimeAccessRemovedMetadata),
+        /// A factory Run the user owns waits on them at a Gate.
+        FactoryGateWaiting(FactoryGateWaitingMetadata),
     }
 );
 
@@ -382,6 +384,7 @@ impl NotificationTitle for NotifEvent {
             NotifEvent::AgentSignInExpiry(m) => m.format_title(sender_id),
             NotifEvent::ComputerSetup(m) => m.format_title(sender_id),
             NotifEvent::RuntimeAccessRemoved(m) => m.format_title(sender_id),
+            NotifEvent::FactoryGateWaiting(m) => m.format_title(sender_id),
             NotifEvent::AgentSessionWaitingForInput(m) => m.format_title(sender_id),
             NotifEvent::AgentSessionMentioned(m) => m.format_title(sender_id),
         }
@@ -456,6 +459,7 @@ impl NotificationTitle for NotifEvent {
             NotifEvent::AgentSignInExpiry(m) => m.format_body(sender_id),
             NotifEvent::ComputerSetup(m) => m.format_body(sender_id),
             NotifEvent::RuntimeAccessRemoved(m) => m.format_body(sender_id),
+            NotifEvent::FactoryGateWaiting(m) => m.format_body(sender_id),
             NotifEvent::AgentSessionWaitingForInput(m) => m.format_body(sender_id),
             NotifEvent::AgentSessionMentioned(m) => m.format_body(sender_id),
         }
