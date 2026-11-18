@@ -10,8 +10,10 @@ mod test;
 
 use std::sync::Arc;
 
-use agent::Message;
-use agent::structured_output::{DynamicSchema, dynamic_structured_completion_uncached};
+use agent::structured_output::{
+    DynamicSchema, dynamic_structured_completion, dynamic_structured_completion_uncached,
+};
+use agent::{Message, PromptCache};
 use ai_usage::{AiFeature, UsageContext, UsageRecorder};
 use factory_records::domain::models::{Outcome, RunId};
 use macro_user_id::user_id::MacroUserIdStr;
@@ -41,22 +43,100 @@ struct Picked {
 /// by the id Macro's model router knows.
 pub const DEFAULT_GATE_MODEL: &str = "anthropic/claude-haiku-5-5";
 
-/// A Gate model on Macro's model router.
+/// One structured completion the Gate model asks for: what the model is
+/// told, what it reads, the schema it answers in, whether the prompt is
+/// written to the prompt cache, and what its usage is recorded as.
+#[derive(Debug)]
+pub struct StructuredCall {
+    /// The model, by the id Macro's model router knows.
+    pub model: String,
+    /// What the model is told to do.
+    pub instructions: &'static str,
+    /// What it reads.
+    pub prompt: String,
+    /// The schema its answer must match.
+    pub schema: DynamicSchema,
+    /// Whether the prompt is written to the prompt cache.
+    pub cache: PromptCache,
+    /// What its usage is recorded as.
+    pub usage: UsageContext,
+}
+
+/// Where a Gate model's structured completions are made: Macro's model
+/// router ([`RouterCompletion`]).
+pub trait StructuredCompletion: Send + Sync + 'static {
+    /// Make `call` and return the model's answer.
+    fn complete(
+        &self,
+        call: StructuredCall,
+    ) -> impl Future<Output = Result<serde_json::Value, GateModelError>> + Send;
+}
+
+/// Structured completions on Macro's model router, their usage recorded
+/// through `recorder`.
 #[derive(Clone)]
-pub struct FastGateModel {
-    model: String,
+pub struct RouterCompletion {
     recorder: Arc<dyn UsageRecorder>,
+}
+
+impl StructuredCompletion for RouterCompletion {
+    async fn complete(&self, call: StructuredCall) -> Result<serde_json::Value, GateModelError> {
+        let messages = vec![Message::user(call.prompt)];
+        let recorder = self.recorder.as_ref();
+        let answered = match call.cache {
+            PromptCache::Write => {
+                dynamic_structured_completion(
+                    call.model,
+                    call.instructions,
+                    messages,
+                    call.schema,
+                    recorder,
+                    call.usage,
+                )
+                .await
+            }
+            PromptCache::Skip => {
+                dynamic_structured_completion_uncached(
+                    call.model,
+                    call.instructions,
+                    messages,
+                    call.schema,
+                    recorder,
+                    call.usage,
+                )
+                .await
+            }
+        };
+        answered.map_err(|error| GateModelError::Call(error.to_string()))
+    }
+}
+
+/// A Gate model on Macro's model router, or on `completion` in tests.
+#[derive(Clone)]
+pub struct FastGateModel<C = RouterCompletion> {
+    model: String,
+    completion: C,
 }
 
 impl FastGateModel {
     /// The Gate model on `model`, a model id the router knows, such as
     /// [`DEFAULT_GATE_MODEL`]; its usage is recorded through `recorder`.
     pub fn new(model: String, recorder: Arc<dyn UsageRecorder>) -> Self {
-        Self { model, recorder }
+        Self {
+            model,
+            completion: RouterCompletion { recorder },
+        }
     }
 }
 
-impl GateModel for FastGateModel {
+impl<C> FastGateModel<C> {
+    /// The Gate model on `model`, making its completions on `completion`.
+    pub fn with_completion(model: String, completion: C) -> Self {
+        Self { model, completion }
+    }
+}
+
+impl<C: StructuredCompletion> GateModel for FastGateModel<C> {
     type Err = GateModelError;
 
     #[tracing::instrument(err, skip_all, fields(model = %self.model, choices = question.choices.len()))]
@@ -82,16 +162,16 @@ impl GateModel for FastGateModel {
                 }
             }),
         };
-        let value = dynamic_structured_completion_uncached(
-            self.model.as_str(),
-            question.instructions,
-            vec![Message::user(question.prompt.clone())],
+        // Each prompt is read once, so none is written to the prompt cache.
+        let call = StructuredCall {
+            model: self.model.clone(),
+            instructions: question.instructions,
+            prompt: question.prompt.clone(),
             schema,
-            self.recorder.as_ref(),
-            usage_context(owner, run_id),
-        )
-        .await
-        .map_err(|error| GateModelError::Call(error.to_string()))?;
+            cache: PromptCache::Skip,
+            usage: usage_context(owner, run_id),
+        };
+        let value = self.completion.complete(call).await?;
         let picked: Picked = serde_json::from_value(value)
             .map_err(|error| GateModelError::Call(error.to_string()))?;
         let choice = question
