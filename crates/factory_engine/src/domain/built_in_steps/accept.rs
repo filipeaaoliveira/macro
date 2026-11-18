@@ -95,7 +95,7 @@ enum Checking<'a> {
 fn checking(check: &AcceptanceCheck) -> Checking<'_> {
     match check {
         AcceptanceCheck::Run { run, timeout } => Checking::Run(run, *timeout),
-        AcceptanceCheck::None(why) => Checking::ByHand(format!("no check ({})", escape(why))),
+        AcceptanceCheck::None(why) => Checking::ByHand(escape(why).replace('\n', " ")),
     }
 }
 
@@ -346,7 +346,7 @@ fn accept_instructions(target: &Target, checks: &AcceptanceChecks, unread: &[Str
                 index + 1,
                 run.replace('`', "'").replace('\n', " ")
             ),
-            Checking::ByHand(why) => format!("{}: check it by hand", why.replace('\n', " ")),
+            Checking::ByHand(why) => format!("check it by hand; {why}"),
         };
         text.push_str(&format!("{}. {clause}: {how}\n", index + 1));
     }
@@ -449,9 +449,8 @@ fn verdict(
         .iter()
         .filter_map(|acceptance| match checking(&acceptance.check) {
             Checking::ByHand(why) => Some(format!(
-                "- {}: {}",
+                "- {}: {why}",
                 escape(&acceptance.clause).replace('\n', " "),
-                why.replace('\n', " ")
             )),
             Checking::Run(..) => None,
         })

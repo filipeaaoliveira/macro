@@ -193,7 +193,9 @@ fn a_recorded_plan_s_deployed_check_is_checked_by_hand() {
     ));
     assert!(matches!(
         checks.clauses[1].check,
-        AcceptanceCheck::None(ref why) if why.starts_with("its check needed the deployed change")
+        AcceptanceCheck::None(ref why) if why.starts_with(
+            "the plan's check `curl -f \"$MACRO_DEPLOY_URL\"` needed the deployed change"
+        ) && why.ends_with("that it cannot be seen deployed does not fail it")
     ));
     assert_eq!(
         checks.clauses[2].check,

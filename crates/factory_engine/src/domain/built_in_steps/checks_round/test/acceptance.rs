@@ -194,8 +194,9 @@ async fn accept_runs_the_plan_s_checks_on_the_branch_and_passes() {
         "{prompt}"
     );
     assert!(
-        prompt
-            .contains("3. It looks right on a phone: no check (only a person on a phone sees it)"),
+        prompt.contains(
+            "3. It looks right on a phone: check it by hand; only a person on a phone sees it"
+        ),
         "{prompt}"
     );
     assert!(
@@ -206,7 +207,7 @@ async fn accept_runs_the_plan_s_checks_on_the_branch_and_passes() {
     assert!(
         report
             .output
-            .contains("- It looks right on a phone: no check (only a person on a phone sees it)"),
+            .contains("- It looks right on a phone: only a person on a phone sees it"),
         "{}",
         report.output
     );
@@ -513,14 +514,32 @@ async fn a_recorded_plan_s_deployed_check_is_checked_by_hand() {
     assert_eq!(commands.len(), 1, "{commands:?}");
     assert!(commands[0].ends_with("bun test toggle"), "{}", commands[0]);
     assert_eq!(rounds(&repo, input).await[0].checks, ["acceptance-1"]);
+    let hand = "the plan's check `curl -f \"$MACRO_DEPLOY_URL/toggle\"` needed the deployed change";
     assert!(
         report
             .output
-            .contains("- The live page serves it: no check (its check needed the deployed change"),
+            .contains(&format!("- The live page serves it: {hand}")),
         "{}",
         report.output
     );
     assert!(!report.output.contains("did not read"), "{}", report.output);
+    // The verifier is told the command the check ran, and that the missing
+    // deployment does not fail the clause.
+    let prompt = agent.tasks.lock().expect("tasks")[0].prompt.clone();
+    assert!(
+        prompt.contains(&format!(
+            "2. The live page serves it: check it by hand; {hand}"
+        )),
+        "{prompt}"
+    );
+    assert!(
+        prompt.contains("that it cannot be seen deployed does not fail it"),
+        "{prompt}"
+    );
+    assert!(
+        prompt.contains("That it cannot be seen deployed does not fail it."),
+        "{prompt}"
+    );
 }
 
 /// Acceptance checks that do not read leave every clause to the verifier,

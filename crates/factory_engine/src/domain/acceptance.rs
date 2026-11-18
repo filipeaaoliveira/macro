@@ -59,10 +59,16 @@ const MAX_TEXT_BYTES: usize = 2048;
 /// stays within what a check runs.
 const MAX_RUN_BYTES: usize = 1024;
 
-/// Why a check a recorded plan marked `deployed` is checked by hand: it
-/// needed the deployed change, and the factory ends a Run at its merge.
-const DEPLOYED_BY_HAND: &str = "its check needed the deployed change, which the factory no longer \
-     waits for: check it as far as the branch shows";
+/// Why a check a recorded plan marked `deployed`, whose command is `run`,
+/// is checked by hand: it needed the deployed change, and the factory ends
+/// a Run at its merge. The missing deployment does not fail the clause.
+fn deployed_by_hand(run: &str) -> String {
+    format!(
+        "the plan's check `{}` needed the deployed change, which the factory no longer waits \
+         for: check what the branch shows of it; that it cannot be seen deployed does not fail it",
+        run.replace('`', "'").replace('\n', " ")
+    )
+}
 
 /// What opens and closes a fenced block.
 const FENCE: &str = "```";
@@ -203,7 +209,7 @@ impl AcceptanceChecks {
                         return Err(AcceptanceError::Timeout(number));
                     }
                     if written.deployed {
-                        AcceptanceCheck::None(DEPLOYED_BY_HAND.to_string())
+                        AcceptanceCheck::None(deployed_by_hand(&run))
                     } else {
                         AcceptanceCheck::Run { run, timeout }
                     }

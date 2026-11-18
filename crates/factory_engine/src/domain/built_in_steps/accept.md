@@ -13,6 +13,11 @@ by reading the code and running what shows its behaviour (tests, the
 program). A clause the
 request does not state plainly is checked as the plan reads it.
 
+A clause whose check needed the deployed change comes from a plan written
+before the factory ended a run at its merge: nothing deploys the change
+now, so check what the commit shows of it, such as the code and tests
+behind the command named. That it cannot be seen deployed does not fail it.
+
 A check the factory runs decides nothing by itself: what it runs may be
 code the writer wrote, such as a test it added. For each acceptance check,
 read what it runs at that commit and confirm it really exercises its clause:
