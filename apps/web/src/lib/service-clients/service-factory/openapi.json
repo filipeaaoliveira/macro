@@ -707,6 +707,150 @@
       }
     },
     "/runs": {
+      "get": {
+        "tags": ["factory"],
+        "summary": "List a page of the factory's board: the Runs the caller can see,\ntheirs or their team's, newest first, each with its Steps and where it\nis (`running`, `waiting` on its owner at a Gate, `held` by a Main Hold,\n`stopped` for a person, or `finished`). Read the next page with `next`.",
+        "operationId": "list_factory_board",
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "query",
+            "description": "Whose Runs: the caller's (`mine`, when left out), or their team's\n(`team`), which lists the members' Runs on tasks the caller can see.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/BoardScope"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "description": "Only Runs there.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/BoardState"
+            }
+          },
+          {
+            "name": "flow",
+            "in": "query",
+            "description": "Only Runs of this built-in Flow, by name.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "repoUrl",
+            "in": "query",
+            "description": "Only Runs on this repository, by its `https://github.com/owner/name`\nURL.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "description": "Only Runs whose task was in this Project (an initiative) when they\nstarted.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "description": "Only Runs whose request, or whose task's name, has these words in\nit, in any case: at most 200 characters are read.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "afterCreatedAt",
+            "in": "query",
+            "description": "Where the page starts: the `next.createdAt` of the page before.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "afterId",
+            "in": "query",
+            "description": "With `afterCreatedAt`: the `next.id` of the page before.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RunId"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "The most Runs the page lists: 25 when left out, at most 50.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoardPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
       "post": {
         "tags": ["factory"],
         "summary": "Create a Run of a built-in Flow, owned by the caller, and start its\nworkflow. At the Queue limit of the Project it would start in, it is\nrefused (409 `queueFull`, its message counting both): the caller holds\nas many places in their Queue as the limit, a place being a Run waiting\non them at a Gate or a question, or a Run of a Flow with a Gate that has\nnot reached one yet (`GET /runs/waiting` lists both). The Runs under\nway go on.",
@@ -2510,6 +2654,72 @@
           }
         }
       },
+      "BoardNext": {
+        "type": "object",
+        "description": "Where the board's next page starts: past this Run, in the board's order\n(newest first).",
+        "required": ["createdAt", "id"],
+        "properties": {
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the last Run the page read was created."
+          },
+          "id": {
+            "$ref": "#/components/schemas/RunId",
+            "description": "Its id."
+          }
+        }
+      },
+      "BoardPage": {
+        "type": "object",
+        "description": "A page of the board.",
+        "required": ["runs"],
+        "properties": {
+          "next": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/BoardNext",
+                "description": "Where the next page starts; none on the last."
+              }
+            ]
+          },
+          "runs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BoardRun"
+            },
+            "description": "The Runs, newest first. A page may list fewer than asked while more\nfollow: a team member's Run on a task the caller cannot see is left\nout."
+          }
+        }
+      },
+      "BoardRun": {
+        "type": "object",
+        "description": "One Run on the board, with where it is.",
+        "required": ["state", "detail"],
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/RunDetail",
+            "description": "The Run and its Steps."
+          },
+          "state": {
+            "$ref": "#/components/schemas/BoardState",
+            "description": "Where it is."
+          }
+        }
+      },
+      "BoardScope": {
+        "type": "string",
+        "description": "Whose Runs the board lists.",
+        "enum": ["mine", "team"]
+      },
+      "BoardState": {
+        "type": "string",
+        "description": "Where a Run is, as the board groups it.",
+        "enum": ["running", "waiting", "held", "stopped", "finished"]
+      },
       "CheckResult": {
         "type": "object",
         "description": "How one check of a verified round ran.",
@@ -3683,9 +3893,22 @@
               }
             ]
           },
+          "flow": {
+            "type": ["string", "null"],
+            "description": "The built-in Flow it walks, by name; none only for a Run recorded\nbefore Runs kept it."
+          },
           "id": {
             "$ref": "#/components/schemas/RunId",
             "description": "The Run's id, also its Temporal workflow id."
+          },
+          "projectId": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "The Project (an initiative) its task was in when it was created,\nkept as a record: none without a task or Project, and for a Run\ncreated before Runs kept it."
+          },
+          "pullRequestUrl": {
+            "type": ["string", "null"],
+            "description": "The page of the pull request its branch proposes its change in, as\nthe pull request Steps last found it; none until one is found."
           },
           "repository": {
             "oneOf": [

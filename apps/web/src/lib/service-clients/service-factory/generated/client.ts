@@ -9,6 +9,7 @@ import type {
   Automation,
   AutomationRequest,
   AutomationsSettings,
+  BoardPage,
   CallFactoryAutomationWebhookBody,
   ControlFilesSettings,
   CreatedAutomation,
@@ -19,6 +20,7 @@ import type {
   GetFactoryInsightsParams,
   HandBackRequest,
   LinkTaskRequest,
+  ListFactoryBoardParams,
   NoteStepRequest,
   ReplyToGateRequest,
   ResumeStepRequest,
@@ -739,6 +741,86 @@ export const getFactoryInsights = async (
     status: res.status,
     headers: res.headers,
   } as getFactoryInsightsResponse;
+};
+
+/**
+ * @summary List a page of the factory's board: the Runs the caller can see,
+theirs or their team's, newest first, each with its Steps and where it
+is (`running`, `waiting` on its owner at a Gate, `held` by a Main Hold,
+`stopped` for a person, or `finished`). Read the next page with `next`.
+ */
+export type listFactoryBoardResponse200 = {
+  data: BoardPage;
+  status: 200;
+};
+
+export type listFactoryBoardResponse400 = {
+  data: ErrorResponse;
+  status: 400;
+};
+
+export type listFactoryBoardResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type listFactoryBoardResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type listFactoryBoardResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type listFactoryBoardResponseSuccess = listFactoryBoardResponse200 & {
+  headers: Headers;
+};
+export type listFactoryBoardResponseError = (
+  | listFactoryBoardResponse400
+  | listFactoryBoardResponse401
+  | listFactoryBoardResponse403
+  | listFactoryBoardResponse500
+) & {
+  headers: Headers;
+};
+
+export type listFactoryBoardResponse =
+  | listFactoryBoardResponseSuccess
+  | listFactoryBoardResponseError;
+
+export const getListFactoryBoardUrl = (params?: ListFactoryBoardParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/runs?${stringifiedParams}` : `/runs`;
+};
+
+export const listFactoryBoard = async (
+  params?: ListFactoryBoardParams,
+  options?: RequestInit
+): Promise<listFactoryBoardResponse> => {
+  const res = await fetch(getListFactoryBoardUrl(params), {
+    ...options,
+    method: 'GET',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: listFactoryBoardResponse['data'] = body ? JSON.parse(body) : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as listFactoryBoardResponse;
 };
 
 /**

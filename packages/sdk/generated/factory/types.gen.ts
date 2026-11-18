@@ -187,6 +187,58 @@ export type AutomationsSettings = {
 };
 
 /**
+ * Where the board's next page starts: past this Run, in the board's order
+ * (newest first).
+ */
+export type BoardNext = {
+    /**
+     * When the last Run the page read was created.
+     */
+    createdAt: string;
+    /**
+     * Its id.
+     */
+    id: RunId;
+};
+
+/**
+ * A page of the board.
+ */
+export type BoardPage = {
+    next?: null | BoardNext;
+    /**
+     * The Runs, newest first. A page may list fewer than asked while more
+     * follow: a team member's Run on a task the caller cannot see is left
+     * out.
+     */
+    runs: Array<BoardRun>;
+};
+
+/**
+ * One Run on the board, with where it is.
+ */
+export type BoardRun = {
+    /**
+     * The Run and its Steps.
+     */
+    detail: RunDetail;
+    /**
+     * Where it is.
+     */
+    state: BoardState;
+};
+
+/**
+ * Whose Runs the board lists.
+ */
+export type BoardScope = 'mine' | 'team';
+
+/**
+ * Where a Run is, as the board groups it.
+ */
+export type BoardState = 'running' | 'waiting' | 'held' | 'stopped' | 'finished';
+
+/**
  * How one check of a verified round ran.
  */
 export type CheckResult = {
@@ -1065,9 +1117,25 @@ export type Run = {
     createdInPerson: boolean;
     end?: null | RunEnd;
     /**
+     * The built-in Flow it walks, by name; none only for a Run recorded
+     * before Runs kept it.
+     */
+    flow?: string | null;
+    /**
      * The Run's id, also its Temporal workflow id.
      */
     id: RunId;
+    /**
+     * The Project (an initiative) its task was in when it was created,
+     * kept as a record: none without a task or Project, and for a Run
+     * created before Runs kept it.
+     */
+    projectId?: string | null;
+    /**
+     * The page of the pull request its branch proposes its change in, as
+     * the pull request Steps last found it; none until one is found.
+     */
+    pullRequestUrl?: string | null;
     repository?: null | Repository;
     /**
      * What the Run was asked to do.
@@ -1859,6 +1927,69 @@ export type GetFactoryInsightsResponses = {
 };
 
 export type GetFactoryInsightsResponse = GetFactoryInsightsResponses[keyof GetFactoryInsightsResponses];
+
+export type ListFactoryBoardData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Whose Runs: the caller's (`mine`, when left out), or their team's
+         * (`team`), which lists the members' Runs on tasks the caller can see.
+         */
+        scope?: BoardScope;
+        /**
+         * Only Runs there.
+         */
+        state?: BoardState;
+        /**
+         * Only Runs of this built-in Flow, by name.
+         */
+        flow?: string;
+        /**
+         * Only Runs on this repository, by its `https://github.com/owner/name`
+         * URL.
+         */
+        repoUrl?: string;
+        /**
+         * Only Runs whose task was in this Project (an initiative) when they
+         * started.
+         */
+        projectId?: string;
+        /**
+         * Only Runs whose request, or whose task's name, has these words in
+         * it, in any case: at most 200 characters are read.
+         */
+        search?: string;
+        /**
+         * Where the page starts: the `next.createdAt` of the page before.
+         */
+        afterCreatedAt?: string;
+        /**
+         * With `afterCreatedAt`: the `next.id` of the page before.
+         */
+        afterId?: RunId;
+        /**
+         * The most Runs the page lists: 25 when left out, at most 50.
+         */
+        limit?: number;
+    };
+    url: '/runs';
+};
+
+export type ListFactoryBoardErrors = {
+    400: ErrorResponse;
+    401: ErrorResponse;
+    403: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type ListFactoryBoardError = ListFactoryBoardErrors[keyof ListFactoryBoardErrors];
+
+export type ListFactoryBoardResponses = {
+    200: BoardPage;
+};
+
+export type ListFactoryBoardResponse = ListFactoryBoardResponses[keyof ListFactoryBoardResponses];
 
 export type CreateFactoryRunData = {
     body: CreateRunRequest;
