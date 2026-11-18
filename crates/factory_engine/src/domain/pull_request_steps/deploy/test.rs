@@ -6,9 +6,7 @@ use macro_user_id::user_id::MacroUserIdStr;
 use super::super::{PullRequestStepError, PullRequestSteps};
 use super::DEPLOY_WAIT;
 use crate::domain::fakes::{FakeGithub, FakeRepo, FakeWatches, ci};
-use crate::domain::models::{
-    Deployment, DeploymentState, PullRequestState, StepInput, StepReport,
-};
+use crate::domain::models::{Deployment, DeploymentState, PullRequestState, StepInput, StepReport};
 use crate::domain::verification::VERIFY_FILE;
 
 static JULIA: LazyLock<MacroUserIdStr<'static>> = LazyLock::new(|| {
@@ -94,7 +92,11 @@ async fn no_deploy_declared_is_not_needed() {
         let report = deploy(&github).await.expect("deploy");
 
         assert_eq!(report.outcome.as_str(), "not_needed");
-        assert!(report.output.contains(FakeGithub::MERGED), "{}", report.output);
+        assert!(
+            report.output.contains(FakeGithub::MERGED),
+            "{}",
+            report.output
+        );
         assert!(github.state().deployment_reads.is_empty());
     }
 }
@@ -118,7 +120,9 @@ async fn the_run_waits_for_the_merge_commit_s_deployment() {
 
     assert_eq!(report.outcome.as_str(), "deployed");
     assert!(
-        report.output.contains("deployed to production at https://app.example.com"),
+        report
+            .output
+            .contains("deployed to production at https://app.example.com"),
         "{}",
         report.output
     );

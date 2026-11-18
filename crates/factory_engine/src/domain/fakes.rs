@@ -33,9 +33,8 @@ use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
 use crate::domain::models::{
-    Check, CheckState, CheckSuite, CodeRepository, Deployment, HeadChecks, Merging, OpenPullRequest,
-    Opening,
-    PullRequest, PullRequestState, RepositoryAccess, RequiredChecks,
+    Check, CheckState, CheckSuite, CodeRepository, Deployment, HeadChecks, Merging,
+    OpenPullRequest, Opening, PullRequest, PullRequestState, RepositoryAccess, RequiredChecks,
 };
 use crate::domain::ports::{
     FollowUpTask, PullRequests, Retryable, TaskAccess, TaskDirectory, UserDirectory,

@@ -338,7 +338,12 @@ where
         checks_until: Instant,
     ) -> Result<CheckRound, BuiltInStepError> {
         let repo = self.pull_requests.records();
-        if repo.check_rounds(input.key).await.map_err(records)?.is_empty() {
+        if repo
+            .check_rounds(input.key)
+            .await
+            .map_err(records)?
+            .is_empty()
+        {
             let declared = serde_json::json!({
                 "rounds": 1,
                 "checks": runs

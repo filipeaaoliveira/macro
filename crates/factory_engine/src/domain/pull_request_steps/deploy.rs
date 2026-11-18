@@ -168,7 +168,13 @@ where
 
         let newest = self
             .github
-            .deployments(input.owner, &repository, None, environment, LATER_DEPLOYMENTS)
+            .deployments(
+                input.owner,
+                &repository,
+                None,
+                environment,
+                LATER_DEPLOYMENTS,
+            )
             .await
             .map_err(PullRequestStepError::github)?;
         for later in newest.iter().filter(|later| {

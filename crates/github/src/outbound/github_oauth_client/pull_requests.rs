@@ -439,22 +439,19 @@ impl GithubOauthImpl {
                 "failed to find pull request",
             )
             .await?;
-        Ok(pull_requests
-            .into_iter()
-            .next()
-            .map(|pull_request| {
-                // Before a merge, GitHub names the commit of a trial merge
-                // here: only a merged pull request's is on its base.
-                let merged = pull_request.merged_at.is_some();
-                GithubPullRequestHead {
-                    number: pull_request.number,
-                    html_url: pull_request.html_url,
-                    state: pull_request.state,
-                    merged,
-                    head_sha: pull_request.head.sha,
-                    merge_commit_sha: pull_request.merge_commit_sha.filter(|_| merged),
-                }
-            }))
+        Ok(pull_requests.into_iter().next().map(|pull_request| {
+            // Before a merge, GitHub names the commit of a trial merge
+            // here: only a merged pull request's is on its base.
+            let merged = pull_request.merged_at.is_some();
+            GithubPullRequestHead {
+                number: pull_request.number,
+                html_url: pull_request.html_url,
+                state: pull_request.state,
+                merged,
+                head_sha: pull_request.head.sha,
+                merge_commit_sha: pull_request.merge_commit_sha.filter(|_| merged),
+            }
+        }))
     }
 
     /// The check suites on the commit `sha`.

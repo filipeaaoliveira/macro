@@ -18,8 +18,8 @@ mod brief;
 #[cfg(test)]
 mod test;
 
-use answer::place;
 pub(crate) use answer::json_block;
+use answer::place;
 pub use answer::{ReviewerAnswer, ReviewerAnswerError, WHOLE_CHANGE};
 pub(crate) use brief::escape;
 pub use brief::{BRIEF_BUDGET, blockers_brief, carried_blockers, fenced_review, findings_block};

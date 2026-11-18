@@ -258,7 +258,11 @@ async fn a_commit_s_parents_are_read_first_first() {
         .unwrap();
 
     assert_eq!(parents, ["base", "branch"]);
-    assert!(server.finish().starts_with("GET /repos/macro/app/commits/m HTTP/1.1"));
+    assert!(
+        server
+            .finish()
+            .starts_with("GET /repos/macro/app/commits/m HTTP/1.1")
+    );
 }
 
 /// A commit contains another when it is that commit or comes after it,

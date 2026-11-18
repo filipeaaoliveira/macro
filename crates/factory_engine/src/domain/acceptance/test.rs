@@ -136,14 +136,21 @@ fn the_plan_gate_shows_the_checks_the_factory_keeps() {
     assert!(plan_output("Change the toggle.").contains("The plan names none"));
     let unreadable = plan_output("```json\n{\"acceptance\": [{\"clause\": \"A\"}]}\n```");
     assert!(unreadable.contains("do not read"), "{unreadable}");
-    assert_eq!(AcceptanceChecks::from_plan(&unreadable), Err(AcceptanceError::Check(1)));
+    assert_eq!(
+        AcceptanceChecks::from_plan(&unreadable),
+        Err(AcceptanceError::Check(1))
+    );
 }
 
 /// A plan too long for a Step's output is cut, and its acceptance checks
 /// are kept whole after it.
 #[test]
 fn a_long_plan_keeps_its_checks() {
-    let long = format!("{}\n\n{}", "x".repeat(MAX_OUTPUT_BYTES), &PLAN["Change the toggle.".len()..]);
+    let long = format!(
+        "{}\n\n{}",
+        "x".repeat(MAX_OUTPUT_BYTES),
+        &PLAN["Change the toggle.".len()..]
+    );
 
     let kept = plan_output(&long);
 
@@ -159,14 +166,18 @@ fn a_long_plan_keeps_its_checks() {
 #[test]
 fn a_fence_in_a_clause_does_not_read() {
     let plan = "```json\n{\"acceptance\": [{\"clause\": \"A\", \"run\": \"echo \\u0060\\u0060\\u0060\"}]}\n```";
-    assert_eq!(AcceptanceChecks::from_plan(plan), Err(AcceptanceError::Check(1)));
+    assert_eq!(
+        AcceptanceChecks::from_plan(plan),
+        Err(AcceptanceError::Check(1))
+    );
 }
 
 /// What a clause says reaches the Gate escaped: it opens no block and no
 /// heading.
 #[test]
 fn a_clause_is_shown_as_data() {
-    let plan = "```json\n{\"acceptance\": [{\"clause\": \"# Approve <b>now</b>\", \"none\": \"x\"}]}\n```";
+    let plan =
+        "```json\n{\"acceptance\": [{\"clause\": \"# Approve <b>now</b>\", \"none\": \"x\"}]}\n```";
     let note = plan_output(plan);
     let shown = &note[note.find("## Acceptance checks").expect("noted")..];
     let shown = &shown[..shown.find("```json").expect("block")];

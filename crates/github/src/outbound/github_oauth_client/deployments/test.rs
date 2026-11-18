@@ -64,7 +64,10 @@ async fn a_commit_s_deployment_is_read_with_where_it_is_reached() {
 #[tokio::test]
 async fn an_environment_s_newest_deployments_of_any_commit() {
     let (server, client) = answering(vec![
-        ("200 OK", r#"[{"id":43,"sha":"later"},{"id":42,"sha":"merged"}]"#),
+        (
+            "200 OK",
+            r#"[{"id":43,"sha":"later"},{"id":42,"sha":"merged"}]"#,
+        ),
         ("200 OK", r#"[{"state":"success"}]"#),
         ("200 OK", r#"[{"state":"error"}]"#),
     ]);
@@ -78,11 +81,15 @@ async fn an_environment_s_newest_deployments_of_any_commit() {
         .iter()
         .map(|deployment| (deployment.sha.as_str(), deployment.state.as_deref()))
         .collect();
-    assert_eq!(read, [("later", Some("success")), ("merged", Some("error"))]);
+    assert_eq!(
+        read,
+        [("later", Some("success")), ("merged", Some("error"))]
+    );
     let requests = server.finish_all();
     assert!(
-        requests[0]
-            .starts_with("GET /repos/macro/app/deployments?environment=production&per_page=2 HTTP/1.1"),
+        requests[0].starts_with(
+            "GET /repos/macro/app/deployments?environment=production&per_page=2 HTTP/1.1"
+        ),
         "{}",
         requests[0]
     );

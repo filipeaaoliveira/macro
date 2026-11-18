@@ -781,7 +781,16 @@ fn acceptance_that_fails_before_the_merge_goes_back_to_be_fixed() {
 /// person.
 #[test]
 fn a_merged_change_is_verified_and_its_failure_fails_the_run() {
-    let merged = ["approve", "done", "pass", "pass", "published", "green", "approve", "merged"];
+    let merged = [
+        "approve",
+        "done",
+        "pass",
+        "pass",
+        "published",
+        "green",
+        "approve",
+        "merged",
+    ];
     let after = |outcomes: &[&'static str]| {
         let mut all = merged.to_vec();
         all.extend_from_slice(outcomes);
@@ -842,7 +851,15 @@ fn a_run_in_flight_on_the_code_flow_before_verify_ends_at_its_merge() {
 
     let (steps, end) = walk(
         &old,
-        &["approve", "done", "pass", "published", "green", "approve", "merged"],
+        &[
+            "approve",
+            "done",
+            "pass",
+            "published",
+            "green",
+            "approve",
+            "merged",
+        ],
     );
 
     assert_eq!(steps.last().map(String::as_str), Some("merge#1"));

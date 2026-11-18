@@ -10,9 +10,9 @@
 
 mod checks_round;
 mod review_panel;
-mod verify;
 #[cfg(test)]
 mod test;
+mod verify;
 
 use factory_records::domain::main_hold::MainHoldRepository;
 use factory_records::domain::models::{Outcome, Repository, Role, Step, StepKey, StepSession};
@@ -21,7 +21,6 @@ use factory_records::domain::review_rounds::{ReviewRound, ReviewRoundRepository}
 use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::acceptance::plan_output;
-use crate::domain::verification::VerifyFile;
 use crate::domain::agents::{REVIEWER_ROLES, VERIFIER};
 use crate::domain::flow::{StepName, StepUse};
 use crate::domain::gate_owner::owner_notes_brief;
@@ -35,6 +34,7 @@ use crate::domain::questions::{
     SESSION_LOST_NOTE, answers_brief, ask_instructions, going_on_prompt,
 };
 use crate::domain::review_rounds::{blockers_brief, escape, fenced_review};
+use crate::domain::verification::VerifyFile;
 
 /// What the agent is told for a `plan` Step.
 const PLAN_INSTRUCTIONS: &str = include_str!("built_in_steps/plan.md");
@@ -517,9 +517,11 @@ where
 /// none when it does not read.
 fn deploy_note(file: Option<&VerifyFile>) -> String {
     match file {
-        Some(file) if !file.verify => "\nThe repository turns its verify phase off: the factory runs \
+        Some(file) if !file.verify => {
+            "\nThe repository turns its verify phase off: the factory runs \
              none of these checks, but write them for the person who reads the plan.\n"
-            .to_string(),
+                .to_string()
+        }
         Some(VerifyFile {
             deploy: Some(deploy),
             ..
@@ -532,8 +534,9 @@ fn deploy_note(file: Option<&VerifyFile>) -> String {
         Some(_) => "\nThe repository declares no deploy: mark no check `deployed`, since such a \
                     check is never run here.\n"
             .to_string(),
-        None => "\nThe repository's verify file does not read: mark no check `deployed`.\n"
-            .to_string(),
+        None => {
+            "\nThe repository's verify file does not read: mark no check `deployed`.\n".to_string()
+        }
     }
 }
 
@@ -665,9 +668,10 @@ fn section(step: &Step) -> String {
     // A review panel's reviewer, or a verifier, wrote its output with what
     // the change's own checks printed: it is data, fenced as the briefs
     // fence the findings, never instructions.
-    let reviewed = step.role.as_ref().is_some_and(|role| {
-        REVIEWER_ROLES.contains(&role.as_str()) || role.as_str() == VERIFIER
-    });
+    let reviewed = step
+        .role
+        .as_ref()
+        .is_some_and(|role| REVIEWER_ROLES.contains(&role.as_str()) || role.as_str() == VERIFIER);
     let output = if reviewed {
         fenced_review(&end.output)
     } else {

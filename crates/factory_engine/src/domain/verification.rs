@@ -82,7 +82,9 @@ pub enum VerifyFileError {
     #[error("{VERIFY_FILE} is over {MAX_FILE_BYTES} bytes")]
     TooLarge,
     /// The deploy's environment is blank or too long.
-    #[error("{VERIFY_FILE} names a deploy environment that is blank or over {MAX_ENVIRONMENT_BYTES} bytes")]
+    #[error(
+        "{VERIFY_FILE} names a deploy environment that is blank or over {MAX_ENVIRONMENT_BYTES} bytes"
+    )]
     Environment,
 }
 

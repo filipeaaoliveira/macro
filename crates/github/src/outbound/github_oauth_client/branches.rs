@@ -264,7 +264,11 @@ impl GithubOauthImpl {
                 "failed to read a commit",
             )
             .await?;
-        Ok(commit.parents.into_iter().map(|parent| parent.sha).collect())
+        Ok(commit
+            .parents
+            .into_iter()
+            .map(|parent| parent.sha)
+            .collect())
     }
 
     /// Whether the commit `head` contains the commit `ancestor`: it is that

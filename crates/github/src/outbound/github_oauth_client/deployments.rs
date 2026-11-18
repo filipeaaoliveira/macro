@@ -56,7 +56,10 @@ impl GithubOauthImpl {
         count: u8,
     ) -> Result<Vec<GithubDeployment>, GithubError> {
         let per_page = count.to_string();
-        let mut query = vec![("environment", environment), ("per_page", per_page.as_str())];
+        let mut query = vec![
+            ("environment", environment),
+            ("per_page", per_page.as_str()),
+        ];
         if let Some(sha) = sha {
             query.push(("sha", sha));
         }

@@ -621,7 +621,10 @@ where
     /// The head of the Run's branch on GitHub, read again once after a
     /// moment when it is not there yet; a branch still missing then fails
     /// the attempt for a retry.
-    pub(super) async fn pushed_commit(&self, input: StepInput<'_>) -> Result<String, BuiltInStepError> {
+    pub(super) async fn pushed_commit(
+        &self,
+        input: StepInput<'_>,
+    ) -> Result<String, BuiltInStepError> {
         let head = match self.pull_requests.branch_head(&input).await? {
             Some(head) => head,
             None => {

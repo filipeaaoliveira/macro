@@ -64,7 +64,12 @@ async fn run_visit(
     visit: u16,
 ) -> Result<StepReport, super::super::BuiltInStepError> {
     let entry = EntryId::try_from(step.to_string()).expect("valid");
-    if repo.claimed_session(input.key).await.expect("read").is_none() {
+    if repo
+        .claimed_session(input.key)
+        .await
+        .expect("read")
+        .is_none()
+    {
         repo.start_step(input.key, &entry, visit)
             .await
             .expect("start");
@@ -194,10 +199,14 @@ async fn accept_runs_the_plan_s_checks_on_the_branch_and_passes() {
         "{prompt}"
     );
     assert!(
-        prompt.contains("3. It looks right on a phone: no check (only a person on a phone sees it)"),
+        prompt
+            .contains("3. It looks right on a phone: no check (only a person on a phone sees it)"),
         "{prompt}"
     );
-    assert!(prompt.contains("confirm it really exercises its clause"), "{prompt}");
+    assert!(
+        prompt.contains("confirm it really exercises its clause"),
+        "{prompt}"
+    );
     assert!(agent.turns().is_empty());
     assert!(
         report
@@ -226,8 +235,16 @@ async fn a_failed_acceptance_check_before_the_merge_goes_back_as_blockers() {
         .expect("accept");
 
     assert_eq!(report.outcome.as_str(), "blockers");
-    assert!(report.output.contains("acceptance checks failed"), "{}", report.output);
-    assert!(report.output.contains("expected dark, got light"), "{}", report.output);
+    assert!(
+        report.output.contains("acceptance checks failed"),
+        "{}",
+        report.output
+    );
+    assert!(
+        report.output.contains("expected dark, got light"),
+        "{}",
+        report.output
+    );
 }
 
 /// A verifier that stopped without a result, even once reminded, ends its
@@ -249,11 +266,14 @@ async fn a_verifier_that_stopped_without_a_result_asks_its_owner() {
             ..input()
         };
 
-        let report = run(&agent, &github, &repo, step, input)
-            .await
-            .expect(step);
+        let report = run(&agent, &github, &repo, step, input).await.expect(step);
 
-        assert_eq!(report.outcome, Outcome::no_result(), "{step}: {}", report.output);
+        assert_eq!(
+            report.outcome,
+            Outcome::no_result(),
+            "{step}: {}",
+            report.output
+        );
         assert_eq!(report.output, "I stopped before checking.", "{step}");
         assert!(commands(&agent).is_empty(), "{step}");
         assert!(rounds(&repo, input).await.is_empty(), "{step}");
@@ -302,13 +322,19 @@ async fn a_merged_change_is_checked_where_it_is_deployed() {
     );
     let rounds = rounds(&repo, input).await;
     assert_eq!(rounds[0].checks, ["acceptance-1", "acceptance-2"]);
-    assert_eq!(rounds[0].checked_commit.as_deref(), Some(FakeGithub::MERGED));
+    assert_eq!(
+        rounds[0].checked_commit.as_deref(),
+        Some(FakeGithub::MERGED)
+    );
     let prompt = &agent.tasks.lock().expect("tasks")[0].prompt;
     assert!(
         prompt.contains("deployed to production at https://app.example.com"),
         "{prompt}"
     );
-    assert!(prompt.contains("It is merged: nothing goes back"), "{prompt}");
+    assert!(
+        prompt.contains("It is merged: nothing goes back"),
+        "{prompt}"
+    );
 }
 
 /// A merged change whose check fails fails the Step. With no deploy
@@ -386,7 +412,11 @@ async fn acceptance_that_keeps_failing_is_unresolved_at_the_last_visit() {
         .expect("accept");
 
     assert_eq!(report.outcome.as_str(), "unresolved", "{}", report.output);
-    assert!(report.output.starts_with("Acceptance kept failing"), "{}", report.output);
+    assert!(
+        report.output.starts_with("Acceptance kept failing"),
+        "{}",
+        report.output
+    );
 }
 
 /// Where the verifier's session runs no command, it runs the checks itself
@@ -410,10 +440,22 @@ async fn where_the_session_runs_no_command_the_verifier_runs_the_checks() {
     let turns = agent.turns();
     assert_eq!(turns.len(), 1);
     assert_eq!(turns[0].role.as_str(), "verifier");
-    assert!(turns[0].prompt.contains(&format!("The commit: {HEAD}.")), "{}", turns[0].prompt);
-    assert!(turns[0].prompt.contains("bun test toggle"), "{}", turns[0].prompt);
+    assert!(
+        turns[0].prompt.contains(&format!("The commit: {HEAD}.")),
+        "{}",
+        turns[0].prompt
+    );
+    assert!(
+        turns[0].prompt.contains("bun test toggle"),
+        "{}",
+        turns[0].prompt
+    );
     assert!(!rounds(&repo, input).await[0].verified);
-    assert!(report.output.contains("run by the verifier"), "{}", report.output);
+    assert!(
+        report.output.contains("run by the verifier"),
+        "{}",
+        report.output
+    );
 }
 
 /// A repository that turns the Phase off passes the change on unchecked.
@@ -429,9 +471,7 @@ async fn a_repository_that_turns_the_phase_off_is_not_verified() {
     };
 
     for step in ["accept", "verify"] {
-        let report = run(&agent, &github, &repo, step, input)
-            .await
-            .expect("off");
+        let report = run(&agent, &github, &repo, step, input).await.expect("off");
         assert_eq!(report.outcome.as_str(), "off", "{step}");
     }
     assert!(agent.tasks.lock().expect("tasks").is_empty());
@@ -457,7 +497,10 @@ async fn with_no_acceptance_checks_the_verifier_decides() {
     assert_eq!(report.outcome.as_str(), "pass");
     assert!(rounds(&repo, input).await.is_empty());
     let prompt = &agent.tasks.lock().expect("tasks")[0].prompt;
-    assert!(prompt.contains("The plan wrote no acceptance checks"), "{prompt}");
+    assert!(
+        prompt.contains("The plan wrote no acceptance checks"),
+        "{prompt}"
+    );
 }
 
 /// A retried Step goes on with the round it recorded: the checks that ran
@@ -500,7 +543,11 @@ async fn a_plan_on_a_repository_keeps_its_acceptance_checks() {
         .await
         .expect("plan");
 
-    assert!(report.output.contains("## Acceptance checks"), "{}", report.output);
+    assert!(
+        report.output.contains("## Acceptance checks"),
+        "{}",
+        report.output
+    );
     assert!(
         report
             .output

@@ -16,9 +16,8 @@ use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::models::{
     Check, CheckState, CheckSuite, CodeRepository, CommitStatus, Deployment, DeploymentState,
-    HeadChecks, Merging,
-    OpenPullRequest, Opening, PullRequest, PullRequestState, RepositoryAccess, RequiredCheck,
-    RequiredChecks,
+    HeadChecks, Merging, OpenPullRequest, Opening, PullRequest, PullRequestState, RepositoryAccess,
+    RequiredCheck, RequiredChecks,
 };
 use crate::domain::ports::{PullRequests, Retryable};
 use crate::domain::review_rounds::ChangedFile;
@@ -479,7 +478,13 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
         let token = self.token(owner).await?;
         Ok(self
             .github
-            .commit_contains(&token, repository.owner(), repository.name(), ancestor, head)
+            .commit_contains(
+                &token,
+                repository.owner(),
+                repository.name(),
+                ancestor,
+                head,
+            )
             .await?)
     }
 

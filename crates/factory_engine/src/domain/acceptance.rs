@@ -134,7 +134,9 @@ pub enum AcceptanceError {
     #[error("the acceptance block lists {0} clauses; a plan lists 1 to {MAX_CLAUSES}")]
     Clauses(usize),
     /// A clause is blank, too long, or holds a code fence.
-    #[error("clause {0} of the acceptance block is blank, over {MAX_TEXT_BYTES} bytes, or holds a code fence")]
+    #[error(
+        "clause {0} of the acceptance block is blank, over {MAX_TEXT_BYTES} bytes, or holds a code fence"
+    )]
     Clause(usize),
     /// A clause has both a check and a reason for none, or neither, or one
     /// that is blank or too long.
@@ -143,7 +145,9 @@ pub enum AcceptanceError {
     )]
     Check(usize),
     /// A clause's timeout is outside what a check may take.
-    #[error("clause {0} of the acceptance block has a timeout outside 1 to {MAX_CHECK_TIMEOUT_SECS} seconds")]
+    #[error(
+        "clause {0} of the acceptance block has a timeout outside 1 to {MAX_CHECK_TIMEOUT_SECS} seconds"
+    )]
     Timeout(usize),
     /// The checks take more of the plan's output than they may.
     #[error("the acceptance checks are over {MAX_NOTE_BYTES} bytes")]
