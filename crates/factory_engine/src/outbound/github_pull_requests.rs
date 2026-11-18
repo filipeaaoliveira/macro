@@ -423,28 +423,64 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
     }
 
     #[tracing::instrument(err, skip(self, owner))]
-    async fn deployment(
+    async fn deployments(
         &self,
         owner: &MacroUserIdStr<'static>,
         repository: &CodeRepository,
-        sha: &str,
+        sha: Option<&str>,
         environment: &str,
-    ) -> Result<Option<Deployment>, GithubPullRequestsErr> {
+        count: u8,
+    ) -> Result<Vec<Deployment>, GithubPullRequestsErr> {
         let token = self.token(owner).await?;
-        let deployment = self
+        let deployments = self
             .github
-            .get_latest_deployment(
+            .list_deployments(
                 &token,
                 repository.owner(),
                 repository.name(),
                 sha,
                 environment,
+                count,
             )
             .await?;
-        Ok(deployment.map(|deployment| Deployment {
-            state: DeploymentState::of_status(deployment.state.as_deref()),
-            url: deployment.environment_url,
-        }))
+        Ok(deployments
+            .into_iter()
+            .map(|deployment| Deployment {
+                commit: deployment.sha,
+                state: DeploymentState::of_status(deployment.state.as_deref()),
+                url: deployment.environment_url,
+            })
+            .collect())
+    }
+
+    #[tracing::instrument(err, skip(self, owner))]
+    async fn first_parent(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        sha: &str,
+    ) -> Result<Option<String>, GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        let parents = self
+            .github
+            .get_commit_parents(&token, repository.owner(), repository.name(), sha)
+            .await?;
+        Ok(parents.into_iter().next())
+    }
+
+    #[tracing::instrument(err, skip(self, owner))]
+    async fn contains(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        ancestor: &str,
+        head: &str,
+    ) -> Result<bool, GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        Ok(self
+            .github
+            .commit_contains(&token, repository.owner(), repository.name(), ancestor, head)
+            .await?)
     }
 
     #[tracing::instrument(err, skip(self, owner, pull_request), fields(branch = %pull_request.branch))]

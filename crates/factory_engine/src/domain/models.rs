@@ -489,12 +489,15 @@ pub enum Opening {
     Refused(String),
 }
 
-/// The newest deployment of a commit to an environment, as GitHub has it.
+/// A deployment of a commit to an environment, as GitHub has it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Deployment {
+    /// The commit it deploys.
+    pub commit: String,
     /// How it went, by its newest status.
     pub state: DeploymentState,
-    /// Where it is reached, when its newest status says.
+    /// Where it is reached, as the newest of its statuses that says so
+    /// names it.
     pub url: Option<String>,
 }
 

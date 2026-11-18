@@ -572,7 +572,7 @@ where
                     &role,
                     worktree::check_command(
                         round_id,
-                        run,
+                        &format!("{}{run}", target.environment()),
                         timeout.as_secs(),
                         worktree::LOCK_WAIT_SECS,
                     ),
@@ -762,14 +762,28 @@ pub(super) enum Checked<'a> {
         verified_before: bool,
     },
     /// `commit`: the acceptance checks of an `accept` or `verify` Step,
-    /// which the agent is asked to run with `prompt` where the engine runs
-    /// no command.
+    /// each run after `environment` (the variables it is told, kept out of
+    /// the commands the round records and shows), and which the agent is
+    /// asked to run with `prompt` where the engine runs no command.
     Commit {
         /// The commit.
         commit: &'a str,
+        /// What each check's command runs after, as shell.
+        environment: &'a str,
         /// What the agent is asked.
         prompt: &'a str,
     },
+}
+
+impl Checked<'_> {
+    /// What each check's command runs after: nothing for the repository's
+    /// checks.
+    fn environment(&self) -> &str {
+        match self {
+            Checked::Branch { .. } => "",
+            Checked::Commit { environment, .. } => environment,
+        }
+    }
 }
 
 /// How a round's checks went, for the loop that runs the rounds.

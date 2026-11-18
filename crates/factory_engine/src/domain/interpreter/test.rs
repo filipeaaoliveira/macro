@@ -707,8 +707,10 @@ fn a_flow_without_questions_reads_and_writes_as_before() {
 }
 
 /// Before the merge, a verifier checks the change once the review passed:
-/// what fails goes to a fix, through the review again, and is checked
-/// again; a change that keeps failing is left for a person.
+/// its Blockers Gate's `fix` sends it to a fix, through the review again
+/// from its first visit, and it is checked again. Its last visit's failure
+/// routes `unresolved`, which leaves the branch for a person with no fix
+/// after it; so does `stop`. Its failures never use up review rounds.
 #[test]
 fn acceptance_that_fails_before_the_merge_goes_back_to_be_fixed() {
     let (steps, end) = walk(
@@ -717,7 +719,7 @@ fn acceptance_that_fails_before_the_merge_goes_back_to_be_fixed() {
             "approve",
             "done",
             "pass",
-            "blockers",
+            "fix",
             "done",
             "pass",
             "pass",
@@ -736,7 +738,7 @@ fn acceptance_that_fails_before_the_merge_goes_back_to_be_fixed() {
             "review#1",
             "accept#1",
             "fix#1",
-            "review#2",
+            "review#1",
             "accept#2",
             "publish#1",
             "ci#1"
@@ -744,26 +746,39 @@ fn acceptance_that_fails_before_the_merge_goes_back_to_be_fixed() {
     );
     assert_eq!(end, Ok(RunOutcome::Success));
 
-    // Each failure takes a review's visit too: the review runs out first.
     let (steps, end) = walk(
         &flow(CODE_FLOW),
         &[
-            "approve", "done", "pass", "blockers", "done", "pass", "blockers", "done", "pass",
-            "blockers", "done",
+            "approve",
+            "done",
+            "changes",
+            "done",
+            "changes",
+            "done",
+            "pass",
+            "fix",
+            "done",
+            "pass",
+            "fix",
+            "done",
+            "pass",
+            "unresolved",
         ],
     );
-    assert_eq!(steps.last().map(String::as_str), Some("fix#3"));
-    assert_eq!(
-        steps.iter().filter(|step| step.starts_with("accept#")).count(),
-        3
-    );
+    assert_eq!(steps.last().map(String::as_str), Some("accept#3"));
+    assert!(steps.iter().all(|step| step != "fix#5"), "{steps:?}");
+    assert_eq!(end, Ok(RunOutcome::Manual));
+
+    let (steps, end) = walk(&flow(CODE_FLOW), &["approve", "done", "pass", "stop"]);
+    assert_eq!(steps.last().map(String::as_str), Some("accept#1"));
     assert_eq!(end, Ok(RunOutcome::Manual));
 }
 
 /// Once merged, the Run waits for the deploy, then a verifier checks the
 /// merged change: a failed check fails the Run, as does a failed deploy;
 /// a repository that turns the Phase off ends the Run at its merge, and a
-/// deploy that never comes leaves the Run for a person.
+/// deploy that never comes, or a Step that crashed, leaves the Run for a
+/// person.
 #[test]
 fn a_merged_change_is_verified_and_its_failure_fails_the_run() {
     let merged = ["approve", "done", "pass", "pass", "published", "green", "approve", "merged"];
@@ -803,10 +818,12 @@ fn a_merged_change_is_verified_and_its_failure_fails_the_run() {
             "{left}"
         );
     }
-    // A verifier's or a deploy's Step that failed for good fails the Run:
-    // it never goes on to the entry below.
-    assert_eq!(after(&["failed"]).1, Ok(RunOutcome::Failed));
-    assert_eq!(after(&["deployed", "failed"]).1, Ok(RunOutcome::Failed));
+    assert_eq!(after(&["not_needed", "off"]).1, Ok(RunOutcome::Success));
+    // A verifier's or a deploy's Step that failed for good, a crash rather
+    // than a failed check, leaves the Run for a person: it never fails the
+    // Run, nor goes on to the entry below.
+    assert_eq!(after(&["failed"]).1, Ok(RunOutcome::Manual));
+    assert_eq!(after(&["deployed", "failed"]).1, Ok(RunOutcome::Manual));
 }
 
 /// The `code` Flow as Runs in flight carry it, from before the verify

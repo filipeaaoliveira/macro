@@ -17,43 +17,74 @@ fn answering(responses: Vec<(&'static str, &str)>) -> (MockServer, GithubOauthIm
     (server, client)
 }
 
-/// The newest deployment of the commit to the environment is read with its
-/// newest status.
+/// The newest deployment of the commit to the environment is read with
+/// its newest status, and the address of the newest status that names one:
+/// a later `inactive` status names none.
 #[tokio::test]
-async fn the_newest_deployment_is_read_with_its_newest_status() {
+async fn a_commit_s_deployment_is_read_with_where_it_is_reached() {
     let (server, client) = answering(vec![
         ("200 OK", r#"[{"id":41,"sha":"abc123"}]"#),
         (
             "200 OK",
-            r#"[{"state":"success","environment_url":"https://app.example.com"}]"#,
+            r#"[{"state":"inactive","environment_url":""},{"state":"success","environment_url":"https://app.example.com"}]"#,
         ),
     ]);
 
-    let deployment = client
-        .get_latest_deployment("token", "macro", "app", "abc123", "production")
+    let deployments = client
+        .list_deployments("token", "macro", "app", Some("abc123"), "production", 1)
         .await
         .unwrap();
 
     assert_eq!(
-        deployment,
-        Some(GithubDeployment {
+        deployments,
+        [GithubDeployment {
             id: 41,
-            state: Some("success".to_string()),
+            sha: "abc123".to_string(),
+            state: Some("inactive".to_string()),
             environment_url: Some("https://app.example.com".to_string()),
-        })
+        }]
     );
     let requests = server.finish_all();
     assert!(
         requests[0].starts_with(
-            "GET /repos/macro/app/deployments?sha=abc123&environment=production&per_page=1 HTTP/1.1"
+            "GET /repos/macro/app/deployments?environment=production&per_page=1&sha=abc123 HTTP/1.1"
         ),
         "{}",
         requests[0]
     );
     assert!(
-        requests[1].starts_with("GET /repos/macro/app/deployments/41/statuses?per_page=1 HTTP/1.1"),
+        requests[1]
+            .starts_with("GET /repos/macro/app/deployments/41/statuses?per_page=30 HTTP/1.1"),
         "{}",
         requests[1]
+    );
+}
+
+/// The environment's newest deployments, of any commit, newest first.
+#[tokio::test]
+async fn an_environment_s_newest_deployments_of_any_commit() {
+    let (server, client) = answering(vec![
+        ("200 OK", r#"[{"id":43,"sha":"later"},{"id":42,"sha":"merged"}]"#),
+        ("200 OK", r#"[{"state":"success"}]"#),
+        ("200 OK", r#"[{"state":"error"}]"#),
+    ]);
+
+    let deployments = client
+        .list_deployments("token", "macro", "app", None, "production", 2)
+        .await
+        .unwrap();
+
+    let read: Vec<(&str, Option<&str>)> = deployments
+        .iter()
+        .map(|deployment| (deployment.sha.as_str(), deployment.state.as_deref()))
+        .collect();
+    assert_eq!(read, [("later", Some("success")), ("merged", Some("error"))]);
+    let requests = server.finish_all();
+    assert!(
+        requests[0]
+            .starts_with("GET /repos/macro/app/deployments?environment=production&per_page=2 HTTP/1.1"),
+        "{}",
+        requests[0]
     );
 }
 
@@ -63,24 +94,28 @@ async fn the_newest_deployment_is_read_with_its_newest_status() {
 async fn no_deployment_or_no_status_yet() {
     let (server, client) = answering(vec![("200 OK", "[]")]);
     let none = client
-        .get_latest_deployment("token", "macro", "app", "abc123", "production")
+        .list_deployments("token", "macro", "app", Some("abc123"), "production", 1)
         .await
         .unwrap();
-    assert_eq!(none, None);
+    assert_eq!(none, []);
     server.finish_all();
 
-    let (server, client) = answering(vec![("200 OK", r#"[{"id":41}]"#), ("200 OK", "[]")]);
+    let (server, client) = answering(vec![
+        ("200 OK", r#"[{"id":41,"sha":"abc123"}]"#),
+        ("200 OK", "[]"),
+    ]);
     let waiting = client
-        .get_latest_deployment("token", "macro", "app", "abc123", "production")
+        .list_deployments("token", "macro", "app", Some("abc123"), "production", 1)
         .await
         .unwrap();
     assert_eq!(
         waiting,
-        Some(GithubDeployment {
+        [GithubDeployment {
             id: 41,
+            sha: "abc123".to_string(),
             state: None,
             environment_url: None,
-        })
+        }]
     );
     server.finish_all();
 }
@@ -90,7 +125,7 @@ async fn no_deployment_or_no_status_yet() {
 async fn a_repository_out_of_reach_is_an_error() {
     let (server, client) = answering(vec![("404 Not Found", r#"{"message":"Not Found"}"#)]);
     let read = client
-        .get_latest_deployment("token", "macro", "app", "abc123", "production")
+        .list_deployments("token", "macro", "app", Some("abc123"), "production", 1)
         .await;
     assert!(
         matches!(read, Err(GithubError::RepositoryUnavailable)),

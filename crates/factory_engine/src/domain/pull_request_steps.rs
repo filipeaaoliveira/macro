@@ -21,6 +21,7 @@
 //! (`deploy`).
 
 mod deploy;
+pub(crate) use deploy::DeployState;
 #[cfg(test)]
 mod test;
 
@@ -98,6 +99,10 @@ pub enum PullRequestStepError {
     /// its merge made.
     #[error("github names no merge commit for the run's merged pull request yet")]
     NoMergeCommit,
+    /// GitHub names no parent of the Run's merge commit, so the base as it
+    /// was before the merge cannot be read.
+    #[error("github names no parent of the run's merge commit")]
+    NoMergeParent,
     /// GitHub could not be asked.
     #[error("github failed: {report:?}")]
     Github {
@@ -156,6 +161,7 @@ impl Retryable for PullRequestStepError {
             | Self::NoPullRequest
             | Self::NoMergeHead
             | Self::NotMerged
+            | Self::NoMergeParent
             | Self::ControlFiles(_) => false,
         }
     }

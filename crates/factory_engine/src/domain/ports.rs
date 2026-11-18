@@ -289,15 +289,36 @@ pub trait PullRequests: Send + Sync + 'static {
         head: &str,
     ) -> impl Future<Output = Result<Option<Vec<ChangedFile>>, Self::Err>> + Send;
 
-    /// The newest deployment of the commit `sha` of `repository` to
-    /// `environment`; none before one is made.
-    fn deployment(
+    /// The newest `count` deployments of `repository` to `environment`,
+    /// newest first: of the commit `sha` only, when given.
+    fn deployments(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        sha: Option<&str>,
+        environment: &str,
+        count: u8,
+    ) -> impl Future<Output = Result<Vec<Deployment>, Self::Err>> + Send;
+
+    /// The first parent of the commit `sha` of `repository`: for a merge
+    /// commit, the base branch as it was before the merge. None for a
+    /// commit with no parent.
+    fn first_parent(
         &self,
         owner: &MacroUserIdStr<'static>,
         repository: &CodeRepository,
         sha: &str,
-        environment: &str,
-    ) -> impl Future<Output = Result<Option<Deployment>, Self::Err>> + Send;
+    ) -> impl Future<Output = Result<Option<String>, Self::Err>> + Send;
+
+    /// Whether the commit `head` of `repository` contains the commit
+    /// `ancestor`: it is that commit, or comes after it.
+    fn contains(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        ancestor: &str,
+        head: &str,
+    ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
 
     /// Ask GitHub to open `pull_request` in `repository`.
     fn open(

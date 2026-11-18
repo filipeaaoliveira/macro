@@ -21,6 +21,7 @@ use factory_records::domain::review_rounds::{ReviewRound, ReviewRoundRepository}
 use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::acceptance::plan_output;
+use crate::domain::verification::VerifyFile;
 use crate::domain::agents::{REVIEWER_ROLES, VERIFIER};
 use crate::domain::flow::{StepName, StepUse};
 use crate::domain::gate_owner::owner_notes_brief;
@@ -373,7 +374,11 @@ where
             // On a repository, the plan ends with its acceptance checks,
             // which the Step keeps written out for the person at its Gate.
             BuiltInStep::Plan if input.repository.is_some() => {
-                let instructions = format!("{PLAN_INSTRUCTIONS}{PLAN_ACCEPTANCE_INSTRUCTIONS}");
+                let file = self.pull_requests.base_verify_file(&input).await?;
+                let instructions = format!(
+                    "{PLAN_INSTRUCTIONS}{PLAN_ACCEPTANCE_INSTRUCTIONS}{}",
+                    deploy_note(file.as_ref().ok())
+                );
                 let plan = self
                     .ask_agent(step, &instructions, vec![Outcome::done()], input)
                     .await?;
@@ -473,6 +478,31 @@ where
             // Only an agent Step holds a session.
             None => Ok(()),
         }
+    }
+}
+
+/// What the planner is told of the repository's deploy, so it marks a
+/// check `deployed` only where one runs: from the repository's verify file,
+/// none when it does not read.
+fn deploy_note(file: Option<&VerifyFile>) -> String {
+    match file {
+        Some(file) if !file.verify => "\nThe repository turns its verify phase off: the factory runs \
+             none of these checks, but write them for the person who reads the plan.\n"
+            .to_string(),
+        Some(VerifyFile {
+            deploy: Some(deploy),
+            ..
+        }) => format!(
+            "\nThe repository deploys each merge to the `{}` environment: a check marked \
+             `deployed` reaches the deployed change at `$MACRO_DEPLOY_URL` when the deployment \
+             names its address, and is not run when it names none.\n",
+            escape(&deploy.environment)
+        ),
+        Some(_) => "\nThe repository declares no deploy: mark no check `deployed`, since such a \
+                    check is never run here.\n"
+            .to_string(),
+        None => "\nThe repository's verify file does not read: mark no check `deployed`.\n"
+            .to_string(),
     }
 }
 

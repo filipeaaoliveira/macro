@@ -22,9 +22,19 @@
 //! for the person at its Gate, then the block as the factory read it, last
 //! ([`plan_output`]). The factory keeps the checks in the plan Step's
 //! recorded output, never in the Run's branch: the writer and fixer push
-//! the branch, and cannot change them. Only the planner writes them, at a
-//! visit of `plan` a person's answer to its Gate approves, after seeing
+//! the branch, and cannot change the commands. Only the planner writes
 //! them.
+//!
+//! Trust: the commands are an agent's, not people's. A repository's
+//! `.macro/checks.json` is written and merged by people; acceptance checks
+//! are written by the planner, and run in the verifier's session, on its
+//! machine, with the same trust as any agent's command there. The plan's
+//! Gate shows them, but a Standing Rule or the stand-in may answer that
+//! Gate, so they may run without a person having seen them. And what a
+//! command runs may be code the writer wrote, such as a test it adds: the
+//! command is fixed, its target is not. The verifier is told to read what
+//! each check runs and confirm it really tests its clause; a check that
+//! passes proves only as much as the code it runs.
 
 #[cfg(test)]
 mod test;
@@ -39,11 +49,16 @@ use crate::domain::review_rounds::{escape, json_block};
 /// The entry whose Step's output holds the acceptance checks.
 const PLAN_STEP: &str = "plan";
 
-/// The most clauses a plan's acceptance checks hold.
-const MAX_CLAUSES: usize = 32;
+/// The most clauses a plan's acceptance checks hold: with their commands,
+/// what a round of checks records stays within what it keeps.
+const MAX_CLAUSES: usize = 16;
 
-/// The longest clause, reason or command, in bytes.
+/// The longest clause or reason, in bytes.
 const MAX_TEXT_BYTES: usize = 2048;
+
+/// The longest command, in bytes: with the variables a check is told, it
+/// stays within what a check runs.
+const MAX_RUN_BYTES: usize = 1024;
 
 /// What opens and closes a fenced block.
 const FENCE: &str = "```";
@@ -124,7 +139,7 @@ pub enum AcceptanceError {
     /// A clause has both a check and a reason for none, or neither, or one
     /// that is blank or too long.
     #[error(
-        "clause {0} of the acceptance block must have either a command (`run`) or why it has none (`none`), not blank, at most {MAX_TEXT_BYTES} bytes and with no code fence"
+        "clause {0} of the acceptance block must have either a command (`run`, at most {MAX_RUN_BYTES} bytes) or why it has none (`none`, at most {MAX_TEXT_BYTES} bytes), not blank and with no code fence"
     )]
     Check(usize),
     /// A clause's timeout is outside what a check may take.
@@ -170,11 +185,11 @@ impl AcceptanceChecks {
             if clause.is_empty() || clause.len() > MAX_TEXT_BYTES || clause.contains(FENCE) {
                 return Err(AcceptanceError::Clause(number));
             }
-            let usable = |text: &str| {
-                !text.trim().is_empty() && text.len() <= MAX_TEXT_BYTES && !text.contains(FENCE)
+            let usable = |text: &str, most: usize| {
+                !text.trim().is_empty() && text.len() <= most && !text.contains(FENCE)
             };
             let check = match (written.run, written.none, written.timeout) {
-                (Some(run), None, timeout) if usable(&run) => {
+                (Some(run), None, timeout) if usable(&run, MAX_RUN_BYTES) => {
                     let timeout = timeout.unwrap_or(DEFAULT_CHECK_TIMEOUT_SECS);
                     if timeout == 0 || timeout > MAX_CHECK_TIMEOUT_SECS {
                         return Err(AcceptanceError::Timeout(number));
@@ -185,7 +200,7 @@ impl AcceptanceChecks {
                         deployed: written.deployed,
                     }
                 }
-                (None, Some(why), None) if usable(&why) && !written.deployed => {
+                (None, Some(why), None) if usable(&why, MAX_TEXT_BYTES) && !written.deployed => {
                     AcceptanceCheck::None(why.trim().to_string())
                 }
                 _ => return Err(AcceptanceError::Check(number)),

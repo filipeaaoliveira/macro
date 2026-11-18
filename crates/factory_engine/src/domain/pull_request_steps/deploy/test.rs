@@ -44,7 +44,7 @@ fn input() -> StepInput<'static> {
 }
 
 /// GitHub with the Run's pull request merged, its base declaring `verify`
-/// as its verify file (none when absent).
+/// as its verify file before the merge (none when absent).
 fn merged(verify: Option<&str>) -> FakeGithub {
     let github = FakeGithub::with_open_pull_request(ci(Some("success")));
     {
@@ -54,7 +54,7 @@ fn merged(verify: Option<&str>) -> FakeGithub {
         pull_request.merge_commit = Some(FakeGithub::MERGED.to_string());
         if let Some(verify) = verify {
             state.files.insert(
-                ("main".to_string(), VERIFY_FILE.to_string()),
+                (FakeGithub::BASE.to_string(), VERIFY_FILE.to_string()),
                 verify.to_string(),
             );
         }
@@ -62,11 +62,18 @@ fn merged(verify: Option<&str>) -> FakeGithub {
     github
 }
 
-fn deployment(state: DeploymentState) -> Option<Deployment> {
-    Some(Deployment {
+/// A deployment of `commit` that went as `state`.
+fn deployment_of(commit: &str, state: DeploymentState) -> Deployment {
+    Deployment {
+        commit: commit.to_string(),
         state,
         url: Some("https://app.example.com".to_string()),
-    })
+    }
+}
+
+/// The merge commit's deployment, gone as `state`.
+fn deployment(state: DeploymentState) -> Vec<Deployment> {
+    vec![deployment_of(FakeGithub::MERGED, state)]
 }
 
 async fn deploy(github: &FakeGithub) -> Result<StepReport, PullRequestStepError> {
@@ -97,8 +104,11 @@ async fn no_deploy_declared_is_not_needed() {
 #[tokio::test(start_paused = true)]
 async fn the_run_waits_for_the_merge_commit_s_deployment() {
     let github = merged(Some(PRODUCTION));
+    // Each wait reads the commit's deployments, then the environment's.
     github.state().deployments = [
-        None,
+        Vec::new(),
+        Vec::new(),
+        deployment(DeploymentState::Waiting),
         deployment(DeploymentState::Waiting),
         deployment(DeploymentState::Succeeded),
     ]
@@ -113,12 +123,12 @@ async fn the_run_waits_for_the_merge_commit_s_deployment() {
         report.output
     );
     let reads = github.state().deployment_reads.clone();
-    assert_eq!(reads.len(), 3);
-    assert!(
-        reads
-            .iter()
-            .all(|read| read == &(FakeGithub::MERGED.to_string(), "production".to_string()))
+    assert_eq!(reads.len(), 5);
+    assert_eq!(
+        reads[4],
+        (FakeGithub::MERGED.to_string(), "production".to_string())
     );
+    assert_eq!(reads[1], ("any".to_string(), "production".to_string()));
 }
 
 /// A deployment replaced by a later one did deploy the change.
@@ -130,6 +140,37 @@ async fn a_replaced_deployment_was_deployed() {
     let report = deploy(&github).await.expect("deploy");
 
     assert_eq!(report.outcome.as_str(), "deployed");
+}
+
+/// A later commit's deployment that succeeded deployed the merge with it
+/// when that commit contains the merge, so a cancelled or failed
+/// deployment of the merge itself is no failure then; one of a commit
+/// beside it deployed nothing of it.
+#[tokio::test(start_paused = true)]
+async fn a_later_commit_s_deployment_deploys_the_merge() {
+    const LATER: &str = "4444444444444444444444444444444444444444";
+    const BESIDE: &str = "5555555555555555555555555555555555555555";
+    let github = merged(Some(PRODUCTION));
+    github.state().deployments = [vec![
+        deployment_of(BESIDE, DeploymentState::Succeeded),
+        deployment_of(LATER, DeploymentState::Succeeded),
+        deployment_of(FakeGithub::MERGED, DeploymentState::Failed),
+    ]]
+    .into();
+    github
+        .state()
+        .descendants
+        .insert((FakeGithub::MERGED.to_string(), LATER.to_string()));
+
+    let report = deploy(&github).await.expect("deploy");
+
+    assert_eq!(report.outcome.as_str(), "deployed", "{}", report.output);
+    assert!(report.output.contains(LATER), "{}", report.output);
+
+    // Without it, the failed deployment of the merge is a failure.
+    github.state().descendants.clear();
+    let report = deploy(&github).await.expect("deploy");
+    assert_eq!(report.outcome.as_str(), "deploy_failed");
 }
 
 #[tokio::test]
@@ -159,7 +200,9 @@ async fn a_deployment_that_never_comes_times_out() {
 /// and one whose file does not read says why.
 #[tokio::test]
 async fn the_phase_turned_off_or_unreadable() {
-    let off = merged(Some(r#"{"verify": false, "deploy": {"environment": "production"}}"#));
+    let off = merged(Some(
+        r#"{"verify": false, "deploy": {"environment": "production"}}"#,
+    ));
     let report = deploy(&off).await.expect("deploy");
     assert_eq!(report.outcome.as_str(), "off");
     assert!(off.state().deployment_reads.is_empty());
@@ -168,6 +211,22 @@ async fn the_phase_turned_off_or_unreadable() {
     let report = deploy(&unreadable).await.expect("deploy");
     assert_eq!(report.outcome.as_str(), "unreadable");
     assert!(report.output.contains(VERIFY_FILE), "{}", report.output);
+}
+
+/// The verify file is read as the base had it before the merge: a Run whose
+/// own change turns the phase off, now on the base branch, is still
+/// verified.
+#[tokio::test]
+async fn a_run_cannot_turn_its_own_verification_off() {
+    let github = merged(None);
+    github.state().files.insert(
+        ("main".to_string(), VERIFY_FILE.to_string()),
+        r#"{"verify": false}"#.to_string(),
+    );
+
+    let report = deploy(&github).await.expect("deploy");
+
+    assert_eq!(report.outcome.as_str(), "not_needed", "{}", report.output);
 }
 
 /// A pull request GitHub lists merged without its merge commit yet is

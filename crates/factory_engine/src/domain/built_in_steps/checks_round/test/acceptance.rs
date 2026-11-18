@@ -50,9 +50,23 @@ async fn run(
     step: &str,
     input: StepInput<'_>,
 ) -> Result<StepReport, super::super::BuiltInStepError> {
+    run_visit(agent, github, repo, step, input, 1).await
+}
+
+/// [`run`], at the entry's visit `visit`.
+async fn run_visit(
+    agent: &ScriptedAgent,
+    github: &FakeGithub,
+    repo: &FakeRepo,
+    step: &str,
+    input: StepInput<'_>,
+    visit: u16,
+) -> Result<StepReport, super::super::BuiltInStepError> {
     let entry = EntryId::try_from(step.to_string()).expect("valid");
     if repo.claimed_session(input.key).await.expect("read").is_none() {
-        repo.start_step(input.key, &entry, 1).await.expect("start");
+        repo.start_step(input.key, &entry, visit)
+            .await
+            .expect("start");
         repo.claim_session(
             input.key,
             StepSession {
@@ -108,7 +122,7 @@ fn commands(agent: &ScriptedAgent) -> Vec<String> {
 
 /// GitHub with the Run's branch at [`HEAD`] and its pull request merged
 /// as [`FakeGithub::MERGED`], its base declaring `verify` as its verify
-/// file.
+/// file, now and before the merge.
 fn merged(verify: Option<&str>) -> FakeGithub {
     let github = github(None, None);
     github.state().pull_request = Some(crate::domain::models::PullRequest {
@@ -119,10 +133,12 @@ fn merged(verify: Option<&str>) -> FakeGithub {
         merge_commit: Some(FakeGithub::MERGED.to_string()),
     });
     if let Some(verify) = verify {
-        github.state().files.insert(
-            ("main".to_string(), VERIFY_FILE.to_string()),
-            verify.to_string(),
-        );
+        for at in ["main", FakeGithub::BASE] {
+            github.state().files.insert(
+                (at.to_string(), VERIFY_FILE.to_string()),
+                verify.to_string(),
+            );
+        }
     }
     github
 }
@@ -159,6 +175,8 @@ async fn accept_runs_the_plan_s_checks_on_the_branch_and_passes() {
     assert_eq!(rounds.len(), 1);
     assert!(rounds[0].verified);
     assert_eq!(rounds[0].checks, ["acceptance-1"]);
+    // The round keeps and shows the command as the plan wrote it.
+    assert_eq!(rounds[0].commands, ["bun test toggle"]);
     assert_eq!(rounds[0].checked_commit.as_deref(), Some(HEAD));
 
     let tasks = agent.tasks.lock().expect("tasks");
@@ -170,16 +188,20 @@ async fn accept_runs_the_plan_s_checks_on_the_branch_and_passes() {
         prompt.contains("1. The toggle switches the theme: the factory runs `acceptance-1`"),
         "{prompt}"
     );
-    assert!(prompt.contains("2. The live page serves it: checked once deployed"), "{prompt}");
+    assert!(
+        prompt.contains("2. The live page serves it: its check needs the deployed change"),
+        "{prompt}"
+    );
     assert!(
         prompt.contains("3. It looks right on a phone: no check (only a person on a phone sees it)"),
         "{prompt}"
     );
+    assert!(prompt.contains("confirm it really exercises its clause"), "{prompt}");
     assert!(agent.turns().is_empty());
     assert!(
         report
             .output
-            .contains("- It looks right on a phone: only a person on a phone sees it"),
+            .contains("- It looks right on a phone: no check (only a person on a phone sees it)"),
         "{}",
         report.output
     );
@@ -213,10 +235,11 @@ async fn a_failed_acceptance_check_before_the_merge_goes_back_as_blockers() {
 #[tokio::test]
 async fn a_merged_change_is_checked_where_it_is_deployed() {
     let github = merged(Some(r#"{"deploy": {"environment": "production"}}"#));
-    github.state().deployments = [Some(Deployment {
+    github.state().deployments = [vec![Deployment {
+        commit: FakeGithub::MERGED.to_string(),
         state: DeploymentState::Succeeded,
         url: Some("https://app.example.com".to_string()),
-    })]
+    }]]
     .into();
     let repo = FakeRepo::default();
     let earlier = planned(PLAN);
@@ -257,7 +280,9 @@ async fn a_merged_change_is_checked_where_it_is_deployed() {
     assert!(prompt.contains("It is merged: nothing goes back"), "{prompt}");
 }
 
-/// A merged change whose check fails fails the Step.
+/// A merged change whose check fails fails the Step. With no deploy
+/// declared, a check of the deployed change has nothing to reach: it is
+/// not run, and the verifier checks its clause by hand.
 #[tokio::test]
 async fn a_failed_check_after_the_merge_fails_the_step() {
     let github = merged(None);
@@ -268,13 +293,69 @@ async fn a_failed_check_after_the_merge_fails_the_step() {
         ..input()
     };
 
-    let agent = verifier("pass", vec![ran(0, "ok"), ran(7, "404")], FakeGithub::MERGED);
+    let agent = verifier("pass", vec![ran(7, "expected dark")], FakeGithub::MERGED);
     let report = run(&agent, &github, &repo, "verify", input)
         .await
         .expect("verify");
 
     assert_eq!(report.outcome.as_str(), "fail", "{}", report.output);
     assert!(report.output.contains("acceptance checks failed"));
+    assert_eq!(commands(&agent).len(), 1);
+    assert_eq!(rounds(&repo, input).await[0].checks, ["acceptance-1"]);
+    assert!(
+        report
+            .output
+            .contains("- The live page serves it: its check needs the deployed change, and no deployment names where it is reached"),
+        "{}",
+        report.output
+    );
+}
+
+/// After the merge the verify file is read as the base had it before the
+/// merge: a Run whose own change turns the phase off is still verified.
+#[tokio::test]
+async fn a_run_cannot_turn_its_own_verification_off() {
+    let github = merged(None);
+    github.state().files.insert(
+        ("main".to_string(), VERIFY_FILE.to_string()),
+        r#"{"verify": false}"#.to_string(),
+    );
+    let repo = FakeRepo::default();
+    let earlier = planned(PLAN);
+    let input = StepInput {
+        earlier: &earlier,
+        ..input()
+    };
+
+    let agent = verifier("pass", vec![ran(0, "ok")], FakeGithub::MERGED);
+    let report = run(&agent, &github, &repo, "verify", input)
+        .await
+        .expect("verify");
+
+    assert_eq!(report.outcome.as_str(), "pass", "{}", report.output);
+    assert_eq!(commands(&agent).len(), 1);
+}
+
+/// At the `accept` entry's last visit, a failure ends `unresolved`, so the
+/// Run is left for a person rather than sent to a fix no acceptance would
+/// check.
+#[tokio::test]
+async fn acceptance_that_keeps_failing_is_unresolved_at_the_last_visit() {
+    let agent = verifier("fail", vec![ran(0, "ok")], HEAD);
+    let github = github(None, None);
+    let repo = FakeRepo::default();
+    let earlier = planned(PLAN);
+    let input = StepInput {
+        earlier: &earlier,
+        ..input()
+    };
+
+    let report = run_visit(&agent, &github, &repo, "accept", input, 3)
+        .await
+        .expect("accept");
+
+    assert_eq!(report.outcome.as_str(), "unresolved", "{}", report.output);
+    assert!(report.output.starts_with("Acceptance kept failing"), "{}", report.output);
 }
 
 /// Where the verifier's session runs no command, it runs the checks itself
@@ -404,6 +485,12 @@ async fn a_plan_on_a_repository_keeps_its_acceptance_checks() {
         agent.tasks.lock().expect("tasks")[0]
             .prompt
             .contains("End the plan with a fenced `json` block of acceptance checks")
+    );
+    // The planner is told whether a deploy runs, to mark checks of it.
+    assert!(
+        agent.tasks.lock().expect("tasks")[0]
+            .prompt
+            .contains("The repository declares no deploy: mark no check `deployed`")
     );
 
     let no_repository = StepInput {

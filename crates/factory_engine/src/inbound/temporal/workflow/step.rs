@@ -14,6 +14,7 @@
 mod test;
 
 use factory_records::domain::models::{Outcome, RunOutcome, StepKey};
+use factory_records::domain::standing_rules::RuleGateKind;
 
 use super::review_round::Round;
 use super::work::Work;
@@ -21,6 +22,7 @@ use super::{Asking, FAILED_STEP_OUTPUT, Questions};
 use crate::domain::flow::Entry;
 use crate::domain::gate::{GateOpening, GateTelling};
 use crate::domain::models::{StepEnding, StepReport, StepRequest, StepStart};
+use crate::domain::standing_rules::rule_fix_limit;
 
 /// Walk the Step `request` of `entry`, and the Steps that go on from its
 /// agent's questions, and return the outcome the Flow routes, or how the
@@ -153,11 +155,22 @@ pub(super) async fn walk_step<W: Work>(
                     question: gate.question.clone(),
                     answers: gate.answers.clone(),
                 };
+                // A single Step's Blockers Gate (`accept`'s) bounds the
+                // rule's fixes as a review panel's does: one fix a visit,
+                // the visits before this one. No Flow a Run carried before
+                // had such a Gate, so every recorded history asks as it did.
+                let (fix_rounds, fix_limit) = match gate.kind {
+                    Some(RuleGateKind::Blockers) => (
+                        request.visit.saturating_sub(1),
+                        rule_fix_limit(entry.max_visits),
+                    ),
+                    _ => (0, 0),
+                };
                 let rule = Asking {
                     kind: gate.kind,
                     person_only: gate.person_only,
-                    fix_rounds: 0,
-                    fix_limit: 0,
+                    fix_rounds,
+                    fix_limit,
                 };
                 match ask(work, opening, Some(rule), held).await? {
                     Some(answer) => answer,
