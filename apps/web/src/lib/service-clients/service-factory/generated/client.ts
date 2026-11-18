@@ -244,7 +244,9 @@ export const getFactoryInsights = async (
 
 /**
  * @summary Create a Run of a built-in Flow, owned by the caller, and start its
-workflow.
+workflow. Above the Queue limit of the Project it would start in, it is
+refused (409 `queueFull`): more Gates and questions wait on the caller
+than the limit, and the Runs under way go on.
  */
 export type createFactoryRunResponse201 = {
   data: RunDetail;
@@ -264,6 +266,11 @@ export type createFactoryRunResponse401 = {
 export type createFactoryRunResponse403 = {
   data: ErrorResponse;
   status: 403;
+};
+
+export type createFactoryRunResponse409 = {
+  data: RunErrorResponse;
+  status: 409;
 };
 
 export type createFactoryRunResponse500 = {
@@ -288,6 +295,7 @@ export type createFactoryRunResponseError = (
   | createFactoryRunResponse400
   | createFactoryRunResponse401
   | createFactoryRunResponse403
+  | createFactoryRunResponse409
   | createFactoryRunResponse500
   | createFactoryRunResponse502
   | createFactoryRunResponse503
@@ -564,8 +572,13 @@ export const cancelFactoryRun = async (
 /**
  * @summary Answer, as the caller, the Gate one of their Runs waits on. The Run
 goes on once its workflow took the answer; reading the Run shows the
-answer once it is recorded. A Gate asks a person: only the owner's own
-signed-in session answers it (403 otherwise).
+answer once it is recorded. A Gate asks a person: the owner's own
+signed-in session answers it, and an agent session they work with
+(such as the Orchestrator in Macro chat), from its code, answers only
+what a Standing Rule could: never an agent's question, a Gate its Flow
+keeps for a person, a Tampered Run's approval or a merge Gate under a
+Main Hold (403 `reservedForAPerson`), and never from a factory Step's
+own session. Any other caller is refused (403).
  */
 export type answerFactoryGateResponse202 = {
   data: void;
@@ -583,7 +596,7 @@ export type answerFactoryGateResponse401 = {
 };
 
 export type answerFactoryGateResponse403 = {
-  data: ErrorResponse;
+  data: RunErrorResponse;
   status: 403;
 };
 

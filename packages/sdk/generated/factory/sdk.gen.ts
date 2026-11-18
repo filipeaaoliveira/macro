@@ -92,7 +92,9 @@ export class Sdk extends HeyApiClient {
 
     /**
      * Create a Run of a built-in Flow, owned by the caller, and start its
-     * workflow.
+     * workflow. Above the Queue limit of the Project it would start in, it is
+     * refused (409 `queueFull`): more Gates and questions wait on the caller
+     * than the limit, and the Runs under way go on.
      */
     public createFactoryRun<ThrowOnError extends boolean = false>(options: Options<CreateFactoryRunData, ThrowOnError>): RequestResult<CreateFactoryRunResponses, CreateFactoryRunErrors, ThrowOnError> {
         return (options.client ?? this.client).post<CreateFactoryRunResponses, CreateFactoryRunErrors, ThrowOnError>({
@@ -133,8 +135,13 @@ export class Sdk extends HeyApiClient {
     /**
      * Answer, as the caller, the Gate one of their Runs waits on. The Run
      * goes on once its workflow took the answer; reading the Run shows the
-     * answer once it is recorded. A Gate asks a person: only the owner's own
-     * signed-in session answers it (403 otherwise).
+     * answer once it is recorded. A Gate asks a person: the owner's own
+     * signed-in session answers it, and an agent session they work with
+     * (such as the Orchestrator in Macro chat), from its code, answers only
+     * what a Standing Rule could: never an agent's question, a Gate its Flow
+     * keeps for a person, a Tampered Run's approval or a merge Gate under a
+     * Main Hold (403 `reservedForAPerson`), and never from a factory Step's
+     * own session. Any other caller is refused (403).
      */
     public answerFactoryGate<ThrowOnError extends boolean = false>(options: Options<AnswerFactoryGateData, ThrowOnError>): RequestResult<AnswerFactoryGateResponses, AnswerFactoryGateErrors, ThrowOnError> {
         return (options.client ?? this.client).post<AnswerFactoryGateResponses, AnswerFactoryGateErrors, ThrowOnError>({

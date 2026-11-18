@@ -508,8 +508,9 @@ export type NamedCount = {
 /**
  * A workspace's Orchestrator Definition: which kinds of Gate the factory
  * decides on its own, whether the Gates it leaves go to the Run's owner,
- * and which the stand-in answers for the Run's owner when no rule does. A
- * kind left off waits for a person, as every Gate did before Standing
+ * which the stand-in answers for the Run's owner when no rule does, and
+ * the Queue limit above which no new Run starts. A kind left off waits for
+ * a person, as every Gate did before Standing
  * Rules. Whatever it says, a Tampered Run's Gates and a merge through a
  * Main Hold stay a person's.
  */
@@ -539,6 +540,15 @@ export type OrchestratorDefinition = {
      * Approve the plan Gate (`approve_plan`).
      */
     plan: boolean;
+    /**
+     * The Queue limit: the most Gates and questions that may wait on a
+     * person (their Queue) for a new Run of theirs to start under this
+     * definition. Above it, no new Run starts; Runs already going go on.
+     * None, and a definition sent without it, sets no limit. At most
+     * [`MAX_QUEUE_LIMIT`]. A Run does not keep it: it decides only
+     * whether a Run starts, so a Run's rules read with none.
+     */
+    queueLimit?: number | null;
     /**
      * The kinds of Gate the stand-in answers for the Run's owner, after
      * the rules and before the person; off for every kind when left out.
@@ -842,7 +852,7 @@ export type RunEnd = {
 /**
  * Why a request was refused, where a client acts on the cause.
  */
-export type RunErrorCode = 'unreachableRepository' | 'noPushAccess' | 'controlFilesNotApproved';
+export type RunErrorCode = 'unreachableRepository' | 'noPushAccess' | 'controlFilesNotApproved' | 'queueFull' | 'reservedForAPerson';
 
 /**
  * What a refused or failed request answers: a message, and for a refusal
@@ -1300,6 +1310,7 @@ export type CreateFactoryRunErrors = {
     400: RunErrorResponse;
     401: ErrorResponse;
     403: ErrorResponse;
+    409: RunErrorResponse;
     500: ErrorResponse;
     502: ErrorResponse;
     503: ErrorResponse;
@@ -1411,7 +1422,7 @@ export type AnswerFactoryGateData = {
 export type AnswerFactoryGateErrors = {
     400: ErrorResponse;
     401: ErrorResponse;
-    403: ErrorResponse;
+    403: RunErrorResponse;
     404: ErrorResponse;
     409: ErrorResponse;
     500: ErrorResponse;

@@ -15,4 +15,6 @@ export const RunErrorCode = {
   unreachableRepository: 'unreachableRepository',
   noPushAccess: 'noPushAccess',
   controlFilesNotApproved: 'controlFilesNotApproved',
+  queueFull: 'queueFull',
+  reservedForAPerson: 'reservedForAPerson',
 } as const;

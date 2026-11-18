@@ -57,6 +57,7 @@ export * from './mainHold';
 export * from './mainHoldTaskId';
 export * from './namedCount';
 export * from './orchestratorDefinition';
+export * from './orchestratorDefinitionQueueLimit';
 export * from './outcome';
 export * from './outcomeCounts';
 export * from './passedOver';
