@@ -4,8 +4,8 @@
 
 use std::sync::Arc;
 
+use agent::Message;
 use agent::structured_output::{DynamicSchema, dynamic_structured_completion};
-use agent::{Message, PredefinedModel};
 use ai_usage::{AiFeature, UsageContext, UsageRecorder};
 use factory_records::domain::models::Outcome;
 use macro_user_id::user_id::MacroUserIdStr;
@@ -31,6 +31,10 @@ struct Picked {
     reason: String,
 }
 
+/// The model a Gate model runs on unless told otherwise: Claude Haiku 5.5,
+/// by the id Macro's model router knows.
+pub const DEFAULT_GATE_MODEL: &str = "anthropic/claude-haiku-5-5";
+
 /// A Gate model on Macro's model router.
 #[derive(Clone)]
 pub struct FastGateModel {
@@ -39,14 +43,10 @@ pub struct FastGateModel {
 }
 
 impl FastGateModel {
-    /// The Gate model on `model`, a model id the router knows, or the
-    /// router's fast model when none is given; its usage is recorded
-    /// through `recorder`.
-    pub fn new(model: Option<String>, recorder: Arc<dyn UsageRecorder>) -> Self {
-        Self {
-            model: model.unwrap_or_else(|| PredefinedModel::Fast.to_string()),
-            recorder,
-        }
+    /// The Gate model on `model`, a model id the router knows, such as
+    /// [`DEFAULT_GATE_MODEL`]; its usage is recorded through `recorder`.
+    pub fn new(model: String, recorder: Arc<dyn UsageRecorder>) -> Self {
+        Self { model, recorder }
     }
 }
 

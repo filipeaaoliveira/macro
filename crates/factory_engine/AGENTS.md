@@ -790,7 +790,8 @@ with the `factory_reply_gate` update (refused, as an answer is, for a Gate
 the Run does not wait on, after an answer or other words it has not read,
 and for a Gate opened before replies) and asks the worker to read them
 (`factory_read_gate_reply`): a small model (the `GateModel` port; on
-Macro's model router in `outbound/fast_gate_model.rs`,
+Macro's model router in `outbound/fast_gate_model.rs`, Claude Haiku 5.5
+(`DEFAULT_GATE_MODEL`) unless `FACTORY_GATE_MODEL` names another,
 `AiFeature::FactoryGate`, billed to no one) picks one of the Gate's answers
 or `unclear`, with how sure it is. The question, its answers and the words
 reach the model as one JSON object, so the words open no section of their
