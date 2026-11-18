@@ -986,6 +986,10 @@ pub enum StepError {
     /// The Step's work failed in a way trying again would repeat.
     #[error("the step's work failed for good: {0:?}")]
     Final(rootcause::Report),
+    /// The quota of the Agents that fill the Step's Role ran out: trying
+    /// again would repeat the refusal, and the work never started.
+    #[error("the step's agents are out of quota: {0:?}")]
+    OutOfQuota(rootcause::Report),
     /// Any other internal error.
     #[error("internal step error: {0:?}")]
     Internal(rootcause::Report),

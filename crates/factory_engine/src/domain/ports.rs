@@ -114,7 +114,7 @@ pub trait AgentFailure: Retryable {
 /// Does the work of a Flow's Steps.
 pub trait StepExecutor: Send + Sync + 'static {
     /// The error type returned when a Step's work fails.
-    type Err: std::error::Error + Retryable + Send + Sync + 'static;
+    type Err: std::error::Error + AgentFailure + Send + Sync + 'static;
 
     /// How it does `step`'s work, if it does.
     fn serves(&self, step: &StepName) -> Option<StepUse>;

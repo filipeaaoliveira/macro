@@ -9,7 +9,7 @@ use factory_records::domain::models::{EntryId, Role, RunId, StepKey};
 use temporalio_sdk::activities::ActivityError;
 use tokio::sync::{Notify, watch};
 
-use super::{FactoryActivities, Liveness};
+use super::{FactoryActivities, INFRASTRUCTURE_FAILURE, Liveness};
 use crate::domain::fakes::{FakeGithub, FakeRepo};
 use crate::domain::flow::StepName;
 use crate::domain::gate::{GateAnswered, GateOpening, GateTelling};
@@ -189,4 +189,23 @@ async fn stopping_a_step_heartbeats_while_it_goes() {
 
     assert_eq!(steps.stops.load(Ordering::SeqCst), 1);
     assert!(context.beats.load(Ordering::SeqCst) >= 4);
+}
+
+/// Work whose agents' quota ran out fails for good as infrastructure's, for
+/// the workflow to read; work that fails for itself carries no such type.
+#[test]
+fn a_quota_that_ran_out_fails_as_infrastructure() {
+    let out_of_quota = super::failure(StepError::OutOfQuota(rootcause::report!("no quota")));
+    let for_good = super::failure(StepError::Final(rootcause::report!("bad outcome")));
+
+    let ActivityError::Application(out_of_quota) = out_of_quota else {
+        panic!("not an application failure: {out_of_quota:?}");
+    };
+    assert!(out_of_quota.is_non_retryable());
+    assert_eq!(out_of_quota.type_name(), Some(INFRASTRUCTURE_FAILURE));
+    let ActivityError::Application(for_good) = for_good else {
+        panic!("not an application failure: {for_good:?}");
+    };
+    assert!(for_good.is_non_retryable());
+    assert_eq!(for_good.type_name(), None);
 }

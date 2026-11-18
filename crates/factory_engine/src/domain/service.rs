@@ -41,9 +41,9 @@ use crate::domain::models::{
     StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
 };
 use crate::domain::ports::{
-    AnswerDelivery, FactoryService, GateNotifier, NoOwnerGates, NoTaskThread, PullRequests,
-    Retryable, RunWorkflows, RunWorkflowsError, StepExecutor, StepService, TaskAccess,
-    TaskDirectory, TaskNotes, TaskThread, UserDirectory,
+    AgentFailure, AnswerDelivery, FactoryService, GateNotifier, NoOwnerGates, NoTaskThread,
+    PullRequests, Retryable, RunWorkflows, RunWorkflowsError, StepExecutor, StepService,
+    TaskAccess, TaskDirectory, TaskNotes, TaskThread, UserDirectory,
 };
 use crate::domain::standing_rules::{
     GateFacts, RuleAnswer, kind_answers, offers_kind_answers, repeated_blockers, rule_answer,
@@ -825,7 +825,8 @@ where
         // A Run kept when its workflow's start could not be checked, and
         // whose workflow never came, would wait forever: once it is old
         // enough that a started workflow would have taken a Step, and
-        // Temporal says it has no workflow, it ends failed.
+        // Temporal says it has no workflow, it ends `infrastructure`, as
+        // nothing of its work ever ran.
         let stale = Utc::now() - run.created_at > UNSTARTED_AFTER;
         if run.end.is_none()
             && steps.is_empty()
@@ -833,7 +834,7 @@ where
             && let Ok(false) = self.workflows.exists(id).await
         {
             self.repo
-                .end_run(id, RunOutcome::Failed)
+                .end_run(id, RunOutcome::Infrastructure)
                 .await
                 .map_err(internal)?;
             run = self.owned_run(actor, id).await?;
@@ -1581,9 +1582,12 @@ where
             .run(&request.step, input)
             .await
             .map_err(|error| {
+                let out_of_quota = error.out_of_quota();
                 let final_failure = !error.retryable();
                 let report = internal(error);
-                if final_failure {
+                if out_of_quota {
+                    StepError::OutOfQuota(report)
+                } else if final_failure {
                     StepError::Final(report)
                 } else {
                     StepError::Internal(report)

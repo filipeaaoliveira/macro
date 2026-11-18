@@ -216,6 +216,20 @@ impl Retryable for BuiltInStepError {
     }
 }
 
+impl AgentFailure for BuiltInStepError {
+    fn out_of_quota(&self) -> bool {
+        match self {
+            BuiltInStepError::Agent { out_of_quota, .. } => *out_of_quota,
+            BuiltInStepError::UnknownStep(_)
+            | BuiltInStepError::NotAnAgentStep(_)
+            | BuiltInStepError::NoRepository(_)
+            | BuiltInStepError::UnexpectedOutcome { .. }
+            | BuiltInStepError::PullRequest(_)
+            | BuiltInStepError::Unanswered(_) => false,
+        }
+    }
+}
+
 fn outcomes(names: &[&str]) -> Vec<Outcome> {
     names
         .iter()

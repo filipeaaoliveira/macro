@@ -82,7 +82,7 @@ impl StepAgent for AskingAgent {
     }
 
     async fn follow_up(&self, _turn: AgentTurn) -> Result<AgentAnswer, AgentFailed> {
-        Err(AgentFailed)
+        Err(AgentFailed::ForGood)
     }
 
     async fn run_check(

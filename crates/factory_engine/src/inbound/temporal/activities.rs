@@ -133,10 +133,21 @@ impl FactoryActivities {
     }
 }
 
+/// The type a Step's work failure carries when it failed for a machine,
+/// quota or network reason, for the workflow to end its Run
+/// `infrastructure`. Renaming it changes how the Runs that failed so before
+/// replay.
+pub(crate) const INFRASTRUCTURE_FAILURE: &str = "FactoryInfrastructure";
+
 /// A Step error as Temporal sees it: retried unless the same Step would fail
 /// the same way again.
 pub(super) fn failure(error: StepError) -> ActivityError {
     match error {
+        StepError::OutOfQuota(_) => ApplicationFailure::builder(error)
+            .type_name(INFRASTRUCTURE_FAILURE.to_string())
+            .non_retryable(true)
+            .build()
+            .into(),
         StepError::OutputTooLarge { .. }
         | StepError::NoSuchRun
         | StepError::RunEnded

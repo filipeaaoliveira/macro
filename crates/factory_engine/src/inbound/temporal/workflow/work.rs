@@ -5,6 +5,7 @@
 //! in the same order, so a replay walks it the same way.
 
 use factory_records::domain::models::Outcome;
+use temporalio_common::error::{ActivityExecutionError, IncomingError};
 use temporalio_sdk::workflows::join_all;
 use temporalio_sdk::{
     ActivityCloseTimeouts, ActivityOptions, WorkflowContext, WorkflowTermination,
@@ -18,7 +19,36 @@ use super::{
 use crate::domain::gate::{GateOpening, GateTelling};
 use crate::domain::models::{StepEnding, StepReport, StepRequest, StepStart};
 use crate::domain::review_rounds::{ReviewRoundClosing, ReviewRoundOpening};
-use crate::inbound::temporal::activities::FactoryActivities;
+use crate::inbound::temporal::activities::{FactoryActivities, INFRASTRUCTURE_FAILURE};
+
+/// Why a Step's work failed for good, as the workflow reads it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum WorkFailure {
+    /// For a machine, quota or network reason: its attempts ran out of
+    /// time, as work does that keeps failing in ways a retry may get past,
+    /// or its agents' quota ran out.
+    Infrastructure,
+    /// For the work itself, as an agent that ended the Step with an
+    /// outcome it does not offer.
+    Work,
+}
+
+/// Why the activity of a Step's work failed for good, read from its
+/// failure, which the workflow's history keeps, so a replay reads it the
+/// same way.
+fn work_failure(error: &ActivityExecutionError) -> WorkFailure {
+    if error.as_timeout().is_some() {
+        return WorkFailure::Infrastructure;
+    }
+    match error.cause() {
+        Some(IncomingError::Application(failure))
+            if failure.type_name() == Some(INFRASTRUCTURE_FAILURE) =>
+        {
+            WorkFailure::Infrastructure
+        }
+        _ => WorkFailure::Work,
+    }
+}
 
 /// What a Step's walk and a review round ask of Temporal: their
 /// activities, the Run's Gates, and whether the Run was cancelled.
@@ -40,12 +70,12 @@ pub(super) trait Work {
     /// Record that a Step started.
     async fn start(&self, request: StepRequest) -> Result<StepStart, Self::Failure>;
 
-    /// Run one Step's work.
-    async fn run(&self, request: &StepRequest) -> Result<StepReport, Self::Failure>;
+    /// Run one Step's work, or say why it failed for good.
+    async fn run(&self, request: &StepRequest) -> Result<StepReport, WorkFailure>;
 
     /// Run the reviewers' work at once, and return each one's result in
     /// the order of `requests`.
-    async fn run_all(&self, requests: &[StepRequest]) -> Vec<Result<StepReport, Self::Failure>>;
+    async fn run_all(&self, requests: &[StepRequest]) -> Vec<Result<StepReport, WorkFailure>>;
 
     /// Record how a Step ended.
     async fn end(&self, ending: StepEnding) -> Result<(), Self::Failure>;
@@ -114,18 +144,18 @@ impl Work for TemporalWork<'_> {
             .await?)
     }
 
-    async fn run(&self, request: &StepRequest) -> Result<StepReport, Self::Failure> {
-        Ok(self
-            .ctx
+    async fn run(&self, request: &StepRequest) -> Result<StepReport, WorkFailure> {
+        self.ctx
             .execute_activity(
                 FactoryActivities::run_step,
                 request.clone(),
                 self.work_options.clone(),
             )
-            .await?)
+            .await
+            .map_err(|error| work_failure(&error))
     }
 
-    async fn run_all(&self, requests: &[StepRequest]) -> Vec<Result<StepReport, Self::Failure>> {
+    async fn run_all(&self, requests: &[StepRequest]) -> Vec<Result<StepReport, WorkFailure>> {
         // The activities are scheduled in the entry's order and their
         // results read in it, so a replay walks the same way.
         join_all(requests.iter().map(|request| {
@@ -137,7 +167,7 @@ impl Work for TemporalWork<'_> {
         }))
         .await
         .into_iter()
-        .map(|worked| worked.map_err(Into::into))
+        .map(|worked| worked.map_err(|error| work_failure(&error)))
         .collect()
     }
 

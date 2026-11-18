@@ -300,8 +300,19 @@ once trimmed (400).
 `POST /runs/{id}/cancel` cancels the workflow through Temporal; cancelling a
 cancelled Run again is accepted, and a Run whose workflow never started ends
 `cancelled` (its workflow, should it start late, takes no Step). Reading a Run
-whose workflow never started ends it `failed` once it is five minutes old. A
-Temporal outage answers 503 (or 502 for an unusable answer), never 500.
+whose workflow never started ends it `infrastructure` once it is five minutes
+old. A Temporal outage answers 503 (or 502 for an unusable answer), never 500.
+
+A Run ends `infrastructure`, not `failed`, when it fails for a machine, quota
+or network reason rather than its work: a Step whose work failed for good
+because its attempts ran out of time (`STEP_TOTAL`), or because every Agent
+of its Role was out of quota (`StepError::OutOfQuota`, an activity failure of
+type `FactoryInfrastructure`), ends `failed` and the Flow routes `failed` as
+before; when the Run then ends `failed` right on it, the workflow records
+`infrastructure`, behind the `factory-infrastructure-outcome` marker. A
+review round counts so only when every reviewer that failed did so for
+infrastructure. A Gate's answer to such a Step is a person's, and routes as
+any answer.
 
 The built-in Steps (`src/domain/built_in_steps.rs`) are `reply`, which
 acknowledges the request; `plan`, `write`, `review`, `fix` and `ci_fix`, which

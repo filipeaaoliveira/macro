@@ -19,7 +19,7 @@ mod test;
 use factory_records::domain::models::{Outcome, RunId, RunOutcome, StepKey};
 
 use super::step::ask;
-use super::work::Work;
+use super::work::{Work, WorkFailure};
 use super::{Asking, FAILED_STEP_OUTPUT, Question, Questions};
 use crate::domain::flow::Entry;
 use crate::domain::gate::{GateOpening, GateTelling};
@@ -39,13 +39,29 @@ pub(super) struct Panel<'a> {
     pub(super) questions: Questions,
 }
 
-/// What a review round came to.
+/// What a review round, or a Step's walk, came to.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Round {
     /// Its outcome, for the Flow to route.
     Routed(Outcome),
+    /// Its work failed for good for a machine, quota or network reason:
+    /// the Flow routes `failed`, and a Run that ends `failed` on it ends
+    /// `infrastructure`.
+    FailedForInfrastructure,
     /// The Run ended: cancelled, or before the round's Steps started.
     Ended(RunOutcome),
+}
+
+impl Round {
+    /// `outcome` for the Flow to route, which came of work that failed for
+    /// infrastructure when `infrastructure` says so.
+    pub(super) fn routed(outcome: Outcome, infrastructure: bool) -> Self {
+        if infrastructure && outcome == Outcome::failed() {
+            Round::FailedForInfrastructure
+        } else {
+            Round::Routed(outcome)
+        }
+    }
 }
 
 /// Run `panel`'s review round: open it, start a Step for each reviewer, in
@@ -70,9 +86,11 @@ pub(super) async fn review_round<W: Work>(
         .unwrap_or(u16::MAX)
         .max(1);
     let mut latest = panel.seq.saturating_add(reviewers - 1);
-    let round = walk_round(work, panel, held, resume, &mut latest).await?;
-    let Round::Routed(outcome) = round else {
-        return Ok(round);
+    let (outcome, infrastructure) = match walk_round(work, panel, held, resume, &mut latest).await?
+    {
+        Round::Routed(outcome) => (outcome, false),
+        Round::FailedForInfrastructure => (Outcome::failed(), true),
+        ended @ Round::Ended(_) => return Ok(ended),
     };
     let Some(gate) = panel
         .entry
@@ -80,7 +98,7 @@ pub(super) async fn review_round<W: Work>(
         .as_ref()
         .filter(|gate| outcome == gate.opened_by())
     else {
-        return Ok(Round::Routed(outcome));
+        return Ok(Round::routed(outcome, infrastructure));
     };
 
     // A notify-only Gate tells the Run's owner of the round's outcome,
@@ -94,7 +112,7 @@ pub(super) async fn review_round<W: Work>(
             question: gate.question.clone(),
         };
         work.tell(telling).await;
-        return Ok(Round::Routed(outcome));
+        return Ok(Round::routed(outcome, infrastructure));
     }
 
     let opening = GateOpening {
@@ -169,12 +187,19 @@ async fn walk_round<W: Work>(
     held.clone_from(&requests);
     let worked = work.run_all(&requests).await;
 
+    // The round fails for infrastructure only when every reviewer that
+    // failed did so for it.
     let mut any_failed = false;
+    let mut work_failed = false;
+    let mut failed = |failure: WorkFailure| {
+        any_failed = true;
+        work_failed |= failure == WorkFailure::Work;
+    };
     let mut asking: Vec<(StepRequest, Question)> = Vec::new();
     for (request, worked) in requests.iter().zip(worked) {
         match end_reviewer(work, panel.questions, request, worked, held, &[]).await? {
             Reviewed::Ended(Ended::Done) => {}
-            Reviewed::Ended(Ended::Failed) => any_failed = true,
+            Reviewed::Ended(Ended::Failed(failure)) => failed(failure),
             Reviewed::Asked(question) => asking.push((request.clone(), question)),
             Reviewed::RunEnded(outcome) => return Ok(Round::Ended(outcome)),
         }
@@ -229,8 +254,8 @@ async fn walk_round<W: Work>(
             let worked = work.run(&going_on).await;
             match end_reviewer(work, panel.questions, &going_on, worked, held, &chain).await? {
                 Reviewed::Ended(Ended::Done) => break,
-                Reviewed::Ended(Ended::Failed) => {
-                    any_failed = true;
+                Reviewed::Ended(Ended::Failed(failure)) => {
+                    failed(failure);
                     break;
                 }
                 Reviewed::Asked(again) => {
@@ -252,8 +277,9 @@ async fn walk_round<W: Work>(
         failed: any_failed,
         last,
     };
+    let infrastructure = any_failed && !work_failed;
     match work.close(closing).await {
-        Ok(outcome) => Ok(Round::Routed(outcome)),
+        Ok(outcome) => Ok(Round::routed(outcome, infrastructure)),
         Err(_) if work.cancelled() => Ok(Round::Ended(RunOutcome::Cancelled)),
         Err(_) => Ok(Round::Routed(Outcome::failed())),
     }
@@ -274,8 +300,8 @@ enum Reviewed {
 enum Ended {
     /// With its review.
     Done,
-    /// Its work failed for good.
-    Failed,
+    /// Its work failed for good, and why.
+    Failed(WorkFailure),
 }
 
 /// Record how the reviewer's Step `request` ended, from its work
@@ -288,19 +314,19 @@ async fn end_reviewer<W: Work>(
     work: &W,
     questions: Questions,
     request: &StepRequest,
-    worked: Result<StepReport, W::Failure>,
+    worked: Result<StepReport, WorkFailure>,
     held: &mut Vec<StepRequest>,
     asking: &[StepRequest],
 ) -> Result<Reviewed, W::Failure> {
     let (report, failed) = match worked {
-        Ok(report) => (report, false),
+        Ok(report) => (report, None),
         Err(_) if work.cancelled() => return Ok(Reviewed::RunEnded(RunOutcome::Cancelled)),
-        Err(_) => (
+        Err(failure) => (
             StepReport {
                 outcome: Outcome::failed(),
                 output: FAILED_STEP_OUTPUT.to_string(),
             },
-            true,
+            Some(failure),
         ),
     };
     let question = questions.asked(request, &report);
@@ -322,14 +348,14 @@ async fn end_reviewer<W: Work>(
         kept.key == request.key || asking.iter().any(|asked| asked.key == kept.key)
     };
     held.retain(|kept| !ends(kept));
-    if failed {
+    if let Some(failure) = failed {
         // The Step may have failed before it claimed the asking Steps'
         // session: stopping them stops it all the same.
         work.stop(request).await;
         for asked in asking.iter().rev() {
             work.stop(asked).await;
         }
-        return Ok(Reviewed::Ended(Ended::Failed));
+        return Ok(Reviewed::Ended(Ended::Failed(failure)));
     }
     if let Err(error) = work.release(request.clone()).await {
         if work.cancelled() {
