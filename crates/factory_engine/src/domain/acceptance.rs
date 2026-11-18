@@ -116,6 +116,10 @@ struct WrittenClause {
     timeout: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     none: Option<String>,
+    /// Read and ignored: a plan recorded before Runs ended at their merge
+    /// may mark a check as one of the deployed change. Never written.
+    #[serde(default, rename = "deployed", skip_serializing)]
+    _deployed: serde::de::IgnoredAny,
 }
 
 /// Why a plan's acceptance checks do not read.
@@ -258,6 +262,7 @@ impl AcceptanceChecks {
                         run,
                         timeout,
                         none,
+                        _deployed: serde::de::IgnoredAny,
                     }
                 })
                 .collect(),

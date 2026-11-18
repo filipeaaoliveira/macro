@@ -84,12 +84,6 @@ fn a_clause_has_a_check_or_why_not() {
         Err(AcceptanceError::Timeout(1))
     );
     assert_eq!(read(""), Err(AcceptanceError::Clauses(0)));
-    // Nothing runs after the merge: a check marked for a deploy does not
-    // read.
-    assert!(matches!(
-        read(r#"{"clause": "A", "run": "true", "deployed": true}"#),
-        Err(AcceptanceError::Unreadable(_))
-    ));
     assert!(matches!(
         read(r#"{"clause": "A", "run": "true", "shell": "zsh"}"#),
         Err(AcceptanceError::Unreadable(_))
@@ -172,4 +166,29 @@ fn a_clause_is_shown_as_data() {
     let shown = &shown[..shown.find("```json").expect("block")];
     assert!(!shown.contains("<b>"), "{shown}");
     assert!(!shown.contains("\n# Approve"), "{shown}");
+}
+
+/// A plan recorded before Runs ended at their merge may mark a check
+/// `deployed`: the mark is read and ignored, so the Run keeps every check,
+/// and the factory never writes it back.
+#[test]
+fn a_recorded_plan_s_deployed_mark_is_ignored() {
+    let plan = r#"```json
+{"acceptance": [
+  {"clause": "A", "run": "bun test a"},
+  {"clause": "B", "run": "curl -f \"$MACRO_DEPLOY_URL\"", "deployed": true},
+  {"clause": "C", "none": "only a person sees it", "deployed": false}
+]}
+```"#;
+
+    let checks = AcceptanceChecks::from_plan(plan)
+        .expect("reads")
+        .expect("named");
+
+    assert_eq!(checks.clauses.len(), 3);
+    assert!(matches!(
+        checks.clauses[1].check,
+        AcceptanceCheck::Run { ref run, .. } if run.starts_with("curl")
+    ));
+    assert!(!checks.block().contains("deployed"), "{}", checks.block());
 }
