@@ -507,6 +507,7 @@ export const factoryExcluded = [
   // The factory's settings are the person's: only their own session
   // changes them, and the web app reads them.
   'getFactoryControlFiles',
+  'getFactoryDefinition',
   'getFactoryInsights',
   'getFactoryStandingRules',
   // Only the person in their own session makes an Automation, which starts
@@ -523,6 +524,9 @@ export const factoryExcluded = [
   // Only the person in their own session sets the Control Files an agent's
   // changes are checked against.
   'setFactoryControlFiles',
+  // Only the person in their own session names the Factory Definition
+  // whose Flows, Agents and rules their team's Runs take.
+  'setFactoryDefinition',
   // Only the person in their own session sets the Standing Rules that
   // answer Gates in a person's place.
   'setFactoryProjectStandingRules',

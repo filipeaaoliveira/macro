@@ -358,6 +358,37 @@ export type CreatedAutomation = {
 };
 
 /**
+ * The Factory Definition a person's team names: the repository whose
+ * files its Runs take their Flows, Agents and rules from.
+ */
+export type DefinitionSettings = {
+    /**
+     * Whether the person may change it: they administer the team.
+     */
+    canEdit: boolean;
+    /**
+     * The commit of its default branch a Run started now would read,
+     * when the Definition reads there as the person reaches it.
+     */
+    commit?: string | null;
+    /**
+     * Why it does not read now, when it does not: the person cannot reach
+     * it, or a file of it is wrong.
+     */
+    problem?: string | null;
+    /**
+     * The repository's `https://github.com/owner/name` URL; none when the
+     * team names none, so its Runs take the team's settings and the
+     * factory's built-in Flows and Agents.
+     */
+    repoUrl?: string | null;
+    /**
+     * The team; none when the person is on no team.
+     */
+    teamId?: string | null;
+};
+
+/**
  * A spread of durations: how many, their median and 90th percentile.
  */
 export type DurationStats = {
@@ -1045,7 +1076,7 @@ export type RoutineFiring = {
 /**
  * Where a Run's Standing Rules came from.
  */
-export type RulesSource = 'default' | 'team' | 'project';
+export type RulesSource = 'default' | 'team' | 'project' | 'definition';
 
 /**
  * One Run of a Flow.
@@ -1063,6 +1094,7 @@ export type Run = {
      * the Control Files it names.
      */
     createdInPerson: boolean;
+    definition?: null | RunDefinition;
     end?: null | RunEnd;
     /**
      * The Run's id, also its Temporal workflow id.
@@ -1104,6 +1136,21 @@ export type RunAutomation = {
 };
 
 /**
+ * The Factory Definition a Run started under: the repository its owner's
+ * team named, at the commit its default branch was at then.
+ */
+export type RunDefinition = {
+    /**
+     * The commit the Run read the Definition at.
+     */
+    commit: string;
+    /**
+     * The repository's `https://github.com/owner/name` URL.
+     */
+    repoUrl: string;
+};
+
+/**
  * A Run and the Steps it took.
  */
 export type RunDetail = {
@@ -1140,7 +1187,7 @@ export type RunEnd = {
 /**
  * Why a request was refused, where a client acts on the cause.
  */
-export type RunErrorCode = 'unreachableRepository' | 'noPushAccess' | 'controlFilesNotApproved' | 'queueFull' | 'reservedForAPerson';
+export type RunErrorCode = 'unreachableRepository' | 'noPushAccess' | 'controlFilesNotApproved' | 'queueFull' | 'reservedForAPerson' | 'unreachableDefinition' | 'invalidDefinition' | 'definitionNamed';
 
 /**
  * What a refused or failed request answers: a message, and for a refusal
@@ -1303,6 +1350,18 @@ export type SetControlFilesRequest = {
      * factory's default; an empty list checks no file.
      */
     patterns?: Array<string> | null;
+};
+
+/**
+ * Request body for naming the team's Factory Definition.
+ */
+export type SetDefinitionRequest = {
+    /**
+     * The repository's `https://github.com/owner/name` URL. Null names
+     * none: the team's Runs go back to its settings and the factory's
+     * built-in Flows and Agents.
+     */
+    repoUrl?: string | null;
 };
 
 /**
@@ -1786,8 +1845,10 @@ export type ListFactoryFlowsData = {
 };
 
 export type ListFactoryFlowsErrors = {
+    400: RunErrorResponse;
     401: ErrorResponse;
     403: ErrorResponse;
+    500: ErrorResponse;
 };
 
 export type ListFactoryFlowsError = ListFactoryFlowsErrors[keyof ListFactoryFlowsErrors];
@@ -2253,6 +2314,49 @@ export type SetFactoryControlFilesResponses = {
 };
 
 export type SetFactoryControlFilesResponse = SetFactoryControlFilesResponses[keyof SetFactoryControlFilesResponses];
+
+export type GetFactoryDefinitionData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/settings/definition';
+};
+
+export type GetFactoryDefinitionErrors = {
+    401: ErrorResponse;
+    403: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type GetFactoryDefinitionError = GetFactoryDefinitionErrors[keyof GetFactoryDefinitionErrors];
+
+export type GetFactoryDefinitionResponses = {
+    200: DefinitionSettings;
+};
+
+export type GetFactoryDefinitionResponse = GetFactoryDefinitionResponses[keyof GetFactoryDefinitionResponses];
+
+export type SetFactoryDefinitionData = {
+    body: SetDefinitionRequest;
+    path?: never;
+    query?: never;
+    url: '/settings/definition';
+};
+
+export type SetFactoryDefinitionErrors = {
+    400: RunErrorResponse;
+    401: ErrorResponse;
+    403: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type SetFactoryDefinitionError = SetFactoryDefinitionErrors[keyof SetFactoryDefinitionErrors];
+
+export type SetFactoryDefinitionResponses = {
+    200: DefinitionSettings;
+};
+
+export type SetFactoryDefinitionResponse = SetFactoryDefinitionResponses[keyof SetFactoryDefinitionResponses];
 
 export type GetFactoryStandingRulesData = {
     body?: never;
