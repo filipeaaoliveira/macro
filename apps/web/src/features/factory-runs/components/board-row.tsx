@@ -134,11 +134,7 @@ export function BoardRunRow(props: {
         </span>
         <span class="flex h-4.5 shrink-0 items-center gap-1.5 text-[11.5px] tabular-nums text-ink-subtle">
           <Show when={blockers() > 0}>
-            <Badge
-              variant="outline"
-              size="xs"
-              class="border-failure/30 text-failure"
-            >
+            <Badge variant="failure" size="xs">
               {t('factoryBoard.blockers', { count: blockers() })}
             </Badge>
           </Show>

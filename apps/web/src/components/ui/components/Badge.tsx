@@ -22,6 +22,8 @@ export const badgeVariants = createVariants(
       violet: 'bg-violet-bg text-violet-ink',
       /** Done or running, e.g. a routine that is on. */
       success: 'bg-success-bg text-success',
+      /** Something that holds work back, e.g. a review's open blockers. */
+      failure: 'bg-failure-bg text-failure',
     },
     size: {
       xs: "h-5 gap-1 px-2 text-xs [&>svg:not([class*='size-'])]:size-3 has-[>[data-slot=avatar][data-size=sm]:first-child]:pl-px",
@@ -67,8 +69,8 @@ export function badgeClasses(options: BadgeClassOptions = {}): string {
 /** Returns Button interaction styles with Badge variants, sizes, and shape. */
 export function badgeTriggerClasses(options: BadgeClassOptions = {}): string {
   const { variant = 'ghost', size = 'md', class: className } = options;
-  // Buttons have no violet; a violet badge keeps its label look.
-  if (variant === 'violet')
+  // Buttons have no violet or failure; such a badge keeps its label look.
+  if (variant === 'violet' || variant === 'failure')
     return cn(
       badgeClasses({ variant, size, class: className }),
       'outline-none focus-visible:ring-2 focus-visible:ring-accent/20'

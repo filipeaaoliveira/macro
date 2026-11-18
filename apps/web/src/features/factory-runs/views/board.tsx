@@ -143,8 +143,8 @@ function BoardCapacity(props: {
 }) {
   const queue = () =>
     props.limit === null || props.limit === undefined
-      ? t('factoryBoard.queueUnlimited', { held: props.held })
-      : t('factoryBoard.queueHeld', { held: props.held, limit: props.limit });
+      ? t('factoryBoard.queueUnlimited', { count: props.held })
+      : t('factoryBoard.queueHeld', { count: props.held, limit: props.limit });
 
   return (
     <dl class="flex flex-wrap gap-x-6 gap-y-1 px-4 pt-3 text-xs">
@@ -288,7 +288,9 @@ export function BoardView(props: {
                 {t('factoryBoard.empty')}
               </p>
               <p class="text-xs text-ink-muted">
-                {t('factoryBoard.emptyHint')}
+                {props.state.scope() === 'team'
+                  ? t('factoryBoard.emptyHintTeam')
+                  : t('factoryBoard.emptyHint')}
               </p>
             </div>
           </Match>
@@ -303,7 +305,11 @@ export function BoardView(props: {
                     <h2 class="flex items-center gap-1.5 px-2 text-xs font-medium text-ink-muted">
                       {boardStateLabel(group.state)}
                       <span class="tabular-nums text-ink-subtle">
-                        {group.runs.length}
+                        {props.source.hasMore()
+                          ? t('factoryBoard.loadedCount', {
+                              count: group.runs.length,
+                            })
+                          : group.runs.length}
                       </span>
                     </h2>
                     <ul class="-mx-2 flex flex-col">

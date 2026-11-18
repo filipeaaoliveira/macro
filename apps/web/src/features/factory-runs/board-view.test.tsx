@@ -226,7 +226,7 @@ describe('FactoryBoardView', () => {
     expect(within(running).getByText('Coupons at checkout')).toBeTruthy();
     expect(within(running).getByText('Write · writer (primary)')).toBeTruthy();
     expect(
-      within(running).getByText('acme/shop · Code · Started by You')
+      within(running).getByText('acme/shop · Code · Started by you')
     ).toBeTruthy();
     expect(within(running).getByText('1 blocker')).toBeTruthy();
     expect(

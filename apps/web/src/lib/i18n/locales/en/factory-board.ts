@@ -22,7 +22,7 @@ export default {
   project: 'Project',
   allProjects: 'All projects',
   // A row.
-  you: 'You',
+  you: 'you',
   someone: 'A teammate',
   startedByPerson: 'Started by {{owner}}',
   startedByOrchestrator: 'Started by the Orchestrator for {{owner}}',
@@ -35,13 +35,23 @@ export default {
   pullRequest: 'Pull request',
   // The capacity header.
   queue: 'Your queue',
-  queueHeld: '{{held}} of {{limit}} places',
-  queueUnlimited: '{{held}} places, no limit',
+  queueHeld: {
+    one: '{{count}} of {{limit}} places',
+    other: '{{count}} of {{limit}} places',
+  },
+  queueUnlimited: {
+    one: '{{count}} place, no limit',
+    other: '{{count}} places, no limit',
+  },
   waitingOnYou: 'Waiting on you',
   // The list.
   loadFailed: 'Runs couldn’t be loaded',
   empty: 'No runs here',
   emptyHint:
     'Runs you start from a task show here while they go and once they end.',
+  emptyHintTeam:
+    'Runs you and your team start show here, on tasks you can see.',
+  // A group's count while more Runs follow than are loaded.
+  loadedCount: '{{count}}+',
   loadMore: 'Show more',
 };

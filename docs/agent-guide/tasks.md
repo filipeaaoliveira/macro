@@ -1484,16 +1484,17 @@ factory's board: every Run the person can see, grouped by where it is
 **Stopped for a person**, **Finished**; a merged Run is finished). **Mine**
 lists their own Runs, **My team** their team members' too, on tasks the
 person can see. The state tabs, the filter popover (Flow, repository,
-Project) and the search by task narrow it; **Show more** reads the next 25.
-Each row shows the task (or the request), its Step with the Role and Agent
-on it or who it waits on, the repository, Flow and who started it (the
-owner, the Orchestrator for them, or an Automation), how long it has been
-there, its open Blockers and a link to its pull request. A row opens the
-Run in a pane beside the board; a team member's Run opens without its Gate's answers, Cancel run or
-the Step Terminal, which stay its owner's. Above the list, the person's
-Queue (places held against its limit) and the Runs waiting on them. The
-board is read again every 15 seconds while a Run it shows goes, every
-minute otherwise.
+Project) and the search by task narrow it; **Show more** reads the next 25,
+and while more follow a group's count reads as loaded (`25+`). Each row
+shows the task (or the request), its Step with the Role and Agent on it or
+who it waits on, the repository, Flow and who started it (the owner, the
+Orchestrator for them, or an Automation), how long it has been there, its
+open Blockers and a link to its pull request. A row opens the Run in a pane
+beside the board; a team member's Run opens without its Gate's answers,
+Cancel run or the Step Terminal, which stay its owner's. Above the list, the
+person's Queue (places held against its limit) and the Runs waiting on
+them. The board is read again every 15 seconds while a Run it shows goes,
+every minute otherwise.
 
 Team settings' **Standing rules** section also has **Send undecided gates
 to the run's owner** (off by default). With it on, a Gate no rule answers,
