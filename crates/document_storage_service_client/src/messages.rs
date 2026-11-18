@@ -36,6 +36,11 @@ pub struct NewDocumentComment<'a> {
     /// The thread it replies to, by its first comment's id; none starts a
     /// thread.
     pub thread_id: Option<Uuid>,
+    /// Whether it notifies no one, as an internal caller may ask: for
+    /// updates a service posts as the user, which nobody needs to be told
+    /// of.
+    #[serde(skip)]
+    pub silent: bool,
 }
 
 /// How posting a comment ended, short of an outage.
@@ -72,10 +77,14 @@ impl DocumentStorageServiceClient {
         user_id: &str,
         comment: &NewDocumentComment<'_>,
     ) -> Result<CommentPosted, PostCommentError> {
-        let response = self
+        let mut request = self
             .client
             .post(format!("{}/messages/document/{document_id}", self.url))
-            .header(MACRO_INTERNAL_USER_ID_HEADER_KEY, user_id)
+            .header(MACRO_INTERNAL_USER_ID_HEADER_KEY, user_id);
+        if comment.silent {
+            request = request.query(&[("notification_policy", "Silent")]);
+        }
+        let response = request
             .json(comment)
             .send()
             .await

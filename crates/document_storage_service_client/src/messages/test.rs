@@ -2,7 +2,7 @@ use messages::domain::ports::MessageTimelineQuery;
 use reqwest::StatusCode;
 use serde_json::json;
 use uuid::Uuid;
-use wiremock::matchers::{body_json, header, method, path, query_param};
+use wiremock::matchers::{body_json, header, method, path, query_param, query_param_is_missing};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::{CommentPosted, NewDocumentComment, PostCommentError, ReadMessagesError};
@@ -81,7 +81,7 @@ async fn a_refusal_is_not_there_and_an_outage_is_unavailable() {
 }
 
 /// A comment is posted as the user, with the internal key, its id and the
-/// thread it replies to.
+/// thread it replies to, asking to notify no one when it is silent.
 #[tokio::test]
 async fn a_comment_is_posted_as_the_user_with_its_id_and_thread() {
     let server = MockServer::start().await;
@@ -102,6 +102,7 @@ async fn a_comment_is_posted_as_the_user_with_its_id_and_thread() {
             "content": "The run ended.",
             "thread_id": root
         })))
+        .and(query_param("notification_policy", "Silent"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
         .expect(1)
         .mount(&server)
@@ -115,6 +116,7 @@ async fn a_comment_is_posted_as_the_user_with_its_id_and_thread() {
                 id,
                 content: "The run ended.",
                 thread_id: Some(root),
+                silent: true,
             },
         )
         .await
@@ -153,6 +155,7 @@ async fn a_conflict_was_posted_before_and_a_missing_thread_is_not_there() {
 async fn posted_when_answered(status: u16) -> Result<CommentPosted, PostCommentError> {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
+        .and(query_param_is_missing("notification_policy"))
         .respond_with(ResponseTemplate::new(status))
         .mount(&server)
         .await;
@@ -160,6 +163,7 @@ async fn posted_when_answered(status: u16) -> Result<CommentPosted, PostCommentE
         id: Uuid::nil(),
         content: "The run started.",
         thread_id: None,
+        silent: false,
     };
     DocumentStorageServiceClient::new("internal-key".into(), server.uri())
         .post_document_comment(DOCUMENT, "macro|julia@example.com", &comment)
