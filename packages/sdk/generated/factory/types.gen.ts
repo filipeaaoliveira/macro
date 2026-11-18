@@ -31,6 +31,57 @@ export type AnswerGateRequest = {
 };
 
 /**
+ * How one arm's Runs did.
+ */
+export type ArmInsight = {
+    /**
+     * The Agents it gives Roles, by Role; empty for the arm that keeps the
+     * agent definition's.
+     */
+    agents: {
+        [key: string]: string;
+    };
+    /**
+     * How many of them ended.
+     */
+    ended: number;
+    /**
+     * Its name.
+     */
+    name: string;
+    /**
+     * How many of the period's Runs took it.
+     */
+    runs: number;
+    /**
+     * The Scorers' judgments of its Runs.
+     */
+    scores: Array<ArmScoreInsight>;
+    /**
+     * How many ended `success`.
+     */
+    succeeded: number;
+};
+
+/**
+ * One Scorer's judgments of one arm's Runs.
+ */
+export type ArmScoreInsight = {
+    /**
+     * How many of the arm's Runs it judged.
+     */
+    judged: number;
+    /**
+     * Their mean score, from 0 to 1.
+     */
+    meanScore: number;
+    /**
+     * The Scorer.
+     */
+    scorer: string;
+};
+
+/**
  * A reply the factory could not read as one of a Gate's answers, so it
  * asked the person back.
  */
@@ -184,6 +235,28 @@ export type AutomationsSettings = {
      * The team; none when the person is on no team, and so has none.
      */
     teamId?: string | null;
+};
+
+/**
+ * A Benchmark one may start a suite of.
+ */
+export type BenchmarkSummary = {
+    /**
+     * Its name.
+     */
+    name: string;
+    /**
+     * The repository its trials work on.
+     */
+    repository: string;
+    /**
+     * The Scorers that judge each trial.
+     */
+    scorers: Array<string>;
+    /**
+     * Its frozen tasks, by name.
+     */
+    tasks: Array<string>;
 };
 
 /**
@@ -432,6 +505,66 @@ export type ErrorResponse = {
      * Message to explain failure
      */
     message: string;
+};
+
+/**
+ * The evaluation insights of a period.
+ */
+export type EvaluationInsights = {
+    /**
+     * The Benchmarks one may start a suite of.
+     */
+    benchmarks: Array<BenchmarkSummary>;
+    /**
+     * Each Experiment, defined or with Runs in the period.
+     */
+    experiments: Array<ExperimentInsight>;
+    /**
+     * The Flow the Runs were read for; none for every Flow.
+     */
+    flow?: string | null;
+    /**
+     * The period's first day.
+     */
+    from: string;
+    /**
+     * Each Scorer, defined or with judgments in the period.
+     */
+    scorers: Array<ScorerInsight>;
+    /**
+     * The suites started in the period, newest first.
+     */
+    suites: Array<SuiteInsight>;
+    /**
+     * The time zone its days are in.
+     */
+    timeZone: string;
+    /**
+     * Its last day, included.
+     */
+    to: string;
+};
+
+/**
+ * An Experiment and how its arms did over the period.
+ */
+export type ExperimentInsight = {
+    /**
+     * Its arms, as defined, then any no longer defined that took Runs.
+     */
+    arms: Array<ArmInsight>;
+    /**
+     * The Flow whose Runs it splits; none for one no longer defined.
+     */
+    flow?: string | null;
+    /**
+     * Its name.
+     */
+    name: string;
+    /**
+     * Whether it still assigns new Runs.
+     */
+    running: boolean;
 };
 
 /**
@@ -1269,6 +1402,41 @@ export type RunTokens = {
 };
 
 /**
+ * A Scorer and its live judgments of the period's Runs.
+ */
+export type ScorerInsight = {
+    /**
+     * The Flows whose Runs it judges; every Flow when empty.
+     */
+    flows: Array<string>;
+    /**
+     * What it judges; none for a Scorer no longer defined whose
+     * judgments remain.
+     */
+    instructions?: string | null;
+    /**
+     * How many of the period's Runs it judged.
+     */
+    judged: number;
+    /**
+     * Their mean score, from 0 to 1; none when it judged none.
+     */
+    meanScore?: number | null;
+    /**
+     * Its name.
+     */
+    name: string;
+    /**
+     * How many of them scored half or more.
+     */
+    passed: number;
+    /**
+     * The percentage of those Runs it judges; none when no longer defined.
+     */
+    samplePercent?: number | null;
+};
+
+/**
  * The factory Step an agent session works in, as its owner reads it.
  */
 export type SessionStepRef = {
@@ -1385,6 +1553,19 @@ export type StandingRulesSettings = {
      * The team whose rules they are; none when the person is on no team.
      */
     teamId?: string | null;
+};
+
+/**
+ * The configuration a suite's trials run on.
+ */
+export type StartSuiteRequest = {
+    /**
+     * The Agent of the agent definition each Role takes in place of its
+     * first, by Role; a Role left out takes the definition's.
+     */
+    agents?: {
+        [key: string]: string;
+    };
 };
 
 /**
@@ -1516,6 +1697,62 @@ export type StepTerminal = {
 };
 
 /**
+ * One suite: a Benchmark replayed on one configuration.
+ */
+export type SuiteInsight = {
+    /**
+     * The Agents its configuration gave Roles, by Role.
+     */
+    agents: {
+        [key: string]: string;
+    };
+    /**
+     * The Benchmark it replayed.
+     */
+    benchmark: string;
+    /**
+     * When it started.
+     */
+    createdAt: string;
+    /**
+     * The suite.
+     */
+    id: string;
+    /**
+     * Their mean score; none until one has.
+     */
+    meanScore?: number | null;
+    /**
+     * How many trials have their result.
+     */
+    scored: number;
+    /**
+     * The tokens of the trials that have their result.
+     */
+    tokens: TokenCounts;
+    /**
+     * Its trials, by task.
+     */
+    trials: Array<TrialInsight>;
+};
+
+/**
+ * A suite that started.
+ */
+export type SuiteStarted = {
+    /**
+     * The suite.
+     */
+    id: string;
+    /**
+     * Its trials' Runs, by task.
+     */
+    runs: {
+        [key: string]: RunId;
+    };
+};
+
+/**
  * A task's Runs, as the caller sees them.
  */
 export type TaskRunsResponse = {
@@ -1545,6 +1782,45 @@ export type TokenCounts = {
      * Output tokens.
      */
     output: number;
+};
+
+/**
+ * One trial of a suite.
+ */
+export type TrialInsight = {
+    /**
+     * Its Run.
+     */
+    runId: RunId;
+    runOutcome?: null | RunOutcome;
+    /**
+     * Its mechanical score, from 0 to 1: 1 when its checks went green, 0.5
+     * when they stayed red, 0 otherwise; none until its Run ended.
+     */
+    score?: number | null;
+    /**
+     * Its Benchmark's Scorers' judgments.
+     */
+    scores: Array<TrialScore>;
+    /**
+     * The frozen task.
+     */
+    task: string;
+    tokens?: null | TokenCounts;
+};
+
+/**
+ * A Scorer's judgment of one trial.
+ */
+export type TrialScore = {
+    /**
+     * From 0 to 1.
+     */
+    score: number;
+    /**
+     * The Scorer.
+     */
+    scorer: string;
 };
 
 /**
@@ -1778,6 +2054,37 @@ export type CallFactoryAutomationWebhookResponses = {
 
 export type CallFactoryAutomationWebhookResponse = CallFactoryAutomationWebhookResponses[keyof CallFactoryAutomationWebhookResponses];
 
+export type StartFactoryBenchmarkSuiteData = {
+    body: StartSuiteRequest;
+    path: {
+        /**
+         * The Benchmark's name.
+         */
+        benchmark: string;
+    };
+    query?: never;
+    url: '/benchmarks/{benchmark}/suites';
+};
+
+export type StartFactoryBenchmarkSuiteErrors = {
+    400: ErrorResponse;
+    401: ErrorResponse;
+    403: ErrorResponse;
+    404: ErrorResponse;
+    409: ErrorResponse;
+    500: ErrorResponse;
+    502: ErrorResponse;
+    503: ErrorResponse;
+};
+
+export type StartFactoryBenchmarkSuiteError = StartFactoryBenchmarkSuiteErrors[keyof StartFactoryBenchmarkSuiteErrors];
+
+export type StartFactoryBenchmarkSuiteResponses = {
+    201: SuiteStarted;
+};
+
+export type StartFactoryBenchmarkSuiteResponse = StartFactoryBenchmarkSuiteResponses[keyof StartFactoryBenchmarkSuiteResponses];
+
 export type ListFactoryFlowsData = {
     body?: never;
     path?: never;
@@ -1859,6 +2166,45 @@ export type GetFactoryInsightsResponses = {
 };
 
 export type GetFactoryInsightsResponse = GetFactoryInsightsResponses[keyof GetFactoryInsightsResponses];
+
+export type GetFactoryEvaluationData = {
+    body?: never;
+    path?: never;
+    query: {
+        /**
+         * The period's first day, `YYYY-MM-DD`.
+         */
+        from: string;
+        /**
+         * Its last day, included. The period lasts at most 366 days.
+         */
+        to: string;
+        /**
+         * The IANA time zone the days are in, such as `Europe/Lisbon`.
+         */
+        timeZone: string;
+        /**
+         * A built-in Flow's name, to read only its Runs.
+         */
+        flow?: string;
+    };
+    url: '/insights/evaluation';
+};
+
+export type GetFactoryEvaluationErrors = {
+    400: ErrorResponse;
+    401: ErrorResponse;
+    403: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type GetFactoryEvaluationError = GetFactoryEvaluationErrors[keyof GetFactoryEvaluationErrors];
+
+export type GetFactoryEvaluationResponses = {
+    200: EvaluationInsights;
+};
+
+export type GetFactoryEvaluationResponse = GetFactoryEvaluationResponses[keyof GetFactoryEvaluationResponses];
 
 export type CreateFactoryRunData = {
     body: CreateRunRequest;
