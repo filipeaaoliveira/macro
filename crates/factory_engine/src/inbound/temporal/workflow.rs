@@ -75,6 +75,7 @@
 //! recorded.
 
 mod review_round;
+mod run_end;
 mod step;
 mod work;
 
@@ -104,6 +105,7 @@ use crate::inbound::temporal::activities::FactoryActivities;
 use crate::inbound::temporal::gate_activities::GateActivities;
 use crate::temporal::{ANSWER_GATE_UPDATE, FLOW_WORKFLOW, REPLY_GATE_UPDATE};
 use review_round::{Panel, Round, review_round};
+use run_end::RunEnding;
 use step::walk_step;
 use work::TemporalWork;
 
@@ -228,9 +230,9 @@ impl FlowWorkflow {
         // started before them carries, never takes their path, so its
         // history replays as before.
         let questions = Questions::of(&start.flow);
-        // Whether the outcome the Flow routed last came of work that failed
-        // for infrastructure.
-        let mut infrastructure = false;
+        // Whether the Run ends `infrastructure`, from the rounds the Flow
+        // routes.
+        let mut ending = RunEnding::default();
         let outcome = loop {
             let next = match interpreter.next_step(&mut state) {
                 Ok(next) => next,
@@ -271,7 +273,7 @@ impl FlowWorkflow {
                 };
                 review_round(&temporal, &panel, &mut held, &mut resume).await?
             };
-            infrastructure = walked == Round::FailedForInfrastructure;
+            ending.routed(&walked);
             let routed = match walked {
                 Round::Routed(outcome) => outcome,
                 Round::FailedForInfrastructure => Outcome::failed(),
@@ -286,9 +288,7 @@ impl FlowWorkflow {
         // A Run that ends `failed` right on work that failed for a machine,
         // quota or network reason ends `infrastructure`, behind the marker:
         // a Run whose history ended before it replays `failed`.
-        let outcome = if outcome == RunOutcome::Failed
-            && infrastructure
-            && stopped.is_none()
+        let outcome = if ending.infrastructure(outcome, stopped.is_some())
             && ctx.patched(INFRASTRUCTURE_PATCH)
         {
             RunOutcome::Infrastructure
