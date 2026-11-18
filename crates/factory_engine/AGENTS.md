@@ -617,10 +617,13 @@ deleted, as GitHub's "delete branch after merge" does: by `merge` after
 its merge, and by `ready_to_merge` or `merge` when they find the pull
 request merged outside the Run, unless the repository has GitHub delete
 merged branches itself (`delete_branch_on_merge`) or can no longer be
-read. The deletion is best effort: a failure is logged, never the Step's.
+read. The deletion is best effort: a failure is logged, never the Step's,
+and it takes at most a minute, its reads included, so a slow GitHub keeps
+the branch rather than the merge Step's time.
 
-Only the Run's own branch is deleted (the GitHub adapter refuses any
-other), and only while it is at the commit merged and no open pull
+Only the Run's own branch is deleted (`PullRequests::delete_run_branch`
+takes a Run's id and names its branch, so any name that is not a Run's
+branch cannot reach it), and only while it is at the commit merged and no open pull
 request is based on it: a branch pushed to since keeps its commits, and
 deleting a branch through the API closes the pull requests based on it,
 where GitHub's own deletion moves them to its base. Both checks read

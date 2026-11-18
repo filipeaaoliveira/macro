@@ -1389,6 +1389,12 @@ pub(crate) struct FakeGithubState {
     pub(crate) onto_asked: Vec<String>,
     /// How many times what the owner may do with the repository was read.
     pub(crate) access_reads: usize,
+    /// Whether reading what the owner may do with the repository fails.
+    pub(crate) access_fails: bool,
+    /// Whether reading the head of the Run's branch fails.
+    pub(crate) branch_head_fails: bool,
+    /// When set, each deletion of a branch waits to be let go.
+    pub(crate) delete_gate: Option<Arc<tokio::sync::Semaphore>>,
 }
 
 /// GitHub in memory, for one Run's branch: opening its pull request makes
@@ -1502,6 +1508,9 @@ impl PullRequests for FakeGithub {
     ) -> Result<Option<RepositoryAccess>, FakeGithubError> {
         let mut state = self.state();
         state.access_reads += 1;
+        if state.access_fails {
+            return Err(FakeGithubError::Down);
+        }
         Ok((!state.unreachable).then(|| RepositoryAccess {
             default_branch: "main".to_string(),
             can_push: !state.read_only,
@@ -1601,6 +1610,9 @@ impl PullRequests for FakeGithub {
         _branch: &str,
     ) -> Result<Option<String>, FakeGithubError> {
         let mut state = self.state();
+        if state.branch_head_fails {
+            return Err(FakeGithubError::Down);
+        }
         if state.branch_heads.is_empty() {
             return Ok(state.head.clone());
         }
@@ -1689,6 +1701,10 @@ impl PullRequests for FakeGithub {
         _repository: &CodeRepository,
         run_id: RunId,
     ) -> Result<BranchDeletion, FakeGithubError> {
+        let gate = self.state().delete_gate.clone();
+        if let Some(gate) = gate {
+            gate.acquire().await.expect("gate").forget();
+        }
         let mut state = self.state();
         if state.delete_fails {
             return Err(FakeGithubError::Down);

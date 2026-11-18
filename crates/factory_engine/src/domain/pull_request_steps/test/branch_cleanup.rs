@@ -210,6 +210,56 @@ async fn a_repository_out_of_reach_keeps_the_branch() {
     assert!(github.state().deleted_branches.is_empty());
 }
 
+/// A head that cannot be read keeps the branch, and the merge stands; so
+/// does, for a pull request merged outside the Run, a repository whose
+/// settings cannot be read.
+#[tokio::test]
+async fn a_read_that_fails_keeps_the_branch() {
+    let head_unread = github();
+    head_unread.state().branch_head_fails = true;
+    let access_unread = github();
+    access_unread.state().access_fails = true;
+    merged_on_github(&access_unread);
+    let repo = FakeRepo::default();
+
+    let run_id = agreed(&repo).await;
+    let merged = steps(&head_unread, &repo)
+        .merge(input(run_id))
+        .await
+        .expect("merge");
+    let run_id = agreed(&repo).await;
+    let found = steps(&access_unread, &repo)
+        .ready_to_merge(input(run_id))
+        .await
+        .expect("ready");
+
+    assert_eq!(outcome(&merged), "merged");
+    assert_eq!(head_unread.state().merges, [FakeGithub::HEAD]);
+    assert_eq!(outcome(&found), "merged");
+    assert!(head_unread.state().deleted_branches.is_empty());
+    assert!(access_unread.state().deleted_branches.is_empty());
+}
+
+/// A deletion GitHub does not answer is given up after a minute, and the
+/// merge stands.
+#[tokio::test(start_paused = true)]
+async fn a_deletion_github_does_not_answer_is_given_up() {
+    let github = github();
+    github.state().delete_gate = Some(std::sync::Arc::new(tokio::sync::Semaphore::new(0)));
+    let repo = FakeRepo::default();
+    let run_id = agreed(&repo).await;
+
+    let steps = steps(&github, &repo);
+    let merging = steps.merge(input(run_id));
+    let report = tokio::time::timeout(std::time::Duration::from_secs(120), merging)
+        .await
+        .expect("the merge ends")
+        .expect("merge");
+
+    assert_eq!(outcome(&report), "merged");
+    assert!(github.state().deleted_branches.is_empty());
+}
+
 /// A branch GitHub does not delete leaves the merge as it is: merged and
 /// recorded, the Step done.
 #[tokio::test]

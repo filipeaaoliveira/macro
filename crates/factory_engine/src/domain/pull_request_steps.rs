@@ -180,6 +180,10 @@ enum Merger {
     Outside,
 }
 
+/// How long deleting a merged Run's branch may take, its reads included: a
+/// slow GitHub keeps the branch rather than the merge Step's time.
+const BRANCH_DELETION_WAIT: Duration = Duration::from_secs(60);
+
 /// What a pull request's checks on its head say.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Verdict {
@@ -573,14 +577,25 @@ where
     /// A pull request a person merged leaves its branch to GitHub when the
     /// repository deletes merged branches itself, or when the repository
     /// can no longer be read.
+    ///
+    /// It takes at most [`BRANCH_DELETION_WAIT`], all its reads included.
+    #[tracing::instrument(
+        name = "factory.delete_run_branch",
+        skip_all,
+        fields(run_id = %input.key.run_id)
+    )]
     async fn delete_merged_branch(&self, input: &StepInput<'_>, merged_head: &str, merger: Merger) {
         let branch = run_branch(input.key.run_id);
-        let _ = self
-            .delete_branch_at(input, &branch, merged_head, merger)
-            .await
-            .inspect_err(|error| {
+        let deleting = self.delete_branch_at(input, &branch, merged_head, merger);
+        match tokio::time::timeout(BRANCH_DELETION_WAIT, deleting).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
                 tracing::warn!(?error, %branch, "the merged run's branch was not deleted");
-            });
+            }
+            Err(_) => {
+                tracing::warn!(%branch, "the merged run's branch was not deleted in time");
+            }
+        }
     }
 
     /// [`Self::delete_merged_branch`], with its failure.
