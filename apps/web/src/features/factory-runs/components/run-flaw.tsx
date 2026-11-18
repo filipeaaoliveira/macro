@@ -4,6 +4,7 @@ import { fireAndForget } from '@core/util/fireAndForget';
 import { Button, TextField } from '@ui';
 import { createSignal, createUniqueId, Show } from 'solid-js';
 import { useRunsContext } from '../context/runs-context';
+import type { RunFlaw } from '../core/run';
 
 /** The most bytes a flaw's reason holds, as the factory keeps it. */
 const MAX_REASON_BYTES = 4096;
@@ -11,8 +12,6 @@ const MAX_REASON_BYTES = 4096;
 function reasonBytes(reason: string): number {
   return new TextEncoder().encode(reason.trim()).length;
 }
-
-import type { RunFlaw } from '../core/run';
 
 /** Why a flawed Run is flawed, and who marked it when. */
 export function RunFlawNote(props: {

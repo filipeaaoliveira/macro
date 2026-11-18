@@ -1242,7 +1242,7 @@ describe('RunView', () => {
     fireEvent.click(confirm);
 
     expect(
-      await screen.findByText(/Keep the reason under 4,?096 bytes/)
+      await screen.findByText(/The reason must be at most 4,?096 bytes/)
     ).toBeTruthy();
     expect(markRunFlawed).not.toHaveBeenCalled();
   });
