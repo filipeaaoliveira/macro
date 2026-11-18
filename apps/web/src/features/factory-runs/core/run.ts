@@ -4,7 +4,19 @@ export type RunOutcome =
   | 'manual'
   | 'blocked'
   | 'failed'
-  | 'cancelled';
+  | 'cancelled'
+  | 'infrastructure'
+  | 'flawed';
+
+/**
+ * Why a Run that succeeded was found wrong afterwards: who marked it (its
+ * owner, or a Scorer by its name), why, and when.
+ */
+export type RunFlaw = {
+  by: { kind: 'person'; userId: string } | { kind: 'scorer'; name: string };
+  reason: string;
+  markedAt: string;
+};
 
 /** A Standing Rule: an answer the factory gives a kind of Gate on its own. */
 export type StandingRule = 'approve_plan' | 'fix_blockers' | 'merge_when_green';
@@ -294,7 +306,8 @@ export type Run = {
   automation?: RunAutomation;
   /** The Control Files its branch changed, if any. */
   controlFiles?: ControlFileChanges;
-  end?: { outcome: RunOutcome; endedAt: string };
+  /** How and when it ended, and for a flawed Run, why. */
+  end?: { outcome: RunOutcome; endedAt: string; flaw?: RunFlaw };
   steps: RunStep[];
   /** While the Run is at its merge and its base branch is red. */
   mainHold?: MainHold;

@@ -16,6 +16,20 @@ export default {
   outcomeBlocked: 'Blocked',
   outcomeFailed: 'Failed',
   outcomeCancelled: 'Cancelled',
+  outcomeInfrastructure: 'Infrastructure failure',
+  outcomeFlawed: 'Flawed',
+  // Marking a run flawed.
+  markFlawed: 'Mark flawed',
+  markFlawedTitle: 'Mark this run flawed?',
+  markFlawedBody:
+    'Its result is wrong even though it ended done. Insights count it as flawed.',
+  flawReason: 'What’s wrong with the result',
+  keepDone: 'Keep as done',
+  markFlawedFailed: 'Couldn’t mark the run flawed',
+  markFlawedConflict: 'Only a run that ended done can be marked flawed',
+  flawed: 'Why it’s flawed',
+  flawedByPerson: 'Marked flawed by its owner, {{time}}',
+  flawedByScorer: 'Marked flawed by the {{scorer}} scorer, {{time}}',
   startedAt: 'Started {{time}}',
   endedAt: 'Ended {{time}}',
   // Starting a Run.

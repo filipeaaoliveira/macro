@@ -68,6 +68,7 @@ function mount(options: {
   answerGate?: RunsContext['answerGate'];
   replyToGate?: RunsContext['replyToGate'];
   cancelRun?: RunsContext['cancelRun'];
+  markRunFlawed?: RunsContext['markRunFlawed'];
   state?: Accessor<'pending' | 'error' | 'ready'>;
   retry?: () => void;
 }) {
@@ -99,6 +100,7 @@ function mount(options: {
     answerGate: options.answerGate ?? vi.fn(async () => DONE),
     replyToGate: options.replyToGate ?? vi.fn(async () => DONE),
     cancelRun: options.cancelRun ?? vi.fn(async () => DONE),
+    markRunFlawed: options.markRunFlawed ?? vi.fn(async () => DONE),
     steerStep: vi.fn(async () => DONE),
   };
   render(() => (
@@ -1188,5 +1190,68 @@ describe('RunView', () => {
     expect(await screen.findByText('Answered:')).toBeTruthy();
     expect(screen.getByText('Yes, in red')).toBeTruthy();
     expect(screen.queryByText('The Planner has a question')).toBeNull();
+  });
+  it('marks a run that ended done flawed, with what is wrong', async () => {
+    const markRunFlawed = vi.fn(async () => DONE);
+    const { setRun } = mount({ markRunFlawed });
+    setRun({
+      ...waitingRun,
+      end: { outcome: 'success', endedAt: '2026-11-16T09:10:00Z' },
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Mark flawed' }));
+    const confirm = screen
+      .getAllByRole('button', { name: 'Mark flawed' })
+      .find((button) => button.getAttribute('data-variant') === 'danger');
+    if (!confirm) throw new Error('No confirm button');
+    // Nothing goes until the person says what is wrong.
+    fireEvent.click(confirm);
+    expect(markRunFlawed).not.toHaveBeenCalled();
+
+    fireEvent.input(
+      screen.getByRole('textbox', { name: 'What’s wrong with the result' }),
+      { target: { value: '  The column is never filled  ' } }
+    );
+    fireEvent.click(confirm);
+
+    await waitFor(() =>
+      expect(markRunFlawed).toHaveBeenCalledWith({
+        runId: 'run-1',
+        reason: 'The column is never filled',
+      })
+    );
+  });
+
+  it('offers no flaw mark for a run that did not end done', async () => {
+    const { setRun } = mount({});
+    setRun({
+      ...waitingRun,
+      end: { outcome: 'infrastructure', endedAt: '2026-11-16T09:10:00Z' },
+    });
+
+    expect(await screen.findByText('Infrastructure failure')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Mark flawed' })).toBeNull();
+  });
+
+  it('shows why a flawed run is flawed and which scorer said so', async () => {
+    const { setRun } = mount({});
+    setRun({
+      ...waitingRun,
+      end: {
+        outcome: 'flawed',
+        endedAt: '2026-11-16T09:10:00Z',
+        flaw: {
+          by: { kind: 'scorer', name: 'tests-pass' },
+          reason: 'Two tests fail on main',
+          markedAt: '2026-11-16T10:00:00Z',
+        },
+      },
+    });
+
+    expect(await screen.findByText('Two tests fail on main')).toBeTruthy();
+    expect(
+      screen.getByText(/Marked flawed by the tests-pass scorer/)
+    ).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Mark flawed' })).toBeNull();
   });
 });

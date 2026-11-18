@@ -16,7 +16,13 @@ export function RunStatusDot(props: { status: RunStatus }) {
       .with({ kind: 'ended' }, (status) =>
         match(status.outcome)
           .with('success', () => 'done' as const)
-          .with('failed', 'blocked', () => 'failed' as const)
+          .with(
+            'failed',
+            'blocked',
+            'infrastructure',
+            'flawed',
+            () => 'failed' as const
+          )
           .with('manual', 'cancelled', () => 'idle' as const)
           .exhaustive()
       )
@@ -33,6 +39,8 @@ export function runOutcomeLabel(outcome: RunOutcome): string {
     .with('blocked', () => t('factoryRuns.outcomeBlocked'))
     .with('failed', () => t('factoryRuns.outcomeFailed'))
     .with('cancelled', () => t('factoryRuns.outcomeCancelled'))
+    .with('infrastructure', () => t('factoryRuns.outcomeInfrastructure'))
+    .with('flawed', () => t('factoryRuns.outcomeFlawed'))
     .exhaustive();
 }
 

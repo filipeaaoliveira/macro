@@ -44,6 +44,8 @@ const counts = (changes: Partial<OutcomeCounts> = {}): OutcomeCounts => ({
   blocked: 0,
   failed: 0,
   cancelled: 0,
+  infrastructure: 0,
+  flawed: 0,
   ...changes,
 });
 
@@ -54,6 +56,8 @@ const add = (a: OutcomeCounts, b: OutcomeCounts): OutcomeCounts => ({
   blocked: a.blocked + b.blocked,
   failed: a.failed + b.failed,
   cancelled: a.cancelled + b.cancelled,
+  infrastructure: a.infrastructure + b.infrastructure,
+  flawed: a.flawed + b.flawed,
 });
 
 const RUNS: Run[] = [
@@ -118,6 +122,8 @@ function dayCounts(index: number, flow: string): OutcomeCounts {
     blocked: seed === 7 ? 1 : 0,
     failed: seed % 6 === 1 ? 1 : 0,
     cancelled: seed === 9 ? 1 : 0,
+    infrastructure: seed === 10 ? 1 : 0,
+    flawed: flow === 'code' && seed === 2 ? 1 : 0,
     running: index > 27 && seed % 2 === 0 ? 1 : 0,
   });
 }
@@ -395,6 +401,7 @@ function createFixtureRuns(): RunsContext {
     answerGate: async () => ({ ok: false, reason: 'failed' }),
     replyToGate: async () => ({ ok: false, reason: 'failed' }),
     cancelRun: async () => ({ ok: false, reason: 'failed' }),
+    markRunFlawed: async () => ({ ok: false, reason: 'failed' }),
     steerStep: async () => ({ ok: false, reason: 'failed' }),
   };
 }
