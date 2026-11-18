@@ -452,7 +452,7 @@ async fn a_plan_on_a_repository_keeps_its_acceptance_checks() {
     // run before the merge; nothing runs after it, so no deploy is named.
     let prompt = agent.tasks.lock().expect("tasks")[0].prompt.clone();
     assert!(
-        prompt.contains("`$MACRO_VERIFY_COMMIT` names\nthe commit under check"),
+        prompt.contains("`$MACRO_VERIFY_COMMIT` names the commit under check"),
         "{prompt}"
     );
     assert!(

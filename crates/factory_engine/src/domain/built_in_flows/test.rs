@@ -76,10 +76,8 @@ fn every_agent_entry_names_its_role() {
             .read(|_| Some(crate::domain::flow::StepUse::Work))
             .expect("reads");
         for entry in read.entries {
-            let agent_step = [
-                "plan", "write", "review", "fix", "ci_fix", "accept", "verify",
-            ]
-            .contains(&entry.step.as_str());
+            let agent_step = ["plan", "write", "review", "fix", "ci_fix", "accept"]
+                .contains(&entry.step.as_str());
             assert_eq!(
                 entry.role.is_some() || !entry.reviewers.is_empty(),
                 agent_step,
