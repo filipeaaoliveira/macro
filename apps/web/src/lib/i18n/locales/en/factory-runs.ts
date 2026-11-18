@@ -165,6 +165,12 @@ export default {
     other:
       '{{count}} projects have rules of their own, which replace these for runs on their tasks.',
   },
+  // The person's Runs that wait on them, on the insights page.
+  waitingOnYou: 'Waiting on you',
+  waitingOnYouHint: 'Runs stopped at a gate only you can answer.',
+  standingRulesOwnerGates: 'Send undecided gates to the run’s owner',
+  standingRulesOwnerGatesHint:
+    'Notify the run’s owner when a gate waits on them, ask them instead of fixing again when a fix leaves the blockers unchanged, and give the next step their comments on the task.',
   standingRulesUseDefault: 'Use default',
   standingRulesSaved: 'Standing rules saved',
   standingRulesSaveFailed: 'Couldn’t save the standing rules',

@@ -26,7 +26,7 @@ vi.mock('@core/component/Toast/Toast', () => ({
 }));
 
 const teamDefault: Settings = {
-  definition: { plan: false, blockers: true, merge: false },
+  definition: { plan: false, blockers: true, merge: false, ownerGates: false },
   isDefault: true,
   projects: [],
   teamId: '00000000-0000-7000-8000-000000000201',
@@ -56,7 +56,12 @@ describe('StandingRulesSettings', () => {
       .mockResolvedValueOnce(
         ok({
           ...teamDefault,
-          definition: { plan: false, blockers: true, merge: true },
+          definition: {
+            plan: false,
+            blockers: true,
+            merge: true,
+            ownerGates: false,
+          },
           isDefault: false,
         })
       )
@@ -74,11 +79,38 @@ describe('StandingRulesSettings', () => {
         plan: false,
         blockers: true,
         merge: true,
+        ownerGates: false,
       })
     );
     fireEvent.click(await screen.findByRole('button', { name: 'Use default' }));
     await waitFor(() =>
       expect(factoryClient.setStandingRules).toHaveBeenLastCalledWith(null)
+    );
+  });
+
+  it('turns the owner section on, keeping the rules', async () => {
+    vi.mocked(factoryClient.setStandingRules).mockResolvedValueOnce(
+      ok({
+        ...teamDefault,
+        definition: { ...teamDefault.definition, ownerGates: true },
+        isDefault: false,
+      })
+    );
+    mount(teamDefault);
+
+    const owner = await screen.findByRole('checkbox', {
+      name: 'Send undecided gates to the run’s owner',
+    });
+    expect((owner as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(owner);
+
+    await waitFor(() =>
+      expect(factoryClient.setStandingRules).toHaveBeenCalledWith({
+        plan: false,
+        blockers: true,
+        merge: false,
+        ownerGates: true,
+      })
     );
   });
 

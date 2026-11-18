@@ -9,13 +9,18 @@ export const RULE_NAMES = {
 
 /**
  * Which kinds of Gate the factory answers on its own: the plan, a review's
- * blockers, and the merge.
+ * blockers, and the merge; and whether the Gates it leaves go to the Run's
+ * owner (the owner section).
  */
 export type OrchestratorDefinition = {
   plan: boolean;
   blockers: boolean;
   merge: boolean;
+  ownerGates: boolean;
 };
+
+/** A kind of Gate a rule decides. */
+export type GateKind = Exclude<keyof OrchestratorDefinition, 'ownerGates'>;
 
 /** Each kind of Gate a rule decides, with its rule, in the Flow's order. */
 export const GATE_KINDS = [
@@ -23,6 +28,6 @@ export const GATE_KINDS = [
   { kind: 'blockers', rule: 'fix_blockers' },
   { kind: 'merge', rule: 'merge_when_green' },
 ] as const satisfies readonly {
-  kind: keyof OrchestratorDefinition;
+  kind: GateKind;
   rule: StandingRule;
 }[];

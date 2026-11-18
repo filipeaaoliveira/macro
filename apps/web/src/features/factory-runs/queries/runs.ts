@@ -146,6 +146,23 @@ export function taskRunsOptions(client: QueryClient, taskId: string) {
   });
 }
 
+/** The person's Runs that wait on them; read again slowly, as a waiting task's are. */
+export function waitingRunsOptions(client: QueryClient) {
+  return queryOptions({
+    queryKey: factoryRunKeys.waiting.queryKey,
+    queryFn: async ({ signal }) => {
+      const details = await throwOnErr(() =>
+        factoryClient.listWaitingRuns(signal)
+      );
+      const runs = details.map(toRun);
+      for (const run of runs) seedRun(client, run);
+      return runs;
+    },
+    refetchInterval: WAITING_POLL_MS,
+    reconcile: 'id',
+  });
+}
+
 export function runOptions(runId: string) {
   return queryOptions({
     queryKey: factoryRunKeys.run(runId).queryKey,
@@ -206,6 +223,7 @@ function refreshRun(
 ): Promise<unknown> {
   const reads = [
     client.invalidateQueries({ queryKey: factoryRunKeys.run(runId).queryKey }),
+    client.invalidateQueries({ queryKey: factoryRunKeys.waiting.queryKey }),
   ];
   if (taskId) {
     reads.push(
@@ -229,6 +247,8 @@ export function createAppRunsContext(client: QueryClient): RunsContext {
 
     run: (runId: Accessor<string>) =>
       toSource(useQuery(() => runOptions(runId()))),
+
+    waitingRuns: () => toSource(useQuery(() => waitingRunsOptions(client))),
 
     flows: () => toSource(useQuery(() => flowsOptions())),
 

@@ -77,6 +77,11 @@ function mount(options: {
       data: () => [waitingRun],
       retry: vi.fn(),
     }),
+    waitingRuns: () => ({
+      state: () => 'ready',
+      data: () => [waitingRun],
+      retry: vi.fn(),
+    }),
     run: () => ({
       state: options.state ?? (() => 'ready'),
       data: () =>

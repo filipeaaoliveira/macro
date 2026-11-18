@@ -6,6 +6,7 @@ import { Button, Checkbox } from '@ui';
 import { For, Match, Show, Switch } from 'solid-js';
 import {
   GATE_KINDS,
+  type GateKind,
   type OrchestratorDefinition,
   RULE_NAMES,
 } from '../core/standing-rules';
@@ -18,13 +19,13 @@ const RULE_HINTS = {
   plan: 'factoryRuns.standingRulesApprovePlanHint',
   blockers: 'factoryRuns.standingRulesFixBlockersHint',
   merge: 'factoryRuns.standingRulesMergeWhenGreenHint',
-} as const satisfies Record<keyof OrchestratorDefinition, string>;
+} as const satisfies Record<GateKind, string>;
 
 /**
  * The team's Standing Rules: which kinds of Gate the factory answers on its
- * own for its Runs. Its admins turn each on or off, or go back to the
- * default; other members read them. A Tampered Run always waits for a
- * person, whatever they say.
+ * own for its Runs, and whether the Gates it leaves go to the Run's owner.
+ * Its admins turn each on or off, or go back to the default; other members
+ * read them. A Tampered Run always waits for a person, whatever they say.
  */
 export function StandingRulesSettings() {
   const query = useStandingRulesQuery();
@@ -65,9 +66,14 @@ export function StandingRulesSettings() {
       <Match when={query.data}>
         {(settings) => {
           const locked = () => !settings().canEdit || mutation.isPending;
+          // A definition read without the owner section has it off.
+          const definition = (): OrchestratorDefinition => ({
+            ...settings().definition,
+            ownerGates: settings().definition.ownerGates ?? false,
+          });
           const toggle = (kind: keyof OrchestratorDefinition, on: boolean) =>
             fireAndForget(
-              save({ ...settings().definition, [kind]: on }),
+              save({ ...definition(), [kind]: on }),
               'factory-runs'
             );
           return (
@@ -92,6 +98,22 @@ export function StandingRulesSettings() {
                   </Checkbox>
                 )}
               </For>
+              <Checkbox
+                size="sm"
+                checked={definition().ownerGates}
+                onChange={(on: boolean) => toggle('ownerGates', on)}
+                disabled={locked()}
+              >
+                <Checkbox.Control />
+                <div class="flex flex-col gap-0.5">
+                  <Checkbox.Label class="text-sm">
+                    {t('factoryRuns.standingRulesOwnerGates')}
+                  </Checkbox.Label>
+                  <Checkbox.Description class="text-xs text-ink-muted">
+                    {t('factoryRuns.standingRulesOwnerGatesHint')}
+                  </Checkbox.Description>
+                </div>
+              </Checkbox>
               <p class="text-xs text-ink-muted">
                 {settings().isDefault
                   ? t('factoryRuns.standingRulesDefault')

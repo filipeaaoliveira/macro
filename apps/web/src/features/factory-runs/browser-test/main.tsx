@@ -219,6 +219,7 @@ function createFixtureContext(): RunsContext {
 
   return {
     taskRuns: () => ready(runs),
+    waitingRuns: () => ready(() => []),
     run: (runId) => ready(() => runs().find((run) => run.id === runId())),
     flows: () =>
       ready(() => [

@@ -5,6 +5,7 @@ import type { RunInsights } from '../../core/insights';
 import type { InsightsState } from '../../primitives/insights-state';
 import { InsightsBody } from '../shared/insights-body';
 import { InsightsFilters } from '../shared/insights-filters';
+import { WaitingRuns } from '../shared/waiting-runs';
 
 /**
  * Run insights on a phone or tablet: the title in the header, the filters
@@ -21,6 +22,7 @@ export function MobileInsightsView(props: {
         <MobileHeader.Title label={t('factoryInsights.title')} />
       </MobileHeader>
       <div class="size-full min-h-0 overflow-y-auto px-4 pb-(--mobile-content-inset-bottom) pt-(--mobile-content-inset-top)">
+        <WaitingRuns onOpenRun={props.state.setOpenRunId} />
         <InsightsBody
           source={props.source}
           onOpenRun={props.state.setOpenRunId}

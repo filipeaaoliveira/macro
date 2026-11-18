@@ -145,6 +145,11 @@ function mount(options: {
   };
   const runs: RunsContext = {
     taskRuns: () => ({ state: () => 'ready', data: () => [], retry: vi.fn() }),
+    waitingRuns: () => ({
+      state: () => 'ready',
+      data: () => [],
+      retry: vi.fn(),
+    }),
     run: (runId) => ({
       state: () => 'ready',
       data: () => (runId() === failedImport.id ? failedImport : undefined),
