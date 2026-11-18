@@ -188,7 +188,7 @@ const judged: EvaluationInsights = {
           runs: 2,
           ended: 2,
           succeeded: 2,
-          fellBack: 0,
+          fellBack: 1,
           scores: [{ scorer: 'correctness', judged: 2, meanScore: 0.9 }],
         },
       ],
@@ -431,6 +431,7 @@ describe('RunInsightsView', () => {
     const backup = screen.getByRole('rowheader', { name: /backup/ });
     expect(backup.parentElement?.textContent).toContain('0.90');
     expect(backup.textContent).toContain('writer: backup');
+    expect(backup.textContent).toContain('1 run fell back to another agent');
 
     const trials = screen.getByRole('list', { name: 'Trial' });
     const trial = within(trials).getByRole('button', { name: /typo/ });
