@@ -1,5 +1,6 @@
-//! A document's discussions, read as an acting user: the comment threads on
-//! it, through document storage's `/messages/document/{id}` routes.
+//! A document's discussions, read and posted to as an acting user: the
+//! comment threads on it, through document storage's
+//! `/messages/document/{id}` routes.
 
 #[cfg(test)]
 mod test;
@@ -24,7 +25,85 @@ pub enum ReadMessagesError {
     Unavailable(String),
 }
 
+/// A comment to post on a document, as a new thread or a reply.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct NewDocumentComment<'a> {
+    /// The comment's id: a UUIDv7 stamped within a day of now. Posting the
+    /// same id again is refused as a conflict, so a retry posts it once.
+    pub id: Uuid,
+    /// The comment, as Macro markdown.
+    pub content: &'a str,
+    /// The thread it replies to, by its first comment's id; none starts a
+    /// thread.
+    pub thread_id: Option<Uuid>,
+}
+
+/// How posting a comment ended, short of an outage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommentPosted {
+    /// The comment is posted.
+    Posted,
+    /// A comment with its id was posted before (409).
+    AlreadyPosted,
+    /// The document, or the thread it replies to, is not there for the
+    /// user (401, 403, 404).
+    NotThere,
+}
+
+/// Why a comment could not be posted.
+#[derive(Debug, thiserror::Error)]
+pub enum PostCommentError {
+    /// Document storage refused the comment itself (another 4xx): posting
+    /// it again fails the same way.
+    #[error("the comment was refused: HTTP {0}: {1}")]
+    Refused(StatusCode, String),
+    /// Document storage could not answer now: worth trying again.
+    #[error("the comment could not be posted: {0}")]
+    Unavailable(String),
+}
+
 impl DocumentStorageServiceClient {
+    /// Post `comment` on the document `document_id` as `user_id`, who must
+    /// be able to comment on it.
+    #[tracing::instrument(skip(self, comment), fields(comment_id = %comment.id), err)]
+    pub async fn post_document_comment(
+        &self,
+        document_id: Uuid,
+        user_id: &str,
+        comment: &NewDocumentComment<'_>,
+    ) -> Result<CommentPosted, PostCommentError> {
+        let response = self
+            .client
+            .post(format!("{}/messages/document/{document_id}", self.url))
+            .header(MACRO_INTERNAL_USER_ID_HEADER_KEY, user_id)
+            .json(comment)
+            .send()
+            .await
+            .map_err(|error| PostCommentError::Unavailable(error.to_string()))?;
+        let status = response.status();
+        if status.is_success() {
+            return Ok(CommentPosted::Posted);
+        }
+        let not_there = [
+            StatusCode::UNAUTHORIZED,
+            StatusCode::FORBIDDEN,
+            StatusCode::NOT_FOUND,
+        ];
+        if status == StatusCode::CONFLICT {
+            return Ok(CommentPosted::AlreadyPosted);
+        }
+        if not_there.contains(&status) {
+            return Ok(CommentPosted::NotThere);
+        }
+        let body = response.text().await.unwrap_or_default();
+        if status.is_client_error() && status != StatusCode::TOO_MANY_REQUESTS {
+            return Err(PostCommentError::Refused(status, body));
+        }
+        Err(PostCommentError::Unavailable(format!(
+            "HTTP {status}: {body}"
+        )))
+    }
+
     /// One page of the discussions on the document `document_id` that
     /// `query` selects, newest root first, each with a preview of its
     /// replies, as `user_id` reads them.
