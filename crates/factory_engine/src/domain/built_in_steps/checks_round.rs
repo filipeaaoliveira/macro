@@ -572,9 +572,11 @@ where
         }
 
         // The repository's setup, as the round read it from the base,
-        // prepares the worktree before the checks, each attempt: a command
-        // that fails ends the round as a check that failed, and no check
-        // runs.
+        // prepares the worktree before the checks. Each command's run is
+        // recorded among the round's results (`setup:<name>`), so a retry,
+        // whose worktree at the same commit keeps what the setup made,
+        // runs only the commands still to run. A command that fails ends
+        // the round as a check that failed, and no check runs.
         let setup = round
             .setup
             .as_deref()
@@ -587,6 +589,10 @@ where
             .iter()
             .any(|name| !results.iter().any(|result| &result.name == name));
         for command in setup.setup.iter().filter(|_| to_run) {
+            let name = format!("{SETUP_RESULT}{}", command.name);
+            if results.iter().any(|result| result.name == name) {
+                continue;
+            }
             let timeout = Duration::from_secs(command.timeout);
             let run_for = timeout + worktree::RUN_MARGIN;
             if until(answer_by) < run_for {
@@ -628,16 +634,17 @@ where
                     command.name
                 )));
             }
-            if output.exit_code != 0 {
-                let result = CheckResult {
-                    name: format!("{SETUP_RESULT}{}", command.name),
-                    exit_code: output.exit_code,
-                    output: check_output(&output, timeout),
-                };
-                repo.record_check_result(input.key, round.round, &commit, &result)
-                    .await
-                    .map_err(records)?;
-                results.push(result);
+            let result = CheckResult {
+                name,
+                exit_code: output.exit_code,
+                output: check_output(&output, timeout),
+            };
+            repo.record_check_result(input.key, round.round, &commit, &result)
+                .await
+                .map_err(records)?;
+            let failed = result.exit_code != 0;
+            results.push(result);
+            if failed {
                 let report = setup_failed_report(round, &setup, &results);
                 repo.end_check_round(input.key, round.round, CheckRoundOutcome::Failed, &report)
                     .await

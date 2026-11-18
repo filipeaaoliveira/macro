@@ -670,9 +670,12 @@ so the workflow and its replay are unchanged.
 A checks round (and `accept`'s round of acceptance checks) keeps the setup
 file its first round read (`factory_check_round.setup`), and a verified
 round runs its commands in the round's worktree, under the round's lock,
-after setting it up and before the checks, each attempt, within the same
-time limits as a check. A command that fails is recorded among the round's
-results as `setup:<name>` and ends the round failed, as a red check: its
+after setting it up and before the checks, within the same time limits as
+a check. Each command's run is recorded among the round's results as
+`setup:<name>`, so a retry, whose worktree at the same commit keeps what
+the setup made (`reset --hard`, never cleaned), runs only the commands
+still to run: a long setup and a long check fit in two attempts. A command
+that fails ends the round failed, as a red check: its
 report, which goes to the agent's fix, shows the command and the end of its
 output, and says the checks did not run.
 

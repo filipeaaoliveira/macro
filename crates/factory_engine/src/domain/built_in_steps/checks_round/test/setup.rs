@@ -203,7 +203,43 @@ async fn a_verified_round_runs_the_setup_before_its_checks() {
     assert_eq!(machine.last().map(String::as_str), Some("remove"));
     let rounds = rounds(&repo, input).await;
     assert_eq!(rounds[0].setup.as_deref(), Some(SETUP));
-    assert_eq!(rounds[0].results.len(), 1, "a setup that passed is not a check");
+    assert_eq!(
+        rounds[0]
+            .results
+            .iter()
+            .map(|result| (result.name.as_str(), result.exit_code))
+            .collect::<Vec<_>>(),
+        [("setup:install", 0), ("web", 0)]
+    );
+}
+
+/// An attempt that ends after the setup passed leaves it recorded: the
+/// retry, in the same worktree, goes on with the checks and never runs the
+/// setup again, so a long setup and a long check fit in two attempts.
+#[tokio::test]
+async fn a_retried_round_does_not_run_its_passed_setup_again() {
+    let agent = verifying(
+        vec![ran(0, "installed"), Err(FAILED), ran(0, "12 passed")],
+        Vec::new(),
+    );
+    let github = github(Some(CHECKS), Some(&["apps/web/src/main.ts"]));
+    declare_setup(&github, "main", SETUP);
+    let repo = FakeRepo::default();
+    let input = input();
+
+    let first = write_in_session(&agent, &github, &repo, input).await;
+    assert!(first.is_err(), "the session failed during the check");
+    let steps = BuiltInSteps::new(
+        agent.clone(),
+        PullRequestSteps::new(github.clone(), repo.clone(), FakeWatches::default()),
+    );
+    let step = StepName::try_from("write".to_string()).expect("valid");
+    let report = steps.run(&step, input).await.expect("retried");
+
+    assert_eq!(report.outcome, Outcome::done(), "{}", report.output);
+    let ran = commands(&agent);
+    assert_eq!(ran.len(), 3, "{ran:#?}");
+    assert!(ran[2].contains("bun run check"), "{}", ran[2]);
 }
 
 /// A setup that fails in the round's worktree ends the round failed, as a
