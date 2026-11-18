@@ -8,9 +8,10 @@
 //!
 //! `verify` is whether the Phase runs at all, `true` when left out: with
 //! `false`, the `accept` Step passes the change on unchecked. A repository
-//! with no file is checked. A file with any other key, such as the `deploy`
-//! key an earlier factory read, does not read, and turns nothing off: the
-//! factory ends a Run at its merge, and waits for no deploy.
+//! with no file is checked. A `deploy` key, which an earlier factory read
+//! to wait for a deploy after the merge, is read and ignored: the factory
+//! ends a Run at its merge. A file with any other key does not read, and
+//! turns nothing off.
 //!
 //! The file is read from the base branch, as the checks file is. A Run's
 //! change to it is a Control File (`control_files`), so a change that turns
@@ -28,12 +29,21 @@ pub const VERIFY_FILE: &str = ".macro/verify.json";
 const MAX_FILE_BYTES: usize = 4096;
 
 /// The verify Phase a repository declares.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerifyFile {
     /// Whether the Phase runs.
-    #[serde(default = "on")]
     pub verify: bool,
+}
+
+/// The verify file as a repository writes it.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WrittenVerifyFile {
+    #[serde(default = "on")]
+    verify: bool,
+    /// Read and ignored: the deploy an earlier factory waited for.
+    #[serde(default, rename = "deploy")]
+    _deploy: Option<serde::de::IgnoredAny>,
 }
 
 fn on() -> bool {
@@ -68,6 +78,10 @@ impl VerifyFile {
         if text.len() > MAX_FILE_BYTES {
             return Err(VerifyFileError::TooLarge);
         }
-        serde_json::from_str(text).map_err(|error| VerifyFileError::Unreadable(error.to_string()))
+        let written: WrittenVerifyFile = serde_json::from_str(text)
+            .map_err(|error| VerifyFileError::Unreadable(error.to_string()))?;
+        Ok(Self {
+            verify: written.verify,
+        })
     }
 }

@@ -19,15 +19,27 @@ fn a_file_that_does_not_read_says_why() {
         VerifyFile::read(Some(r#"{"verify": "no"}"#)),
         Err(VerifyFileError::Unreadable(_))
     ));
-    // The factory waits for no deploy: a file that names one does not read.
     assert!(matches!(
-        VerifyFile::read(Some(
-            r#"{"verify": false, "deploy": {"environment": "production"}}"#
-        )),
+        VerifyFile::read(Some(r#"{"verify": false, "skip": true}"#)),
         Err(VerifyFileError::Unreadable(_))
     ));
     assert_eq!(
         VerifyFile::read(Some(&" ".repeat(5000))),
         Err(VerifyFileError::TooLarge)
+    );
+}
+
+/// The deploy an earlier factory waited for after the merge is read and
+/// ignored: a file that still names one keeps its `verify`.
+#[test]
+fn a_leftover_deploy_is_ignored() {
+    let off = r#"{"verify": false, "deploy": {"environment": "production"}}"#;
+    assert_eq!(
+        VerifyFile::read(Some(off)),
+        Ok(VerifyFile { verify: false })
+    );
+    assert_eq!(
+        VerifyFile::read(Some(r#"{"deploy": {"environment": "production"}}"#)),
+        Ok(VerifyFile::default())
     );
 }

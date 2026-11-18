@@ -334,23 +334,30 @@ async fn where_the_session_runs_no_command_the_verifier_runs_the_checks() {
     );
 }
 
-/// A repository that turns the Phase off passes the change on unchecked.
+/// A repository that turns the Phase off passes the change on unchecked,
+/// one whose file still names the deploy an earlier factory waited for
+/// too.
 #[tokio::test]
 async fn a_repository_that_turns_the_phase_off_is_not_verified() {
-    let agent = verifier("fail", Vec::new(), HEAD);
-    let github = declaring(Some(r#"{"verify": false}"#));
-    let repo = FakeRepo::default();
-    let earlier = planned(PLAN);
-    let input = StepInput {
-        earlier: &earlier,
-        ..input()
-    };
+    for file in [
+        r#"{"verify": false}"#,
+        r#"{"verify": false, "deploy": {"environment": "production"}}"#,
+    ] {
+        let agent = verifier("fail", Vec::new(), HEAD);
+        let github = declaring(Some(file));
+        let repo = FakeRepo::default();
+        let earlier = planned(PLAN);
+        let input = StepInput {
+            earlier: &earlier,
+            ..input()
+        };
 
-    let report = run(&agent, &github, &repo, "accept", input)
-        .await
-        .expect("off");
-    assert_eq!(report.outcome.as_str(), "off");
-    assert!(agent.tasks.lock().expect("tasks").is_empty());
+        let report = run(&agent, &github, &repo, "accept", input)
+            .await
+            .expect("off");
+        assert_eq!(report.outcome.as_str(), "off", "{file}");
+        assert!(agent.tasks.lock().expect("tasks").is_empty(), "{file}");
+    }
 }
 
 /// A plan with no acceptance checks leaves the verifier to check the
@@ -545,13 +552,13 @@ async fn checks_that_do_not_read_are_reported() {
     );
 }
 
-/// A verify file that does not read, such as one still naming a deploy,
-/// turns nothing off: the change is checked, and both the Step's report
-/// and the planner say why the file was not followed.
+/// A verify file that does not read, such as one with a key it does not
+/// know, turns nothing off: the change is checked, and both the Step's
+/// report and the planner say why the file was not followed.
 #[tokio::test]
 async fn a_verify_file_that_does_not_read_is_reported_and_the_change_checked() {
-    let file = r#"{"verify": false, "deploy": {"environment": "production"}}"#;
-    let note = "`.macro/verify.json` does not read (unknown field `deploy`";
+    let file = r#"{"verify": false, "skip": true}"#;
+    let note = "`.macro/verify.json` does not read (unknown field `skip`";
     let agent = verifier("pass", vec![ran(0, "ok"), ran(0, "ok")], HEAD);
     let github = declaring(Some(file));
     let repo = FakeRepo::default();
