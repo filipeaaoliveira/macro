@@ -30,6 +30,17 @@
 //! - `code_waiting_at_plan_gate_with_rules`: a Run cut where it waits on its
 //!   plan Gate once the rules left it to a person.
 //!
+//! Recorded on the workflow that asks the rules, then the stand-in, then
+//! tells the owner of a Gate still left to them (all three markers):
+//! - `code_owner_told_of_gates`: the owner section is on; the owner is told
+//!   of the plan and merge Gates and answers both, and the rule fixes the
+//!   review's Blockers;
+//! - `code_stand_in_taken_back_then_told`: the stand-in's answer to the
+//!   plan Gate is taken back once the branch turns Tampered, and the owner
+//!   is told of the Gate then;
+//! - `code_reply_answered_after_told`: the owner, told of the plan Gate,
+//!   answers it in words.
+//!
 //! Before changing what the workflow decides, record the histories it
 //! makes now beside these, so the change is checked against both.
 
@@ -144,6 +155,33 @@ async fn a_run_whose_stand_in_answer_was_taken_back_replays() {
     replays(
         "code_stand_in_taken_back",
         include_bytes!("histories/code_stand_in_taken_back.json"),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_run_whose_owner_was_told_of_its_gates_replays() {
+    replays(
+        "code_owner_told_of_gates",
+        include_bytes!("histories/code_owner_told_of_gates.json"),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_run_told_once_its_stand_in_answer_was_taken_back_replays() {
+    replays(
+        "code_stand_in_taken_back_then_told",
+        include_bytes!("histories/code_stand_in_taken_back_then_told.json"),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_run_whose_told_gate_a_reply_answered_replays() {
+    replays(
+        "code_reply_answered_after_told",
+        include_bytes!("histories/code_reply_answered_after_told.json"),
     )
     .await;
 }

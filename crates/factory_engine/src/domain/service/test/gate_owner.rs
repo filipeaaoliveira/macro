@@ -1,6 +1,7 @@
 //! The owner section at the worker: a waiting Gate told to the Run's owner,
 //! repeated Blockers left to them, and their comments on the Run's task
-//! given to the next Step; and none of it with the section off.
+//! given to the next Step, apart from their words on a Gate; and none of it
+//! with the section off.
 
 use chrono::{TimeDelta, Utc};
 use factory_records::domain::models::{EntryId, NewRun, Outcome, Role, RunId, RunInsert, StepKey};
@@ -12,11 +13,13 @@ use factory_records::domain::standing_rules::{
 use uuid::Uuid;
 
 use super::{FakeExecutor, julia, reply_step};
-use crate::domain::fakes::{FakeNotifier, FakeRepo, FakeTaskNotes};
-use crate::domain::gate::{AnswerGate, GateAnswered, GateRuling};
+use crate::domain::fakes::{FakeGateModel, FakeNotifier, FakeRepo, FakeTaskNotes};
+use crate::domain::gate::{AnswerGate, GateAnswered, GateRuling, ReplyRead, ReplyReading};
 use crate::domain::gate_owner::{OwnerNote, factory_signed, notice_id};
+use crate::domain::gate_replies::GateReplySettings;
+use crate::domain::gate_replies::service::GateRepliesImpl;
 use crate::domain::models::{StepEnding, StepError, StepReport};
-use crate::domain::ports::StepService;
+use crate::domain::ports::{GateReplyService, StepService};
 use crate::domain::service::StepServiceImpl;
 use crate::domain::standing_rules::RuleAnswer;
 
@@ -414,4 +417,71 @@ async fn an_answered_gate_s_notification_is_done() {
             assert!(done.is_empty());
         }
     }
+}
+
+/// The owner's notes and their words on a Gate stay apart: a comment on
+/// the task answers no Gate, words that answer one reach the next Step as
+/// that Gate's answer only, never as an owner's note, and answering in
+/// words marks the Gate's notification done.
+#[tokio::test]
+async fn owner_notes_and_a_reply_on_a_gate_do_not_mix() {
+    let repo = FakeRepo::default();
+    let (run_id, task) = run_on_task(&repo, rules(true)).await;
+    let notes = FakeTaskNotes::default();
+    let notifier = FakeNotifier::default();
+    let executor = FakeExecutor::default();
+    let steps = service(&repo, &executor, &notifier, &notes);
+    let model = FakeGateModel::picking(Some("approve"), 0.95);
+    let gates = GateRepliesImpl::new(repo.clone(), model, GateReplySettings::default())
+        .with_notifier(notifier.clone());
+
+    let key = StepKey { run_id, seq: 1 };
+    gate_at(&repo, key, "reply", "done", &["approve", "revise"]).await;
+    let opened_at = repo.list_steps(run_id).await.expect("steps")[0]
+        .gate
+        .as_ref()
+        .expect("gate")
+        .opened_at;
+    steps.notify_gate(key).await.expect("notify");
+    notes.notes.lock().expect("notes").push((
+        task,
+        OwnerNote {
+            written_at: opened_at + TimeDelta::minutes(1),
+            text: "approve".to_string(),
+        },
+    ));
+    // A comment, even one that reads as an answer, leaves the Gate waiting.
+    let gate = repo.list_steps(run_id).await.expect("steps")[0]
+        .gate
+        .clone()
+        .expect("gate");
+    assert!(gate.answer.is_none());
+
+    let read = gates
+        .read_reply(ReplyReading {
+            key,
+            question: false,
+            reply: "Go ahead, but keep the old index".to_string(),
+            user_id: julia(),
+        })
+        .await
+        .expect("read");
+    assert_eq!(read, ReplyRead::Answered(outcome("approve")));
+    assert_eq!(*notifier.done.lock().expect("done"), [notice_id(run_id, 1)]);
+
+    steps
+        .start_step(reply_step(run_id, 2))
+        .await
+        .expect("start");
+    steps.run_step(reply_step(run_id, 2)).await.expect("run");
+    assert_eq!(*executor.noted.lock().expect("noted"), [["approve"]]);
+    let answer = repo.list_steps(run_id).await.expect("steps")[0]
+        .gate
+        .clone()
+        .and_then(|gate| gate.answer)
+        .expect("answered");
+    assert_eq!(
+        answer.note.as_deref(),
+        Some("Go ahead, but keep the old index")
+    );
 }
