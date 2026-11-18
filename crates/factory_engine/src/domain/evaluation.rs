@@ -21,7 +21,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use factory_records::domain::evaluation::{AgentChoices, BENCHMARK_FLOW, MAX_OPEN_TRIALS, RunArm};
 use factory_records::domain::models::{MAX_REQUEST_BYTES, Role, RunId, checked_name};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
@@ -32,7 +32,7 @@ use crate::domain::built_in_flows::BuiltInFlow;
 pub const MAX_INSTRUCTIONS_BYTES: usize = 8192;
 
 /// A Scorer: what it judges, which Flows' Runs, and what share of them.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ScorerDefinition {
     /// Its name, as its judgments are kept under.
@@ -58,7 +58,7 @@ impl ScorerDefinition {
 }
 
 /// One arm of an Experiment.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ArmDefinition {
     /// Its name.
@@ -77,7 +77,7 @@ fn one() -> u16 {
 }
 
 /// An Experiment: the Flow whose Runs it splits, and its arms.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ExperimentDefinition {
     /// Its name.
@@ -108,7 +108,7 @@ impl ExperimentDefinition {
 }
 
 /// A frozen task: a request kept as it was, to replay.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FrozenTask {
     /// Its name within the Benchmark.
@@ -123,7 +123,7 @@ pub struct FrozenTask {
 
 /// A Benchmark: frozen tasks on one repository, and the Scorers that judge
 /// its trials.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BenchmarkDefinition {
     /// Its name.
@@ -138,15 +138,27 @@ pub struct BenchmarkDefinition {
     pub scorers: Vec<String>,
 }
 
-/// The Scorers, Experiments and Benchmarks of a workspace's factory. It is
-/// read as JSON (`FACTORY_EVALUATION`), so a loader of the factory's
-/// definition files can fill it the same way.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
-#[serde(try_from = "EvaluationDefinitionFields")]
+/// The Scorers, Experiments and Benchmarks of a factory: a team's Factory
+/// Definition's (`scorers.json`) or, for a team that names none, the
+/// deployment's (`FACTORY_EVALUATION`), both this JSON. Reading it checks
+/// what holds in itself; [`Self::checked`] checks it against the Flows and
+/// Agents it is used with. A Run keeps its Definition's as it wrote it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "EvaluationDefinitionFields", rename_all = "camelCase")]
 pub struct EvaluationDefinition {
     scorers: Vec<ScorerDefinition>,
     experiments: Vec<ExperimentDefinition>,
     benchmarks: Vec<BenchmarkDefinition>,
+}
+
+/// A team's Factory Definition's Scorers, Experiments and Benchmarks, with
+/// the Agents its arms and a suite's configuration choose among.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TeamEvaluation {
+    /// Its Scorers, Experiments and Benchmarks.
+    pub evaluation: EvaluationDefinition,
+    /// Its Agents.
+    pub agents: AgentDefinition,
 }
 
 /// An [`EvaluationDefinition`] as written, before its checks.
@@ -162,7 +174,7 @@ struct EvaluationDefinitionFields {
 }
 
 /// What is wrong with an evaluation definition.
-#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum EvaluationDefinitionError {
     /// A name breaks the name rules.
     #[error(transparent)]
@@ -255,11 +267,6 @@ pub fn is_commit_id(commit: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
-/// Whether `flow` is a Flow people start Runs of.
-fn startable(flow: &str) -> bool {
-    flow != BENCHMARK_FLOW && BuiltInFlow::named(flow).is_some()
-}
-
 impl TryFrom<EvaluationDefinitionFields> for EvaluationDefinition {
     type Error = EvaluationDefinitionError;
 
@@ -274,9 +281,6 @@ impl TryFrom<EvaluationDefinitionFields> for EvaluationDefinition {
             if scorer.sample_percent > 100 {
                 return Err(EvaluationDefinitionError::Sample(scorer.name.clone()));
             }
-            if let Some(flow) = scorer.flows.iter().find(|flow| !startable(flow)) {
-                return Err(EvaluationDefinitionError::UnknownFlow(flow.clone()));
-            }
         }
 
         unique(
@@ -287,11 +291,6 @@ impl TryFrom<EvaluationDefinitionFields> for EvaluationDefinition {
         // Experiment that does.
         let mut chosen: BTreeMap<(&str, &Role), &str> = BTreeMap::new();
         for experiment in &fields.experiments {
-            if !startable(&experiment.flow) {
-                return Err(EvaluationDefinitionError::UnknownFlow(
-                    experiment.flow.clone(),
-                ));
-            }
             unique("arm", experiment.arms.iter().map(|arm| &arm.name))?;
             if experiment.arms.len() < 2 || experiment.arms.iter().any(|arm| arm.weight == 0) {
                 return Err(EvaluationDefinitionError::Arms(experiment.name.clone()));
@@ -376,21 +375,45 @@ pub fn check_choices(
 }
 
 impl EvaluationDefinition {
-    /// The definition the service runs with: `definition`, from
-    /// `FACTORY_EVALUATION`, once its arms name only Agents of `agents`,
-    /// the agent definition; an empty one when unset.
+    /// The deployment's definition, for a team that names no Factory
+    /// Definition: `definition`, from `FACTORY_EVALUATION`, checked against
+    /// the built-in Flows and `agents`, the deployment's agent definition;
+    /// an empty one when unset.
     pub fn configured(
         definition: Option<Self>,
         agents: Option<&AgentDefinition>,
     ) -> Result<Self, EvaluationDefinitionError> {
-        let definition = definition.unwrap_or_default();
-        for experiment in &definition.experiments {
+        definition
+            .unwrap_or_default()
+            .checked(|flow| BuiltInFlow::named(flow).is_some(), agents)
+    }
+
+    /// Itself, once every Flow its Scorers and Experiments name is one
+    /// `starts` says Runs are started of (never a Benchmark's), and its
+    /// arms name only Agents of `agents`.
+    pub fn checked(
+        self,
+        starts: impl Fn(&str) -> bool,
+        agents: Option<&AgentDefinition>,
+    ) -> Result<Self, EvaluationDefinitionError> {
+        let startable = |flow: &str| flow != BENCHMARK_FLOW && starts(flow);
+        for scorer in &self.scorers {
+            if let Some(flow) = scorer.flows.iter().find(|flow| !startable(flow)) {
+                return Err(EvaluationDefinitionError::UnknownFlow(flow.clone()));
+            }
+        }
+        for experiment in &self.experiments {
+            if !startable(&experiment.flow) {
+                return Err(EvaluationDefinitionError::UnknownFlow(
+                    experiment.flow.clone(),
+                ));
+            }
             for arm in &experiment.arms {
                 let whose = format!("arm {} of experiment {}", arm.name, experiment.name);
                 check_choices(&whose, &arm.agents, agents)?;
             }
         }
-        Ok(definition)
+        Ok(self)
     }
 
     /// Its Scorers.

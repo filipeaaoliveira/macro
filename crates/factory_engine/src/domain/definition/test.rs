@@ -11,6 +11,7 @@ use super::{
 use crate::domain::agents::AgentDefinitionError;
 use crate::domain::built_in_steps::built_in_step_use;
 use crate::domain::control_files::{ControlFiles, ControlFilesError};
+use crate::domain::evaluation::{EvaluationDefinition, EvaluationDefinitionError};
 use crate::domain::flow::FlowError;
 use crate::outbound::local_definition_files::LocalDefinitionFiles;
 
@@ -75,7 +76,17 @@ async fn a_definition_reads_its_flows_agents_rules_and_scorers() {
     );
     files.insert(
         "scorers.json".to_string(),
-        r#"{ "scorers": [{ "name": "tests-pass", "settings": { "weight": 2 } }] }"#.to_string(),
+        r#"{
+            "scorers": [{
+                "name": "tests-pass", "instructions": "Do the tests pass?",
+                "flows": ["plan"], "samplePercent": 10
+            }],
+            "experiments": [{
+                "name": "backup-writer", "flow": "plan",
+                "arms": [{ "name": "usual" }, { "name": "backup", "agents": { "writer": "backup" } }]
+            }]
+        }"#
+        .to_string(),
     );
 
     let definition = read(files).await.expect("a definition");
@@ -101,8 +112,11 @@ async fn a_definition_reads_its_flows_agents_rules_and_scorers() {
         definition.rules.control_files,
         Some(vec![".github/**".to_string(), "tests/**".to_string()])
     );
-    assert_eq!(definition.scorers[0].name, "tests-pass");
-    assert_eq!(definition.scorers[0].settings["weight"], 2);
+    let scorer = &definition.evaluation.scorers()[0];
+    assert_eq!(scorer.name, "tests-pass");
+    assert_eq!(scorer.flows, ["plan"]);
+    assert_eq!(scorer.sample_percent, 10);
+    assert_eq!(definition.evaluation.experiments()[0].flow, "plan");
 }
 
 #[tokio::test]
@@ -111,7 +125,7 @@ async fn rules_and_scorers_left_out_take_the_defaults() {
 
     assert_eq!(definition.rules.standing_rules, None);
     assert_eq!(definition.rules.control_files, None);
-    assert!(definition.scorers.is_empty());
+    assert_eq!(definition.evaluation, EvaluationDefinition::default());
 }
 
 #[tokio::test]
@@ -138,6 +152,10 @@ async fn the_starter_definition_reads() {
         .standing_rules
         .is_some_and(|rules| rules.merge);
     assert!(!merge_by_rule, "a person merges in the starter definition");
+    // Every judgment is a model call: the starter's Scorers judge no Run.
+    let scorers = definition.evaluation.scorers();
+    assert!(!scorers.is_empty());
+    assert!(scorers.iter().all(|scorer| scorer.sample_percent == 0));
 }
 
 #[tokio::test]
@@ -253,24 +271,65 @@ async fn rules_the_factory_does_not_take_do_not_read() {
     );
 }
 
+/// `scorers.json` is refused when its Scorers do not hold together, when
+/// they or its Experiments name a Flow or an Agent the Definition does not
+/// have (a built-in Flow among them), and when it names a key twice or is
+/// in another shape.
 #[tokio::test]
-async fn scorers_need_distinct_names() {
+async fn scorers_that_do_not_fit_the_definition_do_not_read() {
+    let unreadable = |error: Result<FactoryDefinition, DefinitionError>| match error {
+        Err(DefinitionError::Unreadable { path, error }) => (path, error),
+        other => panic!("not unreadable: {other:?}"),
+    };
+
+    let (path, error) = unreadable(
+        read(with(
+            "scorers.json",
+            r#"{ "scorers": [
+                { "name": "speed", "instructions": "Fast?", "samplePercent": 5 },
+                { "name": "speed", "instructions": "Quick?", "samplePercent": 5 }
+            ] }"#,
+        ))
+        .await,
+    );
+    assert_eq!(path, "scorers.json");
+    assert!(error.contains("two scorers are named speed"), "{error}");
+
     assert_eq!(
         read(with(
             "scorers.json",
-            r#"{ "scorers": [{ "name": "speed" }, { "name": "speed" }] }"#
+            r#"{ "scorers": [{ "name": "speed", "instructions": "Fast?", "flows": ["code"], "samplePercent": 5 }] }"#
         ))
         .await,
-        Err(DefinitionError::DuplicateScorer("speed".to_string()))
+        Err(DefinitionError::Evaluation(
+            EvaluationDefinitionError::UnknownFlow("code".to_string())
+        ))
     );
-    assert_eq!(
+    let Err(DefinitionError::Evaluation(EvaluationDefinitionError::UnknownAgent { agent, .. })) =
         read(with(
             "scorers.json",
-            r#"{ "scorers": [{ "name": "Speed" }] }"#
+            r#"{ "experiments": [{
+                "name": "other-writer", "flow": "plan",
+                "arms": [{ "name": "usual" }, { "name": "other", "agents": { "writer": "elsewhere" } }]
+            }] }"#,
+        ))
+        .await
+    else {
+        panic!("an arm's Agent the definition does not have is refused");
+    };
+    assert_eq!(agent, "elsewhere");
+
+    let (_, error) =
+        unreadable(read(with("scorers.json", r#"{ "scorers": [], "scorers": [] }"#)).await);
+    assert!(error.contains("appears twice"), "{error}");
+    let (_, error) = unreadable(
+        read(with(
+            "scorers.json",
+            r#"{ "scorers": [{ "name": "speed", "settings": { "weight": 2 } }] }"#,
         ))
         .await,
-        Err(DefinitionError::ScorerName("Speed".to_string()))
     );
+    assert!(error.contains("settings"), "{error}");
 }
 
 #[tokio::test]
@@ -278,8 +337,8 @@ async fn a_file_holding_a_secret_does_not_read() {
     let agents = AGENTS.replace("large-model", concat!("ghp_", "0123456789abcdefABCDEF0123"));
     // Split so the repository's own secret scan does not read the fake key.
     let key = concat!(
-        r#"{ "scorers": [{ "name": "speed", "settings": { "key": "-----BEGIN "#,
-        r#"PRIVATE KEY-----" } }] }"#
+        r#"{ "scorers": [{ "name": "speed", "instructions": "-----BEGIN "#,
+        r#"PRIVATE KEY-----", "samplePercent": 0 }] }"#
     );
 
     assert_eq!(

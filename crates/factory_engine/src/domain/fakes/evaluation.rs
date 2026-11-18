@@ -187,6 +187,12 @@ impl EvaluationRepository for FakeRepo {
             steps,
             trial,
             judged,
+            evaluation: self
+                .definition_evaluations
+                .lock()
+                .expect("definition evaluations")
+                .get(&run_id)
+                .cloned(),
         }))
     }
 

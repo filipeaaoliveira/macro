@@ -1,7 +1,11 @@
 //! A team's Factory Definition: the Runs of its members start of its Flows,
 //! under its rules, and keep the commit they read it at.
 
-use factory_records::domain::models::{EntryId, RunDefinition, StepKey, TeamMembership};
+use std::sync::Arc;
+
+use factory_records::domain::models::{
+    EntryId, RunDefinition, RunOutcome, StepKey, TeamMembership,
+};
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::standing_rules::{OrchestratorDefinition, RulesSource};
 use uuid::Uuid;
@@ -9,10 +13,13 @@ use uuid::Uuid;
 use super::{FakeWorkflows, code_service, julia, teo};
 use crate::domain::built_in_steps::BuiltInSteps;
 use crate::domain::definition::DefinitionError;
-use crate::domain::fakes::{FakeGithub, FakeRepo, FakeWatches};
+use crate::domain::evaluation::EvaluationDefinition;
+use crate::domain::evaluation::service::ScoringServiceImpl;
+use crate::domain::fakes::{FakeGithub, FakeJudge, FakeRepo, FakeWatches};
 use crate::domain::flow::StepName;
+use crate::domain::insights::fakes::FakeUsage;
 use crate::domain::models::{FactoryError, StepRequest};
-use crate::domain::ports::{FactoryService, StepService};
+use crate::domain::ports::{FactoryService, ScoringService, StepService};
 use crate::domain::pull_request_steps::PullRequestSteps;
 use crate::domain::service::StepServiceImpl;
 use crate::outbound::local_agent::LocalAgent;
@@ -586,4 +593,115 @@ async fn a_definition_repository_github_moved_is_named_where_it_is() {
         "{moved:?}"
     );
     assert!(same.is_ok(), "{same:?}");
+}
+
+/// A Definition's `scorers.json` decides its Runs' Scorers and arms, as it
+/// held them when each Run started: its Experiment splits its Flow's Runs,
+/// and its Scorer judges them, never the deployment's. Once the team names
+/// no Definition, the deployment's Scorers judge its Runs and its
+/// Experiments split them.
+#[tokio::test]
+async fn a_definition_s_scorers_judge_its_runs_and_the_deployment_s_the_others() {
+    let repo = team_repo();
+    let workflows = FakeWorkflows::default();
+    let github = github_at(FIRST);
+    definition_files(&github, FIRST, "Notes.", None);
+    github.state().files.insert(
+        (FIRST.to_string(), "scorers.json".to_string()),
+        r#"{
+            "scorers": [{
+                "name": "reads-well", "instructions": "Do the notes read well?",
+                "flows": ["notes"], "samplePercent": 100
+            }],
+            "experiments": [{
+                "name": "notes-writer", "flow": "notes",
+                "arms": [{ "name": "usual" }, { "name": "again", "agents": { "writer": "primary" } }]
+            }]
+        }"#
+        .to_string(),
+    );
+    let deployment: EvaluationDefinition = serde_json::from_value(serde_json::json!({
+        "scorers": [{
+            "name": "deployment-wide", "instructions": "Is it right?", "samplePercent": 100
+        }],
+        "experiments": [{
+            "name": "plan-writer", "flow": "plan",
+            "arms": [{ "name": "usual" }, { "name": "other", "weight": 1 }]
+        }]
+    }))
+    .expect("the deployment's definition");
+    let deployment = Arc::new(deployment);
+    let service = code_service(&repo, &workflows, &github).with_evaluation(deployment.clone());
+    let task_id = Uuid::from_u128(7);
+    repo.tasks.lock().expect("tasks").insert(task_id);
+
+    let defined = service
+        .create_run(
+            teo(),
+            "notes".to_string(),
+            "Note it".to_string(),
+            Some(task_id),
+            None,
+            true,
+        )
+        .await
+        .expect("a run of the definition's flow");
+    repo.end_run(defined.run.id, RunOutcome::Success)
+        .await
+        .expect("end");
+    repo.team_definitions
+        .lock()
+        .expect("team definitions")
+        .remove(&TEAM);
+    let plain = service
+        .create_run(
+            teo(),
+            "plan".to_string(),
+            "Plan it".to_string(),
+            Some(task_id),
+            None,
+            true,
+        )
+        .await
+        .expect("a run of a built-in flow");
+    repo.end_run(plain.run.id, RunOutcome::Success)
+        .await
+        .expect("end");
+
+    let judge = Arc::new(FakeJudge::default());
+    judge.then(0.8);
+    judge.then(0.6);
+    let scoring = ScoringServiceImpl::new(
+        repo.clone(),
+        judge,
+        FakeUsage::new(Vec::new()),
+        github.clone(),
+        deployment,
+    );
+    scoring
+        .score_run(defined.run.id, false)
+        .await
+        .expect("scored");
+    scoring
+        .score_run(plain.run.id, false)
+        .await
+        .expect("scored");
+
+    let kept = repo.evaluation.lock().expect("evaluation").clone();
+    let scorers = |run_id| -> Vec<String> {
+        kept.run_scores[&run_id]
+            .iter()
+            .map(|judgment| judgment.scorer.clone())
+            .collect()
+    };
+    assert_eq!(scorers(defined.run.id), ["reads-well"]);
+    assert_eq!(scorers(plain.run.id), ["deployment-wide"]);
+    let experiments = |run_id| -> Vec<String> {
+        kept.arms[&run_id]
+            .iter()
+            .map(|arm| arm.experiment.clone())
+            .collect()
+    };
+    assert_eq!(experiments(defined.run.id), ["notes-writer"]);
+    assert_eq!(experiments(plain.run.id), ["plan-writer"]);
 }

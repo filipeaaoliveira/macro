@@ -17,10 +17,13 @@ async fn main() -> ExitCode {
     match read_definition(&LocalDefinitionFiles::new(&root), built_in_step_use).await {
         Ok(definition) => {
             let flows: Vec<&str> = definition.flows.keys().map(String::as_str).collect();
+            let evaluation = &definition.evaluation;
             println!(
-                "{root}: the definition reads: flows {}, {} scorers",
+                "{root}: the definition reads: flows {}, {} scorers, {} experiments, {} benchmarks",
                 flows.join(", "),
-                definition.scorers.len()
+                evaluation.scorers().len(),
+                evaluation.experiments().len(),
+                evaluation.benchmarks().len()
             );
             ExitCode::SUCCESS
         }

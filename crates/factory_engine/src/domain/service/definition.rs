@@ -40,6 +40,8 @@ pub(super) struct PinnedDefinition {
     pub(super) definition: FactoryDefinition,
     /// Its Agents, as a Run keeps them.
     pub(super) agents: serde_json::Value,
+    /// Its Scorers, Experiments and Benchmarks, as a Run keeps them.
+    pub(super) evaluation: serde_json::Value,
 }
 
 impl PinnedDefinition {
@@ -49,6 +51,7 @@ impl PinnedDefinition {
             repo_url: &self.repo_url,
             commit: &self.commit,
             agents: &self.agents,
+            evaluation: &self.evaluation,
         }
     }
 }
@@ -200,12 +203,15 @@ where
             })?;
         let agents = serde_json::to_value(&definition.agents)
             .map_err(|error| FactoryError::Internal(internal(error)))?;
+        let evaluation = serde_json::to_value(&definition.evaluation)
+            .map_err(|error| FactoryError::Internal(internal(error)))?;
         Ok(PinnedDefinition {
             repo_url: repository.url(),
             branch: access.default_branch,
             commit,
             definition,
             agents,
+            evaluation,
         })
     }
 

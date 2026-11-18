@@ -6,6 +6,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use super::{insert, julia};
+use crate::domain::evaluation::EvaluationRepository;
 use crate::domain::models::{KeptFlow, NewRun, NewRunDefinition, RunDefinition, RunId, RunInsert};
 use crate::domain::ports::RunRepository;
 use crate::domain::standing_rules::{OrchestratorDefinition, RulesSource, RunRules};
@@ -46,8 +47,8 @@ async fn a_team_names_its_definition(pool: PgPool) {
 }
 
 /// A Run keeps the Definition it started under: the repository, the commit
-/// it read, its rules' source, and the Agents its Steps take. A Run started
-/// under none keeps none.
+/// it read, its rules' source, the Agents its Steps take, and the Scorers
+/// that judge it once it ends. A Run started under none keeps none.
 #[sqlx::test(
     migrator = "MACRO_DB_MIGRATIONS",
     fixtures(path = "../fixtures", scripts("people"))
@@ -57,6 +58,9 @@ async fn a_run_keeps_the_definition_commit_it_read(pool: PgPool) {
     let agents = serde_json::json!({
         "agents": { "primary": { "bot": "00000000-0000-0000-0000-00000000c1a0" } },
         "roles": { "writer": ["primary"] }
+    });
+    let evaluation = serde_json::json!({
+        "scorers": [{ "name": "tests-pass", "instructions": "Do the tests pass?", "samplePercent": 10 }]
     });
     let id = RunId::generate();
     let RunInsert::Inserted(inserted) = repo
@@ -81,6 +85,7 @@ async fn a_run_keeps_the_definition_commit_it_read(pool: PgPool) {
                 repo_url: REPO_URL,
                 commit: COMMIT,
                 agents: &agents,
+                evaluation: &evaluation,
             }),
             kept_flow: None,
         })
@@ -109,6 +114,11 @@ async fn a_run_keeps_the_definition_commit_it_read(pool: PgPool) {
         repo.run_definition_agents(id).await.expect("read"),
         Some(agents)
     );
+    let subject = repo.scoring_subject(id).await.expect("read");
+    assert_eq!(
+        subject.and_then(|subject| subject.evaluation),
+        Some(evaluation)
+    );
 
     let plain = repo.get_run(without).await.expect("get").expect("the run");
     assert_eq!(plain.definition, None);
@@ -116,6 +126,8 @@ async fn a_run_keeps_the_definition_commit_it_read(pool: PgPool) {
         repo.run_definition_agents(without).await.expect("read"),
         None
     );
+    let subject = repo.scoring_subject(without).await.expect("read");
+    assert_eq!(subject.and_then(|subject| subject.evaluation), None);
 }
 
 /// A Run keeps the Flow it walks, and whether it asks before its first

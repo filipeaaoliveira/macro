@@ -201,7 +201,8 @@ impl EvaluationRepository for PgRunRepository {
     async fn scoring_subject(&self, run_id: RunId) -> Result<Option<ScoringSubject>, Self::Err> {
         let Some(run) = sqlx::query!(
             r#"
-            SELECT r.user_id, r.flow, r.request, r.repo_url, r.base_branch, r.outcome
+            SELECT r.user_id, r.flow, r.request, r.repo_url, r.base_branch, r.outcome,
+                r.definition_evaluation
             FROM factory_run r
             WHERE r.id = $1
             "#,
@@ -274,6 +275,7 @@ impl EvaluationRepository for PgRunRepository {
             steps,
             trial,
             judged,
+            evaluation: run.definition_evaluation,
         }))
     }
 

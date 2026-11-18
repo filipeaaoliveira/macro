@@ -20,6 +20,7 @@ use crate::domain::automations::{
     AutomationRequest, AutomationsSettings, CreatedAutomation, FiringResult, RoutineFiring,
 };
 use crate::domain::board::{BoardFilter, BoardPage};
+use crate::domain::evaluation::TeamEvaluation;
 use crate::domain::flow::{StepName, StepUse};
 use crate::domain::gate::{
     AnswerGate, GateAnswered, GateOpening, GateRuling, GateTelling, ReplyGate,
@@ -976,6 +977,14 @@ pub trait FactoryService: Send + Sync + 'static {
         actor: &MacroUserIdStr<'static>,
         repo_url: &str,
     ) -> impl Future<Output = Result<String, FactoryError>> + Send;
+
+    /// The Scorers, Experiments and Benchmarks of `actor`'s team's Factory
+    /// Definition, with the Agents it holds, read at its head as `actor`;
+    /// none when the team names no Definition, so the deployment's apply.
+    fn team_evaluation(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+    ) -> impl Future<Output = Result<Option<TeamEvaluation>, FactoryError>> + Send;
 
     /// Record and start a Benchmark trial's Run of the built-in Flow
     /// `flow`, owned by `actor`, who started its suite: as

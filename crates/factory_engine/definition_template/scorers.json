@@ -1,3 +1,12 @@
 {
-  "scorers": []
+  "scorers": [
+    {
+      "name": "does-what-was-asked",
+      "instructions": "Does the change do what the request asks, and nothing it does not ask for? Score 1 when it does exactly that, 0 when it misses the point.",
+      "flows": ["code"],
+      "samplePercent": 0
+    }
+  ],
+  "experiments": [],
+  "benchmarks": []
 }

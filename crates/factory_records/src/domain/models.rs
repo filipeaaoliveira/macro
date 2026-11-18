@@ -79,7 +79,7 @@ impl FromStr for RunId {
 
 /// A name a Flow gives something: lowercase letters, digits, `-` and `_`, at
 /// most 64 of them.
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 #[error("{kind} {value:?} must be 1 to 64 lowercase letters, digits, - or _")]
 pub struct InvalidName {
     kind: &'static str,
@@ -568,6 +568,9 @@ pub struct NewRunDefinition<'a> {
     pub commit: &'a str,
     /// The Agents it holds, as written, which the Run's agent Steps take.
     pub agents: &'a serde_json::Value,
+    /// Its Scorers, Experiments and Benchmarks, as written, which judge the
+    /// Run once it ends.
+    pub evaluation: &'a serde_json::Value,
 }
 
 /// What keeping a new Run came to.

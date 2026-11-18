@@ -166,6 +166,9 @@ pub(crate) struct FakeRepo {
     pub(crate) kept_flows: Arc<Mutex<BTreeMap<RunId, (serde_json::Value, bool)>>>,
     /// The Agents of the Definition each Run started under, as kept.
     pub(crate) definition_agents: Arc<Mutex<BTreeMap<RunId, serde_json::Value>>>,
+    /// The Scorers, Experiments and Benchmarks of the Definition each Run
+    /// started under, as kept.
+    pub(crate) definition_evaluations: Arc<Mutex<BTreeMap<RunId, serde_json::Value>>>,
     /// The Standing Rules each team set.
     pub(crate) team_rules: Arc<Mutex<BTreeMap<Uuid, OrchestratorDefinition>>>,
     /// The Standing Rules each team set for a Project, by team and Project.
@@ -549,6 +552,10 @@ impl RunRepository for FakeRepo {
                 .lock()
                 .expect("definition agents")
                 .insert(id, definition.agents.clone());
+            self.definition_evaluations
+                .lock()
+                .expect("definition evaluations")
+                .insert(id, definition.evaluation.clone());
         }
         self.runs.lock().expect("runs").insert(id, run.clone());
         self.flows

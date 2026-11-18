@@ -110,11 +110,17 @@ fn a_definition_is_checked_as_a_whole() {
         ]}))
         .contains("at least two arms")
     );
-    assert!(
-        checked(json!({ "experiments": [
-            { "name": "e", "flow": "benchmark", "arms": [{ "name": "a" }, { "name": "b" }] }
-        ]}))
-        .contains("not a flow")
+    // The Flows it names are checked against those it is used with: the
+    // built-in Flows for the deployment's, never the Benchmark's own.
+    let benchmark_arms = read(json!({ "experiments": [
+        { "name": "e", "flow": "benchmark", "arms": [{ "name": "a" }, { "name": "b" }] }
+    ]}))
+    .expect("it reads");
+    assert_eq!(
+        EvaluationDefinition::configured(Some(benchmark_arms), None),
+        Err(EvaluationDefinitionError::UnknownFlow(
+            "benchmark".to_string()
+        ))
     );
     assert!(
         checked(json!({ "experiments": [

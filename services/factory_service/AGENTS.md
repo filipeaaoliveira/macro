@@ -27,7 +27,8 @@ worker that walks each Run's Flow, in one process.
   and before the stand-in answers one, 90), `FACTORY_STAND_IN_WINDOW_SECS`
   (optional: how long the owner may override the stand-in, 600),
   `FACTORY_EVALUATION` (optional: the Scorers, Experiments and Benchmarks,
-  as JSON; none when unset) and `FACTORY_SCORER_MODEL` (optional: the model
+  as JSON, of teams that name no Factory Definition, whose own
+  `scorers.json` holds theirs; none when unset) and `FACTORY_SCORER_MODEL` (optional: the model
   Scorers judge with, Claude Haiku 5.5 when unset; an id past 200 bytes
   stops the service from starting).
 - `src/definition_check.rs`: the `factory_definition_check [folder]`

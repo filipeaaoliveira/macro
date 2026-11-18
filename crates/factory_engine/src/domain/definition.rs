@@ -1,7 +1,8 @@
 //! The Factory Definition: the files, kept in a repository a team names and
 //! changed by pull requests, that say how its factory works. It holds the
 //! Flows its Runs start of, the Agents that fill each Role, the rules that
-//! answer Gates and the Control Files, and the Scorers.
+//! answer Gates and the Control Files, and its Scorers, Experiments and
+//! Benchmarks.
 //!
 //! A Run reads the Definition at the commit its repository's default branch
 //! is at when the Run starts, and keeps that commit, so a change merged
@@ -16,7 +17,9 @@
 //! - `rules.json` (optional): the Standing Rules (`standingRules`, an
 //!   Orchestrator Definition) and the Control File patterns
 //!   (`controlFiles`). Left out, the factory's defaults apply.
-//! - `scorers.json` (optional): the Scorers, each a name and its settings.
+//! - `scorers.json` (optional): the Scorers, Experiments and Benchmarks, in
+//!   `FACTORY_EVALUATION`'s format, of this Definition's Flows and Agents.
+//!   Left out, the team has none.
 //!
 //! Secrets never live in a Definition: no field takes one, and a file that
 //! holds something shaped like a key or a token does not read.
@@ -35,6 +38,7 @@ use serde::Deserialize;
 
 use crate::domain::agents::{AgentDefinition, AgentDefinitionError};
 use crate::domain::control_files::{ControlFiles, ControlFilesError, MAX_PATTERNS};
+use crate::domain::evaluation::{EvaluationDefinition, EvaluationDefinitionError};
 use crate::domain::flow::{Flow, FlowError, StepName, StepUse};
 
 /// The file that names the Definition's format and its Flows.
@@ -46,7 +50,7 @@ pub const AGENTS_FILE: &str = "agents.json";
 /// The file of the Standing Rules and the Control File patterns.
 pub const RULES_FILE: &str = "rules.json";
 
-/// The file of the Scorers.
+/// The file of the Scorers, Experiments and Benchmarks.
 pub const SCORERS_FILE: &str = "scorers.json";
 
 /// The Control File patterns of a Definition's own files: a Run on its
@@ -179,8 +183,8 @@ pub struct FactoryDefinition {
     pub agents: AgentDefinition,
     /// Its Standing Rules and Control File patterns.
     pub rules: DefinitionRules,
-    /// Its Scorers.
-    pub scorers: Vec<ScorerConfig>,
+    /// Its Scorers, Experiments and Benchmarks.
+    pub evaluation: EvaluationDefinition,
 }
 
 /// `factory.json`.
@@ -205,29 +209,6 @@ pub struct DefinitionRules {
     /// The Control File patterns; the factory's default when left out.
     #[serde(default)]
     pub control_files: Option<Vec<String>>,
-}
-
-/// `scorers.json`.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ScorersFile {
-    scorers: Vec<ScorerConfig>,
-}
-
-/// A Scorer the Definition names: its name and its own settings, which the
-/// Scorer reads. The factory keeps them with the Definition; it does not
-/// read the settings itself.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ScorerConfig {
-    /// Its name: lower-case letters, digits, `-` and `_`, 1 to 64.
-    pub name: String,
-    /// What it scores, for a person.
-    #[serde(default)]
-    pub description: String,
-    /// Its settings, a JSON object.
-    #[serde(default)]
-    pub settings: serde_json::Map<String, serde_json::Value>,
 }
 
 /// What is wrong with a Factory Definition.
@@ -294,12 +275,10 @@ pub enum DefinitionError {
     /// The Queue limit is out of range.
     #[error("{RULES_FILE}: queueLimit must be from {MIN_QUEUE_LIMIT} to {MAX_QUEUE_LIMIT}")]
     QueueLimit,
-    /// A Scorer's name is not one the factory takes.
-    #[error("scorer name {0:?} must be 1 to 64 lower-case letters, digits, `-` or `_`")]
-    ScorerName(String),
-    /// `scorers.json` names a Scorer twice.
-    #[error("{SCORERS_FILE} names scorer {0} twice")]
-    DuplicateScorer(String),
+    /// The Scorers, Experiments or Benchmarks name a Flow the Definition
+    /// does not have, or an Agent its Agents do not.
+    #[error("{SCORERS_FILE}: {0}")]
+    Evaluation(EvaluationDefinitionError),
     /// `scorers.json` names more than [`MAX_SCORERS`].
     #[error("{SCORERS_FILE} names more than {MAX_SCORERS} scorers")]
     ScorerCount,
@@ -316,7 +295,7 @@ pub enum DefinitionReadError<E> {
     Invalid(#[from] DefinitionError),
 }
 
-/// Whether `name` is one a Run keeps as its Flow's, and a Scorer takes:
+/// Whether `name` is one a Run keeps as its Flow's:
 /// what `factory_run.flow` allows.
 fn is_name(name: &str) -> bool {
     (1..=64).contains(&name.len())
@@ -513,8 +492,9 @@ pub fn flow_path(name: &str) -> String {
 
 /// Read the Factory Definition `files` hold, and check it: every file
 /// reads, every Flow holds together and names only Steps `serves` says a
-/// worker serves, its Agents fill every Role its Flows name, and its rules
-/// and Scorers are ones the factory takes.
+/// worker serves, its Agents fill every Role its Flows name, its rules are
+/// ones the factory takes, and its Scorers, Experiments and Benchmarks
+/// name only its own Flows and Agents.
 pub async fn read_definition<F: DefinitionFiles>(
     files: &F,
     serves: impl Fn(&StepName) -> Option<StepUse>,
@@ -577,28 +557,21 @@ pub async fn read_definition<F: DefinitionFiles>(
         return Err(DefinitionError::QueueLimit.into());
     }
 
-    let scorers = match json::<F, ScorersFile>(files, SCORERS_FILE).await? {
-        Some(file) => file.scorers,
-        None => Vec::new(),
-    };
-    if scorers.len() > MAX_SCORERS {
+    // A Definition's Scorers and Experiments judge and split its own
+    // Flows' Runs, and its arms choose among its own Agents.
+    let evaluation: EvaluationDefinition = json(files, SCORERS_FILE).await?.unwrap_or_default();
+    if evaluation.scorers().len() > MAX_SCORERS {
         return Err(DefinitionError::ScorerCount.into());
     }
-    let mut names = BTreeSet::new();
-    for scorer in &scorers {
-        if !is_name(&scorer.name) {
-            return Err(DefinitionError::ScorerName(scorer.name.clone()).into());
-        }
-        if !names.insert(scorer.name.as_str()) {
-            return Err(DefinitionError::DuplicateScorer(scorer.name.clone()).into());
-        }
-    }
+    let evaluation = evaluation
+        .checked(|flow| flows.contains_key(flow), Some(&agents))
+        .map_err(DefinitionError::Evaluation)?;
 
     Ok(FactoryDefinition {
         description: manifest.description,
         flows,
         agents,
         rules,
-        scorers,
+        evaluation,
     })
 }

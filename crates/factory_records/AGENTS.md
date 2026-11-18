@@ -78,6 +78,7 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261118210000_factory_evaluation.sql`,
   `20261118210100_factory_benchmark_trial_base.sql`,
   `20261118213000_factory_definition.sql`,
+  `20261118213200_factory_run_definition_evaluation.sql`,
   `20261118220000_factory_run_outcome_kinds.sql`), `factory_step_steer`,
   `factory_run_score`, `factory_run_arm`, `factory_benchmark_suite`,
   `factory_benchmark_trial` and `factory_benchmark_trial_score`.

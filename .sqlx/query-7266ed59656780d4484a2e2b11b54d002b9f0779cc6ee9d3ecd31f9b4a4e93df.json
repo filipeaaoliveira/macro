@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT r.user_id, r.flow, r.request, r.repo_url, r.base_branch, r.outcome\n            FROM factory_run r\n            WHERE r.id = $1\n            ",
+  "query": "\n            SELECT r.user_id, r.flow, r.request, r.repo_url, r.base_branch, r.outcome,\n                r.definition_evaluation\n            FROM factory_run r\n            WHERE r.id = $1\n            ",
   "describe": {
     "columns": [
       {
@@ -32,6 +32,11 @@
         "ordinal": 5,
         "name": "outcome",
         "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "definition_evaluation",
+        "type_info": "Jsonb"
       }
     ],
     "parameters": {
@@ -45,8 +50,9 @@
       false,
       true,
       true,
+      true,
       true
     ]
   },
-  "hash": "1d5fb0c74d1ccad21c7e243621501f05fd97d0a24a4e92036581834e262b4005"
+  "hash": "7266ed59656780d4484a2e2b11b54d002b9f0779cc6ee9d3ecd31f9b4a4e93df"
 }

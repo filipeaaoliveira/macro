@@ -490,12 +490,24 @@ where
         query: InsightsQuery,
     ) -> Result<EvaluationInsights, InsightsError> {
         let scope = query.scope(actor)?;
+        // A team's Definition lists its own Scorers, Experiments and
+        // Benchmarks; one that does not read lists none, never the
+        // deployment's, and its records still show.
+        let team = match self.runs.team_evaluation(actor).await {
+            Ok(team) => team.map(|team| team.evaluation),
+            Err(FactoryError::Internal(report)) => return Err(InsightsError::Internal(report)),
+            Err(error) => {
+                tracing::warn!(%error, "the team's definition did not read for its evaluation");
+                Some(EvaluationDefinition::default())
+            }
+        };
+        let definition = team.as_ref().unwrap_or(&self.definition);
         let records = self
             .repo
             .read_evaluation(&scope)
             .await
             .map_err(|error| InsightsError::Internal(internal(error)))?;
-        Ok(evaluation_insights(&self.definition, &query, records))
+        Ok(evaluation_insights(definition, &query, records))
     }
 
     #[tracing::instrument(skip(self, actor, agents))]
@@ -505,13 +517,21 @@ where
         benchmark: &str,
         agents: AgentChoices,
     ) -> Result<SuiteStarted, SuiteError> {
-        let Some(definition) = self.definition.benchmark(benchmark) else {
+        // A team's Definition holds its own Benchmarks and the Agents a
+        // configuration chooses among; a team with none takes the
+        // deployment's.
+        let team = self.runs.team_evaluation(&actor).await?;
+        let (evaluation, defined_agents) = match &team {
+            Some(team) => (&team.evaluation, Some(&team.agents)),
+            None => (&*self.definition, self.agents.as_ref()),
+        };
+        let Some(definition) = evaluation.benchmark(benchmark) else {
             return Err(SuiteError::UnknownBenchmark(benchmark.to_string()));
         };
         check_choices(
             &format!("the configuration of benchmark {benchmark}"),
             &agents,
-            self.agents.as_ref(),
+            defined_agents,
         )?;
 
         // The caller must reach the repository before anything is kept;

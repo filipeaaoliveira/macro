@@ -275,12 +275,16 @@ where
 
     /// The live Scorers whose sample takes the Run judge it, each once. A
     /// cancelled Run is no one's finished work, so no Scorer judges it.
-    async fn score_live(&self, subject: &ScoringSubject) -> Result<bool, StepError> {
+    async fn score_live(
+        &self,
+        definition: &EvaluationDefinition,
+        subject: &ScoringSubject,
+    ) -> Result<bool, StepError> {
         if subject.outcome == Some(RunOutcome::Cancelled) {
             return Ok(true);
         }
         let mut all_judged = true;
-        for scorer in self.definition.scorers() {
+        for scorer in definition.scorers() {
             let due = scorer.samples(subject.flow.as_deref(), subject.run_id)
                 && !subject.judged.contains(&scorer.name);
             if !due {
@@ -303,6 +307,7 @@ where
     /// Scorers' judgments never see it.
     async fn score_trial(
         &self,
+        definition: &EvaluationDefinition,
         subject: &ScoringSubject,
         trial: &SubjectTrial,
         last_attempt: bool,
@@ -349,12 +354,12 @@ where
         if subject.outcome == Some(RunOutcome::Cancelled) {
             return Ok(true);
         }
-        let Some(benchmark) = self.definition.benchmark(&trial.benchmark) else {
+        let Some(benchmark) = definition.benchmark(&trial.benchmark) else {
             return Ok(true);
         };
         let mut all_judged = true;
         for name in &benchmark.scorers {
-            let Some(scorer) = self.definition.scorer(name) else {
+            let Some(scorer) = definition.scorer(name) else {
                 continue;
             };
             if subject.judged.contains(name) {
@@ -382,27 +387,28 @@ where
 {
     #[tracing::instrument(err, skip(self))]
     async fn score_run(&self, run_id: RunId, last_attempt: bool) -> Result<(), StepError> {
-        // With no Scorer, only a trial has anything to keep: any other Run
-        // is left without reading it.
-        if self.definition.scorers().is_empty()
-            && self
-                .repo
-                .trial_of(run_id)
-                .await
-                .map_err(internal)?
-                .is_none()
-        {
-            return Ok(());
-        }
         let Some(subject) = self.repo.scoring_subject(run_id).await.map_err(internal)? else {
             return Ok(());
         };
         if subject.outcome.is_none() {
             return Ok(());
         }
+        // A Run started under a Factory Definition is judged by the Scorers
+        // it kept, read at the commit it started at; any other, by the
+        // deployment's.
+        let kept = match &subject.evaluation {
+            Some(kept) => Some(
+                serde_json::from_value::<EvaluationDefinition>(kept.clone()).map_err(internal)?,
+            ),
+            None => None,
+        };
+        let definition = kept.as_ref().unwrap_or(&self.definition);
         let all_judged = match &subject.trial {
-            Some(trial) => self.score_trial(&subject, trial, last_attempt).await?,
-            None => self.score_live(&subject).await?,
+            Some(trial) => {
+                self.score_trial(definition, &subject, trial, last_attempt)
+                    .await?
+            }
+            None => self.score_live(definition, &subject).await?,
         };
         // A judge that failed is asked again on the activity's retry; the
         // judgments already kept are not asked for twice.

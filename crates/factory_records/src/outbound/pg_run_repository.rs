@@ -683,11 +683,11 @@ impl RunRepository for PgRunRepository {
                 control_file_patterns, control_files_team_id, standing_rules, standing_rules_source,
                 standing_rules_project_id, automation_id, automation_name, automation_trigger,
                 automation_firing_key, definition_repo_url, definition_commit, definition_agents,
-                flow_definition, flow_asks, project_id
+                definition_evaluation, flow_definition, flow_asks, project_id
             )
             VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
-                $19, $20, $21, $22, $23
+                $19, $20, $21, $22, $23, $24
             )
             RETURNING
                 id, request, user_id, flow, created_at, task_id, project_id, repo_url, base_branch, created_in_person,
@@ -717,6 +717,7 @@ impl RunRepository for PgRunRepository {
             run.definition.map(|definition| definition.repo_url),
             run.definition.map(|definition| definition.commit),
             run.definition.map(|definition| definition.agents),
+            run.definition.map(|definition| definition.evaluation),
             run.kept_flow.map(|flow| flow.definition),
             run.kept_flow.map(|flow| flow.asks),
             run.project_id,

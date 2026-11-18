@@ -400,6 +400,13 @@ impl FactoryService for FakeService {
         Err(self.refusing(actor))
     }
 
+    async fn team_evaluation(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+    ) -> Result<Option<crate::domain::evaluation::TeamEvaluation>, FactoryError> {
+        Err(self.refusing(actor))
+    }
+
     async fn create_trial_run(
         &self,
         actor: MacroUserIdStr<'static>,

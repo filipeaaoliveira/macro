@@ -242,10 +242,17 @@ reads the newest `INSIGHTS_RUN_CAP` Runs of the period. A bad period, time
 zone or Flow name is 400.
 
 Evaluation (`src/domain/evaluation.rs`, `evaluation/service.rs`,
-`evaluation/insights.rs`, `inbound/evaluation.rs`): a workspace's
-`EvaluationDefinition` (`FACTORY_EVALUATION`, JSON; a loader of the
-factory's definition files fills the same type) names its Scorers,
-Experiments and Benchmarks, checked against the agent definition at start.
+`evaluation/insights.rs`, `inbound/evaluation.rs`): an
+`EvaluationDefinition` names Scorers, Experiments and Benchmarks. A team
+that names a Factory Definition takes its `scorers.json` (the same JSON,
+checked against the Definition's own Flows and Agents when it is read);
+any other team takes the deployment's (`FACTORY_EVALUATION`, checked
+against the built-in Flows and `FACTORY_AGENTS` at start). A Run of a
+Definition keeps its evaluation (`factory_run.definition_evaluation`) with
+the commit, and is judged by it once it ends; its arms are assigned from
+it as it starts. Insights and a suite's start read the team's Definition at
+its head (`FactoryService::team_evaluation`); one that does not read lists
+no Scorers, Experiments or Benchmarks, never the deployment's.
 A Scorer judges, with a small model on Macro's model router (the `RunJudge`
 port, `outbound/model_run_judge.rs`, `FACTORY_SCORER_MODEL`, usage as
 `AiFeature::FactoryGate`, billed to no one), the `samplePercent` of its
@@ -254,7 +261,7 @@ Flows' finished Runs: once a Run ends, the workflow asks the worker
 failure ignored) and each sampled Scorer judges it once, from a hash of the
 Scorer and the Run, so a retry samples the same Runs and judges nothing
 twice; the activity is tried at most three times. A cancelled Run is not
-judged, and with no Scorer only trials are read. An Experiment splits a
+judged. An Experiment splits a
 Flow's Runs on
 a task into arms by a hash of the Experiment and the task (a Run on no task
 takes none); `start_run` records the arms (`factory_run_arm`) before the
@@ -1353,8 +1360,9 @@ factory: `factory.json` (the format's `version`, 1, and its Flows by name),
 are), `agents.json` (`FACTORY_AGENTS`' format; it must fill every Role its
 Flows name), and the optional `rules.json` (`standingRules`, an Orchestrator
 Definition, and `controlFiles`, each the factory's default when left out) and
-`scorers.json` (each Scorer's `name`, `description` and `settings`, kept and
-checked, not read by the factory yet). No field takes a secret, and a file
+`scorers.json` (the team's Scorers, Experiments and Benchmarks, in
+`FACTORY_EVALUATION`'s format, naming only its own Flows and Agents; see
+Evaluation above). No field takes a secret, and a file
 holding something shaped like a key or token (`ghp_`, `sk-ant-`, a private
 key, ...) does not read. An admin of the team names it, in person, with `PUT
 /settings/definition` (`{"repoUrl"}`, null for none;

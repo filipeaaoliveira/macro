@@ -31,7 +31,7 @@ its built-in Flows or the team's own settings. Team settings say why.
 | `flows/{name}.json` | Each Flow `factory.json` names, in the factory's Flow format. |
 | `agents.json` | The Agents (`bot`, optional `model` and `instructions`) and, for each Role, the Agents that fill it, in order. It must fill every Role a Flow names. |
 | `rules.json` | Optional. `standingRules`: which Gates the factory answers on its own. `controlFiles`: the Control File patterns, which replace the factory's default whole; this template lists the default and this Definition's own files. Each left out takes the factory's default. |
-| `scorers.json` | Optional. The Scorers, each a `name`, a `description` and its `settings`. |
+| `scorers.json` | Optional. The team's Scorers, Experiments and Benchmarks, in the factory's evaluation format (below). Left out, the team has none. |
 | `.macro/checks.json` | The check a Run on this repository runs: it validates the Definition. |
 
 Secrets never go here: no field takes an API key or a token, and a file that
@@ -58,6 +58,27 @@ It leaves off:
 - `plan`: a person approves each plan.
 - `merge`: a person merges each pull request. Turn it on only once you trust
   the Flow's checks and review.
+
+## Scorers, Experiments and Benchmarks
+
+`scorers.json` holds the team's evaluation, as the factory's
+`FACTORY_EVALUATION` does for teams that name no Definition:
+
+- `scorers`: each a `name`, the `instructions` a small model judges a
+  finished Run by (from 0 to 1), the `flows` whose Runs it judges (every
+  Flow of this Definition when left out), and `samplePercent`, the share of
+  those Runs it judges, from 0 to 100.
+- `experiments`: each a `name`, the `flow` whose Runs on a task it splits,
+  and at least two `arms`, each a `name`, an optional `weight` and the
+  `agents` it gives Roles in place of `agents.json`'s first.
+- `benchmarks`: each a `name`, the `repository` its trials work on, its
+  `tasks` (a `name`, a `request` and an optional pinned `baseCommit`), and
+  the `scorers` that judge its trials.
+
+The Flows and Agents they name must be this Definition's own. A Run keeps
+the Scorers it started with, as it keeps the commit. Every judgment is a
+model call: this template's Scorer judges no Run (`samplePercent` 0) until
+you raise it.
 
 ## Check the Definition
 

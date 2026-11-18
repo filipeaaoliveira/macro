@@ -37,7 +37,7 @@ use crate::domain::board::{BoardFilter, BoardPage};
 use crate::domain::built_in_flows::BUILT_IN_FLOWS;
 use crate::domain::control_files::ControlFiles;
 use crate::domain::definition::DEFINITION_FILE_PATTERNS;
-use crate::domain::evaluation::EvaluationDefinition;
+use crate::domain::evaluation::{EvaluationDefinition, TeamEvaluation};
 use crate::domain::flaws::mark_flawed;
 use crate::domain::flow::Flow;
 use crate::domain::gate::{
@@ -814,11 +814,17 @@ where
 
         // The Run keeps its trial, or the arms of its Flow's Experiments,
         // before its workflow starts, so its first Step already runs on
-        // their Agents. A Run that cannot keep them does not start.
+        // their Agents. A Run that cannot keep them does not start. A
+        // team's Definition holds its Experiments; a team with none takes
+        // the deployment's.
         let kept = match &trial {
             Some((trial, base_commit)) => self.repo.insert_trial(trial, run_id, base_commit).await,
             None => {
-                let arms = self.evaluation.assign_arms(&flow_name, task_id);
+                let evaluation = match &definition {
+                    Some(pinned) => &pinned.definition.evaluation,
+                    None => &*self.evaluation,
+                };
+                let arms = evaluation.assign_arms(&flow_name, task_id);
                 self.repo.record_arms(run_id, &arms).await
             }
         };
@@ -942,6 +948,18 @@ where
             .await
             .map_err(internal)?
             .ok_or(FactoryError::UnreachableRepository)
+    }
+
+    async fn team_evaluation(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+    ) -> Result<Option<TeamEvaluation>, FactoryError> {
+        let team = self.repo.team_of(actor).await.map_err(internal)?;
+        let pinned = self.team_definition(actor, team).await?;
+        Ok(pinned.map(|pinned| TeamEvaluation {
+            evaluation: pinned.definition.evaluation,
+            agents: pinned.definition.agents,
+        }))
     }
 
     async fn create_trial_run(

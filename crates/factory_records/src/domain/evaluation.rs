@@ -148,6 +148,10 @@ pub struct ScoringSubject {
     /// The Scorers that judged it already: into the live judgments, or into
     /// its trial's.
     pub judged: Vec<String>,
+    /// The Scorers, Experiments and Benchmarks of the Factory Definition it
+    /// started under, as it kept them; none for a Run that started under
+    /// no Definition.
+    pub evaluation: Option<serde_json::Value>,
 }
 
 /// A suite to record before its trials start.
