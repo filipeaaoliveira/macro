@@ -101,7 +101,7 @@ pub const MAX_QUEUE_LIMIT: u16 = 1000;
 /// A workspace's Orchestrator Definition: which kinds of Gate the factory
 /// decides on its own, whether the Gates it leaves go to the Run's owner,
 /// which the stand-in answers for the Run's owner when no rule does, and
-/// the Queue limit above which no new Run starts. A kind left off waits for
+/// the Queue limit at which no new Run starts. A kind left off waits for
 /// a person, as every Gate did before Standing
 /// Rules. Whatever it says, a Tampered Run's Gates and a merge through a
 /// Main Hold stay a person's.
@@ -137,7 +137,8 @@ pub struct OrchestratorDefinition {
     /// The Queue limit: the most places a person may hold in their Queue
     /// for a new Run of theirs to start under this definition. A place is
     /// a Run of theirs waiting on them at a Gate or a question, or a Run
-    /// of a Flow with a Gate that has not reached one yet. Above it, no new Run starts; Runs already going go on.
+    /// of a Flow with a Gate that has not reached one yet. Once they hold
+    /// that many, no new Run starts; Runs already going go on.
     /// None, and a definition sent without it, sets no limit. At most
     /// [`MAX_QUEUE_LIMIT`]. A Run does not keep it: it decides only
     /// whether a Run starts, so a Run's rules read with none.

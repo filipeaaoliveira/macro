@@ -79,7 +79,7 @@ worker that walks each Run's Flow, in one process.
   its owner section on, `"taskThread": true` its task thread section
   (each Run on a task posts its updates to one comment thread on it), and
   `"queueLimit": 5` sets its Queue limit (null or left out: none): the
-  most places a person may hold before `POST /runs` refuses their new Run
+  most places a person may hold: once they hold that many, `POST /runs` refuses their new Run
   (409 `queueFull`, its message counting both kinds), a place being a Run
   waiting on them at a Gate or a question, or a Run of a Flow with a Gate
   that has not reached one yet. `GET /runs/waiting` lists the caller's

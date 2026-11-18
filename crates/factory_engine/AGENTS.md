@@ -164,8 +164,8 @@ question (`GET /runs/waiting`, Insights' "Waiting on you"). A team's
 Orchestrator Definition, or a Project's own, may set a Queue limit
 (`queueLimit`, 0 to 1000; none by default). `POST /runs` counts the owner's
 Queue across all their Projects, against the limit of the rules the Run
-would start under, and refuses the Run while the owner holds more places
-than the limit (409 `queueFull`, naming the team's or the Project's rules),
+would start under, and refuses the Run while the owner holds as many places
+as the limit or more, so a limit of N lets them hold at most N (409 `queueFull`, naming the team's or the Project's rules),
 for the person, an agent for them and an Automation alike; Runs under way
 go on. A place is an open Run at an unanswered Gate the stand-in has not
 answered, or an open Run of a Flow with a Gate of its own (`asking_flows`:
@@ -951,7 +951,7 @@ Automation), never started again. A firing starts nothing, and records why
 repository event about a Run's own branch (`own_branch`), its creator is
 no longer on its team (`creator_left_team`) or their account is an
 agent's (`agent_account`), the queue takes no more of the creator's Runs
-(`queue_full`: the Run API refuses the Run with `QueueFull` under the
+(`queue_full`: the Run API refuses the Run with `QueueFull` at the
 limit of the rules it would start under, the one the creator's own starts
 meet, counted as the Run is kept), a Run already runs on its task,
 whoever started it (`task_busy`: checked before the Run is created, and

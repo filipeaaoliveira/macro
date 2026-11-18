@@ -44,7 +44,7 @@ export default {
   startRun: 'Start run',
   startFailed: 'Couldn’t start the run. Please try again.',
   queueFull:
-    'Your queue is full: too many of your runs wait on you, or have yet to ask you anything, above this project’s queue limit. Answer some in Waiting on you, or cancel a run you no longer need, then start the run.',
+    'Your queue is full: as many of your runs wait on you, or have yet to ask you anything, as this project’s queue limit allows. Answer some in Waiting on you, or cancel one listed there that you no longer need, then start the run.',
   // A Run.
   runDetails: 'Run details',
   closeRun: 'Close run',
@@ -196,7 +196,7 @@ export default {
     'When no rule answers, the stand-in answers as the owner would, if it is sure enough, and says why. The owner can change its answer for ten minutes before the run goes on. It never answers a merge, a run that changes control files, or an agent’s question.',
   queueLimit: 'Limit the queue',
   queueLimitHint:
-    'Above this many of a person’s runs waiting on them, or yet to ask them anything, no new run of theirs starts, whoever starts it: the person, the Orchestrator or an automation. A run that never asks anything holds no place until it does. Runs under way go on.',
+    'Once this many of a person’s runs wait on them, or have yet to ask them anything, no new run of theirs starts, whoever starts it: the person, the Orchestrator or an automation. A run that never asks anything holds no place until it does. Runs under way go on.',
   queueLimitLabel: 'Queue limit',
   queueLimitUnit: 'waiting',
   orchestratorTitle: 'Orchestrator',

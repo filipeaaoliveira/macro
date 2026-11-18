@@ -1,7 +1,7 @@
 //! The Orchestrator through the Run API: an agent session in Macro chat
 //! answers Gates for the person from its code, with their own access, and
 //! is refused what the factory keeps for them in person; and a Run refused
-//! above the Queue limit says why.
+//! at the Queue limit says why.
 
 use agent_correlation::context::{Attribution, scope_attribution};
 use agent_correlation::scope::SessionScope;
@@ -194,10 +194,11 @@ async fn an_agent_s_answer_to_a_question_says_it_is_the_person_s() {
     assert!(refusal["message"].is_string());
 }
 
-/// A Run refused above the Queue limit says so with a code, to the person
-/// and to an agent starting it for them alike.
+/// A Run refused at the Queue limit, one place held under a limit of 1,
+/// says so with a code, to the person and to an agent starting it for
+/// them alike.
 #[tokio::test]
-async fn a_run_refused_above_the_queue_limit_says_why() {
+async fn a_run_refused_at_the_queue_limit_says_why() {
     let repo = FakeRepo::default();
     let router = records_router(&repo);
     let alice = MacroUserIdStr::try_from(ALICE.to_string()).expect("valid");
@@ -212,7 +213,7 @@ async fn a_run_refused_above_the_queue_limit_says_why() {
     repo.team_rules.lock().expect("rules").insert(
         team_id,
         OrchestratorDefinition {
-            queue_limit: Some(0),
+            queue_limit: Some(1),
             ..OrchestratorDefinition::DEFAULT
         },
     );

@@ -81,7 +81,7 @@ impl<S, Auth> FromRef<FactoryRouterState<S, Auth>> for MacroAuthorizationState<A
 /// Routes:
 /// - `GET /flows` — the built-in Flows a Run can be started of.
 /// - `POST /runs` — create a Run of a built-in Flow, owned by the acting
-///   user, and start it, unless it holds more places in its Queue than the
+///   user, and start it, unless it holds as many places in its Queue as the
 ///   Queue limit: Runs waiting on it, and Runs yet to reach their first Gate.
 /// - `GET /tasks/{task_id}/runs` — the caller's Runs on a task, newest
 ///   first.
@@ -294,9 +294,9 @@ where
 }
 
 /// Create a Run of a built-in Flow, owned by the caller, and start its
-/// workflow. Above the Queue limit of the Project it would start in, it is
+/// workflow. At the Queue limit of the Project it would start in, it is
 /// refused (409 `queueFull`, its message counting both): the caller holds
-/// more places in their Queue than the limit, a place being a Run waiting
+/// as many places in their Queue as the limit, a place being a Run waiting
 /// on them at a Gate or a question, or a Run of a Flow with a Gate that has
 /// not reached one yet (`GET /runs/waiting` lists both). The Runs under
 /// way go on.
@@ -789,7 +789,7 @@ pub enum RunErrorCode {
     /// The Run is Tampered, and approving its Gate needs
     /// `approvedControlFiles` listing its Tampered files.
     ControlFilesNotApproved,
-    /// The caller holds more places in their Queue than the Queue limit of
+    /// The caller holds as many places in their Queue as the Queue limit of
     /// the Project the Run would start in: Runs waiting on them at a Gate or
     /// a question, and Runs of a Flow with a Gate that have not reached one
     /// yet. No new Run starts until they answer some, or cancel one.

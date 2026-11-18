@@ -611,9 +611,9 @@ where
         // change which of its Gates a rule answers.
         let standing_rules = self.run_rules(&actor, team, task_id).await?;
         // The Run and its task are kept in one write, so a task deleted
-        // since it was checked leaves nothing behind. Above the Queue limit
-        // of the rules it would start under, counted in the same write, no
-        // new Run starts, whoever asks: the person, an agent for them, or
+        // since it was checked leaves nothing behind. Once the owner holds
+        // as many places as the Queue limit of the rules it would start
+        // under, counted in the same write, no new Run starts, whoever asks: the person, an agent for them, or
         // an Automation; starts at the same time are counted one after the
         // other.
         let asking_flows = self.asking_flows();

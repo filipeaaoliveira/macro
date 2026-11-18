@@ -203,9 +203,10 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `lock_timeout`); under a Queue limit it first counts the places the owner
   holds (`queue_places`: their open Runs at an unanswered Gate the stand-in
   has not answered, and those of the given `asking_flows` that have not
-  reached a Gate yet, through `factory_run_user_open_idx`, up to one past
-  the limit) and keeps nothing above it (`RunInsert::QueueFull`, with the
-  counts). `insert_run` takes the same lock with no limit.
+  reached a Gate yet, through `factory_run_user_open_idx`, up to the
+  limit) and keeps nothing once they hold as many as the limit
+  (`RunInsert::QueueFull`, with the counts), so a limit of N lets them
+  hold at most N. `insert_run` takes the same lock with no limit.
   `list_starting_runs` lists the second kind.
 - `factory_run.standing_rules`, `standing_rules_source` and
   `standing_rules_project_id` are set once, by `insert_run`; all null for

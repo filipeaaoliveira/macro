@@ -798,12 +798,12 @@ pub enum FactoryError {
     /// for the owner in person.
     #[error(transparent)]
     ReservedForAPerson(#[from] PersonOnly),
-    /// The person holds more places in their Queue than the Queue limit of
+    /// The person holds as many places in their Queue as the Queue limit of
     /// the rules a new Run of theirs would start under: Runs waiting on
     /// them at a Gate or a question, and Runs of a Flow with a Gate that
     /// have not reached one yet.
     #[error(
-        "your queue is full: {waiting} of your runs wait on you at a gate or question and {starting} more have yet to ask you anything, above the queue limit of {limit} {} sets; answer some, or cancel a run you no longer need, before a new run starts; runs under way go on",
+        "your queue is full: {waiting} of your runs wait on you at a gate or question and {starting} more have yet to ask you anything, which fills the queue limit of {limit} {} sets; answer some, or cancel a run you no longer need, before a new run starts; runs under way go on",
         queue_limit_source(*set_by)
     )]
     QueueFull {
@@ -812,7 +812,7 @@ pub enum FactoryError {
         /// Whose rules set it: the team's, or the Project's.
         set_by: RulesSource,
         /// The person's Runs waiting on them at a Gate or a question,
-        /// counted up to one past the limit with `starting`.
+        /// counted up to the limit with `starting`.
         waiting: u16,
         /// The person's Runs that hold a place before their first Gate.
         starting: u16,

@@ -32,7 +32,7 @@ pub trait RunRepository: Send + Sync + 'static {
     /// Keep `run` as [`Self::insert_run`] does, held to its owner's Queue: a
     /// start waits behind a lock on that owner's Queue, so starts at the
     /// same time are taken one after the other, and under `hold`'s limit it
-    /// is kept only while the owner holds no more places than the limit
+    /// is kept only while the owner holds fewer places than the limit
     /// (`RunInsert::QueueFull` otherwise, with the places counted).
     fn insert_run_in_queue(
         &self,

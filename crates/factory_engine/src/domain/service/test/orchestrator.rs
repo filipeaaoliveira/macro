@@ -375,19 +375,20 @@ fn julia_s_team(repo: &FakeRepo, definition: OrchestratorDefinition) -> Uuid {
     team_id
 }
 
-/// Above the Queue limit no new Run starts, whoever asks, and says why; a
-/// Run just started holds the place it will ask for; a Run already going
-/// goes on, and once the Queue is back at its limit Runs start again. A
-/// Project's own limit replaces the team's.
+/// At the Queue limit no new Run starts, whoever asks, and says why: a
+/// limit of 2 lets a person hold at most 2 places. A Run just started
+/// holds the place it will ask for; a Run already going goes on, and once
+/// the Queue is back under its limit Runs start again. A Project's own
+/// limit replaces the team's.
 #[tokio::test]
-async fn above_the_queue_limit_no_new_run_starts() {
+async fn at_the_queue_limit_no_new_run_starts() {
     let repo = FakeRepo::default();
     let workflows = FakeWorkflows::default();
     let service = code_service(&repo, &workflows, &FakeGithub::default());
     let team_id = julia_s_team(
         &repo,
         OrchestratorDefinition {
-            queue_limit: Some(1),
+            queue_limit: Some(2),
             ..OrchestratorDefinition::DEFAULT
         },
     );
@@ -410,7 +411,7 @@ async fn above_the_queue_limit_no_new_run_starts() {
     let first = waiting_at(&repo, "plan", "done", &["approve", "revise"]).await;
     let started = start()
         .await
-        .expect("one waits: at the limit, not above")
+        .expect("one waits: under the limit")
         .run
         .id;
 
@@ -420,7 +421,7 @@ async fn above_the_queue_limit_no_new_run_starts() {
         matches!(
             refused,
             Err(FactoryError::QueueFull {
-                limit: 1,
+                limit: 2,
                 waiting: 1,
                 starting: 1,
                 ..
@@ -461,7 +462,7 @@ async fn above_the_queue_limit_no_new_run_starts() {
     )
     .await
     .expect("recorded");
-    let again = start().await.expect("back at the limit").run.id;
+    let again = start().await.expect("back under the limit").run.id;
     for run in [started, again] {
         repo.end_run(run, RunOutcome::Cancelled)
             .await
@@ -502,7 +503,7 @@ async fn above_the_queue_limit_no_new_run_starts() {
         .insert((team_id, project), OrchestratorDefinition::DEFAULT);
     assert!(matches!(
         start().await,
-        Err(FactoryError::QueueFull { limit: 1, .. })
+        Err(FactoryError::QueueFull { limit: 2, .. })
     ));
     service
         .create_run(

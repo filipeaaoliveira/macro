@@ -22,9 +22,10 @@ export type OrchestratorDefinition = {
   taskThread?: boolean;
   standIn?: StandInKinds;
   /**
-   * The Queue limit: above this many places held by a person (Runs waiting
-   * on them at a Gate or a question, and Runs of a Flow with a Gate yet to
-   * reach one), no new Run of theirs starts. None sets no limit.
+   * The Queue limit: the most places a person may hold (Runs waiting on
+   * them at a Gate or a question, and Runs of a Flow with a Gate yet to
+   * reach one); once they hold this many, no new Run of theirs starts.
+   * None sets no limit.
    */
   queueLimit?: number | null;
   /** The kinds of Gate the Orchestrator may approve for the Run's owner. */

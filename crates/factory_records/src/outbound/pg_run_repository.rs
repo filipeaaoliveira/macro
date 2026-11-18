@@ -572,10 +572,10 @@ impl RunRepository for PgRunRepository {
                 &mut transaction,
                 run.user_id,
                 hold.asking_flows,
-                limit.saturating_add(1),
+                limit,
             )
             .await?;
-            if places.held() > limit {
+            if places.held() >= limit {
                 return Ok(RunInsert::QueueFull(places));
             }
         }
