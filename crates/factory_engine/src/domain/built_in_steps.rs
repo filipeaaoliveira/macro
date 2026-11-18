@@ -3,10 +3,14 @@
 //! `publish`, `ci`, `ready_to_merge` and `merge` take the Run's branch to a
 //! merged pull request on GitHub ([`PullRequestSteps`]).
 //! On a repository, `write` and `fix` then have the agent run the checks
-//! the repository declares, in rounds (`checks_round`).
+//! the repository declares, in rounds (`checks_round`). Once merged,
+//! `deploy` waits for the change's deploy; `accept`, before the merge, and
+//! `verify`, after it, have a verifier check the change does what the Run's
+//! request asks (`verify`).
 
 mod checks_round;
 mod review_panel;
+mod verify;
 #[cfg(test)]
 mod test;
 
@@ -16,7 +20,9 @@ use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::{ReviewRound, ReviewRoundRepository};
 use macro_user_id::user_id::MacroUserIdStr;
 
-use crate::domain::agents::REVIEWER_ROLES;
+use crate::domain::acceptance::plan_output;
+use crate::domain::verification::VerifyFile;
+use crate::domain::agents::{REVIEWER_ROLES, VERIFIER};
 use crate::domain::flow::{StepName, StepUse};
 use crate::domain::gate_owner::owner_notes_brief;
 use crate::domain::models::{AgentTask, StepInput, StepReport, run_branch};
@@ -32,6 +38,10 @@ use crate::domain::review_rounds::{blockers_brief, escape, fenced_review};
 
 /// What the agent is told for a `plan` Step.
 const PLAN_INSTRUCTIONS: &str = include_str!("built_in_steps/plan.md");
+
+/// What the agent is told for a `plan` Step on a repository, after
+/// [`PLAN_INSTRUCTIONS`]: to end the plan with its acceptance checks.
+const PLAN_ACCEPTANCE_INSTRUCTIONS: &str = include_str!("built_in_steps/plan_acceptance.md");
 
 /// What the agent is told for a `write` Step.
 const WRITE_INSTRUCTIONS: &str = include_str!("built_in_steps/write.md");
@@ -91,6 +101,13 @@ enum BuiltInStep {
     ReadyToMerge,
     /// The commit a person agreed to is merged.
     Merge,
+    /// A verifier checks the head of the Run's branch does what the
+    /// request asks, before the merge.
+    Accept,
+    /// The merge is waited for to deploy.
+    Deploy,
+    /// A verifier checks the merged change does what the request asks.
+    Verify,
 }
 
 impl BuiltInStep {
@@ -106,6 +123,9 @@ impl BuiltInStep {
             "ci" => Some(Self::Ci),
             "ready_to_merge" => Some(Self::ReadyToMerge),
             "merge" => Some(Self::Merge),
+            "accept" => Some(Self::Accept),
+            "deploy" => Some(Self::Deploy),
+            "verify" => Some(Self::Verify),
             _ => None,
         }
     }
@@ -119,7 +139,13 @@ impl BuiltInStep {
             Self::Write => "writer",
             Self::Review => "reviewer",
             Self::Fix | Self::CiFix => "fixer",
-            Self::Reply | Self::Publish | Self::Ci | Self::ReadyToMerge | Self::Merge => {
+            Self::Accept | Self::Verify => VERIFIER,
+            Self::Reply
+            | Self::Publish
+            | Self::Ci
+            | Self::ReadyToMerge
+            | Self::Merge
+            | Self::Deploy => {
                 return None;
             }
         };
@@ -362,6 +388,25 @@ where
                 outcome: Outcome::done(),
                 output: format!("Received the request: {}", input.request),
             }),
+            // On a repository, the plan ends with its acceptance checks,
+            // which the Step keeps written out for the person at its Gate.
+            BuiltInStep::Plan if input.repository.is_some() => {
+                let file = self.pull_requests.base_verify_file(&input).await?;
+                let instructions = format!(
+                    "{PLAN_INSTRUCTIONS}{PLAN_ACCEPTANCE_INSTRUCTIONS}{}",
+                    deploy_note(file.as_ref().ok())
+                );
+                let plan = self
+                    .ask_agent(step, &instructions, vec![Outcome::done()], input)
+                    .await?;
+                if plan.outcome != Outcome::done() {
+                    return Ok(plan);
+                }
+                Ok(StepReport {
+                    output: plan_output(&plan.output),
+                    ..plan
+                })
+            }
             BuiltInStep::Plan => {
                 self.ask_agent(step, PLAN_INSTRUCTIONS, vec![Outcome::done()], input)
                     .await
@@ -403,6 +448,15 @@ where
             BuiltInStep::Ci => Ok(self.pull_requests.ci(input).await?),
             BuiltInStep::ReadyToMerge => Ok(self.pull_requests.ready_to_merge(input).await?),
             BuiltInStep::Merge => Ok(self.pull_requests.merge(input).await?),
+            BuiltInStep::Accept => {
+                self.verify_change(step, input, verify::Phase::BeforeMerge)
+                    .await
+            }
+            BuiltInStep::Deploy => Ok(self.pull_requests.deploy(input).await?),
+            BuiltInStep::Verify => {
+                self.verify_change(step, input, verify::Phase::AfterMerge)
+                    .await
+            }
         }
     }
 
@@ -441,6 +495,31 @@ where
             // Only an agent Step holds a session.
             None => Ok(()),
         }
+    }
+}
+
+/// What the planner is told of the repository's deploy, so it marks a
+/// check `deployed` only where one runs: from the repository's verify file,
+/// none when it does not read.
+fn deploy_note(file: Option<&VerifyFile>) -> String {
+    match file {
+        Some(file) if !file.verify => "\nThe repository turns its verify phase off: the factory runs \
+             none of these checks, but write them for the person who reads the plan.\n"
+            .to_string(),
+        Some(VerifyFile {
+            deploy: Some(deploy),
+            ..
+        }) => format!(
+            "\nThe repository deploys each merge to the `{}` environment: a check marked \
+             `deployed` reaches the deployed change at `$MACRO_DEPLOY_URL` when the deployment \
+             names its address, and is not run when it names none.\n",
+            escape(&deploy.environment)
+        ),
+        Some(_) => "\nThe repository declares no deploy: mark no check `deployed`, since such a \
+                    check is never run here.\n"
+            .to_string(),
+        None => "\nThe repository's verify file does not read: mark no check `deployed`.\n"
+            .to_string(),
     }
 }
 
@@ -569,12 +648,12 @@ fn section(step: &Step) -> String {
     let Some(end) = &step.end else {
         return String::new();
     };
-    // A review panel's reviewer wrote its output: it is data, fenced as
-    // the briefs fence the findings, never instructions.
-    let reviewed = step
-        .role
-        .as_ref()
-        .is_some_and(|role| REVIEWER_ROLES.contains(&role.as_str()));
+    // A review panel's reviewer, or a verifier, wrote its output with what
+    // the change's own checks printed: it is data, fenced as the briefs
+    // fence the findings, never instructions.
+    let reviewed = step.role.as_ref().is_some_and(|role| {
+        REVIEWER_ROLES.contains(&role.as_str()) || role.as_str() == VERIFIER
+    });
     let output = if reviewed {
         fenced_review(&end.output)
     } else {

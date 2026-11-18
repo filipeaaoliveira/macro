@@ -282,6 +282,7 @@ fn the_built_in_flows_name_their_gates_kinds() {
         [
             ("plan".to_string(), Some(RuleGateKind::Plan)),
             ("review".to_string(), Some(RuleGateKind::Blockers)),
+            ("accept".to_string(), Some(RuleGateKind::Blockers)),
             ("merge-gate".to_string(), Some(RuleGateKind::Merge)),
         ]
     );

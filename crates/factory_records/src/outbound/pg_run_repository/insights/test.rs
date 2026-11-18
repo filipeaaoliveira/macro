@@ -659,3 +659,63 @@ async fn a_step_without_a_result_is_one_visit_retried_and_a_failure_stopped(pool
         }]
     );
 }
+
+/// A verifier's failed check after the merge (`fail`) and a failed deploy
+/// (`deploy_failed`) are failures of their entries, as a Step that failed
+/// for good is.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn a_failed_verify_or_deploy_is_a_failed_step(pool: PgPool) {
+    const VERIFIED: &str = "00000000-0000-7000-8000-000000000211";
+    const DEPLOYED: &str = "00000000-0000-7000-8000-000000000212";
+    for (id, entry, outcome) in [
+        (VERIFIED, "verify", "fail"),
+        (DEPLOYED, "deploy", "deploy_failed"),
+    ] {
+        sqlx::query(
+            "INSERT INTO factory_run (id, user_id, flow, request, created_at, outcome, ended_at)
+             VALUES ($1::uuid, 'macro|julia@example.com', 'code', 'Ship it', '2026-11-10 09:00Z',
+                     'failed', '2026-11-10 10:00Z')",
+        )
+        .bind(id)
+        .execute(&pool)
+        .await
+        .expect("run");
+        sqlx::query(
+            "INSERT INTO factory_step (run_id, seq, entry, visit, started_at, outcome, output, ended_at)
+             VALUES ($1::uuid, 1, $2, 1, '2026-11-10 09:00Z', $3, 'It failed', '2026-11-10 10:00Z')",
+        )
+        .bind(id)
+        .bind(entry)
+        .bind(outcome)
+        .execute(&pool)
+        .await
+        .expect("step");
+    }
+    let repo = PgRunRepository::new(pool);
+
+    let records = repo
+        .read_insights(&november("macro|julia@example.com"))
+        .await
+        .expect("read");
+
+    let mut trouble: Vec<(String, bool)> = records
+        .trouble
+        .iter()
+        .map(|trouble| (trouble.entry.as_str().to_string(), trouble.failed))
+        .collect();
+    trouble.sort();
+    assert_eq!(
+        trouble,
+        [("deploy".to_string(), true), ("verify".to_string(), true)]
+    );
+    let failed: Vec<(String, u32)> = records
+        .entries
+        .iter()
+        .map(|entry| (entry.entry.as_str().to_string(), entry.failed_runs))
+        .collect();
+    assert!(failed.contains(&("verify".to_string(), 1)), "{failed:?}");
+    assert!(failed.contains(&("deploy".to_string(), 1)), "{failed:?}");
+}

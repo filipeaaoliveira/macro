@@ -6,7 +6,7 @@ import CaretDownIcon from '@icon/system/regular/caret-down.svg';
 import { Badge, Button, Card, cn } from '@ui';
 import { CollapseTransition } from '@ui/components/CollapseTransition';
 import { createSignal, For, type JSX, Match, Show, Switch } from 'solid-js';
-import { flowWordLabel, flowWordText } from '../core/flow-words';
+import { fellShort, flowWordLabel, flowWordText } from '../core/flow-words';
 import {
   type BaseRequiredChecks,
   type CheckRound,
@@ -136,7 +136,13 @@ function TimelineStep(props: {
           }
         >
           {(end) => (
-            <Badge variant="outline" size="xs">
+            <Badge
+              variant="outline"
+              size="xs"
+              class={cn(
+                fellShort(end().outcome) && 'border-failure/30 text-failure'
+              )}
+            >
               {flowWordLabel(end().outcome)}
             </Badge>
           )}

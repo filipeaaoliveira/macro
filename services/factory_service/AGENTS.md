@@ -99,7 +99,11 @@ worker that walks each Run's Flow, in one process.
   `tests-reviewer`: each the definition does not list takes `reviewer`'s
   Agents, so a definition written for one reviewer keeps working, and lists
   one to give it Agents of its own. Without either, the service refuses to
-  start and names both. `reviewer` stays required: Runs started before the
+  start and names both. The `verifier`, which checks a change against its
+  request before and after its merge, takes `reviewer`'s Agents the same
+  way. It always works in a session of its own, never the writer's; list
+  Agents for it other than the writer's to have another agent check the
+  work. `reviewer` stays required: Runs started before the
   review panel review with it until they end. For example, with a
   backup for planning when the first Agent's quota runs out:
 

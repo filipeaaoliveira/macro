@@ -22,7 +22,7 @@ use crate::domain::gate_owner::{GateNotice, OwnerNote};
 use crate::domain::main_hold::{HoldTask, MainLook, MainWatch};
 use crate::domain::models::{
     AgentAnswer, AgentCommand, AgentTask, AgentTurn, Answerer, CodeRepository,
-    ControlFilesSettings, FactoryError, FlowSummary, HeadChecks, Merging, OpenPullRequest, Opening,
+    ControlFilesSettings, Deployment, FactoryError, FlowSummary, HeadChecks, Merging, OpenPullRequest, Opening,
     PullRequest, RepositoryAccess, RequiredChecks, RunDetail, RunFinish, RunStart,
     StandingRulesSettings, StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
 };
@@ -294,6 +294,37 @@ pub trait PullRequests: Send + Sync + 'static {
         base: &str,
         head: &str,
     ) -> impl Future<Output = Result<Option<Vec<ChangedFile>>, Self::Err>> + Send;
+
+    /// The newest `count` deployments of `repository` to `environment`,
+    /// newest first: of the commit `sha` only, when given.
+    fn deployments(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        sha: Option<&str>,
+        environment: &str,
+        count: u8,
+    ) -> impl Future<Output = Result<Vec<Deployment>, Self::Err>> + Send;
+
+    /// The first parent of the commit `sha` of `repository`: for a merge
+    /// commit, the base branch as it was before the merge. None for a
+    /// commit with no parent.
+    fn first_parent(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        sha: &str,
+    ) -> impl Future<Output = Result<Option<String>, Self::Err>> + Send;
+
+    /// Whether the commit `head` of `repository` contains the commit
+    /// `ancestor`: it is that commit, or comes after it.
+    fn contains(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        ancestor: &str,
+        head: &str,
+    ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
 
     /// Ask GitHub to open `pull_request` in `repository`.
     fn open(

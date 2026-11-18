@@ -564,10 +564,10 @@ async fn a_step_whose_worker_shuts_down_goes_on_at_once_on_the_next() {
 /// The agent of a `code` Run: it ends each Step it is asked for `done`, but
 /// a reviewer's with the next of `reviews` (`pass` once they run out:
 /// `changes` hands back a Blocker in the change, `outside` one in a file it
-/// does not touch), and a CI fix by pushing a commit whose checks pass. With
-/// `together`, the reviewers of a round answer only once all of them were
-/// asked. It says when it is asked for a Step, and keeps the Steps it was
-/// asked for, by name.
+/// does not touch), a CI fix by pushing a commit whose checks pass, and a
+/// verifier's with the next of `verdicts` (`pass` once they run out). With `together`, the reviewers of a round answer
+/// only once all of them were asked. It says when it is asked for a Step,
+/// and keeps the Steps it was asked for, by name.
 #[derive(Clone)]
 struct CodeAgent {
     github: FakeGithub,
@@ -575,6 +575,8 @@ struct CodeAgent {
     together: Option<Arc<tokio::sync::Barrier>>,
     steps: Arc<Mutex<Vec<String>>>,
     asked: Arc<Notify>,
+    /// What a verifier hands back, in turn: `pass` once they run out.
+    verdicts: Arc<Mutex<Vec<&'static str>>>,
 }
 
 /// What a reviewer hands back for `review`, one of [`CodeAgent`]'s
@@ -608,6 +610,7 @@ impl CodeAgent {
             together: None,
             steps: Arc::default(),
             asked: Arc::default(),
+            verdicts: Arc::default(),
         }
     }
 
@@ -651,6 +654,15 @@ impl StepAgent for CodeAgent {
                 }
                 github.checks = [ci(Some("success"))].into();
                 "done"
+            }
+            // The verifier ends with its next verdict.
+            "accept" | "verify" => {
+                let mut verdicts = self.verdicts.lock().expect("verdicts");
+                if verdicts.is_empty() {
+                    "pass"
+                } else {
+                    verdicts.remove(0)
+                }
             }
             _ => "done",
         };
@@ -1045,9 +1057,13 @@ async fn a_code_run_merges_its_pull_request_once_a_person_approves() {
     .await;
 
     assert!(matches!(ended, Ok(RunOutcome::Success)), "{ended:?}");
+    // The verifier checks the change before the pull request, and the
+    // merged change once its deploy is not needed.
     assert_eq!(
         agent.steps(),
-        ["plan", "write", "review", "review", "review"]
+        [
+            "plan", "write", "review", "review", "review", "accept", "verify"
+        ]
     );
     let github = github.state();
     assert_eq!(github.opened, 1);
@@ -1080,7 +1096,8 @@ async fn red_ci_is_fixed_and_the_fixed_commit_merges() {
     assert_eq!(
         agent.steps(),
         [
-            "plan", "write", "review", "review", "review", "ci_fix", "review", "review", "review"
+            "plan", "write", "review", "review", "review", "accept", "ci_fix", "review", "review",
+            "review", "accept", "verify"
         ]
     );
     let github = github.state();
@@ -1112,7 +1129,8 @@ async fn revising_or_cancelling_at_the_merge_question_merges_nothing() {
     assert_eq!(
         agent.steps(),
         [
-            "plan", "write", "review", "review", "review", "fix", "review", "review", "review"
+            "plan", "write", "review", "review", "review", "accept", "fix", "review", "review",
+            "review", "accept"
         ]
     );
     let github = github.state();
@@ -1164,6 +1182,76 @@ async fn a_review_that_keeps_finding_blockers_ends_the_run_for_a_person() {
     let github = github.state();
     assert_eq!(github.opened, 0);
     assert!(github.merges.is_empty());
+}
+
+/// The verifier's failure before the merge opens the `accept` entry's
+/// Blockers Gate, which the `fix_blockers` rule answers as it does a
+/// review's: the change is fixed, reviewed and checked again, then merges
+/// with no person asked.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "Temporal doesn't exist in CI"]
+async fn failed_acceptance_goes_to_the_blockers_rule_and_is_fixed() {
+    let github = FakeGithub::default();
+    github.state().checks = [ci(Some("success"))].into();
+    let agent = CodeAgent::new(&github);
+    *agent.verdicts.lock().expect("verdicts") = vec!["fail"];
+    let repo = FakeRepo::default();
+    let rules = RunRules {
+        definition: OrchestratorDefinition {
+            stand_in: factory_records::domain::standing_rules::StandInKinds {
+                plan: false,
+                blockers: false,
+            },
+            plan: true,
+            blockers: true,
+            merge: true,
+            owner_gates: false,
+            task_thread: false,
+            queue_limit: None,
+            orchestrator: factory_records::domain::standing_rules::OrchestratorKinds {
+                plan: false,
+                blockers: false,
+            },
+        },
+        source: RulesSource::Team,
+        project_id: None,
+    };
+
+    let ended = walk_code_with(
+        &agent,
+        &github,
+        &repo,
+        CodeWalk {
+            rules,
+            ..CodeWalk::default()
+        },
+        |_| async {},
+    )
+    .await;
+
+    assert!(matches!(ended, Ok(RunOutcome::Success)), "{ended:?}");
+    assert_eq!(
+        agent.steps(),
+        [
+            "plan", "write", "review", "review", "review", "accept", "fix", "review", "review",
+            "review", "accept", "verify"
+        ]
+    );
+    let ruled: Vec<StandingRule> = repo
+        .rule_answers
+        .lock()
+        .expect("answers")
+        .iter()
+        .map(|(_, _, rule)| *rule)
+        .collect();
+    assert_eq!(
+        ruled,
+        [
+            StandingRule::ApprovePlan,
+            StandingRule::FixBlockers,
+            StandingRule::MergeWhenGreen
+        ]
+    );
 }
 
 /// A Run whose Standing Rules decide every Gate goes from its plan to a

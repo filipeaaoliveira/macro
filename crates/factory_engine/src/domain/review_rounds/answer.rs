@@ -136,7 +136,7 @@ impl ReviewerAnswer {
 
 /// `text` without its last fenced `json` block (`json` in any case),
 /// trimmed, and the block.
-fn json_block(text: &str) -> Option<(String, &str)> {
+pub(crate) fn json_block(text: &str) -> Option<(String, &str)> {
     // ASCII lowercasing keeps every byte where it was, so places in it are
     // places in `text`.
     let lower = text.to_ascii_lowercase();

@@ -1,5 +1,6 @@
 //! Domain layer of the factory's engine.
 
+pub mod acceptance;
 pub mod agents;
 pub mod automations;
 pub mod built_in_flows;
@@ -26,3 +27,4 @@ pub mod session_agent;
 pub mod stand_in;
 pub mod standing_rules;
 pub mod task_thread;
+pub mod verification;

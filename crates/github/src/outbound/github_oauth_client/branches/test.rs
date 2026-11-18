@@ -213,3 +213,74 @@ async fn compared_files_keep_their_hunks_and_a_comparison_cut_short_is_unknown()
     assert_eq!(files, None);
     cut.finish();
 }
+
+/// A file read at a commit that holds none is none: the commit's own read,
+/// not a branch's, tells a missing file from a commit out of reach.
+#[tokio::test]
+async fn a_missing_file_at_a_commit_is_none() {
+    let commit = "3333333333333333333333333333333333333333";
+    let missing = MockServer::start_many(vec![
+        MockResponse {
+            status: "404 Not Found",
+            body: r#"{"message":"Not Found"}"#.to_string(),
+        },
+        MockResponse {
+            status: "200 OK",
+            body: r#"{"sha":"3333333333333333333333333333333333333333","parents":[]}"#.to_string(),
+        },
+    ]);
+    let client = GithubOauthImpl::with_api_base_url(missing.base_url.clone());
+
+    let text = client
+        .get_file_text("token", "macro", "app", commit, ".macro/verify.json")
+        .await
+        .unwrap();
+
+    assert_eq!(text, None);
+    let requests = missing.finish_all();
+    assert!(
+        requests[1].starts_with(&format!("GET /repos/macro/app/commits/{commit} HTTP/1.1")),
+        "{}",
+        requests[1]
+    );
+}
+
+#[tokio::test]
+async fn a_commit_s_parents_are_read_first_first() {
+    let (server, client) = answering(
+        "200 OK",
+        r#"{"sha":"m","parents":[{"sha":"base"},{"sha":"branch"}]}"#,
+    );
+
+    let parents = client
+        .get_commit_parents("token", "macro", "app", "m")
+        .await
+        .unwrap();
+
+    assert_eq!(parents, ["base", "branch"]);
+    assert!(server.finish().starts_with("GET /repos/macro/app/commits/m HTTP/1.1"));
+}
+
+/// A commit contains another when it is that commit or comes after it,
+/// never when it is behind or beside it.
+#[tokio::test]
+async fn a_commit_contains_those_it_comes_after() {
+    for (status, contains) in [
+        ("ahead", true),
+        ("identical", true),
+        ("behind", false),
+        ("diverged", false),
+    ] {
+        let (server, client) = answering("200 OK", &format!(r#"{{"status":"{status}"}}"#));
+        let read = client
+            .commit_contains("token", "macro", "app", "merged", "later")
+            .await
+            .unwrap();
+        assert_eq!(read, contains, "{status}");
+        assert!(
+            server
+                .finish()
+                .starts_with("GET /repos/macro/app/compare/merged...later?per_page=1 HTTP/1.1")
+        );
+    }
+}

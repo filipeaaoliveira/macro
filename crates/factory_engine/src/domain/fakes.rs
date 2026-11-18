@@ -31,7 +31,8 @@ use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
 use crate::domain::models::{
-    Check, CheckState, CheckSuite, CodeRepository, HeadChecks, Merging, OpenPullRequest, Opening,
+    Check, CheckState, CheckSuite, CodeRepository, Deployment, HeadChecks, Merging, OpenPullRequest,
+    Opening,
     PullRequest, PullRequestState, RepositoryAccess, RequiredChecks,
 };
 use crate::domain::ports::{
@@ -1314,6 +1315,15 @@ pub(crate) struct FakeGithubState {
     pub(crate) diffs: BTreeMap<(String, String), Vec<ChangedFile>>,
     /// The head commit of the Run's branch; none before it is pushed.
     pub(crate) head: Option<String>,
+    /// The deployments to the environment each read shows next, newest
+    /// first, in order; the last list stays once the others were read. A
+    /// read of one commit's sees only its own.
+    pub(crate) deployments: VecDeque<Vec<Deployment>>,
+    /// The commits (`any` for none) and environments whose deployments
+    /// were read, in order.
+    pub(crate) deployment_reads: Vec<(String, String)>,
+    /// The pairs of commits whose second contains the first.
+    pub(crate) descendants: BTreeSet<(String, String)>,
 }
 
 /// GitHub in memory, for one Run's branch: opening its pull request makes
@@ -1331,6 +1341,13 @@ impl FakeGithub {
     /// The commit an opened pull request's head is at.
     pub(crate) const HEAD: &str = "1111111111111111111111111111111111111111";
 
+    /// The commit merging the pull request makes on its base.
+    pub(crate) const MERGED: &str = "2222222222222222222222222222222222222222";
+
+    /// The base branch as it was before the merge: [`Self::MERGED`]'s
+    /// first parent.
+    pub(crate) const BASE: &str = "3333333333333333333333333333333333333333";
+
     /// GitHub's id of the CI app whose runs [`ci`] makes.
     pub(crate) const ACTIONS: u64 = 15368;
 
@@ -1347,6 +1364,7 @@ impl FakeGithub {
             url: "https://github.com/macro/app/pull/7".to_string(),
             state: PullRequestState::Open,
             head_sha: Self::HEAD.to_string(),
+            merge_commit: None,
         });
         github.state().checks = [checks].into();
         github
@@ -1555,6 +1573,7 @@ impl PullRequests for FakeGithub {
             url: format!("{}/pull/7", repository.url()),
             state: PullRequestState::Open,
             head_sha: Self::HEAD.to_string(),
+            merge_commit: None,
         });
         Ok(Opening::Opened)
     }
@@ -1578,7 +1597,57 @@ impl PullRequests for FakeGithub {
             return Ok(Merging::HeadChanged);
         }
         pull_request.state = PullRequestState::Merged;
+        pull_request.merge_commit = Some(Self::MERGED.to_string());
         Ok(Merging::Merged)
+    }
+
+    async fn deployments(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        sha: Option<&str>,
+        environment: &str,
+        count: u8,
+    ) -> Result<Vec<Deployment>, FakeGithubError> {
+        let mut state = self.state();
+        state.deployment_reads.push((
+            sha.map_or_else(|| "any".to_string(), str::to_string),
+            environment.to_string(),
+        ));
+        let listed = if state.deployments.len() > 1 {
+            state.deployments.pop_front()
+        } else {
+            state.deployments.front().cloned()
+        };
+        Ok(listed
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|deployment| sha.is_none_or(|sha| deployment.commit == sha))
+            .take(usize::from(count))
+            .collect())
+    }
+
+    async fn first_parent(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        _sha: &str,
+    ) -> Result<Option<String>, FakeGithubError> {
+        Ok(Some(Self::BASE.to_string()))
+    }
+
+    async fn contains(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        ancestor: &str,
+        head: &str,
+    ) -> Result<bool, FakeGithubError> {
+        let state = self.state();
+        Ok(ancestor == head
+            || state
+                .descendants
+                .contains(&(ancestor.to_string(), head.to_string())))
     }
 }
 

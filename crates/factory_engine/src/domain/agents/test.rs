@@ -165,6 +165,7 @@ fn the_review_panel_roles_default_to_the_reviewer() {
         "writer": ["primary"],
         "reviewer": ["backup"],
         "tests-reviewer": ["primary"],
+        "verifier": ["primary"],
         "fixer": ["primary"]
     }));
     let no_reviewer = definition(json!({
@@ -188,6 +189,13 @@ fn the_review_panel_roles_default_to_the_reviewer() {
         [agent("backup")]
     );
     assert_eq!(own_tests.for_role(&role("other-reviewer")), []);
+    // The verifier takes `reviewer`'s Agents unless the definition lists
+    // its own, so a definition written before it keeps working.
+    assert_eq!(
+        single.for_role(&role("verifier")),
+        [agent("backup"), agent("primary")]
+    );
+    assert_eq!(own_tests.for_role(&role("verifier")), [agent("primary")]);
 
     let refused = no_reviewer.fills_built_in_flows();
     assert_eq!(
@@ -213,6 +221,7 @@ fn the_reviewer_stays_required_for_runs_in_flight() {
             "correctness-reviewer": ["primary"],
             "scope-reviewer": ["primary"],
             "tests-reviewer": ["primary"],
+            "verifier": ["primary"],
             "fixer": ["primary"]
         }
     }))

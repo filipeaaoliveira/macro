@@ -56,10 +56,13 @@ fn a_passing_review_goes_through_ci_to_the_merge_question() {
             "approve",
             "done",
             "pass",
+            "pass",
             "published",
             "green",
             "approve",
             "merged",
+            "deployed",
+            "pass",
         ],
     );
 
@@ -69,10 +72,13 @@ fn a_passing_review_goes_through_ci_to_the_merge_question() {
             "plan#1",
             "write#1",
             "review#1",
+            "accept#1",
             "publish#1",
             "ci#1",
             "merge-gate#1",
-            "merge#1"
+            "merge#1",
+            "deploy#1",
+            "verify#1"
         ]
     );
     assert_eq!(end, Ok(RunOutcome::Success));
@@ -221,18 +227,23 @@ fn red_ci_is_fixed_reviewed_again_and_goes_green() {
             "changes",
             "done",
             "pass",
+            "pass",
             "published",
             "red",
             "done",
+            "pass",
             "pass",
             "published",
             "green",
             "approve",
             "merged",
+            "not_needed",
+            "pass",
         ],
     );
 
-    // The review had used two visits; the reset lets it run from #1 again.
+    // The review had used two visits; the reset lets it, and the
+    // acceptance after it, run from #1 again.
     assert_eq!(
         steps,
         [
@@ -241,14 +252,18 @@ fn red_ci_is_fixed_reviewed_again_and_goes_green() {
             "review#1",
             "fix#1",
             "review#2",
+            "accept#1",
             "publish#1",
             "ci#1",
             "ci-fix#1",
             "review#1",
+            "accept#1",
             "publish#2",
             "ci#2",
             "merge-gate#1",
-            "merge#1"
+            "merge#1",
+            "deploy#1",
+            "verify#1"
         ]
     );
     assert_eq!(end, Ok(RunOutcome::Success));
@@ -256,9 +271,9 @@ fn red_ci_is_fixed_reviewed_again_and_goes_green() {
 
 #[test]
 fn ci_that_stays_red_after_three_fixes_is_left_for_a_person() {
-    let mut outcomes = vec!["approve", "done", "pass", "published", "red"];
+    let mut outcomes = vec!["approve", "done", "pass", "pass", "published", "red"];
     for _ in 0..3 {
-        outcomes.extend(["done", "pass", "published", "red"]);
+        outcomes.extend(["done", "pass", "pass", "published", "red"]);
     }
 
     let (steps, end) = walk(&flow(CODE_FLOW), &outcomes);
@@ -282,15 +297,18 @@ fn a_person_sending_the_merge_back_has_the_change_fixed_and_asked_again() {
             "approve",
             "done",
             "pass",
+            "pass",
             "published",
             "green",
             "revise",
             "done",
             "pass",
+            "pass",
             "published",
             "green",
             "approve",
             "merged",
+            "off",
         ],
     );
 
@@ -300,15 +318,18 @@ fn a_person_sending_the_merge_back_has_the_change_fixed_and_asked_again() {
             "plan#1",
             "write#1",
             "review#1",
+            "accept#1",
             "publish#1",
             "ci#1",
             "merge-gate#1",
             "fix#1",
             "review#1",
+            "accept#1",
             "publish#2",
             "ci#2",
             "merge-gate#2",
-            "merge#1"
+            "merge#1",
+            "deploy#1"
         ]
     );
     assert_eq!(end, Ok(RunOutcome::Success));
@@ -326,18 +347,19 @@ fn a_revise_at_the_merge_question_is_reviewed_again_and_the_question_is_capped()
         "changes",
         "done",
         "pass",
+        "off",
         "published",
         "green",
     ];
     for _ in 0..3 {
-        outcomes.extend(["revise", "done", "pass", "published", "green"]);
+        outcomes.extend(["revise", "done", "pass", "off", "published", "green"]);
     }
 
     let (steps, end) = walk(&flow(CODE_FLOW), &outcomes);
 
     // After three reviews, the first revise is still reviewed: the reset
     // counts its visits from one.
-    assert_eq!(steps[9..12], ["merge-gate#1", "fix#3", "review#1"]);
+    assert_eq!(steps[10..13], ["merge-gate#1", "fix#3", "review#1"]);
     assert_eq!(
         steps
             .iter()
@@ -356,6 +378,7 @@ fn a_head_that_moved_before_the_merge_goes_back_to_ci() {
             "approve",
             "done",
             "pass",
+            "pass",
             "published",
             "green",
             "approve",
@@ -363,12 +386,22 @@ fn a_head_that_moved_before_the_merge_goes_back_to_ci() {
             "green",
             "approve",
             "merged",
+            "deployed",
+            "pass",
         ],
     );
 
     assert_eq!(
-        steps[5..],
-        ["merge-gate#1", "merge#1", "ci#2", "merge-gate#2", "merge#2"]
+        steps[6..],
+        [
+            "merge-gate#1",
+            "merge#1",
+            "ci#2",
+            "merge-gate#2",
+            "merge#2",
+            "deploy#1",
+            "verify#1"
+        ]
     );
     assert_eq!(end, Ok(RunOutcome::Success));
 }
@@ -376,7 +409,10 @@ fn a_head_that_moved_before_the_merge_goes_back_to_ci() {
 #[test]
 fn nothing_to_write_or_a_refused_pull_request_is_left_for_a_person() {
     let (unchanged, unchanged_end) = walk(&flow(CODE_FLOW), &["approve", "unchanged"]);
-    let (refused, refused_end) = walk(&flow(CODE_FLOW), &["approve", "done", "pass", "refused"]);
+    let (refused, refused_end) = walk(
+        &flow(CODE_FLOW),
+        &["approve", "done", "pass", "pass", "refused"],
+    );
 
     assert_eq!(unchanged, ["plan#1", "write#1"]);
     assert_eq!(unchanged_end, Ok(RunOutcome::Manual));
@@ -566,6 +602,7 @@ fn a_held_merge_asks_again_even_after_tampered_merges_went_back() {
             "approve",
             "done",
             "pass",
+            "pass",
             "published",
             "green",
             "approve",
@@ -578,11 +615,13 @@ fn a_held_merge_asks_again_even_after_tampered_merges_went_back() {
             "held",
             "approve",
             "merged",
+            "deployed",
+            "pass",
         ],
     );
 
     assert_eq!(
-        steps[5..],
+        steps[6..],
         [
             "merge-gate#1",
             "merge#1",
@@ -594,6 +633,8 @@ fn a_held_merge_asks_again_even_after_tampered_merges_went_back() {
             "merge#3",
             "merge-gate#1",
             "merge#4",
+            "deploy#1",
+            "verify#1",
         ]
     );
     assert_eq!(end, Ok(RunOutcome::Success));
@@ -663,4 +704,147 @@ fn a_flow_without_questions_reads_and_writes_as_before() {
     assert_eq!(written["questions"], 2);
     let read: Flow = serde_json::from_value(written).expect("reads back");
     assert_eq!(read.questions, Some(2));
+}
+
+/// Before the merge, a verifier checks the change once the review passed:
+/// its Blockers Gate's `fix` sends it to a fix, through the review again
+/// from its first visit, and it is checked again. Its last visit's failure
+/// routes `unresolved`, which leaves the branch for a person with no fix
+/// after it; so does `stop`. Its failures never use up review rounds.
+#[test]
+fn acceptance_that_fails_before_the_merge_goes_back_to_be_fixed() {
+    let (steps, end) = walk(
+        &flow(CODE_FLOW),
+        &[
+            "approve",
+            "done",
+            "pass",
+            "fix",
+            "done",
+            "pass",
+            "pass",
+            "published",
+            "green",
+            "approve",
+            "merged",
+            "off",
+        ],
+    );
+    assert_eq!(
+        steps[..9],
+        [
+            "plan#1",
+            "write#1",
+            "review#1",
+            "accept#1",
+            "fix#1",
+            "review#1",
+            "accept#2",
+            "publish#1",
+            "ci#1"
+        ]
+    );
+    assert_eq!(end, Ok(RunOutcome::Success));
+
+    let (steps, end) = walk(
+        &flow(CODE_FLOW),
+        &[
+            "approve",
+            "done",
+            "changes",
+            "done",
+            "changes",
+            "done",
+            "pass",
+            "fix",
+            "done",
+            "pass",
+            "fix",
+            "done",
+            "pass",
+            "unresolved",
+        ],
+    );
+    assert_eq!(steps.last().map(String::as_str), Some("accept#3"));
+    assert!(steps.iter().all(|step| step != "fix#5"), "{steps:?}");
+    assert_eq!(end, Ok(RunOutcome::Manual));
+
+    let (steps, end) = walk(&flow(CODE_FLOW), &["approve", "done", "pass", "stop"]);
+    assert_eq!(steps.last().map(String::as_str), Some("accept#1"));
+    assert_eq!(end, Ok(RunOutcome::Manual));
+}
+
+/// Once merged, the Run waits for the deploy, then a verifier checks the
+/// merged change: a failed check fails the Run, as does a failed deploy;
+/// a repository that turns the Phase off ends the Run at its merge, and a
+/// deploy that never comes, or a Step that crashed, leaves the Run for a
+/// person.
+#[test]
+fn a_merged_change_is_verified_and_its_failure_fails_the_run() {
+    let merged = ["approve", "done", "pass", "pass", "published", "green", "approve", "merged"];
+    let after = |outcomes: &[&'static str]| {
+        let mut all = merged.to_vec();
+        all.extend_from_slice(outcomes);
+        let (steps, end) = walk(&flow(CODE_FLOW), &all);
+        (steps[merged.len()..].to_vec(), end)
+    };
+
+    assert_eq!(
+        after(&["deployed", "pass"]),
+        (
+            vec!["deploy#1".to_string(), "verify#1".to_string()],
+            Ok(RunOutcome::Success)
+        )
+    );
+    assert_eq!(
+        after(&["not_needed", "fail"]),
+        (
+            vec!["deploy#1".to_string(), "verify#1".to_string()],
+            Ok(RunOutcome::Failed)
+        )
+    );
+    assert_eq!(
+        after(&["deploy_failed"]),
+        (vec!["deploy#1".to_string()], Ok(RunOutcome::Failed))
+    );
+    assert_eq!(
+        after(&["off"]),
+        (vec!["deploy#1".to_string()], Ok(RunOutcome::Success))
+    );
+    for left in ["timeout", "unreadable"] {
+        assert_eq!(
+            after(&[left]),
+            (vec!["deploy#1".to_string()], Ok(RunOutcome::Manual)),
+            "{left}"
+        );
+    }
+    assert_eq!(after(&["not_needed", "off"]).1, Ok(RunOutcome::Success));
+    // A verifier's or a deploy's Step that failed for good, a crash rather
+    // than a failed check, leaves the Run for a person: it never fails the
+    // Run, nor goes on to the entry below.
+    assert_eq!(after(&["failed"]).1, Ok(RunOutcome::Manual));
+    assert_eq!(after(&["deployed", "failed"]).1, Ok(RunOutcome::Manual));
+}
+
+/// The `code` Flow as Runs in flight carry it, from before the verify
+/// Phase: their workflow's input holds it, so they keep walking it and end
+/// at their merge, never reaching a Step a worker added since.
+const REVIEW_PANEL_CODE_FLOW: &str = include_str!("review_panel_code.json");
+
+#[test]
+fn a_run_in_flight_on_the_code_flow_before_verify_ends_at_its_merge() {
+    let old = flow(REVIEW_PANEL_CODE_FLOW);
+    assert!(
+        old.entries
+            .iter()
+            .all(|entry| !["accept", "deploy", "verify"].contains(&entry.step.as_str()))
+    );
+
+    let (steps, end) = walk(
+        &old,
+        &["approve", "done", "pass", "published", "green", "approve", "merged"],
+    );
+
+    assert_eq!(steps.last().map(String::as_str), Some("merge#1"));
+    assert_eq!(end, Ok(RunOutcome::Success));
 }

@@ -20,3 +20,21 @@ export function flowWordText(word: string): string {
     .map((part) => (ACRONYMS.has(part) ? part.toUpperCase() : part))
     .join(' ');
 }
+
+/**
+ * Step outcomes that say its work fell short: a failure, checks that stayed
+ * red, a verification that failed, a deploy that failed, or Blockers left
+ * unresolved. Shown in the failure tone.
+ */
+const SHORT_OUTCOMES = new Set([
+  'failed',
+  'red',
+  'fail',
+  'deploy_failed',
+  'unresolved',
+]);
+
+/** Whether a Step's `outcome` says its work fell short. */
+export function fellShort(outcome: string): boolean {
+  return SHORT_OUTCOMES.has(outcome);
+}

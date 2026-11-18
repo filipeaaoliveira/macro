@@ -150,8 +150,8 @@ impl RunInsightsRepository for PgRunRepository {
                 SELECT s.run_id, s.entry, s.outcome, s.started_at, s.ended_at,
                        s.outcome IS DISTINCT FROM 'question'
                            AND NOT (s.outcome = 'no_result' AND g.answer = 'retry') AS visit,
-                       s.outcome = 'failed' OR (s.outcome = 'no_result' AND g.answer = 'stop')
-                           AS failed,
+                       s.outcome IN ('failed', 'fail', 'deploy_failed')
+                           OR (s.outcome = 'no_result' AND g.answer = 'stop') AS failed,
                        CASE WHEN s.outcome IN ('question', 'no_result') THEN NULL
                            ELSE g.opened_at END AS opened_at,
                        CASE WHEN s.outcome IN ('question', 'no_result') THEN NULL
@@ -312,7 +312,8 @@ impl RunInsightsRepository for PgRunRepository {
                         s.entry,
                         s.run_id,
                         coalesce(bool_or(
-                            s.outcome = 'failed' OR (s.outcome = 'no_result' AND g.answer = 'stop')
+                            s.outcome IN ('failed', 'fail', 'deploy_failed')
+                                OR (s.outcome = 'no_result' AND g.answer = 'stop')
                         ), false) AS failed,
                         count(*) FILTER (
                             WHERE s.outcome IS DISTINCT FROM 'question'

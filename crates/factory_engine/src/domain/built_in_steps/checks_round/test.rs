@@ -20,6 +20,7 @@ use crate::domain::models::{
 use crate::domain::ports::{AgentFailure, Retryable, StepAgent, StepExecutor};
 use crate::domain::pull_request_steps::PullRequestSteps;
 
+mod acceptance;
 mod verified;
 
 #[derive(Debug, Clone, thiserror::Error)]

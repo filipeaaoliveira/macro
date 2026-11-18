@@ -15,7 +15,8 @@ use github::outbound::github_oauth_client::GithubOauthImpl;
 use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::models::{
-    Check, CheckState, CheckSuite, CodeRepository, CommitStatus, HeadChecks, Merging,
+    Check, CheckState, CheckSuite, CodeRepository, CommitStatus, Deployment, DeploymentState,
+    HeadChecks, Merging,
     OpenPullRequest, Opening, PullRequest, PullRequestState, RepositoryAccess, RequiredCheck,
     RequiredChecks,
 };
@@ -249,6 +250,7 @@ fn pull_request(found: GithubPullRequestHead) -> PullRequest {
         url: found.html_url,
         state,
         head_sha: found.head_sha,
+        merge_commit: found.merge_commit_sha,
     }
 }
 
@@ -418,6 +420,67 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
                 .collect(),
             complete: required.complete,
         }))
+    }
+
+    #[tracing::instrument(err, skip(self, owner))]
+    async fn deployments(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        sha: Option<&str>,
+        environment: &str,
+        count: u8,
+    ) -> Result<Vec<Deployment>, GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        let deployments = self
+            .github
+            .list_deployments(
+                &token,
+                repository.owner(),
+                repository.name(),
+                sha,
+                environment,
+                count,
+            )
+            .await?;
+        Ok(deployments
+            .into_iter()
+            .map(|deployment| Deployment {
+                commit: deployment.sha,
+                state: DeploymentState::of_status(deployment.state.as_deref()),
+                url: deployment.environment_url,
+            })
+            .collect())
+    }
+
+    #[tracing::instrument(err, skip(self, owner))]
+    async fn first_parent(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        sha: &str,
+    ) -> Result<Option<String>, GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        let parents = self
+            .github
+            .get_commit_parents(&token, repository.owner(), repository.name(), sha)
+            .await?;
+        Ok(parents.into_iter().next())
+    }
+
+    #[tracing::instrument(err, skip(self, owner))]
+    async fn contains(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        ancestor: &str,
+        head: &str,
+    ) -> Result<bool, GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        Ok(self
+            .github
+            .commit_contains(&token, repository.owner(), repository.name(), ancestor, head)
+            .await?)
     }
 
     #[tracing::instrument(err, skip(self, owner, pull_request), fields(branch = %pull_request.branch))]

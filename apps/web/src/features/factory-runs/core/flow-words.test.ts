@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { flowWordLabel, flowWordText } from './flow-words';
+import { fellShort, flowWordLabel, flowWordText } from './flow-words';
 
 describe('flow words', () => {
   it('reads a Flow word as a label, acronyms in capitals', () => {
@@ -12,5 +12,20 @@ describe('flow words', () => {
   it('keeps a word lowercase inside a sentence, but not an acronym', () => {
     expect(flowWordText('ci-fix')).toBe('CI fix');
     expect(flowWordText('write')).toBe('write');
+  });
+
+  it('names the outcomes that fell short, a failed verify and deploy among them', () => {
+    for (const outcome of [
+      'failed',
+      'red',
+      'fail',
+      'deploy_failed',
+      'unresolved',
+    ]) {
+      expect(fellShort(outcome)).toBe(true);
+    }
+    for (const outcome of ['done', 'pass', 'deployed', 'not_needed', 'off']) {
+      expect(fellShort(outcome)).toBe(false);
+    }
   });
 });

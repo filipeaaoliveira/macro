@@ -34,6 +34,21 @@ struct BranchCommit {
 }
 
 #[derive(serde::Deserialize)]
+struct CommitResponse {
+    parents: Vec<BranchCommit>,
+}
+
+#[derive(serde::Deserialize)]
+struct CompareStatus {
+    status: String,
+}
+
+/// Whether `text` is a commit's full id: 40 hexadecimal digits.
+fn is_commit_id(text: &str) -> bool {
+    text.len() == 40 && text.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+#[derive(serde::Deserialize)]
 struct CompareResponse {
     #[serde(default)]
     files: Option<Vec<CompareFile>>,
@@ -88,10 +103,11 @@ impl GithubOauthImpl {
         }
     }
 
-    /// The text of the file at `path` on `branch`; `None` when the branch
-    /// holds no file there (a folder there is not one). A branch or
-    /// repository the user cannot reach is
-    /// [`GithubError::RepositoryUnavailable`], never a missing file.
+    /// The text of the file at `path` on `branch`, or at a commit when
+    /// `branch` is a commit's full id; `None` when it holds no file there (a
+    /// folder there is not one). A branch, commit or repository the user
+    /// cannot reach is [`GithubError::RepositoryUnavailable`], never a
+    /// missing file.
     #[tracing::instrument(skip(self, access_token), err)]
     pub async fn get_file_text(
         &self,
@@ -111,17 +127,17 @@ impl GithubOauthImpl {
             .await;
         let value = match read {
             Ok(value) => value,
-            // GitHub answers a missing file, a missing branch and a
-            // repository out of reach alike: the branch's own read tells
-            // them apart.
+            // GitHub answers a missing file, a missing branch or commit and
+            // a repository out of reach alike: the branch's, or the
+            // commit's, own read tells them apart.
             Err(GithubError::RepositoryUnavailable) => {
+                let at = if is_commit_id(branch) {
+                    format!("/repos/{owner}/{repo}/commits/{branch}")
+                } else {
+                    format!("/repos/{owner}/{repo}/branches/{branch}")
+                };
                 let _: serde_json::Value = self
-                    .read(
-                        access_token,
-                        &format!("/repos/{owner}/{repo}/branches/{branch}"),
-                        &[],
-                        "failed to read a branch",
-                    )
+                    .read(access_token, &at, &[], "failed to read a branch")
                     .await?;
                 return Ok(None);
             }
@@ -227,5 +243,49 @@ impl GithubOauthImpl {
             paths.push(file.filename);
         }
         Ok(Some(paths))
+    }
+
+    /// The parents of the commit `sha`, its first the branch it was made
+    /// on; a commit or repository the user cannot reach is
+    /// [`GithubError::RepositoryUnavailable`].
+    #[tracing::instrument(skip(self, access_token), err)]
+    pub async fn get_commit_parents(
+        &self,
+        access_token: &str,
+        owner: &str,
+        repo: &str,
+        sha: &str,
+    ) -> Result<Vec<String>, GithubError> {
+        let commit: CommitResponse = self
+            .read(
+                access_token,
+                &format!("/repos/{owner}/{repo}/commits/{sha}"),
+                &[],
+                "failed to read a commit",
+            )
+            .await?;
+        Ok(commit.parents.into_iter().map(|parent| parent.sha).collect())
+    }
+
+    /// Whether the commit `head` contains the commit `ancestor`: it is that
+    /// commit, or comes after it.
+    #[tracing::instrument(skip(self, access_token), err)]
+    pub async fn commit_contains(
+        &self,
+        access_token: &str,
+        owner: &str,
+        repo: &str,
+        ancestor: &str,
+        head: &str,
+    ) -> Result<bool, GithubError> {
+        let compared: CompareStatus = self
+            .read(
+                access_token,
+                &format!("/repos/{owner}/{repo}/compare/{ancestor}...{head}"),
+                &[("per_page", "1")],
+                "failed to compare commits",
+            )
+            .await?;
+        Ok(matches!(compared.status.as_str(), "ahead" | "identical"))
     }
 }

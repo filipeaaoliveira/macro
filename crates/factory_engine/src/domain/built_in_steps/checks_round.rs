@@ -78,7 +78,7 @@ const CHECK_TIMEOUT: Duration = Duration::from_secs(DEFAULT_CHECK_TIMEOUT_SECS);
 /// How long one attempt of the Step runs checks, from its start: short of
 /// its activity's 30 minutes, as a CI wait is. The checks still to run then
 /// go on in the next attempt.
-const ATTEMPT_CHECKS_FOR: Duration = Duration::from_secs(25 * 60);
+pub(super) const ATTEMPT_CHECKS_FOR: Duration = Duration::from_secs(25 * 60);
 
 /// How long the Run branch's head is waited for on GitHub when it is not
 /// there at once, before the round is left to a retry.
@@ -220,7 +220,8 @@ where
                     .map(|()| Ran::Ended)
             } else {
                 let verified_before = rounds.iter().any(|round| round.verified);
-                self.run_round(step, input, latest, end_by, checks_until, verified_before)
+                let target = Checked::Branch { verified_before };
+                self.run_round(step, input, latest, end_by, checks_until, &target)
                     .await
             };
             // An agent whose quota ran out cannot go on, and no other Agent
@@ -379,7 +380,7 @@ where
         Ok(None)
     }
 
-    async fn record_round(
+    pub(super) async fn record_round(
         &self,
         input: StepInput<'_>,
         round: u8,
@@ -402,18 +403,18 @@ where
             .map_err(records)
     }
 
-    /// Run `round`'s recorded checks in the agent's checkout, or, where its
-    /// session's runtime runs no command, have the agent run them; and
-    /// record how they went. A round the agent was already asked to run,
-    /// by an earlier attempt, stays the agent's.
-    async fn run_round(
+    /// Run `round`'s recorded checks in the agent's checkout, at what
+    /// `target` checks, or, where its session's runtime runs no command,
+    /// have the agent run them; and record how they went. A round the agent
+    /// was already asked to run, by an earlier attempt, stays the agent's.
+    pub(super) async fn run_round(
         &self,
         step: &StepName,
         input: StepInput<'_>,
         round: &CheckRound,
         answer_by: DateTime<Utc>,
         checks_until: Instant,
-        verified_before: bool,
+        target: &Checked<'_>,
     ) -> Result<Ran, BuiltInStepError> {
         let asked = !round.verified
             && !matches!(
@@ -426,7 +427,7 @@ where
             );
         if !asked {
             match self
-                .verify_round(step, input, round, answer_by, checks_until)
+                .verify_round(step, input, round, answer_by, checks_until, target)
                 .await?
             {
                 Verify::Ended => return Ok(Ran::Ended),
@@ -434,7 +435,14 @@ where
                 // A Step whose checks the factory ran before never leaves
                 // them to the agent: its session ran commands, and one that
                 // no longer does is retried until the rounds' time is up.
-                Verify::Unsupported if verified_before => {
+                Verify::Unsupported
+                    if matches!(
+                        target,
+                        Checked::Branch {
+                            verified_before: true
+                        }
+                    ) =>
+                {
                     return Err(retry(
                         "the agent's session ran this step's checks before and runs no command now"
                             .to_string(),
@@ -452,7 +460,10 @@ where
                 role: turn_role(step, input)?,
                 action_id: round.check_action_id,
                 place: checks_place(round.round),
-                prompt: checks_prompt(round),
+                prompt: match target {
+                    Checked::Branch { .. } => checks_prompt(round),
+                    Checked::Commit { prompt, .. } => (*prompt).to_string(),
+                },
                 outcomes: vec![passed(), failed()],
                 answer_by,
             })
@@ -497,15 +508,17 @@ where
         round: &CheckRound,
         answer_by: DateTime<Utc>,
         checks_until: Instant,
+        target: &Checked<'_>,
     ) -> Result<Verify, BuiltInStepError> {
         let repo = self.pull_requests.records();
         let role = turn_role(step, input)?;
         let declared = RepositoryChecks::parse(&round.declared)
             .map_err(|_| lost("a recorded checks file does not read"))?;
         let mut results = round.results.clone();
-        let commit = match &round.checked_commit {
-            Some(commit) => commit.clone(),
-            None => self.pushed_commit(input).await?,
+        let commit = match (&round.checked_commit, target) {
+            (Some(commit), _) => commit.clone(),
+            (None, Checked::Branch { .. }) => self.pushed_commit(input).await?,
+            (None, Checked::Commit { commit, .. }) => (*commit).to_string(),
         };
         let round_id = round.check_action_id;
 
@@ -559,7 +572,7 @@ where
                     &role,
                     worktree::check_command(
                         round_id,
-                        run,
+                        &format!("{}{run}", target.environment()),
                         timeout.as_secs(),
                         worktree::LOCK_WAIT_SECS,
                     ),
@@ -608,7 +621,7 @@ where
     /// The head of the Run's branch on GitHub, read again once after a
     /// moment when it is not there yet; a branch still missing then fails
     /// the attempt for a retry.
-    async fn pushed_commit(&self, input: StepInput<'_>) -> Result<String, BuiltInStepError> {
+    pub(super) async fn pushed_commit(&self, input: StepInput<'_>) -> Result<String, BuiltInStepError> {
         let head = match self.pull_requests.branch_head(&input).await? {
             Some(head) => head,
             None => {
@@ -739,8 +752,42 @@ where
     }
 }
 
+/// What a round checks.
+pub(super) enum Checked<'a> {
+    /// The head of the Run's branch as GitHub has it: a write or fix
+    /// Step's repository checks, which the factory ran in an earlier round
+    /// when `verified_before`.
+    Branch {
+        /// Whether the factory ran an earlier round's checks itself.
+        verified_before: bool,
+    },
+    /// `commit`: the acceptance checks of an `accept` or `verify` Step,
+    /// each run after `environment` (the variables it is told, kept out of
+    /// the commands the round records and shows), and which the agent is
+    /// asked to run with `prompt` where the engine runs no command.
+    Commit {
+        /// The commit.
+        commit: &'a str,
+        /// What each check's command runs after, as shell.
+        environment: &'a str,
+        /// What the agent is asked.
+        prompt: &'a str,
+    },
+}
+
+impl Checked<'_> {
+    /// What each check's command runs after: nothing for the repository's
+    /// checks.
+    fn environment(&self) -> &str {
+        match self {
+            Checked::Branch { .. } => "",
+            Checked::Commit { environment, .. } => environment,
+        }
+    }
+}
+
 /// How a round's checks went, for the loop that runs the rounds.
-enum Ran {
+pub(super) enum Ran {
     /// The round ended, or its fix was sent.
     Ended,
     /// The Step's rounds had no time left for the next check.
@@ -959,7 +1006,7 @@ fn until(at: DateTime<Utc>) -> Duration {
 }
 
 /// `summary`, then `body` cut to fit what a Step's output holds.
-fn fit(summary: &str, body: &str) -> String {
+pub(super) fn fit(summary: &str, body: &str) -> String {
     let joined = format!("{summary}\n\n{body}");
     if joined.len() <= MAX_OUTPUT_BYTES {
         return joined;
