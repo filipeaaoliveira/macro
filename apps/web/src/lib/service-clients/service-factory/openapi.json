@@ -9,6 +9,493 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/automations": {
+      "get": {
+        "tags": ["factory"],
+        "summary": "The caller's team's Automations, newest first, and whether the caller\nadministers the team. A person on no team has none.",
+        "operationId": "list_factory_automations",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomationsSettings"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["factory"],
+        "summary": "Make an Automation of the caller's team, which starts Runs as the\ncaller, with their permissions, each time its trigger fires. Only the\ncaller in their own signed-in session makes one (403 otherwise), and\nits Runs must be ones they could start now. A schedule, a repository\nevent and a Task event are a routine of the caller's, which the\nscheduler must take (400 with its reason otherwise); a webhook's secret\nis in the answer, once.",
+        "operationId": "create_factory_automation",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AutomationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedAutomation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/automations/fire": {
+      "post": {
+        "tags": ["factory"],
+        "summary": "Fire the Automation whose routine this run is: only the code step of a\nrun of an Automation's routine calls it, with the credential the\nscheduler signed for the routine (403 for any other caller). It starts\na Run as the Automation's creator, once per routine run, unless the\nAutomation is switched off, the queue is full or a Run already runs on\nthe task.",
+        "operationId": "fire_factory_automation",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoutineFiring"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FiringResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/automations/{id}": {
+      "delete": {
+        "tags": ["factory"],
+        "summary": "Delete an Automation of the caller's team, as for switching it off, and\nits routine. The Runs it started keep the record of it.",
+        "operationId": "delete_factory_automation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The Automation's id.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/automations/{id}/enabled": {
+      "put": {
+        "tags": ["factory"],
+        "summary": "Switch an Automation of the caller's team on or off: their own, or any\nfor an admin of the team (403 otherwise). Its routine follows.",
+        "operationId": "set_factory_automation_enabled",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The Automation's id.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetAutomationEnabledRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Automation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/automations/{id}/webhook": {
+      "post": {
+        "tags": ["factory"],
+        "summary": "Fire a webhook Automation. The call carries no login: it is signed with\nthe Automation's secret, as Macro signs its own webhooks\n(`x-macro-signature: v1=<hex>`, an HMAC-SHA256 of\n`\"{x-macro-timestamp}.{body}\"`), at a timestamp (Unix seconds) within\nfive minutes of now (401 otherwise). A call received before is refused\n(409), so a replay starts nothing. The body is empty, or JSON naming the\ntask the Run works on.",
+        "operationId": "call_factory_automation_webhook",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The Automation's id.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/WebhookFiring"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FiringResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/flows": {
       "get": {
         "tags": ["factory"],
@@ -1327,6 +1814,205 @@
           }
         }
       },
+      "Automation": {
+        "type": "object",
+        "description": "A team's standing order to start a Run of a Flow when its trigger fires.\nIts Runs are its creator's, as if they had started them.",
+        "required": [
+          "id",
+          "teamId",
+          "createdBy",
+          "name",
+          "trigger",
+          "flow",
+          "requestTemplate",
+          "enabled",
+          "createdAt"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was created."
+          },
+          "createdBy": {
+            "$ref": "#/components/schemas/MacroUserIdStr",
+            "description": "Who created it: the owner of the Runs it starts."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether it starts Runs."
+          },
+          "flow": {
+            "type": "string",
+            "description": "The built-in Flow its Runs walk, by name."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Its id."
+          },
+          "name": {
+            "type": "string",
+            "description": "What its team calls it."
+          },
+          "repoUrl": {
+            "type": ["string", "null"],
+            "description": "The repository its Runs work on, for a Flow that works on one."
+          },
+          "requestTemplate": {
+            "type": "string",
+            "description": "What its Runs are asked to do."
+          },
+          "routineId": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "The Macro routine that fires it, for a schedule, a repository event\nor a Task event, once it is made."
+          },
+          "teamId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The team it belongs to."
+          },
+          "trigger": {
+            "$ref": "#/components/schemas/AutomationTrigger",
+            "description": "What starts its Runs."
+          }
+        }
+      },
+      "AutomationRequest": {
+        "type": "object",
+        "description": "A new Automation, as a person asks for it.",
+        "required": ["name", "trigger", "flow", "requestTemplate"],
+        "properties": {
+          "flow": {
+            "type": "string",
+            "description": "The built-in Flow its Runs walk, one `GET /flows` lists."
+          },
+          "name": {
+            "type": "string",
+            "description": "What the team calls it, 1 to 120 characters."
+          },
+          "repoUrl": {
+            "type": ["string", "null"],
+            "description": "The GitHub repository its Runs work on, as its\n`https://github.com/owner/name` URL: required by a Flow that works\non one, and by a repository event, whose repository it is."
+          },
+          "requestTemplate": {
+            "type": "string",
+            "description": "What its Runs are asked to do."
+          },
+          "trigger": {
+            "$ref": "#/components/schemas/AutomationTrigger",
+            "description": "What starts its Runs."
+          }
+        },
+        "additionalProperties": false
+      },
+      "AutomationTrigger": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "A schedule, as a Macro routine's cron trigger.",
+            "required": ["cron", "timezone", "kind"],
+            "properties": {
+              "cron": {
+                "type": "string",
+                "description": "Six fields: seconds, minutes, hours, day of month, month and\nweekday, such as `0 0 9 * * Mon-Fri`."
+              },
+              "kind": {
+                "type": "string",
+                "enum": ["schedule"]
+              },
+              "timezone": {
+                "type": "string",
+                "description": "The IANA time zone the schedule is read in, such as\n`Europe/Lisbon`."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A delivery from Macro's GitHub App about the Automation's\nrepository.",
+            "required": ["events", "kind"],
+            "properties": {
+              "actions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Payload actions, such as `opened`; any when empty."
+              },
+              "events": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "GitHub event names, such as `push` or `pull_request`: at least\none."
+              },
+              "kind": {
+                "type": "string",
+                "enum": ["repository_event"]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A call to the Automation's webhook, signed with its secret.",
+            "required": ["kind"],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["webhook"]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A task's property gaining one of some values, such as its status\nbecoming `In Progress` or its tags gaining one.",
+            "required": ["propertyId", "kind"],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["task_event"]
+              },
+              "propertyId": {
+                "type": "string",
+                "format": "uuid",
+                "description": "The property definition that must change, such as the status's."
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Select option ids or referenced entity ids, one of which the\nchange must add; any change to the property when empty."
+              }
+            }
+          }
+        ],
+        "description": "What starts an Automation's Runs, with the kind's own settings."
+      },
+      "AutomationsSettings": {
+        "type": "object",
+        "description": "A team's Automations, for one of its members.",
+        "required": ["automations", "isAdmin"],
+        "properties": {
+          "automations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Automation"
+            },
+            "description": "The team's Automations, newest first, at most\n[`TEAM_AUTOMATIONS_LISTED`]."
+          },
+          "isAdmin": {
+            "type": "boolean",
+            "description": "Whether the person may change any of them, as a team admin; anyone\nmay change their own."
+          },
+          "teamId": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "The team; none when the person is on no team, and so has none."
+          }
+        }
+      },
       "CheckResult": {
         "type": "object",
         "description": "How one check of a verified round ran.",
@@ -1499,6 +2185,21 @@
           }
         }
       },
+      "CreatedAutomation": {
+        "type": "object",
+        "description": "A new Automation, and the secret its webhook's calls are signed with:\nshown once, when it is made.",
+        "required": ["automation"],
+        "properties": {
+          "automation": {
+            "$ref": "#/components/schemas/Automation",
+            "description": "The Automation."
+          },
+          "webhookSecret": {
+            "type": ["string", "null"],
+            "description": "For a webhook, the secret its calls are signed with: the factory\nnever shows it again."
+          }
+        }
+      },
       "DurationStats": {
         "type": "object",
         "description": "A spread of durations: how many, their median and 90th percentile.",
@@ -1638,6 +2339,44 @@
         "type": "string",
         "description": "What a finding turned out to be once its round ended.",
         "enum": ["blocker", "follow_up"]
+      },
+      "FiringResult": {
+        "type": "object",
+        "description": "What a firing came to.",
+        "required": ["repeated"],
+        "properties": {
+          "repeated": {
+            "type": "boolean",
+            "description": "Whether an earlier firing with the same key came to this, so this\none started nothing."
+          },
+          "runId": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RunId",
+                "description": "The Run it started."
+              }
+            ]
+          },
+          "skipped": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/FiringSkip",
+                "description": "Why it started none."
+              }
+            ]
+          }
+        }
+      },
+      "FiringSkip": {
+        "type": "string",
+        "description": "Why a firing started no Run.",
+        "enum": ["disabled", "task_busy", "queue_full", "refused"]
       },
       "FlowInsight": {
         "type": "object",
@@ -1847,6 +2586,22 @@
         "type": "string",
         "description": "Who asks a Gate's question, which says how it is answered.",
         "enum": ["flow", "question"]
+      },
+      "GithubFiring": {
+        "type": "object",
+        "description": "The GitHub delivery that fired a repository event's Automation.",
+        "required": ["event"],
+        "properties": {
+          "action": {
+            "type": ["string", "null"],
+            "description": "Its payload's action, such as `opened`."
+          },
+          "event": {
+            "type": "string",
+            "description": "Its event, such as `pull_request`."
+          }
+        },
+        "additionalProperties": false
       },
       "HandBackRequest": {
         "type": "object",
@@ -2282,6 +3037,34 @@
         "type": "string",
         "description": "A job in a Flow, such as `planner`, `writer`, `reviewer` or `fixer`. An\nentry whose Step an agent does names the Role, and the factory's agent\ndefinition lists the Agents that may fill it."
       },
+      "RoutineFiring": {
+        "type": "object",
+        "description": "What fired an Automation, from its routine's run.",
+        "required": ["firing"],
+        "properties": {
+          "firing": {
+            "type": "string",
+            "description": "The routine run's id: a retried run fires once."
+          },
+          "github": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/GithubFiring",
+                "description": "The GitHub delivery a repository event is."
+              }
+            ]
+          },
+          "taskId": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "The task a Task event is about."
+          }
+        },
+        "additionalProperties": false
+      },
       "RulesSource": {
         "type": "string",
         "description": "Where a Run's Standing Rules came from.",
@@ -2292,6 +3075,17 @@
         "description": "One Run of a Flow.",
         "required": ["id", "request", "userId", "createdAt", "createdInPerson"],
         "properties": {
+          "automation": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RunAutomation",
+                "description": "The Automation that started it, as it was then; none for a Run a\nperson started."
+              }
+            ]
+          },
           "controlFiles": {
             "oneOf": [
               {
@@ -2361,6 +3155,26 @@
           "userId": {
             "$ref": "#/components/schemas/MacroUserIdStr",
             "description": "Who started the Run: its agent Steps run as them."
+          }
+        }
+      },
+      "RunAutomation": {
+        "type": "object",
+        "description": "The Automation that started a Run, as it was then.",
+        "required": ["id", "name", "trigger"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The Automation's id; it may have been deleted since."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name when it started the Run."
+          },
+          "trigger": {
+            "$ref": "#/components/schemas/TriggerKind",
+            "description": "What kind of trigger started the Run."
           }
         }
       },
@@ -2617,6 +3431,17 @@
           "tokens": {
             "$ref": "#/components/schemas/TokenCounts",
             "description": "What its agents used."
+          }
+        }
+      },
+      "SetAutomationEnabledRequest": {
+        "type": "object",
+        "description": "Request body for switching an Automation on or off.",
+        "required": ["enabled"],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether it starts Runs."
           }
         }
       },
@@ -2886,6 +3711,11 @@
           }
         }
       },
+      "TriggerKind": {
+        "type": "string",
+        "description": "What starts an Automation's Runs, as a kind.",
+        "enum": ["schedule", "repository_event", "webhook", "task_event"]
+      },
       "TroubleRun": {
         "type": "object",
         "description": "A Run where an entry failed or was visited more than once.",
@@ -2962,6 +3792,18 @@
             "description": "The caller's Runs that have not ended and wait on a Gate no one\nanswered yet, newest first: at most the newest 50."
           }
         }
+      },
+      "WebhookFiring": {
+        "type": "object",
+        "description": "What a webhook call may carry, as its JSON body; an empty body carries\nnothing.",
+        "properties": {
+          "taskId": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "The task the Run works on, which the Automation's creator must see."
+          }
+        },
+        "additionalProperties": false
       }
     }
   },

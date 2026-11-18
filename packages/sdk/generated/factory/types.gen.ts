@@ -46,6 +46,147 @@ export type AskedBack = {
 };
 
 /**
+ * A team's standing order to start a Run of a Flow when its trigger fires.
+ * Its Runs are its creator's, as if they had started them.
+ */
+export type Automation = {
+    /**
+     * When it was created.
+     */
+    createdAt: string;
+    /**
+     * Who created it: the owner of the Runs it starts.
+     */
+    createdBy: MacroUserIdStr;
+    /**
+     * Whether it starts Runs.
+     */
+    enabled: boolean;
+    /**
+     * The built-in Flow its Runs walk, by name.
+     */
+    flow: string;
+    /**
+     * Its id.
+     */
+    id: string;
+    /**
+     * What its team calls it.
+     */
+    name: string;
+    /**
+     * The repository its Runs work on, for a Flow that works on one.
+     */
+    repoUrl?: string | null;
+    /**
+     * What its Runs are asked to do.
+     */
+    requestTemplate: string;
+    /**
+     * The Macro routine that fires it, for a schedule, a repository event
+     * or a Task event, once it is made.
+     */
+    routineId?: string | null;
+    /**
+     * The team it belongs to.
+     */
+    teamId: string;
+    /**
+     * What starts its Runs.
+     */
+    trigger: AutomationTrigger;
+};
+
+/**
+ * A new Automation, as a person asks for it.
+ */
+export type AutomationRequest = {
+    /**
+     * The built-in Flow its Runs walk, one `GET /flows` lists.
+     */
+    flow: string;
+    /**
+     * What the team calls it, 1 to 120 characters.
+     */
+    name: string;
+    /**
+     * The GitHub repository its Runs work on, as its
+     * `https://github.com/owner/name` URL: required by a Flow that works
+     * on one, and by a repository event, whose repository it is.
+     */
+    repoUrl?: string | null;
+    /**
+     * What its Runs are asked to do.
+     */
+    requestTemplate: string;
+    /**
+     * What starts its Runs.
+     */
+    trigger: AutomationTrigger;
+};
+
+/**
+ * What starts an Automation's Runs, with the kind's own settings.
+ */
+export type AutomationTrigger = {
+    /**
+     * Six fields: seconds, minutes, hours, day of month, month and
+     * weekday, such as `0 0 9 * * Mon-Fri`.
+     */
+    cron: string;
+    kind: 'schedule';
+    /**
+     * The IANA time zone the schedule is read in, such as
+     * `Europe/Lisbon`.
+     */
+    timezone: string;
+} | {
+    /**
+     * Payload actions, such as `opened`; any when empty.
+     */
+    actions?: Array<string>;
+    /**
+     * GitHub event names, such as `push` or `pull_request`: at least
+     * one.
+     */
+    events: Array<string>;
+    kind: 'repository_event';
+} | {
+    kind: 'webhook';
+} | {
+    kind: 'task_event';
+    /**
+     * The property definition that must change, such as the status's.
+     */
+    propertyId: string;
+    /**
+     * Select option ids or referenced entity ids, one of which the
+     * change must add; any change to the property when empty.
+     */
+    values?: Array<string>;
+};
+
+/**
+ * A team's Automations, for one of its members.
+ */
+export type AutomationsSettings = {
+    /**
+     * The team's Automations, newest first, at most
+     * [`TEAM_AUTOMATIONS_LISTED`].
+     */
+    automations: Array<Automation>;
+    /**
+     * Whether the person may change any of them, as a team admin; anyone
+     * may change their own.
+     */
+    isAdmin: boolean;
+    /**
+     * The team; none when the person is on no team, and so has none.
+     */
+    teamId?: string | null;
+};
+
+/**
  * How one check of a verified round ran.
  */
 export type CheckResult = {
@@ -201,6 +342,22 @@ export type CreateRunRequest = {
 };
 
 /**
+ * A new Automation, and the secret its webhook's calls are signed with:
+ * shown once, when it is made.
+ */
+export type CreatedAutomation = {
+    /**
+     * The Automation.
+     */
+    automation: Automation;
+    /**
+     * For a webhook, the secret its calls are signed with: the factory
+     * never shows it again.
+     */
+    webhookSecret?: string | null;
+};
+
+/**
  * A spread of durations: how many, their median and 90th percentile.
  */
 export type DurationStats = {
@@ -281,6 +438,24 @@ export type ErrorResponse = {
  * What a finding turned out to be once its round ended.
  */
 export type FindingKind = 'blocker' | 'follow_up';
+
+/**
+ * What a firing came to.
+ */
+export type FiringResult = {
+    /**
+     * Whether an earlier firing with the same key came to this, so this
+     * one started nothing.
+     */
+    repeated: boolean;
+    runId?: null | RunId;
+    skipped?: null | FiringSkip;
+};
+
+/**
+ * Why a firing started no Run.
+ */
+export type FiringSkip = 'disabled' | 'task_busy' | 'queue_full' | 'refused';
 
 /**
  * The Runs of one Flow.
@@ -411,6 +586,20 @@ export type GateInsight = {
  * Who asks a Gate's question, which says how it is answered.
  */
 export type GateKind = 'flow' | 'question';
+
+/**
+ * The GitHub delivery that fired a repository event's Automation.
+ */
+export type GithubFiring = {
+    /**
+     * Its payload's action, such as `opened`.
+     */
+    action?: string | null;
+    /**
+     * Its event, such as `pull_request`.
+     */
+    event: string;
+};
 
 /**
  * Request body for handing back an agent Step's result.
@@ -764,6 +953,21 @@ export type ReviewRoundOutcome = 'pass' | 'changes' | 'failed';
 export type Role = string;
 
 /**
+ * What fired an Automation, from its routine's run.
+ */
+export type RoutineFiring = {
+    /**
+     * The routine run's id: a retried run fires once.
+     */
+    firing: string;
+    github?: null | GithubFiring;
+    /**
+     * The task a Task event is about.
+     */
+    taskId?: string | null;
+};
+
+/**
  * Where a Run's Standing Rules came from.
  */
 export type RulesSource = 'default' | 'team' | 'project';
@@ -772,6 +976,7 @@ export type RulesSource = 'default' | 'team' | 'project';
  * One Run of a Flow.
  */
 export type Run = {
+    automation?: null | RunAutomation;
     controlFiles?: null | ControlFileChanges;
     /**
      * When the Run was created.
@@ -803,6 +1008,24 @@ export type Run = {
      * Who started the Run: its agent Steps run as them.
      */
     userId: MacroUserIdStr;
+};
+
+/**
+ * The Automation that started a Run, as it was then.
+ */
+export type RunAutomation = {
+    /**
+     * The Automation's id; it may have been deleted since.
+     */
+    id: string;
+    /**
+     * Its name when it started the Run.
+     */
+    name: string;
+    /**
+     * What kind of trigger started the Run.
+     */
+    trigger: TriggerKind;
 };
 
 /**
@@ -968,6 +1191,16 @@ export type RunTokens = {
      * What its agents used.
      */
     tokens: TokenCounts;
+};
+
+/**
+ * Request body for switching an Automation on or off.
+ */
+export type SetAutomationEnabledRequest = {
+    /**
+     * Whether it starts Runs.
+     */
+    enabled: boolean;
 };
 
 /**
@@ -1152,6 +1385,11 @@ export type TokenCounts = {
 };
 
 /**
+ * What starts an Automation's Runs, as a kind.
+ */
+export type TriggerKind = 'schedule' | 'repository_event' | 'webhook' | 'task_event';
+
+/**
  * A Run where an entry failed or was visited more than once.
  */
 export type TroubleRun = {
@@ -1206,6 +1444,170 @@ export type WaitingRunsResponse = {
      */
     runs: Array<RunDetail>;
 };
+
+/**
+ * What a webhook call may carry, as its JSON body; an empty body carries
+ * nothing.
+ */
+export type WebhookFiring = {
+    /**
+     * The task the Run works on, which the Automation's creator must see.
+     */
+    taskId?: string | null;
+};
+
+export type ListFactoryAutomationsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/automations';
+};
+
+export type ListFactoryAutomationsErrors = {
+    401: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type ListFactoryAutomationsError = ListFactoryAutomationsErrors[keyof ListFactoryAutomationsErrors];
+
+export type ListFactoryAutomationsResponses = {
+    200: AutomationsSettings;
+};
+
+export type ListFactoryAutomationsResponse = ListFactoryAutomationsResponses[keyof ListFactoryAutomationsResponses];
+
+export type CreateFactoryAutomationData = {
+    body: AutomationRequest;
+    path?: never;
+    query?: never;
+    url: '/automations';
+};
+
+export type CreateFactoryAutomationErrors = {
+    400: RunErrorResponse;
+    401: ErrorResponse;
+    403: ErrorResponse;
+    500: ErrorResponse;
+    502: ErrorResponse;
+};
+
+export type CreateFactoryAutomationError = CreateFactoryAutomationErrors[keyof CreateFactoryAutomationErrors];
+
+export type CreateFactoryAutomationResponses = {
+    201: CreatedAutomation;
+};
+
+export type CreateFactoryAutomationResponse = CreateFactoryAutomationResponses[keyof CreateFactoryAutomationResponses];
+
+export type FireFactoryAutomationData = {
+    body: RoutineFiring;
+    path?: never;
+    query?: never;
+    url: '/automations/fire';
+};
+
+export type FireFactoryAutomationErrors = {
+    400: ErrorResponse;
+    401: ErrorResponse;
+    403: ErrorResponse;
+    404: ErrorResponse;
+    409: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type FireFactoryAutomationError = FireFactoryAutomationErrors[keyof FireFactoryAutomationErrors];
+
+export type FireFactoryAutomationResponses = {
+    200: FiringResult;
+};
+
+export type FireFactoryAutomationResponse = FireFactoryAutomationResponses[keyof FireFactoryAutomationResponses];
+
+export type DeleteFactoryAutomationData = {
+    body?: never;
+    path: {
+        /**
+         * The Automation's id.
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/automations/{id}';
+};
+
+export type DeleteFactoryAutomationErrors = {
+    400: ErrorResponse;
+    401: ErrorResponse;
+    403: ErrorResponse;
+    404: ErrorResponse;
+    500: ErrorResponse;
+    502: ErrorResponse;
+};
+
+export type DeleteFactoryAutomationError = DeleteFactoryAutomationErrors[keyof DeleteFactoryAutomationErrors];
+
+export type DeleteFactoryAutomationResponses = {
+    204: void;
+};
+
+export type DeleteFactoryAutomationResponse = DeleteFactoryAutomationResponses[keyof DeleteFactoryAutomationResponses];
+
+export type SetFactoryAutomationEnabledData = {
+    body: SetAutomationEnabledRequest;
+    path: {
+        /**
+         * The Automation's id.
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/automations/{id}/enabled';
+};
+
+export type SetFactoryAutomationEnabledErrors = {
+    400: ErrorResponse;
+    401: ErrorResponse;
+    403: ErrorResponse;
+    404: ErrorResponse;
+    500: ErrorResponse;
+    502: ErrorResponse;
+};
+
+export type SetFactoryAutomationEnabledError = SetFactoryAutomationEnabledErrors[keyof SetFactoryAutomationEnabledErrors];
+
+export type SetFactoryAutomationEnabledResponses = {
+    200: Automation;
+};
+
+export type SetFactoryAutomationEnabledResponse = SetFactoryAutomationEnabledResponses[keyof SetFactoryAutomationEnabledResponses];
+
+export type CallFactoryAutomationWebhookData = {
+    body?: null | WebhookFiring;
+    path: {
+        /**
+         * The Automation's id.
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/automations/{id}/webhook';
+};
+
+export type CallFactoryAutomationWebhookErrors = {
+    400: ErrorResponse;
+    401: ErrorResponse;
+    404: ErrorResponse;
+    409: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type CallFactoryAutomationWebhookError = CallFactoryAutomationWebhookErrors[keyof CallFactoryAutomationWebhookErrors];
+
+export type CallFactoryAutomationWebhookResponses = {
+    202: FiringResult;
+};
+
+export type CallFactoryAutomationWebhookResponse = CallFactoryAutomationWebhookResponses[keyof CallFactoryAutomationWebhookResponses];
 
 export type ListFactoryFlowsData = {
     body?: never;

@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AnswerFactoryGateData, AnswerFactoryGateErrors, AnswerFactoryGateResponses, CancelFactoryRunData, CancelFactoryRunErrors, CancelFactoryRunResponses, CreateFactoryRunData, CreateFactoryRunErrors, CreateFactoryRunResponses, GetFactoryControlFilesData, GetFactoryControlFilesErrors, GetFactoryControlFilesResponses, GetFactoryInsightsData, GetFactoryInsightsErrors, GetFactoryInsightsResponses, GetFactoryRunData, GetFactoryRunErrors, GetFactoryRunResponses, GetFactoryStandingRulesData, GetFactoryStandingRulesErrors, GetFactoryStandingRulesResponses, HandBackFactoryStepData, HandBackFactoryStepErrors, HandBackFactoryStepResponses, LinkFactoryRunTaskData, LinkFactoryRunTaskErrors, LinkFactoryRunTaskResponses, ListFactoryFlowsData, ListFactoryFlowsErrors, ListFactoryFlowsResponses, ListFactoryTaskRunsData, ListFactoryTaskRunsErrors, ListFactoryTaskRunsResponses, ListFactoryWaitingRunsData, ListFactoryWaitingRunsErrors, ListFactoryWaitingRunsResponses, ReplyToFactoryGateData, ReplyToFactoryGateErrors, ReplyToFactoryGateResponses, SetFactoryControlFilesData, SetFactoryControlFilesErrors, SetFactoryControlFilesResponses, SetFactoryProjectStandingRulesData, SetFactoryProjectStandingRulesErrors, SetFactoryProjectStandingRulesResponses, SetFactoryStandingRulesData, SetFactoryStandingRulesErrors, SetFactoryStandingRulesResponses } from './types.gen';
+import type { AnswerFactoryGateData, AnswerFactoryGateErrors, AnswerFactoryGateResponses, CallFactoryAutomationWebhookData, CallFactoryAutomationWebhookErrors, CallFactoryAutomationWebhookResponses, CancelFactoryRunData, CancelFactoryRunErrors, CancelFactoryRunResponses, CreateFactoryAutomationData, CreateFactoryAutomationErrors, CreateFactoryAutomationResponses, CreateFactoryRunData, CreateFactoryRunErrors, CreateFactoryRunResponses, DeleteFactoryAutomationData, DeleteFactoryAutomationErrors, DeleteFactoryAutomationResponses, FireFactoryAutomationData, FireFactoryAutomationErrors, FireFactoryAutomationResponses, GetFactoryControlFilesData, GetFactoryControlFilesErrors, GetFactoryControlFilesResponses, GetFactoryInsightsData, GetFactoryInsightsErrors, GetFactoryInsightsResponses, GetFactoryRunData, GetFactoryRunErrors, GetFactoryRunResponses, GetFactoryStandingRulesData, GetFactoryStandingRulesErrors, GetFactoryStandingRulesResponses, HandBackFactoryStepData, HandBackFactoryStepErrors, HandBackFactoryStepResponses, LinkFactoryRunTaskData, LinkFactoryRunTaskErrors, LinkFactoryRunTaskResponses, ListFactoryAutomationsData, ListFactoryAutomationsErrors, ListFactoryAutomationsResponses, ListFactoryFlowsData, ListFactoryFlowsErrors, ListFactoryFlowsResponses, ListFactoryTaskRunsData, ListFactoryTaskRunsErrors, ListFactoryTaskRunsResponses, ListFactoryWaitingRunsData, ListFactoryWaitingRunsErrors, ListFactoryWaitingRunsResponses, ReplyToFactoryGateData, ReplyToFactoryGateErrors, ReplyToFactoryGateResponses, SetFactoryAutomationEnabledData, SetFactoryAutomationEnabledErrors, SetFactoryAutomationEnabledResponses, SetFactoryControlFilesData, SetFactoryControlFilesErrors, SetFactoryControlFilesResponses, SetFactoryProjectStandingRulesData, SetFactoryProjectStandingRulesErrors, SetFactoryProjectStandingRulesResponses, SetFactoryStandingRulesData, SetFactoryStandingRulesErrors, SetFactoryStandingRulesResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -55,6 +55,96 @@ export class Sdk extends HeyApiClient {
     }) {
         super(args);
         Sdk.__registry.set(this, args?.key);
+    }
+
+    /**
+     * The caller's team's Automations, newest first, and whether the caller
+     * administers the team. A person on no team has none.
+     */
+    public listFactoryAutomations<ThrowOnError extends boolean = false>(options?: Options<ListFactoryAutomationsData, ThrowOnError>): RequestResult<ListFactoryAutomationsResponses, ListFactoryAutomationsErrors, ThrowOnError> {
+        return (options?.client ?? this.client).get<ListFactoryAutomationsResponses, ListFactoryAutomationsErrors, ThrowOnError>({ url: '/automations', ...options });
+    }
+
+    /**
+     * Make an Automation of the caller's team, which starts Runs as the
+     * caller, with their permissions, each time its trigger fires. Only the
+     * caller in their own signed-in session makes one (403 otherwise), and
+     * its Runs must be ones they could start now. A schedule, a repository
+     * event and a Task event are a routine of the caller's, which the
+     * scheduler must take (400 with its reason otherwise); a webhook's secret
+     * is in the answer, once.
+     */
+    public createFactoryAutomation<ThrowOnError extends boolean = false>(options: Options<CreateFactoryAutomationData, ThrowOnError>): RequestResult<CreateFactoryAutomationResponses, CreateFactoryAutomationErrors, ThrowOnError> {
+        return (options.client ?? this.client).post<CreateFactoryAutomationResponses, CreateFactoryAutomationErrors, ThrowOnError>({
+            url: '/automations',
+            ...options,
+            headers: {
+                'Content-Type': 'application/json',
+                ...options.headers
+            }
+        });
+    }
+
+    /**
+     * Fire the Automation whose routine this run is: only the code step of a
+     * run of an Automation's routine calls it, with the credential the
+     * scheduler signed for the routine (403 for any other caller). It starts
+     * a Run as the Automation's creator, once per routine run, unless the
+     * Automation is switched off, the queue is full or a Run already runs on
+     * the task.
+     */
+    public fireFactoryAutomation<ThrowOnError extends boolean = false>(options: Options<FireFactoryAutomationData, ThrowOnError>): RequestResult<FireFactoryAutomationResponses, FireFactoryAutomationErrors, ThrowOnError> {
+        return (options.client ?? this.client).post<FireFactoryAutomationResponses, FireFactoryAutomationErrors, ThrowOnError>({
+            url: '/automations/fire',
+            ...options,
+            headers: {
+                'Content-Type': 'application/json',
+                ...options.headers
+            }
+        });
+    }
+
+    /**
+     * Delete an Automation of the caller's team, as for switching it off, and
+     * its routine. The Runs it started keep the record of it.
+     */
+    public deleteFactoryAutomation<ThrowOnError extends boolean = false>(options: Options<DeleteFactoryAutomationData, ThrowOnError>): RequestResult<DeleteFactoryAutomationResponses, DeleteFactoryAutomationErrors, ThrowOnError> {
+        return (options.client ?? this.client).delete<DeleteFactoryAutomationResponses, DeleteFactoryAutomationErrors, ThrowOnError>({ url: '/automations/{id}', ...options });
+    }
+
+    /**
+     * Switch an Automation of the caller's team on or off: their own, or any
+     * for an admin of the team (403 otherwise). Its routine follows.
+     */
+    public setFactoryAutomationEnabled<ThrowOnError extends boolean = false>(options: Options<SetFactoryAutomationEnabledData, ThrowOnError>): RequestResult<SetFactoryAutomationEnabledResponses, SetFactoryAutomationEnabledErrors, ThrowOnError> {
+        return (options.client ?? this.client).put<SetFactoryAutomationEnabledResponses, SetFactoryAutomationEnabledErrors, ThrowOnError>({
+            url: '/automations/{id}/enabled',
+            ...options,
+            headers: {
+                'Content-Type': 'application/json',
+                ...options.headers
+            }
+        });
+    }
+
+    /**
+     * Fire a webhook Automation. The call carries no login: it is signed with
+     * the Automation's secret, as Macro signs its own webhooks
+     * (`x-macro-signature: v1=<hex>`, an HMAC-SHA256 of
+     * `"{x-macro-timestamp}.{body}"`), at a timestamp (Unix seconds) within
+     * five minutes of now (401 otherwise). A call received before is refused
+     * (409), so a replay starts nothing. The body is empty, or JSON naming the
+     * task the Run works on.
+     */
+    public callFactoryAutomationWebhook<ThrowOnError extends boolean = false>(options: Options<CallFactoryAutomationWebhookData, ThrowOnError>): RequestResult<CallFactoryAutomationWebhookResponses, CallFactoryAutomationWebhookErrors, ThrowOnError> {
+        return (options.client ?? this.client).post<CallFactoryAutomationWebhookResponses, CallFactoryAutomationWebhookErrors, ThrowOnError>({
+            url: '/automations/{id}/webhook',
+            ...options,
+            headers: {
+                'Content-Type': 'application/json',
+                ...options.headers
+            }
+        });
     }
 
     /**

@@ -6,24 +6,517 @@
  */
 import type {
   AnswerGateRequest,
+  Automation,
+  AutomationRequest,
+  AutomationsSettings,
+  CallFactoryAutomationWebhookBody,
   ControlFilesSettings,
+  CreatedAutomation,
   CreateRunRequest,
   ErrorResponse,
+  FiringResult,
   FlowsResponse,
   GetFactoryInsightsParams,
   HandBackRequest,
   LinkTaskRequest,
   ReplyToGateRequest,
+  RoutineFiring,
   RunDetail,
   RunErrorResponse,
   RunId,
   RunInsights,
+  SetAutomationEnabledRequest,
   SetControlFilesRequest,
   SetStandingRulesRequest,
   StandingRulesSettings,
   TaskRunsResponse,
   WaitingRunsResponse,
 } from './schemas';
+
+/**
+ * @summary The caller's team's Automations, newest first, and whether the caller
+administers the team. A person on no team has none.
+ */
+export type listFactoryAutomationsResponse200 = {
+  data: AutomationsSettings;
+  status: 200;
+};
+
+export type listFactoryAutomationsResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type listFactoryAutomationsResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type listFactoryAutomationsResponseSuccess =
+  listFactoryAutomationsResponse200 & {
+    headers: Headers;
+  };
+export type listFactoryAutomationsResponseError = (
+  | listFactoryAutomationsResponse401
+  | listFactoryAutomationsResponse500
+) & {
+  headers: Headers;
+};
+
+export type listFactoryAutomationsResponse =
+  | listFactoryAutomationsResponseSuccess
+  | listFactoryAutomationsResponseError;
+
+export const getListFactoryAutomationsUrl = () => {
+  return `/automations`;
+};
+
+export const listFactoryAutomations = async (
+  options?: RequestInit
+): Promise<listFactoryAutomationsResponse> => {
+  const res = await fetch(getListFactoryAutomationsUrl(), {
+    ...options,
+    method: 'GET',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: listFactoryAutomationsResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as listFactoryAutomationsResponse;
+};
+
+/**
+ * @summary Make an Automation of the caller's team, which starts Runs as the
+caller, with their permissions, each time its trigger fires. Only the
+caller in their own signed-in session makes one (403 otherwise), and
+its Runs must be ones they could start now. A schedule, a repository
+event and a Task event are a routine of the caller's, which the
+scheduler must take (400 with its reason otherwise); a webhook's secret
+is in the answer, once.
+ */
+export type createFactoryAutomationResponse201 = {
+  data: CreatedAutomation;
+  status: 201;
+};
+
+export type createFactoryAutomationResponse400 = {
+  data: RunErrorResponse;
+  status: 400;
+};
+
+export type createFactoryAutomationResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type createFactoryAutomationResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type createFactoryAutomationResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type createFactoryAutomationResponse502 = {
+  data: ErrorResponse;
+  status: 502;
+};
+
+export type createFactoryAutomationResponseSuccess =
+  createFactoryAutomationResponse201 & {
+    headers: Headers;
+  };
+export type createFactoryAutomationResponseError = (
+  | createFactoryAutomationResponse400
+  | createFactoryAutomationResponse401
+  | createFactoryAutomationResponse403
+  | createFactoryAutomationResponse500
+  | createFactoryAutomationResponse502
+) & {
+  headers: Headers;
+};
+
+export type createFactoryAutomationResponse =
+  | createFactoryAutomationResponseSuccess
+  | createFactoryAutomationResponseError;
+
+export const getCreateFactoryAutomationUrl = () => {
+  return `/automations`;
+};
+
+export const createFactoryAutomation = async (
+  automationRequest: AutomationRequest,
+  options?: RequestInit
+): Promise<createFactoryAutomationResponse> => {
+  const res = await fetch(getCreateFactoryAutomationUrl(), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(automationRequest),
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: createFactoryAutomationResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as createFactoryAutomationResponse;
+};
+
+/**
+ * @summary Fire the Automation whose routine this run is: only the code step of a
+run of an Automation's routine calls it, with the credential the
+scheduler signed for the routine (403 for any other caller). It starts
+a Run as the Automation's creator, once per routine run, unless the
+Automation is switched off, the queue is full or a Run already runs on
+the task.
+ */
+export type fireFactoryAutomationResponse200 = {
+  data: FiringResult;
+  status: 200;
+};
+
+export type fireFactoryAutomationResponse400 = {
+  data: ErrorResponse;
+  status: 400;
+};
+
+export type fireFactoryAutomationResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type fireFactoryAutomationResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type fireFactoryAutomationResponse404 = {
+  data: ErrorResponse;
+  status: 404;
+};
+
+export type fireFactoryAutomationResponse409 = {
+  data: ErrorResponse;
+  status: 409;
+};
+
+export type fireFactoryAutomationResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type fireFactoryAutomationResponseSuccess =
+  fireFactoryAutomationResponse200 & {
+    headers: Headers;
+  };
+export type fireFactoryAutomationResponseError = (
+  | fireFactoryAutomationResponse400
+  | fireFactoryAutomationResponse401
+  | fireFactoryAutomationResponse403
+  | fireFactoryAutomationResponse404
+  | fireFactoryAutomationResponse409
+  | fireFactoryAutomationResponse500
+) & {
+  headers: Headers;
+};
+
+export type fireFactoryAutomationResponse =
+  | fireFactoryAutomationResponseSuccess
+  | fireFactoryAutomationResponseError;
+
+export const getFireFactoryAutomationUrl = () => {
+  return `/automations/fire`;
+};
+
+export const fireFactoryAutomation = async (
+  routineFiring: RoutineFiring,
+  options?: RequestInit
+): Promise<fireFactoryAutomationResponse> => {
+  const res = await fetch(getFireFactoryAutomationUrl(), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(routineFiring),
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: fireFactoryAutomationResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as fireFactoryAutomationResponse;
+};
+
+/**
+ * @summary Delete an Automation of the caller's team, as for switching it off, and
+its routine. The Runs it started keep the record of it.
+ */
+export type deleteFactoryAutomationResponse204 = {
+  data: void;
+  status: 204;
+};
+
+export type deleteFactoryAutomationResponse400 = {
+  data: ErrorResponse;
+  status: 400;
+};
+
+export type deleteFactoryAutomationResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type deleteFactoryAutomationResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type deleteFactoryAutomationResponse404 = {
+  data: ErrorResponse;
+  status: 404;
+};
+
+export type deleteFactoryAutomationResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type deleteFactoryAutomationResponse502 = {
+  data: ErrorResponse;
+  status: 502;
+};
+
+export type deleteFactoryAutomationResponseSuccess =
+  deleteFactoryAutomationResponse204 & {
+    headers: Headers;
+  };
+export type deleteFactoryAutomationResponseError = (
+  | deleteFactoryAutomationResponse400
+  | deleteFactoryAutomationResponse401
+  | deleteFactoryAutomationResponse403
+  | deleteFactoryAutomationResponse404
+  | deleteFactoryAutomationResponse500
+  | deleteFactoryAutomationResponse502
+) & {
+  headers: Headers;
+};
+
+export type deleteFactoryAutomationResponse =
+  | deleteFactoryAutomationResponseSuccess
+  | deleteFactoryAutomationResponseError;
+
+export const getDeleteFactoryAutomationUrl = (id: string) => {
+  return `/automations/${id}`;
+};
+
+export const deleteFactoryAutomation = async (
+  id: string,
+  options?: RequestInit
+): Promise<deleteFactoryAutomationResponse> => {
+  const res = await fetch(getDeleteFactoryAutomationUrl(id), {
+    ...options,
+    method: 'DELETE',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: deleteFactoryAutomationResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as deleteFactoryAutomationResponse;
+};
+
+/**
+ * @summary Switch an Automation of the caller's team on or off: their own, or any
+for an admin of the team (403 otherwise). Its routine follows.
+ */
+export type setFactoryAutomationEnabledResponse200 = {
+  data: Automation;
+  status: 200;
+};
+
+export type setFactoryAutomationEnabledResponse400 = {
+  data: ErrorResponse;
+  status: 400;
+};
+
+export type setFactoryAutomationEnabledResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type setFactoryAutomationEnabledResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type setFactoryAutomationEnabledResponse404 = {
+  data: ErrorResponse;
+  status: 404;
+};
+
+export type setFactoryAutomationEnabledResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type setFactoryAutomationEnabledResponse502 = {
+  data: ErrorResponse;
+  status: 502;
+};
+
+export type setFactoryAutomationEnabledResponseSuccess =
+  setFactoryAutomationEnabledResponse200 & {
+    headers: Headers;
+  };
+export type setFactoryAutomationEnabledResponseError = (
+  | setFactoryAutomationEnabledResponse400
+  | setFactoryAutomationEnabledResponse401
+  | setFactoryAutomationEnabledResponse403
+  | setFactoryAutomationEnabledResponse404
+  | setFactoryAutomationEnabledResponse500
+  | setFactoryAutomationEnabledResponse502
+) & {
+  headers: Headers;
+};
+
+export type setFactoryAutomationEnabledResponse =
+  | setFactoryAutomationEnabledResponseSuccess
+  | setFactoryAutomationEnabledResponseError;
+
+export const getSetFactoryAutomationEnabledUrl = (id: string) => {
+  return `/automations/${id}/enabled`;
+};
+
+export const setFactoryAutomationEnabled = async (
+  id: string,
+  setAutomationEnabledRequest: SetAutomationEnabledRequest,
+  options?: RequestInit
+): Promise<setFactoryAutomationEnabledResponse> => {
+  const res = await fetch(getSetFactoryAutomationEnabledUrl(id), {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(setAutomationEnabledRequest),
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: setFactoryAutomationEnabledResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as setFactoryAutomationEnabledResponse;
+};
+
+/**
+ * @summary Fire a webhook Automation. The call carries no login: it is signed with
+the Automation's secret, as Macro signs its own webhooks
+(`x-macro-signature: v1=<hex>`, an HMAC-SHA256 of
+`"{x-macro-timestamp}.{body}"`), at a timestamp (Unix seconds) within
+five minutes of now (401 otherwise). A call received before is refused
+(409), so a replay starts nothing. The body is empty, or JSON naming the
+task the Run works on.
+ */
+export type callFactoryAutomationWebhookResponse202 = {
+  data: FiringResult;
+  status: 202;
+};
+
+export type callFactoryAutomationWebhookResponse400 = {
+  data: ErrorResponse;
+  status: 400;
+};
+
+export type callFactoryAutomationWebhookResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type callFactoryAutomationWebhookResponse404 = {
+  data: ErrorResponse;
+  status: 404;
+};
+
+export type callFactoryAutomationWebhookResponse409 = {
+  data: ErrorResponse;
+  status: 409;
+};
+
+export type callFactoryAutomationWebhookResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type callFactoryAutomationWebhookResponseSuccess =
+  callFactoryAutomationWebhookResponse202 & {
+    headers: Headers;
+  };
+export type callFactoryAutomationWebhookResponseError = (
+  | callFactoryAutomationWebhookResponse400
+  | callFactoryAutomationWebhookResponse401
+  | callFactoryAutomationWebhookResponse404
+  | callFactoryAutomationWebhookResponse409
+  | callFactoryAutomationWebhookResponse500
+) & {
+  headers: Headers;
+};
+
+export type callFactoryAutomationWebhookResponse =
+  | callFactoryAutomationWebhookResponseSuccess
+  | callFactoryAutomationWebhookResponseError;
+
+export const getCallFactoryAutomationWebhookUrl = (id: string) => {
+  return `/automations/${id}/webhook`;
+};
+
+export const callFactoryAutomationWebhook = async (
+  id: string,
+  callFactoryAutomationWebhookBody: CallFactoryAutomationWebhookBody,
+  options?: RequestInit
+): Promise<callFactoryAutomationWebhookResponse> => {
+  const res = await fetch(getCallFactoryAutomationWebhookUrl(id), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(callFactoryAutomationWebhookBody),
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: callFactoryAutomationWebhookResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as callFactoryAutomationWebhookResponse;
+};
 
 /**
  * @summary List the built-in Flows a Run can be started of, by name.

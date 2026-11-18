@@ -6,6 +6,7 @@
  */
 
 import type { MacroUserIdStr } from './macroUserIdStr';
+import type { RunAutomationProperty } from './runAutomationProperty';
 import type { RunControlFiles } from './runControlFiles';
 import type { RunEndProperty } from './runEndProperty';
 import type { RunId } from './runId';
@@ -17,6 +18,7 @@ import type { RunTaskId } from './runTaskId';
  * One Run of a Flow.
  */
 export interface Run {
+  automation?: RunAutomationProperty;
   controlFiles?: RunControlFiles;
   /** When the Run was created. */
   createdAt: string;
