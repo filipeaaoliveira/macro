@@ -14,6 +14,7 @@ import {
   getGetFactoryControlFilesUrl,
   getGetFactoryInsightsUrl,
   getGetFactoryRunUrl,
+  getGetFactorySessionStepUrl,
   getGetFactoryStandingRulesUrl,
   getListFactoryAutomationsUrl,
   getListFactoryFlowsUrl,
@@ -44,6 +45,7 @@ import type {
   RunDetail,
   RunErrorCode,
   RunInsights,
+  SessionStepRef,
   StandingRulesSettings,
   TaskRunsResponse,
   WaitingRunsResponse,
@@ -197,6 +199,17 @@ export const factoryClient = {
       `${host()}${getReplyToFactoryGateUrl(encodeURIComponent(runId), seq)}`,
       { method: 'POST', body: JSON.stringify(reply) }
     ).then((result) => result.map(() => undefined));
+  },
+
+  /**
+   * The person's factory Step that works in the agent session `sessionId`;
+   * any other session fails `NOT_FOUND`.
+   */
+  getSessionStep(sessionId: string, signal?: AbortSignal) {
+    return fetchWithToken<SessionStepRef>(
+      `${host()}${getGetFactorySessionStepUrl(encodeURIComponent(sessionId))}`,
+      { method: 'GET', signal }
+    );
   },
 
   /**

@@ -6,11 +6,17 @@ import type { SteerAction } from '../core/run';
 /**
  * A running Step's Step Terminal controls: a note to its agent, Pause or
  * Resume, and Stop step, confirmed in place as Cancel run is. While the
- * Step is paused, the note goes with the resume. Nothing is sent once the
- * Step ended or is stopping, or while a steer is on the wire.
+ * Step is paused, the note goes with the resume, and it says when the Step
+ * ends unless resumed. Between its agent's turns the controls stay, disabled,
+ * saying why. Nothing is sent once the Step ended or is stopping, or while
+ * a steer is on the wire.
  */
 export function StepTerminalControls(props: {
-  state: 'working' | 'paused' | 'stopping' | 'ended';
+  state: 'working' | 'paused' | 'stopping' | 'between' | 'ended';
+  /** When a paused Step ends unless resumed, as the person reads times. */
+  endsBy?: string;
+  /** The Step ended because it stayed paused past its time. */
+  ranOut?: boolean;
   note: string;
   onNoteChange: (note: string) => void;
   /** The steer on the wire, if one is. */
@@ -24,7 +30,12 @@ export function StepTerminalControls(props: {
   const locked = () =>
     props.steering !== undefined ||
     props.state === 'stopping' ||
+    props.state === 'between' ||
     props.state === 'ended';
+  const open = () =>
+    props.state === 'working' ||
+    props.state === 'paused' ||
+    props.state === 'between';
 
   const askToStop = () => {
     setConfirmingStop(true);
@@ -42,8 +53,18 @@ export function StepTerminalControls(props: {
   return (
     <div class="flex flex-col gap-3">
       <Switch>
+        <Match when={props.state === 'ended' && props.ranOut}>
+          <p class="text-sm text-ink-muted">
+            {t('factoryRuns.terminalPauseRanOut')}
+          </p>
+        </Match>
         <Match when={props.state === 'ended'}>
           <p class="text-sm text-ink-muted">{t('factoryRuns.terminalEnded')}</p>
+        </Match>
+        <Match when={props.state === 'between'}>
+          <p class="text-sm text-ink-muted">
+            {t('factoryRuns.terminalBetweenTurns')}
+          </p>
         </Match>
         <Match when={props.state === 'stopping'}>
           <p class="text-sm text-ink-muted">
@@ -52,11 +73,18 @@ export function StepTerminalControls(props: {
         </Match>
         <Match when={props.state === 'paused'}>
           <p class="text-sm text-ink-muted">
-            {t('factoryRuns.terminalPausedHint')}
+            {t('factoryRuns.terminalPausedHint')}{' '}
+            <Show when={props.endsBy}>
+              {(endsBy) => (
+                <span class="font-medium text-ink">
+                  {t('factoryRuns.terminalPausedEndsBy', { time: endsBy() })}
+                </span>
+              )}
+            </Show>
           </p>
         </Match>
       </Switch>
-      <Show when={props.state === 'working' || props.state === 'paused'}>
+      <Show when={open()}>
         <TextField
           value={props.note}
           onChange={props.onNoteChange}
@@ -73,7 +101,7 @@ export function StepTerminalControls(props: {
           />
         </TextField>
       </Show>
-      <Show when={props.state === 'working' || props.state === 'paused'}>
+      <Show when={open()}>
         <Show
           when={confirmingStop()}
           fallback={

@@ -17,6 +17,7 @@ import {
   terminalState,
 } from '../core/run';
 import type { RunController } from '../primitives/run-controller';
+import { formatRunTime } from './shared/run-time';
 
 function notifySteer(result: RunActionResult | undefined) {
   if (!result || result.ok) return;
@@ -43,7 +44,7 @@ function StepSessionTranscript(props: { sessionId: string }) {
     <StaticMarkdownContext>
       <AgentSessionProvider blockId={props.sessionId}>
         <div class="flex size-full min-h-0 @container/agent-session">
-          <Transcript />
+          <Transcript replies={false} />
         </div>
       </AgentSessionProvider>
     </StaticMarkdownContext>
@@ -116,6 +117,12 @@ export function StepTerminalDialog(props: {
           <div class="w-full">
             <StepTerminalControls
               state={state()}
+              endsBy={
+                props.step.terminal?.endsBy
+                  ? formatRunTime(props.step.terminal.endsBy)
+                  : undefined
+              }
+              ranOut={Boolean(props.step.terminal?.pauseRanOutAt)}
               note={props.controller.terminalNote()}
               onNoteChange={props.controller.setTerminalNote}
               steering={props.controller.steering()}

@@ -126,6 +126,15 @@ export type StepTerminal = {
   sessionId?: string;
   pausedAt?: string;
   stopAskedAt?: string;
+  /**
+   * Its agent works on no turn the Step waits on, as while the factory runs
+   * the repository's checks: it takes no steering until its next turn.
+   */
+  betweenTurns?: boolean;
+  /** When a paused Step ends, failed, unless it is resumed first. */
+  endsBy?: string;
+  /** When it ended because it stayed paused past its time. */
+  pauseRanOutAt?: string;
   steers: Steer[];
 };
 
@@ -435,7 +444,8 @@ export function steerableSession(step: RunStep): string | undefined {
 /** Where a running Step stands for its Step Terminal. */
 export function terminalState(
   step: RunStep
-): 'working' | 'paused' | 'stopping' {
+): 'working' | 'paused' | 'stopping' | 'between' {
   if (step.terminal?.stopAskedAt) return 'stopping';
-  return step.terminal?.pausedAt ? 'paused' : 'working';
+  if (step.terminal?.pausedAt) return 'paused';
+  return step.terminal?.betweenTurns ? 'between' : 'working';
 }

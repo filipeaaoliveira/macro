@@ -4,6 +4,7 @@ import {
   ChangesSplit,
   ReviewNotesDock,
 } from '@app/features/changes/changes';
+import { StepSessionComposerGate } from '@app/features/factory-runs/components/step-session-gate';
 import { useFeatureFlag } from '@app/lib/analytics/posthog';
 import { useGlobalNotificationSource } from '@components/app/GlobalAppState';
 import { FloatRegionOrInline } from '@components/app/mobile/float-regions/FloatRegion';
@@ -248,13 +249,15 @@ function AgentBlockContent(props: {
                     >
                       <ChangesHandoff />
                       <ReviewNotesDock />
-                      <AgentComposer
-                        autofocus={
-                          canAutofocusSplitContent &&
-                          !navigatedFromJK() &&
-                          !searchTarget()
-                        }
-                      />
+                      <StepSessionComposerGate sessionId={sessionId()}>
+                        <AgentComposer
+                          autofocus={
+                            canAutofocusSplitContent &&
+                            !navigatedFromJK() &&
+                            !searchTarget()
+                          }
+                        />
+                      </StepSessionComposerGate>
                     </Show>
                   </div>
                 </AgentPanelClearance>

@@ -31,7 +31,7 @@ const started: RunDetail = {
   },
   steps: [
     {
-      terminal: { steers: [] },
+      terminal: { betweenTurns: false, steers: [] },
       seq: 1,
       entry: 'plan',
       visit: 1,
@@ -130,6 +130,9 @@ describe('createAppRunsContext', () => {
             sessionId: undefined,
             pausedAt: undefined,
             stopAskedAt: undefined,
+            betweenTurns: false,
+            endsBy: undefined,
+            pauseRanOutAt: undefined,
             steers: [],
           },
           checks: [
@@ -188,7 +191,7 @@ describe('createAppRunsContext', () => {
       ...started,
       steps: [
         {
-          terminal: { steers: [] },
+          terminal: { betweenTurns: false, steers: [] },
           seq: 1,
           entry: 'plan',
           visit: 1,
@@ -424,7 +427,7 @@ describe('createAppRunsContext', () => {
         ...started,
         steps: [
           {
-            terminal: { steers: [] },
+            terminal: { betweenTurns: false, steers: [] },
             seq: 1,
             entry: 'plan',
             visit: 1,

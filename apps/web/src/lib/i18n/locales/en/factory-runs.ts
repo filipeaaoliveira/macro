@@ -272,7 +272,13 @@ export default {
   closeTerminal: 'Close',
   terminalEnded: 'This step has ended. Its agent’s session is closed.',
   terminalPausedHint:
-    'The agent is paused. Resume it to go on; a note you write goes with the resume. A paused step still ends two hours after it started.',
+    'The agent is paused. Resume it to go on; a note you write goes with the resume.',
+  terminalPausedEndsBy:
+    'Its time runs out at {{time}}: unless you resume it by then, it ends as failed.',
+  terminalPauseRanOut:
+    'The step stayed paused past its time, and ended as failed.',
+  terminalBetweenTurns:
+    'The agent is between turns while the factory runs the repository’s checks. You can steer it again once its next turn starts.',
   terminalStoppingHint: 'The step is stopping, and will end as failed.',
   terminalNoteLabel: 'Note to the agent',
   terminalNotePlaceholder:
@@ -295,4 +301,8 @@ export default {
   steerResume: 'You resumed the step',
   steerStop: 'You stopped the step',
   steerUndelivered: 'The agent never got it',
+  // An agent session a factory Step works in, opened on its own.
+  stepSessionNotice:
+    'A factory step works in this session. Steer it from its run, which keeps what you do.',
+  stepSessionOpenRun: 'Open the run',
 };

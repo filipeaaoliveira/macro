@@ -30,7 +30,9 @@ vi.mock('@app/features/block-agent/agent-session-provider', () => ({
   ),
 }));
 vi.mock('@app/features/block-agent/component/Transcript', () => ({
-  Transcript: () => <p>The agent’s transcript</p>,
+  Transcript: (props: { replies?: boolean }) => (
+    <p data-replies={String(props.replies)}>The agent’s transcript</p>
+  ),
 }));
 
 beforeAll(() => {
@@ -146,7 +148,9 @@ describe('Step Terminal', () => {
 
     const session = document.querySelector('[data-agent-session]');
     expect(session?.getAttribute('data-agent-session')).toBe('session-2');
-    expect(screen.getByText('The agent’s transcript')).toBeTruthy();
+    const transcript = screen.getByText('The agent’s transcript');
+    // Read-only: nothing quotes the transcript into a composer.
+    expect(transcript.getAttribute('data-replies')).toBe('false');
   });
 
   it('sends the agent a note and clears it', async () => {
@@ -231,6 +235,51 @@ describe('Step Terminal', () => {
     expect(
       screen.queryByRole('textbox', { name: 'Note to the agent' })
     ).toBeNull();
+  });
+
+  it('says when a paused Step ends, and why it ended', async () => {
+    const { withTerminal } = mount();
+    await openTerminal();
+    withTerminal({
+      sessionId: 'session-2',
+      pausedAt: '2026-11-16T09:02:00Z',
+      endsBy: '2026-11-16T10:51:00Z',
+      steers: [],
+    });
+    expect(await screen.findByText(/Its time runs out at /)).toBeTruthy();
+
+    withTerminal(
+      {
+        pausedAt: '2026-11-16T09:02:00Z',
+        pauseRanOutAt: '2026-11-16T10:51:00Z',
+        steers: [],
+      },
+      {
+        outcome: 'failed',
+        output: 'The step stayed paused past its time.',
+        endedAt: '2026-11-16T10:51:00Z',
+      }
+    );
+    expect(
+      await screen.findByText(
+        'The step stayed paused past its time, and ended as failed.'
+      )
+    ).toBeTruthy();
+  });
+
+  it('keeps the controls, disabled, while the agent is between turns', async () => {
+    const { steerStep, withTerminal } = mount();
+    await openTerminal();
+    withTerminal({ sessionId: 'session-2', betweenTurns: true, steers: [] });
+
+    expect(await screen.findByText(/The agent is between turns/)).toBeTruthy();
+    for (const name of ['Stop step', 'Pause', 'Send note']) {
+      expect(
+        screen.getByRole('button', { name }).hasAttribute('disabled')
+      ).toBe(true);
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Stop step' }));
+    expect(steerStep).not.toHaveBeenCalled();
   });
 
   it('says why the Step took no steering, and that it ended', async () => {

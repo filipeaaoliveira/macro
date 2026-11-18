@@ -46,7 +46,7 @@ const planning: RunDetail = {
   },
   steps: [
     {
-      terminal: { steers: [] },
+      terminal: { betweenTurns: false, steers: [] },
       seq: 1,
       entry: 'plan',
       visit: 1,
@@ -64,7 +64,7 @@ const waiting: RunDetail = {
   ...planning,
   steps: [
     {
-      terminal: { steers: [] },
+      terminal: { betweenTurns: false, steers: [] },
       seq: 1,
       entry: 'plan',
       visit: 1,

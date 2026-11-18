@@ -88,6 +88,9 @@ function toRun(detail: RunDetail): Run {
             sessionId: step.terminal.sessionId ?? undefined,
             pausedAt: step.terminal.pausedAt ?? undefined,
             stopAskedAt: step.terminal.stopAskedAt ?? undefined,
+            betweenTurns: step.terminal.betweenTurns,
+            endsBy: step.terminal.endsBy ?? undefined,
+            pauseRanOutAt: step.terminal.pauseRanOutAt ?? undefined,
             steers: step.terminal.steers.map((steer) => ({
               action: steer.action,
               note: steer.note ?? undefined,
