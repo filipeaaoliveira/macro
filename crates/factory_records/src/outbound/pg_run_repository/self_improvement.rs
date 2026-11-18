@@ -103,7 +103,8 @@ impl SelfImprovementRepository for PgRunRepository {
         let named_by = row
             .named_by_user_id
             .map(|id| {
-                MacroUserIdStr::try_from(id.clone()).map_err(|_| PgRunRepositoryErr::InvalidUserId(id))
+                MacroUserIdStr::try_from(id.clone())
+                    .map_err(|_| PgRunRepositoryErr::InvalidUserId(id))
             })
             .transpose()?;
         Ok(Some(DefinitionNaming {

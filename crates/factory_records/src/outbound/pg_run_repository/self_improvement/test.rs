@@ -285,22 +285,14 @@ async fn a_runs_failure_facts_read_its_judgments(pool: PgPool) {
     .await
     .expect("score");
 
-    let facts = repo
-        .failure_facts(id)
-        .await
-        .expect("read")
-        .expect("found");
+    let facts = repo.failure_facts(id).await.expect("read").expect("found");
     assert_eq!(facts.user_id, julia());
     assert_eq!(facts.flow, "plan");
     assert_eq!(facts.outcome, Some(RunOutcome::Success));
     assert_eq!(facts.definition_repo_url, None);
     assert_eq!(
         facts.judgments,
-        vec![(
-            "tests".to_string(),
-            0.25,
-            "No test covers it".to_string()
-        )]
+        vec![("tests".to_string(), 0.25, "No test covers it".to_string())]
     );
     assert_eq!(
         repo.failure_facts(RunId::generate()).await.expect("read"),

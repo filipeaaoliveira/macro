@@ -7,6 +7,7 @@ mod flaws;
 mod gate_owner;
 mod gate_replies;
 mod main_hold;
+pub(crate) mod self_improvement;
 mod steering;
 mod task_thread;
 
@@ -158,6 +159,10 @@ pub(crate) struct FakeRepo {
     pub(crate) control_files: Arc<Mutex<BTreeMap<Uuid, Vec<String>>>>,
     /// The Factory Definition each team names, by its repository's URL.
     pub(crate) team_definitions: Arc<Mutex<BTreeMap<Uuid, String>>>,
+    /// Who named each team's Definition, by team.
+    pub(crate) definition_namers: Arc<Mutex<BTreeMap<Uuid, String>>>,
+    /// Failures and self-improvement Runs.
+    pub(crate) improvement: Arc<Mutex<self_improvement::FakeImprovement>>,
     /// How many times one Run's Flow was read on its own.
     pub(crate) flow_reads: Arc<Mutex<usize>>,
     /// The Runs each read of several Runs' Flows asked for, in order.
@@ -700,11 +705,19 @@ impl RunRepository for FakeRepo {
         &self,
         team_id: Uuid,
         repo_url: Option<&str>,
+        named_by: &MacroUserIdStr<'static>,
     ) -> Result<(), FakeError> {
         let mut kept = self.team_definitions.lock().expect("team definitions");
+        let mut namers = self.definition_namers.lock().expect("definition namers");
         match repo_url {
-            Some(repo_url) => kept.insert(team_id, repo_url.to_string()),
-            None => kept.remove(&team_id),
+            Some(repo_url) => {
+                kept.insert(team_id, repo_url.to_string());
+                namers.insert(team_id, named_by.as_ref().to_string());
+            }
+            None => {
+                kept.remove(&team_id);
+                namers.remove(&team_id);
+            }
         };
         Ok(())
     }

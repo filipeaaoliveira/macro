@@ -30,6 +30,7 @@ mod definition;
 mod evaluation;
 mod gate_owner;
 mod orchestrator;
+mod self_improvement;
 mod standing_rules;
 mod step_terminal;
 mod task_thread;

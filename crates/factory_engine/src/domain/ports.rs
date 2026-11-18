@@ -1012,6 +1012,21 @@ pub trait FactoryService: Send + Sync + 'static {
         trial: TrialKey,
         base_commit: String,
     ) -> impl Future<Output = Result<RunDetail, FactoryError>> + Send;
+
+    /// Record and start the self-improvement Run `improvement`, kept as
+    /// starting, of the built-in `improve` Flow on the team's Definition
+    /// repository `repo_url`, owned by `actor`, for `request`: as
+    /// [`Self::create_run`] for a Run on no task that its owner did not
+    /// start in person, kept as the improvement's Run before its workflow
+    /// starts. The repository must be the Definition `actor`'s team names,
+    /// and its Agents must fill the Flow's Roles.
+    fn create_improvement_run(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        request: String,
+        repo_url: String,
+        improvement: Uuid,
+    ) -> impl Future<Output = Result<RunDetail, FactoryError>> + Send;
 }
 
 /// The Macro routines that fire Automations: a schedule's, a repository

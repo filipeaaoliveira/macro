@@ -16,6 +16,7 @@ use factory_records::domain::main_hold::MainHoldRepository;
 use factory_records::domain::models::{GateKind, Run, RunId, Step};
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::ReviewRoundRepository;
+use factory_records::domain::self_improvement::SelfImprovementRepository;
 use factory_records::domain::standing_rules::StandingRulesRepository;
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
@@ -63,7 +64,8 @@ where
         + AutomationRepository
         + FlawRepository
         + RunBoardRepository
-        + EvaluationRepository,
+        + EvaluationRepository
+        + SelfImprovementRepository,
     W: RunWorkflows,
     E: StepExecutor,
     U: UserDirectory,

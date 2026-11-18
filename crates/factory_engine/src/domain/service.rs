@@ -26,6 +26,7 @@ use factory_records::domain::models::{
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::{ReviewRound, ReviewRoundRepository};
+use factory_records::domain::self_improvement::{IMPROVE_FLOW, SelfImprovementRepository};
 use factory_records::domain::standing_rules::{
     MAX_QUEUE_LIMIT, MIN_QUEUE_LIMIT, OrchestratorDefinition, ProjectRulesSet, RuleGateKind,
     RulesSource, RunRules, StandingRulesRepository,
@@ -36,7 +37,7 @@ use uuid::Uuid;
 use crate::domain::board::{BoardFilter, BoardPage, PullRequestRuns};
 use crate::domain::built_in_flows::BUILT_IN_FLOWS;
 use crate::domain::control_files::ControlFiles;
-use crate::domain::definition::DEFINITION_FILE_PATTERNS;
+use crate::domain::definition::{DEFINITION_FILE_PATTERNS, DefinitionError};
 use crate::domain::evaluation::{EvaluationDefinition, TeamEvaluation};
 use crate::domain::flaws::mark_flawed;
 use crate::domain::flow::Flow;
@@ -118,6 +119,9 @@ struct RunOrder<'a> {
     /// The Benchmark trial it is, if a suite starts it, and the commit its
     /// write starts from.
     trial: Option<(TrialKey, String)>,
+    /// The self-improvement Run it is, kept as starting, if the factory
+    /// starts it against its team's Definition.
+    improvement: Option<Uuid>,
 }
 
 /// The Run API, over the Run records, the Runs' workflows, the worker that
@@ -146,7 +150,8 @@ where
         + AutomationRepository
         + FlawRepository
         + RunBoardRepository
-        + EvaluationRepository,
+        + EvaluationRepository
+        + SelfImprovementRepository,
     W: RunWorkflows,
     E: StepExecutor,
     U: UserDirectory,
@@ -660,10 +665,14 @@ where
             in_person,
             automation,
             trial,
+            improvement,
         } = order;
         // A Benchmark's Flow runs only as a suite's trial, and a trial only
-        // on it.
-        if (flow == BENCHMARK_FLOW) != trial.is_some() {
+        // on it; the improve Flow only as a self-improvement Run, and that
+        // only on it.
+        if (flow == BENCHMARK_FLOW) != trial.is_some()
+            || (flow == IMPROVE_FLOW) != improvement.is_some()
+        {
             return Err(FactoryError::UnknownFlow);
         }
         // A team that names a Factory Definition starts its Runs of the
@@ -675,8 +684,31 @@ where
         // A Benchmark trial walks the built-in benchmark Flow whatever Flows
         // the team's Definition holds, none of which takes its name; it
         // still keeps the Definition, whose Agents its Steps take.
-        let flows_of = definition.as_ref().filter(|_| trial.is_none());
+        // So does a self-improvement Run walk the built-in improve Flow,
+        // on the Definition's own repository, whose Agents must fill it.
+        let flows_of = definition
+            .as_ref()
+            .filter(|_| trial.is_none() && improvement.is_none());
         let flow = self.flow_named(&flow_name, flows_of)?;
+        if improvement.is_some() {
+            let Some(pinned) = &definition else {
+                return Err(FactoryError::UnknownFlow);
+            };
+            let on_definition = repo_url
+                .as_deref()
+                .is_some_and(|repo_url| pinned.repo_url.eq_ignore_ascii_case(repo_url));
+            if !on_definition {
+                return Err(FactoryError::InvalidRepository);
+            }
+            let roles: BTreeSet<_> = flow
+                .entries
+                .iter()
+                .flat_map(|entry| entry.role.iter().chain(&entry.reviewers))
+                .collect();
+            pinned.definition.agents.fills(roles).map_err(|error| {
+                FactoryError::InvalidDefinition(DefinitionError::ImprovementAgents(error))
+            })?;
+        }
         if request.trim().is_empty() {
             return Err(FactoryError::EmptyRequest);
         }
@@ -821,9 +853,28 @@ where
         // their Agents. A Run that cannot keep them does not start. A
         // team's Definition holds its Experiments; a team with none takes
         // the deployment's.
-        let kept = match &trial {
-            Some((trial, base_commit)) => self.repo.insert_trial(trial, run_id, base_commit).await,
-            None => {
+        let kept = match (&trial, improvement) {
+            (Some((trial, base_commit)), _) => {
+                self.repo.insert_trial(trial, run_id, base_commit).await
+            }
+            // A self-improvement Run is kept as its improvement's before
+            // its workflow starts; one no longer starting does not start.
+            (None, Some(improvement)) => {
+                match self.repo.link_improvement_run(improvement, run_id).await {
+                    Ok(true) => Ok(()),
+                    Ok(false) => {
+                        self.forget_unstarted(run_id).await;
+                        return Err(FactoryError::Internal(rootcause::report!(
+                            "the self-improvement run is no longer starting"
+                        )));
+                    }
+                    Err(error) => {
+                        self.forget_unstarted(run_id).await;
+                        return Err(FactoryError::Internal(internal(error)));
+                    }
+                }
+            }
+            (None, None) => {
                 let evaluation = match &definition {
                     Some(pinned) => &pinned.definition.evaluation,
                     None => &*self.evaluation,
@@ -878,7 +929,8 @@ where
         + AutomationRepository
         + FlawRepository
         + RunBoardRepository
-        + EvaluationRepository,
+        + EvaluationRepository
+        + SelfImprovementRepository,
     W: RunWorkflows,
     E: StepExecutor,
     U: UserDirectory,
@@ -905,7 +957,7 @@ where
         // offered: a Run of it would be refused.
         Ok(BUILT_IN_FLOWS
             .into_iter()
-            .filter(|flow| flow.name != BENCHMARK_FLOW)
+            .filter(|flow| flow.name != BENCHMARK_FLOW && flow.name != IMPROVE_FLOW)
             .filter_map(|flow| {
                 let read = flow.read(|step| self.executor.serves(step)).ok()?;
                 Some(FlowSummary {
@@ -935,6 +987,7 @@ where
             in_person,
             automation: None,
             trial: None,
+            improvement: None,
         })
         .await
     }
@@ -984,6 +1037,28 @@ where
             in_person: false,
             automation: None,
             trial: Some((trial, base_commit)),
+            improvement: None,
+        })
+        .await
+    }
+
+    async fn create_improvement_run(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        request: String,
+        repo_url: String,
+        improvement: Uuid,
+    ) -> Result<RunDetail, FactoryError> {
+        self.start_run(RunOrder {
+            actor,
+            flow: IMPROVE_FLOW.to_string(),
+            request,
+            task_id: None,
+            repo_url: Some(repo_url),
+            in_person: false,
+            automation: None,
+            trial: None,
+            improvement: Some(improvement),
         })
         .await
     }
@@ -994,7 +1069,7 @@ where
         flow: &str,
         repo_url: Option<&str>,
     ) -> Result<(), FactoryError> {
-        if flow == BENCHMARK_FLOW {
+        if flow == BENCHMARK_FLOW || flow == IMPROVE_FLOW {
             return Err(FactoryError::UnknownFlow);
         }
         let team = self.repo.team_of(actor).await.map_err(internal)?;
@@ -1038,6 +1113,7 @@ where
                 firing_key,
             }),
             trial: None,
+            improvement: None,
         })
         .await
     }
@@ -1663,6 +1739,11 @@ where
             user_id: actor.clone(),
         };
         mark_flawed(&self.repo, id, by, reason).await?;
+        // The flaw is a failure the team's Definition may learn from; a
+        // failure to keep it is logged, and the mark stands.
+        if let Err(error) = crate::domain::self_improvement::collect(&self.repo, id).await {
+            tracing::warn!(?error, run_id = %id, "a flawed run's failure was not kept");
+        }
         self.get_run(actor, id).await
     }
 }

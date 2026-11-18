@@ -26,6 +26,7 @@ pub mod ports;
 pub mod pull_request_steps;
 pub mod questions;
 pub mod review_rounds;
+pub mod self_improvement;
 pub mod service;
 pub mod session_agent;
 pub mod stand_in;

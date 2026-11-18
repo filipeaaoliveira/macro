@@ -332,6 +332,21 @@ async fn scorers_that_do_not_fit_the_definition_do_not_read() {
     assert!(error.contains("settings"), "{error}");
 }
 
+/// The improve Flow is the factory's own, which only a self-improvement
+/// Run walks: a Definition names no Flow of its name.
+#[tokio::test]
+async fn a_definition_names_no_improve_flow() {
+    let mut named = with(
+        "factory.json",
+        r#"{ "version": 1, "flows": ["reply", "improve"] }"#,
+    );
+    named.insert("flows/improve.json".to_string(), REPLY.to_string());
+    assert_eq!(
+        read(named).await,
+        Err(DefinitionError::ReservedFlow("improve".to_string()))
+    );
+}
+
 /// The benchmark Flow is the factory's own, which only a Benchmark's
 /// trials walk: a Definition names no Flow of its name, and one with
 /// Benchmarks has Agents for its Roles.
