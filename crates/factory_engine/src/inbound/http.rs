@@ -1032,6 +1032,7 @@ impl FactoryError {
         match self {
             FactoryError::InvalidFlow(_)
             | FactoryError::EmptyRequest
+            | FactoryError::HalfCursor
             | FactoryError::RequestTooLarge { .. }
             | FactoryError::NoteTooLarge { .. }
             | FactoryError::EmptyNote

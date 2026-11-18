@@ -83,6 +83,19 @@ async fn the_board_lists_the_caller_s_runs_a_page_at_a_time() {
     let eve_s = body(list("/runs?scope=team", Caller::User("eve")).await).await;
     assert_eq!(eve_s["runs"], serde_json::json!([]));
 
+    let half_cursor = list(
+        "/runs?afterCreatedAt=2026-11-18T10:00:00Z",
+        Caller::User("alice"),
+    )
+    .await;
+    assert_eq!(half_cursor.status(), StatusCode::BAD_REQUEST);
+    let other_half = list(
+        "/runs?afterId=0193a1e8-a9d0-7c1d-b114-175185b044c8",
+        Caller::User("alice"),
+    )
+    .await;
+    assert_eq!(other_half.status(), StatusCode::BAD_REQUEST);
+
     let unknown_state = list("/runs?state=lost", Caller::User("alice")).await;
     assert_eq!(unknown_state.status(), StatusCode::BAD_REQUEST);
 

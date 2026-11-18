@@ -46,7 +46,8 @@ pub struct BoardParams {
     /// Where the page starts: the `next.createdAt` of the page before.
     #[serde(default)]
     pub after_created_at: Option<DateTime<Utc>>,
-    /// With `afterCreatedAt`: the `next.id` of the page before.
+    /// The `next.id` of the page before: given with `afterCreatedAt` or
+    /// not at all (400 otherwise).
     #[serde(default)]
     pub after_id: Option<RunId>,
     /// The most Runs the page lists: 25 when left out, at most 50.
@@ -85,7 +86,8 @@ where
     let actor = caller.authorization.user.macro_user_id;
     let after = match (params.after_created_at, params.after_id) {
         (Some(created_at), Some(id)) => Some(BoardNext { created_at, id }),
-        _ => None,
+        (None, None) => None,
+        _ => return Err(FactoryError::HalfCursor),
     };
     let filter = BoardFilter {
         scope: params.scope.unwrap_or_default(),
