@@ -138,5 +138,9 @@ async fn the_benchmark_flow_runs_only_as_a_suite_s_trial() {
         kept.trials[&(Uuid::from_u128(600), "typo".to_string())],
         created.run.id
     );
-    assert_eq!(workflows.started.lock().expect("started").len(), 1);
+    // A trial asks no one: its agents are offered no question.
+    let started = workflows.started.lock().expect("started").clone();
+    assert_eq!(started.len(), 1);
+    assert!(started[0].flow.unattended);
+    assert_eq!(started[0].flow.questions, None);
 }

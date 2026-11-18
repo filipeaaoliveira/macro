@@ -197,6 +197,7 @@ async fn walk_entry(
         questions: Questions {
             may_ask: true,
             most: 2,
+            owner_answers: true,
         },
     };
     let mut held = Vec::new();
@@ -436,6 +437,7 @@ async fn reviewers_of_a_flow_without_questions_never_ask() {
         questions: Questions {
             may_ask: false,
             most: 0,
+            owner_answers: true,
         },
     };
     let mut held = Vec::new();

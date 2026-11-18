@@ -685,6 +685,9 @@ pub(super) struct Questions {
     /// How many questions each Step's work may ask; the next one ends the
     /// Run for a person.
     pub(super) most: u8,
+    /// Whether the Run's owner is asked about a Step whose agent stopped
+    /// without a result: never on an unattended Flow, whose Step fails.
+    pub(super) owner_answers: bool,
 }
 
 impl Questions {
@@ -695,6 +698,7 @@ impl Questions {
         Self {
             may_ask: most > 0,
             most,
+            owner_answers: !flow.unattended,
         }
     }
 
