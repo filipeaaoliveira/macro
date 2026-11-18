@@ -1,6 +1,7 @@
 use factory_records::domain::models::{Outcome, RunOutcome};
 
 use super::{Interpreter, InterpreterError, NextStep};
+use crate::domain::built_in_steps::past_merge_outcome;
 use crate::domain::flow::{FactName, Flow};
 
 const REPLY_FLOW: &str = include_str!("../../../flows/reply.json");
@@ -774,15 +775,26 @@ fn a_run_ends_once_its_change_is_merged() {
     assert_eq!(end, Ok(RunOutcome::Success));
 }
 
-/// The `code` Flow as Runs in flight carry it, from before the Run ended at
-/// its merge: once merged, it goes on to `deploy` and `verify`, whose
-/// Steps now end `off` at once (`built_in_steps`), which ends the Run
-/// `success` at its next Step, wherever it stood after the merge.
-const DEPLOY_VERIFY_CODE_FLOW: &str = include_str!("deploy_verify_code.json");
+/// The `code` Flows as Runs in flight carry them, from before the Run ended
+/// at its merge: once merged, they go on to `deploy` and `verify`, whose
+/// Steps now end at once (`built_in_steps::past_merge_outcome`), which ends
+/// the Run `success` at its next Step, wherever it stood after the merge.
+/// The first of them (`first_deploy_verify_code.json`) has no `off` from
+/// `verify`; the later one (`deploy_verify_code.json`) has.
+const DEPLOY_VERIFY_CODE_FLOWS: [(&str, &str); 2] = [
+    (
+        "first_deploy_verify_code",
+        include_str!("first_deploy_verify_code.json"),
+    ),
+    (
+        "deploy_verify_code",
+        include_str!("deploy_verify_code.json"),
+    ),
+];
 
 #[test]
 fn a_run_in_flight_past_its_merge_ends_at_its_next_step() {
-    let old = flow(DEPLOY_VERIFY_CODE_FLOW);
+    let ended = |step: &str| past_merge_outcome(step).expect("served");
     let merged = [
         "approve",
         "done",
@@ -793,28 +805,32 @@ fn a_run_in_flight_past_its_merge_ends_at_its_next_step() {
         "approve",
         "merged",
     ];
-    let after = |outcomes: &[&'static str]| {
-        let mut all = merged.to_vec();
-        all.extend_from_slice(outcomes);
-        let (steps, end) = walk(&old, &all);
-        (steps[merged.len()..].to_vec(), end)
-    };
+    for (name, definition) in DEPLOY_VERIFY_CODE_FLOWS {
+        let old = flow(definition);
+        let after = |outcomes: &[&str]| {
+            let mut all = merged.to_vec();
+            all.extend_from_slice(outcomes);
+            let (steps, end) = walk(&old, &all);
+            (steps[merged.len()..].to_vec(), end)
+        };
 
-    // One merged on a worker that still had the Steps: `deploy` ends `off`.
-    assert_eq!(
-        after(&["off"]),
-        (vec!["deploy#1".to_string()], Ok(RunOutcome::Success))
-    );
-    // One whose deploy was waited for already: `verify` ends `off`.
-    for waited in ["deployed", "not_needed"] {
+        // One merged on a worker without the Steps: `deploy` ends it.
         assert_eq!(
-            after(&[waited, "off"]),
-            (
-                vec!["deploy#1".to_string(), "verify#1".to_string()],
-                Ok(RunOutcome::Success)
-            ),
-            "{waited}"
+            after(&[ended("deploy")]),
+            (vec!["deploy#1".to_string()], Ok(RunOutcome::Success)),
+            "{name}"
         );
+        // One whose deploy was waited for already: `verify` ends it.
+        for waited in ["deployed", "not_needed"] {
+            assert_eq!(
+                after(&[waited, ended("verify")]),
+                (
+                    vec!["deploy#1".to_string(), "verify#1".to_string()],
+                    Ok(RunOutcome::Success)
+                ),
+                "{name}: {waited}"
+            );
+        }
     }
 }
 

@@ -163,17 +163,39 @@ fn the_code_flow_s_steps_are_served() {
 #[tokio::test]
 async fn the_steps_after_a_merge_end_at_once() {
     let agent = FakeAgent::ending_with("fail");
-    let steps = BuiltInSteps::new(agent.clone(), pull_requests());
+    let github = FakeGithub::default();
+    let steps = BuiltInSteps::new(
+        agent.clone(),
+        PullRequestSteps::new(github.clone(), FakeRepo::default(), FakeWatches::default()),
+    );
+    let repository = Repository {
+        url: "https://github.com/macro/app".to_string(),
+        base_branch: "main".to_string(),
+    };
 
-    for name in ["deploy", "verify"] {
+    // `off` ends the Run at `deploy`; `pass` at `verify`, which every Flow
+    // that named it routes to `success`, the first one having no `off`.
+    for (name, ended) in [("deploy", "off"), ("verify", "pass")] {
         let report = steps
-            .run(&step(name), input(&[]))
+            .run(
+                &step(name),
+                StepInput {
+                    repository: Some(&repository),
+                    ..input(&[])
+                },
+            )
             .await
             .unwrap_or_else(|error| panic!("{name}: {error}"));
-        assert_eq!(report.outcome.as_str(), "off", "{name}");
+        assert_eq!(report.outcome.as_str(), ended, "{name}");
         assert!(report.output.contains("ends at its merge"), "{name}");
     }
     assert!(agent.tasks.lock().expect("tasks").is_empty());
+    // GitHub was never asked: no pull request, file or diff was read.
+    let github = github.state();
+    assert_eq!(github.reads, 0);
+    assert!(github.file_reads.is_empty());
+    assert!(github.compared.is_empty());
+    assert!(github.merges.is_empty());
 }
 
 /// An agent Step goes to an Agent of the Role its entry names. A Run whose

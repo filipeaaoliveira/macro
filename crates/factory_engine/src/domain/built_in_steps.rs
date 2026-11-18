@@ -6,8 +6,8 @@
 //! the repository declares, in rounds (`checks_round`). `accept`, before
 //! the merge, has a verifier check the change does what the Run's request
 //! asks (`accept`). A Run ends at its merge: `deploy` and `verify`, which
-//! once followed it, are only served for the Runs whose Flow still names
-//! them, and end at once (`ENDED_AT_MERGE`).
+//! once followed it, run only for the Runs whose Flow still names them, and
+//! end at once ([`past_merge_outcome`]). No new Flow may name them.
 
 mod accept;
 mod checks_round;
@@ -41,6 +41,19 @@ use crate::domain::verification::VerifyFile;
 /// one whose Flow still names them goes no further.
 const ENDED_AT_MERGE: &str = "The change is merged, and the run ends at its merge: \
      the factory no longer waits for a deploy or checks the merged change.";
+
+/// The outcome a `deploy` or `verify` Step, of a Run whose Flow still goes
+/// on past its merge, ends with at once: the one every such Flow routes to
+/// the Run's `success`. `deploy`'s `off` ends the Run there; a Run already
+/// in `verify` ends with its `pass`, as the first of those Flows has no
+/// `off` from `verify`. None for any other Step.
+pub(crate) fn past_merge_outcome(step: &str) -> Option<&'static str> {
+    match step {
+        "deploy" => Some("off"),
+        "verify" => Some("pass"),
+        _ => None,
+    }
+}
 
 /// What the agent is told for a `plan` Step.
 const PLAN_INSTRUCTIONS: &str = include_str!("built_in_steps/plan.md");
@@ -111,10 +124,11 @@ enum BuiltInStep {
     /// request asks, before the merge.
     Accept,
     /// Once waited for the merge to deploy. Only a Run started on a `code`
-    /// Flow that named it reaches it, once merged: it ends `off` at once.
+    /// Flow that named it reaches it, once merged: it ends `off` at once,
+    /// which ends the Run `success`.
     Deploy,
     /// Once had a verifier check the merged change. Only a Run started on
-    /// a `code` Flow that named it reaches it, once merged: it ends `off`
+    /// a `code` Flow that named it reaches it, once merged: it ends `pass`
     /// at once, which ends the Run `success`.
     Verify,
 }
@@ -459,7 +473,7 @@ where
             BuiltInStep::Merge => Ok(self.pull_requests.merge(input).await?),
             BuiltInStep::Accept => self.accept_change(step, input).await,
             BuiltInStep::Deploy | BuiltInStep::Verify => Ok(StepReport {
-                outcome: Outcome::try_from("off".to_string()).unwrap_or_else(|_| Outcome::failed()),
+                outcome: accept::outcome(past_merge_outcome(step.as_str()).unwrap_or("off")),
                 output: ENDED_AT_MERGE.to_string(),
             }),
         }

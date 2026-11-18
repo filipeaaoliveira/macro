@@ -1342,6 +1342,8 @@ pub(crate) struct FakeGithubState {
     pub(crate) merge_refusal: Option<String>,
     /// The text of each file, by its branch and path.
     pub(crate) files: BTreeMap<(String, String), String>,
+    /// The files read, by their branch and path, in order.
+    pub(crate) file_reads: Vec<(String, String)>,
     /// The paths the Run's branch changed against its base; none when
     /// GitHub cannot list them all.
     pub(crate) changed: Option<Vec<String>>,
@@ -1540,7 +1542,9 @@ impl PullRequests for FakeGithub {
         path: &str,
     ) -> Result<Option<String>, FakeGithubError> {
         let file = (branch.to_string(), path.to_string());
-        Ok(self.state().files.get(&file).cloned())
+        let mut state = self.state();
+        state.file_reads.push(file.clone());
+        Ok(state.files.get(&file).cloned())
     }
 
     async fn changed_paths(

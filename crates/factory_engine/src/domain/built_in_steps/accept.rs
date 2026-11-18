@@ -439,6 +439,6 @@ fn verdict(
     }
 }
 
-fn outcome(name: &str) -> Outcome {
+pub(super) fn outcome(name: &str) -> Outcome {
     Outcome::try_from(name.to_string()).unwrap_or_else(|_| Outcome::failed())
 }
