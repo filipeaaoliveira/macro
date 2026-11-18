@@ -136,16 +136,17 @@ pub async fn dynamic_structured_completion_thinking<M: ToString>(
     parse_and_validate(&response, &validator)
 }
 
-/// [`dynamic_structured_completion`] for a one-shot prompt no later call
-/// shares a prefix with: it writes nothing to the prompt cache
-/// ([`PromptCache::Skip`]), whose write would cost more than plain input
-/// and never be read back.
+/// [`dynamic_structured_completion`], writing the prompt to the prompt
+/// cache as `cache` says: [`PromptCache::Skip`] for a one-shot prompt no
+/// later call shares a prefix with, whose write would cost more than plain
+/// input and never be read back.
 #[tracing::instrument(skip(model, system_prompt, messages, schema, recorder, ctx), err)]
-pub async fn dynamic_structured_completion_uncached<M: ToString>(
+pub async fn dynamic_structured_completion_with_cache<M: ToString>(
     model: M,
     system_prompt: &str,
     messages: Vec<Message>,
     schema: DynamicSchema,
+    cache: PromptCache,
     recorder: &dyn ai_usage::UsageRecorder,
     ctx: ai_usage::UsageContext,
 ) -> anyhow::Result<serde_json::Value> {
@@ -156,7 +157,7 @@ pub async fn dynamic_structured_completion_uncached<M: ToString>(
         &structured_prompt,
         messages,
         None,
-        PromptCache::Skip,
+        cache,
         recorder,
         ctx,
     )

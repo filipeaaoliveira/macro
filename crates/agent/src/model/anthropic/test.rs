@@ -1,4 +1,5 @@
 use super::*;
+use crate::completion::PromptCache;
 use crate::model::metering::{ProviderSupport, WireProtocol};
 use ai_usage::financial::ProviderModel;
 use bytes::Bytes;
@@ -52,12 +53,12 @@ impl HttpClientExt for CaptureTransport {
 }
 
 async fn captured_wire_body(streaming: bool) -> Value {
-    captured_body(streaming, true).await
+    captured_body(streaming, PromptCache::Write).await
 }
 
-/// The body a request leaves with, from the cached completion model or the
-/// uncached one.
-async fn captured_body(streaming: bool, cached: bool) -> Value {
+/// The body a request leaves with, from the completion model a one-shot
+/// completion picks for `cache`.
+async fn captured_body(streaming: bool, cache: PromptCache) -> Value {
     let transport = CaptureTransport::default();
     let client = anthropic::Client::builder()
         .api_key("test-anthropic-key")
@@ -97,11 +98,7 @@ async fn captured_body(streaming: bool, cached: bool) -> Value {
         output_schema: None,
         record_telemetry_content: false,
     };
-    let completion = if cached {
-        model.completion()
-    } else {
-        model.uncached_completion()
-    };
+    let completion = model.completion_for(cache);
     if streaming {
         let mut response = completion.stream(request).await.unwrap();
         // Rig starts its HTTP request lazily on the first stream poll.
@@ -155,13 +152,16 @@ async fn stream_caches_tools_system_and_conversation() {
 }
 
 #[tokio::test]
-async fn uncached_completion_marks_no_cache_breakpoint() {
-    // A one-shot prompt nothing reads back writes nothing to the cache.
-    let body = captured_body(false, false).await;
+async fn a_skipped_prompt_cache_marks_no_breakpoint() {
+    // A one-shot prompt nothing reads back writes nothing to the cache; one
+    // that writes it marks it.
+    let skipped = captured_body(false, PromptCache::Skip).await;
     assert!(
-        !body.to_string().contains("cache_control"),
-        "an uncached request carries no breakpoint: {body}"
+        !skipped.to_string().contains("cache_control"),
+        "an uncached request carries no breakpoint: {skipped}"
     );
+    let written = captured_body(false, PromptCache::Write).await;
+    assert_eq!(written["cache_control"], json!({"type": "ephemeral"}));
 }
 
 #[test]

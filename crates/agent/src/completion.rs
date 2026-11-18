@@ -163,12 +163,8 @@ pub async fn complete_with_history_params_and_cache<M: ToString>(
         let protocol = routed.protocol();
         let response = match routed {
             RoutedModel::Anthropic(m) => {
-                let completion = match cache {
-                    PromptCache::Write => m.completion(),
-                    PromptCache::Skip => m.uncached_completion(),
-                };
                 prompt_with_history(
-                    TracedModel::new(completion, telemetry.clone()),
+                    TracedModel::new(m.completion_for(cache), telemetry.clone()),
                     system_prompt,
                     messages,
                     telemetry,

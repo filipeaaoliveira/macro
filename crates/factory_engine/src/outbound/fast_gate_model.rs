@@ -10,9 +10,7 @@ mod test;
 
 use std::sync::Arc;
 
-use agent::structured_output::{
-    DynamicSchema, dynamic_structured_completion, dynamic_structured_completion_uncached,
-};
+use agent::structured_output::{DynamicSchema, dynamic_structured_completion_with_cache};
 use agent::{Message, PromptCache};
 use ai_usage::{AiFeature, UsageContext, UsageRecorder};
 use factory_records::domain::models::{Outcome, RunId};
@@ -83,30 +81,16 @@ impl StructuredCompletion for RouterCompletion {
     async fn complete(&self, call: StructuredCall) -> Result<serde_json::Value, GateModelError> {
         let messages = vec![Message::user(call.prompt)];
         let recorder = self.recorder.as_ref();
-        let answered = match call.cache {
-            PromptCache::Write => {
-                dynamic_structured_completion(
-                    call.model,
-                    call.instructions,
-                    messages,
-                    call.schema,
-                    recorder,
-                    call.usage,
-                )
-                .await
-            }
-            PromptCache::Skip => {
-                dynamic_structured_completion_uncached(
-                    call.model,
-                    call.instructions,
-                    messages,
-                    call.schema,
-                    recorder,
-                    call.usage,
-                )
-                .await
-            }
-        };
+        let answered = dynamic_structured_completion_with_cache(
+            call.model,
+            call.instructions,
+            messages,
+            call.schema,
+            call.cache,
+            recorder,
+            call.usage,
+        )
+        .await;
         answered.map_err(|error| GateModelError::Call(error.to_string()))
     }
 }
