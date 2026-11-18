@@ -8,8 +8,9 @@
 -- a place in the Queue before its first Gate. Both null for Runs created
 -- before this, which are looked up by their Flow's name, as before.
 --
--- Adding nullable columns rewrites no rows; the lock on factory_run is
--- brief. Give up rather than queue behind a long transaction.
+-- Adding nullable columns rewrites no rows; adding the check scans
+-- factory_run under its ACCESS EXCLUSIVE lock, which this small table holds
+-- briefly. Give up rather than queue behind a long transaction.
 SET LOCAL lock_timeout = '5s';
 
 ALTER TABLE factory_run

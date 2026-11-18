@@ -69,7 +69,9 @@ pub fn built_in_roles() -> Result<BTreeSet<Role>, FlowError> {
 /// of its name. None when neither reads.
 pub fn walked_flow(kept: RunFlow) -> Option<Flow> {
     match kept.definition {
-        Some(definition) => serde_json::from_value(definition).ok(),
+        Some(definition) => serde_json::from_value(definition)
+            .inspect_err(|error| tracing::warn!(?error, "a run's kept flow does not read"))
+            .ok(),
         None => BuiltInFlow::named(kept.name.as_deref()?)?
             .read(|_| Some(StepUse::Work))
             .ok(),
