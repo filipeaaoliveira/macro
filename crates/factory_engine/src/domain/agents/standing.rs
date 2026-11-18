@@ -123,4 +123,3 @@ pub enum StandingCheck {
         allowing: Vec<StandingRoleName>,
     },
 }
-

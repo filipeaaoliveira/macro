@@ -12,11 +12,11 @@ use factory_records::domain::board::{
 };
 use factory_records::domain::evaluation::EvaluationRepository;
 use factory_records::domain::flaws::FlawRepository;
-use factory_records::domain::standing_acts::StandingActRepository;
 use factory_records::domain::main_hold::MainHoldRepository;
 use factory_records::domain::models::{GateKind, Run, RunId, Step};
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::ReviewRoundRepository;
+use factory_records::domain::standing_acts::StandingActRepository;
 use factory_records::domain::standing_rules::StandingRulesRepository;
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;

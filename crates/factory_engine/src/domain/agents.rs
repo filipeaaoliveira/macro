@@ -14,8 +14,8 @@ use factory_records::domain::models::{AgentName, Role};
 use factory_records::domain::standing_acts::{StandingAct, StandingRoleName};
 use serde::{Deserialize, Serialize};
 
-pub use self::standing::{StandingCheck, StandingRole};
 use self::standing::StandingRoleFields;
+pub use self::standing::{StandingCheck, StandingRole};
 
 use crate::domain::built_in_flows::built_in_roles;
 use crate::domain::flow::FlowError;
@@ -274,14 +274,11 @@ impl AgentDefinition {
             if !role.acts.contains(&act) {
                 continue;
             }
-            let filled_by = role
-                .agents
-                .iter()
-                .find(|agent| {
-                    self.agents
-                        .get(*agent)
-                        .is_some_and(|known| Some(known.bot) == bot)
-                });
+            let filled_by = role.agents.iter().find(|agent| {
+                self.agents
+                    .get(*agent)
+                    .is_some_and(|known| Some(known.bot) == bot)
+            });
             if let Some(agent) = filled_by {
                 return StandingCheck::Filled {
                     role: name.clone(),

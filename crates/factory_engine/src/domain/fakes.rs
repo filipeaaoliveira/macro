@@ -174,8 +174,14 @@ pub(crate) struct FakeRepo {
     /// session's id.
     pub(crate) session_bots: Arc<Mutex<BTreeMap<Uuid, (String, Uuid)>>>,
     /// The standing acts kept, in order.
-    pub(crate) standing_acts:
-        Arc<Mutex<Vec<(RunId, factory_records::domain::standing_acts::StandingActRecord)>>>,
+    pub(crate) standing_acts: Arc<
+        Mutex<
+            Vec<(
+                RunId,
+                factory_records::domain::standing_acts::StandingActRecord,
+            )>,
+        >,
+    >,
     /// The Standing Rules each team set.
     pub(crate) team_rules: Arc<Mutex<BTreeMap<Uuid, OrchestratorDefinition>>>,
     /// The Standing Rules each team set for a Project, by team and Project.

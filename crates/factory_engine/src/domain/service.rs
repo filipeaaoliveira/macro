@@ -19,7 +19,6 @@ use factory_records::domain::automations::{
 use factory_records::domain::board::RunBoardRepository;
 use factory_records::domain::evaluation::{BENCHMARK_FLOW, EvaluationRepository, TrialKey};
 use factory_records::domain::flaws::FlawRepository;
-use factory_records::domain::standing_acts::{StandingAct, StandingActRepository};
 use factory_records::domain::main_hold::{BaseState, MainHoldRepository};
 use factory_records::domain::models::{
     EntryId, FlawMarker, HandBack, KeptFlow, MAX_NOTE_BYTES, MAX_OUTPUT_BYTES, MAX_QUESTION_BYTES,
@@ -28,6 +27,7 @@ use factory_records::domain::models::{
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::{ReviewRound, ReviewRoundRepository};
+use factory_records::domain::standing_acts::{StandingAct, StandingActRepository};
 use factory_records::domain::standing_rules::{
     MAX_QUEUE_LIMIT, MIN_QUEUE_LIMIT, OrchestratorDefinition, ProjectRulesSet, RuleGateKind,
     RulesSource, RunRules, StandingRulesRepository,
@@ -35,13 +35,13 @@ use factory_records::domain::standing_rules::{
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
+use crate::domain::agents::AgentDefinition;
 use crate::domain::board::{BoardFilter, BoardPage, PullRequestRuns};
 use crate::domain::built_in_flows::BUILT_IN_FLOWS;
 use crate::domain::control_files::ControlFiles;
 use crate::domain::definition::DEFINITION_FILE_PATTERNS;
 use crate::domain::evaluation::{EvaluationDefinition, TeamEvaluation};
 use crate::domain::flaws::mark_flawed;
-use crate::domain::agents::AgentDefinition;
 use crate::domain::flow::Flow;
 use crate::domain::gate::{
     AnswerGate, GateAnswered, GateOpening, GateRuling, GateTelling, ReplyGate, StandingAnswer,
@@ -1460,7 +1460,10 @@ where
                         .await?
                         .map(|by| StandingAnswer { act, by });
                 }
-                None if agents.as_ref().is_some_and(AgentDefinition::has_standing_roles) => {
+                None if agents
+                    .as_ref()
+                    .is_some_and(AgentDefinition::has_standing_roles) =>
+                {
                     return Err(PersonOnly::Merge.into());
                 }
                 None => {}
@@ -1805,7 +1808,11 @@ pub struct StepServiceImpl<R, E, N = NoOwnerGates, T = NoOwnerGates, P = NoTaskT
 
 impl<R, E> StepServiceImpl<R, E>
 where
-    R: RunRepository + ReviewRoundRepository + MainHoldRepository + EvaluationRepository + StandingActRepository,
+    R: RunRepository
+        + ReviewRoundRepository
+        + MainHoldRepository
+        + EvaluationRepository
+        + StandingActRepository,
     E: StepExecutor,
 {
     /// Create the Step service, which tells no owner of a waiting Gate,
@@ -1824,7 +1831,11 @@ where
 
 impl<R, E, N, T, P> StepServiceImpl<R, E, N, T, P>
 where
-    R: RunRepository + ReviewRoundRepository + MainHoldRepository + EvaluationRepository + StandingActRepository,
+    R: RunRepository
+        + ReviewRoundRepository
+        + MainHoldRepository
+        + EvaluationRepository
+        + StandingActRepository,
     E: StepExecutor,
     N: GateNotifier,
     T: TaskNotes,
@@ -1902,7 +1913,11 @@ where
 
 impl<R, E, N, T, P> StepService for StepServiceImpl<R, E, N, T, P>
 where
-    R: RunRepository + ReviewRoundRepository + MainHoldRepository + EvaluationRepository + StandingActRepository,
+    R: RunRepository
+        + ReviewRoundRepository
+        + MainHoldRepository
+        + EvaluationRepository
+        + StandingActRepository,
     E: StepExecutor,
     N: GateNotifier,
     T: TaskNotes,

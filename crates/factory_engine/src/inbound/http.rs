@@ -938,7 +938,10 @@ fn answerer(
 /// the call's credential: none for the person in their own signed-in
 /// session, and for an internal caller. Under a Factory Definition with
 /// Standing Roles, its bot must fill one that allows the act.
-fn acting_session(authorization: &UserOrInternalAuthorization, headers: &HeaderMap) -> Option<Uuid> {
+fn acting_session(
+    authorization: &UserOrInternalAuthorization,
+    headers: &HeaderMap,
+) -> Option<Uuid> {
     if is_in_person(authorization, headers) || authorization.caller != UserOrInternalCaller::User {
         return None;
     }

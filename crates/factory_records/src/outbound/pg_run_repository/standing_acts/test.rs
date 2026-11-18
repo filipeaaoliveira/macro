@@ -78,7 +78,10 @@ async fn a_session_reads_as_its_bot_for_its_owner_only(pool: PgPool) {
 
     let owners = repo.session_bot(session, &julia()).await.expect("read");
     let others = repo.session_bot(session, &teo()).await.expect("read");
-    let unknown = repo.session_bot(Uuid::now_v7(), &julia()).await.expect("read");
+    let unknown = repo
+        .session_bot(Uuid::now_v7(), &julia())
+        .await
+        .expect("read");
 
     assert_eq!(owners, Some(bot));
     assert_eq!(others, None);

@@ -585,7 +585,9 @@ async fn someone_else_s_run_reads_answers_and_cancels_as_missing() {
         )
         .await;
     let cancelled = service.cancel_run(&teo(), run_id, None).await;
-    let linked = service.link_task(&teo(), run_id, Uuid::now_v7(), None).await;
+    let linked = service
+        .link_task(&teo(), run_id, Uuid::now_v7(), None)
+        .await;
 
     assert!(matches!(read, Err(FactoryError::NotFound)));
     assert!(matches!(answered, Err(FactoryError::NotFound)));

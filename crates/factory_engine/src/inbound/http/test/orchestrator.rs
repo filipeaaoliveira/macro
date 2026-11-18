@@ -188,7 +188,12 @@ async fn starts_cancels_and_links_carry_the_calling_agent_session() {
     }
     let person = router
         .clone()
-        .oneshot(call("POST", &cancel_path, Caller::User("alice"), serde_json::json!({})))
+        .oneshot(call(
+            "POST",
+            &cancel_path,
+            Caller::User("alice"),
+            serde_json::json!({}),
+        ))
         .await
         .expect("response");
     let sessionless = router
@@ -207,14 +212,25 @@ async fn starts_cancels_and_links_carry_the_calling_agent_session() {
         assert_eq!(refusal.status(), StatusCode::FORBIDDEN);
         let body = body(refusal).await;
         assert_eq!(body["code"], "notInStandingRole");
-        assert!(body["message"].as_str().is_some_and(|message| message.contains("operator")));
+        assert!(
+            body["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("operator"))
+        );
     }
     for other in [person, sessionless, internal] {
         assert_eq!(other.status(), StatusCode::FORBIDDEN);
     }
     assert_eq!(
         *service.agent_sessions.lock().expect("agent sessions"),
-        [Some(session_id), Some(session_id), Some(session_id), None, None, None]
+        [
+            Some(session_id),
+            Some(session_id),
+            Some(session_id),
+            None,
+            None,
+            None
+        ]
     );
 }
 

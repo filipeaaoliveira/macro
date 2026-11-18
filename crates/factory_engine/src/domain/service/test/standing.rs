@@ -359,10 +359,7 @@ async fn the_recorded_answer_keeps_its_standing_role() {
     };
     let steps = StepServiceImpl::new(repo.clone(), FakeExecutor::default());
 
-    steps
-        .answer_gate(answered.clone())
-        .await
-        .expect("record");
+    steps.answer_gate(answered.clone()).await.expect("record");
     steps.answer_gate(answered).await.expect("record again");
 
     let detail = service.get_run(&julia(), run_id).await.expect("read");
@@ -407,15 +404,16 @@ async fn cancel_and_link_take_a_bot_in_a_standing_role_that_allows_them() {
         .link_task(&julia(), run_id, task, Some(backup))
         .await;
     let cancelled = service.cancel_run(&julia(), run_id, Some(backup)).await;
-    let open_linked = service
-        .link_task(&julia(), open, task, Some(primary))
-        .await;
+    let open_linked = service.link_task(&julia(), open, task, Some(primary)).await;
     let open_cancelled = service.cancel_run(&julia(), open, Some(primary)).await;
 
     let Err(FactoryError::NotInStandingRole { act, allowing }) = link_refused else {
         panic!("a bot in no standing role that links is refused");
     };
-    assert_eq!((act, allowing), (StandingAct::Link, vec![standing_role("intake")]));
+    assert_eq!(
+        (act, allowing),
+        (StandingAct::Link, vec![standing_role("intake")])
+    );
     let Err(FactoryError::NotInStandingRole { act, allowing }) = cancel_refused else {
         panic!("a bot in no standing role that cancels is refused");
     };
@@ -512,13 +510,30 @@ async fn starting_a_run_takes_a_bot_in_a_standing_role_that_allows_it() {
     let Err(FactoryError::NotInStandingRole { act, allowing }) = refused else {
         panic!("a bot in no standing role that starts is refused");
     };
-    assert_eq!((act, allowing), (StandingAct::Start, vec![standing_role("intake")]));
+    assert_eq!(
+        (act, allowing),
+        (StandingAct::Start, vec![standing_role("intake")])
+    );
     assert_eq!(repo.runs.lock().expect("runs").len(), 2);
-    assert_eq!(started.run.definition.as_ref().map(|kept| kept.repo_url.as_str()), Some(DEFINITION_REPO));
+    assert_eq!(
+        started
+            .run
+            .definition
+            .as_ref()
+            .map(|kept| kept.repo_url.as_str()),
+        Some(DEFINITION_REPO)
+    );
     let kept: Vec<_> = started
         .standing_acts
         .iter()
-        .map(|act| (act.act, act.standing_role.as_str().to_string(), act.bot_id, act.session_id))
+        .map(|act| {
+            (
+                act.act,
+                act.standing_role.as_str().to_string(),
+                act.bot_id,
+                act.session_id,
+            )
+        })
         .collect();
     assert_eq!(
         kept,
