@@ -91,7 +91,7 @@ function mount(steerStep: RunsContext['steerStep'] = vi.fn(async () => DONE)) {
     }),
     waitingRuns: () => ({
       state: () => 'ready',
-      data: () => [],
+      data: () => ({ waiting: [], starting: [] }),
       retry: vi.fn(),
     }),
     run: () => ({ state: () => 'ready', data: run, retry: vi.fn() }),
