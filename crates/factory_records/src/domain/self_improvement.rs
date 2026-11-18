@@ -120,7 +120,18 @@ pub struct PendingFailures {
 }
 
 /// Where a self-improvement Run is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::AsRefStr, strum::EnumString)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    utoipa::ToSchema,
+    strum::AsRefStr,
+    strum::EnumString,
+)]
+#[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum ImprovementState {
     /// Its Run is being recorded and started.

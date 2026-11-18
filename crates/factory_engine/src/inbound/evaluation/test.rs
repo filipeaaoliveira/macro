@@ -97,6 +97,7 @@ impl EvaluationService for Arc<FakeEvaluation> {
             experiments: Vec::new(),
             benchmarks: Vec::new(),
             suites: Vec::new(),
+            self_improvement: None,
         })
     }
 

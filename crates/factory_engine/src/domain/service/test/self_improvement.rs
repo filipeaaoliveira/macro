@@ -647,3 +647,62 @@ async fn a_refused_improvement_run_waits_and_people_cannot_start_one() {
     assert!(listed.iter().all(|flow| flow.name != IMPROVE_FLOW));
     assert!(bench.workflows.started.lock().expect("started").len() >= 3);
 }
+
+/// Insights show the team's pending failures, by source, what starts a
+/// Run, and the latest self-improvement Run; a team with no Definition
+/// shows none.
+#[tokio::test]
+async fn insights_show_pending_failures_and_the_last_improvement_run() {
+    use crate::domain::evaluation::insights::{EvaluationService, EvaluationServiceImpl};
+    use crate::domain::insights::InsightsQuery;
+
+    let bench = Bench::new(team_repo(true), AGENTS, None);
+    let today = Utc::now().date_naive();
+    let query = || InsightsQuery::new(today, today, "UTC", None).expect("valid query");
+    let insights = EvaluationServiceImpl::new(
+        bench.repo.clone(),
+        bench.service.clone(),
+        Arc::new(EvaluationDefinition::default()),
+        None,
+    );
+
+    bench.judged_run(0.2).await;
+    let shown = insights
+        .evaluation(&teo(), query())
+        .await
+        .expect("insights")
+        .self_improvement
+        .expect("the team names a definition");
+    assert_eq!(shown.repo_url, DEFINITION_REPO);
+    assert_eq!(shown.pending, 1);
+    assert_eq!(shown.failures_threshold, 2);
+    assert_eq!(shown.oldest_days, 7);
+    assert!(shown.enabled && shown.has_owner);
+    assert_eq!(shown.pending_by_source[0].source, "reads-well");
+    assert_eq!(shown.last, None);
+
+    bench.judged_run(0.2).await;
+    let shown = insights
+        .evaluation(&teo(), query())
+        .await
+        .expect("insights")
+        .self_improvement
+        .expect("the team names a definition");
+    assert_eq!(shown.pending, 0);
+    let last = shown.last.expect("the last run");
+    assert_eq!(last.state, ImprovementState::Open);
+    assert_eq!(last.failures, 2);
+    assert_eq!(last.run_id, bench.improvement_runs().first().copied());
+
+    bench
+        .repo
+        .team_definitions
+        .lock()
+        .expect("team definitions")
+        .remove(&TEAM);
+    let none = insights
+        .evaluation(&teo(), query())
+        .await
+        .expect("insights");
+    assert_eq!(none.self_improvement, None);
+}
