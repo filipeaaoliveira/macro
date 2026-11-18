@@ -313,9 +313,11 @@ describe('RunInsightsView', () => {
     expect(figure('Infrastructure failures')).toBe('25%');
     // The success rate leaves the infrastructure failures out: 3 of 6.
     expect(
-      screen.getByText('Success rate').closest('div')?.parentElement
-        ?.textContent
-    ).toContain('50');
+      screen
+        .getByText('Success rate')
+        .closest('div')
+        ?.parentElement?.querySelector('p')?.textContent
+    ).toBe('50%');
   });
 
   it('says there is nothing to show for a period with no runs', () => {
