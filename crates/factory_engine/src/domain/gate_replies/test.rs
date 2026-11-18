@@ -261,6 +261,35 @@ async fn a_reply_read_at_or_above_the_threshold_answers_the_gate() {
     assert!(asked[0].prompt.contains("Looks right, go ahead."));
 }
 
+/// On a Tampered Run, words the model cannot read, or reads as Approve
+/// below the threshold, are asked back as any others: not as an approval
+/// only the button gives.
+#[tokio::test]
+async fn unclear_words_on_a_tampered_run_are_not_refused_approvals() {
+    for (choice, confidence) in [(None, 0.95), (Some("approve"), 0.5)] {
+        let repo = FakeRepo::default();
+        let key = run_at_plan_gate(&repo, Some(OrchestratorDefinition::DEFAULT), None).await;
+        repo.control_file_changes.lock().expect("changes").insert(
+            key.run_id,
+            ControlFileChanges {
+                tampered: vec![".github/workflows/ci.yml".to_string()],
+                named: Vec::new(),
+                unlisted: false,
+            },
+        );
+        let model = FakeGateModel::picking(choice, confidence);
+
+        let read = gates(&repo, &model)
+            .read_reply(reading(key, "Hmm"))
+            .await
+            .expect("read");
+
+        assert_eq!(read, ReplyRead::AskedBack);
+        let asked = gate(&repo, key).await.asked_back.expect("asked back");
+        assert!(!asked.refused_tampered, "{choice:?} at {confidence}");
+    }
+}
+
 /// A reply the model is not sure enough of, or cannot tell, is asked back
 /// on the Gate, which still waits.
 #[tokio::test]
