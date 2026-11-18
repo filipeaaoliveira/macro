@@ -142,10 +142,17 @@ fn the_code_flow_s_steps_are_served() {
         "ci",
         "ready_to_merge",
         "merge",
+        "accept",
+        "deploy",
+        "verify",
     ] {
         assert!(steps.serves(&step(name)).is_some(), "{name}");
     }
-    assert!(steps.serves(&step("deploy")).is_none());
+    assert!(steps.serves(&step("release")).is_none());
+    // A verifier, an agent, checks the change; the deploy is waited for.
+    assert_eq!(steps.serves(&step("accept")), Some(StepUse::Agent));
+    assert_eq!(steps.serves(&step("verify")), Some(StepUse::Agent));
+    assert_eq!(steps.serves(&step("deploy")), Some(StepUse::Work));
 }
 
 /// An agent Step goes to an Agent of the Role its entry names. A Run whose

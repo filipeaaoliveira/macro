@@ -329,6 +329,8 @@ pub struct PullRequest {
     pub state: PullRequestState,
     /// The commit its head branch is at.
     pub head_sha: String,
+    /// The commit its merge made on its base; none until it is merged.
+    pub merge_commit: Option<String>,
 }
 
 /// Whether a pull request is open, closed, or merged.
@@ -485,6 +487,42 @@ pub enum Opening {
     /// GitHub declined, for this reason: one is already open for the
     /// branch, or the branch has nothing its base lacks.
     Refused(String),
+}
+
+/// The newest deployment of a commit to an environment, as GitHub has it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Deployment {
+    /// How it went, by its newest status.
+    pub state: DeploymentState,
+    /// Where it is reached, when its newest status says.
+    pub url: Option<String>,
+}
+
+/// How a deployment went, by its newest status.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeploymentState {
+    /// It has no status yet, or is queued, pending or in progress.
+    Waiting,
+    /// It succeeded.
+    Succeeded,
+    /// It succeeded, and a later deployment to its environment has since
+    /// replaced it.
+    Replaced,
+    /// It failed, or ended in error.
+    Failed,
+}
+
+impl DeploymentState {
+    /// The state GitHub's newest status `state` names; none, or a state
+    /// GitHub adds later, is still waiting.
+    pub fn of_status(state: Option<&str>) -> Self {
+        match state {
+            Some("success") => Self::Succeeded,
+            Some("inactive") => Self::Replaced,
+            Some("failure" | "error") => Self::Failed,
+            _ => Self::Waiting,
+        }
+    }
 }
 
 /// What asking GitHub to merge a pull request came to.

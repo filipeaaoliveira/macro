@@ -25,10 +25,16 @@ pub const REVIEWER: &str = "reviewer";
 /// more, and one at its tests.
 pub const REVIEWER_ROLES: [&str; 3] = ["correctness-reviewer", "scope-reviewer", "tests-reviewer"];
 
-/// Whether `role` is one of the review panel's, which [`REVIEWER`]'s Agents
-/// fill by default.
-fn is_panel_role(role: &Role) -> bool {
-    REVIEWER_ROLES.contains(&role.as_str())
+/// The Role of the agent that checks a change does what its Run's request
+/// asks, before and after its merge: never the writer's. A definition that
+/// does not list it has [`REVIEWER`]'s Agents fill it, so a definition
+/// written before it keeps working.
+pub const VERIFIER: &str = "verifier";
+
+/// Whether `role` is one of the review panel's, or the verifier, which
+/// [`REVIEWER`]'s Agents fill by default.
+fn defaults_to_reviewer(role: &Role) -> bool {
+    REVIEWER_ROLES.contains(&role.as_str()) || role.as_str() == VERIFIER
 }
 
 /// An Agent: whose sessions it runs in, on which model, told what.
@@ -87,11 +93,12 @@ pub enum AgentDefinitionError {
     /// A Flow names a Role the definition does not fill.
     #[error("a flow names role {0}, which the agent definition does not fill")]
     UnfilledRole(Role),
-    /// A Flow names a review panel's Role, and the definition fills neither
-    /// it nor `reviewer`, whose Agents would fill it.
+    /// A Flow names a review panel's Role, or the verifier, and the
+    /// definition fills neither it nor `reviewer`, whose Agents would fill
+    /// it.
     #[error(
-        "a flow names reviewer role {0}: the agent definition must fill it, or `reviewer`, \
-         whose agents fill every reviewer role it does not list"
+        "a flow names role {0}: the agent definition must fill it, or `reviewer`, \
+         whose agents fill every reviewer role and the verifier when it does not list them"
     )]
     UnfilledReviewer(Role),
     /// A built-in Flow does not read.
@@ -139,13 +146,14 @@ impl TryFrom<AgentDefinitionFields> for AgentDefinition {
 
 impl AgentDefinition {
     /// The Agents that fill `role`, in order: the first is its default.
-    /// A review panel's Role the definition does not list takes
-    /// [`REVIEWER`]'s. Empty for a Role the definition does not fill.
+    /// A review panel's Role, or the verifier, the definition does not
+    /// list takes [`REVIEWER`]'s. Empty for a Role the definition does not
+    /// fill.
     pub fn for_role(&self, role: &Role) -> &[AgentName] {
         if let Some(listed) = self.roles.get(role) {
             return listed;
         }
-        if is_panel_role(role) {
+        if defaults_to_reviewer(role) {
             return self
                 .roles
                 .iter()
@@ -199,7 +207,7 @@ impl AgentDefinition {
             if !self.for_role(role).is_empty() {
                 continue;
             }
-            if is_panel_role(role) {
+            if defaults_to_reviewer(role) {
                 return Err(AgentDefinitionError::UnfilledReviewer(role.clone()));
             }
             return Err(AgentDefinitionError::UnfilledRole(role.clone()));

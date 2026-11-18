@@ -31,7 +31,8 @@ use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
 use crate::domain::models::{
-    Check, CheckState, CheckSuite, CodeRepository, HeadChecks, Merging, OpenPullRequest, Opening,
+    Check, CheckState, CheckSuite, CodeRepository, Deployment, HeadChecks, Merging, OpenPullRequest,
+    Opening,
     PullRequest, PullRequestState, RepositoryAccess, RequiredChecks,
 };
 use crate::domain::ports::{
@@ -1314,6 +1315,12 @@ pub(crate) struct FakeGithubState {
     pub(crate) diffs: BTreeMap<(String, String), Vec<ChangedFile>>,
     /// The head commit of the Run's branch; none before it is pushed.
     pub(crate) head: Option<String>,
+    /// The deployment each read of a commit's deployments shows next, in
+    /// order; the last one stays once the others were read. None while
+    /// nothing was deployed.
+    pub(crate) deployments: VecDeque<Option<Deployment>>,
+    /// The commits and environments whose deployments were read, in order.
+    pub(crate) deployment_reads: Vec<(String, String)>,
 }
 
 /// GitHub in memory, for one Run's branch: opening its pull request makes
@@ -1331,6 +1338,9 @@ impl FakeGithub {
     /// The commit an opened pull request's head is at.
     pub(crate) const HEAD: &str = "1111111111111111111111111111111111111111";
 
+    /// The commit merging the pull request makes on its base.
+    pub(crate) const MERGED: &str = "2222222222222222222222222222222222222222";
+
     /// GitHub's id of the CI app whose runs [`ci`] makes.
     pub(crate) const ACTIONS: u64 = 15368;
 
@@ -1347,6 +1357,7 @@ impl FakeGithub {
             url: "https://github.com/macro/app/pull/7".to_string(),
             state: PullRequestState::Open,
             head_sha: Self::HEAD.to_string(),
+            merge_commit: None,
         });
         github.state().checks = [checks].into();
         github
@@ -1555,6 +1566,7 @@ impl PullRequests for FakeGithub {
             url: format!("{}/pull/7", repository.url()),
             state: PullRequestState::Open,
             head_sha: Self::HEAD.to_string(),
+            merge_commit: None,
         });
         Ok(Opening::Opened)
     }
@@ -1578,7 +1590,25 @@ impl PullRequests for FakeGithub {
             return Ok(Merging::HeadChanged);
         }
         pull_request.state = PullRequestState::Merged;
+        pull_request.merge_commit = Some(Self::MERGED.to_string());
         Ok(Merging::Merged)
+    }
+
+    async fn deployment(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        sha: &str,
+        environment: &str,
+    ) -> Result<Option<Deployment>, FakeGithubError> {
+        let mut state = self.state();
+        state
+            .deployment_reads
+            .push((sha.to_string(), environment.to_string()));
+        if state.deployments.len() > 1 {
+            return Ok(state.deployments.pop_front().flatten());
+        }
+        Ok(state.deployments.front().cloned().flatten())
     }
 }
 

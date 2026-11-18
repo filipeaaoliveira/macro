@@ -22,7 +22,7 @@ use crate::domain::gate_owner::{GateNotice, OwnerNote};
 use crate::domain::main_hold::{HoldTask, MainLook, MainWatch};
 use crate::domain::models::{
     AgentAnswer, AgentCommand, AgentTask, AgentTurn, Answerer, CodeRepository,
-    ControlFilesSettings, FactoryError, FlowSummary, HeadChecks, Merging, OpenPullRequest, Opening,
+    ControlFilesSettings, Deployment, FactoryError, FlowSummary, HeadChecks, Merging, OpenPullRequest, Opening,
     PullRequest, RepositoryAccess, RequiredChecks, RunDetail, RunFinish, RunStart,
     StandingRulesSettings, StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
 };
@@ -288,6 +288,16 @@ pub trait PullRequests: Send + Sync + 'static {
         base: &str,
         head: &str,
     ) -> impl Future<Output = Result<Option<Vec<ChangedFile>>, Self::Err>> + Send;
+
+    /// The newest deployment of the commit `sha` of `repository` to
+    /// `environment`; none before one is made.
+    fn deployment(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        sha: &str,
+        environment: &str,
+    ) -> impl Future<Output = Result<Option<Deployment>, Self::Err>> + Send;
 
     /// Ask GitHub to open `pull_request` in `repository`.
     fn open(

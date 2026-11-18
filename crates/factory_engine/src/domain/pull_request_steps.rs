@@ -16,7 +16,11 @@
 //!
 //! While a Main Hold holds the Run's base, `merge` merges nothing: it waits
 //! for the hold to clear, then ends `held`, which goes back to the merge Gate.
+//!
+//! Once merged, `deploy` waits for the deploy the repository declares
+//! (`deploy`).
 
+mod deploy;
 #[cfg(test)]
 mod test;
 
@@ -86,6 +90,14 @@ pub enum PullRequestStepError {
     /// The Run asked no person to merge a commit.
     #[error("the run asked no one to merge a commit")]
     NoMergeHead,
+    /// The Run's pull request is not merged, and a Step after its merge
+    /// runs.
+    #[error("the run's pull request is not merged")]
+    NotMerged,
+    /// GitHub lists the Run's pull request as merged, yet names no commit
+    /// its merge made.
+    #[error("github names no merge commit for the run's merged pull request yet")]
+    NoMergeCommit,
     /// GitHub could not be asked.
     #[error("github failed: {report:?}")]
     Github {
@@ -137,12 +149,13 @@ impl Retryable for PullRequestStepError {
     /// failed read or write of the records is the database's.
     fn retryable(&self) -> bool {
         match self {
-            Self::NotListed | Self::Records(_) => true,
+            Self::NotListed | Self::NoMergeCommit | Self::Records(_) => true,
             Self::Github { retryable, .. } | Self::Watch { retryable, .. } => *retryable,
             Self::NoRepository
             | Self::InvalidRepository(_)
             | Self::NoPullRequest
             | Self::NoMergeHead
+            | Self::NotMerged
             | Self::ControlFiles(_) => false,
         }
     }

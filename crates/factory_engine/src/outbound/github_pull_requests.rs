@@ -15,7 +15,8 @@ use github::outbound::github_oauth_client::GithubOauthImpl;
 use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::models::{
-    Check, CheckState, CheckSuite, CodeRepository, CommitStatus, HeadChecks, Merging,
+    Check, CheckState, CheckSuite, CodeRepository, CommitStatus, Deployment, DeploymentState,
+    HeadChecks, Merging,
     OpenPullRequest, Opening, PullRequest, PullRequestState, RepositoryAccess, RequiredCheck,
     RequiredChecks,
 };
@@ -249,6 +250,7 @@ fn pull_request(found: GithubPullRequestHead) -> PullRequest {
         url: found.html_url,
         state,
         head_sha: found.head_sha,
+        merge_commit: found.merge_commit_sha,
     }
 }
 
@@ -417,6 +419,31 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
                 })
                 .collect(),
             complete: required.complete,
+        }))
+    }
+
+    #[tracing::instrument(err, skip(self, owner))]
+    async fn deployment(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        sha: &str,
+        environment: &str,
+    ) -> Result<Option<Deployment>, GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        let deployment = self
+            .github
+            .get_latest_deployment(
+                &token,
+                repository.owner(),
+                repository.name(),
+                sha,
+                environment,
+            )
+            .await?;
+        Ok(deployment.map(|deployment| Deployment {
+            state: DeploymentState::of_status(deployment.state.as_deref()),
+            url: deployment.environment_url,
         }))
     }
 
