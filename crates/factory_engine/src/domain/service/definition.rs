@@ -15,12 +15,12 @@ use macro_user_id::user_id::MacroUserIdStr;
 use super::{FactoryServiceImpl, internal};
 use crate::domain::built_in_flows::{BuiltInFlow, walked_flow};
 use crate::domain::definition::{
-    DefinitionFiles, DefinitionReadError, FactoryDefinition, read_definition,
+    DefinitionError, DefinitionFiles, DefinitionReadError, FactoryDefinition, read_definition,
 };
 use crate::domain::flow::Flow;
 use crate::domain::models::{CodeRepository, DefinitionSettings, FactoryError};
 use crate::domain::ports::{
-    PullRequests, RunWorkflows, StepExecutor, TaskDirectory, UserDirectory,
+    PullRequests, Retryable, RunWorkflows, StepExecutor, TaskDirectory, UserDirectory,
 };
 
 /// A Factory Definition read at one commit of its repository: what a Run
@@ -59,13 +59,42 @@ struct RepositoryFiles<'a, G> {
     commit: &'a str,
 }
 
-impl<G: PullRequests> DefinitionFiles for RepositoryFiles<'_, G> {
-    type Err = G::Err;
+/// Why a file of a Definition's repository was not read.
+#[derive(Debug, thiserror::Error)]
+enum RepositoryFileError<E: std::error::Error + 'static> {
+    /// GitHub could not be asked; a retry may read it.
+    #[error(transparent)]
+    Github(E),
+    /// GitHub will not give the file, however often it is asked, as one
+    /// over the 1 MB its contents API gives: the Definition's to fix.
+    #[error(
+        "{path} could not be read from GitHub ({error}); a definition file must be text under 1 MB"
+    )]
+    Refused {
+        /// The file.
+        path: String,
+        /// What GitHub said.
+        error: E,
+    },
+}
 
-    async fn read(&self, path: &str) -> Result<Option<String>, G::Err> {
+impl<G: PullRequests> DefinitionFiles for RepositoryFiles<'_, G> {
+    type Err = RepositoryFileError<G::Err>;
+
+    async fn read(&self, path: &str) -> Result<Option<String>, Self::Err> {
         self.github
             .file_text(self.reader, self.repository, self.commit, path)
             .await
+            .map_err(|error| {
+                if error.retryable() {
+                    RepositoryFileError::Github(error)
+                } else {
+                    RepositoryFileError::Refused {
+                        path: path.to_string(),
+                        error,
+                    }
+                }
+            })
     }
 }
 
@@ -138,7 +167,17 @@ where
         let definition = read_definition(&files, |step| self.executor.serves(step))
             .await
             .map_err(|error| match error {
-                DefinitionReadError::Files(error) => FactoryError::Internal(internal(error)),
+                DefinitionReadError::Files(RepositoryFileError::Refused { path, error }) => {
+                    FactoryError::InvalidDefinition(DefinitionError::Unreadable {
+                        path,
+                        error: format!(
+                            "GitHub would not give it ({error}): a definition file must be text under 1 MB"
+                        ),
+                    })
+                }
+                DefinitionReadError::Files(RepositoryFileError::Github(error)) => {
+                    FactoryError::Internal(internal(error))
+                }
                 DefinitionReadError::Invalid(error) => FactoryError::InvalidDefinition(error),
             })?;
         let agents = serde_json::to_value(&definition.agents)

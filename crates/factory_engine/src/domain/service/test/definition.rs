@@ -469,3 +469,38 @@ async fn the_settings_say_what_the_definition_decides() {
     assert!(control_files.definition_named && !control_files.can_edit);
     assert!(rules.definition_named && !rules.can_edit);
 }
+
+/// A file GitHub will not give, as one over the 1 MB its contents API
+/// gives, is the Definition's to fix: the Run is refused saying which
+/// file, not failed as an outage.
+#[tokio::test]
+async fn a_file_github_will_not_give_is_the_definition_s_problem() {
+    let repo = team_repo();
+    let workflows = FakeWorkflows::default();
+    let github = github_at(FIRST);
+    definition_files(&github, FIRST, "Notes.", None);
+    github
+        .state()
+        .refused_files
+        .insert("agents.json".to_string());
+    let service = code_service(&repo, &workflows, &github);
+
+    let refused = service
+        .create_run(
+            teo(),
+            "notes".to_string(),
+            "Hi".to_string(),
+            None,
+            None,
+            true,
+        )
+        .await;
+
+    assert!(
+        matches!(
+            &refused,
+            Err(FactoryError::InvalidDefinition(DefinitionError::Unreadable { path, .. })) if path == "agents.json"
+        ),
+        "{refused:?}"
+    );
+}

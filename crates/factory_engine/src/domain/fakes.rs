@@ -1486,6 +1486,8 @@ pub(crate) struct FakeGithubState {
 /// it listed, open, at [`FakeGithub::HEAD`], and merging it merges it.
 #[derive(Clone, Default)]
 pub(crate) struct FakeGithub {
+    /// The paths of the files GitHub will not give, as one over 1 MB.
+    pub(crate) refused_files: BTreeSet<String>,
     pub(crate) state: Arc<Mutex<FakeGithubState>>,
     /// Told each time the pull request is looked for.
     pub(crate) read: Arc<tokio::sync::Notify>,
@@ -1677,6 +1679,9 @@ impl PullRequests for FakeGithub {
     async fn changed_paths(
         &self,
         _owner: &MacroUserIdStr<'static>,
+        if state.refused_files.contains(path) {
+            return Err(FakeGithubError::Refused);
+        }
         _repository: &CodeRepository,
         _base: &str,
         branch: &str,
