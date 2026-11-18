@@ -558,6 +558,7 @@ async fn an_answer_is_sent_to_the_run_s_workflow_as_its_owner() {
             note: Some("Go ahead".to_string()),
             user_id: julia(),
             approved_control_files: None,
+            agent_session: None,
         }]
     );
 }

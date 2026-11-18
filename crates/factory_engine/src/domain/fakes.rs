@@ -574,6 +574,34 @@ impl RunRepository for FakeRepo {
         Ok(runs)
     }
 
+    async fn queue_size(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        limit: u16,
+    ) -> Result<u16, FakeError> {
+        let waiting: BTreeSet<RunId> = self
+            .steps
+            .lock()
+            .expect("steps")
+            .iter()
+            .filter(|(_, step)| {
+                step.gate
+                    .as_ref()
+                    .is_some_and(|gate| gate.answer.is_none() && gate.stand_in.is_none())
+            })
+            .map(|(run, _)| *run)
+            .collect();
+        let size = self
+            .runs
+            .lock()
+            .expect("runs")
+            .values()
+            .filter(|run| run.user_id == *user_id && run.end.is_none() && waiting.contains(&run.id))
+            .count()
+            .min(usize::from(limit));
+        Ok(u16::try_from(size).unwrap_or(limit))
+    }
+
     async fn list_runs_steps(
         &self,
         ids: &[RunId],
@@ -657,6 +685,7 @@ impl RunRepository for FakeRepo {
         note: Option<&str>,
         user_id: &MacroUserIdStr<'static>,
         approved_control_files: Option<&[String]>,
+        agent_session: Option<Uuid>,
     ) -> Result<(), FakeError> {
         self.with_step(key, |step| {
             if let Some(gate) = step.gate.as_mut()
@@ -665,6 +694,7 @@ impl RunRepository for FakeRepo {
                 gate.answer = Some(GateAnswer {
                     reply_confidence: None,
                     by_stand_in: false,
+                    agent_session_id: agent_session,
                     answer: answer.clone(),
                     note: note.map(str::to_string),
                     user_id: Some(user_id.clone()),
@@ -694,6 +724,7 @@ impl RunRepository for FakeRepo {
                 gate.answer = Some(GateAnswer {
                     reply_confidence: None,
                     by_stand_in: false,
+                    agent_session_id: None,
                     answer: answer.clone(),
                     note: None,
                     user_id: None,

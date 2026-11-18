@@ -32,6 +32,10 @@ const EVERY_RULE: OrchestratorDefinition = OrchestratorDefinition {
     merge: true,
     owner_gates: false,
     queue_limit: None,
+    orchestrator: factory_records::domain::standing_rules::OrchestratorKinds {
+        plan: false,
+        blockers: false,
+    },
 };
 
 fn base() -> Repository {
@@ -301,6 +305,7 @@ async fn a_gate_a_person_answered_first_is_not_taken_as_ruled() {
                 gate.answer = Some(factory_records::domain::models::GateAnswer {
                     reply_confidence: None,
                     by_stand_in: false,
+                    agent_session_id: None,
                     answer: outcome("revise"),
                     note: None,
                     user_id: Some(julia()),

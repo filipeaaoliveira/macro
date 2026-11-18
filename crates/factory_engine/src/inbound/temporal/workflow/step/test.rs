@@ -448,6 +448,10 @@ const EVERY_RULE: OrchestratorDefinition = OrchestratorDefinition {
     merge: true,
     owner_gates: false,
     queue_limit: None,
+    orchestrator: factory_records::domain::standing_rules::OrchestratorKinds {
+        plan: false,
+        blockers: false,
+    },
 };
 
 /// A `plan` entry whose Gate is of the `plan` kind, as the built-in Flows

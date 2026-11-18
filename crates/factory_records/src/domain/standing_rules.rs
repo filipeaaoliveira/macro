@@ -133,6 +133,26 @@ pub struct OrchestratorDefinition {
     /// the rules and before the person; off for every kind when left out.
     #[serde(default)]
     pub stand_in: StandInKinds,
+    /// The kinds of Gate the Orchestrator, the owner's agent in Macro chat,
+    /// may give the approving answer to for them (`approve`, `fix`); off
+    /// for every kind when left out. It may always send work back, and
+    /// never approves a merge.
+    #[serde(default)]
+    pub orchestrator: OrchestratorKinds,
+}
+
+/// The kinds of Gate the Orchestrator may give the approving answer to for
+/// the Run's owner. It never approves a merge, so it has no setting for
+/// one.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, utoipa::ToSchema,
+)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OrchestratorKinds {
+    /// Approve the plan Gate.
+    pub plan: bool,
+    /// Send a review round's Blockers to be fixed.
+    pub blockers: bool,
 }
 
 /// The kinds of Gate the stand-in answers for the Run's owner: a small
@@ -157,6 +177,12 @@ const STAND_IN_PLAN: &str = "stand_in_plan";
 /// How a definition keeps that the stand-in answers the Blockers Gate.
 const STAND_IN_BLOCKERS: &str = "stand_in_blockers";
 
+/// How a definition keeps that the Orchestrator may approve the plan Gate.
+const ORCHESTRATOR_PLAN: &str = "orchestrator_plan";
+
+/// How a definition keeps that the Orchestrator may send Blockers to a fix.
+const ORCHESTRATOR_BLOCKERS: &str = "orchestrator_blockers";
+
 impl OrchestratorDefinition {
     /// The definition that applies when a team set none: the review's
     /// Blockers are fixed on their own, as they were before Standing Rules,
@@ -168,6 +194,10 @@ impl OrchestratorDefinition {
         owner_gates: false,
         queue_limit: None,
         stand_in: StandInKinds {
+            plan: false,
+            blockers: false,
+        },
+        orchestrator: OrchestratorKinds {
             plan: false,
             blockers: false,
         },
@@ -192,9 +222,21 @@ impl OrchestratorDefinition {
         }
     }
 
+    /// Whether the Orchestrator may give a Gate of `kind` its approving
+    /// answer for the Run's owner. It never approves a merge.
+    pub fn orchestrator_approves(self, kind: RuleGateKind) -> bool {
+        match kind {
+            RuleGateKind::Plan => self.orchestrator.plan,
+            RuleGateKind::Blockers => self.orchestrator.blockers,
+            RuleGateKind::Merge => false,
+        }
+    }
+
     /// The kinds its rules decide, then [`OWNER_GATES`] when its owner
     /// section is on, then the kinds the stand-in answers
-    /// (`stand_in_plan`, `stand_in_blockers`): what is stored of it beside
+    /// (`stand_in_plan`, `stand_in_blockers`), then those the Orchestrator
+    /// may approve (`orchestrator_plan`, `orchestrator_blockers`): what is
+    /// stored of it beside
     /// its Queue limit, which has a column of its own.
     pub fn kinds(self) -> Vec<String> {
         let ruled = [
@@ -213,7 +255,18 @@ impl OrchestratorDefinition {
         .into_iter()
         .filter(|(on, _)| *on)
         .map(|(_, kind)| kind.to_string());
-        ruled.chain(owner).chain(stood_in).collect()
+        let orchestrated = [
+            (self.orchestrator.plan, ORCHESTRATOR_PLAN),
+            (self.orchestrator.blockers, ORCHESTRATOR_BLOCKERS),
+        ]
+        .into_iter()
+        .filter(|(on, _)| *on)
+        .map(|(_, kind)| kind.to_string());
+        ruled
+            .chain(owner)
+            .chain(stood_in)
+            .chain(orchestrated)
+            .collect()
     }
 
     /// The definition stored as `kinds` ([`Self::kinds`]), with no Queue
@@ -225,6 +278,8 @@ impl OrchestratorDefinition {
                 OWNER_GATES => definition.owner_gates = true,
                 STAND_IN_PLAN => definition.stand_in.plan = true,
                 STAND_IN_BLOCKERS => definition.stand_in.blockers = true,
+                ORCHESTRATOR_PLAN => definition.orchestrator.plan = true,
+                ORCHESTRATOR_BLOCKERS => definition.orchestrator.blockers = true,
                 _ => match kind.parse::<RuleGateKind>().ok()? {
                     RuleGateKind::Plan => definition.plan = true,
                     RuleGateKind::Blockers => definition.blockers = true,

@@ -184,7 +184,7 @@ impl GateReplyRepository for PgRunRepository {
             JOIN factory_gate g ON g.run_id = s.run_id AND g.seq = s.seq
             WHERE r.flow = (SELECT flow FROM factory_run WHERE id = $3)
                 AND s.entry = $2 AND s.outcome IS DISTINCT FROM 'question'
-                AND g.user_id = $1 AND g.answer IS NOT NULL
+                AND g.user_id = $1 AND g.answer IS NOT NULL AND g.agent_session_id IS NULL
             ORDER BY g.answered_at DESC
             LIMIT $5
             "#,
@@ -239,6 +239,7 @@ impl GateReplyRepository for PgRunRepository {
             JOIN factory_run r ON r.id = g.run_id
             WHERE g.answer IS NOT NULL AND g.user_id IS NOT NULL AND g.rule IS NULL
                 AND NOT g.by_stand_in AND g.reply_confidence IS NULL
+                AND g.agent_session_id IS NULL
             ORDER BY g.answered_at, g.run_id, g.seq
             LIMIT $1
             "#,

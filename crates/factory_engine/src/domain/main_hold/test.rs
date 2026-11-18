@@ -773,6 +773,7 @@ fn approved_merge_gate(approved: &[&str]) -> Step {
             answer: Some(GateAnswer {
                 reply_confidence: None,
                 by_stand_in: false,
+                agent_session_id: None,
                 answer: approve,
                 note: None,
                 user_id: None,

@@ -27,6 +27,10 @@ const PLAN_AND_MERGE: OrchestratorDefinition = OrchestratorDefinition {
     merge: true,
     owner_gates: false,
     queue_limit: None,
+    orchestrator: crate::domain::standing_rules::OrchestratorKinds {
+        plan: false,
+        blockers: false,
+    },
     stand_in: StandInKinds {
         plan: false,
         blockers: true,
@@ -39,6 +43,10 @@ const OWNER_GATES_ON: OrchestratorDefinition = OrchestratorDefinition {
     merge: false,
     owner_gates: true,
     queue_limit: None,
+    orchestrator: crate::domain::standing_rules::OrchestratorKinds {
+        plan: false,
+        blockers: false,
+    },
     stand_in: StandInKinds {
         plan: false,
         blockers: false,
@@ -51,6 +59,10 @@ const EVERY_SETTING: OrchestratorDefinition = OrchestratorDefinition {
     merge: true,
     owner_gates: true,
     queue_limit: None,
+    orchestrator: crate::domain::standing_rules::OrchestratorKinds {
+        plan: true,
+        blockers: true,
+    },
     stand_in: StandInKinds {
         plan: true,
         blockers: true,
@@ -402,12 +414,26 @@ async fn a_rule_answers_a_gate_once(pool: PgPool) {
         .expect("rule answer")
         .expect("the gate is recorded");
     assert_eq!(kept.rule, Some(StandingRule::ApprovePlan));
-    repo.answer_gate(key(run_id, 1), &outcome("revise"), None, &julia(), None)
-        .await
-        .expect("a person's answer after it");
-    repo.answer_gate(key(run_id, 2), &outcome("revise"), None, &julia(), None)
-        .await
-        .expect("a person's answer");
+    repo.answer_gate(
+        key(run_id, 1),
+        &outcome("revise"),
+        None,
+        &julia(),
+        None,
+        None,
+    )
+    .await
+    .expect("a person's answer after it");
+    repo.answer_gate(
+        key(run_id, 2),
+        &outcome("revise"),
+        None,
+        &julia(),
+        None,
+        None,
+    )
+    .await
+    .expect("a person's answer");
     // The person's answer stays, and is what the rule reads back.
     let kept = repo
         .answer_gate_by_rule(

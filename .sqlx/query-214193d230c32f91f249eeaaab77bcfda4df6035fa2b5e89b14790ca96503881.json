@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                s.run_id,\n                s.seq,\n                s.entry,\n                s.visit,\n                s.started_at,\n                s.outcome,\n                s.output,\n                s.ended_at,\n                g.question AS \"question?\",\n                g.answers AS \"answers?\",\n                g.opened_at AS \"opened_at?\",\n                g.answer,\n                g.note,\n                g.user_id,\n                g.approved_control_files,\n                g.rule,\n                g.reply_confidence,\n                g.by_stand_in AS \"by_stand_in?\",\n                g.asked_back_reply,\n                g.asked_back_at,\n                g.stand_in_answer,\n                g.stand_in_reason,\n                g.stand_in_confidence,\n                g.stand_in_until,\n                g.answered_at,\n                s.role,\n                s.agent,\n                s.passed_over,\n                s.pass_reasons\n            FROM factory_step s\n            LEFT JOIN factory_gate g ON g.run_id = s.run_id AND g.seq = s.seq\n            WHERE s.run_id = ANY($1)\n            ORDER BY s.run_id, s.seq\n            ",
+  "query": "\n            SELECT\n                s.run_id,\n                s.seq,\n                s.entry,\n                s.visit,\n                s.started_at,\n                s.outcome,\n                s.output,\n                s.ended_at,\n                g.question AS \"question?\",\n                g.answers AS \"answers?\",\n                g.opened_at AS \"opened_at?\",\n                g.answer,\n                g.note,\n                g.user_id,\n                g.approved_control_files,\n                g.rule,\n                g.reply_confidence,\n                g.by_stand_in AS \"by_stand_in?\",\n                g.agent_session_id AS \"agent_session_id?\",\n                g.asked_back_reply,\n                g.asked_back_at,\n                g.stand_in_answer,\n                g.stand_in_reason,\n                g.stand_in_confidence,\n                g.stand_in_until,\n                g.answered_at,\n                s.role,\n                s.agent,\n                s.passed_over,\n                s.pass_reasons\n            FROM factory_step s\n            LEFT JOIN factory_gate g ON g.run_id = s.run_id AND g.seq = s.seq\n            WHERE s.run_id = $1\n            ORDER BY s.seq\n            ",
   "describe": {
     "columns": [
       {
@@ -95,63 +95,68 @@
       },
       {
         "ordinal": 18,
+        "name": "agent_session_id?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 19,
         "name": "asked_back_reply",
         "type_info": "Text"
       },
       {
-        "ordinal": 19,
+        "ordinal": 20,
         "name": "asked_back_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 20,
+        "ordinal": 21,
         "name": "stand_in_answer",
         "type_info": "Text"
       },
       {
-        "ordinal": 21,
+        "ordinal": 22,
         "name": "stand_in_reason",
         "type_info": "Text"
       },
       {
-        "ordinal": 22,
+        "ordinal": 23,
         "name": "stand_in_confidence",
         "type_info": "Int2"
       },
       {
-        "ordinal": 23,
+        "ordinal": 24,
         "name": "stand_in_until",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 24,
+        "ordinal": 25,
         "name": "answered_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 25,
+        "ordinal": 26,
         "name": "role",
         "type_info": "Text"
       },
       {
-        "ordinal": 26,
+        "ordinal": 27,
         "name": "agent",
         "type_info": "Text"
       },
       {
-        "ordinal": 27,
+        "ordinal": 28,
         "name": "passed_over",
         "type_info": "TextArray"
       },
       {
-        "ordinal": 28,
+        "ordinal": 29,
         "name": "pass_reasons",
         "type_info": "TextArray"
       }
     ],
     "parameters": {
       "Left": [
-        "UuidArray"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -163,15 +168,16 @@
       true,
       true,
       true,
+      false,
+      false,
+      false,
       true,
       true,
       true,
       true,
       true,
       true,
-      true,
-      true,
-      true,
+      false,
       true,
       true,
       true,
@@ -186,5 +192,5 @@
       false
     ]
   },
-  "hash": "1368b7980d7b5ec660391e696d80ea6aa1d90c1b8b0e09c53b6f616c6eb5d5f5"
+  "hash": "214193d230c32f91f249eeaaab77bcfda4df6035fa2b5e89b14790ca96503881"
 }

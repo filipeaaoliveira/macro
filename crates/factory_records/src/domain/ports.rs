@@ -63,6 +63,16 @@ pub trait RunRepository: Send + Sync + 'static {
         limit: u16,
     ) -> impl Future<Output = Result<Vec<Run>, Self::Err>> + Send;
 
+    /// The size of `user_id`'s Queue, counted up to `limit`: their Runs
+    /// that have not ended and wait on them in person at a Gate, leaving
+    /// out a Gate the stand-in answered, while the owner may still
+    /// override it.
+    fn queue_size(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        limit: u16,
+    ) -> impl Future<Output = Result<u16, Self::Err>> + Send;
+
     /// The Steps of the Runs `ids`, each Run's in order. A Run with no Steps
     /// has no entry.
     fn list_runs_steps(
@@ -98,8 +108,9 @@ pub trait RunRepository: Send + Sync + 'static {
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// Record `user_id`'s answer to the Gate of the Step `key`, with the
-    /// Tampered files it approved, if any. A Gate already answered keeps its
-    /// first answer.
+    /// Tampered files it approved, if any, and the agent session that gave
+    /// it for them (`agent_session`), when the Orchestrator did. A Gate
+    /// already answered keeps its first answer.
     fn answer_gate(
         &self,
         key: StepKey,
@@ -107,6 +118,7 @@ pub trait RunRepository: Send + Sync + 'static {
         note: Option<&str>,
         user_id: &MacroUserIdStr<'static>,
         approved_control_files: Option<&[String]>,
+        agent_session: Option<Uuid>,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// Record the Standing Rule `rule`'s answer to the Gate of the Step

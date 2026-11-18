@@ -41,7 +41,8 @@ use crate::domain::ports::{
     TaskNotes, UserDirectory,
 };
 use crate::domain::standing_rules::{
-    GateFacts, RuleAnswer, offers_kind_answers, repeated_blockers, rule_answer,
+    GateFacts, RuleAnswer, kind_answers, offers_kind_answers, repeated_blockers, rule_answer,
+    rule_fix_limit,
 };
 
 fn internal(error: impl std::error::Error + Send + Sync + 'static) -> rootcause::Report {
@@ -375,31 +376,48 @@ where
     }
 
     /// The kind of Gate the entry `entry` asks, by its Flow, when an agent
-    /// answering for the Run's owner may answer it: every built-in Flow
-    /// that has the entry asks the same kind of Gate there, not one kept
-    /// for a person. A Run does not keep its Flow's name, so the entry is
-    /// looked up in each, as for a Run at its merge.
-    fn agent_answerable_kind(&self, entry: &EntryId) -> Option<RuleGateKind> {
-        let mut kinds = BUILT_IN_FLOWS
+    /// answering for the Run's owner may answer it, with the most visits
+    /// the entry runs: every built-in Flow that has the entry asks the same
+    /// kind of Gate there, not one kept for a person. A Run does not keep
+    /// its Flow's name, so the entry is looked up in each, as for a Run at
+    /// its merge, bound to the review rounds the Runs this service starts
+    /// are.
+    fn agent_answerable_entry(&self, entry: &EntryId) -> Option<(RuleGateKind, Option<NonZeroU8>)> {
+        let mut asked = BUILT_IN_FLOWS
             .into_iter()
             .filter_map(|flow| flow.read(|step| self.executor.serves(step)).ok())
-            .flat_map(|flow| flow.entries)
+            .flat_map(|mut flow| {
+                if let Some(rounds) = self.review_rounds {
+                    flow.bound_review_rounds(rounds);
+                }
+                flow.entries
+            })
             .filter(|asking| asking.id == *entry)
             .map(|asking| match asking.gate {
-                Some(gate) if !gate.person_only => gate.kind,
+                Some(gate) if !gate.person_only => gate.kind.map(|kind| (kind, asking.max_visits)),
                 _ => None,
             });
-        let first = kinds.next()??;
-        kinds.all(|kind| kind == Some(first)).then_some(first)
+        let (kind, mut max_visits) = asked.next()??;
+        for other in asked {
+            let (other_kind, other_visits) = other?;
+            if other_kind != kind {
+                return None;
+            }
+            max_visits = max_visits.min(other_visits);
+        }
+        Some((kind, max_visits))
     }
 
     /// Fails unless an agent answering for the Run's owner from the session
-    /// `session_id` may give `answer` to the Gate of `run`'s Step `seq`: it
-    /// answers only what a Standing Rule could, and never what the factory
-    /// keeps for the owner in person. A factory Step's own session never
-    /// answers a Gate; an agent's question, a Gate its Flow keeps for a
-    /// person or one of no kind, a Tampered Run's approval, and a merge Gate
-    /// while its base branch has a Main Hold are the owner's.
+    /// `session_id` may give `answer` to the Gate of `run`'s Step `seq`,
+    /// which must still wait for an answer. It answers only a Flow's Gate
+    /// of a kind a Standing Rule could decide, and never from a session a
+    /// factory Step works in. It may always send work back (`revise`,
+    /// `stop`). It gives the approving answer (`approve`, `fix`) only where
+    /// the Run's Orchestrator Definition lets it, for that kind, never for
+    /// a merge, never approving a Tampered Run, and never sending Blockers
+    /// to a fix the `fix_blockers` rule would leave to the owner.
+    #[expect(clippy::too_many_arguments, reason = "each is a part of one answer")]
     async fn agent_may_answer(
         &self,
         run: &Run,
@@ -421,41 +439,65 @@ where
             return Err(PersonOnly::StepSession.into());
         }
 
-        let Some(step) = steps.iter().find(|step| step.seq == seq) else {
+        // The agent names the Gate it decided on: one answered since, by
+        // anyone, takes no answer from it.
+        let waiting = steps
+            .iter()
+            .find(|step| step.seq == seq)
+            .and_then(|step| Some((step, step.gate.as_ref()?)))
+            .filter(|(_, gate)| gate.answer.is_none());
+        let Some((step, gate)) = waiting else {
             return Err(FactoryError::AnswerRefused(
-                "the run waits on no gate of that step".to_string(),
-            ));
-        };
-        let Some(gate) = step.gate.as_ref() else {
-            return Err(FactoryError::AnswerRefused(
-                "the run waits on no gate of that step".to_string(),
+                "the run no longer waits on that gate".to_string(),
             ));
         };
         if gate.kind.answered_only_by_a_person() {
             return Err(PersonOnly::Question.into());
         }
-        let kind = self
-            .agent_answerable_kind(&step.entry)
-            .filter(|kind| offers_kind_answers(*kind, &gate.answers))
+        let (kind, max_visits) = self
+            .agent_answerable_entry(&step.entry)
+            .filter(|(kind, _)| offers_kind_answers(*kind, &gate.answers))
             .ok_or(PersonOnly::PersonsGate)?;
+        if approved_control_files {
+            return Err(PersonOnly::ControlFiles.into());
+        }
 
-        // Only the owner in person approves the Control Files a Tampered
-        // Run's branch changed, as no rule approves its plan or merge.
+        // Sending work back changes nothing a person has not seen.
+        let [approving, _] = kind_answers(kind);
+        if answer.as_str() != approving {
+            return Ok(());
+        }
+
         let tampered = run
             .control_files
             .as_ref()
             .is_some_and(|changes| changes.is_tampered());
-        if approved_control_files || (tampered && answer.as_str() == APPROVE) {
-            return Err(PersonOnly::ControlFiles.into());
+        match kind {
+            RuleGateKind::Merge => return Err(PersonOnly::Merge.into()),
+            RuleGateKind::Plan if tampered => return Err(PersonOnly::ControlFiles.into()),
+            RuleGateKind::Plan | RuleGateKind::Blockers => {}
+        }
+        let Some(rules) = run.standing_rules else {
+            return Err(PersonOnly::NotAllowed.into());
+        };
+        if !rules.definition.orchestrator_approves(kind) {
+            return Err(PersonOnly::NotAllowed.into());
         }
 
-        // A merge Gate under a Main Hold is the owner's, as the
-        // `merge_when_green` rule answers none.
-        if kind == RuleGateKind::Merge
-            && let Some(base) = run.repository.as_ref()
-            && self.repo.main_hold(base).await.map_err(internal)?.is_some()
-        {
-            return Err(PersonOnly::MainHold.into());
+        // A Blockers Gate the `fix_blockers` rule would leave to the owner
+        // is theirs: past the fix rounds in a row it may send, and, with
+        // the owner section on, Blockers found again unchanged after a fix.
+        if kind == RuleGateKind::Blockers {
+            let fix_rounds = step.visit.saturating_sub(1);
+            if fix_rounds >= rule_fix_limit(max_visits) {
+                return Err(PersonOnly::OwnersBlockers.into());
+            }
+            if rules.definition.owner_gates {
+                let rounds = self.repo.review_rounds(run.id).await.map_err(internal)?;
+                if repeated_blockers(&rounds, steps, seq) {
+                    return Err(PersonOnly::OwnersBlockers.into());
+                }
+            }
         }
         Ok(())
     }
@@ -471,15 +513,18 @@ where
         let Some(limit) = rules.definition.queue_limit else {
             return Ok(());
         };
-        // Each Run waits on at most one Gate at a time, so its waiting Runs
-        // are the person's Queue; one past the limit is enough to tell.
-        let waiting = self
+        // Each Run waits on at most one Gate at a time; counting one past
+        // the limit is enough to tell.
+        let size = self
             .repo
-            .list_waiting_runs(user_id, limit.saturating_add(1))
+            .queue_size(user_id, limit.saturating_add(1))
             .await
             .map_err(internal)?;
-        if waiting.len() > usize::from(limit) {
-            return Err(FactoryError::QueueFull { limit });
+        if size > limit {
+            return Err(FactoryError::QueueFull {
+                limit,
+                set_by: rules.source,
+            });
         }
         Ok(())
     }
@@ -774,6 +819,7 @@ where
                 note: Some(reply),
                 user_id: actor,
                 approved_control_files: None,
+                agent_session: None,
             };
             self.workflows.answer(id, &answer).await?
         } else {
@@ -876,6 +922,10 @@ where
             note,
             user_id: actor,
             approved_control_files,
+            agent_session: match answerer {
+                Answerer::InPerson => None,
+                Answerer::Agent { session_id } => Some(session_id),
+            },
         };
         match self.workflows.answer(id, &answer).await? {
             AnswerDelivery::Taken => Ok(()),
@@ -1329,6 +1379,7 @@ where
                 answer.note.as_deref(),
                 &answer.user_id,
                 answer.approved_control_files.as_deref(),
+                answer.agent_session,
             )
             .await
             .map_err(internal)?;

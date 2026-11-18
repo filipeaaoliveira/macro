@@ -141,9 +141,16 @@ async fn the_stand_in_answers_only_a_gate_the_owner_left(pool: PgPool) {
     repo.stand_in(key(run_id, 2), &stand_in("approve"))
         .await
         .expect("stand in");
-    repo.answer_gate(key(run_id, 2), &outcome("revise"), None, &julia(), None)
-        .await
-        .expect("override");
+    repo.answer_gate(
+        key(run_id, 2),
+        &outcome("revise"),
+        None,
+        &julia(),
+        None,
+        None,
+    )
+    .await
+    .expect("override");
     let kept = repo
         .answer_gate_by_stand_in(key(run_id, 2))
         .await
@@ -190,8 +197,8 @@ async fn the_stand_in_answers_only_a_gate_the_owner_left(pool: PgPool) {
 }
 
 /// The owner's past answers to the same Flow's entry are read newest
-/// first, without the Run asking, a rule's, the stand-in's, an agent's
-/// question or another Flow's; every Gate a person answered with a button
+/// first, without the Run asking, a rule's, the stand-in's, the
+/// Orchestrator's, an agent's question or another Flow's; every Gate a person answered with a button
 /// is read for a replay, and none read from their words.
 #[sqlx::test(
     migrator = "MACRO_DB_MIGRATIONS",
@@ -207,6 +214,7 @@ async fn past_answers_are_the_owner_s_own(pool: PgPool) {
         &outcome("revise"),
         Some("Cover the edge cases"),
         &julia(),
+        None,
         None,
     )
     .await
@@ -235,9 +243,30 @@ async fn past_answers_are_the_owner_s_own(pool: PgPool) {
         Some("Due date"),
         &julia(),
         None,
+        None,
     )
     .await
     .expect("answer the question");
+    // Nor is the Orchestrator's answer for the owner, which the Gate
+    // keeps with its session.
+    let orchestrator = uuid::Uuid::now_v7();
+    open_plan_gate(&repo, key(older, 4)).await;
+    repo.answer_gate(
+        key(older, 4),
+        &outcome("approve"),
+        None,
+        &julia(),
+        None,
+        Some(orchestrator),
+    )
+    .await
+    .expect("the orchestrator answers");
+    let steps = repo.list_steps(older).await.expect("steps");
+    let kept = steps[3].gate.as_ref().and_then(|gate| gate.answer.as_ref());
+    assert_eq!(
+        kept.and_then(|answer| answer.agent_session_id),
+        Some(orchestrator)
+    );
 
     // Nor is an answer to the same entry in a Run of another Flow.
     let other_flow = RunId::generate();
@@ -266,6 +295,7 @@ async fn past_answers_are_the_owner_s_own(pool: PgPool) {
         None,
         &julia(),
         None,
+        None,
     )
     .await
     .expect("answer");
@@ -273,9 +303,16 @@ async fn past_answers_are_the_owner_s_own(pool: PgPool) {
     let current = RunId::generate();
     insert(&repo, current, "Current").await;
     open_plan_gate(&repo, key(current, 1)).await;
-    repo.answer_gate(key(current, 1), &outcome("approve"), None, &julia(), None)
-        .await
-        .expect("answer");
+    repo.answer_gate(
+        key(current, 1),
+        &outcome("approve"),
+        None,
+        &julia(),
+        None,
+        None,
+    )
+    .await
+    .expect("answer");
     // An answer the model read from words is not the replay's ground
     // truth.
     open_plan_gate(&repo, key(current, 2)).await;

@@ -4,6 +4,7 @@
 //! above the Queue limit says why.
 
 use agent_correlation::context::{Attribution, scope_attribution};
+use agent_correlation::scope::SessionScope;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -30,6 +31,15 @@ async fn in_session(
         session_id: Some(session_id),
         ..Attribution::default()
     };
+    in_attribution(router, attribution, request).await
+}
+
+/// A request handled with `attribution` accepted at its boundary.
+async fn in_attribution(
+    router: &Router,
+    attribution: Attribution,
+    request: Request<Body>,
+) -> axum::response::Response {
     scope_attribution(attribution, router.clone().oneshot(request))
         .await
         .expect("response")
@@ -100,6 +110,43 @@ async fn an_agent_session_answers_for_the_person_and_only_it() {
         ),
     )
     .await;
+
+    // A routine's run is not a chat: signed for the routine, carrying its
+    // id, or a background run held to a scope.
+    let mut signed = call(
+        "POST",
+        &answer_path,
+        Caller::User("routine"),
+        answer.clone(),
+    );
+    signed
+        .headers_mut()
+        .insert(CODE_EXECUTION_HEADER, "true".parse().expect("header"));
+    let signed = in_session(&router, session_id, signed).await;
+    let carried = in_attribution(
+        &router,
+        Attribution {
+            session_id: Some(session_id),
+            routine_id: Some(Uuid::now_v7()),
+            ..Attribution::default()
+        },
+        from_code("POST", &answer_path, answer.clone()),
+    )
+    .await;
+    let scoped = in_attribution(
+        &router,
+        Attribution {
+            session_id: Some(session_id),
+            scope: Some(SessionScope::NoSend),
+            ..Attribution::default()
+        },
+        from_code("POST", &answer_path, answer.clone()),
+    )
+    .await;
+    for routine in [signed, carried, scoped] {
+        assert_eq!(routine.status(), StatusCode::FORBIDDEN);
+        assert_eq!(body(routine).await["code"], "reservedForAPerson");
+    }
 
     assert_eq!(agent.status(), StatusCode::NOT_FOUND);
     assert_eq!(person.status(), StatusCode::NOT_FOUND);

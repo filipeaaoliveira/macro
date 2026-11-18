@@ -33,6 +33,7 @@ fn asked(seq: u16, role: &str, question: &str, answer: Option<&str>) -> Step {
             answer: answer.map(|answer| GateAnswer {
                 reply_confidence: None,
                 by_stand_in: false,
+                agent_session_id: None,
                 answer: Outcome::answer(),
                 note: Some(answer.to_string()),
                 user_id: None,

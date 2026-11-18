@@ -1,17 +1,21 @@
-//! The Orchestrator: an agent session answering a Gate for the Run's owner,
-//! which answers only what a Standing Rule could, and the Queue limit,
-//! above which no new Run starts.
+//! The Orchestrator: an agent session in Macro chat answering a Gate for
+//! the Run's owner, which may always send work back, approves only what
+//! the Run's Orchestrator Definition lets it, and never approves a merge;
+//! and the Queue limit, above which no new Run starts.
 
 use chrono::Utc;
-use factory_records::domain::main_hold::MainHoldRepository;
+use factory_records::domain::gate_replies::GateReplyRepository as _;
 use factory_records::domain::models::{
     AgentName, ControlFileChanges, EntryId, NewRun, Outcome, Repository, Role, RunId, RunInsert,
-    StepKey, StepSession, TeamMembership,
+    StandInAnswer, StepKey, StepSession, TeamMembership,
 };
 use factory_records::domain::ports::RunRepository;
-use factory_records::domain::standing_rules::{OrchestratorDefinition, RunRules};
+use factory_records::domain::standing_rules::{
+    OrchestratorDefinition, OrchestratorKinds, RulesSource, RunRules,
+};
 use uuid::Uuid;
 
+use super::gate_owner::{blocker, second_round_finding};
 use super::{FakeWorkflows, code_service, julia};
 use crate::domain::fakes::{FakeGithub, FakeRepo};
 use crate::domain::models::{Answerer, FactoryError, PersonOnly};
@@ -35,9 +39,30 @@ fn orchestrator() -> Answerer {
     }
 }
 
-/// A `code` Run of Julia's whose Step 1, at `entry`, ended `ended` and
-/// asks `answers` on a Gate.
-async fn waiting_at(repo: &FakeRepo, entry: &str, ended: &str, answers: &[&str]) -> RunId {
+/// The team's rules, with the Orchestrator allowed to approve `plan` and
+/// send `blockers` to a fix as given, and the owner section `owner_gates`.
+fn rules(plan: bool, blockers: bool, owner_gates: bool) -> RunRules {
+    RunRules {
+        definition: OrchestratorDefinition {
+            owner_gates,
+            orchestrator: OrchestratorKinds { plan, blockers },
+            ..OrchestratorDefinition::DEFAULT
+        },
+        source: RulesSource::Team,
+        project_id: None,
+    }
+}
+
+/// A `code` Run of Julia's with `rules`, whose Step 1, at `entry` on its
+/// `visit`, ended `ended` and asks `answers` on a Gate.
+async fn waiting_with(
+    repo: &FakeRepo,
+    rules: RunRules,
+    entry: &str,
+    visit: u16,
+    ended: &str,
+    answers: &[&str],
+) -> RunId {
     let RunInsert::Inserted(run) = repo
         .insert_run(NewRun {
             id: RunId::generate(),
@@ -49,7 +74,7 @@ async fn waiting_at(repo: &FakeRepo, entry: &str, ended: &str, answers: &[&str])
             created_in_person: true,
             control_file_patterns: &[],
             control_files_team_id: None,
-            standing_rules: RunRules::DEFAULT,
+            standing_rules: rules,
         })
         .await
         .expect("insert")
@@ -61,7 +86,7 @@ async fn waiting_at(repo: &FakeRepo, entry: &str, ended: &str, answers: &[&str])
         seq: 1,
     };
     let entry = EntryId::try_from(entry.to_string()).expect("valid");
-    repo.start_step(key, &entry, 1).await.expect("start");
+    repo.start_step(key, &entry, visit).await.expect("start");
     repo.end_step(key, &outcome(ended), "Step output")
         .await
         .expect("end");
@@ -70,54 +95,107 @@ async fn waiting_at(repo: &FakeRepo, entry: &str, ended: &str, answers: &[&str])
     run.id
 }
 
-/// An agent session answers a Flow's Gate of a kind for the Run's owner,
-/// as the owner's answer: a plan, a review's Blockers, and a merge with
-/// no Main Hold.
+/// A Run with the default rules, waiting at `entry`'s Gate on its first
+/// visit.
+async fn waiting_at(repo: &FakeRepo, entry: &str, ended: &str, answers: &[&str]) -> RunId {
+    waiting_with(repo, RunRules::DEFAULT, entry, 1, ended, answers).await
+}
+
+/// What `service` says to an agent answering `answer` on Step 1 of `run`.
+async fn agent_answers(
+    service: &impl FactoryService,
+    run: RunId,
+    answer: &str,
+) -> Result<(), FactoryError> {
+    service
+        .answer_gate(julia(), run, 1, outcome(answer), None, None, orchestrator())
+        .await
+}
+
+/// The Orchestrator may always send work back; it gives the approving
+/// answer to a plan or Blockers Gate only where the Run's definition lets
+/// it, and never approves a merge. Its answers reach the workflow with
+/// its session, so they are recorded as its own.
 #[tokio::test]
-async fn an_agent_answers_a_gate_a_standing_rule_could() {
+async fn an_agent_sends_work_back_and_approves_only_what_the_rules_let_it() {
     let repo = FakeRepo::default();
     let workflows = FakeWorkflows::default();
     let service = code_service(&repo, &workflows, &FakeGithub::default());
 
-    for (entry, ended, answers, answer) in [
-        ("plan", "done", ["approve", "revise"], "approve"),
-        ("review", "changes", ["fix", "stop"], "fix"),
-        ("merge-gate", "done", ["approve", "revise"], "approve"),
+    for (entry, ended, answers, back, approving) in [
+        ("plan", "done", ["approve", "revise"], "revise", "approve"),
+        ("review", "changes", ["fix", "stop"], "stop", "fix"),
+        (
+            "merge-gate",
+            "done",
+            ["approve", "revise"],
+            "revise",
+            "approve",
+        ),
     ] {
-        let run_id = waiting_at(&repo, entry, ended, &answers).await;
-        service
-            .answer_gate(
-                julia(),
-                run_id,
-                1,
-                outcome(answer),
-                None,
-                None,
-                orchestrator(),
-            )
+        let off = waiting_at(&repo, entry, ended, &answers).await;
+        agent_answers(&service, off, back)
             .await
-            .unwrap_or_else(|error| panic!("{entry}: {error}"));
+            .unwrap_or_else(|error| panic!("{entry} sent back: {error}"));
+        let refused = agent_answers(&service, off, approving).await;
+        let expected = if entry == "merge-gate" {
+            PersonOnly::Merge
+        } else {
+            PersonOnly::NotAllowed
+        };
+        assert!(
+            matches!(refused, Err(FactoryError::ReservedForAPerson(why)) if why == expected),
+            "{entry}: {refused:?}"
+        );
     }
 
+    let on = rules(true, true, false);
+    let plan = waiting_with(&repo, on, "plan", 1, "done", &["approve", "revise"]).await;
+    agent_answers(&service, plan, "approve")
+        .await
+        .expect("the rules let it approve the plan");
+    let review = waiting_with(&repo, on, "review", 1, "changes", &["fix", "stop"]).await;
+    agent_answers(&service, review, "fix")
+        .await
+        .expect("the rules let it send blockers to a fix");
+    let merge = waiting_with(&repo, on, "merge-gate", 1, "done", &["approve", "revise"]).await;
+    let refused = agent_answers(&service, merge, "approve").await;
+    assert!(
+        matches!(
+            refused,
+            Err(FactoryError::ReservedForAPerson(PersonOnly::Merge))
+        ),
+        "{refused:?}"
+    );
+
     let answers = workflows.answers.lock().expect("answers").clone();
-    assert_eq!(answers.len(), 3);
+    assert_eq!(answers.len(), 5);
     assert!(answers.iter().all(|answer| answer.user_id == julia()));
+    assert!(answers.iter().all(|answer| answer.agent_session.is_some()));
 }
 
 /// What the factory keeps for the owner in person stays refused to an
-/// agent answering for them, before the workflow hears of it: an agent's
-/// question, a Tampered Run's approval, Control Files sent with an
-/// answer, a merge Gate while its base has a Main Hold, a Gate of an
-/// entry no Standing Rule decides, and any answer from a factory Step's
-/// own session.
+/// agent answering for them, before the workflow hears of it, whatever the
+/// rules let it approve: an agent's question, a Tampered Run's plan,
+/// Control Files sent with an answer, a Gate of an entry no Standing Rule
+/// decides, Blockers past the rule's fix rounds or found again after a
+/// fix, a Gate answered since the agent read it, and any answer from a
+/// factory Step's own session.
 #[tokio::test]
 async fn an_agent_never_answers_what_is_kept_for_a_person() {
     let repo = FakeRepo::default();
     let workflows = FakeWorkflows::default();
     let service = code_service(&repo, &workflows, &FakeGithub::default());
+    let on = rules(true, true, true);
+    let refused_for = |result: Result<(), FactoryError>, expected: PersonOnly| {
+        assert!(
+            matches!(result, Err(FactoryError::ReservedForAPerson(why)) if why == expected),
+            "{expected:?}: {result:?}"
+        );
+    };
 
-    let question = waiting_at(&repo, "write", "question", &["answer"]).await;
-    let refused = service
+    let question = waiting_with(&repo, on, "write", 1, "question", &["answer"]).await;
+    let asked = service
         .answer_gate(
             julia(),
             question,
@@ -128,15 +206,9 @@ async fn an_agent_never_answers_what_is_kept_for_a_person() {
             orchestrator(),
         )
         .await;
-    assert!(
-        matches!(
-            refused,
-            Err(FactoryError::ReservedForAPerson(PersonOnly::Question))
-        ),
-        "{refused:?}"
-    );
+    refused_for(asked, PersonOnly::Question);
 
-    let tampered = waiting_at(&repo, "merge-gate", "done", &["approve", "revise"]).await;
+    let tampered = waiting_with(&repo, on, "plan", 1, "done", &["approve", "revise"]).await;
     let changes = ControlFileChanges {
         tampered: vec![".github/workflows/ci.yml".to_string()],
         named: Vec::new(),
@@ -145,75 +217,62 @@ async fn an_agent_never_answers_what_is_kept_for_a_person() {
     repo.set_control_file_changes(tampered, Some(&changes))
         .await
         .expect("keep");
-    for seen in [None, Some(changes.tampered.clone())] {
-        let refused = service
-            .answer_gate(
-                julia(),
-                tampered,
-                1,
-                outcome("approve"),
-                None,
-                seen,
-                orchestrator(),
-            )
-            .await;
-        assert!(
-            matches!(
-                refused,
-                Err(FactoryError::ReservedForAPerson(PersonOnly::ControlFiles))
-            ),
-            "{refused:?}"
-        );
-    }
-
-    let held = waiting_at(&repo, "merge-gate", "done", &["approve", "revise"]).await;
-    repo.hold_main(&base(), "abc123", "ci", Utc::now())
-        .await
-        .expect("hold");
-    let refused = service
+    refused_for(
+        agent_answers(&service, tampered, "approve").await,
+        PersonOnly::ControlFiles,
+    );
+    let sent = service
         .answer_gate(
             julia(),
-            held,
+            tampered,
             1,
-            outcome("approve"),
+            outcome("revise"),
             None,
-            None,
+            Some(changes.tampered.clone()),
             orchestrator(),
         )
         .await;
-    assert!(
-        matches!(
-            refused,
-            Err(FactoryError::ReservedForAPerson(PersonOnly::MainHold))
-        ),
-        "{refused:?}"
-    );
+    refused_for(sent, PersonOnly::ControlFiles);
 
     // `ci` asks nothing in the built-in Flows: no rule could decide a
     // Gate there.
-    let unkinded = waiting_at(&repo, "ci", "done", &["approve", "revise"]).await;
-    let refused = service
+    let unkinded = waiting_with(&repo, on, "ci", 1, "done", &["approve", "revise"]).await;
+    refused_for(
+        agent_answers(&service, unkinded, "revise").await,
+        PersonOnly::PersonsGate,
+    );
+
+    // The `code` Flow's review panel runs three rounds: the rule sends at
+    // most two to a fix in a row, so the third round's Blockers are the
+    // owner's.
+    let third = waiting_with(&repo, on, "review", 3, "changes", &["fix", "stop"]).await;
+    refused_for(
+        agent_answers(&service, third, "fix").await,
+        PersonOnly::OwnersBlockers,
+    );
+    agent_answers(&service, third, "stop")
+        .await
+        .expect("stopping is always the agent's to say");
+
+    // Blockers found again, unchanged, after the rule's fix.
+    let same = blocker(3, "correctness-reviewer", "src/a.rs", (12, 16));
+    let repeated = second_round_finding(&repo, on, same).await;
+    let again = service
         .answer_gate(
             julia(),
-            unkinded,
-            1,
-            outcome("approve"),
+            repeated.run_id,
+            repeated.seq,
+            outcome("fix"),
             None,
             None,
             orchestrator(),
         )
         .await;
-    assert!(
-        matches!(
-            refused,
-            Err(FactoryError::ReservedForAPerson(PersonOnly::PersonsGate))
-        ),
-        "{refused:?}"
-    );
+    refused_for(again, PersonOnly::OwnersBlockers);
 
     // A planner's session works as the owner too: it never approves the
     // plan it wrote.
-    let plan = waiting_at(&repo, "plan", "done", &["approve", "revise"]).await;
+    let plan = waiting_with(&repo, on, "plan", 1, "done", &["approve", "revise"]).await;
     let session = StepSession {
         session_id: Uuid::now_v7(),
         action_id: Uuid::now_v7(),
@@ -233,40 +292,44 @@ async fn an_agent_never_answers_what_is_kept_for_a_person() {
     )
     .await
     .expect("claim");
-    let refused = service
+    let own = service
         .answer_gate(
             julia(),
             plan,
             1,
-            outcome("approve"),
+            outcome("revise"),
             None,
             None,
             Answerer::Agent { session_id },
         )
         .await;
+    refused_for(own, PersonOnly::StepSession);
+
+    // The agent decided on a Gate the owner answered meanwhile.
+    let raced = waiting_with(&repo, on, "plan", 1, "done", &["approve", "revise"]).await;
+    repo.answer_gate(
+        StepKey {
+            run_id: raced,
+            seq: 1,
+        },
+        &outcome("revise"),
+        None,
+        &julia(),
+        None,
+        None,
+    )
+    .await
+    .expect("the owner answers first");
+    let late = agent_answers(&service, raced, "approve").await;
     assert!(
-        matches!(
-            refused,
-            Err(FactoryError::ReservedForAPerson(PersonOnly::StepSession))
-        ),
-        "{refused:?}"
+        matches!(late, Err(FactoryError::AnswerRefused(_))),
+        "{late:?}"
     );
 
-    assert!(workflows.answers.lock().expect("answers").is_empty());
+    // `stop` on the third round went through; nothing else did.
+    assert_eq!(workflows.answers.lock().expect("answers").len(), 1);
 
-    // The owner in person still answers each of them.
-    service
-        .answer_gate(
-            julia(),
-            held,
-            1,
-            outcome("approve"),
-            None,
-            None,
-            Answerer::InPerson,
-        )
-        .await
-        .expect("the owner answers a held merge gate");
+    // The owner in person still answers what the agent may not.
     service
         .answer_gate(
             julia(),
@@ -279,7 +342,18 @@ async fn an_agent_never_answers_what_is_kept_for_a_person() {
         )
         .await
         .expect("the owner answers a question");
-    assert_eq!(workflows.answers.lock().expect("answers").len(), 2);
+    service
+        .answer_gate(
+            julia(),
+            third,
+            1,
+            outcome("fix"),
+            None,
+            None,
+            Answerer::InPerson,
+        )
+        .await
+        .expect("the owner sends blockers to another fix");
 }
 
 /// Julia's team, which she administers, with `definition` as its
@@ -332,7 +406,7 @@ async fn above_the_queue_limit_no_new_run_starts() {
     waiting_at(&repo, "plan", "done", &["approve", "revise"]).await;
     let refused = start().await;
     assert!(
-        matches!(refused, Err(FactoryError::QueueFull { limit: 1 })),
+        matches!(refused, Err(FactoryError::QueueFull { limit: 1, .. })),
         "{refused:?}"
     );
     let started = workflows.started.lock().expect("started").len();
@@ -360,10 +434,30 @@ async fn above_the_queue_limit_no_new_run_starts() {
         None,
         &julia(),
         None,
+        None,
     )
     .await
     .expect("recorded");
     start().await.expect("back at the limit");
+
+    // A Gate the stand-in answered, which the owner may still override,
+    // does not wait on them in person.
+    let stood_in = waiting_at(&repo, "plan", "done", &["approve", "revise"]).await;
+    repo.stand_in(
+        StepKey {
+            run_id: stood_in,
+            seq: 1,
+        },
+        &StandInAnswer {
+            answer: outcome("approve"),
+            reason: "The plan matches the request".to_string(),
+            confidence: 95,
+            until: Utc::now() + chrono::TimeDelta::minutes(10),
+        },
+    )
+    .await
+    .expect("stand in");
+    start().await.expect("a stood-in gate is not in the queue");
 
     // A Project's own rules, with no limit, replace the team's.
     let project = Uuid::now_v7();
@@ -380,7 +474,7 @@ async fn above_the_queue_limit_no_new_run_starts() {
     waiting_at(&repo, "plan", "done", &["approve", "revise"]).await;
     assert!(matches!(
         start().await,
-        Err(FactoryError::QueueFull { limit: 1 })
+        Err(FactoryError::QueueFull { limit: 1, .. })
     ));
     service
         .create_run(

@@ -509,6 +509,10 @@ const EVERY_RULE: OrchestratorDefinition = OrchestratorDefinition {
     merge: true,
     owner_gates: false,
     queue_limit: None,
+    orchestrator: factory_records::domain::standing_rules::OrchestratorKinds {
+        plan: false,
+        blockers: false,
+    },
 };
 
 /// The review panel of three reviewers, at most three rounds, with the

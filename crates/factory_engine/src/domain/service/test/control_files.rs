@@ -120,6 +120,7 @@ async fn an_approval_carries_the_tampered_files_to_the_workflow() {
                 note: None,
                 user_id: julia(),
                 approved_control_files: Some(changes().tampered),
+                agent_session: None,
             },
             AnswerGate {
                 seq: 6,
@@ -127,6 +128,7 @@ async fn an_approval_carries_the_tampered_files_to_the_workflow() {
                 note: None,
                 user_id: julia(),
                 approved_control_files: None,
+                agent_session: None,
             },
         ]
     );
@@ -179,6 +181,7 @@ async fn the_recorded_answer_keeps_the_files_it_approved() {
                 note: None,
                 user_id: julia(),
                 approved_control_files: Some(changes().tampered),
+                agent_session: None,
             },
         })
         .await

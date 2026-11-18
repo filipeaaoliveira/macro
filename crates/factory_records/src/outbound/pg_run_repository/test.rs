@@ -106,9 +106,16 @@ async fn a_reset_entry_keeps_every_visit_it_made(pool: PgPool) {
         repo.open_gate(key(id, seq), "Go on?", &[outcome("yes")])
             .await
             .expect("open");
-        repo.answer_gate(key(id, seq), &outcome("yes"), Some(output), &julia(), None)
-            .await
-            .expect("answer");
+        repo.answer_gate(
+            key(id, seq),
+            &outcome("yes"),
+            Some(output),
+            &julia(),
+            None,
+            None,
+        )
+        .await
+        .expect("answer");
         repo.end_step(key(id, seq), &outcome("done"), output)
             .await
             .expect("end");
@@ -283,10 +290,11 @@ async fn a_gate_waits_then_keeps_its_first_answer(pool: PgPool) {
         Some("Keep the old index"),
         &julia(),
         None,
+        None,
     )
     .await
     .expect("answer");
-    repo.answer_gate(key(id, 1), &outcome("approve"), None, &julia(), None)
+    repo.answer_gate(key(id, 1), &outcome("approve"), None, &julia(), None, None)
         .await
         .expect("answer again");
 
@@ -319,7 +327,7 @@ async fn an_answer_from_an_account_gone_since_records_no_one(pool: PgPool) {
     // The API refuses an unknown user, but an account can go between that
     // check and the workflow recording the answer.
     let gone = MacroUserIdStr::try_from("macro|gone@example.com".to_string()).expect("valid");
-    repo.answer_gate(key(id, 1), &outcome("approve"), None, &gone, None)
+    repo.answer_gate(key(id, 1), &outcome("approve"), None, &gone, None, None)
         .await
         .expect("answer");
 

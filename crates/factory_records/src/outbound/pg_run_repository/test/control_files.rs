@@ -122,13 +122,14 @@ async fn an_answer_keeps_the_control_files_it_approved(pool: PgPool) {
         None,
         &julia(),
         Some(&approved),
+        None,
     )
     .await
     .expect("answer");
-    repo.answer_gate(key(id, 1), &outcome("approve"), None, &julia(), None)
+    repo.answer_gate(key(id, 1), &outcome("approve"), None, &julia(), None, None)
         .await
         .expect("answer again");
-    repo.answer_gate(key(id, 2), &outcome("approve"), None, &julia(), None)
+    repo.answer_gate(key(id, 2), &outcome("approve"), None, &julia(), None, None)
         .await
         .expect("answer");
 

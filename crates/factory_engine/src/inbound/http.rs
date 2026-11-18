@@ -29,11 +29,13 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::domain::models::{
-    Answerer, ControlFilesSettings, FactoryError, FlowSummary, RunDetail, StandingRulesSettings,
+    Answerer, ControlFilesSettings, FactoryError, FlowSummary, PersonOnly, RunDetail,
+    StandingRulesSettings,
 };
 use crate::domain::ports::FactoryService;
 use factory_records::domain::standing_rules::{
-    OrchestratorDefinition, ProjectRules, RulesSource, RunRules, StandInKinds, StandingRule,
+    OrchestratorDefinition, OrchestratorKinds, ProjectRules, RulesSource, RunRules, StandInKinds,
+    StandingRule,
 };
 
 /// Router state for the Run API.
@@ -437,9 +439,11 @@ where
 /// signed-in session answers it, and an agent session they work with
 /// (such as the Orchestrator in Macro chat), from its code, answers only
 /// what a Standing Rule could: never an agent's question, a Gate its Flow
-/// keeps for a person, a Tampered Run's approval or a merge Gate under a
-/// Main Hold (403 `reservedForAPerson`), and never from a factory Step's
-/// own session. Any other caller is refused (403).
+/// keeps for a person, approving a merge or a Tampered Run, nor an
+/// approving answer the Run's Orchestrator Definition does not allow
+/// (403 `reservedForAPerson`); only from a chat, never from a routine's
+/// run or a factory Step's own session. A Gate answered since is a
+/// conflict (409). Any other caller is refused (403).
 #[utoipa::path(
     post,
     tag = "factory",
@@ -550,10 +554,10 @@ fn in_person(
 }
 
 /// Who answers a Gate: the person in their own signed-in session, or an
-/// agent session acting for them from its code, as the correlation layer
-/// validated the session against the call's credential. An internal
-/// caller, an API key or token, or a routine's program with no agent
-/// session answers nothing.
+/// agent session they chat with acting for them from its code, as the
+/// correlation layer validated the session against the call's credential.
+/// An internal caller, an API key or token, a routine's run, and a
+/// background run held to a scope answer nothing.
 fn answerer(
     authorization: UserOrInternalAuthorization,
     headers: &HeaderMap,
@@ -562,13 +566,22 @@ fn answerer(
         return Ok((authorization.user.macro_user_id, Answerer::InPerson));
     }
     let session = agent_correlation::context::current_session();
-    match (authorization.caller, session) {
-        (UserOrInternalCaller::User, Some(session_id)) => Ok((
-            authorization.user.macro_user_id,
-            Answerer::Agent { session_id },
-        )),
-        _ => Err(FactoryError::NotAPerson),
+    let Some(session_id) = session.filter(|_| authorization.caller == UserOrInternalCaller::User)
+    else {
+        return Err(FactoryError::NotAPerson);
+    };
+    // Only a chat with the person: a routine's run, signed for it or
+    // carrying its id, and a background run held to a scope answer
+    // nothing for them.
+    let routine = agent_correlation::context::current_routine().is_some()
+        || authorization.user.routine_id.is_some();
+    if routine || agent_correlation::context::current_scope().is_some() {
+        return Err(PersonOnly::NotAChat.into());
     }
+    Ok((
+        authorization.user.macro_user_id,
+        Answerer::Agent { session_id },
+    ))
 }
 
 /// Whether the caller is the person in their own signed-in session: not an
@@ -856,6 +869,7 @@ impl IntoResponse for FactoryError {
         StandingRulesSettings,
         OrchestratorDefinition,
         StandInKinds,
+        OrchestratorKinds,
         ProjectRules,
         RunRules,
         RulesSource,

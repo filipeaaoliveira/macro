@@ -466,7 +466,7 @@ async fn a_question_and_the_step_going_on_from_it_are_one_visit(pool: PgPool) {
     repo.open_gate(key(1), "CSV or JSON?", &[outcome("answer")])
         .await
         .expect("open");
-    repo.answer_gate(key(1), &outcome("answer"), Some("CSV"), &julia, None)
+    repo.answer_gate(key(1), &outcome("answer"), Some("CSV"), &julia, None, None)
         .await
         .expect("answer");
     repo.end_step(key(2), &outcome("done"), "The plan")
@@ -475,7 +475,7 @@ async fn a_question_and_the_step_going_on_from_it_are_one_visit(pool: PgPool) {
     repo.open_gate(key(2), "Approve?", &[outcome("approve")])
         .await
         .expect("open");
-    repo.answer_gate(key(2), &outcome("approve"), None, &julia, None)
+    repo.answer_gate(key(2), &outcome("approve"), None, &julia, None, None)
         .await
         .expect("answer");
 
@@ -518,4 +518,44 @@ async fn a_question_and_the_step_going_on_from_it_are_one_visit(pool: PgPool) {
         ]
     );
     assert!(records.trouble.is_empty());
+}
+
+/// The Orchestrator's answers for the person are not the person's: their
+/// Gates read as no Gate, as a rule's and the stand-in's do.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "insights"))
+)]
+async fn the_orchestrator_s_answers_are_left_out(pool: PgPool) {
+    let repo = PgRunRepository::new(pool.clone());
+    sqlx::query!(
+        r#"
+        UPDATE factory_gate SET agent_session_id = $1
+        WHERE answer IS NOT NULL AND rule IS NULL AND NOT by_stand_in
+        "#,
+        uuid::Uuid::now_v7(),
+    )
+    .execute(&pool)
+    .await
+    .expect("mark the answers the orchestrator's");
+
+    let records = repo
+        .read_insights(&november("macro|julia@example.com"))
+        .await
+        .expect("read");
+
+    let plan = records
+        .entries
+        .iter()
+        .find(|summary| summary.entry == entry("plan"))
+        .expect("plan");
+    assert_eq!(plan.gates_answered, 0);
+    assert!(
+        records
+            .counts
+            .iter()
+            .all(|count| count.kind != EntryCountKind::Answer),
+        "{:?}",
+        records.counts
+    );
 }
