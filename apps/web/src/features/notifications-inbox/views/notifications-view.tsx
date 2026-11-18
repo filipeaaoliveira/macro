@@ -22,10 +22,6 @@ import {
   SwipableRowProvider,
 } from '@components/app/mobile/SwipableRow';
 import { PreviewPanel } from '@components/app/PreviewPanel';
-import {
-  type PreviewPanelSelection,
-  previewBlockTarget,
-} from '@components/app/previewTarget';
 import { useSplitPanelOrThrow } from '@components/app/split-layout/layoutUtils';
 import { SplitPanel } from '@components/app/split-panel';
 import { StaticMarkdownContext } from '@core/component/LexicalMarkdown/component/core/StaticMarkdown';
@@ -36,7 +32,6 @@ import { isModality } from '@core/mobile/inputModality';
 import { isTouchDevice } from '@core/mobile/isTouchDevice';
 import { fireAndForget } from '@core/util/fireAndForget';
 import EmptyStateInboxTrayGraphic from '@design/empty-state-inbox-tray.svg';
-import type { EntityData } from '@entity';
 import { formatTimestamp } from '@entity/utils/timestamp';
 import ArrowCounterClockwise from '@icon/system/regular/arrow-counter-clockwise.svg';
 import CheckIcon from '@icon/system/regular/check.svg';
@@ -111,10 +106,7 @@ import {
   type InboxShownRow,
   type InboxShownRowLocation,
 } from '../primitives/inbox-selection';
-import {
-  agentTurnParams,
-  crmCommentParams,
-} from '../primitives/notification-location';
+import { previewTargetFor } from '../primitives/preview-target';
 import { createRowActions, rowButtons } from '../primitives/row-actions';
 import { rowEntity } from '../primitives/row-entity';
 import { InboxRowAvatar } from './inbox-row-avatar';
@@ -171,20 +163,6 @@ const decisionFailure = (decision: InboxDecision) =>
     .exhaustive();
 
 /**
- * What the preview pane can show inline; calendar events show through the
- * view's calendar route, and projects open in their own view.
- */
-const previewSelection = (
-  entity: EntityData
-): PreviewPanelSelection | undefined =>
-  entity.type === 'calendar_event' ||
-  entity.type === 'initiative' ||
-  entity.type === 'harness' ||
-  entity.type === 'team'
-    ? undefined
-    : entity;
-
-/**
  * A calendar event row as the Calendar reads it: its notifications, such as
  * a reminder naming the occurrence, behind an accessor.
  */
@@ -200,24 +178,6 @@ const calendarSelection = (
         ? notifications
         : () => notifications ?? [],
   };
-};
-
-/**
- * What the preview shows for a row or one of its notifications; undefined when
- * it has no inline preview. An agent's notification opens at its turn, and a
- * company or contact at its comment.
- */
-const previewTargetFor = (
-  row: NotificationInboxRow,
-  notification?: UnifiedNotification
-) => {
-  const entity = previewSelection(rowEntity(row, notification));
-  if (!entity) return undefined;
-  const target = previewBlockTarget(entity);
-  const params =
-    (notification && agentTurnParams(notification)) ??
-    crmCommentParams(notification ?? row.content.notifications[0]);
-  return params ? { ...target, params } : target;
 };
 
 function ListHeader(props: { actions: JSX.Element }) {

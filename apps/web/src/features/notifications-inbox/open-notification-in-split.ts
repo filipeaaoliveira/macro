@@ -6,7 +6,7 @@ import { openNotification } from '@notifications';
 import type { UnifiedNotification } from '@notifications/types';
 import type { NotificationInboxRow } from './context/notifications-inbox-context';
 import { agentTurnParams } from './primitives/notification-location';
-import { rowEntity } from './primitives/row-entity';
+import { rowEntity, runNotification } from './primitives/row-entity';
 
 type PasswordsVisibility = {
   enabled: () => boolean;
@@ -114,11 +114,13 @@ export function openNotificationInSplit(
     return;
   // A runtime or team has no page of its own: its newest notification opens
   // its target (Settings → Machines, or the vault item a request is about).
+  // A factory Run waiting on its owner is answered on the Run, not on the task
+  // the notification is filed under.
   const notification =
     options.notification ??
     (row.content.entity.type === 'harness' || row.content.entity.type === 'team'
       ? row.content.notifications[0]
-      : undefined);
+      : runNotification(row));
   fireAndForget(
     notification
       ? openStackNotification(row, notification, options)

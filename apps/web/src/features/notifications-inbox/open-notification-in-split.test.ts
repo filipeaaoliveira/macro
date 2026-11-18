@@ -1,6 +1,7 @@
 import type { SplitManager } from '@components/app/split-layout/layoutManager';
 import { createRoutedSplitLayout } from '@components/app/split-layout/tests/fixtures';
 import { createBlockOrchestrator } from '@core/orchestrator';
+import type { EntityData } from '@entity';
 import type { UnifiedNotification } from '@notifications/types';
 import { err, ok, type Result } from 'neverthrow';
 import { createRoot, createSignal } from 'solid-js';
@@ -182,4 +183,101 @@ it('rechecks current scope before opening a retained Team row', () => {
   });
   expect(mocks.open).not.toHaveBeenCalled();
   expect(mocks.entity).not.toHaveBeenCalled();
+});
+
+function gateWaiting(id = 'gate-1', runId = 'run-1'): UnifiedNotification {
+  return {
+    id,
+    entity_type: 'document',
+    entity_id: 'task-1',
+    notification_event_type: 'factory_gate_waiting',
+    notification_metadata: {
+      tag: 'factory_gate_waiting',
+      content: {
+        runId,
+        seq: 1,
+        taskId: 'task-1',
+        question: 'Approve this plan?',
+        request: 'Add a helper',
+      },
+    },
+    created_at: '2026-11-18T00:00:00Z',
+    updated_at: '2026-11-18T00:00:00Z',
+    sent: true,
+    state: 'unseen',
+  };
+}
+function taskAssigned(): UnifiedNotification {
+  return {
+    ...gateWaiting('assigned-1'),
+    notification_event_type: 'task_assigned',
+    notification_metadata: {
+      tag: 'task_assigned',
+      content: { taskId: 'task-1', taskName: 'Add a helper' },
+    },
+  } as UnifiedNotification;
+}
+function taskRow(notifications: UnifiedNotification[]): NotificationInboxRow {
+  return {
+    id: 'task:task-1',
+    type: 'task',
+    revision: 'rev-1',
+    latestAt: 1,
+    unseen: true,
+    count: notifications.length,
+    actions: [{ kind: 'open' }],
+    content: {
+      entity: {
+        type: 'document',
+        id: 'task-1',
+        name: 'Add a helper',
+        ownerId: 'viewer',
+        fileType: 'md',
+      } as EntityData,
+      notifications,
+    },
+  };
+}
+
+it("opens a waiting factory Run's notification, not its task, from the row", async () => {
+  const { manager, splitHandle } = layout();
+  const row = taskRow([gateWaiting()]);
+  openNotificationInSplit(row, { splitHandle, newSplit: false });
+  expect(mocks.open).toHaveBeenCalledExactlyOnceWith(
+    row.content.notifications[0],
+    manager,
+    false,
+    expect.anything(),
+    splitHandle
+  );
+  await mocks.open.mock.results.at(-1)?.value;
+  expect(mocks.entity).not.toHaveBeenCalled();
+});
+
+it("opens a waiting factory Run's notification chosen in a stack", async () => {
+  const { manager, splitHandle } = layout();
+  const chosen = gateWaiting('gate-2', 'run-2');
+  const row = taskRow([gateWaiting(), chosen]);
+  openNotificationInSplit(row, {
+    splitHandle,
+    newSplit: true,
+    notification: chosen,
+  });
+  expect(mocks.open).toHaveBeenCalledExactlyOnceWith(
+    chosen,
+    manager,
+    true,
+    expect.anything(),
+    splitHandle
+  );
+  await mocks.open.mock.results.at(-1)?.value;
+  expect(mocks.entity).not.toHaveBeenCalled();
+});
+
+it('still opens the task of a row whose newest notification is not a waiting Run', () => {
+  const { splitHandle } = layout();
+  const row = taskRow([taskAssigned(), gateWaiting()]);
+  openNotificationInSplit(row, { splitHandle, newSplit: false });
+  expect(mocks.open).not.toHaveBeenCalled();
+  expect(mocks.entity).toHaveBeenCalledOnce();
 });
