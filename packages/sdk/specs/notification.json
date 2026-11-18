@@ -2203,6 +2203,10 @@
             "type": ["string", "null"],
             "description": "For an agent's question, the Role of the agent that asks; absent\nfor a Gate of the Run's Flow."
           },
+          "notifyOnly": {
+            "type": "boolean",
+            "description": "Whether the Gate only tells the owner, for their information, and\nthe Run goes on without an answer; absent for a Gate that waits."
+          },
           "question": {
             "type": "string",
             "description": "The start of the Gate's question."

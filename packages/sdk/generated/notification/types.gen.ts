@@ -783,6 +783,11 @@ export type FactoryGateWaitingMetadata = {
      */
     asker?: string | null;
     /**
+     * Whether the Gate only tells the owner, for their information, and
+     * the Run goes on without an answer; absent for a Gate that waits.
+     */
+    notifyOnly?: boolean;
+    /**
      * The start of the Gate's question.
      */
     question: string;
