@@ -114,10 +114,15 @@ export function openNotificationInSplit(
     return;
   // A runtime or team has no page of its own: its newest notification opens
   // its target (Settings → Machines, or the vault item a request is about).
+  // A factory Run waiting on its owner is answered on the Run, not on the task
+  // the notification is filed under.
+  const newest = row.content.notifications[0];
   const notification =
     options.notification ??
-    (row.content.entity.type === 'harness' || row.content.entity.type === 'team'
-      ? row.content.notifications[0]
+    (row.content.entity.type === 'harness' ||
+    row.content.entity.type === 'team' ||
+    newest?.notification_metadata.tag === 'factory_gate_waiting'
+      ? newest
       : undefined);
   fireAndForget(
     notification
