@@ -4,6 +4,7 @@ pub(crate) mod constants;
 pub mod delete;
 pub mod document;
 pub mod error;
+pub mod messages;
 pub mod notification;
 pub mod project;
 pub mod task;

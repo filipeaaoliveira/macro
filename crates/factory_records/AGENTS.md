@@ -46,7 +46,8 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261117210000_factory_main_hold_task_key.sql`,
   `20261117215724_factory_step_shared_session.sql`,
   `20261117220000_factory_follow_up_commented.sql`,
-  `20261117221000_factory_standing_rules.sql`).
+  `20261117221000_factory_standing_rules.sql`,
+  `20261118005054_factory_owner_gates.sql`).
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
 
 ## Boundaries
@@ -121,6 +122,9 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   references `"Document"` and is cleared when the task is deleted.
   `mark_follow_up_commented` sets `follow_up_commented` on a round's
   findings linked to a task, and repeating it changes nothing.
+- `list_waiting_runs` reads one owner's Runs that have not ended and wait
+  on an unanswered Gate, newest first, through `factory_run_user_open_idx`
+  (open Runs only) and the Gates' primary key, up to its limit.
 - `factory_run.task_id` references `"Document"` and is cleared when the task
   document is deleted; `link_task` reports a missing task or Run instead of
   failing. `list_task_runs` reads one owner's Runs on a task newest first
@@ -161,7 +165,9 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   column alone, and a row left with neither is removed. It goes with the
   team. `factory_project_rules` keeps a team's rules for one Project (an
   initiative), and goes with either. Rules are stored as the Gate kinds
-  they decide (`plan`, `blockers`, `merge`), checked against those names.
+  they decide (`plan`, `blockers`, `merge`), and `owner_gates` when the
+  definition's owner section is on (`OrchestratorDefinition::kinds`),
+  checked against those names.
 - `factory_run.standing_rules`, `standing_rules_source` and
   `standing_rules_project_id` are set once, by `insert_run`; all null for
   a Run created before Runs kept rules. `answer_gate_by_rule` records a

@@ -32,7 +32,9 @@ use factory_engine::inbound::insights::{InsightsApiDoc, InsightsRouterState, ins
 use factory_engine::outbound::auth_user_directory::AuthUserDirectory;
 use factory_engine::outbound::document_hold_tasks::DocumentHoldTasks;
 use factory_engine::outbound::document_task_directory::DocumentTaskDirectory;
+use factory_engine::outbound::document_task_notes::DocumentTaskNotes;
 use factory_engine::outbound::github_pull_requests::GithubPullRequests;
+use factory_engine::outbound::ingress_gate_notifier::IngressGateNotifier;
 use factory_engine::outbound::local_agent::LocalAgent;
 use factory_engine::outbound::temporal_main_watches::TemporalMainWatches;
 use factory_engine::outbound::temporal_run_workflows::TemporalRunWorkflows;
@@ -46,6 +48,8 @@ use macro_authorization::{
 use macro_entrypoint::{MacroEntrypoint, shutdown_signal};
 use macro_service_urls::{AgentHarnessServiceUrl, AuthServiceUrl, DocumentStorageServiceUrl};
 use macro_tower_layers::MacroRequestIdAndTracingLayer;
+use notification::domain::service::SqsNotificationIngress;
+use notification::outbound::queue::SqsQueue;
 use sqlx::postgres::PgPoolOptions;
 use temporalio_client::{Client, ClientOptions, ConnectionOptions};
 use temporalio_sdk::Runtime;
@@ -91,8 +95,9 @@ async fn run() -> Result<(), rootcause::Report> {
     )
     .await?;
 
+    let aws_config = macro_aws_config::get_macro_aws_config().await;
     let secretsmanager_client = secretsmanager_client::SecretsManager::new(
-        aws_sdk_secretsmanager::Client::new(&macro_aws_config::get_macro_aws_config().await),
+        aws_sdk_secretsmanager::Client::new(&aws_config),
     );
     let jwt_args =
         JwtValidationArgs::new_with_secret_manager(config.environment, &secretsmanager_client)
@@ -133,7 +138,16 @@ async fn run() -> Result<(), rootcause::Report> {
             EntityAccessServiceImpl::new(PgAccessRepository::new(db.clone())),
             documents.clone(),
         ),
-        hold_tasks: DocumentHoldTasks::new(documents),
+        hold_tasks: DocumentHoldTasks::new(documents.clone()),
+        task_notes: DocumentTaskNotes::new(documents),
+        // A Gate left for a person tells the Run's owner through the
+        // notification ingress, as every Macro producer notifies.
+        gate_notifier: IngressGateNotifier::new(Arc::new(SqsNotificationIngress {
+            queue: SqsQueue::new(
+                aws_sdk_sqs::Client::new(&aws_config),
+                macro_queues::NotificationIngressQueue::new().to_string(),
+            ),
+        })),
         client,
         authorization_state,
         correlation: CorrelationState::new(db, jwt_args),
@@ -178,6 +192,8 @@ struct Parts {
     github: GithubPullRequests<AuthServiceClient>,
     tasks: DocumentTaskDirectory<EntityAccessServiceImpl<PgAccessRepository>>,
     hold_tasks: DocumentHoldTasks,
+    task_notes: DocumentTaskNotes,
+    gate_notifier: IngressGateNotifier<SqsNotificationIngress<SqsQueue>>,
     client: Client,
     authorization_state: MacroAuthorizationState<Authorization>,
     correlation: CorrelationState,
@@ -208,7 +224,8 @@ async fn serve<A: StepAgent + Clone>(
     let worker = factory_engine::inbound::temporal::worker(
         &runtime,
         parts.client.clone(),
-        StepServiceImpl::new(parts.repo.clone(), steps.clone()),
+        StepServiceImpl::new(parts.repo.clone(), steps.clone())
+            .with_owner_gates(parts.gate_notifier, parts.task_notes),
         reviews,
         MainWatchServiceImpl::new(parts.repo.clone(), parts.github.clone(), parts.hold_tasks),
     )?;

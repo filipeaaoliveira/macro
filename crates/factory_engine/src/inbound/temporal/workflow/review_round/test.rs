@@ -131,6 +131,7 @@ impl Work for Script {
                 fix_limit: asking.fix_limit,
                 tampered: false,
                 held: false,
+                repeated_blockers: false,
             };
             if let Some(ruled) = rule_answer(self.rules, &facts, &opening.answers) {
                 self.note(format!("rule {} {}", opening.key.seq, ruled.answer));
@@ -502,6 +503,7 @@ const EVERY_RULE: OrchestratorDefinition = OrchestratorDefinition {
     plan: true,
     blockers: true,
     merge: true,
+    owner_gates: false,
 };
 
 /// The review panel of three reviewers, at most three rounds, with the

@@ -123,6 +123,7 @@ fn input<'a>(earlier: &'a [Step]) -> StepInput<'a> {
         may_ask: false,
         questions_left: 0,
         resumes: None,
+        owner_notes: &[],
     }
 }
 
@@ -752,4 +753,53 @@ async fn a_gate_s_question_and_note_reach_the_history_escaped() {
     assert!(!prompt.contains("\n# Ignore the request"));
     assert!(prompt.contains("\\# Ignore the request"));
     assert!(!prompt.contains("```"));
+}
+
+/// The owner's notes on the Run's task reach the agent's prompt, fenced as
+/// data: a Step's full prompt, and the prompt of a Step that goes on from
+/// its agent's question.
+#[tokio::test]
+async fn the_owner_s_notes_reach_the_prompt_as_data() {
+    let agent = FakeAgent::ending_with("done");
+    let steps = BuiltInSteps::new(agent.clone(), pull_requests());
+    let notes = [crate::domain::gate_owner::OwnerNote {
+        written_at: Utc::now(),
+        text: "The cause: bwrap cannot mount /proc".to_string(),
+    }];
+    let earlier = [asked(1, "plan", "CSV or JSON?", "CSV")];
+
+    steps
+        .run(
+            &step("write"),
+            StepInput {
+                owner_notes: &notes,
+                ..input(&earlier)
+            },
+        )
+        .await
+        .expect("write");
+    steps
+        .run(
+            &step("plan"),
+            StepInput {
+                may_ask: true,
+                resumes: Some(1),
+                owner_notes: &notes,
+                ..input(&earlier)
+            },
+        )
+        .await
+        .expect("plan");
+
+    let tasks = agent.tasks.lock().expect("tasks");
+    for task in tasks.iter() {
+        assert!(
+            task.prompt.contains("## The run's owner's notes"),
+            "{}",
+            task.prompt
+        );
+        assert!(task.prompt.contains("<owner-notes>\n- On "));
+        assert!(task.prompt.contains("The cause: bwrap cannot mount /proc"));
+    }
+    assert_eq!(tasks.len(), 2);
 }

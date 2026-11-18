@@ -18,6 +18,7 @@ use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::agents::REVIEWER_ROLES;
 use crate::domain::flow::{StepName, StepUse};
+use crate::domain::gate_owner::owner_notes_brief;
 use crate::domain::models::{AgentTask, StepInput, StepReport, run_branch};
 use crate::domain::ports::{
     AgentFailure, MainWatches, PullRequests, Retryable, StepAgent, StepExecutor,
@@ -251,8 +252,11 @@ where
         // the agent asked in with the owner's answer: the agent has the
         // Step's instructions and its work so far there.
         let asked_prompt = match input.resumes {
-            Some(asked) => going_on_prompt(input.earlier, asked, input.questions_left)
-                .ok_or(BuiltInStepError::Unanswered(asked))?,
+            Some(asked) => {
+                let answered = going_on_prompt(input.earlier, asked, input.questions_left)
+                    .ok_or(BuiltInStepError::Unanswered(asked))?;
+                format!("{answered}{}", owner_notes_brief(input.owner_notes))
+            }
             None => prompt(instructions, &outcomes, input),
         };
         let task = AgentTask {
@@ -451,8 +455,9 @@ const HISTORY_BUDGET: usize = 48 * 1024;
 /// The agent's prompt: the Step's instructions, the outcomes it may end
 /// with, how to ask the Run's owner when it may, where it works when the
 /// Run works on a repository ([`workplace`]), the Run's request, the
-/// questions the owner answered ([`answers_brief`]), then the Run's earlier
-/// Steps ([`history`]).
+/// questions the owner answered ([`answers_brief`]), the notes the owner
+/// left on the Run's task since its latest Gate ([`owner_notes_brief`]),
+/// then the Run's earlier Steps ([`history`]).
 fn prompt(instructions: &str, outcomes: &[Outcome], input: StepInput<'_>) -> String {
     let outcomes = outcomes
         .iter()
@@ -470,9 +475,10 @@ fn prompt(instructions: &str, outcomes: &[Outcome], input: StepInput<'_>) -> Str
         .unwrap_or_default();
     format!(
         "{instructions}\nEnd the step with one of these outcomes: {outcomes}.\n{ask}{workplace}\n\
-         ## Request\n\n{}\n{}{}",
+         ## Request\n\n{}\n{}{}{}",
         input.request,
         answers_brief(input.earlier),
+        owner_notes_brief(input.owner_notes),
         history(input.earlier)
     )
 }

@@ -12,7 +12,8 @@ use chrono::Utc;
 use factory_records::domain::main_hold::{BaseState, MainHoldRepository};
 use factory_records::domain::models::{
     HandBack, MAX_NOTE_BYTES, MAX_OUTPUT_BYTES, MAX_QUESTION_BYTES, MAX_REQUEST_BYTES, NewRun,
-    Outcome, Repository, Run, RunId, RunInsert, RunOutcome, Step, TaskLink, TeamMembership,
+    Outcome, Repository, Run, RunId, RunInsert, RunOutcome, Step, StepKey, TaskLink,
+    TeamMembership,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::{ReviewRound, ReviewRoundRepository};
@@ -26,16 +27,18 @@ use uuid::Uuid;
 use crate::domain::built_in_flows::{BUILT_IN_FLOWS, BuiltInFlow};
 use crate::domain::control_files::ControlFiles;
 use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening, GateRuling};
+use crate::domain::gate_owner::{OwnerNote, gate_notice, notes_since};
 use crate::domain::models::{
     CodeRepository, ControlFilesSettings, FactoryError, FlowSummary, RunDetail, RunFinish,
     RunStart, StandingRulesSettings, StepEnding, StepError, StepInput, StepReport, StepRequest,
     StepStart,
 };
 use crate::domain::ports::{
-    AnswerDelivery, FactoryService, PullRequests, Retryable, RunWorkflows, RunWorkflowsError,
-    StepExecutor, StepService, TaskAccess, TaskDirectory, UserDirectory,
+    AnswerDelivery, FactoryService, GateNotifier, NoOwnerGates, PullRequests, Retryable,
+    RunWorkflows, RunWorkflowsError, StepExecutor, StepService, TaskAccess, TaskDirectory,
+    TaskNotes, UserDirectory,
 };
-use crate::domain::standing_rules::{GateFacts, RuleAnswer, rule_answer};
+use crate::domain::standing_rules::{GateFacts, RuleAnswer, repeated_blockers, rule_answer};
 
 fn internal(error: impl std::error::Error + Send + Sync + 'static) -> rootcause::Report {
     rootcause::Report::new(error).into_dynamic()
@@ -56,6 +59,9 @@ const APPROVE: &str = "approve";
 
 /// The most Runs a task's list holds: its owner's newest.
 pub const TASK_RUNS_LISTED: u16 = 50;
+
+/// The most Runs waiting on their owner that are listed for them.
+pub const WAITING_RUNS_LISTED: u16 = 50;
 
 /// How old a Run with no Step and no workflow must be before it counts as
 /// one whose workflow never started.
@@ -340,6 +346,30 @@ where
         })
     }
 
+    /// `runs`, each with its Steps, its review rounds, and what was read of
+    /// its base branch, in their order.
+    async fn details(&self, runs: Vec<Run>) -> Result<Vec<RunDetail>, FactoryError> {
+        let ids: Vec<RunId> = runs.iter().map(|run| run.id).collect();
+        let mut steps = self.repo.list_runs_steps(&ids).await.map_err(internal)?;
+        let mut rounds = self.repo.runs_review_rounds(&ids).await.map_err(internal)?;
+        // Runs on one base share what was read of it.
+        let mut known = BTreeMap::new();
+        let mut details = Vec::with_capacity(runs.len());
+        for run in runs {
+            let steps = steps.remove(&run.id).unwrap_or_default();
+            let review_rounds = rounds.remove(&run.id).unwrap_or_default();
+            let base = self.base_shown(&run, &steps, &mut known).await?;
+            details.push(RunDetail {
+                run,
+                steps,
+                main_hold: base.hold,
+                base_required_checks: base.required,
+                review_rounds,
+            });
+        }
+        Ok(details)
+    }
+
     /// Remove a Run whose workflow did not start, unless it did after all:
     /// a start that failed after the server took it leaves a workflow
     /// behind, which needs its Run.
@@ -530,25 +560,20 @@ where
             .list_task_runs(task_id, actor, TASK_RUNS_LISTED)
             .await
             .map_err(internal)?;
-        let ids: Vec<RunId> = runs.iter().map(|run| run.id).collect();
-        let mut steps = self.repo.list_runs_steps(&ids).await.map_err(internal)?;
-        let mut rounds = self.repo.runs_review_rounds(&ids).await.map_err(internal)?;
-        // Runs on one base share what was read of it.
-        let mut known = BTreeMap::new();
-        let mut details = Vec::with_capacity(runs.len());
-        for run in runs {
-            let steps = steps.remove(&run.id).unwrap_or_default();
-            let review_rounds = rounds.remove(&run.id).unwrap_or_default();
-            let base = self.base_shown(&run, &steps, &mut known).await?;
-            details.push(RunDetail {
-                run,
-                steps,
-                main_hold: base.hold,
-                base_required_checks: base.required,
-                review_rounds,
-            });
-        }
-        Ok(details)
+        self.details(runs).await
+    }
+
+    #[tracing::instrument(skip(self, actor))]
+    async fn list_waiting_runs(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+    ) -> Result<Vec<RunDetail>, FactoryError> {
+        let runs = self
+            .repo
+            .list_waiting_runs(actor, WAITING_RUNS_LISTED)
+            .await
+            .map_err(internal)?;
+        self.details(runs).await
     }
 
     #[tracing::instrument(skip(self))]
@@ -877,11 +902,15 @@ where
 pub const DEFAULT_QUESTIONS: u8 = 2;
 
 /// What a Run's worker does for its workflow: run Steps, and record Steps,
-/// Gates and the Run's end, each on its own.
+/// Gates and the Run's end, each on its own. A Run whose owner section is
+/// on has its waiting Gates told to its owner through `notifier`, and its
+/// owner's comments on its task read through `notes`.
 #[derive(Debug, Clone)]
-pub struct StepServiceImpl<R, E> {
+pub struct StepServiceImpl<R, E, N = NoOwnerGates, T = NoOwnerGates> {
     repo: R,
     executor: E,
+    notifier: N,
+    notes: T,
 }
 
 impl<R, E> StepServiceImpl<R, E>
@@ -889,9 +918,59 @@ where
     R: RunRepository + ReviewRoundRepository + MainHoldRepository,
     E: StepExecutor,
 {
-    /// Create the Step service.
+    /// Create the Step service, which tells no owner of a waiting Gate and
+    /// reads no comment, until [`Self::with_owner_gates`].
     pub fn new(repo: R, executor: E) -> Self {
-        Self { repo, executor }
+        Self {
+            repo,
+            executor,
+            notifier: NoOwnerGates,
+            notes: NoOwnerGates,
+        }
+    }
+}
+
+impl<R, E, N, T> StepServiceImpl<R, E, N, T>
+where
+    R: RunRepository + ReviewRoundRepository + MainHoldRepository,
+    E: StepExecutor,
+    N: GateNotifier,
+    T: TaskNotes,
+{
+    /// The service, telling Runs' owners of their waiting Gates through
+    /// `notifier`, and reading their comments on the Runs' tasks through
+    /// `notes`, for the Runs whose owner section is on.
+    pub fn with_owner_gates<N2: GateNotifier, T2: TaskNotes>(
+        self,
+        notifier: N2,
+        notes: T2,
+    ) -> StepServiceImpl<R, E, N2, T2> {
+        StepServiceImpl {
+            repo: self.repo,
+            executor: self.executor,
+            notifier,
+            notes,
+        }
+    }
+
+    /// What the owner of `run` commented on its task since the latest Gate
+    /// of the Steps `earlier` opened: none unless the Run's owner section
+    /// is on, it works on a task, and a Gate opened. Comments that cannot
+    /// be read now fail the Step's attempt, to be tried again.
+    async fn owner_notes(&self, run: &Run, earlier: &[Step]) -> Result<Vec<OwnerNote>, StepError> {
+        let owner_gates = run
+            .standing_rules
+            .is_some_and(|rules| rules.definition.owner_gates);
+        if !owner_gates {
+            return Ok(Vec::new());
+        }
+        let (Some(task_id), Some(since)) = (run.task_id, notes_since(earlier)) else {
+            return Ok(Vec::new());
+        };
+        self.notes
+            .owner_notes(task_id, &run.user_id, since)
+            .await
+            .map_err(|error| StepError::Internal(internal(error)))
     }
 
     async fn run_of(&self, request: &StepRequest) -> Result<Run, StepError> {
@@ -903,10 +982,12 @@ where
     }
 }
 
-impl<R, E> StepService for StepServiceImpl<R, E>
+impl<R, E, N, T> StepService for StepServiceImpl<R, E, N, T>
 where
     R: RunRepository + ReviewRoundRepository + MainHoldRepository,
     E: StepExecutor,
+    N: GateNotifier,
+    T: TaskNotes,
 {
     #[tracing::instrument(err, skip_all, fields(run_id = %request.key.run_id, seq = request.key.seq))]
     async fn start_step(&self, request: StepRequest) -> Result<StepStart, StepError> {
@@ -946,6 +1027,7 @@ where
             .await
             .map_err(internal)?;
         let review = review_of(&rounds, &request)?;
+        let owner_notes = self.owner_notes(&run, &earlier).await?;
         let input = StepInput {
             key: request.key,
             role: request.role.as_ref(),
@@ -961,6 +1043,7 @@ where
             may_ask: request.may_ask,
             questions_left: request.questions_left,
             resumes: request.resumes,
+            owner_notes: &owner_notes,
         };
         let report = self
             .executor
@@ -1088,6 +1171,19 @@ where
             }
             _ => false,
         };
+        // Whether a review round found its round before's Blockers again
+        // decides only with the owner section on.
+        let repeated = match ruling.kind {
+            RuleGateKind::Blockers if rules.definition.owner_gates => {
+                let rounds = self
+                    .repo
+                    .review_rounds(key.run_id)
+                    .await
+                    .map_err(internal)?;
+                repeated_blockers(&rounds, &steps, key.seq)
+            }
+            _ => false,
+        };
         let facts = GateFacts {
             kind: ruling.kind,
             fix_rounds: ruling.fix_rounds,
@@ -1097,6 +1193,7 @@ where
                 .as_ref()
                 .is_some_and(|changes| changes.is_tampered()),
             held,
+            repeated_blockers: repeated,
         };
         let Some(ruled) = rule_answer(Some(rules.definition), &facts, &ruling.answers) else {
             return Ok(None);
@@ -1119,6 +1216,25 @@ where
             rule,
             answer: kept.answer,
         }))
+    }
+
+    #[tracing::instrument(err, skip_all, fields(run_id = %key.run_id, seq = key.seq))]
+    async fn notify_gate(&self, key: StepKey) -> Result<(), StepError> {
+        let run = self
+            .repo
+            .get_run(key.run_id)
+            .await
+            .map_err(internal)?
+            .ok_or(StepError::NoSuchRun)?;
+        let steps = self.repo.list_steps(key.run_id).await.map_err(internal)?;
+        let notice = steps
+            .iter()
+            .find(|step| step.seq == key.seq)
+            .and_then(|step| gate_notice(&run, step));
+        if let Some(notice) = notice {
+            self.notifier.notify(notice).await;
+        }
+        Ok(())
     }
 
     #[tracing::instrument(err, skip_all, fields(run_id = %finish.run_id, outcome = %finish.outcome))]

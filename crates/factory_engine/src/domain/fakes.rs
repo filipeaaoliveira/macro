@@ -1,7 +1,9 @@
 //! In-memory stand-ins for the factory's records, for the domain's tests.
 
+mod gate_owner;
 mod main_hold;
 
+pub(crate) use gate_owner::{FakeNotifier, FakeTaskNotes};
 pub(crate) use main_hold::{FakeHoldTasks, FakeMain, FakeWatches};
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -530,6 +532,32 @@ impl RunRepository for FakeRepo {
             .expect("runs")
             .values()
             .filter(|run| run.task_id == Some(task_id) && run.user_id == *user_id)
+            .cloned()
+            .collect();
+        runs.sort_by_key(|run| std::cmp::Reverse((run.created_at, run.id)));
+        runs.truncate(usize::from(limit));
+        Ok(runs)
+    }
+
+    async fn list_waiting_runs(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        limit: u16,
+    ) -> Result<Vec<Run>, FakeError> {
+        let waiting: BTreeSet<RunId> = self
+            .steps
+            .lock()
+            .expect("steps")
+            .iter()
+            .filter(|(_, step)| step.gate.as_ref().is_some_and(|gate| gate.answer.is_none()))
+            .map(|(run, _)| *run)
+            .collect();
+        let mut runs: Vec<Run> = self
+            .runs
+            .lock()
+            .expect("runs")
+            .values()
+            .filter(|run| run.user_id == *user_id && run.end.is_none() && waiting.contains(&run.id))
             .cloned()
             .collect();
         runs.sort_by_key(|run| std::cmp::Reverse((run.created_at, run.id)));

@@ -35,6 +35,7 @@ use crate::outbound::local_agent::LocalAgent;
 
 mod control_files;
 mod standing_rules;
+mod waiting;
 
 const KEY: &str = "test-internal-key";
 const ALICE: &str = "macro|alice@example.com";
@@ -204,6 +205,13 @@ impl FactoryService for FakeService {
         &self,
         actor: &MacroUserIdStr<'static>,
         _task_id: Uuid,
+    ) -> Result<Vec<RunDetail>, FactoryError> {
+        Err(self.refusing(actor))
+    }
+
+    async fn list_waiting_runs(
+        &self,
+        actor: &MacroUserIdStr<'static>,
     ) -> Result<Vec<RunDetail>, FactoryError> {
         Err(self.refusing(actor))
     }

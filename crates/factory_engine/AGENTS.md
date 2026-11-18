@@ -615,6 +615,40 @@ the rules: the workflow asks `factory_rule_gate` only about a Flow's Gate
 worker answers none for a Gate `GateKind::answered_only_by_a_person` keeps
 for the owner, whatever the ruling names.
 
+A team's Orchestrator Definition also has an owner section
+(`owner_gates`, `ownerGates` in `PUT /settings/standing-rules` and its
+Project route; off by default and when a definition leaves it out), kept
+on the Run with its rules (`src/domain/gate_owner.rs`). With it on:
+
+- a Gate left for a person (a Flow's Gate no rule answered, or an agent's
+  question) tells the Run's owner: once the workflow takes its answers it
+  calls `factory_notify_gate` (behind the `factory-gate-owner` patch
+  marker; tried for at most five minutes, and a failure leaves the Gate
+  waiting), and the worker sends a `factory_gate_waiting` notification
+  about the Run's task through the notification ingress
+  (`outbound/ingress_gate_notifier.rs`), with an id derived from the Run
+  and the Step, so a retry is one notification. A Run with no task has
+  nothing to notify about. `GET /runs/waiting` lists the caller's Runs
+  waiting at an unanswered Gate, whatever the section says;
+- a review round whose Blockers are the round before's, unchanged, after
+  the `fix_blockers` rule sent those to a fix, is left for the owner
+  rather than fixed again (`standing_rules::repeated_blockers`), on top of
+  the rule's fix cap. "The same" is `review_rounds::same_blockers`: every
+  Blocker of each round has one in the other found by a reviewer of the
+  same Role, in the same file, at lines that meet (no lines is the whole
+  file); what a Blocker says is not compared, and an answer that never
+  read is no finding. A person's fix, and a round after a reset, are never
+  compared;
+- the owner's comments on the Run's task since its latest Gate opened
+  reach every later agent Step's prompt, and the prompt of a Step that
+  goes on from a question, fenced as the owner's notes
+  (`owner_notes_brief`, escaped as reviewers' findings are). They are read
+  as the owner through document storage's `/messages/document/{id}` routes
+  (`outbound/document_task_notes.rs`); a task the owner no longer reads has
+  none, and an outage fails the Step's attempt, for a retry.
+
+With it off, as for a Run created before it, none of this happens.
+
 ## Start here
 
 - `src/domain/flow.rs`: the Flow model and the checks a definition must pass.
@@ -640,7 +674,9 @@ for the owner, whatever the ruling names.
 - `src/domain/main_hold.rs` and `src/inbound/temporal/main_watch.rs`: the
   Main Hold, its looks at a base branch and the watch that makes them.
 - `src/domain/standing_rules.rs`: which Gates a Standing Rule answers, and
-  what it never answers. Project rules are set through the API only: team
+  what it never answers.
+- `src/domain/gate_owner.rs`: the owner section: the notice a waiting Gate
+  sends, and the owner's notes a Step reads. Project rules are set through the API only: team
   settings show how many Projects have their own.
 - `flows/`: the built-in Flows, each named for its file
   (`src/domain/built_in_flows.rs`). `GET /flows` lists those whose Steps the
@@ -666,6 +702,8 @@ for the owner, whatever the ruling names.
   `entity_access` (ports), `document_storage_service_client`,
   `authentication_service_client` (accounts and linked GitHub tokens),
   `models_properties` and `system_properties` (a task's Project property),
+  `model_notifications`, `notification` and `model-entity` (a waiting
+  Gate's notification), `messages` (the discussions on a Run's task),
   `github` (the user-token client), the Temporal Rust SDK.
 - Used by: `services/factory_service`.
 
@@ -765,6 +803,10 @@ for the owner, whatever the ruling names.
 - A worker older than `GateDefinition::after` cannot read a Flow that has
   it, and one older than `factory_rule_gate` fails that activity: deploy
   every worker before the API starts Runs on the new `code` Flow.
+- Removing the `factory-gate-owner` patch breaks the replay of Runs that
+  told their owner of a Gate; the histories recorded before it
+  (`code_rules_fixed_then_merged`, `code_waiting_at_plan_gate_with_rules`)
+  replay without it.
 - Removing the `factory-standing-rules` patch, or asking anything new
   between recording a Gate and waiting on it without a patch of its own,
   breaks the replay of Runs in flight: `inbound/temporal/test/replay.rs`

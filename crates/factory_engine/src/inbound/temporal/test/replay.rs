@@ -13,6 +13,14 @@
 //! - `code_waiting_at_merge_gate`: `code_merged` cut where the Run waits on
 //!   its merge Gate, as a Run in flight is when a new worker takes it.
 //!
+//! Recorded on the workflow that asks the Run's Standing Rules about each
+//! Gate (the `factory-standing-rules` marker), before it told the owner of
+//! the Gates left to them (`factory-gate-owner`):
+//! - `code_rules_fixed_then_merged`: a person approves the plan, the rule
+//!   sends the review's Blockers to a fix, and a person approves the merge;
+//! - `code_waiting_at_plan_gate_with_rules`: a Run cut where it waits on its
+//!   plan Gate once the rules left it to a person.
+//!
 //! Before changing what the workflow decides, record the histories it
 //! makes now beside these, so the change is checked against both.
 
@@ -64,6 +72,24 @@ async fn a_run_waiting_on_its_merge_gate_replays() {
     replays(
         "code_waiting_at_merge_gate",
         include_bytes!("histories/code_waiting_at_merge_gate.json"),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_run_whose_rules_fixed_its_blockers_replays() {
+    replays(
+        "code_rules_fixed_then_merged",
+        include_bytes!("histories/code_rules_fixed_then_merged.json"),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_run_waiting_on_a_gate_the_rules_left_replays() {
+    replays(
+        "code_waiting_at_plan_gate_with_rules",
+        include_bytes!("histories/code_waiting_at_plan_gate_with_rules.json"),
     )
     .await;
 }

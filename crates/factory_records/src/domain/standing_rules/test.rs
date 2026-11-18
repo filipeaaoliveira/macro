@@ -36,7 +36,11 @@ fn the_owner_section_is_stored_beside_the_kinds() {
 
 #[test]
 fn the_owner_section_is_off_by_default_and_when_a_definition_leaves_it_out() {
-    assert!(!OrchestratorDefinition::DEFAULT.owner_gates);
+    assert!(
+        !OrchestratorDefinition::DEFAULT
+            .kinds()
+            .contains(&"owner_gates".to_string())
+    );
     let sent: OrchestratorDefinition =
         serde_json::from_str(r#"{"plan": true, "blockers": true, "merge": false}"#)
             .expect("a definition without the section reads");

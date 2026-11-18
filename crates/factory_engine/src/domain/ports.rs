@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 use crate::domain::flow::{StepName, StepUse};
 use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening, GateRuling};
+use crate::domain::gate_owner::{GateNotice, OwnerNote};
 use crate::domain::main_hold::{HoldTask, MainLook, MainWatch};
 use crate::domain::models::{
     AgentAnswer, AgentCommand, AgentTask, AgentTurn, CodeRepository, ControlFilesSettings,
@@ -328,6 +329,52 @@ pub trait HoldTasks: Send + Sync + 'static {
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 }
 
+/// Tells a Run's owner that one of its Gates waits on them.
+pub trait GateNotifier: Send + Sync + 'static {
+    /// Send `notice`. Sending it again is the same notification. A notice
+    /// that cannot be sent is logged and dropped: the Gate waits all the
+    /// same, and is listed as waiting.
+    fn notify(&self, notice: GateNotice) -> impl Future<Output = ()> + Send;
+}
+
+/// Reads what a Run's owner commented on the Run's task.
+pub trait TaskNotes: Send + Sync + 'static {
+    /// The error type returned when the comments cannot be read now.
+    type Err: std::error::Error + Send + Sync + 'static;
+
+    /// The comments `owner` left on the task document `task_id` at or
+    /// after `since`, oldest first, read as `owner`: none once they no
+    /// longer see the task, or it is gone.
+    fn owner_notes(
+        &self,
+        task_id: Uuid,
+        owner: &MacroUserIdStr<'static>,
+        since: chrono::DateTime<chrono::Utc>,
+    ) -> impl Future<Output = Result<Vec<OwnerNote>, Self::Err>> + Send;
+}
+
+/// The owner section's ports where nothing serves them: no Gate notifies
+/// anyone, and no comment is read.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoOwnerGates;
+
+impl GateNotifier for NoOwnerGates {
+    async fn notify(&self, _notice: GateNotice) {}
+}
+
+impl TaskNotes for NoOwnerGates {
+    type Err = std::convert::Infallible;
+
+    async fn owner_notes(
+        &self,
+        _task_id: Uuid,
+        _owner: &MacroUserIdStr<'static>,
+        _since: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Vec<OwnerNote>, Self::Err> {
+        Ok(Vec::new())
+    }
+}
+
 /// Inbound service port: what the watch of a base branch asks its worker
 /// to do.
 pub trait MainWatchService: Send + Sync + 'static {
@@ -478,6 +525,16 @@ pub trait FactoryService: Send + Sync + 'static {
         &self,
         actor: &MacroUserIdStr<'static>,
         task_id: Uuid,
+    ) -> impl Future<Output = Result<Vec<RunDetail>, FactoryError>> + Send;
+
+    /// `actor`'s Runs that wait on them at a Gate no one answered yet,
+    /// newest first, each with its Steps: at most the newest
+    /// [`WAITING_RUNS_LISTED`].
+    ///
+    /// [`WAITING_RUNS_LISTED`]: crate::domain::service::WAITING_RUNS_LISTED
+    fn list_waiting_runs(
+        &self,
+        actor: &MacroUserIdStr<'static>,
     ) -> impl Future<Output = Result<Vec<RunDetail>, FactoryError>> + Send;
 
     /// Link `actor`'s Run to the task document `task_id`, replacing any task
@@ -640,6 +697,11 @@ pub trait StepService: Send + Sync + 'static {
         &self,
         ruling: GateRuling,
     ) -> impl Future<Output = Result<Option<RuleAnswer>, StepError>> + Send;
+
+    /// Tell the Run's owner that the Gate of the Step `key` waits on them,
+    /// when the Run's owner section is on and nothing answered it yet.
+    /// Telling them again is the same notification.
+    fn notify_gate(&self, key: StepKey) -> impl Future<Output = Result<(), StepError>> + Send;
 
     /// Record how a Run ended.
     fn end_run(&self, finish: RunFinish) -> impl Future<Output = Result<(), StepError>> + Send;
