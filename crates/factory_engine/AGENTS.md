@@ -671,10 +671,12 @@ The `code` Flow checks that a change does what its request asks before
 its merge: its verify Phase. It is on for every repository by default,
 including one with no verify file. The repository turns it off in
 `.macro/verify.json` (`src/domain/verification.rs`): `{"verify": false}`
-(`true` when left out). A file with any other key, such as the `deploy`
-key an earlier factory read, does not read and turns nothing off: the
-change is checked, and `accept`'s report and the planner's note say
-"`.macro/verify.json` does not read (why): the change is checked". `accept`
+(`true` when left out). A `deploy` key, which an earlier factory read to
+wait for a deploy after the merge, is read and ignored, so
+`{"verify": false, "deploy": ...}` still turns the Phase off. A file with
+any other key does not read and turns nothing off: the change is checked,
+and `accept`'s report and the planner's note say "`.macro/verify.json`
+does not read (why): the change is checked". `accept`
 and `plan` read the file on the base branch, which the Run has not merged
 into. The file is also a default Control File (a team that keeps its own
 list must add it).
@@ -686,12 +688,15 @@ list must add it).
   repository's root (at most 1 KiB) that exits 0 only when the clause
   holds (`timeout` as a check's), or `none`, why no command checks it. A
   `deployed` mark, which plans recorded before Runs ended at their merge
-  may hold, is read and ignored, and never written; any other key does not
-  read. The Step keeps the plan with the checks written out for its Gate,
-  then the block as the factory read it (`plan_output`). Later Steps read
-  the latest `plan` Step's (`AcceptanceChecks::of_run`); checks that do not
-  read are logged, and `accept`'s report says so, its verifier checking
-  every clause by hand.
+  may hold, is read and never written: nothing deploys the change now, so
+  such a check is never run, and its clause is checked by hand (it would
+  fail, with no deployment to reach). Any other key does not read. The
+  Step keeps the plan with the checks written out for its Gate, then the
+  block as the factory read it (`plan_output`); checks too large to keep
+  are dropped with their block, and a note says so. Later Steps read the
+  latest `plan` Step's (`AcceptanceChecks::of_run`); checks that do not
+  read, or were dropped for their size, are logged, and `accept`'s report
+  says so, its verifier checking every clause by hand.
 - Trust: the checks live in the plan Step's recorded output, never in the
   branch, so the writer and fixer cannot change the commands. They are an
   agent's commands, not people's: `.macro/checks.json` is written and

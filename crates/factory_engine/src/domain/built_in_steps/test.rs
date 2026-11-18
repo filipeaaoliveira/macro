@@ -170,8 +170,9 @@ fn a_new_flow_may_not_name_the_steps_past_a_merge() {
 }
 
 /// A Run ends at its merge: one whose Flow still goes on to `deploy` or
-/// `verify` once merged finds each ends `off` at once, which its Flow
-/// routes to the Run's `success`. Nothing is waited for, read or asked.
+/// `verify` once merged finds `deploy` ends `off` and `verify` `pass` at
+/// once, which its Flow routes to the Run's `success`. Nothing is waited
+/// for, read or asked.
 #[tokio::test]
 async fn the_steps_after_a_merge_end_at_once() {
     let agent = FakeAgent::ending_with("fail");

@@ -6,8 +6,8 @@ Done-when clause of the request (or, when it states none, per result it asks
 for), each with the `clause` and either `run`, a command from the
 repository's root that exits 0 only when the clause holds on the finished
 change, or `none`, why no command can check it. A check exercises real
-behaviour: a test you plan for the writer to add, a script, a request to the
-running service. A verifier reads what each check runs before it counts, so
+behaviour: a test you plan for the writer to add, a script, or a request to
+a service the check starts. A verifier reads what each check runs before it counts, so
 name the test and what it asserts in the plan. `$MACRO_VERIFY_COMMIT` names
 the commit under check. `timeout` is how many seconds a check may take, 600
 when left out. The factory keeps these checks: the writer cannot change them.
