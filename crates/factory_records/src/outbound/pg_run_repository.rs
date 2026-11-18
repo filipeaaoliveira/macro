@@ -850,6 +850,26 @@ impl RunRepository for PgRunRepository {
         }))
     }
 
+    async fn runs_flows(&self, ids: &[RunId]) -> Result<BTreeMap<RunId, RunFlow>, Self::Err> {
+        let ids: Vec<Uuid> = ids.iter().map(|id| id.as_uuid()).collect();
+        let rows = sqlx::query!(
+            "SELECT id, flow, flow_definition FROM factory_run WHERE id = ANY($1)",
+            &ids,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| {
+                let flow = RunFlow {
+                    name: row.flow,
+                    definition: row.flow_definition,
+                };
+                (RunId::from_uuid(row.id), flow)
+            })
+            .collect())
+    }
+
     async fn run_definition_agents(
         &self,
         id: RunId,

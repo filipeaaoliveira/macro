@@ -471,6 +471,13 @@ pub trait RunRepository: Send + Sync + 'static {
         id: RunId,
     ) -> impl Future<Output = Result<Option<RunFlow>, Self::Err>> + Send;
 
+    /// The Flows the Runs `ids` walk, as each keeps it, by Run; a Run that
+    /// is not there is left out.
+    fn runs_flows(
+        &self,
+        ids: &[RunId],
+    ) -> impl Future<Output = Result<BTreeMap<RunId, RunFlow>, Self::Err>> + Send;
+
     /// The commit the Run last asked a person to merge, if any.
     fn merge_head(
         &self,

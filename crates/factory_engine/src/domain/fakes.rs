@@ -149,6 +149,8 @@ pub(crate) struct FakeRepo {
     pub(crate) control_files: Arc<Mutex<BTreeMap<Uuid, Vec<String>>>>,
     /// The Factory Definition each team names, by its repository's URL.
     pub(crate) team_definitions: Arc<Mutex<BTreeMap<Uuid, String>>>,
+    /// How many times one Run's Flow was read on its own.
+    pub(crate) flow_reads: Arc<Mutex<usize>>,
     /// The Flow each Run kept, and whether it asks, by Run.
     pub(crate) kept_flows: Arc<Mutex<BTreeMap<RunId, (serde_json::Value, bool)>>>,
     /// The Agents of the Definition each Run started under, as kept.
@@ -657,7 +659,24 @@ impl RunRepository for FakeRepo {
         Ok(())
     }
 
+    async fn runs_flows(&self, ids: &[RunId]) -> Result<BTreeMap<RunId, RunFlow>, FakeError> {
+        let names = self.flows.lock().expect("flows").clone();
+        let kept = self.kept_flows.lock().expect("kept flows").clone();
+        Ok(ids
+            .iter()
+            .filter_map(|id| {
+                let name = names.get(id)?.clone();
+                let flow = RunFlow {
+                    name: Some(name),
+                    definition: kept.get(id).map(|(flow, _)| flow.clone()),
+                };
+                Some((*id, flow))
+            })
+            .collect())
+    }
+
     async fn run_flow(&self, id: RunId) -> Result<Option<RunFlow>, FakeError> {
+        *self.flow_reads.lock().expect("flow reads") += 1;
         let Some(name) = self.flows.lock().expect("flows").get(&id).cloned() else {
             return Ok(None);
         };

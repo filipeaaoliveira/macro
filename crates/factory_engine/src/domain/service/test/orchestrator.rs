@@ -626,3 +626,20 @@ async fn an_entry_s_gate_kind_is_read_from_the_run_s_own_flow() {
     );
     assert!(workflows.answers.lock().expect("answers").is_empty());
 }
+
+/// A list of Runs reads the Flows of those that may be at their merge in
+/// one read, not one for each Run.
+#[tokio::test]
+async fn a_list_of_runs_reads_their_flows_at_once() {
+    let repo = FakeRepo::default();
+    let workflows = FakeWorkflows::default();
+    let service = code_service(&repo, &workflows, &FakeGithub::default());
+    for _ in 0..3 {
+        waiting_at(&repo, "merge-gate", "done", &["approve", "revise"]).await;
+    }
+
+    let waiting = service.list_waiting_runs(&julia()).await.expect("waiting");
+
+    assert_eq!(waiting.len(), 3);
+    assert_eq!(*repo.flow_reads.lock().expect("flow reads"), 0);
+}

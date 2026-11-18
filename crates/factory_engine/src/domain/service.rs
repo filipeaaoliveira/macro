@@ -360,26 +360,29 @@ where
         })
     }
 
+    /// Whether `run` may be at its merge, so what it shows of its base
+    /// branch needs its Flow: it works on a repository, goes, and took a
+    /// Step.
+    fn may_be_at_merge(run: &Run, steps: &[Step]) -> bool {
+        run.repository.is_some() && run.end.is_none() && !steps.is_empty()
+    }
+
     /// What the Run shows of the base branch it merges to: nothing unless
-    /// it goes and is at its merge, so only a Run about to merge shows a
-    /// hold. `known` keeps what was read of each base, for a list of Runs.
+    /// it goes and is at its merge in `flow`, its own, so only a Run about
+    /// to merge shows a hold. `known` keeps what was read of each base,
+    /// for a list of Runs.
     async fn base_shown(
         &self,
         run: &Run,
         steps: &[Step],
+        flow: Option<&Flow>,
         known: &mut BTreeMap<(String, String), BaseState>,
     ) -> Result<BaseState, FactoryError> {
         let Some(repository) = run.repository.as_ref() else {
             return Ok(BaseState::default());
         };
-        if run.end.is_some() || steps.is_empty() {
-            return Ok(BaseState::default());
-        }
-        let at_merge = self
-            .run_flow(run.id)
-            .await?
-            .is_some_and(|flow| Self::at_merge(steps, &flow));
-        if !at_merge {
+        let at_merge = flow.is_some_and(|flow| Self::at_merge(steps, flow));
+        if !Self::may_be_at_merge(run, steps) || !at_merge {
             return Ok(BaseState::default());
         }
         let base = (repository.url.clone(), repository.base_branch.clone());
@@ -398,7 +401,14 @@ where
         steps: Vec<Step>,
         review_rounds: Vec<ReviewRound>,
     ) -> Result<RunDetail, FactoryError> {
-        let base = self.base_shown(&run, &steps, &mut BTreeMap::new()).await?;
+        let flow = if Self::may_be_at_merge(&run, &steps) {
+            self.run_flow(run.id).await?
+        } else {
+            None
+        };
+        let base = self
+            .base_shown(&run, &steps, flow.as_ref(), &mut BTreeMap::new())
+            .await?;
         Ok(RunDetail {
             run,
             steps: with_pause_ends(steps),
@@ -414,13 +424,25 @@ where
         let ids: Vec<RunId> = runs.iter().map(|run| run.id).collect();
         let mut steps = self.repo.list_runs_steps(&ids).await.map_err(internal)?;
         let mut rounds = self.repo.runs_review_rounds(&ids).await.map_err(internal)?;
+        // The Flows of the Runs that may be at their merge, in one read.
+        let at_merge_ids: Vec<RunId> = runs
+            .iter()
+            .filter(|run| {
+                let taken = steps.get(&run.id).map_or(&[][..], Vec::as_slice);
+                Self::may_be_at_merge(run, taken)
+            })
+            .map(|run| run.id)
+            .collect();
+        let flows = self.runs_flows(&at_merge_ids).await?;
         // Runs on one base share what was read of it.
         let mut known = BTreeMap::new();
         let mut details = Vec::with_capacity(runs.len());
         for run in runs {
             let steps = with_pause_ends(steps.remove(&run.id).unwrap_or_default());
             let review_rounds = rounds.remove(&run.id).unwrap_or_default();
-            let base = self.base_shown(&run, &steps, &mut known).await?;
+            let base = self
+                .base_shown(&run, &steps, flows.get(&run.id), &mut known)
+                .await?;
             details.push(RunDetail {
                 run,
                 steps,

@@ -6,9 +6,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use super::{insert, julia};
-use crate::domain::models::{
-    KeptFlow, NewRun, NewRunDefinition, RunDefinition, RunId, RunInsert,
-};
+use crate::domain::models::{KeptFlow, NewRun, NewRunDefinition, RunDefinition, RunId, RunInsert};
 use crate::domain::ports::RunRepository;
 use crate::domain::standing_rules::{OrchestratorDefinition, RulesSource, RunRules};
 use crate::outbound::pg_run_repository::PgRunRepository;

@@ -4,7 +4,9 @@
 
 use factory_records::domain::automations::AutomationRepository;
 use factory_records::domain::main_hold::MainHoldRepository;
-use factory_records::domain::models::{NewRunDefinition, RunId, TeamMembership};
+use std::collections::BTreeMap;
+
+use factory_records::domain::models::{NewRunDefinition, RunFlow, RunId, TeamMembership};
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::ReviewRoundRepository;
 use factory_records::domain::standing_rules::StandingRulesRepository;
@@ -197,6 +199,28 @@ where
         let Some(kept) = self.repo.run_flow(run_id).await.map_err(internal)? else {
             return Ok(None);
         };
+        Ok(self.bounded(kept))
+    }
+
+    /// The Flows the Runs `ids` walk, as [`Self::run_flow`] reads each, in
+    /// one read: a Run whose Flow does not read is left out.
+    pub(super) async fn runs_flows(
+        &self,
+        ids: &[RunId],
+    ) -> Result<BTreeMap<RunId, Flow>, FactoryError> {
+        if ids.is_empty() {
+            return Ok(BTreeMap::new());
+        }
+        let kept = self.repo.runs_flows(ids).await.map_err(internal)?;
+        Ok(kept
+            .into_iter()
+            .filter_map(|(id, kept)| Some((id, self.bounded(kept)?)))
+            .collect())
+    }
+
+    /// The Flow `kept` says a Run walks, a built-in one bound as this
+    /// service bounds the Flows it starts.
+    fn bounded(&self, kept: RunFlow) -> Option<Flow> {
         let built_in = kept.definition.is_none();
         let Some(mut flow) = walked_flow(kept) else {
             return Ok(None);
