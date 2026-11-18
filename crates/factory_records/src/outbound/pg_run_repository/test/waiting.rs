@@ -215,7 +215,10 @@ async fn starts_at_the_same_time_are_held_to_the_queue_limit(pool: PgPool) {
             .map(|result| result.expect("insert"))
             .filter_map(|insert| match insert {
                 RunInsert::Inserted(run) => {
-                    assert_eq!(run.standing_rules.map(|rules| rules.definition.queue_limit), Some(None));
+                    assert_eq!(
+                        run.standing_rules.map(|rules| rules.definition.queue_limit),
+                        Some(None)
+                    );
                     Some(run.id)
                 }
                 RunInsert::QueueFull => None,

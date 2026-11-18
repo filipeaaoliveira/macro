@@ -561,9 +561,13 @@ async fn an_orchestrator_answer_is_posted_as_the_orchestrator_s() {
         .await
         .expect("end");
     let key = StepKey { run_id, seq: 1 };
-    repo.open_gate(key, "Approve the plan?", &[outcome("approve"), outcome("revise")])
-        .await
-        .expect("open");
+    repo.open_gate(
+        key,
+        "Approve the plan?",
+        &[outcome("approve"), outcome("revise")],
+    )
+    .await
+    .expect("open");
     steps
         .answer_gate(GateAnswered {
             key,

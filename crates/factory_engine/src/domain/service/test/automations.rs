@@ -245,11 +245,7 @@ async fn a_repository_event_starts_a_run_on_its_repository() {
     let workflows = FakeWorkflows::default();
     let github = FakeGithub::default();
     let triggers = FakeTriggers::default();
-    let automations = automations(
-        &repo,
-        code_service(&repo, &workflows, &github),
-        &triggers,
-    );
+    let automations = automations(&repo, code_service(&repo, &workflows, &github), &triggers);
     let request = AutomationRequest {
         name: "Review new pull requests".to_string(),
         trigger: AutomationTrigger::RepositoryEvent {

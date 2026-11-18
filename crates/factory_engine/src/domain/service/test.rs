@@ -1138,9 +1138,9 @@ async fn a_task_s_list_holds_its_owner_s_fifty_newest_runs() {
         {
             RunInsert::Inserted(run) => started.push(run.id),
             RunInsert::NoSuchTask
-        | RunInsert::TaskBusy
-        | RunInsert::FiringStarted
-        | RunInsert::QueueFull => {
+            | RunInsert::TaskBusy
+            | RunInsert::FiringStarted
+            | RunInsert::QueueFull => {
                 panic!("the task exists")
             }
         }
