@@ -11,10 +11,10 @@
 -- proposes its change in, kept by the Step that last found it. Null until
 -- one is found, and for a Run that works on no code.
 --
--- Adding nullable columns rewrites no rows. The check is added NOT VALID,
--- which scans nothing under the ACCESS EXCLUSIVE lock, and validated after
--- under a lock that lets reads and writes go on. Give up rather than queue
--- behind a long transaction on the table.
+-- Adding nullable columns rewrites no rows; adding the check scans
+-- factory_run under its ACCESS EXCLUSIVE lock, as the migration runs in one
+-- transaction, which this small table holds briefly. Give up rather than
+-- queue behind a long transaction on it.
 SET LOCAL lock_timeout = '5s';
 
 ALTER TABLE factory_run
@@ -22,6 +22,4 @@ ALTER TABLE factory_run
     ADD COLUMN pull_request_url text,
     ADD CONSTRAINT factory_run_pull_request_url CHECK (
         pull_request_url LIKE 'https://%' AND octet_length(pull_request_url) <= 2048
-    ) NOT VALID;
-
-ALTER TABLE factory_run VALIDATE CONSTRAINT factory_run_pull_request_url;
+    );
