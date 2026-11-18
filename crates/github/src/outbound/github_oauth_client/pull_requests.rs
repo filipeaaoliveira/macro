@@ -1,6 +1,6 @@
 //! Calls that take a branch to a merged pull request as the user: what they
 //! may do with a repository, the pull request from a branch, opening one,
-//! and the checks and statuses on its head. Each read is one request for
+//! the checks and statuses on its head, and deleting the branch once merged. Each read is one request for
 //! only what it needs, as they are read again and again while CI runs.
 //!
 //! A refusal GitHub answers is told apart from an outage: 401 is a token
@@ -34,6 +34,9 @@ const PAGE_SIZE: usize = 100;
 /// list GitHub keeps paging is not read for ever.
 const MAX_PAGES: usize = 10;
 
+/// GitHub's message for a branch it does not have, on a ref's deletion.
+const MISSING_REFERENCE: &str = "Reference does not exist";
+
 /// What a refused read is, once throttling is ruled out.
 fn refusal(status: StatusCode) -> Option<GithubError> {
     match status {
@@ -50,6 +53,8 @@ struct RepositoryResponse {
     default_branch: Option<String>,
     #[serde(default)]
     permissions: Option<RepositoryPermissions>,
+    #[serde(default)]
+    delete_branch_on_merge: bool,
 }
 
 #[derive(serde::Deserialize)]
@@ -405,6 +410,7 @@ impl GithubOauthImpl {
                 push: repository
                     .permissions
                     .is_some_and(|permissions| permissions.push),
+                delete_branch_on_merge: repository.delete_branch_on_merge,
             })),
             // GitHub answers a private repository the user cannot see as
             // missing.
@@ -672,5 +678,64 @@ impl GithubOauthImpl {
                 "failed to open pull request",
             )),
         }
+    }
+
+    /// Deletes `branch` as the user: `true` once deleted, `false` when the
+    /// repository has no such branch, as when it was deleted already.
+    /// GitHub refusing it, as for a protected branch, is an error.
+    #[tracing::instrument(skip(self, access_token), err)]
+    pub async fn delete_branch(
+        &self,
+        access_token: &str,
+        owner: &str,
+        repo: &str,
+        branch: &str,
+    ) -> Result<bool, GithubError> {
+        // GitHub names a branch's ref by its path: each part is encoded, its
+        // slashes are not.
+        let path = branch
+            .split('/')
+            .map(|part| urlencoding::encode(part).into_owned())
+            .collect::<Vec<_>>()
+            .join("/");
+        let response = self
+            .client
+            .delete(format!(
+                "{}/repos/{owner}/{repo}/git/refs/heads/{path}",
+                self.api_base_url()
+            ))
+            .header("Authorization", format!("Bearer {access_token}"))
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", USER_AGENT)
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .timeout(REQUEST_TIMEOUT)
+            .send()
+            .await
+            .map_err(transport_error)?;
+
+        let status = response.status();
+        if status.is_success() {
+            return Ok(true);
+        }
+
+        let headers = response.headers().clone();
+        let body = response_text(response).await;
+        if throttling(status, &headers, &body).is_some() {
+            return Err(unexpected(
+                status,
+                &headers,
+                body,
+                "failed to delete a branch",
+            ));
+        }
+        // GitHub answers a branch that is not there with a 422 of its own.
+        let missing = status == StatusCode::UNPROCESSABLE_ENTITY
+            && serde_json::from_str::<GithubErrorBody>(&body)
+                .is_ok_and(|error| error.message == MISSING_REFERENCE);
+        if missing {
+            return Ok(false);
+        }
+        Err(refusal(status)
+            .unwrap_or_else(|| unexpected(status, &headers, body, "failed to delete a branch")))
     }
 }

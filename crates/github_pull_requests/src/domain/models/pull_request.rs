@@ -801,6 +801,8 @@ pub struct GithubRepositoryAccess {
     pub default_branch: Option<String>,
     /// Whether the user may push to it.
     pub push: bool,
+    /// Whether GitHub deletes a pull request's branch once it merges.
+    pub delete_branch_on_merge: bool,
 }
 
 /// A pull request's number, state and head, from GitHub's pull request

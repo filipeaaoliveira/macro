@@ -27,7 +27,7 @@ fn open_request() -> GithubOpenPullRequest {
 async fn repository_access_reads_the_default_branch_and_push_permission() {
     let (server, client) = answering(
         "200 OK",
-        r#"{"default_branch":"trunk","permissions":{"admin":false,"push":true,"pull":true}}"#,
+        r#"{"default_branch":"trunk","permissions":{"admin":false,"push":true,"pull":true},"delete_branch_on_merge":true}"#,
     );
 
     let access = client
@@ -40,6 +40,7 @@ async fn repository_access_reads_the_default_branch_and_push_permission() {
         Some(GithubRepositoryAccess {
             default_branch: Some("trunk".to_string()),
             push: true,
+            delete_branch_on_merge: true,
         })
     );
     assert!(server.finish().starts_with("GET /repos/macro/app HTTP/1.1"));
@@ -56,7 +57,12 @@ async fn repository_access_without_permissions_cannot_push() {
         .await
         .unwrap();
 
-    assert_eq!(access.map(|access| access.push), Some(false));
+    assert_eq!(access.as_ref().map(|access| access.push), Some(false));
+    // A read that does not name the setting reads it as off.
+    assert_eq!(
+        access.map(|access| access.delete_branch_on_merge),
+        Some(false)
+    );
     server.finish();
 }
 
@@ -489,4 +495,68 @@ async fn workflow_runs_are_read_for_the_head_commit() {
             .finish()
             .starts_with("GET /repos/macro/app/actions/runs?head_sha=abc123&per_page=100&page=1 ")
     );
+}
+
+/// A branch is deleted by its ref, its slashes kept as GitHub names it.
+#[tokio::test]
+async fn delete_branch_deletes_the_branch_s_ref() {
+    let (server, client) = answering("204 No Content", "");
+
+    let deleted = client
+        .delete_branch("token", "macro", "app", "factory/run")
+        .await
+        .unwrap();
+
+    assert!(deleted);
+    assert!(
+        server
+            .finish()
+            .starts_with("DELETE /repos/macro/app/git/refs/heads/factory/run HTTP/1.1")
+    );
+}
+
+/// A branch already gone, as one GitHub deleted on merge, is not deleted
+/// again, and is no error.
+#[tokio::test]
+async fn delete_branch_of_a_branch_already_gone_deletes_nothing() {
+    let (server, client) = answering(
+        "422 Unprocessable Entity",
+        r#"{"message":"Reference does not exist","documentation_url":"https://docs.github.com/rest/git/refs#delete-a-reference","status":"422"}"#,
+    );
+
+    let deleted = client
+        .delete_branch("token", "macro", "app", "factory/run")
+        .await
+        .unwrap();
+
+    assert!(!deleted);
+    server.finish();
+}
+
+/// GitHub refusing the deletion, as of a protected branch or by a user who
+/// may not push, is an error, not a branch already gone.
+#[tokio::test]
+async fn delete_branch_refused_is_an_error() {
+    let (protected, client) = answering(
+        "422 Unprocessable Entity",
+        r#"{"message":"Cannot delete this protected branch"}"#,
+    );
+    let refused = client
+        .delete_branch("token", "macro", "app", "factory/run")
+        .await;
+    assert!(
+        matches!(refused, Err(GithubError::Internal(_))),
+        "{refused:?}"
+    );
+    protected.finish();
+
+    let (forbidden, client) = answering("403 Forbidden", r#"{"message":"Forbidden"}"#);
+    let refused = client
+        .delete_branch("token", "macro", "app", "factory/run")
+        .await;
+    assert!(
+        matches!(refused, Err(GithubError::Forbidden)),
+        "{refused:?}"
+    );
+    forbidden.finish();
 }
