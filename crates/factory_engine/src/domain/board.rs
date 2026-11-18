@@ -74,7 +74,7 @@ impl BoardFilter {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct BoardNext {
-    /// When the last Run the page read was created.
+    /// When the last Run the page listed was created.
     pub created_at: DateTime<Utc>,
     /// Its id.
     pub id: RunId,
@@ -86,6 +86,8 @@ pub struct BoardNext {
 pub struct BoardRun {
     /// Where it is.
     pub state: BoardState,
+    /// The name of the task it works on; none without a task.
+    pub task_name: Option<String>,
     /// The Run and its Steps.
     pub detail: RunDetail,
 }
@@ -94,10 +96,10 @@ pub struct BoardRun {
 #[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct BoardPage {
-    /// The Runs, newest first. A page may list fewer than asked while more
-    /// follow: a team member's Run on a task the caller cannot see is left
-    /// out.
+    /// The Runs, newest first: never a team member's Run on a task the
+    /// caller cannot see.
     pub runs: Vec<BoardRun>,
-    /// Where the next page starts; none on the last.
+    /// Where the next page starts, past the last Run listed; none on the
+    /// last.
     pub next: Option<BoardNext>,
 }

@@ -46,12 +46,21 @@ fn hide(repo: &FakeRepo, user_id: &MacroUserIdStr<'static>, task_id: Uuid) {
 }
 
 async fn keep(repo: &FakeRepo, owner: &MacroUserIdStr<'static>, task_id: Option<Uuid>) -> RunId {
+    keep_asking(repo, owner, task_id, "Plan the migration").await
+}
+
+async fn keep_asking(
+    repo: &FakeRepo,
+    owner: &MacroUserIdStr<'static>,
+    task_id: Option<Uuid>,
+    request: &str,
+) -> RunId {
     let id = RunId::generate();
     let inserted = repo
         .insert_run(NewRun {
             id,
             flow: "plan",
-            request: "Plan the migration",
+            request,
             user_id: owner,
             task_id,
             project_id: None,
@@ -125,11 +134,11 @@ async fn the_team_board_lists_teammates_runs_on_tasks_the_person_sees() {
     );
 }
 
-/// A page names where the next one starts while more follow, past the
-/// last Run it read even when that one was left out, so a page of hidden
-/// Runs never repeats.
+/// A page names where the next one starts only while a Run the person sees
+/// follows, past the last Run it lists: a team member's Run they cannot see
+/// never shapes it.
 #[tokio::test]
-async fn a_page_names_where_the_next_starts() {
+async fn a_page_names_where_the_next_starts_past_the_last_run_listed() {
     let repo = FakeRepo::default();
     let service = service(&repo, &FakeWorkflows::default());
     on_team(&repo, &julia());
@@ -137,36 +146,113 @@ async fn a_page_names_where_the_next_starts() {
     let hidden_task = task(&repo);
     hide(&repo, &julia(), hidden_task);
 
+    let _oldest_hidden = keep(&repo, &teo(), Some(hidden_task)).await;
     let oldest = keep(&repo, &julia(), None).await;
     let _hidden = keep(&repo, &teo(), Some(hidden_task)).await;
+    let middle = keep(&repo, &julia(), None).await;
     let newest = keep(&repo, &julia(), None).await;
+    let page = |after| BoardFilter {
+        limit: 2,
+        after,
+        ..filter(BoardScope::Team)
+    };
 
-    let first = service
-        .board(
-            &julia(),
-            BoardFilter {
-                limit: 2,
-                ..filter(BoardScope::Team)
-            },
-        )
-        .await
-        .expect("board");
-    assert_eq!(ids(&first), [newest]);
+    let first = service.board(&julia(), page(None)).await.expect("board");
+    assert_eq!(ids(&first), [newest, middle]);
     let next = first.next.expect("another page");
+    assert_eq!(next.id, middle);
 
     let second = service
-        .board(
-            &julia(),
-            BoardFilter {
-                limit: 2,
-                after: Some(next),
-                ..filter(BoardScope::Team)
-            },
-        )
+        .board(&julia(), page(Some(next)))
         .await
         .expect("board");
     assert_eq!(ids(&second), [oldest]);
+    // Only a hidden Run is older: the page is the last.
     assert!(second.next.is_none());
+}
+
+/// A search that only a team member's hidden Run matches reads exactly as
+/// one nothing matches: no Run, and no next page.
+#[tokio::test]
+async fn a_search_only_hidden_runs_match_reads_as_no_match() {
+    let repo = FakeRepo::default();
+    let service = service(&repo, &FakeWorkflows::default());
+    on_team(&repo, &julia());
+    on_team(&repo, &teo());
+    let hidden_task = task(&repo);
+    hide(&repo, &julia(), hidden_task);
+    let _own = keep(&repo, &julia(), None).await;
+    let _hidden = keep_asking(&repo, &teo(), Some(hidden_task), "Rotate the secret key").await;
+    let search = |words: &str| BoardFilter {
+        limit: 1,
+        search: Some(words.to_string()),
+        ..filter(BoardScope::Team)
+    };
+
+    let hidden_match = service
+        .board(&julia(), search("secret"))
+        .await
+        .expect("board");
+    let no_match = service
+        .board(&julia(), search("nothing like it"))
+        .await
+        .expect("board");
+
+    assert!(hidden_match.runs.is_empty());
+    assert!(hidden_match.next.is_none());
+    assert_eq!(hidden_match, no_match);
+}
+
+/// Past many hidden Runs, the page still lists the Runs the person sees
+/// behind them.
+#[tokio::test]
+async fn a_page_reads_past_hidden_runs() {
+    let repo = FakeRepo::default();
+    let service = service(&repo, &FakeWorkflows::default());
+    on_team(&repo, &julia());
+    on_team(&repo, &teo());
+    let hidden_task = task(&repo);
+    hide(&repo, &julia(), hidden_task);
+    let own = keep(&repo, &julia(), None).await;
+    for _ in 0..60 {
+        keep(&repo, &teo(), Some(hidden_task)).await;
+    }
+
+    let page = service
+        .board(
+            &julia(),
+            BoardFilter {
+                limit: 1,
+                ..filter(BoardScope::Team)
+            },
+        )
+        .await
+        .expect("board");
+
+    assert_eq!(ids(&page), [own]);
+    assert!(page.next.is_none());
+}
+
+/// A team member's read of a Run whose workflow never started changes
+/// nothing; its owner's read ends it.
+#[tokio::test]
+async fn only_the_owner_s_read_ends_a_run_that_never_started() {
+    let repo = FakeRepo::default();
+    let workflows = FakeWorkflows::default();
+    let service = service(&repo, &workflows);
+    on_team(&repo, &julia());
+    on_team(&repo, &teo());
+    let shared_task = task(&repo);
+    let run_id = keep(&repo, &teo(), Some(shared_task)).await;
+    if let Some(run) = repo.runs.lock().expect("runs").get_mut(&run_id) {
+        run.created_at -= chrono::TimeDelta::hours(1);
+    }
+
+    let read = service.get_run(&julia(), run_id).await.expect("read");
+    assert!(read.run.end.is_none());
+
+    let owner_s = service.get_run(&teo(), run_id).await.expect("read");
+    assert!(owner_s.run.end.is_some());
 }
 
 /// The board says where each Run is, and lists those of one state alone.
@@ -249,4 +335,37 @@ async fn a_team_member_reads_a_run_on_a_task_they_see() {
     }
     let cancel = service.cancel_run(&julia(), shared).await;
     assert!(matches!(cancel, Err(FactoryError::NotFound)));
+}
+
+/// A Run keeps the Project its task is in when it starts, which the board
+/// filters by.
+#[tokio::test]
+async fn a_run_keeps_the_project_its_task_is_in() {
+    let repo = FakeRepo::default();
+    let service = service(&repo, &FakeWorkflows::default());
+    let task_id = task(&repo);
+    let project = Uuid::now_v7();
+    repo.task_projects
+        .lock()
+        .expect("task projects")
+        .insert(task_id, project);
+
+    let created = service
+        .create_run(
+            julia(),
+            "reply".to_string(),
+            "Summarise the release notes".to_string(),
+            Some(task_id),
+            None,
+            true,
+        )
+        .await
+        .expect("create");
+
+    let kept = repo
+        .get_run(created.run.id)
+        .await
+        .expect("get")
+        .expect("kept");
+    assert_eq!(kept.project_id, Some(project));
 }

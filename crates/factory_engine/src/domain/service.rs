@@ -851,9 +851,11 @@ where
         // A Run kept when its workflow's start could not be checked, and
         // whose workflow never came, would wait forever: once it is old
         // enough that a started workflow would have taken a Step, and
-        // Temporal says it has no workflow, it ends failed.
+        // Temporal says it has no workflow, its owner's read ends it
+        // failed. A team member's read changes nothing.
         let stale = Utc::now() - run.created_at > UNSTARTED_AFTER;
-        if run.end.is_none()
+        if run.user_id == *actor
+            && run.end.is_none()
             && steps.is_empty()
             && stale
             && let Ok(false) = self.workflows.exists(id).await
@@ -862,7 +864,7 @@ where
                 .end_run(id, RunOutcome::Failed)
                 .await
                 .map_err(internal)?;
-            run = self.readable_run(actor, id).await?;
+            run = self.owned_run(actor, id).await?;
         }
         let review_rounds = self.repo.review_rounds(id).await.map_err(internal)?;
         self.detail(run, steps, review_rounds).await
