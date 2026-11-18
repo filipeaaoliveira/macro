@@ -67,13 +67,23 @@ async fn only_the_owner_in_person_steers_a_step() {
         );
         let internal = router
             .clone()
-            .oneshot(call("POST", &path, Caller::Internal(Some(ALICE)), body.clone()))
+            .oneshot(call(
+                "POST",
+                &path,
+                Caller::Internal(Some(ALICE)),
+                body.clone(),
+            ))
             .await
             .expect("response");
         assert_eq!(internal.status(), StatusCode::FORBIDDEN, "{path}");
         let key = router
             .clone()
-            .oneshot(call("POST", &path, Caller::ApiKey("alice-key"), body.clone()))
+            .oneshot(call(
+                "POST",
+                &path,
+                Caller::ApiKey("alice-key"),
+                body.clone(),
+            ))
             .await
             .expect("response");
         assert_eq!(key.status(), StatusCode::FORBIDDEN, "{path}");

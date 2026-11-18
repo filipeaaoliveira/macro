@@ -283,7 +283,11 @@ async fn a_refused_prompt_is_undelivered_and_no_longer_followed(pool: PgPool) {
     let (first, first_prompt) = note("First");
     repo.steer(key, &first).await.expect("steer").expect("note");
     let (second, second_prompt) = note("Second");
-    let steered = repo.steer(key, &second).await.expect("steer").expect("note");
+    let steered = repo
+        .steer(key, &second)
+        .await
+        .expect("steer")
+        .expect("note");
 
     repo.unsteer(key, second_prompt, steered.previous_prompt)
         .await

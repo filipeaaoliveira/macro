@@ -8,8 +8,8 @@ use uuid::Uuid;
 use crate::domain::models::{
     CheckResult, CheckRound, CheckRoundOutcome, CheckRoundStart, ClaimedSession,
     ControlFileChanges, EntryId, GateAnswer, HandBack, HandedBack, NewRun, NewSteer, Outcome,
-    PassedOver, QueueHold, Role, Run, RunId, RunInsert, RunOutcome, SessionStep, Step, StepKey,
-    StepSession, StepSteering, SteerRefusal, Steered, StoppingSession, TaskLink, TeamMembership,
+    PassedOver, QueueHold, Role, Run, RunId, RunInsert, RunOutcome, SessionStep, SteerRefusal,
+    Steered, Step, StepKey, StepSession, StepSteering, StoppingSession, TaskLink, TeamMembership,
 };
 use crate::domain::standing_rules::StandingRule;
 
@@ -284,7 +284,10 @@ pub trait RunRepository: Send + Sync + 'static {
 
     /// The owner's steering of the Step `key`, as its work reads it while
     /// it waits on its agent.
-    fn steering(&self, key: StepKey) -> impl Future<Output = Result<StepSteering, Self::Err>> + Send;
+    fn steering(
+        &self,
+        key: StepKey,
+    ) -> impl Future<Output = Result<StepSteering, Self::Err>> + Send;
 
     /// Stop the Step `key` taking its owner's steering, once its agent's
     /// turn ended and its work follows `followed`, the prompt of the

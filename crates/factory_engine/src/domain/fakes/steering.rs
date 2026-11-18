@@ -67,7 +67,8 @@ impl FakeRepo {
             .expect("runs")
             .get(&key.run_id)
             .is_none_or(|run| run.end.is_some());
-        let Some((ended, role)) = self.with_step(key, |step| (step.end.is_some(), step.role.clone()))
+        let Some((ended, role)) =
+            self.with_step(key, |step| (step.end.is_some(), step.role.clone()))
         else {
             return Ok(Err(SteerRefusal::Ended));
         };
@@ -90,9 +91,7 @@ impl FakeRepo {
                 Some(SteerRefusal::Stopping)
             } else {
                 match steer {
-                    NewSteer::Note { .. } | NewSteer::Pause if paused => {
-                        Some(SteerRefusal::Paused)
-                    }
+                    NewSteer::Note { .. } | NewSteer::Pause if paused => Some(SteerRefusal::Paused),
                     NewSteer::Resume { .. } if !paused => Some(SteerRefusal::NotPaused),
                     _ if steering.closed => Some(SteerRefusal::NotWorking),
                     _ => None,

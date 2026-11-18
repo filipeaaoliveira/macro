@@ -20,10 +20,10 @@ use chrono::Utc;
 use factory_records::domain::automations::{Automation, FiringEnd};
 use factory_records::domain::models::{
     CheckResult, CheckRound, CheckRoundEnd, CheckRoundOutcome, CheckRoundStart, ClaimedSession,
-    ControlFileChanges, EntryId, Gate, GateAnswer, GateKind, HandBack, HandedBack, NewRun, NewSteer,
-    Outcome, PassedOver, QueueHold, QueuePlaces, Role, Run, RunEnd, RunId, RunInsert, RunOutcome,
-    SessionStep, Step, StepEnd, StepKey, StepSession, StepSteering, SteerRefusal, Steered,
-    StoppingSession, TaskLink, TeamMembership,
+    ControlFileChanges, EntryId, Gate, GateAnswer, GateKind, HandBack, HandedBack, NewRun,
+    NewSteer, Outcome, PassedOver, QueueHold, QueuePlaces, Role, Run, RunEnd, RunId, RunInsert,
+    RunOutcome, SessionStep, SteerRefusal, Steered, Step, StepEnd, StepKey, StepSession,
+    StepSteering, StoppingSession, TaskLink, TeamMembership,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::standing_rules::{
@@ -1152,7 +1152,11 @@ impl RunRepository for FakeRepo {
         Ok(self.read_steering(key))
     }
 
-    async fn close_steering(&self, key: StepKey, followed: Option<Uuid>) -> Result<bool, FakeError> {
+    async fn close_steering(
+        &self,
+        key: StepKey,
+        followed: Option<Uuid>,
+    ) -> Result<bool, FakeError> {
         Ok(self.stop_steering(key, followed))
     }
 

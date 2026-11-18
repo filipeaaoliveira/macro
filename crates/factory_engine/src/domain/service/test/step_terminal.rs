@@ -62,7 +62,11 @@ async fn the_owner_steers_a_running_step_through_its_session() {
 
     let steered = executor.steered.lock().expect("steered").clone();
     assert_eq!(steered.len(), 4);
-    assert!(steered.iter().all(|(at, session, _)| *at == key && *session == session_id));
+    assert!(
+        steered
+            .iter()
+            .all(|(at, session, _)| *at == key && *session == session_id)
+    );
     let SessionSteer::Prompt { prompt_id, prompt } = &steered[0].2 else {
         panic!("a note is a prompt");
     };
@@ -77,7 +81,10 @@ async fn the_owner_steers_a_running_step_through_its_session() {
         panic!("a resume is a prompt");
     };
     assert!(prompt.contains("resumes it: go on with the step where you left off"));
-    assert!(!prompt.contains("<owner-notes>"), "a resume without a note has none");
+    assert!(
+        !prompt.contains("<owner-notes>"),
+        "a resume without a note has none"
+    );
     assert_ne!(prompt_id, resumed);
     assert_eq!(steered[3].2, SessionSteer::Interrupt);
 
@@ -116,7 +123,10 @@ async fn only_the_run_s_owner_steers_it() {
     let stranger = service
         .steer_step(teo(), key.run_id, key.seq, TerminalRequest::Stop)
         .await;
-    assert!(matches!(stranger, Err(FactoryError::NotFound)), "{stranger:?}");
+    assert!(
+        matches!(stranger, Err(FactoryError::NotFound)),
+        "{stranger:?}"
+    );
 
     repo.agent_accounts
         .lock()
@@ -174,7 +184,10 @@ async fn steering_the_step_cannot_take_is_refused() {
         )
         .await;
     assert!(
-        matches!(paused, Err(FactoryError::NotSteerable(SteerRefusal::Paused))),
+        matches!(
+            paused,
+            Err(FactoryError::NotSteerable(SteerRefusal::Paused))
+        ),
         "{paused:?}"
     );
 
@@ -231,7 +244,10 @@ async fn a_prompt_the_session_refuses_is_not_followed() {
         "{resume:?}"
     );
     let steering = repo.steering(key).await.expect("read");
-    assert!(steering.paused, "a resume the agent never read leaves it paused");
+    assert!(
+        steering.paused,
+        "a resume the agent never read leaves it paused"
+    );
     assert_eq!(steering.prompt, None);
 
     let read = service.get_run(&julia(), key.run_id).await.expect("get");

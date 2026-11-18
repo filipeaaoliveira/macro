@@ -9,7 +9,8 @@ use crate::domain::models::FactoryError;
 /// prompt of their own.
 #[test]
 fn a_request_keeps_the_owner_s_words_within_a_note_s_size() {
-    let Ok(NewSteer::Note { note, .. }) = TerminalRequest::Note("  Use tokens \n".to_string()).steer()
+    let Ok(NewSteer::Note { note, .. }) =
+        TerminalRequest::Note("  Use tokens \n".to_string()).steer()
     else {
         panic!("a note");
     };
@@ -51,6 +52,9 @@ fn a_note_is_fenced_as_the_owner_s_notes() {
 
     let resumed = resume_prompt(Some("Skip the docs"), at);
     assert!(resumed.contains("where you left off"));
-    assert!(resumed.ends_with("<owner-notes>\n- On 2026-11-18 09:30 UTC: Skip the docs\n</owner-notes>\n"));
+    assert!(
+        resumed
+            .ends_with("<owner-notes>\n- On 2026-11-18 09:30 UTC: Skip the docs\n</owner-notes>\n")
+    );
     assert!(!resume_prompt(None, at).contains("<owner-notes>"));
 }

@@ -243,7 +243,8 @@ impl PgRunRepository {
         .await?;
         let mut steers: BTreeMap<(RunId, u16), Vec<Steer>> = BTreeMap::new();
         for row in rows {
-            let seq = u16::try_from(row.seq).map_err(|_| PgRunRepositoryErr::OutOfRange(row.seq))?;
+            let seq =
+                u16::try_from(row.seq).map_err(|_| PgRunRepositoryErr::OutOfRange(row.seq))?;
             let at: DateTime<Utc> = row.at;
             steers
                 .entry((RunId::from_uuid(row.run_id), seq))

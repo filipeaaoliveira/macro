@@ -39,7 +39,10 @@ struct ScriptedSessions {
 
 impl ScriptedSessions {
     fn set(&self, action: Uuid, status: RoutineActionStatus) {
-        self.statuses.lock().expect("statuses").insert(action, status);
+        self.statuses
+            .lock()
+            .expect("statuses")
+            .insert(action, status);
     }
 
     fn cancels(&self) -> usize {
@@ -214,7 +217,10 @@ async fn the_step_waits_for_the_agent_to_answer_a_note() {
     let sent = sessions.follow_ups.lock().expect("follow-ups").clone();
     assert_eq!(sent.len(), 1);
     assert_eq!(sent[0].action.action_id.as_uuid(), note);
-    assert_eq!(sent[0].action.session_id.as_uuid(), working.session.session_id);
+    assert_eq!(
+        sent[0].action.session_id.as_uuid(),
+        working.session.session_id
+    );
     assert_eq!(sent[0].prompt, "Use the theme tokens");
 
     working.hand_back(&repo, &the_plan()).await;
@@ -225,7 +231,10 @@ async fn the_step_waits_for_the_agent_to_answer_a_note() {
         "the turn before the note is not the step's end"
     );
 
-    sessions.set(note, RoutineActionStatus::Pending(RoutinePendingReason::Running));
+    sessions.set(
+        note,
+        RoutineActionStatus::Pending(RoutinePendingReason::Running),
+    );
     tokio::time::sleep(Duration::from_secs(60)).await;
     working.hand_back(&repo, &revised()).await;
     sessions.set(note, RoutineActionStatus::Succeeded);
@@ -289,7 +298,10 @@ async fn a_paused_step_holds_until_it_is_resumed() {
             },
         )
         .await;
-    sessions.set(resume, RoutineActionStatus::Pending(RoutinePendingReason::Running));
+    sessions.set(
+        resume,
+        RoutineActionStatus::Pending(RoutinePendingReason::Running),
+    );
     tokio::time::sleep(Duration::from_secs(60)).await;
     assert!(!working.work.is_finished());
     working.hand_back(&repo, &the_plan()).await;
@@ -314,9 +326,15 @@ async fn a_stop_ends_the_step_at_once() {
     let Err(error) = stopped else {
         panic!("a stopped step fails");
     };
-    assert!(matches!(error, SessionAgentError::StoppedByOwner), "{error:?}");
+    assert!(
+        matches!(error, SessionAgentError::StoppedByOwner),
+        "{error:?}"
+    );
     assert!(!error.retryable());
-    assert!(sessions.cancels() >= 2, "the terminal's stop and the work's");
+    assert!(
+        sessions.cancels() >= 2,
+        "the terminal's stop and the work's"
+    );
 }
 
 /// The Terminal's prompt goes to the Step's session as a later prompt, run

@@ -22,10 +22,10 @@ use crate::domain::automations::{RunAutomation, TriggerKind};
 use crate::domain::models::{
     AgentName, AskedBack, CheckResult, CheckRound, CheckRoundOutcome, CheckRoundStart,
     ClaimedSession, ControlFileChanges, EntryId, Gate, GateAnswer, GateKind, HandBack, HandedBack,
-    InvalidName, NewRun, Outcome, PassedOver, QueueHold, QueuePlaces, Repository, Role, Run,
-    NewSteer, RunEnd, RunId, RunInsert, RunOutcome, SessionStep, StandInAnswer, Step, StepEnd,
-    StepKey, StepSession, StepSteering, StepTerminal, SteerRefusal, Steered, StoppingSession,
-    TaskLink, TeamMembership,
+    InvalidName, NewRun, NewSteer, Outcome, PassedOver, QueueHold, QueuePlaces, Repository, Role,
+    Run, RunEnd, RunId, RunInsert, RunOutcome, SessionStep, StandInAnswer, SteerRefusal, Steered,
+    Step, StepEnd, StepKey, StepSession, StepSteering, StepTerminal, StoppingSession, TaskLink,
+    TeamMembership,
 };
 use crate::domain::ports::RunRepository;
 use crate::domain::standing_rules::{OrchestratorDefinition, RulesSource, RunRules, StandingRule};
@@ -1648,7 +1648,11 @@ impl RunRepository for PgRunRepository {
     }
 
     #[tracing::instrument(err, skip(self))]
-    async fn close_steering(&self, key: StepKey, followed: Option<Uuid>) -> Result<bool, Self::Err> {
+    async fn close_steering(
+        &self,
+        key: StepKey,
+        followed: Option<Uuid>,
+    ) -> Result<bool, Self::Err> {
         self.stop_steering(key, followed).await
     }
 
