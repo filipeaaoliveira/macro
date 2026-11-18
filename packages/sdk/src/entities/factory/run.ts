@@ -3,7 +3,7 @@ import type {
   RunDetail,
   Step,
 } from '../../../generated/factory/types.gen';
-import { MacroError, unwrap } from '../../utils';
+import { unwrap } from '../../utils';
 import type { MacroClient } from '../../utils/client';
 import { Task } from '../tasks/task';
 
@@ -63,20 +63,27 @@ export class FactoryRun {
   }
 
   /**
-   * Answer the Gate the Run waits on, as its owner would, with one of the
-   * answers it offers and an optional note for its later Steps. From an
-   * agent session the factory takes only what a Standing Rule could
-   * answer: an agent's question, a Tampered Run's approval and a merge
-   * while the base branch has a Main Hold stay the owner's, and are
-   * refused with code `reservedForAPerson`.
+   * Answer the Gate you read with {@link waitingGate} and decided on, as
+   * the Run's owner told you, with one of the answers it offers and an
+   * optional note for its later Steps. If the Run no longer waits on that
+   * Gate (someone answered it, or the Run moved on), the factory refuses
+   * the answer (409): read the Run again and ask the person. From an agent
+   * session the factory takes sending work back (`revise`, `stop`), and
+   * the approving answer (`approve`, `fix`) only where the Run's Standing
+   * Rules let the Orchestrator give it; it never takes an agent's
+   * question, a merge's approval or a Tampered Run's, which it refuses
+   * with code `reservedForAPerson`.
+   *
+   * @example
+   * const waiting = await run.waitingGate();
+   * if (waiting) await run.answer(waiting, { answer: 'revise', note: 'Add tests first.' });
    *
    * @write
    */
-  async answer(opts: { answer: string; note?: string }): Promise<void> {
-    const waiting = await this.waitingGate();
-    if (!waiting) {
-      throw new MacroError(`Run ${this.id} waits on no gate`);
-    }
+  async answer(
+    waiting: WaitingGate,
+    opts: { answer: string; note?: string },
+  ): Promise<void> {
     unwrap(
       await this.client.factory.answerFactoryGate({
         path: { id: this.id, seq: waiting.step.seq },

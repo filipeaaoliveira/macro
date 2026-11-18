@@ -72,30 +72,46 @@ const macro = () =>
     hosts: { factory: 'https://factory.test' },
   });
 
-test('a run answers the gate it waits on, by its step', async () => {
+test('a run answers the gate the agent decided on, by its step', async () => {
   const requests = serve(run([step(2, answered), step(4, open)]));
+  const factoryRun = macro().factory.byId(RUN);
 
-  await macro().factory.byId(RUN).answer({ answer: 'approve', note: 'Go' });
+  const waiting = await factoryRun.waitingGate();
+  if (!waiting) throw new Error('the run waits on a gate');
+  await factoryRun.answer(waiting, { answer: 'revise', note: 'Go' });
 
   const answer = requests.at(-1);
   expect(answer?.method).toBe('POST');
   expect(answer?.url).toBe(`https://factory.test/runs/${RUN}/steps/4/answer`);
-  expect(await answer?.json()).toEqual({ answer: 'approve', note: 'Go' });
+  expect(await answer?.json()).toEqual({ answer: 'revise', note: 'Go' });
 });
 
-test('a run that waits on no gate answers nothing', async () => {
-  const requests = serve(run([step(2, answered)]));
+test('a run that waits on no gate has none to answer', async () => {
+  serve(run([step(2, answered)]));
 
+  expect(await macro().factory.byId(RUN).waitingGate()).toBeUndefined();
+});
+
+test('a gate answered since the agent read it is refused', async () => {
+  const detail = run([step(4, open)]);
+  serve(detail, 409);
+  const factoryRun = macro().factory.byId(RUN);
+  const waiting = await factoryRun.waitingGate();
+  if (!waiting) throw new Error('the run waits on a gate');
+
+  // The person answered meanwhile: the factory refuses the stale answer.
   await expect(
-    macro().factory.byId(RUN).answer({ answer: 'approve' }),
-  ).rejects.toThrow('waits on no gate');
-  expect(requests.every((request) => request.method === 'GET')).toBe(true);
+    factoryRun.answer(waiting, { answer: 'approve' }),
+  ).rejects.toThrow();
 });
 
 test('an answer the factory keeps for the person is refused', async () => {
   serve(run([step(4, open)]), 403);
+  const factoryRun = macro().factory.byId(RUN);
+  const waiting = await factoryRun.waitingGate();
+  if (!waiting) throw new Error('the run waits on a gate');
 
   await expect(
-    macro().factory.byId(RUN).answer({ answer: 'approve' }),
+    factoryRun.answer(waiting, { answer: 'approve' }),
   ).rejects.toThrow();
 });

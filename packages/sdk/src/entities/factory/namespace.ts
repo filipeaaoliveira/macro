@@ -16,11 +16,13 @@ import { FactoryRun } from './run';
  *
  * @agent
  * Follow the Orchestrate Factory Runs skill. Start a Run only when the person
- * asks for the work; answer a Gate only with an answer the person gave or a
- * Standing Rule would give, and say which. Never answer an agent's question,
- * approve a Tampered Run or merge through a Main Hold: the factory refuses
- * them (`reservedForAPerson`), and they are the person's. A start refused
- * with `queueFull` waits until the person answers their Queue.
+ * asks for the work. Answer a Gate only with the answer the person gave in
+ * chat, passing the Gate you showed them (`run.answer(waiting, ...)`); a
+ * 409 means it was answered or the Run moved on. Sending work back is
+ * always yours to do; approving is only where their Orchestrator Definition
+ * allows, and never a merge, an agent's question or a Tampered Run: the
+ * factory refuses those (`reservedForAPerson`). A start refused with
+ * `queueFull` waits until the person answers their Queue.
  *
  * @mcp-exclude the factory service runs only where code mode is handed its host
  */

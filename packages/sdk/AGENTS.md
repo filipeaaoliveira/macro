@@ -44,7 +44,8 @@ enforced by the ordinary backend APIs.
 - `src/entities/factory/`: `macro.factory`, the Run API as the Orchestrator
   (a person's agent in Macro chat) uses it: `flows`, `start`, `queue` (the
   Runs waiting on the person), `runsOf(task)` and `FactoryRun` (`read`,
-  `waitingGate`, `answer`, `cancel`, `linkTask`), and `handBack`, how the
+  `waitingGate`, `answer(waiting, ...)` on the Gate the agent read,
+  `cancel`, `linkTask`), and `handBack`, how the
   agent session doing a Step hands back its result. The factory's settings,
   a reply in words and insights are the person's (`coverage/skipped.ts`);
   the service refuses an agent session what it keeps for the person in
