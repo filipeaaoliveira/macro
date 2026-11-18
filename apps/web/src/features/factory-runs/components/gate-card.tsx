@@ -305,7 +305,8 @@ function ModelReadingLine(props: { reading: GateModelReading }) {
  * What the factory did with the Gate so far, while it waits: the stand-in's
  * answer for the owner, which they may override until its window ends; or
  * why the stand-in left the Gate to them, and words it couldn't read as an
- * answer, each with how the Gate model read them.
+ * answer (which end the stand-in's window), each with how the Gate model
+ * read them.
  */
 export function GateStatus(props: {
   gate: Pick<Gate, 'askedBack' | 'standIn' | 'standInDeclined'>;
@@ -324,8 +325,12 @@ export function GateStatus(props: {
         role="status"
         class="flex flex-col gap-1 px-3 py-2.5 text-sm leading-5 [overflow-wrap:anywhere]"
       >
+        {/*
+          Words the factory asked back on in the stand-in's window ended it:
+          the Gate waits for the owner, so the window is no longer shown.
+        */}
         <Show
-          when={props.gate.standIn}
+          when={props.gate.askedBack ? undefined : props.gate.standIn}
           fallback={
             <>
               <Show when={props.gate.standInDeclined}>

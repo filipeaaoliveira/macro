@@ -551,6 +551,46 @@ describe('RunView', () => {
     expect(await screen.findByText('It didn’t answer.')).toBeTruthy();
   });
 
+  it('shows words asked back on in the stand-in’s window, not the window', async () => {
+    const { setRun } = mount({});
+    const [first] = waitingRun.steps;
+    if (!first?.gate) throw new Error('No first Gate');
+    setRun({
+      ...waitingRun,
+      steps: [
+        {
+          ...first,
+          gate: {
+            ...first.gate,
+            standIn: {
+              answer: 'approve',
+              reason: 'You approved every plan like this one.',
+              confidence: 93,
+              until: '2026-11-16T09:11:00Z',
+            },
+            askedBack: {
+              reply: 'Hmm',
+              at: '2026-11-16T09:05:00Z',
+              reading: {
+                pick: 'revise',
+                confidence: 70,
+                reason: 'The reply doubts the plan.',
+              },
+            },
+          },
+        },
+      ],
+    });
+    expect(
+      await screen.findByText(
+        'It leaned to Revise (70% sure). The reply doubts the plan.'
+      )
+    ).toBeTruthy();
+    expect(
+      screen.queryByText('The stand-in answered Approve for you (93% sure)')
+    ).toBeNull();
+  });
+
   it('says when the stand-in answered, and when an answer was read from a reply', async () => {
     const { setRun } = mount({});
     const [first] = waitingRun.steps;
