@@ -19,16 +19,13 @@ use super::{
 use crate::domain::gate::{GateOpening, GateTelling};
 use crate::domain::models::{StepEnding, StepReport, StepRequest, StepStart};
 use crate::domain::review_rounds::{ReviewRoundClosing, ReviewRoundOpening};
-use crate::inbound::temporal::activities::{
-    AGENT_OVERDUE_FAILURE, FactoryActivities, INFRASTRUCTURE_FAILURE,
-};
+use crate::inbound::temporal::activities::{FactoryActivities, INFRASTRUCTURE_FAILURE};
 
 /// Why a Step's work failed for good, as the workflow reads it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum WorkFailure {
-    /// For a machine, quota or network reason: its attempts ran out of
-    /// time, as work does that keeps failing in ways a retry may get past,
-    /// or its agents' quota ran out.
+    /// For a machine, quota or network reason: its agents' quota ran out,
+    /// or its attempts ran out of time as their worker was lost.
     Infrastructure,
     /// For the work itself, as an agent that ended the Step with an
     /// outcome it does not offer.
@@ -37,27 +34,30 @@ pub(super) enum WorkFailure {
 
 /// Why the activity of a Step's work failed for good, read from its
 /// failure, which the workflow's history keeps, so a replay reads it the
-/// same way. Only what is surely the factory's counts as infrastructure:
-/// attempts that ran out of time, unless the last of them failed as the
-/// agent was still at work, and agents out of quota. Anything else is the
-/// work's.
+/// same way. Only what is surely the factory's counts as infrastructure;
+/// when unsure, the failure is the work's. Infrastructure's are: agents out
+/// of quota (`FactoryInfrastructure`), and a timeout whose last attempt
+/// failed so too, timed out itself (its worker was lost) or left no
+/// failure. Attempts whose time ran out after a failure Temporal retried
+/// come back as that last failure, not as a timeout: one of no known kind,
+/// as an agent still at work (`FactoryAgentOverdue`) or a round of checks
+/// that could not go on, is the work's. This decides whether the
+/// workflow asks for the `factory-infrastructure-outcome` marker, so
+/// changing it changes how recorded histories replay.
 pub(super) fn work_failure(error: &ActivityExecutionError) -> WorkFailure {
+    let infrastructure = |failure: &IncomingError| match failure {
+        IncomingError::Application(failure) => failure.type_name() == Some(INFRASTRUCTURE_FAILURE),
+        _ => false,
+    };
     if let Some(timeout) = error.as_timeout() {
         return match timeout.cause() {
-            Some(IncomingError::Application(last))
-                if last.type_name() == Some(AGENT_OVERDUE_FAILURE) =>
-            {
-                WorkFailure::Work
-            }
-            _ => WorkFailure::Infrastructure,
+            None | Some(IncomingError::Timeout(_)) => WorkFailure::Infrastructure,
+            Some(last) if infrastructure(last) => WorkFailure::Infrastructure,
+            Some(_) => WorkFailure::Work,
         };
     }
     match error.cause() {
-        Some(IncomingError::Application(failure))
-            if failure.type_name() == Some(INFRASTRUCTURE_FAILURE) =>
-        {
-            WorkFailure::Infrastructure
-        }
+        Some(cause) if infrastructure(cause) => WorkFailure::Infrastructure,
         _ => WorkFailure::Work,
     }
 }
