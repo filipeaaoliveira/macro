@@ -326,7 +326,9 @@ behind the `factory-infrastructure-outcome` marker
 (`workflow/run_end.rs`); a Run that walks on past it and fails later ends
 as that later failure does, and so does one whose entry it went back to
 had run out of visits and ends `failed` (`on_exhausted`): the loop did not
-converge, which is the work's. A review round
+converge, which is the work's. So does a `failed` routed past an entry its
+`when` skips to a `failed` end: only a `failed` that ends the Run itself
+counts. A review round
 counts only when every reviewer that failed did so for infrastructure and
 none ended without a review (`pass` or `changes`). An answer to its Gate
 routes as any answer. A Flow may not end a Run
@@ -1417,7 +1419,11 @@ every Run in flight replays as before.
   from any other failed turn, and a round of checks that ends red because
   the fixer's quota ran out (`Red::QuotaRanOut`) is the Step's outcome, not
   a failure of its work: both still end the Run `failed` when the Flow
-  routes them there. A network or GitHub outage surfaces as a retried
+  routes them there. An edge the other way: when an earlier attempt's
+  worker went quiet and a later, slow attempt is still running as the
+  Step's time (`STEP_TOTAL`) runs out, the timeout may carry the earlier
+  heartbeat timeout as its cause, and the Run can read as infrastructure.
+  A network or GitHub outage surfaces as a retried
   internal error (`StepError::Internal`), whose last failure reads as the
   work's once the Step's time runs out.
 - Removing the `factory-notify-only-gates` patch breaks the replay of Runs
