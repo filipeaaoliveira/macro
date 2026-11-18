@@ -80,7 +80,7 @@ function mount(options: {
     }),
     waitingRuns: () => ({
       state: () => 'ready',
-      data: () => [waitingRun],
+      data: () => ({ waiting: [waitingRun], starting: [] }),
       retry: vi.fn(),
     }),
     run: () => ({

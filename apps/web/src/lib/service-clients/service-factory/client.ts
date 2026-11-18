@@ -115,12 +115,16 @@ export const factoryClient = {
     ).then((result) => result.map((data) => data.runs));
   },
 
-  /** The caller's Runs that wait on them at a Gate, newest first. */
+  /**
+   * The caller's Runs that hold a place in their Queue, newest first: those
+   * waiting on them at a Gate (`runs`), and those yet to reach their first
+   * (`starting`).
+   */
   listWaitingRuns(signal?: AbortSignal) {
     return fetchWithToken<WaitingRunsResponse>(
       `${host()}${getListFactoryWaitingRunsUrl()}`,
       { method: 'GET', signal }
-    ).then((result) => result.map((data) => data.runs));
+    );
   },
 
   getRun(runId: string, signal?: AbortSignal) {

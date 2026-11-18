@@ -31,6 +31,16 @@ export type StartRunFailure =
   | 'noPushAccess'
   | 'queueFull';
 
+/**
+ * The person's Runs that hold a place in their Queue, newest first: those
+ * waiting on them at a Gate, and those of a Flow with a Gate that have not
+ * reached one yet.
+ */
+export type RunsQueue = {
+  waiting: Run[];
+  starting: Run[];
+};
+
 export type StartRunResult =
   | { ok: true; value: Run }
   | { ok: false; reason: StartRunFailure };
@@ -65,8 +75,8 @@ export type RunsContext = {
   taskRuns: (taskId: Accessor<string>) => RunsSource<Run[]>;
   /** One Run; kept current until it ends. */
   run: (runId: Accessor<string>) => RunsSource<Run>;
-  /** The person's Runs that wait on them at a Gate, newest first. */
-  waitingRuns: () => RunsSource<Run[]>;
+  /** The person's Runs that hold a place in their Queue. */
+  waitingRuns: () => RunsSource<RunsQueue>;
   flows: () => RunsSource<Flow[]>;
   /**
    * The URLs of the GitHub repositories the person can start a Run on, read

@@ -45,6 +45,7 @@ export default {
   startFailed: 'Couldn’t start the run. Please try again.',
   queueFull:
     'Your queue is full: as many of your runs wait on you, or have yet to ask you anything, as this project’s queue limit allows. Answer some in Waiting on you, or cancel one listed there that you no longer need, then start the run.',
+  openWaitingOnYou: 'Open Waiting on you',
   // A Run.
   runDetails: 'Run details',
   closeRun: 'Close run',
@@ -181,7 +182,11 @@ export default {
   },
   // The person's Runs that wait on them, on the insights page.
   waitingOnYou: 'Waiting on you',
-  waitingOnYouHint: 'Runs stopped at a gate only you can answer.',
+  waitingOnYouHint:
+    'Runs stopped at a gate only you can answer, and runs yet to ask you anything. Each holds a place in your queue.',
+  holdingAPlace: 'Yet to ask you anything',
+  holdingAPlaceHint:
+    'Each holds the place it will ask for. Cancel one you no longer need to free its place.',
   standingRulesOwnerGates: 'Send undecided gates to the run’s owner',
   standingRulesOwnerGatesHint:
     'Notify the run’s owner when a gate waits on them, ask them instead of fixing again when a fix leaves the blockers unchanged, and give the next step their comments on the task.',

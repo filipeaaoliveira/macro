@@ -83,6 +83,7 @@ function mount(
     flowsState?: Accessor<'pending' | 'error' | 'ready'>;
     flowsRetry?: () => void;
     repositories?: Accessor<string[]>;
+    onOpenInsights?: () => void;
   } = {}
 ) {
   const [list, setList] = createSignal(runs);
@@ -95,7 +96,7 @@ function mount(
     }),
     waitingRuns: () => ({
       state: () => 'ready',
-      data: () => [],
+      data: () => ({ waiting: [], starting: [] }),
       retry: vi.fn(),
     }),
     run: (runId: Accessor<string>) => {
@@ -153,7 +154,11 @@ function mount(
   };
   render(() => (
     <RunsProvider value={context}>
-      <TaskRunsSection taskId="task-1" order={36} />
+      <TaskRunsSection
+        taskId="task-1"
+        order={36}
+        onOpenInsights={options.onOpenInsights}
+      />
     </RunsProvider>
   ));
   return { context, openedRuns };
@@ -370,6 +375,56 @@ describe('TaskRunsSection', () => {
       (screen.getByLabelText('Request') as HTMLTextAreaElement).value
     ).toBe('Add a due date column');
     expect(openedRuns).toEqual([]);
+  });
+
+  it('sends a start refused for a full queue to Waiting on you', async () => {
+    const onOpenInsights = vi.fn();
+    mount([running], {
+      startRun: vi.fn(async () => ({
+        ok: false as const,
+        reason: 'queueFull' as const,
+      })),
+      onOpenInsights,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'New run' }));
+    fireEvent.input(await screen.findByLabelText('Request'), {
+      target: { value: 'Add a due date column' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Start run' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'Your queue is full'
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Open Waiting on you' })
+    );
+
+    expect(onOpenInsights).toHaveBeenCalledOnce();
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Start run' })).toBeNull()
+    );
+  });
+
+  it('offers no way to Waiting on you for another refusal', async () => {
+    mount([running], {
+      startRun: vi.fn(async () => ({
+        ok: false as const,
+        reason: 'failed' as const,
+      })),
+      onOpenInsights: vi.fn(),
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'New run' }));
+    fireEvent.input(await screen.findByLabelText('Request'), {
+      target: { value: 'Add a due date column' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Start run' }));
+
+    expect(await screen.findByRole('alert')).toBeTruthy();
+    expect(
+      screen.queryByRole('button', { name: 'Open Waiting on you' })
+    ).toBeNull();
   });
 
   it('moves row times on after every Run has ended', () => {

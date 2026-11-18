@@ -41,6 +41,11 @@ export function StartRunDialog(props: {
   onRetryRepositories: () => void;
   /** Where to send someone who reaches no repository yet. */
   onConnectGitHub?: () => void;
+  /**
+   * Opens Waiting on you, which lists the Runs holding the person's places,
+   * for a start refused because their Queue is full.
+   */
+  onOpenQueue?: () => void;
   onOpenChange: (open: boolean) => void;
   /** Resolves `started` once the Run started, else why it didn't. */
   onStart: (choice: StartRunChoice) => Promise<'started' | StartRunFailure>;
@@ -194,9 +199,23 @@ export function StartRunDialog(props: {
             </Show>
             <Show when={failure()}>
               {(reason) => (
-                <p role="alert" class="text-sm text-failure">
-                  {failureMessage(reason())}
-                </p>
+                <div class="flex flex-col items-start gap-2">
+                  <p role="alert" class="text-sm text-failure">
+                    {failureMessage(reason())}
+                  </p>
+                  <Show when={reason() === 'queueFull' && props.onOpenQueue}>
+                    {(openQueue) => (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="xs"
+                        onClick={() => openQueue()()}
+                      >
+                        {t('factoryRuns.openWaitingOnYou')}
+                      </Button>
+                    )}
+                  </Show>
+                </div>
               )}
             </Show>
           </ActionDialogShell.Body>

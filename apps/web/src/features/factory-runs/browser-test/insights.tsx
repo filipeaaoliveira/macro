@@ -387,7 +387,7 @@ function createFixtureRuns(): RunsContext {
   });
   return {
     taskRuns: () => ready(() => RUNS),
-    waitingRuns: () => ready(() => []),
+    waitingRuns: () => ready(() => ({ waiting: [], starting: [] })),
     run: (runId) => ready(() => RUNS.find((run) => run.id === runId())),
     flows: () => ready(() => []),
     repositories: () => ready(() => []),
