@@ -52,6 +52,7 @@ async fn run_by(
         request: "Plan the task",
         user_id: &julia(),
         task_id,
+        project_id: None,
         repository: None,
         created_in_person: false,
         control_file_patterns: &[],

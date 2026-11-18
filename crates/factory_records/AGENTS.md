@@ -28,6 +28,8 @@ the Gates they asked people in MacroDB, and defines the names Flows use
 - `src/domain/automations.rs` and
   `src/outbound/pg_run_repository/automations.rs`: `AutomationRepository`,
   teams' Automations and each time one fired.
+- `src/domain/board.rs` and `src/outbound/pg_run_repository/board.rs`:
+  `RunBoardRepository`, the board's read of Runs across tasks.
 - `src/domain/gate_replies.rs` and
   `src/outbound/pg_run_repository/gate_replies.rs`: `GateReplyRepository`,
   a person's answer read from their words, the factory asking back, the
@@ -64,7 +66,8 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261118141500_factory_orchestrator_answers.sql`,
   `20261118143000_factory_automation.sql`,
   `20261118150000_factory_standing_rules_names.sql`,
-  `20261118170000_factory_step_terminal.sql`), and `factory_step_steer`.
+  `20261118170000_factory_step_terminal.sql`,
+  `20261118190000_factory_run_board.sql`), and `factory_step_steer`.
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
 
 ## Boundaries
@@ -165,6 +168,21 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   whether an account is an agent's.
 - `factory_run.flow` is the built-in Flow's name, which `insert_run` keeps;
   it is null only for Runs recorded before it was.
+- `factory_run.project_id` is the Project the Run's task was in when it was
+  kept, set once by `insert_run` (`NewRun::project_id`): a record, not a
+  reference, null for Runs kept before it. `pull_request_url` is the page of
+  the Run's pull request, replaced by `set_pull_request_url` each time a
+  pull request Step finds it.
+- `board_runs` reads one person's Runs, or theirs and their team members'
+  (`team_user` by `team_id`), newest first through
+  `factory_run_user_created_idx` (or `factory_run_user_open_idx` for the
+  states of Runs that go), past a `(created_at, id)` cursor, up to its
+  limit, under a 5 s timeout. Where a Run is (`BoardState`) is read in the
+  same query: its outcome, an unanswered Gate by primary key, and for a Run
+  whose latest Step is one of the given merge entries, its base's Main Hold
+  by primary key. A search reads the request and the task's name
+  (`"Document".name`) with `ILIKE`, its `%`, `_` and `\` literal. A held Run
+  is held only at its merge, so a merged Run is `finished`.
 - `read_insights` reads one person's newest Runs in a period through
   `factory_run_user_created_idx` (`user_id, created_at DESC, id DESC`), up to
   its cap (one past it, to tell whether Runs were left out), then their Steps

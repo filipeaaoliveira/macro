@@ -339,11 +339,18 @@ pub struct Run {
     pub request: String,
     /// Who started the Run: its agent Steps run as them.
     pub user_id: MacroUserIdStr<'static>,
+    /// The built-in Flow it walks, by name; none only for a Run recorded
+    /// before Runs kept it.
+    pub flow: Option<String>,
     /// When the Run was created.
     pub created_at: DateTime<Utc>,
     /// The Macro task the Run works on: its task document's id. None when
     /// the Run has no task, or its task was deleted.
     pub task_id: Option<Uuid>,
+    /// The Project (an initiative) its task was in when it was created,
+    /// kept as a record: none without a task or Project, and for a Run
+    /// created before Runs kept it.
+    pub project_id: Option<Uuid>,
     /// The GitHub repository the Run works on; none for a Run that works on
     /// no code.
     pub repository: Option<Repository>,
@@ -362,6 +369,9 @@ pub struct Run {
     /// The Control Files its branch changed, as the pull request Steps last
     /// read them. None when it changed none.
     pub control_files: Option<ControlFileChanges>,
+    /// The page of the pull request its branch proposes its change in, as
+    /// the pull request Steps last found it; none until one is found.
+    pub pull_request_url: Option<String>,
     /// The Standing Rules that answer its Gates, as they were when it was
     /// created; none for a Run created before Runs kept them, whose Gates
     /// all wait for a person.
@@ -447,6 +457,8 @@ pub struct NewRun<'a> {
     pub user_id: &'a MacroUserIdStr<'static>,
     /// The task document it works on, if any.
     pub task_id: Option<Uuid>,
+    /// The Project its task is in, if any.
+    pub project_id: Option<Uuid>,
     /// The repository it works in, if any.
     pub repository: Option<&'a Repository>,
     /// Whether its owner created it in their own signed-in session.

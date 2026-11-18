@@ -296,6 +296,7 @@ async fn past_answers_are_the_owner_s_own(pool: PgPool) {
             request: "Elsewhere",
             user_id: &julia(),
             task_id: None,
+            project_id: None,
             repository: None,
             created_in_person: false,
             control_file_patterns: &[],

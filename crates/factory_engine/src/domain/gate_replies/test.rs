@@ -73,6 +73,7 @@ async fn run_at_plan_gate(
             request: "Fix the login bug",
             user_id: &julia(),
             task_id,
+            project_id: None,
             repository: Some(&base()),
             created_in_person: true,
             control_file_patterns: &[],

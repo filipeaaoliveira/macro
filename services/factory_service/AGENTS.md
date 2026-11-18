@@ -86,6 +86,11 @@ worker that walks each Run's Flow, in one process.
   that has not reached one yet. `GET /runs/waiting` lists the caller's
   Runs waiting at a Gate (`runs`) and those yet to reach their first
   (`starting`): the places they hold.
+  `GET /runs` is the board: a page of the caller's Runs, or with
+  `scope=team` their team's on tasks they can see, newest first, each with
+  its `state` (`running`, `waiting`, `held`, `stopped`, `finished`);
+  `state`, `flow`, `repoUrl`, `projectId` and `search` narrow it, and
+  `afterCreatedAt` with `afterId` (the page's `next`) reads the next page.
 
 ## Gotchas
 

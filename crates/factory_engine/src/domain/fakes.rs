@@ -1,6 +1,7 @@
 //! In-memory stand-ins for the factory's records, for the domain's tests.
 
 mod automations;
+mod board;
 mod gate_owner;
 mod gate_replies;
 mod main_hold;
@@ -436,6 +437,7 @@ impl RunRepository for FakeRepo {
             request,
             user_id,
             task_id,
+            project_id,
             repository,
             created_in_person,
             control_file_patterns,
@@ -469,13 +471,16 @@ impl RunRepository for FakeRepo {
             id,
             request: request.to_string(),
             user_id: user_id.clone(),
+            flow: Some(flow.to_string()),
             created_at: Utc::now(),
             task_id,
+            project_id,
             repository: repository.cloned(),
             created_in_person,
             control_file_patterns: Some(control_file_patterns.to_vec()),
             control_files_team_id,
             control_files: None,
+            pull_request_url: None,
             standing_rules: Some(standing_rules),
             automation: automation.map(|start| start.automation.clone()),
             end: None,
@@ -506,6 +511,13 @@ impl RunRepository for FakeRepo {
             .lock()
             .expect("merge heads")
             .insert(id, sha.to_string());
+        Ok(())
+    }
+
+    async fn set_pull_request_url(&self, id: RunId, url: &str) -> Result<(), FakeError> {
+        if let Some(run) = self.runs.lock().expect("runs").get_mut(&id) {
+            run.pull_request_url = Some(url.to_string());
+        }
         Ok(())
     }
 

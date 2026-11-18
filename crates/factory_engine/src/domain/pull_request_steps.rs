@@ -552,16 +552,37 @@ where
         Ok((repository, recorded))
     }
 
-    /// The pull request from the Run's branch, if there is one.
+    /// The pull request from the Run's branch, if there is one. The Run
+    /// keeps its page, which the board links to.
     async fn find(
         &self,
         input: &StepInput<'_>,
         repository: &CodeRepository,
     ) -> Result<Option<PullRequest>, PullRequestStepError> {
-        self.github
+        let found = self
+            .github
             .find(input.owner, repository, &run_branch(input.key.run_id))
             .await
-            .map_err(PullRequestStepError::github)
+            .map_err(PullRequestStepError::github)?;
+        if let Some(pull_request) = &found {
+            self.keep_page(input, pull_request).await?;
+        }
+        Ok(found)
+    }
+
+    /// Keep `pull_request`'s page on the Run, when GitHub names one.
+    async fn keep_page(
+        &self,
+        input: &StepInput<'_>,
+        pull_request: &PullRequest,
+    ) -> Result<(), PullRequestStepError> {
+        if !pull_request.url.starts_with("https://") {
+            return Ok(());
+        }
+        self.repo
+            .set_pull_request_url(input.key.run_id, &pull_request.url)
+            .await
+            .map_err(PullRequestStepError::records)
     }
 
     /// Open the Run's pull request, or find the one it opened: `published`,
@@ -630,7 +651,8 @@ where
         required: Option<&RequiredChecks>,
     ) -> Result<(PullRequest, HeadChecks), PullRequestStepError> {
         let all_runs = required.is_some_and(|required| !required.checks.is_empty());
-        self.github
+        let (pull_request, checks) = self
+            .github
             .find_with_checks(
                 input.owner,
                 repository,
@@ -639,7 +661,9 @@ where
             )
             .await
             .map_err(PullRequestStepError::github)?
-            .ok_or(PullRequestStepError::NoPullRequest)
+            .ok_or(PullRequestStepError::NoPullRequest)?;
+        self.keep_page(input, &pull_request).await?;
+        Ok((pull_request, checks))
     }
 
     /// The checks the base branch requires, as far as they can be read.

@@ -28,13 +28,16 @@ fn run(owner_gates: bool) -> Run {
         id: RunId::generate(),
         request: "Fix the login\nbug".to_string(),
         user_id: owner(),
+        flow: None,
         created_at: Utc::now(),
         task_id: Some(TASK),
+        project_id: None,
         repository: None,
         created_in_person: true,
         control_file_patterns: None,
         control_files_team_id: None,
         control_files: None,
+        pull_request_url: None,
         standing_rules: Some(RunRules {
             definition: OrchestratorDefinition {
                 owner_gates,

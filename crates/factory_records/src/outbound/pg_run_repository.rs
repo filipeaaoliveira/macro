@@ -1,6 +1,7 @@
 //! PostgreSQL implementation of the [`RunRepository`] port.
 
 mod automations;
+mod board;
 mod check_rounds;
 mod gate_replies;
 mod insights;
@@ -133,6 +134,9 @@ pub enum PgRunRepositoryErr {
     /// A stored Run outcome is not one this code knows.
     #[error("unknown run outcome {0:?}")]
     UnknownRunOutcome(String),
+    /// The board read a place for a Run that this code does not know.
+    #[error("unknown board state {0:?}")]
+    UnknownBoardState(String),
     /// A stored round of checks ended with an outcome this code does not
     /// know.
     #[error("unknown check round outcome {0:?}")]
@@ -216,8 +220,10 @@ struct RunRow {
     id: Uuid,
     request: String,
     user_id: String,
+    flow: Option<String>,
     created_at: DateTime<Utc>,
     task_id: Option<String>,
+    project_id: Option<Uuid>,
     repo_url: Option<String>,
     base_branch: Option<String>,
     created_in_person: bool,
@@ -232,6 +238,7 @@ struct RunRow {
     automation_id: Option<Uuid>,
     automation_name: Option<String>,
     automation_trigger: Option<String>,
+    pull_request_url: Option<String>,
     outcome: Option<String>,
     ended_at: Option<DateTime<Utc>>,
 }
@@ -287,11 +294,13 @@ impl TryFrom<RunRow> for Run {
             request: row.request,
             user_id: MacroUserIdStr::try_from(row.user_id.clone())
                 .map_err(|_| PgRunRepositoryErr::InvalidUserId(row.user_id))?,
+            flow: row.flow,
             created_at: row.created_at,
             task_id: row
                 .task_id
                 .map(|id| Uuid::parse_str(&id).map_err(|_| PgRunRepositoryErr::InvalidTaskId(id)))
                 .transpose()?,
+            project_id: row.project_id,
             repository,
             created_in_person: row.created_in_person,
             control_file_patterns: row.control_file_patterns,
@@ -305,6 +314,7 @@ impl TryFrom<RunRow> for Run {
                 (None, None) => None,
                 _ => return Err(PgRunRepositoryErr::PartialControlFiles),
             },
+            pull_request_url: row.pull_request_url,
             standing_rules,
             automation,
             end,
@@ -600,16 +610,16 @@ impl RunRepository for PgRunRepository {
                 id, flow, request, user_id, task_id, repo_url, base_branch, created_in_person,
                 control_file_patterns, control_files_team_id, standing_rules, standing_rules_source,
                 standing_rules_project_id, automation_id, automation_name, automation_trigger,
-            automation_firing_key
+                automation_firing_key, project_id
             )
             VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
             )
             RETURNING
-                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,
+                id, request, user_id, flow, created_at, task_id, project_id, repo_url, base_branch, created_in_person,
                 control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,
                 standing_rules, standing_rules_source, standing_rules_project_id,
-                automation_id, automation_name, automation_trigger, outcome, ended_at
+                automation_id, automation_name, automation_trigger, pull_request_url, outcome, ended_at
             "#,
             run.id.as_uuid(),
             run.flow,
@@ -629,6 +639,7 @@ impl RunRepository for PgRunRepository {
             run.automation.map(|start| start.automation.name.as_str()),
             run.automation.map(|start| start.automation.trigger.as_ref()),
             run.automation.map(|start| start.firing_key),
+            run.project_id,
         )
         .fetch_one(&mut *transaction)
         .await;
@@ -682,6 +693,18 @@ impl RunRepository for PgRunRepository {
             "UPDATE factory_run SET merge_head_sha = $2 WHERE id = $1",
             id.as_uuid(),
             sha,
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn set_pull_request_url(&self, id: RunId, url: &str) -> Result<(), Self::Err> {
+        sqlx::query!(
+            "UPDATE factory_run SET pull_request_url = $2 WHERE id = $1",
+            id.as_uuid(),
+            url,
         )
         .execute(&self.pool)
         .await?;
@@ -836,10 +859,10 @@ impl RunRepository for PgRunRepository {
             RunRow,
             r#"
             SELECT
-                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,
+                id, request, user_id, flow, created_at, task_id, project_id, repo_url, base_branch, created_in_person,
                 control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,
                 standing_rules, standing_rules_source, standing_rules_project_id,
-                automation_id, automation_name, automation_trigger, outcome, ended_at
+                automation_id, automation_name, automation_trigger, pull_request_url, outcome, ended_at
             FROM factory_run
             WHERE id = $1
             "#,
@@ -932,10 +955,10 @@ impl RunRepository for PgRunRepository {
             RunRow,
             r#"
             SELECT
-                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,
+                id, request, user_id, flow, created_at, task_id, project_id, repo_url, base_branch, created_in_person,
                 control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,
                 standing_rules, standing_rules_source, standing_rules_project_id,
-                automation_id, automation_name, automation_trigger, outcome, ended_at
+                automation_id, automation_name, automation_trigger, pull_request_url, outcome, ended_at
             FROM factory_run
             WHERE task_id = $1 AND user_id = $2
             ORDER BY created_at DESC, id DESC
@@ -969,10 +992,10 @@ impl RunRepository for PgRunRepository {
             RunRow,
             r#"
             SELECT
-                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,
+                id, request, user_id, flow, created_at, task_id, project_id, repo_url, base_branch, created_in_person,
                 control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,
                 standing_rules, standing_rules_source, standing_rules_project_id,
-                automation_id, automation_name, automation_trigger, outcome, ended_at
+                automation_id, automation_name, automation_trigger, pull_request_url, outcome, ended_at
             FROM factory_run r
             WHERE r.user_id = $1
                 AND r.ended_at IS NULL
@@ -1014,10 +1037,10 @@ impl RunRepository for PgRunRepository {
             RunRow,
             r#"
             SELECT
-                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,
+                id, request, user_id, flow, created_at, task_id, project_id, repo_url, base_branch, created_in_person,
                 control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,
                 standing_rules, standing_rules_source, standing_rules_project_id,
-                automation_id, automation_name, automation_trigger, outcome, ended_at
+                automation_id, automation_name, automation_trigger, pull_request_url, outcome, ended_at
             FROM factory_run r
             WHERE r.user_id = $1
                 AND r.ended_at IS NULL

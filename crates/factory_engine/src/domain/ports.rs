@@ -14,6 +14,7 @@ use uuid::Uuid;
 use crate::domain::automations::{
     AutomationRequest, AutomationsSettings, CreatedAutomation, FiringResult, RoutineFiring,
 };
+use crate::domain::board::{BoardFilter, BoardPage};
 use crate::domain::flow::{StepName, StepUse};
 use crate::domain::gate::{
     AnswerGate, GateAnswered, GateOpening, GateRuling, GateTelling, ReplyGate,
@@ -689,7 +690,8 @@ pub trait FactoryService: Send + Sync + 'static {
         in_person: bool,
     ) -> impl Future<Output = Result<RunDetail, FactoryError>> + Send;
 
-    /// `actor`'s Run and the Steps it took. Reading a Run whose workflow
+    /// `actor`'s Run and the Steps it took, or a team member's on a task
+    /// `actor` can see, which only its owner acts on. Reading a Run whose workflow
     /// never started, once it is old enough that a started one would have
     /// taken a Step, ends it `failed`: the one read that writes.
     fn get_run(
@@ -730,6 +732,15 @@ pub trait FactoryService: Send + Sync + 'static {
         &self,
         actor: &MacroUserIdStr<'static>,
     ) -> impl Future<Output = Result<Vec<RunDetail>, FactoryError>> + Send;
+
+    /// A page of the board: the Runs `filter` names that `actor` can see,
+    /// newest first, each with its Steps and where it is. A team's board
+    /// lists the members' Runs only on tasks `actor` can see.
+    fn board(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        filter: BoardFilter,
+    ) -> impl Future<Output = Result<BoardPage, FactoryError>> + Send;
 
     /// Link `actor`'s Run to the task document `task_id`, replacing any task
     /// it had. The actor must see the task.

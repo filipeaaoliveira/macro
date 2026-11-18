@@ -54,6 +54,7 @@ async fn run_on_task(repo: &FakeRepo, rules: RunRules) -> (RunId, Uuid) {
             request: "Fix the login bug",
             user_id: &julia(),
             task_id: Some(task),
+            project_id: None,
             repository: None,
             created_in_person: true,
             control_file_patterns: &[],

@@ -199,6 +199,7 @@ async fn a_pull_request_merged_outside_the_run_keeps_its_control_files() {
             request: "Collapse repeated dashes in slugs",
             user_id: &JULIA,
             task_id: None,
+            project_id: None,
             repository: None,
             created_in_person: true,
             control_file_patterns: &[],

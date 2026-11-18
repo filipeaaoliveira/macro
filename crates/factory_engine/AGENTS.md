@@ -1222,6 +1222,15 @@ every Run in flight replays as before.
   pause, resume and stop do, and the prompts they send the agent.
 - `src/domain/task_thread.rs`: the task thread: the comment each update of
   a Run posts to its task, and its id.
+- `src/domain/board.rs`, `src/domain/service/board.rs` and
+  `src/inbound/http/board.rs`: the board (`GET /runs`): a page of the
+  caller's Runs, or their team's (`scope=team`), newest first, each with
+  where it is, and who may read a team member's Run. A team member's Run is
+  listed and read (`GET /runs/{id}`) only on a task the caller can see, by
+  someone on its owner's team; one with no task stays its owner's, and only
+  the owner acts on a Run. A page reads one Run past its limit and its
+  `next` starts past the last Run it read, listed or left out, so a page
+  may list fewer than asked while more follow.
 - `flows/`: the built-in Flows, each named for its file
   (`src/domain/built_in_flows.rs`). `GET /flows` lists those whose Steps the
   worker serves, with their `description` and whether they work on a

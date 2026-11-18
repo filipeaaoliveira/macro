@@ -1,6 +1,7 @@
 //! The factory's use cases: starting and reading Runs, and running their
 //! Steps.
 
+mod board;
 #[cfg(test)]
 mod test;
 
@@ -12,6 +13,7 @@ use chrono::Utc;
 use factory_records::domain::automations::{
     Automation, AutomationRepository, AutomationStart, RunAutomation,
 };
+use factory_records::domain::board::RunBoardRepository;
 use factory_records::domain::main_hold::{BaseState, MainHoldRepository};
 use factory_records::domain::models::{
     EntryId, HandBack, MAX_NOTE_BYTES, MAX_OUTPUT_BYTES, MAX_QUESTION_BYTES, MAX_REQUEST_BYTES,
@@ -27,6 +29,7 @@ use factory_records::domain::standing_rules::{
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
+use crate::domain::board::{BoardFilter, BoardPage};
 use crate::domain::built_in_flows::{BUILT_IN_FLOWS, BuiltInFlow};
 use crate::domain::control_files::ControlFiles;
 use crate::domain::gate::{
@@ -125,7 +128,8 @@ where
         + MainHoldRepository
         + ReviewRoundRepository
         + StandingRulesRepository
-        + AutomationRepository,
+        + AutomationRepository
+        + RunBoardRepository,
     W: RunWorkflows,
     E: StepExecutor,
     U: UserDirectory,
@@ -228,46 +232,51 @@ where
         Ok((team, own))
     }
 
-    /// The Standing Rules a Run of `user_id`'s on the task `task_id` is
-    /// created with: the Project's own, when its owner's team set rules
-    /// for the Project the task is in, else the team's, else the
-    /// factory's default.
-    async fn run_rules(
+    /// The Project the task `task_id` is in, as `user_id` sees it: none
+    /// without a task, or when it cannot be read now, which leaves a Run
+    /// its team's rules rather than refusing it.
+    async fn run_project(
         &self,
         user_id: &MacroUserIdStr<'static>,
-        team: Option<TeamMembership>,
         task_id: Option<Uuid>,
+    ) -> Option<Uuid> {
+        let task_id = task_id?;
+        match self.tasks.task_project(user_id, task_id).await {
+            Ok(project) => project,
+            Err(error) => {
+                tracing::warn!(
+                    ?error,
+                    %task_id,
+                    "the run task's project could not be read: the run takes its team's standing rules"
+                );
+                None
+            }
+        }
+    }
+
+    /// The Standing Rules a Run is created with, in the Project `project`
+    /// when its task is in one: the Project's own, when its owner's team
+    /// set rules for it, else the team's, else the factory's default.
+    async fn run_rules(
+        &self,
+        team: Option<TeamMembership>,
+        project: Option<Uuid>,
     ) -> Result<RunRules, FactoryError> {
         let Some(team) = team else {
             return Ok(RunRules::DEFAULT);
         };
-        if let Some(task_id) = task_id {
-            // A Project that cannot be read now leaves the Run the team's
-            // rules, rather than refusing the Run.
-            let project = match self.tasks.task_project(user_id, task_id).await {
-                Ok(project) => project,
-                Err(error) => {
-                    tracing::warn!(
-                        ?error,
-                        %task_id,
-                        "the run task's project could not be read: the run takes its team's standing rules"
-                    );
-                    None
-                }
-            };
-            if let Some(project_id) = project
-                && let Some(definition) = self
-                    .repo
-                    .project_rules(team.team_id, project_id)
-                    .await
-                    .map_err(internal)?
-            {
-                return Ok(RunRules {
-                    definition,
-                    source: RulesSource::Project,
-                    project_id: Some(project_id),
-                });
-            }
+        if let Some(project_id) = project
+            && let Some(definition) = self
+                .repo
+                .project_rules(team.team_id, project_id)
+                .await
+                .map_err(internal)?
+        {
+            return Ok(RunRules {
+                definition,
+                source: RulesSource::Project,
+                project_id: Some(project_id),
+            });
         }
         let own = self.repo.team_rules(team.team_id).await.map_err(internal)?;
         Ok(match own {
@@ -330,20 +339,34 @@ where
             .ok_or(FactoryError::NotFound)
     }
 
+    /// The Run `id`, when `actor` may read it: their own, or a team
+    /// member's on a task they can see. Only its owner acts on it.
+    async fn readable_run(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        id: RunId,
+    ) -> Result<Run, FactoryError> {
+        let run = self
+            .repo
+            .get_run(id)
+            .await
+            .map_err(internal)?
+            .ok_or(FactoryError::NotFound)?;
+        if run.user_id == *actor || self.sees_teammates_run(actor, &run).await? {
+            return Ok(run);
+        }
+        Err(FactoryError::NotFound)
+    }
+
     /// Whether `steps`' latest Step is at a merge: its entry runs
     /// `ready_to_merge` or `merge` in a built-in Flow.
     fn at_merge(&self, steps: &[Step]) -> bool {
         let Some(latest) = steps.last() else {
             return false;
         };
-        BUILT_IN_FLOWS
-            .into_iter()
-            .filter_map(|flow| flow.read(|step| self.executor.serves(step)).ok())
-            .flat_map(|flow| flow.entries)
-            .any(|entry| {
-                entry.id == latest.entry
-                    && matches!(entry.step.as_str(), "ready_to_merge" | "merge")
-            })
+        self.merge_entries()
+            .iter()
+            .any(|entry| *entry == latest.entry.to_string())
     }
 
     /// What the Run shows of the base branch it merges to: nothing unless
@@ -632,7 +655,8 @@ where
         // The Run keeps its Standing Rules the same way: a change to the
         // team's or the Project's rules, or a task linked later, does not
         // change which of its Gates a rule answers.
-        let standing_rules = self.run_rules(&actor, team, task_id).await?;
+        let project_id = self.run_project(&actor, task_id).await;
+        let standing_rules = self.run_rules(team, project_id).await?;
         // The Run and its task are kept in one write, so a task deleted
         // since it was checked leaves nothing behind. Once the owner holds
         // as many places as the Queue limit of the rules it would start
@@ -656,6 +680,7 @@ where
                     request: &request,
                     user_id: &actor,
                     task_id,
+                    project_id,
                     repository: repository.as_ref(),
                     created_in_person,
                     control_file_patterns: &control_file_patterns,
@@ -720,7 +745,8 @@ where
         + MainHoldRepository
         + ReviewRoundRepository
         + StandingRulesRepository
-        + AutomationRepository,
+        + AutomationRepository
+        + RunBoardRepository,
     W: RunWorkflows,
     E: StepExecutor,
     U: UserDirectory,
@@ -819,7 +845,7 @@ where
         actor: &MacroUserIdStr<'static>,
         id: RunId,
     ) -> Result<RunDetail, FactoryError> {
-        let mut run = self.owned_run(actor, id).await?;
+        let mut run = self.readable_run(actor, id).await?;
         let steps = self.repo.list_steps(id).await.map_err(internal)?;
 
         // A Run kept when its workflow's start could not be checked, and
@@ -836,7 +862,7 @@ where
                 .end_run(id, RunOutcome::Failed)
                 .await
                 .map_err(internal)?;
-            run = self.owned_run(actor, id).await?;
+            run = self.readable_run(actor, id).await?;
         }
         let review_rounds = self.repo.review_rounds(id).await.map_err(internal)?;
         self.detail(run, steps, review_rounds).await
@@ -881,6 +907,15 @@ where
             .await
             .map_err(internal)?;
         self.details(runs).await
+    }
+
+    #[tracing::instrument(skip(self, actor, filter), fields(scope = ?filter.scope, state = ?filter.state))]
+    async fn board(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        filter: BoardFilter,
+    ) -> Result<BoardPage, FactoryError> {
+        self.board_page(actor, filter).await
     }
 
     async fn list_starting_runs(

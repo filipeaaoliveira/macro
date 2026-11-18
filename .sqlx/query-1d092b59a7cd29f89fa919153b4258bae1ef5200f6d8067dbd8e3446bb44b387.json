@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,\n                standing_rules, standing_rules_source, standing_rules_project_id,\n                automation_id, automation_name, automation_trigger, outcome, ended_at\n            FROM factory_run\n            WHERE task_id = $1 AND user_id = $2\n            ORDER BY created_at DESC, id DESC\n            LIMIT $3\n            ",
+  "query": "\n            SELECT\n                id, request, user_id, flow, created_at, task_id, project_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,\n                standing_rules, standing_rules_source, standing_rules_project_id,\n                automation_id, automation_name, automation_trigger, pull_request_url, outcome, ended_at\n            FROM factory_run r\n            WHERE r.user_id = $1\n                AND r.ended_at IS NULL\n                AND r.flow = ANY($2)\n                AND NOT EXISTS (SELECT 1 FROM factory_gate g WHERE g.run_id = r.id)\n            ORDER BY r.created_at DESC, r.id DESC\n            LIMIT $3\n            ",
   "describe": {
     "columns": [
       {
@@ -20,91 +20,106 @@
       },
       {
         "ordinal": 3,
+        "name": "flow",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "task_id",
         "type_info": "Text"
       },
       {
-        "ordinal": 5,
+        "ordinal": 6,
+        "name": "project_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
         "name": "repo_url",
         "type_info": "Text"
       },
       {
-        "ordinal": 6,
+        "ordinal": 8,
         "name": "base_branch",
         "type_info": "Text"
       },
       {
-        "ordinal": 7,
+        "ordinal": 9,
         "name": "created_in_person",
         "type_info": "Bool"
       },
       {
-        "ordinal": 8,
+        "ordinal": 10,
         "name": "control_file_patterns",
         "type_info": "TextArray"
       },
       {
-        "ordinal": 9,
+        "ordinal": 11,
         "name": "control_files_team_id",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 10,
+        "ordinal": 12,
         "name": "tampered_files",
         "type_info": "TextArray"
       },
       {
-        "ordinal": 11,
+        "ordinal": 13,
         "name": "named_control_files",
         "type_info": "TextArray"
       },
       {
-        "ordinal": 12,
+        "ordinal": 14,
         "name": "control_files_unlisted",
         "type_info": "Bool"
       },
       {
-        "ordinal": 13,
+        "ordinal": 15,
         "name": "standing_rules",
         "type_info": "TextArray"
       },
       {
-        "ordinal": 14,
+        "ordinal": 16,
         "name": "standing_rules_source",
         "type_info": "Text"
       },
       {
-        "ordinal": 15,
+        "ordinal": 17,
         "name": "standing_rules_project_id",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 16,
+        "ordinal": 18,
         "name": "automation_id",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 17,
+        "ordinal": 19,
         "name": "automation_name",
         "type_info": "Text"
       },
       {
-        "ordinal": 18,
+        "ordinal": 20,
         "name": "automation_trigger",
         "type_info": "Text"
       },
       {
-        "ordinal": 19,
+        "ordinal": 21,
+        "name": "pull_request_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 22,
         "name": "outcome",
         "type_info": "Text"
       },
       {
-        "ordinal": 20,
+        "ordinal": 23,
         "name": "ended_at",
         "type_info": "Timestamptz"
       }
@@ -112,7 +127,7 @@
     "parameters": {
       "Left": [
         "Text",
-        "Text",
+        "TextArray",
         "Int8"
       ]
     },
@@ -120,9 +135,6 @@
       false,
       false,
       false,
-      false,
-      true,
-      true,
       true,
       false,
       true,
@@ -130,6 +142,12 @@
       true,
       true,
       false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
       true,
       true,
       true,
@@ -140,5 +158,5 @@
       true
     ]
   },
-  "hash": "ca22557750f6b117c4fe2e9a327ed0ad0300e5a6211a5b36eff9ffdf598dc041"
+  "hash": "1d092b59a7cd29f89fa919153b4258bae1ef5200f6d8067dbd8e3446bb44b387"
 }

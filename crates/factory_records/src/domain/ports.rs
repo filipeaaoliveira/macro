@@ -396,6 +396,15 @@ pub trait RunRepository: Send + Sync + 'static {
         sha: &str,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
+    /// Keep `url` as the page of the pull request the Run's branch proposes
+    /// its change in, replacing the one kept before. Keeping it again
+    /// changes nothing.
+    fn set_pull_request_url(
+        &self,
+        id: RunId,
+        url: &str,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
     /// Keep the Control Files the Run's branch changed, as last read,
     /// replacing what was kept before: none clears it. Keeping it again
     /// changes nothing.
