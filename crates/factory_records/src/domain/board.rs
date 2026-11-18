@@ -32,9 +32,11 @@ pub enum BoardState {
     /// It is at its merge and the base branch it merges to is under a Main
     /// Hold, so it does not merge until the base's checks pass again.
     Held,
-    /// It ended for a person to take over: `manual`, `blocked` or `failed`.
+    /// It ended for a person to take over: `manual`, `blocked`, `failed` or
+    /// `infrastructure`.
     Stopped,
-    /// It ended as asked: `success`, or a person cancelled it.
+    /// It ended as asked: `success`, `flawed` (a success found wrong
+    /// afterwards, which did finish its work), or a person cancelled it.
     Finished,
 }
 

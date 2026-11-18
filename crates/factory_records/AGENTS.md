@@ -206,7 +206,9 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   trashed) and, only then, its name. A search reads the request and a live
   task's name with `ILIKE`, its `%`, `_` and `\` literal, and so reads
   every Run of the owners (some 200 ms on 280k). A held Run is held only at
-  its merge, so a merged Run is `finished`.
+  its merge, so a merged Run is `finished`, as is a `flawed` one. A
+  Benchmark's trials (Flow `benchmark`) are no one's work: neither query
+  reads them.
 - `read_insights` reads one person's newest Runs in a period through
   `factory_run_user_created_idx` (`user_id, created_at DESC, id DESC`), up to
   its cap (one past it, to tell whether Runs were left out), then their Steps

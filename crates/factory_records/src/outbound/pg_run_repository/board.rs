@@ -8,6 +8,7 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use super::{PgRunRepository, PgRunRepositoryErr, RunRow};
+use crate::domain::evaluation::BENCHMARK_FLOW;
 use crate::domain::board::{BoardQuery, BoardRun, BoardState, RunBoardRepository, search_pattern};
 use crate::domain::models::Run;
 
@@ -109,7 +110,8 @@ impl RunBoardRepository for PgRunRepository {
         // the owners' Runs are then merged newest first and cut to it. Where
         // a Run is reads its Gates, its base's Main Hold, its latest Step and
         // its task's name by primary key; whether that Step is at the merge
-        // reads the Flow the Run kept, in its own row. A first page starts past the
+        // reads the Flow the Run kept, in its own row. A Benchmark's trials
+        // are no one's work and are never read. A first page starts past the
         // latest time there is. The timeout bounds the read all the same.
         let state = query.state.map(|state| state.as_ref().to_string());
         let open_only = matches!(
@@ -186,7 +188,7 @@ impl RunBoardRepository for PgRunRepository {
                 ) task
                 CROSS JOIN LATERAL (
                     SELECT CASE
-                        WHEN r.outcome IN ('success', 'cancelled') THEN 'finished'
+                        WHEN r.outcome IN ('success', 'cancelled', 'flawed') THEN 'finished'
                         WHEN r.outcome IS NOT NULL THEN 'stopped'
                         WHEN EXISTS (
                             SELECT 1 FROM factory_gate g
@@ -230,6 +232,7 @@ impl RunBoardRepository for PgRunRepository {
                         OR r.request ILIKE $10
                         OR (task.live AND d.name ILIKE $10)
                     )
+                    AND r.flow IS DISTINCT FROM $12
                 ORDER BY r.created_at DESC, r.id DESC
                 LIMIT $11
             ) r
@@ -247,6 +250,7 @@ impl RunBoardRepository for PgRunRepository {
                 query.project_id,
                 search,
                 i64::from(query.limit),
+                BENCHMARK_FLOW,
             )
             .fetch_all(&mut *transaction)
             .await?
@@ -300,7 +304,7 @@ impl RunBoardRepository for PgRunRepository {
                 ) task
                 CROSS JOIN LATERAL (
                     SELECT CASE
-                        WHEN r.outcome IN ('success', 'cancelled') THEN 'finished'
+                        WHEN r.outcome IN ('success', 'cancelled', 'flawed') THEN 'finished'
                         WHEN r.outcome IS NOT NULL THEN 'stopped'
                         WHEN EXISTS (
                             SELECT 1 FROM factory_gate g
@@ -343,6 +347,7 @@ impl RunBoardRepository for PgRunRepository {
                         OR r.request ILIKE $10
                         OR (task.live AND d.name ILIKE $10)
                     )
+                    AND r.flow IS DISTINCT FROM $12
                 ORDER BY r.created_at DESC, r.id DESC
                 LIMIT $11
             ) r
@@ -360,6 +365,7 @@ impl RunBoardRepository for PgRunRepository {
                 query.project_id,
                 search,
                 i64::from(query.limit),
+                BENCHMARK_FLOW,
             )
             .fetch_all(&mut *transaction)
             .await?

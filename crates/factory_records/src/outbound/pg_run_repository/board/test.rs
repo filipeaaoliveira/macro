@@ -9,8 +9,10 @@ use uuid::Uuid;
 
 use super::super::test::{entry, julia, key, outcome, teo};
 use crate::domain::board::{BoardCursor, BoardQuery, BoardState, RunBoardRepository};
+use crate::domain::evaluation::BENCHMARK_FLOW;
+use crate::domain::flaws::{FlawMarking, FlawRepository};
 use crate::domain::main_hold::MainHoldRepository;
-use crate::domain::models::{KeptFlow, NewRun, Repository, RunId, RunInsert, RunOutcome};
+use crate::domain::models::{FlawMarker, KeptFlow, NewRun, Repository, RunId, RunInsert, RunOutcome};
 use crate::domain::ports::RunRepository;
 use crate::domain::standing_rules::RunRules;
 use crate::outbound::pg_run_repository::PgRunRepository;
@@ -617,4 +619,74 @@ async fn a_document_that_is_not_a_task_is_not_named(pool: PgPool) {
 
     assert!(!read[0].task_live);
     assert_eq!(read[0].task_name, None);
+}
+
+/// A Benchmark's trial is no one's work: neither the open states' read nor
+/// the others' lists it, running or ended.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn a_benchmark_trial_is_not_on_the_board(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let own = keep(&repo, Kept::julias("Ship the banner")).await;
+    keep(
+        &repo,
+        Kept {
+            flow: BENCHMARK_FLOW,
+            ..Kept::julias("Replay the coupon task")
+        },
+    )
+    .await;
+    let ended = keep(
+        &repo,
+        Kept {
+            flow: BENCHMARK_FLOW,
+            ..Kept::julias("Replay the cart task")
+        },
+    )
+    .await;
+    repo.end_run(ended, RunOutcome::Success)
+        .await
+        .expect("end");
+
+    assert_eq!(read(&repo, &query(None)).await, [(own, BoardState::Running)]);
+    let running = BoardQuery {
+        state: Some(BoardState::Running),
+        ..query(None)
+    };
+    assert_eq!(read(&repo, &running).await, [(own, BoardState::Running)]);
+    let finished = BoardQuery {
+        state: Some(BoardState::Finished),
+        ..query(None)
+    };
+    assert!(read(&repo, &finished).await.is_empty());
+}
+
+/// A Run marked flawed finished its work: the board shows it finished, not
+/// stopped for a person.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn a_flawed_run_is_finished(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let flawed = keep(&repo, Kept::julias("Ship the banner")).await;
+    repo.end_run(flawed, RunOutcome::Success)
+        .await
+        .expect("end");
+    let marked = repo
+        .mark_flawed(
+            flawed,
+            &FlawMarker::Person { user_id: julia() },
+            "The banner is the wrong colour",
+        )
+        .await
+        .expect("mark");
+    assert!(matches!(marked, FlawMarking::Flawed(_)), "flawed");
+
+    assert_eq!(
+        read(&repo, &query(None)).await,
+        [(flawed, BoardState::Finished)]
+    );
 }
