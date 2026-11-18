@@ -1429,7 +1429,19 @@ outcomes and tokens; **Where runs stop**, the Steps that failed or were
 revisited with their latest Runs, which open as from a task; Runs by Flow;
 and **Agent usage**, the tokens Macro recorded for the agent Steps (none for
 an agent on the person's own computer). The page reads at most the newest
-1,000 Runs of a period.
+1,000 Runs of a period. Above them, **Waiting on you** lists the person's
+Runs stopped at a Gate no one answered yet, newest first (none shows when
+none waits); each opens the Run to answer it. `/app/factory/runs/<run id>`
+opens one Run over the page, as a Run's notification does.
+
+Team settings' **Standing rules** section also has **Send undecided gates
+to the run's owner** (off by default). With it on, a Gate no rule answers,
+or an agent's question, sends the Run's owner a notification about the
+Run's task (**A factory run waits on your answer**, or **The planner asks
+you a question**), shown on the task's row in the inbox; opening it opens
+the Run. A review that finds the same blockers again after a rule's fix
+waits for the owner, and the owner's comments on the task after a Gate
+opened are given to the next agent step.
 
 The browser regression runs the section and dialog on an in-memory factory,
 and the insights page on another (`insights.html`; `?error` fails the first

@@ -82,6 +82,8 @@ impl<S, Auth> FromRef<FactoryRouterState<S, Auth>> for MacroAuthorizationState<A
 ///   user, and start it.
 /// - `GET /tasks/{task_id}/runs` — the caller's Runs on a task, newest
 ///   first.
+/// - `GET /runs/waiting` — the caller's Runs that wait on them at a Gate,
+///   newest first.
 /// - `GET /runs/{id}` — read a Run and the Steps it took.
 /// - `POST /runs/{id}/steps/{seq}/answer` — answer the Gate of the Run's
 ///   Step `seq`.
@@ -113,6 +115,7 @@ where
             "/tasks/{task_id}/runs",
             get(list_task_runs_handler::<S, Auth>),
         )
+        .route("/runs/waiting", get(list_waiting_runs_handler::<S, Auth>))
         .route("/runs/{id}", get(get_run_handler::<S, Auth>))
         .route(
             "/runs/{id}/steps/{seq}/answer",
@@ -188,6 +191,14 @@ pub struct TaskRunsParams {
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct TaskRunsResponse {
     /// The caller's Runs on the task, newest first: at most the newest 50.
+    pub runs: Vec<RunDetail>,
+}
+
+/// The caller's Runs that wait on them.
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct WaitingRunsResponse {
+    /// The caller's Runs that have not ended and wait on a Gate no one
+    /// answered yet, newest first: at most the newest 50.
     pub runs: Vec<RunDetail>,
 }
 
@@ -341,6 +352,36 @@ where
     let actor = caller.authorization.user.macro_user_id;
     let runs = state.service.list_task_runs(&actor, params.task_id).await?;
     Ok(Json(TaskRunsResponse { runs }))
+}
+
+/// List the caller's Runs that wait on them at a Gate no one answered
+/// yet, a Flow's Gate no Standing Rule answered or an agent's question,
+/// newest first, each with the Steps it took.
+#[utoipa::path(
+    get,
+    tag = "factory",
+    operation_id = "list_factory_waiting_runs",
+    path = "/runs/waiting",
+    responses(
+        (status = 200, body = WaitingRunsResponse),
+        (status = 400, body = ErrorResponse),
+        (status = 401, body = ErrorResponse),
+        (status = 403, body = ErrorResponse),
+        (status = 500, body = ErrorResponse),
+    )
+)]
+#[tracing::instrument(skip_all)]
+pub async fn list_waiting_runs_handler<S, Auth>(
+    State(state): State<FactoryRouterState<S, Auth>>,
+    caller: MacroAuthorizationExtractor<Auth, UserOrInternal>,
+) -> Result<Json<WaitingRunsResponse>, FactoryError>
+where
+    S: FactoryService,
+    Auth: MacroAuthorizationService,
+{
+    let actor = caller.authorization.user.macro_user_id;
+    let runs = state.service.list_waiting_runs(&actor).await?;
+    Ok(Json(WaitingRunsResponse { runs }))
 }
 
 /// Read one of the caller's Runs and the Steps it took.
@@ -671,6 +712,7 @@ impl IntoResponse for FactoryError {
     paths(
         list_flows_handler,
         list_task_runs_handler,
+        list_waiting_runs_handler,
         create_run_handler,
         get_run_handler,
         answer_gate_handler,
@@ -687,6 +729,7 @@ impl IntoResponse for FactoryError {
         FlowsResponse,
         FlowSummary,
         TaskRunsResponse,
+        WaitingRunsResponse,
         CreateRunRequest,
         AnswerGateRequest,
         LinkTaskRequest,

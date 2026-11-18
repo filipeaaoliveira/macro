@@ -8,6 +8,7 @@ use document_storage_service_client::task::{CreateTaskError, NewTask};
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
+use crate::domain::gate_owner::factory_signed;
 use crate::domain::main_hold::HoldTask;
 use crate::domain::ports::HoldTasks;
 use crate::outbound::task_project::{initiative_of, new_task_properties};
@@ -102,7 +103,12 @@ impl HoldTasks for DocumentHoldTasks {
         text: &str,
     ) -> Result<(), DocumentHoldTasksErr> {
         self.documents
-            .comment_on_text(&task_id.to_string(), owner.as_ref(), quote, text)
+            .comment_on_text(
+                &task_id.to_string(),
+                owner.as_ref(),
+                quote,
+                &factory_signed(text),
+            )
             .await
             .map_err(|error| DocumentHoldTasksErr(rootcause::report!("{error:#}")))
     }

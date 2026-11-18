@@ -27,6 +27,13 @@
 //! path, so Runs on a Flow without one replay as before. A question Gate
 //! is never put to the rules: only the Run's owner answers an agent.
 //!
+//! A Gate left for a person, a Flow's Gate no rule answered or an agent's
+//! question, is told to the Run's owner once the workflow takes its
+//! answers (`factory_notify_gate`, behind the [`GATE_OWNER_PATCH`]
+//! marker); the worker notifies only for a Run whose owner section is on,
+//! and its result changes nothing the workflow decides. A Run whose
+//! history waited on a Gate before the marker replays without it.
+//!
 //! A Step whose agent asks the Run's owner a question (only one whose Flow
 //! says how many, `questions`) keeps its session; the workflow opens a
 //! question Gate, waits for the answer, and has the same Role go on in a
@@ -94,6 +101,10 @@ const STEP_TOTAL: Duration = Duration::from_secs(2 * 60 * 60);
 /// How long recording a Step, a Gate or a Run's end may take.
 const RECORD_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// How long telling a Run's owner of a Gate may take in all, across its
+/// attempts, before the Gate waits without it.
+const NOTIFY_TOTAL: Duration = Duration::from_secs(5 * 60);
+
 /// How long opening a review round may take: it reads GitHub.
 const OPEN_ROUND_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
@@ -116,6 +127,11 @@ const STOP_TOTAL: Duration = Duration::from_secs(15 * 60);
 /// The marker of the workflow that asks a Run's Standing Rules about each
 /// Gate it opens. Renaming it breaks the replay of Runs that passed it.
 pub(crate) const STANDING_RULES_PATCH: &str = "factory-standing-rules";
+
+/// The marker of the workflow that tells the Run's owner of each Gate it
+/// waits on for a person. Renaming it breaks the replay of Runs that
+/// passed it.
+pub(crate) const GATE_OWNER_PATCH: &str = "factory-gate-owner";
 
 /// The workflow of one Run.
 #[workflow]
@@ -351,6 +367,24 @@ async fn ask(
         });
         workflow.answer = None;
     });
+
+    // The Run's owner is told once the Gate takes answers, so the one they
+    // give from the notification is taken, even while it is sent. Telling
+    // them is tried for at most `NOTIFY_TOTAL`, and a notice that never
+    // went out leaves the Gate waiting all the same: it is listed as
+    // waiting on them. A Run whose history waited on this Gate before the
+    // marker existed replays without telling.
+    if ctx.patched(GATE_OWNER_PATCH) {
+        let options =
+            ActivityOptions::with_close_timeouts(ActivityCloseTimeouts::ScheduleAndStartToClose {
+                schedule_to_close: NOTIFY_TOTAL,
+                start_to_close: RECORD_TIMEOUT,
+            })
+            .build();
+        let _ = ctx
+            .execute_activity(FactoryActivities::notify_gate, key, options)
+            .await;
+    }
 
     // The Gate closes in the same change that takes its answer, so no
     // second answer slips in between.

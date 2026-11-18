@@ -13,6 +13,7 @@ use crate::domain::models::{
 use crate::domain::ports::RunRepository;
 
 mod control_files;
+mod waiting;
 
 const LOGIN_TASK: &str = "00000000-0000-7000-8000-000000000101";
 const DARK_MODE_TASK: &str = "00000000-0000-7000-8000-000000000102";
@@ -1164,7 +1165,7 @@ async fn an_old_attempt_never_forgets_a_newer_attempt_s_prepare(pool: PgPool) {
     );
 }
 
-fn teo() -> MacroUserIdStr<'static> {
+pub(super) fn teo() -> MacroUserIdStr<'static> {
     MacroUserIdStr::try_from("macro|teo@example.com".to_string()).expect("valid user id")
 }
 

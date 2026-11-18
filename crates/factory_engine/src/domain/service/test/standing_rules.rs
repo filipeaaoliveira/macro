@@ -26,6 +26,7 @@ const EVERY_RULE: OrchestratorDefinition = OrchestratorDefinition {
     plan: true,
     blockers: true,
     merge: true,
+    owner_gates: false,
 };
 
 fn base() -> Repository {

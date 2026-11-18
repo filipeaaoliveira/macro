@@ -216,6 +216,7 @@ fn reviewing<'a>(run_id: RunId, round: &'a ReviewRound) -> StepInput<'a> {
         resumes: None,
         created_in_person: false,
         control_file_patterns: None,
+        owner_notes: &[],
     }
 }
 

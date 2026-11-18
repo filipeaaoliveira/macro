@@ -15,7 +15,7 @@ use crate::domain::models::{RunFinish, StepEnding, StepError, StepReport, StepRe
 use crate::domain::ports::{ReviewService, StepService};
 use crate::domain::review_rounds::{ReviewRoundClosing, ReviewRoundOpening};
 use crate::domain::standing_rules::RuleAnswer;
-use factory_records::domain::models::Outcome;
+use factory_records::domain::models::{Outcome, StepKey};
 
 /// How often a Step's work tells Temporal its worker is alive. The worker
 /// sends them on at most every few seconds (`MAX_HEARTBEAT_THROTTLE` in
@@ -43,6 +43,8 @@ trait DynStepService: Send + Sync {
     async fn answer_gate(&self, answered: GateAnswered) -> Result<(), StepError>;
 
     async fn rule_gate(&self, ruling: GateRuling) -> Result<Option<RuleAnswer>, StepError>;
+
+    async fn notify_gate(&self, key: StepKey) -> Result<(), StepError>;
 
     async fn end_run(&self, finish: RunFinish) -> Result<(), StepError>;
 }
@@ -79,6 +81,10 @@ impl<T: StepService> DynStepService for T {
 
     async fn rule_gate(&self, ruling: GateRuling) -> Result<Option<RuleAnswer>, StepError> {
         StepService::rule_gate(self, ruling).await
+    }
+
+    async fn notify_gate(&self, key: StepKey) -> Result<(), StepError> {
+        StepService::notify_gate(self, key).await
     }
 
     async fn end_run(&self, finish: RunFinish) -> Result<(), StepError> {
@@ -279,6 +285,17 @@ impl FactoryActivities {
         ruling: GateRuling,
     ) -> Result<Option<RuleAnswer>, ActivityError> {
         self.steps.rule_gate(ruling).await.map_err(failure)
+    }
+
+    /// Tell the Run's owner that a Gate no Standing Rule answered waits on
+    /// them, when the Run's owner section is on.
+    #[activity(name = "factory_notify_gate")]
+    pub async fn notify_gate(
+        self: Arc<Self>,
+        _ctx: ActivityContext,
+        key: StepKey,
+    ) -> Result<(), ActivityError> {
+        self.steps.notify_gate(key).await.map_err(failure)
     }
 
     /// Record the review round a review panel starts, before its

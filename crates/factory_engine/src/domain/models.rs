@@ -16,6 +16,7 @@ use uuid::Uuid;
 
 use crate::domain::control_files::ControlFilesError;
 use crate::domain::flow::{Entry, Flow, FlowError, StepName};
+use crate::domain::gate_owner::OwnerNote;
 
 /// What a Run's workflow starts with. The Run's request stays in its
 /// records, so a Run's history carries ids, not its text.
@@ -161,6 +162,10 @@ pub struct StepInput<'a> {
     /// The Step whose question it goes on from, by its place: its agent
     /// goes on in that Step's session, with the owner's answer.
     pub resumes: Option<u16>,
+    /// What the Run's owner commented on the Run's task since its latest
+    /// Gate opened, oldest first: none unless the Run's owner section is
+    /// on.
+    pub owner_notes: &'a [OwnerNote],
 }
 
 /// What an agent is asked to do for one Step.

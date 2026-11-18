@@ -88,6 +88,7 @@ export function getNotificationIcon(
     .with('routine_run_finished', () => ClockIcon)
     .with('agent_sign_in_expiry', () => HardDrivesIcon)
     .with('computer_setup', () => HardDrivesIcon)
+    .with('factory_gate_waiting', () => QuestionIcon)
     .exhaustive(() => BellIcon);
 }
 

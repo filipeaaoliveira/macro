@@ -142,6 +142,12 @@ export const NOTIFICATION_EVENT_GROUPS: readonly NotificationEventGroup[] = [
         label: 'Assignments',
         description: 'When a task is assigned to you',
       },
+      {
+        type: 'factory_gate_waiting',
+        label: 'Factory runs waiting on you',
+        description:
+          'When a factory run on one of your tasks waits for your answer',
+      },
     ],
   },
   {

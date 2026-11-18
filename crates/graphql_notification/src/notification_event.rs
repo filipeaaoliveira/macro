@@ -33,14 +33,15 @@ use model_notifications::{
     AgentSignInExpiryStage, AiResponseMetadata, CalendarEventReminderMetadata, CallStartedMetadata,
     ChannelInviteMetadata, ChannelMentionMetadata, ChannelMessageReactionMetadata,
     ChannelMessageSendMetadata, ChannelReplyMetadata, ChannelType, CommentedOnDocumentMetadata,
-    ComputerSetupMetadata, ComputerSetupOutcome, DocumentMentionMetadata, GithubPrCheckRun,
-    GithubPrCheckRunState, GithubPrComment, GithubPrCommentKind, GithubPrEventAction,
-    GithubPrEventStatus, GithubPrMention, GithubPrMentionLocation, GithubPrNotificationCommon,
-    GithubPrReview, GithubPrReviewState, GithubPrStatusChanged, GithubReviewRequested,
-    InboxReauthRequiredMetadata, InviteToTeamMetadata, MentionedInDocumentCommentMetadata,
-    NewEmailMetadata, NotifEvent, NotificationDocumentSubType, ReminderMetadata,
-    RepliedToDocumentCommentThreadMetadata, RoutineRunFinishedMetadata, RoutineRunOutcome,
-    RuntimeAccessRemovedMetadata, StoppedAgent, TaskAssignedMetadata,
+    ComputerSetupMetadata, ComputerSetupOutcome, DocumentMentionMetadata,
+    FactoryGateWaitingMetadata, GithubPrCheckRun, GithubPrCheckRunState, GithubPrComment,
+    GithubPrCommentKind, GithubPrEventAction, GithubPrEventStatus, GithubPrMention,
+    GithubPrMentionLocation, GithubPrNotificationCommon, GithubPrReview, GithubPrReviewState,
+    GithubPrStatusChanged, GithubReviewRequested, InboxReauthRequiredMetadata,
+    InviteToTeamMetadata, MentionedInDocumentCommentMetadata, NewEmailMetadata, NotifEvent,
+    NotificationDocumentSubType, ReminderMetadata, RepliedToDocumentCommentThreadMetadata,
+    RoutineRunFinishedMetadata, RoutineRunOutcome, RuntimeAccessRemovedMetadata, StoppedAgent,
+    TaskAssignedMetadata,
 };
 
 /// GraphQL channel type used by notification metadata.
@@ -946,6 +947,43 @@ impl GraphqlRuntimeAccessRemovedMetadata {
     }
 }
 
+/// GraphQL wrapper for a factory Run waiting on its owner at a Gate.
+pub struct GraphqlFactoryGateWaitingMetadata(FactoryGateWaitingMetadata);
+
+/// Metadata for a factory Run waiting on its owner at a Gate.
+#[Object]
+impl GraphqlFactoryGateWaitingMetadata {
+    /// The Run that waits.
+    async fn run_id(&self) -> ID {
+        ID(self.0.run_id.to_string())
+    }
+
+    /// The place, among the Run's Steps, of the Step whose Gate waits.
+    async fn seq(&self) -> i32 {
+        i32::from(self.0.seq)
+    }
+
+    /// The task document the Run works on.
+    async fn task_id(&self) -> ID {
+        ID(self.0.task_id.clone())
+    }
+
+    /// The start of what the Run was asked to do.
+    async fn request(&self) -> &str {
+        &self.0.request
+    }
+
+    /// The start of the Gate's question.
+    async fn question(&self) -> &str {
+        &self.0.question
+    }
+
+    /// For an agent's question, the Role of the agent that asks.
+    async fn asker(&self) -> Option<&str> {
+        self.0.asker.as_deref()
+    }
+}
+
 /// GraphQL wrapper for team invitation metadata.
 pub struct GraphqlInviteToTeamMetadata(InviteToTeamMetadata);
 
@@ -1520,6 +1558,8 @@ pub enum GraphqlNotifEvent {
     WhatsappGroupMessage(GraphqlWhatsappGroupMessageMetadata),
     /// Removed runtime access that stopped the recipient's agents.
     RuntimeAccessRemoved(GraphqlRuntimeAccessRemovedMetadata),
+    /// A factory Run waiting on its owner at a Gate.
+    FactoryGateWaiting(GraphqlFactoryGateWaitingMetadata),
 }
 
 impl From<NotifEvent> for GraphqlNotifEvent {
@@ -1591,6 +1631,9 @@ impl From<NotifEvent> for GraphqlNotifEvent {
             }
             NotifEvent::RuntimeAccessRemoved(metadata) => {
                 Self::RuntimeAccessRemoved(GraphqlRuntimeAccessRemovedMetadata(metadata))
+            }
+            NotifEvent::FactoryGateWaiting(metadata) => {
+                Self::FactoryGateWaiting(GraphqlFactoryGateWaitingMetadata(metadata))
             }
             NotifEvent::InboxReauthRequired(metadata) => {
                 Self::InboxReauthRequired(GraphqlInboxReauthRequiredMetadata(metadata))

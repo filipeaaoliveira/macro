@@ -57,6 +57,8 @@ export type RunsContext = {
   taskRuns: (taskId: Accessor<string>) => RunsSource<Run[]>;
   /** One Run; kept current until it ends. */
   run: (runId: Accessor<string>) => RunsSource<Run>;
+  /** The person's Runs that wait on them at a Gate, newest first. */
+  waitingRuns: () => RunsSource<Run[]>;
   flows: () => RunsSource<Flow[]>;
   /**
    * The URLs of the GitHub repositories the person can start a Run on, read

@@ -6,6 +6,7 @@
 //! test runs its own worker on a task queue of its own, so the stack's
 //! factory worker never takes its work.
 
+mod gate_owner;
 mod questions;
 mod replay;
 mod review_panel;
@@ -36,7 +37,9 @@ use uuid::Uuid;
 use super::worker_on;
 use crate::domain::built_in_flows::BuiltInFlow;
 use crate::domain::built_in_steps::BuiltInSteps;
-use crate::domain::fakes::{FakeGithub, FakeHoldTasks, FakeRepo, FakeWatches, ci};
+use crate::domain::fakes::{
+    FakeGithub, FakeHoldTasks, FakeNotifier, FakeRepo, FakeTaskNotes, FakeWatches, ci,
+};
 use crate::domain::flow::Flow;
 use crate::domain::gate::AnswerGate;
 use crate::domain::main_hold::{MainWatch, MainWatchServiceImpl};
@@ -809,6 +812,8 @@ struct CodeWalk {
     flow: Option<Flow>,
     /// The questions each Step's agent may ask, when the Flow lets them.
     questions: Option<u8>,
+    /// What the Run's owner is told of its Gates, for a Run on a task.
+    notifier: Option<FakeNotifier>,
 }
 
 impl Default for CodeWalk {
@@ -818,6 +823,7 @@ impl Default for CodeWalk {
             rounds: None,
             flow: None,
             questions: None,
+            notifier: None,
         }
     }
 }
@@ -839,13 +845,20 @@ where
         url: "https://github.com/macro/app".to_string(),
         base_branch: "main".to_string(),
     };
+    // A Run whose owner is told of its Gates works on a task, which the
+    // notification is about.
+    let task_id = walk.notifier.as_ref().map(|_| {
+        let task = Uuid::now_v7();
+        repo.tasks.lock().expect("tasks").insert(task);
+        task
+    });
     let RunInsert::Inserted(run) = repo
         .insert_run(NewRun {
             id: RunId::generate(),
             flow: "code",
             request: "Collapse repeated dashes in slugs",
             user_id: &julia(),
-            task_id: None,
+            task_id,
             repository: Some(&repository),
             created_in_person: false,
             control_file_patterns: &[],
@@ -894,7 +907,10 @@ where
         &task_queue,
         &runtime,
         client.clone(),
-        StepServiceImpl::new(repo.clone(), steps),
+        StepServiceImpl::new(repo.clone(), steps).with_owner_gates(
+            walk.notifier.clone().unwrap_or_default(),
+            FakeTaskNotes::default(),
+        ),
         ReviewRoundsImpl::new(repo.clone(), github.clone(), repo.clone()),
         watches(&repo),
     )
@@ -1089,6 +1105,7 @@ async fn a_run_whose_rules_decide_every_gate_merges_with_no_person_asked() {
             plan: true,
             blockers: true,
             merge: true,
+            owner_gates: false,
         },
         source: RulesSource::Team,
         project_id: None,
@@ -1139,6 +1156,7 @@ async fn a_gate_of_no_kind_waits_for_a_person_whatever_the_rules() {
             plan: true,
             blockers: true,
             merge: true,
+            owner_gates: false,
         },
         source: RulesSource::Team,
         project_id: None,

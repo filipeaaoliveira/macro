@@ -253,6 +253,33 @@ fn reported_again(round: &ReviewRound, same: &[&ReviewFinding]) -> String {
     )
 }
 
+/// Whether `round` found the same Blockers as `before`, unchanged: every
+/// Blocker of each has one in the other found by a reviewer of the same
+/// Role, in the same file, at lines that meet (one that names no lines is
+/// about its whole file). What a Blocker says is not compared: a reviewer
+/// words one problem differently from round to round, and where it is and
+/// who found it tell it apart. A round with no Blocker repeats nothing,
+/// and an answer that never read ([`WHOLE_CHANGE`]) is no finding to
+/// compare.
+pub fn same_blockers(before: &ReviewRound, round: &ReviewRound) -> bool {
+    let earlier: Vec<&ReviewFinding> = before
+        .blockers()
+        .filter(|blocker| blocker.path != WHOLE_CHANGE)
+        .collect();
+    let now: Vec<&ReviewFinding> = round
+        .blockers()
+        .filter(|blocker| blocker.path != WHOLE_CHANGE)
+        .collect();
+    if earlier.is_empty() || now.is_empty() {
+        return false;
+    }
+
+    let same = |a: &&ReviewFinding, b: &&ReviewFinding| a.role == b.role && same_place(a, b);
+    let found_again = now.iter().all(|a| earlier.iter().any(|b| same(a, b)));
+    let none_gone = earlier.iter().all(|b| now.iter().any(|a| same(a, b)));
+    found_again && none_gone
+}
+
 /// Whether the findings `a` and `b` report one problem: two reviewers
 /// point at the same file, at lines that meet (a finding that names no
 /// lines is about the whole file).

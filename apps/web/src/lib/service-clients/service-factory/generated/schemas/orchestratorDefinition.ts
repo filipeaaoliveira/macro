@@ -7,9 +7,10 @@
 
 /**
  * A workspace's Orchestrator Definition: which kinds of Gate the factory
-decides on its own. A kind left off waits for a person, as every Gate
-did before Standing Rules. Whatever it says, a Tampered Run's Gates and
-a merge through a Main Hold stay a person's.
+decides on its own, and whether the Gates it leaves go to the Run's
+owner. A kind left off waits for a person, as every Gate did before
+Standing Rules. Whatever it says, a Tampered Run's Gates and a merge
+through a Main Hold stay a person's.
  */
 export interface OrchestratorDefinition {
   /** Send a review round's Blockers to be fixed (`fix_blockers`), for at
@@ -19,6 +20,14 @@ person. */
   /** Merge once CI is green, nothing is Tampered and the base branch has
 no Main Hold (`merge_when_green`). */
   merge: boolean;
+  /** The owner section: a Gate no rule answers goes to the Run's owner.
+They are notified, and the Gate is listed as waiting on them; a
+review round whose Blockers are the round before's, unchanged after
+a rule sent those to a fix, waits for them rather than another fix;
+and what they comment on the Run's task once a Gate opened reaches
+the next agent Step. Off, the factory leaves those Gates waiting as
+before. A definition sent without it has it off. */
+  ownerGates?: boolean;
   /** Approve the plan Gate (`approve_plan`). */
   plan: boolean;
 }

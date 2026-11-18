@@ -107,6 +107,10 @@ impl StepService for Steps {
         Ok(None)
     }
 
+    async fn notify_gate(&self, _key: StepKey) -> Result<(), StepError> {
+        Ok(())
+    }
+
     async fn end_run(&self, _finish: RunFinish) -> Result<(), StepError> {
         Ok(())
     }

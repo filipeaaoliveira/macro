@@ -15,14 +15,21 @@
 //!   Control Files again before it merges;
 //! - merge while the base branch has a Main Hold;
 //! - send Blockers to more fixes in a row than [`rule_fix_limit`] allows;
+//! - with the owner section on, send a round's Blockers to a fix when they
+//!   are the round before's, unchanged after the rule sent those to a fix
+//!   ([`repeated_blockers`]): another fix would repeat the last, so the
+//!   Gate waits for the Run's owner;
 //! - answer a Gate of a Run created before Runs kept rules.
 
 #[cfg(test)]
 mod test;
 
-use factory_records::domain::models::Outcome;
+use factory_records::domain::models::{Outcome, Step};
+use factory_records::domain::review_rounds::ReviewRound;
 use factory_records::domain::standing_rules::{OrchestratorDefinition, RuleGateKind, StandingRule};
 use serde::{Deserialize, Serialize};
+
+use crate::domain::review_rounds::same_blockers;
 
 /// The most fix rounds in a row the `fix_blockers` rule sends; Blockers a
 /// review finds after them go to a person.
@@ -75,6 +82,10 @@ pub struct GateFacts {
     pub tampered: bool,
     /// Whether the base branch the Run merges to has a Main Hold.
     pub held: bool,
+    /// For a review panel's Gate, whether its round's Blockers are the
+    /// round before's, unchanged after the rule sent those to a fix
+    /// ([`repeated_blockers`]); false for other Gates.
+    pub repeated_blockers: bool,
 }
 
 /// A Standing Rule's answer to a Gate: the rule, and the answer it gives.
@@ -102,6 +113,7 @@ pub fn rule_answer(
         RuleGateKind::Plan | RuleGateKind::Merge if facts.tampered => return None,
         RuleGateKind::Plan => "approve",
         RuleGateKind::Blockers if facts.fix_rounds >= facts.fix_limit => return None,
+        RuleGateKind::Blockers if rules.owner_gates && facts.repeated_blockers => return None,
         RuleGateKind::Blockers => "fix",
         // The merge Gate opens only once `ready_to_merge` found the pull
         // request's head still the commit `ci` called green, with its
@@ -114,4 +126,52 @@ pub fn rule_answer(
         rule: facts.kind.rule(),
         answer,
     })
+}
+
+/// Whether the review round the Gate at `seq` asks about found the round
+/// before's Blockers again, unchanged, after the `fix_blockers` rule sent
+/// those to a fix: a second rule fix would most likely repeat the first.
+/// `rounds` and `steps` are the Run's, in order.
+///
+/// The round asked about is the latest that started at or before `seq`
+/// (its Gate is on its latest Step), and the round before is the latest
+/// earlier round of the same review panel (the entry of its first Step)
+/// one visit before it, so a round after a reset, and a round of another
+/// panel, are never compared with it. That
+/// round's Blockers went to a fix by the rule when a Step between the two
+/// rounds has a Gate whose Rule Answer is `fix_blockers`: a person's fix
+/// is theirs to repeat. Which Blockers count as the same is
+/// [`same_blockers`]'s to say.
+pub fn repeated_blockers(rounds: &[ReviewRound], steps: &[Step], seq: u16) -> bool {
+    let Some(at) = rounds.iter().rposition(|round| round.seq <= seq) else {
+        return false;
+    };
+    let round = &rounds[at];
+    let entry_of = |seq: u16| {
+        steps
+            .iter()
+            .find(|step| step.seq == seq)
+            .map(|step| &step.entry)
+    };
+    let Some(entry) = entry_of(round.seq) else {
+        return false;
+    };
+    let Some(before) = rounds[..at]
+        .iter()
+        .rev()
+        .find(|before| entry_of(before.seq) == Some(entry) && before.visit + 1 == round.visit)
+    else {
+        return false;
+    };
+
+    let fixed_by_rule = steps.iter().any(|step| {
+        let between = step.seq >= before.seq && step.seq < round.seq;
+        let rule = step
+            .gate
+            .as_ref()
+            .and_then(|gate| gate.answer.as_ref())
+            .and_then(|answer| answer.rule);
+        between && rule == Some(StandingRule::FixBlockers)
+    });
+    fixed_by_rule && same_blockers(before, round)
 }

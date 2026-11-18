@@ -5,6 +5,8 @@ use serde_json::json;
 use super::{GateFacts, MAX_RULE_FIX_ROUNDS, RuleAnswer, rule_answer, rule_fix_limit};
 use crate::domain::flow::{Flow, FlowError, StepUse};
 
+mod repeated;
+
 fn outcome(name: &str) -> Outcome {
     Outcome::try_from(name.to_string()).expect("valid outcome")
 }
@@ -13,6 +15,7 @@ const EVERY_RULE: OrchestratorDefinition = OrchestratorDefinition {
     plan: true,
     blockers: true,
     merge: true,
+    owner_gates: false,
 };
 
 fn facts(kind: RuleGateKind) -> GateFacts {
@@ -22,6 +25,7 @@ fn facts(kind: RuleGateKind) -> GateFacts {
         fix_limit: MAX_RULE_FIX_ROUNDS,
         tampered: false,
         held: false,
+        repeated_blockers: false,
     }
 }
 

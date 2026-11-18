@@ -113,3 +113,4 @@ export * from './taskRunsResponse';
 export * from './tokenCounts';
 export * from './troubleRun';
 export * from './usageInsight';
+export * from './waitingRunsResponse';

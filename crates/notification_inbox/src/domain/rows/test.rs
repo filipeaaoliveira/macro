@@ -422,6 +422,30 @@ fn each_access_request_and_task_is_its_own_row() {
     );
 }
 
+#[test]
+fn a_factory_run_waiting_on_its_owner_shows_on_its_task_s_row_from_macro() {
+    let waiting = notification(
+        4,
+        entity(EntityType::Document, DOC),
+        "factory_gate_waiting",
+        json!({
+            "runId": uuid(0xF1),
+            "seq": 3,
+            "taskId": uuid(DOC),
+            "request": "Fix the login bug",
+            "question": "Approve the plan?",
+        }),
+        4,
+        NotificationState::Unseen,
+    );
+    let listed = rows_of(&group(EntityType::Document, DOC), &[waiting]);
+    assert_eq!(
+        shape(&listed),
+        vec![(InboxRowType::Task, vec![uuid(4)], vec![])]
+    );
+    assert_eq!(listed[0].actor, Some(InboxActor::Macro));
+}
+
 const TEAM: u128 = 0x7E;
 
 #[test]

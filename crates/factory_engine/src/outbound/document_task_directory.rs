@@ -14,6 +14,7 @@ use uuid::Uuid;
 #[cfg(test)]
 mod test;
 
+use crate::domain::gate_owner::factory_signed;
 use crate::domain::ports::{FollowUpMade, FollowUpTask, TaskAccess, TaskDirectory};
 use crate::outbound::task_project::{initiative_of, new_task_properties};
 
@@ -148,7 +149,12 @@ impl<A: EntityAccessService> TaskDirectory for DocumentTaskDirectory<A> {
         text: &str,
     ) -> Result<(), Self::Err> {
         self.documents
-            .comment_on_text(&task_id.to_string(), user_id.as_ref(), quote, text)
+            .comment_on_text(
+                &task_id.to_string(),
+                user_id.as_ref(),
+                quote,
+                &factory_signed(text),
+            )
             .await
             .map_err(documents)
     }

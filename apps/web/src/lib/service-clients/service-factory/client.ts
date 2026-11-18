@@ -15,6 +15,7 @@ import {
   getGetFactoryStandingRulesUrl,
   getListFactoryFlowsUrl,
   getListFactoryTaskRunsUrl,
+  getListFactoryWaitingRunsUrl,
   getSetFactoryControlFilesUrl,
   getSetFactoryStandingRulesUrl,
 } from './generated/client';
@@ -29,6 +30,7 @@ import type {
   RunInsights,
   StandingRulesSettings,
   TaskRunsResponse,
+  WaitingRunsResponse,
 } from './generated/schemas';
 
 const host = () => SERVER_HOSTS.factory;
@@ -92,6 +94,14 @@ export const factoryClient = {
   listTaskRuns(taskId: string, signal?: AbortSignal) {
     return fetchWithToken<TaskRunsResponse>(
       `${host()}${getListFactoryTaskRunsUrl(encodeURIComponent(taskId))}`,
+      { method: 'GET', signal }
+    ).then((result) => result.map((data) => data.runs));
+  },
+
+  /** The caller's Runs that wait on them at a Gate, newest first. */
+  listWaitingRuns(signal?: AbortSignal) {
+    return fetchWithToken<WaitingRunsResponse>(
+      `${host()}${getListFactoryWaitingRunsUrl()}`,
       { method: 'GET', signal }
     ).then((result) => result.map((data) => data.runs));
   },

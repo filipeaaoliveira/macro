@@ -1691,3 +1691,52 @@ fn an_agent_teammates_computer_setup_names_the_agent() {
         "The computer couldn't be created on the host. Retry from Ada's row in Members."
     );
 }
+
+#[test]
+fn factory_gate_waiting_serializes_with_the_run_and_its_gate() {
+    let event: NotifEvent = serde_json::from_value(serde_json::json!({
+        "tag": "factory_gate_waiting",
+        "content": {
+            "runId": "00000000-0000-0000-0000-000000000001",
+            "seq": 4,
+            "taskId": "00000000-0000-0000-0000-000000000002",
+            "request": "Fix the login bug",
+            "question": "Send the review's Blockers to a fix?",
+        },
+    }))
+    .unwrap();
+    let NotifEvent::FactoryGateWaiting(metadata) = event else {
+        panic!("expected a factory gate notice, got {event:?}");
+    };
+    assert_eq!(metadata.asker, None);
+    assert_eq!(metadata.seq, 4);
+    assert_eq!(
+        metadata.format_title(None).unwrap(),
+        "A factory run waits on your answer"
+    );
+    assert_eq!(
+        metadata.format_body(None).unwrap(),
+        "Fix the login bug: Send the review's Blockers to a fix?"
+    );
+
+    let asked = FactoryGateWaitingMetadata {
+        asker: Some("planner".to_string()),
+        ..metadata
+    };
+    assert_eq!(
+        asked.format_title(None).unwrap(),
+        "The planner asks you a question"
+    );
+}
+
+#[test]
+fn a_factory_excerpt_is_one_line_cut_to_its_bound() {
+    assert_eq!(
+        FactoryGateWaitingMetadata::excerpt("Fix\n  the   login bug"),
+        "Fix the login bug"
+    );
+    let long = "word ".repeat(100);
+    let excerpt = FactoryGateWaitingMetadata::excerpt(&long);
+    assert_eq!(excerpt.chars().count(), 200);
+    assert!(excerpt.ends_with('…'));
+}

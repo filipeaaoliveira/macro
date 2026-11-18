@@ -641,6 +641,46 @@ impl RunRepository for PgRunRepository {
         rows.into_iter().map(Run::try_from).collect()
     }
 
+    #[tracing::instrument(err, skip(self, user_id))]
+    async fn list_waiting_runs(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        limit: u16,
+    ) -> Result<Vec<Run>, Self::Err> {
+        // `factory_run_user_open_idx` reads the person's Runs that have not
+        // ended, newest first; each is checked for an unanswered Gate by
+        // the Gates' primary key, until the limit. The timeout bounds the
+        // read all the same.
+        let mut transaction = self.pool.begin().await?;
+        sqlx::query!("SET LOCAL statement_timeout = '5s'")
+            .execute(&mut *transaction)
+            .await?;
+        let rows = sqlx::query_as!(
+            RunRow,
+            r#"
+            SELECT
+                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,
+                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,
+                standing_rules, standing_rules_source, standing_rules_project_id, outcome, ended_at
+            FROM factory_run r
+            WHERE r.user_id = $1
+                AND r.ended_at IS NULL
+                AND EXISTS (
+                    SELECT 1 FROM factory_gate g
+                    WHERE g.run_id = r.id AND g.answer IS NULL
+                )
+            ORDER BY r.created_at DESC, r.id DESC
+            LIMIT $2
+            "#,
+            user_id.as_ref(),
+            i64::from(limit),
+        )
+        .fetch_all(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        rows.into_iter().map(Run::try_from).collect()
+    }
+
     #[tracing::instrument(err, skip(self, ids), fields(runs = ids.len()))]
     async fn list_runs_steps(
         &self,

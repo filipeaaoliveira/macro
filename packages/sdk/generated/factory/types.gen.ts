@@ -478,9 +478,10 @@ export type NamedCount = {
 
 /**
  * A workspace's Orchestrator Definition: which kinds of Gate the factory
- * decides on its own. A kind left off waits for a person, as every Gate
- * did before Standing Rules. Whatever it says, a Tampered Run's Gates and
- * a merge through a Main Hold stay a person's.
+ * decides on its own, and whether the Gates it leaves go to the Run's
+ * owner. A kind left off waits for a person, as every Gate did before
+ * Standing Rules. Whatever it says, a Tampered Run's Gates and a merge
+ * through a Main Hold stay a person's.
  */
 export type OrchestratorDefinition = {
     /**
@@ -494,6 +495,16 @@ export type OrchestratorDefinition = {
      * no Main Hold (`merge_when_green`).
      */
     merge: boolean;
+    /**
+     * The owner section: a Gate no rule answers goes to the Run's owner.
+     * They are notified, and the Gate is listed as waiting on them; a
+     * review round whose Blockers are the round before's, unchanged after
+     * a rule sent those to a fix, waits for them rather than another fix;
+     * and what they comment on the Run's task once a Gate opened reaches
+     * the next agent Step. Off, the factory leaves those Gates waiting as
+     * before. A definition sent without it has it off.
+     */
+    ownerGates?: boolean;
     /**
      * Approve the plan Gate (`approve_plan`).
      */
@@ -1100,6 +1111,17 @@ export type UsageInsight = {
     tokens: TokenCounts;
 };
 
+/**
+ * The caller's Runs that wait on them.
+ */
+export type WaitingRunsResponse = {
+    /**
+     * The caller's Runs that have not ended and wait on a Gate no one
+     * answered yet, newest first: at most the newest 50.
+     */
+    runs: Array<RunDetail>;
+};
+
 export type ListFactoryFlowsData = {
     body?: never;
     path?: never;
@@ -1205,6 +1227,28 @@ export type CreateFactoryRunResponses = {
 };
 
 export type CreateFactoryRunResponse = CreateFactoryRunResponses[keyof CreateFactoryRunResponses];
+
+export type ListFactoryWaitingRunsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/runs/waiting';
+};
+
+export type ListFactoryWaitingRunsErrors = {
+    400: ErrorResponse;
+    401: ErrorResponse;
+    403: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type ListFactoryWaitingRunsError = ListFactoryWaitingRunsErrors[keyof ListFactoryWaitingRunsErrors];
+
+export type ListFactoryWaitingRunsResponses = {
+    200: WaitingRunsResponse;
+};
+
+export type ListFactoryWaitingRunsResponse = ListFactoryWaitingRunsResponses[keyof ListFactoryWaitingRunsResponses];
 
 export type GetFactoryRunData = {
     body?: never;

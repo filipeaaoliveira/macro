@@ -21,6 +21,7 @@ import type {
   SetStandingRulesRequest,
   StandingRulesSettings,
   TaskRunsResponse,
+  WaitingRunsResponse,
 } from './schemas';
 
 /**
@@ -320,6 +321,77 @@ export const createFactoryRun = async (
     status: res.status,
     headers: res.headers,
   } as createFactoryRunResponse;
+};
+
+/**
+ * @summary List the caller's Runs that wait on them at a Gate no one answered
+yet, a Flow's Gate no Standing Rule answered or an agent's question,
+newest first, each with the Steps it took.
+ */
+export type listFactoryWaitingRunsResponse200 = {
+  data: WaitingRunsResponse;
+  status: 200;
+};
+
+export type listFactoryWaitingRunsResponse400 = {
+  data: ErrorResponse;
+  status: 400;
+};
+
+export type listFactoryWaitingRunsResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type listFactoryWaitingRunsResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type listFactoryWaitingRunsResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type listFactoryWaitingRunsResponseSuccess =
+  listFactoryWaitingRunsResponse200 & {
+    headers: Headers;
+  };
+export type listFactoryWaitingRunsResponseError = (
+  | listFactoryWaitingRunsResponse400
+  | listFactoryWaitingRunsResponse401
+  | listFactoryWaitingRunsResponse403
+  | listFactoryWaitingRunsResponse500
+) & {
+  headers: Headers;
+};
+
+export type listFactoryWaitingRunsResponse =
+  | listFactoryWaitingRunsResponseSuccess
+  | listFactoryWaitingRunsResponseError;
+
+export const getListFactoryWaitingRunsUrl = () => {
+  return `/runs/waiting`;
+};
+
+export const listFactoryWaitingRuns = async (
+  options?: RequestInit
+): Promise<listFactoryWaitingRunsResponse> => {
+  const res = await fetch(getListFactoryWaitingRunsUrl(), {
+    ...options,
+    method: 'GET',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: listFactoryWaitingRunsResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as listFactoryWaitingRunsResponse;
 };
 
 /**

@@ -9,6 +9,7 @@ pub mod control_files;
 pub(crate) mod fakes;
 pub mod flow;
 pub mod gate;
+pub mod gate_owner;
 pub mod insights;
 pub mod interpreter;
 pub mod main_hold;

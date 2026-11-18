@@ -308,6 +308,65 @@
         }
       }
     },
+    "/runs/waiting": {
+      "get": {
+        "tags": ["factory"],
+        "summary": "List the caller's Runs that wait on them at a Gate no one answered\nyet, a Flow's Gate no Standing Rule answered or an agent's question,\nnewest first, each with the Steps it took.",
+        "operationId": "list_factory_waiting_runs",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WaitingRunsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/runs/{id}": {
       "get": {
         "tags": ["factory"],
@@ -1726,7 +1785,7 @@
       },
       "OrchestratorDefinition": {
         "type": "object",
-        "description": "A workspace's Orchestrator Definition: which kinds of Gate the factory\ndecides on its own. A kind left off waits for a person, as every Gate\ndid before Standing Rules. Whatever it says, a Tampered Run's Gates and\na merge through a Main Hold stay a person's.",
+        "description": "A workspace's Orchestrator Definition: which kinds of Gate the factory\ndecides on its own, and whether the Gates it leaves go to the Run's\nowner. A kind left off waits for a person, as every Gate did before\nStanding Rules. Whatever it says, a Tampered Run's Gates and a merge\nthrough a Main Hold stay a person's.",
         "required": ["plan", "blockers", "merge"],
         "properties": {
           "blockers": {
@@ -1736,6 +1795,10 @@
           "merge": {
             "type": "boolean",
             "description": "Merge once CI is green, nothing is Tampered and the base branch has\nno Main Hold (`merge_when_green`)."
+          },
+          "ownerGates": {
+            "type": "boolean",
+            "description": "The owner section: a Gate no rule answers goes to the Run's owner.\nThey are notified, and the Gate is listed as waiting on them; a\nreview round whose Blockers are the round before's, unchanged after\na rule sent those to a fix, waits for them rather than another fix;\nand what they comment on the Run's task once a Gate opened reaches\nthe next agent Step. Off, the factory leaves those Gates waiting as\nbefore. A definition sent without it has it off."
           },
           "plan": {
             "type": "boolean",
@@ -2654,6 +2717,20 @@
           "tokens": {
             "$ref": "#/components/schemas/TokenCounts",
             "description": "What they used, summed."
+          }
+        }
+      },
+      "WaitingRunsResponse": {
+        "type": "object",
+        "description": "The caller's Runs that wait on them.",
+        "required": ["runs"],
+        "properties": {
+          "runs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunDetail"
+            },
+            "description": "The caller's Runs that have not ended and wait on a Gate no one\nanswered yet, newest first: at most the newest 50."
           }
         }
       }

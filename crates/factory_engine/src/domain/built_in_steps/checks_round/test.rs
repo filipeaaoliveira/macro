@@ -294,6 +294,7 @@ fn input() -> StepInput<'static> {
         may_ask: false,
         questions_left: 0,
         resumes: None,
+        owner_notes: &[],
     }
 }
 

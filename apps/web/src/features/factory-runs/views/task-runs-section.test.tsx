@@ -93,6 +93,11 @@ function mount(
       data: () => (options.listState?.() === 'error' ? undefined : list()),
       retry: options.retry ?? vi.fn(),
     }),
+    waitingRuns: () => ({
+      state: () => 'ready',
+      data: () => [],
+      retry: vi.fn(),
+    }),
     run: (runId: Accessor<string>) => {
       openedRuns.push(runId());
       return {

@@ -60,7 +60,9 @@ worker that walks each Run's Flow, in one process.
   `{"definition": {"plan": true, "blockers": true, "merge": false}}` sets
   the team's, `{"definition": null}` goes back to the default, and `PUT
   /settings/standing-rules/projects/<initiative id>` sets or removes a
-  Project's own, the same way.
+  Project's own, the same way; `"ownerGates": true` in a definition turns
+  its owner section on. `GET /runs/waiting` lists the caller's Runs
+  waiting at a Gate.
 
 ## Gotchas
 
@@ -149,6 +151,17 @@ worker that walks each Run's Flow, in one process.
   through `POST /documents/{id}/comments/text`, as the Run's owner with the
   internal key, so the service needs that service's public routes reachable
   at `DocumentStorageServiceUrl`.
+- A Gate left for a person, on a Run whose owner section is on, notifies
+  its owner through the notification ingress queue
+  (`NotificationIngressQueue`, over SQS as every Macro producer), so the
+  service needs `sqs:SendMessage` on it once it deploys. An answered Gate's
+  notification is marked done through the notifications' reader over
+  MacroDB, which queues the push's clearing on `NotificationQueue`, so it
+  needs `sqs:SendMessage` there too; the owner's
+  comments on the Run's task are read through document storage's
+  `/messages/document/{id}` routes with `DOCUMENT_STORAGE_SERVICE_AUTH_KEY`,
+  as the owner. Deploy `notification_service` and `document_storage_service`
+  with the `factory_gate_waiting` kind before a factory that sends it.
 - An operator clears a Main Hold no look can clear: `POST
   http://localhost:8113/internal/main-holds/clear` with the
   `x-internal-auth-key` header and `{"repoUrl":

@@ -788,6 +788,14 @@ export const factoryInsightsRoute = defineRoute({
   path: 'factory/insights',
 });
 
+/** One of the person's factory Runs, opened over their insights. */
+export const factoryRunRoute = defineRoute({
+  id: 'view-factory-run',
+  path: 'factory/runs/:runId',
+  params: z.object({ runId: z.string().uuid() }),
+  remountKey: ({ runId }) => runId,
+});
+
 export const bookingLinksRoute = defineRoute({
   id: 'view-booking-links',
   path: 'scheduling',

@@ -36,6 +36,7 @@ export function getNotificationSenderFallbackName(
     .with('routine_run_finished', () => content?.routineName)
     .with('agent_sign_in_expiry', () => content?.computerName)
     .with('computer_setup', () => content?.agent?.name ?? content?.computerName)
+    .with('factory_gate_waiting', () => 'Macro')
     .with(
       'agent_session_settled',
       'agent_session_waiting_for_input',

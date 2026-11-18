@@ -120,6 +120,7 @@ const CATEGORY_BY_EVENT: Record<
   inbox_reauth_required: 'other',
   agent_sign_in_expiry: 'other',
   computer_setup: 'other',
+  factory_gate_waiting: 'tasks',
   github_pr_status_changed: 'other',
   github_pr_check_run: 'other',
   github_review_requested: 'other',

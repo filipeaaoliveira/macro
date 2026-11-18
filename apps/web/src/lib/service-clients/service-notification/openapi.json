@@ -2194,6 +2194,40 @@
         "description": "The messaging service an external chat lives in.",
         "enum": ["whatsapp"]
       },
+      "FactoryGateWaitingMetadata": {
+        "type": "object",
+        "description": "A factory Run waits on its owner at a Gate. The notification is about\nthe Run's task, and opens the Run, where the owner answers the Gate.",
+        "required": ["runId", "seq", "taskId", "request", "question"],
+        "properties": {
+          "asker": {
+            "type": ["string", "null"],
+            "description": "For an agent's question, the Role of the agent that asks; absent\nfor a Gate of the Run's Flow."
+          },
+          "question": {
+            "type": "string",
+            "description": "The start of the Gate's question."
+          },
+          "request": {
+            "type": "string",
+            "description": "The start of what the Run was asked to do."
+          },
+          "runId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The Run that waits."
+          },
+          "seq": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The place, among the Run's Steps, of the Step whose Gate waits.",
+            "minimum": 0
+          },
+          "taskId": {
+            "type": "string",
+            "description": "The task document the Run works on."
+          }
+        }
+      },
       "GetAllUserNotificationsResponse": {
         "type": "object",
         "description": "The strongly typed response for listing user notifications.",
@@ -3345,6 +3379,21 @@
               "tag": {
                 "type": "string",
                 "enum": ["runtime_access_removed"]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A factory Run the user owns waits on them at a Gate.",
+            "required": ["content", "tag"],
+            "properties": {
+              "content": {
+                "$ref": "#/components/schemas/FactoryGateWaitingMetadata",
+                "description": "A factory Run the user owns waits on them at a Gate."
+              },
+              "tag": {
+                "type": "string",
+                "enum": ["factory_gate_waiting"]
               }
             }
           }

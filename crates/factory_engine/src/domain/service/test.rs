@@ -24,6 +24,7 @@ use crate::domain::ports::{
 };
 
 mod control_files;
+mod gate_owner;
 mod standing_rules;
 
 /// Keeps what it was sent. Refuses every answer when `refuse` is set; a
@@ -82,12 +83,13 @@ impl RunWorkflows for FakeWorkflows {
 
 /// Serves `reply`, which ends `done` with a fixed output, or fails with
 /// `failure` when it is set, and keeps the places of the earlier Steps each
-/// run was given.
+/// run was given, and the owner's notes it was given.
 #[derive(Clone)]
 struct FakeExecutor {
     output: String,
     failure: Option<WorkFailure>,
     given: Arc<Mutex<Vec<Vec<u16>>>>,
+    noted: Arc<Mutex<Vec<Vec<String>>>>,
     /// Whether it serves every Step, not only `reply`.
     serves_all: bool,
 }
@@ -98,6 +100,7 @@ impl Default for FakeExecutor {
             output: "Replied".to_string(),
             failure: None,
             given: Arc::default(),
+            noted: Arc::default(),
             serves_all: false,
         }
     }
@@ -129,6 +132,12 @@ impl StepExecutor for FakeExecutor {
         }
         let earlier = input.earlier.iter().map(|step| step.seq).collect();
         self.given.lock().expect("given").push(earlier);
+        let notes = input
+            .owner_notes
+            .iter()
+            .map(|note| note.text.clone())
+            .collect();
+        self.noted.lock().expect("noted").push(notes);
         Ok(StepReport {
             outcome: Outcome::done(),
             output: self.output.clone(),

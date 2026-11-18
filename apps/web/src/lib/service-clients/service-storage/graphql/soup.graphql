@@ -575,6 +575,14 @@ fragment SoupNotificationNavigationMetadataFields on GraphqlNotifEvent {
 			name
 		}
 	}
+	... on GraphqlFactoryGateWaitingMetadata {
+		factoryGateWaitingRunId: runId
+		factoryGateWaitingSeq: seq
+		factoryGateWaitingTaskId: taskId
+		factoryGateWaitingRequest: request
+		factoryGateWaitingQuestion: question
+		factoryGateWaitingAsker: asker
+	}
 	... on GraphqlCommentedOnDocumentMetadata {
 		commentedOnDocumentDocumentName: documentName
 		commentedOnDocumentOwner: owner

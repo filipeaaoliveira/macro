@@ -290,6 +290,8 @@ export const listTypedNotificationsResponseItemsItemNotificationMetadataContentT
 
 export const listTypedNotificationsResponseItemsItemNotificationMetadataContentTurnMinOne = 0;
 
+export const listTypedNotificationsResponseItemsItemNotificationMetadataContentSeqMin = 0;
+
 export const listTypedNotificationsResponse = zod
   .object({
     items: zod
@@ -2461,6 +2463,45 @@ export const listTypedNotificationsResponse = zod
                     .describe(
                       "A runtime's owner removed the user's access to it, and agents of\ntheirs living there stopped."
                     ),
+                  zod
+                    .object({
+                      content: zod
+                        .object({
+                          asker: zod
+                            .string()
+                            .nullish()
+                            .describe(
+                              "For an agent's question, the Role of the agent that asks; absent\nfor a Gate of the Run's Flow."
+                            ),
+                          question: zod
+                            .string()
+                            .describe("The start of the Gate's question."),
+                          request: zod
+                            .string()
+                            .describe(
+                              'The start of what the Run was asked to do.'
+                            ),
+                          runId: zod.uuid().describe('The Run that waits.'),
+                          seq: zod
+                            .number()
+                            .min(
+                              listTypedNotificationsResponseItemsItemNotificationMetadataContentSeqMin
+                            )
+                            .describe(
+                              "The place, among the Run's Steps, of the Step whose Gate waits."
+                            ),
+                          taskId: zod
+                            .string()
+                            .describe('The task document the Run works on.'),
+                        })
+                        .describe(
+                          "A factory Run waits on its owner at a Gate. The notification is about\nthe Run's task, and opens the Run, where the owner answers the Gate."
+                        ),
+                      tag: zod.enum(['factory_gate_waiting']),
+                    })
+                    .describe(
+                      'A factory Run the user owns waits on them at a Gate.'
+                    ),
                 ])
                 .describe(
                   'Mirrors [`model_notifications::NotificationEvent`] but uses `tag` \/ `content`\nas the serde adjacently-tagged field names so it can be deserialized from the\nshape produced by [`UserNotificationRow::into_tagged`] +\n[`UserNotificationRow::into_json`].\n\nOnly includes variants whose metadata types implement the `Notification` trait.'
@@ -2598,6 +2639,8 @@ export const bulkGetTypedNotificationsByEventItemIdsResponseItemsItemNotificatio
 export const bulkGetTypedNotificationsByEventItemIdsResponseItemsItemNotificationMetadataContentTurnMin = 0;
 
 export const bulkGetTypedNotificationsByEventItemIdsResponseItemsItemNotificationMetadataContentTurnMinOne = 0;
+
+export const bulkGetTypedNotificationsByEventItemIdsResponseItemsItemNotificationMetadataContentSeqMin = 0;
 
 export const bulkGetTypedNotificationsByEventItemIdsResponse = zod
   .object({
@@ -4770,6 +4813,45 @@ export const bulkGetTypedNotificationsByEventItemIdsResponse = zod
                     .describe(
                       "A runtime's owner removed the user's access to it, and agents of\ntheirs living there stopped."
                     ),
+                  zod
+                    .object({
+                      content: zod
+                        .object({
+                          asker: zod
+                            .string()
+                            .nullish()
+                            .describe(
+                              "For an agent's question, the Role of the agent that asks; absent\nfor a Gate of the Run's Flow."
+                            ),
+                          question: zod
+                            .string()
+                            .describe("The start of the Gate's question."),
+                          request: zod
+                            .string()
+                            .describe(
+                              'The start of what the Run was asked to do.'
+                            ),
+                          runId: zod.uuid().describe('The Run that waits.'),
+                          seq: zod
+                            .number()
+                            .min(
+                              bulkGetTypedNotificationsByEventItemIdsResponseItemsItemNotificationMetadataContentSeqMin
+                            )
+                            .describe(
+                              "The place, among the Run's Steps, of the Step whose Gate waits."
+                            ),
+                          taskId: zod
+                            .string()
+                            .describe('The task document the Run works on.'),
+                        })
+                        .describe(
+                          "A factory Run waits on its owner at a Gate. The notification is about\nthe Run's task, and opens the Run, where the owner answers the Gate."
+                        ),
+                      tag: zod.enum(['factory_gate_waiting']),
+                    })
+                    .describe(
+                      'A factory Run the user owns waits on them at a Gate.'
+                    ),
                 ])
                 .describe(
                   'Mirrors [`model_notifications::NotificationEvent`] but uses `tag` \/ `content`\nas the serde adjacently-tagged field names so it can be deserialized from the\nshape produced by [`UserNotificationRow::into_tagged`] +\n[`UserNotificationRow::into_json`].\n\nOnly includes variants whose metadata types implement the `Notification` trait.'
@@ -4857,6 +4939,8 @@ export const getTypedNotificationsByEventItemIdResponseItemsItemNotificationMeta
 export const getTypedNotificationsByEventItemIdResponseItemsItemNotificationMetadataContentTurnMin = 0;
 
 export const getTypedNotificationsByEventItemIdResponseItemsItemNotificationMetadataContentTurnMinOne = 0;
+
+export const getTypedNotificationsByEventItemIdResponseItemsItemNotificationMetadataContentSeqMin = 0;
 
 export const getTypedNotificationsByEventItemIdResponse = zod
   .object({
@@ -7029,6 +7113,45 @@ export const getTypedNotificationsByEventItemIdResponse = zod
                     .describe(
                       "A runtime's owner removed the user's access to it, and agents of\ntheirs living there stopped."
                     ),
+                  zod
+                    .object({
+                      content: zod
+                        .object({
+                          asker: zod
+                            .string()
+                            .nullish()
+                            .describe(
+                              "For an agent's question, the Role of the agent that asks; absent\nfor a Gate of the Run's Flow."
+                            ),
+                          question: zod
+                            .string()
+                            .describe("The start of the Gate's question."),
+                          request: zod
+                            .string()
+                            .describe(
+                              'The start of what the Run was asked to do.'
+                            ),
+                          runId: zod.uuid().describe('The Run that waits.'),
+                          seq: zod
+                            .number()
+                            .min(
+                              getTypedNotificationsByEventItemIdResponseItemsItemNotificationMetadataContentSeqMin
+                            )
+                            .describe(
+                              "The place, among the Run's Steps, of the Step whose Gate waits."
+                            ),
+                          taskId: zod
+                            .string()
+                            .describe('The task document the Run works on.'),
+                        })
+                        .describe(
+                          "A factory Run waits on its owner at a Gate. The notification is about\nthe Run's task, and opens the Run, where the owner answers the Gate."
+                        ),
+                      tag: zod.enum(['factory_gate_waiting']),
+                    })
+                    .describe(
+                      'A factory Run the user owns waits on them at a Gate.'
+                    ),
                 ])
                 .describe(
                   'Mirrors [`model_notifications::NotificationEvent`] but uses `tag` \/ `content`\nas the serde adjacently-tagged field names so it can be deserialized from the\nshape produced by [`UserNotificationRow::into_tagged`] +\n[`UserNotificationRow::into_json`].\n\nOnly includes variants whose metadata types implement the `Notification` trait.'
@@ -7125,6 +7248,8 @@ export const getTypedNotificationByIdResponseNotificationMetadataContentReviewGi
 export const getTypedNotificationByIdResponseNotificationMetadataContentTurnMin = 0;
 
 export const getTypedNotificationByIdResponseNotificationMetadataContentTurnMinOne = 0;
+
+export const getTypedNotificationByIdResponseNotificationMetadataContentSeqMin = 0;
 
 export const getTypedNotificationByIdResponse = zod
   .object({
@@ -9116,6 +9241,41 @@ export const getTypedNotificationByIdResponse = zod
             .describe(
               "A runtime's owner removed the user's access to it, and agents of\ntheirs living there stopped."
             ),
+          zod
+            .object({
+              content: zod
+                .object({
+                  asker: zod
+                    .string()
+                    .nullish()
+                    .describe(
+                      "For an agent's question, the Role of the agent that asks; absent\nfor a Gate of the Run's Flow."
+                    ),
+                  question: zod
+                    .string()
+                    .describe("The start of the Gate's question."),
+                  request: zod
+                    .string()
+                    .describe('The start of what the Run was asked to do.'),
+                  runId: zod.uuid().describe('The Run that waits.'),
+                  seq: zod
+                    .number()
+                    .min(
+                      getTypedNotificationByIdResponseNotificationMetadataContentSeqMin
+                    )
+                    .describe(
+                      "The place, among the Run's Steps, of the Step whose Gate waits."
+                    ),
+                  taskId: zod
+                    .string()
+                    .describe('The task document the Run works on.'),
+                })
+                .describe(
+                  "A factory Run waits on its owner at a Gate. The notification is about\nthe Run's task, and opens the Run, where the owner answers the Gate."
+                ),
+              tag: zod.enum(['factory_gate_waiting']),
+            })
+            .describe('A factory Run the user owns waits on them at a Gate.'),
         ])
         .describe(
           'Mirrors [`model_notifications::NotificationEvent`] but uses `tag` \/ `content`\nas the serde adjacently-tagged field names so it can be deserialized from the\nshape produced by [`UserNotificationRow::into_tagged`] +\n[`UserNotificationRow::into_json`].\n\nOnly includes variants whose metadata types implement the `Notification` trait.'
