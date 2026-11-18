@@ -560,3 +560,59 @@ async fn delete_branch_refused_is_an_error() {
     );
     forbidden.finish();
 }
+
+/// Each part of a branch's name is encoded, its slashes kept.
+#[tokio::test]
+async fn delete_branch_encodes_each_part_of_the_name() {
+    let (server, client) = answering("204 No Content", "");
+
+    client
+        .delete_branch("token", "macro", "app", "factory/ü#1")
+        .await
+        .unwrap();
+
+    assert!(
+        server
+            .finish()
+            .starts_with("DELETE /repos/macro/app/git/refs/heads/factory/%C3%BC%231 HTTP/1.1")
+    );
+}
+
+/// A name git would not take for a branch is refused before any request:
+/// `..` parts would otherwise move the deletion onto the repository.
+#[tokio::test]
+async fn delete_branch_refuses_a_name_git_would_not_take() {
+    // Nothing listens here: a request sent would fail as an outage.
+    let client = GithubOauthImpl::with_api_base_url("http://127.0.0.1:9".to_string());
+
+    for branch in [
+        "../../..",
+        "factory/..",
+        "factory/./run",
+        "factory//run",
+        "factory/run/",
+        "factory/.hidden",
+        "factory/run.lock",
+        "factory/run.",
+        "-factory",
+        "factory/a..b",
+        "factory/@{1}",
+        "@",
+        "",
+        "factory/a b",
+        "factory/a\tb",
+        "factory/a~1",
+        "factory/a^",
+        "factory/a:b",
+        "factory/a?",
+        "factory/a*",
+        "factory/a[b",
+        "factory\\run",
+    ] {
+        let refused = client.delete_branch("token", "macro", "app", branch).await;
+        assert!(
+            matches!(refused, Err(GithubError::Internal(_))),
+            "{branch:?}: {refused:?}"
+        );
+    }
+}

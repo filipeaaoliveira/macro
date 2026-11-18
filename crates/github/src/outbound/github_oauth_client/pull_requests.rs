@@ -1,7 +1,8 @@
 //! Calls that take a branch to a merged pull request as the user: what they
 //! may do with a repository, the pull request from a branch, opening one,
-//! the checks and statuses on its head, and deleting the branch once merged. Each read is one request for
-//! only what it needs, as they are read again and again while CI runs.
+//! the checks and statuses on its head, and deleting the branch once
+//! merged. Each read is one request for only what it needs, as they are
+//! read again and again while CI runs.
 //!
 //! A refusal GitHub answers is told apart from an outage: 401 is a token
 //! that no longer works ([`GithubError::ReauthenticationRequired`]), 403
@@ -36,6 +37,30 @@ const MAX_PAGES: usize = 10;
 
 /// GitHub's message for a branch it does not have, on a ref's deletion.
 const MISSING_REFERENCE: &str = "Reference does not exist";
+
+/// Whether git takes `branch` as a branch's name, by the rules of
+/// `git check-ref-format --branch`: no empty part and none that starts with
+/// `.` or ends with `.lock`, no `..` or `@{`, no control character, space,
+/// `~`, `^`, `:`, `?`, `*`, `[` or `\`, and not `@`, nor starting with `-`
+/// or ending with `.`.
+fn is_branch_name(branch: &str) -> bool {
+    const REFUSED: &[char] = &[' ', '~', '^', ':', '?', '*', '[', '\\'];
+
+    let refused_char = branch
+        .chars()
+        .any(|c| c.is_ascii_control() || REFUSED.contains(&c));
+    let refused_part = branch
+        .split('/')
+        .any(|part| part.is_empty() || part.starts_with('.') || part.ends_with(".lock"));
+    !branch.is_empty()
+        && branch != "@"
+        && !branch.starts_with('-')
+        && !branch.ends_with('.')
+        && !branch.contains("..")
+        && !branch.contains("@{")
+        && !refused_char
+        && !refused_part
+}
 
 /// What a refused read is, once throttling is ruled out.
 fn refusal(status: StatusCode) -> Option<GithubError> {
@@ -682,7 +707,8 @@ impl GithubOauthImpl {
 
     /// Deletes `branch` as the user: `true` once deleted, `false` when the
     /// repository has no such branch, as when it was deleted already.
-    /// GitHub refusing it, as for a protected branch, is an error.
+    /// GitHub refusing it, as for a protected branch, is an error, and so
+    /// is a name git would not take for a branch, which is never sent.
     #[tracing::instrument(skip(self, access_token), err)]
     pub async fn delete_branch(
         &self,
@@ -691,6 +717,14 @@ impl GithubOauthImpl {
         repo: &str,
         branch: &str,
     ) -> Result<bool, GithubError> {
+        // A part such as `..` would survive the encoding below and move the
+        // request off the branch's ref, onto the repository itself.
+        if !is_branch_name(branch) {
+            return Err(GithubError::Internal(anyhow::anyhow!(
+                "not a branch name: {branch:?}"
+            )));
+        }
+
         // GitHub names a branch's ref by its path: each part is encoded, its
         // slashes are not.
         let path = branch
