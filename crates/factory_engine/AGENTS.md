@@ -266,7 +266,9 @@ Benchmark lists frozen tasks on one repository, each pinning a
 and reads its default branch's head once, records a suite, and starts one
 trial Run of each task on the `benchmark` Flow (plan, then write, no Gate,
 no pull request), its branch made from the task's pinned commit or that
-head (kept on the trial, read into the prompt as `StepInput::base_commit`).
+head (kept on the trial, read into the prompt as `StepInput::base_commit`;
+the agent is told to branch from it, and scoring checks the pushed branch
+contains it, scoring a trial that left it 0).
 The Flow is `unattended`: its agents ask no question, a Step whose agent
 stops without a result fails, and it runs only as a trial, left out of
 `GET /flows`, live insights and live Scorers. A trial runs on its
@@ -1423,8 +1425,9 @@ every Run in flight replays as before.
 - Removing the `factory-scoring` patch breaks the replay of Runs that
   were scored once they ended (`plan_scored_judge_failed`); Runs that
   ended before it replay without it.
-- A worker older than `Flow::unattended` cannot read the `benchmark` Flow:
-  deploy every worker before the API starts a suite.
+- A worker older than `Flow::unattended` cannot read the `benchmark` Flow.
+  The API and the worker are one binary: add Benchmarks to
+  `FACTORY_EVALUATION` only after every pod runs this version.
 - Removing the `factory-gate-owner` patch breaks the replay of Runs that
   told their owner of a Gate; the histories recorded before it
   (`code_rules_fixed_then_merged`, `code_waiting_at_plan_gate_with_rules`,

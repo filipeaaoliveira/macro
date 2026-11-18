@@ -126,8 +126,9 @@ impl EvaluationRepository for FakeRepo {
 
     async fn delete_suite(&self, suite_id: Uuid) -> Result<(), FakeError> {
         let mut kept = self.evaluation.lock().expect("evaluation");
-        kept.suites.remove(&suite_id);
-        kept.trials.retain(|(suite, _), _| *suite != suite_id);
+        if !kept.trials.keys().any(|(suite, _)| *suite == suite_id) {
+            kept.suites.remove(&suite_id);
+        }
         Ok(())
     }
 

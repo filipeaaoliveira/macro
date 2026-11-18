@@ -63,7 +63,9 @@
 //! in `test.rs` with `FACTORY_RECORD_HISTORY` set:
 //! - `plan_scored_judge_failed`: a `plan` Run ends `success`, then a
 //!   sampled Scorer's judge fails on each of its three attempts, and the
-//!   Run ends as it would have.
+//!   Run ends as it would have. The file written was then stripped of its
+//!   null fields (recursively, with a JSON tool), which the history reads
+//!   as their defaults.
 //!
 //! Before changing what the workflow decides, record the histories it
 //! makes now beside these, so the change is checked against both.
