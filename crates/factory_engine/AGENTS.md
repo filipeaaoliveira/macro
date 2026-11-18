@@ -1203,7 +1203,27 @@ name (a built-in Flow it does not name is `UnknownFlow`), with its rules
 apply) and Control Files, and keeps the repository, the commit
 (`factory_run.definition_*`, `definition` in the Run API, which the Run view
 shows) and the Agents (`definition_agents`), which its agent Steps take
-(`SessionAgent::run_agents`) in place of `FACTORY_AGENTS`. Only the default
+(`SessionAgent::run_agents`, read and checked again for each Step, so a
+kept definition that no longer reads fails the Step, `DefinitionAgents`)
+in place of `FACTORY_AGENTS`. Every Run keeps the Flow it walks
+(`factory_run.flow_definition`) and whether it has a Gate of its own
+(`flow_asks`): a Gate's kind for the Orchestrator, whether a Run is at its
+merge, which entries name its pull request on the task thread, the replay
+measure's stand-in kinds and its Queue place before its first Gate are read
+from it (`built_in_flows::walked_flow`; a Run kept before falls back to the
+built-in Flow of its name). A Definition's Flow must merge only through a
+merge Gate (`Flow::check_merges`, which a test holds the built-in Flows
+to): a Gate on `ready_to_merge` or `merge` is of kind `merge`, a `merge` Gate is only on
+`ready_to_merge`, every way into `merge` is that Gate's `approve`, and the
+entry above `merge`, with no `next`, is that Gate's, never skipped and
+routing every other outcome; so the Orchestrator never approves a merge
+and only the `merge_when_green` rule merges without a person. A Run on its
+team's Definition repository adds the Definition's own files
+(`DEFINITION_FILE_PATTERNS`) to its Control Files. `GET
+/settings/definition` says whether the default branch takes changes only by
+pull request (`requiresPullRequest`, from its rulesets or, for its admins,
+its branch protection), and the Control Files and Standing Rules settings
+say a Definition is named (`definitionNamed`). Only the default
 branch is read, so a change reaches Runs once its pull request merges, and a
 Run started already, or a Run's own branch, never changes the rules it runs
 under. The team's Control Files and Standing Rules settings are refused
@@ -1428,12 +1448,13 @@ replaced; a person merges), which a test reads; `factory_definition_check`
   replays recorded histories, and gets new ones recorded beside them when
   the workflow changes.
 - A Run under a Factory Definition keeps its Agents, so a Definition that
-  renames an Agent changes only later Runs. Places that look a Flow up by
-  its entries rather than the Run's input (the Orchestrator's answerable
-  Gates, a Run at its merge, the Queue's `starting` list, Insights' Flow
-  filter, the replay measure) read the built-in Flows: a Definition Flow
-  whose entries share the built-in ids and Gates behaves the same, and one
-  with other entries leaves its Gates to a person there.
+  renames an Agent changes only later Runs. Insights orders a Flow's
+  entries by the built-in Flow of that name: a Definition's Flow of another
+  name lists its entries in no set order (display only).
+- Deploy every worker before the API starts Runs under a Definition: an
+  older worker cannot read a Run whose `standing_rules_source` is
+  `definition` (`RulesSource`), and fails the Step's activity, and it reads
+  Gate kinds from the built-in Flows rather than the Run's kept Flow.
 - Renaming or removing an Agent while its Steps run fails their retries
   (`UnknownAgent`: its model and instructions are gone), though stops and
   releases still reach their sessions through the recorded bot.

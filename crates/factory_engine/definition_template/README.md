@@ -18,6 +18,11 @@ the Definition it started with.
    settings (Factory Definition). Every member who starts Runs must be able
    to read the repository with the GitHub account they linked to Macro.
 
+While the team names a Definition, it is the only source of the team's
+Flows, Agents and rules. A Definition that does not read, or a repository a
+member cannot reach, starts no Run for them: the factory never falls back to
+its built-in Flows or the team's own settings. Team settings say why.
+
 ## The files
 
 | File | What it holds |
@@ -42,14 +47,14 @@ holds something shaped like one does not read.
   comments on the Run's task reach the next agent Step.
 - `taskThread`: a Run on a task posts its main updates to the task.
 
+A Run on this repository always counts this Definition's own files as
+Control Files: a person approves every change a Run makes to them.
+
 It leaves off:
 
 - `plan`: a person approves each plan.
 - `merge`: a person merges each pull request. Turn it on only once you trust
   the Flow's checks and review.
-A Run on this repository always counts this Definition's own files as
-Control Files: a person approves every change a Run makes to them.
-
 
 ## Check the Definition
 
