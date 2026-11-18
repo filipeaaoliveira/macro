@@ -7,13 +7,14 @@
 
 /**
  * The Queue limit: the most places a person may hold in their Queue
-for a new Run of theirs to start under this definition. A place is
-a Run of theirs waiting on them at a Gate or a question, or a Run
-of a Flow with a Gate that has not reached one yet. Once they hold
-that many, no new Run starts; Runs already going go on.
-None, and a definition sent without it, sets no limit. At most
-[`MAX_QUEUE_LIMIT`]. A Run does not keep it: it decides only
+under this definition. A place is a Run of theirs waiting on them at
+a Gate or a question, or a Run of a Flow with a Gate that has not
+reached one yet. A new Run of theirs starts only while they hold
+fewer places than the limit; Runs already going go on. None, and a
+definition sent without it, sets no limit. From [`MIN_QUEUE_LIMIT`]
+to [`MAX_QUEUE_LIMIT`]. A Run does not keep it: it decides only
 whether a Run starts, so a Run's rules read with none.
- * @minimum 0
+ * @minimum 1
+ * @maximum 1000
  */
 export type OrchestratorDefinitionQueueLimit = number | null;

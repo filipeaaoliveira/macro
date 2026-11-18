@@ -2765,8 +2765,9 @@
           "queueLimit": {
             "type": ["integer", "null"],
             "format": "int32",
-            "description": "The Queue limit: the most places a person may hold in their Queue\nfor a new Run of theirs to start under this definition. A place is\na Run of theirs waiting on them at a Gate or a question, or a Run\nof a Flow with a Gate that has not reached one yet. Once they hold\nthat many, no new Run starts; Runs already going go on.\nNone, and a definition sent without it, sets no limit. At most\n[`MAX_QUEUE_LIMIT`]. A Run does not keep it: it decides only\nwhether a Run starts, so a Run's rules read with none.",
-            "minimum": 0
+            "description": "The Queue limit: the most places a person may hold in their Queue\nunder this definition. A place is a Run of theirs waiting on them at\na Gate or a question, or a Run of a Flow with a Gate that has not\nreached one yet. A new Run of theirs starts only while they hold\nfewer places than the limit; Runs already going go on. None, and a\ndefinition sent without it, sets no limit. From [`MIN_QUEUE_LIMIT`]\nto [`MAX_QUEUE_LIMIT`]. A Run does not keep it: it decides only\nwhether a Run starts, so a Run's rules read with none.",
+            "maximum": 1000,
+            "minimum": 1
           },
           "standIn": {
             "$ref": "#/components/schemas/StandInKinds",
