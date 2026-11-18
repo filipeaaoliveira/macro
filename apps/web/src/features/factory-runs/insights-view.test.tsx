@@ -179,6 +179,7 @@ const judged: EvaluationInsights = {
           runs: 3,
           ended: 2,
           succeeded: 1,
+          fellBack: 0,
           scores: [],
         },
         {
@@ -187,6 +188,7 @@ const judged: EvaluationInsights = {
           runs: 2,
           ended: 2,
           succeeded: 2,
+          fellBack: 0,
           scores: [{ scorer: 'correctness', judged: 2, meanScore: 0.9 }],
         },
       ],
@@ -195,7 +197,6 @@ const judged: EvaluationInsights = {
   benchmarks: [
     {
       name: 'core',
-      repository: 'https://github.com/acme/widgets',
       tasks: ['typo'],
       scorers: ['correctness'],
     },
@@ -227,6 +228,8 @@ function mount(options: {
   state?: Accessor<'pending' | 'error' | 'ready'>;
   insights?: RunInsights;
   evaluation?: EvaluationInsights;
+  evaluationState?: Accessor<'pending' | 'error' | 'ready'>;
+  evaluationRetry?: () => void;
   retry?: () => void;
   openRunId?: Accessor<string | undefined>;
   queue?: RunsQueue;
@@ -244,9 +247,11 @@ function mount(options: {
       };
     },
     evaluation: () => ({
-      state: () => (options.evaluation ? 'ready' : 'pending'),
+      state:
+        options.evaluationState ??
+        (() => (options.evaluation ? 'ready' : 'pending')),
       data: () => options.evaluation,
-      retry: vi.fn(),
+      retry: options.evaluationRetry ?? vi.fn(),
       updating: () => false,
     }),
     flowNames: () => ({
@@ -434,6 +439,27 @@ describe('RunInsightsView', () => {
 
     fireEvent.click(trial);
     expect(await screen.findByText('No steps yet')).toBeTruthy();
+  });
+
+  it('holds a placeholder while the evaluation loads, and reads it again on Retry', () => {
+    mount({ insights: november });
+    expect(
+      screen.getByLabelText('Loading scorers, experiments and benchmarks…')
+    ).toBeTruthy();
+    cleanup();
+
+    const retry = vi.fn();
+    mount({
+      insights: november,
+      evaluationState: () => 'error',
+      evaluationRetry: retry,
+    });
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toContain(
+      'Scorers, experiments and benchmarks couldn’t be loaded'
+    );
+    fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }));
+    expect(retry).toHaveBeenCalledOnce();
   });
 
   it('opens the run a link names, and another link’s run in the same view', async () => {

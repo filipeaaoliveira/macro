@@ -1,4 +1,5 @@
 export default {
+  loading: 'Loading scorers, experiments and benchmarks…',
   loadFailed: 'Scorers, experiments and benchmarks couldn’t be loaded',
   // Scorers.
   scorers: 'Scorers',
@@ -20,6 +21,10 @@ export default {
   arm: 'Arm',
   armRuns: 'Runs',
   armSucceeded: 'Succeeded',
+  fellBack: {
+    one: '{{count}} run fell back to another agent',
+    other: '{{count}} runs fell back to another agent',
+  },
   definitionAgents: 'The agent definition’s agents',
   roleAgent: '{{role}}: {{agent}}',
   // Benchmarks.

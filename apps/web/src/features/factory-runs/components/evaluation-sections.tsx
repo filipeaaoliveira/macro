@@ -97,6 +97,11 @@ function ArmRow(props: { arm: ArmInsight }) {
         <span class="block text-xs font-normal text-ink-muted">
           {agentsLine(props.arm.agents)}
         </span>
+        <Show when={props.arm.fellBack > 0}>
+          <span class="block text-xs font-normal text-ink-muted">
+            {t('factoryEvaluation.fellBack', { count: props.arm.fellBack })}
+          </span>
+        </Show>
       </th>
       <td class="py-2 pr-3 tabular-nums">{props.arm.runs}</td>
       <td class="py-2 pr-3 tabular-nums">
