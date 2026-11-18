@@ -86,11 +86,15 @@ export function MergePullRequestButton(props: {
   const refusal = () => guard.mergeRefusal(url());
   const action = createMergePullRequestAction({
     onMerged: props.onMerged,
-    confirm: (target) =>
-      confirmMergePullRequest(
+    confirm: async (target) => {
+      const confirmed = await confirmMergePullRequest(
         { ...target, warning: guard.mergeWarning(url()) },
         owner
-      ),
+      );
+      // The guard may have learned the pull request is a Run's while the
+      // confirmation was open: it takes the merge then, as before.
+      return confirmed && !guard.merge(url());
+    },
   });
   const label = () => (action.pending() ? 'Merging…' : 'Merge');
   const Control = props.grouped ? ButtonGroup.Button : Button;

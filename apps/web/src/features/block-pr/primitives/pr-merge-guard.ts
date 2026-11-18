@@ -69,9 +69,16 @@ export function createGuardedPrActions(
     return at ? guard.mergeWarning(at) : undefined;
   };
   const actions = withMergeGuard(
-    createPrActions(detail, (target, owner) =>
-      confirmMerge({ ...target, warning: warning() }, owner)
-    ),
+    createPrActions(detail, async (target, owner) => {
+      const confirmed = await confirmMerge(
+        { ...target, warning: warning() },
+        owner
+      );
+      // The guard may have learned the pull request is a Run's while the
+      // confirmation was open: it takes the merge then, as before.
+      const at = url();
+      return confirmed && !(at && guard.merge(at));
+    }),
     url,
     guard
   );

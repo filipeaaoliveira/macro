@@ -297,6 +297,21 @@ describe('MergePullRequestButton', () => {
       expect(button.disabled).toBe(true);
     });
 
+    it('asks the guard again once the confirmation closes, and merges nothing it takes then', async () => {
+      vi.mocked(confirmDialog).mockResolvedValue(true);
+      // Left to GitHub when pressed; a Run's by the time it was confirmed.
+      const take = vi.fn().mockReturnValueOnce(false).mockReturnValue(true);
+      renderGuarded(guard({ merge: take }));
+
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Merge pull request #6369' })
+      );
+
+      await waitFor(() => expect(take).toHaveBeenCalledTimes(2));
+      expect(confirmDialog).toHaveBeenCalledOnce();
+      expect(authServiceClient.mergeGithubPullRequest).not.toHaveBeenCalled();
+    });
+
     it('leaves a merge the guard takes to it, and never asks GitHub', async () => {
       const take = vi.fn(() => true);
       renderGuarded(guard({ merge: take }));
