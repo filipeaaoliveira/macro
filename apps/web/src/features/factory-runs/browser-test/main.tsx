@@ -21,6 +21,8 @@ import { TaskRunsSection } from '../views/task-runs-section';
 // `touch:` styles key on this attribute, as the app shell sets it.
 document.documentElement.dataset.touchDevice = String(isTouchDevice());
 
+/** The person the fixture shows, who owns its Runs. */
+const FIXTURE_OWNER = 'macro|owner@example.com';
 const MINUTE = 60_000;
 
 // `?long-question` asks a Gate question long enough to fill a phone.
@@ -46,6 +48,7 @@ const INITIAL_RUNS: Run[] = [
   {
     id: 'run-waiting',
     request: 'Add a due date column to the task list\n\nSort by it too.',
+    ownerId: FIXTURE_OWNER,
     createdAt: at(12),
     taskId: 'task-1',
     steps: [
@@ -86,6 +89,7 @@ const INITIAL_RUNS: Run[] = [
   {
     id: 'run-running',
     request: 'Fix the empty state of the board',
+    ownerId: FIXTURE_OWNER,
     createdAt: at(40),
     taskId: 'task-1',
     steps: [
@@ -145,6 +149,7 @@ const INITIAL_RUNS: Run[] = [
   {
     id: 'run-done',
     request: 'Rename the Updated column',
+    ownerId: FIXTURE_OWNER,
     createdAt: at(60 * 26),
     taskId: 'task-1',
     end: { outcome: 'success', endedAt: at(60 * 25) },
@@ -161,6 +166,7 @@ const INITIAL_RUNS: Run[] = [
   {
     id: 'run-cancelled',
     request: 'Try a denser row layout',
+    ownerId: FIXTURE_OWNER,
     createdAt: at(60 * 24 * 3),
     taskId: 'task-1',
     end: { outcome: 'cancelled', endedAt: at(60 * 24 * 3 - 5) },
@@ -218,6 +224,7 @@ function createFixtureContext(): RunsContext {
   };
 
   return {
+    viewerId: () => FIXTURE_OWNER,
     taskRuns: () => ready(runs),
     waitingRuns: () => ready(() => ({ waiting: [], starting: [] })),
     run: (runId) => ready(() => runs().find((run) => run.id === runId())),
@@ -251,6 +258,7 @@ function createFixtureContext(): RunsContext {
       const run: Run = {
         id: `run-${runs().length + 1}`,
         request: input.request,
+        ownerId: FIXTURE_OWNER,
         createdAt: new Date().toISOString(),
         taskId: input.taskId,
         repository: input.repoUrl
