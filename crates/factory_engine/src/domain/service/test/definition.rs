@@ -1,16 +1,21 @@
 //! A team's Factory Definition: the Runs of its members start of its Flows,
 //! under its rules, and keep the commit they read it at.
 
-use factory_records::domain::models::{RunDefinition, TeamMembership};
+use factory_records::domain::models::{EntryId, RunDefinition, StepKey, TeamMembership};
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::standing_rules::{OrchestratorDefinition, RulesSource};
 use uuid::Uuid;
 
 use super::{FakeWorkflows, code_service, julia, teo};
+use crate::domain::built_in_steps::BuiltInSteps;
 use crate::domain::definition::DefinitionError;
-use crate::domain::fakes::{FakeGithub, FakeRepo};
-use crate::domain::models::FactoryError;
-use crate::domain::ports::FactoryService;
+use crate::domain::fakes::{FakeGithub, FakeRepo, FakeWatches};
+use crate::domain::flow::StepName;
+use crate::domain::models::{FactoryError, StepRequest};
+use crate::domain::ports::{FactoryService, StepService};
+use crate::domain::pull_request_steps::PullRequestSteps;
+use crate::domain::service::StepServiceImpl;
+use crate::outbound::local_agent::LocalAgent;
 
 const TEAM: Uuid = Uuid::from_u128(0x7ea4);
 
@@ -383,7 +388,7 @@ async fn a_run_on_the_definition_repository_guards_its_files() {
         .create_run(
             teo(),
             "change".to_string(),
-            "Change the rules".to_string(),
+            "Update rules.json".to_string(),
             None,
             Some("https://github.com/Macro/Factory-Definition".to_string()),
             true,
@@ -411,6 +416,41 @@ async fn a_run_on_the_definition_repository_guards_its_files() {
         elsewhere.run.control_file_patterns,
         Some(vec!["ci/**".to_string()])
     );
+
+    // Published through the worker's Steps, the Run's change to the file
+    // its request names in person is Tampered all the same.
+    github.state().changed = Some(vec!["rules.json".to_string()]);
+    let worker = StepServiceImpl::new(
+        repo.clone(),
+        BuiltInSteps::new(
+            LocalAgent,
+            PullRequestSteps::new(github.clone(), repo.clone(), FakeWatches::default()),
+        ),
+    );
+    let publish = StepRequest {
+        key: StepKey {
+            run_id: on_definition.run.id,
+            seq: 1,
+        },
+        entry: EntryId::try_from("publish".to_string()).expect("valid"),
+        step: StepName::try_from("publish".to_string()).expect("valid"),
+        role: None,
+        visit: 1,
+        round: None,
+        may_ask: false,
+        questions_left: 0,
+        resumes: None,
+    };
+    worker.run_step(publish).await.expect("published");
+    let kept = repo
+        .control_file_changes
+        .lock()
+        .expect("control files")
+        .get(&on_definition.run.id)
+        .cloned()
+        .expect("control files kept");
+    assert_eq!(kept.tampered, vec!["rules.json".to_string()]);
+    assert!(kept.named.is_empty());
 }
 
 /// A Run of a Definition's Flow that asks holds a place in its owner's
