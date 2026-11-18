@@ -674,6 +674,130 @@
         }
       }
     },
+    "/runs/{id}/steps/{seq}/reply": {
+      "post": {
+        "tags": ["factory"],
+        "summary": "Reply, as the caller, in words to the Gate one of their Runs waits on.\nThe factory reads the words as one of the Gate's answers, kept as its\nnote, or asks back on the Gate, which then still waits; an agent's\nquestion takes them as the answer. Reading the Run shows which. Only\nthe owner's own signed-in session replies (403 otherwise).",
+        "operationId": "reply_to_factory_gate",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The Run's id.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/RunId"
+            }
+          },
+          {
+            "name": "seq",
+            "in": "path",
+            "description": "The place, among the Run's Steps, of the Step whose Gate it answers.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplyToGateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/runs/{id}/task": {
       "put": {
         "tags": ["factory"],
@@ -1187,6 +1311,22 @@
           }
         }
       },
+      "AskedBack": {
+        "type": "object",
+        "description": "A reply the factory could not read as one of a Gate's answers, so it\nasked the person back.",
+        "required": ["reply", "at"],
+        "properties": {
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the factory asked back."
+          },
+          "reply": {
+            "type": "string",
+            "description": "The person's words."
+          }
+        }
+      },
       "CheckResult": {
         "type": "object",
         "description": "How one check of a verified round ran.",
@@ -1570,6 +1710,17 @@
             },
             "description": "The answers it offers, in the Flow's order."
           },
+          "askedBack": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AskedBack",
+                "description": "The latest reply the factory could not read as one of its answers,\nand asked back for; none when it never asked back."
+              }
+            ]
+          },
           "kind": {
             "$ref": "#/components/schemas/GateKind",
             "description": "Who asks it: the Flow, or the Step's agent."
@@ -1582,13 +1733,24 @@
           "question": {
             "type": "string",
             "description": "The question."
+          },
+          "standIn": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/StandInAnswer",
+                "description": "The stand-in's answer for the Run's owner, while the owner may\noverride it and after; none when the stand-in did not answer."
+              }
+            ]
           }
         }
       },
       "GateAnswer": {
         "type": "object",
-        "description": "The answer to a Gate: a person's, or a Standing Rule's (a Rule Answer).",
-        "required": ["answer", "answeredAt"],
+        "description": "The answer to a Gate: a person's, a Standing Rule's (a Rule Answer), or\nthe stand-in's for the Run's owner.",
+        "required": ["answer", "byStandIn", "answeredAt"],
         "properties": {
           "answer": {
             "$ref": "#/components/schemas/Outcome",
@@ -1606,9 +1768,19 @@
             },
             "description": "The Run's Tampered files the person approved with their answer: an\nempty list approves a Run whose changes GitHub could not list. None\nwhen the answer approved none."
           },
+          "byStandIn": {
+            "type": "boolean",
+            "description": "Whether the answer is the stand-in's, which the owner let stand\n([`Gate::stand_in`] says why it gave it)."
+          },
           "note": {
             "type": ["string", "null"],
             "description": "What the person added, for the Run's later Steps to read."
+          },
+          "replyConfidence": {
+            "type": ["integer", "null"],
+            "format": "int32",
+            "description": "For a person's answer the factory read from their words (kept as its\nnote), how sure it was, in percent; none for an answer given with a\nbutton, and for any answer not a person's.",
+            "minimum": 0
           },
           "rule": {
             "oneOf": [
@@ -1785,7 +1957,7 @@
       },
       "OrchestratorDefinition": {
         "type": "object",
-        "description": "A workspace's Orchestrator Definition: which kinds of Gate the factory\ndecides on its own, and whether the Gates it leaves go to the Run's\nowner. A kind left off waits for a person, as every Gate did before\nStanding Rules. Whatever it says, a Tampered Run's Gates and a merge\nthrough a Main Hold stay a person's.",
+        "description": "A workspace's Orchestrator Definition: which kinds of Gate the factory\ndecides on its own, whether the Gates it leaves go to the Run's owner,\nand which the stand-in answers for the Run's owner when no rule does. A\nkind left off waits for a person, as every Gate did before Standing\nRules. Whatever it says, a Tampered Run's Gates and a merge through a\nMain Hold stay a person's.",
         "required": ["plan", "blockers", "merge"],
         "properties": {
           "blockers": {
@@ -1803,6 +1975,10 @@
           "plan": {
             "type": "boolean",
             "description": "Approve the plan Gate (`approve_plan`)."
+          },
+          "standIn": {
+            "$ref": "#/components/schemas/StandInKinds",
+            "description": "The kinds of Gate the stand-in answers for the Run's owner, after\nthe rules and before the person; off for every kind when left out."
           }
         },
         "additionalProperties": false
@@ -1889,6 +2065,17 @@
             "type": "string",
             "format": "uuid",
             "description": "The Project: an initiative's id."
+          }
+        }
+      },
+      "ReplyToGateRequest": {
+        "type": "object",
+        "description": "Request body for replying to a Gate in words.",
+        "required": ["reply"],
+        "properties": {
+          "reply": {
+            "type": "string",
+            "description": "The person's words, in place of one of the Gate's answers."
           }
         }
       },
@@ -2462,6 +2649,48 @@
             ]
           }
         }
+      },
+      "StandInAnswer": {
+        "type": "object",
+        "description": "The stand-in's answer to a Gate, for the Run's owner: the answer it\ngives, why, and until when the owner may override it.",
+        "required": ["answer", "reason", "confidence", "until"],
+        "properties": {
+          "answer": {
+            "$ref": "#/components/schemas/Outcome",
+            "description": "Its answer, one the Gate offers."
+          },
+          "confidence": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How sure it was, in percent.",
+            "minimum": 0
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why, in a sentence or two."
+          },
+          "until": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Until when the owner may override it; then the Run goes on with it."
+          }
+        }
+      },
+      "StandInKinds": {
+        "type": "object",
+        "description": "The kinds of Gate the stand-in answers for the Run's owner: a small\nmodel that answers as the owner would, which the owner may override for\na short while. It never answers a merge Gate, so it has no setting for\none.",
+        "required": ["plan", "blockers"],
+        "properties": {
+          "blockers": {
+            "type": "boolean",
+            "description": "Answer a review round's Blockers Gate."
+          },
+          "plan": {
+            "type": "boolean",
+            "description": "Answer the plan Gate."
+          }
+        },
+        "additionalProperties": false
       },
       "StandingRule": {
         "type": "string",
