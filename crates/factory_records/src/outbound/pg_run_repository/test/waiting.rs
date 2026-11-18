@@ -40,14 +40,13 @@ async fn a_run_waits_on_its_owner_while_its_gate_is_open(pool: PgPool) {
     let theirs = RunId::generate();
     insert(&repo, theirs, "Plan the cutover").await;
     let teo = teo();
-    sqlx::query!(
-        "UPDATE factory_run SET user_id = $1 WHERE id = $2",
-        teo.as_ref(),
-        theirs.as_uuid(),
-    )
-    .execute(&pool)
-    .await
-    .expect("hand the run to teo");
+    // Checked at run time: a test query keeps no offline metadata.
+    sqlx::query("UPDATE factory_run SET user_id = $1 WHERE id = $2")
+        .bind(teo.as_ref())
+        .bind(theirs.as_uuid())
+        .execute(&pool)
+        .await
+        .expect("hand the run to teo");
     repo.start_step(key(theirs, 1), &entry("plan"), 1)
         .await
         .expect("start");

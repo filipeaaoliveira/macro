@@ -167,7 +167,8 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   initiative), and goes with either. Rules are stored as the Gate kinds
   they decide (`plan`, `blockers`, `merge`), and `owner_gates` when the
   definition's owner section is on (`OrchestratorDefinition::kinds`),
-  checked against those names.
+  checked against those names. A definition kept before the section has
+  none of it, and reads with it off.
 - `factory_run.standing_rules`, `standing_rules_source` and
   `standing_rules_project_id` are set once, by `insert_run`; all null for
   a Run created before Runs kept rules. `answer_gate_by_rule` records a
