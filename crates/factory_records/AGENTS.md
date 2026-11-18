@@ -190,8 +190,10 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   statement may get, cannot tell which filters are unset and reads and
   sorts every Run of the owners (on 280k Runs, 90 to 330 ms against 0.2 to
   0.5 ms). Where a Run is (`BoardState`) is read in the same query: its
-  outcome, an unanswered Gate, and for a Run whose latest Step is one of the
-  given merge entries, its base's Main Hold, each by primary key; it also
+  outcome, an unanswered Gate, and for a Run whose latest Step is at its
+  merge (an entry that runs `ready_to_merge` or `merge` in the Flow the Run
+  kept, in its own row; for a Run that kept none, one of the built-in merge
+  entries given), its base's Main Hold, each by primary key; it also
   reads whether its task is a live task (`task_live`: a task document, not
   trashed) and, only then, its name. A search reads the request and a live
   task's name with `ILIKE`, its `%`, `_` and `\` literal, and so reads
