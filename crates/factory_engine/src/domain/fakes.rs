@@ -1294,6 +1294,7 @@ impl RunRepository for FakeRepo {
             run.end = Some(RunEnd {
                 outcome,
                 ended_at: Utc::now(),
+                flaw: None,
             });
             // A cancelled Run's open Steps end with it.
             if outcome == RunOutcome::Cancelled {

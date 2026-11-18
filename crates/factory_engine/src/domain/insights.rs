@@ -118,10 +118,16 @@ pub struct OutcomeCounts {
     pub manual: u32,
     /// Runs that ran out of visits, or of Steps, with nowhere to go.
     pub blocked: u32,
-    /// Runs that ended failed.
+    /// Runs that ended failed for their work.
     pub failed: u32,
     /// Runs a person cancelled.
     pub cancelled: u32,
+    /// Runs that failed for a machine, quota or network reason: the
+    /// factory's plumbing, not its work.
+    pub infrastructure: u32,
+    /// Runs that succeeded, and whose result a Scorer or a person found
+    /// wrong afterwards.
+    pub flawed: u32,
 }
 
 impl OutcomeCounts {
@@ -133,6 +139,8 @@ impl OutcomeCounts {
             Some(RunOutcome::Blocked) => &mut self.blocked,
             Some(RunOutcome::Failed) => &mut self.failed,
             Some(RunOutcome::Cancelled) => &mut self.cancelled,
+            Some(RunOutcome::Infrastructure) => &mut self.infrastructure,
+            Some(RunOutcome::Flawed) => &mut self.flawed,
         };
         *count += 1;
     }
@@ -652,4 +660,6 @@ fn total(counts: &OutcomeCounts) -> u32 {
         + counts.blocked
         + counts.failed
         + counts.cancelled
+        + counts.infrastructure
+        + counts.flawed
 }

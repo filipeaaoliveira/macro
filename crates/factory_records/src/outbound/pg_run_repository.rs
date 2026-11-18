@@ -2,6 +2,7 @@
 
 mod automations;
 mod check_rounds;
+mod flaws;
 mod gate_replies;
 mod insights;
 mod main_hold;
@@ -29,6 +30,7 @@ use crate::domain::models::{
 };
 use crate::domain::ports::RunRepository;
 use crate::domain::standing_rules::{OrchestratorDefinition, RulesSource, RunRules, StandingRule};
+use flaws::run_flaw;
 
 /// The foreign key from a Run to its task document.
 const TASK_FOREIGN_KEY: &str = "factory_run_task_id_fkey";
@@ -151,6 +153,10 @@ pub enum PgRunRepositoryErr {
     /// A stored Run or Step has only part of its end.
     #[error("a stored end has an outcome but no time, or the other way round")]
     PartialEnd,
+    /// A stored Run's flaw lacks its reason or who marked it, or names
+    /// more than one marker.
+    #[error("a stored flaw has only part of its mark")]
+    PartialFlaw,
     /// A verified round's results do not read as each check's name, exit
     /// code and output.
     #[error("a round's check results do not read")]
@@ -234,18 +240,29 @@ struct RunRow {
     automation_trigger: Option<String>,
     outcome: Option<String>,
     ended_at: Option<DateTime<Utc>>,
+    flawed_at: Option<DateTime<Utc>>,
+    flawed_by_user_id: Option<String>,
+    flawed_by_scorer: Option<String>,
+    flaw_reason: Option<String>,
 }
 
 impl TryFrom<RunRow> for Run {
     type Error = PgRunRepositoryErr;
 
     fn try_from(row: RunRow) -> Result<Self, Self::Error> {
+        let flaw = run_flaw(
+            row.flawed_at,
+            row.flawed_by_user_id,
+            row.flawed_by_scorer,
+            row.flaw_reason,
+        )?;
         let end = match (row.outcome, row.ended_at) {
             (Some(outcome), Some(ended_at)) => Some(RunEnd {
                 outcome: outcome
                     .parse::<RunOutcome>()
                     .map_err(|_| PgRunRepositoryErr::UnknownRunOutcome(outcome))?,
                 ended_at,
+                flaw,
             }),
             (None, None) => None,
             _ => return Err(PgRunRepositoryErr::PartialEnd),
@@ -609,7 +626,8 @@ impl RunRepository for PgRunRepository {
                 id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,
                 control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,
                 standing_rules, standing_rules_source, standing_rules_project_id,
-                automation_id, automation_name, automation_trigger, outcome, ended_at
+                automation_id, automation_name, automation_trigger, outcome, ended_at,
+                flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason
             "#,
             run.id.as_uuid(),
             run.flow,
@@ -839,7 +857,8 @@ impl RunRepository for PgRunRepository {
                 id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,
                 control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,
                 standing_rules, standing_rules_source, standing_rules_project_id,
-                automation_id, automation_name, automation_trigger, outcome, ended_at
+                automation_id, automation_name, automation_trigger, outcome, ended_at,
+                flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason
             FROM factory_run
             WHERE id = $1
             "#,
@@ -935,7 +954,8 @@ impl RunRepository for PgRunRepository {
                 id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,
                 control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,
                 standing_rules, standing_rules_source, standing_rules_project_id,
-                automation_id, automation_name, automation_trigger, outcome, ended_at
+                automation_id, automation_name, automation_trigger, outcome, ended_at,
+                flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason
             FROM factory_run
             WHERE task_id = $1 AND user_id = $2
             ORDER BY created_at DESC, id DESC
@@ -972,7 +992,8 @@ impl RunRepository for PgRunRepository {
                 id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,
                 control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,
                 standing_rules, standing_rules_source, standing_rules_project_id,
-                automation_id, automation_name, automation_trigger, outcome, ended_at
+                automation_id, automation_name, automation_trigger, outcome, ended_at,
+                flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason
             FROM factory_run r
             WHERE r.user_id = $1
                 AND r.ended_at IS NULL
@@ -1017,7 +1038,8 @@ impl RunRepository for PgRunRepository {
                 id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,
                 control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,
                 standing_rules, standing_rules_source, standing_rules_project_id,
-                automation_id, automation_name, automation_trigger, outcome, ended_at
+                automation_id, automation_name, automation_trigger, outcome, ended_at,
+                flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason
             FROM factory_run r
             WHERE r.user_id = $1
                 AND r.ended_at IS NULL

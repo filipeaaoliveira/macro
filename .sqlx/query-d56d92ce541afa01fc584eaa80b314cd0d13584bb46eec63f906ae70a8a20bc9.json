@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason\n            FROM factory_run\n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "outcome",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "ended_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "flawed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "flawed_by_user_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "flawed_by_scorer",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "flaw_reason",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "d56d92ce541afa01fc584eaa80b314cd0d13584bb46eec63f906ae70a8a20bc9"
+}

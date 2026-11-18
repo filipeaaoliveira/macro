@@ -140,6 +140,7 @@ fn no_notice_without_the_owner_section_or_a_waiting_gate() {
         end: Some(RunEnd {
             outcome: RunOutcome::Cancelled,
             ended_at: Utc::now(),
+            flaw: None,
         }),
         ..run(true)
     };
