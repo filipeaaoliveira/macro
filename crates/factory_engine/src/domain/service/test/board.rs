@@ -204,7 +204,7 @@ async fn a_search_only_hidden_runs_match_reads_as_no_match() {
 }
 
 /// Past many hidden Runs, the page still lists the Runs the person sees
-/// behind them.
+/// behind them, asking which tasks they see once a round.
 #[tokio::test]
 async fn a_page_reads_past_hidden_runs() {
     let repo = FakeRepo::default();
@@ -231,6 +231,123 @@ async fn a_page_reads_past_hidden_runs() {
 
     assert_eq!(ids(&page), [own]);
     assert!(page.next.is_none());
+    // Two rounds, one check: the second round's task was decided.
+    assert_eq!(*repo.view_checks.lock().expect("checks"), 1);
+}
+
+/// Pages of two across rounds of hidden Runs list every Run the person
+/// sees once, newest first.
+#[tokio::test]
+async fn pages_across_rounds_skip_and_repeat_no_run() {
+    let repo = FakeRepo::default();
+    let service = service(&repo, &FakeWorkflows::default());
+    on_team(&repo, &julia());
+    on_team(&repo, &teo());
+    let mut own = Vec::new();
+    for _ in 0..4 {
+        own.push(keep(&repo, &julia(), None).await);
+        for _ in 0..30 {
+            let hidden_task = task(&repo);
+            hide(&repo, &julia(), hidden_task);
+            keep(&repo, &teo(), Some(hidden_task)).await;
+        }
+    }
+    own.push(keep(&repo, &julia(), None).await);
+    own.reverse();
+
+    let mut listed = Vec::new();
+    let mut after = None;
+    loop {
+        let page = service
+            .board(
+                &julia(),
+                BoardFilter {
+                    limit: 2,
+                    after,
+                    ..filter(BoardScope::Team)
+                },
+            )
+            .await
+            .expect("board");
+        listed.extend(ids(&page));
+        match page.next {
+            Some(next) => after = Some(next),
+            None => break,
+        }
+    }
+
+    assert_eq!(listed, own);
+}
+
+/// More hidden Runs in a row than the rounds read end the page there:
+/// the older Run behind them is not listed, and no next page is named.
+#[tokio::test]
+async fn the_rounds_end_a_page_past_some_250_hidden_runs() {
+    let repo = FakeRepo::default();
+    let service = service(&repo, &FakeWorkflows::default());
+    on_team(&repo, &julia());
+    on_team(&repo, &teo());
+    let hidden_task = task(&repo);
+    hide(&repo, &julia(), hidden_task);
+    let _behind = keep(&repo, &julia(), None).await;
+    // Five rounds of fifty read 250 Runs.
+    for _ in 0..260 {
+        keep(&repo, &teo(), Some(hidden_task)).await;
+    }
+
+    let page = service
+        .board(
+            &julia(),
+            BoardFilter {
+                limit: 1,
+                ..filter(BoardScope::Team)
+            },
+        )
+        .await
+        .expect("board");
+
+    assert!(page.runs.is_empty());
+    assert!(page.next.is_none());
+}
+
+/// A board read again soon after asks no task view again.
+#[tokio::test]
+async fn a_board_read_again_soon_asks_no_task_view_again() {
+    let repo = FakeRepo::default();
+    let service = service(&repo, &FakeWorkflows::default());
+    on_team(&repo, &julia());
+    on_team(&repo, &teo());
+    let shared_task = task(&repo);
+    keep(&repo, &teo(), Some(shared_task)).await;
+
+    for _ in 0..2 {
+        let page = service
+            .board(&julia(), filter(BoardScope::Team))
+            .await
+            .expect("board");
+        assert_eq!(page.runs.len(), 1);
+    }
+
+    assert_eq!(*repo.view_checks.lock().expect("checks"), 1);
+}
+
+/// A team member's Run on a task that is no longer there is hidden.
+#[tokio::test]
+async fn a_run_on_a_trashed_task_is_hidden() {
+    let repo = FakeRepo::default();
+    let service = service(&repo, &FakeWorkflows::default());
+    on_team(&repo, &julia());
+    on_team(&repo, &teo());
+    let gone = task(&repo);
+    keep(&repo, &teo(), Some(gone)).await;
+    repo.tasks.lock().expect("tasks").remove(&gone);
+
+    let page = service
+        .board(&julia(), filter(BoardScope::Team))
+        .await
+        .expect("board");
+
+    assert!(page.runs.is_empty());
 }
 
 /// A team member's read of a Run whose workflow never started changes

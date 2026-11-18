@@ -129,6 +129,8 @@ pub(crate) struct FakeRepo {
     pub(crate) documents: Arc<Mutex<BTreeSet<Uuid>>>,
     /// The task documents a user cannot see: their id and the task's.
     pub(crate) hidden: Arc<Mutex<BTreeSet<(String, Uuid)>>>,
+    /// How many batch view checks were asked.
+    pub(crate) view_checks: Arc<Mutex<usize>>,
     /// The commit each Run last asked a person to merge.
     pub(crate) merge_heads: Arc<Mutex<BTreeMap<RunId, String>>>,
     /// Told each time a Gate opens.
@@ -225,6 +227,22 @@ impl TaskDirectory for FakeRepo {
         } else {
             Ok(TaskAccess::NotFound)
         }
+    }
+
+    async fn viewable_documents(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        document_ids: &[Uuid],
+    ) -> Result<BTreeSet<Uuid>, FakeError> {
+        *self.view_checks.lock().expect("view checks") += 1;
+        // As entity access: whether the document is a task, or trashed, is
+        // not its to say.
+        let hidden = self.hidden.lock().expect("hidden");
+        Ok(document_ids
+            .iter()
+            .copied()
+            .filter(|id| !hidden.contains(&(user_id.as_ref().to_string(), *id)))
+            .collect())
     }
 
     async fn task_project(

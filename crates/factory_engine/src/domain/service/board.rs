@@ -1,6 +1,8 @@
 //! The board's reads, and who may read a Run that is not theirs.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use agent_session::domain::session_task::TaskDocumentId;
 use factory_records::domain::automations::AutomationRepository;
@@ -12,7 +14,6 @@ use factory_records::domain::models::Run;
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::ReviewRoundRepository;
 use factory_records::domain::standing_rules::StandingRulesRepository;
-use futures::{StreamExt as _, TryStreamExt as _, stream};
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
@@ -22,15 +23,15 @@ use crate::domain::built_in_flows::BUILT_IN_FLOWS;
 use crate::domain::models::FactoryError;
 
 /// How many rounds of Runs a page reads at most, looking past Runs the
-/// caller cannot see.
+/// caller cannot see. Past five rounds of hidden Runs in a row (some 250),
+/// the page ends with no next page: the older Runs behind them are not
+/// listed, rather than reading on without end.
 const BOARD_ROUNDS: usize = 5;
 
 /// The fewest Runs a round reads, so a page of hidden Runs is passed in few
 /// rounds.
 const BOARD_BATCH_MIN: u16 = 50;
 
-/// How many task access checks run at once.
-const TASK_CHECKS_AT_ONCE: usize = 8;
 use crate::domain::ports::{
     PullRequests, RunWorkflows, StepExecutor, TaskAccess, TaskDirectory, UserDirectory,
 };
@@ -207,33 +208,88 @@ where
         Ok(BoardPage { runs, next })
     }
 
-    /// Whether the caller can see each task of a team member's Run in
-    /// `read` not asked before, kept in `seen`; asked at once, a few at a
-    /// time.
+    /// Whether the caller can see each live task of a team member's Run in
+    /// `read` not decided before, kept in `seen`: from the views kept a
+    /// short while, else asked in one check. A Run's task that is not a
+    /// live task is hidden without asking.
     async fn check_tasks(
         &self,
         actor: &MacroUserIdStr<'static>,
         read: &[RecordedBoardRun],
         seen: &mut BTreeMap<Uuid, bool>,
     ) -> Result<(), FactoryError> {
-        let mut asked: Vec<Uuid> = read
-            .iter()
-            .filter(|board_run| board_run.run.user_id != *actor)
-            .filter_map(|board_run| board_run.run.task_id)
-            .filter(|task_id| !seen.contains_key(task_id))
-            .collect();
+        let mut asked: Vec<Uuid> = Vec::new();
+        for board_run in read {
+            let Some(task_id) = board_run.run.task_id else {
+                continue;
+            };
+            if board_run.run.user_id == *actor || seen.contains_key(&task_id) {
+                continue;
+            }
+            if !board_run.task_live {
+                seen.insert(task_id, false);
+                continue;
+            }
+            match self.task_views.get(actor, task_id) {
+                Some(visible) => {
+                    seen.insert(task_id, visible);
+                }
+                None => asked.push(task_id),
+            }
+        }
         asked.sort_unstable();
         asked.dedup();
-        let answers: Vec<(Uuid, bool)> = stream::iter(asked)
-            .map(|task_id| async move {
-                self.sees_task(actor, task_id)
-                    .await
-                    .map(|visible| (task_id, visible))
-            })
-            .buffer_unordered(TASK_CHECKS_AT_ONCE)
-            .try_collect()
-            .await?;
-        seen.extend(answers);
+        if asked.is_empty() {
+            return Ok(());
+        }
+
+        let viewable = self
+            .tasks
+            .viewable_documents(actor, &asked)
+            .await
+            .map_err(internal)?;
+        for task_id in asked {
+            let visible = viewable.contains(&task_id);
+            self.task_views.keep(actor, task_id, visible);
+            seen.insert(task_id, visible);
+        }
         Ok(())
+    }
+}
+
+/// How long a task view decided for the board is kept.
+const TASK_VIEW_KEPT: Duration = Duration::from_secs(30);
+
+/// The most task views kept; past it they are all dropped.
+const TASK_VIEWS_KEPT: usize = 10_000;
+
+/// Whether a person can see a task, as the board last asked, each kept for
+/// [`TASK_VIEW_KEPT`]: a board read again every few seconds does not ask
+/// again for every Run of its team. A view that changed shows within that
+/// time.
+#[derive(Debug, Clone, Default)]
+pub(super) struct TaskViews(Arc<Mutex<HashMap<ViewKey, (bool, Instant)>>>);
+
+/// Whose view of which task: the person's user id and the task's.
+type ViewKey = (String, Uuid);
+
+impl TaskViews {
+    fn get(&self, actor: &MacroUserIdStr<'static>, task_id: Uuid) -> Option<bool> {
+        let views = self.0.lock().ok()?;
+        let (visible, at) = views.get(&(actor.as_ref().to_string(), task_id))?;
+        (at.elapsed() < TASK_VIEW_KEPT).then_some(*visible)
+    }
+
+    fn keep(&self, actor: &MacroUserIdStr<'static>, task_id: Uuid, visible: bool) {
+        let Ok(mut views) = self.0.lock() else {
+            return;
+        };
+        if views.len() >= TASK_VIEWS_KEPT {
+            views.clear();
+        }
+        views.insert(
+            (actor.as_ref().to_string(), task_id),
+            (visible, Instant::now()),
+        );
     }
 }

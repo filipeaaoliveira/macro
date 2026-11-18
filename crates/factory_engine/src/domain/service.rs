@@ -120,6 +120,7 @@ pub struct FactoryServiceImpl<R, W, E, U, T, G> {
     github: G,
     review_rounds: Option<NonZeroU8>,
     questions: u8,
+    task_views: board::TaskViews,
 }
 
 impl<R, W, E, U, T, G> FactoryServiceImpl<R, W, E, U, T, G>
@@ -147,6 +148,7 @@ where
             github,
             review_rounds: None,
             questions: DEFAULT_QUESTIONS,
+            task_views: board::TaskViews::default(),
         }
     }
 

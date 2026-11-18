@@ -1,5 +1,7 @@
 //! Ports (trait contracts) of the factory's use cases.
 
+use std::collections::BTreeSet;
+
 mod gate_replies;
 
 pub use gate_replies::{GateModel, GateReplyService, ModelPick, ModelQuestion};
@@ -603,6 +605,14 @@ pub trait TaskDirectory: Send + Sync + 'static {
         user_id: &MacroUserIdStr<'static>,
         task: &TaskDocumentId,
     ) -> impl Future<Output = Result<TaskAccess, Self::Err>> + Send;
+
+    /// Which of the documents `document_ids` `user_id` may view, asked in
+    /// one check; whether each is a task the caller reads elsewhere.
+    fn viewable_documents(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        document_ids: &[Uuid],
+    ) -> impl Future<Output = Result<BTreeSet<Uuid>, Self::Err>> + Send;
 
     /// The Project (an initiative) the task document `task_id` is in, as
     /// its Project property names it and `user_id` sees it; none when it is

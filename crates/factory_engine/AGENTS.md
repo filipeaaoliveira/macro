@@ -1229,11 +1229,16 @@ every Run in flight replays as before.
   listed and read (`GET /runs/{id}`) only on a task the caller can see, by
   someone on its owner's team; one with no task stays its owner's, and only
   the owner acts on a Run. A Run the caller cannot see never shapes a
-  page: the board reads on past them, in up to five rounds, until it has
-  one Run the caller sees past the page, asking for the tasks a few at a
-  time; `next` names the last Run listed, and only while such a Run
-  follows, so a page of hidden Runs alone reads as no Run. Only the owner's
-  read of a Run whose workflow never started ends it.
+  page: the board reads on past them, in up to five rounds of at least 50
+  Runs, until it has one Run the caller sees past the page; `next` names
+  the last Run listed, and only while such a Run follows, so a page of
+  hidden Runs alone reads as no Run. Past five rounds of hidden Runs in a
+  row (some 250) the page ends there, with no next page. A team member's
+  Run on a task that is not a live task is hidden without asking; the
+  others' tasks are asked in one check a round (`TaskDirectory::
+  viewable_documents`, entity access's batch receipts), and each answer is
+  kept 30 s. Only the owner's read of a Run whose workflow never started
+  ends it.
 - `flows/`: the built-in Flows, each named for its file
   (`src/domain/built_in_flows.rs`). `GET /flows` lists those whose Steps the
   worker serves, with their `description` and whether they work on a
