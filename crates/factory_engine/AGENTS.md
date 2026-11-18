@@ -308,8 +308,11 @@ or network reason rather than its work. Only what is surely the factory's
 counts; when unsure, the failure is the work's (`workflow/work.rs`,
 `work_failure`). A Step's work failed for infrastructure when every Agent of
 its Role was out of quota (`StepError::OutOfQuota`, type
-`FactoryInfrastructure`), or when it timed out and its last attempt was out
-of quota too, timed out itself (its worker was lost) or left no failure.
+`FactoryInfrastructure`), or when it timed out because its worker went
+quiet (`Heartbeat`) or no worker took it (`ScheduleToStart`); an attempt
+that ran past its own time (`StartToClose`) may be an agent slower than its
+deadline, and is the work's. A Step whose whole time ran out reads as its
+last attempt did, and as infrastructure's when none left a failure.
 Temporal hands back attempts whose time (`STEP_TOTAL`) ran out after a
 retried failure as that last failure, not as a timeout: one of no known
 kind, as an agent still at work on a later prompt (`StepError::Overdue`,
@@ -319,11 +322,14 @@ asks for its marker, so changing it changes how recorded histories
 replay. Such a Step ends `failed` and the Flow routes
 `failed` as before. When that `failed` takes the Run straight to a `failed`
 end, with no Step after it, the workflow records `infrastructure` instead,
-behind the `factory-infrastructure-outcome` marker; a Run that walks on
-past it and fails later ends as that later failure does. A review round
+behind the `factory-infrastructure-outcome` marker
+(`workflow/run_end.rs`); a Run that walks on past it and fails later ends
+as that later failure does, and so does one whose entry it went back to
+had run out of visits and ends `failed` (`on_exhausted`): the loop did not
+converge, which is the work's. A review round
 counts only when every reviewer that failed did so for infrastructure and
-none ended without a review (`pass` or `changes`). A Gate's answer to such
-a Step is a person's, and routes as any answer. A Flow may not end a Run
+none ended without a review (`pass` or `changes`). An answer to its Gate
+routes as any answer. A Flow may not end a Run
 `infrastructure` or `flawed` itself (`FlowError::ReservedEnd`).
 
 A Run that ended `success` can be marked `flawed` afterwards
@@ -1411,7 +1417,9 @@ every Run in flight replays as before.
   from any other failed turn, and a round of checks that ends red because
   the fixer's quota ran out (`Red::QuotaRanOut`) is the Step's outcome, not
   a failure of its work: both still end the Run `failed` when the Flow
-  routes them there.
+  routes them there. A network or GitHub outage surfaces as a retried
+  internal error (`StepError::Internal`), whose last failure reads as the
+  work's once the Step's time runs out.
 - Removing the `factory-notify-only-gates` patch breaks the replay of Runs
   that passed a notify-only Gate (`code_notify_only_plan_with_thread`). A
   worker older than `notify_only` cannot read a Flow that has it, so deploy
