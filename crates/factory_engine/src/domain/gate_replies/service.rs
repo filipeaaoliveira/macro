@@ -344,6 +344,11 @@ where
                     .ask_back(key, &reading.reply, &model_reading(pick.as_ref()))
                     .await
                     .map_err(internal)?;
+                // Words in the stand-in's window end it, whatever they say:
+                // the Gate is the owner's again.
+                if stood_in {
+                    self.window_closed(&run, key).await;
+                }
                 tracing::info!("the factory asked back on a gate");
                 Ok(ReplyRead::AskedBack)
             }

@@ -1061,7 +1061,8 @@ notification about the Run's task, of the waiting Gate's kind flagged
 what the stand-in answered and for how many minutes they can change it,
 one per Gate (`gate_owner::stand_in_id`, apart from the Gate's waiting
 notice); it is marked done once the window closes, the owner answers in
-it, or the Run ends. A Run with no task tells no one. Run insights count neither its answers nor Rule Answers.
+it or replies in it (words asked back end the window too), or the Run
+ends. A Run with no task tells no one. Run insights count neither its answers nor Rule Answers.
 
 The model calls are activities, so a replay reads their results from the
 history. The stand-in and replies are behind the `factory-gate-replies`

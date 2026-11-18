@@ -737,6 +737,36 @@ async fn an_override_in_the_window_replaces_the_stand_in_s_answer() {
     );
 }
 
+/// Words in the stand-in's window end it, whatever the factory reads in
+/// them: the notice that the stand-in answered is done once they are asked
+/// back, as once they answer the Gate.
+#[tokio::test]
+async fn words_in_the_window_close_the_stand_in_s_notice() {
+    for (choice, confidence) in [(None, 0.9), (Some("revise"), 0.95)] {
+        let repo = FakeRepo::default();
+        let key = run_at_plan_gate(&repo, Some(STAND_IN_ONLY), None).await;
+        let model = FakeGateModel::picking(Some("approve"), 0.95);
+        model.then(choice, confidence);
+        let notifier = FakeNotifier::default();
+        let service = gates(&repo, &model).with_notifier(notifier.clone());
+        service.stand_in(plan_asking(key)).await.expect("stand in");
+
+        service
+            .read_reply(reading(key, "Hmm, not that"))
+            .await
+            .expect("read");
+
+        assert!(
+            notifier
+                .done
+                .lock()
+                .expect("done")
+                .contains(&stand_in_id(key.run_id, key.seq)),
+            "{choice:?}"
+        );
+    }
+}
+
 /// A retried stand-in returns the answer it kept first, with what is left
 /// of its window, and asks the model nothing again.
 #[tokio::test]
