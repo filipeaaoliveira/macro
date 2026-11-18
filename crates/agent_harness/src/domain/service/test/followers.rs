@@ -1,4 +1,5 @@
 use super::*;
+use agent_session::domain::model::{SessionSource, SessionVisibility};
 
 fn other_person() -> MacroUserIdStr<'static> {
     MacroUserIdStr::try_from_email("editor@example.com").expect("a valid user id")
@@ -101,4 +102,45 @@ async fn a_typed_prompt_records_its_tab_on_the_turn() {
             .expect("the turn recorded its prompter");
         assert_eq!(prompter.client, client);
     }
+}
+
+/// A background session runs out of sight, as a factory Step's does: a
+/// prompt its owner sends it from no thread, as the factory's are, follows
+/// it for no one, so no list shows it.
+#[tokio::test]
+async fn prompts_to_a_background_session_follow_it_for_no_one() {
+    let ((service, repo, containers, _announcer, _runtimes), mut turns) =
+        harness_with_signals(PromptContextMock::default(), PromptComposerMock::default());
+    let id = AgentSessionId::new();
+    let container = live_session(&service, &containers, id).await;
+    let agent = container.agent();
+    turns.settled(id).await;
+    let mut session = repo.get(id).await.expect("persisted");
+    let owner = session.owner_user().expect("a person owns it").clone();
+    session.source = SessionSource::User;
+    session.visibility = SessionVisibility::Hidden;
+    session.thread_id = None;
+    session.originating_message_id = None;
+    session.origin = trigger_context::TriggerOrigin::Requested { by: owner.clone() };
+    assert!(session.is_background());
+    repo.insert_session(session);
+
+    let prompted = service.control_event(
+        id,
+        ControlEvent {
+            action: AgentAction::prompt("go on with the step"),
+            action_id: None,
+            actor: Some(owner),
+            context: None,
+            client: None,
+        },
+    );
+    let (result, ()) = tokio::join!(prompted, agent.completes_prompt());
+    result.expect("the prompt should deliver");
+    turns.settled(id).await;
+
+    assert!(
+        repo.followers(id).is_empty(),
+        "a background session is followed by no one"
+    );
 }
