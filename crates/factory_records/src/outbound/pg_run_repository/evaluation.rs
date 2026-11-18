@@ -173,7 +173,11 @@ impl EvaluationRepository for PgRunRepository {
     #[tracing::instrument(err, skip(self))]
     async fn delete_suite(&self, suite_id: Uuid) -> Result<(), Self::Err> {
         sqlx::query!(
-            "DELETE FROM factory_benchmark_suite WHERE id = $1",
+            r#"
+            DELETE FROM factory_benchmark_suite s
+            WHERE s.id = $1
+              AND NOT EXISTS (SELECT 1 FROM factory_benchmark_trial t WHERE t.suite_id = s.id)
+            "#,
             suite_id
         )
         .execute(&self.pool)
@@ -332,9 +336,11 @@ impl EvaluationRepository for PgRunRepository {
     #[tracing::instrument(err, skip(self, suite), fields(benchmark = suite.benchmark))]
     async fn insert_suite(&self, suite: &NewSuite<'_>) -> Result<SuiteInsert, Self::Err> {
         // One person's starts are counted one after the other: the lock on
-        // their id holds a second start until the first is kept. A suite
-        // runs while one of its trials' Runs has not ended, or while it has
-        // no trial yet and started lately: its trials are being started.
+        // their id holds a second start until the first is kept. Its trials
+        // are recorded one by one after it, so a suite that started lately
+        // and has fewer trials than it planned is still starting: the
+        // trials it has yet to record count as running, and it runs. Any
+        // other suite runs while one of its trials' Runs has not ended.
         let mut transaction = self.pool.begin().await?;
         sqlx::query!(
             "SELECT pg_advisory_xact_lock(hashtextextended('factory_benchmark_suite:' || $1, 0))",
@@ -344,32 +350,34 @@ impl EvaluationRepository for PgRunRepository {
         .await?;
         let open = sqlx::query!(
             r#"
+            WITH suites AS (
+                SELECT
+                    s.benchmark,
+                    (
+                        SELECT count(*)
+                        FROM factory_benchmark_trial t
+                        JOIN factory_run r ON r.id = t.run_id
+                        WHERE t.suite_id = s.id AND r.ended_at IS NULL
+                    ) AS running_trials,
+                    CASE
+                        WHEN s.created_at > now() - make_interval(secs => $3) THEN greatest(
+                            s.planned_trials - (
+                                SELECT count(*) FROM factory_benchmark_trial t WHERE t.suite_id = s.id
+                            ),
+                            0
+                        )
+                        ELSE 0
+                    END AS starting_trials
+                FROM factory_benchmark_suite s
+                WHERE s.user_id = $1
+            )
             SELECT
-                count(*) FILTER (WHERE r.ended_at IS NULL) AS "open_trials!",
-                EXISTS (
-                    SELECT 1
-                    FROM factory_benchmark_suite s
-                    WHERE s.user_id = $1
-                      AND s.benchmark = $2
-                      AND (
-                          EXISTS (
-                              SELECT 1
-                              FROM factory_benchmark_trial t
-                              JOIN factory_run r ON r.id = t.run_id
-                              WHERE t.suite_id = s.id AND r.ended_at IS NULL
-                          )
-                          OR (
-                              NOT EXISTS (
-                                  SELECT 1 FROM factory_benchmark_trial t WHERE t.suite_id = s.id
-                              )
-                              AND s.created_at > now() - make_interval(secs => $3)
-                          )
-                      )
+                coalesce(sum(running_trials + starting_trials), 0)::bigint AS "open_trials!",
+                coalesce(
+                    bool_or(benchmark = $2 AND running_trials + starting_trials > 0),
+                    false
                 ) AS "running!"
-            FROM factory_benchmark_suite s
-            JOIN factory_benchmark_trial t ON t.suite_id = s.id
-            JOIN factory_run r ON r.id = t.run_id
-            WHERE s.user_id = $1
+            FROM suites
             "#,
             suite.user_id.as_ref(),
             suite.benchmark,
@@ -386,14 +394,15 @@ impl EvaluationRepository for PgRunRepository {
         }
         sqlx::query!(
             r#"
-            INSERT INTO factory_benchmark_suite (id, user_id, benchmark, agents)
-            VALUES ($1, $2, $3, $4)
+            INSERT INTO factory_benchmark_suite (id, user_id, benchmark, agents, planned_trials)
+            VALUES ($1, $2, $3, $4, $5)
             ON CONFLICT (id) DO NOTHING
             "#,
             suite.id,
             suite.user_id.as_ref(),
             suite.benchmark,
             agents_json(suite.agents)?,
+            i32::from(suite.trials),
         )
         .execute(&mut *transaction)
         .await?;
@@ -487,8 +496,9 @@ impl EvaluationRepository for PgRunRepository {
 
         // An arm's Agents are the same for each of its Runs while the
         // Experiment is unchanged; the newest Run's are shown. A Run fell
-        // back when one of its Steps passed over the Agent the arm chose
-        // for the Step's Role, and another of the Role's took the Step.
+        // back when one of its Steps of a Role the arm chooses for was
+        // taken by another Agent: the chosen one could not start, or the
+        // agent definition no longer has it.
         let arms = sqlx::query!(
             r#"
             SELECT a.experiment, a.arm,
@@ -502,8 +512,7 @@ impl EvaluationRepository for PgRunRepository {
                            SELECT 1
                            FROM factory_step st
                            WHERE st.run_id = a.run_id
-                             AND st.role IS NOT NULL
-                             AND (a.agents ->> st.role) = ANY (st.passed_over)
+                             AND (a.agents ->> st.role) <> st.agent
                        )
                    ) AS "fell_back!"
             FROM factory_run_arm a

@@ -387,3 +387,89 @@ async fn an_arm_counts_its_runs_whose_chosen_agent_was_passed_over(pool: PgPool)
         .collect();
     assert_eq!(fell_back, vec![("backup", 1), ("control", 0)]);
 }
+
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn a_suite_still_starting_counts_the_trials_it_plans_and_keeps_them(pool: PgPool) {
+    let repo = PgRunRepository::new(pool.clone());
+    let owner = julia();
+    let agents = choices(&[("writer", "backup")]);
+    let suite = |id: u128, benchmark: &'static str, trials: u16| NewSuite {
+        id: Uuid::from_u128(id),
+        user_id: &owner,
+        benchmark,
+        agents: &agents,
+        trials,
+    };
+
+    // A suite of 15 trials has recorded none yet: a suite of another
+    // Benchmark started a moment later counts them.
+    assert_eq!(
+        repo.insert_suite(&suite(1, "core", 15))
+            .await
+            .expect("suite"),
+        SuiteInsert::Inserted
+    );
+    assert_eq!(
+        repo.insert_suite(&suite(2, "other", 10))
+            .await
+            .expect("suite"),
+        SuiteInsert::TooManyTrials(15)
+    );
+    assert_eq!(
+        repo.insert_suite(&suite(3, "other", 5))
+            .await
+            .expect("suite"),
+        SuiteInsert::Inserted
+    );
+
+    // A suite with a trial is never deleted.
+    going_trial_run(&pool, TYPO_TRIAL).await;
+    let trial = TrialKey {
+        suite_id: Uuid::from_u128(1),
+        task: "typo".to_string(),
+    };
+    repo.insert_trial(&trial, run(TYPO_TRIAL), BASE)
+        .await
+        .expect("trial");
+    repo.delete_suite(Uuid::from_u128(1)).await.expect("delete");
+    assert_eq!(
+        repo.trial_of(run(TYPO_TRIAL))
+            .await
+            .expect("read")
+            .map(|trial| trial.key),
+        Some(trial)
+    );
+}
+
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "evaluation"))
+)]
+async fn an_arm_counts_its_runs_whose_chosen_agent_was_replaced_as_fallen_back(pool: PgPool) {
+    let repo = PgRunRepository::new(pool.clone());
+    // The arm chose `backup` for the writer; `primary` took the Step with
+    // no Agent passed over, as when the definition no longer has `backup`.
+    sqlx::query(
+        "INSERT INTO factory_step (run_id, seq, entry, visit, started_at, outcome, output, ended_at, \
+             session_id, action_id, offered, role, agent) \
+         VALUES ($1, 1, 'write', 1, '2026-11-11 09:00Z', 'done', 'Written', '2026-11-11 09:30Z', \
+             $2, $3, '{done}', 'writer', 'primary')",
+    )
+    .bind(Uuid::parse_str(IMPORT).expect("valid run id"))
+    .bind(Uuid::from_u128(0x711))
+    .bind(Uuid::from_u128(0x712))
+    .execute(&pool)
+    .await
+    .expect("step recorded");
+
+    let read = repo.read_evaluation(&november()).await.expect("read");
+    let fell_back: Vec<_> = read
+        .arms
+        .iter()
+        .map(|arm| (arm.arm.as_str(), arm.fell_back))
+        .collect();
+    assert_eq!(fell_back, vec![("backup", 1), ("control", 0)]);
+}

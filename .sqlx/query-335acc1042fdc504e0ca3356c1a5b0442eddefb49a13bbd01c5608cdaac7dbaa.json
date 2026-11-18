@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO factory_benchmark_suite (id, user_id, benchmark, agents, planned_trials)\n            VALUES ($1, $2, $3, $4, $5)\n            ON CONFLICT (id) DO NOTHING\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "335acc1042fdc504e0ca3356c1a5b0442eddefb49a13bbd01c5608cdaac7dbaa"
+}

@@ -215,8 +215,9 @@ pub struct ArmTally {
     pub ended: u32,
     /// How many ended `success`.
     pub succeeded: u32,
-    /// How many had a Step where the Agent the arm chose could not start,
-    /// and another of its Role's took the Step.
+    /// How many had a Step of a Role the arm chooses for that another
+    /// Agent took: the chosen one could not start, or the agent definition
+    /// no longer has it.
     pub fell_back: u32,
 }
 
@@ -319,7 +320,8 @@ pub trait EvaluationRepository: Send + Sync + 'static {
         trial: &TrialKey,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
-    /// Delete a suite none of whose trials started, so it is not listed.
+    /// Delete a suite none of whose trials started, so it is not listed; a
+    /// suite with a trial is kept.
     fn delete_suite(&self, suite_id: Uuid) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// The Run, as its judges read it; none when it is not recorded.
