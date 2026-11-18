@@ -1,7 +1,7 @@
 use agent_session::domain::routines::{RoutineActionStatus, RoutineSessionError};
 use agent_session::domain::session_command::SessionCommandOutput;
 
-use super::{BACKUP, FakeSessions, PRIMARY, agent, no_quota, plan_task, the_plan};
+use super::{BACKUP, FakeSessions, PRIMARY, Reply, agent, no_quota, plan_task, the_plan};
 use crate::domain::fakes::FakeRepo;
 use crate::domain::models::AgentTask;
 use crate::domain::ports::{AgentFailure, Retryable, StepAgent};
@@ -144,6 +144,62 @@ async fn a_retry_in_the_same_session_skips_the_setup_that_passed() {
 
     agent.answer(task).await.expect("retried again");
     assert_eq!(commands(&sessions).len(), 3, "the setup passed already");
+}
+
+/// The Step keeps how many setup commands passed in its session: a retry
+/// whose prompt never landed, as one the runtime dropped, sets nothing up
+/// again, though the session still awaits its first prompt.
+#[tokio::test]
+async fn a_retry_whose_prompt_never_landed_skips_the_setup_that_passed() {
+    let repo = FakeRepo::default();
+    let mut sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded)
+        .prompting(&[Reply {
+            error: Some(RoutineSessionError::RuntimeUnavailable),
+            lands: false,
+        }]);
+    sessions.command_output = Some(SessionCommandOutput {
+        exit_code: 0,
+        stdout: String::new(),
+        stderr: String::new(),
+    });
+    let task = task_with_setup(&repo).await;
+    let agent = agent(&sessions, &repo);
+
+    let first = agent.answer(task.clone()).await;
+    let Err(error) = first else {
+        panic!("the runtime went away");
+    };
+    assert!(error.retryable(), "{error:?}");
+    assert_eq!(sessions.landed(), 0);
+    assert_eq!(commands(&sessions).len(), 2);
+
+    agent.answer(task).await.expect("retried");
+    assert_eq!(commands(&sessions).len(), 2, "the setup passed already");
+    assert_eq!(sessions.landed(), 1);
+}
+
+/// A session whose first prompt landed, as one prompted before Steps ran
+/// setups, is never set up: the agent works in it.
+#[tokio::test]
+async fn a_session_whose_prompt_landed_is_not_set_up() {
+    let repo = FakeRepo::default();
+    let mut sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
+    sessions.command_output = Some(SessionCommandOutput {
+        exit_code: 0,
+        stdout: String::new(),
+        stderr: String::new(),
+    });
+    let task = plan_task(&repo).await;
+    let agent = agent(&sessions, &repo);
+    agent.answer(task.clone()).await.expect("answer");
+
+    let retried = AgentTask {
+        setup: Some(setup()),
+        ..task
+    };
+    agent.answer(retried).await.expect("retried");
+
+    assert!(commands(&sessions).is_empty());
 }
 
 /// A session the Step goes on in when its Agent could not start runs the

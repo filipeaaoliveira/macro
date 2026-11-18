@@ -611,3 +611,47 @@ async fn a_verify_file_that_does_not_read_is_reported_and_the_change_checked() {
     assert!(prompt.contains(note), "{prompt}");
     assert!(prompt.contains("): the change is checked."), "{prompt}");
 }
+
+/// The base's setup reaches the verifier's session, and its acceptance
+/// round keeps it and runs it in the round's worktree before the checks.
+#[tokio::test]
+async fn accept_runs_the_base_s_setup_before_the_plan_s_checks() {
+    let agent = verifier(
+        "pass",
+        vec![ran(0, "installed"), ran(0, "1 passed"), ran(0, "2 passed")],
+        HEAD,
+    );
+    let github = github(None, None);
+    let setup = r#"{"setup":[{"name":"install","run":"bun install"}]}"#;
+    github.state().files.insert(
+        (
+            "main".to_string(),
+            crate::domain::setup::SETUP_FILE.to_string(),
+        ),
+        setup.to_string(),
+    );
+    let repo = FakeRepo::default();
+    let earlier = planned(PLAN);
+    let input = StepInput {
+        earlier: &earlier,
+        ..input()
+    };
+
+    let report = run(&agent, &github, &repo, "accept", input)
+        .await
+        .expect("accept");
+
+    assert_eq!(report.outcome.as_str(), "pass", "{}", report.output);
+    assert_eq!(
+        commands(&agent),
+        [
+            "bun install".to_string(),
+            format!("export MACRO_VERIFY_COMMIT={HEAD}; bun test toggle"),
+            format!("export MACRO_VERIFY_COMMIT={HEAD}; bun test page"),
+        ]
+    );
+    let rounds = rounds(&repo, input).await;
+    assert_eq!(rounds[0].setup.as_deref(), Some(setup));
+    let tasks = agent.tasks.lock().expect("tasks");
+    assert!(tasks[0].setup.is_some(), "the verifier's session is set up");
+}
