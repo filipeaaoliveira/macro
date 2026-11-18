@@ -34,14 +34,14 @@ use model_notifications::{
     ChannelInviteMetadata, ChannelMentionMetadata, ChannelMessageReactionMetadata,
     ChannelMessageSendMetadata, ChannelReplyMetadata, ChannelType, CommentedOnDocumentMetadata,
     ComputerSetupMetadata, ComputerSetupOutcome, DocumentMentionMetadata,
-    FactoryGateWaitingMetadata, GithubPrCheckRun,
-    GithubPrCheckRunState, GithubPrComment, GithubPrCommentKind, GithubPrEventAction,
-    GithubPrEventStatus, GithubPrMention, GithubPrMentionLocation, GithubPrNotificationCommon,
-    GithubPrReview, GithubPrReviewState, GithubPrStatusChanged, GithubReviewRequested,
-    InboxReauthRequiredMetadata, InviteToTeamMetadata, MentionedInDocumentCommentMetadata,
-    NewEmailMetadata, NotifEvent, NotificationDocumentSubType, ReminderMetadata,
-    RepliedToDocumentCommentThreadMetadata, RoutineRunFinishedMetadata, RoutineRunOutcome,
-    RuntimeAccessRemovedMetadata, StoppedAgent, TaskAssignedMetadata,
+    FactoryGateWaitingMetadata, GithubPrCheckRun, GithubPrCheckRunState, GithubPrComment,
+    GithubPrCommentKind, GithubPrEventAction, GithubPrEventStatus, GithubPrMention,
+    GithubPrMentionLocation, GithubPrNotificationCommon, GithubPrReview, GithubPrReviewState,
+    GithubPrStatusChanged, GithubReviewRequested, InboxReauthRequiredMetadata,
+    InviteToTeamMetadata, MentionedInDocumentCommentMetadata, NewEmailMetadata, NotifEvent,
+    NotificationDocumentSubType, ReminderMetadata, RepliedToDocumentCommentThreadMetadata,
+    RoutineRunFinishedMetadata, RoutineRunOutcome, RuntimeAccessRemovedMetadata, StoppedAgent,
+    TaskAssignedMetadata,
 };
 
 /// GraphQL channel type used by notification metadata.
