@@ -444,6 +444,7 @@ async fn a_question_and_the_step_going_on_from_it_are_one_visit(pool: PgPool) {
             created_in_person: false,
             control_file_patterns: &[],
             control_files_team_id: None,
+            standing_rules: RunRules::DEFAULT,
         })
         .await
         .expect("insert")
