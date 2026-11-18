@@ -288,3 +288,39 @@ async fn a_commit_contains_those_it_comes_after() {
         );
     }
 }
+
+#[tokio::test]
+async fn deleting_a_branch_deletes_its_ref_and_a_missing_branch_is_gone_already() {
+    let (server, client) = answering("204 No Content", "");
+    let deleted = client
+        .delete_branch("token", "macro", "app", "factory/run-1")
+        .await
+        .unwrap();
+    assert!(deleted);
+    let request = server.finish();
+    assert!(
+        request.starts_with("DELETE /repos/macro/app/git/refs/heads/factory%2Frun-1 HTTP/1.1"),
+        "{request}"
+    );
+
+    let (gone, client) = answering(
+        "422 Unprocessable Entity",
+        r#"{"message":"Reference does not exist"}"#,
+    );
+    assert!(
+        client
+            .delete_branch("token", "macro", "app", "factory/run-1")
+            .await
+            .unwrap()
+    );
+    gone.finish();
+
+    let (unreachable, client) = answering("404 Not Found", r#"{"message":"Not Found"}"#);
+    assert!(matches!(
+        client
+            .delete_branch("token", "macro", "app", "factory/run-1")
+            .await,
+        Err(crate::domain::models::GithubError::RepositoryUnavailable)
+    ));
+    unreachable.finish();
+}

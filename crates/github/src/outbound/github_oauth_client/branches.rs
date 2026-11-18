@@ -4,7 +4,12 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 
-use super::GithubOauthImpl;
+use reqwest::StatusCode;
+
+use super::{
+    GithubOauthImpl, REQUEST_TIMEOUT, USER_AGENT, response_text, throttling, transport_error,
+    unexpected,
+};
 use crate::domain::models::GithubError;
 
 #[cfg(test)]
@@ -100,6 +105,59 @@ impl GithubOauthImpl {
             Ok(branch) => Ok(Some(branch.commit.sha)),
             Err(GithubError::RepositoryUnavailable) => Ok(None),
             Err(error) => Err(error),
+        }
+    }
+
+    /// Delete `branch` as the user. True once it is gone: deleted now, or
+    /// already gone (GitHub answers a missing branch 422). A repository the
+    /// user cannot reach is [`GithubError::RepositoryUnavailable`].
+    #[tracing::instrument(skip(self, access_token), err)]
+    pub async fn delete_branch(
+        &self,
+        access_token: &str,
+        owner: &str,
+        repo: &str,
+        branch: &str,
+    ) -> Result<bool, GithubError> {
+        let branch = urlencoding::encode(branch);
+        let response = self
+            .client
+            .delete(format!(
+                "{}/repos/{owner}/{repo}/git/refs/heads/{branch}",
+                self.api_base_url()
+            ))
+            .header("Authorization", format!("Bearer {access_token}"))
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", USER_AGENT)
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .timeout(REQUEST_TIMEOUT)
+            .send()
+            .await
+            .map_err(transport_error)?;
+        let status = response.status();
+        if status.is_success() || status == StatusCode::UNPROCESSABLE_ENTITY {
+            return Ok(true);
+        }
+        let headers = response.headers().clone();
+        let body = response_text(response).await;
+        if throttling(status, &headers, &body).is_some() {
+            return Err(unexpected(
+                status,
+                &headers,
+                body,
+                "failed to delete a branch",
+            ));
+        }
+        match status {
+            StatusCode::UNAUTHORIZED => Err(GithubError::ReauthenticationRequired),
+            StatusCode::FORBIDDEN => Err(GithubError::Forbidden),
+            StatusCode::NOT_FOUND => Err(GithubError::RepositoryUnavailable),
+            _ => Err(unexpected(
+                status,
+                &headers,
+                body,
+                "failed to delete a branch",
+            )),
         }
     }
 
