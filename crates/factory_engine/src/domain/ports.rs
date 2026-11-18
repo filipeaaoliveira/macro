@@ -345,15 +345,6 @@ pub trait PullRequests: Send + Sync + 'static {
         branch: &str,
     ) -> impl Future<Output = Result<Option<Vec<String>>, Self::Err>> + Send;
 
-    /// Delete `branch` of `repository` as `owner`: true once it is gone,
-    /// deleted now or gone already.
-    fn delete_branch(
-        &self,
-        owner: &MacroUserIdStr<'static>,
-        repository: &CodeRepository,
-        branch: &str,
-    ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
-
     /// The commit `branch` of `repository` is at; none when the branch is
     /// not there.
     fn branch_head(

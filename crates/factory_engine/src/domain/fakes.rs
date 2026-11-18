@@ -1547,8 +1547,6 @@ pub(crate) struct FakeGithubState {
     pub(crate) refused_files: BTreeSet<String>,
     /// The pairs of commits whose second contains the first.
     pub(crate) descendants: BTreeSet<(String, String)>,
-    /// The trial branches deleted, by repository and branch, in order.
-    pub(crate) deleted_trial_branches: Vec<(String, String)>,
     /// The merge base of two commits neither contains the other of.
     pub(crate) merge_bases: BTreeMap<(String, String), String>,
 }
@@ -1793,22 +1791,6 @@ impl PullRequests for FakeGithub {
             state.branch_heads.front().cloned()
         };
         Ok(head.flatten())
-    }
-
-    async fn delete_branch(
-        &self,
-        _owner: &MacroUserIdStr<'static>,
-        repository: &CodeRepository,
-        branch: &str,
-    ) -> Result<bool, FakeGithubError> {
-        let mut state = self.state();
-        if state.unreachable {
-            return Err(FakeGithubError::Refused);
-        }
-        state
-            .deleted_trial_branches
-            .push((repository.url(), branch.to_string()));
-        Ok(true)
     }
 
     async fn changed_files(

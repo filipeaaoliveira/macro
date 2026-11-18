@@ -455,6 +455,8 @@ async fn a_trial_keeps_its_score_tokens_and_judgments_apart_from_the_live_scorer
     judge.then(0.9);
     judge.then(0.2);
     let github = FakeGithub::default();
+    // The trial's branch is there, at its pin.
+    github.state().head = Some("1111111111111111111111111111111111111111".to_string());
     let scoring = ScoringServiceImpl::new(
         repo.clone(),
         judge.clone(),
@@ -506,8 +508,8 @@ async fn a_trial_keeps_its_score_tokens_and_judgments_apart_from_the_live_scorer
     // Once scored, the trial's own branch is deleted, once; a live Run's
     // branch is never touched.
     assert_eq!(
-        github.state().deleted_trial_branches,
-        [(WIDGETS.to_string(), format!("factory/{trial_run}"))]
+        github.state().deleted_branches,
+        [format!("factory/{trial_run}")]
     );
     assert_eq!(kept.branches_deleted, [(suite_id, "typo".to_string())]);
 }

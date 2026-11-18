@@ -12,7 +12,7 @@ use serde_json::json;
 use uuid::Uuid;
 
 use super::{EvaluationDefinition, ScorerDefinition};
-use crate::domain::models::{CodeRepository, StepError, run_branch};
+use crate::domain::models::{BranchDeletion, CodeRepository, StepError, run_branch};
 use crate::domain::ports::{JudgeQuestion, PullRequests, RunJudge, ScoringService};
 
 /// The entry whose Step's end gives a trial its mechanical score.
@@ -132,25 +132,26 @@ where
     }
 
     /// Delete a scored trial's Run's branch, its own and no other, as the
-    /// Run's owner: a trial opens no pull request, so the branch is of no
-    /// more use. A failure is logged and leaves the branch.
+    /// Run's owner, through the port that takes a Run, not a branch name: a
+    /// trial opens no pull request, so the branch is of no more use. A
+    /// branch found missing is gone all the same. A failure is logged and
+    /// leaves the branch.
     async fn delete_trial_branch(&self, subject: &ScoringSubject, trial: &SubjectTrial) {
         let Some(repository) = subject.repo_url.as_deref().and_then(CodeRepository::parse) else {
             return;
         };
-        let branch = run_branch(subject.run_id);
         match self
             .github
-            .delete_branch(&subject.user_id, &repository, &branch)
+            .delete_run_branch(&subject.user_id, &repository, subject.run_id)
             .await
         {
-            Ok(_) => {
+            Ok(BranchDeletion::Deleted | BranchDeletion::Missing) => {
                 if let Err(error) = self.repo.record_branch_deleted(&trial.key).await {
                     tracing::warn!(?error, "a deleted trial branch was not recorded");
                 }
             }
             Err(error) => {
-                tracing::warn!(?error, %branch, "a trial's branch was not deleted");
+                tracing::warn!(?error, run_id = %subject.run_id, "a trial's branch was not deleted");
             }
         }
     }
