@@ -2473,6 +2473,12 @@ export const listTypedNotificationsResponse = zod
                             .describe(
                               "For an agent's question, the Role of the agent that asks; absent\nfor a Gate of the Run's Flow."
                             ),
+                          notifyOnly: zod
+                            .boolean()
+                            .optional()
+                            .describe(
+                              'Whether the Gate only tells the owner, for their information, and\nthe Run goes on without an answer; absent for a Gate that waits.'
+                            ),
                           question: zod
                             .string()
                             .describe("The start of the Gate's question."),
@@ -4823,6 +4829,12 @@ export const bulkGetTypedNotificationsByEventItemIdsResponse = zod
                             .describe(
                               "For an agent's question, the Role of the agent that asks; absent\nfor a Gate of the Run's Flow."
                             ),
+                          notifyOnly: zod
+                            .boolean()
+                            .optional()
+                            .describe(
+                              'Whether the Gate only tells the owner, for their information, and\nthe Run goes on without an answer; absent for a Gate that waits.'
+                            ),
                           question: zod
                             .string()
                             .describe("The start of the Gate's question."),
@@ -7123,6 +7135,12 @@ export const getTypedNotificationsByEventItemIdResponse = zod
                             .describe(
                               "For an agent's question, the Role of the agent that asks; absent\nfor a Gate of the Run's Flow."
                             ),
+                          notifyOnly: zod
+                            .boolean()
+                            .optional()
+                            .describe(
+                              'Whether the Gate only tells the owner, for their information, and\nthe Run goes on without an answer; absent for a Gate that waits.'
+                            ),
                           question: zod
                             .string()
                             .describe("The start of the Gate's question."),
@@ -9250,6 +9268,12 @@ export const getTypedNotificationByIdResponse = zod
                     .nullish()
                     .describe(
                       "For an agent's question, the Role of the agent that asks; absent\nfor a Gate of the Run's Flow."
+                    ),
+                  notifyOnly: zod
+                    .boolean()
+                    .optional()
+                    .describe(
+                      'Whether the Gate only tells the owner, for their information, and\nthe Run goes on without an answer; absent for a Gate that waits.'
                     ),
                   question: zod
                     .string()

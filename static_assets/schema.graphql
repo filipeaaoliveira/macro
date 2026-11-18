@@ -5577,6 +5577,11 @@ type GraphqlFactoryGateWaitingMetadata {
 	For an agent's question, the Role of the agent that asks.
 	"""
 	asker: String
+	"""
+	Whether the Gate only tells the owner, and the Run goes on without
+	an answer.
+	"""
+	notifyOnly: Boolean!
 }
 
 """
