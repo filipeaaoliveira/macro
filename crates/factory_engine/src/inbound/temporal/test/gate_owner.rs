@@ -146,7 +146,11 @@ async fn a_gate_the_stand_in_answers_is_not_told_to_the_owner() {
     assert!(matches!(ended, Ok(RunOutcome::Success)), "{ended:?}");
     let told = told(&notifier);
     assert_eq!(told, [merge_gate.expect("the merge gate opened")]);
-    assert_eq!(stand_in_told(&notifier), [1], "the stand-in's answer is told");
+    assert_eq!(
+        stand_in_told(&notifier),
+        [1],
+        "the stand-in's answer is told"
+    );
 }
 
 /// A stand-in's answer taken back when the window ends (the branch turned

@@ -16,8 +16,9 @@ use github::outbound::github_oauth_client::{FileTooLarge, GithubOauthImpl};
 use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::models::{
-    BranchDeletion, Check, CheckState, CheckSuite, CodeRepository, CommitStatus, HeadChecks, Merging, OpenPullRequest, Opening, PullRequest, PullRequestState,
-    RepositoryAccess, RequiredCheck, RequiredChecks, run_branch,
+    BranchDeletion, Check, CheckState, CheckSuite, CodeRepository, CommitStatus, HeadChecks,
+    Merging, OpenPullRequest, Opening, PullRequest, PullRequestState, RepositoryAccess,
+    RequiredCheck, RequiredChecks, run_branch,
 };
 use crate::domain::ports::{FileRefusal, PullRequests, Retryable};
 use crate::domain::review_rounds::ChangedFile;

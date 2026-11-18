@@ -570,15 +570,16 @@ impl GithubOauthImpl {
                 "failed to find pull request",
             )
             .await?;
-        Ok(pull_requests.into_iter().next().map(|pull_request| {
-            GithubPullRequestHead {
+        Ok(pull_requests
+            .into_iter()
+            .next()
+            .map(|pull_request| GithubPullRequestHead {
                 number: pull_request.number,
                 html_url: pull_request.html_url,
                 state: pull_request.state,
                 merged: pull_request.merged_at.is_some(),
                 head_sha: pull_request.head.sha,
-            }
-        }))
+            }))
     }
 
     /// The check suites on the commit `sha`.
