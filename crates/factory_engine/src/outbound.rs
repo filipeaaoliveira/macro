@@ -4,6 +4,7 @@ pub mod auth_user_directory;
 pub mod document_hold_tasks;
 pub mod document_task_directory;
 pub mod document_task_notes;
+pub mod document_task_thread;
 pub mod fast_gate_model;
 pub mod github_pull_requests;
 pub mod ingress_gate_notifier;

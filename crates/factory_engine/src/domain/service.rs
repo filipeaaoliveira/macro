@@ -36,11 +36,12 @@ use crate::domain::models::{
     StepStart,
 };
 use crate::domain::ports::{
-    AnswerDelivery, FactoryService, GateNotifier, NoOwnerGates, PullRequests, Retryable,
-    RunWorkflows, RunWorkflowsError, StepExecutor, StepService, TaskAccess, TaskDirectory,
-    TaskNotes, UserDirectory,
+    AnswerDelivery, FactoryService, GateNotifier, NoOwnerGates, NoTaskThread, PullRequests,
+    Retryable, RunWorkflows, RunWorkflowsError, StepExecutor, StepService, TaskAccess,
+    TaskDirectory, TaskNotes, TaskThread, UserDirectory,
 };
 use crate::domain::standing_rules::{GateFacts, RuleAnswer, repeated_blockers, rule_answer};
+use crate::domain::task_thread::{RunUpdate, post_update};
 
 fn internal(error: impl std::error::Error + Send + Sync + 'static) -> rootcause::Report {
     rootcause::Report::new(error).into_dynamic()
@@ -961,13 +962,16 @@ pub const DEFAULT_QUESTIONS: u8 = 2;
 /// What a Run's worker does for its workflow: run Steps, and record Steps,
 /// Gates and the Run's end, each on its own. A Run whose owner section is
 /// on has its waiting Gates told to its owner through `notifier`, and its
-/// owner's comments on its task read through `notes`.
+/// owner's comments on its task read through `notes`. A Run whose task
+/// thread section is on has its updates posted to its task through
+/// `thread`, once each is recorded.
 #[derive(Debug, Clone)]
-pub struct StepServiceImpl<R, E, N = NoOwnerGates, T = NoOwnerGates> {
+pub struct StepServiceImpl<R, E, N = NoOwnerGates, T = NoOwnerGates, P = NoTaskThread> {
     repo: R,
     executor: E,
     notifier: N,
     notes: T,
+    thread: P,
 }
 
 impl<R, E> StepServiceImpl<R, E>
@@ -975,24 +979,27 @@ where
     R: RunRepository + ReviewRoundRepository + MainHoldRepository,
     E: StepExecutor,
 {
-    /// Create the Step service, which tells no owner of a waiting Gate and
-    /// reads no comment, until [`Self::with_owner_gates`].
+    /// Create the Step service, which tells no owner of a waiting Gate,
+    /// reads no comment and posts no update, until
+    /// [`Self::with_owner_gates`] and [`Self::with_task_thread`].
     pub fn new(repo: R, executor: E) -> Self {
         Self {
             repo,
             executor,
             notifier: NoOwnerGates,
             notes: NoOwnerGates,
+            thread: NoTaskThread,
         }
     }
 }
 
-impl<R, E, N, T> StepServiceImpl<R, E, N, T>
+impl<R, E, N, T, P> StepServiceImpl<R, E, N, T, P>
 where
     R: RunRepository + ReviewRoundRepository + MainHoldRepository,
     E: StepExecutor,
     N: GateNotifier,
     T: TaskNotes,
+    P: TaskThread,
 {
     /// The service, telling Runs' owners of their waiting Gates through
     /// `notifier`, and reading their comments on the Runs' tasks through
@@ -1001,13 +1008,32 @@ where
         self,
         notifier: N2,
         notes: T2,
-    ) -> StepServiceImpl<R, E, N2, T2> {
+    ) -> StepServiceImpl<R, E, N2, T2, P> {
         StepServiceImpl {
             repo: self.repo,
             executor: self.executor,
             notifier,
             notes,
+            thread: self.thread,
         }
+    }
+
+    /// The service, posting Runs' updates to their tasks through `thread`,
+    /// for the Runs whose task thread section is on.
+    pub fn with_task_thread<P2: TaskThread>(self, thread: P2) -> StepServiceImpl<R, E, N, T, P2> {
+        StepServiceImpl {
+            repo: self.repo,
+            executor: self.executor,
+            notifier: self.notifier,
+            notes: self.notes,
+            thread,
+        }
+    }
+
+    /// Post `update` of the Run `run_id` to its task's thread, once what it
+    /// tells is recorded. It never fails the activity that posts it.
+    async fn post(&self, run_id: RunId, update: RunUpdate) {
+        post_update(&self.repo, &self.thread, run_id, update).await;
     }
 
     /// What the owner of `run` commented on its task since the latest Gate
@@ -1045,12 +1071,13 @@ where
     }
 }
 
-impl<R, E, N, T> StepService for StepServiceImpl<R, E, N, T>
+impl<R, E, N, T, P> StepService for StepServiceImpl<R, E, N, T, P>
 where
     R: RunRepository + ReviewRoundRepository + MainHoldRepository,
     E: StepExecutor,
     N: GateNotifier,
     T: TaskNotes,
+    P: TaskThread,
 {
     #[tracing::instrument(err, skip_all, fields(run_id = %request.key.run_id, seq = request.key.seq))]
     async fn start_step(&self, request: StepRequest) -> Result<StepStart, StepError> {
@@ -1062,6 +1089,10 @@ where
             .start_step(request.key, &request.entry, request.visit)
             .await
             .map_err(internal)?;
+        // The Run's first Step starting is the Run starting.
+        if request.key.seq == 1 {
+            self.post(request.key.run_id, RunUpdate::Started).await;
+        }
         Ok(StepStart::Started)
     }
 
@@ -1165,6 +1196,10 @@ where
             .end_step(ending.key, &ending.report.outcome, &ending.report.output)
             .await
             .map_err(internal)?;
+        let ended = RunUpdate::StepEnded {
+            seq: ending.key.seq,
+        };
+        self.post(ending.key.run_id, ended).await;
         Ok(())
     }
 
@@ -1206,6 +1241,10 @@ where
             let id = notice_id(answered.key.run_id, answered.key.seq);
             self.notifier.answered(&run.user_id, id).await;
         }
+        let update = RunUpdate::GateAnswered {
+            seq: answered.key.seq,
+        };
+        self.post(answered.key.run_id, update).await;
         Ok(())
     }
 
@@ -1226,10 +1265,17 @@ where
         }
         let answered = gate.and_then(|gate| gate.answer.as_ref());
         if let Some(answer) = answered {
-            return Ok(answer.rule.map(|rule| RuleAnswer {
+            let ruled = answer.rule.map(|rule| RuleAnswer {
                 rule,
                 answer: answer.answer.clone(),
-            }));
+            });
+            // An attempt that answered before its result was lost may not
+            // have posted it: posting it again posts it once.
+            if ruled.is_some() {
+                self.post(key.run_id, RunUpdate::GateAnswered { seq: key.seq })
+                    .await;
+            }
+            return Ok(ruled);
         }
 
         let run = self
@@ -1291,6 +1337,8 @@ where
             )));
         };
         tracing::info!(%rule, answer = %kept.answer, "a standing rule answered a gate");
+        self.post(key.run_id, RunUpdate::GateAnswered { seq: key.seq })
+            .await;
         Ok(Some(RuleAnswer {
             rule,
             answer: kept.answer,
@@ -1313,6 +1361,8 @@ where
         if let Some(notice) = notice {
             self.notifier.notify(notice).await;
         }
+        self.post(key.run_id, RunUpdate::GateWaiting { seq: key.seq })
+            .await;
         Ok(())
     }
 
@@ -1349,6 +1399,7 @@ where
                 }
             }
         }
+        self.post(finish.run_id, RunUpdate::Ended).await;
         Ok(())
     }
 }

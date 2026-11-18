@@ -3,10 +3,12 @@
 mod gate_owner;
 mod gate_replies;
 mod main_hold;
+mod task_thread;
 
 pub(crate) use gate_owner::{FakeNotifier, FakeTaskNotes};
 pub(crate) use gate_replies::FakeGateModel;
 pub(crate) use main_hold::{FakeHoldTasks, FakeMain, FakeWatches};
+pub(crate) use task_thread::FakeTaskThread;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Arc, Mutex};

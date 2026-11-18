@@ -653,7 +653,7 @@ admin turns it on there), kept on the Run with its rules
   goes on from a question, fenced as the owner's notes
   (`owner_notes_brief`, escaped as reviewers' findings are; a single note
   past the budget is cut). The comments the factory posts as the owner (a
-  follow-up's "reported again", a Main Hold task's) end with
+  follow-up's "reported again", a Main Hold task's, a Run's task thread) end with
   `FACTORY_SIGNATURE` (`factory_signed`), and are left out. Macro marks
   only a bot's comments as its own: one an agent session, a routine or an
   API call posted as the owner reads as theirs, so the notes may include
@@ -664,6 +664,36 @@ admin turns it on there), kept on the Run with its rules
   none, and an outage fails the Step's attempt, for a retry.
 
 With it off, as for a Run created before it, none of this happens.
+
+The Orchestrator Definition's task thread section (`task_thread`,
+`taskThread` in the settings routes; off by default and when a definition
+leaves it out, kept on the Run with its rules) posts a Run's main updates
+to its task (`src/domain/task_thread.rs`), as its owner, through document
+storage's `POST /messages/document/{id}` (`outbound/document_task_thread.rs`):
+one comment thread per Run, whose first comment is the Run's start, and one
+reply per update: each Step's end (a `publish` or `merge` Step's names its
+pull request), a Gate left for a person, a Gate's answer and who or what
+gave it (the owner, read from their words or not, the Standing Rule, or
+the stand-in), and the Run's end. A Run with
+no task posts nothing. The worker posts each from the activity that
+records what it tells, once that record is written: `factory_start_step`
+(the first Step), `factory_end_step`, `factory_notify_gate`,
+`factory_answer_gate`, `factory_rule_gate`, `factory_keep_stand_in`,
+`factory_read_gate_reply` and `factory_end_run`, so
+the thread adds no command to the workflow and Runs in flight replay as
+before. Each comment's id is a UUIDv7 of when its update happened, whose
+other bytes come from the Run and the update (`task_thread::comment_id`):
+a retried activity posts it again and document storage refuses it as a
+conflict, which counts as posted, so each update is one comment. A reply
+whose thread is not there posts the first comment, then the reply again.
+Posting never fails or holds the Run: it is bounded by `POST_TIMEOUT`
+(15 s), and what cannot be read or posted is logged at warn level and
+dropped. Every comment ends with `FACTORY_SIGNATURE`, so the owner's notes
+leave it out; a Gate's question is quoted escaped, on one line, as an
+agent may have written it. Document storage takes a comment's own id only
+within a day of its time, so an update posted more than a day after it
+happened (a first comment posted again for a Run older than a day) is
+refused and dropped.
 
 Gate replies (`src/domain/gate_replies.rs`, `gate_replies/service.rs`):
 a person may answer a Gate in words rather than with a button, with `POST
@@ -801,6 +831,8 @@ owner's note.
 - `src/domain/gate_owner.rs`: the owner section: the notice a waiting Gate
   sends, and the owner's notes a Step reads. Project rules are set through the API only: team
   settings show how many Projects have their own.
+- `src/domain/task_thread.rs`: the task thread: the comment each update of
+  a Run posts to its task, and its id.
 - `flows/`: the built-in Flows, each named for its file
   (`src/domain/built_in_flows.rs`). `GET /flows` lists those whose Steps the
   worker serves, with their `description` and whether they work on a

@@ -17,11 +17,13 @@ use crate::domain::gate_owner::notice_id;
 use crate::domain::models::StepError;
 use crate::domain::ports::{
     GateModel, GateNotifier, GateReplyService, ModelPick, ModelQuestion, NoOwnerGates,
+    NoTaskThread, TaskThread,
 };
 use crate::domain::stand_in::{
     PAST_ANSWERS_READ, StandInContext, StandInFacts, may_stand_in, stand_in_question,
 };
 use crate::domain::standing_rules::repeated_blockers;
+use crate::domain::task_thread::{RunUpdate, post_update};
 
 /// The answer that agrees to what a Gate asks, which on a Tampered Run
 /// also approves its Control Files: a person approves those with the
@@ -38,13 +40,16 @@ fn internal(error: impl std::error::Error + Send + Sync + 'static) -> StepError 
 /// Gate replies and the stand-in, over the Run records `repo` and the
 /// small model `model`. A Gate answered from a person's words has its
 /// owner's notification marked done through `notifier`, as an answer
-/// given with a button does.
+/// given with a button does. A Gate answered from words or by the
+/// stand-in is posted to the Run's task thread through `thread`, when the
+/// Run's task thread section is on.
 #[derive(Debug, Clone)]
-pub struct GateRepliesImpl<R, M, N = NoOwnerGates> {
+pub struct GateRepliesImpl<R, M, N = NoOwnerGates, P = NoTaskThread> {
     repo: R,
     model: M,
     settings: GateReplySettings,
     notifier: N,
+    thread: P,
 }
 
 impl<R, M> GateRepliesImpl<R, M>
@@ -60,27 +65,49 @@ where
             model,
             settings,
             notifier: NoOwnerGates,
+            thread: NoTaskThread,
         }
     }
+}
 
+impl<R, M, N, P> GateRepliesImpl<R, M, N, P>
+where
+    R: RunRepository + GateReplyRepository + MainHoldRepository + ReviewRoundRepository,
+    M: GateModel,
+    N: GateNotifier,
+    P: TaskThread,
+{
     /// The service, marking the owner's notification of a Gate done
     /// through `notifier` once their words answer it.
-    pub fn with_notifier<N: GateNotifier>(self, notifier: N) -> GateRepliesImpl<R, M, N> {
+    pub fn with_notifier<N2: GateNotifier>(self, notifier: N2) -> GateRepliesImpl<R, M, N2, P> {
         GateRepliesImpl {
             repo: self.repo,
             model: self.model,
             settings: self.settings,
             notifier,
+            thread: self.thread,
         }
     }
-}
 
-impl<R, M, N> GateRepliesImpl<R, M, N>
-where
-    R: RunRepository + GateReplyRepository + MainHoldRepository + ReviewRoundRepository,
-    M: GateModel,
-    N: GateNotifier,
-{
+    /// The service, posting the Gates it answers to their Runs' task
+    /// threads through `thread`.
+    pub fn with_task_thread<P2: TaskThread>(self, thread: P2) -> GateRepliesImpl<R, M, N, P2> {
+        GateRepliesImpl {
+            repo: self.repo,
+            model: self.model,
+            settings: self.settings,
+            notifier: self.notifier,
+            thread,
+        }
+    }
+
+    /// Post that the Gate of `key` was answered to its Run's task thread.
+    /// It never fails the activity that posts it.
+    async fn post_answered(&self, key: StepKey) {
+        let update = RunUpdate::GateAnswered { seq: key.seq };
+        post_update(&self.repo, &self.thread, key.run_id, update).await;
+    }
+
     /// Whether the stand-in may answer the Gate `asked` of `run`, whose
     /// Steps are `steps`, offering `answers`, as the Run reads now.
     async fn may_stand_in_now(
@@ -178,7 +205,8 @@ where
     }
 
     /// The Gate of `key` is answered: the notification its owner was told
-    /// of it by is done, when the Run's owner section is on.
+    /// of it by is done, when the Run's owner section is on, and the answer
+    /// is posted to its task thread, when that section is on.
     async fn answered(&self, key: StepKey) -> Result<(), StepError> {
         let run = self.run(key).await?;
         if run
@@ -188,6 +216,7 @@ where
             let id = notice_id(key.run_id, key.seq);
             self.notifier.answered(&run.user_id, id).await;
         }
+        self.post_answered(key).await;
         Ok(())
     }
 }
@@ -235,11 +264,12 @@ fn gate_of(steps: &[Step], seq: u16) -> Result<&Gate, StepError> {
         .ok_or_else(|| StepError::Internal(rootcause::report!("the gate is not recorded")))
 }
 
-impl<R, M, N> GateReplyService for GateRepliesImpl<R, M, N>
+impl<R, M, N, P> GateReplyService for GateRepliesImpl<R, M, N, P>
 where
     R: RunRepository + GateReplyRepository + MainHoldRepository + ReviewRoundRepository,
     M: GateModel,
     N: GateNotifier,
+    P: TaskThread,
 {
     #[tracing::instrument(err, skip_all, fields(run_id = %reading.key.run_id, seq = reading.key.seq))]
     async fn read_reply(&self, reading: ReplyReading) -> Result<ReplyRead, StepError> {
@@ -374,8 +404,9 @@ where
         let steps = self.steps(key).await?;
         let gate = gate_of(&steps, key.seq)?;
         // An earlier attempt kept it, or the owner answered first: that
-        // answer stands.
+        // answer stands, and posting it again posts it once.
         if let Some(answer) = &gate.answer {
+            self.post_answered(key).await;
             return Ok(Some(answer.answer.clone()));
         }
         // The Run may have changed in the window: a Tampered branch, a Main
@@ -399,6 +430,7 @@ where
                     "the gate has no answer of the stand-in's to keep"
                 ))
             })?;
+        self.post_answered(key).await;
         Ok(Some(kept.answer))
     }
 }
