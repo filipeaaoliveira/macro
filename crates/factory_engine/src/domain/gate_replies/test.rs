@@ -290,6 +290,33 @@ async fn unclear_words_on_a_tampered_run_are_not_refused_approvals() {
     }
 }
 
+/// A pick the Gate does not offer is kept as no pick, as it decides
+/// nothing, whether the words are asked back or the stand-in declines.
+#[tokio::test]
+async fn a_pick_the_gate_does_not_offer_is_kept_as_none() {
+    let repo = FakeRepo::default();
+    let key = run_at_plan_gate(&repo, Some(STAND_IN_ONLY), None).await;
+    let model = FakeGateModel::picking(Some("merge"), 0.97);
+    model.then(Some("merge"), 0.97);
+    let service = gates(&repo, &model);
+
+    service.stand_in(plan_asking(key)).await.expect("stand in");
+    service
+        .read_reply(reading(key, "Ship it"))
+        .await
+        .expect("read");
+
+    let gate = gate(&repo, key).await;
+    let declined = gate.stand_in_declined.expect("declined");
+    assert_eq!(declined.pick, None);
+    assert_eq!(declined.confidence, Some(97));
+    let asked = gate
+        .asked_back
+        .and_then(|asked| asked.reading)
+        .expect("reading");
+    assert_eq!(asked.pick, None);
+}
+
 /// A reply the model is not sure enough of, or cannot tell, is asked back
 /// on the Gate, which still waits.
 #[tokio::test]

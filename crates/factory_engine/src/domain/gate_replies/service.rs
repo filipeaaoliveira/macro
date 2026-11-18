@@ -340,7 +340,7 @@ where
             Decision::Undecided => false,
         };
 
-        let asked = model_reading(pick.as_ref());
+        let asked = model_reading(pick.as_ref(), &gate.answers);
         self.repo
             .ask_back(key, &reading.reply, &asked, refused_approval)
             .await
@@ -417,7 +417,7 @@ where
         ) else {
             // The owner reads on the Gate why it is theirs.
             self.repo
-                .decline_stand_in(key, &model_reading(pick.as_ref()))
+                .decline_stand_in(key, &model_reading(pick.as_ref(), &gate.answers))
                 .await
                 .map_err(internal)?;
             tracing::info!("the stand-in left a gate to its owner");
@@ -481,12 +481,17 @@ where
     }
 }
 
-/// How the Gate model read a Gate, from its `pick`: none when its call
-/// failed or took too long, which leaves no pick, confidence or reason.
-fn model_reading(pick: Option<&ModelPick>) -> GateModelReading {
+/// How the Gate model read a Gate offering `offered`, from its `pick`:
+/// none when its call failed or took too long, which leaves no pick,
+/// confidence or reason. A pick the Gate does not offer is kept as none,
+/// as [`decide`] reads it, so the record holds only the Gate's answers.
+fn model_reading(pick: Option<&ModelPick>, offered: &[Outcome]) -> GateModelReading {
     match pick {
         Some(pick) => GateModelReading {
-            pick: pick.choice.clone(),
+            pick: pick
+                .choice
+                .clone()
+                .filter(|choice| offered.contains(choice)),
             confidence: Some(percent(pick.confidence)),
             reason: cut(pick.reason.trim(), MAX_NOTE_BYTES).to_string(),
         },
