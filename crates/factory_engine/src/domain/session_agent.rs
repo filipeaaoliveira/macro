@@ -937,6 +937,14 @@ impl<S: RoutineSessions, R: RunRepository + EvaluationRepository> SessionAgent<S
             let timeout = Duration::from_secs(command.timeout);
             let run_for = timeout + SETUP_MARGIN;
             if deadline.saturating_duration_since(tokio::time::Instant::now()) < run_for {
+                // Short of the time the Step gives its work, a retry has no
+                // more: the Step ends, saying so, as a checks round does.
+                if task.answer_by.is_some_and(|answer_by| until(answer_by) < run_for) {
+                    return Err(SessionAgentError::SetupFailed(format!(
+                        "The step's time ran out before setup command `{}` (`{}`, from `{SETUP_FILE}`) could run its {} seconds, so the agent did not start.",
+                        command.name, command.run, command.timeout
+                    )));
+                }
                 return Err(SessionAgentError::SetupOutOfTime(command.name.clone()));
             }
             self.still_holds(task.key, session.session_id).await?;

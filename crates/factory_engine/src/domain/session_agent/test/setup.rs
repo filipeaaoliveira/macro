@@ -194,9 +194,10 @@ async fn a_session_that_runs_no_command_cannot_be_set_up() {
     assert_eq!(sessions.prompts(), 0);
 }
 
-/// A command that would run past the attempt's time is left to a retry.
+/// A command that would run past the time the Step gives its work ends the
+/// Step, saying so: a retry would have no more time.
 #[tokio::test]
-async fn a_setup_command_without_time_left_is_left_to_a_retry() {
+async fn a_setup_command_past_the_step_s_time_ends_the_step() {
     let repo = FakeRepo::default();
     let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
     let task = AgentTask {
@@ -209,11 +210,14 @@ async fn a_setup_command_without_time_left_is_left_to_a_retry() {
     let Err(error) = failed else {
         panic!("no time for the setup");
     };
+    assert!(!error.retryable(), "{error:?}");
+    let Some(report) = error.setup_failed() else {
+        panic!("{error:?}");
+    };
     assert!(
-        matches!(error, SessionAgentError::SetupOutOfTime(ref name) if name == "install"),
-        "{error:?}"
+        report.starts_with("The step's time ran out before setup command `install`"),
+        "{report}"
     );
-    assert!(error.retryable());
     assert!(commands(&sessions).is_empty());
     assert_eq!(sessions.prompts(), 0);
 }
