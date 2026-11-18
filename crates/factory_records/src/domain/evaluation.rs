@@ -24,8 +24,19 @@ pub const PASS_SCORE: f64 = 0.5;
 /// The most bytes of a judgment's reason that are kept.
 pub const MAX_REASON_BYTES: usize = 4096;
 
+/// The most bytes of the id of the model a judgment records.
+pub const MAX_MODEL_BYTES: usize = 200;
+
 /// How many suites [`EvaluationRecords::suites`] keeps: the newest.
 pub const SUITES_READ: i64 = 20;
+
+/// The most trials one person may have running at once, across their
+/// suites: a suite that would pass it does not start.
+pub const MAX_OPEN_TRIALS: u16 = 20;
+
+/// How long a suite with no trial yet counts as running: its trials are
+/// being started.
+pub const SUITE_STARTING_SECS: f64 = 300.0;
 
 /// The Agents a configuration gives Roles in place of the agent
 /// definition's first; a Role it leaves out keeps the definition's.
@@ -108,6 +119,8 @@ pub struct SubjectTrial {
     pub benchmark: String,
     /// Whether it has its result already.
     pub scored: bool,
+    /// Whether its Run's branch was deleted once it was scored.
+    pub branch_deleted: bool,
 }
 
 /// A finished Run, as its judges and its trial's result read it.
@@ -121,6 +134,8 @@ pub struct ScoringSubject {
     pub flow: Option<String>,
     /// What it was asked to do.
     pub request: String,
+    /// The GitHub repository it worked on, if any.
+    pub repo_url: Option<String>,
     /// How it ended; none while it goes.
     pub outcome: Option<RunOutcome>,
     /// Its Steps, in order.
@@ -143,6 +158,33 @@ pub struct NewSuite<'a> {
     pub benchmark: &'a str,
     /// The configuration its trials run on.
     pub agents: &'a AgentChoices,
+    /// How many trials it starts, held to [`MAX_OPEN_TRIALS`] with the
+    /// person's running ones.
+    pub trials: u16,
+}
+
+/// What recording a new suite came to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SuiteInsert {
+    /// The suite is kept.
+    Inserted,
+    /// A suite of the same Benchmark of the person's still runs, so none
+    /// was kept.
+    Running,
+    /// Its trials would take the person past [`MAX_OPEN_TRIALS`] running
+    /// trials, counting this many running now, so none was kept.
+    TooManyTrials(u32),
+}
+
+/// The Agents a Run's Steps start with, and whether it is a trial.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RunAgents {
+    /// The Agents its arms, or its suite, give its Roles.
+    pub choices: AgentChoices,
+    /// Whether it is a Benchmark trial: its Steps take no other Agent when
+    /// the chosen one cannot start, so every trial runs on its
+    /// configuration.
+    pub trial: bool,
 }
 
 /// A Scorer's live judgments of the Runs read.
@@ -173,6 +215,9 @@ pub struct ArmTally {
     pub ended: u32,
     /// How many ended `success`.
     pub succeeded: u32,
+    /// How many had a Step where the Agent the arm chose could not start,
+    /// and another of its Role's took the Step.
+    pub fell_back: u32,
 }
 
 /// One Scorer's live judgments of one arm's Runs.
@@ -253,7 +298,29 @@ pub trait EvaluationRepository: Send + Sync + 'static {
     fn run_agents(
         &self,
         run_id: RunId,
-    ) -> impl Future<Output = Result<AgentChoices, Self::Err>> + Send;
+    ) -> impl Future<Output = Result<RunAgents, Self::Err>> + Send;
+
+    /// The trial a Run is, if a Benchmark suite started it.
+    fn trial_of(
+        &self,
+        run_id: RunId,
+    ) -> impl Future<Output = Result<Option<SubjectTrial>, Self::Err>> + Send;
+
+    /// The commit a trial's write starts from; none for a Run that is not
+    /// a trial.
+    fn trial_base_commit(
+        &self,
+        run_id: RunId,
+    ) -> impl Future<Output = Result<Option<String>, Self::Err>> + Send;
+
+    /// Record that a trial's Run's branch is deleted.
+    fn record_branch_deleted(
+        &self,
+        trial: &TrialKey,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// Delete a suite none of whose trials started, so it is not listed.
+    fn delete_suite(&self, suite_id: Uuid) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// The Run, as its judges read it; none when it is not recorded.
     fn scoring_subject(
@@ -282,17 +349,22 @@ pub trait EvaluationRepository: Send + Sync + 'static {
         result: &TrialResult,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
-    /// Record a suite, before its trials.
+    /// Record a suite, before its trials, unless a suite of the same
+    /// Benchmark of the person's still runs or its trials would take them
+    /// past [`MAX_OPEN_TRIALS`]. Two starts of one person are counted one
+    /// after the other.
     fn insert_suite(
         &self,
         suite: &NewSuite<'_>,
-    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+    ) -> impl Future<Output = Result<SuiteInsert, Self::Err>> + Send;
 
-    /// Record that `run_id` is `trial`, before the Run's workflow starts.
+    /// Record that `run_id` is `trial`, its write starting from
+    /// `base_commit`, before the Run's workflow starts.
     fn insert_trial(
         &self,
         trial: &TrialKey,
         run_id: RunId,
+        base_commit: &str,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// What the evaluation insights read about `scope`, from one snapshot.

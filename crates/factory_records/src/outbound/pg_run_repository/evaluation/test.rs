@@ -5,8 +5,8 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::domain::evaluation::{
-    AgentChoices, EvaluationRepository, Judgment, NewSuite, RunArm, TrialKey, TrialResult,
-    TrialTokens,
+    AgentChoices, EvaluationRepository, Judgment, MAX_OPEN_TRIALS, NewSuite, RunAgents, RunArm,
+    SuiteInsert, TrialKey, TrialResult, TrialTokens,
 };
 use crate::domain::insights::{InsightsScope, RunInsightsRepository};
 use crate::domain::models::{AgentName, Role, RunId};
@@ -16,6 +16,7 @@ const EXPORT: &str = "00000000-0000-7000-8000-000000000401";
 const IMPORT: &str = "00000000-0000-7000-8000-000000000402";
 const TYPO_TRIAL: &str = "00000000-0000-7000-8000-000000000403";
 const SUITE: &str = "00000000-0000-7000-8000-000000000601";
+const BASE: &str = "1111111111111111111111111111111111111111";
 
 fn run(id: &str) -> RunId {
     RunId::from_uuid(Uuid::parse_str(id).expect("valid run id"))
@@ -75,16 +76,22 @@ async fn a_run_takes_the_agents_of_its_arms_and_a_trial_those_of_its_suite(pool:
     let repo = PgRunRepository::new(pool);
 
     assert_eq!(
-        repo.run_agents(run(IMPORT)).await.expect("agents read"),
+        repo.run_agents(run(IMPORT))
+            .await
+            .expect("agents read")
+            .choices,
         choices(&[("writer", "backup")])
     );
     assert_eq!(
         repo.run_agents(run(EXPORT)).await.expect("agents read"),
-        AgentChoices::new()
+        RunAgents::default()
     );
     assert_eq!(
         repo.run_agents(run(TYPO_TRIAL)).await.expect("agents read"),
-        choices(&[("planner", "backup")])
+        RunAgents {
+            choices: choices(&[("planner", "backup")]),
+            trial: true,
+        }
     );
 
     // Recording a Run's arms again keeps the first.
@@ -99,7 +106,10 @@ async fn a_run_takes_the_agents_of_its_arms_and_a_trial_those_of_its_suite(pool:
     .await
     .expect("arms recorded");
     assert_eq!(
-        repo.run_agents(run(IMPORT)).await.expect("agents read"),
+        repo.run_agents(run(IMPORT))
+            .await
+            .expect("agents read")
+            .choices,
         choices(&[("writer", "backup")])
     );
 }
@@ -226,45 +236,154 @@ async fn arms_are_counted_with_their_scores_and_trials_are_left_out_of_live_insi
     assert_eq!(ids, vec![run(IMPORT), run(EXPORT)]);
 }
 
-#[sqlx::test(
-    migrator = "MACRO_DB_MIGRATIONS",
-    fixtures(path = "../fixtures", scripts("people"))
-)]
-async fn a_suite_keeps_its_trials_runs(pool: PgPool) {
-    let repo = PgRunRepository::new(pool.clone());
-    let suite_id = Uuid::parse_str(SUITE).expect("valid suite id");
-    let agents = choices(&[("writer", "backup")]);
-    repo.insert_suite(&NewSuite {
-        id: suite_id,
-        user_id: &julia(),
-        benchmark: "core",
-        agents: &agents,
-    })
-    .await
-    .expect("suite recorded");
+/// A Run of Julia's of the benchmark Flow, still going.
+async fn going_trial_run(pool: &PgPool, id: &str) {
     sqlx::query(
         "INSERT INTO factory_run (id, user_id, flow, request) \
          VALUES ($1, 'macro|julia@example.com', 'benchmark', 'Fix the typo')",
     )
-    .bind(Uuid::parse_str(TYPO_TRIAL).expect("valid run id"))
-    .execute(&pool)
+    .bind(Uuid::parse_str(id).expect("valid run id"))
+    .execute(pool)
     .await
     .expect("run recorded");
-    repo.insert_trial(&typo(), run(TYPO_TRIAL))
+}
+
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn a_suite_keeps_its_trials_runs_and_base_and_a_suite_still_running_holds_the_next(
+    pool: PgPool,
+) {
+    let repo = PgRunRepository::new(pool.clone());
+    let suite_id = Uuid::parse_str(SUITE).expect("valid suite id");
+    let agents = choices(&[("writer", "backup")]);
+    let owner = julia();
+    let suite = |id: Uuid, trials: u16| NewSuite {
+        id,
+        user_id: &owner,
+        benchmark: "core",
+        agents: &agents,
+        trials,
+    };
+    assert_eq!(
+        repo.insert_suite(&suite(suite_id, 1)).await.expect("suite"),
+        SuiteInsert::Inserted
+    );
+    // A suite with no trial yet is starting: another of the Benchmark waits.
+    assert_eq!(
+        repo.insert_suite(&suite(Uuid::from_u128(7), 1))
+            .await
+            .expect("suite"),
+        SuiteInsert::Running
+    );
+    going_trial_run(&pool, TYPO_TRIAL).await;
+    repo.insert_trial(&typo(), run(TYPO_TRIAL), BASE)
         .await
         .expect("trial recorded");
 
     assert_eq!(
         repo.run_agents(run(TYPO_TRIAL)).await.expect("agents read"),
-        agents
+        RunAgents {
+            choices: agents.clone(),
+            trial: true,
+        }
     );
-    // The suite started now, so the period reaches past today.
+    assert_eq!(
+        repo.trial_base_commit(run(TYPO_TRIAL))
+            .await
+            .expect("base read")
+            .as_deref(),
+        Some(BASE)
+    );
+    assert_eq!(
+        repo.trial_base_commit(run(EXPORT))
+            .await
+            .expect("base read"),
+        None
+    );
+    // Its trial still runs: another suite of the Benchmark waits, and one
+    // of another Benchmark may not pass the person's open trials.
+    assert_eq!(
+        repo.insert_suite(&suite(Uuid::from_u128(7), 1))
+            .await
+            .expect("suite"),
+        SuiteInsert::Running
+    );
+    let other = NewSuite {
+        benchmark: "other",
+        ..suite(Uuid::from_u128(8), MAX_OPEN_TRIALS)
+    };
+    assert_eq!(
+        repo.insert_suite(&other).await.expect("suite"),
+        SuiteInsert::TooManyTrials(1)
+    );
+
+    repo.record_branch_deleted(&typo()).await.expect("deleted");
+    let trial = repo
+        .trial_of(run(TYPO_TRIAL))
+        .await
+        .expect("trial read")
+        .expect("a trial");
+    assert!(trial.branch_deleted);
+    assert!(!trial.scored);
+
+    // The suite started now, so the period reaches past today. A suite
+    // none of whose trials started is deleted, and never listed.
     let any_time = InsightsScope {
         from: at("2000-01-01T00:00:00Z"),
         to: at("2100-01-01T00:00:00Z"),
         ..november()
     };
+    sqlx::query("UPDATE factory_run SET outcome = 'success', ended_at = now() WHERE id = $1")
+        .bind(Uuid::parse_str(TYPO_TRIAL).expect("valid run id"))
+        .execute(&pool)
+        .await
+        .expect("ended");
+    assert_eq!(
+        repo.insert_suite(&suite(Uuid::from_u128(9), 1))
+            .await
+            .expect("suite"),
+        SuiteInsert::Inserted
+    );
     let read = repo.read_evaluation(&any_time).await.expect("read");
     assert_eq!(read.suites.len(), 1);
     assert_eq!(read.suites[0].trials[0].result, None);
+    repo.delete_suite(Uuid::from_u128(9))
+        .await
+        .expect("deleted");
+    assert_eq!(
+        repo.insert_suite(&suite(Uuid::from_u128(10), 1))
+            .await
+            .expect("suite"),
+        SuiteInsert::Inserted
+    );
+}
+
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "evaluation"))
+)]
+async fn an_arm_counts_its_runs_whose_chosen_agent_was_passed_over(pool: PgPool) {
+    let repo = PgRunRepository::new(pool.clone());
+    sqlx::query(
+        "INSERT INTO factory_step (run_id, seq, entry, visit, started_at, outcome, output, ended_at, \
+             session_id, action_id, offered, role, agent, passed_over, pass_reasons) \
+         VALUES ($1, 1, 'write', 1, '2026-11-11 09:00Z', 'done', 'Written', '2026-11-11 09:30Z', \
+             $2, $3, '{done}', 'writer', 'primary', '{backup}', '{ai_allowance_exhausted}')",
+    )
+    .bind(Uuid::parse_str(IMPORT).expect("valid run id"))
+    .bind(Uuid::from_u128(0x701))
+    .bind(Uuid::from_u128(0x702))
+    .execute(&pool)
+    .await
+    .expect("step recorded");
+
+    let read = repo.read_evaluation(&november()).await.expect("read");
+    let fell_back: Vec<_> = read
+        .arms
+        .iter()
+        .map(|arm| (arm.arm.as_str(), arm.fell_back))
+        .collect();
+    assert_eq!(fell_back, vec![("backup", 1), ("control", 0)]);
 }

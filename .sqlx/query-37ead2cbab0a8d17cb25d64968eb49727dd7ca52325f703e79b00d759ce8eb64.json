@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE factory_benchmark_trial\n            SET branch_deleted_at = now()\n            WHERE suite_id = $1 AND task = $2 AND branch_deleted_at IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "37ead2cbab0a8d17cb25d64968eb49727dd7ca52325f703e79b00d759ce8eb64"
+}

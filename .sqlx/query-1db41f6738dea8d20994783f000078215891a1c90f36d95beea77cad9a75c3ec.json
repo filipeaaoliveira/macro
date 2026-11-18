@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT t.suite_id, t.task, s.benchmark,\n                   t.scored_at IS NOT NULL AS \"scored!\",\n                   t.branch_deleted_at IS NOT NULL AS \"branch_deleted!\"\n            FROM factory_benchmark_trial t\n            JOIN factory_benchmark_suite s ON s.id = t.suite_id\n            WHERE t.run_id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "suite_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "task",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "benchmark",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "scored!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "branch_deleted!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "1db41f6738dea8d20994783f000078215891a1c90f36d95beea77cad9a75c3ec"
+}

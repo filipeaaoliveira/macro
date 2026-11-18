@@ -13,9 +13,9 @@ use uuid::Uuid;
 use super::{PgRunRepository, PgRunRepositoryErr};
 use crate::domain::evaluation::{
     AgentChoices, ArmScore, ArmTally, BENCHMARK_FLOW, EvaluationRecords, EvaluationRepository,
-    Judgment, MAX_REASON_BYTES, NewSuite, PASS_SCORE, RunArm, SUITES_READ, ScorerTally,
-    ScoringStep, ScoringSubject, SubjectTrial, SuiteRecord, TrialKey, TrialRecord, TrialResult,
-    TrialTokens,
+    Judgment, MAX_OPEN_TRIALS, MAX_REASON_BYTES, NewSuite, PASS_SCORE, RunAgents, RunArm,
+    SUITE_STARTING_SECS, SUITES_READ, ScorerTally, ScoringStep, ScoringSubject, SubjectTrial,
+    SuiteInsert, SuiteRecord, TrialKey, TrialRecord, TrialResult, TrialTokens,
 };
 use crate::domain::insights::InsightsScope;
 use crate::domain::models::{EntryId, Outcome, RunId, RunOutcome};
@@ -90,17 +90,17 @@ impl EvaluationRepository for PgRunRepository {
     }
 
     #[tracing::instrument(err, skip(self))]
-    async fn run_agents(&self, run_id: RunId) -> Result<AgentChoices, Self::Err> {
+    async fn run_agents(&self, run_id: RunId) -> Result<RunAgents, Self::Err> {
         // A Run takes Agents from its arms, or from its suite when it is a
         // trial. The definition's checks keep two arms of one Run from
         // choosing for the same Role.
-        let rows = sqlx::query_scalar!(
+        let rows = sqlx::query!(
             r#"
-            SELECT agents AS "agents!: Json<serde_json::Value>"
+            SELECT agents AS "agents!: Json<serde_json::Value>", false AS "trial!"
             FROM factory_run_arm
             WHERE run_id = $1
             UNION ALL
-            SELECT s.agents
+            SELECT s.agents, true
             FROM factory_benchmark_trial t
             JOIN factory_benchmark_suite s ON s.id = t.suite_id
             WHERE t.run_id = $1
@@ -109,23 +109,84 @@ impl EvaluationRepository for PgRunRepository {
         )
         .fetch_all(&self.pool)
         .await?;
-        let mut agents = BTreeMap::new();
+        let mut agents = RunAgents::default();
         for row in rows {
-            agents.extend(agents_of(row.0)?);
+            agents.choices.extend(agents_of(row.agents.0)?);
+            agents.trial |= row.trial;
         }
         Ok(agents)
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn trial_of(&self, run_id: RunId) -> Result<Option<SubjectTrial>, Self::Err> {
+        let row = sqlx::query!(
+            r#"
+            SELECT t.suite_id, t.task, s.benchmark,
+                   t.scored_at IS NOT NULL AS "scored!",
+                   t.branch_deleted_at IS NOT NULL AS "branch_deleted!"
+            FROM factory_benchmark_trial t
+            JOIN factory_benchmark_suite s ON s.id = t.suite_id
+            WHERE t.run_id = $1
+            "#,
+            run_id.as_uuid(),
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|row| SubjectTrial {
+            key: TrialKey {
+                suite_id: row.suite_id,
+                task: row.task,
+            },
+            benchmark: row.benchmark,
+            scored: row.scored,
+            branch_deleted: row.branch_deleted,
+        }))
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn trial_base_commit(&self, run_id: RunId) -> Result<Option<String>, Self::Err> {
+        Ok(sqlx::query_scalar!(
+            "SELECT base_commit FROM factory_benchmark_trial WHERE run_id = $1",
+            run_id.as_uuid(),
+        )
+        .fetch_optional(&self.pool)
+        .await?
+        .flatten())
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn record_branch_deleted(&self, trial: &TrialKey) -> Result<(), Self::Err> {
+        sqlx::query!(
+            r#"
+            UPDATE factory_benchmark_trial
+            SET branch_deleted_at = now()
+            WHERE suite_id = $1 AND task = $2 AND branch_deleted_at IS NULL
+            "#,
+            trial.suite_id,
+            trial.task,
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn delete_suite(&self, suite_id: Uuid) -> Result<(), Self::Err> {
+        sqlx::query!(
+            "DELETE FROM factory_benchmark_suite WHERE id = $1",
+            suite_id
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     #[tracing::instrument(err, skip(self))]
     async fn scoring_subject(&self, run_id: RunId) -> Result<Option<ScoringSubject>, Self::Err> {
         let Some(run) = sqlx::query!(
             r#"
-            SELECT r.user_id, r.flow, r.request, r.outcome,
-                   t.suite_id AS "suite_id?", t.task AS "task?", s.benchmark AS "benchmark?",
-                   t.scored_at IS NOT NULL AS "trial_scored!"
+            SELECT r.user_id, r.flow, r.request, r.repo_url, r.outcome
             FROM factory_run r
-            LEFT JOIN factory_benchmark_trial t ON t.run_id = r.id
-            LEFT JOIN factory_benchmark_suite s ON s.id = t.suite_id
             WHERE r.id = $1
             "#,
             run_id.as_uuid(),
@@ -158,14 +219,7 @@ impl EvaluationRepository for PgRunRepository {
         })
         .collect::<Result<Vec<_>, PgRunRepositoryErr>>()?;
 
-        let trial = match (run.suite_id, run.task, run.benchmark) {
-            (Some(suite_id), Some(task), Some(benchmark)) => Some(SubjectTrial {
-                key: TrialKey { suite_id, task },
-                benchmark,
-                scored: run.trial_scored,
-            }),
-            _ => None,
-        };
+        let trial = self.trial_of(run_id).await?;
         // A trial's judgments are its own; a live Run's are the live
         // Scorers'.
         let judged = match &trial {
@@ -198,6 +252,7 @@ impl EvaluationRepository for PgRunRepository {
                 .map_err(|_| PgRunRepositoryErr::InvalidUserId(run.user_id))?,
             flow: run.flow,
             request: run.request,
+            repo_url: run.repo_url,
             outcome: run_outcome(run.outcome)?,
             steps,
             trial,
@@ -275,7 +330,60 @@ impl EvaluationRepository for PgRunRepository {
     }
 
     #[tracing::instrument(err, skip(self, suite), fields(benchmark = suite.benchmark))]
-    async fn insert_suite(&self, suite: &NewSuite<'_>) -> Result<(), Self::Err> {
+    async fn insert_suite(&self, suite: &NewSuite<'_>) -> Result<SuiteInsert, Self::Err> {
+        // One person's starts are counted one after the other: the lock on
+        // their id holds a second start until the first is kept. A suite
+        // runs while one of its trials' Runs has not ended, or while it has
+        // no trial yet and started lately: its trials are being started.
+        let mut transaction = self.pool.begin().await?;
+        sqlx::query!(
+            "SELECT pg_advisory_xact_lock(hashtextextended('factory_benchmark_suite:' || $1, 0))",
+            suite.user_id.as_ref(),
+        )
+        .execute(&mut *transaction)
+        .await?;
+        let open = sqlx::query!(
+            r#"
+            SELECT
+                count(*) FILTER (WHERE r.ended_at IS NULL) AS "open_trials!",
+                EXISTS (
+                    SELECT 1
+                    FROM factory_benchmark_suite s
+                    WHERE s.user_id = $1
+                      AND s.benchmark = $2
+                      AND (
+                          EXISTS (
+                              SELECT 1
+                              FROM factory_benchmark_trial t
+                              JOIN factory_run r ON r.id = t.run_id
+                              WHERE t.suite_id = s.id AND r.ended_at IS NULL
+                          )
+                          OR (
+                              NOT EXISTS (
+                                  SELECT 1 FROM factory_benchmark_trial t WHERE t.suite_id = s.id
+                              )
+                              AND s.created_at > now() - make_interval(secs => $3)
+                          )
+                      )
+                ) AS "running!"
+            FROM factory_benchmark_suite s
+            JOIN factory_benchmark_trial t ON t.suite_id = s.id
+            JOIN factory_run r ON r.id = t.run_id
+            WHERE s.user_id = $1
+            "#,
+            suite.user_id.as_ref(),
+            suite.benchmark,
+            SUITE_STARTING_SECS,
+        )
+        .fetch_one(&mut *transaction)
+        .await?;
+        if open.running {
+            return Ok(SuiteInsert::Running);
+        }
+        let open_trials = count(open.open_trials);
+        if open_trials + u32::from(suite.trials) > u32::from(MAX_OPEN_TRIALS) {
+            return Ok(SuiteInsert::TooManyTrials(open_trials));
+        }
         sqlx::query!(
             r#"
             INSERT INTO factory_benchmark_suite (id, user_id, benchmark, agents)
@@ -287,22 +395,29 @@ impl EvaluationRepository for PgRunRepository {
             suite.benchmark,
             agents_json(suite.agents)?,
         )
-        .execute(&self.pool)
+        .execute(&mut *transaction)
         .await?;
-        Ok(())
+        transaction.commit().await?;
+        Ok(SuiteInsert::Inserted)
     }
 
     #[tracing::instrument(err, skip(self))]
-    async fn insert_trial(&self, trial: &TrialKey, run_id: RunId) -> Result<(), Self::Err> {
+    async fn insert_trial(
+        &self,
+        trial: &TrialKey,
+        run_id: RunId,
+        base_commit: &str,
+    ) -> Result<(), Self::Err> {
         sqlx::query!(
             r#"
-            INSERT INTO factory_benchmark_trial (suite_id, task, run_id)
-            VALUES ($1, $2, $3)
+            INSERT INTO factory_benchmark_trial (suite_id, task, run_id, base_commit)
+            VALUES ($1, $2, $3, $4)
             ON CONFLICT (suite_id, task) DO NOTHING
             "#,
             trial.suite_id,
             trial.task,
             run_id.as_uuid(),
+            base_commit,
         )
         .execute(&self.pool)
         .await?;
@@ -371,7 +486,9 @@ impl EvaluationRepository for PgRunRepository {
         .collect();
 
         // An arm's Agents are the same for each of its Runs while the
-        // Experiment is unchanged; the newest Run's are shown.
+        // Experiment is unchanged; the newest Run's are shown. A Run fell
+        // back when one of its Steps passed over the Agent the arm chose
+        // for the Step's Role, and another of the Role's took the Step.
         let arms = sqlx::query!(
             r#"
             SELECT a.experiment, a.arm,
@@ -379,7 +496,16 @@ impl EvaluationRepository for PgRunRepository {
                        AS "agents!: Json<serde_json::Value>",
                    count(*) AS "runs!",
                    count(r.outcome) AS "ended!",
-                   count(*) FILTER (WHERE r.outcome = 'success') AS "succeeded!"
+                   count(*) FILTER (WHERE r.outcome = 'success') AS "succeeded!",
+                   count(*) FILTER (
+                       WHERE EXISTS (
+                           SELECT 1
+                           FROM factory_step st
+                           WHERE st.run_id = a.run_id
+                             AND st.role IS NOT NULL
+                             AND (a.agents ->> st.role) = ANY (st.passed_over)
+                       )
+                   ) AS "fell_back!"
             FROM factory_run_arm a
             JOIN factory_run r ON r.id = a.run_id
             WHERE a.run_id = ANY($1)
@@ -399,6 +525,7 @@ impl EvaluationRepository for PgRunRepository {
                 runs: count(row.runs),
                 ended: count(row.ended),
                 succeeded: count(row.succeeded),
+                fell_back: count(row.fell_back),
             })
         })
         .collect::<Result<Vec<_>, PgRunRepositoryErr>>()?;
@@ -451,8 +578,9 @@ impl PgRunRepository {
         let suites = sqlx::query!(
             r#"
             SELECT id, benchmark, agents AS "agents: Json<serde_json::Value>", created_at
-            FROM factory_benchmark_suite
+            FROM factory_benchmark_suite s
             WHERE user_id = $1 AND created_at >= $2 AND created_at < $3
+              AND EXISTS (SELECT 1 FROM factory_benchmark_trial t WHERE t.suite_id = s.id)
             ORDER BY created_at DESC, id DESC
             LIMIT $4
             "#,

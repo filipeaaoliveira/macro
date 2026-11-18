@@ -68,7 +68,8 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261118143000_factory_automation.sql`,
   `20261118150000_factory_standing_rules_names.sql`,
   `20261118170000_factory_step_terminal.sql`,
-  `20261118210000_factory_evaluation.sql`), `factory_step_steer`,
+  `20261118210000_factory_evaluation.sql`,
+  `20261118210100_factory_benchmark_trial_base.sql`), `factory_step_steer`,
   `factory_run_score`, `factory_run_arm`, `factory_benchmark_suite`,
   `factory_benchmark_trial` and `factory_benchmark_trial_score`.
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
@@ -177,6 +178,11 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   and Gates by primary key, in one read-only
   snapshot under a 5 s timeout. Keep its first `WHERE` and `ORDER BY` on that
   index, and every later read on the Runs' ids.
+- `insert_suite` counts one person's starts one after the other (an
+  advisory lock on their id in its transaction) and refuses a suite while
+  one of the same Benchmark of theirs runs (a trial's Run not ended, or no
+  trial yet and started in the last five minutes) or its trials would pass
+  `MAX_OPEN_TRIALS`. `read_evaluation` lists only suites with a trial.
 - A trial's judgments (`factory_benchmark_trial_score`) never go in
   `factory_run_score`, and `read_insights` and `read_evaluation` leave Runs
   of the `benchmark` Flow out, so a Benchmark moves no live number.

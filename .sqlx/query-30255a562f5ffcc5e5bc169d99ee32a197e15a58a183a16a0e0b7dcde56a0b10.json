@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT agents AS \"agents!: Json<serde_json::Value>\", false AS \"trial!\"\n            FROM factory_run_arm\n            WHERE run_id = $1\n            UNION ALL\n            SELECT s.agents, true\n            FROM factory_benchmark_trial t\n            JOIN factory_benchmark_suite s ON s.id = t.suite_id\n            WHERE t.run_id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "agents!: Json<serde_json::Value>",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 1,
+        "name": "trial!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "30255a562f5ffcc5e5bc169d99ee32a197e15a58a183a16a0e0b7dcde56a0b10"
+}
