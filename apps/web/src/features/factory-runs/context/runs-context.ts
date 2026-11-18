@@ -28,7 +28,8 @@ export type RunActionResult<T = undefined> =
 export type StartRunFailure =
   | 'failed'
   | 'unreachableRepository'
-  | 'noPushAccess';
+  | 'noPushAccess'
+  | 'queueFull';
 
 export type StartRunResult =
   | { ok: true; value: Run }

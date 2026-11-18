@@ -19,13 +19,24 @@ export type OrchestratorDefinition = {
   merge: boolean;
   ownerGates: boolean;
   standIn?: StandInKinds;
+  /**
+   * The Queue limit: above this many Gates and questions waiting on a
+   * person, no new Run of theirs starts. None sets no limit.
+   */
+  queueLimit?: number | null;
 };
 
 /** A kind of Gate a rule decides. */
 export type GateKind = Exclude<
   keyof OrchestratorDefinition,
-  'ownerGates' | 'standIn'
+  'ownerGates' | 'standIn' | 'queueLimit'
 >;
+
+/** The Queue limit a team starts from when it turns the limit on. */
+export const DEFAULT_QUEUE_LIMIT = 5;
+
+/** The highest Queue limit the factory takes. */
+export const MAX_QUEUE_LIMIT = 1000;
 
 /** The kinds of Gate the stand-in answers for the Run's owner. */
 export type StandInKinds = {

@@ -226,6 +226,14 @@ describe('createAppRunsContext', () => {
     });
 
     vi.mocked(factoryClient.startRun).mockResolvedValueOnce(
+      err([{ code: 'QUEUE_FULL', message: 'too many wait' }])
+    );
+    expect(await context.startRun(input)).toEqual({
+      ok: false,
+      reason: 'queueFull',
+    });
+
+    vi.mocked(factoryClient.startRun).mockResolvedValueOnce(
       err([{ code: 'HTTP_ERROR', message: 'HTTP error! status: 400' }])
     );
     expect(await context.startRun(input)).toEqual({

@@ -217,6 +217,7 @@ function startFailure(
   const codes = errors.map((error) => error.code);
   if (codes.includes('NO_PUSH_ACCESS')) return 'noPushAccess';
   if (codes.includes('UNREACHABLE_REPOSITORY')) return 'unreachableRepository';
+  if (codes.includes('QUEUE_FULL')) return 'queueFull';
   return 'failed';
 }
 

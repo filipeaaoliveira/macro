@@ -148,6 +148,51 @@ describe('StandingRulesSettings', () => {
     );
   });
 
+  it('sets the queue limit, keeping the rules, and changes it', async () => {
+    const limited = {
+      ...teamDefault,
+      definition: { ...teamDefault.definition, queueLimit: 5 },
+      isDefault: false,
+    };
+    vi.mocked(factoryClient.setStandingRules)
+      .mockResolvedValueOnce(ok(limited))
+      .mockResolvedValueOnce(
+        ok({
+          ...limited,
+          definition: { ...limited.definition, queueLimit: 2 },
+        })
+      );
+    mount(teamDefault);
+
+    const limit = await screen.findByRole('checkbox', {
+      name: 'Limit the queue',
+    });
+    expect((limit as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(limit);
+    await waitFor(() =>
+      expect(factoryClient.setStandingRules).toHaveBeenCalledWith({
+        plan: false,
+        blockers: true,
+        merge: false,
+        ownerGates: false,
+        queueLimit: 5,
+      })
+    );
+
+    const field = await screen.findByLabelText('Queue limit');
+    fireEvent.input(field, { target: { value: '2' } });
+    fireEvent.blur(field);
+    await waitFor(() =>
+      expect(factoryClient.setStandingRules).toHaveBeenLastCalledWith({
+        plan: false,
+        blockers: true,
+        merge: false,
+        ownerGates: false,
+        queueLimit: 2,
+      })
+    );
+  });
+
   it('shows a member the team’s rules without letting them change them', async () => {
     mount({ ...teamDefault, canEdit: false });
 

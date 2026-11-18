@@ -43,6 +43,8 @@ export default {
     'Your linked GitHub account can’t push to this repository. Choose one it can push to.',
   startRun: 'Start run',
   startFailed: 'Couldn’t start the run. Please try again.',
+  queueFull:
+    'Too many gates and questions wait on you, above this project’s queue limit. Answer some in Waiting on you, then start the run.',
   // A Run.
   runDetails: 'Run details',
   closeRun: 'Close run',
@@ -188,6 +190,11 @@ export default {
   standInBlockers: 'Answer review blocker questions for the run’s owner',
   standInHint:
     'When no rule answers, the stand-in answers as the owner would, if it is sure enough, and says why. The owner can change its answer for ten minutes before the run goes on. It never answers a merge, a run that changes control files, or an agent’s question.',
+  queueLimit: 'Limit the queue',
+  queueLimitHint:
+    'Above this many gates and questions waiting on a person, no new run of theirs starts. Runs under way go on.',
+  queueLimitLabel: 'Queue limit',
+  queueLimitUnit: 'waiting',
   standingRulesSaved: 'Standing rules saved',
   standingRulesSaveFailed: 'Couldn’t save the standing rules',
 };
