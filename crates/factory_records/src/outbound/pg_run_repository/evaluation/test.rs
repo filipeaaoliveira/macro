@@ -538,3 +538,40 @@ async fn an_arm_counts_its_runs_whose_chosen_agent_was_passed_over_with_none_aft
         .collect();
     assert_eq!(fell_back, vec![("backup", 1), ("control", 0)]);
 }
+
+/// A Run of an arm that ended `infrastructure` never had its work run: the
+/// arm counts it among its Runs but not among those that ended, so it does
+/// not count against the arm's Agents.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "evaluation"))
+)]
+async fn an_arm_leaves_its_runs_that_ended_for_infrastructure_out_of_its_ended(pool: PgPool) {
+    let lost = Uuid::parse_str("00000000-0000-7000-8000-000000000404").expect("valid run id");
+    sqlx::query(
+        "INSERT INTO factory_run (id, user_id, flow, request, created_at, outcome, ended_at) \
+         VALUES ($1, 'macro|julia@example.com', 'code', 'Add the search', \
+                 '2026-11-13 09:00Z', 'infrastructure', '2026-11-13 09:01Z')",
+    )
+    .bind(lost)
+    .execute(&pool)
+    .await
+    .expect("run recorded");
+    sqlx::query(
+        "INSERT INTO factory_run_arm (run_id, experiment, arm, agents) \
+         VALUES ($1, 'writer', 'backup', '{\"writer\": \"backup\"}')",
+    )
+    .bind(lost)
+    .execute(&pool)
+    .await
+    .expect("arm recorded");
+    let repo = PgRunRepository::new(pool);
+
+    let read = repo.read_evaluation(&november()).await.expect("read");
+    let arms: Vec<_> = read
+        .arms
+        .iter()
+        .map(|arm| (arm.arm.as_str(), arm.runs, arm.ended, arm.succeeded))
+        .collect();
+    assert_eq!(arms, vec![("backup", 2, 1, 0), ("control", 1, 1, 1)]);
+}

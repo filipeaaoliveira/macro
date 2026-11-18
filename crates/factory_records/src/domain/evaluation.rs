@@ -218,7 +218,8 @@ pub struct ArmTally {
     pub agents: AgentChoices,
     /// How many Runs it took.
     pub runs: u32,
-    /// How many of them ended.
+    /// How many of them ended, but for those that ended `infrastructure`:
+    /// their work never ran.
     pub ended: u32,
     /// How many ended `success`.
     pub succeeded: u32,

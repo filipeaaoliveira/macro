@@ -429,6 +429,35 @@ async fn a_failed_judge_is_asked_again_and_a_cancelled_run_is_not_judged() {
     assert_eq!(judge.asked().len(), 2);
 }
 
+/// A Run that ended `infrastructure` never had its work run: no live
+/// Scorer judges it.
+#[tokio::test]
+async fn a_run_that_ended_for_infrastructure_is_not_judged() {
+    let repo = FakeRepo::default();
+    let session = Uuid::from_u128(7);
+    let lost = ended_run(&repo, "code", RunOutcome::Infrastructure, "done", session).await;
+    let judge = Arc::new(FakeJudge::default());
+    let scoring = ScoringServiceImpl::new(
+        repo.clone(),
+        judge.clone(),
+        usage(session),
+        FakeGithub::default(),
+        Arc::new(definition()),
+    );
+
+    scoring.score_run(lost, false).await.expect("nothing to judge");
+
+    assert!(
+        !repo
+            .evaluation
+            .lock()
+            .expect("evaluation")
+            .run_scores
+            .contains_key(&lost)
+    );
+    assert!(judge.asked().is_empty());
+}
+
 #[tokio::test]
 async fn a_trial_keeps_its_score_tokens_and_judgments_apart_from_the_live_scorers() {
     let repo = FakeRepo::default();

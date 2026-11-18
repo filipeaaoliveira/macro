@@ -2920,7 +2920,7 @@
           "ended": {
             "type": "integer",
             "format": "int32",
-            "description": "How many of them ended.",
+            "description": "How many of them ended, but for those that ended `infrastructure`:\ntheir work never ran.",
             "minimum": 0
           },
           "fellBack": {

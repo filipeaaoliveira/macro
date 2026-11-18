@@ -274,13 +274,17 @@ where
     }
 
     /// The live Scorers whose sample takes the Run judge it, each once. A
-    /// cancelled Run is no one's finished work, so no Scorer judges it.
+    /// cancelled Run is no one's finished work, and a Run that ended
+    /// `infrastructure` never had its work run, so no Scorer judges either.
     async fn score_live(
         &self,
         definition: &EvaluationDefinition,
         subject: &ScoringSubject,
     ) -> Result<bool, StepError> {
-        if subject.outcome == Some(RunOutcome::Cancelled) {
+        if matches!(
+            subject.outcome,
+            Some(RunOutcome::Cancelled | RunOutcome::Infrastructure)
+        ) {
             return Ok(true);
         }
         let mut all_judged = true;

@@ -15,7 +15,8 @@ export interface ArmInsight {
 agent definition's. */
   agents: ArmInsightAgents;
   /**
-   * How many of them ended.
+   * How many of them ended, but for those that ended `infrastructure`:
+their work never ran.
    * @minimum 0
    */
   ended: number;

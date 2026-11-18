@@ -514,14 +514,15 @@ impl EvaluationRepository for PgRunRepository {
         // back when one of its Steps of a Role the arm chooses for was
         // taken by another Agent (the chosen one could not start, or the
         // agent definition no longer has it), or passed over the chosen one
-        // and no Agent took it.
+        // and no Agent took it. A Run that ended `infrastructure` never had
+        // its work run, so it is not among the arm's ended Runs.
         let arms = sqlx::query!(
             r#"
             SELECT a.experiment, a.arm,
                    (array_agg(a.agents ORDER BY r.created_at DESC))[1]
                        AS "agents!: Json<serde_json::Value>",
                    count(*) AS "runs!",
-                   count(r.outcome) AS "ended!",
+                   count(r.outcome) FILTER (WHERE r.outcome <> 'infrastructure') AS "ended!",
                    count(*) FILTER (WHERE r.outcome = 'success') AS "succeeded!",
                    count(*) FILTER (
                        WHERE EXISTS (

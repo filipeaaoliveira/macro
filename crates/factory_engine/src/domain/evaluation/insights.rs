@@ -75,7 +75,8 @@ pub struct ArmInsight {
     pub agents: BTreeMap<String, String>,
     /// How many of the period's Runs took it.
     pub runs: u32,
-    /// How many of them ended.
+    /// How many of them ended, but for those that ended `infrastructure`:
+    /// their work never ran.
     pub ended: u32,
     /// How many ended `success`.
     pub succeeded: u32,
