@@ -590,6 +590,9 @@ pub struct AskedBack {
     /// How the Gate model read the words; none for a reply asked back
     /// before the factory kept it.
     pub reading: Option<GateModelReading>,
+    /// Whether the words approved a Tampered Run, which only the Approve
+    /// button approves, since it lists the Run's changed Control Files.
+    pub refused_tampered: bool,
 }
 
 /// How the Gate model read a Gate when what it said decided nothing: its

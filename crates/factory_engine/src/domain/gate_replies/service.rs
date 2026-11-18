@@ -32,11 +32,6 @@ use crate::domain::task_thread::{RunUpdate, post_update};
 /// button, which lists them, never in words.
 const APPROVE: &str = "approve";
 
-/// Why words that approve a Tampered Run are asked back, ahead of the
-/// model's reason.
-const TAMPERED_APPROVAL: &str = "The run changed its Control Files, so approving it takes the \
-button, which lists them.";
-
 /// The Role whose Step makes a Run's plan.
 const PLANNER: &str = "planner";
 
@@ -345,14 +340,9 @@ where
             Decision::Undecided => false,
         };
 
-        let mut asked = model_reading(pick.as_ref());
-        if refused_approval {
-            asked.reason = format!("{TAMPERED_APPROVAL} {}", asked.reason)
-                .trim_end()
-                .to_string();
-        }
+        let asked = model_reading(pick.as_ref());
         self.repo
-            .ask_back(key, &reading.reply, &asked)
+            .ask_back(key, &reading.reply, &asked, refused_approval)
             .await
             .map_err(internal)?;
         // Words in the stand-in's window end it, whatever they say: the

@@ -5,8 +5,8 @@
 use chrono::Utc;
 use factory_records::domain::main_hold::MainHoldRepository;
 use factory_records::domain::models::{
-    ControlFileChanges, EntryId, GateModelReading, NewRun, Outcome, Repository, Role, RunId,
-    RunInsert, StepKey,
+    ControlFileChanges, EntryId, GateModelReading, MAX_NOTE_BYTES, NewRun, Outcome, Repository,
+    Role, RunId, RunInsert, StepKey,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::standing_rules::{
@@ -347,15 +347,42 @@ async fn words_never_approve_a_tampered_run() {
         .expect("read");
 
     assert_eq!(read, ReplyRead::AskedBack);
-    // The reading says why the factory asked back on a clear approval.
+    // It is kept as refused for the Tampered Run, beside the model's own
+    // reading, whose reason stays as the model gave it, within the note's
+    // size, however long.
     let asked = gate(&repo, key).await.asked_back.expect("asked back");
-    let reading = asked.reading.expect("reading");
-    assert_eq!(reading.pick, Some(outcome("approve")));
-    assert_eq!(
-        reading.reason,
-        "The run changed its Control Files, so approving it takes the button, which lists \
-         them. The owner approved every plan like this one."
+    assert!(asked.refused_tampered);
+    let kept = asked.reading.expect("reading");
+    assert_eq!(kept.pick, Some(outcome("approve")));
+    assert_eq!(kept.reason, "The owner approved every plan like this one.");
+
+    let repo = FakeRepo::default();
+    let key = run_at_plan_gate(&repo, Some(OrchestratorDefinition::DEFAULT), None).await;
+    repo.control_file_changes.lock().expect("changes").insert(
+        key.run_id,
+        ControlFileChanges {
+            tampered: vec![".github/workflows/ci.yml".to_string()],
+            named: Vec::new(),
+            unlisted: false,
+        },
     );
+    let model = FakeGateModel::default();
+    model.picks.lock().expect("picks").push_back(Ok(ModelPick {
+        choice: Some(outcome("approve")),
+        confidence: 0.99,
+        reason: "y".repeat(5000),
+    }));
+    gates(&repo, &model)
+        .read_reply(reading(key, "Approve"))
+        .await
+        .expect("read");
+    let reason = gate(&repo, key)
+        .await
+        .asked_back
+        .and_then(|asked| asked.reading)
+        .expect("reading")
+        .reason;
+    assert_eq!(reason.len(), MAX_NOTE_BYTES);
 }
 
 /// An agent's question takes the words as its answer, with no model; a

@@ -67,14 +67,16 @@ pub trait GateReplyRepository: Send + Sync + 'static {
     type Err: std::error::Error + Send + Sync + 'static;
 
     /// Record that the factory asked back for `reply`, the person's words
-    /// on the Gate of `key`, which the Gate model read as `reading`, while
-    /// the Gate has no answer; a later reply replaces both. Whether it was
-    /// recorded.
+    /// on the Gate of `key`, which the Gate model read as `reading`, and
+    /// whether because they approved a Tampered Run (`refused_tampered`),
+    /// while the Gate has no answer; a later reply replaces them. Whether
+    /// it was recorded.
     fn ask_back(
         &self,
         key: StepKey,
         reply: &str,
         reading: &GateModelReading,
+        refused_tampered: bool,
     ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
 
     /// Answer the Gate of `key` with `answer`, read from `reply`, the words

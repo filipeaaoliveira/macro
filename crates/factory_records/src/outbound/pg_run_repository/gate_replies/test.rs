@@ -56,13 +56,13 @@ async fn a_reply_is_asked_back_or_answers_the_gate_once(pool: PgPool) {
 
     let unclear = leaning(None, Some(40));
     assert!(
-        repo.ask_back(key(run_id, 1), "hmm", &unclear)
+        repo.ask_back(key(run_id, 1), "hmm", &unclear, true)
             .await
             .expect("ask")
     );
     let approve = leaning(Some("approve"), Some(70));
     assert!(
-        repo.ask_back(key(run_id, 1), "not sure yet", &approve)
+        repo.ask_back(key(run_id, 1), "not sure yet", &approve, false)
             .await
             .expect("ask again")
     );
@@ -72,6 +72,7 @@ async fn a_reply_is_asked_back_or_answers_the_gate_once(pool: PgPool) {
     assert_eq!(asked.reply, "not sure yet");
     // The latest words' reading replaces the one before.
     assert_eq!(asked.reading, Some(approve));
+    assert!(!asked.refused_tampered);
     assert_eq!(gate.answer, None);
 
     let kept = repo
@@ -104,10 +105,43 @@ async fn a_reply_is_asked_back_or_answers_the_gate_once(pool: PgPool) {
     assert_eq!(again.answer, outcome("approve"));
     assert!(
         !repo
-            .ask_back(key(run_id, 1), "late", &unclear)
+            .ask_back(key(run_id, 1), "late", &unclear, false)
             .await
             .expect("ask late")
     );
+}
+
+/// Words that approved a Tampered Run are kept as asked back on for it,
+/// with the longest reason the model may give.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn words_refused_on_a_tampered_run_keep_a_full_reason(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let run_id = RunId::generate();
+    insert(&repo, run_id, "Fix it").await;
+    open_plan_gate(&repo, key(run_id, 1)).await;
+    let longest = GateModelReading {
+        pick: Some(outcome("approve")),
+        confidence: Some(97),
+        reason: "x".repeat(4096),
+    };
+
+    assert!(
+        repo.ask_back(key(run_id, 1), "Approve", &longest, true)
+            .await
+            .expect("ask")
+    );
+
+    let steps = repo.list_steps(run_id).await.expect("steps");
+    let asked = steps[0]
+        .gate
+        .as_ref()
+        .and_then(|gate| gate.asked_back.clone())
+        .expect("asked back");
+    assert!(asked.refused_tampered);
+    assert_eq!(asked.reading, Some(longest));
 }
 
 /// The stand-in that left a Gate to its owner keeps how the model read it

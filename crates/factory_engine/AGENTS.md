@@ -1007,9 +1007,9 @@ the person's answer, the words kept as its note and the confidence beside
 it; below it, `unclear`, an answer the Gate does not offer, a call that
 fails or takes longer than `MODEL_TIMEOUT` (30 s), the factory asks back on
 the Gate (`asked_back`, with how the model read the words: its pick, how
-sure it was and why, none of them when it did not answer; words that
-approve a Tampered Run say ahead of the reason that the button approves
-it), which waits on
+sure it was and why, none of them when it did not answer, and whether
+the words approved a Tampered Run, which only the Approve button does:
+`refused_tampered`), which waits on
 and takes an answer or new words.
 Words never approve a Tampered Run: its Control Files are approved with the
 button, which lists them. An agent's question takes the words as its

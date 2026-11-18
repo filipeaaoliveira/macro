@@ -26,12 +26,14 @@ impl GateReplyRepository for PgRunRepository {
         key: StepKey,
         reply: &str,
         reading: &GateModelReading,
+        refused_tampered: bool,
     ) -> Result<bool, Self::Err> {
         let asked = sqlx::query!(
             r#"
             UPDATE factory_gate
             SET asked_back_reply = $3, asked_back_at = now(), asked_back_pick = $4,
-                asked_back_confidence = $5, asked_back_reason = $6
+                asked_back_confidence = $5, asked_back_reason = $6,
+                asked_back_refused_tampered = $7
             WHERE run_id = $1 AND seq = $2 AND answer IS NULL
             "#,
             key.run_id.as_uuid(),
@@ -40,6 +42,7 @@ impl GateReplyRepository for PgRunRepository {
             reading.pick.as_ref().map(Outcome::as_str),
             reading.confidence.map(i16::from),
             reading.reason,
+            refused_tampered,
         )
         .execute(&self.pool)
         .await?

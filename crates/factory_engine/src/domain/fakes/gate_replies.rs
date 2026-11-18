@@ -22,6 +22,7 @@ impl GateReplyRepository for FakeRepo {
         key: StepKey,
         reply: &str,
         reading: &GateModelReading,
+        refused_tampered: bool,
     ) -> Result<bool, FakeError> {
         let asked = self.with_step(key, |step| {
             let gate = step.gate.as_mut().filter(|gate| gate.answer.is_none())?;
@@ -29,6 +30,7 @@ impl GateReplyRepository for FakeRepo {
                 reply: reply.to_string(),
                 at: Utc::now(),
                 reading: Some(reading.clone()),
+                refused_tampered,
             });
             Some(())
         });
