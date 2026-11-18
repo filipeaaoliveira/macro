@@ -247,15 +247,17 @@ pub struct PostQuery {
     pub notification_policy: Option<PostMessageNotificationPolicy>,
 }
 
-/// The notification behavior of a post by `principal`, which asked for
-/// `requested`: only an internal caller's request is honoured.
+/// The notification behavior of a post by `principal`, whose body chose
+/// `chosen` and whose query asked for `requested`: only an internal caller's
+/// query is honoured, on any parent; anyone else keeps the body's choice.
 fn post_notification_policy(
     principal: &MacroAuthorization,
     requested: Option<PostMessageNotificationPolicy>,
+    chosen: PostMessageNotificationPolicy,
 ) -> PostMessageNotificationPolicy {
     match (principal, requested) {
         (MacroAuthorization::Internal(_), Some(policy)) => policy,
-        _ => PostMessageNotificationPolicy::Default,
+        _ => chosen,
     }
 }
 
@@ -272,9 +274,13 @@ where
     A: EntityAccessService,
     Auth: MacroAuthorizationService,
 {
+    ensure_policy_fits_parent(&path, &input)?;
     input.attribution = sender_attribution(&user.authorization);
-    input.notification_policy =
-        post_notification_policy(&user.authorization, query.notification_policy);
+    input.notification_policy = post_notification_policy(
+        &user.authorization,
+        query.notification_policy,
+        input.notification_policy,
+    );
     Ok(Json(
         state
             .service
@@ -284,6 +290,23 @@ where
             )
             .await?,
     ))
+}
+
+/// A caller may quiet only a channel message. Discussion delivery on other
+/// parents also grants mentioned people access, which a quieter policy would
+/// skip, so they take only the default.
+fn ensure_policy_fits_parent(
+    path: &ParentPath,
+    input: &PostMessage,
+) -> Result<(), MessageHttpError> {
+    let is_channel = matches!(
+        MessageParent::parse(&path.parent_type, &path.parent_id),
+        Ok(MessageParent::Channel(_))
+    );
+    if is_channel || input.notification_policy == PostMessageNotificationPolicy::Default {
+        return Ok(());
+    }
+    Err(MessageError::Invalid("notification_policy applies only to channel messages").into())
 }
 
 /// How a new message's signed agent attribution labels it: with the client a

@@ -5,6 +5,7 @@ import {
   ReviewNotesDock,
 } from '@app/features/changes/changes';
 import { StepSessionComposerGate } from '@app/features/factory-runs/components/step-session-gate';
+import { useBlockEntityCommands } from '@app/features/next-soup/actions';
 import { useFeatureFlag } from '@app/lib/analytics/posthog';
 import { useGlobalNotificationSource } from '@components/app/GlobalAppState';
 import { FloatRegionOrInline } from '@components/app/mobile/float-regions/FloatRegion';
@@ -56,6 +57,7 @@ function AgentBlockHeader(props: {
   title: Accessor<string | undefined>;
 }) {
   const header = useAgentSessionHeader(props);
+  useBlockEntityCommands({ resolveEntity: header.entity });
 
   return (
     <Show

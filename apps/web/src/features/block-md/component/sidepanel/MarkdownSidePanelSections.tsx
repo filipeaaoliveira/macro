@@ -4,7 +4,6 @@ import {
   EntityPropertiesSection,
   EntityTagsSection,
 } from '@app/features/property/side-panel/properties';
-import { useFeatureFlag } from '@app/lib/analytics/posthog';
 import { useGlobalNotificationSource } from '@components/app/GlobalAppState';
 import {
   GithubPullRequestDetailsRows,
@@ -20,10 +19,7 @@ import { openDocument } from '@core/component/LexicalMarkdown/component/core/Blo
 import { Wordcount } from '@core/component/LexicalMarkdown/component/status/Wordcount';
 import { Notifications } from '@core/component/Notifications';
 import { References } from '@core/component/References';
-import {
-  enableProjects,
-  USE_MACRO_PR_SUMMARY_BLOCK,
-} from '@core/constant/featureFlags';
+import { USE_MACRO_PR_SUMMARY_BLOCK } from '@core/constant/featureFlags';
 import type { Entity } from '@core/types';
 import type { DateValue } from '@core/util/date';
 import { openExternalUrl } from '@core/util/url';
@@ -187,13 +183,9 @@ function PropertiesSectionContent(props: {
 
   const entityType: PropertiesEntityType = props.isTask ? 'TASK' : 'DOCUMENT';
 
-  const projects = useFeatureFlag(enableProjects);
   const defaultTitlePropertyDefinitionIds = () =>
     props.isTask
-      ? [
-          ...getDefaultPinnedProperties('task'),
-          ...(projects().enabled ? [SYSTEM_PROPERTY_IDS.PROJECT] : []),
-        ]
+      ? [...getDefaultPinnedProperties('task'), SYSTEM_PROPERTY_IDS.PROJECT]
       : [];
   const pins = createPinnedProperties(
     () => mdData.editor,
@@ -221,9 +213,7 @@ function PropertiesSectionContent(props: {
       renderSection={props.renderSection}
       // A task joins a project through its Project property, edited like the others.
       defaultProperties={() =>
-        props.isTask && projects().enabled
-          ? [buildTaskProjectDefaultProperty()]
-          : []
+        props.isTask ? [buildTaskProjectDefaultProperty()] : []
       }
     />
   );

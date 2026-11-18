@@ -70,10 +70,17 @@ the post as that client's ("Claude Code · Agent · from <user>"). It is a displ
 label only. Over HTTP the label comes only from the signed `agent_via` claim of
 a code-mode token, never from the request body.
 
-`POST /messages/{parent_type}/{parent_id}` takes `?notification_policy=`
-(`Default`, `MentionsOnly`, `Silent`) from an internal caller only, such as
-a service posting updates as a user that should notify no one; any other
-caller's post notifies as usual, whatever it asks.
+A channel post's `notification_policy` is part of the request: any caller may
+quiet its own post, since every policy only narrows who is notified. `Silent`
+notifies no one, mentions and first-message invites included, while delivery,
+realtime, search, mention events and agent triggers still run. Other parents
+accept only `Default` over HTTP, because their discussion delivery also grants
+mentioned people access. `attribution` stays server-set.
+
+An internal caller may also pass `?notification_policy=` (`Default`,
+`MentionsOnly`, `Silent`) on `POST /messages/{parent_type}/{parent_id}`, on
+any parent, such as a service posting updates as a user that should notify
+no one; it overrides the body's choice. Any other caller's query is ignored.
 
 New posts use the message sender receipt to retain signed code-mode agent
 attribution. All other operations use the caller receipt so attribution cannot

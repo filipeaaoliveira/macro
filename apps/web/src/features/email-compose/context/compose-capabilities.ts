@@ -251,6 +251,9 @@ export type EmailSendProgress =
   | { state: 'unconfirmed' }
   | { state: 'untracked' };
 
+/** A send the outbox holds, keyed as the server knows its attempt. */
+export type QueuedSend = { sendAttemptId: string; inboxId: string };
+
 export interface EmailDelivery {
   /** Whether sends can be persisted and replayed without connectivity. */
   queueActive?: (inboxId?: string) => boolean;
@@ -262,6 +265,11 @@ export interface EmailDelivery {
   watchSend?(
     sendAttemptId: string,
     changed: (progress: EmailSendProgress) => void
+  ): () => void;
+  /** Reports the server's id for the send's thread once the server accepts it. */
+  watchSentThread?(
+    send: QueuedSend,
+    found: (threadId: string) => void
   ): () => void;
   sendMessage(input: SendEmailDraft): Promise<PersistedEmailIdentity>;
   unschedule(input: {
@@ -360,7 +368,7 @@ export interface EmailComposeFeedback {
       message: string,
       options?: ComposeNoticeOptions
     ): number | undefined;
-    alert(message: string, options?: ComposeNoticeOptions): void;
+    alert(message: string, options?: ComposeNoticeOptions): number | undefined;
     dismiss(id: number): void;
   };
   /** A modal notice with a single acknowledgement; resolves when dismissed. */
@@ -394,7 +402,6 @@ export interface EmailComposePresentation {
   isTouch: Accessor<boolean>;
   isMobile: Accessor<boolean>;
   scheduleEnabled: boolean;
-  signaturesEnabled: Accessor<boolean>;
 }
 
 /** A file stored as a Macro document, as a body link names it. */
@@ -423,7 +430,6 @@ export interface EmailEditorFiles {
 
 /** Opens a calendar event drafted from an email. */
 export interface EmailCalendarEvents {
-  enabled: Accessor<boolean>;
   open(email: { subject: string; guests: string[]; text: string }): boolean;
 }
 
@@ -459,6 +465,12 @@ export interface ComposeNoticeOptions {
   subtext?: string;
   duration?: number;
   persistent?: boolean;
+  /** An open notice this one changes in place, keeping its id. */
+  replace?: number;
+  /** Keeps an earlier notice with the same message instead of replacing it. */
+  stack?: boolean;
+  /** Runs once the notice closes, however it closes. */
+  onDismiss?: () => void;
   /** `kind` picks the action's icon; actions default to undo. */
   actions?: {
     label: string;
