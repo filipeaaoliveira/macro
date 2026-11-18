@@ -141,16 +141,21 @@ impl RunInsightsRepository for PgRunRepository {
         // whose agent asked the Run's owner a question is not a visit of its
         // own: the Step that goes on with the answer is the same visit. Its
         // Gate, which the owner answers in words, is left out of the Gates'
-        // counts and waits.
+        // counts and waits. So is a Step whose agent stopped without a
+        // result and its Gate: its owner's `retry` goes on in the same
+        // visit, and their `stop` fails it, as its Flow routes it.
         let entries = sqlx::query!(
             r#"
             WITH steps AS (
                 SELECT s.run_id, s.entry, s.outcome, s.started_at, s.ended_at,
-                       s.outcome IS DISTINCT FROM 'question' AS visit,
-                       CASE WHEN s.outcome = 'question' THEN NULL ELSE g.opened_at END
-                           AS opened_at,
-                       CASE WHEN s.outcome = 'question' THEN NULL ELSE g.answered_at END
-                           AS answered_at
+                       s.outcome IS DISTINCT FROM 'question'
+                           AND NOT (s.outcome = 'no_result' AND g.answer = 'retry') AS visit,
+                       s.outcome = 'failed' OR (s.outcome = 'no_result' AND g.answer = 'stop')
+                           AS failed,
+                       CASE WHEN s.outcome IN ('question', 'no_result') THEN NULL
+                           ELSE g.opened_at END AS opened_at,
+                       CASE WHEN s.outcome IN ('question', 'no_result') THEN NULL
+                           ELSE g.answered_at END AS answered_at
                 FROM factory_step s
                 LEFT JOIN factory_gate g
                     ON g.run_id = s.run_id AND g.seq = s.seq AND g.rule IS NULL AND NOT g.by_stand_in
@@ -185,7 +190,7 @@ impl RunInsightsRepository for PgRunRepository {
             ),
             visits AS (
                 SELECT entry, count(*) FILTER (WHERE visit) AS visits,
-                       bool_or(outcome = 'failed') AS failed
+                       bool_or(failed) AS failed
                 FROM steps
                 GROUP BY entry, run_id
             ),
@@ -240,16 +245,23 @@ impl RunInsightsRepository for PgRunRepository {
         // The Runs' Steps, with their Gates, are read once by primary key;
         // both counts come from that one read. An agent's question, and the
         // answer a question Gate takes, are no outcome or answer the Flow
-        // routes, so neither is counted.
+        // routes, so neither is counted; nor is a Step whose agent stopped
+        // without a result, or its Gate's answer, but one its owner stopped
+        // counts as `failed`, which its Flow routes.
         let counts = sqlx::query!(
             r#"
             WITH steps AS MATERIALIZED (
-                SELECT s.entry, s.outcome, g.answer
+                SELECT s.entry,
+                       CASE WHEN s.outcome = 'no_result' AND g.answer = 'stop' THEN 'failed'
+                           ELSE s.outcome END AS outcome,
+                       g.answer,
+                       s.outcome = 'no_result' AS stopped
                 FROM factory_step s
                 LEFT JOIN factory_gate g
                     ON g.run_id = s.run_id AND g.seq = s.seq AND g.rule IS NULL AND NOT g.by_stand_in
                         AND g.agent_session_id IS NULL
                 WHERE s.run_id = ANY($1) AND s.outcome IS DISTINCT FROM 'question'
+                    AND NOT (s.outcome = 'no_result' AND g.answer IS DISTINCT FROM 'stop')
             )
             SELECT entry AS "entry!", 'outcome' AS "kind!", outcome AS "value!", count(*) AS "count!"
             FROM steps
@@ -258,7 +270,7 @@ impl RunInsightsRepository for PgRunRepository {
             UNION ALL
             SELECT entry, 'answer', answer, count(*)
             FROM steps
-            WHERE answer IS NOT NULL
+            WHERE answer IS NOT NULL AND NOT stopped
             GROUP BY entry, answer
             ORDER BY 1, 2, 3
             "#,
@@ -297,13 +309,19 @@ impl RunInsightsRepository for PgRunRepository {
                     row_number() OVER (PARTITION BY t.entry ORDER BY r.place) AS rank
                 FROM (
                     SELECT
-                        entry,
-                        run_id,
-                        coalesce(bool_or(outcome = 'failed'), false) AS failed,
-                        count(*) FILTER (WHERE outcome IS DISTINCT FROM 'question') AS visits
-                    FROM factory_step
-                    WHERE run_id = ANY($1)
-                    GROUP BY entry, run_id
+                        s.entry,
+                        s.run_id,
+                        coalesce(bool_or(
+                            s.outcome = 'failed' OR (s.outcome = 'no_result' AND g.answer = 'stop')
+                        ), false) AS failed,
+                        count(*) FILTER (
+                            WHERE s.outcome IS DISTINCT FROM 'question'
+                                AND NOT (s.outcome = 'no_result' AND g.answer = 'retry')
+                        ) AS visits
+                    FROM factory_step s
+                    LEFT JOIN factory_gate g ON g.run_id = s.run_id AND g.seq = s.seq
+                    WHERE s.run_id = ANY($1)
+                    GROUP BY s.entry, s.run_id
                 ) t
                 JOIN unnest($1::uuid[]) WITH ORDINALITY AS r(id, place) ON r.id = t.run_id
                 WHERE t.failed OR t.visits > 1
