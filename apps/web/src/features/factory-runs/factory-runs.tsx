@@ -14,6 +14,7 @@ import { createAppInsightsContext } from './queries/insights';
 import { createAppRunsContext } from './queries/runs';
 import { AutomationsSettings } from './views/automations-settings';
 import { ControlFilesSettings } from './views/control-files-settings';
+import { DefinitionSettings } from './views/definition-settings';
 import { StandingRulesSettings } from './views/standing-rules-settings';
 import { TaskRunsSection } from './views/task-runs-section';
 
@@ -61,6 +62,14 @@ export function TaskRuns(props: { taskId: string; order: number }) {
  */
 export function TeamControlFiles() {
   return <ControlFilesSettings />;
+}
+
+/**
+ * The team's Factory Definition, as the body of a team settings section:
+ * the repository its Runs take their Flows, Agents and rules from.
+ */
+export function TeamDefinition() {
+  return <DefinitionSettings />;
 }
 
 /**

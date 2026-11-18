@@ -63,6 +63,8 @@ async fn run_on_task(repo: &FakeRepo, rules: RunRules) -> (RunId, Uuid) {
             control_files_team_id: None,
             standing_rules: rules,
             automation: None,
+            definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert")
@@ -415,6 +417,8 @@ async fn a_review_round_is_one_comment() {
             control_files_team_id: None,
             standing_rules: rules(true, false),
             automation: None,
+            definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert")

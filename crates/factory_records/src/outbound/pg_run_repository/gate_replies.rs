@@ -259,6 +259,7 @@ impl GateReplyRepository for PgRunRepository {
                 s.entry,
                 r.user_id AS owner,
                 r.flow,
+                r.flow_definition,
                 r.request,
                 s.outcome,
                 s.output AS "output?",
@@ -298,6 +299,7 @@ impl GateReplyRepository for PgRunRepository {
                     owner: MacroUserIdStr::try_from(row.owner.clone())
                         .map_err(|_| PgRunRepositoryErr::InvalidUserId(row.owner))?,
                     flow: row.flow,
+                    flow_definition: row.flow_definition,
                     request: row.request,
                     kind: GateKind::of(outcome.as_ref()),
                     question: row.question,

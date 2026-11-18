@@ -19,6 +19,12 @@ fn every_built_in_flow_reads_and_describes_itself() {
             "flow {} has no description",
             flow.name
         );
+        assert_eq!(
+            read.check_merges(),
+            Ok(()),
+            "flow {} merges without a merge gate's approval",
+            flow.name
+        );
     }
 }
 

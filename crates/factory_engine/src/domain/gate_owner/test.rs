@@ -44,6 +44,7 @@ fn run(owner_gates: bool) -> Run {
             project_id: None,
         }),
         automation: None,
+        definition: None,
         end: None,
     }
 }

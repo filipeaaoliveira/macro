@@ -24,9 +24,10 @@ const AUTOMATION_TRIGGERS = {
 
 /**
  * Where the Run is, when it started and ended, the repository it works on,
- * the Automation that started it, and what its request says past the
- * title. The status line takes focus when the control a person used goes
- * away (an answered Gate, a cancelled Run).
+ * the Factory Definition commit it read, the Automation that started it,
+ * and what its request says past the title. The status line takes focus
+ * when the control a person used goes away (an answered Gate, a cancelled
+ * Run).
  */
 export function RunSummary(props: {
   run: Run;
@@ -73,6 +74,28 @@ export function RunSummary(props: {
                 repository: repositoryLabel(repository().url),
                 branch: repository().baseBranch,
               })}
+            </p>
+          </section>
+        )}
+      </Show>
+      <Show when={props.run.definition}>
+        {(definition) => (
+          <section class="flex flex-col gap-1.5">
+            <h3 class="text-xs font-medium text-ink-muted">
+              {t('factoryRuns.definition')}
+            </h3>
+            <p class="text-sm leading-5 [overflow-wrap:anywhere]">
+              <a
+                class="underline"
+                href={`${definition().repoUrl}/tree/${definition().commit}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {t('factoryRuns.definitionAt', {
+                  repository: repositoryLabel(definition().repoUrl),
+                  commit: definition().commit.slice(0, 7),
+                })}
+              </a>
             </p>
           </section>
         )}

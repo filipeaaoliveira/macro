@@ -10,6 +10,16 @@ use crate::domain::models::GithubError;
 #[cfg(test)]
 mod test;
 
+/// A file GitHub's contents API gives no content for: one over 1 MB. It
+/// is the source of the [`GithubError::Internal`] that answers it, so a
+/// caller can tell it apart.
+#[derive(Debug, thiserror::Error)]
+#[error("the file {path} is over the 1 MB GitHub's contents API gives")]
+pub struct FileTooLarge {
+    /// The file.
+    pub path: String,
+}
+
 /// The most files GitHub lists when it compares two commits.
 const COMPARE_FILES_LISTED: usize = 300;
 
@@ -17,6 +27,10 @@ const COMPARE_FILES_LISTED: usize = 300;
 struct ContentResponse {
     #[serde(rename = "type")]
     kind: String,
+    /// The path of what GitHub answers with: a symlink's target's, when
+    /// GitHub follows it to a file.
+    #[serde(default)]
+    path: Option<String>,
     #[serde(default)]
     encoding: Option<String>,
     #[serde(default)]
@@ -147,12 +161,22 @@ impl GithubOauthImpl {
         if content.kind != "file" {
             return Ok(None);
         }
+        // GitHub follows a symlink to the file it points at and answers with
+        // that file: what is at `path` is a symlink, not a file.
+        if content
+            .path
+            .as_deref()
+            .is_some_and(|answered| answered != path)
+        {
+            return Ok(None);
+        }
 
-        // GitHub gives a file's content in base64, wrapped over lines.
+        // GitHub gives a file's content in base64, wrapped over lines; a file
+        // over the 1 MB its contents API gives comes with none (`none`).
         let (Some("base64"), Some(encoded)) = (content.encoding.as_deref(), content.content) else {
-            return Err(GithubError::Internal(anyhow::anyhow!(
-                "GitHub gave the file {path} with no base64 content"
-            )));
+            return Err(GithubError::Internal(anyhow::Error::new(FileTooLarge {
+                path: path.to_string(),
+            })));
         };
         let encoded: String = encoded.split_whitespace().collect();
         let bytes = STANDARD

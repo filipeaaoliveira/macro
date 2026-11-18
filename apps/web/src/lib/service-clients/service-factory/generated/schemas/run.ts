@@ -8,6 +8,7 @@
 import type { MacroUserIdStr } from './macroUserIdStr';
 import type { RunAutomationProperty } from './runAutomationProperty';
 import type { RunControlFiles } from './runControlFiles';
+import type { RunDefinitionProperty } from './runDefinitionProperty';
 import type { RunEndProperty } from './runEndProperty';
 import type { RunId } from './runId';
 import type { RunRepository } from './runRepository';
@@ -26,6 +27,7 @@ export interface Run {
 account that is not an agent's: only then does its request ask for
 the Control Files it names. */
   createdInPerson: boolean;
+  definition?: RunDefinitionProperty;
   end?: RunEndProperty;
   /** The Run's id, also its Temporal workflow id. */
   id: RunId;

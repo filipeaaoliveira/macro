@@ -141,6 +141,8 @@ async fn second_round(repo: &FakeRepo, blockers: &[&str], fix_diff: bool) -> (Ru
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
             automation: None,
+            definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert")
@@ -217,6 +219,7 @@ fn reviewing<'a>(run_id: RunId, round: &'a ReviewRound) -> StepInput<'a> {
         resumes: None,
         created_in_person: false,
         control_file_patterns: None,
+        definition_repo: None,
         owner_notes: &[],
     }
 }

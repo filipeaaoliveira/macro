@@ -106,6 +106,24 @@ const CI_FIX_INSTRUCTIONS: &str = include_str!("built_in_steps/ci_fix.md");
 /// Where an agent works when the Run works on a repository.
 const REPOSITORY_INSTRUCTIONS: &str = include_str!("built_in_steps/repository.md");
 
+/// How a worker does the built-in Step `step`, if it is one: what
+/// [`BuiltInSteps`] serves, for a check that runs without a worker, as a
+/// Factory Definition's.
+pub fn built_in_step_use(step: &StepName) -> Option<StepUse> {
+    let built_in = BuiltInStep::named(step)?;
+    // A new Flow may not name the Steps past a merge: only a Run whose
+    // Flow, in its workflow's input, still names them runs them, and
+    // that Flow is never read again.
+    if matches!(built_in, BuiltInStep::Deploy | BuiltInStep::Verify) {
+        return None;
+    }
+    if built_in.agent_role().is_some() {
+        Some(StepUse::Agent)
+    } else {
+        Some(StepUse::Work)
+    }
+}
+
 /// One of the Steps [`BuiltInSteps`] does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BuiltInStep {
@@ -429,18 +447,7 @@ where
     type Err = BuiltInStepError;
 
     fn serves(&self, step: &StepName) -> Option<StepUse> {
-        let built_in = BuiltInStep::named(step)?;
-        // A new Flow may not name the Steps past a merge: only a Run whose
-        // Flow, in its workflow's input, still names them runs them, and
-        // that Flow is never read again.
-        if matches!(built_in, BuiltInStep::Deploy | BuiltInStep::Verify) {
-            return None;
-        }
-        if built_in.agent_role().is_some() {
-            Some(StepUse::Agent)
-        } else {
-            Some(StepUse::Work)
-        }
+        built_in_step_use(step)
     }
 
     async fn run(

@@ -103,6 +103,7 @@ async fn only_the_admin_s_own_session_sets_the_team_s_rules() {
             "projects": [],
             "teamId": team_id,
             "canEdit": true,
+            "definitionNamed": false,
         })
     );
 
@@ -223,6 +224,7 @@ async fn the_rules_read_as_the_team_s_or_the_default() {
             "projects": [],
             "teamId": null,
             "canEdit": false,
+            "definitionNamed": false,
         })
     );
     let own = router

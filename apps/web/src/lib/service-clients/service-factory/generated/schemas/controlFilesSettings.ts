@@ -13,6 +13,9 @@ team's, or the factory's default.
 export interface ControlFilesSettings {
   /** Whether the person may change them: they administer the team. */
   canEdit: boolean;
+  /** Whether the team names a Factory Definition, whose `rules.json`
+sets its Runs' Control Files in place of these. */
+  definitionNamed: boolean;
   /** Whether they are the factory's default: the team set none, or the
 person is on no team. */
   isDefault: boolean;

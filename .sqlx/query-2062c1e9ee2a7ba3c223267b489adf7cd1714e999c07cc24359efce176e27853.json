@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT flow, flow_definition FROM factory_run WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "flow",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "flow_definition",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      true
+    ]
+  },
+  "hash": "2062c1e9ee2a7ba3c223267b489adf7cd1714e999c07cc24359efce176e27853"
+}

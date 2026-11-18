@@ -13,6 +13,7 @@ import type {
   ControlFilesSettings,
   CreatedAutomation,
   CreateRunRequest,
+  DefinitionSettings,
   ErrorResponse,
   FiringResult,
   FlawRunRequest,
@@ -31,6 +32,7 @@ import type {
   SessionStepRef,
   SetAutomationEnabledRequest,
   SetControlFilesRequest,
+  SetDefinitionRequest,
   SetStandingRulesRequest,
   StandingRulesSettings,
   TaskRunsResponse,
@@ -526,11 +528,19 @@ export const callFactoryAutomationWebhook = async (
 };
 
 /**
- * @summary List the built-in Flows a Run can be started of, by name.
+ * @summary List the Flows the caller can start a Run of, by name: their team's
+Factory Definition's, read at its default branch's head, when the team
+names one (400 `unreachableDefinition` or `invalidDefinition` when it
+does not read), else the built-in Flows.
  */
 export type listFactoryFlowsResponse200 = {
   data: FlowsResponse;
   status: 200;
+};
+
+export type listFactoryFlowsResponse400 = {
+  data: RunErrorResponse;
+  status: 400;
 };
 
 export type listFactoryFlowsResponse401 = {
@@ -543,12 +553,19 @@ export type listFactoryFlowsResponse403 = {
   status: 403;
 };
 
+export type listFactoryFlowsResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
 export type listFactoryFlowsResponseSuccess = listFactoryFlowsResponse200 & {
   headers: Headers;
 };
 export type listFactoryFlowsResponseError = (
+  | listFactoryFlowsResponse400
   | listFactoryFlowsResponse401
   | listFactoryFlowsResponse403
+  | listFactoryFlowsResponse500
 ) & {
   headers: Headers;
 };
@@ -2011,6 +2028,149 @@ export const setFactoryControlFiles = async (
     status: res.status,
     headers: res.headers,
   } as setFactoryControlFilesResponse;
+};
+
+/**
+ * @summary The Factory Definition the caller's team names, and whether it reads at
+its default branch's head as the caller reaches it on GitHub.
+ */
+export type getFactoryDefinitionResponse200 = {
+  data: DefinitionSettings;
+  status: 200;
+};
+
+export type getFactoryDefinitionResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type getFactoryDefinitionResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type getFactoryDefinitionResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type getFactoryDefinitionResponseSuccess =
+  getFactoryDefinitionResponse200 & {
+    headers: Headers;
+  };
+export type getFactoryDefinitionResponseError = (
+  | getFactoryDefinitionResponse401
+  | getFactoryDefinitionResponse403
+  | getFactoryDefinitionResponse500
+) & {
+  headers: Headers;
+};
+
+export type getFactoryDefinitionResponse =
+  | getFactoryDefinitionResponseSuccess
+  | getFactoryDefinitionResponseError;
+
+export const getGetFactoryDefinitionUrl = () => {
+  return `/settings/definition`;
+};
+
+export const getFactoryDefinition = async (
+  options?: RequestInit
+): Promise<getFactoryDefinitionResponse> => {
+  const res = await fetch(getGetFactoryDefinitionUrl(), {
+    ...options,
+    method: 'GET',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: getFactoryDefinitionResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as getFactoryDefinitionResponse;
+};
+
+/**
+ * @summary Name the repository whose files the caller's team's Runs take their
+Flows, Agents, rules and Scorers from, or name none. The Definition must
+read at its default branch's head as the caller reaches it (400
+`unreachableDefinition` or `invalidDefinition`, naming the file and the
+problem). Only an admin or the owner of the team names it, in their own
+signed-in session (403 otherwise). While one is named, the team's
+Control File and Standing Rules settings are refused (409
+`definitionNamed`): the Definition's pull requests change them.
+ */
+export type setFactoryDefinitionResponse200 = {
+  data: DefinitionSettings;
+  status: 200;
+};
+
+export type setFactoryDefinitionResponse400 = {
+  data: RunErrorResponse;
+  status: 400;
+};
+
+export type setFactoryDefinitionResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type setFactoryDefinitionResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type setFactoryDefinitionResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type setFactoryDefinitionResponseSuccess =
+  setFactoryDefinitionResponse200 & {
+    headers: Headers;
+  };
+export type setFactoryDefinitionResponseError = (
+  | setFactoryDefinitionResponse400
+  | setFactoryDefinitionResponse401
+  | setFactoryDefinitionResponse403
+  | setFactoryDefinitionResponse500
+) & {
+  headers: Headers;
+};
+
+export type setFactoryDefinitionResponse =
+  | setFactoryDefinitionResponseSuccess
+  | setFactoryDefinitionResponseError;
+
+export const getSetFactoryDefinitionUrl = () => {
+  return `/settings/definition`;
+};
+
+export const setFactoryDefinition = async (
+  setDefinitionRequest: SetDefinitionRequest,
+  options?: RequestInit
+): Promise<setFactoryDefinitionResponse> => {
+  const res = await fetch(getSetFactoryDefinitionUrl(), {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(setDefinitionRequest),
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: setFactoryDefinitionResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as setFactoryDefinitionResponse;
 };
 
 /**

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                    INSERT INTO factory_team_definition (team_id, repo_url)\n                    VALUES ($1, $2)\n                    ON CONFLICT (team_id)\n                    DO UPDATE SET repo_url = EXCLUDED.repo_url, updated_at = now()\n                    ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a30f67aa85651a44061803c102fce30f13086716b637b3ae8f54ab3c563775ff"
+}

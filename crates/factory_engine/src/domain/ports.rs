@@ -22,7 +22,7 @@ use crate::domain::gate_owner::{GateNotice, OwnerNote};
 use crate::domain::main_hold::{HoldTask, MainLook, MainWatch};
 use crate::domain::models::{
     AgentAnswer, AgentCommand, AgentTask, AgentTurn, Answerer, BranchDeletion, CodeRepository,
-    ControlFilesSettings, FactoryError, FlowSummary, HeadChecks, Merging,
+    ControlFilesSettings, DefinitionSettings, FactoryError, FlowSummary, HeadChecks, Merging,
     OpenPullRequest, Opening, PullRequest, RepositoryAccess, RequiredChecks, RunDetail, RunFinish,
     RunStart, SessionSteer, SessionStepRef, StandingRulesSettings, StepEnding, StepError,
     StepInput, StepReport, StepRequest, StepStart,
@@ -239,11 +239,24 @@ pub trait StepAgent: Send + Sync + 'static {
     }
 }
 
+/// Why GitHub will not give a file, however often it is asked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileRefusal {
+    /// It is over the 1 MB GitHub's contents API gives.
+    TooLarge,
+    /// GitHub refuses the owner the file.
+    Refused,
+}
+
 /// Pull requests on GitHub, read and changed as a Run's owner, with the
 /// GitHub account they connected to Macro.
 pub trait PullRequests: Send + Sync + 'static {
     /// The error type returned when GitHub cannot be asked.
     type Err: std::error::Error + Retryable + Send + Sync + 'static;
+
+    /// Why `error`, from [`Self::file_text`], is GitHub refusing that file
+    /// for good; none when it is any other failure.
+    fn file_refusal(error: &Self::Err) -> Option<FileRefusal>;
 
     /// What `owner` may do with `repository`: none when they cannot reach
     /// it, have connected no GitHub account, or it has no branch yet.
@@ -295,6 +308,16 @@ pub trait PullRequests: Send + Sync + 'static {
         repository: &CodeRepository,
         base: &str,
     ) -> impl Future<Output = Result<Option<RequiredChecks>, Self::Err>> + Send;
+
+    /// Whether a change reaches `branch` of `repository` only through a
+    /// pull request, by its rulesets or branch protection; none when
+    /// `owner` cannot tell.
+    fn requires_pull_request(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        branch: &str,
+    ) -> impl Future<Output = Result<Option<bool>, Self::Err>> + Send;
 
     /// The text of the file at `path` on `branch` of `repository`; none
     /// when the branch holds no file there.
@@ -663,11 +686,16 @@ pub struct FollowUpTask {
 /// Inbound service port: the Run API used by drivers (HTTP). Every call but
 /// a hand back is made for an acting user, and reaches only that user's Runs.
 pub trait FactoryService: Send + Sync + 'static {
-    /// The built-in Flows a Run can be started of: those that name only
-    /// Steps the worker serves.
-    fn list_flows(&self) -> Vec<FlowSummary>;
+    /// The Flows `actor` can start a Run of: their team's Factory
+    /// Definition's, read at its default branch's head, when the team names
+    /// one; else the built-in Flows that name only Steps the worker serves.
+    fn list_flows(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+    ) -> impl Future<Output = Result<Vec<FlowSummary>, FactoryError>> + Send;
 
-    /// Record `actor`'s new Run of the built-in Flow named `flow` for
+    /// Record `actor`'s new Run of the Flow named `flow` (their team's
+    /// Factory Definition's when it names one, else a built-in Flow) for
     /// `request`, working on the task document `task_id` if one is given,
     /// and on the GitHub repository `repo_url` if the Flow works on one,
     /// and start it. The actor must have an account, see the task, and
@@ -800,6 +828,22 @@ pub trait FactoryService: Send + Sync + 'static {
         actor: MacroUserIdStr<'static>,
         patterns: Option<Vec<String>>,
     ) -> impl Future<Output = Result<ControlFilesSettings, FactoryError>> + Send;
+
+    /// The Factory Definition `actor`'s team names, and whether it reads at
+    /// its default branch's head as `actor` reaches it.
+    fn definition(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+    ) -> impl Future<Output = Result<DefinitionSettings, FactoryError>> + Send;
+
+    /// Name `repo_url` as the Factory Definition of `actor`'s team, once it
+    /// reads at its default branch's head as `actor` reaches it; none names
+    /// none. The actor must administer the team.
+    fn set_definition(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        repo_url: Option<String>,
+    ) -> impl Future<Output = Result<DefinitionSettings, FactoryError>> + Send;
 
     /// The Standing Rules `actor`'s Runs are created with: their team's
     /// Orchestrator Definition, or the factory's default, and the team's

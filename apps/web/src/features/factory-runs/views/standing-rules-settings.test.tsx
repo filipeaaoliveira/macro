@@ -31,6 +31,7 @@ const teamDefault: Settings = {
   projects: [],
   teamId: '00000000-0000-7000-8000-000000000201',
   canEdit: true,
+  definitionNamed: false,
 };
 
 function mount(settings: Settings) {

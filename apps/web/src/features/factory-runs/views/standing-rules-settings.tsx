@@ -88,6 +88,11 @@ export function StandingRulesSettings() {
           </Button>
         </div>
       </Match>
+      <Match when={query.data?.definitionNamed}>
+        <p class="p-3 text-sm text-ink-muted">
+          {t('factoryRuns.standingRulesFromDefinition')}
+        </p>
+      </Match>
       <Match when={query.data}>
         {(settings) => {
           const locked = () => !settings().canEdit || mutation.isPending;

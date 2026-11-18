@@ -244,3 +244,37 @@ async fn a_missing_file_at_a_commit_is_none() {
         requests[1]
     );
 }
+
+/// A symlink GitHub follows to a file answers with that file's path: what
+/// is at the path asked for is no file. A file over the 1 MB GitHub's
+/// contents API gives comes with no content, which reads as too large.
+#[tokio::test]
+async fn a_followed_symlink_is_no_file_and_a_large_one_is_too_large() {
+    let (linked, client) = answering(
+        "200 OK",
+        r#"{"type":"file","path":"elsewhere/rules.json","encoding":"base64","content":"e30="}"#,
+    );
+    let followed = client
+        .get_file_text("token", "macro", "definition", "main", "rules.json")
+        .await
+        .unwrap();
+    linked.finish();
+
+    let (large, client) = answering(
+        "200 OK",
+        r#"{"type":"file","path":"agents.json","encoding":"none","content":""}"#,
+    );
+    let too_large = client
+        .get_file_text("token", "macro", "definition", "main", "agents.json")
+        .await;
+    large.finish();
+
+    assert_eq!(followed, None);
+    let Err(GithubError::Internal(error)) = too_large else {
+        panic!("a large file is an error: {too_large:?}");
+    };
+    assert!(
+        error.downcast_ref::<super::FileTooLarge>().is_some(),
+        "{error}"
+    );
+}

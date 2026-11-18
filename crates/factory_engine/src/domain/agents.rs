@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 
 use bot_id::BotId;
 use factory_records::domain::models::{AgentName, Role};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::domain::built_in_flows::built_in_roles;
 use crate::domain::flow::FlowError;
@@ -38,22 +38,23 @@ fn defaults_to_reviewer(role: &Role) -> bool {
 }
 
 /// An Agent: whose sessions it runs in, on which model, told what.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Agent {
     /// The Macro agent whose sessions do the work: its harness runs them.
     /// The Run's owner must be allowed to use it.
     pub bot: BotId,
     /// The model the sessions use; the agent's default when absent.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     /// What every session of it is told before the Step's prompt.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instructions: Option<String>,
 }
 
-/// The Agents, and the ones each Role takes, in order.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+/// The Agents, and the ones each Role takes, in order. It is written as it
+/// is read, so a Run keeps its Factory Definition's and reads them back.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "AgentDefinitionFields")]
 pub struct AgentDefinition {
     agents: BTreeMap<AgentName, Agent>,

@@ -311,6 +311,15 @@ export type AutomationTriggerKind =
   | 'webhook'
   | 'task_event';
 
+/**
+ * The Factory Definition a Run started under: its repository, and the
+ * commit of its default branch the Run read.
+ */
+export type RunDefinition = {
+  repoUrl: string;
+  commit: string;
+};
+
 /** The Automation that started a Run, as it was then. */
 export type RunAutomation = {
   id: string;
@@ -326,6 +335,8 @@ export type Run = {
   repository?: RunRepository;
   /** The Automation that started it; none for a Run a person started. */
   automation?: RunAutomation;
+  /** The Factory Definition it started under; none for the built-in Flows. */
+  definition?: RunDefinition;
   /** The Control Files its branch changed, if any. */
   controlFiles?: ControlFileChanges;
   /** How and when it ended, and for a flawed Run, why. */

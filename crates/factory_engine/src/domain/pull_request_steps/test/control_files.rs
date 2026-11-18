@@ -206,6 +206,8 @@ async fn a_pull_request_merged_outside_the_run_keeps_its_control_files() {
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
             automation: None,
+            definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert");
@@ -366,4 +368,53 @@ async fn the_patterns_the_run_keeps_replace_the_default() {
         .expect("publish");
     assert_eq!(kept(&repo, run_id), None);
     assert_eq!(github.state().compared.len(), compared);
+}
+
+/// On its team's Definition repository, a change to the Definition's own
+/// files is Tampered even when the request, made in person, names it: a
+/// person approves every change to the rules the factory merges under.
+/// The request still names the other Control Files it asks for.
+#[tokio::test]
+async fn a_definition_s_own_files_are_tampered_on_its_repository() {
+    let github = github_changing(Some(&["rules.json", "Makefile", "src/slug.ts"]));
+    let repo = FakeRepo::default();
+    let patterns = paths(&["rules.json", "Makefile"]);
+    let on_definition = RunId::generate();
+    let elsewhere = RunId::generate();
+    let asking = |run_id, definition_repo| {
+        let mut asking = input(run_id);
+        asking.request = "Update rules.json and the Makefile.";
+        asking.control_file_patterns = Some(&patterns);
+        asking.definition_repo = definition_repo;
+        asking
+    };
+
+    steps(&github, &repo)
+        .publish(asking(on_definition, Some("https://github.com/Macro/App")))
+        .await
+        .expect("publish");
+    steps(&github, &repo)
+        .publish(asking(
+            elsewhere,
+            Some("https://github.com/macro/factory-definition"),
+        ))
+        .await
+        .expect("publish");
+
+    assert_eq!(
+        kept(&repo, on_definition),
+        Some(ControlFileChanges {
+            tampered: paths(&["rules.json"]),
+            named: paths(&["Makefile"]),
+            unlisted: false,
+        })
+    );
+    assert_eq!(
+        kept(&repo, elsewhere),
+        Some(ControlFileChanges {
+            tampered: Vec::new(),
+            named: paths(&["rules.json", "Makefile"]),
+            unlisted: false,
+        })
+    );
 }

@@ -22,9 +22,9 @@ use factory_records::domain::automations::{Automation, FiringEnd};
 use factory_records::domain::models::{
     CheckResult, CheckRound, CheckRoundEnd, CheckRoundOutcome, CheckRoundStart, ClaimedSession,
     ControlFileChanges, EntryId, Gate, GateAnswer, GateKind, HandBack, HandedBack, NewRun,
-    NewSteer, Outcome, PassedOver, QueueHold, QueuePlaces, Role, Run, RunEnd, RunId, RunInsert,
-    RunOutcome, SessionStep, SteerRefusal, Steered, Step, StepEnd, StepKey, StepSession,
-    StepSteering, StoppingSession, TaskLink, TeamMembership,
+    NewSteer, Outcome, PassedOver, QueueHold, QueuePlaces, Role, Run, RunDefinition, RunEnd,
+    RunFlow, RunId, RunInsert, RunOutcome, SessionStep, SteerRefusal, Steered, Step, StepEnd,
+    StepKey, StepSession, StepSteering, StoppingSession, TaskLink, TeamMembership,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::standing_rules::{
@@ -39,7 +39,7 @@ use crate::domain::models::{
     run_branch,
 };
 use crate::domain::ports::{
-    FollowUpTask, PullRequests, Retryable, TaskAccess, TaskDirectory, UserDirectory,
+    FileRefusal, FollowUpTask, PullRequests, Retryable, TaskAccess, TaskDirectory, UserDirectory,
 };
 use crate::domain::review_rounds::ChangedFile;
 
@@ -74,6 +74,8 @@ pub(crate) enum FakeGithubError {
     Down,
     #[error("github refused the owner")]
     Refused,
+    #[error("the file is over 1 MB")]
+    TooLarge,
 }
 
 impl Retryable for FakeGithubError {
@@ -149,6 +151,16 @@ pub(crate) struct FakeRepo {
     pub(crate) teams: Arc<Mutex<BTreeMap<String, TeamMembership>>>,
     /// The Control File patterns each team set.
     pub(crate) control_files: Arc<Mutex<BTreeMap<Uuid, Vec<String>>>>,
+    /// The Factory Definition each team names, by its repository's URL.
+    pub(crate) team_definitions: Arc<Mutex<BTreeMap<Uuid, String>>>,
+    /// How many times one Run's Flow was read on its own.
+    pub(crate) flow_reads: Arc<Mutex<usize>>,
+    /// The Runs each read of several Runs' Flows asked for, in order.
+    pub(crate) runs_flows_reads: Arc<Mutex<Vec<Vec<RunId>>>>,
+    /// The Flow each Run kept, and whether it asks, by Run.
+    pub(crate) kept_flows: Arc<Mutex<BTreeMap<RunId, (serde_json::Value, bool)>>>,
+    /// The Agents of the Definition each Run started under, as kept.
+    pub(crate) definition_agents: Arc<Mutex<BTreeMap<RunId, serde_json::Value>>>,
     /// The Standing Rules each team set.
     pub(crate) team_rules: Arc<Mutex<BTreeMap<Uuid, OrchestratorDefinition>>>,
     /// The Standing Rules each team set for a Project, by team and Project.
@@ -361,7 +373,7 @@ impl FakeRepo {
             })
             .map(|(run, _)| *run)
             .collect();
-        let flows = self.flows.lock().expect("flows").clone();
+        let asks = self.asks(asking_flows);
         let mut places = QueuePlaces::default();
         for run in self.runs.lock().expect("runs").values() {
             if run.user_id != *user_id || run.end.is_some() || places.held() >= limit {
@@ -369,15 +381,27 @@ impl FakeRepo {
             }
             if waiting.contains(&run.id) {
                 places.waiting += 1;
-            } else if !gated.contains(&run.id)
-                && flows
-                    .get(&run.id)
-                    .is_some_and(|flow| asking_flows.contains(&flow.as_str()))
-            {
+            } else if !gated.contains(&run.id) && asks.contains(&run.id) {
                 places.starting += 1;
             }
         }
         places
+    }
+
+    /// As the database: the Runs whose Flow asks before their first Gate,
+    /// as each kept it, else by `asking_flows`, its Flow's name.
+    fn asks(&self, asking_flows: &[&str]) -> BTreeSet<RunId> {
+        let kept = self.kept_flows.lock().expect("kept flows").clone();
+        self.flows
+            .lock()
+            .expect("flows")
+            .iter()
+            .filter(|(run, flow)| match kept.get(run) {
+                Some((_, asks)) => *asks,
+                None => asking_flows.contains(&flow.as_str()),
+            })
+            .map(|(run, _)| *run)
+            .collect()
     }
 
     /// Fail the call `name` once, after `passing` calls of it pass.
@@ -444,7 +468,8 @@ impl RunRepository for FakeRepo {
             control_files_team_id,
             standing_rules,
             automation,
-            ..
+            definition,
+            kept_flow,
         } = new;
         if let Some(task_id) = task_id
             && !self.tasks.lock().expect("tasks").contains(&task_id)
@@ -480,8 +505,24 @@ impl RunRepository for FakeRepo {
             control_files: None,
             standing_rules: Some(standing_rules),
             automation: automation.map(|start| start.automation.clone()),
+            definition: definition.map(|definition| RunDefinition {
+                repo_url: definition.repo_url.to_string(),
+                commit: definition.commit.to_string(),
+            }),
             end: None,
         };
+        if let Some(kept) = kept_flow {
+            self.kept_flows
+                .lock()
+                .expect("kept flows")
+                .insert(id, (kept.definition.clone(), kept.asks));
+        }
+        if let Some(definition) = definition {
+            self.definition_agents
+                .lock()
+                .expect("definition agents")
+                .insert(id, definition.agents.clone());
+        }
         self.runs.lock().expect("runs").insert(id, run.clone());
         self.flows
             .lock()
@@ -602,6 +643,77 @@ impl RunRepository for FakeRepo {
             .cloned())
     }
 
+    async fn team_definition(&self, team_id: Uuid) -> Result<Option<String>, FakeError> {
+        Ok(self
+            .team_definitions
+            .lock()
+            .expect("team definitions")
+            .get(&team_id)
+            .cloned())
+    }
+
+    async fn set_team_definition(
+        &self,
+        team_id: Uuid,
+        repo_url: Option<&str>,
+    ) -> Result<(), FakeError> {
+        let mut kept = self.team_definitions.lock().expect("team definitions");
+        match repo_url {
+            Some(repo_url) => kept.insert(team_id, repo_url.to_string()),
+            None => kept.remove(&team_id),
+        };
+        Ok(())
+    }
+
+    async fn runs_flows(&self, ids: &[RunId]) -> Result<BTreeMap<RunId, RunFlow>, FakeError> {
+        self.runs_flows_reads
+            .lock()
+            .expect("runs flows reads")
+            .push(ids.to_vec());
+        let names = self.flows.lock().expect("flows").clone();
+        let kept = self.kept_flows.lock().expect("kept flows").clone();
+        Ok(ids
+            .iter()
+            .filter_map(|id| {
+                let name = names.get(id)?.clone();
+                let flow = RunFlow {
+                    name: Some(name),
+                    definition: kept.get(id).map(|(flow, _)| flow.clone()),
+                };
+                Some((*id, flow))
+            })
+            .collect())
+    }
+
+    async fn run_flow(&self, id: RunId) -> Result<Option<RunFlow>, FakeError> {
+        *self.flow_reads.lock().expect("flow reads") += 1;
+        let Some(name) = self.flows.lock().expect("flows").get(&id).cloned() else {
+            return Ok(None);
+        };
+        let definition = self
+            .kept_flows
+            .lock()
+            .expect("kept flows")
+            .get(&id)
+            .map(|(flow, _)| flow.clone());
+        Ok(Some(RunFlow {
+            name: Some(name),
+            definition,
+        }))
+    }
+
+    async fn run_definition_agents(
+        &self,
+        id: RunId,
+    ) -> Result<Option<serde_json::Value>, FakeError> {
+        Ok(self
+            .definition_agents
+            .lock()
+            .expect("definition agents")
+            .get(&id)
+            .cloned())
+    }
+
     async fn set_team_control_files(
         &self,
         team_id: Uuid,
@@ -702,7 +814,7 @@ impl RunRepository for FakeRepo {
         limit: u16,
     ) -> Result<Vec<Run>, FakeError> {
         let gated = self.gated_runs();
-        let flows = self.flows.lock().expect("flows").clone();
+        let asks = self.asks(asking_flows);
         let mut runs: Vec<Run> = self
             .runs
             .lock()
@@ -712,9 +824,7 @@ impl RunRepository for FakeRepo {
                 run.user_id == *user_id
                     && run.end.is_none()
                     && !gated.contains(&run.id)
-                    && flows
-                        .get(&run.id)
-                        .is_some_and(|flow| asking_flows.contains(&flow.as_str()))
+                    && asks.contains(&run.id)
             })
             .cloned()
             .collect();
@@ -1391,6 +1501,13 @@ pub(crate) struct FakeGithubState {
     pub(crate) branch_head_fails: bool,
     /// When set, each deletion of a branch waits to be let go.
     pub(crate) delete_gate: Option<Arc<tokio::sync::Semaphore>>,
+    /// Whether the default branch takes changes only through a pull
+    /// request; none when that cannot be told.
+    pub(crate) requires_pull_request: Option<bool>,
+    /// The `owner/name` GitHub answers a repository with, when it says.
+    pub(crate) full_name: Option<String>,
+    /// The paths of the files GitHub will not give, as one over 1 MB.
+    pub(crate) refused_files: BTreeSet<String>,
 }
 
 /// GitHub in memory, for one Run's branch: opening its pull request makes
@@ -1491,6 +1608,14 @@ pub(crate) fn ci(conclusion: Option<&str>) -> HeadChecks {
 }
 
 impl PullRequests for FakeGithub {
+    fn file_refusal(error: &FakeGithubError) -> Option<FileRefusal> {
+        match error {
+            FakeGithubError::TooLarge => Some(FileRefusal::TooLarge),
+            FakeGithubError::Refused => Some(FileRefusal::Refused),
+            FakeGithubError::Down => None,
+        }
+    }
+
     type Err = FakeGithubError;
 
     async fn repository_access(
@@ -1504,6 +1629,7 @@ impl PullRequests for FakeGithub {
             return Err(FakeGithubError::Down);
         }
         Ok((!state.unreachable).then(|| RepositoryAccess {
+            full_name: state.full_name.clone(),
             default_branch: "main".to_string(),
             can_push: !state.read_only,
             deletes_merged_branches: state.deletes_merged_branches,
@@ -1564,6 +1690,15 @@ impl PullRequests for FakeGithub {
         Ok(state.required.clone())
     }
 
+    async fn requires_pull_request(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        _branch: &str,
+    ) -> Result<Option<bool>, FakeGithubError> {
+        Ok(self.state().requires_pull_request)
+    }
+
     async fn file_text(
         &self,
         _owner: &MacroUserIdStr<'static>,
@@ -1574,6 +1709,9 @@ impl PullRequests for FakeGithub {
         let file = (branch.to_string(), path.to_string());
         let mut state = self.state();
         state.file_reads.push(file.clone());
+        if state.refused_files.contains(path) {
+            return Err(FakeGithubError::TooLarge);
+        }
         Ok(state.files.get(&file).cloned())
     }
 

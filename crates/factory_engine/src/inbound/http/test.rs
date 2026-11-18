@@ -28,7 +28,8 @@ use crate::domain::built_in_steps::BuiltInSteps;
 use crate::domain::fakes::{FakeGithub, FakeRepo, FakeWatches};
 use crate::domain::gate::{AnswerGate, ReplyGate};
 use crate::domain::models::{
-    Answerer, ControlFilesSettings, FactoryError, FlowSummary, RunDetail, RunStart,
+    Answerer, ControlFilesSettings, DefinitionSettings, FactoryError, FlowSummary, RunDetail,
+    RunStart,
 };
 use crate::domain::ports::{AnswerDelivery, FactoryService, RunWorkflows, RunWorkflowsError};
 use crate::domain::pull_request_steps::PullRequestSteps;
@@ -183,8 +184,11 @@ impl FakeService {
 }
 
 impl FactoryService for FakeService {
-    fn list_flows(&self) -> Vec<FlowSummary> {
-        Vec::new()
+    async fn list_flows(
+        &self,
+        _actor: &MacroUserIdStr<'static>,
+    ) -> Result<Vec<FlowSummary>, FactoryError> {
+        Ok(Vec::new())
     }
 
     async fn create_run(
@@ -285,6 +289,21 @@ impl FactoryService for FakeService {
         actor: &MacroUserIdStr<'static>,
     ) -> Result<ControlFilesSettings, FactoryError> {
         Err(self.refusing(actor))
+    }
+
+    async fn definition(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+    ) -> Result<DefinitionSettings, FactoryError> {
+        Err(self.refusing(actor))
+    }
+
+    async fn set_definition(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        _repo_url: Option<String>,
+    ) -> Result<DefinitionSettings, FactoryError> {
+        Err(self.refusing(&actor))
     }
 
     async fn set_control_files(
@@ -454,6 +473,8 @@ async fn alice_s_run(repo: &FakeRepo) -> RunId {
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
             automation: None,
+            definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert")
@@ -1097,6 +1118,8 @@ async fn a_run_at_its_merge_on_a_held_base_shows_the_main_hold() {
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
             automation: None,
+            definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert");

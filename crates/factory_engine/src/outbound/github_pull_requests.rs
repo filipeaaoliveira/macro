@@ -12,14 +12,14 @@ use github::domain::models::{
     GithubOpenPullRequest, GithubOpenPullRequestOutcome, GithubPullRequestHead,
 };
 use github::domain::ports::GithubOauth;
-use github::outbound::github_oauth_client::GithubOauthImpl;
+use github::outbound::github_oauth_client::{FileTooLarge, GithubOauthImpl};
 use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::models::{
     BranchDeletion, Check, CheckState, CheckSuite, CodeRepository, CommitStatus, HeadChecks, Merging, OpenPullRequest, Opening, PullRequest, PullRequestState,
     RepositoryAccess, RequiredCheck, RequiredChecks, run_branch,
 };
-use crate::domain::ports::{PullRequests, Retryable};
+use crate::domain::ports::{FileRefusal, PullRequests, Retryable};
 use crate::domain::review_rounds::ChangedFile;
 
 /// GitHub Actions' app, whose workflow runs say whether a run still waits.
@@ -256,6 +256,18 @@ fn pull_request(found: GithubPullRequestHead) -> PullRequest {
 impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
     type Err = GithubPullRequestsErr;
 
+    fn file_refusal(error: &GithubPullRequestsErr) -> Option<FileRefusal> {
+        match error {
+            GithubPullRequestsErr::Github(GithubError::Internal(error))
+                if error.downcast_ref::<FileTooLarge>().is_some() =>
+            {
+                Some(FileRefusal::TooLarge)
+            }
+            GithubPullRequestsErr::Github(GithubError::Forbidden) => Some(FileRefusal::Refused),
+            _ => None,
+        }
+    }
+
     #[tracing::instrument(err, skip(self, owner))]
     async fn repository_access(
         &self,
@@ -274,6 +286,7 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
             .await?;
         Ok(access.and_then(|access| {
             Some(RepositoryAccess {
+                full_name: access.full_name,
                 default_branch: access.default_branch?,
                 can_push: access.push,
                 deletes_merged_branches: access.delete_branch_on_merge,
@@ -420,6 +433,20 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
                 .collect(),
             complete: required.complete,
         }))
+    }
+
+    #[tracing::instrument(err, skip(self, owner))]
+    async fn requires_pull_request(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        branch: &str,
+    ) -> Result<Option<bool>, GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        Ok(self
+            .github
+            .get_requires_pull_request(&token, repository.owner(), repository.name(), branch)
+            .await?)
     }
 
     #[tracing::instrument(err, skip(self, owner, pull_request), fields(branch = %pull_request.branch))]

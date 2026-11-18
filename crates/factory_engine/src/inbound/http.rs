@@ -1,6 +1,7 @@
 //! Axum router for the Run API.
 
 mod control_files;
+mod definition;
 mod main_hold;
 mod standing_rules;
 #[cfg(test)]
@@ -17,8 +18,8 @@ use axum::{
 };
 use factory_records::domain::models::{
     AskedBack, ControlFileChanges, EntryId, FlawMarker, Gate, GateAnswer, GateModelReading, HandBack,
-    Outcome, Run, RunEnd, RunFlaw, RunId, RunOutcome, StandInAnswer, Steer, SteerAction, Step,
-    StepEnd, StepTerminal,
+    Outcome, Run, RunDefinition, RunEnd, RunFlaw, RunId, RunOutcome, StandInAnswer, Steer,
+    SteerAction, Step, StepEnd, StepTerminal,
 };
 use macro_authorization::{
     MacroAuthorizationExtractor, MacroAuthorizationService, MacroAuthorizationState, UserOnly,
@@ -30,8 +31,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::domain::models::{
-    Answerer, ControlFilesSettings, FactoryError, FlowSummary, PersonOnly, RunDetail,
-    SessionStepRef, StandingRulesSettings,
+    Answerer, ControlFilesSettings, DefinitionSettings, FactoryError, FlowSummary, PersonOnly,
+    RunDetail, SessionStepRef, StandingRulesSettings,
 };
 use crate::domain::ports::FactoryService;
 use crate::domain::step_terminal::TerminalRequest;
@@ -111,6 +112,9 @@ impl<S, Auth> FromRef<FactoryRouterState<S, Auth>> for MacroAuthorizationState<A
 /// - `GET /settings/control-files` — the Control File patterns the caller's
 ///   Runs are checked against.
 /// - `PUT /settings/control-files` — set them, or go back to the default.
+/// - `GET /settings/definition` — the Factory Definition the caller's team
+///   names, and whether it reads.
+/// - `PUT /settings/definition` — name one, or none.
 /// - `GET /settings/standing-rules` — the Standing Rules the caller's Runs
 ///   are created with.
 /// - `PUT /settings/standing-rules` — set the team's, or go back to the
@@ -171,6 +175,11 @@ where
             "/settings/control-files",
             get(control_files::get_control_files_handler::<S, Auth>)
                 .put(control_files::set_control_files_handler::<S, Auth>),
+        )
+        .route(
+            "/settings/definition",
+            get(definition::get_definition_handler::<S, Auth>)
+                .put(definition::set_definition_handler::<S, Auth>),
         )
         .route(
             "/settings/standing-rules",
@@ -328,7 +337,10 @@ pub struct HandBackRequest {
     pub text: String,
 }
 
-/// List the built-in Flows a Run can be started of, by name.
+/// List the Flows the caller can start a Run of, by name: their team's
+/// Factory Definition's, read at its default branch's head, when the team
+/// names one (400 `unreachableDefinition` or `invalidDefinition` when it
+/// does not read), else the built-in Flows.
 #[utoipa::path(
     get,
     tag = "factory",
@@ -336,22 +348,25 @@ pub struct HandBackRequest {
     path = "/flows",
     responses(
         (status = 200, body = FlowsResponse),
+        (status = 400, body = RunErrorResponse),
         (status = 401, body = ErrorResponse),
         (status = 403, body = ErrorResponse),
+        (status = 500, body = ErrorResponse),
     )
 )]
 #[tracing::instrument(skip_all)]
 pub async fn list_flows_handler<S, Auth>(
     State(state): State<FactoryRouterState<S, Auth>>,
-    _caller: MacroAuthorizationExtractor<Auth, UserOrInternal>,
-) -> Json<FlowsResponse>
+    caller: MacroAuthorizationExtractor<Auth, UserOrInternal>,
+) -> Result<Json<FlowsResponse>, FactoryError>
 where
     S: FactoryService,
     Auth: MacroAuthorizationService,
 {
-    Json(FlowsResponse {
-        flows: state.service.list_flows(),
-    })
+    let actor = caller.authorization.user.macro_user_id;
+    Ok(Json(FlowsResponse {
+        flows: state.service.list_flows(&actor).await?,
+    }))
 }
 
 /// Create a Run of a built-in Flow, owned by the caller, and start its
@@ -1091,6 +1106,8 @@ impl FactoryError {
             | FactoryError::InvalidRepository
             | FactoryError::UnreachableRepository
             | FactoryError::NoPushAccess
+            | FactoryError::UnreachableDefinition
+            | FactoryError::InvalidDefinition(_)
             | FactoryError::AnswerNotOffered { .. }
             | FactoryError::NotAStepSession
             | FactoryError::OutcomeNotOffered { .. }
@@ -1120,7 +1137,8 @@ impl FactoryError {
             | FactoryError::NotSteerable(_)
             | FactoryError::TaskBusy
             | FactoryError::NotSucceeded
-            | FactoryError::FiringRepeated => StatusCode::CONFLICT,
+            | FactoryError::FiringRepeated
+            | FactoryError::DefinitionNamed => StatusCode::CONFLICT,
             FactoryError::TriggerUnavailable | FactoryError::SessionUnreachable => {
                 StatusCode::BAD_GATEWAY
             }
@@ -1151,6 +1169,15 @@ pub enum RunErrorCode {
     /// An agent answering for the Run's owner tried what the factory keeps
     /// for the owner in person.
     ReservedForAPerson,
+    /// The caller's linked GitHub account cannot read the repository of
+    /// their team's Factory Definition.
+    UnreachableDefinition,
+    /// Their team's Factory Definition does not read; the message says
+    /// which file and why.
+    InvalidDefinition,
+    /// Their team's Factory Definition sets this: it changes by pull
+    /// request.
+    DefinitionNamed,
 }
 
 /// What a refused or failed request answers: a message, and for a refusal
@@ -1174,6 +1201,9 @@ impl FactoryError {
             FactoryError::ControlFilesNotApproved => Some(RunErrorCode::ControlFilesNotApproved),
             FactoryError::QueueFull { .. } => Some(RunErrorCode::QueueFull),
             FactoryError::ReservedForAPerson(_) => Some(RunErrorCode::ReservedForAPerson),
+            FactoryError::UnreachableDefinition => Some(RunErrorCode::UnreachableDefinition),
+            FactoryError::InvalidDefinition(_) => Some(RunErrorCode::InvalidDefinition),
+            FactoryError::DefinitionNamed => Some(RunErrorCode::DefinitionNamed),
             _ => None,
         }
     }
@@ -1223,6 +1253,8 @@ impl IntoResponse for FactoryError {
         hand_back_handler,
         control_files::get_control_files_handler,
         control_files::set_control_files_handler,
+        definition::get_definition_handler,
+        definition::set_definition_handler,
         standing_rules::get_standing_rules_handler,
         standing_rules::set_standing_rules_handler,
         standing_rules::set_project_standing_rules_handler
@@ -1260,6 +1292,9 @@ impl IntoResponse for FactoryError {
         ControlFileChanges,
         ControlFilesSettings,
         control_files::SetControlFilesRequest,
+        DefinitionSettings,
+        definition::SetDefinitionRequest,
+        RunDefinition,
         StandingRulesSettings,
         OrchestratorDefinition,
         StandInKinds,

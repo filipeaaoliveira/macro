@@ -406,8 +406,22 @@ pub struct Run {
     /// The Automation that started it, as it was then; none for a Run a
     /// person started.
     pub automation: Option<RunAutomation>,
+    /// The Factory Definition it started under; none when its owner's team
+    /// named none, so it took the factory's built-in Flows and Agents.
+    pub definition: Option<RunDefinition>,
     /// How and when it ended; none while it runs.
     pub end: Option<RunEnd>,
+}
+
+/// The Factory Definition a Run started under: the repository its owner's
+/// team named, at the commit its default branch was at then.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RunDefinition {
+    /// The repository's `https://github.com/owner/name` URL.
+    pub repo_url: String,
+    /// The commit the Run read the Definition at.
+    pub commit: String,
 }
 
 /// The Control Files a Run's branch changed: files that decide whether the
@@ -476,7 +490,8 @@ pub struct Repository {
 pub struct NewRun<'a> {
     /// Its id, also its Temporal workflow id.
     pub id: RunId,
-    /// The built-in Flow it walks, by name.
+    /// The Flow it walks, by name: a built-in Flow's, or its Factory
+    /// Definition's.
     pub flow: &'a str,
     /// What it is asked to do.
     pub request: &'a str,
@@ -498,6 +513,43 @@ pub struct NewRun<'a> {
     /// The Automation that starts it, if one does: then no other Run an
     /// Automation started may be running on its task.
     pub automation: Option<AutomationStart<'a>>,
+    /// The Factory Definition it starts under, if its owner's team names
+    /// one.
+    pub definition: Option<NewRunDefinition<'a>>,
+    /// The Flow it walks, as it starts, kept so what the Run's Gates are is
+    /// read from its own Flow; none only for records written before.
+    pub kept_flow: Option<KeptFlow<'a>>,
+}
+
+/// The Flow a new Run walks, as the Run keeps it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct KeptFlow<'a> {
+    /// The Flow, as it starts.
+    pub definition: &'a serde_json::Value,
+    /// Whether it has a Gate of its own, so the Run holds a place in its
+    /// owner's Queue before its first Gate.
+    pub asks: bool,
+}
+
+/// The Flow a Run walks, as it keeps it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RunFlow {
+    /// The Flow's name; none for a Run of an early local build.
+    pub name: Option<String>,
+    /// The Flow as the Run started it; none for a Run created before Runs
+    /// kept it, which is looked up by its name.
+    pub definition: Option<serde_json::Value>,
+}
+
+/// The Factory Definition a new Run keeps.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NewRunDefinition<'a> {
+    /// The repository's `https://github.com/owner/name` URL.
+    pub repo_url: &'a str,
+    /// The commit the Run reads it at.
+    pub commit: &'a str,
+    /// The Agents it holds, as written, which the Run's agent Steps take.
+    pub agents: &'a serde_json::Value,
 }
 
 /// What keeping a new Run came to.

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM factory_team_definition WHERE team_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1d6b1b27a18875b647180f1bcfa2490236c01a3e45eb1c45e4067e069b9d8863"
+}

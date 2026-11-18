@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            INSERT INTO factory_run (\n                id, flow, request, user_id, task_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, standing_rules, standing_rules_source,\n                standing_rules_project_id, automation_id, automation_name, automation_trigger,\n            automation_firing_key\n            )\n            VALUES (\n                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17\n            )\n            RETURNING\n                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,\n                standing_rules, standing_rules_source, standing_rules_project_id,\n                automation_id, automation_name, automation_trigger, outcome, ended_at,\n                flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason\n            ",
+  "query": "\n            INSERT INTO factory_run (\n                id, flow, request, user_id, task_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, standing_rules, standing_rules_source,\n                standing_rules_project_id, automation_id, automation_name, automation_trigger,\n                automation_firing_key, definition_repo_url, definition_commit, definition_agents,\n                flow_definition, flow_asks\n            )\n            VALUES (\n                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,\n                $19, $20, $21, $22\n            )\n            RETURNING\n                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,\n                standing_rules, standing_rules_source, standing_rules_project_id,\n                automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,\n                outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason\n            ",
   "describe": {
     "columns": [
       {
@@ -100,31 +100,41 @@
       },
       {
         "ordinal": 19,
-        "name": "outcome",
+        "name": "definition_repo_url",
         "type_info": "Text"
       },
       {
         "ordinal": 20,
+        "name": "definition_commit",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 21,
+        "name": "outcome",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 22,
         "name": "ended_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 21,
+        "ordinal": 23,
         "name": "flawed_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 22,
+        "ordinal": 24,
         "name": "flawed_by_user_id",
         "type_info": "Text"
       },
       {
-        "ordinal": 23,
+        "ordinal": 25,
         "name": "flawed_by_scorer",
         "type_info": "Text"
       },
       {
-        "ordinal": 24,
+        "ordinal": 26,
         "name": "flaw_reason",
         "type_info": "Text"
       }
@@ -147,7 +157,12 @@
         "Uuid",
         "Text",
         "Text",
-        "Text"
+        "Text",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Jsonb",
+        "Bool"
       ]
     },
     "nullable": [
@@ -175,8 +190,10 @@
       true,
       true,
       true,
+      true,
+      true,
       true
     ]
   },
-  "hash": "536b33ef7f3ee3548abaea8ae75ae5c88e6878fe790a7e339452d1d97d855300"
+  "hash": "df93f795563ec820a9398622b7e096740a2600e487d8f8397025737fc216a12e"
 }

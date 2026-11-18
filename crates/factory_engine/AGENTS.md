@@ -164,7 +164,8 @@ fixes of the visits before it, not the retried Step.
 
 People call the Run API with their own login (`UserOrInternal`), and internal
 services for an acting user (the internal key's identity headers). A Run starts
-only of a built-in Flow, by name: no caller sends a Flow definition. The acting
+only of a Flow by name, its team's Factory Definition's or a built-in one (below):
+no caller sends a Flow definition. The acting
 user owns the Runs they create, and reads, answers, links and cancels only
 those; someone else's Run reads as missing (404). A call with no user is
 refused (401), and one whose user has no account (400). A Run may work on a
@@ -1289,6 +1290,66 @@ Automation, and stays for its owner to delete. The workflow
 is not touched: a Run an Automation starts walks its Flow as any other, so
 every Run in flight replays as before.
 
+A team's Factory Definition (`src/domain/definition.rs`) is the files, in a
+GitHub repository the team names and changed by pull requests, that hold its
+factory: `factory.json` (the format's `version`, 1, and its Flows by name),
+`flows/{name}.json` (each Flow, in the built-in Flows' format, checked as they
+are), `agents.json` (`FACTORY_AGENTS`' format; it must fill every Role its
+Flows name), and the optional `rules.json` (`standingRules`, an Orchestrator
+Definition, and `controlFiles`, each the factory's default when left out) and
+`scorers.json` (each Scorer's `name`, `description` and `settings`, kept and
+checked, not read by the factory yet). No field takes a secret, and a file
+holding something shaped like a key or token (`ghp_`, `sk-ant-`, a private
+key, ...) does not read. An admin of the team names it, in person, with `PUT
+/settings/definition` (`{"repoUrl"}`, null for none;
+`factory_team_definition`), which reads it first as them and refuses one that
+does not read (400 `invalidDefinition`, naming the file and the problem, or
+`unreachableDefinition`); `GET` reads it at its head as the caller and says
+why it does not read (`problem`). While a team names one, `POST /runs`, `GET
+/flows` and an Automation's check read it as the Run's owner at the commit its
+default branch is at (`PullRequests::branch_head`, then `file_text` at that
+commit; `service/definition.rs`): the Run walks the Definition's Flow of that
+name (a built-in Flow it does not name is `UnknownFlow`), with its rules
+(`RulesSource::Definition`: neither the team's settings nor a Project's own
+apply) and Control Files, and keeps the repository, the commit
+(`factory_run.definition_*`, `definition` in the Run API, which the Run view
+shows) and the Agents (`definition_agents`), which its agent Steps take
+(`SessionAgent::run_agents`, read and checked again for each Step, so a
+kept definition that no longer reads fails the Step, `DefinitionAgents`)
+in place of `FACTORY_AGENTS`. Every Run keeps the Flow it walks
+(`factory_run.flow_definition`) and whether it has a Gate of its own
+(`flow_asks`): a Gate's kind for the Orchestrator, whether a Run is at its
+merge, which entries name its pull request on the task thread, the replay
+measure's stand-in kinds and its Queue place before its first Gate are read
+from it (`built_in_flows::walked_flow`; a Run kept before falls back to the
+built-in Flow of its name). A Definition's Flow must merge only through a
+merge Gate (`Flow::check_merges`, which a test holds the built-in Flows
+to): a Gate on `ready_to_merge` or `merge` is of kind `merge`, a `merge` Gate is only on
+`ready_to_merge`, every way into `merge` is that Gate's `approve`, and the
+entry above `merge`, with no `next`, is that Gate's, never skipped and
+routing every other outcome; so the Orchestrator never approves a merge
+and only the `merge_when_green` rule merges without a person. A Run on its
+team's Definition repository adds the Definition's own files
+(`DEFINITION_FILE_PATTERNS`) to its Control Files, and a change to one is
+Tampered even when the request names it (`ControlFiles::changes_guarding`),
+so a person approves it; `rules.json` lists at most
+`MAX_DEFINITION_CONTROL_FILES` (195) patterns to leave them room. `GET
+/settings/definition` says whether the default branch takes changes only by
+pull request (`requiresPullRequest`, from its rulesets or, for its admins,
+its branch protection), and the Control Files and Standing Rules settings
+say a Definition is named (`definitionNamed`). Only the default
+branch is read, so a change reaches Runs once its pull request merges, and a
+Run started already, or a Run's own branch, never changes the rules it runs
+under. The team's Control Files and Standing Rules settings are refused
+meanwhile (409 `definitionNamed`) and read as not editable. A team that names
+none takes its settings and the built-in Flows and Agents, as before. The
+Flow goes into the workflow's input as a built-in one does, so the workflow
+and the interpreter did not change, and Runs in flight replay as before. A
+starter Definition is in `definition_template/` (the built-in Flows, with no
+post-merge Steps in `code`; `primary` and `backup` Agents whose bots must be
+replaced; a person merges), which a test reads; `factory_definition_check`
+(`services/factory_service`) checks one in a folder.
+
 ## Start here
 
 - `src/domain/flow.rs`: the Flow model and the checks a definition must pass.
@@ -1311,6 +1372,9 @@ every Run in flight replays as before.
   the checks rounds of `write` and `fix`, and the checks file they read.
 - `src/domain/control_files.rs`: Control Files, the default patterns, and
   what makes a Run Tampered.
+- `src/domain/definition.rs` and `src/domain/service/definition.rs`: the
+  Factory Definition's files, their checks, and reading a team's at its
+  head; `definition_template/`: the starter Definition.
 - `src/domain/verification.rs`, `src/domain/acceptance.rs` and
   `src/domain/built_in_steps/accept.rs`: the verify Phase, the plan's
   acceptance checks and the `accept` Step.
@@ -1335,7 +1399,8 @@ every Run in flight replays as before.
 - `flows/`: the built-in Flows, each named for its file
   (`src/domain/built_in_flows.rs`). `GET /flows` lists those whose Steps the
   worker serves, with their `description` and whether they work on a
-  `repository`: `code`, `plan` and `reply`.
+  `repository`: `code`, `plan` and `reply`; for a team that names a Factory
+  Definition, its Flows instead.
 
 ## Scope
 
@@ -1388,6 +1453,9 @@ every Run in flight replays as before.
 - Add a field to the checks file: `src/domain/checks.rs` (field, check
   and test), then `checks_round.rs`: the prompt, if the agent needs it, and
   the command the engine runs.
+- Add a file or field to the Factory Definition: `src/domain/definition.rs`
+  (field, check and test), `definition_template/` and its README, then what
+  reads it at a Run's start (`service/definition.rs`, `start_run`).
 - Add a Flow keyword: `src/domain/flow.rs` (field and check) →
   `src/domain/interpreter.rs` → `src/domain/interpreter/test.rs`.
 
@@ -1509,6 +1577,14 @@ every Run in flight replays as before.
   without a patch of its own, breaks the replay of Runs in flight: `inbound/temporal/test/replay.rs`
   replays recorded histories, and gets new ones recorded beside them when
   the workflow changes.
+- A Run under a Factory Definition keeps its Agents, so a Definition that
+  renames an Agent changes only later Runs. Insights orders a Flow's
+  entries by the built-in Flow of that name: a Definition's Flow of another
+  name lists its entries in no set order (display only).
+- Deploy every worker before the API starts Runs under a Definition: an
+  older worker cannot read a Run whose `standing_rules_source` is
+  `definition` (`RulesSource`), and fails the Step's activity, and it reads
+  Gate kinds from the built-in Flows rather than the Run's kept Flow.
 - Renaming or removing an Agent while its Steps run fails their retries
   (`UnknownAgent`: its model and instructions are gone), though stops and
   releases still reach their sessions through the recorded bot.

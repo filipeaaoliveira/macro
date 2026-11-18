@@ -1,0 +1,8 @@
+{
+  "checks": [
+    {
+      "name": "definition",
+      "run": "factory_definition_check ."
+    }
+  ]
+}

@@ -499,7 +499,7 @@
     "/flows": {
       "get": {
         "tags": ["factory"],
-        "summary": "List the built-in Flows a Run can be started of, by name.",
+        "summary": "List the Flows the caller can start a Run of, by name: their team's\nFactory Definition's, read at its default branch's head, when the team\nnames one (400 `unreachableDefinition` or `invalidDefinition` when it\ndoes not read), else the built-in Flows.",
         "operationId": "list_factory_flows",
         "responses": {
           "200": {
@@ -508,6 +508,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/FlowsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunErrorResponse"
                 }
               }
             }
@@ -523,6 +533,16 @@
             }
           },
           "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
             "description": "",
             "content": {
               "application/json": {
@@ -2088,6 +2108,122 @@
         }
       }
     },
+    "/settings/definition": {
+      "get": {
+        "tags": ["factory"],
+        "summary": "The Factory Definition the caller's team names, and whether it reads at\nits default branch's head as the caller reaches it on GitHub.",
+        "operationId": "get_factory_definition",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DefinitionSettings"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": ["factory"],
+        "summary": "Name the repository whose files the caller's team's Runs take their\nFlows, Agents, rules and Scorers from, or name none. The Definition must\nread at its default branch's head as the caller reaches it (400\n`unreachableDefinition` or `invalidDefinition`, naming the file and the\nproblem). Only an admin or the owner of the team names it, in their own\nsigned-in session (403 otherwise). While one is named, the team's\nControl File and Standing Rules settings are refused (409\n`definitionNamed`): the Definition's pull requests change them.",
+        "operationId": "set_factory_definition",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetDefinitionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DefinitionSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/settings/standing-rules": {
       "get": {
         "tags": ["factory"],
@@ -2749,11 +2885,15 @@
       "ControlFilesSettings": {
         "type": "object",
         "description": "The Control File patterns a person's Runs are checked against: their\nteam's, or the factory's default.",
-        "required": ["patterns", "isDefault", "canEdit"],
+        "required": ["patterns", "isDefault", "canEdit", "definitionNamed"],
         "properties": {
           "canEdit": {
             "type": "boolean",
             "description": "Whether the person may change them: they administer the team."
+          },
+          "definitionNamed": {
+            "type": "boolean",
+            "description": "Whether the team names a Factory Definition, whose `rules.json`\nsets its Runs' Control Files in place of these."
           },
           "isDefault": {
             "type": "boolean",
@@ -2809,6 +2949,38 @@
           "webhookSecret": {
             "type": ["string", "null"],
             "description": "For a webhook, the secret its calls are signed with: the factory\nnever shows it again."
+          }
+        }
+      },
+      "DefinitionSettings": {
+        "type": "object",
+        "description": "The Factory Definition a person's team names: the repository whose\nfiles its Runs take their Flows, Agents and rules from.",
+        "required": ["canEdit"],
+        "properties": {
+          "canEdit": {
+            "type": "boolean",
+            "description": "Whether the person may change it: they administer the team."
+          },
+          "commit": {
+            "type": ["string", "null"],
+            "description": "The commit of its default branch a Run started now would read,\nwhen the Definition reads there as the person reaches it."
+          },
+          "problem": {
+            "type": ["string", "null"],
+            "description": "Why it does not read now, when it does not: the person cannot reach\nit, or a file of it is wrong."
+          },
+          "repoUrl": {
+            "type": ["string", "null"],
+            "description": "The repository's `https://github.com/owner/name` URL; none when the\nteam names none, so its Runs take the team's settings and the\nfactory's built-in Flows and Agents."
+          },
+          "requiresPullRequest": {
+            "type": ["boolean", "null"],
+            "description": "Whether a ruleset or the branch protection of its default branch\nasks for a pull request; none when that cannot be told, as when the\nperson does not administer it. Without one, a push changes the\nfactory's rules unreviewed. With one, whoever may bypass the rules\n(a ruleset's bypass list, admins when protection does not include\nthem) still can: GitHub does not tell the factory who."
+          },
+          "teamId": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "The team; none when the person is on no team."
           }
         }
       },
@@ -3848,7 +4020,7 @@
       "RulesSource": {
         "type": "string",
         "description": "Where a Run's Standing Rules came from.",
-        "enum": ["default", "team", "project"]
+        "enum": ["default", "team", "project", "definition"]
       },
       "Run": {
         "type": "object",
@@ -3885,6 +4057,17 @@
           "createdInPerson": {
             "type": "boolean",
             "description": "Whether its owner created it in their own signed-in session, from an\naccount that is not an agent's: only then does its request ask for\nthe Control Files it names."
+          },
+          "definition": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RunDefinition",
+                "description": "The Factory Definition it started under; none when its owner's team\nnamed none, so it took the factory's built-in Flows and Agents."
+              }
+            ]
           },
           "end": {
             "oneOf": [
@@ -3955,6 +4138,21 @@
           "trigger": {
             "$ref": "#/components/schemas/TriggerKind",
             "description": "What kind of trigger started the Run."
+          }
+        }
+      },
+      "RunDefinition": {
+        "type": "object",
+        "description": "The Factory Definition a Run started under: the repository its owner's\nteam named, at the commit its default branch was at then.",
+        "required": ["repoUrl", "commit"],
+        "properties": {
+          "commit": {
+            "type": "string",
+            "description": "The commit the Run read the Definition at."
+          },
+          "repoUrl": {
+            "type": "string",
+            "description": "The repository's `https://github.com/owner/name` URL."
           }
         }
       },
@@ -4040,7 +4238,10 @@
           "noPushAccess",
           "controlFilesNotApproved",
           "queueFull",
-          "reservedForAPerson"
+          "reservedForAPerson",
+          "unreachableDefinition",
+          "invalidDefinition",
+          "definitionNamed"
         ]
       },
       "RunErrorResponse": {
@@ -4296,6 +4497,16 @@
           }
         }
       },
+      "SetDefinitionRequest": {
+        "type": "object",
+        "description": "Request body for naming the team's Factory Definition.",
+        "properties": {
+          "repoUrl": {
+            "type": ["string", "null"],
+            "description": "The repository's `https://github.com/owner/name` URL. Null names\nnone: the team's Runs go back to its settings and the factory's\nbuilt-in Flows and Agents."
+          }
+        }
+      },
       "SetStandingRulesRequest": {
         "type": "object",
         "description": "Request body for setting an Orchestrator Definition.",
@@ -4363,7 +4574,13 @@
       "StandingRulesSettings": {
         "type": "object",
         "description": "The Standing Rules a person's Runs are created with: their team's\nOrchestrator Definition, or the factory's default, and the team's\nProjects' own, which replace it for a Run whose task is in one.",
-        "required": ["definition", "isDefault", "projects", "canEdit"],
+        "required": [
+          "definition",
+          "isDefault",
+          "projects",
+          "canEdit",
+          "definitionNamed"
+        ],
         "properties": {
           "canEdit": {
             "type": "boolean",
@@ -4372,6 +4589,10 @@
           "definition": {
             "$ref": "#/components/schemas/OrchestratorDefinition",
             "description": "Which kinds of Gate the factory answers on its own."
+          },
+          "definitionNamed": {
+            "type": "boolean",
+            "description": "Whether the team names a Factory Definition, whose `rules.json`\nsets its Runs' Standing Rules in place of these and the Projects'."
           },
           "isDefault": {
             "type": "boolean",

@@ -17,6 +17,10 @@ path = "src/openapi.rs"
 name = "factory_gate_replay"
 path = "src/gate_replay.rs"
 
+[[bin]]
+name = "factory_definition_check"
+path = "src/definition_check.rs"
+
 [dependencies]
 agent_correlation = { path = "../../crates/agent_correlation", features = ["http", "postgres"] }
 agent_harness_service_client = { path = "../../crates/agent_harness_service_client" }

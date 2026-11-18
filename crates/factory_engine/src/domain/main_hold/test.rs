@@ -71,6 +71,8 @@ async fn run_of_on(
         control_files_team_id: None,
         standing_rules: RunRules::DEFAULT,
         automation: None,
+        definition: None,
+        kept_flow: None,
     })
     .await
     .expect("insert");
@@ -93,6 +95,7 @@ fn input(run_id: RunId) -> StepInput<'static> {
         earlier: &[],
         created_in_person: false,
         control_file_patterns: None,
+        definition_repo: None,
         review: None,
         reviewer: false,
         may_ask: false,

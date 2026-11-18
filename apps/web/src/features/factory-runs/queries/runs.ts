@@ -63,6 +63,7 @@ function toRun(detail: RunDetail): Run {
     taskId: run.taskId ?? undefined,
     repository: run.repository ?? undefined,
     automation: run.automation ?? undefined,
+    definition: run.definition ?? undefined,
     controlFiles: run.controlFiles ?? undefined,
     end: run.end
       ? {
@@ -263,7 +264,10 @@ function failure(
   return { ok: false, reason: conflict ? 'conflict' : 'failed' };
 }
 
-/** Why a Run didn't start: the repository cause the service named, if any. */
+/**
+ * Why a Run didn't start: the repository, Queue or Definition cause the
+ * service named, if any.
+ */
 function startFailure(
   errors: ResultError<FetchWithTokenErrorCode | StartRunErrorCode>[]
 ): StartRunFailure {
@@ -271,6 +275,7 @@ function startFailure(
   if (codes.includes('NO_PUSH_ACCESS')) return 'noPushAccess';
   if (codes.includes('UNREACHABLE_REPOSITORY')) return 'unreachableRepository';
   if (codes.includes('QUEUE_FULL')) return 'queueFull';
+  if (codes.includes('DEFINITION_UNREADABLE')) return 'definitionUnreadable';
   return 'failed';
 }
 

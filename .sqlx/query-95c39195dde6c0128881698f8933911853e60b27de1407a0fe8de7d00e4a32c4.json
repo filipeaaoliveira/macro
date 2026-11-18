@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,\n                standing_rules, standing_rules_source, standing_rules_project_id,\n                automation_id, automation_name, automation_trigger, outcome, ended_at,\n                flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason\n            FROM factory_run\n            WHERE task_id = $1 AND user_id = $2\n            ORDER BY created_at DESC, id DESC\n            LIMIT $3\n            ",
+  "query": "\n            SELECT\n                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,\n                standing_rules, standing_rules_source, standing_rules_project_id,\n                automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,\n                outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason\n            FROM factory_run r\n            WHERE r.user_id = $1\n                AND r.ended_at IS NULL\n                AND EXISTS (\n                    SELECT 1 FROM factory_gate g\n                    WHERE g.run_id = r.id AND g.answer IS NULL\n                )\n            ORDER BY r.created_at DESC, r.id DESC\n            LIMIT $2\n            ",
   "describe": {
     "columns": [
       {
@@ -100,38 +100,47 @@
       },
       {
         "ordinal": 19,
-        "name": "outcome",
+        "name": "definition_repo_url",
         "type_info": "Text"
       },
       {
         "ordinal": 20,
+        "name": "definition_commit",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 21,
+        "name": "outcome",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 22,
         "name": "ended_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 21,
+        "ordinal": 23,
         "name": "flawed_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 22,
+        "ordinal": 24,
         "name": "flawed_by_user_id",
         "type_info": "Text"
       },
       {
-        "ordinal": 23,
+        "ordinal": 25,
         "name": "flawed_by_scorer",
         "type_info": "Text"
       },
       {
-        "ordinal": 24,
+        "ordinal": 26,
         "name": "flaw_reason",
         "type_info": "Text"
       }
     ],
     "parameters": {
       "Left": [
-        "Text",
         "Text",
         "Int8"
       ]
@@ -161,8 +170,10 @@
       true,
       true,
       true,
+      true,
+      true,
       true
     ]
   },
-  "hash": "6d3b0b8a91f4c5f648fe5140071b78fc2ff7611b2c8d1178ff85bb4392efdf66"
+  "hash": "95c39195dde6c0128881698f8933911853e60b27de1407a0fe8de7d00e4a32c4"
 }

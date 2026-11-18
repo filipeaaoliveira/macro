@@ -23,13 +23,15 @@ export type RunActionResult<T = undefined> =
 /**
  * Why a Run didn't start. `unreachableRepository` and `noPushAccess` mean the
  * person's linked GitHub account can't reach the repository, or can't push to
- * it.
+ * it; `definitionUnreadable`, that their team's Factory Definition doesn't
+ * read, or they can't reach it.
  */
 export type StartRunFailure =
   | 'failed'
   | 'unreachableRepository'
   | 'noPushAccess'
-  | 'queueFull';
+  | 'queueFull'
+  | 'definitionUnreadable';
 
 /**
  * The person's Runs that hold a place in their Queue, newest first: those

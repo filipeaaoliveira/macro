@@ -34,9 +34,12 @@ pub struct AnsweredGate {
     pub entry: EntryId,
     /// The Run's owner.
     pub owner: MacroUserIdStr<'static>,
-    /// The built-in Flow the Run walked; none for a Run recorded before
+    /// The name of the Flow the Run walked; none for a Run recorded before
     /// Runs kept it.
     pub flow: Option<String>,
+    /// The Flow the Run walked, as it kept it; none for a Run kept before
+    /// Runs kept theirs.
+    pub flow_definition: Option<serde_json::Value>,
     /// The Run's request.
     pub request: String,
     /// Who asked: the Flow, or the Step's agent.

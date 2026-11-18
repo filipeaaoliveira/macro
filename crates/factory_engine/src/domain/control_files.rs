@@ -184,6 +184,19 @@ impl ControlFiles {
         request: &str,
         request_asks: bool,
     ) -> Option<ControlFileChanges> {
+        self.changes_guarding(changed, request, request_asks, None)
+    }
+
+    /// [`Self::changes`], with the Control Files `guarded` matches always
+    /// Tampered, whatever the request names: a person approves each change
+    /// to them before a merge.
+    pub fn changes_guarding(
+        &self,
+        changed: Option<&[String]>,
+        request: &str,
+        request_asks: bool,
+        guarded: Option<&ControlFiles>,
+    ) -> Option<ControlFileChanges> {
         if self.is_empty() {
             return None;
         }
@@ -203,7 +216,8 @@ impl ControlFiles {
             if seen || !self.matches(path) {
                 continue;
             }
-            if request_asks && names(request, path) {
+            let always_tampered = guarded.is_some_and(|guarded| guarded.matches(path));
+            if request_asks && !always_tampered && names(request, path) {
                 named.push(path.clone());
             } else {
                 tampered.push(path.clone());
