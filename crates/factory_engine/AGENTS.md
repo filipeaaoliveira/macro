@@ -305,12 +305,18 @@ old. A Temporal outage answers 503 (or 502 for an unusable answer), never 500.
 
 A Run ends `infrastructure`, not `failed`, when it fails for a machine, quota
 or network reason rather than its work. Only what is surely the factory's
-counts; when unsure, the failure is the work's. A Step's work failed for
-infrastructure when its attempts ran out of time (`STEP_TOTAL`), unless the
-last of them failed as its agent was still at work on a later prompt
-(`StepError::Overdue`, type `FactoryAgentOverdue`, the work's), or when every
-Agent of its Role was out of quota (`StepError::OutOfQuota`, type
-`FactoryInfrastructure`). Such a Step ends `failed` and the Flow routes
+counts; when unsure, the failure is the work's (`workflow/work.rs`,
+`work_failure`). A Step's work failed for infrastructure when every Agent of
+its Role was out of quota (`StepError::OutOfQuota`, type
+`FactoryInfrastructure`), or when it timed out and its last attempt was out
+of quota too, timed out itself (its worker was lost) or left no failure.
+Temporal hands back attempts whose time (`STEP_TOTAL`) ran out after a
+retried failure as that last failure, not as a timeout: one of no known
+kind, as an agent still at work on a later prompt (`StepError::Overdue`,
+type `FactoryAgentOverdue`) or a round of checks that could not go on, is
+the work's. That reading decides whether the workflow
+asks for its marker, so changing it changes how recorded histories
+replay. Such a Step ends `failed` and the Flow routes
 `failed` as before. When that `failed` takes the Run straight to a `failed`
 end, with no Step after it, the workflow records `infrastructure` instead,
 behind the `factory-infrastructure-outcome` marker; a Run that walks on

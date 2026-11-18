@@ -66,6 +66,10 @@
 //! - `plan_infrastructure_after_marker`: by the workflow with it: the Run
 //!   ends `infrastructure`.
 //!
+//! Whether the workflow asks for that marker follows from `work_failure`'s
+//! reading of the Step's failure, so changing that reading changes how
+//! these histories replay: record them again.
+//!
 //! Before changing what the workflow decides, record the histories it
 //! makes now beside these, so the change is checked against both.
 
