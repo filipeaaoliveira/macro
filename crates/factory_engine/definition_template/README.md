@@ -58,4 +58,11 @@ factory_definition_check path/to/definition
 
 It prints the first problem it finds, with the file it is in, and exits 1
 when there is one. Build it from the Macro repository with
-`cargo build -p factory_service --bin factory_definition_check`.
+`cargo build -p factory_service --bin factory_definition_check`. The
+`definition` check in `.macro/checks.json` runs it by name, so it must be on
+the `PATH` of every machine that runs this repository's checks: the CI
+runner, and the machine a factory Run's agent works on.
+
+A merge needs a merge Gate's approval: a Flow whose way into its `merge`
+Step skips the `ready_to_merge` entry's merge Gate, or that gives that
+Gate another kind, does not read.

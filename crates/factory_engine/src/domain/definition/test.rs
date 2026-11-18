@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::convert::Infallible;
 
-use factory_records::domain::models::{AgentName, Role};
+use factory_records::domain::models::{AgentName, EntryId, Role};
 use factory_records::domain::standing_rules::OrchestratorDefinition;
 
 use super::{
@@ -295,3 +295,146 @@ async fn a_file_holding_a_secret_does_not_read() {
     let instructions = AGENTS.replace("large-model", "use the task-runner skill");
     assert!(read(with("agents.json", &instructions)).await.is_ok());
 }
+
+/// A Definition of one Flow, `ship`, of `entries`, its Agents filling no
+/// Role it needs.
+fn shipping(entries: serde_json::Value) -> BTreeMap<String, String> {
+    let flow = serde_json::json!({ "repository": true, "entries": entries });
+    let mut files = with("factory.json", r#"{ "version": 1, "flows": ["ship"] }"#);
+    files.insert("flows/ship.json".to_string(), flow.to_string());
+    files
+}
+
+fn end(outcome: &str) -> serde_json::Value {
+    serde_json::json!([{ "to": { "kind": "end", "outcome": outcome } }])
+}
+
+fn to(entry: &str) -> serde_json::Value {
+    serde_json::json!([{ "to": { "kind": "entry", "entry": entry } }])
+}
+
+/// A merge Gate asking to merge, with every outcome of `ready_to_merge`
+/// routed, and `approve` going to `approved`.
+fn merge_gate(id: &str, kind: &str, approved: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "id": id,
+        "step": "ready_to_merge",
+        "gate": { "kind": kind, "question": "Merge?", "answers": ["approve", "revise"] },
+        "on": {
+            "approve": approved,
+            "revise": end("manual"),
+            "changed": end("manual"),
+            "merged": end("success"),
+            "closed": end("manual")
+        }
+    })
+}
+
+fn merge_step() -> serde_json::Value {
+    serde_json::json!({
+        "id": "merge",
+        "step": "merge",
+        "on": {
+            "merged": end("success"),
+            "changed": end("manual"),
+            "refused": end("manual"),
+            "held": end("manual"),
+            "closed": end("manual")
+        }
+    })
+}
+
+fn flow_error(read: Result<FactoryDefinition, DefinitionError>) -> FlowError {
+    match read {
+        Err(DefinitionError::Flow { error, .. }) => error,
+        other => panic!("expected a flow error, got {other:?}"),
+    }
+}
+
+/// A merge goes through a merge Gate's approval: a Gate on the merge's
+/// entries of another kind, one named `plan` whose rule or Orchestrator
+/// approves plans, and a way into `merge` that skips the Gate do not read;
+/// the built-in way does.
+#[tokio::test]
+async fn a_merge_needs_a_merge_gate_s_approval() {
+    let entry = |id: &str| EntryId::try_from(id.to_string()).expect("valid");
+
+    let guarded = read(shipping(serde_json::json!([
+        merge_gate("merge-gate", "merge", to("merge")),
+        merge_step()
+    ])))
+    .await;
+    assert!(guarded.is_ok(), "{guarded:?}");
+
+    // A merge's Gate labelled `plan`, in an entry named `plan`.
+    let relabelled = read(shipping(serde_json::json!([
+        merge_gate("plan", "plan", to("merge")),
+        merge_step()
+    ])))
+    .await;
+    assert_eq!(
+        flow_error(relabelled),
+        FlowError::MergeGateKind(entry("plan"))
+    );
+
+    // A merge Gate on an entry that does not ask to merge.
+    let mut elsewhere = merge_gate("merge-gate", "merge", to("merge"));
+    elsewhere["step"] = serde_json::json!("reply");
+    let elsewhere = read(shipping(serde_json::json!([elsewhere, merge_step()]))).await;
+    assert_eq!(
+        flow_error(elsewhere),
+        FlowError::MergeGateKind(entry("merge-gate"))
+    );
+
+    // CI green straight to the merge, with no Gate.
+    let straight = read(shipping(serde_json::json!([
+        { "id": "ci", "step": "ci", "on": { "green": to("merge"), "red": end("manual") } },
+        merge_step()
+    ])))
+    .await;
+    assert_eq!(
+        flow_error(straight),
+        FlowError::UnguardedMerge {
+            from: entry("ci"),
+            to: entry("merge"),
+        }
+    );
+
+    // The Gate's `revise` going to the merge.
+    let mut revised = merge_gate("merge-gate", "merge", end("manual"));
+    revised["on"]["revise"] = to("merge");
+    let revised = read(shipping(serde_json::json!([revised, merge_step()]))).await;
+    assert_eq!(
+        flow_error(revised),
+        FlowError::UnguardedMerge {
+            from: entry("merge-gate"),
+            to: entry("merge"),
+        }
+    );
+
+    // An outcome the Gate's entry leaves unrouted falls down into the merge.
+    let mut unrouted = merge_gate("merge-gate", "merge", to("merge"));
+    unrouted["on"]
+        .as_object_mut()
+        .expect("routes")
+        .remove("closed");
+    let unrouted = read(shipping(serde_json::json!([unrouted, merge_step()]))).await;
+    assert_eq!(
+        flow_error(unrouted),
+        FlowError::UnguardedMerge {
+            from: entry("merge-gate"),
+            to: entry("merge"),
+        }
+    );
+
+    // A Run that would start at the merge.
+    let first = read(shipping(serde_json::json!([merge_step()]))).await;
+    assert_eq!(
+        flow_error(first),
+        FlowError::UnguardedMerge {
+            from: entry("merge"),
+            to: entry("merge"),
+        }
+    );
+}
+

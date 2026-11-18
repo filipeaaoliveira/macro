@@ -385,6 +385,7 @@ pub async fn read_definition<F: DefinitionFiles>(
         flows,
         agents,
         rules,
+            .and_then(|flow| flow.check_merges().map(|()| flow))
         scorers,
     })
 }
