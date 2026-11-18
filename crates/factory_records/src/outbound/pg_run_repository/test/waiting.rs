@@ -51,6 +51,7 @@ async fn a_run_waits_on_its_owner_while_its_gate_is_open(pool: PgPool) {
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
+            automation: None,
         })
         .await
         .expect("insert")

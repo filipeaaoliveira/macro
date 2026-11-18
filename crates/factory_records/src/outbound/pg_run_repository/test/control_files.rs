@@ -40,6 +40,7 @@ async fn a_run_keeps_how_it_was_created(pool: PgPool) {
                 control_file_patterns: &patterns,
                 control_files_team_id: team,
                 standing_rules: RunRules::DEFAULT,
+                automation: None,
             })
             .await
             .expect("insert")

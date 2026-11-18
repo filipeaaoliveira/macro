@@ -293,6 +293,7 @@ async fn a_new_run_is_read_with_its_flow(pool: PgPool) {
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
+            automation: None,
         })
         .await
         .expect("insert")
@@ -445,6 +446,7 @@ async fn a_question_and_the_step_going_on_from_it_are_one_visit(pool: PgPool) {
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
+            automation: None,
         })
         .await
         .expect("insert")

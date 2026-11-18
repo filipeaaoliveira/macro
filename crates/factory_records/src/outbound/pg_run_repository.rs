@@ -1,5 +1,6 @@
 //! PostgreSQL implementation of the [`RunRepository`] port.
 
+mod automations;
 mod check_rounds;
 mod gate_replies;
 mod insights;
@@ -16,6 +17,7 @@ use macro_user_id::user_id::MacroUserIdStr;
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use crate::domain::automations::{RunAutomation, TriggerKind};
 use crate::domain::models::{
     AgentName, AskedBack, CheckResult, CheckRound, CheckRoundOutcome, CheckRoundStart,
     ClaimedSession, ControlFileChanges, EntryId, Gate, GateAnswer, GateKind, HandBack, HandedBack,
@@ -28,6 +30,10 @@ use crate::domain::standing_rules::{OrchestratorDefinition, RulesSource, RunRule
 
 /// The foreign key from a Run to its task document.
 const TASK_FOREIGN_KEY: &str = "factory_run_task_id_fkey";
+
+/// The index that keeps an Automation from starting a second Run on a
+/// task while one it started runs there.
+const AUTOMATION_TASK_OPEN_INDEX: &str = "factory_run_automation_task_open_idx";
 
 /// The foreign key from a Gate's answer to the user who gave it.
 const GATE_USER_FOREIGN_KEY: &str = "factory_gate_user_id_fkey";
@@ -157,6 +163,19 @@ pub enum PgRunRepositoryErr {
     /// knows.
     #[error("unknown standing rules {0:?}")]
     UnknownStandingRules(Vec<String>),
+    /// A stored Run has only part of the Automation that started it.
+    #[error("a stored run has only part of the automation that started it")]
+    PartialAutomation,
+    /// A stored Automation's trigger kind is not one this code knows.
+    #[error("unknown automation trigger kind {0:?}")]
+    UnknownTriggerKind(String),
+    /// A stored Automation's trigger does not read.
+    #[error("a stored automation's trigger does not read: {0}")]
+    UnreadableTrigger(serde_json::Error),
+    /// A stored firing has neither a Run nor a reason it started none, or
+    /// a reason this code does not know.
+    #[error("a stored automation firing ended without a run or a known reason")]
+    UnreadableFiring,
     /// A stored Gate has only part of its question or its answer.
     #[error("a stored gate has only part of its question or its answer")]
     PartialGate,
@@ -201,6 +220,9 @@ struct RunRow {
     standing_rules: Option<Vec<String>>,
     standing_rules_source: Option<String>,
     standing_rules_project_id: Option<Uuid>,
+    automation_id: Option<Uuid>,
+    automation_name: Option<String>,
+    automation_trigger: Option<String>,
     outcome: Option<String>,
     ended_at: Option<DateTime<Utc>>,
 }
@@ -236,6 +258,21 @@ impl TryFrom<RunRow> for Run {
             (None, None) => None,
             _ => return Err(PgRunRepositoryErr::PartialStandingRules),
         };
+        let automation = match (
+            row.automation_id,
+            row.automation_name,
+            row.automation_trigger,
+        ) {
+            (Some(id), Some(name), Some(trigger)) => Some(RunAutomation {
+                id,
+                name,
+                trigger: trigger
+                    .parse::<TriggerKind>()
+                    .map_err(|_| PgRunRepositoryErr::UnknownTriggerKind(trigger))?,
+            }),
+            (None, None, None) => None,
+            _ => return Err(PgRunRepositoryErr::PartialAutomation),
+        };
         Ok(Run {
             id: RunId::from_uuid(row.id),
             request: row.request,
@@ -260,6 +297,7 @@ impl TryFrom<RunRow> for Run {
                 _ => return Err(PgRunRepositoryErr::PartialControlFiles),
             },
             standing_rules,
+            automation,
             end,
         })
     }
@@ -438,13 +476,14 @@ impl RunRepository for PgRunRepository {
             INSERT INTO factory_run (
                 id, flow, request, user_id, task_id, repo_url, base_branch, created_in_person,
                 control_file_patterns, control_files_team_id, standing_rules, standing_rules_source,
-                standing_rules_project_id
+                standing_rules_project_id, automation_id, automation_name, automation_trigger
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
             RETURNING
                 id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,
                 control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,
-                standing_rules, standing_rules_source, standing_rules_project_id, outcome, ended_at
+                standing_rules, standing_rules_source, standing_rules_project_id,
+                automation_id, automation_name, automation_trigger, outcome, ended_at
             "#,
             run.id.as_uuid(),
             run.flow,
@@ -460,6 +499,9 @@ impl RunRepository for PgRunRepository {
             &run.standing_rules.definition.kinds(),
             run.standing_rules.source.as_ref(),
             run.standing_rules.project_id,
+            run.automation.map(|automation| automation.id),
+            run.automation.map(|automation| automation.name.as_str()),
+            run.automation.map(|automation| automation.trigger.as_ref()),
         )
         .fetch_one(&self.pool)
         .await;
@@ -468,6 +510,11 @@ impl RunRepository for PgRunRepository {
             Ok(row) => Ok(RunInsert::Inserted(Box::new(Run::try_from(row)?))),
             Err(sqlx::Error::Database(error)) if error.constraint() == Some(TASK_FOREIGN_KEY) => {
                 Ok(RunInsert::NoSuchTask)
+            }
+            Err(sqlx::Error::Database(error))
+                if error.constraint() == Some(AUTOMATION_TASK_OPEN_INDEX) =>
+            {
+                Ok(RunInsert::TaskBusy)
             }
             Err(error) => Err(error.into()),
         }
@@ -636,7 +683,8 @@ impl RunRepository for PgRunRepository {
             SELECT
                 id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,
                 control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,
-                standing_rules, standing_rules_source, standing_rules_project_id, outcome, ended_at
+                standing_rules, standing_rules_source, standing_rules_project_id,
+                automation_id, automation_name, automation_trigger, outcome, ended_at
             FROM factory_run
             WHERE id = $1
             "#,
@@ -722,7 +770,8 @@ impl RunRepository for PgRunRepository {
             SELECT
                 id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,
                 control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,
-                standing_rules, standing_rules_source, standing_rules_project_id, outcome, ended_at
+                standing_rules, standing_rules_source, standing_rules_project_id,
+                automation_id, automation_name, automation_trigger, outcome, ended_at
             FROM factory_run
             WHERE task_id = $1 AND user_id = $2
             ORDER BY created_at DESC, id DESC
@@ -758,7 +807,8 @@ impl RunRepository for PgRunRepository {
             SELECT
                 id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,
                 control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,
-                standing_rules, standing_rules_source, standing_rules_project_id, outcome, ended_at
+                standing_rules, standing_rules_source, standing_rules_project_id,
+                automation_id, automation_name, automation_trigger, outcome, ended_at
             FROM factory_run r
             WHERE r.user_id = $1
                 AND r.ended_at IS NULL

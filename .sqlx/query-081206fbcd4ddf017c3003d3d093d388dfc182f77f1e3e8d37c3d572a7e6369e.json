@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,\n                standing_rules, standing_rules_source, standing_rules_project_id, outcome, ended_at\n            FROM factory_run r\n            WHERE r.user_id = $1\n                AND r.ended_at IS NULL\n                AND EXISTS (\n                    SELECT 1 FROM factory_gate g\n                    WHERE g.run_id = r.id AND g.answer IS NULL\n                )\n            ORDER BY r.created_at DESC, r.id DESC\n            LIMIT $2\n            ",
+  "query": "\n            INSERT INTO factory_run (\n                id, flow, request, user_id, task_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, standing_rules, standing_rules_source,\n                standing_rules_project_id, automation_id, automation_name, automation_trigger\n            )\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)\n            RETURNING\n                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,\n                standing_rules, standing_rules_source, standing_rules_project_id,\n                automation_id, automation_name, automation_trigger, outcome, ended_at\n            ",
   "describe": {
     "columns": [
       {
@@ -85,19 +85,48 @@
       },
       {
         "ordinal": 16,
+        "name": "automation_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 17,
+        "name": "automation_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 18,
+        "name": "automation_trigger",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 19,
         "name": "outcome",
         "type_info": "Text"
       },
       {
-        "ordinal": 17,
+        "ordinal": 20,
         "name": "ended_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
+        "Uuid",
         "Text",
-        "Int8"
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Bool",
+        "TextArray",
+        "Uuid",
+        "TextArray",
+        "Text",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text"
       ]
     },
     "nullable": [
@@ -118,8 +147,11 @@
       true,
       true,
       true,
+      true,
+      true,
+      true,
       true
     ]
   },
-  "hash": "76e6a1305beef719b20e018ecc80d0cf0e35d62c5e67ffaa087c3d56545018e5"
+  "hash": "081206fbcd4ddf017c3003d3d093d388dfc182f77f1e3e8d37c3d572a7e6369e"
 }

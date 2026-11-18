@@ -11,6 +11,7 @@ use macro_user_id::user_id::MacroUserIdStr;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::domain::automations::RunAutomation;
 use crate::domain::standing_rules::{RunRules, StandingRule};
 
 /// The most bytes a Run's request may hold (the `factory_run.request` check).
@@ -345,6 +346,9 @@ pub struct Run {
     /// created; none for a Run created before Runs kept them, whose Gates
     /// all wait for a person.
     pub standing_rules: Option<RunRules>,
+    /// The Automation that started it, as it was then; none for a Run a
+    /// person started.
+    pub automation: Option<RunAutomation>,
     /// How and when it ended; none while it runs.
     pub end: Option<RunEnd>,
 }
@@ -433,6 +437,9 @@ pub struct NewRun<'a> {
     pub control_files_team_id: Option<Uuid>,
     /// The Standing Rules that answer its Gates.
     pub standing_rules: RunRules,
+    /// The Automation that starts it, if one does: then no other Run an
+    /// Automation started may be running on its task.
+    pub automation: Option<&'a RunAutomation>,
 }
 
 /// What keeping a new Run came to.
@@ -443,6 +450,9 @@ pub enum RunInsert {
     /// No document has the task id the Run was to work on, so nothing was
     /// kept.
     NoSuchTask,
+    /// An Automation started it, and a Run another Automation started is
+    /// running on its task, so nothing was kept.
+    TaskBusy,
 }
 
 /// Whether a Run was linked to a task.
