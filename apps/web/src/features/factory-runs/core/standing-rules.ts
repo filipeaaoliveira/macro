@@ -22,7 +22,8 @@ export type OrchestratorDefinition = {
 };
 
 /** A kind of Gate a rule decides. */
-export type GateKind = Exclude<keyof OrchestratorDefinition, 
+export type GateKind = Exclude<
+  keyof OrchestratorDefinition,
   'ownerGates' | 'standIn'
 >;
 
