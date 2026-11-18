@@ -227,7 +227,8 @@ pub fn stand_in_notice(run: &Run, step: &Step, answer: &Outcome) -> Option<GateN
 /// Words Flows use that people write in capitals.
 const ACRONYMS: [&str; 3] = ["ai", "ci", "pr"];
 
-/// A Flow's answer as the Run view labels it: `Approve`, `CI fix`.
+/// A Flow's answer as the Run view labels it: `Approve`, `CI fix`. It
+/// mirrors the web app's `flowWordLabel`: keep the two alike.
 fn answer_label(answer: &Outcome) -> String {
     let words: Vec<String> = answer
         .as_str()

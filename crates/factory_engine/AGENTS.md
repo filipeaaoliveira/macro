@@ -1055,20 +1055,31 @@ it still lets the stand-in answer, the stand-in's answer becomes the Gate's
 Tampered, the base is held, the Run ended), the stand-in's answer is taken
 back and the Gate waits for the owner. Below the threshold, unsure, or
 failing, it keeps no answer, and the Gate waits for the person, keeping
-how the model read it (`stand_in_declined`: its pick,
-how sure it was and why, none of them when it did not answer), which the
+how the model read it (`stand_in_declined`: its pick, how sure it was and
+why, none of them when it did not answer), which the
 Run view shows the owner. A retry returns the answer kept first, with what
 is left of its window. While the window is open the owner is told, lightly,
 whatever the owner section says (`gate_owner::stand_in_notice`): a
 notification about the Run's task, of the waiting Gate's kind flagged
 `notifyOnly` as a notify-only Gate's, not pushed to their phone, saying
-what the stand-in answered (by the answer's label) and that they can
-change it in the Run until its window closes (the Run view says when),
+what the stand-in answered (by the answer's label,
+`gate_owner::answer_label`, which mirrors the web app's `flowWordLabel`:
+keep the two alike) and that they can change it in the Run until its
+window closes (the Run view says when),
 one per Gate (`gate_owner::stand_in_id`, apart from the Gate's waiting
 notice); it is marked done once the window closes, the owner answers in
 it or replies in it (words asked back end the window too), or the Run
 ends. A Run with no task tells no one. Run insights count neither its
 answers nor Rule Answers.
+
+A notice is sent through the notification ingress, a queue, while it is
+marked done at once through the notifications' reader. So a notice
+marked done in the moments before the ingress creates it, as when the
+owner answers within seconds of the stand-in, or of being told a Gate
+waits, is created afterwards and stays open until they mark it done:
+it then opens a Run that no longer waits. The waiting Gate's notice
+(`notice_id`) has the same race: a mark made before the notification
+exists changes nothing, and nothing retries it.
 
 The model calls are activities, so a replay reads their results from the
 history. The stand-in and replies are behind the `factory-gate-replies`
