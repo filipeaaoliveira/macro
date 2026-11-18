@@ -153,6 +153,7 @@ async fn a_run_s_updates_are_posted_once_each_to_one_thread_on_its_task() {
             user_id: julia(),
             approved_control_files: None,
             agent_session: None,
+            standing: None,
         },
     };
     steps.answer_gate(answered.clone()).await.expect("answer");
@@ -593,6 +594,7 @@ async fn an_orchestrator_answer_is_posted_as_the_orchestrator_s() {
                 user_id: julia(),
                 approved_control_files: None,
                 agent_session: Some(Uuid::from_u128(0xa6e)),
+                standing: None,
             },
         })
         .await

@@ -30,6 +30,7 @@ mod definition;
 mod evaluation;
 mod gate_owner;
 mod orchestrator;
+mod standing;
 mod standing_rules;
 mod step_terminal;
 mod task_thread;
@@ -331,6 +332,7 @@ async fn creating_a_run_records_it_for_its_owner_and_starts_its_workflow() {
             None,
             None,
             true,
+            None,
         )
         .await
         .expect("create");
@@ -361,6 +363,7 @@ async fn a_code_run_keeps_its_repository_and_its_base_branch() {
             None,
             Some("https://github.com/macro/app".to_string()),
             true,
+            None,
         )
         .await
         .expect("create");
@@ -395,6 +398,7 @@ async fn a_run_s_repository_must_fit_its_flow_and_be_reachable() {
                     None,
                     repo_url,
                     true,
+                    None,
                 )
                 .await
         }
@@ -444,6 +448,7 @@ async fn a_run_whose_workflow_does_not_start_is_not_kept() {
             None,
             None,
             true,
+            None,
         )
         .await;
 
@@ -470,6 +475,7 @@ async fn a_run_whose_workflow_started_despite_a_failed_start_is_kept() {
             None,
             None,
             true,
+            None,
         )
         .await;
 
@@ -491,6 +497,7 @@ async fn a_flow_with_a_step_no_worker_serves_is_refused_before_anything_is_kept(
             None,
             None,
             true,
+            None,
         )
         .await;
 
@@ -512,6 +519,7 @@ async fn a_flow_no_built_in_flow_is_named_for_is_refused_before_anything_is_kept
             None,
             None,
             true,
+            None,
         )
         .await;
 
@@ -530,6 +538,7 @@ async fn an_empty_request_is_refused() {
             None,
             None,
             true,
+            None,
         )
         .await;
 
@@ -548,6 +557,7 @@ async fn a_run_for_a_user_with_no_account_is_refused() {
             None,
             None,
             true,
+            None,
         )
         .await;
 
@@ -574,8 +584,8 @@ async fn someone_else_s_run_reads_answers_and_cancels_as_missing() {
             Answerer::InPerson,
         )
         .await;
-    let cancelled = service.cancel_run(&teo(), run_id).await;
-    let linked = service.link_task(&teo(), run_id, Uuid::now_v7()).await;
+    let cancelled = service.cancel_run(&teo(), run_id, None).await;
+    let linked = service.link_task(&teo(), run_id, Uuid::now_v7(), None).await;
 
     assert!(matches!(read, Err(FactoryError::NotFound)));
     assert!(matches!(answered, Err(FactoryError::NotFound)));
@@ -614,6 +624,7 @@ async fn an_answer_is_sent_to_the_run_s_workflow_as_its_owner() {
             user_id: julia(),
             approved_control_files: None,
             agent_session: None,
+            standing: None,
         }]
     );
 }
@@ -695,17 +706,17 @@ async fn cancelling_a_run_twice_is_one_cancel_and_an_ended_run_is_not_cancelled(
     let service = service(&repo, &workflows);
 
     service
-        .cancel_run(&julia(), cancelled_run)
+        .cancel_run(&julia(), cancelled_run, None)
         .await
         .expect("cancel");
     repo.end_run(cancelled_run, RunOutcome::Cancelled)
         .await
         .expect("the workflow ends it");
-    let again = service.cancel_run(&julia(), cancelled_run).await;
+    let again = service.cancel_run(&julia(), cancelled_run, None).await;
     repo.end_run(finished_run, RunOutcome::Success)
         .await
         .expect("end");
-    let finished = service.cancel_run(&julia(), finished_run).await;
+    let finished = service.cancel_run(&julia(), finished_run, None).await;
 
     assert!(again.is_ok());
     assert!(matches!(finished, Err(FactoryError::RunEnded)));
@@ -730,6 +741,7 @@ async fn a_run_created_for_a_task_keeps_it() {
             Some(task_id),
             None,
             true,
+            None,
         )
         .await
         .expect("create");
@@ -753,6 +765,7 @@ async fn a_run_for_a_document_that_is_not_a_task_or_is_missing_is_refused() {
             Some(note),
             None,
             true,
+            None,
         )
         .await;
     let missing = service
@@ -763,6 +776,7 @@ async fn a_run_for_a_document_that_is_not_a_task_or_is_missing_is_refused() {
             Some(Uuid::now_v7()),
             None,
             true,
+            None,
         )
         .await;
 
@@ -782,11 +796,11 @@ async fn linking_a_run_replaces_its_task() {
     let service = service(&repo, &FakeWorkflows::default());
 
     service
-        .link_task(&julia(), run_id, first)
+        .link_task(&julia(), run_id, first, None)
         .await
         .expect("link");
     let relinked = service
-        .link_task(&julia(), run_id, second)
+        .link_task(&julia(), run_id, second, None)
         .await
         .expect("relink");
 
@@ -1060,7 +1074,7 @@ async fn cancelling_a_run_whose_workflow_completed_is_a_conflict() {
     let run_id = julia_s_run(&repo).await;
 
     let refused = service(&repo, &workflows)
-        .cancel_run(&julia(), run_id)
+        .cancel_run(&julia(), run_id, None)
         .await;
 
     assert!(matches!(refused, Err(FactoryError::RunEnded)));
@@ -1078,7 +1092,7 @@ async fn cancelling_a_run_whose_workflow_never_started_ends_it_cancelled() {
     let run_id = julia_s_run(&repo).await;
 
     service(&repo, &workflows)
-        .cancel_run(&julia(), run_id)
+        .cancel_run(&julia(), run_id, None)
         .await
         .expect("cancel");
     let started = StepServiceImpl::new(repo.clone(), FakeExecutor::default())
@@ -1113,7 +1127,7 @@ async fn a_workflow_that_starts_as_its_run_is_cancelled_is_cancelled_too() {
     let run_id = julia_s_run(&repo).await;
 
     service(&repo, &workflows)
-        .cancel_run(&julia(), run_id)
+        .cancel_run(&julia(), run_id, None)
         .await
         .expect("cancel");
 
@@ -1131,7 +1145,7 @@ async fn a_workflow_that_started_after_the_cancel_was_sent_is_cancelled() {
     let run_id = julia_s_run(&repo).await;
 
     service(&repo, &workflows)
-        .cancel_run(&julia(), run_id)
+        .cancel_run(&julia(), run_id, None)
         .await
         .expect("cancel");
 
@@ -1383,6 +1397,7 @@ async fn a_run_s_flow_keeps_how_many_questions_its_agents_may_ask() {
                 None,
                 None,
                 true,
+                None,
             )
             .await
             .expect("create");

@@ -7,6 +7,7 @@ mod flaws;
 mod gate_owner;
 mod gate_replies;
 mod main_hold;
+mod standing_acts;
 mod steering;
 mod task_thread;
 
@@ -169,6 +170,12 @@ pub(crate) struct FakeRepo {
     /// The Scorers, Experiments and Benchmarks of the Definition each Run
     /// started under, as kept.
     pub(crate) definition_evaluations: Arc<Mutex<BTreeMap<RunId, serde_json::Value>>>,
+    /// The bot of each agent session, with the session's owner, by the
+    /// session's id.
+    pub(crate) session_bots: Arc<Mutex<BTreeMap<Uuid, (String, Uuid)>>>,
+    /// The standing acts kept, in order.
+    pub(crate) standing_acts:
+        Arc<Mutex<Vec<(RunId, factory_records::domain::standing_acts::StandingActRecord)>>>,
     /// The Standing Rules each team set.
     pub(crate) team_rules: Arc<Mutex<BTreeMap<Uuid, OrchestratorDefinition>>>,
     /// The Standing Rules each team set for a Project, by team and Project.

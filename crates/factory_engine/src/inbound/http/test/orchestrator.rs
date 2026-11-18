@@ -10,6 +10,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use factory_records::domain::models::{EntryId, Outcome, StepKey, TeamMembership};
 use factory_records::domain::ports::RunRepository;
+use factory_records::domain::standing_acts::{StandingAct, StandingRoleName};
 use factory_records::domain::standing_rules::OrchestratorDefinition;
 use macro_authorization::CODE_EXECUTION_HEADER;
 use macro_user_id::user_id::MacroUserIdStr;
@@ -157,6 +158,63 @@ async fn an_agent_session_answers_for_the_person_and_only_it() {
     assert_eq!(
         *service.answerers.lock().expect("answerers"),
         [Answerer::Agent { session_id }, Answerer::InPerson]
+    );
+}
+
+/// A start, a cancel and a link from code in an agent session reach the
+/// service with the session, for its Standing Roles to check; the person
+/// in their own session, code with no session, and an internal caller in
+/// one, with none. A refusal says which Standing Roles allow the act.
+#[tokio::test]
+async fn starts_cancels_and_links_carry_the_calling_agent_session() {
+    let (router, service) = router(|| FactoryError::NotInStandingRole {
+        act: StandingAct::Cancel,
+        allowing: vec![StandingRoleName::try_from("operator".to_string()).expect("valid")],
+    });
+    let run = factory_records::domain::models::RunId::generate();
+    let start = serde_json::json!({ "flow": "reply", "request": "Say hello" });
+    let link = serde_json::json!({ "taskId": Uuid::now_v7() });
+    let cancel_path = format!("/runs/{run}/cancel");
+    let link_path = format!("/runs/{run}/task");
+    let session_id = Uuid::now_v7();
+
+    let mut refusals = Vec::new();
+    for (method, path, request) in [
+        ("POST", "/runs", start.clone()),
+        ("POST", cancel_path.as_str(), serde_json::json!({})),
+        ("PUT", link_path.as_str(), link.clone()),
+    ] {
+        refusals.push(in_session(&router, session_id, from_code(method, path, request)).await);
+    }
+    let person = router
+        .clone()
+        .oneshot(call("POST", &cancel_path, Caller::User("alice"), serde_json::json!({})))
+        .await
+        .expect("response");
+    let sessionless = router
+        .clone()
+        .oneshot(from_code("PUT", &link_path, link.clone()))
+        .await
+        .expect("response");
+    let internal = in_session(
+        &router,
+        session_id,
+        call("POST", "/runs", Caller::Internal(Some(ALICE)), start),
+    )
+    .await;
+
+    for refusal in refusals {
+        assert_eq!(refusal.status(), StatusCode::FORBIDDEN);
+        let body = body(refusal).await;
+        assert_eq!(body["code"], "notInStandingRole");
+        assert!(body["message"].as_str().is_some_and(|message| message.contains("operator")));
+    }
+    for other in [person, sessionless, internal] {
+        assert_eq!(other.status(), StatusCode::FORBIDDEN);
+    }
+    assert_eq!(
+        *service.agent_sessions.lock().expect("agent sessions"),
+        [Some(session_id), Some(session_id), Some(session_id), None, None, None]
     );
 }
 

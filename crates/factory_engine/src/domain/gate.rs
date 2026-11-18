@@ -4,6 +4,7 @@
 mod test;
 
 use factory_records::domain::models::{Outcome, StepKey};
+use factory_records::domain::standing_acts::{StandingAct, StandingActor};
 use factory_records::domain::standing_rules::RuleGateKind;
 use macro_user_id::user_id::MacroUserIdStr;
 use serde::{Deserialize, Serialize};
@@ -43,6 +44,22 @@ pub struct AnswerGate {
     /// before it are the same.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_session: Option<Uuid>,
+    /// The bot of that session, its Agent and the Standing Role that let it
+    /// answer, when the Run's Factory Definition has Standing Roles. Left
+    /// out when none, so answers read and recorded before it are the same:
+    /// the workflow only hands it on to the activity that records it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub standing: Option<StandingAnswer>,
+}
+
+/// The Standing Role an agent answered a Gate under, for the worker to
+/// keep with the answer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StandingAnswer {
+    /// The act: answering a plan or a Blockers Gate.
+    pub act: StandingAct,
+    /// The session, its bot and Agent, and the Standing Role.
+    pub by: StandingActor,
 }
 
 /// A Gate a Run's workflow opened, for its worker to record.

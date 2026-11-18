@@ -510,6 +510,7 @@ async fn a_full_queue_starts_no_run() {
             None,
             None,
             false,
+            None,
         )
     };
     automations

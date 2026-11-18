@@ -871,6 +871,7 @@ impl CodeRun {
             user_id: julia(),
             approved_control_files: None,
             agent_session: None,
+            standing: None,
         };
         for _ in 0..100 {
             let delivery = workflows

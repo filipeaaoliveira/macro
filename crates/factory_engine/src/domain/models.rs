@@ -10,6 +10,7 @@ use factory_records::domain::models::{
     StepKey,
 };
 use factory_records::domain::review_rounds::ReviewRound;
+use factory_records::domain::standing_acts::{StandingAct, StandingActRecord, StandingRoleName};
 use factory_records::domain::standing_rules::{OrchestratorDefinition, ProjectRules, RulesSource};
 use macro_user_id::user_id::MacroUserIdStr;
 use serde::{Deserialize, Serialize};
@@ -606,6 +607,10 @@ pub struct RunDetail {
     pub base_required_checks: Option<RequiredChecksState>,
     /// Its review rounds, in order, each with what its reviewers found.
     pub review_rounds: Vec<ReviewRound>,
+    /// What agents did to it under its Factory Definition's Standing
+    /// Roles, in order: who started, cancelled or linked it, and answered
+    /// its Gates.
+    pub standing_acts: Vec<StandingActRecord>,
 }
 
 /// The Control File patterns a person's Runs are checked against: their
@@ -745,6 +750,20 @@ pub enum PersonOnly {
     /// unchanged after a fix.
     #[error("these blockers are the run's owner's to send to another fix")]
     OwnersBlockers,
+}
+
+/// Why an agent may not do `act`, naming the Standing Roles that allow it.
+fn standing_refusal(act: StandingAct, allowing: &[StandingRoleName]) -> String {
+    if allowing.is_empty() {
+        return format!(
+            "no standing role of the run's factory definition allows {act}: the run's owner does it"
+        );
+    }
+    let roles: Vec<&str> = allowing.iter().map(StandingRoleName::as_str).collect();
+    format!(
+        "this agent fills no standing role that allows {act}; the standing roles that allow it: {}",
+        roles.join(", ")
+    )
 }
 
 /// Who set a Queue limit, in words.
@@ -934,6 +953,16 @@ pub enum FactoryError {
     /// for the owner in person.
     #[error(transparent)]
     ReservedForAPerson(#[from] PersonOnly),
+    /// An agent acting for the Run's owner tried an act no Standing Role
+    /// its bot fills allows, under a Factory Definition with Standing
+    /// Roles.
+    #[error("{}", standing_refusal(*act, allowing))]
+    NotInStandingRole {
+        /// The act it tried.
+        act: StandingAct,
+        /// The Standing Roles that allow the act.
+        allowing: Vec<StandingRoleName>,
+    },
     /// The person holds as many places in their Queue as the Queue limit of
     /// the rules a new Run of theirs would start under: Runs waiting on
     /// them at a Gate or a question, and Runs of a Flow with a Gate that

@@ -425,6 +425,7 @@ where
     // request names: an agent could otherwise name the file it means to
     // weaken.
     let created_in_person = is_in_person(&caller.authorization, &headers);
+    let agent_session = acting_session(&caller.authorization, &headers);
     // The id is lowercase, whatever case the caller named it in: a
     // `MacroUserIdStr` lowercases what it parses, as `"User".id` is stored.
     let actor = caller.authorization.user.macro_user_id;
@@ -437,6 +438,7 @@ where
             body.task_id,
             body.repo_url,
             created_in_person,
+            agent_session,
         )
         .await?;
     Ok((StatusCode::CREATED, Json(created)))
@@ -931,6 +933,18 @@ fn answerer(
     ))
 }
 
+/// The agent session a call came from, when an agent acts for the caller
+/// from its code, as the correlation layer validated the session against
+/// the call's credential: none for the person in their own signed-in
+/// session, and for an internal caller. Under a Factory Definition with
+/// Standing Roles, its bot must fill one that allows the act.
+fn acting_session(authorization: &UserOrInternalAuthorization, headers: &HeaderMap) -> Option<Uuid> {
+    if is_in_person(authorization, headers) || authorization.caller != UserOrInternalCaller::User {
+        return None;
+    }
+    agent_correlation::context::current_session()
+}
+
 /// Whether the caller is the person in their own signed-in session: not an
 /// internal caller, an API key or token, an agent's or a routine's program.
 /// An agent's account signs in as a person does; the service, which reads
@@ -969,14 +983,19 @@ pub(crate) fn is_in_person(
 pub async fn cancel_run_handler<S, Auth>(
     State(state): State<FactoryRouterState<S, Auth>>,
     caller: MacroAuthorizationExtractor<Auth, UserOrInternal>,
+    headers: HeaderMap,
     Path(params): Path<GetRunParams>,
 ) -> Result<StatusCode, FactoryError>
 where
     S: FactoryService,
     Auth: MacroAuthorizationService,
 {
+    let agent_session = acting_session(&caller.authorization, &headers);
     let actor = caller.authorization.user.macro_user_id;
-    state.service.cancel_run(&actor, params.id).await?;
+    state
+        .service
+        .cancel_run(&actor, params.id, agent_session)
+        .await?;
     Ok(StatusCode::ACCEPTED)
 }
 
@@ -1044,6 +1063,7 @@ where
 pub async fn link_task_handler<S, Auth>(
     State(state): State<FactoryRouterState<S, Auth>>,
     caller: MacroAuthorizationExtractor<Auth, UserOrInternal>,
+    headers: HeaderMap,
     Path(params): Path<GetRunParams>,
     Json(body): Json<LinkTaskRequest>,
 ) -> Result<Json<RunDetail>, FactoryError>
@@ -1051,11 +1071,12 @@ where
     S: FactoryService,
     Auth: MacroAuthorizationService,
 {
+    let agent_session = acting_session(&caller.authorization, &headers);
     let actor = caller.authorization.user.macro_user_id;
     Ok(Json(
         state
             .service
-            .link_task(&actor, params.id, body.task_id)
+            .link_task(&actor, params.id, body.task_id, agent_session)
             .await?,
     ))
 }
@@ -1146,6 +1167,7 @@ impl FactoryError {
             | FactoryError::NotAPerson
             | FactoryError::NotATeamAdmin
             | FactoryError::ReservedForAPerson(_)
+            | FactoryError::NotInStandingRole { .. }
             | FactoryError::NotTheAutomationOwner
             | FactoryError::NotARoutine => StatusCode::FORBIDDEN,
             FactoryError::NotFound | FactoryError::TaskNotFound => StatusCode::NOT_FOUND,
@@ -1188,6 +1210,9 @@ pub enum RunErrorCode {
     /// An agent answering for the Run's owner tried what the factory keeps
     /// for the owner in person.
     ReservedForAPerson,
+    /// An agent acting for the caller tried an act no Standing Role its bot
+    /// fills allows; the message names the Standing Roles that allow it.
+    NotInStandingRole,
     /// The caller's linked GitHub account cannot read the repository of
     /// their team's Factory Definition.
     UnreachableDefinition,
@@ -1220,6 +1245,7 @@ impl FactoryError {
             FactoryError::ControlFilesNotApproved => Some(RunErrorCode::ControlFilesNotApproved),
             FactoryError::QueueFull { .. } => Some(RunErrorCode::QueueFull),
             FactoryError::ReservedForAPerson(_) => Some(RunErrorCode::ReservedForAPerson),
+            FactoryError::NotInStandingRole { .. } => Some(RunErrorCode::NotInStandingRole),
             FactoryError::UnreachableDefinition => Some(RunErrorCode::UnreachableDefinition),
             FactoryError::InvalidDefinition(_) => Some(RunErrorCode::InvalidDefinition),
             FactoryError::DefinitionNamed => Some(RunErrorCode::DefinitionNamed),

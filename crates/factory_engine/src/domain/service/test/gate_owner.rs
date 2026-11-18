@@ -419,6 +419,7 @@ async fn an_answered_gate_s_notification_is_done() {
                     user_id: julia(),
                     approved_control_files: None,
                     agent_session: None,
+                    standing: None,
                 },
             })
             .await
@@ -664,6 +665,7 @@ async fn the_stand_in_s_notice_is_done_when_its_window_closes_early() {
             user_id: julia(),
             approved_control_files: None,
             agent_session: None,
+            standing: None,
         },
     };
 

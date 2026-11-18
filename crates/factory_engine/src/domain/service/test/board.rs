@@ -541,7 +541,7 @@ async fn a_team_member_reads_a_run_on_a_task_they_see() {
         let refused = service.get_run(&julia(), id).await;
         assert!(matches!(refused, Err(FactoryError::NotFound)), "{id}");
     }
-    let cancel = service.cancel_run(&julia(), shared).await;
+    let cancel = service.cancel_run(&julia(), shared, None).await;
     assert!(matches!(cancel, Err(FactoryError::NotFound)));
 }
 
@@ -566,6 +566,7 @@ async fn a_run_keeps_the_project_its_task_is_in() {
             Some(task_id),
             None,
             true,
+            None,
         )
         .await
         .expect("create");

@@ -175,6 +175,8 @@ struct FakeService {
     answer: fn() -> FactoryError,
     actors: Mutex<Vec<String>>,
     answerers: Mutex<Vec<Answerer>>,
+    /// The agent session each start, cancel and link came from, in order.
+    agent_sessions: Mutex<Vec<Option<Uuid>>>,
 }
 
 impl FakeService {
@@ -200,7 +202,12 @@ impl FactoryService for FakeService {
         _task_id: Option<Uuid>,
         _repo_url: Option<String>,
         _in_person: bool,
+        agent_session: Option<Uuid>,
     ) -> Result<RunDetail, FactoryError> {
+        self.agent_sessions
+            .lock()
+            .expect("agent sessions")
+            .push(agent_session);
         Err(self.refusing(&actor))
     }
 
@@ -255,7 +262,12 @@ impl FactoryService for FakeService {
         actor: &MacroUserIdStr<'static>,
         _id: RunId,
         _task_id: Uuid,
+        agent_session: Option<Uuid>,
     ) -> Result<RunDetail, FactoryError> {
+        self.agent_sessions
+            .lock()
+            .expect("agent sessions")
+            .push(agent_session);
         Err(self.refusing(actor))
     }
 
@@ -368,7 +380,12 @@ impl FactoryService for FakeService {
         &self,
         actor: &MacroUserIdStr<'static>,
         _id: RunId,
+        agent_session: Option<Uuid>,
     ) -> Result<(), FactoryError> {
+        self.agent_sessions
+            .lock()
+            .expect("agent sessions")
+            .push(agent_session);
         Err(self.refusing(actor))
     }
 
@@ -441,6 +458,7 @@ fn router(answer: fn() -> FactoryError) -> (Router, Arc<FakeService>) {
         answer,
         actors: Mutex::new(Vec::new()),
         answerers: Mutex::new(Vec::new()),
+        agent_sessions: Mutex::new(Vec::new()),
     });
     let state = FactoryRouterState::new(Arc::clone(&service), authorization());
     (factory_router(state), service)

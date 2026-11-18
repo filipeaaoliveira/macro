@@ -207,6 +207,32 @@ left out of the owner's past answers, the replay measure and Insights' Gate
 answers. A reply in words and the factory's settings stay the person's own
 session's.
 
+Standing Roles (`src/domain/agents/standing.rs`, `src/domain/service/standing.rs`)
+narrow which agent does what. A Factory Definition's `agents.json` may have a
+`standing` section: each Standing Role names the acts it allows (`start`,
+`cancel`, `link`, `answer_plan`, `answer_blockers`, a fixed set: none merges,
+and an act that names a merge, or any other, does not read) and the Agents whose
+bots fill it. The Run keeps it with its Agents (`definition_agents`);
+`FACTORY_AGENTS` takes none (`StandingOutsideDefinition`), as a Run under no
+Definition keeps no Agents. When a call comes from an agent session (the
+correlation layer's session on a person's credential, not in person:
+`acting_session` for start, cancel and link, `Answerer::Agent` for an answer),
+and the Definition the Run starts under, or the one it kept, has the section,
+the service reads the session's bot (`StandingActRepository::session_bot`, the
+owner's sessions only) and takes the act only when the bot is an Agent of a
+Standing Role that allows it; else 403 `notInStandingRole`, naming the act and
+the Standing Roles that allow it. A Gate answer is checked after
+`agent_may_answer`, by the kind it read: a plan Gate is `answer_plan`, a
+Blockers Gate `answer_blockers`, and a merge Gate no act at all, so under the
+section an agent's every answer to a merge Gate is refused
+(`PersonOnly::Merge`). Without the section, or for the person in person or an
+internal caller, nothing changes. The Run keeps who did each act, with its bot,
+Agent and Standing Role (`factory_standing_act`): a start before its workflow
+starts (a start whose record fails is removed as unstarted), a cancel before it
+is sent, a link once linked, and an answer in `factory_answer_gate`, from
+`AnswerGate::standing` (left out when none, so histories replay as before; the
+workflow only hands it on). The Run API lists them as `standingActs`.
+
 A person's Queue is their Runs waiting on them at a Gate or an agent's
 question (`GET /runs/waiting`, Insights' "Waiting on you"). A team's
 Orchestrator Definition, or a Project's own, may set a Queue limit
@@ -1368,7 +1394,7 @@ GitHub repository the team names and changed by pull requests, that hold its
 factory: `factory.json` (the format's `version`, 1, and its Flows by name),
 `flows/{name}.json` (each Flow, in the built-in Flows' format, checked as they
 are), `agents.json` (`FACTORY_AGENTS`' format; it must fill every Role its
-Flows name), and the optional `rules.json` (`standingRules`, an Orchestrator
+Flows name; its optional `standing` section holds the Standing Roles), and the optional `rules.json` (`standingRules`, an Orchestrator
 Definition, and `controlFiles`, each the factory's default when left out) and
 `scorers.json` (the team's Scorers, Experiments and Benchmarks, in
 `FACTORY_EVALUATION`'s format, naming only its own Flows and Agents; see

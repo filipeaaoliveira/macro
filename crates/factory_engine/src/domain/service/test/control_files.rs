@@ -121,6 +121,7 @@ async fn an_approval_carries_the_tampered_files_to_the_workflow() {
                 user_id: julia(),
                 approved_control_files: Some(changes().tampered),
                 agent_session: None,
+                standing: None,
             },
             AnswerGate {
                 seq: 6,
@@ -129,6 +130,7 @@ async fn an_approval_carries_the_tampered_files_to_the_workflow() {
                 user_id: julia(),
                 approved_control_files: None,
                 agent_session: None,
+                standing: None,
             },
         ]
     );
@@ -182,6 +184,7 @@ async fn the_recorded_answer_keeps_the_files_it_approved() {
                 user_id: julia(),
                 approved_control_files: Some(changes().tampered),
                 agent_session: None,
+                standing: None,
             },
         })
         .await
@@ -206,6 +209,7 @@ async fn a_run_keeps_whether_it_was_created_in_person() {
                 None,
                 None,
                 in_person,
+                None,
             )
             .await
             .expect("create");
@@ -320,6 +324,7 @@ async fn a_run_keeps_the_patterns_it_was_created_with() {
             None,
             None,
             true,
+            None,
         )
     };
 
@@ -379,6 +384,7 @@ async fn an_agent_account_is_never_in_person() {
             None,
             None,
             true,
+            None,
         )
         .await
         .expect("create");
