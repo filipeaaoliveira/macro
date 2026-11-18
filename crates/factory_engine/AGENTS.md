@@ -286,7 +286,10 @@ scores the trial unchecked and logs it. A trial scoring 0 anyway, a
 cancelled one among them, is not checked).
 The Flow is `unattended`: its agents ask no question, a Step whose agent
 stops without a result fails, and it runs only as a trial, left out of
-`GET /flows`, live insights and live Scorers. A trial runs on its
+`GET /flows`, live insights and live Scorers. A trial walks it even for a
+team that names a Factory Definition, keeping the Definition, whose Agents
+take its Steps: a Definition names no Flow `benchmark`, and one with
+Benchmarks must fill the benchmark Flow's Roles. A trial runs on its
 configuration only: an Agent out of quota fails its Step, with no other
 of its Role taking it. One running suite of a Benchmark per person, and
 `MAX_OPEN_TRIALS` running trials per person, hold new suites (409); a

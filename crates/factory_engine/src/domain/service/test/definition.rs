@@ -3,17 +3,20 @@
 
 use std::sync::Arc;
 
+use factory_records::domain::evaluation::{AgentChoices, BENCHMARK_FLOW};
 use factory_records::domain::models::{
-    EntryId, RunDefinition, RunOutcome, StepKey, TeamMembership,
+    AgentName, EntryId, Role, RunDefinition, RunOutcome, StepKey, TeamMembership,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::standing_rules::{OrchestratorDefinition, RulesSource};
 use uuid::Uuid;
 
 use super::{FakeWorkflows, code_service, julia, teo};
+use crate::domain::agents::AgentDefinition;
 use crate::domain::built_in_steps::BuiltInSteps;
 use crate::domain::definition::DefinitionError;
 use crate::domain::evaluation::EvaluationDefinition;
+use crate::domain::evaluation::insights::{EvaluationService, EvaluationServiceImpl, SuiteError};
 use crate::domain::evaluation::service::ScoringServiceImpl;
 use crate::domain::fakes::{FakeGithub, FakeJudge, FakeRepo, FakeWatches};
 use crate::domain::flow::StepName;
@@ -704,4 +707,78 @@ async fn a_definition_s_scorers_judge_its_runs_and_the_deployment_s_the_others()
     };
     assert_eq!(experiments(defined.run.id), ["notes-writer"]);
     assert_eq!(experiments(plain.run.id), ["plan-writer"]);
+}
+
+/// A team's Definition holds its Benchmarks: a suite of one is checked
+/// against the Definition's Agents, never the deployment's, and starts its
+/// trials on the factory's benchmark Flow, which the Definition does not
+/// name, each keeping the Definition it started under.
+#[tokio::test]
+async fn a_suite_of_a_definition_s_benchmark_walks_the_benchmark_flow() {
+    let repo = team_repo();
+    let github = github_at(FIRST);
+    definition_files(&github, FIRST, "Notes.", None);
+    let mut state = github.state();
+    state.files.insert(
+        (FIRST.to_string(), "agents.json".to_string()),
+        r#"{
+            "agents": { "primary": { "bot": "00000000-0000-0000-0000-00000000c1a0" } },
+            "roles": { "planner": ["primary"], "writer": ["primary"] }
+        }"#
+        .to_string(),
+    );
+    state.files.insert(
+        (FIRST.to_string(), "scorers.json".to_string()),
+        r#"{
+            "benchmarks": [{
+                "name": "core", "repository": "https://github.com/macro/widgets",
+                "tasks": [{ "name": "typo", "request": "Fix the typo." }]
+            }]
+        }"#
+        .to_string(),
+    );
+    drop(state);
+    let deployment_agents: AgentDefinition = serde_json::from_value(serde_json::json!({
+        "agents": { "elsewhere": { "bot": "00000000-0000-0000-0000-00000000c0de" } },
+        "roles": { "planner": ["elsewhere"], "writer": ["elsewhere"] }
+    }))
+    .expect("the deployment's agents");
+    let suites = EvaluationServiceImpl::new(
+        repo.clone(),
+        Arc::new(code_service(&repo, &FakeWorkflows::default(), &github)),
+        Arc::new(EvaluationDefinition::default()),
+        Some(deployment_agents),
+    );
+    let writer = |agent: &str| -> AgentChoices {
+        [(
+            Role::try_from("writer".to_string()).expect("valid"),
+            AgentName::try_from(agent.to_string()).expect("valid"),
+        )]
+        .into_iter()
+        .collect()
+    };
+
+    let refused = suites.start_suite(teo(), "core", writer("elsewhere")).await;
+    assert!(
+        matches!(refused, Err(SuiteError::Configuration(_))),
+        "{refused:?}"
+    );
+    let started = suites
+        .start_suite(teo(), "core", writer("primary"))
+        .await
+        .expect("a suite of the definition's benchmark");
+
+    let trial = started.runs["typo"];
+    assert_eq!(
+        repo.flows.lock().expect("flows")[&trial].as_str(),
+        BENCHMARK_FLOW
+    );
+    let kept = repo.get_run(trial).await.expect("read").expect("the trial");
+    assert_eq!(
+        kept.definition,
+        Some(RunDefinition {
+            repo_url: DEFINITION_REPO.to_string(),
+            commit: FIRST.to_string(),
+        })
+    );
 }

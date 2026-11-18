@@ -672,7 +672,11 @@ where
         let team = self.repo.team_of(&actor).await.map_err(internal)?;
         let definition = self.team_definition(&actor, team).await?;
         let flow_name = flow;
-        let flow = self.flow_named(&flow_name, definition.as_ref())?;
+        // A Benchmark trial walks the built-in benchmark Flow whatever Flows
+        // the team's Definition holds, none of which takes its name; it
+        // still keeps the Definition, whose Agents its Steps take.
+        let flows_of = definition.as_ref().filter(|_| trial.is_none());
+        let flow = self.flow_named(&flow_name, flows_of)?;
         if request.trim().is_empty() {
             return Err(FactoryError::EmptyRequest);
         }

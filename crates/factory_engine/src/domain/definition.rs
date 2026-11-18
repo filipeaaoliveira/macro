@@ -30,6 +30,7 @@ mod test;
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 
+use factory_records::domain::evaluation::BENCHMARK_FLOW;
 use factory_records::domain::models::Role;
 use factory_records::domain::standing_rules::{
     MAX_QUEUE_LIMIT, MIN_QUEUE_LIMIT, OrchestratorDefinition,
@@ -37,6 +38,7 @@ use factory_records::domain::standing_rules::{
 use serde::Deserialize;
 
 use crate::domain::agents::{AgentDefinition, AgentDefinitionError};
+use crate::domain::built_in_flows::BuiltInFlow;
 use crate::domain::control_files::{ControlFiles, ControlFilesError, MAX_PATTERNS};
 use crate::domain::evaluation::{EvaluationDefinition, EvaluationDefinitionError};
 use crate::domain::flow::{Flow, FlowError, StepName, StepUse};
@@ -275,6 +277,13 @@ pub enum DefinitionError {
     /// The Queue limit is out of range.
     #[error("{RULES_FILE}: queueLimit must be from {MIN_QUEUE_LIMIT} to {MAX_QUEUE_LIMIT}")]
     QueueLimit,
+    /// `factory.json` names a Flow the factory keeps for itself.
+    #[error("{MANIFEST_FILE} names flow {0}, which only a benchmark's trials walk")]
+    ReservedFlow(String),
+    /// The Definition has Benchmarks, and its Agents do not fill a Role of
+    /// the benchmark Flow its trials walk.
+    #[error("{AGENTS_FILE}: a benchmark's trials walk the benchmark flow: {0}")]
+    BenchmarkAgents(AgentDefinitionError),
     /// The Scorers, Experiments or Benchmarks name a Flow the Definition
     /// does not have, or an Agent its Agents do not.
     #[error("{SCORERS_FILE}: {0}")]
@@ -525,6 +534,11 @@ pub async fn read_definition<F: DefinitionFiles>(
         if flows.contains_key(&name) {
             return Err(DefinitionError::DuplicateFlow(name).into());
         }
+        // Only a Benchmark's trials walk the benchmark Flow, the factory's
+        // own, which no one starts.
+        if name == BENCHMARK_FLOW {
+            return Err(DefinitionError::ReservedFlow(name).into());
+        }
         let path = flow_path(&name);
         let definition: serde_json::Value = required(files, &path).await?;
         let flow = Flow::parse(definition, serves)
@@ -566,6 +580,25 @@ pub async fn read_definition<F: DefinitionFiles>(
     let evaluation = evaluation
         .checked(|flow| flows.contains_key(flow), Some(&agents))
         .map_err(DefinitionError::Evaluation)?;
+    // A Benchmark's trials walk the factory's benchmark Flow on the
+    // Definition's Agents, which must fill its Roles.
+    if !evaluation.benchmarks().is_empty() {
+        let benchmark = BuiltInFlow::named(BENCHMARK_FLOW)
+            .ok_or_else(|| FlowError::Unreadable(format!("no built-in flow {BENCHMARK_FLOW}")))
+            .and_then(|built_in| built_in.read(&serves))
+            .map_err(|error| DefinitionError::Flow {
+                path: BENCHMARK_FLOW.to_string(),
+                error,
+            })?;
+        let roles: BTreeSet<&Role> = benchmark
+            .entries
+            .iter()
+            .flat_map(|entry| entry.role.iter().chain(&entry.reviewers))
+            .collect();
+        agents
+            .fills(roles)
+            .map_err(DefinitionError::BenchmarkAgents)?;
+    }
 
     Ok(FactoryDefinition {
         description: manifest.description,

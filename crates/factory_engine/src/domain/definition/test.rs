@@ -332,6 +332,51 @@ async fn scorers_that_do_not_fit_the_definition_do_not_read() {
     assert!(error.contains("settings"), "{error}");
 }
 
+/// The benchmark Flow is the factory's own, which only a Benchmark's
+/// trials walk: a Definition names no Flow of its name, and one with
+/// Benchmarks has Agents for its Roles.
+#[tokio::test]
+async fn a_definition_keeps_to_the_benchmark_flow() {
+    let mut named = with(
+        "factory.json",
+        r#"{ "version": 1, "flows": ["reply", "benchmark"] }"#,
+    );
+    named.insert("flows/benchmark.json".to_string(), REPLY.to_string());
+    assert_eq!(
+        read(named).await,
+        Err(DefinitionError::ReservedFlow("benchmark".to_string()))
+    );
+
+    let benchmark = r#"{
+        "benchmarks": [{
+            "name": "core", "repository": "https://github.com/acme/widgets",
+            "tasks": [{ "name": "typo", "request": "Fix the typo." }]
+        }]
+    }"#;
+    let mut writer_only = with("scorers.json", benchmark);
+    writer_only.insert(
+        "factory.json".to_string(),
+        r#"{ "version": 1, "flows": ["reply"] }"#.to_string(),
+    );
+    writer_only.insert(
+        "agents.json".to_string(),
+        r#"{
+            "agents": { "primary": { "bot": "00000000-0000-0000-0000-00000000c1a0" } },
+            "roles": { "writer": ["primary"] }
+        }"#
+        .to_string(),
+    );
+    assert!(matches!(
+        read(writer_only).await,
+        Err(DefinitionError::BenchmarkAgents(_))
+    ));
+    // Agents for its planner and writer, as these have, read.
+    let read_benchmark = read(with("scorers.json", benchmark))
+        .await
+        .expect("a definition with a benchmark");
+    assert_eq!(read_benchmark.evaluation.benchmarks()[0].name, "core");
+}
+
 #[tokio::test]
 async fn a_file_holding_a_secret_does_not_read() {
     let agents = AGENTS.replace("large-model", concat!("ghp_", "0123456789abcdefABCDEF0123"));

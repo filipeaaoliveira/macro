@@ -75,7 +75,10 @@ It leaves off:
   `tasks` (a `name`, a `request` and an optional pinned `baseCommit`), and
   the `scorers` that judge its trials.
 
-The Flows and Agents they name must be this Definition's own. A Run keeps
+The Flows and Agents they name must be this Definition's own. A
+Benchmark's trials walk the factory's own `benchmark` Flow (plan, then
+write, asking no one), which no Flow here may be named: with Benchmarks,
+`agents.json` must fill its `planner` and `writer` Roles. A Run keeps
 the Scorers it started with, as it keeps the commit. Every judgment is a
 model call: this template's Scorer judges no Run (`samplePercent` 0) until
 you raise it.
