@@ -195,6 +195,13 @@ function SuiteRow(props: {
             scored: props.suite.scored,
             count: props.suite.trials.length,
           })}
+          <Show when={props.suite.infrastructure > 0}>
+            <span class="block text-xs font-normal text-ink-muted">
+              {t('factoryEvaluation.suiteInfrastructure', {
+                count: props.suite.infrastructure,
+              })}
+            </span>
+          </Show>
         </Figure>
       </dl>
       <ul aria-label={t('factoryEvaluation.trial')} class="-mx-2 flex flex-col">

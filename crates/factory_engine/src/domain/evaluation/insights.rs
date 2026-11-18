@@ -134,9 +134,11 @@ pub struct TrialInsight {
     /// How its Run ended; none while it goes.
     pub run_outcome: Option<RunOutcome>,
     /// Its mechanical score, from 0 to 1: 1 when its checks went green, 0.5
-    /// when they stayed red, 0 otherwise; none until its Run ended.
+    /// when they stayed red, 0 otherwise; none until its Run ended, and
+    /// none for a Run that ended `infrastructure`, whose work never ran.
     pub score: Option<f64>,
-    /// The tokens its agents used; none until its Run ended.
+    /// The tokens its agents used; none until its Run ended, and none for a
+    /// Run that ended `infrastructure`.
     pub tokens: Option<TokenCounts>,
     /// Its Benchmark's Scorers' judgments.
     pub scores: Vec<TrialScore>,
@@ -156,8 +158,13 @@ pub struct SuiteInsight {
     pub created_at: DateTime<Utc>,
     /// Its trials, by task.
     pub trials: Vec<TrialInsight>,
-    /// How many trials have their result.
+    /// How many trials have their result. A trial whose Run ended
+    /// `infrastructure` never had its work run, so it is never among them.
     pub scored: u32,
+    /// How many trials' Runs ended `infrastructure`: left out of the
+    /// suite's score and tokens rather than counted against its
+    /// configuration.
+    pub infrastructure: u32,
     /// Their mean score; none until one has.
     pub mean_score: Option<f64>,
     /// The tokens of the trials that have their result.
@@ -420,12 +427,21 @@ pub(crate) fn evaluation_insights(
         .map(|suite| {
             let mut tokens = TokenCounts::default();
             let mut scored = 0u32;
+            let mut infrastructure = 0u32;
             let mut score_sum = 0.0;
             let trials = suite
                 .trials
                 .into_iter()
                 .map(|trial| {
-                    let trial_tokens = trial.result.map(|result| {
+                    // A trial lost to infrastructure is left out even with
+                    // a result, as one scored before such trials kept none
+                    // has.
+                    let lost = trial.run_outcome == Some(RunOutcome::Infrastructure);
+                    if lost {
+                        infrastructure += 1;
+                    }
+                    let result = trial.result.filter(|_| !lost);
+                    let trial_tokens = result.map(|result| {
                         scored += 1;
                         score_sum += result.score;
                         let counts = TokenCounts {
@@ -444,7 +460,7 @@ pub(crate) fn evaluation_insights(
                         task: trial.task,
                         run_id: trial.run_id,
                         run_outcome: trial.run_outcome,
-                        score: trial.result.map(|result| result.score),
+                        score: result.map(|result| result.score),
                         tokens: trial_tokens,
                         scores: trial
                             .scores
@@ -461,6 +477,7 @@ pub(crate) fn evaluation_insights(
                 created_at: suite.created_at,
                 trials,
                 scored,
+                infrastructure,
                 mean_score: (scored > 0).then(|| score_sum / f64::from(scored)),
                 tokens,
             }

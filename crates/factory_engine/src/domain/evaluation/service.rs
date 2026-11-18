@@ -308,7 +308,9 @@ where
 
     /// A trial keeps its mechanical score and its agents' tokens, then its
     /// Benchmark's Scorers' judgments, all with the trial: the live
-    /// Scorers' judgments never see it.
+    /// Scorers' judgments never see it. A trial whose Run ended
+    /// `infrastructure` never had its work run: it keeps no result, which
+    /// would count against its configuration, and no Scorer judges it.
     async fn score_trial(
         &self,
         definition: &EvaluationDefinition,
@@ -316,7 +318,8 @@ where
         trial: &SubjectTrial,
         last_attempt: bool,
     ) -> Result<bool, StepError> {
-        if !trial.scored {
+        let lost = subject.outcome == Some(RunOutcome::Infrastructure);
+        if !trial.scored && !lost {
             let sessions: Vec<Uuid> = subject
                 .steps
                 .iter()
@@ -352,10 +355,14 @@ where
             self.delete_trial_branch(subject, trial).await;
         }
 
-        // A cancelled trial did not finish its work, so no Scorer judges it;
-        // a Benchmark removed from the definition since keeps its result
-        // and is judged no more.
-        if subject.outcome == Some(RunOutcome::Cancelled) {
+        // A cancelled trial did not finish its work, and one lost to
+        // infrastructure never did it, so no Scorer judges either; a
+        // Benchmark removed from the definition since keeps its result and
+        // is judged no more.
+        if matches!(
+            subject.outcome,
+            Some(RunOutcome::Cancelled | RunOutcome::Infrastructure)
+        ) {
             return Ok(true);
         }
         let Some(benchmark) = definition.benchmark(&trial.benchmark) else {

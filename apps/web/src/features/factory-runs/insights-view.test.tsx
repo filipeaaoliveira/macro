@@ -210,6 +210,7 @@ const judged: EvaluationInsights = {
       agents: { writer: 'backup' },
       createdAt: '2026-11-10T09:00:00Z',
       scored: 1,
+      infrastructure: 0,
       meanScore: 0.5,
       tokens: { input: 1200, output: 300, cacheRead: 0, cacheWrite: 0 },
       trials: [
@@ -491,6 +492,42 @@ describe('RunInsightsView', () => {
 
     fireEvent.click(trial);
     expect(await screen.findByText('No steps yet')).toBeTruthy();
+  });
+
+  it('says how many of a suite’s trials were lost to infrastructure, with no score', () => {
+    const [suite] = judged.suites;
+    if (!suite) throw new Error('No suite');
+    mount({
+      insights: november,
+      evaluation: {
+        ...judged,
+        suites: [
+          {
+            ...suite,
+            infrastructure: 1,
+            trials: [
+              ...suite.trials,
+              {
+                task: 'export',
+                runId: 'run-lost',
+                runOutcome: 'infrastructure',
+                score: null,
+                tokens: null,
+                scores: [],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(screen.getByText('1 of 2 trials scored')).toBeTruthy();
+    expect(
+      screen.getByText('1 lost to infrastructure, left out of the score')
+    ).toBeTruthy();
+    const trials = screen.getByRole('list', { name: 'Trial' });
+    const lost = within(trials).getByRole('button', { name: /export/ });
+    expect(lost.textContent).not.toMatch(/\d\.\d\d/);
   });
 
   it('holds a placeholder while the evaluation loads, and reads it again on Retry', () => {

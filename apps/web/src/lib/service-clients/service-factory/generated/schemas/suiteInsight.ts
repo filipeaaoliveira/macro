@@ -21,10 +21,18 @@ export interface SuiteInsight {
   createdAt: string;
   /** The suite. */
   id: string;
+  /**
+   * How many trials' Runs ended `infrastructure`: left out of the
+suite's score and tokens rather than counted against its
+configuration.
+   * @minimum 0
+   */
+  infrastructure: number;
   /** Their mean score; none until one has. */
   meanScore?: SuiteInsightMeanScore;
   /**
-   * How many trials have their result.
+   * How many trials have their result. A trial whose Run ended
+`infrastructure` never had its work run, so it is never among them.
    * @minimum 0
    */
   scored: number;

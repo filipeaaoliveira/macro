@@ -301,7 +301,10 @@ planned. Once a trial's Run ends it keeps its score (1 when write ended
 `factory/<run>` branch is deleted as its owner (best effort, through
 `PullRequests::delete_run_branch`, which takes the Run, never a branch
 name; one found missing counts as deleted), and, unless it was cancelled, the Scorers
-its Benchmark names judge it into the trial's own record.
+its Benchmark names judge it into the trial's own record. A trial whose Run
+ended `infrastructure` never had its work run: it keeps no score or tokens,
+no Scorer judges it, and its suite counts it apart (`infrastructure`) and
+leaves it out of its score, even one kept before such trials kept none.
 `GET /insights/evaluation` (same
 params as `/insights`) shows each Scorer's judgments, each Experiment's
 arms with their Runs' outcomes and scores, the Benchmarks and the caller's

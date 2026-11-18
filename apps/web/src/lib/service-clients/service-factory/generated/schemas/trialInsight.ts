@@ -18,7 +18,8 @@ export interface TrialInsight {
   runId: RunId;
   runOutcome?: TrialInsightRunOutcome;
   /** Its mechanical score, from 0 to 1: 1 when its checks went green, 0.5
-when they stayed red, 0 otherwise; none until its Run ended. */
+when they stayed red, 0 otherwise; none until its Run ended, and
+none for a Run that ended `infrastructure`, whose work never ran. */
   score?: TrialInsightScore;
   /** Its Benchmark's Scorers' judgments. */
   scores: TrialScore[];

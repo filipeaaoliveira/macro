@@ -735,6 +735,123 @@ async fn a_cancelled_trial_keeps_a_zero_score_and_is_not_judged() {
     assert!(judge.asked().is_empty());
 }
 
+/// A trial whose Run ended `infrastructure` never had its work run: it
+/// keeps no score, which would count against its configuration, and no
+/// Scorer judges it; its branch is deleted all the same.
+#[tokio::test]
+async fn a_trial_that_ended_for_infrastructure_keeps_no_score_and_is_not_judged() {
+    let repo = FakeRepo::default();
+    let session = Uuid::from_u128(7);
+    let trial_run = ended_run(&repo, "benchmark", RunOutcome::Infrastructure, "done", session).await;
+    let suite_id = Uuid::from_u128(600);
+    let configuration = [(role("writer"), agent("backup"))].into_iter().collect();
+    repo.insert_suite(&NewSuite {
+        id: suite_id,
+        user_id: &julia(),
+        benchmark: "core",
+        agents: &configuration,
+        trials: 1,
+    })
+    .await
+    .expect("suite");
+    let trial = TrialKey {
+        suite_id,
+        task: "typo".to_string(),
+    };
+    repo.insert_trial(
+        &trial,
+        trial_run,
+        "1111111111111111111111111111111111111111",
+    )
+    .await
+    .expect("trial");
+    let judge = Arc::new(FakeJudge::default());
+    let github = FakeGithub::default();
+    github.state().head = Some("2".repeat(40));
+    let scoring = ScoringServiceImpl::new(
+        repo.clone(),
+        judge.clone(),
+        usage(session),
+        github.clone(),
+        Arc::new(definition()),
+    );
+
+    scoring.score_run(trial_run, false).await.expect("scored");
+
+    let kept = repo.evaluation.lock().expect("evaluation").clone();
+    assert!(kept.trial_results.is_empty());
+    assert!(kept.trial_scores.is_empty());
+    assert!(judge.asked().is_empty());
+    assert_eq!(
+        github.state().deleted_branches,
+        [format!("factory/{trial_run}")]
+    );
+    assert_eq!(kept.branches_deleted, [(suite_id, "typo".to_string())]);
+}
+
+/// A suite's score and tokens leave out its trials that ended
+/// `infrastructure`, a result kept for one before they were left out among
+/// them, and count those trials apart; such a trial shows no score.
+#[test]
+fn a_suite_counts_its_trials_lost_to_infrastructure_apart() {
+    use chrono::NaiveDate;
+    use factory_records::domain::evaluation::{
+        EvaluationRecords, SuiteRecord, TrialRecord, TrialResult,
+    };
+
+    use super::insights::evaluation_insights;
+    use crate::domain::insights::InsightsQuery;
+
+    let day = |day: u32| NaiveDate::from_ymd_opt(2026, 11, day).expect("valid day");
+    let query = InsightsQuery::new(day(1), day(30), "Europe/Lisbon", None).expect("query");
+    let result = |score: f64| TrialResult {
+        score,
+        tokens: TrialTokens {
+            input: 10,
+            output: 1,
+            cache_read: 0,
+            cache_write: 0,
+        },
+    };
+    let trial = |task: &str, outcome: RunOutcome, result: Option<TrialResult>| TrialRecord {
+        task: task.to_string(),
+        run_id: RunId::generate(),
+        run_outcome: Some(outcome),
+        result,
+        scores: Vec::new(),
+    };
+    let records = EvaluationRecords {
+        suites: vec![SuiteRecord {
+            id: Uuid::from_u128(600),
+            benchmark: "core".to_string(),
+            agents: Default::default(),
+            created_at: Utc::now(),
+            trials: vec![
+                trial("typo", RunOutcome::Success, Some(result(1.0))),
+                trial("cart", RunOutcome::Manual, Some(result(0.5))),
+                trial("search", RunOutcome::Infrastructure, Some(result(0.0))),
+                trial("export", RunOutcome::Infrastructure, None),
+            ],
+        }],
+        ..Default::default()
+    };
+
+    let insights = evaluation_insights(&definition(), &query, records);
+
+    let suite = &insights.suites[0];
+    assert_eq!(suite.scored, 2);
+    assert_eq!(suite.infrastructure, 2);
+    assert_eq!(suite.mean_score, Some(0.75));
+    assert_eq!(suite.tokens.input, 20);
+    let lost: Vec<_> = suite
+        .trials
+        .iter()
+        .filter(|trial| trial.run_outcome == Some(RunOutcome::Infrastructure))
+        .map(|trial| (trial.score, trial.tokens.is_some()))
+        .collect();
+    assert_eq!(lost, vec![(None, false), (None, false)]);
+}
+
 #[tokio::test]
 async fn a_trial_is_scored_by_how_its_write_step_ended() {
     let repo = FakeRepo::default();

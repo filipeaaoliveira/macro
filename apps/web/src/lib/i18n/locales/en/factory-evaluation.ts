@@ -36,6 +36,10 @@ export default {
   judgedBy: 'Judged by {{scorers}}',
   noSuites: 'No suite ran in this period.',
   suiteScored: { other: '{{scored}} of {{count}} trials scored' },
+  suiteInfrastructure: {
+    one: '{{count}} lost to infrastructure, left out of the score',
+    other: '{{count}} lost to infrastructure, left out of the score',
+  },
   trial: 'Trial',
   score: 'Score',
   tokens: 'Tokens',

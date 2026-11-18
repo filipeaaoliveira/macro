@@ -1972,11 +1972,18 @@ export type SuiteInsight = {
      */
     id: string;
     /**
+     * How many trials' Runs ended `infrastructure`: left out of the
+     * suite's score and tokens rather than counted against its
+     * configuration.
+     */
+    infrastructure: number;
+    /**
      * Their mean score; none until one has.
      */
     meanScore?: number | null;
     /**
-     * How many trials have their result.
+     * How many trials have their result. A trial whose Run ended
+     * `infrastructure` never had its work run, so it is never among them.
      */
     scored: number;
     /**
@@ -2049,7 +2056,8 @@ export type TrialInsight = {
     runOutcome?: null | RunOutcome;
     /**
      * Its mechanical score, from 0 to 1: 1 when its checks went green, 0.5
-     * when they stayed red, 0 otherwise; none until its Run ended.
+     * when they stayed red, 0 otherwise; none until its Run ended, and
+     * none for a Run that ended `infrastructure`, whose work never ran.
      */
     score?: number | null;
     /**
