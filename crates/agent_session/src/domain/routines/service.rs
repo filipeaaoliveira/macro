@@ -352,6 +352,7 @@ where
                     actor: Some(action.owner),
                     context: command.context,
                     client: None,
+                    // A routine's step has no person behind its words.
                     prompter: crate::domain::model::PrompterKind::Program,
                 },
             )
