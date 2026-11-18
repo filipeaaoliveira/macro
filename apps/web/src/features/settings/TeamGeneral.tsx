@@ -1,4 +1,5 @@
 import {
+  TeamAutomations,
   TeamControlFiles,
   TeamStandingRules,
 } from '@app/features/factory-runs/factory-runs';
@@ -434,6 +435,14 @@ export function TeamGeneral(props: { team: TeamSummary }) {
             >
               <SettingsCard>
                 <TeamStandingRules />
+              </SettingsCard>
+            </SettingsSection>
+            <SettingsSection
+              title="Automations"
+              description="Start a factory run on a schedule, on a repository's GitHub event, on a signed webhook call or when a task changes."
+            >
+              <SettingsCard>
+                <TeamAutomations />
               </SettingsCard>
             </SettingsSection>
           </>

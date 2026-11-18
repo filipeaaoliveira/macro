@@ -12,6 +12,7 @@ import { RunsProvider } from './context/runs-context';
 import { RunInsightsView } from './insights-view';
 import { createAppInsightsContext } from './queries/insights';
 import { createAppRunsContext } from './queries/runs';
+import { AutomationsSettings } from './views/automations-settings';
 import { ControlFilesSettings } from './views/control-files-settings';
 import { StandingRulesSettings } from './views/standing-rules-settings';
 import { TaskRunsSection } from './views/task-runs-section';
@@ -68,6 +69,14 @@ export function TeamControlFiles() {
  */
 export function TeamStandingRules() {
   return <StandingRulesSettings />;
+}
+
+/**
+ * The team's Automations, as the body of a team settings section: what
+ * starts a Run on its own, as the person who made it.
+ */
+export function TeamAutomations() {
+  return <AutomationsSettings />;
 }
 
 /**

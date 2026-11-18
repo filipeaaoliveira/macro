@@ -46,6 +46,7 @@ function toRun(detail: RunDetail): Run {
     createdAt: run.createdAt,
     taskId: run.taskId ?? undefined,
     repository: run.repository ?? undefined,
+    automation: run.automation ?? undefined,
     controlFiles: run.controlFiles ?? undefined,
     end: run.end ?? undefined,
     steps: detail.steps.map((step) => ({

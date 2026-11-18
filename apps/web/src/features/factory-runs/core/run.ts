@@ -231,12 +231,28 @@ export type MainHold = {
 export type BaseRequiredChecks = 'unread' | 'none';
 
 /** One Run of a Flow, with the Steps it took in the order they started. */
+/** What kind of trigger started an Automation's Run. */
+export type AutomationTriggerKind =
+  | 'schedule'
+  | 'repository_event'
+  | 'webhook'
+  | 'task_event';
+
+/** The Automation that started a Run, as it was then. */
+export type RunAutomation = {
+  id: string;
+  name: string;
+  trigger: AutomationTriggerKind;
+};
+
 export type Run = {
   id: string;
   request: string;
   createdAt: string;
   taskId?: string;
   repository?: RunRepository;
+  /** The Automation that started it; none for a Run a person started. */
+  automation?: RunAutomation;
   /** The Control Files its branch changed, if any. */
   controlFiles?: ControlFileChanges;
   end?: { outcome: RunOutcome; endedAt: string };
