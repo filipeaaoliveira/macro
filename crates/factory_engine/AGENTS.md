@@ -769,6 +769,65 @@ does. The owner's notes are their comments on the Run's task; a person's
 words on a Gate are kept as that Gate's note and reach no agent as an
 owner's note.
 
+Automations (`src/domain/automations.rs`, `automations/service.rs`,
+`inbound/automations.rs`) start Runs on their own: a team member makes one
+(`POST /automations`, in their own signed-in session, from an account that
+is not an agent's) with a trigger, a built-in Flow, the repository for a
+Flow that works on one, and a request template. Its Runs act as its
+creator, with their permissions: each is created as `create_run` would
+create it for them outside their signed-in session (their task access,
+their linked GitHub account, their team's Control Files and Standing Rules,
+no Control File named), and keeps which Automation started it, with its
+name and trigger kind as they were (`factory_run.automation_*`,
+`automation` in the Run API). A Flow and repository the creator could not
+start a Run of now are refused when it is made (`check_run_order`). The
+triggers:
+
+- `schedule` (cron and time zone), `repository_event` (GitHub event names
+  and optional actions, on the Automation's repository) and `task_event`
+  (a task property and the values it must gain: the status becoming one,
+  a tag added) are a Macro routine of the creator's, made through the
+  scheduler's API with the internal key as the creator
+  (`outbound/routine_automation_triggers.rs`, the `AutomationTriggers`
+  port): a cron trigger, a `github` event filter on the repository, or a
+  `task.property_changed` filter with a `property` selector. The factory
+  keeps no scheduler. The routine's one code step calls
+  `macro.factory.fireAutomation` (`POST /automations/fire`), skipping a dry
+  run; the factory takes the routine from the credential the scheduler
+  signed for it (`agent_correlation::context::current_routine`, never the
+  body) and fires the Automation of that routine only for its creator. A
+  routine the scheduler refuses (an invalid cron, event routines the
+  creator may not have, no linked GitHub account) takes its Automation
+  with it, and the refusal says why (400). Only people's actions start
+  event routines, so a task an agent moves starts nothing.
+- `webhook` is fired by `POST /automations/{id}/webhook`, which carries no
+  login: the call is signed with the Automation's secret (shown once, when
+  it is made) as Macro signs its own webhooks (`webhook_signature`:
+  `x-macro-signature: v1=<hex>`, an HMAC-SHA256 of `"{timestamp}.{body}"`,
+  and `x-macro-timestamp` in Unix seconds), within `WEBHOOK_TOLERANCE_SECS`
+  of now (401 otherwise). The body is empty or `{"taskId"}`.
+
+Each firing is keyed (`factory_automation_firing`): by the routine run's id,
+so a retried run starts one Run, or by the webhook call's signature, so a
+replay within the tolerance is refused (409) and one past it fails the
+timestamp check. A claim that never ended is taken over after
+`FIRING_CLAIM_STALE_AFTER` (ten minutes), longer than the tolerance. A
+firing starts nothing, and records why (`skipped`), when the Automation is
+switched off (`disabled`), the queue takes no more of the creator's Runs
+(`queue_full`, the `RunQueue` port: the Queue limit plugs in there, and
+until it does `NoQueue` takes every Run), a Run already runs on its task,
+whoever started it (`task_busy`: checked before the Run is created, and
+held by the unique index `factory_run_automation_task_open_idx` between
+two firings that race; a person's Run started in the same instant can still
+overlap one), or the Run API refuses the Run as it would refuse its creator
+(`refused`). An outage leaves the firing claimed, for a retry once the
+claim is stale. A team's members list its Automations (`GET
+/automations`); its creator, or an admin of the team, switches one on or off
+(`PUT /automations/{id}/enabled`) or deletes it (`DELETE
+/automations/{id}`), and its routine follows, as the creator. The workflow
+is not touched: a Run an Automation starts walks its Flow as any other, so
+every Run in flight replays as before.
+
 ## Start here
 
 - `src/domain/flow.rs`: the Flow model and the checks a definition must pass.
@@ -798,6 +857,9 @@ owner's note.
   `gate_replies/measure.rs`: the replay measure that sets their thresholds.
 - `src/domain/standing_rules.rs`: which Gates a Standing Rule answers, and
   what it never answers.
+- `src/domain/automations.rs` and `automations/service.rs`: Automations,
+  their triggers and firings; `outbound/routine_automation_triggers.rs`:
+  the routines that fire them.
 - `src/domain/gate_owner.rs`: the owner section: the notice a waiting Gate
   sends, and the owner's notes a Step reads. Project rules are set through the API only: team
   settings show how many Projects have their own.
@@ -946,5 +1008,11 @@ owner's note.
 - A subscription that runs out mid-turn (a turn that fails with the
   provider's usage limit) is not a refusal to start: it fails the Step as any
   failed turn does, and no other Agent takes it.
+- Deploy `agent_harness_service` with an SDK that has
+  `macro.factory.fireAutomation` before a factory that makes Automations:
+  saving the routine type-checks its code step against the harness's SDK.
+  Event routines need the creator's `enable-event-routines` flag in
+  PostHog, and the harness starts no event intake without PostHog: then a
+  repository event's or a Task event's routine is refused, or never runs.
 - `#[activities]` takes no generic type, so `FactoryActivities` holds the Step
   service as a trait object.

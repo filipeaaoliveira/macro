@@ -19,16 +19,20 @@ use document_storage_service_client::DocumentStorageServiceClient;
 use entity_access::domain::service::EntityAccessServiceImpl;
 use entity_access::outbound::PgAccessRepository;
 use factory_engine::domain::agents::AgentDefinition;
+use factory_engine::domain::automations::service::AutomationServiceImpl;
 use factory_engine::domain::built_in_steps::BuiltInSteps;
 use factory_engine::domain::gate_replies::GateReplySettings;
 use factory_engine::domain::gate_replies::service::GateRepliesImpl;
 use factory_engine::domain::insights::InsightsServiceImpl;
 use factory_engine::domain::main_hold::MainWatchServiceImpl;
-use factory_engine::domain::ports::StepAgent;
+use factory_engine::domain::ports::{NoQueue, StepAgent};
 use factory_engine::domain::pull_request_steps::PullRequestSteps;
 use factory_engine::domain::review_rounds::ReviewRoundsImpl;
 use factory_engine::domain::service::{FactoryServiceImpl, StepServiceImpl};
 use factory_engine::domain::session_agent::SessionAgent;
+use factory_engine::inbound::automations::{
+    AutomationsApiDoc, AutomationsRouterState, automations_router,
+};
 use factory_engine::inbound::http::{ApiDoc, FactoryRouterState, factory_router};
 use factory_engine::inbound::insights::{InsightsApiDoc, InsightsRouterState, insights_router};
 use factory_engine::inbound::temporal::WorkerServices;
@@ -40,6 +44,7 @@ use factory_engine::outbound::fast_gate_model::FastGateModel;
 use factory_engine::outbound::github_pull_requests::GithubPullRequests;
 use factory_engine::outbound::ingress_gate_notifier::IngressGateNotifier;
 use factory_engine::outbound::local_agent::LocalAgent;
+use factory_engine::outbound::routine_automation_triggers::RoutineAutomationTriggers;
 use factory_engine::outbound::temporal_main_watches::TemporalMainWatches;
 use factory_engine::outbound::temporal_run_workflows::TemporalRunWorkflows;
 use factory_records::outbound::pg_run_repository::PgRunRepository;
@@ -50,7 +55,9 @@ use macro_authorization::{
     PgUserApiKeyAuthorizer,
 };
 use macro_entrypoint::{MacroEntrypoint, shutdown_signal};
-use macro_service_urls::{AgentHarnessServiceUrl, AuthServiceUrl, DocumentStorageServiceUrl};
+use macro_service_urls::{
+    AgentHarnessServiceUrl, AuthServiceUrl, DocumentStorageServiceUrl, ScheduledActionServiceUrl,
+};
 use macro_tower_layers::MacroRequestIdAndTracingLayer;
 use notification::domain::ports::NoopNotificationRealtimePublisher;
 use notification::domain::service::{
@@ -192,6 +199,13 @@ async fn run() -> Result<(), rootcause::Report> {
                 realtime: NoopNotificationRealtimePublisher,
             }),
         ),
+        // A schedule's, a repository event's and a Task event's Automation
+        // is a routine of its creator's, made through the scheduler with
+        // the internal key, acting as them.
+        automation_triggers: RoutineAutomationTriggers::new(
+            ScheduledActionServiceUrl::new()?.as_ref(),
+            config.internal_api_key.as_ref(),
+        )?,
         client,
         authorization_state,
         correlation: CorrelationState::new(db, jwt_args),
@@ -239,6 +253,7 @@ struct Parts {
     hold_tasks: DocumentHoldTasks,
     task_notes: DocumentTaskNotes,
     gate_notifier: IngressGateNotifier<SqsNotificationIngress<SqsQueue>, NotificationReader>,
+    automation_triggers: RoutineAutomationTriggers,
     client: Client,
     authorization_state: MacroAuthorizationState<Authorization>,
     correlation: CorrelationState,
@@ -293,7 +308,7 @@ async fn serve<A: StepAgent + Clone>(
 
     let insights = Arc::new(InsightsServiceImpl::new(parts.repo.clone(), parts.usage));
     let mut service = FactoryServiceImpl::new(
-        parts.repo,
+        parts.repo.clone(),
         TemporalRunWorkflows::new(parts.client),
         steps,
         parts.users,
@@ -307,17 +322,30 @@ async fn serve<A: StepAgent + Clone>(
         service = service.with_questions(questions);
     }
     let service = Arc::new(service);
+    // Automations start their Runs through the Run API, as their creators.
+    // The Queue limit is not in yet: every firing's Run is taken.
+    let automations = Arc::new(AutomationServiceImpl::new(
+        parts.repo.clone(),
+        service.clone(),
+        parts.automation_triggers,
+        NoQueue,
+    ));
     let api = factory_router(FactoryRouterState::new(
         service,
         parts.authorization_state.clone(),
     ))
     .merge(insights_router(InsightsRouterState::new(
         insights,
+        parts.authorization_state.clone(),
+    )))
+    .merge(automations_router(AutomationsRouterState::new(
+        automations,
         parts.authorization_state,
     )))
     .merge(health::router());
     let mut openapi = ApiDoc::openapi();
     openapi.merge(InsightsApiDoc::openapi());
+    openapi.merge(AutomationsApiDoc::openapi());
     // The correlation layer finds the agent session behind a code-mode
     // credential, and holds a scoped session to its scope.
     let app = traced(mount_at_root_and_prefix(api))

@@ -70,6 +70,7 @@ async fn run_of_on(
         control_file_patterns: &[],
         control_files_team_id: None,
         standing_rules: RunRules::DEFAULT,
+        automation: None,
     })
     .await
     .expect("insert");

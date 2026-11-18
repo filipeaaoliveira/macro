@@ -303,6 +303,24 @@ impl FactoryService for FakeService {
         Err(self.refusing(actor))
     }
 
+    async fn check_run_order(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        _flow: &str,
+        _repo_url: Option<&str>,
+    ) -> Result<(), FactoryError> {
+        Err(self.refusing(actor))
+    }
+
+    async fn create_automation_run(
+        &self,
+        automation: &factory_records::domain::automations::Automation,
+        _request: String,
+        _task_id: Option<Uuid>,
+    ) -> Result<RunDetail, FactoryError> {
+        Err(self.refusing(&automation.created_by))
+    }
+
     async fn clear_main_hold(
         &self,
         _repo_url: &str,
@@ -391,12 +409,13 @@ async fn alice_s_run(repo: &FakeRepo) -> RunId {
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
+            automation: None,
         })
         .await
         .expect("insert")
     {
         RunInsert::Inserted(run) => run.id,
-        RunInsert::NoSuchTask => panic!("a run with no task is kept"),
+        RunInsert::NoSuchTask | RunInsert::TaskBusy => panic!("a run with no task is kept"),
     }
 }
 
@@ -1028,6 +1047,7 @@ async fn a_run_at_its_merge_on_a_held_base_shows_the_main_hold() {
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
+            automation: None,
         })
         .await
         .expect("insert");

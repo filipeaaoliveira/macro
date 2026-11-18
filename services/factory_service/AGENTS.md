@@ -153,6 +153,13 @@ worker that walks each Run's Flow, in one process.
   an unreachable repository. The agent pushes the Run's branch with its
   runtime's own git credentials.
 
+- Automations' routines are made through the scheduler at
+  `ScheduledActionServiceUrl` (`SCHEDULED_ACTION_SERVICE_URL` overrides
+  its default), with `INTERNAL_API_KEY` and the Automation's creator as the
+  acting user, so the scheduler must take that key. `POST
+  /automations/{id}/webhook` takes calls with no login: put it behind the
+  gateway's `/factory` route as the rest of the API. The Queue limit is not
+  wired yet: `main.rs` passes `NoQueue`.
 - Open for deploying: the service reaches the harness's routine sessions at
   `AgentHarnessServiceUrl`, which outside the local stack is the public
   gateway, as for every Macro caller outside the harness's process (the

@@ -6,10 +6,14 @@ pub use gate_replies::{GateModel, GateReplyService, ModelPick, ModelQuestion};
 
 use agent_session::domain::session_command::SessionCommandOutput;
 use agent_session::domain::session_task::TaskDocumentId;
+use factory_records::domain::automations::Automation;
 use factory_records::domain::models::{HandBack, Outcome, Role, RunId, StepKey};
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
+use crate::domain::automations::{
+    AutomationRequest, AutomationsSettings, CreatedAutomation, FiringResult, RoutineFiring,
+};
 use crate::domain::flow::{StepName, StepUse};
 use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening, GateRuling, ReplyGate};
 use crate::domain::gate_owner::{GateNotice, OwnerNote};
@@ -661,6 +665,145 @@ pub trait FactoryService: Send + Sync + 'static {
         actor: &MacroUserIdStr<'static>,
         id: RunId,
     ) -> impl Future<Output = Result<(), FactoryError>> + Send;
+
+    /// Check that `actor` could start a Run of the built-in Flow named
+    /// `flow` on the repository `repo_url`, as [`Self::create_run`] checks:
+    /// the Flow exists, takes a repository exactly when one is given, and
+    /// the actor's GitHub account reaches it and may push to it.
+    fn check_run_order(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        flow: &str,
+        repo_url: Option<&str>,
+    ) -> impl Future<Output = Result<(), FactoryError>> + Send;
+
+    /// Record and start the Run `automation` starts for `request`, owned by
+    /// its creator, on the task `task_id` if one is given: as
+    /// [`Self::create_run`] for a Run its creator did not start in person,
+    /// keeping which Automation started it. `TaskBusy` when a Run another
+    /// Automation started runs on the task.
+    fn create_automation_run(
+        &self,
+        automation: &Automation,
+        request: String,
+        task_id: Option<Uuid>,
+    ) -> impl Future<Output = Result<RunDetail, FactoryError>> + Send;
+}
+
+/// The Macro routines that fire Automations: a schedule's, a repository
+/// event's and a Task event's trigger is a routine of the Automation's
+/// creator, whose code step fires it. Every call acts as the creator.
+pub trait AutomationTriggers: Send + Sync + 'static {
+    /// Make the routine that fires `automation`, enabled, and return its
+    /// id.
+    fn create(
+        &self,
+        automation: &Automation,
+    ) -> impl Future<Output = Result<Uuid, AutomationTriggerError>> + Send;
+
+    /// Switch the routine `routine_id` of `owner` on or off.
+    fn set_enabled(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        routine_id: Uuid,
+        enabled: bool,
+    ) -> impl Future<Output = Result<(), AutomationTriggerError>> + Send;
+
+    /// Delete the routine `routine_id` of `owner`; one already gone is
+    /// deleted.
+    fn delete(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        routine_id: Uuid,
+    ) -> impl Future<Output = Result<(), AutomationTriggerError>> + Send;
+}
+
+/// Why a routine that fires an Automation could not be made or changed.
+#[derive(Debug, thiserror::Error)]
+pub enum AutomationTriggerError {
+    /// The scheduler refused it, and said why: an invalid schedule, event
+    /// routines its creator may not have, or no linked GitHub account.
+    #[error("the routine was refused: {0}")]
+    Refused(String),
+    /// The scheduler could not be reached, or failed.
+    #[error("the scheduler is unavailable: {0:?}")]
+    Unavailable(rootcause::Report),
+}
+
+/// The queue of Runs an Automation's firing joins.
+///
+/// The factory's Queue limit plugs in here: a queue that takes no more of
+/// `owner`'s Runs now has the firing skipped as `queue_full`, recorded on
+/// the firing. Until the Queue lands, [`NoQueue`] takes every Run.
+pub trait RunQueue: Send + Sync + 'static {
+    /// Whether the queue takes another Run of `owner`'s now.
+    fn admits(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+    ) -> impl Future<Output = Result<bool, rootcause::Report>> + Send;
+}
+
+/// A queue with no limit: it takes every Run.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoQueue;
+
+impl RunQueue for NoQueue {
+    async fn admits(&self, _owner: &MacroUserIdStr<'static>) -> Result<bool, rootcause::Report> {
+        Ok(true)
+    }
+}
+
+/// Inbound service port: a team's Automations and their firings.
+pub trait AutomationService: Send + Sync + 'static {
+    /// `actor`'s team's Automations.
+    fn automations(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+    ) -> impl Future<Output = Result<AutomationsSettings, FactoryError>> + Send;
+
+    /// Keep a new Automation of `actor`'s team, which acts as `actor`.
+    /// Only the actor in person makes one.
+    fn create_automation(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        in_person: bool,
+        request: AutomationRequest,
+    ) -> impl Future<Output = Result<CreatedAutomation, FactoryError>> + Send;
+
+    /// Switch `actor`'s team's Automation `id` on or off: its creator's or,
+    /// for an admin, any.
+    fn set_automation_enabled(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        id: Uuid,
+        enabled: bool,
+    ) -> impl Future<Output = Result<Automation, FactoryError>> + Send;
+
+    /// Delete `actor`'s team's Automation `id`, as for switching it off.
+    fn delete_automation(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        id: Uuid,
+    ) -> impl Future<Output = Result<(), FactoryError>> + Send;
+
+    /// Fire the Automation the routine `routine_id` fires, from one of its
+    /// runs, which acts as `actor`.
+    fn fire_from_routine(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        routine_id: Uuid,
+        firing: RoutineFiring,
+    ) -> impl Future<Output = Result<FiringResult, FactoryError>> + Send;
+
+    /// Fire the webhook Automation `id` from a call whose `body` is signed
+    /// as `signature` at `timestamp` (Unix seconds).
+    fn fire_webhook(
+        &self,
+        id: Uuid,
+        timestamp: &str,
+        signature: &str,
+        body: &[u8],
+    ) -> impl Future<Output = Result<FiringResult, FactoryError>> + Send;
 }
 
 /// Inbound service port: what a Run's workflow asks its worker to do for a

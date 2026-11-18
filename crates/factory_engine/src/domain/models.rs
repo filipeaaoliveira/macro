@@ -721,6 +721,43 @@ pub enum FactoryError {
         /// The most bytes a note may hold.
         max: usize,
     },
+    /// A Run already runs on the task, so an Automation starts none.
+    #[error("a run is already running on this task")]
+    TaskBusy,
+    /// The caller is on no team, which keeps Automations.
+    #[error("only a member of a team can have automations")]
+    NoTeam,
+    /// The caller may not change the Automation: it is not theirs, and
+    /// they do not administer its team.
+    #[error("only an automation's creator or an admin of its team can change it")]
+    NotTheAutomationOwner,
+    /// The Automation asked for does not read.
+    #[error(transparent)]
+    InvalidAutomation(#[from] crate::domain::automations::AutomationRequestError),
+    /// The firing does not read.
+    #[error(transparent)]
+    InvalidFiring(#[from] crate::domain::automations::FiringError),
+    /// The scheduler refused the routine that would fire the Automation,
+    /// and said why.
+    #[error("the automation's trigger was refused: {0}")]
+    TriggerRefused(String),
+    /// The scheduler, which fires the Automation, could not be reached.
+    #[error("the automation's trigger could not be set up; try again")]
+    TriggerUnavailable,
+    /// Only an Automation's routine fires it, from its code step, with the
+    /// credential the scheduler signed for the routine.
+    #[error("only an automation's routine fires it")]
+    NotARoutine,
+    /// A webhook call that is not signed with its Automation's secret, or
+    /// whose timestamp is too far from now.
+    #[error(
+        "the call is not signed with the automation's secret, or its timestamp is not within five minutes of now"
+    )]
+    BadSignature,
+    /// A firing with the same key was received before: a retry, or a
+    /// replayed webhook call.
+    #[error("this firing was received before")]
+    FiringRepeated,
     /// The Run's workflow did not take the answer, and said why: it waits
     /// on no Gate of that Step, or the Gate was answered.
     #[error("the answer was refused: {0}")]
