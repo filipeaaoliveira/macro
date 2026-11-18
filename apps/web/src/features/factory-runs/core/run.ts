@@ -45,6 +45,17 @@ export type StandInAnswer = {
 };
 
 /**
+ * How the Gate model read a Gate when what it said decided nothing: the
+ * answer it picked (none when it couldn't tell), how sure it was, in
+ * percent, and why. Without a confidence the model didn't answer.
+ */
+export type GateModelReading = {
+  pick?: string;
+  confidence?: number;
+  reason: string;
+};
+
+/**
  * Who asks a Gate's question: the Flow, once its Step is done, offering
  * answers to pick from, or the Step's agent, which the Run's owner answers
  * in their own words (the note of its one answer, `answer`).
@@ -59,10 +70,15 @@ export type Gate = {
   answers: string[];
   openedAt: string;
   answer?: GateAnswer;
-  /** The person's latest words the factory couldn't read as an answer. */
-  askedBack?: { reply: string; at: string };
+  /**
+   * The person's latest words the factory couldn't read as an answer, and
+   * how the Gate model read them.
+   */
+  askedBack?: { reply: string; at: string; reading?: GateModelReading };
   /** The stand-in's answer, while the owner may override it and after. */
   standIn?: StandInAnswer;
+  /** How the Gate model read the Gate when the stand-in left it to the owner. */
+  standInDeclined?: GateModelReading;
 };
 
 /**

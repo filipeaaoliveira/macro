@@ -494,6 +494,63 @@ describe('RunView', () => {
     ).toBe(false);
   });
 
+  it('says why the stand-in left a Gate, and how the words asked back on were read', async () => {
+    const { setRun } = mount({});
+    const [first] = waitingRun.steps;
+    if (!first?.gate) throw new Error('No first Gate');
+    setRun({
+      ...waitingRun,
+      steps: [
+        {
+          ...first,
+          gate: {
+            ...first.gate,
+            standInDeclined: {
+              pick: 'approve',
+              confidence: 62,
+              reason: 'The plan leaves the migration out.',
+            },
+            askedBack: {
+              reply: 'Hmm',
+              at: '2026-11-16T09:02:00Z',
+              reading: {
+                confidence: 40,
+                reason: 'The reply asks a question back.',
+              },
+            },
+          },
+        },
+      ],
+    });
+    expect(
+      await screen.findByText('The stand-in left this one to you.')
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        'It leaned to Approve (62% sure). The plan leaves the migration out.'
+      )
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        'It couldn’t tell which answer fits (40% sure). The reply asks a question back.'
+      )
+    ).toBeTruthy();
+
+    setRun({
+      ...waitingRun,
+      steps: [
+        {
+          ...first,
+          gate: {
+            ...first.gate,
+            standInDeclined: { reason: '' },
+          },
+        },
+      ],
+    });
+    expect(await screen.findByText('The model didn’t answer.')).toBeTruthy();
+  });
+
   it('says when the stand-in answered, and when an answer was read from a reply', async () => {
     const { setRun } = mount({});
     const [first] = waitingRun.steps;

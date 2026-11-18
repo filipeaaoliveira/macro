@@ -125,6 +125,11 @@ export default {
     'The stand-in answered {{answer}} for you ({{confidence}}% sure)',
   standInWindow:
     'The run goes on with it at {{time}}, unless you answer first.',
+  standInDeclined: 'The stand-in left this one to you.',
+  modelLeaned: 'It leaned to {{answer}} ({{confidence}}% sure).',
+  modelCouldNotTell:
+    'It couldn’t tell which answer fits ({{confidence}}% sure).',
+  modelDidNotAnswer: 'The model didn’t answer.',
   ruleApprovePlan: 'Approve plans',
   ruleFixBlockers: 'Fix review blockers',
   ruleMergeWhenGreen: 'Merge when CI is green',

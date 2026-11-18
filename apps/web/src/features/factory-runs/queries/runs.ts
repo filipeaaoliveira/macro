@@ -3,7 +3,10 @@ import { fireAndForget } from '@core/util/fireAndForget';
 import { type ResultError, throwOnErr } from '@core/util/result';
 import { useAgentRepositoriesQuery } from '@queries/agent-repositories/repositories';
 import { factoryClient, type StartRunErrorCode } from '@service-factory/client';
-import type { RunDetail } from '@service-factory/generated/schemas';
+import type {
+  GateModelReading as ApiGateModelReading,
+  RunDetail,
+} from '@service-factory/generated/schemas';
 import {
   type QueryClient,
   queryOptions,
@@ -18,7 +21,7 @@ import type {
   RunsSource,
   StartRunFailure,
 } from '../context/runs-context';
-import { type Run, runStatus } from '../core/run';
+import { type GateModelReading, type Run, runStatus } from '../core/run';
 import { factoryRunKeys } from './keys';
 
 /** How often an open Run, or a task with a Run going, is read again. */
@@ -37,6 +40,18 @@ function taskRunsPollMs(runs: Run[] | undefined): number | false {
   if (live.length === 0) return false;
   const running = live.some((run) => runStatus(run).kind === 'running');
   return running ? LIVE_POLL_MS : WAITING_POLL_MS;
+}
+
+/** The Gate model's reading of a Gate, as the view keeps it. */
+function modelReading(
+  reading: ApiGateModelReading | null | undefined
+): GateModelReading | undefined {
+  if (!reading) return undefined;
+  return {
+    pick: reading.pick ?? undefined,
+    confidence: reading.confidence ?? undefined,
+    reason: reading.reason,
+  };
 }
 
 function toRun(detail: RunDetail): Run {
@@ -76,8 +91,15 @@ function toRun(detail: RunDetail): Run {
                   answeredAt: step.gate.answer.answeredAt,
                 }
               : undefined,
-            askedBack: step.gate.askedBack ?? undefined,
+            askedBack: step.gate.askedBack
+              ? {
+                  reply: step.gate.askedBack.reply,
+                  at: step.gate.askedBack.at,
+                  reading: modelReading(step.gate.askedBack.reading),
+                }
+              : undefined,
             standIn: step.gate.standIn ?? undefined,
+            standInDeclined: modelReading(step.gate.standInDeclined),
           }
         : undefined,
       role: step.role ?? undefined,
