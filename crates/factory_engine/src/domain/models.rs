@@ -640,6 +640,9 @@ pub struct ControlFilesSettings {
     pub team_id: Option<Uuid>,
     /// Whether the person may change them: they administer the team.
     pub can_edit: bool,
+    /// Whether the team names a Factory Definition, whose `rules.json`
+    /// sets its Runs' Control Files in place of these.
+    pub definition_named: bool,
 }
 
 /// The Factory Definition a person's team names: the repository whose
@@ -657,6 +660,11 @@ pub struct DefinitionSettings {
     /// Why it does not read now, when it does not: the person cannot reach
     /// it, or a file of it is wrong.
     pub problem: Option<String>,
+    /// Whether its default branch takes changes only through a pull
+    /// request, by a ruleset or its branch protection; none when that
+    /// cannot be told, as when the person does not administer it. Without
+    /// one, a push changes the factory's rules unreviewed.
+    pub requires_pull_request: Option<bool>,
     /// The team; none when the person is on no team.
     pub team_id: Option<Uuid>,
     /// Whether the person may change it: they administer the team.
@@ -680,6 +688,9 @@ pub struct StandingRulesSettings {
     pub team_id: Option<Uuid>,
     /// Whether the person may change them: they administer the team.
     pub can_edit: bool,
+    /// Whether the team names a Factory Definition, whose `rules.json`
+    /// sets its Runs' Standing Rules in place of these and the Projects'.
+    pub definition_named: bool,
 }
 
 /// A Flow a person can start a Run of.

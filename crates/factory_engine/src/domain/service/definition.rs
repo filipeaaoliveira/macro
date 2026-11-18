@@ -27,6 +27,8 @@ use crate::domain::ports::{
 pub(super) struct PinnedDefinition {
     /// The repository's `https://github.com/owner/name` URL.
     pub(super) repo_url: String,
+    /// The default branch it was read from.
+    pub(super) branch: String,
     /// The commit it was read at.
     pub(super) commit: String,
     /// What it holds.
@@ -141,6 +143,7 @@ where
             .map_err(|error| FactoryError::Internal(internal(error)))?;
         Ok(PinnedDefinition {
             repo_url: repository.url(),
+            branch: access.default_branch,
             commit,
             definition,
             agents,
@@ -221,13 +224,46 @@ where
             },
             None => (None, None),
         };
+        // A change reaches the Definition by pull request only where its
+        // default branch asks for one: say so when it does not. GitHub
+        // failing to tell is not the settings' failure.
+        let requires_pull_request = match &pinned {
+            Some(pinned) => self.requires_pull_request(actor, pinned).await,
+            None => None,
+        };
         Ok(DefinitionSettings {
             repo_url,
             commit: pinned.map(|pinned| pinned.commit),
             problem,
+            requires_pull_request,
             team_id: team.map(|team| team.team_id),
             can_edit: !agent && team.is_some_and(|team| team.admin),
         })
+    }
+
+    /// Whether `pinned`'s default branch takes changes only through a pull
+    /// request, as `reader` can tell; none when they cannot, or GitHub
+    /// fails to say.
+    async fn requires_pull_request(
+        &self,
+        reader: &MacroUserIdStr<'static>,
+        pinned: &PinnedDefinition,
+    ) -> Option<bool> {
+        let repository = CodeRepository::parse(&pinned.repo_url)?;
+        match self
+            .github
+            .requires_pull_request(reader, &repository, &pinned.branch)
+            .await
+        {
+            Ok(requires) => requires,
+            Err(error) => {
+                tracing::warn!(
+                    ?error,
+                    "whether the definition's branch requires a pull request could not be read"
+                );
+                None
+            }
+        }
     }
 
     /// Name `repo_url` as `actor`'s team's Factory Definition once it reads

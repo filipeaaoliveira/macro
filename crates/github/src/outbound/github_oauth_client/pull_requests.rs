@@ -169,6 +169,7 @@ struct BranchRule {
 #[serde(rename_all = "snake_case")]
 enum BranchRuleKind {
     RequiredStatusChecks,
+    PullRequest,
     #[serde(other)]
     Other,
 }
@@ -270,6 +271,63 @@ impl GithubOauthImpl {
             items: all,
             complete: false,
         })
+    }
+
+    /// Whether a change reaches `branch` only through a pull request: a
+    /// ruleset that applies to it requires one, or its branch protection
+    /// requires pull request reviews. `None` when that cannot be told: the
+    /// rulesets cannot be read, or the protection is refused to the caller,
+    /// as it is to one who does not administer the repository.
+    #[tracing::instrument(skip(self, access_token), err)]
+    pub async fn get_requires_pull_request(
+        &self,
+        access_token: &str,
+        owner: &str,
+        repo: &str,
+        branch: &str,
+    ) -> Result<Option<bool>, GithubError> {
+        let branch = urlencoding::encode(branch);
+        let rules = self
+            .read_pages(
+                access_token,
+                &format!("/repos/{owner}/{repo}/rules/branches/{branch}"),
+                "failed to read branch rules",
+                |page: Vec<BranchRule>| page,
+            )
+            .await;
+        match rules {
+            Ok(rules)
+                if rules
+                    .items
+                    .iter()
+                    .any(|rule| rule.kind == BranchRuleKind::PullRequest) =>
+            {
+                return Ok(Some(true));
+            }
+            Ok(_) => {}
+            Err(GithubError::Forbidden | GithubError::RepositoryUnavailable) => return Ok(None),
+            Err(error) => return Err(error),
+        }
+
+        // No ruleset asks for one: the branch protection may, which only
+        // the repository's admins may read. GitHub answers 404 when it
+        // asks for none, or the branch has no protection.
+        let reviews: Result<serde_json::Value, GithubError> = self
+            .read(
+                access_token,
+                &format!(
+                    "/repos/{owner}/{repo}/branches/{branch}/protection/required_pull_request_reviews"
+                ),
+                &[],
+                "failed to read branch protection",
+            )
+            .await;
+        match reviews {
+            Ok(_) => Ok(Some(true)),
+            Err(GithubError::RepositoryUnavailable) => Ok(Some(false)),
+            Err(GithubError::Forbidden) => Ok(None),
+            Err(error) => Err(error),
+        }
     }
 
     /// The checks a pull request to `branch` must pass before it merges:

@@ -290,6 +290,16 @@ pub trait PullRequests: Send + Sync + 'static {
         base: &str,
     ) -> impl Future<Output = Result<Option<RequiredChecks>, Self::Err>> + Send;
 
+    /// Whether a change reaches `branch` of `repository` only through a
+    /// pull request, by its rulesets or branch protection; none when
+    /// `owner` cannot tell.
+    fn requires_pull_request(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        branch: &str,
+    ) -> impl Future<Output = Result<Option<bool>, Self::Err>> + Send;
+
     /// The text of the file at `path` on `branch` of `repository`; none
     /// when the branch holds no file there.
     fn file_text(

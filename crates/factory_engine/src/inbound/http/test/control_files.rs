@@ -93,6 +93,7 @@ async fn only_the_admin_s_own_session_sets_the_team_s_control_files() {
             "isDefault": false,
             "teamId": team_id,
             "canEdit": true,
+            "definitionNamed": false,
         })
     );
 }
@@ -123,6 +124,7 @@ async fn the_control_files_read_as_the_team_s_or_the_default() {
             "isDefault": true,
             "teamId": null,
             "canEdit": false,
+            "definitionNamed": false,
         })
     );
 

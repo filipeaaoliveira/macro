@@ -422,6 +422,20 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
     }
 
     #[tracing::instrument(err, skip(self, owner))]
+    async fn requires_pull_request(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        branch: &str,
+    ) -> Result<Option<bool>, GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        Ok(self
+            .github
+            .get_requires_pull_request(&token, repository.owner(), repository.name(), branch)
+            .await?)
+    }
+
+    #[tracing::instrument(err, skip(self, owner))]
     async fn deployments(
         &self,
         owner: &MacroUserIdStr<'static>,

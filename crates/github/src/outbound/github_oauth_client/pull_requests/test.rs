@@ -490,3 +490,81 @@ async fn workflow_runs_are_read_for_the_head_commit() {
             .starts_with("GET /repos/macro/app/actions/runs?head_sha=abc123&per_page=100&page=1 ")
     );
 }
+
+/// A branch a ruleset asks a pull request for, or whose protection asks
+/// for reviews, takes changes only through one; neither, and it takes
+/// pushes; a protection refused to the caller says nothing.
+#[tokio::test]
+async fn a_branch_requires_a_pull_request_by_ruleset_or_protection() {
+    let by_ruleset = MockServer::start_many(vec![MockResponse {
+        status: "200 OK",
+        body: r#"[{"type":"pull_request","parameters":{}}]"#.to_string(),
+    }]);
+    let client = GithubOauthImpl::with_api_base_url(by_ruleset.base_url.clone());
+    let ruleset = client
+        .get_requires_pull_request("token", "macro", "definition", "main")
+        .await
+        .unwrap();
+    by_ruleset.finish_all();
+
+    let by_protection = MockServer::start_many(vec![
+        MockResponse {
+            status: "200 OK",
+            body: "[]".to_string(),
+        },
+        MockResponse {
+            status: "200 OK",
+            body: r#"{"required_approving_review_count":1}"#.to_string(),
+        },
+    ]);
+    let client = GithubOauthImpl::with_api_base_url(by_protection.base_url.clone());
+    let protection = client
+        .get_requires_pull_request("token", "macro", "definition", "main")
+        .await
+        .unwrap();
+    let requests = by_protection.finish_all();
+
+    let neither = MockServer::start_many(vec![
+        MockResponse {
+            status: "200 OK",
+            body:
+                r#"[{"type":"required_status_checks","parameters":{"required_status_checks":[]}}]"#
+                    .to_string(),
+        },
+        MockResponse {
+            status: "404 Not Found",
+            body: r#"{"message":"Not Found"}"#.to_string(),
+        },
+    ]);
+    let client = GithubOauthImpl::with_api_base_url(neither.base_url.clone());
+    let unprotected = client
+        .get_requires_pull_request("token", "macro", "definition", "main")
+        .await
+        .unwrap();
+    neither.finish_all();
+
+    let refused = MockServer::start_many(vec![
+        MockResponse {
+            status: "200 OK",
+            body: "[]".to_string(),
+        },
+        MockResponse {
+            status: "403 Forbidden",
+            body: r#"{"message":"Must have admin rights to Repository."}"#.to_string(),
+        },
+    ]);
+    let client = GithubOauthImpl::with_api_base_url(refused.base_url.clone());
+    let unknown = client
+        .get_requires_pull_request("token", "macro", "definition", "main")
+        .await
+        .unwrap();
+    refused.finish_all();
+
+    assert_eq!(ruleset, Some(true));
+    assert_eq!(protection, Some(true));
+    assert!(requests[1].starts_with(
+        "GET /repos/macro/definition/branches/main/protection/required_pull_request_reviews "
+    ));
+    assert_eq!(unprotected, Some(false));
+    assert_eq!(unknown, None);
+}

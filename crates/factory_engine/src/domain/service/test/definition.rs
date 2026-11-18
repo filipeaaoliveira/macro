@@ -438,3 +438,26 @@ async fn a_definition_run_that_asks_holds_its_queue_place() {
     );
 }
 
+/// The settings say whether the Definition's branch takes changes only by
+/// pull request, and that the team's own rules and Control Files apply to
+/// no Run while it is named.
+#[tokio::test]
+async fn the_settings_say_what_the_definition_decides() {
+    let repo = team_repo();
+    let workflows = FakeWorkflows::default();
+    let github = github_at(FIRST);
+    definition_files(&github, FIRST, "Notes.", None);
+    let service = code_service(&repo, &workflows, &github);
+
+    github.state().requires_pull_request = Some(false);
+    let unprotected = service.definition(&julia()).await.expect("settings");
+    github.state().requires_pull_request = Some(true);
+    let protected = service.definition(&julia()).await.expect("settings");
+    let control_files = service.control_files(&julia()).await.expect("settings");
+    let rules = service.standing_rules(&julia()).await.expect("settings");
+
+    assert_eq!(unprotected.requires_pull_request, Some(false));
+    assert_eq!(protected.requires_pull_request, Some(true));
+    assert!(control_files.definition_named && !control_files.can_edit);
+    assert!(rules.definition_named && !rules.can_edit);
+}

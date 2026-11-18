@@ -1456,6 +1456,9 @@ pub(crate) struct FakeGithubState {
     pub(crate) deployment_reads: Vec<(String, String)>,
     /// The pairs of commits whose second contains the first.
     pub(crate) descendants: BTreeSet<(String, String)>,
+    /// Whether the default branch takes changes only through a pull
+    /// request; none when that cannot be told.
+    pub(crate) requires_pull_request: Option<bool>,
 }
 
 /// GitHub in memory, for one Run's branch: opening its pull request makes
@@ -1626,6 +1629,15 @@ impl PullRequests for FakeGithub {
             return Err(FakeGithubError::Refused);
         }
         Ok(state.required.clone())
+    }
+
+    async fn requires_pull_request(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        _branch: &str,
+    ) -> Result<Option<bool>, FakeGithubError> {
+        Ok(self.state().requires_pull_request)
     }
 
     async fn file_text(

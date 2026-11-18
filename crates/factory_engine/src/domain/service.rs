@@ -1300,6 +1300,7 @@ where
             patterns: own.unwrap_or_else(ControlFiles::default_patterns),
             team_id: team.map(|team| team.team_id),
             can_edit: !named && team.is_some_and(|team| team.admin),
+            definition_named: named,
         })
     }
 
@@ -1364,6 +1365,7 @@ where
             projects,
             team_id: team.map(|team| team.team_id),
             can_edit: !agent && !named && team.is_some_and(|team| team.admin),
+            definition_named: named,
         })
     }
 
