@@ -289,6 +289,38 @@ async fn no_agent_answers_a_merge_gate_whatever_its_standing_roles() {
     assert!(workflows.answers.lock().expect("answers").is_empty());
 }
 
+/// Without Standing Roles an agent still sends a merge back: `revise` on a
+/// merge Gate of a Run under no Definition, or under one with no
+/// `standing` section, is taken as before, with no Standing Role kept.
+#[tokio::test]
+async fn without_standing_roles_an_agent_sends_a_merge_back() {
+    let repo = FakeRepo::default();
+    let workflows = FakeWorkflows::default();
+    let service = code_service(&repo, &workflows, &FakeGithub::default());
+    let no_definition =
+        waiting_run(&repo, None, "merge-gate", "done", &["approve", "revise"]).await;
+    let no_section = waiting_run(
+        &repo,
+        Some(agents(None)),
+        "merge-gate",
+        "done",
+        &["approve", "revise"],
+    )
+    .await;
+
+    answer_from(&service, no_definition, "revise", Uuid::now_v7())
+        .await
+        .expect("a merge sent back under no definition");
+    answer_from(&service, no_section, "revise", Uuid::now_v7())
+        .await
+        .expect("a merge sent back under no standing section");
+
+    let answers = workflows.answers.lock().expect("answers").clone();
+    assert_eq!(answers.len(), 2);
+    assert!(answers.iter().all(|answer| answer.standing.is_none()));
+    assert!(repo.standing_acts.lock().expect("acts").is_empty());
+}
+
 /// A Run under no Definition, or one whose Definition has no `standing`
 /// section, takes an agent's answer as before: from any session of the
 /// owner's, with no Standing Role kept.
