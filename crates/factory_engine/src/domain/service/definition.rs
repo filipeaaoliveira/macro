@@ -250,7 +250,7 @@ where
         let Some(kept) = self.repo.run_flow(run_id).await.map_err(internal)? else {
             return Ok(None);
         };
-        Ok(self.bounded(kept))
+        Ok(self.bounded(run_id, kept))
     }
 
     /// The Flows the Runs `ids` walk, as [`Self::run_flow`] reads each, in
@@ -265,15 +265,15 @@ where
         let kept = self.repo.runs_flows(ids).await.map_err(internal)?;
         Ok(kept
             .into_iter()
-            .filter_map(|(id, kept)| Some((id, self.bounded(kept)?)))
+            .filter_map(|(id, kept)| Some((id, self.bounded(id, kept)?)))
             .collect())
     }
 
     /// The Flow `kept` says a Run walks, a built-in one bound as this
     /// service bounds the Flows it starts.
-    fn bounded(&self, kept: RunFlow) -> Option<Flow> {
+    fn bounded(&self, run_id: RunId, kept: RunFlow) -> Option<Flow> {
         let built_in = kept.definition.is_none();
-        let mut flow = walked_flow(kept)?;
+        let mut flow = walked_flow(run_id, kept)?;
         if built_in && let Some(rounds) = self.review_rounds {
             flow.bound_review_rounds(rounds);
         }

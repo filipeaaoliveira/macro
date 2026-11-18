@@ -207,7 +207,7 @@ where
         .run_flow(run_id)
         .await
         .map_err(|e| e.to_string())?
-        .and_then(walked_flow);
+        .and_then(|kept| walked_flow(run_id, kept));
     let run_link = thread.run_link(run_id);
     let context = UpdateContext {
         run_link: &run_link,

@@ -134,10 +134,13 @@ pub struct ReplayReport {
 /// may answer Gates of that kind: never a merge Gate, nor a Gate of a Run
 /// whose Flow is not known.
 pub fn stand_in_kind(gate: &AnsweredGate) -> Option<RuleGateKind> {
-    let flow = walked_flow(RunFlow {
-        name: gate.flow.clone(),
-        definition: gate.flow_definition.clone(),
-    })?;
+    let flow = walked_flow(
+        gate.run_id,
+        RunFlow {
+            name: gate.flow.clone(),
+            definition: gate.flow_definition.clone(),
+        },
+    )?;
     let kind = flow
         .entries
         .iter()
