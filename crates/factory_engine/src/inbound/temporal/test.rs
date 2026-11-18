@@ -6,6 +6,7 @@
 //! test runs its own worker on a task queue of its own, so the stack's
 //! factory worker never takes its work.
 
+mod answered_once;
 mod gate_owner;
 mod gate_replies;
 mod questions;
