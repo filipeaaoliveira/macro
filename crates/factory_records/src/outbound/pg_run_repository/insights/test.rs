@@ -668,36 +668,48 @@ async fn a_step_without_a_result_is_one_visit_retried_and_a_failure_stopped(pool
     fixtures(path = "../fixtures", scripts("people"))
 )]
 async fn a_failed_verify_or_deploy_is_a_failed_step(pool: PgPool) {
-    const VERIFIED: &str = "00000000-0000-7000-8000-000000000211";
-    const DEPLOYED: &str = "00000000-0000-7000-8000-000000000212";
-    for (id, entry, outcome) in [
-        (VERIFIED, "verify", "fail"),
-        (DEPLOYED, "deploy", "deploy_failed"),
-    ] {
-        sqlx::query(
-            "INSERT INTO factory_run (id, user_id, flow, request, created_at, outcome, ended_at)
-             VALUES ($1::uuid, 'macro|julia@example.com', 'code', 'Ship it', '2026-11-10 09:00Z',
-                     'failed', '2026-11-10 10:00Z')",
-        )
-        .bind(id)
-        .execute(&pool)
-        .await
-        .expect("run");
-        sqlx::query(
-            "INSERT INTO factory_step (run_id, seq, entry, visit, started_at, outcome, output, ended_at)
-             VALUES ($1::uuid, 1, $2, 1, '2026-11-10 09:00Z', $3, 'It failed', '2026-11-10 10:00Z')",
-        )
-        .bind(id)
-        .bind(entry)
-        .bind(outcome)
-        .execute(&pool)
-        .await
-        .expect("step");
-    }
     let repo = PgRunRepository::new(pool);
+    let julia = user("macro|julia@example.com");
+    for (entry_id, ended) in [("verify", "fail"), ("deploy", "deploy_failed")] {
+        let id = RunId::generate();
+        let RunInsert::Inserted(_) = repo
+            .insert_run(NewRun {
+                id,
+                flow: "code",
+                request: "Ship it",
+                user_id: &julia,
+                task_id: None,
+                repository: None,
+                created_in_person: false,
+                control_file_patterns: &[],
+                control_files_team_id: None,
+                standing_rules: RunRules::DEFAULT,
+                automation: None,
+            })
+            .await
+            .expect("insert")
+        else {
+            panic!("a run with no task is kept");
+        };
+        let key = crate::domain::models::StepKey { run_id: id, seq: 1 };
+        repo.start_step(key, &entry(entry_id), 1)
+            .await
+            .expect("start");
+        let outcome =
+            crate::domain::models::Outcome::try_from(ended.to_string()).expect("valid outcome");
+        repo.end_step(key, &outcome, "It failed")
+            .await
+            .expect("end");
+    }
 
     let records = repo
-        .read_insights(&november("macro|julia@example.com"))
+        .read_insights(&InsightsScope {
+            user_id: julia,
+            from: at("2000-01-01T00:00:00Z"),
+            to: at("2100-01-01T00:00:00Z"),
+            flow: None,
+            cap: 1000,
+        })
         .await
         .expect("read");
 
