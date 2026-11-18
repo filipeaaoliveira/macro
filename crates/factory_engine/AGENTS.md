@@ -1260,7 +1260,10 @@ every Run in flight replays as before.
   any client calling Macro's merge route) still merges a Run's pull
   request; and a viewer who cannot see the Run (a teammate on a hidden
   task, someone off the team) is not guarded, as the lookup must not tell
-  them a Run exists.
+  them a Run exists. A Step that finds the Run's pull request keeps its page
+  (`keep_page`), and a write that fails fails the Step, which is retried, so
+  a Run's pull request is not left unguarded; the guard still cannot see a
+  pull request in the moment between GitHub opening it and that write.
 - `flows/`: the built-in Flows, each named for its file
   (`src/domain/built_in_flows.rs`). `GET /flows` lists those whose Steps the
   worker serves, with their `description` and whether they work on a

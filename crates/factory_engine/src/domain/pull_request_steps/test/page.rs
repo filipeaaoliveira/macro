@@ -4,8 +4,9 @@ use factory_records::domain::models::{NewRun, RunId};
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::standing_rules::RunRules;
 
-use super::{JULIA, input, outcome, steps};
+use super::{JULIA, PullRequestStepError, input, outcome, steps};
 use crate::domain::fakes::{FakeGithub, FakeRepo, ci};
+use crate::domain::ports::Retryable;
 
 async fn keep_run(repo: &FakeRepo) -> RunId {
     let run_id = RunId::generate();
@@ -70,19 +71,45 @@ async fn ci_keeps_the_pull_request_s_page() {
     );
 }
 
-/// A page the records could not keep does not fail the Step.
+/// A page the records could not keep fails the Step with an error that is
+/// retried, since the merge guard finds the Run by it; the retry keeps it.
 #[tokio::test]
-async fn a_page_that_cannot_be_kept_does_not_fail_the_step() {
+async fn a_page_that_cannot_be_kept_fails_the_step_until_it_is_kept() {
     let github = FakeGithub::default();
     let repo = FakeRepo::default();
     let run_id = keep_run(&repo).await;
     repo.fail_once_after("set_pull_request_url", 0);
 
+    let error = steps(&github, &repo)
+        .publish(input(run_id))
+        .await
+        .expect_err("the page was not kept");
+    assert!(matches!(error, PullRequestStepError::Records(_)));
+    assert!(error.retryable());
+    assert_eq!(kept_page(&repo, run_id).await, None);
+
     let report = steps(&github, &repo)
         .publish(input(run_id))
         .await
-        .expect("publish");
-
+        .expect("publish again");
     assert_eq!(outcome(&report), "published");
-    assert_eq!(kept_page(&repo, run_id).await, None);
+    assert_eq!(
+        kept_page(&repo, run_id).await.as_deref(),
+        Some("https://github.com/macro/app/pull/7")
+    );
+}
+
+/// `ci` fails the same way when the page is not kept.
+#[tokio::test(start_paused = true)]
+async fn ci_fails_when_the_page_cannot_be_kept() {
+    let github = FakeGithub::with_open_pull_request(ci(Some("failure")));
+    let repo = FakeRepo::default();
+    let run_id = keep_run(&repo).await;
+    repo.fail_once_after("set_pull_request_url", 0);
+
+    let error = steps(&github, &repo)
+        .ci(input(run_id))
+        .await
+        .expect_err("the page was not kept");
+    assert!(matches!(error, PullRequestStepError::Records(_)));
 }
