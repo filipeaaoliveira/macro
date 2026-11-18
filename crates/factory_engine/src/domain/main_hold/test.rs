@@ -95,6 +95,7 @@ fn input(run_id: RunId) -> StepInput<'static> {
         earlier: &[],
         created_in_person: false,
         control_file_patterns: None,
+        definition_repo: None,
         review: None,
         reviewer: false,
         may_ask: false,

@@ -1671,6 +1671,10 @@ where
             request: &run.request,
             created_in_person: run.created_in_person,
             control_file_patterns: run.control_file_patterns.as_deref(),
+            definition_repo: run
+                .definition
+                .as_ref()
+                .map(|definition| definition.repo_url.as_str()),
             task_id: run.task_id,
             repository: run.repository.as_ref(),
             earlier: &earlier,

@@ -35,6 +35,7 @@ use github::domain::models::MacroTaskId;
 
 use crate::domain::checks::CHECKS_FILE;
 use crate::domain::control_files::{ControlFiles, ControlFilesError};
+use crate::domain::definition::DEFINITION_FILE_PATTERNS;
 use crate::domain::main_hold::{MainWatch, held_note};
 use crate::domain::models::{
     CheckState, CheckSuite, CodeRepository, HeadChecks, Merging, OpenPullRequest, Opening,
@@ -504,7 +505,24 @@ where
                 .changed_paths(input.owner, repository, &recorded.base_branch, head)
                 .await
                 .map_err(PullRequestStepError::github)?;
-            control_files.changes(changed.as_deref(), input.request, input.created_in_person)
+            // On its team's Definition repository, a change to the
+            // Definition's own files is never one the request asks for: it
+            // changes the rules the factory merges under.
+            let on_definition = input.definition_repo.zip(input.repository).is_some_and(
+                |(definition, repository)| definition.eq_ignore_ascii_case(&repository.url),
+            );
+            let guarded = if on_definition {
+                let patterns = DEFINITION_FILE_PATTERNS.map(str::to_string);
+                Some(ControlFiles::parse(&patterns)?)
+            } else {
+                None
+            };
+            control_files.changes_guarding(
+                changed.as_deref(),
+                input.request,
+                input.created_in_person,
+                guarded.as_ref(),
+            )
         };
         self.repo
             .set_control_file_changes(input.key.run_id, changes.as_ref())

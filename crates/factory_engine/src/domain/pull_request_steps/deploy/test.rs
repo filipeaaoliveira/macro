@@ -29,6 +29,7 @@ fn input() -> StepInput<'static> {
         request: "Collapse repeated dashes in slugs",
         created_in_person: true,
         control_file_patterns: None,
+        definition_repo: None,
         task_id: None,
         repository: Some(&REPOSITORY),
         earlier: &[],
