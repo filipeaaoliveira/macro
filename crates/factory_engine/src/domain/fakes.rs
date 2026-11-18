@@ -1,12 +1,14 @@
 //! In-memory stand-ins for the factory's records, for the domain's tests.
 
 mod automations;
+mod evaluation;
 mod gate_owner;
 mod gate_replies;
 mod main_hold;
 mod steering;
 mod task_thread;
 
+pub(crate) use evaluation::{FakeEvaluation, FakeJudge};
 pub(crate) use gate_owner::{FakeNotifier, FakeTaskNotes};
 pub(crate) use gate_replies::FakeGateModel;
 pub(crate) use main_hold::{FakeHoldTasks, FakeMain, FakeWatches};
@@ -187,6 +189,8 @@ pub(crate) struct FakeRepo {
     /// Each Automation's firings, by its id and the firing's key, with what
     /// they came to.
     pub(crate) firings: Arc<Mutex<BTreeMap<FiringKey, Option<FiringEnd>>>>,
+    /// Experiment arms, Scorers' judgments and Benchmark suites.
+    pub(crate) evaluation: Arc<Mutex<FakeEvaluation>>,
 }
 
 /// A firing: its Automation and its key.

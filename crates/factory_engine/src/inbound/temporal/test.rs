@@ -39,8 +39,9 @@ use uuid::Uuid;
 use super::{WorkerServices, worker_on};
 use crate::domain::built_in_flows::BuiltInFlow;
 use crate::domain::built_in_steps::BuiltInSteps;
+use crate::domain::evaluation::service::ScoringServiceImpl;
 use crate::domain::fakes::{
-    FakeGateModel, FakeGithub, FakeHoldTasks, FakeNotifier, FakeRepo, FakeTaskNotes,
+    FakeGateModel, FakeGithub, FakeHoldTasks, FakeJudge, FakeNotifier, FakeRepo, FakeTaskNotes,
     FakeTaskThread, FakeWatches, ci,
 };
 use crate::domain::flow::Flow;
@@ -206,6 +207,19 @@ fn watches(repo: &FakeRepo) -> MainWatchServiceImpl<FakeRepo, FakeGithub, FakeHo
     )
 }
 
+/// Scoring with no Scorer and no Benchmark: the Runs' ends are scored, and
+/// nothing is judged.
+fn scoring(
+    repo: &FakeRepo,
+) -> ScoringServiceImpl<FakeRepo, FakeJudge, crate::domain::insights::fakes::FakeUsage> {
+    ScoringServiceImpl::new(
+        repo.clone(),
+        FakeJudge::default(),
+        crate::domain::insights::fakes::FakeUsage::new(Vec::new()),
+        std::sync::Arc::default(),
+    )
+}
+
 /// A client of the Temporal at `TEMPORAL_ADDRESS`, the stack's by default.
 async fn client() -> Client {
     let address = macro_env_var::maybe_read_env("TEMPORAL_ADDRESS")
@@ -311,6 +325,7 @@ where
             reviews: ReviewRoundsImpl::new(repo.clone(), FakeGithub::default(), repo.clone()),
             gates: gates(&repo),
             watches: watches(&repo),
+            scoring: scoring(&repo),
         },
     )
     .expect("worker");
@@ -510,6 +525,7 @@ async fn a_step_whose_worker_shuts_down_goes_on_at_once_on_the_next() {
                 reviews: reviews(),
                 gates: gates(&repo),
                 watches: watches(&repo),
+                scoring: scoring(&repo),
             },
         )
         .expect("worker");
@@ -536,6 +552,7 @@ async fn a_step_whose_worker_shuts_down_goes_on_at_once_on_the_next() {
             reviews: reviews(),
             gates: gates(&repo),
             watches: watches(&repo),
+            scoring: scoring(&repo),
         },
     )
     .expect("worker");
@@ -1001,6 +1018,7 @@ where
                 .with_notifier(notifier)
                 .with_task_thread(thread),
             watches: watches(&repo),
+            scoring: scoring(&repo),
         },
     )
     .expect("worker");
@@ -1527,6 +1545,7 @@ async fn with_watch_worker<T>(
             reviews: ReviewRoundsImpl::new(repo.clone(), github.clone(), repo.clone()),
             gates: gates(repo),
             watches: MainWatchServiceImpl::new(repo.clone(), github.clone(), tasks.clone()),
+            scoring: scoring(&repo),
         },
     )
     .expect("worker");

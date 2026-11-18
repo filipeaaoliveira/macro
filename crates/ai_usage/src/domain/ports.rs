@@ -87,8 +87,9 @@ pub enum AiFeature {
     /// An agent session its opener made non-billable: background work the
     /// user didn't ask for turn by turn. Recorded, never billed.
     NonBillableAgentSession,
-    /// The software factory reading a person's words on a Gate as one of
-    /// its answers, or answering a routine Gate for the Run's owner.
+    /// The software factory's small model: reading a person's words on a
+    /// Gate as one of its answers, answering a routine Gate for the Run's
+    /// owner, or a Scorer judging a sampled Run or a Benchmark trial.
     FactoryGate,
 }
 

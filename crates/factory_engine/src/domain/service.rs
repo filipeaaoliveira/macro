@@ -6,12 +6,14 @@ mod test;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU8;
+use std::sync::Arc;
 
 use agent_session::domain::session_task::TaskDocumentId;
 use chrono::Utc;
 use factory_records::domain::automations::{
     Automation, AutomationRepository, AutomationStart, RunAutomation,
 };
+use factory_records::domain::evaluation::{BENCHMARK_FLOW, EvaluationRepository, TrialKey};
 use factory_records::domain::main_hold::{BaseState, MainHoldRepository};
 use factory_records::domain::models::{
     EntryId, HandBack, MAX_NOTE_BYTES, MAX_OUTPUT_BYTES, MAX_QUESTION_BYTES, MAX_REQUEST_BYTES,
@@ -29,6 +31,7 @@ use uuid::Uuid;
 
 use crate::domain::built_in_flows::{BUILT_IN_FLOWS, BuiltInFlow};
 use crate::domain::control_files::ControlFiles;
+use crate::domain::evaluation::EvaluationDefinition;
 use crate::domain::gate::{
     AnswerGate, GateAnswered, GateOpening, GateRuling, GateTelling, ReplyGate,
 };
@@ -102,6 +105,8 @@ struct RunOrder<'a> {
     repo_url: Option<String>,
     in_person: bool,
     automation: Option<AutomationStart<'a>>,
+    /// The Benchmark trial it is, if a suite starts it.
+    trial: Option<TrialKey>,
 }
 
 /// The Run API, over the Run records, the Runs' workflows, the worker that
@@ -117,6 +122,7 @@ pub struct FactoryServiceImpl<R, W, E, U, T, G> {
     github: G,
     review_rounds: Option<NonZeroU8>,
     questions: u8,
+    evaluation: Arc<EvaluationDefinition>,
 }
 
 impl<R, W, E, U, T, G> FactoryServiceImpl<R, W, E, U, T, G>
@@ -125,7 +131,8 @@ where
         + MainHoldRepository
         + ReviewRoundRepository
         + StandingRulesRepository
-        + AutomationRepository,
+        + AutomationRepository
+        + EvaluationRepository,
     W: RunWorkflows,
     E: StepExecutor,
     U: UserDirectory,
@@ -143,7 +150,15 @@ where
             github,
             review_rounds: None,
             questions: DEFAULT_QUESTIONS,
+            evaluation: Arc::default(),
         }
+    }
+
+    /// Assign the Runs it starts to the arms of `evaluation`'s
+    /// Experiments, in place of none.
+    pub fn with_evaluation(mut self, evaluation: Arc<EvaluationDefinition>) -> Self {
+        self.evaluation = evaluation;
+        self
     }
 
     /// Let each agent Step of the Runs it starts ask the Run's owner up to
@@ -431,10 +446,11 @@ where
     /// kind of Gate there, not one kept for a person. A Run does not keep
     /// its Flow's name, so the entry is looked up in each, as for a Run at
     /// its merge, bound to the review rounds the Runs this service starts
-    /// are.
+    /// are. A Benchmark trial's Flow opens no Gate, so it is not looked in.
     fn agent_answerable_entry(&self, entry: &EntryId) -> Option<(RuleGateKind, Option<NonZeroU8>)> {
         let mut asked = BUILT_IN_FLOWS
             .into_iter()
+            .filter(|flow| flow.name != BENCHMARK_FLOW)
             .filter_map(|flow| flow.read(|step| self.executor.serves(step)).ok())
             .flat_map(|mut flow| {
                 if let Some(rounds) = self.review_rounds {
@@ -573,7 +589,13 @@ where
             repo_url,
             in_person,
             automation,
+            trial,
         } = order;
+        // A Benchmark's Flow runs only as a suite's trial, and a trial only
+        // on it.
+        if (flow == BENCHMARK_FLOW) != trial.is_some() {
+            return Err(FactoryError::UnknownFlow);
+        }
         let built_in = BuiltInFlow::named(&flow).ok_or(FactoryError::UnknownFlow)?;
         let mut flow = built_in.read(|step| self.executor.serves(step))?;
         if let Some(rounds) = self.review_rounds {
@@ -682,6 +704,21 @@ where
             }
         };
 
+        // The Run keeps its trial, or the arms of its Flow's Experiments,
+        // before its workflow starts, so its first Step already runs on
+        // their Agents. A Run that cannot keep them does not start.
+        let kept = match &trial {
+            Some(trial) => self.repo.insert_trial(trial, run_id).await,
+            None => {
+                let arms = self.evaluation.assign_arms(built_in.name, task_id);
+                self.repo.record_arms(run_id, &arms).await
+            }
+        };
+        if let Err(error) = kept {
+            self.forget_unstarted(run_id).await;
+            return Err(FactoryError::Internal(internal(error)));
+        }
+
         // The Run is recorded before its workflow starts, so the workflow can
         // record its Steps against it.
         let start = RunStart { run_id, flow };
@@ -720,7 +757,8 @@ where
         + MainHoldRepository
         + ReviewRoundRepository
         + StandingRulesRepository
-        + AutomationRepository,
+        + AutomationRepository
+        + EvaluationRepository,
     W: RunWorkflows,
     E: StepExecutor,
     U: UserDirectory,
@@ -732,6 +770,7 @@ where
         // offered: a Run of it would be refused.
         BUILT_IN_FLOWS
             .into_iter()
+            .filter(|flow| flow.name != BENCHMARK_FLOW)
             .filter_map(|flow| {
                 let read = flow.read(|step| self.executor.serves(step)).ok()?;
                 Some(FlowSummary {
@@ -760,6 +799,28 @@ where
             repo_url,
             in_person,
             automation: None,
+            trial: None,
+        })
+        .await
+    }
+
+    async fn create_trial_run(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        flow: String,
+        request: String,
+        repo_url: String,
+        trial: TrialKey,
+    ) -> Result<RunDetail, FactoryError> {
+        self.start_run(RunOrder {
+            actor,
+            flow,
+            request,
+            task_id: None,
+            repo_url: Some(repo_url),
+            in_person: false,
+            automation: None,
+            trial: Some(trial),
         })
         .await
     }
@@ -770,6 +831,9 @@ where
         flow: &str,
         repo_url: Option<&str>,
     ) -> Result<(), FactoryError> {
+        if flow == BENCHMARK_FLOW {
+            return Err(FactoryError::UnknownFlow);
+        }
         let built_in = BuiltInFlow::named(flow).ok_or(FactoryError::UnknownFlow)?;
         let flow = built_in.read(|step| self.executor.serves(step))?;
         match (flow.repository, repo_url) {
@@ -809,6 +873,7 @@ where
                 automation: &started_by,
                 firing_key,
             }),
+            trial: None,
         })
         .await
     }

@@ -354,6 +354,17 @@ impl FactoryService for FakeService {
         Err(self.refusing(&automation.created_by))
     }
 
+    async fn create_trial_run(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        _flow: String,
+        _request: String,
+        _repo_url: String,
+        _trial: factory_records::domain::evaluation::TrialKey,
+    ) -> Result<RunDetail, FactoryError> {
+        Err(self.refusing(&actor))
+    }
+
     async fn clear_main_hold(
         &self,
         _repo_url: &str,

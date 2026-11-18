@@ -7,6 +7,7 @@ pub mod built_in_flows;
 pub mod built_in_steps;
 pub mod checks;
 pub mod control_files;
+pub mod evaluation;
 #[cfg(test)]
 pub(crate) mod fakes;
 pub mod flow;

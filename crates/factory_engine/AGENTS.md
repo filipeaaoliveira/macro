@@ -240,6 +240,35 @@ from the usage log by session id (`ai_usage`'s `SessionUsageReader`). It
 reads the newest `INSIGHTS_RUN_CAP` Runs of the period. A bad period, time
 zone or Flow name is 400.
 
+Evaluation (`src/domain/evaluation.rs`, `evaluation/service.rs`,
+`evaluation/insights.rs`, `inbound/evaluation.rs`): a workspace's
+`EvaluationDefinition` (`FACTORY_EVALUATION`, JSON; a loader of the
+factory's definition files fills the same type) names its Scorers,
+Experiments and Benchmarks, checked against the agent definition at start.
+A Scorer judges, with a small model on Macro's model router (the `RunJudge`
+port, `outbound/model_run_judge.rs`, `FACTORY_SCORER_MODEL`, usage as
+`AiFeature::FactoryGate`, billed to no one), the `samplePercent` of its
+Flows' finished Runs: once a Run ends, the workflow asks the worker
+(`factory_score_run`, behind the `factory-scoring` patch marker, its
+failure ignored) and each sampled Scorer judges it once, from a hash of the
+Scorer and the Run, so a retry samples the same Runs and judges nothing
+twice. A cancelled Run is not judged. An Experiment splits a Flow's Runs on
+a task into arms by a hash of the Experiment and the task (a Run on no task
+takes none); `start_run` records the arms (`factory_run_arm`) before the
+workflow starts, and `SessionAgent` starts each Step with the Agent the
+Run's arm gives its Role, the Role's own Agents following it on lack of
+quota. A Benchmark lists frozen tasks on one repository: `POST
+/benchmarks/{benchmark}/suites` (`{"agents": {role: agent}}`) records a
+suite and starts one trial Run of each task on the `benchmark` Flow (plan,
+then write, no Gate, no pull request), which runs only as a trial and is
+left out of `GET /flows`, live insights and live Scorers. Once a trial's
+Run ends it keeps its score (1 when write ended `done`, 0.5 `red`, 0
+otherwise) and its agents' tokens, and the Scorers its Benchmark names
+judge it into the trial's own record. `GET /insights/evaluation` (same
+params as `/insights`) shows each Scorer's judgments, each Experiment's
+arms with their Runs' outcomes and scores, the Benchmarks and the caller's
+suites of the period.
+
 The Step Terminal (`src/domain/step_terminal.rs`) lets the Run's owner
 watch a running agent Step's session and steer it. A Step reads the
 session it works in while it runs and holds one (`terminal.sessionId` in
@@ -1222,6 +1251,9 @@ every Run in flight replays as before.
   pause, resume and stop do, and the prompts they send the agent.
 - `src/domain/task_thread.rs`: the task thread: the comment each update of
   a Run posts to its task, and its id.
+- `src/domain/evaluation.rs`: Scorers, Experiments and Benchmarks, their
+  sampling and arm assignment; `evaluation/service.rs` scores a Run that
+  ended; `evaluation/insights.rs` the evaluation insights and suites.
 - `flows/`: the built-in Flows, each named for its file
   (`src/domain/built_in_flows.rs`). `GET /flows` lists those whose Steps the
   worker serves, with their `description` and whether they work on a
@@ -1373,6 +1405,8 @@ every Run in flight replays as before.
   result. A worker older than `StoppedWithoutResult` fails such a Step for
   good, and an older harness answers `reply` as not found, so the Gate
   then says the last message could not be read: deploy the harness first.
+- Removing the `factory-scoring` patch breaks the replay of Runs that
+  were scored once they ended; Runs that ended before it replay without it.
 - Removing the `factory-gate-owner` patch breaks the replay of Runs that
   told their owner of a Gate; the histories recorded before it
   (`code_rules_fixed_then_merged`, `code_waiting_at_plan_gate_with_rules`,

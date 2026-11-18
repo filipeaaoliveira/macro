@@ -1,0 +1,24 @@
+{
+  "description": "Replays one frozen task of a Benchmark as a trial: plans the change and writes it on the run's branch, running the repository's own checks, with no person asked and no pull request opened. A Benchmark suite starts it; the trial's score is how its write Step ended.",
+  "repository": true,
+  "entries": [
+    {
+      "id": "plan",
+      "step": "plan",
+      "role": "planner",
+      "on": {
+        "done": [{ "to": { "kind": "entry", "entry": "write" } }]
+      }
+    },
+    {
+      "id": "write",
+      "step": "write",
+      "role": "writer",
+      "on": {
+        "done": [{ "to": { "kind": "end", "outcome": "success" } }],
+        "unchanged": [{ "to": { "kind": "end", "outcome": "manual" } }],
+        "red": [{ "to": { "kind": "end", "outcome": "manual" } }]
+      }
+    }
+  ]
+}

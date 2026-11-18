@@ -1,12 +1,15 @@
 //! Ports (trait contracts) of the factory's use cases.
 
+mod evaluation;
 mod gate_replies;
 
+pub use evaluation::{JudgeQuestion, JudgeVerdict, RunJudge, ScoringService};
 pub use gate_replies::{GateModel, GateReplyService, ModelPick, ModelQuestion};
 
 use agent_session::domain::session_command::SessionCommandOutput;
 use agent_session::domain::session_task::TaskDocumentId;
 use factory_records::domain::automations::Automation;
+use factory_records::domain::evaluation::TrialKey;
 use factory_records::domain::models::{HandBack, Outcome, Role, RunId, StepKey, StepSession};
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
@@ -883,6 +886,19 @@ pub trait FactoryService: Send + Sync + 'static {
         firing_key: &str,
         request: String,
         task_id: Option<Uuid>,
+    ) -> impl Future<Output = Result<RunDetail, FactoryError>> + Send;
+
+    /// Record and start a Benchmark trial's Run of the built-in Flow
+    /// `flow`, owned by `actor`, who started its suite: as
+    /// [`Self::create_run`] for a Run on no task, kept as `trial` before
+    /// its workflow starts, so its Steps run on the suite's configuration.
+    fn create_trial_run(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        flow: String,
+        request: String,
+        repo_url: String,
+        trial: TrialKey,
     ) -> impl Future<Output = Result<RunDetail, FactoryError>> + Send;
 }
 

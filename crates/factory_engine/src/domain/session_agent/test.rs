@@ -496,6 +496,9 @@ const PRIMARY: BotId = BotId::new_from_uuid(Uuid::from_u128(0xc1a0));
 /// The bot whose sessions `backup` runs in.
 const BACKUP: BotId = BotId::new_from_uuid(Uuid::from_u128(0xc0de));
 
+/// The bot whose sessions `spare` runs in.
+const SPARE: BotId = BotId::new_from_uuid(Uuid::from_u128(0x5a5e));
+
 /// A planner is `primary`, on its own model and instructions, or `backup`
 /// when `primary` cannot start.
 fn agents() -> AgentDefinition {
@@ -1242,6 +1245,37 @@ async fn an_agent_out_of_quota_passes_the_step_to_the_next_agent_of_its_role() {
     );
     assert_eq!(recorded(&repo, key).1, Some(name("backup")));
     assert_eq!(claimed.session_id, prepared[1].session_id.as_uuid());
+}
+
+/// A Run whose Experiment arm gives the Step's Role another Agent runs the
+/// Step in that Agent's session first; the Role's own Agents follow it when
+/// it cannot start.
+#[tokio::test]
+async fn a_run_s_arm_chooses_the_agent_its_steps_start_with() {
+    use factory_records::domain::evaluation::{EvaluationRepository, RunArm};
+
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded)
+        .preparing(&[no_quota()]);
+    let task = plan_task(&repo).await;
+    let key = task.key;
+    repo.record_arms(
+        key.run_id,
+        &[RunArm {
+            experiment: "planner-agent".to_string(),
+            arm: "spare".to_string(),
+            agents: [(planner(), name("spare"))].into_iter().collect(),
+        }],
+    )
+    .await
+    .expect("arm kept");
+
+    agent(&sessions, &repo).answer(task).await.expect("answer");
+
+    let prepared = sessions.prepared_calls.lock().expect("prepared");
+    let bots: Vec<BotId> = prepared.iter().map(|call| call.selection.bot_id).collect();
+    assert_eq!(bots, [SPARE, PRIMARY]);
+    assert_eq!(recorded(&repo, key).1, Some(name("primary")));
 }
 
 /// An Agent refused its prompt for lack of quota opened a session that did

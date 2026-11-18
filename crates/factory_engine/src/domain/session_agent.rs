@@ -25,6 +25,7 @@ use agent_session::domain::routines::{
 };
 use ai_billing::DenyReason;
 use bot_id::BotId;
+use factory_records::domain::evaluation::EvaluationRepository;
 use factory_records::domain::models::{
     AgentName, HandedBack, Outcome, PassedOver, Role, StepKey, StepSession,
 };
@@ -244,7 +245,7 @@ impl std::fmt::Debug for Notices {
     }
 }
 
-impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
+impl<S: RoutineSessions, R: RunRepository + EvaluationRepository> SessionAgent<S, R> {
     /// The Agents of `agents`, reached through `sessions`, with their
     /// sessions recorded in `repo`.
     pub fn new(sessions: S, repo: R, agents: AgentDefinition) -> Self {
@@ -281,6 +282,28 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
                 .cloned()
                 .ok_or_else(|| SessionAgentError::UnfilledRole(role.clone())),
         }
+    }
+
+    /// The Agents that take a Step of `task`'s Role in its Run, in order:
+    /// the one the Run's Experiment arm or Benchmark suite chose for the
+    /// Role first, then the agent definition's, which take the Step when
+    /// one cannot start for lack of quota. A choice the definition no
+    /// longer has is passed over.
+    async fn role_agents(&self, task: &AgentTask) -> Result<Vec<AgentName>, SessionAgentError> {
+        let chosen = self
+            .repo
+            .run_agents(task.key.run_id)
+            .await
+            .map_err(Self::records)?;
+        let chosen = chosen
+            .get(&task.role)
+            .filter(|agent| self.agents.agent(agent).is_some());
+        let listed = self.agents.for_role(&task.role);
+        Ok(chosen
+            .into_iter()
+            .chain(listed.iter().filter(|agent| Some(*agent) != chosen))
+            .cloned()
+            .collect())
     }
 
     /// The Agent named `name`.
@@ -675,7 +698,7 @@ pub(super) struct Waited {
     pub(super) deadline: tokio::time::Instant,
 }
 
-impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
+impl<S: RoutineSessions, R: RunRepository + EvaluationRepository> SessionAgent<S, R> {
     /// Wait on the turn of the Step `task`'s own prompt `action` ([`Self::wait_turn`]),
     /// unless an earlier attempt already took the Step on to a later prompt
     /// (its reminder): that turn ended, and the steering the Step takes is
@@ -702,7 +725,7 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
     }
 }
 
-impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
+impl<S: RoutineSessions, R: RunRepository + EvaluationRepository> SessionAgent<S, R> {
     /// Open the Step's `session` and prompt it, as the session's Agent, and
     /// the action to wait on. An Agent whose quota is used up refuses either
     /// before any work starts: its session, if it opened, is deleted, and
@@ -777,7 +800,7 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
     }
 }
 
-impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
+impl<S: RoutineSessions, R: RunRepository + EvaluationRepository> SessionAgent<S, R> {
     /// Do the Step `task`, which goes on from the question of the Step at
     /// `asked`, in that Step's session: the agent has the Step's
     /// instructions and its work so far there. The Step claims the session
@@ -844,8 +867,8 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
         self.delete(&action).await;
         let agent = self.agent_name(&session, &task.role)?;
         let first = self
-            .agents
-            .for_role(&task.role)
+            .role_agents(task)
+            .await?
             .first()
             .cloned()
             .ok_or_else(|| SessionAgentError::UnfilledRole(task.role.clone()))?;
@@ -937,7 +960,7 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
         fresh: bool,
         deadline: tokio::time::Instant,
     ) -> Result<AgentAnswer, SessionAgentError> {
-        let agents = self.agents.for_role(&task.role);
+        let agents = self.role_agents(task).await?;
         let mut session = session;
         let mut fresh = fresh;
         // An Agent that cannot start for lack of quota hands the Step to the
@@ -1041,7 +1064,7 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
     }
 }
 
-impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
+impl<S: RoutineSessions, R: RunRepository + EvaluationRepository> StepAgent for SessionAgent<S, R> {
     type Err = SessionAgentError;
 
     #[tracing::instrument(err, skip_all, fields(run_id = %task.key.run_id, seq = task.key.seq, step = %task.step, role = %task.role))]
@@ -1055,9 +1078,8 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
         if let Some(asked) = task.resumes {
             return self.go_on(&task, asked, deadline).await;
         }
-        let first = self
-            .agents
-            .for_role(&task.role)
+        let agents = self.role_agents(&task).await?;
+        let first = agents
             .first()
             .ok_or_else(|| SessionAgentError::UnfilledRole(task.role.clone()))?;
         // A retried Step goes on in the session its first attempt claimed,

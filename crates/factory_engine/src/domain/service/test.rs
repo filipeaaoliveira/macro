@@ -25,6 +25,7 @@ use crate::domain::ports::{
 
 mod automations;
 mod control_files;
+mod evaluation;
 mod gate_owner;
 mod orchestrator;
 mod standing_rules;
