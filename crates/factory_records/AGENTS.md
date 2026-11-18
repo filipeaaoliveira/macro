@@ -28,6 +28,12 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `src/outbound/pg_run_repository/standing_rules.rs`:
   `StandingRulesRepository`, teams' and Projects' Standing Rules, and the
   Gate kinds, rules and Orchestrator Definition they are made of.
+- `src/domain/standing_acts.rs` and
+  `src/outbound/pg_run_repository/standing_acts.rs`: `StandingActRepository`,
+  the bot behind an agent session of a Run's owner (`agent_session.bot_id`)
+  and what agents did to Runs under a Factory Definition's Standing Roles
+  (`factory_standing_act`): one start, one cancel and one answer per Gate,
+  every link.
 - `src/domain/automations.rs` and
   `src/outbound/pg_run_repository/automations.rs`: `AutomationRepository`,
   teams' Automations and each time one fired.
@@ -50,7 +56,8 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `factory_check_round`, `factory_team_settings`, `factory_merge`,
   `factory_main_hold`, `factory_review_round`, `factory_review_finding`,
   `factory_project_rules`, `factory_automation`,
-  `factory_automation_firing` and `factory_team_definition` tables
+  `factory_automation_firing`, `factory_team_definition` and
+  `factory_standing_act` tables
   (`crates/macro_db_client/migrations/20261116083957_factory.sql`,
   `20261117093000_factory_check_round.sql`,
   `20261117104713_factory_step_agent.sql`,
@@ -81,7 +88,8 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261118213000_factory_definition.sql`,
   `20261118213200_factory_run_definition_evaluation.sql`,
   `20261118220000_factory_run_outcome_kinds.sql`,
-  `20261118233000_factory_run_pull_request_url_index.sql`), `factory_step_steer`,
+  `20261118233000_factory_run_pull_request_url_index.sql`,
+  `20261119000000_factory_standing_act.sql`), `factory_step_steer`,
   `factory_run_score`, `factory_run_arm`, `factory_benchmark_suite`,
   `factory_benchmark_trial` and `factory_benchmark_trial_score`.
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
