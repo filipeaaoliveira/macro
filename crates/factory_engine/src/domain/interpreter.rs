@@ -32,6 +32,14 @@ pub struct RunState {
 }
 
 impl RunState {
+    /// How the Run ended, once it has.
+    pub fn ended(&self) -> Option<RunOutcome> {
+        match self.position {
+            Position::End(outcome) => Some(outcome),
+            Position::Entry(_) => None,
+        }
+    }
+
     /// The value of `fact`; a fact never set is false.
     pub fn fact(&self, fact: &FactName) -> bool {
         self.facts.get(fact).copied().unwrap_or(false)

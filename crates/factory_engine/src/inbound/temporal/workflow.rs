@@ -273,16 +273,16 @@ impl FlowWorkflow {
                 };
                 review_round(&temporal, &panel, &mut held, &mut resume).await?
             };
-            ending.routed(&walked);
-            let routed = match walked {
-                Round::Routed(outcome) => outcome,
+            let routed = match &walked {
+                Round::Routed(outcome) => outcome.clone(),
                 Round::FailedForInfrastructure => Outcome::failed(),
-                Round::Ended(outcome) => break outcome,
+                Round::Ended(outcome) => break *outcome,
             };
             if let Err(error) = interpreter.record(&mut state, &routed) {
                 stopped = Some(error);
                 break RunOutcome::Failed;
             }
+            ending.routed(&walked, &state);
         };
 
         // A Run that ends `failed` right on work that failed for a machine,
