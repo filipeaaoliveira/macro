@@ -617,8 +617,10 @@ for the owner, whatever the ruling names.
 
 A team's Orchestrator Definition also has an owner section
 (`owner_gates`, `ownerGates` in `PUT /settings/standing-rules` and its
-Project route; off by default and when a definition leaves it out), kept
-on the Run with its rules (`src/domain/gate_owner.rs`). With it on:
+Project route; off by default and when a definition leaves it out, so a
+team's or a Project's definition saved before it keeps it off until an
+admin turns it on there), kept on the Run with its rules
+(`src/domain/gate_owner.rs`). With it on:
 
 - a Gate left for a person (a Flow's Gate no rule answered, or an agent's
   question) tells the Run's owner: once the workflow takes its answers it
@@ -628,12 +630,19 @@ on the Run with its rules (`src/domain/gate_owner.rs`). With it on:
   about the Run's task through the notification ingress
   (`outbound/ingress_gate_notifier.rs`), with an id derived from the Run
   and the Step, so a retry is one notification. A Run with no task has
-  nothing to notify about. `GET /runs/waiting` lists the caller's Runs
+  nothing to notify about. The marker and the activity run for every Gate
+  a person answers, whatever the section says: with it off the worker
+  sends nothing. Once the Gate is answered (`factory_answer_gate`, by
+  whoever answers), the worker marks its notification done through the
+  notifications' reader, as the owner marking it done would, which also
+  clears its push; one never sent changes nothing. `GET /runs/waiting` lists the caller's Runs
   waiting at an unanswered Gate, whatever the section says;
 - a review round whose Blockers are the round before's, unchanged, after
   the `fix_blockers` rule sent those to a fix, is left for the owner
   rather than fixed again (`standing_rules::repeated_blockers`), on top of
-  the rule's fix cap. "The same" is `review_rounds::same_blockers`: every
+  the rule's fix cap. The round before is the latest earlier round of the
+  same review panel (the entry of its first Step) one visit before it.
+  "The same" is `review_rounds::same_blockers`: every
   Blocker of each round has one in the other found by a reviewer of the
   same Role, in the same file, at lines that meet (no lines is the whole
   file); what a Blocker says is not compared, and an answer that never
@@ -642,7 +651,14 @@ on the Run with its rules (`src/domain/gate_owner.rs`). With it on:
 - the owner's comments on the Run's task since its latest Gate opened
   reach every later agent Step's prompt, and the prompt of a Step that
   goes on from a question, fenced as the owner's notes
-  (`owner_notes_brief`, escaped as reviewers' findings are). They are read
+  (`owner_notes_brief`, escaped as reviewers' findings are; a single note
+  past the budget is cut). The comments the factory posts as the owner (a
+  follow-up's "reported again", a Main Hold task's) end with
+  `FACTORY_SIGNATURE` (`factory_signed`), and are left out. Macro marks
+  only a bot's comments as its own: one an agent session, a routine or an
+  API call posted as the owner reads as theirs, so the notes may include
+  agent-written text. They decide nothing, are fenced as data, and the
+  brief says so. They are read
   as the owner through document storage's `/messages/document/{id}` routes
   (`outbound/document_task_notes.rs`); a task the owner no longer reads has
   none, and an outage fails the Step's attempt, for a retry.

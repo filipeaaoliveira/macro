@@ -27,7 +27,9 @@ use uuid::Uuid;
 use crate::domain::built_in_flows::{BUILT_IN_FLOWS, BuiltInFlow};
 use crate::domain::control_files::ControlFiles;
 use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening, GateRuling};
-use crate::domain::gate_owner::{OwnerNote, gate_notice, notes_since};
+use crate::domain::gate_owner::{
+    OwnerNote, gate_notice, is_factory_comment, notes_since, notice_id,
+};
 use crate::domain::models::{
     CodeRepository, ControlFilesSettings, FactoryError, FlowSummary, RunDetail, RunFinish,
     RunStart, StandingRulesSettings, StepEnding, StepError, StepInput, StepReport, StepRequest,
@@ -967,10 +969,16 @@ where
         let (Some(task_id), Some(since)) = (run.task_id, notes_since(earlier)) else {
             return Ok(Vec::new());
         };
-        self.notes
+        // Comments the factory posted as the owner are not their notes.
+        let notes = self
+            .notes
             .owner_notes(task_id, &run.user_id, since)
             .await
-            .map_err(|error| StepError::Internal(internal(error)))
+            .map_err(|error| StepError::Internal(internal(error)))?;
+        Ok(notes
+            .into_iter()
+            .filter(|note| !is_factory_comment(&note.text))
+            .collect())
     }
 
     async fn run_of(&self, request: &StepRequest) -> Result<Run, StepError> {
@@ -1127,6 +1135,22 @@ where
             )
             .await
             .map_err(internal)?;
+
+        // A Gate its owner was told of is answered: its notification is
+        // done, whoever answered.
+        let run = self
+            .repo
+            .get_run(answered.key.run_id)
+            .await
+            .map_err(internal)?
+            .ok_or(StepError::NoSuchRun)?;
+        let owner_gates = run
+            .standing_rules
+            .is_some_and(|rules| rules.definition.owner_gates);
+        if owner_gates {
+            let id = notice_id(answered.key.run_id, answered.key.seq);
+            self.notifier.answered(&run.user_id, id).await;
+        }
         Ok(())
     }
 

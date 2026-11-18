@@ -154,7 +154,10 @@ worker that walks each Run's Flow, in one process.
 - A Gate left for a person, on a Run whose owner section is on, notifies
   its owner through the notification ingress queue
   (`NotificationIngressQueue`, over SQS as every Macro producer), so the
-  service needs `sqs:SendMessage` on it once it deploys; the owner's
+  service needs `sqs:SendMessage` on it once it deploys. An answered Gate's
+  notification is marked done through the notifications' reader over
+  MacroDB, which queues the push's clearing on `NotificationQueue`, so it
+  needs `sqs:SendMessage` there too; the owner's
   comments on the Run's task are read through document storage's
   `/messages/document/{id}` routes with `DOCUMENT_STORAGE_SERVICE_AUTH_KEY`,
   as the owner. Deploy `notification_service` and `document_storage_service`

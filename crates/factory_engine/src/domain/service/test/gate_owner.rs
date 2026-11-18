@@ -13,8 +13,8 @@ use uuid::Uuid;
 
 use super::{FakeExecutor, julia, reply_step};
 use crate::domain::fakes::{FakeNotifier, FakeRepo, FakeTaskNotes};
-use crate::domain::gate::GateRuling;
-use crate::domain::gate_owner::OwnerNote;
+use crate::domain::gate::{AnswerGate, GateAnswered, GateRuling};
+use crate::domain::gate_owner::{OwnerNote, factory_signed, notice_id};
 use crate::domain::models::{StepEnding, StepError, StepReport};
 use crate::domain::ports::StepService;
 use crate::domain::service::StepServiceImpl;
@@ -208,6 +208,14 @@ async fn the_owner_s_comments_since_the_gate_reach_the_next_step() {
                 text: "The cause: bwrap cannot mount /proc".to_string(),
             },
         ));
+        // What the factory posted as the owner is not their note.
+        kept.push((
+            task,
+            OwnerNote {
+                written_at: opened_at + TimeDelta::minutes(2),
+                text: factory_signed("Reported again in review round 2."),
+            },
+        ));
     }
 
     steps
@@ -366,4 +374,44 @@ async fn repeated_blockers_after_a_rule_fix_wait_for_the_owner() {
         steps.rule_gate(blockers_ruling(key)).await.expect("rule"),
         fixed_by_rule
     );
+}
+
+/// An answered Gate's notification is marked done, whoever answered, with
+/// the owner section on; with it off nothing is marked.
+#[tokio::test]
+async fn an_answered_gate_s_notification_is_done() {
+    for owner_gates in [true, false] {
+        let repo = FakeRepo::default();
+        let (run_id, _task) = run_on_task(&repo, rules(owner_gates)).await;
+        let key = StepKey { run_id, seq: 1 };
+        gate_at(&repo, key, "plan", "done", &["approve", "revise"]).await;
+        let notifier = FakeNotifier::default();
+        let steps = service(
+            &repo,
+            &FakeExecutor::default(),
+            &notifier,
+            &FakeTaskNotes::default(),
+        );
+
+        steps
+            .answer_gate(GateAnswered {
+                key,
+                answer: AnswerGate {
+                    seq: 1,
+                    answer: outcome("approve"),
+                    note: None,
+                    user_id: julia(),
+                    approved_control_files: None,
+                },
+            })
+            .await
+            .expect("answer");
+
+        let done = notifier.done.lock().expect("done").clone();
+        if owner_gates {
+            assert_eq!(done, [notice_id(run_id, 1)]);
+        } else {
+            assert!(done.is_empty());
+        }
+    }
 }

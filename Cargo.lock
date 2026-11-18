@@ -8427,6 +8427,7 @@ dependencies = [
  "ai_usage",
  "authentication_service_client",
  "aws-sdk-secretsmanager",
+ "aws-sdk-sns",
  "aws-sdk-sqs",
  "axum",
  "database_env_vars",

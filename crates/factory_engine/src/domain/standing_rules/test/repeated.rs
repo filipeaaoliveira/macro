@@ -53,6 +53,22 @@ fn round(visit: u16, seq: u16, findings: Vec<ReviewFinding>) -> ReviewRound {
     }
 }
 
+/// The first Step, at `seq`, of a round of the review panel `entry`.
+fn reviewed(seq: u16, entry: &str) -> Step {
+    Step {
+        seq,
+        entry: EntryId::try_from(entry.to_string()).expect("valid"),
+        visit: 1,
+        started_at: Utc::now(),
+        end: None,
+        gate: None,
+        role: None,
+        agent: None,
+        passed_over: Vec::new(),
+        checks: Vec::new(),
+    }
+}
+
 /// The Step at `seq` whose Blockers Gate was answered `fix`, by `rule` or
 /// by a person.
 fn fixed(seq: u16, rule: Option<StandingRule>) -> Step {
@@ -215,10 +231,14 @@ fn blockers_repeat_only_after_the_rule_sent_the_round_before_to_a_fix() {
     };
     let rounds = [round(1, 3, found()), round(2, 8, found())];
 
-    let by_rule = [fixed(4, Some(StandingRule::FixBlockers))];
+    let by_rule = [
+        reviewed(3, "review"),
+        fixed(4, Some(StandingRule::FixBlockers)),
+        reviewed(8, "review"),
+    ];
     assert!(repeated_blockers(&rounds, &by_rule, 9));
 
-    let by_person = [fixed(4, None)];
+    let by_person = [reviewed(3, "review"), fixed(4, None), reviewed(8, "review")];
     assert!(!repeated_blockers(&rounds, &by_person, 9));
 
     let reset = [round(1, 3, found()), round(1, 8, found())];
@@ -226,4 +246,36 @@ fn blockers_repeat_only_after_the_rule_sent_the_round_before_to_a_fix() {
 
     let first = [round(1, 3, found())];
     assert!(!repeated_blockers(&first, &by_rule, 4));
+}
+
+/// With two review panels, a round is compared with the round before of
+/// its own panel, never with another panel's round between them.
+#[test]
+fn blockers_are_compared_with_the_same_panel_s_round_before() {
+    let x = || blocker(3, "correctness-reviewer", "src/a.rs", Some((10, 14)));
+    let y = || blocker(6, "correctness-reviewer", "src/b.rs", Some((1, 2)));
+    let steps = [
+        reviewed(3, "review"),
+        fixed(5, Some(StandingRule::FixBlockers)),
+        reviewed(6, "security-review"),
+        reviewed(8, "review"),
+    ];
+
+    // The panel's own round before found the same Blocker; the other
+    // panel's, just before it, found another.
+    let own_same = [
+        round(1, 3, vec![x()]),
+        round(1, 6, vec![y()]),
+        round(2, 8, vec![x()]),
+    ];
+    assert!(repeated_blockers(&own_same, &steps, 9));
+
+    // The other panel's round found the same Blocker; the panel's own did
+    // not.
+    let other_same = [
+        round(1, 3, vec![y()]),
+        round(1, 6, vec![x()]),
+        round(2, 8, vec![x()]),
+    ];
+    assert!(!repeated_blockers(&other_same, &steps, 9));
 }

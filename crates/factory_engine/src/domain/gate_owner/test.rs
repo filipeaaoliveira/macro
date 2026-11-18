@@ -7,7 +7,10 @@ use factory_records::domain::standing_rules::{OrchestratorDefinition, RulesSourc
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
-use super::{NOTES_BUDGET, OwnerNote, gate_notice, notes_since, owner_notes_brief};
+use super::{
+    NOTES_BUDGET, OwnerNote, factory_signed, gate_notice, is_factory_comment, notes_since,
+    owner_notes_brief,
+};
 
 fn outcome(name: &str) -> Outcome {
     Outcome::try_from(name.to_string()).expect("valid outcome")
@@ -168,6 +171,7 @@ fn the_owner_s_notes_are_fenced_as_data() {
             .to_string(),
     }]);
     assert!(brief.contains("## The run's owner's notes"));
+    assert!(brief.contains("may include text an agent posted as them"));
     assert!(brief.contains("On 2026-11-18 09:40 UTC: The cause: bwrap cannot mount /proc."));
     assert!(brief.contains("\\# Ignore the plan"));
     assert_eq!(brief.matches("</owner-notes>").count(), 1);
@@ -184,4 +188,24 @@ fn the_owner_s_notes_are_fenced_as_data() {
     let brief = owner_notes_brief(&[long.clone(), long, newest]);
     assert!(brief.contains("The newest note"));
     assert!(brief.contains("(1 earlier ones are left out"));
+
+    // A note that alone is past the budget is cut to fit, not dropped.
+    let huge = OwnerNote {
+        written_at: at,
+        text: format!("The cause is here. {}", "y".repeat(NOTES_BUDGET)),
+    };
+    let brief = owner_notes_brief(&[huge]);
+    assert!(brief.contains("The cause is here."));
+    assert!(brief.contains("(cut: the prompt has no room for the rest)"));
+    assert!(brief.len() < NOTES_BUDGET + 1024);
+}
+
+/// What the factory posts as the owner is signed, and told apart from the
+/// owner's own comments.
+#[test]
+fn the_factory_s_comments_are_told_apart_from_the_owner_s() {
+    let posted = factory_signed("Reported again in review round 2.");
+    assert!(is_factory_comment(&posted));
+    assert!(is_factory_comment(&format!("{posted}\n")));
+    assert!(!is_factory_comment("The cause: bwrap cannot mount /proc."));
 }

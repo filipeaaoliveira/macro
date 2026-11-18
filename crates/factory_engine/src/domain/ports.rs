@@ -335,6 +335,15 @@ pub trait GateNotifier: Send + Sync + 'static {
     /// that cannot be sent is logged and dropped: the Gate waits all the
     /// same, and is listed as waiting.
     fn notify(&self, notice: GateNotice) -> impl Future<Output = ()> + Send;
+
+    /// Mark the notification `notification_id` of `owner` done: its Gate
+    /// was answered. One never sent changes nothing; one that cannot be
+    /// marked is logged and left.
+    fn answered(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        notification_id: Uuid,
+    ) -> impl Future<Output = ()> + Send;
 }
 
 /// Reads what a Run's owner commented on the Run's task.
@@ -360,6 +369,8 @@ pub struct NoOwnerGates;
 
 impl GateNotifier for NoOwnerGates {
     async fn notify(&self, _notice: GateNotice) {}
+
+    async fn answered(&self, _owner: &MacroUserIdStr<'static>, _notification_id: Uuid) {}
 }
 
 impl TaskNotes for NoOwnerGates {

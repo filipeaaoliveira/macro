@@ -11,15 +11,21 @@ use super::FakeError;
 use crate::domain::gate_owner::{GateNotice, OwnerNote};
 use crate::domain::ports::{GateNotifier, TaskNotes};
 
-/// Keeps every notice it was sent, in order.
+/// Keeps every notice it was sent, and every notification it marked
+/// done, in order.
 #[derive(Clone, Default)]
 pub(crate) struct FakeNotifier {
     pub(crate) sent: Arc<Mutex<Vec<GateNotice>>>,
+    pub(crate) done: Arc<Mutex<Vec<Uuid>>>,
 }
 
 impl GateNotifier for FakeNotifier {
     async fn notify(&self, notice: GateNotice) {
         self.sent.lock().expect("sent").push(notice);
+    }
+
+    async fn answered(&self, _owner: &MacroUserIdStr<'static>, notification_id: Uuid) {
+        self.done.lock().expect("done").push(notification_id);
     }
 }
 

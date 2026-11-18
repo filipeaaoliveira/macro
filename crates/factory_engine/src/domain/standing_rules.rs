@@ -134,9 +134,10 @@ pub fn rule_answer(
 /// `rounds` and `steps` are the Run's, in order.
 ///
 /// The round asked about is the latest that started at or before `seq`
-/// (its Gate is on its latest Step), and the round before is the one just
-/// ahead of it in the same visits of its entry (its visit one less), so a
-/// round after a reset is never compared with the rounds before it. That
+/// (its Gate is on its latest Step), and the round before is the latest
+/// earlier round of the same review panel (the entry of its first Step)
+/// one visit before it, so a round after a reset, and a round of another
+/// panel, are never compared with it. That
 /// round's Blockers went to a fix by the rule when a Step between the two
 /// rounds has a Gate whose Rule Answer is `fix_blockers`: a person's fix
 /// is theirs to repeat. Which Blockers count as the same is
@@ -146,12 +147,22 @@ pub fn repeated_blockers(rounds: &[ReviewRound], steps: &[Step], seq: u16) -> bo
         return false;
     };
     let round = &rounds[at];
-    let Some(before) = at.checked_sub(1).map(|index| &rounds[index]) else {
+    let entry_of = |seq: u16| {
+        steps
+            .iter()
+            .find(|step| step.seq == seq)
+            .map(|step| &step.entry)
+    };
+    let Some(entry) = entry_of(round.seq) else {
         return false;
     };
-    if round.visit < 2 || before.visit + 1 != round.visit {
+    let Some(before) = rounds[..at]
+        .iter()
+        .rev()
+        .find(|before| entry_of(before.seq) == Some(entry) && before.visit + 1 == round.visit)
+    else {
         return false;
-    }
+    };
 
     let fixed_by_rule = steps.iter().any(|step| {
         let between = step.seq >= before.seq && step.seq < round.seq;

@@ -286,3 +286,33 @@ async fn a_task_filed_under_its_id_is_found_not_filed_again() {
         assert_eq!(made, posts, "{before:?} {after:?}");
     }
 }
+
+/// What the factory comments on a hold's task as the owner is signed as
+/// the factory's, so the owner's notes leave it out.
+#[tokio::test]
+async fn a_comment_is_signed_as_the_factory_s() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(format!("/documents/{NEW_TASK}/comments/text")))
+        .and(body_partial_json(json!({
+            "quote": "Failing checks",
+            "content": "The base passes again.\n\nPosted by the software factory.",
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    DocumentHoldTasks::new(DocumentStorageServiceClient::new(
+        "internal-key".into(),
+        server.uri(),
+    ))
+    .comment(
+        &julia(),
+        new_task(),
+        "Failing checks",
+        "The base passes again.",
+    )
+    .await
+    .expect("commented");
+}
