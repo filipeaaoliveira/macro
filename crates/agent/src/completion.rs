@@ -108,6 +108,7 @@ pub async fn complete_with_history<M: ToString>(
 /// Callers may supply structured-output or reasoning settings supported by the
 /// selected provider. Routing, financial authorization, tracing and usage
 /// recording follow the same path as [`complete_with_history`].
+#[tracing::instrument(skip_all, err)]
 pub async fn complete_with_history_and_params<M: ToString>(
     model: M,
     system_prompt: &str,
