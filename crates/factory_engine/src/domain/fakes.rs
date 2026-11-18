@@ -915,6 +915,7 @@ impl RunRepository for FakeRepo {
             claimed.session = to.clone();
             claimed.prepared_at = None;
             claimed.opened = false;
+            self.open_steering(key);
         }
         self.with_step(key, |step| {
             step.role.get_or_insert_with(|| role.clone());
@@ -1150,6 +1151,11 @@ impl RunRepository for FakeRepo {
 
     async fn steering(&self, key: StepKey) -> Result<StepSteering, FakeError> {
         Ok(self.read_steering(key))
+    }
+
+    async fn pause_ran_out(&self, key: StepKey) -> Result<(), FakeError> {
+        self.record_pause_ran_out(key);
+        Ok(())
     }
 
     async fn close_steering(

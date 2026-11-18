@@ -7,7 +7,7 @@ use uuid::Uuid;
 use super::super::PgRunRepository;
 use crate::domain::models::{
     AgentName, EntryId, HandBack, HandedBack, NewRun, NewSteer, Outcome, Role, RunId, RunInsert,
-    SteerAction, SteerRefusal, StepKey, StepSession, StepSteering,
+    SteerAction, SteerRefusal, StepKey, StepSession,
 };
 use crate::domain::ports::RunRepository;
 
@@ -58,6 +58,27 @@ fn writer() -> Role {
     Role::try_from("writer".to_string()).expect("valid role")
 }
 
+/// What the Step's work reads of its steering that a test sets.
+#[derive(Debug, PartialEq)]
+struct Steering {
+    paused: bool,
+    stop_asked: bool,
+    prompt: Option<Uuid>,
+}
+
+async fn steering_of(repo: &PgRunRepository, key: StepKey) -> Steering {
+    let steering = repo.steering(key).await.expect("read");
+    assert!(
+        steering.started_at.is_some(),
+        "the work reads when the step started"
+    );
+    Steering {
+        paused: steering.paused,
+        stop_asked: steering.stop_asked,
+        prompt: steering.prompt,
+    }
+}
+
 fn note(text: &str) -> (NewSteer, Uuid) {
     let prompt_id = Uuid::now_v7();
     (
@@ -91,8 +112,8 @@ async fn notes_pauses_and_resumes_steer_the_step_in_turn(pool: PgPool) {
     assert_eq!(steered.role, writer());
     assert_eq!(steered.previous_prompt, None);
     assert_eq!(
-        repo.steering(key).await.expect("read"),
-        StepSteering {
+        steering_of(&repo, key).await,
+        Steering {
             paused: false,
             stop_asked: false,
             prompt: Some(first_prompt),
@@ -128,8 +149,8 @@ async fn notes_pauses_and_resumes_steer_the_step_in_turn(pool: PgPool) {
         .expect("a paused step resumes");
     assert_eq!(resumed.previous_prompt, Some(first_prompt));
     assert_eq!(
-        repo.steering(key).await.expect("read"),
-        StepSteering {
+        steering_of(&repo, key).await,
+        Steering {
             paused: false,
             stop_asked: false,
             prompt: Some(resume_prompt),
@@ -316,8 +337,8 @@ async fn a_refused_prompt_is_undelivered_and_no_longer_followed(pool: PgPool) {
         .await
         .expect("unsteer");
     assert_eq!(
-        repo.steering(key).await.expect("read"),
-        StepSteering {
+        steering_of(&repo, key).await,
+        Steering {
             paused: true,
             stop_asked: false,
             prompt: Some(first_prompt),
@@ -351,4 +372,141 @@ async fn a_step_without_a_session_takes_no_steering(pool: PgPool) {
         repo.steer(other, &NewSteer::Pause).await.expect("steer"),
         Err(SteerRefusal::NoSession)
     );
+}
+
+/// A Step handed to another Agent's session follows none of the owner's
+/// prompts to the session it left, and takes their steering again.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn a_step_handed_to_a_new_session_follows_none_of_the_old_one(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let (key, session) = writing(&repo).await;
+    let (sent, prompt) = note("Use the tokens");
+    repo.steer(key, &sent).await.expect("steer").expect("note");
+    assert!(repo.close_steering(key, Some(prompt)).await.expect("close"));
+
+    let backup = StepSession {
+        session_id: Uuid::now_v7(),
+        action_id: Uuid::now_v7(),
+        agent: Some(AgentName::try_from("backup".to_string()).expect("agent")),
+        bot: Some(Uuid::now_v7()),
+    };
+    let passed = repo
+        .pass_session(
+            key,
+            session.session_id,
+            &writer(),
+            &crate::domain::models::PassedOver {
+                agent: AgentName::try_from("primary".to_string()).expect("agent"),
+                reason: "ai_allowance_exhausted".to_string(),
+            },
+            Some(&backup),
+        )
+        .await
+        .expect("pass");
+    assert!(passed);
+
+    assert_eq!(steering_of(&repo, key).await.prompt, None);
+    repo.steer(key, &NewSteer::Pause)
+        .await
+        .expect("steer")
+        .expect("the new session's agent takes steering");
+}
+
+/// The Step that goes on after its agent's question works in the asking
+/// Step's session, and takes the owner's steering though the asking Step's
+/// closed, following none of the prompts the owner sent the asking Step.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn the_step_going_on_from_a_question_takes_steering(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let (asking, session) = writing(&repo).await;
+    let (sent, prompt) = note("Before you ask");
+    repo.steer(asking, &sent)
+        .await
+        .expect("steer")
+        .expect("note");
+    assert!(
+        repo.close_steering(asking, Some(prompt))
+            .await
+            .expect("close")
+    );
+    repo.end_step(asking, &outcome("question"), "Which palette?")
+        .await
+        .expect("end");
+
+    let going_on = StepKey {
+        run_id: asking.run_id,
+        seq: 2,
+    };
+    let entry = EntryId::try_from("write".to_string()).expect("entry");
+    repo.start_step(going_on, &entry, 1).await.expect("start");
+    repo.claim_session(
+        going_on,
+        StepSession {
+            action_id: Uuid::now_v7(),
+            ..session.clone()
+        },
+        &writer(),
+        &[outcome("done")],
+    )
+    .await
+    .expect("claim");
+
+    assert_eq!(steering_of(&repo, going_on).await.prompt, None);
+    let (later, _) = note("Use the dark one");
+    let steered_now = repo
+        .steer(going_on, &later)
+        .await
+        .expect("steer")
+        .expect("the step going on takes a note");
+    assert_eq!(steered_now.session.session_id, session.session_id);
+    assert_eq!(
+        repo.list_steps(asking.run_id).await.expect("list")[1]
+            .terminal
+            .session_id,
+        Some(session.session_id)
+    );
+}
+
+/// A Step whose work ended it because it stayed paused says so, and only a
+/// paused Step can; a Step between its agent's turns says that too.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn a_paused_step_that_ran_out_of_time_says_so(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let (key, _) = writing(&repo).await;
+    repo.pause_ran_out(key).await.expect("not paused");
+    assert!(!repo.steering(key).await.expect("read").pause_ran_out);
+    assert!(repo.close_steering(key, None).await.expect("close"));
+    assert!(
+        repo.list_steps(key.run_id).await.expect("list")[0]
+            .terminal
+            .between_turns
+    );
+
+    let checks = Uuid::now_v7();
+    let session = repo
+        .claimed_session(key)
+        .await
+        .expect("read")
+        .expect("claimed");
+    repo.begin_turn(key, session.session_id, checks, 2, &[outcome("passed")])
+        .await
+        .expect("turn");
+    repo.steer(key, &NewSteer::Pause)
+        .await
+        .expect("steer")
+        .expect("pause");
+    repo.pause_ran_out(key).await.expect("ran out");
+    assert!(repo.steering(key).await.expect("read").pause_ran_out);
+    let terminal = &repo.list_steps(key.run_id).await.expect("list")[0].terminal;
+    assert!(terminal.pause_ran_out_at.is_some());
+    assert!(!terminal.between_turns);
 }

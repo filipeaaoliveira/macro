@@ -698,6 +698,15 @@ pub struct StepTerminal {
     /// When the owner asked the Step to stop; it ends `failed` once its
     /// agent's turn stops.
     pub stop_asked_at: Option<DateTime<Utc>>,
+    /// Whether its agent works on no turn the Step waits on now, as while
+    /// the factory runs the repository's checks itself: the Step takes no
+    /// steering until the factory's next prompt.
+    pub between_turns: bool,
+    /// When a paused Step ends, failed, unless it is resumed first: its
+    /// work's time runs out then. Set by the Run API while it is paused.
+    pub ends_by: Option<DateTime<Utc>>,
+    /// When its work ended it because it stayed paused past its time.
+    pub pause_ran_out_at: Option<DateTime<Utc>>,
     /// What the owner did, oldest first.
     pub steers: Vec<Steer>,
 }
@@ -848,6 +857,10 @@ pub struct StepSteering {
     /// follows once the turn before it ends; none once the factory sent a
     /// prompt of its own after it.
     pub prompt: Option<Uuid>,
+    /// When the Step started, which its work's time counts from.
+    pub started_at: Option<DateTime<Utc>>,
+    /// Whether its work ended it because it stayed paused past its time.
+    pub pause_ran_out: bool,
 }
 
 /// The most rounds of checks a Step runs.

@@ -346,6 +346,8 @@ struct StepRow {
     terminal_session_id: Option<Uuid>,
     paused_at: Option<DateTime<Utc>>,
     stop_asked_at: Option<DateTime<Utc>>,
+    between_turns: bool,
+    pause_ran_out_at: Option<DateTime<Utc>>,
 }
 
 impl StepRow {
@@ -546,6 +548,9 @@ impl TryFrom<StepRow> for Step {
                 session_id: row.terminal_session_id,
                 paused_at: row.paused_at,
                 stop_asked_at: row.stop_asked_at,
+                between_turns: row.between_turns,
+                ends_by: None,
+                pause_ran_out_at: row.pause_ran_out_at,
                 steers: Vec::new(),
             },
         })
@@ -889,7 +894,9 @@ impl RunRepository for PgRunRepository {
                 CASE WHEN s.ended_at IS NULL AND s.session_released_at IS NULL
                     THEN s.session_id END AS terminal_session_id,
                 s.paused_at,
-                s.stop_asked_at
+                s.stop_asked_at,
+                s.steer_closed AND s.ended_at IS NULL AS "between_turns!",
+                s.pause_ran_out_at
             FROM factory_step s
             LEFT JOIN factory_gate g ON g.run_id = s.run_id AND g.seq = s.seq
             WHERE s.run_id = $1
@@ -1077,7 +1084,9 @@ impl RunRepository for PgRunRepository {
                 CASE WHEN s.ended_at IS NULL AND s.session_released_at IS NULL
                     THEN s.session_id END AS terminal_session_id,
                 s.paused_at,
-                s.stop_asked_at
+                s.stop_asked_at,
+                s.steer_closed AND s.ended_at IS NULL AS "between_turns!",
+                s.pause_ran_out_at
             FROM factory_step s
             LEFT JOIN factory_gate g ON g.run_id = s.run_id AND g.seq = s.seq
             WHERE s.run_id = ANY($1)
@@ -1324,7 +1333,9 @@ impl RunRepository for PgRunRepository {
                 passed_over = array_append(s.passed_over, $8),
                 pass_reasons = array_append(s.pass_reasons, $9),
                 prepared_at = CASE WHEN $4::uuid IS NULL THEN s.prepared_at END,
-                opened_at = CASE WHEN $4::uuid IS NULL THEN s.opened_at END
+                opened_at = CASE WHEN $4::uuid IS NULL THEN s.opened_at END,
+                steer_action_id = CASE WHEN $4::uuid IS NULL THEN s.steer_action_id END,
+                steer_closed = CASE WHEN $4::uuid IS NULL THEN s.steer_closed ELSE false END
             FROM factory_run r
             WHERE r.id = s.run_id AND s.run_id = $1 AND s.seq = $2 AND s.session_id = $3
                 AND s.session_released_at IS NULL AND s.handed_at IS NULL
@@ -1645,6 +1656,11 @@ impl RunRepository for PgRunRepository {
     #[tracing::instrument(err, skip(self))]
     async fn steering(&self, key: StepKey) -> Result<StepSteering, Self::Err> {
         self.read_steering(key).await
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn pause_ran_out(&self, key: StepKey) -> Result<(), Self::Err> {
+        self.record_pause_ran_out(key).await
     }
 
     #[tracing::instrument(err, skip(self))]

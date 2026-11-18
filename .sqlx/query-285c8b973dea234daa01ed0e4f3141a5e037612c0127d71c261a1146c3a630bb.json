@@ -1,0 +1,47 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                paused_at IS NOT NULL AS \"paused!\",\n                stop_asked_at IS NOT NULL AS \"stop_asked!\",\n                steer_action_id,\n                started_at,\n                pause_ran_out_at IS NOT NULL AS \"pause_ran_out!\"\n            FROM factory_step\n            WHERE run_id = $1 AND seq = $2\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "paused!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 1,
+        "name": "stop_asked!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 2,
+        "name": "steer_action_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "started_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "pause_ran_out!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      true,
+      false,
+      null
+    ]
+  },
+  "hash": "285c8b973dea234daa01ed0e4f3141a5e037612c0127d71c261a1146c3a630bb"
+}

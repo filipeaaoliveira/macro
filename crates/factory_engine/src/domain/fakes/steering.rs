@@ -16,6 +16,7 @@ pub(crate) struct FakeSteering {
     pub(crate) stop_asked_at: Option<DateTime<Utc>>,
     pub(crate) prompt: Option<Uuid>,
     pub(crate) closed: bool,
+    pub(crate) pause_ran_out_at: Option<DateTime<Utc>>,
     /// What the owner did, in order, with the prompt each sent.
     pub(crate) steers: Vec<(Steer, Option<Uuid>)>,
 }
@@ -39,6 +40,9 @@ impl FakeRepo {
             session_id,
             paused_at: steering.paused_at,
             stop_asked_at: steering.stop_asked_at,
+            between_turns: steering.closed && !ended,
+            ends_by: None,
+            pause_ran_out_at: steering.pause_ran_out_at,
             steers: steering
                 .steers
                 .iter()
@@ -157,11 +161,22 @@ impl FakeRepo {
     }
 
     pub(crate) fn read_steering(&self, key: StepKey) -> StepSteering {
+        let started_at = self.with_step(key, |step| step.started_at);
         self.with_steering(key, |steering| StepSteering {
             paused: steering.paused_at.is_some(),
             stop_asked: steering.stop_asked_at.is_some(),
             prompt: steering.prompt,
+            started_at,
+            pause_ran_out: steering.pause_ran_out_at.is_some(),
         })
+    }
+
+    pub(crate) fn record_pause_ran_out(&self, key: StepKey) {
+        self.with_steering(key, |steering| {
+            if steering.paused_at.is_some() && steering.pause_ran_out_at.is_none() {
+                steering.pause_ran_out_at = Some(Utc::now());
+            }
+        });
     }
 
     pub(crate) fn stop_steering(&self, key: StepKey, followed: Option<Uuid>) -> bool {

@@ -179,7 +179,9 @@ impl PgRunRepository {
             SELECT
                 paused_at IS NOT NULL AS "paused!",
                 stop_asked_at IS NOT NULL AS "stop_asked!",
-                steer_action_id
+                steer_action_id,
+                started_at,
+                pause_ran_out_at IS NOT NULL AS "pause_ran_out!"
             FROM factory_step
             WHERE run_id = $1 AND seq = $2
             "#,
@@ -192,7 +194,29 @@ impl PgRunRepository {
             paused: row.paused,
             stop_asked: row.stop_asked,
             prompt: row.steer_action_id,
+            started_at: Some(row.started_at),
+            pause_ran_out: row.pause_ran_out,
         }))
+    }
+
+    /// [`crate::domain::ports::RunRepository::pause_ran_out`].
+    pub(super) async fn record_pause_ran_out(
+        &self,
+        key: StepKey,
+    ) -> Result<(), PgRunRepositoryErr> {
+        sqlx::query!(
+            r#"
+            UPDATE factory_step
+            SET pause_ran_out_at = now()
+            WHERE run_id = $1 AND seq = $2
+                AND paused_at IS NOT NULL AND pause_ran_out_at IS NULL
+            "#,
+            key.run_id.as_uuid(),
+            i32::from(key.seq),
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     /// [`crate::domain::ports::RunRepository::close_steering`]: a Step that

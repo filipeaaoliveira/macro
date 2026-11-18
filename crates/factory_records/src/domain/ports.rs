@@ -289,6 +289,10 @@ pub trait RunRepository: Send + Sync + 'static {
         key: StepKey,
     ) -> impl Future<Output = Result<StepSteering, Self::Err>> + Send;
 
+    /// Record that the work of the paused Step `key` ended it because it
+    /// stayed paused past its time. Recording it again changes nothing.
+    fn pause_ran_out(&self, key: StepKey) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
     /// Stop the Step `key` taking its owner's steering, once its agent's
     /// turn ended and its work follows `followed`, the prompt of the
     /// owner's steering it read last (none when it followed none), and the
