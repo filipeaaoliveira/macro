@@ -780,7 +780,7 @@
           {
             "name": "afterId",
             "in": "query",
-            "description": "With `afterCreatedAt`: the `next.id` of the page before.",
+            "description": "The `next.id` of the page before: given with `afterCreatedAt` or\nnot at all (400 otherwise).",
             "required": false,
             "schema": {
               "$ref": "#/components/schemas/RunId"
@@ -2662,7 +2662,7 @@
           "createdAt": {
             "type": "string",
             "format": "date-time",
-            "description": "When the last Run the page read was created."
+            "description": "When the last Run the page listed was created."
           },
           "id": {
             "$ref": "#/components/schemas/RunId",
@@ -2682,7 +2682,7 @@
               },
               {
                 "$ref": "#/components/schemas/BoardNext",
-                "description": "Where the next page starts; none on the last."
+                "description": "Where the next page starts, past the last Run listed; none on the\nlast."
               }
             ]
           },
@@ -2691,7 +2691,7 @@
             "items": {
               "$ref": "#/components/schemas/BoardRun"
             },
-            "description": "The Runs, newest first. A page may list fewer than asked while more\nfollow: a team member's Run on a task the caller cannot see is left\nout."
+            "description": "The Runs, newest first: never a team member's Run on a task the\ncaller cannot see."
           }
         }
       },
@@ -2707,6 +2707,10 @@
           "state": {
             "$ref": "#/components/schemas/BoardState",
             "description": "Where it is."
+          },
+          "taskName": {
+            "type": ["string", "null"],
+            "description": "The name of the task it works on; none without a task."
           }
         }
       },

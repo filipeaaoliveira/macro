@@ -11,7 +11,7 @@ import type { RunId } from './runId';
 (newest first).
  */
 export interface BoardNext {
-  /** When the last Run the page read was created. */
+  /** When the last Run the page listed was created. */
   createdAt: string;
   /** Its id. */
   id: RunId;

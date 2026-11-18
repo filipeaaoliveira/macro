@@ -12,8 +12,7 @@ import type { BoardRun } from './boardRun';
  */
 export interface BoardPage {
   next?: BoardPageNext;
-  /** The Runs, newest first. A page may list fewer than asked while more
-follow: a team member's Run on a task the caller cannot see is left
-out. */
+  /** The Runs, newest first: never a team member's Run on a task the
+caller cannot see. */
   runs: BoardRun[];
 }

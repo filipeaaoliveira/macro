@@ -42,8 +42,9 @@ it, in any case: at most 200 characters are read.
    */
   afterCreatedAt?: string;
   /**
-   * With `afterCreatedAt`: the `next.id` of the page before.
-   */
+ * The `next.id` of the page before: given with `afterCreatedAt` or
+not at all (400 otherwise).
+ */
   afterId?: RunId;
   /**
    * The most Runs the page lists: 25 when left out, at most 50.

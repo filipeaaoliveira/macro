@@ -5,6 +5,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
+import type { BoardRunTaskName } from './boardRunTaskName';
 import type { BoardState } from './boardState';
 import type { RunDetail } from './runDetail';
 
@@ -16,4 +17,6 @@ export interface BoardRun {
   detail: RunDetail;
   /** Where it is. */
   state: BoardState;
+  /** The name of the task it works on; none without a task. */
+  taskName?: BoardRunTaskName;
 }

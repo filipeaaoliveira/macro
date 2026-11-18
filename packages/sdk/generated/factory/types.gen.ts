@@ -192,7 +192,7 @@ export type AutomationsSettings = {
  */
 export type BoardNext = {
     /**
-     * When the last Run the page read was created.
+     * When the last Run the page listed was created.
      */
     createdAt: string;
     /**
@@ -207,9 +207,8 @@ export type BoardNext = {
 export type BoardPage = {
     next?: null | BoardNext;
     /**
-     * The Runs, newest first. A page may list fewer than asked while more
-     * follow: a team member's Run on a task the caller cannot see is left
-     * out.
+     * The Runs, newest first: never a team member's Run on a task the
+     * caller cannot see.
      */
     runs: Array<BoardRun>;
 };
@@ -226,6 +225,10 @@ export type BoardRun = {
      * Where it is.
      */
     state: BoardState;
+    /**
+     * The name of the task it works on; none without a task.
+     */
+    taskName?: string | null;
 };
 
 /**
@@ -1965,7 +1968,8 @@ export type ListFactoryBoardData = {
          */
         afterCreatedAt?: string;
         /**
-         * With `afterCreatedAt`: the `next.id` of the page before.
+         * The `next.id` of the page before: given with `afterCreatedAt` or
+         * not at all (400 otherwise).
          */
         afterId?: RunId;
         /**

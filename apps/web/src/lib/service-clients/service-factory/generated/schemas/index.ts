@@ -30,6 +30,7 @@ export * from './boardNext';
 export * from './boardPage';
 export * from './boardPageNext';
 export * from './boardRun';
+export * from './boardRunTaskName';
 export * from './boardScope';
 export * from './boardState';
 export * from './callFactoryAutomationWebhookBody';
