@@ -61,6 +61,7 @@ const writing: RunStep = {
 const runningRun: Run = {
   id: 'run-1',
   request: 'Add a due date column',
+  ownerId: 'macro|julia@example.com',
   createdAt: '2026-11-16T09:00:00Z',
   taskId: 'task-1',
   steps: [
@@ -84,6 +85,7 @@ const DONE: RunActionResult = { ok: true, value: undefined };
 function mount(steerStep: RunsContext['steerStep'] = vi.fn(async () => DONE)) {
   const [run, setRun] = createSignal<Run>(runningRun);
   const context: RunsContext = {
+    viewerId: () => 'macro|julia@example.com',
     taskRuns: () => ({
       state: () => 'ready',
       data: () => [run()],

@@ -31,6 +31,9 @@ import { RunInsightsView } from '../insights-view';
 document.documentElement.dataset.touchDevice = String(isTouchDevice());
 
 // `?error` fails the first read; `?empty` has no Runs in any period.
+
+/** The person the fixture shows, who owns its Runs. */
+const FIXTURE_OWNER = 'macro|owner@example.com';
 const search = new URLSearchParams(location.search);
 const FAIL_FIRST = search.has('error');
 const EMPTY = search.has('empty');
@@ -64,6 +67,7 @@ const RUNS: Run[] = [
   {
     id: 'run-ci',
     request: 'Add a due date column to the task list',
+    ownerId: FIXTURE_OWNER,
     createdAt: new Date(+NOW - 2 * DAY).toISOString(),
     end: {
       outcome: 'manual',
@@ -86,6 +90,7 @@ const RUNS: Run[] = [
   {
     id: 'run-review',
     request: 'Fix the empty state of the board',
+    ownerId: FIXTURE_OWNER,
     createdAt: new Date(+NOW - 5 * DAY).toISOString(),
     end: {
       outcome: 'success',
@@ -96,6 +101,7 @@ const RUNS: Run[] = [
   {
     id: 'run-failed',
     request: 'Plan the CSV import',
+    ownerId: FIXTURE_OWNER,
     createdAt: new Date(+NOW - 9 * DAY).toISOString(),
     end: {
       outcome: 'failed',
@@ -392,6 +398,7 @@ function createFixtureRuns(): RunsContext {
     retry: () => {},
   });
   return {
+    viewerId: () => FIXTURE_OWNER,
     taskRuns: () => ready(() => RUNS),
     waitingRuns: () => ready(() => ({ waiting: [], starting: [] })),
     run: (runId) => ready(() => RUNS.find((run) => run.id === runId())),

@@ -11,6 +11,7 @@ const VARIANTS: BadgeVariant[] = [
   'accent',
   'violet',
   'success',
+  'failure',
 ];
 
 // #region demo:variants

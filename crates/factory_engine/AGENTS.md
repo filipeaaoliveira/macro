@@ -1396,6 +1396,25 @@ replaced; a person merges), which a test reads; `factory_definition_check`
   pause, resume and stop do, and the prompts they send the agent.
 - `src/domain/task_thread.rs`: the task thread: the comment each update of
   a Run posts to its task, and its id.
+- `src/domain/board.rs`, `src/domain/service/board.rs` and
+  `src/inbound/http/board.rs`: the board (`GET /runs`): a page of the
+  caller's Runs, or their team's (`scope=team`), newest first, each with
+  where it is, and who may read a team member's Run. A team member's Run is
+  listed and read (`GET /runs/{id}`) only on a task the caller can see, by
+  someone on its owner's team; one with no task stays its owner's, and only
+  the owner acts on a Run. A Run the caller cannot see never shapes a
+  page: the board reads on past them, in up to five rounds of at least 50
+  Runs, until it has one Run the caller sees past the page; `next` names
+  the last Run listed, and only while such a Run follows, so a page of
+  hidden Runs alone reads as no Run. Past five rounds of hidden Runs in a
+  row (some 250) the page ends there, with no next page, and says it
+  stopped early (`stoppedEarly`) only on a board no filter or search
+  narrows, so the flag never tells how many hidden Runs match a filter. A team member's
+  Run on a task that is not a live task is hidden without asking; the
+  others' tasks are asked in one check a round (`TaskDirectory::
+  viewable_documents`, entity access's batch receipts), and each answer is
+  kept 30 s. Only the owner's read of a Run whose workflow never started
+  ends it.
 - `flows/`: the built-in Flows, each named for its file
   (`src/domain/built_in_flows.rs`). `GET /flows` lists those whose Steps the
   worker serves, with their `description` and whether they work on a

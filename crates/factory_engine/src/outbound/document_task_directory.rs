@@ -1,6 +1,8 @@
 //! [`TaskDirectory`] over Macro's entity access checks and the document
 //! storage service.
 
+use std::collections::BTreeSet;
+
 use agent_session::domain::session_task::TaskDocumentId;
 use document_storage_service_client::DocumentStorageServiceClient;
 use document_storage_service_client::task::{CreateTaskError, NewTask};
@@ -100,6 +102,24 @@ impl<A: EntityAccessService> TaskDirectory for DocumentTaskDirectory<A> {
         } else {
             Ok(TaskAccess::NotATask)
         }
+    }
+
+    #[tracing::instrument(err, skip_all, fields(documents = document_ids.len()))]
+    async fn viewable_documents(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        document_ids: &[Uuid],
+    ) -> Result<BTreeSet<Uuid>, Self::Err> {
+        let ids: Vec<String> = document_ids.iter().map(Uuid::to_string).collect();
+        let receipts = self
+            .access
+            .generate_document_view_access_receipts(&user_id.0, &ids)
+            .await
+            .map_err(DocumentTaskDirectoryErr::Access)?;
+        Ok(receipts
+            .keys()
+            .filter_map(|id| Uuid::parse_str(id).ok())
+            .collect())
     }
 
     #[tracing::instrument(err, skip(self, user_id))]

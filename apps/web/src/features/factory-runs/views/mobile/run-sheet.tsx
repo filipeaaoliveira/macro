@@ -75,7 +75,7 @@ export function MobileRunSheet(props: {
           </MobileDrawer.Title>
           <Show when={source.data()}>
             {(run) => (
-              <Show when={!run().end}>
+              <Show when={props.controller.owned() && !run().end}>
                 <div class="flex shrink-0 flex-col gap-3 px-5 pb-3">
                   <Show when={props.controller.waiting()}>
                     {(waiting) => (

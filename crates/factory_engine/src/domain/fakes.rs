@@ -1,6 +1,7 @@
 //! In-memory stand-ins for the factory's records, for the domain's tests.
 
 mod automations;
+mod board;
 mod flaws;
 mod gate_owner;
 mod gate_replies;
@@ -132,6 +133,8 @@ pub(crate) struct FakeRepo {
     pub(crate) documents: Arc<Mutex<BTreeSet<Uuid>>>,
     /// The task documents a user cannot see: their id and the task's.
     pub(crate) hidden: Arc<Mutex<BTreeSet<(String, Uuid)>>>,
+    /// How many batch view checks were asked.
+    pub(crate) view_checks: Arc<Mutex<usize>>,
     /// The commit each Run last asked a person to merge.
     pub(crate) merge_heads: Arc<Mutex<BTreeMap<RunId, String>>>,
     /// Told each time a Gate opens.
@@ -238,6 +241,22 @@ impl TaskDirectory for FakeRepo {
         } else {
             Ok(TaskAccess::NotFound)
         }
+    }
+
+    async fn viewable_documents(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        document_ids: &[Uuid],
+    ) -> Result<BTreeSet<Uuid>, FakeError> {
+        *self.view_checks.lock().expect("view checks") += 1;
+        // As entity access: whether the document is a task, or trashed, is
+        // not its to say.
+        let hidden = self.hidden.lock().expect("hidden");
+        Ok(document_ids
+            .iter()
+            .copied()
+            .filter(|id| !hidden.contains(&(user_id.as_ref().to_string(), *id)))
+            .collect())
     }
 
     async fn task_project(
@@ -462,6 +481,7 @@ impl RunRepository for FakeRepo {
             request,
             user_id,
             task_id,
+            project_id,
             repository,
             created_in_person,
             control_file_patterns,
@@ -496,13 +516,16 @@ impl RunRepository for FakeRepo {
             id,
             request: request.to_string(),
             user_id: user_id.clone(),
+            flow: Some(flow.to_string()),
             created_at: Utc::now(),
             task_id,
+            project_id,
             repository: repository.cloned(),
             created_in_person,
             control_file_patterns: Some(control_file_patterns.to_vec()),
             control_files_team_id,
             control_files: None,
+            pull_request_url: None,
             standing_rules: Some(standing_rules),
             automation: automation.map(|start| start.automation.clone()),
             definition: definition.map(|definition| RunDefinition {
@@ -549,6 +572,16 @@ impl RunRepository for FakeRepo {
             .lock()
             .expect("merge heads")
             .insert(id, sha.to_string());
+        Ok(())
+    }
+
+    async fn set_pull_request_url(&self, id: RunId, url: &str) -> Result<(), FakeError> {
+        if self.fails("set_pull_request_url") {
+            return Err(FakeError);
+        }
+        if let Some(run) = self.runs.lock().expect("runs").get_mut(&id) {
+            run.pull_request_url = Some(url.to_string());
+        }
         Ok(())
     }
 

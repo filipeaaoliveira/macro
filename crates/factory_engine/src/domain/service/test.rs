@@ -24,6 +24,7 @@ use crate::domain::ports::{
 };
 
 mod automations;
+mod board;
 mod control_files;
 mod definition;
 mod gate_owner;
@@ -292,6 +293,7 @@ async fn julia_s_run(repo: &FakeRepo) -> RunId {
             request: "Plan",
             user_id: &julia(),
             task_id: None,
+            project_id: None,
             repository: None,
             created_in_person: false,
             control_file_patterns: &[],
@@ -1216,6 +1218,7 @@ async fn a_task_s_list_holds_its_owner_s_fifty_newest_runs() {
                 request: &format!("Run {n}"),
                 user_id: &julia(),
                 task_id: Some(task_id),
+                project_id: None,
                 repository: None,
                 created_in_person: false,
                 control_file_patterns: &[],

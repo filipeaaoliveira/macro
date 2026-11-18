@@ -1,5 +1,6 @@
 //! Axum router for the Run API.
 
+mod board;
 mod control_files;
 mod definition;
 mod main_hold;
@@ -16,6 +17,7 @@ use axum::{
     response::IntoResponse,
     routing::{get, post, put},
 };
+use factory_records::domain::board::BoardState;
 use factory_records::domain::models::{
     AskedBack, ControlFileChanges, EntryId, FlawMarker, Gate, GateAnswer, GateModelReading, HandBack,
     Outcome, Run, RunDefinition, RunEnd, RunFlaw, RunId, RunOutcome, StandInAnswer, Steer,
@@ -30,6 +32,7 @@ use model_error_response::ErrorResponse;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::domain::board::{BoardNext, BoardPage, BoardRun, BoardScope};
 use crate::domain::models::{
     Answerer, ControlFilesSettings, DefinitionSettings, FactoryError, FlowSummary, PersonOnly,
     RunDetail, SessionStepRef, StandingRulesSettings,
@@ -83,6 +86,8 @@ impl<S, Auth> FromRef<FactoryRouterState<S, Auth>> for MacroAuthorizationState<A
 ///
 /// Routes:
 /// - `GET /flows` — the built-in Flows a Run can be started of.
+/// - `GET /runs` — a page of the board: the caller's Runs, or their
+///   team's on tasks they can see, newest first, by where each one is.
 /// - `POST /runs` — create a Run of a built-in Flow, owned by the acting
 ///   user, and start it, unless it holds as many places in its Queue as the
 ///   Queue limit: Runs waiting on it, and Runs yet to reach their first Gate.
@@ -90,7 +95,8 @@ impl<S, Auth> FromRef<FactoryRouterState<S, Auth>> for MacroAuthorizationState<A
 ///   first.
 /// - `GET /runs/waiting` — the caller's Runs that wait on them at a Gate,
 ///   newest first, and those that hold a place before their first Gate.
-/// - `GET /runs/{id}` — read a Run and the Steps it took.
+/// - `GET /runs/{id}` — read a Run and the Steps it took: the caller's, or
+///   a team member's on a task they can see.
 /// - `POST /runs/{id}/steps/{seq}/answer` — answer the Gate of the Run's
 ///   Step `seq`.
 /// - `POST /runs/{id}/steps/{seq}/reply` — reply to it in words, which the
@@ -132,7 +138,10 @@ where
 {
     Router::new()
         .route("/flows", get(list_flows_handler::<S, Auth>))
-        .route("/runs", post(create_run_handler::<S, Auth>))
+        .route(
+            "/runs",
+            get(board::list_board_handler::<S, Auth>).post(create_run_handler::<S, Auth>),
+        )
         .route(
             "/tasks/{task_id}/runs",
             get(list_task_runs_handler::<S, Auth>),
@@ -1092,6 +1101,7 @@ impl FactoryError {
         match self {
             FactoryError::InvalidFlow(_)
             | FactoryError::EmptyRequest
+            | FactoryError::HalfCursor
             | FactoryError::RequestTooLarge { .. }
             | FactoryError::NoteTooLarge { .. }
             | FactoryError::EmptyNote
@@ -1238,6 +1248,7 @@ impl IntoResponse for FactoryError {
         list_flows_handler,
         list_task_runs_handler,
         list_waiting_runs_handler,
+        board::list_board_handler,
         create_run_handler,
         get_run_handler,
         answer_gate_handler,
@@ -1264,6 +1275,11 @@ impl IntoResponse for FactoryError {
         FlowSummary,
         TaskRunsResponse,
         WaitingRunsResponse,
+        BoardPage,
+        BoardRun,
+        BoardNext,
+        BoardState,
+        BoardScope,
         CreateRunRequest,
         AnswerGateRequest,
         ReplyToGateRequest,

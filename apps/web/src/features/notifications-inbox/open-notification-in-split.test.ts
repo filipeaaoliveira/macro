@@ -222,6 +222,7 @@ function taskRow(notifications: UnifiedNotification[]): NotificationInboxRow {
   return {
     id: 'task:task-1',
     type: 'task',
+    alsoListedAs: [],
     revision: 'rev-1',
     latestAt: 1,
     unseen: true,

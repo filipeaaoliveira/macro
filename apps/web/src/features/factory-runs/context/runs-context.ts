@@ -93,6 +93,11 @@ export type RunsContext = {
   taskRuns: (taskId: Accessor<string>) => RunsSource<Run[]>;
   /** One Run; kept current until it ends. */
   run: (runId: Accessor<string>) => RunsSource<Run>;
+  /**
+   * The signed-in person's user id: a Run of someone else's, a team
+   * member's they can read, opens without its owner's controls.
+   */
+  viewerId?: Accessor<string | undefined>;
   /** The person's Runs that hold a place in their Queue. */
   waitingRuns: () => RunsSource<RunsQueue>;
   flows: () => RunsSource<Flow[]>;

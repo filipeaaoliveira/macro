@@ -37,7 +37,12 @@ function gateKey(step: Pick<RunStep, 'seq'>): number {
 export function createRunController(
   context: Pick<
     RunsContext,
-    'run' | 'answerGate' | 'replyToGate' | 'cancelRun' | 'steerStep'
+    | 'run'
+    | 'answerGate'
+    | 'replyToGate'
+    | 'cancelRun'
+    | 'steerStep'
+    | 'viewerId'
   >,
   runId: () => string
 ) {
@@ -196,8 +201,18 @@ export function createRunController(
     return result;
   };
 
+  // Only its owner answers, cancels or steers a Run; a team member reads it.
+  // The Run is the person's only once both its owner and they are known.
+  const owned = () => {
+    const owner = source.data()?.ownerId;
+    const viewer = context.viewerId?.();
+    return owner !== undefined && viewer !== undefined && owner === viewer;
+  };
+
   return {
     source,
+    /** Whether the person owns the Run, and so acts on it. */
+    owned,
     status,
     waiting,
     note,

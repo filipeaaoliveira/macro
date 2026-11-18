@@ -135,6 +135,7 @@ async fn second_round(repo: &FakeRepo, blockers: &[&str], fix_diff: bool) -> (Ru
             request: "Add dark mode",
             user_id: &JULIA,
             task_id: None,
+            project_id: None,
             repository: Some(&REPOSITORY),
             created_in_person: false,
             control_file_patterns: &[],

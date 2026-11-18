@@ -33,7 +33,7 @@ const PasswordsRouteView = lazyNamed(
 );
 const FactoryRunView = lazyNamed(
   () => import('@app/features/factory-runs/factory-runs'),
-  'FactoryInsights'
+  'FactoryRun'
 );
 const ActivityRouteView = lazyNamed(
   () => import('@app/features/activity/route-views'),
@@ -291,10 +291,10 @@ registerComponent(
   () => composableLayout()
 );
 registerComponent('activity', () => <ActivityRouteView />);
-// A factory Run's notification opens the Run over the person's insights.
+// A factory Run's notification opens the Run as a pane of its own.
 registerComponent('factory-run', (params) => (
   <FactoryRunView
-    openRunId={typeof params.runId === 'string' ? params.runId : undefined}
+    runId={typeof params.runId === 'string' ? params.runId : ''}
   />
 ));
 registerComponent(

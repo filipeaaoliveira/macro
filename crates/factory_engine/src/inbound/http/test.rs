@@ -36,6 +36,7 @@ use crate::domain::pull_request_steps::PullRequestSteps;
 use crate::domain::service::FactoryServiceImpl;
 use crate::outbound::local_agent::LocalAgent;
 
+mod board;
 mod control_files;
 mod flaws;
 mod orchestrator;
@@ -230,6 +231,14 @@ impl FactoryService for FakeService {
         &self,
         actor: &MacroUserIdStr<'static>,
     ) -> Result<Vec<RunDetail>, FactoryError> {
+        Err(self.refusing(actor))
+    }
+
+    async fn board(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        _filter: crate::domain::board::BoardFilter,
+    ) -> Result<crate::domain::board::BoardPage, FactoryError> {
         Err(self.refusing(actor))
     }
 
@@ -467,6 +476,7 @@ async fn alice_s_run(repo: &FakeRepo) -> RunId {
             request: "Plan the export",
             user_id: &alice,
             task_id: None,
+            project_id: None,
             repository: None,
             created_in_person: false,
             control_file_patterns: &[],
@@ -1112,6 +1122,7 @@ async fn a_run_at_its_merge_on_a_held_base_shows_the_main_hold() {
             request: "Add dark mode",
             user_id: &alice,
             task_id: None,
+            project_id: None,
             repository: Some(base),
             created_in_person: false,
             control_file_patterns: &[],

@@ -10,7 +10,10 @@ import type { RunAutomationProperty } from './runAutomationProperty';
 import type { RunControlFiles } from './runControlFiles';
 import type { RunDefinitionProperty } from './runDefinitionProperty';
 import type { RunEndProperty } from './runEndProperty';
+import type { RunFlow } from './runFlow';
 import type { RunId } from './runId';
+import type { RunProjectId } from './runProjectId';
+import type { RunPullRequestUrl } from './runPullRequestUrl';
 import type { RunRepository } from './runRepository';
 import type { RunStandingRules } from './runStandingRules';
 import type { RunTaskId } from './runTaskId';
@@ -29,8 +32,18 @@ the Control Files it names. */
   createdInPerson: boolean;
   definition?: RunDefinitionProperty;
   end?: RunEndProperty;
+  /** The built-in Flow it walks, by name; none only for a Run recorded
+before Runs kept it. */
+  flow?: RunFlow;
   /** The Run's id, also its Temporal workflow id. */
   id: RunId;
+  /** The Project (an initiative) its task was in when it was created,
+kept as a record: none without a task or Project, and for a Run
+created before Runs kept it. */
+  projectId?: RunProjectId;
+  /** The page of the pull request its branch proposes its change in, as
+the pull request Steps last found it; none until one is found. */
+  pullRequestUrl?: RunPullRequestUrl;
   repository?: RunRepository;
   /** What the Run was asked to do. */
   request: string;

@@ -1,6 +1,7 @@
 //! Domain layer of the factory's records.
 
 pub mod automations;
+pub mod board;
 pub mod flaws;
 pub mod gate_replies;
 pub mod insights;

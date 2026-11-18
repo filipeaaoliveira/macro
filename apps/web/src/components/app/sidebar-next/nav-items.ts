@@ -33,6 +33,8 @@ import PhoneCallIcon from '@icon/system/regular/phone-call.svg';
 import PlugIcon from '@icon/system/regular/plug.svg';
 import PulseIcon from '@icon/system/regular/pulse.svg';
 import AgentIcon from '@icon/system/regular/sparkle.svg';
+import FactoryIcon from '@phosphor/factory.svg';
+import FactoryFillIcon from '@phosphor-fill/factory-fill.svg';
 import PulseFillIcon from '@phosphor-fill/pulse-fill.svg';
 import type { NavIcon } from './nav-glyph';
 import type { SidebarPrefs } from './use-sidebar-prefs';
@@ -216,6 +218,15 @@ export const SIDEBAR_NEXT_NAV_ITEMS = [
     hotkeyToken: TOKENS.sidebar.goTo.activity,
   },
   {
+    id: 'factory',
+    get label() {
+      return t('nav.factory');
+    },
+    href: '/factory',
+    icon: FactoryIcon,
+    iconActive: FactoryFillIcon,
+  },
+  {
     id: 'booking-links',
     get label() {
       return t('nav.scheduling');
@@ -246,6 +257,8 @@ export type NavItemGates = {
   showActivity: boolean;
   showExternal: boolean;
   showPasswords: boolean;
+  /** Behind the factory Runs flag. */
+  showFactory: boolean;
   /** User preferences for which items are shown and in what order. */
   prefs: SidebarPrefs;
 };
@@ -262,6 +275,7 @@ export const isNavItemAvailable = (
   if (item.id === 'activity') return gates.showActivity;
   if (item.id === 'passwords') return gates.showPasswords;
   if (item.id === 'external') return gates.showExternal;
+  if (item.id === 'factory') return gates.showFactory;
   return true;
 };
 

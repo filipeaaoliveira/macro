@@ -35,6 +35,7 @@ async fn a_run_keeps_how_it_was_created(pool: PgPool) {
                 request: "Fix it",
                 user_id: &julia(),
                 task_id: None,
+                project_id: None,
                 repository: None,
                 created_in_person: in_person,
                 control_file_patterns: &patterns,

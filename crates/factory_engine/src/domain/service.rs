@@ -1,6 +1,7 @@
 //! The factory's use cases: starting and reading Runs, and running their
 //! Steps.
 
+mod board;
 mod definition;
 #[cfg(test)]
 mod test;
@@ -13,6 +14,7 @@ use chrono::Utc;
 use factory_records::domain::automations::{
     Automation, AutomationRepository, AutomationStart, RunAutomation,
 };
+use factory_records::domain::board::RunBoardRepository;
 use factory_records::domain::flaws::FlawRepository;
 use factory_records::domain::main_hold::{BaseState, MainHoldRepository};
 use factory_records::domain::models::{
@@ -29,6 +31,7 @@ use factory_records::domain::standing_rules::{
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
+use crate::domain::board::{BoardFilter, BoardPage};
 use crate::domain::built_in_flows::BUILT_IN_FLOWS;
 use crate::domain::control_files::ControlFiles;
 use crate::domain::definition::DEFINITION_FILE_PATTERNS;
@@ -124,6 +127,7 @@ pub struct FactoryServiceImpl<R, W, E, U, T, G> {
     github: G,
     review_rounds: Option<NonZeroU8>,
     questions: u8,
+    task_views: board::TaskViews,
 }
 
 impl<R, W, E, U, T, G> FactoryServiceImpl<R, W, E, U, T, G>
@@ -133,7 +137,8 @@ where
         + ReviewRoundRepository
         + StandingRulesRepository
         + AutomationRepository
-        + FlawRepository,
+        + FlawRepository
+        + RunBoardRepository,
     W: RunWorkflows,
     E: StepExecutor,
     U: UserDirectory,
@@ -151,7 +156,15 @@ where
             github,
             review_rounds: None,
             questions: DEFAULT_QUESTIONS,
+            task_views: board::TaskViews::default(),
         }
+    }
+
+    /// Keep the board's task views for `kept` each, in place of 30 s.
+    #[cfg(test)]
+    pub(crate) fn with_task_views_kept(mut self, kept: std::time::Duration) -> Self {
+        self.task_views = board::TaskViews::kept_for(kept);
+        self
     }
 
     /// Let each agent Step of the Runs it starts ask the Run's owner up to
@@ -236,15 +249,36 @@ where
         Ok((team, own))
     }
 
-    /// The Standing Rules a Run of `user_id`'s on the task `task_id` is
-    /// created with: its team's Factory Definition's when the team names
-    /// one; else the Project's own, when its owner's team set rules for the
-    /// Project the task is in, else the team's, else the factory's default.
-    async fn run_rules(
+    /// The Project the task `task_id` is in, as `user_id` sees it: none
+    /// without a task, or when it cannot be read now, which leaves a Run
+    /// its team's rules rather than refusing it.
+    async fn run_project(
         &self,
         user_id: &MacroUserIdStr<'static>,
-        team: Option<TeamMembership>,
         task_id: Option<Uuid>,
+    ) -> Option<Uuid> {
+        let task_id = task_id?;
+        match self.tasks.task_project(user_id, task_id).await {
+            Ok(project) => project,
+            Err(error) => {
+                tracing::warn!(
+                    ?error,
+                    %task_id,
+                    "the run task's project could not be read: the run takes its team's standing rules"
+                );
+                None
+            }
+        }
+    }
+
+    /// The Standing Rules a Run is created with, in the Project `project`
+    /// when its task is in one: its team's Factory Definition's when the
+    /// team names one; else the Project's own, when its owner's team set
+    /// rules for it, else the team's, else the factory's default.
+    async fn run_rules(
+        &self,
+        team: Option<TeamMembership>,
+        project: Option<Uuid>,
         definition: Option<&PinnedDefinition>,
     ) -> Result<RunRules, FactoryError> {
         // A team's Factory Definition holds its rules: neither the team's
@@ -264,33 +298,18 @@ where
         let Some(team) = team else {
             return Ok(RunRules::DEFAULT);
         };
-        if let Some(task_id) = task_id {
-            // A Project that cannot be read now leaves the Run the team's
-            // rules, rather than refusing the Run.
-            let project = match self.tasks.task_project(user_id, task_id).await {
-                Ok(project) => project,
-                Err(error) => {
-                    tracing::warn!(
-                        ?error,
-                        %task_id,
-                        "the run task's project could not be read: the run takes its team's standing rules"
-                    );
-                    None
-                }
-            };
-            if let Some(project_id) = project
-                && let Some(definition) = self
-                    .repo
-                    .project_rules(team.team_id, project_id)
-                    .await
-                    .map_err(internal)?
-            {
-                return Ok(RunRules {
-                    definition,
-                    source: RulesSource::Project,
-                    project_id: Some(project_id),
-                });
-            }
+        if let Some(project_id) = project
+            && let Some(definition) = self
+                .repo
+                .project_rules(team.team_id, project_id)
+                .await
+                .map_err(internal)?
+        {
+            return Ok(RunRules {
+                definition,
+                source: RulesSource::Project,
+                project_id: Some(project_id),
+            });
         }
         let own = self.repo.team_rules(team.team_id).await.map_err(internal)?;
         Ok(match own {
@@ -351,6 +370,25 @@ where
             .map_err(internal)?
             .filter(|run| run.user_id == *actor)
             .ok_or(FactoryError::NotFound)
+    }
+
+    /// The Run `id`, when `actor` may read it: their own, or a team
+    /// member's on a task they can see. Only its owner acts on it.
+    async fn readable_run(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        id: RunId,
+    ) -> Result<Run, FactoryError> {
+        let run = self
+            .repo
+            .get_run(id)
+            .await
+            .map_err(internal)?
+            .ok_or(FactoryError::NotFound)?;
+        if run.user_id == *actor || self.sees_teammates_run(actor, &run).await? {
+            return Ok(run);
+        }
+        Err(FactoryError::NotFound)
     }
 
     /// Whether `steps`' latest Step is at a merge: its entry runs
@@ -687,9 +725,8 @@ where
         // The Run keeps its Standing Rules the same way: a change to the
         // team's or the Project's rules, or a task linked later, does not
         // change which of its Gates a rule answers.
-        let standing_rules = self
-            .run_rules(&actor, team, task_id, definition.as_ref())
-            .await?;
+        + FlawRepository
+        + RunBoardRepository,
         // The Run and its task are kept in one write, so a task deleted
         // since it was checked leaves nothing behind. Once the owner holds
         // as many places as the Queue limit of the rules it would start
@@ -719,6 +756,7 @@ where
                     request: &request,
                     user_id: &actor,
                     task_id,
+                    project_id,
                     repository: repository.as_ref(),
                     created_in_person,
                     control_file_patterns: &control_file_patterns,
@@ -789,7 +827,10 @@ where
         + ReviewRoundRepository
         + StandingRulesRepository
         + AutomationRepository
-        + FlawRepository,
+        let project_id = self.run_project(&actor, task_id).await;
+        let standing_rules = self
+            .run_rules(team, project_id, definition.as_ref())
+            .await?;
     W: RunWorkflows,
     E: StepExecutor,
     U: UserDirectory,
@@ -904,16 +945,18 @@ where
         actor: &MacroUserIdStr<'static>,
         id: RunId,
     ) -> Result<RunDetail, FactoryError> {
-        let mut run = self.owned_run(actor, id).await?;
+        let mut run = self.readable_run(actor, id).await?;
         let steps = self.repo.list_steps(id).await.map_err(internal)?;
 
         // A Run kept when its workflow's start could not be checked, and
         // whose workflow never came, would wait forever: once it is old
         // enough that a started workflow would have taken a Step, and
-        // Temporal says it has no workflow, it ends `infrastructure`, as
-        // nothing of its work ever ran.
+        // Temporal says it has no workflow, its owner's read ends it
+        // `infrastructure`, as nothing of its work ever ran. A team
+        // member's read changes nothing.
         let stale = Utc::now() - run.created_at > UNSTARTED_AFTER;
-        if run.end.is_none()
+        if run.user_id == *actor
+            && run.end.is_none()
             && steps.is_empty()
             && stale
             && let Ok(false) = self.workflows.exists(id).await
@@ -967,6 +1010,15 @@ where
             .await
             .map_err(internal)?;
         self.details(runs).await
+    }
+
+    #[tracing::instrument(skip(self, actor, filter), fields(scope = ?filter.scope, state = ?filter.state))]
+    async fn board(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        filter: BoardFilter,
+    ) -> Result<BoardPage, FactoryError> {
+        self.board_page(actor, filter).await
     }
 
     async fn list_starting_runs(

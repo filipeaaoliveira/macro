@@ -31,6 +31,8 @@ the Gates they asked people in MacroDB, and defines the names Flows use
 - `src/domain/automations.rs` and
   `src/outbound/pg_run_repository/automations.rs`: `AutomationRepository`,
   teams' Automations and each time one fired.
+- `src/domain/board.rs` and `src/outbound/pg_run_repository/board.rs`:
+  `RunBoardRepository`, the board's read of Runs across tasks.
 - `src/domain/gate_replies.rs` and
   `src/outbound/pg_run_repository/gate_replies.rs`: `GateReplyRepository`,
   a person's answer read from their words, the factory asking back, the
@@ -69,6 +71,7 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261118143000_factory_automation.sql`,
   `20261118150000_factory_standing_rules_names.sql`,
   `20261118170000_factory_step_terminal.sql`,
+  `20261118190000_factory_run_board.sql`,
   `20261118213000_factory_definition.sql`,
   `20261118220000_factory_run_outcome_kinds.sql`), and `factory_step_steer`.
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
@@ -171,6 +174,29 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   whether an account is an agent's.
 - `factory_run.flow` is the built-in Flow's name, which `insert_run` keeps;
   it is null only for Runs recorded before it was.
+- `factory_run.project_id` is the Project the Run's task was in when it was
+  kept, set once by `insert_run` (`NewRun::project_id`): a record, not a
+  reference, null for Runs kept before it. `pull_request_url` is the page of
+  the Run's pull request, replaced by `set_pull_request_url` each time a
+  pull request Step finds it.
+- `board_runs` reads, for each owner (the person, and for a team's board
+  `team_user`'s members of `team_id`), their newest Runs past a
+  `(created_at, id)` cursor in order through `factory_run_user_created_idx`,
+  up to the limit, then merges the owners' Runs newest first and cuts them
+  to it; the states of Runs that go read through `factory_run_user_open_idx`
+  in a query of their own with a literal `ended_at IS NULL`. A first page
+  starts past the latest time there is. It runs under a 5 s timeout and
+  `plan_cache_mode = force_custom_plan`: a generic plan, which a reused
+  statement may get, cannot tell which filters are unset and reads and
+  sorts every Run of the owners (on 280k Runs, 90 to 330 ms against 0.2 to
+  0.5 ms). Where a Run is (`BoardState`) is read in the same query: its
+  outcome, an unanswered Gate, and for a Run whose latest Step is one of the
+  given merge entries, its base's Main Hold, each by primary key; it also
+  reads whether its task is a live task (`task_live`: a task document, not
+  trashed) and, only then, its name. A search reads the request and a live
+  task's name with `ILIKE`, its `%`, `_` and `\` literal, and so reads
+  every Run of the owners (some 200 ms on 280k). A held Run is held only at
+  its merge, so a merged Run is `finished`.
 - `read_insights` reads one person's newest Runs in a period through
   `factory_run_user_created_idx` (`user_id, created_at DESC, id DESC`), up to
   its cap (one past it, to tell whether Runs were left out), then their Steps

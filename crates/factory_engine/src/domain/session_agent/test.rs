@@ -434,6 +434,7 @@ async fn plan_task(repo: &FakeRepo) -> AgentTask {
             request: "Add a dark mode toggle",
             user_id: &julia(),
             task_id: None,
+            project_id: None,
             repository: None,
             created_in_person: false,
             control_file_patterns: &[],

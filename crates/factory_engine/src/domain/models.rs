@@ -773,6 +773,9 @@ pub enum FactoryError {
     /// No Run has this id.
     #[error("run not found")]
     NotFound,
+    /// A page of the board names half of where it starts.
+    #[error("afterCreatedAt and afterId go together")]
+    HalfCursor,
     /// No task the Run's owner can see has this id.
     #[error("no task the run's owner can see has this id")]
     UnknownTask,

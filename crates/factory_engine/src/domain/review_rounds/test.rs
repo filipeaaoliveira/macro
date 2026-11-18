@@ -47,6 +47,7 @@ async fn code_run(repo: &FakeRepo) -> RunId {
             request: "Add dark mode",
             user_id: &julia(),
             task_id: Some(TASK),
+            project_id: None,
             repository: Some(&repository),
             created_in_person: false,
             control_file_patterns: &[],

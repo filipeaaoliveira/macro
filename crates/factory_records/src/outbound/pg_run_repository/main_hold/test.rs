@@ -35,6 +35,7 @@ async fn code_run(repo: &PgRunRepository, repository: Option<&Repository>) -> Ru
             request: "Add dark mode",
             user_id: &julia,
             task_id: None,
+            project_id: None,
             repository,
             created_in_person: false,
             control_file_patterns: &[],

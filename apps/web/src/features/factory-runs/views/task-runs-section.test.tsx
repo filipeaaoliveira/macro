@@ -59,6 +59,7 @@ vi.stubGlobal(
 const running: Run = {
   id: 'run-1',
   request: 'Rename the column',
+  ownerId: 'macro|julia@example.com',
   createdAt: '2026-11-16T09:00:00Z',
   taskId: 'task-1',
   steps: [
@@ -69,6 +70,7 @@ const running: Run = {
 const started: Run = {
   id: 'run-2',
   request: 'Add a due date column',
+  ownerId: 'macro|julia@example.com',
   createdAt: '2026-11-16T10:00:00Z',
   taskId: 'task-1',
   steps: [],
@@ -89,6 +91,7 @@ function mount(
   const [list, setList] = createSignal(runs);
   const openedRuns: string[] = [];
   const context: RunsContext = {
+    viewerId: () => 'macro|julia@example.com',
     taskRuns: () => ({
       state: options.listState ?? (() => 'ready'),
       data: () => (options.listState?.() === 'error' ? undefined : list()),

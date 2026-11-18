@@ -18,6 +18,10 @@ export const BookingLinksRouteView = lazyNamed(
   () => import('@app/features/scheduling/route-views'),
   'BookingLinksRouteView'
 );
+export const FactoryBoardRouteView = lazyNamed(
+  () => import('@app/features/factory-runs/route-views'),
+  'FactoryBoardRouteView'
+);
 export const FactoryInsightsRouteView = lazyNamed(
   () => import('@app/features/factory-runs/route-views'),
   'FactoryInsightsRouteView'

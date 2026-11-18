@@ -157,7 +157,6 @@ function mount(options: {
   state?: Accessor<'pending' | 'error' | 'ready'>;
   insights?: RunInsights;
   retry?: () => void;
-  openRunId?: Accessor<string | undefined>;
   queue?: RunsQueue;
 }) {
   const asked: InsightsParams[] = [];
@@ -210,7 +209,6 @@ function mount(options: {
         <RunInsightsView
           timeZone="Europe/Lisbon"
           now={() => new Date('2026-11-11T12:00:00Z')}
-          openRunId={options.openRunId?.()}
         />
       </InsightsProvider>
     </RunsProvider>
@@ -386,15 +384,5 @@ describe('RunInsightsView', () => {
 
     expect(screen.getByText('Waiting on you')).toBeTruthy();
     expect(screen.getByText('Plan the archive')).toBeTruthy();
-  });
-
-  it('opens the run a link names, and another link’s run in the same view', async () => {
-    const [runId, setRunId] = createSignal<string | undefined>();
-    mount({ insights: november, openRunId: runId });
-    expect(screen.queryByText('No steps yet')).toBeNull();
-
-    setRunId(failedImport.id);
-
-    expect(await screen.findByText('No steps yet')).toBeTruthy();
   });
 });

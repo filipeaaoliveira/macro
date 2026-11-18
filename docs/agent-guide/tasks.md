@@ -1476,7 +1476,28 @@ an agent on the person's own computer). The page reads at most the newest
 1,000 Runs of a period. Above them, **Waiting on you** lists the person's
 Runs stopped at a Gate no one answered yet, newest first (none shows when
 none waits); each opens the Run to answer it. `/app/factory/runs/<run id>`
-opens one Run over the page, as a Run's notification does.
+opens one Run as a pane of its own, as a Run's notification does.
+
+**Factory** in the sidebar (`/app/factory`, behind the same flag) is the
+factory's board: every Run the person can see, grouped by where it is
+(**Waiting on a person**, **Held** at its merge by a Main Hold, **Running**,
+**Stopped for a person**, **Finished**; a merged Run is finished). **Mine**
+lists their own Runs, **My team** their team members' too, on tasks the
+person can see. The state tabs, the filter popover (Flow, repository,
+Project) and the search by task narrow it; **Show more** reads the next 25,
+and while more follow a group's count reads as loaded (`25+`). Each row
+shows the task (or the request), its Step with the Role and Agent on it or
+who it waits on, the repository, Flow and who started it (the owner, the
+Orchestrator for them, or an Automation), how long it has been there, its
+open Blockers and a link to its pull request. A row opens the Run in a pane
+beside the board; a team member's Run opens without its Gate's answers,
+Cancel run or the Step Terminal, which stay its owner's. Above the list, the
+person's Queue (places held against its limit) and the Runs waiting on
+them. The board is read again every 15 seconds while a Run it shows goes,
+every minute otherwise. A team member's Runs on tasks the person can't see
+are left out; past some 250 of them in a row, a page stops there with no
+**Show more**, and the board says older runs may be missing. A Run whose
+task was trashed shows its request as its title.
 
 Team settings' **Standing rules** section also has **Send undecided gates
 to the run's owner** (off by default). With it on, a Gate no rule answers,

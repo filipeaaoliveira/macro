@@ -65,6 +65,7 @@ async fn run_of_on(
         request: "Add dark mode",
         user_id: owner,
         task_id: Some(run_task()),
+        project_id: None,
         repository: Some(repository),
         created_in_person: false,
         control_file_patterns: &[],
