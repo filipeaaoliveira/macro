@@ -89,6 +89,10 @@ impl Work for Script {
                 outcome: Outcome::no_result(),
                 output: format!("Step {} stopped here.", request.key.seq),
             }),
+            Some("blockers") => Ok(StepReport {
+                outcome: Outcome::try_from("blockers".to_string()).expect("valid"),
+                output: "A clause does not hold".to_string(),
+            }),
             _ => Ok(StepReport {
                 outcome: Outcome::done(),
                 output: "The plan".to_string(),
@@ -769,4 +773,89 @@ async fn stopping_a_step_without_a_result_never_asks_the_entry_s_gate_after_fail
         "{asked:?}"
     );
     assert_eq!(asked.last().map(String::as_str), Some("stop 1"));
+}
+
+/// An `accept` entry, as the `code` Flow has it: a single Step whose
+/// Blockers Gate opens on `blockers`.
+fn accept() -> Entry {
+    let flow = Flow::parse(
+        json!({ "entries": [{
+            "id": "accept",
+            "step": "accept",
+            "role": "verifier",
+            "max_visits": 3,
+            "gate": {
+                "kind": "blockers",
+                "after": "blockers",
+                "question": "Fix it?",
+                "answers": ["fix", "stop"]
+            }
+        }] }),
+        |_| Some(StepUse::Agent),
+    )
+    .expect("valid flow");
+    flow.entries[0].clone()
+}
+
+/// A verifier that stopped without a result opens only its owner's Gate,
+/// never the entry's Blockers Gate as well. The Step that goes on from the
+/// owner's `retry` is the same visit: when it finds blockers, the Blockers
+/// Gate asks with the fixes of the visits before this one (none at the
+/// first), which the retried Step does not add to.
+#[tokio::test]
+async fn a_retried_verifier_s_blockers_count_the_visits_not_the_retry() {
+    let script = Script {
+        ends: [(1, "no_result"), (2, "blockers")].into(),
+        answers: RefCell::new(vec![Outcome::retry(), Outcome::stop()]),
+        ..Script::default()
+    };
+    let entry = accept();
+    let key = StepKey {
+        run_id: RunId::generate(),
+        seq: 1,
+    };
+    let request = asking(0).offer(StepRequest::of(key, &entry, 1), 0);
+    let mut held = Vec::new();
+    let mut next = 2;
+    let mut resume = || {
+        let seq = Some(next);
+        next += 1;
+        seq
+    };
+
+    let walked = walk_step(&script, &entry, request, asking(0), &mut held, &mut resume).await;
+
+    assert_eq!(walked, Ok(Round::Routed(Outcome::stop())));
+    assert_eq!(
+        asked_briefly(&script),
+        [
+            "start 1",
+            "run 1",
+            "end 1 no_result",
+            "ask 1 The agent stopped without handing back a result, even once reminded. Retry the step in the same session, or stop it? The agent's last message:",
+            "start 2",
+            "run 2",
+            "end 2 blockers",
+            "release 2",
+            "ask 2 Fix it?"
+        ]
+    );
+    assert_eq!(script.requests.borrow()[1].visit, 1);
+    assert_eq!(
+        *script.asked_with.borrow(),
+        [
+            Some(Asking {
+                kind: None,
+                person_only: true,
+                fix_rounds: 0,
+                fix_limit: 0,
+            }),
+            Some(Asking {
+                kind: Some(factory_records::domain::standing_rules::RuleGateKind::Blockers),
+                person_only: false,
+                fix_rounds: 0,
+                fix_limit: crate::domain::standing_rules::rule_fix_limit(entry.max_visits),
+            }),
+        ]
+    );
 }
