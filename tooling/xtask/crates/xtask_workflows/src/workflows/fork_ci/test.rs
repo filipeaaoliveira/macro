@@ -65,3 +65,49 @@ fn the_gate_always_runs_after_every_job() {
         .collect();
     assert_eq!(gate["needs"], serde_json::json!(others));
 }
+
+/// `changes` builds the package filter from the pull request's code, so its
+/// scripts run only for a trusted pull request.
+#[test]
+fn changes_runs_scripts_only_for_trusted_pull_requests() {
+    let job = serde_json::to_value(changes()).unwrap();
+    let scripts: Vec<&serde_json::Value> = job["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|step| step.get("run").is_some())
+        .collect();
+
+    assert_eq!(scripts.len(), 2);
+
+    for step in scripts {
+        let condition = step["if"].as_str().unwrap();
+        assert!(
+            condition.starts_with(
+                "github.event_name == 'pull_request' && (github.event_name == 'workflow_dispatch' || \
+                 github.event.pull_request.head.repo.full_name == github.repository)"
+            ),
+            "{}: {condition}",
+            step["name"]
+        );
+    }
+}
+
+/// A manual run checks every package, with the live-Postgres tests.
+#[test]
+fn a_manual_run_checks_every_package() {
+    let job = serde_json::to_value(changes()).unwrap();
+
+    assert!(
+        job["outputs"]["rust_packages"]
+            .as_str()
+            .unwrap()
+            .starts_with("${{ github.event_name == 'workflow_dispatch' && 'all' ||")
+    );
+    assert!(
+        job["outputs"]["skip_tests"]
+            .as_str()
+            .unwrap()
+            .starts_with("${{ github.event_name == 'pull_request' &&")
+    );
+}

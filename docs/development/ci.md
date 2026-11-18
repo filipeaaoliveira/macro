@@ -28,12 +28,21 @@ A fork has no Namespace runners, so `PR CI`'s checks queue there forever.
 nextest against Postgres and Redis for the Rust packages the pull request
 affects; Biome, the app's types and the affected Vitest tests for the web app.
 `changes` picks them with `PR CI`'s own path filters and nextest package filter.
-The runner may set `CI_CACHE_DIR` to a directory kept between jobs, for target
-directories and wasm packages.
+A manual run checks the whole branch. The runner may set `CI_CACHE_DIR` to a
+directory kept between jobs, for target directories and wasm packages.
 
-Only branches pushed to the fork reach the runner. `Fork CI gate` is the check
-to require: it fails for a pull request from another repository, and when any
-check failed or was cancelled. A check its filter skipped counts as passed.
+`Fork CI gate` is the check to require: it fails for a pull request from another
+repository, and when any check failed or was cancelled. A check its filter
+skipped counts as passed.
+
+The workflow's jobs run on the self-hosted runner only for branches pushed to
+the fork. That condition is not what protects the runner: a pull request from
+another repository runs its own copy of the workflow, which can drop it. The
+protection is the fork's Actions setting "Require approval for all external
+contributors", which must stay on. Never approve a run for a pull request from
+another repository. A pull request from the upstream repository is one too, so
+sync upstream through a branch of the fork: push upstream's `main` to a fork
+branch and open the pull request from there.
 
 ## Email end-to-end suites
 

@@ -9,8 +9,14 @@
 //! request affects; Biome, the app's types and the affected Vitest tests for
 //! the web app. `Fork CI gate` is the one check a branch rule requires.
 //!
-//! Only branches pushed to the fork itself reach the self-hosted runner. A
-//! pull request from another repository fails the gate instead.
+//! Only branches pushed to the fork itself reach the self-hosted runner, and a
+//! pull request from another repository fails the gate. That condition is not
+//! the protection: such a pull request runs its own copy of this workflow, with
+//! the condition removed if it likes. The protection is the fork's Actions
+//! setting "Require approval for all external contributors", which must stay on,
+//! and never approving a run from another repository's pull request. A pull
+//! request from the upstream repository counts as one, so an upstream sync
+//! goes through a branch of the fork instead.
 
 use gh_workflow::{
     Concurrency, Event, Expression, Job, Level, Permissions, PullRequest, PullRequestType, Run,
@@ -38,8 +44,9 @@ const HOSTED_RUNNER: &str = "ubuntu-latest";
 pub const GATE_NAME: &str = "Fork CI gate";
 
 /// A manual run, or a pull request from a branch of this repository. Jobs on
-/// [`RUNNER`] run only then: a pull request from another repository would
-/// otherwise run its code on the self-hosted runner.
+/// [`RUNNER`] run only then. This only keeps this repository's copy of the
+/// workflow from running another repository's code; see the module docs for
+/// what protects the runner.
 const TRUSTED: &str = "github.event_name == 'workflow_dispatch' || \
      github.event.pull_request.head.repo.full_name == github.repository";
 
@@ -79,9 +86,10 @@ pub fn fork_ci() -> Workflow {
 }
 
 /// Decide which checks run, and the Rust packages they cover: the same filters
-/// and scripts as `cloud storage code check` and `Web App Pr Checks`. Runs no
-/// pull request code beyond the filter's own build, so it stays on a hosted
-/// runner. A manual run skips the filters and checks the branch's last commit.
+/// and scripts as `cloud storage code check` and `Web App Pr Checks`. Builds
+/// the package filter from the pull request's code, so it runs on a hosted
+/// runner, and only for a trusted pull request. A manual run skips the filters
+/// and checks the whole branch: every package, every web file.
 fn changes() -> Job {
     let rust = "github.event_name == 'workflow_dispatch' \
          || steps.rust-filter.outputs.should_run == 'true' \
@@ -89,6 +97,11 @@ fn changes() -> Job {
     let web = "github.event_name == 'workflow_dispatch' \
          || steps.web-filter.outputs.should_run == 'true' \
          || steps.fork-filter.outputs.should_run == 'true'";
+    let scope_rust = format!(
+        "github.event_name == 'pull_request' && ({TRUSTED}) \
+         && (steps.rust-filter.outputs.should_run == 'true' \
+         || steps.fork-filter.outputs.should_run == 'true')"
+    );
 
     Job::default()
         .timeout_minutes(20u32)
@@ -103,15 +116,16 @@ fn changes() -> Job {
         .add_output("web", format!("${{{{ {web} }}}}"))
         .add_output(
             "rust_packages",
-            "${{ steps.nextest-filter.outputs.rust_packages }}",
+            "${{ github.event_name == 'workflow_dispatch' && 'all' \
+             || steps.nextest-filter.outputs.rust_packages }}",
         )
         .add_output(
             "skip_tests",
-            "${{ steps.nextest-filter.outputs.skip_tests }}",
+            "${{ github.event_name == 'pull_request' \
+             && steps.nextest-filter.outputs.skip_tests == 'true' }}",
         )
         // PR merge commits need both parents for `git merge-base`.
         .add_step(steps::checkout(false, false).add_with(("fetch-depth", 2)))
-        .add_step(steps::setup_rust_light())
         .add_step(on_pull_request(
             code_check_cloud_storage::paths_filter().id("rust-filter"),
         ))
@@ -119,8 +133,9 @@ fn changes() -> Job {
             web_app_check_main::paths_filter().id("web-filter"),
         ))
         .add_step(on_pull_request(fork_paths_filter()))
-        .add_step(compute_changed_files().if_condition(Expression::new(rust)))
-        .add_step(compute_nextest_filter().if_condition(Expression::new(rust)))
+        .add_step(steps::setup_rust_light().if_condition(Expression::new(scope_rust.clone())))
+        .add_step(compute_changed_files().if_condition(Expression::new(scope_rust.clone())))
+        .add_step(compute_nextest_filter().if_condition(Expression::new(scope_rust)))
 }
 
 /// fmt, unused dependencies, clippy and the tests of the affected packages.
@@ -173,8 +188,12 @@ fn web() -> Job {
         .add_env(("RUSTFLAGS", "-C link-arg=-fuse-ld=mold"))
         .add_step(steps::checkout(false, false).add_with(("fetch-depth", 2)))
         // Before the dev shell: its LD_LIBRARY_PATH points the runner's
-        // git-remote-https at Nix's glibc, which aborts `git fetch`.
-        .add_step(compute_changed_files())
+        // git-remote-https at Nix's glibc, which aborts `git fetch`. A manual
+        // run has no base revision, so it checks every file.
+        .add_step(
+            compute_changed_files()
+                .if_condition(Expression::new("github.event_name == 'pull_request'")),
+        )
         .add_step(steps::setup_nix())
         .add_step(
             steps::setup_reqs_web("Setup Prereqs", false)
@@ -347,8 +366,8 @@ fn run_tests() -> Step<Run> {
 }
 
 /// Biome on the files changed since the base revision, as `Web App Pr Checks`
-/// runs it against `main`. Without a base revision (no merge-base turned up),
-/// it checks every file.
+/// runs it against `main`. Without a base revision (a manual run, or no
+/// merge-base turned up), it checks every file.
 fn biome(name: &str, dir: xtask_paths::RepoDir<'_>) -> Step<Run> {
     Step::new(name)
         .run(indoc::indoc! {r#"
@@ -363,7 +382,7 @@ fn biome(name: &str, dir: xtask_paths::RepoDir<'_>) -> Step<Run> {
 }
 
 /// The tests that import a changed file, directly or not. Without a base
-/// revision, every test.
+/// revision (a manual run, or no merge-base turned up), every test.
 fn vitest() -> Step<Run> {
     Step::new("Test")
         .run(indoc::indoc! {r#"

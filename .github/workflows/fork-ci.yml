@@ -30,8 +30,8 @@ jobs:
     outputs:
       rust: ${{ github.event_name == 'workflow_dispatch' || steps.rust-filter.outputs.should_run == 'true' || steps.fork-filter.outputs.should_run == 'true' }}
       web: ${{ github.event_name == 'workflow_dispatch' || steps.web-filter.outputs.should_run == 'true' || steps.fork-filter.outputs.should_run == 'true' }}
-      rust_packages: ${{ steps.nextest-filter.outputs.rust_packages }}
-      skip_tests: ${{ steps.nextest-filter.outputs.skip_tests }}
+      rust_packages: ${{ github.event_name == 'workflow_dispatch' && 'all' || steps.nextest-filter.outputs.rust_packages }}
+      skip_tests: ${{ github.event_name == 'pull_request' && steps.nextest-filter.outputs.skip_tests == 'true' }}
     timeout-minutes: 20
     steps:
     - name: Checkout
@@ -40,11 +40,6 @@ jobs:
         clean: 'false'
         persist-credentials: 'false'
         fetch-depth: '2'
-    - name: Setup Rust
-      uses: './.github/actions/setup-rust'
-      with:
-        sccache: 'false'
-        rust-cache: 'false'
     - id: rust-filter
       name: Filter changed paths
       if: github.event_name == 'pull_request'
@@ -180,8 +175,14 @@ jobs:
             - .github/workflows/fork-ci.yml
             - 'tooling/xtask/crates/xtask_workflows/src/workflows/fork_ci.rs'
             - 'tooling/xtask/crates/xtask_workflows/src/workflows/fork_ci/**'
+    - name: Setup Rust
+      if: github.event_name == 'pull_request' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) && (steps.rust-filter.outputs.should_run == 'true' || steps.fork-filter.outputs.should_run == 'true')
+      uses: './.github/actions/setup-rust'
+      with:
+        sccache: 'false'
+        rust-cache: 'false'
     - name: compute changed files
-      if: github.event_name == 'workflow_dispatch' || steps.rust-filter.outputs.should_run == 'true' || steps.fork-filter.outputs.should_run == 'true'
+      if: github.event_name == 'pull_request' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) && (steps.rust-filter.outputs.should_run == 'true' || steps.fork-filter.outputs.should_run == 'true')
       run: |
         set -euo pipefail
 
@@ -223,7 +224,7 @@ jobs:
       shell: bash
     - id: nextest-filter
       name: compute nextest package filter
-      if: github.event_name == 'workflow_dispatch' || steps.rust-filter.outputs.should_run == 'true' || steps.fork-filter.outputs.should_run == 'true'
+      if: github.event_name == 'pull_request' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) && (steps.rust-filter.outputs.should_run == 'true' || steps.fork-filter.outputs.should_run == 'true')
       run: |
         set -euo pipefail
 
@@ -666,6 +667,7 @@ jobs:
         persist-credentials: 'false'
         fetch-depth: '2'
     - name: compute changed files
+      if: github.event_name == 'pull_request'
       run: |
         set -euo pipefail
 
