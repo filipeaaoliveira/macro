@@ -155,7 +155,7 @@ once the Step went on to the reminder, waits on the reminder rather than
 the first prompt, and never closes the reminder's steering. A Step its
 owner stops ends `failed` (`StoppedByOwner`), never `no_result`, as does
 one whose stop is recorded before its reminder is sent; one whose pause
-ran out takes no more steering (409). A verifier (`accept`, `verify`)
+ran out takes no more steering (409). A verifier (`accept`)
 stopping without a result ends its Step `no_result` as any agent does,
 before any acceptance check runs, so its Gate is the only one the Step
 opens: never `accept`'s Blockers Gate too. The Step that goes on from a
@@ -667,30 +667,36 @@ merge and its base watched, as one the Run made; it is not compared again, since
 with its base lists nothing: the Steps keep, and name, the Control Files
 last read. Nothing but a person's answer approves them.
 
-The `code` Flow checks that a change does what its request asks, before
-and after its merge: its verify Phase. It is on for every repository by
-default, including one with no verify file. The repository declares it in
-`.macro/verify.json` (`src/domain/verification.rs`): `verify` (`true` when
-left out) turns the Phase on or off, and an optional `deploy` names the
-signal a merged Run waits for: `{"environment": "production"}`, a GitHub
-deployment to that environment. `accept` and `plan` read the file on the
-base branch, which the Run has not merged into; `deploy` and `verify` read
-it at the merge commit's first parent, the base as it was before the Run's
-change, so a Run never turns its own verification off. The file is also a
-default Control File (a team that keeps its own list must add it).
+The `code` Flow checks that a change does what its request asks before
+its merge: its verify Phase. It is on for every repository by default,
+including one with no verify file. The repository turns it off in
+`.macro/verify.json` (`src/domain/verification.rs`): `{"verify": false}`
+(`true` when left out). A `deploy` key, which an earlier factory read to
+wait for a deploy after the merge, is read and ignored, so
+`{"verify": false, "deploy": ...}` still turns the Phase off. A file with
+any other key does not read and turns nothing off: the change is checked,
+and `accept`'s report and the planner's note say "`.macro/verify.json`
+does not read (why): the change is checked". `accept`
+and `plan` read the file on the base branch, which the Run has not merged
+into. The file is also a default Control File (a team that keeps its own
+list must add it).
 
 - On a repository, `plan` asks the planner to end its plan with a fenced
   `json` block of acceptance checks (`built_in_steps/plan_acceptance.md`,
   `src/domain/acceptance.rs`): one per Done-when clause of the request (at
   most 16), each the `clause` and either `run`, a command from the
   repository's root (at most 1 KiB) that exits 0 only when the clause
-  holds (`timeout` as a check's, and `deployed` for one that needs the
-  deployed change), or `none`, why no command checks it. The planner is
-  told whether the repository declares a deploy, so it marks checks
-  `deployed` only where one runs. The Step keeps the plan with the checks
-  written out for its Gate, then the block as the factory read it
-  (`plan_output`). Later Steps read the latest `plan` Step's
-  (`AcceptanceChecks::of_run`).
+  holds (`timeout` as a check's), or `none`, why no command checks it. A
+  `deployed` mark, which plans recorded before Runs ended at their merge
+  may hold, is read and never written: nothing deploys the change now, so
+  such a check is never run, and its clause is checked by hand (it would
+  fail, with no deployment to reach). Any other key does not read. The
+  Step keeps the plan with the checks written out for its Gate, then the
+  block as the factory read it (`plan_output`); checks too large to keep
+  are dropped with their block, and a note says so. Later Steps read the
+  latest `plan` Step's (`AcceptanceChecks::of_run`); checks that do not
+  read, or were dropped for their size, are logged, and `accept`'s report
+  says so, its verifier checking every clause by hand.
 - Trust: the checks live in the plan Step's recorded output, never in the
   branch, so the writer and fixer cannot change the commands. They are an
   agent's commands, not people's: `.macro/checks.json` is written and
@@ -706,8 +712,8 @@ default Control File (a team that keeps its own list must add it).
   its own, never the writer's session; a definition that does not list the
   Role fills it with `reviewer`'s Agents, and may give it the writer's
   Agent) checks the Done-when clauses on the head of the Run's branch, and
-  the factory runs every acceptance check not marked `deployed` there, as a
-  checks round of one round (`built_in_steps/verify.rs` over
+  the factory runs every acceptance check there, as a checks round of one
+  round (`built_in_steps/accept.rs` over
   `checks_round.rs`'s exec path: a worktree at the commit, the exit codes
   decide, the round recorded before it runs, its time from the Step
   attempt's start; where the session runs no command the verifier runs
@@ -721,33 +727,40 @@ default Control File (a team that keeps its own list must add it).
   last visit (`max_visits`, three) it ends `unresolved` instead, "acceptance
   kept failing", and the Run ends `manual`, so no fix runs that no
   acceptance would check.
-- `deploy`, after `merge` (or a merge found by `ready_to_merge`), is a
-  pull request Step (`pull_request_steps/deploy.rs`): `not_needed` when the
-  repository declares no deploy, else every 20 s for `DEPLOY_WAIT` (25
-  minutes, within one Step attempt) it reads the newest deployment of the
-  pull request's merge commit (`PullRequest::merge_commit`) to the
-  environment: `deployed` once it succeeded (or succeeded and was replaced
-  since), or once one of the environment's five newest deployments that
-  succeeded is of a later commit containing the merge commit (GitHub's
-  compare: `ahead` or `identical`), which deployed it too; `deploy_failed`
-  when the merge commit's own deployment failed or errored and no later one
-  deployed it; `timeout` otherwise. The address is the newest status's
-  that names one (512 bytes at most). `off` ends the Run `success` at its
-  merge, and a file that does not read `unreadable`, for a person.
-- `verify`, after `deploy`, is the phase after the merge: the verifier
-  checks the merge commit, on the deployment when there is one, and the
-  factory runs every acceptance check there, told `MACRO_DEPLOY_URL` too.
-  A check marked `deployed` with no address to reach (no deploy declared,
-  or a deployment that names none) is not run: the verifier checks its
-  clause by hand, and the report says why. Nothing goes back once merged:
-  `pass` (or `off`) ends the Run `success`, and `fail` ends it `failed`, as
-  does `deploy_failed`. A `deploy` or `verify` Step that fails for good (a
-  crash, not a failed check) ends the Run `manual`, as does an `accept`
-  Step's.
 
-The Steps are new entries of `flows/code.json` only: a Run carries its Flow
-in its workflow's input, so one started before them walks the Flow it
-started with and ends at its merge as before (`interpreter/test.rs`,
+A Run ends at its merge: `merge`'s `merged`, or a merge `ready_to_merge`
+found, ends it `success`. What follows a merge, a deploy or a check of the
+deployed change, belongs to other applications.
+
+A Run started on a `code` Flow that still went on, once merged, to a
+`deploy` Step (a wait for a GitHub deployment) and a `verify` Step (a
+verifier checking the merged change) carries that Flow in its workflow's
+input, and walks it. The worker still runs both Steps, for such Runs only:
+each ends at once (`past_merge_outcome` in `built_in_steps.rs`), `deploy`
+with `off` and `verify` with `pass`, the outcomes every such Flow routes to
+the Run's `success` (the first one has no `off` from `verify`), so the Run
+ends at its next Step. No new Flow may name them: `serves` refuses both,
+and only a Run's Flow, in its workflow's input, still does. `verify` keeps
+its `verifier` Role, so a session an earlier attempt held is let go. A Run
+parked at a Gate inside an old `verify` (its verifier's question, or its
+stop without a result) waits as before: an answer or `retry` goes on in a
+Step of its own, which ends `pass` at once; `stop` routes `failed` as that
+Flow says. Nothing in the workflow changed: its decisions come from the
+Flow in its input and the recorded results of its activities, and the
+activities a Run schedules stay the same, so a history that ran `deploy`
+or `verify` replays as it ran. None of the recorded histories in
+`test/replay.rs` reaches those Steps: the claim rests on the workflow code
+being unchanged. `interpreter/test.rs` walks both such Flows
+(`first_deploy_verify_code.json`, `deploy_verify_code.json`), and an
+ignored Temporal test in `inbound/temporal/test.rs` runs one on this
+worker to `success`. Their Steps already recorded keep their
+outcomes (`deployed`, `not_needed`, `deploy_failed`, `fail`): the Run view
+shows them as any Step's, `fail` and `deploy_failed` in the failure tone,
+and Insights still count those two as a failed Step.
+
+`accept` is an entry of `flows/code.json` only: a Run carries its Flow in
+its workflow's input, so one started before it walks the Flow it started
+with and ends at its merge as before (`interpreter/test.rs`,
 `review_panel_code.json`). The interpreter did not change. The workflow
 changed in one place: a single Step's Blockers Gate tells the Standing Rule
 the fix rounds and their limit (`workflow/step.rs`), where it told zero;
@@ -1200,10 +1213,9 @@ every Run in flight replays as before.
   the checks rounds of `write` and `fix`, and the checks file they read.
 - `src/domain/control_files.rs`: Control Files, the default patterns, and
   what makes a Run Tampered.
-- `src/domain/verification.rs`, `src/domain/acceptance.rs`,
-  `src/domain/built_in_steps/verify.rs` and
-  `src/domain/pull_request_steps/deploy.rs`: the verify Phase, the plan's
-  acceptance checks, the `accept` and `verify` Steps, and the deploy wait.
+- `src/domain/verification.rs`, `src/domain/acceptance.rs` and
+  `src/domain/built_in_steps/accept.rs`: the verify Phase, the plan's
+  acceptance checks and the `accept` Step.
 - `src/domain/main_hold.rs` and `src/inbound/temporal/main_watch.rs`: the
   Main Hold, its looks at a base branch and the watch that makes them.
 - `src/domain/gate_replies.rs` and `src/domain/stand_in.rs`: a person's
@@ -1275,10 +1287,6 @@ every Run in flight replays as before.
   of the stored names), the kind's field on `OrchestratorDefinition`,
   `kind_answers` and `rule_answer` in `src/domain/standing_rules.rs`, the
   `kind` on the built-in Flows' Gates it decides, and their tests.
-- Add a deploy signal: a field of `DeploySignal` in
-  `src/domain/verification.rs` (and its check and test), then
-  `pull_request_steps/deploy.rs`, which waits for it, over a
-  `PullRequests` read.
 - Add a field to the checks file: `src/domain/checks.rs` (field, check
   and test), then `checks_round.rs`: the prompt, if the agent needs it, and
   the command the engine runs.
@@ -1394,11 +1402,11 @@ every Run in flight replays as before.
   Event routines need the creator's `enable-event-routines` flag in
   PostHog, and the harness starts no event intake without PostHog: then a
   repository event's or a Task event's routine is refused, or never runs.
-- A worker older than `accept`, `deploy` and `verify` cannot serve a Run
-  of the `code` Flow that names them: deploy every worker before the API
-  starts such Runs. A Run started before them never reaches them.
-- The `deploy` wait is bounded by one Step attempt (25 of its 30
-  minutes); a deploy that takes longer ends `timeout` for a person, and
-  needs the workflow to wait on a timer instead.
+- A worker older than `accept` cannot serve a Run of the `code` Flow that
+  names it: deploy every worker before the API starts such Runs. A Run
+  started before it never reaches it.
+- A worker keeps running `deploy` and `verify`, ending each at once,
+  while a Run whose Flow names them may still run: removing them sooner
+  leaves such a Run's next Step failing for good, and the Run `manual`.
 - `#[activities]` takes no generic type, so `FactoryActivities` holds the Step
   service as a trait object.

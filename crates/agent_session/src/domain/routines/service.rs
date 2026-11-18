@@ -352,6 +352,7 @@ where
                     actor: Some(action.owner),
                     context: command.context,
                     client: None,
+                    prompter: crate::domain::model::PrompterKind::Program,
                 },
             )
             .await

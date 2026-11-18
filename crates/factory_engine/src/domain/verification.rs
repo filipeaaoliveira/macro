@@ -1,21 +1,17 @@
-//! The verify Phase a repository declares for the `code` Flow, after its
-//! merge: `.macro/verify.json` at the root of the Run's base branch, beside
-//! the checks file.
+//! The verify Phase a repository declares for the `code` Flow's `accept`
+//! Step, before its merge: `.macro/verify.json` at the root of the Run's
+//! base branch, beside the checks file.
 //!
 //! ```json
-//! {
-//!   "verify": true,
-//!   "deploy": { "environment": "production" }
-//! }
+//! { "verify": true }
 //! ```
 //!
 //! `verify` is whether the Phase runs at all, `true` when left out: with
-//! `false`, the `accept` Step passes the change on unchecked and the `deploy`
-//! Step ends the Run once it merged. `deploy` names the signal the Run waits
-//! for once it merged: a GitHub deployment of the merge commit to
-//! `environment` whose newest status is `success`. A repository that names
-//! none, or has no file, deploys nothing the Run waits for: the `verify`
-//! Step checks the merged commit itself.
+//! `false`, the `accept` Step passes the change on unchecked. A repository
+//! with no file is checked. A `deploy` key, which an earlier factory read
+//! to wait for a deploy after the merge, is read and ignored: the factory
+//! ends a Run at its merge. A file with any other key does not read, and
+//! turns nothing off.
 //!
 //! The file is read from the base branch, as the checks file is. A Run's
 //! change to it is a Control File (`control_files`), so a change that turns
@@ -32,20 +28,22 @@ pub const VERIFY_FILE: &str = ".macro/verify.json";
 /// The largest verify file read, in bytes.
 const MAX_FILE_BYTES: usize = 4096;
 
-/// The longest environment name GitHub takes.
-const MAX_ENVIRONMENT_BYTES: usize = 255;
-
 /// The verify Phase a repository declares.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerifyFile {
     /// Whether the Phase runs.
-    #[serde(default = "on")]
     pub verify: bool,
-    /// What a merged Run waits for before it verifies; none when nothing
-    /// deploys it.
-    #[serde(default)]
-    pub deploy: Option<DeploySignal>,
+}
+
+/// The verify file as a repository writes it.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WrittenVerifyFile {
+    #[serde(default = "on")]
+    verify: bool,
+    /// Read and ignored: the deploy an earlier factory waited for.
+    #[serde(default, rename = "deploy")]
+    _deploy: Option<serde::de::IgnoredAny>,
 }
 
 fn on() -> bool {
@@ -53,39 +51,21 @@ fn on() -> bool {
 }
 
 impl Default for VerifyFile {
-    /// A repository with no verify file: verified, on its merged commit.
+    /// A repository with no verify file: checked before its merge.
     fn default() -> Self {
-        Self {
-            verify: true,
-            deploy: None,
-        }
+        Self { verify: true }
     }
-}
-
-/// The signal a merged change was deployed: a GitHub deployment of the
-/// merge commit to an environment.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DeploySignal {
-    /// The GitHub environment the deployment is to, as the repository's
-    /// deploy names it.
-    pub environment: String,
 }
 
 /// Why a repository's verify file does not read.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum VerifyFileError {
     /// The file is not the verify Phase's JSON.
-    #[error("{VERIFY_FILE} does not read: {0}")]
+    #[error("`{VERIFY_FILE}` does not read ({0})")]
     Unreadable(String),
     /// The file is larger than one is read.
-    #[error("{VERIFY_FILE} is over {MAX_FILE_BYTES} bytes")]
+    #[error("`{VERIFY_FILE}` does not read (it is over {MAX_FILE_BYTES} bytes)")]
     TooLarge,
-    /// The deploy's environment is blank or too long.
-    #[error(
-        "{VERIFY_FILE} names a deploy environment that is blank or over {MAX_ENVIRONMENT_BYTES} bytes"
-    )]
-    Environment,
 }
 
 impl VerifyFile {
@@ -98,14 +78,10 @@ impl VerifyFile {
         if text.len() > MAX_FILE_BYTES {
             return Err(VerifyFileError::TooLarge);
         }
-        let file: Self = serde_json::from_str(text)
+        let written: WrittenVerifyFile = serde_json::from_str(text)
             .map_err(|error| VerifyFileError::Unreadable(error.to_string()))?;
-        if let Some(deploy) = &file.deploy {
-            let environment = deploy.environment.trim();
-            if environment.is_empty() || deploy.environment.len() > MAX_ENVIRONMENT_BYTES {
-                return Err(VerifyFileError::Environment);
-            }
-        }
-        Ok(file)
+        Ok(Self {
+            verify: written.verify,
+        })
     }
 }

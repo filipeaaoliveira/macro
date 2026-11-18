@@ -2,7 +2,8 @@ use std::sync::{Arc, LazyLock, Mutex};
 
 use chrono::Utc;
 use factory_records::domain::models::{
-    EntryId, Gate, GateAnswer, GateKind, Outcome, Repository, Role, RunId, Step, StepEnd, StepKey,
+    CheckRoundOutcome, CheckRoundStart, EntryId, Gate, GateAnswer, GateKind, Outcome, Repository,
+    Role, RunId, Step, StepEnd, StepKey,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::{FindingKind, Lines, ReviewFinding, ReviewRound};
@@ -143,16 +144,109 @@ fn the_code_flow_s_steps_are_served() {
         "ready_to_merge",
         "merge",
         "accept",
-        "deploy",
-        "verify",
     ] {
         assert!(steps.serves(&step(name)).is_some(), "{name}");
     }
     assert!(steps.serves(&step("release")).is_none());
-    // A verifier, an agent, checks the change; the deploy is waited for.
+    // A verifier, an agent, checks the change before the merge.
     assert_eq!(steps.serves(&step("accept")), Some(StepUse::Agent));
-    assert_eq!(steps.serves(&step("verify")), Some(StepUse::Agent));
-    assert_eq!(steps.serves(&step("deploy")), Some(StepUse::Work));
+}
+
+/// A new Flow may not name `deploy` or `verify`, which once followed a
+/// merge: only a Run whose Flow already names them runs them.
+#[test]
+fn a_new_flow_may_not_name_the_steps_past_a_merge() {
+    let steps = BuiltInSteps::new(FakeAgent::ending_with("done"), pull_requests());
+
+    for name in ["deploy", "verify"] {
+        assert_eq!(steps.serves(&step(name)), None, "{name}");
+        let read = Flow::parse(
+            serde_json::json!({
+                "entries": [{ "id": name, "step": name, "role": "verifier" }]
+            }),
+            |step| steps.serves(step),
+        );
+        assert!(read.is_err(), "{name}");
+    }
+}
+
+/// A Run ends at its merge: one whose Flow still goes on to `deploy` or
+/// `verify` once merged finds `deploy` ends `off` and `verify` `pass` at
+/// once, which its Flow routes to the Run's `success`. Nothing is waited
+/// for, read or asked.
+#[tokio::test]
+async fn the_steps_after_a_merge_end_at_once() {
+    let agent = FakeAgent::ending_with("fail");
+    let github = FakeGithub::default();
+    let steps = BuiltInSteps::new(
+        agent.clone(),
+        PullRequestSteps::new(github.clone(), FakeRepo::default(), FakeWatches::default()),
+    );
+    let repository = Repository {
+        url: "https://github.com/macro/app".to_string(),
+        base_branch: "main".to_string(),
+    };
+
+    // `off` ends the Run at `deploy`; `pass` at `verify`, which every Flow
+    // that named it routes to `success`, the first one having no `off`.
+    for (name, ended) in [("deploy", "off"), ("verify", "pass")] {
+        let report = steps
+            .run(
+                &step(name),
+                StepInput {
+                    repository: Some(&repository),
+                    ..input(&[])
+                },
+            )
+            .await
+            .unwrap_or_else(|error| panic!("{name}: {error}"));
+        assert_eq!(report.outcome.as_str(), ended, "{name}");
+        assert!(report.output.contains("ends at its merge"), "{name}");
+    }
+    assert!(agent.tasks.lock().expect("tasks").is_empty());
+    // GitHub was never asked: no pull request, file or diff was read.
+    let github = github.state();
+    assert_eq!(github.reads, 0);
+    assert!(github.file_reads.is_empty());
+    assert!(github.compared.is_empty());
+    assert!(github.merges.is_empty());
+}
+
+/// An old `verify` whose earlier attempt left its round of acceptance
+/// checks open ends that round, which would otherwise never end.
+#[tokio::test]
+async fn an_old_verify_ends_the_round_it_left_open() {
+    let repo = FakeRepo::default();
+    let steps = BuiltInSteps::new(
+        FakeAgent::ending_with("fail"),
+        PullRequestSteps::new(FakeGithub::default(), repo.clone(), FakeWatches::default()),
+    );
+    let request = input(&[]);
+    let entry = EntryId::try_from("verify".to_string()).expect("valid");
+    repo.start_step(request.key, &entry, 1)
+        .await
+        .expect("start");
+    repo.start_check_round(
+        request.key,
+        &CheckRoundStart {
+            round: 1,
+            work_output: "The verifier's report".to_string(),
+            checks: vec!["acceptance-1".to_string()],
+            commands: vec!["bun test toggle".to_string()],
+            declared: "{}".to_string(),
+            check_action_id: uuid::Uuid::now_v7(),
+        },
+    )
+    .await
+    .expect("round");
+
+    let report = steps.run(&step("verify"), request).await.expect("verify");
+
+    assert_eq!(report.outcome.as_str(), "pass");
+    let rounds = repo.check_rounds(request.key).await.expect("read");
+    let end = rounds[0].end.as_ref().expect("the round ended");
+    assert_eq!(end.outcome, CheckRoundOutcome::Failed);
+    assert!(end.report.contains("ended at its merge"), "{}", end.report);
 }
 
 /// An agent Step goes to an Agent of the Role its entry names. A Run whose

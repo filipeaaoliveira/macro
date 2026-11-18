@@ -23,8 +23,9 @@ export function flowWordText(word: string): string {
 
 /**
  * Step outcomes that say its work fell short: a failure, checks that stayed
- * red, a verification that failed, a deploy that failed, or Blockers left
- * unresolved. Shown in the failure tone.
+ * red, or Blockers left unresolved. `fail` and `deploy_failed` are kept for
+ * the Steps of Runs that went on past their merge, before Runs ended there.
+ * Shown in the failure tone.
  */
 const SHORT_OUTCOMES = new Set([
   'failed',

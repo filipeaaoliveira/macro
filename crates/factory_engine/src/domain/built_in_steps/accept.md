@@ -10,8 +10,13 @@ each Done-when clause of the request against it: the acceptance checks the
 plan wrote for a clause, listed below, are run by the factory on that
 commit, so you need not run them; check by hand each clause that has none,
 by reading the code and running what shows its behaviour (tests, the
-program, the deployed service when the change is deployed). A clause the
+program). A clause the
 request does not state plainly is checked as the plan reads it.
+
+A clause whose check needed the deployed change comes from a plan written
+before the factory ended a run at its merge: nothing deploys the change
+now, so check what the commit shows of it, such as the code and tests
+behind the command named. That it cannot be seen deployed does not fail it.
 
 A check the factory runs decides nothing by itself: what it runs may be
 code the writer wrote, such as a test it added. For each acceptance check,

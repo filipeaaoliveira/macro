@@ -3,19 +3,22 @@
 //! `publish`, `ci`, `ready_to_merge` and `merge` take the Run's branch to a
 //! merged pull request on GitHub ([`PullRequestSteps`]).
 //! On a repository, `write` and `fix` then have the agent run the checks
-//! the repository declares, in rounds (`checks_round`). Once merged,
-//! `deploy` waits for the change's deploy; `accept`, before the merge, and
-//! `verify`, after it, have a verifier check the change does what the Run's
-//! request asks (`verify`).
+//! the repository declares, in rounds (`checks_round`). `accept`, before
+//! the merge, has a verifier check the change does what the Run's request
+//! asks (`accept`). A Run ends at its merge: `deploy` and `verify`, which
+//! once followed it, run only for the Runs whose Flow still names them, and
+//! end at once ([`past_merge_outcome`]). No new Flow may name them.
 
+mod accept;
 mod checks_round;
 mod review_panel;
 #[cfg(test)]
 mod test;
-mod verify;
 
 use factory_records::domain::main_hold::MainHoldRepository;
-use factory_records::domain::models::{Outcome, Repository, Role, Step, StepKey, StepSession};
+use factory_records::domain::models::{
+    CheckRoundOutcome, Outcome, Repository, Role, Step, StepKey, StepSession,
+};
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::{ReviewRound, ReviewRoundRepository};
 use macro_user_id::user_id::MacroUserIdStr;
@@ -34,7 +37,30 @@ use crate::domain::questions::{
     SESSION_LOST_NOTE, answers_brief, ask_instructions, going_on_prompt,
 };
 use crate::domain::review_rounds::{blockers_brief, escape, fenced_review};
-use crate::domain::verification::VerifyFile;
+use crate::domain::verification::{VerifyFile, VerifyFileError};
+
+/// What a `deploy` or `verify` Step reports: a Run ends at its merge, and
+/// one whose Flow still names them goes no further.
+const ENDED_AT_MERGE: &str = "The change is merged, and the run ends at its merge: \
+     the factory no longer waits for a deploy or checks the merged change.";
+
+/// How an old `verify` Step ends a round of acceptance checks an earlier
+/// attempt of it left open.
+const ROUND_ENDED_AT_MERGE: &str =
+    "The run ended at its merge: these checks of the merged change no longer run.";
+
+/// The outcome a `deploy` or `verify` Step, of a Run whose Flow still goes
+/// on past its merge, ends with at once: the one every such Flow routes to
+/// the Run's `success`. `deploy`'s `off` ends the Run there; a Run already
+/// in `verify` ends with its `pass`, as the first of those Flows has no
+/// `off` from `verify`. None for any other Step.
+pub(crate) fn past_merge_outcome(step: &str) -> Option<&'static str> {
+    match step {
+        "deploy" => Some("off"),
+        "verify" => Some("pass"),
+        _ => None,
+    }
+}
 
 /// What the agent is told for a `plan` Step.
 const PLAN_INSTRUCTIONS: &str = include_str!("built_in_steps/plan.md");
@@ -104,9 +130,13 @@ enum BuiltInStep {
     /// A verifier checks the head of the Run's branch does what the
     /// request asks, before the merge.
     Accept,
-    /// The merge is waited for to deploy.
+    /// Once waited for the merge to deploy. Only a Run started on a `code`
+    /// Flow that named it reaches it, once merged: it ends `off` at once,
+    /// which ends the Run `success`.
     Deploy,
-    /// A verifier checks the merged change does what the request asks.
+    /// Once had a verifier check the merged change. Only a Run started on
+    /// a `code` Flow that named it reaches it, once merged: it ends `pass`
+    /// at once, which ends the Run `success`.
     Verify,
 }
 
@@ -369,6 +399,12 @@ where
 
     fn serves(&self, step: &StepName) -> Option<StepUse> {
         let built_in = BuiltInStep::named(step)?;
+        // A new Flow may not name the Steps past a merge: only a Run whose
+        // Flow, in its workflow's input, still names them runs them, and
+        // that Flow is never read again.
+        if matches!(built_in, BuiltInStep::Deploy | BuiltInStep::Verify) {
+            return None;
+        }
         if built_in.agent_role().is_some() {
             Some(StepUse::Agent)
         } else {
@@ -394,7 +430,7 @@ where
                 let file = self.pull_requests.base_verify_file(&input).await?;
                 let instructions = format!(
                     "{PLAN_INSTRUCTIONS}{PLAN_ACCEPTANCE_INSTRUCTIONS}{}",
-                    deploy_note(file.as_ref().ok())
+                    verify_note(&file)
                 );
                 let plan = self
                     .ask_agent(step, &instructions, vec![Outcome::done()], input)
@@ -448,14 +484,29 @@ where
             BuiltInStep::Ci => Ok(self.pull_requests.ci(input).await?),
             BuiltInStep::ReadyToMerge => Ok(self.pull_requests.ready_to_merge(input).await?),
             BuiltInStep::Merge => Ok(self.pull_requests.merge(input).await?),
-            BuiltInStep::Accept => {
-                self.verify_change(step, input, verify::Phase::BeforeMerge)
+            BuiltInStep::Accept => self.accept_change(step, input).await,
+            BuiltInStep::Deploy | BuiltInStep::Verify => {
+                // An earlier attempt of an old `verify` may have left its
+                // round of acceptance checks open: it never ends now.
+                let repo = self.pull_requests.records();
+                let rounds = repo
+                    .check_rounds(input.key)
                     .await
-            }
-            BuiltInStep::Deploy => Ok(self.pull_requests.deploy(input).await?),
-            BuiltInStep::Verify => {
-                self.verify_change(step, input, verify::Phase::AfterMerge)
+                    .map_err(checks_round::records)?;
+                for round in rounds.iter().filter(|round| round.end.is_none()) {
+                    repo.end_check_round(
+                        input.key,
+                        round.round,
+                        CheckRoundOutcome::Failed,
+                        ROUND_ENDED_AT_MERGE,
+                    )
                     .await
+                    .map_err(checks_round::records)?;
+                }
+                Ok(StepReport {
+                    outcome: accept::outcome(past_merge_outcome(step.as_str()).unwrap_or("off")),
+                    output: ENDED_AT_MERGE.to_string(),
+                })
             }
         }
     }
@@ -512,31 +563,17 @@ where
     }
 }
 
-/// What the planner is told of the repository's deploy, so it marks a
-/// check `deployed` only where one runs: from the repository's verify file,
-/// none when it does not read.
-fn deploy_note(file: Option<&VerifyFile>) -> String {
+/// What the planner is told when the repository's verify file turns
+/// acceptance off, or does not read; nothing otherwise.
+fn verify_note(file: &Result<VerifyFile, VerifyFileError>) -> String {
     match file {
-        Some(file) if !file.verify => {
+        Ok(file) if !file.verify => {
             "\nThe repository turns its verify phase off: the factory runs \
              none of these checks, but write them for the person who reads the plan.\n"
                 .to_string()
         }
-        Some(VerifyFile {
-            deploy: Some(deploy),
-            ..
-        }) => format!(
-            "\nThe repository deploys each merge to the `{}` environment: a check marked \
-             `deployed` reaches the deployed change at `$MACRO_DEPLOY_URL` when the deployment \
-             names its address, and is not run when it names none.\n",
-            escape(&deploy.environment)
-        ),
-        Some(_) => "\nThe repository declares no deploy: mark no check `deployed`, since such a \
-                    check is never run here.\n"
-            .to_string(),
-        None => {
-            "\nThe repository's verify file does not read: mark no check `deployed`.\n".to_string()
-        }
+        Ok(_) => String::new(),
+        Err(error) => format!("\n{}: the change is checked.\n", escape(&error.to_string())),
     }
 }
 

@@ -16,12 +16,8 @@
 //!
 //! While a Main Hold holds the Run's base, `merge` merges nothing: it waits
 //! for the hold to clear, then ends `held`, which goes back to the merge Gate.
-//!
-//! Once merged, `deploy` waits for the deploy the repository declares
-//! (`deploy`).
+//! The Run ends once merged.
 
-mod deploy;
-pub(crate) use deploy::DeployState;
 #[cfg(test)]
 mod test;
 
@@ -42,6 +38,7 @@ use crate::domain::models::{
     run_branch,
 };
 use crate::domain::ports::{MainWatches, PullRequests, Retryable};
+use crate::domain::verification::{VERIFY_FILE, VerifyFile, VerifyFileError};
 
 /// How long `ci` waits for a pull request's checks to finish: short of a
 /// Step attempt's 30 minutes, so the Step ends `timeout` rather than failing.
@@ -91,18 +88,6 @@ pub enum PullRequestStepError {
     /// The Run asked no person to merge a commit.
     #[error("the run asked no one to merge a commit")]
     NoMergeHead,
-    /// The Run's pull request is not merged, and a Step after its merge
-    /// runs.
-    #[error("the run's pull request is not merged")]
-    NotMerged,
-    /// GitHub lists the Run's pull request as merged, yet names no commit
-    /// its merge made.
-    #[error("github names no merge commit for the run's merged pull request yet")]
-    NoMergeCommit,
-    /// GitHub names no parent of the Run's merge commit, so the base as it
-    /// was before the merge cannot be read.
-    #[error("github names no parent of the run's merge commit")]
-    NoMergeParent,
     /// GitHub could not be asked.
     #[error("github failed: {report:?}")]
     Github {
@@ -154,14 +139,12 @@ impl Retryable for PullRequestStepError {
     /// failed read or write of the records is the database's.
     fn retryable(&self) -> bool {
         match self {
-            Self::NotListed | Self::NoMergeCommit | Self::Records(_) => true,
+            Self::NotListed | Self::Records(_) => true,
             Self::Github { retryable, .. } | Self::Watch { retryable, .. } => *retryable,
             Self::NoRepository
             | Self::InvalidRepository(_)
             | Self::NoPullRequest
             | Self::NoMergeHead
-            | Self::NotMerged
-            | Self::NoMergeParent
             | Self::ControlFiles(_) => false,
         }
     }
@@ -550,6 +533,22 @@ where
         let repository = CodeRepository::parse(&recorded.url)
             .ok_or_else(|| PullRequestStepError::InvalidRepository(recorded.url.clone()))?;
         Ok((repository, recorded))
+    }
+
+    /// The verify file the Run's base branch holds now, before the Run
+    /// merged: the agent's branch changes it only as a Control File. The
+    /// default when the base has none.
+    pub(crate) async fn base_verify_file(
+        &self,
+        input: &StepInput<'_>,
+    ) -> Result<Result<VerifyFile, VerifyFileError>, PullRequestStepError> {
+        let (repository, recorded) = Self::repository(input)?;
+        let text = self
+            .github
+            .file_text(input.owner, &repository, &recorded.base_branch, VERIFY_FILE)
+            .await
+            .map_err(PullRequestStepError::github)?;
+        Ok(VerifyFile::read(text.as_deref()))
     }
 
     /// The pull request from the Run's branch, if there is one.
