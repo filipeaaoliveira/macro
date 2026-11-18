@@ -520,6 +520,9 @@ export const factoryExcluded = [
   'linkFactoryRunTask',
   'listFactoryFlows',
   'listFactoryTaskRuns',
+  // A reply is a Gate's answer in words: only the person, in their own
+  // session, gives it.
+  'replyToFactoryGate',
   // Only the person in their own session sets the Control Files an agent's
   // changes are checked against.
   'setFactoryControlFiles',

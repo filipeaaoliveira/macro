@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AnswerFactoryGateData, AnswerFactoryGateErrors, AnswerFactoryGateResponses, CancelFactoryRunData, CancelFactoryRunErrors, CancelFactoryRunResponses, CreateFactoryRunData, CreateFactoryRunErrors, CreateFactoryRunResponses, GetFactoryControlFilesData, GetFactoryControlFilesErrors, GetFactoryControlFilesResponses, GetFactoryInsightsData, GetFactoryInsightsErrors, GetFactoryInsightsResponses, GetFactoryRunData, GetFactoryRunErrors, GetFactoryRunResponses, GetFactoryStandingRulesData, GetFactoryStandingRulesErrors, GetFactoryStandingRulesResponses, HandBackFactoryStepData, HandBackFactoryStepErrors, HandBackFactoryStepResponses, LinkFactoryRunTaskData, LinkFactoryRunTaskErrors, LinkFactoryRunTaskResponses, ListFactoryFlowsData, ListFactoryFlowsErrors, ListFactoryFlowsResponses, ListFactoryTaskRunsData, ListFactoryTaskRunsErrors, ListFactoryTaskRunsResponses, SetFactoryControlFilesData, SetFactoryControlFilesErrors, SetFactoryControlFilesResponses, SetFactoryProjectStandingRulesData, SetFactoryProjectStandingRulesErrors, SetFactoryProjectStandingRulesResponses, SetFactoryStandingRulesData, SetFactoryStandingRulesErrors, SetFactoryStandingRulesResponses } from './types.gen';
+import type { AnswerFactoryGateData, AnswerFactoryGateErrors, AnswerFactoryGateResponses, CancelFactoryRunData, CancelFactoryRunErrors, CancelFactoryRunResponses, CreateFactoryRunData, CreateFactoryRunErrors, CreateFactoryRunResponses, GetFactoryControlFilesData, GetFactoryControlFilesErrors, GetFactoryControlFilesResponses, GetFactoryInsightsData, GetFactoryInsightsErrors, GetFactoryInsightsResponses, GetFactoryRunData, GetFactoryRunErrors, GetFactoryRunResponses, GetFactoryStandingRulesData, GetFactoryStandingRulesErrors, GetFactoryStandingRulesResponses, HandBackFactoryStepData, HandBackFactoryStepErrors, HandBackFactoryStepResponses, LinkFactoryRunTaskData, LinkFactoryRunTaskErrors, LinkFactoryRunTaskResponses, ListFactoryFlowsData, ListFactoryFlowsErrors, ListFactoryFlowsResponses, ListFactoryTaskRunsData, ListFactoryTaskRunsErrors, ListFactoryTaskRunsResponses, ReplyToFactoryGateData, ReplyToFactoryGateErrors, ReplyToFactoryGateResponses, SetFactoryControlFilesData, SetFactoryControlFilesErrors, SetFactoryControlFilesResponses, SetFactoryProjectStandingRulesData, SetFactoryProjectStandingRulesErrors, SetFactoryProjectStandingRulesResponses, SetFactoryStandingRulesData, SetFactoryStandingRulesErrors, SetFactoryStandingRulesResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -130,6 +130,24 @@ export class Sdk extends HeyApiClient {
     public answerFactoryGate<ThrowOnError extends boolean = false>(options: Options<AnswerFactoryGateData, ThrowOnError>): RequestResult<AnswerFactoryGateResponses, AnswerFactoryGateErrors, ThrowOnError> {
         return (options.client ?? this.client).post<AnswerFactoryGateResponses, AnswerFactoryGateErrors, ThrowOnError>({
             url: '/runs/{id}/steps/{seq}/answer',
+            ...options,
+            headers: {
+                'Content-Type': 'application/json',
+                ...options.headers
+            }
+        });
+    }
+
+    /**
+     * Reply, as the caller, in words to the Gate one of their Runs waits on.
+     * The factory reads the words as one of the Gate's answers, kept as its
+     * note, or asks back on the Gate, which then still waits; an agent's
+     * question takes them as the answer. Reading the Run shows which. Only
+     * the owner's own signed-in session replies (403 otherwise).
+     */
+    public replyToFactoryGate<ThrowOnError extends boolean = false>(options: Options<ReplyToFactoryGateData, ThrowOnError>): RequestResult<ReplyToFactoryGateResponses, ReplyToFactoryGateErrors, ThrowOnError> {
+        return (options.client ?? this.client).post<ReplyToFactoryGateResponses, ReplyToFactoryGateErrors, ThrowOnError>({
+            url: '/runs/{id}/steps/{seq}/reply',
             ...options,
             headers: {
                 'Content-Type': 'application/json',

@@ -31,6 +31,21 @@ export type AnswerGateRequest = {
 };
 
 /**
+ * A reply the factory could not read as one of a Gate's answers, so it
+ * asked the person back.
+ */
+export type AskedBack = {
+    /**
+     * When the factory asked back.
+     */
+    at: string;
+    /**
+     * The person's words.
+     */
+    reply: string;
+};
+
+/**
  * How one check of a verified round ran.
  */
 export type CheckResult = {
@@ -319,6 +334,7 @@ export type Gate = {
      * The answers it offers, in the Flow's order.
      */
     answers: Array<Outcome>;
+    askedBack?: null | AskedBack;
     /**
      * Who asks it: the Flow, or the Step's agent.
      */
@@ -331,10 +347,12 @@ export type Gate = {
      * The question.
      */
     question: string;
+    standIn?: null | StandInAnswer;
 };
 
 /**
- * The answer to a Gate: a person's, or a Standing Rule's (a Rule Answer).
+ * The answer to a Gate: a person's, a Standing Rule's (a Rule Answer), or
+ * the stand-in's for the Run's owner.
  */
 export type GateAnswer = {
     /**
@@ -352,9 +370,20 @@ export type GateAnswer = {
      */
     approvedControlFiles?: Array<string> | null;
     /**
+     * Whether the answer is the stand-in's, which the owner let stand
+     * ([`Gate::stand_in`] says why it gave it).
+     */
+    byStandIn: boolean;
+    /**
      * What the person added, for the Run's later Steps to read.
      */
     note?: string | null;
+    /**
+     * For a person's answer the factory read from their words (kept as its
+     * note), how sure it was, in percent; none for an answer given with a
+     * button, and for any answer not a person's.
+     */
+    replyConfidence?: number | null;
     rule?: null | StandingRule;
     userId?: null | MacroUserIdStr;
 };
@@ -478,9 +507,10 @@ export type NamedCount = {
 
 /**
  * A workspace's Orchestrator Definition: which kinds of Gate the factory
- * decides on its own. A kind left off waits for a person, as every Gate
- * did before Standing Rules. Whatever it says, a Tampered Run's Gates and
- * a merge through a Main Hold stay a person's.
+ * decides on its own, and which the stand-in answers for the Run's owner
+ * when no rule does. A kind left off waits for a person, as every Gate did
+ * before Standing Rules. Whatever it says, a Tampered Run's Gates and a
+ * merge through a Main Hold stay a person's.
  */
 export type OrchestratorDefinition = {
     /**
@@ -498,6 +528,11 @@ export type OrchestratorDefinition = {
      * Approve the plan Gate (`approve_plan`).
      */
     plan: boolean;
+    /**
+     * The kinds of Gate the stand-in answers for the Run's owner, after
+     * the rules and before the person; off for every kind when left out.
+     */
+    standIn?: StandInKinds;
 };
 
 /**
@@ -563,6 +598,16 @@ export type ProjectRules = {
      * The Project: an initiative's id.
      */
     projectId: string;
+};
+
+/**
+ * Request body for replying to a Gate in words.
+ */
+export type ReplyToGateRequest = {
+    /**
+     * The person's words, in place of one of the Gate's answers.
+     */
+    reply: string;
 };
 
 /**
@@ -935,6 +980,46 @@ export type SetStandingRulesRequest = {
 };
 
 /**
+ * The stand-in's answer to a Gate, for the Run's owner: the answer it
+ * gives, why, and until when the owner may override it.
+ */
+export type StandInAnswer = {
+    /**
+     * Its answer, one the Gate offers.
+     */
+    answer: Outcome;
+    /**
+     * How sure it was, in percent.
+     */
+    confidence: number;
+    /**
+     * Why, in a sentence or two.
+     */
+    reason: string;
+    /**
+     * Until when the owner may override it; then the Run goes on with it.
+     */
+    until: string;
+};
+
+/**
+ * The kinds of Gate the stand-in answers for the Run's owner: a small
+ * model that answers as the owner would, which the owner may override for
+ * a short while. It never answers a merge Gate, so it has no setting for
+ * one.
+ */
+export type StandInKinds = {
+    /**
+     * Answer a review round's Blockers Gate.
+     */
+    blockers: boolean;
+    /**
+     * Answer the plan Gate.
+     */
+    plan: boolean;
+};
+
+/**
  * A Standing Rule: the answer the factory gives a Gate of one kind on its
  * own, when what the rule requires holds.
  */
@@ -1293,6 +1378,39 @@ export type AnswerFactoryGateErrors = {
 export type AnswerFactoryGateError = AnswerFactoryGateErrors[keyof AnswerFactoryGateErrors];
 
 export type AnswerFactoryGateResponses = {
+    202: unknown;
+};
+
+export type ReplyToFactoryGateData = {
+    body: ReplyToGateRequest;
+    path: {
+        /**
+         * The Run's id.
+         */
+        id: RunId;
+        /**
+         * The place, among the Run's Steps, of the Step whose Gate it answers.
+         */
+        seq: number;
+    };
+    query?: never;
+    url: '/runs/{id}/steps/{seq}/reply';
+};
+
+export type ReplyToFactoryGateErrors = {
+    400: ErrorResponse;
+    401: ErrorResponse;
+    403: ErrorResponse;
+    404: ErrorResponse;
+    409: ErrorResponse;
+    500: ErrorResponse;
+    502: ErrorResponse;
+    503: ErrorResponse;
+};
+
+export type ReplyToFactoryGateError = ReplyToFactoryGateErrors[keyof ReplyToFactoryGateErrors];
+
+export type ReplyToFactoryGateResponses = {
     202: unknown;
 };
 
