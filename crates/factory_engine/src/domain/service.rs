@@ -15,8 +15,8 @@ use factory_records::domain::automations::{
 use factory_records::domain::main_hold::{BaseState, MainHoldRepository};
 use factory_records::domain::models::{
     EntryId, HandBack, MAX_NOTE_BYTES, MAX_OUTPUT_BYTES, MAX_QUESTION_BYTES, MAX_REQUEST_BYTES,
-    NewRun, Outcome, QueueHold, Repository, Run, RunId, RunInsert, RunOutcome, Step, StepKey,
-    TaskLink, TeamMembership,
+    NewRun, NewSteer, Outcome, QueueHold, Repository, Run, RunId, RunInsert, RunOutcome,
+    SteerRefusal, Step, StepKey, TaskLink, TeamMembership,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::{ReviewRound, ReviewRoundRepository};
@@ -37,8 +37,8 @@ use crate::domain::gate_owner::{
 };
 use crate::domain::models::{
     Answerer, CodeRepository, ControlFilesSettings, FactoryError, FlowSummary, PersonOnly,
-    RunDetail, RunFinish, RunStart, StandingRulesSettings, StepEnding, StepError, StepInput,
-    StepReport, StepRequest, StepStart,
+    RunDetail, RunFinish, RunStart, SessionSteer, StandingRulesSettings, StepEnding, StepError,
+    StepInput, StepReport, StepRequest, StepStart,
 };
 use crate::domain::ports::{
     AnswerDelivery, FactoryService, GateNotifier, NoOwnerGates, NoTaskThread, PullRequests,
@@ -49,6 +49,7 @@ use crate::domain::standing_rules::{
     GateFacts, RuleAnswer, kind_answers, offers_kind_answers, repeated_blockers, rule_answer,
     rule_fix_limit,
 };
+use crate::domain::step_terminal::{TerminalRequest, note_prompt, resume_prompt};
 use crate::domain::task_thread::{RunUpdate, post_update};
 
 fn internal(error: impl std::error::Error + Send + Sync + 'static) -> rootcause::Report {
@@ -912,6 +913,73 @@ where
             TaskLink::Linked => self.get_run(actor, id).await,
             TaskLink::NoSuchRun => Err(FactoryError::NotFound),
             TaskLink::NoSuchTask => Err(FactoryError::UnknownTask),
+        }
+    }
+
+    #[tracing::instrument(skip(self, actor, request), fields(action = request.action().as_str()))]
+    async fn steer_step(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        id: RunId,
+        seq: u16,
+        request: TerminalRequest,
+    ) -> Result<(), FactoryError> {
+        let steer = request.steer()?;
+        self.known(&actor).await?;
+        self.not_an_agent(&actor).await?;
+        let run = self.owned_run(&actor, id).await?;
+        if run.end.is_some() {
+            return Err(FactoryError::RunEnded);
+        }
+        let key = StepKey { run_id: id, seq };
+        // Kept first: the Step's work reads it while it waits on its agent,
+        // so a pause or a stop holds the Step before the turn stops, and a
+        // note or a resume is followed once its prompt is sent.
+        let steered = match self.repo.steer(key, &steer).await.map_err(internal)? {
+            Ok(steered) => steered,
+            Err(SteerRefusal::Ended) => return Err(FactoryError::StepEnded),
+            Err(refusal) => return Err(FactoryError::NotSteerable(refusal)),
+        };
+        let now = Utc::now();
+        let (act, prompt_id) = match &steer {
+            NewSteer::Note { note, prompt_id } => (
+                SessionSteer::Prompt {
+                    prompt_id: *prompt_id,
+                    prompt: note_prompt(note, now),
+                },
+                Some(*prompt_id),
+            ),
+            NewSteer::Resume { note, prompt_id } => (
+                SessionSteer::Prompt {
+                    prompt_id: *prompt_id,
+                    prompt: resume_prompt(note.as_deref(), now),
+                },
+                Some(*prompt_id),
+            ),
+            NewSteer::Pause | NewSteer::Stop => (SessionSteer::Interrupt, None),
+        };
+        let acted = self
+            .executor
+            .steer(&steered.role, key, &actor, &steered.session, act)
+            .await;
+        match (acted, prompt_id) {
+            (Ok(()), _) => Ok(()),
+            // The session refused the prompt: the agent never reads it, so
+            // the Step no longer follows it.
+            (Err(error), Some(prompt_id)) => {
+                tracing::warn!(?error, "a step's session did not take its owner's prompt");
+                self.repo
+                    .unsteer(key, prompt_id, steered.previous_prompt)
+                    .await
+                    .map_err(internal)?;
+                Err(FactoryError::SessionUnreachable)
+            }
+            // The turn may not have stopped, but the Step holds: its work
+            // stops the turn again while it waits.
+            (Err(error), None) => {
+                tracing::warn!(?error, "a step's session was not stopped for its owner");
+                Ok(())
+            }
         }
     }
 

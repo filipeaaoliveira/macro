@@ -11,7 +11,7 @@ mod review_panel;
 mod test;
 
 use factory_records::domain::main_hold::MainHoldRepository;
-use factory_records::domain::models::{Outcome, Repository, Role, Step, StepKey};
+use factory_records::domain::models::{Outcome, Repository, Role, Step, StepKey, StepSession};
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::{ReviewRound, ReviewRoundRepository};
 use macro_user_id::user_id::MacroUserIdStr;
@@ -19,7 +19,7 @@ use macro_user_id::user_id::MacroUserIdStr;
 use crate::domain::agents::REVIEWER_ROLES;
 use crate::domain::flow::{StepName, StepUse};
 use crate::domain::gate_owner::owner_notes_brief;
-use crate::domain::models::{AgentTask, StepInput, StepReport, run_branch};
+use crate::domain::models::{AgentTask, SessionSteer, StepInput, StepReport, run_branch};
 use crate::domain::ports::{
     AgentFailure, MainWatches, PullRequests, Retryable, StepAgent, StepExecutor,
 };
@@ -424,6 +424,20 @@ where
             // Only an agent Step holds a session.
             None => Ok(()),
         }
+    }
+
+    async fn steer(
+        &self,
+        role: &Role,
+        key: StepKey,
+        owner: &MacroUserIdStr<'static>,
+        session: &StepSession,
+        steer: SessionSteer,
+    ) -> Result<(), BuiltInStepError> {
+        self.agent
+            .steer(key, role, owner, session, steer)
+            .await
+            .map_err(BuiltInStepError::agent)
     }
 }
 

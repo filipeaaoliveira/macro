@@ -49,10 +49,10 @@ pub const NOTES_BUDGET: usize = 8 * 1024;
 const CUT: &str = " (cut: the prompt has no room for the rest)\n";
 
 /// The tag a block of the owner's notes opens with.
-const OPEN: &str = "<owner-notes>";
+pub(crate) const OPEN: &str = "<owner-notes>";
 
 /// The tag a block of the owner's notes closes with.
-const CLOSE: &str = "</owner-notes>";
+pub(crate) const CLOSE: &str = "</owner-notes>";
 
 /// The line that ends every comment the factory posts as a Run's owner, so
 /// the owner's notes leave it out ([`is_factory_comment`]).

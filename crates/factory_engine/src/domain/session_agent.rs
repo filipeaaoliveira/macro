@@ -30,7 +30,7 @@ use uuid::Uuid;
 use crate::domain::agents::{Agent, AgentDefinition};
 use agent_session::domain::session_command::SessionCommandOutput;
 
-use crate::domain::models::{AgentAnswer, AgentCommand, AgentTask, AgentTurn};
+use crate::domain::models::{AgentAnswer, AgentCommand, AgentTask, AgentTurn, SessionSteer};
 use crate::domain::ports::{AgentFailure, Retryable, StepAgent};
 
 /// What the agent is told about handing its result back.
@@ -143,12 +143,16 @@ pub enum SessionAgentError {
     /// The session worked past the Step's deadline.
     #[error("the agent did not finish within {0:?}")]
     TooSlow(Duration),
+    /// The Run's owner stopped the Step from its Step Terminal.
+    #[error("the run's owner stopped the step")]
+    StoppedByOwner,
 }
 
 impl Retryable for SessionAgentError {
     /// A turn that ended without a result, or ran past its deadline, ends
-    /// the same way when asked again, as does a refusal, a mismatch or a
-    /// conflict from the session (only an outage passes on a retry), and a
+    /// the same way when asked again, as does a Step its owner stopped, a
+    /// refusal, a mismatch or a conflict from the session (only an outage
+    /// passes on a retry), and a
     /// quota every Agent of the Role used up, or an agent definition that
     /// does not fill it. A
     /// prompt whose delivery stayed unknown is not tried again either:
@@ -181,7 +185,8 @@ impl Retryable for SessionAgentError {
             | SessionAgentError::PromptUnsettled
             | SessionAgentError::Released
             | SessionAgentError::SessionLost
-            | SessionAgentError::TooSlow(_) => false,
+            | SessionAgentError::TooSlow(_)
+            | SessionAgentError::StoppedByOwner => false,
         }
     }
 }
@@ -456,33 +461,108 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
         }
     }
 
-    /// Wait for the turn of the prompt `action` names to end, until
-    /// `deadline`.
+    /// Wait for the turn of `action`, a prompt of the Step `key`'s session,
+    /// to end, following the Run's owner's steering (`step_terminal`) until
+    /// it closes: the turn of a note or a resume they sent after it, and no
+    /// end while the Step is paused. A stop they asked fails the wait at
+    /// once. The time the Step is paused does not count against `deadline`.
     async fn finished(
         &self,
+        key: StepKey,
         action: &RoutineSessionAction,
         deadline: tokio::time::Instant,
     ) -> Result<(), SessionAgentError> {
+        self.wait_turn(key, action, deadline, false).await
+    }
+
+    /// [`Self::finished`], for a session resumed after a wait (`resumed`):
+    /// one that shows its runtime disconnected for [`RESUME_SETTLE`] in a row
+    /// is lost.
+    async fn wait_turn(
+        &self,
+        key: StepKey,
+        action: &RoutineSessionAction,
+        deadline: tokio::time::Instant,
+        resumed: bool,
+    ) -> Result<(), SessionAgentError> {
+        let mut watched = action.clone();
+        let mut deadline = deadline;
         let mut wait = FIRST_LOOK;
         let mut failed_reads = 0;
+        let mut disconnected_since: Option<tokio::time::Instant> = None;
         loop {
+            let steering = self.repo.steering(key).await.map_err(Self::records)?;
+            if steering.stop_asked {
+                // Its owner stopped the Step: the turn stops, and the Step
+                // ends failed, its session stopped for good with it.
+                self.cancel(&watched).await;
+                return Err(SessionAgentError::StoppedByOwner);
+            }
             // A read that fails now and then is the transport's; only a run
             // of them fails the Step.
-            match self.sessions.status(action.clone()).await {
-                Ok(RoutineActionStatus::Succeeded) => return Ok(()),
+            let ended = match self.sessions.status(watched.clone()).await {
+                Ok(RoutineActionStatus::Succeeded) => Some(Ok(())),
                 Ok(RoutineActionStatus::Failed(reason)) => {
-                    return Err(SessionAgentError::TurnFailed(reason));
+                    Some(Err(SessionAgentError::TurnFailed(reason)))
                 }
-                Ok(RoutineActionStatus::Pending(_)) => failed_reads = 0,
+                Ok(RoutineActionStatus::Pending(RoutinePendingReason::Disconnected)) if resumed => {
+                    failed_reads = 0;
+                    let since = *disconnected_since.get_or_insert_with(tokio::time::Instant::now);
+                    if since.elapsed() >= RESUME_SETTLE {
+                        return Err(SessionAgentError::SessionLost);
+                    }
+                    None
+                }
+                Ok(RoutineActionStatus::Pending(pending)) => {
+                    failed_reads = 0;
+                    disconnected_since = None;
+                    // A turn that still runs while the Step is paused (its
+                    // stop was lost, or a note queued before the pause
+                    // started) is stopped again.
+                    if steering.paused && pending == RoutinePendingReason::Running {
+                        self.cancel(&watched).await;
+                    }
+                    None
+                }
                 Err(error) => {
                     failed_reads += 1;
                     if failed_reads >= MAX_FAILED_READS {
                         return Err(error.into());
                     }
+                    None
+                }
+            };
+
+            if let Some(ended) = ended {
+                match steering.prompt {
+                    // The owner sent a note or a resume after this turn: the
+                    // Step goes on with its turn.
+                    Some(prompt) if prompt != watched.action_id.as_uuid() => {
+                        watched.action_id = AgentActionId::from_uuid(prompt);
+                        wait = FIRST_LOOK;
+                        continue;
+                    }
+                    // Paused: the turn the pause stopped is not the Step's
+                    // end; the resume's turn is.
+                    _ if steering.paused => {}
+                    followed => {
+                        if self
+                            .repo
+                            .close_steering(key, followed)
+                            .await
+                            .map_err(Self::records)?
+                        {
+                            return ended;
+                        }
+                        // Steered since the read: read it again.
+                        continue;
+                    }
                 }
             }
 
-            if tokio::time::Instant::now() >= deadline {
+            if steering.paused {
+                deadline += wait;
+            } else if tokio::time::Instant::now() >= deadline {
                 return Err(SessionAgentError::TooSlow(SESSION_DEADLINE));
             }
             tokio::time::sleep(wait).await;
@@ -690,7 +770,7 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
             })
             .await;
         self.prompt_once(&action, prompted).await?;
-        self.finished_or_lost(&action, deadline).await?;
+        self.wait_turn(task.key, &action, deadline, true).await?;
         self.handed_back(task.key, action.action_id.as_uuid()).await
     }
 
@@ -710,49 +790,6 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
             ..task.clone()
         };
         self.answer_in(&task, session, deadline).await
-    }
-
-    /// [`Self::finished`], for a session resumed after a wait: one that
-    /// shows its runtime disconnected for [`RESUME_SETTLE`] in a row is lost.
-    async fn finished_or_lost(
-        &self,
-        action: &RoutineSessionAction,
-        deadline: tokio::time::Instant,
-    ) -> Result<(), SessionAgentError> {
-        let mut wait = FIRST_LOOK;
-        let mut failed_reads = 0;
-        let mut disconnected_since: Option<tokio::time::Instant> = None;
-        loop {
-            match self.sessions.status(action.clone()).await {
-                Ok(RoutineActionStatus::Succeeded) => return Ok(()),
-                Ok(RoutineActionStatus::Failed(reason)) => {
-                    return Err(SessionAgentError::TurnFailed(reason));
-                }
-                Ok(RoutineActionStatus::Pending(RoutinePendingReason::Disconnected)) => {
-                    failed_reads = 0;
-                    let since = *disconnected_since.get_or_insert_with(tokio::time::Instant::now);
-                    if since.elapsed() >= RESUME_SETTLE {
-                        return Err(SessionAgentError::SessionLost);
-                    }
-                }
-                Ok(RoutineActionStatus::Pending(_)) => {
-                    failed_reads = 0;
-                    disconnected_since = None;
-                }
-                Err(error) => {
-                    failed_reads += 1;
-                    if failed_reads >= MAX_FAILED_READS {
-                        return Err(error.into());
-                    }
-                }
-            }
-
-            if tokio::time::Instant::now() >= deadline {
-                return Err(SessionAgentError::TooSlow(SESSION_DEADLINE));
-            }
-            tokio::time::sleep(wait).await;
-            wait = (wait * 2).min(LONGEST_WAIT);
-        }
     }
 
     /// Do the Step `task` in `session`, the one it claimed: open it and
@@ -835,7 +872,7 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
                 None => return Err(SessionAgentError::NoQuota(reason)),
             }
         };
-        self.finished(&action, deadline).await?;
+        self.finished(task.key, &action, deadline).await?;
 
         // The session stays until the Step's end is recorded: a retry of an
         // attempt whose answer Temporal lost goes on in it.
@@ -930,7 +967,7 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
             })
             .await;
         self.prompt_once(&action, prompted).await?;
-        match self.finished(&action, deadline).await {
+        match self.finished(turn.key, &action, deadline).await {
             Err(SessionAgentError::TooSlow(_)) => return Err(SessionAgentError::Overdue),
             finished => finished?,
         }
@@ -1046,6 +1083,48 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
                 Ok(())
             }
             Err(error) => Err(error.into()),
+        }
+    }
+
+    /// Acts on the session the Step works in, through the bot recorded
+    /// with it. A prompt goes as a later prompt of the session, under the
+    /// id the Step keeps: one already taken, or whose delivery is unknown,
+    /// is taken, since it may land.
+    #[tracing::instrument(err, skip_all, fields(run_id = %key.run_id, seq = key.seq))]
+    async fn steer(
+        &self,
+        key: StepKey,
+        role: &Role,
+        owner: &MacroUserIdStr<'static>,
+        session: &StepSession,
+        steer: SessionSteer,
+    ) -> Result<(), SessionAgentError> {
+        let action = Self::action(owner, session, self.bot(session, role)?);
+        match steer {
+            SessionSteer::Interrupt => {
+                self.sessions.cancel(action).await?;
+                Ok(())
+            }
+            SessionSteer::Prompt { prompt_id, prompt } => {
+                let prompted = self
+                    .sessions
+                    .follow_up(PromptRoutineSession {
+                        action: RoutineSessionAction {
+                            action_id: AgentActionId::from_uuid(prompt_id),
+                            ..action
+                        },
+                        prompt,
+                        context: None,
+                    })
+                    .await;
+                match prompted {
+                    Ok(_)
+                    | Err(
+                        RoutineSessionError::Conflict | RoutineSessionError::PromptDeliveryUnknown,
+                    ) => Ok(()),
+                    Err(error) => Err(error.into()),
+                }
+            }
         }
     }
 

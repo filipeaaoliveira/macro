@@ -38,6 +38,7 @@ use crate::outbound::local_agent::LocalAgent;
 mod control_files;
 mod orchestrator;
 mod standing_rules;
+mod step_terminal;
 mod waiting;
 
 const KEY: &str = "test-internal-key";
@@ -256,6 +257,16 @@ impl FactoryService for FakeService {
         _id: RunId,
         _seq: u16,
         _reply: String,
+    ) -> Result<(), FactoryError> {
+        Err(self.refusing(&actor))
+    }
+
+    async fn steer_step(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        _id: RunId,
+        _seq: u16,
+        _request: crate::domain::step_terminal::TerminalRequest,
     ) -> Result<(), FactoryError> {
         Err(self.refusing(&actor))
     }

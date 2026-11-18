@@ -24,4 +24,5 @@ pub mod service;
 pub mod session_agent;
 pub mod stand_in;
 pub mod standing_rules;
+pub mod step_terminal;
 pub mod task_thread;

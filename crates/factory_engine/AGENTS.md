@@ -192,6 +192,42 @@ from the usage log by session id (`ai_usage`'s `SessionUsageReader`). It
 reads the newest `INSIGHTS_RUN_CAP` Runs of the period. A bad period, time
 zone or Flow name is 400.
 
+The Step Terminal (`src/domain/step_terminal.rs`) lets the Run's owner
+watch a running agent Step's session and steer it. A Step reads the
+session it works in while it runs and holds one (`terminal.sessionId` in
+the Run API), which the web app shows with Macro's own agent session
+transcript. `POST /runs/{id}/steps/{seq}/note` (`{"note"}`) sends the
+agent a note, a later prompt of its session (`StepAgent::steer`, the
+routine sessions' `follow_up`) fenced as the owner's notes are, which it
+reads once its turn ends; `/pause` stops the agent's turn (the routine
+sessions' `cancel`) and holds the Step; `/resume` (`{"note"?}`) tells the
+agent to go on, with the note if there is one; `/stop` stops the turn and
+ends the Step `failed`, as work that fails for good, so its session is
+stopped and deleted and the Flow routes the failure. Each is kept on the
+Step first (`factory_step_steer`, `terminal.steers`), then sent; a prompt
+the session refuses is kept undelivered and no longer followed (502), and
+a refused resume leaves the Step paused. Nothing new goes through the
+workflow: no signal, update or command, so Runs in flight replay as before
+and no patch marker is needed. The Step's work reads the steering while it
+waits on its agent's turn (`SessionAgent::wait_turn`): once a turn ends it
+follows the owner's latest note or resume sent after it, does not end while
+the Step is paused (and stops a turn that starts again meanwhile), and a
+stop fails it at once (`StoppedByOwner`). A note keeps the agent's hand back,
+so a turn that hands back nothing more ends with the one it gave. When the
+work has nothing more to follow it closes the steering
+(`close_steering`, compare-and-set on the prompt it followed), so a note
+that came meanwhile is followed rather than lost; between the factory's
+prompts, as while the engine runs the repository's checks, the Step takes
+no steering (409), and the factory's next prompt (`begin_turn`) opens it
+again. The time the Step is paused does not count against its wait for the
+agent (`SESSION_DEADLINE`), but the work stays one activity, bounded by
+the Step's two hours across attempts (`STEP_TOTAL`): a Step still paused
+then ends `failed`. A note while paused is refused; it goes with the
+resume. Only the Run's owner steers it, in their own signed-in session
+(`is_in_person`), from an account that is not an agent's: code mode, a
+factory Step's own session among them, an API key or token and an internal
+caller are refused (403). A note is 1 to 4096 bytes once trimmed (400).
+
 `POST /runs/{id}/cancel` cancels the workflow through Temporal; cancelling a
 cancelled Run again is accepted, and a Run whose workflow never started ends
 `cancelled` (its workflow, should it start late, takes no Step). Reading a Run
@@ -1009,6 +1045,8 @@ every Run in flight replays as before.
   sends, a notify-only Gate's lighter one, and the owner's notes a Step
   reads. Project rules are set through the API only: team
   settings show how many Projects have their own.
+- `src/domain/step_terminal.rs`: the Step Terminal: what the owner's note,
+  pause, resume and stop do, and the prompts they send the agent.
 - `src/domain/task_thread.rs`: the task thread: the comment each update of
   a Run posts to its task, and its id.
 - `flows/`: the built-in Flows, each named for its file

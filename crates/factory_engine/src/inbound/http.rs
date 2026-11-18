@@ -17,7 +17,7 @@ use axum::{
 };
 use factory_records::domain::models::{
     AskedBack, ControlFileChanges, EntryId, Gate, GateAnswer, HandBack, Outcome, Run, RunEnd,
-    RunId, RunOutcome, StandInAnswer, Step, StepEnd,
+    RunId, RunOutcome, StandInAnswer, Steer, SteerAction, Step, StepEnd, StepTerminal,
 };
 use macro_authorization::{
     MacroAuthorizationExtractor, MacroAuthorizationService, MacroAuthorizationState, UserOnly,
@@ -33,6 +33,7 @@ use crate::domain::models::{
     StandingRulesSettings,
 };
 use crate::domain::ports::FactoryService;
+use crate::domain::step_terminal::TerminalRequest;
 use factory_records::domain::standing_rules::{
     OrchestratorDefinition, OrchestratorKinds, ProjectRules, RulesSource, RunRules, StandInKinds,
     StandingRule,
@@ -92,6 +93,12 @@ impl<S, Auth> FromRef<FactoryRouterState<S, Auth>> for MacroAuthorizationState<A
 ///   Step `seq`.
 /// - `POST /runs/{id}/steps/{seq}/reply` — reply to it in words, which the
 ///   factory reads as one of its answers or asks back.
+/// - `POST /runs/{id}/steps/{seq}/note` — send the agent of the Run's
+///   running Step `seq` a note, from its Step Terminal.
+/// - `POST /runs/{id}/steps/{seq}/pause` — pause it.
+/// - `POST /runs/{id}/steps/{seq}/resume` — resume it, with a note or
+///   without.
+/// - `POST /runs/{id}/steps/{seq}/stop` — stop it: it ends `failed`.
 /// - `POST /runs/{id}/cancel` — cancel a Run.
 /// - `PUT /runs/{id}/task` — link a Run to the Macro task it works on.
 /// - `POST /hand-backs` — an agent Step's session hands back its result.
@@ -129,6 +136,22 @@ where
         .route(
             "/runs/{id}/steps/{seq}/reply",
             post(reply_to_gate_handler::<S, Auth>),
+        )
+        .route(
+            "/runs/{id}/steps/{seq}/note",
+            post(note_step_handler::<S, Auth>),
+        )
+        .route(
+            "/runs/{id}/steps/{seq}/pause",
+            post(pause_step_handler::<S, Auth>),
+        )
+        .route(
+            "/runs/{id}/steps/{seq}/resume",
+            post(resume_step_handler::<S, Auth>),
+        )
+        .route(
+            "/runs/{id}/steps/{seq}/stop",
+            post(stop_step_handler::<S, Auth>),
         )
         .route("/runs/{id}/cancel", post(cancel_run_handler::<S, Auth>))
         .route("/runs/{id}/task", put(link_task_handler::<S, Auth>))
@@ -255,6 +278,25 @@ pub struct AnswerGateRequest {
 pub struct ReplyToGateRequest {
     /// The person's words, in place of one of the Gate's answers.
     pub reply: String,
+}
+
+/// Request body for a note to a running Step's agent.
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteStepRequest {
+    /// The owner's words, for the agent to take into account: at most 4096
+    /// bytes, not blank.
+    pub note: String,
+}
+
+/// Request body for resuming a paused Step.
+#[derive(Debug, Default, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ResumeStepRequest {
+    /// The owner's words for the agent as it goes on, if any: at most 4096
+    /// bytes; a blank note is left out.
+    #[serde(default)]
+    pub note: Option<String>,
 }
 
 /// Request body for handing back an agent Step's result.
@@ -550,6 +592,206 @@ where
     Ok(StatusCode::ACCEPTED)
 }
 
+/// Send the agent of the running Step `seq` of one of the caller's Runs a
+/// note, from its Step Terminal. The agent reads it once its turn ends, or
+/// at once when it works on none, and the Step waits for it to answer: it
+/// ends with the agent's latest hand back. Only the Run's owner, in their
+/// own signed-in session, steers a Step (403 otherwise). A Step that ended
+/// (409), or takes no steering now: paused, asked to stop, between its
+/// agent's turns, or with no agent session (409). A blank note, or one
+/// past 4096 bytes, is refused (400); a session that did not take it is
+/// 502.
+#[utoipa::path(
+    post,
+    tag = "factory",
+    operation_id = "note_factory_step",
+    path = "/runs/{id}/steps/{seq}/note",
+    params(AnswerGateParams),
+    request_body = NoteStepRequest,
+    responses(
+        (status = 202),
+        (status = 400, body = ErrorResponse),
+        (status = 401, body = ErrorResponse),
+        (status = 403, body = ErrorResponse),
+        (status = 404, body = ErrorResponse),
+        (status = 409, body = ErrorResponse),
+        (status = 500, body = ErrorResponse),
+        (status = 502, body = ErrorResponse),
+    )
+)]
+#[tracing::instrument(skip_all, fields(run_id = %params.id, seq = params.seq))]
+pub async fn note_step_handler<S, Auth>(
+    State(state): State<FactoryRouterState<S, Auth>>,
+    caller: MacroAuthorizationExtractor<Auth, UserOrInternal>,
+    headers: HeaderMap,
+    Path(params): Path<AnswerGateParams>,
+    Json(body): Json<NoteStepRequest>,
+) -> Result<StatusCode, FactoryError>
+where
+    S: FactoryService,
+    Auth: MacroAuthorizationService,
+{
+    steer_step(
+        &state,
+        caller.authorization,
+        &headers,
+        params,
+        TerminalRequest::Note(body.note),
+    )
+    .await
+}
+
+/// Pause the running Step `seq` of one of the caller's Runs: its agent's
+/// turn stops, and the Step holds until it is resumed or stopped. The time
+/// it is paused does not count against the Step's wait for its agent, but
+/// a Step still paused when its two hours run out ends `failed`. As for a
+/// note: only the owner in person (403), a Step that ended or takes no
+/// steering now, such as one already paused (409).
+#[utoipa::path(
+    post,
+    tag = "factory",
+    operation_id = "pause_factory_step",
+    path = "/runs/{id}/steps/{seq}/pause",
+    params(AnswerGateParams),
+    responses(
+        (status = 202),
+        (status = 400, body = ErrorResponse),
+        (status = 401, body = ErrorResponse),
+        (status = 403, body = ErrorResponse),
+        (status = 404, body = ErrorResponse),
+        (status = 409, body = ErrorResponse),
+        (status = 500, body = ErrorResponse),
+    )
+)]
+#[tracing::instrument(skip_all, fields(run_id = %params.id, seq = params.seq))]
+pub async fn pause_step_handler<S, Auth>(
+    State(state): State<FactoryRouterState<S, Auth>>,
+    caller: MacroAuthorizationExtractor<Auth, UserOrInternal>,
+    headers: HeaderMap,
+    Path(params): Path<AnswerGateParams>,
+) -> Result<StatusCode, FactoryError>
+where
+    S: FactoryService,
+    Auth: MacroAuthorizationService,
+{
+    steer_step(
+        &state,
+        caller.authorization,
+        &headers,
+        params,
+        TerminalRequest::Pause,
+    )
+    .await
+}
+
+/// Resume the paused Step `seq` of one of the caller's Runs: its agent is
+/// told to go on where it left off, with the owner's note if they wrote
+/// one, and the Step follows that turn. As for a note: only the owner in
+/// person (403), a Step that ended or is not paused (409), a note past 4096
+/// bytes (400), a session that did not take it (502), which leaves the
+/// Step paused.
+#[utoipa::path(
+    post,
+    tag = "factory",
+    operation_id = "resume_factory_step",
+    path = "/runs/{id}/steps/{seq}/resume",
+    params(AnswerGateParams),
+    request_body = ResumeStepRequest,
+    responses(
+        (status = 202),
+        (status = 400, body = ErrorResponse),
+        (status = 401, body = ErrorResponse),
+        (status = 403, body = ErrorResponse),
+        (status = 404, body = ErrorResponse),
+        (status = 409, body = ErrorResponse),
+        (status = 500, body = ErrorResponse),
+        (status = 502, body = ErrorResponse),
+    )
+)]
+#[tracing::instrument(skip_all, fields(run_id = %params.id, seq = params.seq))]
+pub async fn resume_step_handler<S, Auth>(
+    State(state): State<FactoryRouterState<S, Auth>>,
+    caller: MacroAuthorizationExtractor<Auth, UserOrInternal>,
+    headers: HeaderMap,
+    Path(params): Path<AnswerGateParams>,
+    Json(body): Json<ResumeStepRequest>,
+) -> Result<StatusCode, FactoryError>
+where
+    S: FactoryService,
+    Auth: MacroAuthorizationService,
+{
+    steer_step(
+        &state,
+        caller.authorization,
+        &headers,
+        params,
+        TerminalRequest::Resume(body.note),
+    )
+    .await
+}
+
+/// Stop the running Step `seq` of one of the caller's Runs: its agent's
+/// turn stops, and the Step ends `failed`, its session stopped for good;
+/// the Flow routes the failure. As for a note: only the owner in person
+/// (403), a Step that ended or takes no steering now (409).
+#[utoipa::path(
+    post,
+    tag = "factory",
+    operation_id = "stop_factory_step",
+    path = "/runs/{id}/steps/{seq}/stop",
+    params(AnswerGateParams),
+    responses(
+        (status = 202),
+        (status = 400, body = ErrorResponse),
+        (status = 401, body = ErrorResponse),
+        (status = 403, body = ErrorResponse),
+        (status = 404, body = ErrorResponse),
+        (status = 409, body = ErrorResponse),
+        (status = 500, body = ErrorResponse),
+    )
+)]
+#[tracing::instrument(skip_all, fields(run_id = %params.id, seq = params.seq))]
+pub async fn stop_step_handler<S, Auth>(
+    State(state): State<FactoryRouterState<S, Auth>>,
+    caller: MacroAuthorizationExtractor<Auth, UserOrInternal>,
+    headers: HeaderMap,
+    Path(params): Path<AnswerGateParams>,
+) -> Result<StatusCode, FactoryError>
+where
+    S: FactoryService,
+    Auth: MacroAuthorizationService,
+{
+    steer_step(
+        &state,
+        caller.authorization,
+        &headers,
+        params,
+        TerminalRequest::Stop,
+    )
+    .await
+}
+
+/// Steer a Step for its owner in person. An agent works as the Run's owner,
+/// and its code could otherwise steer the Step it works on, or another.
+async fn steer_step<S, Auth>(
+    state: &FactoryRouterState<S, Auth>,
+    authorization: UserOrInternalAuthorization,
+    headers: &HeaderMap,
+    params: AnswerGateParams,
+    request: TerminalRequest,
+) -> Result<StatusCode, FactoryError>
+where
+    S: FactoryService,
+    Auth: MacroAuthorizationService,
+{
+    let actor = in_person(authorization, headers)?;
+    state
+        .service
+        .steer_step(actor, params.id, params.seq, request)
+        .await?;
+    Ok(StatusCode::ACCEPTED)
+}
+
 /// The caller, when they are the person in their own signed-in session:
 /// not an internal caller acting for them, nor an API key or token, nor an
 /// agent's program.
@@ -732,6 +974,7 @@ impl FactoryError {
             | FactoryError::EmptyRequest
             | FactoryError::RequestTooLarge { .. }
             | FactoryError::NoteTooLarge { .. }
+            | FactoryError::EmptyNote
             | FactoryError::UnknownTask
             | FactoryError::NotATask
             | FactoryError::UnknownUser
@@ -767,9 +1010,12 @@ impl FactoryError {
             | FactoryError::QueueFull { .. }
             | FactoryError::AnswerRefused(_)
             | FactoryError::StepEnded
+            | FactoryError::NotSteerable(_)
             | FactoryError::TaskBusy
             | FactoryError::FiringRepeated => StatusCode::CONFLICT,
-            FactoryError::TriggerUnavailable => StatusCode::BAD_GATEWAY,
+            FactoryError::TriggerUnavailable | FactoryError::SessionUnreachable => {
+                StatusCode::BAD_GATEWAY
+            }
             FactoryError::Upstream(upstream) => upstream.status_code(),
             FactoryError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
@@ -858,6 +1104,10 @@ impl IntoResponse for FactoryError {
         get_run_handler,
         answer_gate_handler,
         reply_to_gate_handler,
+        note_step_handler,
+        pause_step_handler,
+        resume_step_handler,
+        stop_step_handler,
         cancel_run_handler,
         link_task_handler,
         hand_back_handler,
@@ -875,6 +1125,8 @@ impl IntoResponse for FactoryError {
         CreateRunRequest,
         AnswerGateRequest,
         ReplyToGateRequest,
+        NoteStepRequest,
+        ResumeStepRequest,
         LinkTaskRequest,
         HandBackRequest,
         RunDetail,
@@ -883,6 +1135,9 @@ impl IntoResponse for FactoryError {
         RunOutcome,
         Step,
         StepEnd,
+        StepTerminal,
+        Steer,
+        SteerAction,
         Gate,
         GateAnswer,
         AskedBack,

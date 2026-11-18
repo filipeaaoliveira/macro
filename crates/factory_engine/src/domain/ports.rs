@@ -7,7 +7,7 @@ pub use gate_replies::{GateModel, GateReplyService, ModelPick, ModelQuestion};
 use agent_session::domain::session_command::SessionCommandOutput;
 use agent_session::domain::session_task::TaskDocumentId;
 use factory_records::domain::automations::Automation;
-use factory_records::domain::models::{HandBack, Outcome, Role, RunId, StepKey};
+use factory_records::domain::models::{HandBack, Outcome, Role, RunId, StepKey, StepSession};
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
@@ -23,11 +23,12 @@ use crate::domain::main_hold::{HoldTask, MainLook, MainWatch};
 use crate::domain::models::{
     AgentAnswer, AgentCommand, AgentTask, AgentTurn, Answerer, CodeRepository,
     ControlFilesSettings, FactoryError, FlowSummary, HeadChecks, Merging, OpenPullRequest, Opening,
-    PullRequest, RepositoryAccess, RequiredChecks, RunDetail, RunFinish, RunStart,
+    PullRequest, RepositoryAccess, RequiredChecks, RunDetail, RunFinish, RunStart, SessionSteer,
     StandingRulesSettings, StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
 };
 use crate::domain::review_rounds::{ChangedFile, ReviewRoundClosing, ReviewRoundOpening};
 use crate::domain::standing_rules::RuleAnswer;
+use crate::domain::step_terminal::TerminalRequest;
 use crate::domain::task_thread::ThreadComment;
 use factory_records::domain::standing_rules::OrchestratorDefinition;
 
@@ -139,6 +140,22 @@ pub trait StepExecutor: Send + Sync + 'static {
         key: StepKey,
         owner: &MacroUserIdStr<'static>,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// Act on `session`, the one the running Step `key` works in, as the
+    /// agent of `role` that works there, for its owner's Step Terminal. An
+    /// error says the session did not take a prompt: the agent never reads
+    /// it. Work no agent does holds no session, so nothing steers it.
+    fn steer(
+        &self,
+        role: &Role,
+        key: StepKey,
+        owner: &MacroUserIdStr<'static>,
+        session: &StepSession,
+        steer: SessionSteer,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send {
+        let _ = (role, key, owner, session, steer);
+        async { Ok(()) }
+    }
 }
 
 /// An agent that does a Step's work: it reads the task's prompt, works, and
@@ -190,6 +207,23 @@ pub trait StepAgent: Send + Sync + 'static {
         role: &Role,
         owner: &MacroUserIdStr<'static>,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// Act on `session`, the one the running Step `key` of `role` works in,
+    /// for `owner`'s Step Terminal: send it a prompt, which the agent reads
+    /// once its turn ends, or stop its turn. An error says the session did
+    /// not take the prompt; a prompt whose delivery is unknown may still
+    /// land, so it is taken. An agent with no sessions has nothing to steer.
+    fn steer(
+        &self,
+        key: StepKey,
+        role: &Role,
+        owner: &MacroUserIdStr<'static>,
+        session: &StepSession,
+        steer: SessionSteer,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send {
+        let _ = (key, role, owner, session, steer);
+        async { Ok(()) }
+    }
 }
 
 /// Pull requests on GitHub, read and changed as a Run's owner, with the
@@ -655,6 +689,18 @@ pub trait FactoryService: Send + Sync + 'static {
         id: RunId,
         task_id: Uuid,
     ) -> impl Future<Output = Result<RunDetail, FactoryError>> + Send;
+
+    /// Steer the running Step `seq` of `actor`'s Run from its Step
+    /// Terminal: send its agent a note, pause it, resume it, or stop it
+    /// (`crate::domain::step_terminal`). The actor is the Run's owner, in
+    /// their own signed-in session; an agent's account is refused.
+    fn steer_step(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        id: RunId,
+        seq: u16,
+        request: TerminalRequest,
+    ) -> impl Future<Output = Result<(), FactoryError>> + Send;
 
     /// Give `actor`'s words, `reply`, to the Gate the actor's Run waits on,
     /// in place of one of its answers: the factory reads them as one of its
