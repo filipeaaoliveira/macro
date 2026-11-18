@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE factory_improvement\n            SET state = $2, refusal = $3, settled_at = now()\n            WHERE id = $1 AND state IN ('starting', 'open')\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7ce5920f2c860d72f65ee04b91e2799824bc76c19816aefc99ce9a20b909ad38"
+}

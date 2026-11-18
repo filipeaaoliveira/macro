@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO factory_improvement (id, team_id, repo_url, state)\n            VALUES ($1, $2, $3, 'starting')\n            ON CONFLICT (team_id) WHERE state IN ('starting', 'open') DO NOTHING\n            RETURNING id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "0bb4016e1d2bdee038d77811ba409b46c43fb4df751bbb183c2a4e0cb91458f6"
+}

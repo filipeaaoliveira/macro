@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE factory_improvement SET run_id = $2, state = 'open'\n            WHERE id = $1 AND state = 'starting'\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3a4907beb63235e23d6db1d5fc12cbe5eac5bbfd54263ff4df624c4f9e7dee34"
+}
