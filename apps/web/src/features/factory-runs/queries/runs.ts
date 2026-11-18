@@ -408,7 +408,15 @@ export function createAppRunsContext(client: QueryClient): RunsContext {
 
     async markRunFlawed({ runId, reason }) {
       const result = await factoryClient.flawRun(runId, { reason });
-      if (result.isErr()) return failure(result.error);
+      if (result.isErr()) {
+        const refused = failure(result.error);
+        // A Run that did not end in success has moved on from what this
+        // person saw: it resolves once the Run is read again.
+        const reads = refreshRun(client, runId, taskOfRun(client, runId));
+        if (refused.reason === 'conflict') await reads.catch(() => undefined);
+        else fireAndForget(reads, 'factory-runs');
+        return refused;
+      }
       seedRun(client, toRun(result.value));
       // A flawed Run counts apart in insights.
       fireAndForget(
