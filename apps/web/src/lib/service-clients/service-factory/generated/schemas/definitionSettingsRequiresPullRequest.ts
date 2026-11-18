@@ -6,9 +6,11 @@
  */
 
 /**
- * Whether its default branch takes changes only through a pull
-request, by a ruleset or its branch protection; none when that
-cannot be told, as when the person does not administer it. Without
-one, a push changes the factory's rules unreviewed.
+ * Whether a ruleset or the branch protection of its default branch
+asks for a pull request; none when that cannot be told, as when the
+person does not administer it. Without one, a push changes the
+factory's rules unreviewed. With one, whoever may bypass the rules
+(a ruleset's bypass list, admins when protection does not include
+them) still can: GitHub does not tell the factory who.
  */
 export type DefinitionSettingsRequiresPullRequest = boolean | null;
