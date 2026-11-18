@@ -45,6 +45,8 @@ struct FakeWorkflows {
     replies: Arc<Mutex<Vec<ReplyGate>>>,
     cancelled: Arc<Mutex<Vec<RunId>>>,
     fail: bool,
+    /// Every cancel fails, as Temporal out of reach does.
+    cancel_fails: bool,
     started_anyway: bool,
     refuse: bool,
     /// The workflow completed, though the Run's end is not recorded yet.
@@ -96,6 +98,9 @@ impl RunWorkflows for FakeWorkflows {
     }
 
     async fn cancel(&self, run_id: RunId) -> Result<bool, RunWorkflowsError> {
+        if self.cancel_fails {
+            return Err(RunWorkflowsError::Other(rootcause::report!("unreachable")));
+        }
         self.cancelled.lock().expect("cancelled").push(run_id);
         let scripted = self.cancel_answers.lock().expect("cancels").pop_front();
         Ok(scripted.unwrap_or(!self.completed && !self.unstarted))

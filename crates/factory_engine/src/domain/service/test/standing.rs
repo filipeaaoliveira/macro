@@ -448,6 +448,58 @@ async fn cancel_and_link_take_a_bot_in_a_standing_role_that_allows_them() {
     assert!(open_detail.standing_acts.is_empty());
 }
 
+/// A cancel the workflow does not take keeps no one as its sender: not one
+/// whose workflow already ended the Run, nor one Temporal fails. A later
+/// cancel that goes through is then the one the Run keeps.
+#[tokio::test]
+async fn a_cancel_that_is_not_taken_keeps_no_standing_act() {
+    let repo = FakeRepo::default();
+    let github = FakeGithub::default();
+    let ended = FakeWorkflows {
+        completed: true,
+        ..FakeWorkflows::default()
+    };
+    let failing = FakeWorkflows {
+        cancel_fails: true,
+        ..FakeWorkflows::default()
+    };
+    let taking = FakeWorkflows::default();
+    let run_id = waiting_run(
+        &repo,
+        Some(agents(Some(split_roles()))),
+        "plan",
+        "done",
+        &["approve", "revise"],
+    )
+    .await;
+    let backup = session_of(&repo, BACKUP_BOT);
+
+    let too_late = code_service(&repo, &ended, &github)
+        .cancel_run(&julia(), run_id, Some(backup))
+        .await;
+    let failed = code_service(&repo, &failing, &github)
+        .cancel_run(&julia(), run_id, Some(backup))
+        .await;
+
+    assert!(matches!(too_late, Err(FactoryError::RunEnded)), "{too_late:?}");
+    assert!(failed.is_err(), "{failed:?}");
+    assert!(repo.standing_acts.lock().expect("acts").is_empty());
+
+    let other = session_of(&repo, BACKUP_BOT);
+    let service = code_service(&repo, &taking, &github);
+    service
+        .cancel_run(&julia(), run_id, Some(other))
+        .await
+        .expect("the operator cancels");
+    let detail = service.get_run(&julia(), run_id).await.expect("read");
+    let kept: Vec<_> = detail
+        .standing_acts
+        .iter()
+        .map(|act| (act.act, act.session_id))
+        .collect();
+    assert_eq!(kept, [(StandingAct::Cancel, other)]);
+}
+
 /// Starting a Run of a Definition with Standing Roles takes a bot that
 /// fills one allowing `start`, and the Run keeps who started it; the
 /// owner in person starts it as before.

@@ -665,6 +665,36 @@ where
         Ok(kind)
     }
 
+    /// Cancel the workflow of the Run `id`, which has not ended: fails
+    /// when the workflow ended it before the cancel reached it.
+    async fn send_cancel(&self, id: RunId) -> Result<(), FactoryError> {
+        if self.workflows.cancel(id).await? {
+            return Ok(());
+        }
+        // Temporal had no running workflow for the Run. One may have
+        // started since, which a second cancel reaches; one that completed
+        // before its Run's end was recorded has ended the Run, though the
+        // records don't say so yet.
+        if self.workflows.exists(id).await? {
+            return if self.workflows.cancel(id).await? {
+                Ok(())
+            } else {
+                Err(FactoryError::RunEnded)
+            };
+        }
+        // A Run whose workflow never started has nothing to stop: it ends
+        // cancelled here. A workflow that starts late takes no Step of it,
+        // and is cancelled if it is there by now.
+        self.repo
+            .end_run(id, RunOutcome::Cancelled)
+            .await
+            .map_err(internal)?;
+        if self.workflows.exists(id).await? {
+            self.workflows.cancel(id).await?;
+        }
+        Ok(())
+    }
+
     /// Record the Run `order` asks for and start it, as
     /// [`FactoryService::create_run`] does, keeping the Automation that
     /// starts it if one does.
@@ -1715,38 +1745,17 @@ where
             .await?;
         match run.end.map(|end| end.outcome) {
             None => {
-                // The agent that asked for the cancel is kept before it is
-                // sent, so a cancel that went through is never left without
-                // it; a Run keeps the first cancel's.
+                self.send_cancel(id).await?;
+                // The agent that asked for the cancel is kept once the
+                // cancel is accepted, so a refused or failed one names no
+                // one; a Run keeps the first cancel's. A failed record
+                // answers an error for a cancel that went through, and only
+                // loses who sent it.
                 if let Some(cancelled_by) = &cancelled_by {
                     self.repo
                         .record_standing_act(id, StandingAct::Cancel, None, cancelled_by)
                         .await
                         .map_err(internal)?;
-                }
-                if self.workflows.cancel(id).await? {
-                    return Ok(());
-                }
-                // Temporal had no running workflow for the Run. One may have
-                // started since, which a second cancel reaches; one that
-                // completed before its Run's end was recorded has ended the
-                // Run, though the records don't say so yet.
-                if self.workflows.exists(id).await? {
-                    return if self.workflows.cancel(id).await? {
-                        Ok(())
-                    } else {
-                        Err(FactoryError::RunEnded)
-                    };
-                }
-                // A Run whose workflow never started has nothing to stop: it
-                // ends cancelled here. A workflow that starts late takes no
-                // Step of it, and is cancelled if it is there by now.
-                self.repo
-                    .end_run(id, RunOutcome::Cancelled)
-                    .await
-                    .map_err(internal)?;
-                if self.workflows.exists(id).await? {
-                    self.workflows.cancel(id).await?;
                 }
                 Ok(())
             }
