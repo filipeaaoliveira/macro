@@ -35,6 +35,9 @@ const TASK_FOREIGN_KEY: &str = "factory_run_task_id_fkey";
 /// task while one it started runs there.
 const AUTOMATION_TASK_OPEN_INDEX: &str = "factory_run_automation_task_open_idx";
 
+/// The index that keeps a firing from starting a second Run.
+const AUTOMATION_FIRING_INDEX: &str = "factory_run_automation_firing_idx";
+
 /// The foreign key from a Gate's answer to the user who gave it.
 const GATE_USER_FOREIGN_KEY: &str = "factory_gate_user_id_fkey";
 
@@ -476,9 +479,12 @@ impl RunRepository for PgRunRepository {
             INSERT INTO factory_run (
                 id, flow, request, user_id, task_id, repo_url, base_branch, created_in_person,
                 control_file_patterns, control_files_team_id, standing_rules, standing_rules_source,
-                standing_rules_project_id, automation_id, automation_name, automation_trigger
+                standing_rules_project_id, automation_id, automation_name, automation_trigger,
+            automation_firing_key
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+            VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
+            )
             RETURNING
                 id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,
                 control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,
@@ -499,9 +505,10 @@ impl RunRepository for PgRunRepository {
             &run.standing_rules.definition.kinds(),
             run.standing_rules.source.as_ref(),
             run.standing_rules.project_id,
-            run.automation.map(|automation| automation.id),
-            run.automation.map(|automation| automation.name.as_str()),
-            run.automation.map(|automation| automation.trigger.as_ref()),
+            run.automation.map(|start| start.automation.id),
+            run.automation.map(|start| start.automation.name.as_str()),
+            run.automation.map(|start| start.automation.trigger.as_ref()),
+            run.automation.map(|start| start.firing_key),
         )
         .fetch_one(&self.pool)
         .await;
@@ -515,6 +522,11 @@ impl RunRepository for PgRunRepository {
                 if error.constraint() == Some(AUTOMATION_TASK_OPEN_INDEX) =>
             {
                 Ok(RunInsert::TaskBusy)
+            }
+            Err(sqlx::Error::Database(error))
+                if error.constraint() == Some(AUTOMATION_FIRING_INDEX) =>
+            {
+                Ok(RunInsert::FiringStarted)
             }
             Err(error) => Err(error.into()),
         }

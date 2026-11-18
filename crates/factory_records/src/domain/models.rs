@@ -11,7 +11,7 @@ use macro_user_id::user_id::MacroUserIdStr;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::domain::automations::RunAutomation;
+use crate::domain::automations::{AutomationStart, RunAutomation};
 use crate::domain::standing_rules::{RunRules, StandingRule};
 
 /// The most bytes a Run's request may hold (the `factory_run.request` check).
@@ -439,7 +439,7 @@ pub struct NewRun<'a> {
     pub standing_rules: RunRules,
     /// The Automation that starts it, if one does: then no other Run an
     /// Automation started may be running on its task.
-    pub automation: Option<&'a RunAutomation>,
+    pub automation: Option<AutomationStart<'a>>,
 }
 
 /// What keeping a new Run came to.
@@ -453,6 +453,8 @@ pub enum RunInsert {
     /// An Automation started it, and a Run another Automation started is
     /// running on its task, so nothing was kept.
     TaskBusy,
+    /// A Run of the same Automation's firing is kept already.
+    FiringStarted,
 }
 
 /// Whether a Run was linked to a task.

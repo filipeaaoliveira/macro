@@ -255,7 +255,25 @@ impl AutomationRepository for PgRunRepository {
         .fetch_optional(&self.pool)
         .await?;
         if claimed.is_some() {
-            return Ok(FiringClaim::Claimed);
+            // A claim taken over may have started its Run before its worker
+            // stopped, short of recording it: the Run keeps the key it
+            // started for, through `factory_run_automation_firing_idx`.
+            let started = sqlx::query_scalar!(
+                r#"
+                SELECT id FROM factory_run
+                WHERE automation_id = $1 AND automation_firing_key = $2
+                "#,
+                automation_id,
+                key,
+            )
+            .fetch_optional(&self.pool)
+            .await?;
+            let Some(run_id) = started else {
+                return Ok(FiringClaim::Claimed);
+            };
+            let end = FiringEnd::Started(RunId::from_uuid(run_id));
+            self.end_firing(automation_id, key, end).await?;
+            return Ok(FiringClaim::Ended(end));
         }
 
         let firing = sqlx::query!(

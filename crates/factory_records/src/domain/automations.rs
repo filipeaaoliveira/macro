@@ -178,6 +178,13 @@ pub enum FiringSkip {
     /// The factory refused the Run, as it would refuse its creator: the
     /// task or repository is out of their reach, or the Flow is gone.
     Refused,
+    /// The repository event is about a branch a factory Run works on, so
+    /// the Run's own pushes and pull requests start no other.
+    OwnBranch,
+    /// The Automation's creator is no longer on its team.
+    CreatorLeftTeam,
+    /// The Automation's creator's account is an agent's.
+    AgentAccount,
 }
 
 /// What a firing came to, once it did.
@@ -187,6 +194,15 @@ pub enum FiringEnd {
     Started(RunId),
     /// It started none, for this reason.
     Skipped(FiringSkip),
+}
+
+/// The Automation that starts a new Run, and the firing it starts it for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AutomationStart<'a> {
+    /// The Automation, as it is now.
+    pub automation: &'a RunAutomation,
+    /// The firing's key: a firing starts at most one Run.
+    pub firing_key: &'a str,
 }
 
 /// What claiming a firing found.
@@ -203,9 +219,11 @@ pub enum FiringClaim {
 
 /// How long a claimed firing that never ended keeps its key: past it, the
 /// worker that claimed it is taken to have stopped, and the next firing
-/// with the key goes on. Longer than a webhook call's timestamp is
-/// accepted, so a replay never takes a firing over.
-pub const FIRING_CLAIM_STALE_AFTER: chrono::TimeDelta = chrono::TimeDelta::minutes(10);
+/// with the key goes on, unless a Run started under the key. Three times
+/// the ten minutes a webhook call's signature is taken (its timestamp
+/// within five minutes of now, either way), so a replay never takes a
+/// firing over.
+pub const FIRING_CLAIM_STALE_AFTER: chrono::TimeDelta = chrono::TimeDelta::minutes(30);
 
 /// Where Automations and their firings are kept.
 pub trait AutomationRepository: Send + Sync + 'static {

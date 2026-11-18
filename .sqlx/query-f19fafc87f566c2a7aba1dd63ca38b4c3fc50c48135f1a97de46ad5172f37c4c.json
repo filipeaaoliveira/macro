@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            INSERT INTO factory_run (\n                id, flow, request, user_id, task_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, standing_rules, standing_rules_source,\n                standing_rules_project_id, automation_id, automation_name, automation_trigger\n            )\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)\n            RETURNING\n                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,\n                standing_rules, standing_rules_source, standing_rules_project_id,\n                automation_id, automation_name, automation_trigger, outcome, ended_at\n            ",
+  "query": "\n            INSERT INTO factory_run (\n                id, flow, request, user_id, task_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, standing_rules, standing_rules_source,\n                standing_rules_project_id, automation_id, automation_name, automation_trigger,\n            automation_firing_key\n            )\n            VALUES (\n                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17\n            )\n            RETURNING\n                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,\n                standing_rules, standing_rules_source, standing_rules_project_id,\n                automation_id, automation_name, automation_trigger, outcome, ended_at\n            ",
   "describe": {
     "columns": [
       {
@@ -126,6 +126,7 @@
         "Uuid",
         "Uuid",
         "Text",
+        "Text",
         "Text"
       ]
     },
@@ -153,5 +154,5 @@
       true
     ]
   },
-  "hash": "081206fbcd4ddf017c3003d3d093d388dfc182f77f1e3e8d37c3d572a7e6369e"
+  "hash": "f19fafc87f566c2a7aba1dd63ca38b4c3fc50c48135f1a97de46ad5172f37c4c"
 }

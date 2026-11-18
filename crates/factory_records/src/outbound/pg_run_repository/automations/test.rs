@@ -6,8 +6,8 @@ use uuid::Uuid;
 
 use super::super::test::julia;
 use crate::domain::automations::{
-    AutomationRepository, AutomationTrigger, FiringClaim, FiringEnd, FiringSkip, NewAutomation,
-    RunAutomation, TriggerKind,
+    AutomationRepository, AutomationStart, AutomationTrigger, FiringClaim, FiringEnd, FiringSkip,
+    NewAutomation, RunAutomation, TriggerKind,
 };
 use crate::domain::models::{NewRun, RunId, RunInsert, RunOutcome};
 use crate::domain::ports::RunRepository;
@@ -39,9 +39,11 @@ async fn keep(repo: &PgRunRepository, trigger: &AutomationTrigger, secret: Optio
     automation_id
 }
 
+/// Keep a Run of Julia's, started by `automation`'s firing keyed `key`
+/// when one is given.
 async fn run_by(
     repo: &PgRunRepository,
-    automation: Option<&RunAutomation>,
+    automation: Option<(&RunAutomation, &str)>,
     task_id: Option<Uuid>,
 ) -> RunInsert {
     repo.insert_run(NewRun {
@@ -55,7 +57,10 @@ async fn run_by(
         control_file_patterns: &[],
         control_files_team_id: None,
         standing_rules: RunRules::DEFAULT,
-        automation,
+        automation: automation.map(|(automation, firing_key)| AutomationStart {
+            automation,
+            firing_key,
+        }),
     })
     .await
     .expect("insert run")
@@ -209,7 +214,15 @@ async fn a_stale_claim_is_taken_over(pool: PgPool) {
     repo.claim_firing(automation_id, "run-1")
         .await
         .expect("claim");
-    sqlx::query!("UPDATE factory_automation_firing SET fired_at = now() - interval '11 minutes'")
+    sqlx::query!("UPDATE factory_automation_firing SET fired_at = now() - interval '29 minutes'")
+        .execute(&pool)
+        .await
+        .expect("age the claim");
+    let fresh = repo
+        .claim_firing(automation_id, "run-1")
+        .await
+        .expect("claim again");
+    sqlx::query!("UPDATE factory_automation_firing SET fired_at = now() - interval '31 minutes'")
         .execute(&pool)
         .await
         .expect("age the claim");
@@ -219,7 +232,41 @@ async fn a_stale_claim_is_taken_over(pool: PgPool) {
         .await
         .expect("claim again");
 
+    assert_eq!(fresh, FiringClaim::InProgress);
     assert_eq!(taken, FiringClaim::Claimed);
+}
+
+/// A claim taken over after its worker started the Run, short of
+/// recording it, finds that Run rather than starting a second.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "team"))
+)]
+async fn a_stale_claim_finds_the_run_its_firing_started(pool: PgPool) {
+    let repo = PgRunRepository::new(pool.clone());
+    let automation_id = keep(&repo, &AutomationTrigger::Webhook, Some("whsec_test")).await;
+    let started_by = RunAutomation {
+        id: automation_id,
+        name: "Triage new tasks".to_string(),
+        trigger: TriggerKind::Webhook,
+    };
+    repo.claim_firing(automation_id, "run-1")
+        .await
+        .expect("claim");
+    let RunInsert::Inserted(run) = run_by(&repo, Some((&started_by, "run-1")), None).await else {
+        panic!("the run starts");
+    };
+    sqlx::query!("UPDATE factory_automation_firing SET fired_at = now() - interval '31 minutes'")
+        .execute(&pool)
+        .await
+        .expect("age the claim");
+
+    let taken = repo
+        .claim_firing(automation_id, "run-1")
+        .await
+        .expect("claim again");
+
+    assert_eq!(taken, FiringClaim::Ended(FiringEnd::Started(run.id)));
 }
 
 /// A Run keeps the Automation that started it, and an Automation never
@@ -239,15 +286,16 @@ async fn an_automation_starts_one_run_on_a_task_at_a_time(pool: PgPool) {
     };
     let task = Some(id(LOGIN_TASK));
 
-    let RunInsert::Inserted(first) = run_by(&repo, Some(&started_by), task).await else {
+    let RunInsert::Inserted(first) = run_by(&repo, Some((&started_by, "f1")), task).await else {
         panic!("the first run starts");
     };
-    let second = run_by(&repo, Some(&started_by), task).await;
+    let second = run_by(&repo, Some((&started_by, "f2")), task).await;
     let by_hand = run_by(&repo, None, task).await;
     repo.end_run(first.id, RunOutcome::Success)
         .await
         .expect("end");
-    let after = run_by(&repo, Some(&started_by), task).await;
+    let after = run_by(&repo, Some((&started_by, "f3")), task).await;
+    let again = run_by(&repo, Some((&started_by, "f3")), None).await;
 
     assert_eq!(first.automation, Some(started_by.clone()));
     assert_eq!(
@@ -261,6 +309,7 @@ async fn an_automation_starts_one_run_on_a_task_at_a_time(pool: PgPool) {
     assert_eq!(second, RunInsert::TaskBusy);
     assert!(matches!(by_hand, RunInsert::Inserted(run) if run.automation.is_none()));
     assert!(matches!(after, RunInsert::Inserted(_)));
+    assert_eq!(again, RunInsert::FiringStarted, "a firing starts one run");
 }
 
 /// A running Run on a task is found whoever owns it, and an ended one is

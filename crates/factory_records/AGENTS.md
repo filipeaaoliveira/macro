@@ -221,11 +221,13 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   creator's account; its trigger is kept as JSON beside its kind, and a
   webhook's secret only for a webhook (`factory_automation_webhook`).
   `claim_firing` claims a firing's key once, at the database's time, unless
-  one that never ended is older than `FIRING_CLAIM_STALE_AFTER`;
+  one that never ended is older than `FIRING_CLAIM_STALE_AFTER`: then it
+  first looks for a Run started under the key, and ends the firing with it;
   `end_firing` keeps the first end. `factory_run.automation_id`,
-  `automation_name` and `automation_trigger` are set once, by `insert_run`
-  (`NewRun::automation`), and are a record, not a reference: they outlive
-  the Automation. `factory_run_automation_task_open_idx` refuses a second
+  `automation_name`, `automation_trigger` and `automation_firing_key` are
+  set once, by `insert_run` (`NewRun::automation`), and are a record, not a
+  reference: they outlive the Automation. `factory_run_automation_firing_idx`
+  refuses a second Run of one firing (`RunInsert::FiringStarted`). `factory_run_automation_task_open_idx` refuses a second
   open Run an Automation started on a task, which `insert_run` answers as
   `RunInsert::TaskBusy`; `running_run_on_task` reads any open Run on a task
   through `factory_run_task_owner_idx`.

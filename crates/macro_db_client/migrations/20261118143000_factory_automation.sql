@@ -47,7 +47,7 @@ CREATE INDEX factory_automation_team_idx
 CREATE INDEX factory_automation_created_by_idx ON factory_automation (created_by);
 
 -- Each time an Automation fires, keyed by what fired it: the routine run's
--- id, or a webhook call's signature, which covers its timestamp and body.
+-- id, or the SHA-256 of a webhook call's signed timestamp and body.
 -- A second firing with the same key is a retry or a replay and starts
 -- nothing. It keeps the Run it started, or why it started none.
 CREATE TABLE factory_automation_firing (
@@ -55,7 +55,12 @@ CREATE TABLE factory_automation_firing (
     firing_key text NOT NULL CHECK (octet_length(firing_key) BETWEEN 1 AND 200),
     fired_at timestamptz NOT NULL DEFAULT now(),
     run_id uuid REFERENCES factory_run (id) ON DELETE SET NULL,
-    skipped text CHECK (skipped IN ('disabled', 'task_busy', 'queue_full', 'refused')),
+    skipped text CHECK (
+        skipped IN (
+            'disabled', 'task_busy', 'queue_full', 'refused', 'own_branch', 'creator_left_team',
+            'agent_account'
+        )
+    ),
     PRIMARY KEY (automation_id, firing_key)
 );
 
@@ -64,17 +69,20 @@ CREATE INDEX factory_automation_firing_run_idx
     WHERE run_id IS NOT NULL;
 
 -- The Automation that started the Run, with its name and trigger kind as
--- they were then: a record, not a reference, so it outlives the
--- Automation. All null for a Run a person started.
+-- they were then, and the key of the firing that started it: a record, not
+-- a reference, so it outlives the Automation. All null for a Run a person
+-- started.
 ALTER TABLE factory_run
     ADD COLUMN automation_id uuid,
     ADD COLUMN automation_name text,
-    ADD COLUMN automation_trigger text;
+    ADD COLUMN automation_trigger text,
+    ADD COLUMN automation_firing_key text;
 
 ALTER TABLE factory_run
     ADD CONSTRAINT factory_run_automation CHECK (
         (automation_id IS NULL) = (automation_name IS NULL)
         AND (automation_id IS NULL) = (automation_trigger IS NULL)
+        AND (automation_id IS NULL) = (automation_firing_key IS NULL)
         AND automation_trigger IN ('schedule', 'repository_event', 'webhook', 'task_event')
     );
 
@@ -84,3 +92,9 @@ ALTER TABLE factory_run
 CREATE UNIQUE INDEX factory_run_automation_task_open_idx
     ON factory_run (task_id)
     WHERE automation_id IS NOT NULL AND ended_at IS NULL AND task_id IS NOT NULL;
+
+-- A firing starts at most one Run: one taken over after its worker stopped
+-- finds the Run the first started, and a second insert is refused.
+CREATE UNIQUE INDEX factory_run_automation_firing_idx
+    ON factory_run (automation_id, automation_firing_key)
+    WHERE automation_id IS NOT NULL;
