@@ -98,7 +98,7 @@ impl<'a, H: HttpClientExt + Clone + Default + 'static> AnthropicModel<'a, H> {
     /// The rig completion model for this id with no cache breakpoint, for a
     /// one-shot prompt no later call shares a prefix with: Anthropic charges
     /// a cache write more than plain input, and nothing would read it back.
-    pub fn uncached_completion(&self) -> anthropic::completion::CompletionModel<H> {
+    pub(crate) fn uncached_completion(&self) -> anthropic::completion::CompletionModel<H> {
         self.client.completion_model(self.model.name().to_string())
     }
 
