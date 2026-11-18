@@ -238,9 +238,12 @@ export default {
   holdingAPlace: 'Yet to ask you anything',
   holdingAPlaceHint:
     'Each holds the place it will ask for. Cancel one you no longer need to free its place.',
+  standingRulesGateNotices: 'Notify the run’s owner when a gate waits on them',
+  standingRulesGateNoticesHint:
+    'On by default. Each gate no rule answers, and each question an agent asks, sends the run’s owner a notification that opens the run. Off, the gate still waits for them.',
   standingRulesOwnerGates: 'Send undecided gates to the run’s owner',
   standingRulesOwnerGatesHint:
-    'Notify the run’s owner when a gate waits on them, ask them instead of fixing again when a fix leaves the blockers unchanged, and give the next step their comments on the task.',
+    'Ask the run’s owner instead of fixing again when a fix leaves the blockers unchanged, and give the next step their comments on the task.',
   standingRulesTaskThread: 'Post run updates to the task',
   standingRulesTaskThreadHint:
     'Each run posts one thread on its task, as the run’s owner: its start, each step’s end, its gates and who answered them, its pull request, the merge and how it ended.',
