@@ -41,6 +41,11 @@ export type GateAnswer = {
   byStandIn?: boolean;
   /** Whether the Orchestrator, the owner's agent in chat, gave it. */
   byOrchestrator?: boolean;
+  /**
+   * The Agent that gave it and the Standing Role that let it, under a
+   * Factory Definition with Standing Roles.
+   */
+  standing?: { agent: string; standingRole: string };
   answeredAt: string;
 };
 
@@ -320,6 +325,27 @@ export type RunDefinition = {
   commit: string;
 };
 
+/** An act a Standing Role allows an agent to do for a Run's owner. */
+export type StandingAct =
+  | 'start'
+  | 'cancel'
+  | 'link'
+  | 'answer_plan'
+  | 'answer_blockers';
+
+/**
+ * What an agent did to a Run under a Standing Role of its Factory
+ * Definition: the act, the Gate's Step for an answer, the Agent and the
+ * Standing Role, and when.
+ */
+export type RunStandingAct = {
+  act: StandingAct;
+  seq?: number;
+  agent: string;
+  standingRole: string;
+  at: string;
+};
+
 /** The Automation that started a Run, as it was then. */
 export type RunAutomation = {
   id: string;
@@ -361,6 +387,8 @@ export type Run = {
   baseRequiredChecks?: BaseRequiredChecks;
   /** Its review rounds, in order; none for a Run with no review panel. */
   reviewRounds?: ReviewRound[];
+  /** What agents did to it under its Definition's Standing Roles, in order. */
+  standingActs?: RunStandingAct[];
 };
 
 /** A Flow a person can start a Run of. */

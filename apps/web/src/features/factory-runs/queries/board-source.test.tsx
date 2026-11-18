@@ -40,6 +40,7 @@ function page(steps: number): BoardPage {
             terminal: { betweenTurns: false, steers: [] },
           })),
           reviewRounds: [],
+          standingActs: [],
         },
       },
     ],

@@ -34,6 +34,7 @@ const ended: RunDetail = {
   },
   steps: [],
   reviewRounds: [],
+  standingActs: [],
 };
 
 afterEach(() => {

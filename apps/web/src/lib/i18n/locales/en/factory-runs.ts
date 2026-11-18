@@ -134,6 +134,8 @@ export default {
   answeredByRule: 'Answered by the standing rule “{{rule}}”: {{answer}}',
   answeredByStandIn: 'Answered for you by the stand-in: {{answer}}',
   answeredByOrchestrator: 'Answered by your Orchestrator: {{answer}}',
+  answeredByStandingAgent:
+    'Answered by agent {{agent}} as {{role}}: {{answer}}',
   answeredFromReply:
     'Answered from your reply ({{confidence}}% sure): {{answer}}',
   sendReply: 'Send as reply',
@@ -266,6 +268,10 @@ export default {
   // A Run an Automation started.
   startedBy: 'Started by',
   startedByAutomation: 'The automation “{{name}}”, {{trigger}}',
+  standingActs: 'Done by agents',
+  standingActStart: 'Started by agent {{agent}} as {{role}}, {{time}}',
+  standingActCancel: 'Cancelled by agent {{agent}} as {{role}}, {{time}}',
+  standingActLink: 'Linked to a task by agent {{agent}} as {{role}}, {{time}}',
   automationTriggerSchedule: 'on its schedule',
   automationTriggerRepositoryEvent: 'on a repository event',
   automationTriggerWebhook: 'on a call to its webhook',

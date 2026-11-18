@@ -54,6 +54,19 @@ function modelReading(
   };
 }
 
+/** The agent that answered `seq`'s Gate under a Standing Role, if one did. */
+function standingAnswer(
+  detail: RunDetail,
+  seq: number
+): { agent: string; standingRole: string } | undefined {
+  const act = (detail.standingActs ?? []).find(
+    (standing) =>
+      standing.seq === seq &&
+      (standing.act === 'answer_plan' || standing.act === 'answer_blockers')
+  );
+  return act ? { agent: act.agent, standingRole: act.standingRole } : undefined;
+}
+
 export function toRun(detail: RunDetail): Run {
   const { run } = detail;
   return {
@@ -100,6 +113,7 @@ export function toRun(detail: RunDetail): Run {
                     step.gate.answer.replyConfidence ?? undefined,
                   byStandIn: step.gate.answer.byStandIn,
                   byOrchestrator: step.gate.answer.agentSessionId != null,
+                  standing: standingAnswer(detail, step.seq),
                   answeredAt: step.gate.answer.answeredAt,
                 }
               : undefined,
@@ -157,6 +171,14 @@ export function toRun(detail: RunDetail): Run {
         }
       : undefined,
     baseRequiredChecks: detail.baseRequiredChecks ?? undefined,
+    // A service older than Standing Roles sends none.
+    standingActs: (detail.standingActs ?? []).map((standing) => ({
+      act: standing.act,
+      seq: standing.seq ?? undefined,
+      agent: standing.agent,
+      standingRole: standing.standingRole,
+      at: standing.at,
+    })),
     reviewRounds: detail.reviewRounds.map((round) => ({
       round: round.round,
       visit: round.visit,
