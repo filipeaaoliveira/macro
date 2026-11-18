@@ -300,6 +300,11 @@ export type ControlFilesSettings = {
      */
     canEdit: boolean;
     /**
+     * Whether the team names a Factory Definition, whose `rules.json`
+     * sets its Runs' Control Files in place of these.
+     */
+    definitionNamed: boolean;
+    /**
      * Whether they are the factory's default: the team set none, or the
      * person is on no team.
      */
@@ -382,6 +387,13 @@ export type DefinitionSettings = {
      * factory's built-in Flows and Agents.
      */
     repoUrl?: string | null;
+    /**
+     * Whether its default branch takes changes only through a pull
+     * request, by a ruleset or its branch protection; none when that
+     * cannot be told, as when the person does not administer it. Without
+     * one, a push changes the factory's rules unreviewed.
+     */
+    requiresPullRequest?: boolean | null;
     /**
      * The team; none when the person is on no team.
      */
@@ -1431,6 +1443,11 @@ export type StandingRulesSettings = {
      * Which kinds of Gate the factory answers on its own.
      */
     definition: OrchestratorDefinition;
+    /**
+     * Whether the team names a Factory Definition, whose `rules.json`
+     * sets its Runs' Standing Rules in place of these and the Projects'.
+     */
+    definitionNamed: boolean;
     /**
      * Whether it is the factory's default: the team set none, or the
      * person is on no team.

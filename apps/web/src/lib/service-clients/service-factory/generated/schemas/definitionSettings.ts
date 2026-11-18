@@ -7,6 +7,7 @@
 import type { DefinitionSettingsCommit } from './definitionSettingsCommit';
 import type { DefinitionSettingsProblem } from './definitionSettingsProblem';
 import type { DefinitionSettingsRepoUrl } from './definitionSettingsRepoUrl';
+import type { DefinitionSettingsRequiresPullRequest } from './definitionSettingsRequiresPullRequest';
 import type { DefinitionSettingsTeamId } from './definitionSettingsTeamId';
 
 /**
@@ -26,6 +27,11 @@ it, or a file of it is wrong. */
 team names none, so its Runs take the team's settings and the
 factory's built-in Flows and Agents. */
   repoUrl?: DefinitionSettingsRepoUrl;
+  /** Whether its default branch takes changes only through a pull
+request, by a ruleset or its branch protection; none when that
+cannot be told, as when the person does not administer it. Without
+one, a push changes the factory's rules unreviewed. */
+  requiresPullRequest?: DefinitionSettingsRequiresPullRequest;
   /** The team; none when the person is on no team. */
   teamId?: DefinitionSettingsTeamId;
 }

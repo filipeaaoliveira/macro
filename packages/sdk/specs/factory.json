@@ -2770,11 +2770,15 @@
       "ControlFilesSettings": {
         "type": "object",
         "description": "The Control File patterns a person's Runs are checked against: their\nteam's, or the factory's default.",
-        "required": ["patterns", "isDefault", "canEdit"],
+        "required": ["patterns", "isDefault", "canEdit", "definitionNamed"],
         "properties": {
           "canEdit": {
             "type": "boolean",
             "description": "Whether the person may change them: they administer the team."
+          },
+          "definitionNamed": {
+            "type": "boolean",
+            "description": "Whether the team names a Factory Definition, whose `rules.json`\nsets its Runs' Control Files in place of these."
           },
           "isDefault": {
             "type": "boolean",
@@ -2853,6 +2857,10 @@
           "repoUrl": {
             "type": ["string", "null"],
             "description": "The repository's `https://github.com/owner/name` URL; none when the\nteam names none, so its Runs take the team's settings and the\nfactory's built-in Flows and Agents."
+          },
+          "requiresPullRequest": {
+            "type": ["boolean", "null"],
+            "description": "Whether its default branch takes changes only through a pull\nrequest, by a ruleset or its branch protection; none when that\ncannot be told, as when the person does not administer it. Without\none, a push changes the factory's rules unreviewed."
           },
           "teamId": {
             "type": ["string", "null"],
@@ -4313,7 +4321,13 @@
       "StandingRulesSettings": {
         "type": "object",
         "description": "The Standing Rules a person's Runs are created with: their team's\nOrchestrator Definition, or the factory's default, and the team's\nProjects' own, which replace it for a Run whose task is in one.",
-        "required": ["definition", "isDefault", "projects", "canEdit"],
+        "required": [
+          "definition",
+          "isDefault",
+          "projects",
+          "canEdit",
+          "definitionNamed"
+        ],
         "properties": {
           "canEdit": {
             "type": "boolean",
@@ -4322,6 +4336,10 @@
           "definition": {
             "$ref": "#/components/schemas/OrchestratorDefinition",
             "description": "Which kinds of Gate the factory answers on its own."
+          },
+          "definitionNamed": {
+            "type": "boolean",
+            "description": "Whether the team names a Factory Definition, whose `rules.json`\nsets its Runs' Standing Rules in place of these and the Projects'."
           },
           "isDefault": {
             "type": "boolean",

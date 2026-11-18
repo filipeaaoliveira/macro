@@ -45,6 +45,7 @@ export * from './definitionSettings';
 export * from './definitionSettingsCommit';
 export * from './definitionSettingsProblem';
 export * from './definitionSettingsRepoUrl';
+export * from './definitionSettingsRequiresPullRequest';
 export * from './definitionSettingsTeamId';
 export * from './durationStats';
 export * from './entryId';
