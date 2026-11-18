@@ -11,7 +11,14 @@
 //! - `code_review_unresolved`: review rounds keep finding Blockers, and the
 //!   Run ends for a person;
 //! - `code_waiting_at_merge_gate`: `code_merged` cut where the Run waits on
-//!   its merge Gate, as a Run in flight is when a new worker takes it.
+//!   its merge Gate, as a Run in flight is when a new worker takes it;
+//! - `code_reply_answered`: the owner's words answer the plan Gate
+//!   (`gate_replies.rs`);
+//! - `code_reply_asked_back`: the words are asked back, and a button
+//!   answers the Gate;
+//! - `code_stand_in_answered`: the stand-in's answer to the plan Gate stands
+//!   once its window passes;
+//! - `code_stand_in_overridden`: the owner overrides it in the window.
 //!
 //! Before changing what the workflow decides, record the histories it
 //! makes now beside these, so the change is checked against both.
@@ -64,6 +71,42 @@ async fn a_run_waiting_on_its_merge_gate_replays() {
     replays(
         "code_waiting_at_merge_gate",
         include_bytes!("histories/code_waiting_at_merge_gate.json"),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_run_whose_plan_gate_a_reply_answered_replays() {
+    replays(
+        "code_reply_answered",
+        include_bytes!("histories/code_reply_answered.json"),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_run_whose_reply_was_asked_back_replays() {
+    replays(
+        "code_reply_asked_back",
+        include_bytes!("histories/code_reply_asked_back.json"),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_run_whose_plan_gate_the_stand_in_answered_replays() {
+    replays(
+        "code_stand_in_answered",
+        include_bytes!("histories/code_stand_in_answered.json"),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_run_whose_owner_overrode_the_stand_in_replays() {
+    replays(
+        "code_stand_in_overridden",
+        include_bytes!("histories/code_stand_in_overridden.json"),
     )
     .await;
 }
