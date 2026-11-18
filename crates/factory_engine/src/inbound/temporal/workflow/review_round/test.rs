@@ -14,8 +14,8 @@ use crate::domain::gate::GateOpening;
 use crate::domain::models::{StepEnding, StepReport, StepRequest, StepStart};
 use crate::domain::review_rounds::{ReviewRoundClosing, ReviewRoundOpening};
 use crate::domain::standing_rules::{GateFacts, rule_answer};
-use crate::inbound::temporal::workflow::{Asking, Questions};
 use crate::inbound::temporal::workflow::work::Work;
+use crate::inbound::temporal::workflow::{Asking, Questions};
 
 /// An activity that failed.
 #[derive(Debug, PartialEq, Eq)]
@@ -615,7 +615,10 @@ async fn a_blockers_gate_past_the_rule_s_fixes_waits_for_a_person() {
         ..Script::default()
     };
 
-    walk_entry(&script, &gated_panel(), 3).await.0.expect("walked");
+    walk_entry(&script, &gated_panel(), 3)
+        .await
+        .0
+        .expect("walked");
 
     assert_eq!(
         script.asked().last().map(String::as_str),

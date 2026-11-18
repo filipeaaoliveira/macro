@@ -114,7 +114,10 @@ pub(super) async fn walk_step<W: Work>(
             }
             // Only the Run's owner answers an agent: no Standing Rule is
             // asked about a question Gate.
-            if ask(work, question.opening(key), None, held).await?.is_none() {
+            if ask(work, question.opening(key), None, held)
+                .await?
+                .is_none()
+            {
                 return Ok(Round::Ended(RunOutcome::Cancelled));
             }
             let Some(seq) = resume() else {
