@@ -513,5 +513,4 @@ describe('RunInsightsView', () => {
     fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }));
     expect(retry).toHaveBeenCalledOnce();
   });
-
 });
