@@ -103,6 +103,32 @@ export type CheckResult = {
   exitCode: number;
 };
 
+/** What the Run's owner did to a running Step from its Step Terminal. */
+export type SteerAction = 'note' | 'pause' | 'resume' | 'stop';
+
+/** One thing the Run's owner did to a running Step. */
+export type Steer = {
+  action: SteerAction;
+  /** Their note to the agent, for a note or a resume that has one. */
+  note?: string;
+  /** The agent's session refused the note or the resume: the agent never read it. */
+  undelivered: boolean;
+  at: string;
+};
+
+/**
+ * A running agent Step as its owner watches and steers it: the agent
+ * session to watch, whether it is paused or asked to stop, and what the
+ * owner did, oldest first.
+ */
+export type StepTerminal = {
+  /** The session the Step works in, while it runs in one. */
+  sessionId?: string;
+  pausedAt?: string;
+  stopAskedAt?: string;
+  steers: Steer[];
+};
+
 /** One visit of one of a Flow's entries. */
 export type RunStep = {
   /** The Step's place among the Run's Steps, from 1: what keys it. */
@@ -127,6 +153,8 @@ export type RunStep = {
   passedOver?: PassedOver[];
   /** The rounds of checks it ran, in order; none for most Steps. */
   checks?: CheckRound[];
+  /** Its Step Terminal; none for a Step read before Steps had one. */
+  terminal?: StepTerminal;
 };
 
 /**
@@ -394,4 +422,20 @@ export function findingCounts(round: ReviewRound): {
     if (finding.kind === 'follow_up') followUps += 1;
   }
   return { blockers, followUps };
+}
+
+/**
+ * The agent session a person can watch and steer `step` in: a running Step
+ * whose agent works in a session.
+ */
+export function steerableSession(step: RunStep): string | undefined {
+  return step.end ? undefined : step.terminal?.sessionId;
+}
+
+/** Where a running Step stands for its Step Terminal. */
+export function terminalState(
+  step: RunStep
+): 'working' | 'paused' | 'stopping' {
+  if (step.terminal?.stopAskedAt) return 'stopping';
+  return step.terminal?.pausedAt ? 'paused' : 'working';
 }

@@ -15,6 +15,7 @@ vi.mock('@service-factory/client', () => ({
     startRun: vi.fn(),
     answerGate: vi.fn(),
     cancelRun: vi.fn(),
+    steerStep: vi.fn(),
   },
 }));
 
@@ -30,6 +31,7 @@ const started: RunDetail = {
   },
   steps: [
     {
+      terminal: { steers: [] },
       seq: 1,
       entry: 'plan',
       visit: 1,
@@ -124,6 +126,12 @@ describe('createAppRunsContext', () => {
           passedOver: [{ agent: 'backup', reason: 'ai_allowance_exhausted' }],
           end: undefined,
           gate: undefined,
+          terminal: {
+            sessionId: undefined,
+            pausedAt: undefined,
+            stopAskedAt: undefined,
+            steers: [],
+          },
           checks: [
             {
               round: 1,
@@ -180,6 +188,7 @@ describe('createAppRunsContext', () => {
       ...started,
       steps: [
         {
+          terminal: { steers: [] },
           seq: 1,
           entry: 'plan',
           visit: 1,
@@ -415,6 +424,7 @@ describe('createAppRunsContext', () => {
         ...started,
         steps: [
           {
+            terminal: { steers: [] },
             seq: 1,
             entry: 'plan',
             visit: 1,

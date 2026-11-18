@@ -64,6 +64,7 @@ export function RunContent(props: {
             reviewRounds={props.run.reviewRounds}
             status={status()}
             time={props.controller.stepTime}
+            onWatch={props.controller.openTerminal}
           />
         </>
       )}

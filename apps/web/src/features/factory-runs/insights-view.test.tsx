@@ -166,6 +166,7 @@ function mount(options: {
     answerGate: vi.fn(),
     replyToGate: vi.fn(),
     cancelRun: vi.fn(),
+    steerStep: vi.fn(),
   };
   render(() => (
     <RunsProvider value={runs}>

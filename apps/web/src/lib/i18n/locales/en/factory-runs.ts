@@ -263,4 +263,36 @@ export default {
   automationSummaryRepositoryEvent: '{{events}} on {{repository}}',
   automationSummaryWebhook: 'Signed webhook calls',
   automationSummaryTaskEvent: 'A task’s property gains a value',
+  // A running Step's Step Terminal: its agent's session, watched and steered.
+  watchStep: 'Watch',
+  watchStepLabel: 'Watch {{step}} and steer its agent',
+  stepPaused: 'Paused',
+  stepStopping: 'Stopping',
+  terminalTitle: '{{step}}: the agent at work',
+  closeTerminal: 'Close',
+  terminalEnded: 'This step has ended. Its agent’s session is closed.',
+  terminalPausedHint:
+    'The agent is paused. Resume it to go on; a note you write goes with the resume. A paused step still ends two hours after it started.',
+  terminalStoppingHint: 'The step is stopping, and will end as failed.',
+  terminalNoteLabel: 'Note to the agent',
+  terminalNotePlaceholder:
+    'Write the agent a note; it reads it once its current turn ends',
+  sendNote: 'Send note',
+  pauseStep: 'Pause',
+  resumeStep: 'Resume',
+  stopStep: 'Stop step',
+  stopStepTitle: 'Stop this step?',
+  stopStepBody:
+    'The agent stops and the step ends as failed; the run goes on as its flow says.',
+  keepStepRunning: 'Keep it running',
+  steerConflict: 'The step can’t take that now',
+  steerConflictDescription:
+    'It ended, is paused, or its agent is between turns. The run shows where it is.',
+  steerFailed: 'Couldn’t reach the step',
+  // What the owner did to a Step, under it.
+  steerNote: 'You sent the agent a note',
+  steerPause: 'You paused the step',
+  steerResume: 'You resumed the step',
+  steerStop: 'You stopped the step',
+  steerUndelivered: 'The agent never got it',
 };

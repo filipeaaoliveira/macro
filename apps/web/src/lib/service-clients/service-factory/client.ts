@@ -19,10 +19,14 @@ import {
   getListFactoryFlowsUrl,
   getListFactoryTaskRunsUrl,
   getListFactoryWaitingRunsUrl,
+  getNoteFactoryStepUrl,
+  getPauseFactoryStepUrl,
   getReplyToFactoryGateUrl,
+  getResumeFactoryStepUrl,
   getSetFactoryAutomationEnabledUrl,
   getSetFactoryControlFilesUrl,
   getSetFactoryStandingRulesUrl,
+  getStopFactoryStepUrl,
 } from './generated/client';
 import type {
   AnswerGateRequest,
@@ -34,7 +38,9 @@ import type {
   CreateRunRequest,
   FlowsResponse,
   GetFactoryInsightsParams,
+  NoteStepRequest,
   ReplyToGateRequest,
+  ResumeStepRequest,
   RunDetail,
   RunErrorCode,
   RunInsights,
@@ -190,6 +196,42 @@ export const factoryClient = {
     return fetchWithToken<Record<string, never>>(
       `${host()}${getReplyToFactoryGateUrl(encodeURIComponent(runId), seq)}`,
       { method: 'POST', body: JSON.stringify(reply) }
+    ).then((result) => result.map(() => undefined));
+  },
+
+  /**
+   * Sends the agent of the Run's running Step `seq` a note, from its Step
+   * Terminal. A Step that ended, is paused, or whose agent works on no turn
+   * fails `CONFLICT`; only the Run's owner, signed in, may (`FORBIDDEN`).
+   */
+  noteStep(runId: string, seq: number, note: NoteStepRequest) {
+    return fetchWithToken<Record<string, never>>(
+      `${host()}${getNoteFactoryStepUrl(encodeURIComponent(runId), seq)}`,
+      { method: 'POST', body: JSON.stringify(note) }
+    ).then((result) => result.map(() => undefined));
+  },
+
+  /** Pauses the Run's running Step `seq`: its agent's turn stops. */
+  pauseStep(runId: string, seq: number) {
+    return fetchWithToken<Record<string, never>>(
+      `${host()}${getPauseFactoryStepUrl(encodeURIComponent(runId), seq)}`,
+      { method: 'POST' }
+    ).then((result) => result.map(() => undefined));
+  },
+
+  /** Resumes the Run's paused Step `seq`, with the person's note if any. */
+  resumeStep(runId: string, seq: number, resume: ResumeStepRequest) {
+    return fetchWithToken<Record<string, never>>(
+      `${host()}${getResumeFactoryStepUrl(encodeURIComponent(runId), seq)}`,
+      { method: 'POST', body: JSON.stringify(resume) }
+    ).then((result) => result.map(() => undefined));
+  },
+
+  /** Stops the Run's running Step `seq`: it ends `failed`. */
+  stopStep(runId: string, seq: number) {
+    return fetchWithToken<Record<string, never>>(
+      `${host()}${getStopFactoryStepUrl(encodeURIComponent(runId), seq)}`,
+      { method: 'POST' }
     ).then((result) => result.map(() => undefined));
   },
 
