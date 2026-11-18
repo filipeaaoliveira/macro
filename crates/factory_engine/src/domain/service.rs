@@ -725,8 +725,10 @@ where
         // The Run keeps its Standing Rules the same way: a change to the
         // team's or the Project's rules, or a task linked later, does not
         // change which of its Gates a rule answers.
-        + FlawRepository
-        + RunBoardRepository,
+        let project_id = self.run_project(&actor, task_id).await;
+        let standing_rules = self
+            .run_rules(team, project_id, definition.as_ref())
+            .await?;
         // The Run and its task are kept in one write, so a task deleted
         // since it was checked leaves nothing behind. Once the owner holds
         // as many places as the Queue limit of the rules it would start
@@ -827,10 +829,8 @@ where
         + ReviewRoundRepository
         + StandingRulesRepository
         + AutomationRepository
-        let project_id = self.run_project(&actor, task_id).await;
-        let standing_rules = self
-            .run_rules(team, project_id, definition.as_ref())
-            .await?;
+        + FlawRepository
+        + RunBoardRepository,
     W: RunWorkflows,
     E: StepExecutor,
     U: UserDirectory,

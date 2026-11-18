@@ -9,6 +9,7 @@ use factory_records::domain::automations::AutomationRepository;
 use factory_records::domain::board::{
     BoardCursor, BoardQuery, BoardRun as RecordedBoardRun, RunBoardRepository,
 };
+use factory_records::domain::flaws::FlawRepository;
 use factory_records::domain::main_hold::MainHoldRepository;
 use factory_records::domain::models::Run;
 use factory_records::domain::ports::RunRepository;
@@ -43,6 +44,7 @@ where
         + ReviewRoundRepository
         + StandingRulesRepository
         + AutomationRepository
+        + FlawRepository
         + RunBoardRepository,
     W: RunWorkflows,
     E: StepExecutor,

@@ -3,6 +3,8 @@
 //! the Flow a Run of it starts with.
 
 use factory_records::domain::automations::AutomationRepository;
+use factory_records::domain::board::RunBoardRepository;
+use factory_records::domain::flaws::FlawRepository;
 use factory_records::domain::main_hold::MainHoldRepository;
 use std::collections::BTreeMap;
 
@@ -107,7 +109,9 @@ where
         + MainHoldRepository
         + ReviewRoundRepository
         + StandingRulesRepository
-        + AutomationRepository,
+        + AutomationRepository
+        + FlawRepository
+        + RunBoardRepository,
     W: RunWorkflows,
     E: StepExecutor,
     U: UserDirectory,
