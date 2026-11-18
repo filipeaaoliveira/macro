@@ -1219,7 +1219,10 @@ entry above `merge`, with no `next`, is that Gate's, never skipped and
 routing every other outcome; so the Orchestrator never approves a merge
 and only the `merge_when_green` rule merges without a person. A Run on its
 team's Definition repository adds the Definition's own files
-(`DEFINITION_FILE_PATTERNS`) to its Control Files. `GET
+(`DEFINITION_FILE_PATTERNS`) to its Control Files, and a change to one is
+Tampered even when the request names it (`ControlFiles::changes_guarding`),
+so a person approves it; `rules.json` lists at most
+`MAX_DEFINITION_CONTROL_FILES` (195) patterns to leave them room. `GET
 /settings/definition` says whether the default branch takes changes only by
 pull request (`requiresPullRequest`, from its rulesets or, for its admins,
 its branch protection), and the Control Files and Standing Rules settings

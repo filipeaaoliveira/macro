@@ -34,7 +34,7 @@ use factory_records::domain::standing_rules::{
 use serde::Deserialize;
 
 use crate::domain::agents::{AgentDefinition, AgentDefinitionError};
-use crate::domain::control_files::{ControlFiles, ControlFilesError};
+use crate::domain::control_files::{ControlFiles, ControlFilesError, MAX_PATTERNS};
 use crate::domain::flow::{Flow, FlowError, StepName, StepUse};
 
 /// The file that names the Definition's format and its Flows.
@@ -62,6 +62,11 @@ pub const DEFINITION_FILE_PATTERNS: [&str; 5] = [
 
 /// The Steps that ran after a merge, which a Definition's Flow never runs.
 const POST_MERGE_STEPS: [&str; 2] = ["deploy", "verify"];
+
+/// The most Control File patterns a Definition's `rules.json` lists: a
+/// Run on its repository adds [`DEFINITION_FILE_PATTERNS`] to them, and a
+/// Run keeps at most [`MAX_PATTERNS`].
+pub const MAX_DEFINITION_CONTROL_FILES: usize = MAX_PATTERNS - DEFINITION_FILE_PATTERNS.len();
 
 /// The format of the Definition this factory reads.
 pub const DEFINITION_VERSION: u32 = 1;
@@ -268,6 +273,12 @@ fn is_name(name: &str) -> bool {
             .bytes()
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"-_".contains(&byte))
 }
+    /// The Control File patterns leave no room for the Definition's own
+    /// files, which a Run on its repository adds.
+    #[error(
+        "{RULES_FILE}: at most {MAX_DEFINITION_CONTROL_FILES} control file patterns, as a run on the definition's repository adds its own files"
+    )]
+    TooManyControlFiles,
 
 /// How the first secret `text` holds begins, if it holds one.
 fn secret_in(text: &str) -> Option<&'static str> {
@@ -457,3 +468,6 @@ pub async fn read_definition<F: DefinitionFiles>(
         scorers,
     })
 }
+        if patterns.len() > MAX_DEFINITION_CONTROL_FILES {
+            return Err(DefinitionError::TooManyControlFiles.into());
+        }

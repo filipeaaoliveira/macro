@@ -48,7 +48,10 @@ holds something shaped like one does not read.
 - `taskThread`: a Run on a task posts its main updates to the task.
 
 A Run on this repository always counts this Definition's own files as
-Control Files: a person approves every change a Run makes to them.
+Control Files, and its change to one is Tampered even when its request names
+the file: a person approves every change a Run makes to them before it
+merges, whatever `merge` says. So `controlFiles` lists at most 195
+patterns, leaving room for the 5 the Run adds.
 
 It leaves off:
 

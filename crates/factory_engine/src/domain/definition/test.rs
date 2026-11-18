@@ -289,7 +289,7 @@ async fn a_file_holding_a_secret_does_not_read() {
         read(with("scorers.json", key)).await,
         Err(DefinitionError::Secret {
             path: "scorers.json".to_string(),
-            kind: "-----BEGIN",
+            kind: "PRIVATE KEY-----",
         })
     );
     // A word that only begins like a token is not one.
@@ -591,3 +591,28 @@ async fn a_token_glued_to_text_is_a_secret() {
         })
     );
 }
+
+/// A Definition's Control Files leave room for its own files, which a Run
+/// on its repository adds: a list one longer does not read.
+#[tokio::test]
+async fn a_definition_s_control_files_leave_room_for_its_own() {
+    let list = |count: usize| {
+        let patterns: Vec<String> = (0..count).map(|at| format!("docs/{at}/**")).collect();
+        serde_json::json!({ "controlFiles": patterns }).to_string()
+    };
+
+    let room = read(with(
+        "rules.json",
+        &list(super::MAX_DEFINITION_CONTROL_FILES),
+    ))
+    .await;
+    let full = read(with(
+        "rules.json",
+        &list(super::MAX_DEFINITION_CONTROL_FILES + 1),
+    ))
+    .await;
+
+    assert!(room.is_ok(), "{room:?}");
+    assert_eq!(full, Err(DefinitionError::TooManyControlFiles));
+}
+
