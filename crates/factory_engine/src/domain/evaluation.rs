@@ -19,7 +19,7 @@ mod test;
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use factory_records::domain::evaluation::{AgentChoices, BENCHMARK_FLOW, RunArm};
+use factory_records::domain::evaluation::{AgentChoices, BENCHMARK_FLOW, MAX_OPEN_TRIALS, RunArm};
 use factory_records::domain::models::{MAX_REQUEST_BYTES, Role, RunId, checked_name};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -205,6 +205,9 @@ pub enum EvaluationDefinitionError {
          and any base commit as 40 lowercase hex digits"
     )]
     Tasks(String),
+    /// A Benchmark has more tasks than a person may have trials running.
+    #[error("benchmark {0} must have at most {MAX_OPEN_TRIALS} tasks")]
+    TooManyTasks(String),
     /// A Benchmark names a Scorer the definition does not have.
     #[error("benchmark {benchmark} names scorer {scorer}, which the definition does not have")]
     UnknownScorer {
@@ -328,6 +331,13 @@ impl TryFrom<EvaluationDefinitionFields> for EvaluationDefinition {
             });
             if benchmark.tasks.is_empty() || unreadable {
                 return Err(EvaluationDefinitionError::Tasks(benchmark.name.clone()));
+            }
+            // A suite starts every task at once, so one with more tasks than
+            // a person may have trials running could never start.
+            if benchmark.tasks.len() > usize::from(MAX_OPEN_TRIALS) {
+                return Err(EvaluationDefinitionError::TooManyTasks(
+                    benchmark.name.clone(),
+                ));
             }
             for scorer in &benchmark.scorers {
                 if !fields.scorers.iter().any(|defined| defined.name == *scorer) {

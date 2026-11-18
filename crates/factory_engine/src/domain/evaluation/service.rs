@@ -144,14 +144,55 @@ where
             .delete_branch(&subject.user_id, &repository, &branch)
             .await
         {
-            Ok(true) => {
+            Ok(_) => {
                 if let Err(error) = self.repo.record_branch_deleted(&trial.key).await {
                     tracing::warn!(?error, "a deleted trial branch was not recorded");
                 }
             }
-            Ok(false) => {}
             Err(error) => {
                 tracing::warn!(?error, %branch, "a trial's branch was not deleted");
+            }
+        }
+    }
+
+    /// Whether the trial's branch started from the commit its suite pinned:
+    /// the agent is told to make it from there, and this checks it did. A
+    /// branch never pushed, a trial with no pinned commit, or a GitHub read
+    /// that fails tells nothing against it.
+    async fn started_from_pin(&self, subject: &ScoringSubject) -> Result<bool, StepError> {
+        let Some(repository) = subject.repo_url.as_deref().and_then(CodeRepository::parse) else {
+            return Ok(true);
+        };
+        let Some(base) = self
+            .repo
+            .trial_base_commit(subject.run_id)
+            .await
+            .map_err(internal)?
+        else {
+            return Ok(true);
+        };
+        let branch = run_branch(subject.run_id);
+        let head = match self
+            .github
+            .branch_head(&subject.user_id, &repository, &branch)
+            .await
+        {
+            Ok(Some(head)) => head,
+            Ok(None) => return Ok(true),
+            Err(error) => {
+                tracing::warn!(?error, %branch, "a trial's branch could not be read");
+                return Ok(true);
+            }
+        };
+        match self
+            .github
+            .contains(&subject.user_id, &repository, &base, &head)
+            .await
+        {
+            Ok(contains) => Ok(contains),
+            Err(error) => {
+                tracing::warn!(?error, %branch, "a trial's branch could not be compared");
+                Ok(true)
             }
         }
     }
@@ -235,10 +276,15 @@ where
                 tokens.cache_read += used.cache_read;
                 tokens.cache_write += used.cache_write;
             }
-            let result = TrialResult {
-                score: trial_score(subject),
-                tokens,
+            // A trial whose branch did not start from its pinned commit
+            // replayed other code: it scores nothing.
+            let score = if self.started_from_pin(subject).await? {
+                trial_score(subject)
+            } else {
+                tracing::warn!(run_id = %subject.run_id, "a trial's branch left its pinned commit");
+                0.0
             };
+            let result = TrialResult { score, tokens };
             self.repo
                 .record_trial_result(&trial.key, &result)
                 .await

@@ -143,6 +143,16 @@ fn a_definition_is_checked_as_a_whole() {
         .contains("names scorer missing")
     );
 
+    let tasks: Vec<_> = (0..21)
+        .map(|task| json!({ "name": format!("task-{task}"), "request": "Do it." }))
+        .collect();
+    assert!(
+        checked(json!({ "benchmarks": [
+            { "name": "big", "repository": "https://github.com/acme/widgets", "tasks": tasks }
+        ]}))
+        .contains("at most 20 tasks")
+    );
+
     // Arms may name only the agent definition's Agents.
     let unknown = read(json!({ "experiments": [
         { "name": "e", "flow": "code", "arms": [
@@ -484,6 +494,57 @@ async fn a_trial_keeps_its_score_tokens_and_judgments_apart_from_the_live_scorer
         [(WIDGETS.to_string(), format!("factory/{trial_run}"))]
     );
     assert_eq!(kept.branches_deleted, [(suite_id, "typo".to_string())]);
+}
+
+/// A trial whose pushed branch does not contain its pinned commit replayed
+/// other code, and scores nothing; one that does keeps its score.
+#[tokio::test]
+async fn a_trial_whose_branch_left_its_pinned_commit_scores_nothing() {
+    let repo = FakeRepo::default();
+    let session = Uuid::from_u128(7);
+    let pinned = "1111111111111111111111111111111111111111";
+    let configuration = [(role("writer"), agent("backup"))].into_iter().collect();
+    let mut trials = Vec::new();
+    for (suite, task) in [(600u128, "off"), (601, "on")] {
+        let run = ended_run(&repo, "benchmark", RunOutcome::Success, "done", session).await;
+        repo.insert_suite(&NewSuite {
+            id: Uuid::from_u128(suite),
+            user_id: &julia(),
+            benchmark: "core",
+            agents: &configuration,
+            trials: 1,
+        })
+        .await
+        .expect("suite");
+        let key = TrialKey {
+            suite_id: Uuid::from_u128(suite),
+            task: task.to_string(),
+        };
+        repo.insert_trial(&key, run, pinned).await.expect("trial");
+        trials.push((run, key));
+    }
+    let github = FakeGithub::default();
+    let head = "2222222222222222222222222222222222222222";
+    github.state().head = Some(head.to_string());
+    let scoring = ScoringServiceImpl::new(
+        repo.clone(),
+        Arc::new(FakeJudge::default()),
+        usage(session),
+        github.clone(),
+        Arc::new(EvaluationDefinition::default()),
+    );
+
+    scoring.score_run(trials[0].0).await.expect("scored");
+    github
+        .state()
+        .descendants
+        .insert((pinned.to_string(), head.to_string()));
+    scoring.score_run(trials[1].0).await.expect("scored");
+
+    let kept = repo.evaluation.lock().expect("evaluation").clone();
+    let score = |key: &TrialKey| kept.trial_results[&(key.suite_id, key.task.clone())].score;
+    assert_eq!(score(&trials[0].1), 0.0);
+    assert_eq!(score(&trials[1].1), 1.0);
 }
 
 #[tokio::test]
