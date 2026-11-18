@@ -63,11 +63,27 @@ const SECRET_NAMES: [&str; 7] = [
 ];
 
 /// The `env` names a setup may not set: those that change what
-/// `bash --noprofile --norc` runs, and the factory's own.
-const RESERVED_NAMES: [&str; 2] = ["BASH_ENV", "ENV"];
+/// `bash --noprofile --norc` runs or traces, where the home is, and where
+/// git finds the repository. `PATH` is allowed: the values are exported
+/// inside the script, so it never reaches `timeout` or `bash`.
+const RESERVED_NAMES: [&str; 11] = [
+    "BASH_ENV",
+    "ENV",
+    "SHELLOPTS",
+    "BASHOPTS",
+    "PS4",
+    "BASH_XTRACEFD",
+    "HOME",
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_CEILING_DIRECTORIES",
+];
 
-/// The prefix of the variables the factory sets itself.
-const RESERVED_PREFIX: &str = "MACRO_";
+/// The beginnings of the names a setup may not set: the factory's own
+/// variables, the dynamic linker's, which load code into every program,
+/// and git's configuration.
+const RESERVED_PREFIXES: [&str; 4] = ["MACRO_", "LD_", "DYLD_", "GIT_CONFIG"];
 
 /// One setup command: a command run from the repository's root.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -134,7 +150,7 @@ pub enum SetupFileError {
     TooManyEnv(usize),
     /// An `env` name is not a shell variable's, or is one the factory keeps.
     #[error(
-        "{SETUP_FILE} sets env {0:?}; a name is a shell variable's (A-Z, a-z, 0-9 and _, not first a digit), not BASH_ENV, ENV or one starting MACRO_"
+        "{SETUP_FILE} sets env {0:?}; a name is a shell variable's (A-Z, a-z, 0-9 and _, not first a digit), and not one that changes the shell, the home, git or the linker, or the factory's own (MACRO_)"
     )]
     EnvName(String),
     /// An `env` name says it holds a secret.
@@ -273,8 +289,10 @@ fn env_name(name: &str) -> bool {
     starts
         && name.len() <= 128
         && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
-        && !RESERVED_NAMES.contains(&name)
-        && !name.to_ascii_uppercase().starts_with(RESERVED_PREFIX)
+        && !RESERVED_NAMES.contains(&name.to_ascii_uppercase().as_str())
+        && !RESERVED_PREFIXES
+            .iter()
+            .any(|prefix| name.to_ascii_uppercase().starts_with(prefix))
 }
 
 /// `text` as one single-quoted shell word.

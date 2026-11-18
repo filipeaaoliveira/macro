@@ -641,8 +641,11 @@ expanded: `$PATH` in a value stays that text. It is read as the
 checks file is, from the Run's recorded base branch, never the Run's branch,
 and is a default Control File. A file that does not read (over 16 KiB, not
 JSON, a key named twice or not known, a bad name, command or timeout, an
-`env` name that is not a shell variable's or is `BASH_ENV`, `ENV` or
-`MACRO_*`, a value over 1 KiB or with a control character) ends the Step
+`env` name that is not a shell variable's, or one that changes the shell
+(`BASH_ENV`, `ENV`, `SHELLOPTS`, `BASHOPTS`, `PS4`, `BASH_XTRACEFD`), the
+home (`HOME`), git (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`,
+`GIT_CEILING_DIRECTORIES`, `GIT_CONFIG*`), the linker (`LD_*`, `DYLD_*`)
+or is the factory's own (`MACRO_*`); `PATH` is allowed, a value over 1 KiB or with a control character) ends the Step
 `failed`, saying why. Secrets never live there: a file holding something
 shaped like a key or a token (the Definition's check), or an `env` name
 that says it holds one (`TOKEN`, `SECRET`, `PASSWORD`, `API_KEY`, ...), does

@@ -103,6 +103,27 @@ fn a_file_that_breaks_the_rules_says_why() {
         (r#"{"env":{"MACRO_VERIFY_COMMIT":"x"}}"#, |e| {
             matches!(e, SetupFileError::EnvName(_))
         }),
+        (r#"{"env":{"LD_PRELOAD":"/tmp/x.so"}}"#, |e| {
+            matches!(e, SetupFileError::EnvName(_))
+        }),
+        (r#"{"env":{"DYLD_INSERT_LIBRARIES":"x"}}"#, |e| {
+            matches!(e, SetupFileError::EnvName(_))
+        }),
+        (r#"{"env":{"GIT_CONFIG_GLOBAL":"/tmp/x"}}"#, |e| {
+            matches!(e, SetupFileError::EnvName(_))
+        }),
+        (r#"{"env":{"GIT_DIR":"/tmp/x"}}"#, |e| {
+            matches!(e, SetupFileError::EnvName(_))
+        }),
+        (r#"{"env":{"SHELLOPTS":"xtrace"}}"#, |e| {
+            matches!(e, SetupFileError::EnvName(_))
+        }),
+        (r#"{"env":{"PS4":"x"}}"#, |e| {
+            matches!(e, SetupFileError::EnvName(_))
+        }),
+        (r#"{"env":{"HOME":"/tmp"}}"#, |e| {
+            matches!(e, SetupFileError::EnvName(_))
+        }),
         (&long_value, |e| matches!(e, SetupFileError::EnvValue(_))),
         (r#"{"env":{"A":"x\ny"}}"#, |e| {
             matches!(e, SetupFileError::EnvValue(_))
