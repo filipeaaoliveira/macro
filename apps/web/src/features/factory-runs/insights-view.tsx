@@ -1,5 +1,5 @@
 import { isTouchDevice } from '@core/mobile/isTouchDevice';
-import { Show } from 'solid-js';
+import { createEffect, on, Show } from 'solid-js';
 import { useInsightsContext } from './context/insights-context';
 import { createInsightsState } from './primitives/insights-state';
 import { RunView } from './run-view';
@@ -19,7 +19,16 @@ export function RunInsightsView(props: {
 }) {
   const context = useInsightsContext();
   const state = createInsightsState(props.timeZone, props.now);
-  if (props.openRunId) state.setOpenRunId(props.openRunId);
+  // A link opens its Run, and a pane reused for another Run's link opens
+  // that one.
+  createEffect(
+    on(
+      () => props.openRunId,
+      (runId) => {
+        if (runId) state.setOpenRunId(runId);
+      }
+    )
+  );
   const source = context.insights(state.params);
   const flowNames = context.flowNames();
   // The filter offers the Flows a Run can start from, and any Flow the
