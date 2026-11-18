@@ -1,7 +1,7 @@
 import { ShowFeatureFlag } from '@app/lib/analytics/posthog';
 import { useOptionalSplitRouter } from '@app/lib/split-router';
 import { PaneContext } from '@app/lib/split-router/solid/context';
-import { factoryInsightsRoute } from '@app/routes/routes';
+import { factoryInsightsRoute, factoryRunRoute } from '@app/routes/routes';
 import { enableFactoryRuns } from '@core/constant/featureFlags';
 import { useSettingsState } from '@core/constant/SettingsState';
 import { useUserId } from '@core/context/user';
@@ -16,6 +16,7 @@ import { RunInsightsView } from './insights-view';
 import { createAppBoardContext } from './queries/board';
 import { createAppInsightsContext } from './queries/insights';
 import { createAppRunsContext } from './queries/runs';
+import { RunPageView } from './run-view';
 import { AutomationsSettings } from './views/automations-settings';
 import { ControlFilesSettings } from './views/control-files-settings';
 import { StandingRulesSettings } from './views/standing-rules-settings';
@@ -39,6 +40,25 @@ function useOpenInsights(): (() => void) | undefined {
     fireAndForget(
       router.open(
         { route: factoryInsightsRoute },
+        { newPane: true, source: pane?.pane() }
+      ),
+      'factory-runs'
+    );
+}
+
+/**
+ * Opens a Run in a new pane beside the one asking; none outside the split
+ * router.
+ */
+function useOpenRun(): ((runId: string) => void) | undefined {
+  const router = useOptionalSplitRouter();
+  const pane = useContext(PaneContext);
+  if (!router) return;
+
+  return (runId) =>
+    fireAndForget(
+      router.open(
+        { route: factoryRunRoute, params: { runId } },
         { newPane: true, source: pane?.pane() }
       ),
       'factory-runs'
@@ -88,11 +108,8 @@ export function TeamAutomations() {
   return <AutomationsSettings />;
 }
 
-/**
- * How the person's Runs went, as a page of its own, with the Run
- * `openRunId` opened over it when a link names one.
- */
-export function FactoryInsights(props: { openRunId?: string }) {
+/** How the person's Runs went, as a page of its own. */
+export function FactoryInsights() {
   return (
     <ShowFeatureFlag flag={enableFactoryRuns}>
       <RunsProvider value={appRunsContext()}>
@@ -100,7 +117,6 @@ export function FactoryInsights(props: { openRunId?: string }) {
           <RunInsightsView
             timeZone={Intl.DateTimeFormat().resolvedOptions().timeZone}
             now={() => new Date()}
-            openRunId={props.openRunId}
           />
         </InsightsProvider>
       </RunsProvider>
@@ -108,16 +124,29 @@ export function FactoryInsights(props: { openRunId?: string }) {
   );
 }
 
+/** One Run as a page of its own, as the board and a Run's link open it. */
+export function FactoryRun(props: { runId: string }) {
+  return (
+    <ShowFeatureFlag flag={enableFactoryRuns}>
+      <RunsProvider value={appRunsContext()}>
+        <RunPageView runId={props.runId} />
+      </RunsProvider>
+    </ShowFeatureFlag>
+  );
+}
+
 /**
  * Every Run the person can see, theirs or their team's, as a page of its
- * own, with the Run `openRunId` opened over it when a link names one.
+ * own; a Run opens in a pane beside it.
  */
-export function FactoryBoard(props: { openRunId?: string }) {
+export function FactoryBoard() {
+  const openRun = useOpenRun();
+
   return (
     <ShowFeatureFlag flag={enableFactoryRuns}>
       <RunsProvider value={appRunsContext()}>
         <BoardProvider value={createAppBoardContext(queryClient)}>
-          <FactoryBoardView openRunId={props.openRunId} />
+          <FactoryBoardView onOpenRun={openRun} />
         </BoardProvider>
       </RunsProvider>
     </ShowFeatureFlag>

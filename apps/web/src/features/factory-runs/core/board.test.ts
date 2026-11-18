@@ -91,11 +91,11 @@ describe('the board’s pages', () => {
     const second = { ...run, id: 'run-2' };
     expect(
       flattenBoardPages([
-        { runs: [{ state: 'running', run }] },
+        { runs: [{ id: run.id, state: 'running', run }] },
         {
           runs: [
-            { state: 'running', run },
-            { state: 'waiting', run: second },
+            { id: run.id, state: 'running', run },
+            { id: second.id, state: 'waiting', run: second },
           ],
         },
       ]).map((listed) => listed.run.id)
@@ -107,7 +107,9 @@ describe('the board’s pages', () => {
       ...run,
       end: { outcome: 'success' as const, endedAt: '2026-11-18T11:00:00Z' },
     };
-    expect(boardPollMs([{ state: 'running', run }])).toBe(15_000);
-    expect(boardPollMs([{ state: 'finished', run: ended }])).toBe(60_000);
+    expect(boardPollMs([{ id: run.id, state: 'running', run }])).toBe(15_000);
+    expect(boardPollMs([{ id: ended.id, state: 'finished', run: ended }])).toBe(
+      60_000
+    );
   });
 });

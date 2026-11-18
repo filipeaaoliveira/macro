@@ -1,4 +1,4 @@
-import { createEffect, on, Show } from 'solid-js';
+import { Show } from 'solid-js';
 import { useBoardContext } from './context/board-context';
 import { useRunsContext } from './context/runs-context';
 import { createBoardState } from './primitives/board-state';
@@ -10,20 +10,15 @@ import { BoardView } from './views/board';
  * as from a task.
  */
 export function FactoryBoardView(props: {
-  /** A Run to open at once, as a link to it does. */
-  openRunId?: string;
+  /**
+   * Opens a Run in a pane of its own; without it, as in tests outside the
+   * split router, the Run opens over the board.
+   */
+  onOpenRun?: (runId: string) => void;
 }) {
   const board = useBoardContext();
   const runs = useRunsContext();
   const state = createBoardState();
-  createEffect(
-    on(
-      () => props.openRunId,
-      (runId) => {
-        if (runId) state.setOpenRunId(runId);
-      }
-    )
-  );
   const source = board.board(state.filters);
   const flows = runs.flows();
   const projects = board.projects();
@@ -63,6 +58,7 @@ export function FactoryBoardView(props: {
     <>
       <BoardView
         state={state}
+        onOpenRun={props.onOpenRun ?? state.setOpenRunId}
         source={source}
         flows={flowNames()}
         repositories={repositories()}

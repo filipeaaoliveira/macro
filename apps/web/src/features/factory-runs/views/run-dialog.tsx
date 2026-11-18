@@ -36,7 +36,7 @@ function RunDialogHeader(props: { title: string }) {
 }
 
 /** The Gate the Run waits on, pinned under the Steps. */
-function RunGate(props: { controller: RunController }) {
+export function RunGate(props: { controller: RunController }) {
   return (
     <Show when={props.controller.waiting()}>
       {(waiting) => (

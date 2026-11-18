@@ -122,12 +122,18 @@ const finishedRun: Run = {
 };
 
 const board: BoardRun[] = [
-  { state: 'running', run: codeRun },
-  { state: 'waiting', run: teosGate },
-  { state: 'finished', run: finishedRun },
+  {
+    id: codeRun.id,
+    state: 'running',
+    taskName: 'Coupons at checkout',
+    run: codeRun,
+  },
+  { id: teosGate.id, state: 'waiting', run: teosGate },
+  { id: finishedRun.id, state: 'finished', run: finishedRun },
 ];
 
 function mount(options: {
+  onOpenRun?: (runId: string) => void;
   runs?: BoardRun[];
   hasMore?: boolean;
   queue?: RunsQueue;
@@ -160,8 +166,6 @@ function mount(options: {
       retry: vi.fn(),
     }),
     viewerId: () => JULIA,
-    taskName: (taskId) => () =>
-      taskId() === 'task-coupon' ? 'Coupons at checkout' : undefined,
     personName: (userId) => () => (userId() === TEO ? 'Teo Silva' : undefined),
   };
   const all = (options.runs ?? board).map((listed) => listed.run);
@@ -200,7 +204,7 @@ function mount(options: {
   render(() => (
     <RunsProvider value={runs}>
       <BoardProvider value={boardContext}>
-        <FactoryBoardView />
+        <FactoryBoardView onOpenRun={options.onOpenRun} />
       </BoardProvider>
     </RunsProvider>
   ));
@@ -321,6 +325,18 @@ describe('FactoryBoardView', () => {
     // A team member's Run reads without its Gate's answers or Cancel run.
     expect(screen.queryByRole('button', { name: 'Cancel run' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull();
+  });
+
+  it('opens a run in a pane of its own where the app gives one', () => {
+    const onOpenRun = vi.fn();
+    mount({ onOpenRun });
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /Coupons at checkout/ })
+    );
+
+    expect(onOpenRun).toHaveBeenCalledWith('run-code');
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 
   it('says when no run is there', () => {

@@ -794,7 +794,7 @@ export const factoryInsightsRoute = defineRoute({
   path: 'factory/insights',
 });
 
-/** One of the person's factory Runs, opened over their insights. */
+/** One factory Run the person can read, as a pane of its own. */
 export const factoryRunRoute = defineRoute({
   id: 'view-factory-run',
   path: 'factory/runs/:runId',

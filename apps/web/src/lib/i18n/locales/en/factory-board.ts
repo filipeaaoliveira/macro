@@ -22,7 +22,6 @@ export default {
   project: 'Project',
   allProjects: 'All projects',
   // A row.
-  noTask: 'No task',
   you: 'You',
   someone: 'A teammate',
   startedByPerson: 'Started by {{owner}}',

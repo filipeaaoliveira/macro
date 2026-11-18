@@ -4,6 +4,7 @@ import {
 } from '@app/features/agent-work/components/WorkList';
 import { t } from '@app/lib/i18n';
 import GitPullRequestIcon from '@icon/system/regular/git-pull-request.svg';
+import { Badge } from '@ui';
 import { Show } from 'solid-js';
 import { match } from 'ts-pattern';
 import { useBoardContext } from '../context/board-context';
@@ -43,7 +44,6 @@ export function BoardRunRow(props: {
 }) {
   const context = useBoardContext();
   const run = () => props.listed.run;
-  const taskName = context.taskName(() => run().taskId ?? '');
   const ownerName = context.personName(() => run().ownerId ?? '');
   const step = () => currentStep(run());
   const blockers = () => openBlockers(run());
@@ -54,10 +54,7 @@ export function BoardRunRow(props: {
     }
     return ownerName() ?? t('factoryBoard.someone');
   };
-  const title = () => {
-    if (!run().taskId) return runTitle(run());
-    return taskName() ?? runTitle(run());
-  };
+  const title = () => props.listed.taskName ?? runTitle(run());
   const starter = () =>
     match(startedBy(run()))
       .with('person', () =>
@@ -137,9 +134,13 @@ export function BoardRunRow(props: {
         </span>
         <span class="flex h-4.5 shrink-0 items-center gap-1.5 text-[11.5px] tabular-nums text-ink-subtle">
           <Show when={blockers() > 0}>
-            <span class="rounded-md bg-failure/10 px-1.5 font-medium text-failure">
+            <Badge
+              variant="outline"
+              size="xs"
+              class="border-failure/30 text-failure"
+            >
               {t('factoryBoard.blockers', { count: blockers() })}
-            </span>
+            </Badge>
           </Show>
           <Show when={since()}>{(time) => props.age(time())}</Show>
         </span>

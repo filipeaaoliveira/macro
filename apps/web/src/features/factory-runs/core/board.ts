@@ -36,8 +36,16 @@ export type BoardFilters = {
   search?: string;
 };
 
-/** One Run on the board, with where it is. */
-export type BoardRun = { state: BoardState; run: Run };
+/**
+ * One Run on the board, with where it is and its task's name; keyed by the
+ * Run's id, so a read again keeps the row.
+ */
+export type BoardRun = {
+  id: string;
+  state: BoardState;
+  taskName?: string;
+  run: Run;
+};
 
 /** Where the board's next page starts. */
 export type BoardCursor = { createdAt: string; id: string };

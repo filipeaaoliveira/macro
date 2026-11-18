@@ -3,7 +3,6 @@ import { fireAndForget } from '@core/util/fireAndForget';
 import { throwOnErr } from '@core/util/result';
 import { useUserNames } from '@queries/auth/user-names';
 import { useQuickAccessInitiativesQuery } from '@queries/soup/quick-access-initiatives';
-import { useDocumentMetadataQuery } from '@queries/storage/document-metadata';
 import { factoryClient } from '@service-factory/client';
 import type { BoardPage as BoardPageResponse } from '@service-factory/generated/schemas';
 import {
@@ -34,7 +33,9 @@ const BOARD_IDLE_POLL_MS = 60_000;
 function toPage(page: BoardPageResponse): BoardPage {
   return {
     runs: page.runs.map((listed) => ({
+      id: listed.detail.run.id,
       state: listed.state,
+      taskName: listed.taskName ?? undefined,
       run: toRun(listed.detail),
     })),
     next: page.next ?? undefined,
@@ -87,6 +88,8 @@ export function boardOptions(filters: BoardFilters) {
       boardPollMs(flattenBoardPages(query.state.data?.pages ?? [])),
     // Other filters keep the last board on screen while they load.
     placeholderData: keepPreviousData,
+    // Read again every few seconds: keep each row's nodes, and focus.
+    reconcile: 'id',
   });
 }
 
@@ -147,12 +150,6 @@ export function createAppBoardContext(_client: QueryClient): BoardContext {
     },
 
     viewerId,
-
-    taskName: (taskId) => {
-      const metadata = useDocumentMetadataQuery(taskId);
-      return () =>
-        metadata.isSuccess ? metadata.data.documentName : undefined;
-    },
 
     personName: (userId) => {
       const names = useUserNames({ userIds: () => [userId()] });

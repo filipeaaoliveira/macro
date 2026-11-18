@@ -5,6 +5,7 @@ import { useRunsContext } from './context/runs-context';
 import { createRunController } from './primitives/run-controller';
 import { MobileRunSheet } from './views/mobile/run-sheet';
 import { RunDialog } from './views/run-dialog';
+import { RunPane } from './views/run-pane';
 import { StepTerminalDialog } from './views/step-terminal-dialog';
 
 /**
@@ -23,6 +24,23 @@ export function RunView(props: { runId: string; onClose: () => void }) {
       >
         <MobileRunSheet controller={controller} onClose={props.onClose} />
       </Show>
+      <Show when={controller.terminalStep()}>
+        {(step) => <StepTerminalDialog controller={controller} step={step()} />}
+      </Show>
+    </StaticMarkdownContext>
+  );
+}
+
+/**
+ * One Run as a pane of its own, as the board and a Run's link open it, with
+ * its Step Terminal over it.
+ */
+export function RunPageView(props: { runId: string }) {
+  const controller = createRunController(useRunsContext(), () => props.runId);
+
+  return (
+    <StaticMarkdownContext>
+      <RunPane controller={controller} />
       <Show when={controller.terminalStep()}>
         {(step) => <StepTerminalDialog controller={controller} step={step()} />}
       </Show>

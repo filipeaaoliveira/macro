@@ -102,7 +102,13 @@ describe('RunView on the factory', () => {
     const client = new QueryClient();
     render(() => (
       <QueryClientProvider client={client}>
-        <RunsProvider value={createAppRunsContext(client)}>
+        <RunsProvider
+          value={{
+            ...createAppRunsContext(client),
+            // The Run's owner reads it, as the app's entry points say.
+            viewerId: () => 'macro|owner@example.com',
+          }}
+        >
           <RunView runId="run-1" onClose={() => {}} />
         </RunsProvider>
       </QueryClientProvider>

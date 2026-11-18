@@ -24,8 +24,6 @@ export type BoardContext = {
   projects: () => RunsSource<BoardProject[]>;
   /** The signed-in person's user id, to tell their Runs from their team's. */
   viewerId: Accessor<string | undefined>;
-  /** A task's name, once read; none for a task the person can't see. */
-  taskName: (taskId: Accessor<string>) => Accessor<string | undefined>;
   /** A person's name, once read. */
   personName: (userId: Accessor<string>) => Accessor<string | undefined>;
 };

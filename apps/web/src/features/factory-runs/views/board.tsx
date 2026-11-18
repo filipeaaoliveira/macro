@@ -1,4 +1,5 @@
 import { ListHeader } from '@app/components/view-shell/ListHeader';
+import { SearchBar } from '@app/components/view-shell/SearchBar';
 import { ViewSidebar } from '@app/components/view-shell/ViewSidebar';
 import { formatCompactRelativeTimestamp } from '@app/features/entity/utils/timestamp';
 import { SelectInput } from '@app/features/scheduling/components/fields';
@@ -178,6 +179,7 @@ function groupByState(runs: BoardRun[]) {
  */
 export function BoardView(props: {
   state: BoardViewState;
+  onOpenRun: (runId: string) => void;
   source: BoardSource;
   flows: string[];
   repositories: string[];
@@ -250,15 +252,13 @@ export function BoardView(props: {
             props.state.setState(BOARD_STATES.find((state) => state === value))
           }
         />
-        <input
-          type="search"
-          aria-label={t('factoryBoard.search')}
+        <SearchBar
+          label={t('factoryBoard.search')}
           placeholder={t('factoryBoard.search')}
-          class="h-7 min-w-40 flex-1 rounded-lg border border-edge-muted bg-transparent px-2 text-sm text-ink outline-none placeholder:text-ink-placeholder focus-visible:border-accent"
+          size="sm"
+          class="min-w-40 flex-1"
           value={props.state.searchText()}
-          onInput={(event) =>
-            props.state.setSearchText(event.currentTarget.value)
-          }
+          onValueChange={props.state.setSearchText}
         />
       </div>
       <div class="min-h-0 flex-1 overflow-y-auto px-4 pb-8 pt-3">
@@ -312,7 +312,7 @@ export function BoardView(props: {
                           <BoardRunRow
                             listed={listed}
                             age={age}
-                            onOpen={props.state.setOpenRunId}
+                            onOpen={props.onOpenRun}
                           />
                         )}
                       </For>
