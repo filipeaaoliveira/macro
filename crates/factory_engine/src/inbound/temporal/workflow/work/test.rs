@@ -74,6 +74,9 @@ fn only_what_is_surely_the_factory_s_counts_as_infrastructure() {
     let out_of_quota = activity(application(Some(INFRASTRUCTURE_FAILURE), true));
     let no_last_failure = activity(timeout(TimeoutType::ScheduleToClose, None));
     let worker_lost = activity(timed_out(timeout(TimeoutType::Heartbeat, None)));
+    let attempt_too_long = activity(timeout(TimeoutType::StartToClose, None));
+    let last_attempt_too_long = activity(timed_out(timeout(TimeoutType::StartToClose, None)));
+    let never_taken = activity(timeout(TimeoutType::ScheduleToStart, None));
     let quota_at_the_end = activity(timed_out(application(Some(INFRASTRUCTURE_FAILURE), false)));
     let retried_work = activity(timed_out(application(None, false)));
     // As Temporal hands back attempts whose time ran out after a retried
@@ -85,6 +88,11 @@ fn only_what_is_surely_the_factory_s_counts_as_infrastructure() {
     assert_eq!(work_failure(&out_of_quota), WorkFailure::Infrastructure);
     assert_eq!(work_failure(&no_last_failure), WorkFailure::Infrastructure);
     assert_eq!(work_failure(&worker_lost), WorkFailure::Infrastructure);
+    assert_eq!(work_failure(&never_taken), WorkFailure::Infrastructure);
+    // An attempt that ran past its own time may be an agent slower than
+    // its deadline: the work's.
+    assert_eq!(work_failure(&attempt_too_long), WorkFailure::Work);
+    assert_eq!(work_failure(&last_attempt_too_long), WorkFailure::Work);
     assert_eq!(work_failure(&quota_at_the_end), WorkFailure::Infrastructure);
     // When unsure, the failure is the work's: a retried failure of no
     // known kind, as a round of checks that could not go on.

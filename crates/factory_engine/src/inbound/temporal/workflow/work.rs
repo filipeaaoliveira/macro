@@ -5,7 +5,7 @@
 //! in the same order, so a replay walks it the same way.
 
 use factory_records::domain::models::Outcome;
-use temporalio_common::error::{ActivityExecutionError, IncomingError};
+use temporalio_common::error::{ActivityExecutionError, IncomingError, TimeoutError, TimeoutType};
 use temporalio_sdk::workflows::join_all;
 use temporalio_sdk::{
     ActivityCloseTimeouts, ActivityOptions, WorkflowContext, WorkflowTermination,
@@ -36,28 +36,47 @@ pub(super) enum WorkFailure {
 /// failure, which the workflow's history keeps, so a replay reads it the
 /// same way. Only what is surely the factory's counts as infrastructure;
 /// when unsure, the failure is the work's. Infrastructure's are: agents out
-/// of quota (`FactoryInfrastructure`), and a timeout whose last attempt
-/// failed so too, timed out itself (its worker was lost) or left no
-/// failure. Attempts whose time ran out after a failure Temporal retried
-/// come back as that last failure, not as a timeout: one of no known kind,
-/// as an agent still at work (`FactoryAgentOverdue`) or a round of checks
-/// that could not go on, is the work's. This decides whether the
-/// workflow asks for the `factory-infrastructure-outcome` marker, so
-/// changing it changes how recorded histories replay.
+/// of quota (`FactoryInfrastructure`), and timeouts no slow agent explains
+/// ([`timeout_failure`]). Attempts whose time ran out after a failure
+/// Temporal retried come back as that last failure, not as a timeout: one
+/// of no known kind, as an agent still at work (`FactoryAgentOverdue`) or a
+/// round of checks that could not go on, is the work's. This decides
+/// whether the workflow asks for the `factory-infrastructure-outcome`
+/// marker, so changing it changes how recorded histories replay.
 pub(super) fn work_failure(error: &ActivityExecutionError) -> WorkFailure {
-    let infrastructure = |failure: &IncomingError| match failure {
-        IncomingError::Application(failure) => failure.type_name() == Some(INFRASTRUCTURE_FAILURE),
-        _ => false,
-    };
     if let Some(timeout) = error.as_timeout() {
-        return match timeout.cause() {
-            None | Some(IncomingError::Timeout(_)) => WorkFailure::Infrastructure,
-            Some(last) if infrastructure(last) => WorkFailure::Infrastructure,
-            Some(_) => WorkFailure::Work,
-        };
+        return timeout_failure(timeout);
     }
     match error.cause() {
-        Some(cause) if infrastructure(cause) => WorkFailure::Infrastructure,
+        Some(cause) if out_of_quota(cause) => WorkFailure::Infrastructure,
+        _ => WorkFailure::Work,
+    }
+}
+
+/// Whether `failure` is agents out of quota.
+fn out_of_quota(failure: &IncomingError) -> bool {
+    match failure {
+        IncomingError::Application(failure) => failure.type_name() == Some(INFRASTRUCTURE_FAILURE),
+        _ => false,
+    }
+}
+
+/// Why a Step's work timed out. Its worker went quiet (`Heartbeat`), or no
+/// worker took it (`ScheduleToStart`): infrastructure's. An attempt that
+/// ran past its own time (`StartToClose`) may be an agent slower than its
+/// deadline: the work's. A Step whose whole time ran out (`ScheduleToClose`)
+/// reads as its last attempt did, and as infrastructure's when none left a
+/// failure.
+fn timeout_failure(timeout: &TimeoutError) -> WorkFailure {
+    match timeout.timeout_type() {
+        TimeoutType::Heartbeat | TimeoutType::ScheduleToStart => WorkFailure::Infrastructure,
+        TimeoutType::ScheduleToClose => match timeout.cause() {
+            None => WorkFailure::Infrastructure,
+            Some(IncomingError::Timeout(last)) => timeout_failure(last),
+            Some(last) if out_of_quota(last) => WorkFailure::Infrastructure,
+            Some(_) => WorkFailure::Work,
+        },
+        // `StartToClose`, and any kind this code does not know: unsure.
         _ => WorkFailure::Work,
     }
 }
