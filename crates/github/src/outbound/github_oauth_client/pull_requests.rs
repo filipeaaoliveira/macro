@@ -65,7 +65,7 @@ fn is_branch_name(branch: &str) -> bool {
 /// Whether `part` can be a GitHub owner's or repository's name: letters,
 /// digits, `-`, `_` and `.`, and neither `.` nor `..`, which URL parsing
 /// would fold.
-fn is_repository_part(part: &str) -> bool {
+pub(super) fn is_repository_part(part: &str) -> bool {
     let allowed = part
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));

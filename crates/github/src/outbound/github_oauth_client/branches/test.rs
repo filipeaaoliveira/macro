@@ -320,3 +320,29 @@ async fn two_commits_merge_base_is_read_from_their_comparison() {
         None
     );
 }
+
+/// An owner or repository name GitHub would not take is refused before any
+/// request, as `..` would move the comparison off the repository.
+#[tokio::test]
+async fn merge_base_refuses_an_owner_or_repository_github_would_not_take() {
+    // Nothing listens here: a request sent would fail as an outage.
+    let client = GithubOauthImpl::with_api_base_url("http://127.0.0.1:9".to_string());
+    let main_head = "1111111111111111111111111111111111111111";
+    let trial_head = "2222222222222222222222222222222222222222";
+
+    for (owner, repo) in [
+        ("..", "app"),
+        ("macro", "."),
+        ("", "app"),
+        ("macro/x", "app"),
+        ("macro", "app?x"),
+    ] {
+        let refused = client
+            .merge_base("token", owner, repo, main_head, trial_head)
+            .await;
+        assert!(
+            matches!(refused, Err(GithubError::Internal(_))),
+            "{owner:?}/{repo:?}: {refused:?}"
+        );
+    }
+}
