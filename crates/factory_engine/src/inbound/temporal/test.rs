@@ -29,8 +29,8 @@ use macro_user_id::user_id::MacroUserIdStr;
 use serde_json::json;
 use temporalio_client::errors::WorkflowGetResultError;
 use temporalio_client::{
-    Client, ClientOptions, ConnectionOptions, Url, WorkflowCancelOptions, WorkflowGetResultOptions,
-    WorkflowStartOptions,
+    Client, ClientOptions, ConnectionOptions, Url, WorkflowCancelOptions,
+    WorkflowFetchHistoryOptions, WorkflowGetResultOptions, WorkflowStartOptions,
 };
 use temporalio_sdk::Runtime;
 use tokio::sync::Notify;
@@ -351,6 +351,22 @@ where
     (ended, repo, run_id)
 }
 
+/// Keep the history of `run_id`'s workflow as `name`, for the replay
+/// tests, when `FACTORY_RECORD_HISTORY` names the folder to keep it in.
+async fn record_history(run_id: RunId, name: &str) {
+    let Some(folder) = macro_env_var::maybe_read_env("FACTORY_RECORD_HISTORY") else {
+        return;
+    };
+    let history = client()
+        .await
+        .get_workflow_handle::<FlowWorkflowDefinition>(run_id.to_string())
+        .fetch_history(WorkflowFetchHistoryOptions::default())
+        .to_json()
+        .await
+        .expect("the history reads");
+    std::fs::write(format!("{folder}/{name}.json"), history).expect("the history is written");
+}
+
 /// Wait until a task reached `agent`.
 async fn asked(agent: &Agent) {
     tokio::time::timeout(PATIENCE, agent.asked.notified())
@@ -467,6 +483,7 @@ async fn a_step_out_of_quota_ends_the_run_infrastructure() {
     let agent = Agent::doing(Work::OutOfQuota);
 
     let (ended, repo, run_id) = walk(&agent, |_, _| async {}).await;
+    record_history(run_id, "plan_infrastructure_after_marker").await;
 
     assert!(matches!(ended, Ok(RunOutcome::Infrastructure)), "{ended:?}");
     assert_eq!(agent.stops.load(Ordering::SeqCst), 1);
