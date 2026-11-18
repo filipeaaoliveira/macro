@@ -31,6 +31,14 @@ struct Script {
     cancelled: bool,
     /// Asking a Gate fails, other than by the Run's cancellation.
     ask_fails: bool,
+    /// The Run.s history passed a Step that ended `no_result` before the
+    /// workflow asked its owner about one.
+    before_no_result_gates: bool,
+    /// The answers a person gives the Gates the walk asks, in order; the
+    /// first a Gate offers once these run out.
+    answers: RefCell<Vec<Outcome>>,
+    /// What each Gate the walk asked says of its Standing Rule, in order.
+    asked_with: RefCell<Vec<Option<Asking>>>,
     /// The Run's Standing Rules; none for a Run created before Runs kept
     /// them.
     rules: Option<OrchestratorDefinition>,
@@ -55,6 +63,10 @@ impl Work for Script {
         self.cancelled
     }
 
+    fn asks_on_no_result(&self) -> bool {
+        !self.before_no_result_gates
+    }
+
     async fn open(&self, _opening: ReviewRoundOpening) -> Result<bool, Failed> {
         unreachable!("a Step's walk opens no round")
     }
@@ -72,6 +84,10 @@ impl Work for Script {
             Some("question") => Ok(StepReport {
                 outcome: Outcome::question(),
                 output: format!("Question of step {}?", request.key.seq),
+            }),
+            Some("no_result") => Ok(StepReport {
+                outcome: Outcome::no_result(),
+                output: format!("Step {} stopped here.", request.key.seq),
             }),
             _ => Ok(StepReport {
                 outcome: Outcome::done(),
@@ -99,6 +115,7 @@ impl Work for Script {
     }
 
     async fn ask(&self, opening: GateOpening, rule: Option<Asking>) -> Result<Outcome, Failed> {
+        self.asked_with.borrow_mut().push(rule);
         // As the worker does: a Flow's Gate of a kind goes to the Run's
         // Standing Rules first, and only one they leave waits for a person.
         if let Some(asking) = rule
@@ -121,7 +138,11 @@ impl Work for Script {
         if self.ask_fails {
             return Err(Failed);
         }
-        Ok(opening.answers[0].clone())
+        let mut answers = self.answers.borrow_mut();
+        if answers.is_empty() {
+            return Ok(opening.answers[0].clone());
+        }
+        Ok(answers.remove(0))
     }
 
     async fn tell(&self, telling: GateTelling) {
@@ -583,4 +604,169 @@ async fn a_notify_only_gate_tells_and_routes_the_step_s_outcome() {
         "{:?}",
         failing.asked()
     );
+}
+
+/// What the walk asked, with each Gate's question cut to its first line.
+fn asked_briefly(script: &Script) -> Vec<String> {
+    script
+        .asked()
+        .into_iter()
+        .map(|asked| asked.lines().next().unwrap_or_default().to_string())
+        .collect()
+}
+
+/// An agent that stopped without a result keeps its session (no release)
+/// and goes to the Run's owner on a Gate that shows its last message and
+/// offers `retry` or `stop`. On `retry` the same Role goes on at the next
+/// place, as the same visit, in that session; once it ends it lets go,
+/// and the entry's Gate asks as usual.
+#[tokio::test]
+async fn an_agent_that_stopped_without_a_result_waits_for_the_owner_who_retries() {
+    let script = Script {
+        ends: [(1, "no_result")].into(),
+        answers: RefCell::new(vec![Outcome::retry()]),
+        ..Script::default()
+    };
+
+    let (walked, held) = walk(&script, &plan(true), asking(0), 10).await;
+
+    assert_eq!(
+        walked,
+        Ok(Round::Routed(
+            Outcome::try_from("approve".to_string()).expect("valid")
+        ))
+    );
+    assert!(held.is_empty());
+    assert_eq!(
+        asked_briefly(&script),
+        [
+            "start 1",
+            "run 1",
+            "end 1 no_result",
+            "ask 1 The agent stopped without handing back a result, even once reminded. Retry the step in the same session, or stop it? The agent's last message:",
+            "start 2",
+            "run 2",
+            "end 2 done",
+            "release 2",
+            "ask 2 Approve?"
+        ]
+    );
+    assert!(script.asked()[3].ends_with("Step 1 stopped here."));
+    let requests = script.requests.borrow();
+    let going_on = &requests[1];
+    assert_eq!(going_on.resumes, Some(1));
+    assert_eq!((going_on.entry.as_str(), going_on.visit), ("plan", 1));
+}
+
+/// On `stop` the stopped Step's agent is stopped, and the Step goes on as
+/// one that failed: the Flow routes `failed`, and nothing stays held.
+#[tokio::test]
+async fn an_owner_who_stops_a_step_without_a_result_fails_it() {
+    let script = Script {
+        ends: [(1, "no_result")].into(),
+        answers: RefCell::new(vec![Outcome::stop()]),
+        ..Script::default()
+    };
+
+    let (walked, held) = walk(&script, &plan(true), asking(0), 10).await;
+
+    assert_eq!(walked, Ok(Round::Routed(Outcome::failed())));
+    assert!(held.is_empty());
+    assert_eq!(&asked_briefly(&script)[4..], ["stop 1"]);
+}
+
+/// A Run whose history passed a Step that ended `no_result` before the
+/// workflow asked its owner replays it as the Step failed then: its agent
+/// stopped, no Gate, `failed` routed.
+#[tokio::test]
+async fn a_step_without_a_result_before_the_marker_fails_as_before() {
+    let script = Script {
+        ends: [(1, "no_result")].into(),
+        before_no_result_gates: true,
+        ..Script::default()
+    };
+
+    let (walked, held) = walk(&script, &plan(true), asking(0), 10).await;
+
+    assert_eq!(walked, Ok(Round::Routed(Outcome::failed())));
+    assert!(held.is_empty());
+    assert_eq!(
+        script.asked(),
+        ["start 1", "run 1", "end 1 failed", "stop 1"]
+    );
+}
+
+/// A Run cancelled while its owner is asked about a Step without a result
+/// ends cancelled, holding the Step for the workflow to stop its session.
+#[tokio::test]
+async fn a_run_cancelled_at_a_step_without_a_result_holds_its_session() {
+    let script = Script {
+        ends: [(1, "no_result")].into(),
+        ask_fails: true,
+        cancelled: true,
+        ..Script::default()
+    };
+
+    let (walked, held) = walk(&script, &plan(false), asking(0), 10).await;
+
+    assert_eq!(walked, Ok(Round::Ended(RunOutcome::Cancelled)));
+    assert_eq!(held, [1]);
+}
+
+/// The Gate of a Step without a result is no Flow's Gate: no kind for a
+/// Standing Rule or the stand-in to read, and kept for a person.
+#[tokio::test]
+async fn the_gate_of_a_step_without_a_result_has_no_kind() {
+    let script = Script {
+        ends: [(1, "no_result")].into(),
+        answers: RefCell::new(vec![Outcome::stop()]),
+        ..Script::default()
+    };
+
+    walk(&script, &plan(false), asking(0), 10)
+        .await
+        .0
+        .expect("walked");
+
+    assert_eq!(
+        *script.asked_with.borrow(),
+        [Some(Asking {
+            kind: None,
+            person_only: true,
+            fix_rounds: 0,
+            fix_limit: 0,
+        })]
+    );
+}
+
+/// An entry whose Gate opens after `failed`: once its Step's owner
+/// answered `stop` to the Gate of an agent that stopped without a result,
+/// the Flow routes `failed` without asking the entry's Gate, since the
+/// Step already had its one Gate.
+#[tokio::test]
+async fn stopping_a_step_without_a_result_never_asks_the_entry_s_gate_after_failed() {
+    let flow = Flow::parse(
+        json!({ "entries": [{
+            "id": "plan", "step": "plan", "role": "planner",
+            "gate": { "question": "Try again?", "answers": ["again", "give_up"], "after": "failed" }
+        }] }),
+        |_| Some(StepUse::Agent),
+    )
+    .expect("valid flow");
+    let script = Script {
+        ends: [(1, "no_result")].into(),
+        answers: RefCell::new(vec![Outcome::stop()]),
+        ..Script::default()
+    };
+
+    let (walked, held) = walk(&script, &flow.entries[0], asking(0), 10).await;
+
+    assert_eq!(walked, Ok(Round::Routed(Outcome::failed())));
+    assert!(held.is_empty());
+    let asked = asked_briefly(&script);
+    assert!(
+        !asked.iter().any(|asked| asked.contains("Try again?")),
+        "{asked:?}"
+    );
+    assert_eq!(asked.last().map(String::as_str), Some("stop 1"));
 }

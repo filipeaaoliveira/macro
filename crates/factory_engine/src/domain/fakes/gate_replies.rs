@@ -106,10 +106,9 @@ impl GateReplyRepository for FakeRepo {
         let mut past: Vec<(DateTime<Utc>, PastAnswer)> = steps
             .iter()
             .filter(|(run, step)| {
-                let question = step
-                    .end
-                    .as_ref()
-                    .is_some_and(|end| end.outcome == Outcome::question());
+                let question = step.end.as_ref().is_some_and(|end| {
+                    end.outcome == Outcome::question() || end.outcome == Outcome::no_result()
+                });
                 *run != of
                     && flow.is_some()
                     && flows.get(run) == flow

@@ -50,6 +50,14 @@
 //! the Step's ends the Run `manual`. A Flow without `questions`, as every
 //! Run started before them carries, never takes that path.
 //!
+//! A Step whose agent stopped without a result, even once reminded
+//! (`no_result`), keeps its session too: behind the [`NO_RESULT_PATCH`]
+//! marker the workflow opens a Gate at once, showing the agent's last
+//! message, and tells the Run's owner; `retry` has the same Role go on in
+//! that session, as a question's answer does, and `stop` stops its agent
+//! and routes `failed`. No worker before the marker ended a Step so, so
+//! Runs in flight replay as before.
+//!
 //! Cancelling the workflow cancels the running Step, whose activity drops
 //! its work before the cancellation completes, or the wait for an answer.
 //! The workflow then stops the Step's agent, which only it can tell was
@@ -154,6 +162,11 @@ pub(crate) const GATE_REPLIES_PATCH: &str = "factory-gate-replies";
 /// notify-only Gate it passes. Renaming it breaks the replay of Runs that
 /// passed it.
 pub(crate) const NOTIFY_ONLY_PATCH: &str = "factory-notify-only-gates";
+
+/// The marker of the workflow that asks the Run's owner about a Step whose
+/// agent stopped without a result, rather than fail it. Renaming it breaks
+/// the replay of Runs that passed it.
+pub(crate) const NO_RESULT_PATCH: &str = "factory-no-result-gates";
 
 /// The workflow of one Run.
 #[workflow]

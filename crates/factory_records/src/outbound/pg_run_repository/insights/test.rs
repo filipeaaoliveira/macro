@@ -561,3 +561,101 @@ async fn the_orchestrator_s_answers_are_left_out(pool: PgPool) {
         records.counts
     );
 }
+
+/// A Step whose agent stopped without a result, and its owner retried, is
+/// one visit with the Step that went on; one its owner then stopped fails
+/// its entry, as its Flow routes it. Neither Gate, nor its answer, counts
+/// among the entry's Gates and answers.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn a_step_without_a_result_is_one_visit_retried_and_a_failure_stopped(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let julia = user("macro|julia@example.com");
+    let id = RunId::generate();
+    let RunInsert::Inserted(_) = repo
+        .insert_run(NewRun {
+            id,
+            flow: "plan",
+            request: "Plan the export",
+            user_id: &julia,
+            task_id: None,
+            repository: None,
+            created_in_person: false,
+            control_file_patterns: &[],
+            control_files_team_id: None,
+            standing_rules: RunRules::DEFAULT,
+            automation: None,
+        })
+        .await
+        .expect("insert")
+    else {
+        panic!("a run with no task is kept");
+    };
+    let key = |seq| crate::domain::models::StepKey { run_id: id, seq };
+    let outcome = |name: &str| {
+        crate::domain::models::Outcome::try_from(name.to_string()).expect("valid outcome")
+    };
+    for (seq, answer) in [(1, "retry"), (2, "stop")] {
+        repo.start_step(key(seq), &entry("plan"), 1)
+            .await
+            .expect("start");
+        repo.end_step(key(seq), &outcome("no_result"), "I stopped.")
+            .await
+            .expect("end");
+        repo.open_gate(
+            key(seq),
+            "Retry or stop?",
+            &[outcome("retry"), outcome("stop")],
+        )
+        .await
+        .expect("open");
+        repo.answer_gate(key(seq), &outcome(answer), None, &julia, None, None)
+            .await
+            .expect("answer");
+    }
+
+    let records = repo
+        .read_insights(&InsightsScope {
+            user_id: julia,
+            from: at("2000-01-01T00:00:00Z"),
+            to: at("2100-01-01T00:00:00Z"),
+            flow: None,
+            cap: 1000,
+        })
+        .await
+        .expect("read");
+
+    let plan = records
+        .entries
+        .iter()
+        .find(|summary| summary.entry == entry("plan"))
+        .expect("plan");
+    assert_eq!(
+        (
+            plan.steps,
+            plan.runs,
+            plan.revisited_runs,
+            plan.failed_runs,
+            plan.troubled_runs
+        ),
+        (2, 1, 0, 1, 1)
+    );
+    assert_eq!((plan.gates_opened, plan.gates_answered), (0, 0));
+    let counted: Vec<(EntryCountKind, &str, u32)> = records
+        .counts
+        .iter()
+        .map(|count| (count.kind, count.value.as_str(), count.count))
+        .collect();
+    assert_eq!(counted, [(EntryCountKind::Outcome, "failed", 1)]);
+    assert_eq!(
+        records.trouble,
+        [EntryTrouble {
+            entry: entry("plan"),
+            run_id: id,
+            failed: true,
+            visits: 1,
+        }]
+    );
+}

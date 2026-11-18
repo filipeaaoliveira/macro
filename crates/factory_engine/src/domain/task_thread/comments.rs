@@ -1,7 +1,7 @@
 //! What each update of a Run says on its task's thread.
 
 use chrono::{DateTime, Utc};
-use factory_records::domain::models::{EntryId, GateAnswer, GateKind, Role, Run, Step};
+use factory_records::domain::models::{EntryId, GateAnswer, GateKind, Outcome, Role, Run, Step};
 use factory_records::domain::review_rounds::ReviewRound;
 use model_notifications::FactoryGateWaitingMetadata;
 
@@ -105,9 +105,20 @@ pub fn update_comment(
             let gate = step.gate.as_ref()?;
             // An agent's question is the agent's words: the thread says
             // only that it asks.
+            // So is the last message of an agent that stopped without a
+            // result, which its Gate shows the owner.
+            let stopped = step
+                .end
+                .as_ref()
+                .is_some_and(|end| end.outcome == Outcome::no_result());
             let text = match gate.kind {
                 GateKind::Question => format!(
                     "Step {seq}'s {} asks the run's owner a question.",
+                    role_name(step.role.as_ref())
+                ),
+                GateKind::Flow if stopped => format!(
+                    "Step {seq}'s {} stopped without handing back a result, and waits for the \
+                     run's owner to answer `retry` or `stop`.",
                     role_name(step.role.as_ref())
                 ),
                 GateKind::Flow => {

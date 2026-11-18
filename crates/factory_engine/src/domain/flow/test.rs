@@ -310,3 +310,19 @@ fn a_notify_only_gate_offers_no_answer_and_keeps_its_question() {
     let unanswerable = gate(json!({ "question": "Go on?" }));
     assert!(matches!(unanswerable, Err(FlowError::IncompleteGate(_))));
 }
+
+/// No Flow's Gate opens after `no_result`: an agent that stopped without a
+/// result has a Gate of its own, which only the Run's owner answers.
+#[test]
+fn a_gate_after_no_result_is_refused() {
+    let flow = parse(json!({
+        "entries": [{
+            "id": "write",
+            "step": "write",
+            "role": "writer",
+            "gate": { "question": "Go on?", "answers": ["approve", "revise"], "after": "no_result" }
+        }]
+    }));
+
+    assert!(matches!(flow, Err(FlowError::GateAfterNoResult(_))));
+}

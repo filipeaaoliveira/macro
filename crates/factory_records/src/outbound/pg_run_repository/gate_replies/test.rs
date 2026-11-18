@@ -198,7 +198,8 @@ async fn the_stand_in_answers_only_a_gate_the_owner_left(pool: PgPool) {
 
 /// The owner's past answers to the same Flow's entry are read newest
 /// first, without the Run asking, a rule's, the stand-in's, the
-/// Orchestrator's, an agent's question or another Flow's; every Gate a person answered with a button
+/// Orchestrator's, an agent's question, an agent's that stopped without a result or another
+/// Flow's; every Gate a person answered with a button
 /// is read for a replay, and none read from their words.
 #[sqlx::test(
     migrator = "MACRO_DB_MIGRATIONS",
@@ -267,6 +268,24 @@ async fn past_answers_are_the_owner_s_own(pool: PgPool) {
         kept.and_then(|answer| answer.agent_session_id),
         Some(orchestrator)
     );
+    // Nor the Gate of an agent that stopped without a result, which asks
+    // nothing of the Flow.
+    repo.start_step(key(older, 5), &entry("plan"), 3)
+        .await
+        .expect("start");
+    repo.end_step(key(older, 5), &outcome("no_result"), "I stopped.")
+        .await
+        .expect("end");
+    repo.open_gate(
+        key(older, 5),
+        "Retry or stop?",
+        &[outcome("retry"), outcome("stop")],
+    )
+    .await
+    .expect("open");
+    repo.answer_gate(key(older, 5), &outcome("retry"), None, &julia(), None, None)
+        .await
+        .expect("answer the stopped agent's gate");
 
     // Nor is an answer to the same entry in a Run of another Flow.
     let other_flow = RunId::generate();

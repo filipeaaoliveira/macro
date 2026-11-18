@@ -177,7 +177,8 @@ async fn an_agent_sends_work_back_and_approves_only_what_the_rules_let_it() {
 
 /// What the factory keeps for the owner in person stays refused to an
 /// agent answering for them, before the workflow hears of it, whatever the
-/// rules let it approve: an agent's question, a Tampered Run's plan,
+/// rules let it approve: an agent's question, the Gate of an agent that
+/// stopped without a result, a Tampered Run's plan,
 /// Control Files sent with an answer, a Gate of an entry no Standing Rule
 /// decides, Blockers past the rule's fix rounds or found again after a
 /// fix, a Gate answered since the agent read it, and any answer from a
@@ -208,6 +209,20 @@ async fn an_agent_never_answers_what_is_kept_for_a_person() {
         )
         .await;
     refused_for(asked, PersonOnly::Question);
+
+    // The Gate of an agent that stopped without a result is the owner's,
+    // whatever answers it offers.
+    let stopped = waiting_with(&repo, on, "write", 1, "no_result", &["retry", "stop"]).await;
+    refused_for(
+        agent_answers(&service, stopped, "stop").await,
+        PersonOnly::PersonsGate,
+    );
+    let stopped_at_plan =
+        waiting_with(&repo, on, "plan", 1, "no_result", &["approve", "revise"]).await;
+    refused_for(
+        agent_answers(&service, stopped_at_plan, "revise").await,
+        PersonOnly::PersonsGate,
+    );
 
     let tampered = waiting_with(&repo, on, "plan", 1, "done", &["approve", "revise"]).await;
     let changes = ControlFileChanges {

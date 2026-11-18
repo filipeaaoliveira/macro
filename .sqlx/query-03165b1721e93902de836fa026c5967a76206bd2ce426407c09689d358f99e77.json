@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH runs AS (\n                SELECT id, flow FROM factory_run\n                WHERE user_id = $1 AND id <> $3\n                ORDER BY created_at DESC, id DESC\n                LIMIT $4\n            )\n            SELECT g.question, g.answer AS \"answer!\", g.note\n            FROM runs r\n            JOIN factory_step s ON s.run_id = r.id\n            JOIN factory_gate g ON g.run_id = s.run_id AND g.seq = s.seq\n            WHERE r.flow = (SELECT flow FROM factory_run WHERE id = $3)\n                AND s.entry = $2 AND s.outcome IS DISTINCT FROM 'question'\n                AND s.outcome IS DISTINCT FROM 'no_result'\n                AND g.user_id = $1 AND g.answer IS NOT NULL AND g.agent_session_id IS NULL\n            ORDER BY g.answered_at DESC\n            LIMIT $5\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "question",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "answer!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "note",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Uuid",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "03165b1721e93902de836fa026c5967a76206bd2ce426407c09689d358f99e77"
+}

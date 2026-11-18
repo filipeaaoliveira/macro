@@ -83,6 +83,19 @@ pub trait RoutineSessions: Send + Sync + 'static {
         async { Err(RoutineSessionError::OperationFailed) }
     }
 
+    /// The agent's last words in its reply to the prompt the action id
+    /// names: the last text of its turn, the end kept when it is longer
+    /// than [`MAX_REPLY_BYTES`]. None when the turn said nothing. Unlike
+    /// [`Self::status`], this is the agent's own text, for the session's
+    /// owner, who sent the prompt.
+    fn reply(
+        &self,
+        command: RoutineSessionAction,
+    ) -> impl Future<Output = Result<Option<String>, RoutineSessionError>> + Send {
+        let _ = command;
+        async { Err(RoutineSessionError::OperationFailed) }
+    }
+
     /// Delete a session the scheduler opened for its owner: a routine's run
     /// (source `routine`), or a draft's background session once its drafter
     /// is done with it (`AgentSession::is_background`). No other session can

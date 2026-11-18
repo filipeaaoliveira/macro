@@ -10,6 +10,10 @@ use crate::domain::model::{
 };
 use crate::domain::session_command::SessionCommand;
 
+/// The most bytes of an agent's reply [`super::RoutineSessions::reply`]
+/// answers with: its end, which says where the agent stopped.
+pub const MAX_REPLY_BYTES: usize = 16 * 1024;
+
 /// A persona selected by a routine's validated user owner.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValidateRoutineSession {

@@ -168,7 +168,8 @@ impl GateReplyRepository for PgRunRepository {
         limit: u16,
     ) -> Result<Vec<PastAnswer>, Self::Err> {
         // A Gate of the entry in a Run of the same Flow, never an agent's
-        // question asked at it (a Step that ended `question`). A Run
+        // question asked at it (a Step that ended `question`), nor the Gate
+        // of an agent that stopped without a result (`no_result`). A Run
         // recorded before Runs kept their Flow has no past answers.
         let rows = sqlx::query!(
             r#"
@@ -184,6 +185,7 @@ impl GateReplyRepository for PgRunRepository {
             JOIN factory_gate g ON g.run_id = s.run_id AND g.seq = s.seq
             WHERE r.flow = (SELECT flow FROM factory_run WHERE id = $3)
                 AND s.entry = $2 AND s.outcome IS DISTINCT FROM 'question'
+                AND s.outcome IS DISTINCT FROM 'no_result'
                 AND g.user_id = $1 AND g.answer IS NOT NULL AND g.agent_session_id IS NULL
             ORDER BY g.answered_at DESC
             LIMIT $5
@@ -208,7 +210,8 @@ impl GateReplyRepository for PgRunRepository {
     }
 
     // An offline read, for the replay measure: it reads every answered
-    // Gate up to its limit.
+    // Gate up to its limit, but the Gate of an agent that stopped without
+    // a result, which asks nothing of the Flow.
     #[tracing::instrument(err, skip(self))]
     async fn answered_gates(&self, limit: u32) -> Result<Vec<AnsweredGate>, Self::Err> {
         let rows = sqlx::query!(
@@ -240,6 +243,7 @@ impl GateReplyRepository for PgRunRepository {
             WHERE g.answer IS NOT NULL AND g.user_id IS NOT NULL AND g.rule IS NULL
                 AND NOT g.by_stand_in AND g.reply_confidence IS NULL
                 AND g.agent_session_id IS NULL
+                AND s.outcome IS DISTINCT FROM 'no_result'
             ORDER BY g.answered_at, g.run_id, g.seq
             LIMIT $1
             "#,

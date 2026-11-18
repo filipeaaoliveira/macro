@@ -813,3 +813,149 @@ async fn the_owner_s_notes_reach_the_prompt_as_data() {
     }
     assert_eq!(tasks.len(), 2);
 }
+
+/// Why an agent that stopped without a result, even once reminded, failed.
+#[derive(Debug, thiserror::Error)]
+#[error("the agent stopped without a result")]
+struct Stopped;
+
+impl Retryable for Stopped {
+    fn retryable(&self) -> bool {
+        false
+    }
+}
+
+impl AgentFailure for Stopped {
+    fn stopped_without_result(&self) -> Option<&str> {
+        Some("I stopped before the tests.")
+    }
+}
+
+/// An agent that never hands back a result.
+#[derive(Clone)]
+struct StoppingAgent;
+
+impl StepAgent for StoppingAgent {
+    type Err = Stopped;
+
+    async fn follow_up(&self, _turn: AgentTurn) -> Result<AgentAnswer, Stopped> {
+        Err(Stopped)
+    }
+
+    async fn run_check(
+        &self,
+        _command: crate::domain::models::AgentCommand,
+    ) -> Result<Option<agent_session::domain::session_command::SessionCommandOutput>, Stopped> {
+        Ok(None)
+    }
+
+    async fn stop(
+        &self,
+        _key: StepKey,
+        _role: &Role,
+        _owner: &MacroUserIdStr<'static>,
+    ) -> Result<(), Stopped> {
+        Ok(())
+    }
+
+    async fn release(
+        &self,
+        _key: StepKey,
+        _role: &Role,
+        _owner: &MacroUserIdStr<'static>,
+    ) -> Result<(), Stopped> {
+        Ok(())
+    }
+
+    async fn answer(&self, _task: AgentTask) -> Result<AgentAnswer, Stopped> {
+        Err(Stopped)
+    }
+}
+
+/// An agent that stopped without a result ends its Step `no_result`, its
+/// last message the output, for the workflow to ask the Run's owner; a
+/// reviewer's fails its Step as before, since its round asks no one.
+#[tokio::test]
+async fn an_agent_that_stopped_without_a_result_ends_its_step_no_result() {
+    let steps = BuiltInSteps::new(StoppingAgent, pull_requests());
+
+    let report = steps
+        .run(&step("plan"), input(&[]))
+        .await
+        .expect("a report");
+    let reviewed = steps
+        .run(
+            &step("plan"),
+            StepInput {
+                reviewer: true,
+                ..input(&[])
+            },
+        )
+        .await;
+
+    assert_eq!(report.outcome, Outcome::no_result());
+    assert_eq!(report.output, "I stopped before the tests.");
+    assert!(reviewed.is_err());
+}
+
+/// A Step that goes on from one whose agent stopped without a result, and
+/// whose owner answered `retry`, prompts the agent's session with the
+/// owner's ask to go on.
+#[tokio::test]
+async fn a_retried_step_tells_the_agent_to_go_on() {
+    let agent = FakeAgent::ending_with("done");
+    let steps = BuiltInSteps::new(agent.clone(), pull_requests());
+    let earlier = [Step {
+        seq: 1,
+        entry: EntryId::try_from("plan".to_string()).expect("valid"),
+        visit: 1,
+        started_at: Utc::now(),
+        end: Some(StepEnd {
+            outcome: Outcome::no_result(),
+            output: "I stopped before the tests.".to_string(),
+            ended_at: Utc::now(),
+        }),
+        gate: Some(Gate {
+            asked_back: None,
+            stand_in: None,
+            kind: GateKind::Flow,
+            question: "Retry?".to_string(),
+            answers: vec![Outcome::retry(), Outcome::stop()],
+            opened_at: Utc::now(),
+            answer: Some(GateAnswer {
+                reply_confidence: None,
+                by_stand_in: false,
+                agent_session_id: None,
+                answer: Outcome::retry(),
+                note: None,
+                user_id: None,
+                rule: None,
+                approved_control_files: None,
+                answered_at: Utc::now(),
+            }),
+        }),
+        role: Some(Role::try_from("planner".to_string()).expect("valid")),
+        agent: None,
+        passed_over: Vec::new(),
+        checks: Vec::new(),
+    }];
+
+    steps
+        .run(
+            &step("plan"),
+            StepInput {
+                resumes: Some(1),
+                ..input(&earlier)
+            },
+        )
+        .await
+        .expect("plan");
+
+    let tasks = agent.tasks.lock().expect("tasks");
+    assert_eq!(tasks[0].resumes, Some(1));
+    assert!(
+        tasks[0]
+            .prompt
+            .starts_with("## The run's owner asks you to try again")
+    );
+}

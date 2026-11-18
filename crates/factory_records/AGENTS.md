@@ -239,9 +239,10 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   Run no longer lets it stand. `past_answers` reads the owner's own
   answers to an entry's Gates through their newest Runs
   (`factory_run_user_created_idx`), in Runs of the same Flow only, never
-  an agent's question asked at the entry; `answered_gates` reads every
-  Gate a person answered with a button (no answer read from words, nor the
-  stand-in's), with the Run's plan, for the offline replay measure only.
+  an agent's question asked at the entry, nor the Gate of an agent that
+  stopped without a result (a Step that ended `no_result`); `answered_gates`
+  reads every Gate a person answered with a button (no answer read from
+  words, nor the stand-in's, nor a `no_result` Step's), with the Run's plan, for the offline replay measure only.
   Run insights leave out the stand-in's answers, as they do Rule
   Answers.
 
