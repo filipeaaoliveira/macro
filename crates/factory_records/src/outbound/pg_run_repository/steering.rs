@@ -220,10 +220,13 @@ impl PgRunRepository {
     }
 
     /// [`crate::domain::ports::RunRepository::close_steering`]: a Step that
-    /// is not there takes no steering, so its work has nothing to follow.
+    /// is not there takes no steering, so its work has nothing to follow;
+    /// nor does the wait on a prompt the Step no longer works on (its
+    /// current one is its later prompt's, else its first's).
     pub(super) async fn stop_steering(
         &self,
         key: StepKey,
+        turn: Uuid,
         followed: Option<Uuid>,
     ) -> Result<bool, PgRunRepositoryErr> {
         let closed = sqlx::query_scalar!(
@@ -232,17 +235,23 @@ impl PgRunRepository {
                 UPDATE factory_step
                 SET steer_closed = true
                 WHERE run_id = $1 AND seq = $2
+                    AND COALESCE(turn_action_id, action_id) = $4
                     AND steer_action_id IS NOT DISTINCT FROM $3
                     AND paused_at IS NULL AND stop_asked_at IS NULL
                 RETURNING 1
             )
             SELECT EXISTS (SELECT 1 FROM closed)
-                OR NOT EXISTS (SELECT 1 FROM factory_step WHERE run_id = $1 AND seq = $2)
+                OR NOT EXISTS (
+                    SELECT 1 FROM factory_step
+                    WHERE run_id = $1 AND seq = $2
+                        AND COALESCE(turn_action_id, action_id) = $4
+                )
                 AS "closed!"
             "#,
             key.run_id.as_uuid(),
             i32::from(key.seq),
             followed,
+            turn,
         )
         .fetch_one(&self.pool)
         .await?;

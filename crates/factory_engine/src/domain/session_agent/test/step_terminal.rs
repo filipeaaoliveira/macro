@@ -19,7 +19,7 @@ use uuid::Uuid;
 
 use super::{agents, julia, plan_task, planner, the_plan};
 use crate::domain::fakes::FakeRepo;
-use crate::domain::models::{AgentAnswer, AgentTurn, SessionSteer};
+use crate::domain::models::{AgentAnswer, AgentTask, AgentTurn, SessionSteer};
 use crate::domain::ports::{PauseNotices, Retryable, StepAgent};
 use crate::domain::session_agent::{SESSION_DEADLINE, SessionAgent, SessionAgentError};
 use crate::domain::step_terminal::PAUSED_STEP_ENDS_AFTER;
@@ -154,6 +154,7 @@ impl RoutineSessions for ScriptedSessions {
 /// Step, its session, and the agent to steer it with.
 struct Working {
     work: JoinHandle<Result<AgentAnswer, SessionAgentError>>,
+    task: AgentTask,
     key: StepKey,
     session: StepSession,
     agent: SessionAgent<ScriptedSessions, FakeRepo>,
@@ -165,6 +166,7 @@ async fn working(repo: &FakeRepo, sessions: &ScriptedSessions) -> Working {
     let key = task.key;
     let work = tokio::spawn({
         let agent = agent.clone();
+        let task = task.clone();
         async move { agent.answer(task).await }
     });
     // Let the work open the session and send its first prompt.
@@ -176,6 +178,7 @@ async fn working(repo: &FakeRepo, sessions: &ScriptedSessions) -> Working {
         .expect("the step claimed its session");
     Working {
         work,
+        task,
         key,
         session,
         agent,
@@ -632,4 +635,129 @@ async fn a_reminded_step_pauses_and_stops_as_its_owner_says() {
         matches!(stopped, Err(SessionAgentError::StoppedByOwner)),
         "{stopped:?}"
     );
+}
+
+/// The reminder sent once the first turn ended with nothing handed back,
+/// the turn of the Step's first prompt having ended.
+async fn reminded(sessions: &ScriptedSessions, working: &Working) -> Uuid {
+    sessions.set(working.session.action_id, RoutineActionStatus::Succeeded);
+    tokio::time::sleep(Duration::from_secs(60)).await;
+    let reminder = sessions.follow_ups.lock().expect("follow-ups")[0]
+        .action
+        .action_id
+        .as_uuid();
+    sessions.set(
+        reminder,
+        RoutineActionStatus::Pending(RoutinePendingReason::Running),
+    );
+    reminder
+}
+
+/// An attempt retried while the reminder's turn runs (Temporal lost the
+/// first attempt) does not wait on the first prompt, whose turn ended, nor
+/// close the steering the reminder's turn takes: the owner still steers
+/// it, and both attempts end with what the agent hands back to it.
+#[tokio::test(start_paused = true)]
+async fn a_retried_attempt_waits_on_the_reminder_and_leaves_it_steerable() {
+    let repo = FakeRepo::default();
+    let sessions = ScriptedSessions::default();
+    let working = working(&repo, &sessions).await;
+    let reminder = reminded(&sessions, &working).await;
+
+    let retried = tokio::spawn({
+        let agent = working.agent.clone();
+        let task = working.task.clone();
+        async move { agent.answer(task).await }
+    });
+    tokio::time::sleep(Duration::from_secs(60)).await;
+    assert!(!retried.is_finished(), "the retry waits on the reminder");
+    let note = working.note(&repo, "Hand back what you have").await;
+
+    sessions.set(reminder, RoutineActionStatus::Succeeded);
+    sessions.set(
+        note,
+        RoutineActionStatus::Pending(RoutinePendingReason::Running),
+    );
+    tokio::time::sleep(Duration::from_secs(60)).await;
+    working.hand_back(&repo, &the_plan()).await;
+    sessions.set(note, RoutineActionStatus::Succeeded);
+
+    let first = working.work.await.expect("joined").expect("answer");
+    let again = retried.await.expect("joined").expect("answer");
+    assert_eq!(first.text, the_plan().output);
+    assert_eq!(again.text, the_plan().output);
+}
+
+/// The reminder's wait keeps the time the Step was paused before it: a
+/// Step paused past its attempt's time, then resumed, is still reminded
+/// and waited on, not failed at once for its time.
+#[tokio::test(start_paused = true)]
+async fn a_reminder_keeps_the_time_its_step_was_paused() {
+    let repo = FakeRepo::default();
+    let sessions = ScriptedSessions::default();
+    let working = working(&repo, &sessions).await;
+    working
+        .steer(&repo, NewSteer::Pause, SessionSteer::Interrupt)
+        .await;
+    sessions.set(
+        working.session.action_id,
+        RoutineActionStatus::Failed(RoutineFailureReason::Cancelled),
+    );
+    tokio::time::sleep(SESSION_DEADLINE + Duration::from_secs(10 * 60)).await;
+    let resume = Uuid::now_v7();
+    working
+        .steer(
+            &repo,
+            NewSteer::Resume {
+                note: None,
+                prompt_id: resume,
+            },
+            SessionSteer::Prompt {
+                prompt_id: resume,
+                prompt: "Go on".to_string(),
+            },
+        )
+        .await;
+    sessions.set(resume, RoutineActionStatus::Succeeded);
+    tokio::time::sleep(Duration::from_secs(60)).await;
+
+    let sent = sessions.follow_ups.lock().expect("follow-ups").clone();
+    let reminder = sent
+        .iter()
+        .map(|prompt| prompt.action.action_id.as_uuid())
+        .find(|sent| *sent != resume)
+        .expect("the agent is reminded");
+    sessions.set(
+        reminder,
+        RoutineActionStatus::Pending(RoutinePendingReason::Running),
+    );
+    tokio::time::sleep(Duration::from_secs(5 * 60)).await;
+    assert!(
+        !working.work.is_finished(),
+        "the reminder is waited on within the time paused"
+    );
+    working.hand_back(&repo, &the_plan()).await;
+    sessions.set(reminder, RoutineActionStatus::Succeeded);
+    let answer = working.work.await.expect("joined").expect("answer");
+    assert_eq!(answer.text, the_plan().output);
+}
+
+/// A reminder whose turn still runs when the attempt's time is up is a
+/// later prompt still going: the attempt fails to be retried, which waits
+/// on the same turn, rather than failing the Step for good.
+#[tokio::test(start_paused = true)]
+async fn a_reminder_still_going_at_the_attempt_s_end_is_retried() {
+    let repo = FakeRepo::default();
+    let sessions = ScriptedSessions::default();
+    let working = working(&repo, &sessions).await;
+    reminded(&sessions, &working).await;
+
+    tokio::time::sleep(SESSION_DEADLINE + Duration::from_secs(60)).await;
+    let ended = working.work.await.expect("joined");
+
+    let Err(error) = ended else {
+        panic!("the attempt's time ran out");
+    };
+    assert!(matches!(error, SessionAgentError::Overdue), "{error:?}");
+    assert!(error.retryable());
 }

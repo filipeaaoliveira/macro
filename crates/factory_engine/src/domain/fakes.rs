@@ -1161,9 +1161,10 @@ impl RunRepository for FakeRepo {
     async fn close_steering(
         &self,
         key: StepKey,
+        turn: Uuid,
         followed: Option<Uuid>,
     ) -> Result<bool, FakeError> {
-        Ok(self.stop_steering(key, followed))
+        Ok(self.stop_steering(key, turn, followed))
     }
 
     async fn check_rounds(&self, key: StepKey) -> Result<Vec<CheckRound>, FakeError> {

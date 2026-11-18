@@ -9,7 +9,7 @@ use agent_session::domain::routines::{
 use factory_records::domain::ports::RunRepository;
 use uuid::Uuid;
 
-use super::{SessionAgent, SessionAgentError, prompt};
+use super::{SessionAgent, SessionAgentError, Waited, prompt};
 use crate::domain::models::{AgentAnswer, AgentTask};
 
 /// What an agent whose turn ended with nothing handed back is told, once.
@@ -29,8 +29,9 @@ const UNREAD_LAST_WORDS: &str = "The agent's last message could not be read.";
 
 impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
     /// What the agent handed back for the Step `task`'s prompt `action`,
-    /// whose turn ended, or the turn of the owner's prompt `last` the Step
-    /// followed after it; when nothing, what it hands back once reminded.
+    /// whose turn ended, or the turn of the owner's prompt the Step followed
+    /// after it (`waited`); when nothing, what it hands back once reminded,
+    /// by the deadline the wait moved on by the time the Step was paused.
     /// The prompt reads as superseded once an earlier attempt reminded the
     /// agent, the only later prompt before the Step's answer: this attempt
     /// then waits on that reminder.
@@ -38,12 +39,12 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
         &self,
         task: &AgentTask,
         action: &RoutineSessionAction,
-        last: AgentActionId,
-        deadline: tokio::time::Instant,
+        waited: Waited,
     ) -> Result<AgentAnswer, SessionAgentError> {
         match self.handed_back(task.key, action.action_id.as_uuid()).await {
             Err(SessionAgentError::NothingHandedBack | SessionAgentError::Superseded) => {
-                self.remind(task, action, last, deadline).await
+                self.remind(task, action, waited.last, waited.deadline)
+                    .await
             }
             handed => handed,
         }
@@ -90,6 +91,17 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
             self.still_holds(task.key, session_id).await?;
             return Err(SessionAgentError::Superseded);
         }
+        // A stop the owner asked once the reminder's turn began, before it
+        // was sent: the Step ends stopped by them, its agent not reminded.
+        if self
+            .repo
+            .steering(task.key)
+            .await
+            .map_err(Self::records)?
+            .stop_asked
+        {
+            return Err(SessionAgentError::StoppedByOwner);
+        }
         tracing::info!("a factory step's agent ended its turn without a result: it is reminded");
         let prompted = self
             .sessions
@@ -101,7 +113,14 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
             })
             .await;
         self.prompt_once(&reminder, prompted).await?;
-        let reminded_last = self.finished(task.key, &reminder, deadline).await?;
+        // The reminder is a later prompt: a turn still going when the
+        // attempt's time runs out is waited on again by a retry, as a check
+        // round's prompt is, not failed for good.
+        let reminded_last = match self.finished(task.key, &reminder, deadline).await {
+            Ok(waited) => waited.last,
+            Err(SessionAgentError::TooSlow(_)) => return Err(SessionAgentError::Overdue),
+            Err(error) => return Err(error),
+        };
 
         match self
             .handed_back(task.key, reminder.action_id.as_uuid())

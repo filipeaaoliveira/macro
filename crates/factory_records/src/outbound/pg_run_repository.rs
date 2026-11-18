@@ -1662,9 +1662,10 @@ impl RunRepository for PgRunRepository {
     async fn close_steering(
         &self,
         key: StepKey,
+        turn: Uuid,
         followed: Option<Uuid>,
     ) -> Result<bool, Self::Err> {
-        self.stop_steering(key, followed).await
+        self.stop_steering(key, turn, followed).await
     }
 
     #[tracing::instrument(err, skip(self))]

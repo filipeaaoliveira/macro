@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH closed AS (\n                UPDATE factory_step\n                SET steer_closed = true\n                WHERE run_id = $1 AND seq = $2\n                    AND COALESCE(turn_action_id, action_id) = $4\n                    AND steer_action_id IS NOT DISTINCT FROM $3\n                    AND paused_at IS NULL AND stop_asked_at IS NULL\n                RETURNING 1\n            )\n            SELECT EXISTS (SELECT 1 FROM closed)\n                OR NOT EXISTS (\n                    SELECT 1 FROM factory_step\n                    WHERE run_id = $1 AND seq = $2\n                        AND COALESCE(turn_action_id, action_id) = $4\n                )\n                AS \"closed!\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "closed!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "2c8975fa5052300950bc41650e298d032979e681fd35b746e5aa1b2f7e4e3496"
+}

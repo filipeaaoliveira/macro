@@ -513,14 +513,15 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
     /// it closes: the turn of a note or a resume they sent after it, and no
     /// end while the Step is paused. A stop they asked fails the wait at
     /// once. The time the Step is paused does not count against `deadline`.
-    /// Returns the prompt whose turn ended last: `action`'s, or the owner's
-    /// last one the wait followed, whose turn holds the agent's last words.
+    /// Returns the prompt whose turn ended last (`action`'s, or the owner's
+    /// last one the wait followed, whose turn holds the agent's last
+    /// words) and `deadline` moved on by the time the Step was paused.
     async fn finished(
         &self,
         key: StepKey,
         action: &RoutineSessionAction,
         deadline: tokio::time::Instant,
-    ) -> Result<AgentActionId, SessionAgentError> {
+    ) -> Result<Waited, SessionAgentError> {
         self.wait_turn(key, action, deadline, false).await
     }
 
@@ -533,7 +534,7 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
         action: &RoutineSessionAction,
         deadline: tokio::time::Instant,
         resumed: bool,
-    ) -> Result<AgentActionId, SessionAgentError> {
+    ) -> Result<Waited, SessionAgentError> {
         let mut watched = action.clone();
         // The turns the wait followed, the first the Step's own: a prompt
         // of the owner's the session refused never arrives, and the wait
@@ -639,11 +640,14 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
                     followed => {
                         if self
                             .repo
-                            .close_steering(key, followed)
+                            .close_steering(key, action.action_id.as_uuid(), followed)
                             .await
                             .map_err(Self::records)?
                         {
-                            return ended.map(|()| watched.action_id);
+                            return ended.map(|()| Waited {
+                                last: watched.action_id,
+                                deadline,
+                            });
                         }
                         // Steered since the read: read it again.
                         continue;
@@ -659,6 +663,42 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
             tokio::time::sleep(wait).await;
             wait = (wait * 2).min(LONGEST_WAIT);
         }
+    }
+}
+
+/// How the wait on a turn ended: the prompt whose turn ended last, and the
+/// attempt's deadline moved on by the time the Step was paused, which the
+/// waits after it keep.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Waited {
+    pub(super) last: AgentActionId,
+    pub(super) deadline: tokio::time::Instant,
+}
+
+impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
+    /// Wait on the turn of the Step `task`'s own prompt `action` ([`Self::wait_turn`]),
+    /// unless an earlier attempt already took the Step on to a later prompt
+    /// (its reminder): that turn ended, and the steering the Step takes is
+    /// the later prompt's, which this attempt then waits on instead.
+    async fn first_wait(
+        &self,
+        task: &AgentTask,
+        action: &RoutineSessionAction,
+        deadline: tokio::time::Instant,
+        resumed: bool,
+    ) -> Result<Waited, SessionAgentError> {
+        let handed = self
+            .repo
+            .handed_back(task.key, action.action_id.as_uuid())
+            .await
+            .map_err(Self::records)?;
+        if handed == HandedBack::Superseded {
+            return Ok(Waited {
+                last: action.action_id,
+                deadline,
+            });
+        }
+        self.wait_turn(task.key, action, deadline, resumed).await
     }
 }
 
@@ -863,8 +903,8 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
             })
             .await;
         self.prompt_once(&action, prompted).await?;
-        let last = self.wait_turn(task.key, &action, deadline, true).await?;
-        self.answer_or_remind(task, &action, last, deadline).await
+        let waited = self.first_wait(task, &action, deadline, true).await?;
+        self.answer_or_remind(task, &action, waited).await
     }
 
     /// Do the Step `task` afresh in `session`, a new session it claimed in
@@ -993,11 +1033,11 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
                 None => return Err(not_passed(refusal)),
             }
         };
-        let last = self.finished(task.key, &action, deadline).await?;
+        let waited = self.first_wait(task, &action, deadline, false).await?;
 
         // The session stays until the Step's end is recorded: a retry of an
         // attempt whose answer Temporal lost goes on in it.
-        self.answer_or_remind(task, &action, last, deadline).await
+        self.answer_or_remind(task, &action, waited).await
     }
 }
 

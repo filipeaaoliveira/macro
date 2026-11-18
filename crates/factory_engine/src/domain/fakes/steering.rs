@@ -179,7 +179,18 @@ impl FakeRepo {
         });
     }
 
-    pub(crate) fn stop_steering(&self, key: StepKey, followed: Option<Uuid>) -> bool {
+    pub(crate) fn stop_steering(&self, key: StepKey, turn: Uuid, followed: Option<Uuid>) -> bool {
+        // The wait on a prompt the Step no longer works on closes nothing.
+        let current = self
+            .sessions
+            .lock()
+            .expect("sessions")
+            .iter()
+            .find(|claimed| claimed.key == key)
+            .map(|claimed| claimed.turn.unwrap_or(claimed.session.action_id));
+        if current.is_some_and(|current| current != turn) {
+            return true;
+        }
         self.with_steering(key, |steering| {
             let closes = steering.prompt == followed
                 && steering.paused_at.is_none()

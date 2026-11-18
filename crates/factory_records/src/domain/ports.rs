@@ -294,15 +294,19 @@ pub trait RunRepository: Send + Sync + 'static {
     fn pause_ran_out(&self, key: StepKey) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// Stop the Step `key` taking its owner's steering, once its agent's
-    /// turn ended and its work follows `followed`, the prompt of the
-    /// owner's steering it read last (none when it followed none), and the
-    /// Step is neither paused nor asked to stop. Whether it stopped: false
-    /// when the owner steered it since, so the work reads the steering
-    /// again. A later prompt of the factory's ([`Self::begin_turn`]) lets
-    /// the owner steer it again.
+    /// turn on the factory's prompt `turn` ended and its work follows
+    /// `followed`, the prompt of the owner's steering it read last (none
+    /// when it followed none), and the Step is neither paused nor asked to
+    /// stop. Whether the wait on `turn` ends: false when the owner steered
+    /// it since, so the work reads the steering again; true, closing
+    /// nothing, once the Step works on a later prompt than `turn`, whose
+    /// wait the steering is now (an attempt retried late never closes it).
+    /// A later prompt of the factory's ([`Self::begin_turn`]) lets the
+    /// owner steer it again.
     fn close_steering(
         &self,
         key: StepKey,
+        turn: Uuid,
         followed: Option<Uuid>,
     ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
 

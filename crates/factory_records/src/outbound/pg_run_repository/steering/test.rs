@@ -207,10 +207,17 @@ async fn closed_steering_opens_again_with_the_factorys_next_prompt(pool: PgPool)
         .expect("a note");
 
     assert!(
-        !repo.close_steering(key, None).await.expect("close"),
+        !repo
+            .close_steering(key, session.action_id, None)
+            .await
+            .expect("close"),
         "a note the work never read keeps the steering open"
     );
-    assert!(repo.close_steering(key, Some(prompt)).await.expect("close"));
+    assert!(
+        repo.close_steering(key, session.action_id, Some(prompt))
+            .await
+            .expect("close")
+    );
     let (late, _) = note("One more thing");
     assert_eq!(
         repo.steer(key, &late).await.expect("steer"),
@@ -272,7 +279,10 @@ async fn a_stop_ends_the_steering_and_a_note_keeps_the_hand_back(pool: PgPool) {
         );
     }
     assert!(
-        !repo.close_steering(key, None).await.expect("close"),
+        !repo
+            .close_steering(key, session.action_id, None)
+            .await
+            .expect("close"),
         "a stop asked keeps the work reading it"
     );
 
@@ -385,7 +395,11 @@ async fn a_step_handed_to_a_new_session_follows_none_of_the_old_one(pool: PgPool
     let (key, session) = writing(&repo).await;
     let (sent, prompt) = note("Use the tokens");
     repo.steer(key, &sent).await.expect("steer").expect("note");
-    assert!(repo.close_steering(key, Some(prompt)).await.expect("close"));
+    assert!(
+        repo.close_steering(key, session.action_id, Some(prompt))
+            .await
+            .expect("close")
+    );
 
     let backup = StepSession {
         session_id: Uuid::now_v7(),
@@ -431,7 +445,7 @@ async fn the_step_going_on_from_a_question_takes_steering(pool: PgPool) {
         .expect("steer")
         .expect("note");
     assert!(
-        repo.close_steering(asking, Some(prompt))
+        repo.close_steering(asking, session.action_id, Some(prompt))
             .await
             .expect("close")
     );
@@ -481,10 +495,14 @@ async fn the_step_going_on_from_a_question_takes_steering(pool: PgPool) {
 )]
 async fn a_paused_step_that_ran_out_of_time_says_so(pool: PgPool) {
     let repo = PgRunRepository::new(pool);
-    let (key, _) = writing(&repo).await;
+    let (key, session) = writing(&repo).await;
     repo.pause_ran_out(key).await.expect("not paused");
     assert!(!repo.steering(key).await.expect("read").pause_ran_out);
-    assert!(repo.close_steering(key, None).await.expect("close"));
+    assert!(
+        repo.close_steering(key, session.action_id, None)
+            .await
+            .expect("close")
+    );
     assert!(
         repo.list_steps(key.run_id).await.expect("list")[0]
             .terminal
@@ -509,4 +527,53 @@ async fn a_paused_step_that_ran_out_of_time_says_so(pool: PgPool) {
     let terminal = &repo.list_steps(key.run_id).await.expect("list")[0].terminal;
     assert!(terminal.pause_ran_out_at.is_some());
     assert!(!terminal.between_turns);
+}
+
+/// The end of a turn the Step no longer works on (an attempt retried late,
+/// still waiting on the first prompt once the Step went on to a later one)
+/// ends that wait but closes nothing: the later prompt's turn still takes
+/// the owner's steering, until its own wait closes it.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn an_old_turn_s_end_leaves_a_later_turn_steerable(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let (key, session) = writing(&repo).await;
+    let reminder = Uuid::now_v7();
+    assert!(
+        repo.begin_turn(key, session.session_id, reminder, 1, &[outcome("done")])
+            .await
+            .expect("turn")
+    );
+
+    assert!(
+        repo.close_steering(key, session.action_id, None)
+            .await
+            .expect("close"),
+        "the old turn's wait ends"
+    );
+    let (sent, prompt) = note("Hand back what you have");
+    repo.steer(key, &sent)
+        .await
+        .expect("steer")
+        .expect("the later turn still takes a note");
+
+    assert!(
+        !repo
+            .close_steering(key, reminder, None)
+            .await
+            .expect("close"),
+        "the later turn's wait follows the note first"
+    );
+    assert!(
+        repo.close_steering(key, reminder, Some(prompt))
+            .await
+            .expect("close")
+    );
+    let (late, _) = note("One more thing");
+    assert_eq!(
+        repo.steer(key, &late).await.expect("steer"),
+        Err(SteerRefusal::NotWorking)
+    );
 }
