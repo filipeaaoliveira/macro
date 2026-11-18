@@ -168,11 +168,19 @@ would start under, and refuses the Run while the owner holds more places
 than the limit (409 `queueFull`, naming the team's or the Project's rules),
 for the person, an agent for them and an Automation alike; Runs under way
 go on. A place is an open Run at an unanswered Gate the stand-in has not
-answered, or an open Run that has not reached a Gate yet, which holds the
-place it will ask for (`queue_size`). The count and the new Run are kept in
-one transaction behind a lock on the owner's Queue (`insert_run`,
-`RunInsert::QueueFull`), so two starts at once are counted one after the
-other. A Gate in the seconds before its rule or the stand-in decides counts:
+answered, or an open Run of a Flow with a Gate of its own (`asking_flows`:
+`plan`, `code`; not `reply`, which holds one only once it asks a question)
+that has not reached a Gate yet, which holds the place it will ask for. The
+refusal's message counts both kinds, and `GET /runs/waiting` lists both
+(`runs`, `starting`), so the person sees what holds their places. Every
+start is kept behind a lock on the owner's Queue, and under a limit the
+places are counted in the same transaction (`insert_run_in_queue`,
+`RunInsert::QueueFull`), so starts at the same time are counted one after
+the other. A Run whose workflow start failed and could not be told to have
+started (`forget_unstarted` keeps it) holds its place until it is
+cancelled: it is listed among `starting`, and cancelling a Run whose
+workflow never started ends it. An Automation's firing on a task meets the
+`task_busy` check only once its creator may see the task. A Gate in the seconds before its rule or the stand-in decides counts:
 the limit holds the Queue back, not to the exact count.
 
 `GET /insights?from=&to=&timeZone=&flow=` (`inbound/insights.rs`,

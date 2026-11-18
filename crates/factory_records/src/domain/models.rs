@@ -436,8 +436,7 @@ pub struct NewRun<'a> {
     /// The team those patterns came from; none when they are the default.
     pub control_files_team_id: Option<Uuid>,
     /// The Standing Rules that answer its Gates. Their Queue limit is not
-    /// kept: it holds the Run back while its owner holds more places in
-    /// their Queue than it, counted as the Run is kept.
+    /// kept: a start is held to it by `insert_run_in_queue` ([`QueueHold`]).
     pub standing_rules: RunRules,
     /// The Automation that starts it, if one does: then no other Run an
     /// Automation started may be running on its task.
@@ -457,9 +456,49 @@ pub enum RunInsert {
     TaskBusy,
     /// A Run of the same Automation's firing is kept already.
     FiringStarted,
-    /// The owner holds more places in their Queue than the Queue limit of
-    /// the Run's rules, counted with the Run kept, so nothing was kept.
-    QueueFull,
+    /// Its owner already held more places in their Queue than the Queue
+    /// limit it started under, so nothing was kept: the places they held,
+    /// counted up to one past the limit.
+    QueueFull(QueuePlaces),
+}
+
+/// The places one owner holds in their Queue.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct QueuePlaces {
+    /// Their open Runs that wait on them in person at a Gate or a question,
+    /// leaving out a Gate the stand-in answered while they may override it.
+    pub waiting: u16,
+    /// Their open Runs of a Flow with a Gate of its own that have not
+    /// reached a Gate yet: each holds the place it will ask for.
+    pub starting: u16,
+}
+
+impl QueuePlaces {
+    /// The places held in all.
+    pub fn held(self) -> u16 {
+        self.waiting.saturating_add(self.starting)
+    }
+}
+
+/// How a new Run is held to its owner's Queue.
+#[derive(Debug, Clone, Copy)]
+pub struct QueueHold<'a> {
+    /// The Queue limit of the rules it starts under: it is kept only while
+    /// its owner holds no more places than this before it. None sets no
+    /// limit.
+    pub limit: Option<u16>,
+    /// The Flows whose Runs hold a place before their first Gate: those
+    /// with a Gate of their own. A Run of another Flow holds one only once
+    /// it asks something.
+    pub asking_flows: &'a [&'a str],
+}
+
+impl QueueHold<'_> {
+    /// No limit: the start only waits its turn behind its owner's others.
+    pub const UNLIMITED: QueueHold<'static> = QueueHold {
+        limit: None,
+        asking_flows: &[],
+    };
 }
 
 /// Whether a Run was linked to a task.

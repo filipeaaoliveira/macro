@@ -21,9 +21,9 @@ use crate::domain::automations::{RunAutomation, TriggerKind};
 use crate::domain::models::{
     AgentName, AskedBack, CheckResult, CheckRound, CheckRoundOutcome, CheckRoundStart,
     ClaimedSession, ControlFileChanges, EntryId, Gate, GateAnswer, GateKind, HandBack, HandedBack,
-    InvalidName, NewRun, Outcome, PassedOver, Repository, Role, Run, RunEnd, RunId, RunInsert,
-    RunOutcome, SessionStep, StandInAnswer, Step, StepEnd, StepKey, StepSession, StoppingSession,
-    TaskLink, TeamMembership,
+    InvalidName, NewRun, Outcome, PassedOver, QueueHold, QueuePlaces, Repository, Role, Run,
+    RunEnd, RunId, RunInsert, RunOutcome, SessionStep, StandInAnswer, Step, StepEnd, StepKey,
+    StepSession, StoppingSession, TaskLink, TeamMembership,
 };
 use crate::domain::ports::RunRepository;
 use crate::domain::standing_rules::{OrchestratorDefinition, RulesSource, RunRules, StandingRule};
@@ -418,28 +418,40 @@ impl StepRow {
     }
 }
 
-/// A stored confidence, which the schema keeps between 0 and 100 percent.
-/// The places `user_id` holds in their Queue, counted up to `limit`: their
-/// Runs that have not ended and either wait on them in person at a Gate
-/// (not one the stand-in answered, while the owner may still override it)
-/// or have not reached a Gate yet, so a Run just started holds the place it
-/// will ask for. As `list_waiting_runs`: the person's open Runs through
+/// The places `user_id` holds in their Queue, counted up to `limit` in
+/// all: their Runs that have not ended and wait on them in person at a Gate
+/// or a question (not a Gate the stand-in answered, while the owner may
+/// still override it), and those of `asking_flows` that have not reached a
+/// Gate yet, so a Run just started holds the place it will ask for. A Run
+/// of a Flow with no Gate of its own holds one only once it asks something.
+/// As `list_waiting_runs`: the person's open Runs through
 /// `factory_run_user_open_idx`, each checked by the Gates' primary key, up
 /// to the limit, under a timeout that also bounds the rest of the
 /// transaction.
 async fn queue_places(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     user_id: &MacroUserIdStr<'static>,
+    asking_flows: &[&str],
     limit: u16,
-) -> Result<u16, PgRunRepositoryErr> {
+) -> Result<QueuePlaces, PgRunRepositoryErr> {
     sqlx::query!("SET LOCAL statement_timeout = '5s'")
         .execute(&mut **transaction)
         .await?;
-    let size = sqlx::query_scalar!(
+    let asking_flows: Vec<String> = asking_flows
+        .iter()
+        .map(|flow| (*flow).to_string())
+        .collect();
+    let places = sqlx::query!(
         r#"
-        SELECT count(*) AS "size!"
+        SELECT
+            count(*) FILTER (WHERE places.waiting) AS "waiting!",
+            count(*) FILTER (WHERE NOT places.waiting) AS "starting!"
         FROM (
-            SELECT 1
+            SELECT EXISTS (
+                SELECT 1 FROM factory_gate g
+                WHERE g.run_id = r.id AND g.answer IS NULL
+                    AND g.stand_in_answer IS NULL
+            ) AS waiting
             FROM factory_run r
             WHERE r.user_id = $1
                 AND r.ended_at IS NULL
@@ -449,20 +461,31 @@ async fn queue_places(
                         WHERE g.run_id = r.id AND g.answer IS NULL
                             AND g.stand_in_answer IS NULL
                     )
-                    OR NOT EXISTS (SELECT 1 FROM factory_gate g WHERE g.run_id = r.id)
+                    OR (
+                        r.flow = ANY($2)
+                        AND NOT EXISTS (SELECT 1 FROM factory_gate g WHERE g.run_id = r.id)
+                    )
                 )
-            LIMIT $2
+            LIMIT $3
         ) places
         "#,
         user_id.as_ref(),
+        &asking_flows,
         i64::from(limit),
     )
     .fetch_one(&mut **transaction)
     .await?;
-    u16::try_from(size)
-        .map_err(|_| PgRunRepositoryErr::OutOfRange(i32::try_from(size).unwrap_or(i32::MAX)))
+    let count = |size: i64| {
+        u16::try_from(size)
+            .map_err(|_| PgRunRepositoryErr::OutOfRange(i32::try_from(size).unwrap_or(i32::MAX)))
+    };
+    Ok(QueuePlaces {
+        waiting: count(places.waiting)?,
+        starting: count(places.starting)?,
+    })
 }
 
+/// A stored confidence, which the schema keeps between 0 and 100 percent.
 fn percent(stored: i16) -> Result<u8, PgRunRepositoryErr> {
     u8::try_from(stored).map_err(|_| PgRunRepositoryErr::OutOfRange(i32::from(stored)))
 }
@@ -518,23 +541,42 @@ impl TryFrom<StepRow> for Step {
 impl RunRepository for PgRunRepository {
     type Err = PgRunRepositoryErr;
 
-    #[tracing::instrument(err, skip_all, fields(id = %run.id))]
     async fn insert_run(&self, run: NewRun<'_>) -> Result<RunInsert, Self::Err> {
+        self.insert_run_in_queue(run, QueueHold::UNLIMITED).await
+    }
+
+    #[tracing::instrument(err, skip_all, fields(id = %run.id, limit = ?hold.limit))]
+    async fn insert_run_in_queue(
+        &self,
+        run: NewRun<'_>,
+        hold: QueueHold<'_>,
+    ) -> Result<RunInsert, Self::Err> {
+        // Every start takes a lock on its owner's Queue, so starts at the
+        // same time, a person's, the Orchestrator's or an Automation's, are
+        // taken one after the other: one under a limit counts the places
+        // held, those of the starts before it among them, and keeps the Run
+        // in the same transaction. A start under no limit takes the lock
+        // too, so a limited start never counts while one is half kept.
         let mut transaction = self.pool.begin().await?;
-        // Under a Queue limit, the places the owner holds are counted and
-        // the Run kept in one transaction, behind a lock on the owner's
-        // Queue: two starts at once, a person's or an Automation's, are
-        // counted one after the other, the second with the first's place.
-        if let Some(limit) = run.standing_rules.definition.queue_limit {
-            sqlx::query!(
-                "SELECT pg_advisory_xact_lock(hashtextextended('factory_queue:' || $1, 0))",
-                run.user_id.as_ref(),
-            )
+        sqlx::query!("SET LOCAL lock_timeout = '5s'")
             .execute(&mut *transaction)
             .await?;
-            let held = queue_places(&mut transaction, run.user_id, limit.saturating_add(1)).await?;
-            if held > limit {
-                return Ok(RunInsert::QueueFull);
+        sqlx::query!(
+            "SELECT pg_advisory_xact_lock(hashtextextended('factory_queue:' || $1, 0))",
+            run.user_id.as_ref(),
+        )
+        .execute(&mut *transaction)
+        .await?;
+        if let Some(limit) = hold.limit {
+            let places = queue_places(
+                &mut transaction,
+                run.user_id,
+                hold.asking_flows,
+                limit.saturating_add(1),
+            )
+            .await?;
+            if places.held() > limit {
+                return Ok(RunInsert::QueueFull(places));
             }
         }
         let inserted = sqlx::query_as!(
@@ -928,16 +970,48 @@ impl RunRepository for PgRunRepository {
         rows.into_iter().map(Run::try_from).collect()
     }
 
-    #[tracing::instrument(err, skip(self))]
-    async fn queue_size(
+    #[tracing::instrument(err, skip(self, user_id))]
+    async fn list_starting_runs(
         &self,
         user_id: &MacroUserIdStr<'static>,
+        asking_flows: &[&str],
         limit: u16,
-    ) -> Result<u16, Self::Err> {
+    ) -> Result<Vec<Run>, Self::Err> {
+        // As `list_waiting_runs`: the person's open Runs through
+        // `factory_run_user_open_idx`, each checked for a Gate by the
+        // Gates' primary key, until the limit, under a timeout.
+        let asking_flows: Vec<String> = asking_flows
+            .iter()
+            .map(|flow| (*flow).to_string())
+            .collect();
         let mut transaction = self.pool.begin().await?;
-        let size = queue_places(&mut transaction, user_id, limit).await?;
+        sqlx::query!("SET LOCAL statement_timeout = '5s'")
+            .execute(&mut *transaction)
+            .await?;
+        let rows = sqlx::query_as!(
+            RunRow,
+            r#"
+            SELECT
+                id, request, user_id, created_at, task_id, repo_url, base_branch, created_in_person,
+                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,
+                standing_rules, standing_rules_source, standing_rules_project_id,
+                automation_id, automation_name, automation_trigger, outcome, ended_at
+            FROM factory_run r
+            WHERE r.user_id = $1
+                AND r.ended_at IS NULL
+                AND r.flow = ANY($2)
+                AND NOT EXISTS (SELECT 1 FROM factory_gate g WHERE g.run_id = r.id)
+            ORDER BY r.created_at DESC, r.id DESC
+            LIMIT $3
+            "#,
+            user_id.as_ref(),
+            &asking_flows,
+            i64::from(limit),
+        )
+        .fetch_all(&mut *transaction)
+        .await?;
         transaction.commit().await?;
-        Ok(size)
+        rows.into_iter().map(Run::try_from).collect()
     }
 
     #[tracing::instrument(err, skip(self, ids), fields(runs = ids.len()))]

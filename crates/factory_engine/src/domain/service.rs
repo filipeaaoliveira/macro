@@ -9,12 +9,14 @@ use std::num::NonZeroU8;
 
 use agent_session::domain::session_task::TaskDocumentId;
 use chrono::Utc;
-use factory_records::domain::automations::{Automation, AutomationStart, RunAutomation};
+use factory_records::domain::automations::{
+    Automation, AutomationRepository, AutomationStart, RunAutomation,
+};
 use factory_records::domain::main_hold::{BaseState, MainHoldRepository};
 use factory_records::domain::models::{
     EntryId, HandBack, MAX_NOTE_BYTES, MAX_OUTPUT_BYTES, MAX_QUESTION_BYTES, MAX_REQUEST_BYTES,
-    NewRun, Outcome, Repository, Run, RunId, RunInsert, RunOutcome, Step, StepKey, TaskLink,
-    TeamMembership,
+    NewRun, Outcome, QueueHold, Repository, Run, RunId, RunInsert, RunOutcome, Step, StepKey,
+    TaskLink, TeamMembership,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::{ReviewRound, ReviewRoundRepository};
@@ -105,7 +107,11 @@ pub struct FactoryServiceImpl<R, W, E, U, T, G> {
 
 impl<R, W, E, U, T, G> FactoryServiceImpl<R, W, E, U, T, G>
 where
-    R: RunRepository + MainHoldRepository + ReviewRoundRepository + StandingRulesRepository,
+    R: RunRepository
+        + MainHoldRepository
+        + ReviewRoundRepository
+        + StandingRulesRepository
+        + AutomationRepository,
     W: RunWorkflows,
     E: StepExecutor,
     U: UserDirectory,
@@ -391,6 +397,20 @@ where
         Ok(details)
     }
 
+    /// The built-in Flows whose Runs hold a place in their owner's Queue
+    /// before their first Gate: those with a Gate of their own. A Run of
+    /// another Flow, such as `reply`, holds one only once it asks something.
+    fn asking_flows(&self) -> Vec<&'static str> {
+        BUILT_IN_FLOWS
+            .into_iter()
+            .filter(|flow| {
+                flow.read(|step| self.executor.serves(step))
+                    .is_ok_and(|read| read.entries.iter().any(|entry| entry.gate.is_some()))
+            })
+            .map(|flow| flow.name)
+            .collect()
+    }
+
     /// The kind of Gate the entry `entry` asks, by its Flow, when an agent
     /// answering for the Run's owner may answer it, with the most visits
     /// the entry runs: every built-in Flow that has the entry asks the same
@@ -554,6 +574,22 @@ where
         if let Some(task_id) = task_id {
             self.visible_task(&actor, task_id).await?;
         }
+        // An Automation starts no Run on a task while one runs there, whoever
+        // started it; checked only once its creator may see the task, so a
+        // firing on a task they cannot see says nothing of it. Two firings
+        // that race past this are held to one by the Runs' index
+        // (`RunInsert::TaskBusy`).
+        if automation.is_some()
+            && let Some(task_id) = task_id
+            && self
+                .repo
+                .running_run_on_task(task_id)
+                .await
+                .map_err(internal)?
+                .is_some()
+        {
+            return Err(FactoryError::TaskBusy);
+        }
         // The owner's GitHub account must reach the repository now: every
         // Step that works on it acts as them.
         let repository = match &repo_url {
@@ -578,26 +614,34 @@ where
         // since it was checked leaves nothing behind. Above the Queue limit
         // of the rules it would start under, counted in the same write, no
         // new Run starts, whoever asks: the person, an agent for them, or
-        // an Automation; two starts at once are counted one after the other.
-        let queue_limit = standing_rules.definition.queue_limit;
+        // an Automation; starts at the same time are counted one after the
+        // other.
+        let asking_flows = self.asking_flows();
+        let hold = QueueHold {
+            limit: standing_rules.definition.queue_limit,
+            asking_flows: &asking_flows,
+        };
         let rules_source = standing_rules.source;
         let run_id = RunId::generate();
         tracing::Span::current().record("run_id", tracing::field::display(run_id));
         let run = match self
             .repo
-            .insert_run(NewRun {
-                id: run_id,
-                flow: built_in.name,
-                request: &request,
-                user_id: &actor,
-                task_id,
-                repository: repository.as_ref(),
-                created_in_person,
-                control_file_patterns: &control_file_patterns,
-                control_files_team_id,
-                standing_rules,
-                automation,
-            })
+            .insert_run_in_queue(
+                NewRun {
+                    id: run_id,
+                    flow: built_in.name,
+                    request: &request,
+                    user_id: &actor,
+                    task_id,
+                    repository: repository.as_ref(),
+                    created_in_person,
+                    control_file_patterns: &control_file_patterns,
+                    control_files_team_id,
+                    standing_rules,
+                    automation,
+                },
+                hold,
+            )
             .await
             .map_err(internal)?
         {
@@ -605,10 +649,12 @@ where
             RunInsert::NoSuchTask => return Err(FactoryError::UnknownTask),
             RunInsert::TaskBusy => return Err(FactoryError::TaskBusy),
             RunInsert::FiringStarted => return Err(FactoryError::FiringRepeated),
-            RunInsert::QueueFull => {
+            RunInsert::QueueFull(places) => {
                 return Err(FactoryError::QueueFull {
-                    limit: queue_limit.unwrap_or_default(),
+                    limit: hold.limit.unwrap_or_default(),
                     set_by: rules_source,
+                    waiting: places.waiting,
+                    starting: places.starting,
                 });
             }
         };
@@ -647,7 +693,11 @@ where
 
 impl<R, W, E, U, T, G> FactoryService for FactoryServiceImpl<R, W, E, U, T, G>
 where
-    R: RunRepository + MainHoldRepository + ReviewRoundRepository + StandingRulesRepository,
+    R: RunRepository
+        + MainHoldRepository
+        + ReviewRoundRepository
+        + StandingRulesRepository
+        + AutomationRepository,
     W: RunWorkflows,
     E: StepExecutor,
     U: UserDirectory,
@@ -805,6 +855,19 @@ where
         let runs = self
             .repo
             .list_waiting_runs(actor, WAITING_RUNS_LISTED)
+            .await
+            .map_err(internal)?;
+        self.details(runs).await
+    }
+
+    async fn list_starting_runs(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+    ) -> Result<Vec<RunDetail>, FactoryError> {
+        let asking_flows = self.asking_flows();
+        let runs = self
+            .repo
+            .list_starting_runs(actor, &asking_flows, WAITING_RUNS_LISTED)
             .await
             .map_err(internal)?;
         self.details(runs).await

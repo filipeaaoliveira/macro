@@ -78,9 +78,13 @@ worker that walks each Run's Flow, in one process.
   Project's own, the same way; `"ownerGates": true` in a definition turns
   its owner section on, `"taskThread": true` its task thread section
   (each Run on a task posts its updates to one comment thread on it), and
-  `"queueLimit": 5` sets its Queue limit (null or left out: none).
-  `GET /runs/waiting` lists the caller's Runs waiting at a Gate: their
-  Queue.
+  `"queueLimit": 5` sets its Queue limit (null or left out: none): the
+  most places a person may hold before `POST /runs` refuses their new Run
+  (409 `queueFull`, its message counting both kinds), a place being a Run
+  waiting on them at a Gate or a question, or a Run of a Flow with a Gate
+  that has not reached one yet. `GET /runs/waiting` lists the caller's
+  Runs waiting at a Gate (`runs`) and those yet to reach their first
+  (`starting`): the places they hold.
 
 ## Gotchas
 

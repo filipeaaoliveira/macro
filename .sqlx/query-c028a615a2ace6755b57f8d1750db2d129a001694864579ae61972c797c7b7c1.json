@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            count(*) FILTER (WHERE places.waiting) AS \"waiting!\",\n            count(*) FILTER (WHERE NOT places.waiting) AS \"starting!\"\n        FROM (\n            SELECT EXISTS (\n                SELECT 1 FROM factory_gate g\n                WHERE g.run_id = r.id AND g.answer IS NULL\n                    AND g.stand_in_answer IS NULL\n            ) AS waiting\n            FROM factory_run r\n            WHERE r.user_id = $1\n                AND r.ended_at IS NULL\n                AND (\n                    EXISTS (\n                        SELECT 1 FROM factory_gate g\n                        WHERE g.run_id = r.id AND g.answer IS NULL\n                            AND g.stand_in_answer IS NULL\n                    )\n                    OR (\n                        r.flow = ANY($2)\n                        AND NOT EXISTS (SELECT 1 FROM factory_gate g WHERE g.run_id = r.id)\n                    )\n                )\n            LIMIT $3\n        ) places\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "waiting!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "starting!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "TextArray",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "c028a615a2ace6755b57f8d1750db2d129a001694864579ae61972c797c7b7c1"
+}

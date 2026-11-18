@@ -81,11 +81,12 @@ impl<S, Auth> FromRef<FactoryRouterState<S, Auth>> for MacroAuthorizationState<A
 /// Routes:
 /// - `GET /flows` — the built-in Flows a Run can be started of.
 /// - `POST /runs` — create a Run of a built-in Flow, owned by the acting
-///   user, and start it.
+///   user, and start it, unless it holds more places in its Queue than the
+///   Queue limit: Runs waiting on it, and Runs yet to reach their first Gate.
 /// - `GET /tasks/{task_id}/runs` — the caller's Runs on a task, newest
 ///   first.
 /// - `GET /runs/waiting` — the caller's Runs that wait on them at a Gate,
-///   newest first.
+///   newest first, and those that hold a place before their first Gate.
 /// - `GET /runs/{id}` — read a Run and the Steps it took.
 /// - `POST /runs/{id}/steps/{seq}/answer` — answer the Gate of the Run's
 ///   Step `seq`.
@@ -202,12 +203,16 @@ pub struct TaskRunsResponse {
     pub runs: Vec<RunDetail>,
 }
 
-/// The caller's Runs that wait on them.
+/// The caller's Runs that hold a place in their Queue.
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct WaitingRunsResponse {
     /// The caller's Runs that have not ended and wait on a Gate no one
     /// answered yet, newest first: at most the newest 50.
     pub runs: Vec<RunDetail>,
+    /// The caller's Runs of a Flow with a Gate that have not ended or
+    /// reached a Gate yet, newest first, at most the newest 50: each holds
+    /// the place it will ask for. Cancelling one frees it.
+    pub starting: Vec<RunDetail>,
 }
 
 /// Path params naming a Run.
@@ -290,8 +295,11 @@ where
 
 /// Create a Run of a built-in Flow, owned by the caller, and start its
 /// workflow. Above the Queue limit of the Project it would start in, it is
-/// refused (409 `queueFull`): more Gates and questions wait on the caller
-/// than the limit, and the Runs under way go on.
+/// refused (409 `queueFull`, its message counting both): the caller holds
+/// more places in their Queue than the limit, a place being a Run waiting
+/// on them at a Gate or a question, or a Run of a Flow with a Gate that has
+/// not reached one yet (`GET /runs/waiting` lists both). The Runs under
+/// way go on.
 #[utoipa::path(
     post,
     tag = "factory",
@@ -375,7 +383,8 @@ where
 
 /// List the caller's Runs that wait on them at a Gate no one answered
 /// yet, a Flow's Gate no Standing Rule answered or an agent's question,
-/// newest first, each with the Steps it took.
+/// newest first, each with the Steps it took; and, apart, those that hold
+/// a place in their Queue before asking anything (`starting`).
 #[utoipa::path(
     get,
     tag = "factory",
@@ -400,7 +409,8 @@ where
 {
     let actor = caller.authorization.user.macro_user_id;
     let runs = state.service.list_waiting_runs(&actor).await?;
-    Ok(Json(WaitingRunsResponse { runs }))
+    let starting = state.service.list_starting_runs(&actor).await?;
+    Ok(Json(WaitingRunsResponse { runs, starting }))
 }
 
 /// Read one of the caller's Runs and the Steps it took.
@@ -779,9 +789,10 @@ pub enum RunErrorCode {
     /// The Run is Tampered, and approving its Gate needs
     /// `approvedControlFiles` listing its Tampered files.
     ControlFilesNotApproved,
-    /// More Gates and questions wait on the caller than the Queue limit of
-    /// the Project the Run would start in: no new Run starts until they
-    /// answer some.
+    /// The caller holds more places in their Queue than the Queue limit of
+    /// the Project the Run would start in: Runs waiting on them at a Gate or
+    /// a question, and Runs of a Flow with a Gate that have not reached one
+    /// yet. No new Run starts until they answer some, or cancel one.
     QueueFull,
     /// An agent answering for the Run's owner tried what the factory keeps
     /// for the owner in person.

@@ -220,6 +220,13 @@ impl FactoryService for FakeService {
         Err(self.refusing(actor))
     }
 
+    async fn list_starting_runs(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+    ) -> Result<Vec<RunDetail>, FactoryError> {
+        Err(self.refusing(actor))
+    }
+
     async fn link_task(
         &self,
         actor: &MacroUserIdStr<'static>,
@@ -426,7 +433,7 @@ async fn alice_s_run(repo: &FakeRepo) -> RunId {
         RunInsert::NoSuchTask
         | RunInsert::TaskBusy
         | RunInsert::FiringStarted
-        | RunInsert::QueueFull => {
+        | RunInsert::QueueFull(_) => {
             panic!("a run with no task is kept")
         }
     }

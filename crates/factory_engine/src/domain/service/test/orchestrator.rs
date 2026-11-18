@@ -391,16 +391,21 @@ async fn above_the_queue_limit_no_new_run_starts() {
             ..OrchestratorDefinition::DEFAULT
         },
     );
-    let start = || {
+    let start_flow = |flow: &str| {
         service.create_run(
             julia(),
-            "reply".to_string(),
-            "Say hello".to_string(),
+            flow.to_string(),
+            "Plan it".to_string(),
             None,
             None,
             false,
         )
     };
+
+    let start = || start_flow("plan");
+    // A Run of a Flow with no Gate holds no place while it runs.
+    start_flow("reply").await.expect("a reply run starts");
+    start_flow("reply").await.expect("and another");
 
     let first = waiting_at(&repo, "plan", "done", &["approve", "revise"]).await;
     let started = start()
@@ -412,10 +417,23 @@ async fn above_the_queue_limit_no_new_run_starts() {
     // The Run just started has not asked anything yet, but holds its place.
     let refused = start().await;
     assert!(
-        matches!(refused, Err(FactoryError::QueueFull { limit: 1, .. })),
+        matches!(
+            refused,
+            Err(FactoryError::QueueFull {
+                limit: 1,
+                waiting: 1,
+                starting: 1,
+                ..
+            })
+        ),
         "{refused:?}"
     );
-    assert_eq!(workflows.started.lock().expect("started").len(), 1);
+    assert_eq!(workflows.started.lock().expect("started").len(), 3);
+    let held = service.list_starting_runs(&julia()).await.expect("listed");
+    assert_eq!(
+        held.iter().map(|detail| detail.run.id).collect::<Vec<_>>(),
+        [started]
+    );
 
     // The Runs under way go on: their Gates still take answers.
     service

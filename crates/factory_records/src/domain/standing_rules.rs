@@ -6,8 +6,9 @@
 //! happens to the Gates no rule answers: with it on, they go to the Run's
 //! owner (`owner_gates`). Its task thread section says whether a Run posts
 //! its updates to its task's comments (`task_thread`). Its Queue limit says
-//! how many Gates and questions may wait on a person before no new Run of
-//! theirs starts (`queue_limit`).
+//! how many places a person may hold in their Queue (Runs waiting on them
+//! at a Gate or a question, and Runs of a Flow with a Gate yet to reach
+//! one) before no new Run of theirs starts (`queue_limit`).
 
 #[cfg(test)]
 mod test;
@@ -133,9 +134,10 @@ pub struct OrchestratorDefinition {
     /// Off, as when a definition is sent without it, a Run posts nothing.
     #[serde(default)]
     pub task_thread: bool,
-    /// The Queue limit: the most Gates and questions that may wait on a
-    /// person (their Queue) for a new Run of theirs to start under this
-    /// definition. Above it, no new Run starts; Runs already going go on.
+    /// The Queue limit: the most places a person may hold in their Queue
+    /// for a new Run of theirs to start under this definition. A place is
+    /// a Run of theirs waiting on them at a Gate or a question, or a Run
+    /// of a Flow with a Gate that has not reached one yet. Above it, no new Run starts; Runs already going go on.
     /// None, and a definition sent without it, sets no limit. At most
     /// [`MAX_QUEUE_LIMIT`]. A Run does not keep it: it decides only
     /// whether a Run starts, so a Run's rules read with none.

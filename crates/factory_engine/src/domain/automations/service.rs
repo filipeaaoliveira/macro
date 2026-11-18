@@ -161,20 +161,6 @@ where
         if team.is_none_or(|team| team.team_id != automation.team_id) {
             return Ok(FiringEnd::Skipped(FiringSkip::CreatorLeftTeam));
         }
-        // Never a second Run on a task while one runs there, whoever
-        // started it. Two firings that race past this check are held to
-        // one by the Runs' index (`TaskBusy` below).
-        if let Some(task_id) = firing.task_id
-            && self
-                .repo
-                .running_run_on_task(task_id)
-                .await
-                .map_err(internal)?
-                .is_some()
-        {
-            return Ok(FiringEnd::Skipped(FiringSkip::TaskBusy));
-        }
-
         let request = run_request(automation, firing);
         match self
             .runs
@@ -182,6 +168,9 @@ where
             .await
         {
             Ok(detail) => Ok(FiringEnd::Started(detail.run.id)),
+            // Never a second Run on a task while one runs there, whoever
+            // started it: the Run API checks once the creator may see the
+            // task, so a firing on one they cannot see is refused alike.
             Err(FactoryError::TaskBusy) => Ok(FiringEnd::Skipped(FiringSkip::TaskBusy)),
             // The Run API holds the creator's Queue to the limit of the
             // rules the Run would start under, shared with their own starts

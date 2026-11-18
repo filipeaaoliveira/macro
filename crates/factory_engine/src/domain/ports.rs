@@ -635,6 +635,18 @@ pub trait FactoryService: Send + Sync + 'static {
         actor: &MacroUserIdStr<'static>,
     ) -> impl Future<Output = Result<Vec<RunDetail>, FactoryError>> + Send;
 
+    /// `actor`'s Runs that hold a place in their Queue before asking them
+    /// anything: those of a Flow with a Gate of its own that have not
+    /// ended or reached a Gate yet, newest first, each with its Steps: at
+    /// most the newest [`WAITING_RUNS_LISTED`]. Cancelling one frees its
+    /// place, as for a Run whose workflow start could not be told.
+    ///
+    /// [`WAITING_RUNS_LISTED`]: crate::domain::service::WAITING_RUNS_LISTED
+    fn list_starting_runs(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+    ) -> impl Future<Output = Result<Vec<RunDetail>, FactoryError>> + Send;
+
     /// Link `actor`'s Run to the task document `task_id`, replacing any task
     /// it had. The actor must see the task.
     fn link_task(

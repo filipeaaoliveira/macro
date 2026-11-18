@@ -499,13 +499,14 @@ async fn a_full_queue_starts_no_run() {
     );
     let workflows = FakeWorkflows::default();
     let triggers = FakeTriggers::default();
-    let automations = automations(&repo, service(&repo, &workflows), &triggers);
-    let own = service(&repo, &workflows);
+    let github = FakeGithub::default();
+    let automations = automations(&repo, code_service(&repo, &workflows, &github), &triggers);
+    let own = code_service(&repo, &workflows, &github);
     let own_start = || {
         own.create_run(
             julia(),
-            "reply".to_string(),
-            "Say hello".to_string(),
+            "plan".to_string(),
+            "Plan it".to_string(),
             None,
             None,
             false,
@@ -515,10 +516,13 @@ async fn a_full_queue_starts_no_run() {
         .create_automation(
             julia(),
             true,
-            reply_automation(AutomationTrigger::Schedule {
-                cron: "0 0 9 * * Mon-Fri".to_string(),
-                timezone: "Europe/Lisbon".to_string(),
-            }),
+            AutomationRequest {
+                flow: "plan".to_string(),
+                ..reply_automation(AutomationTrigger::Schedule {
+                    cron: "0 0 9 * * Mon-Fri".to_string(),
+                    timezone: "Europe/Lisbon".to_string(),
+                })
+            },
         )
         .await
         .expect("created");
@@ -546,14 +550,11 @@ async fn a_full_queue_starts_no_run() {
 
 /// An Automation acts as its creator, so a task they cannot see, someone
 /// else's, gets no Run, and so no thread posted in their name: the firing
-/// is refused as the Run API would refuse them.
+/// is refused as the Run API would refuse them, and says nothing of the
+/// task, not even that a Run runs there.
 #[tokio::test]
 async fn a_task_its_creator_cannot_see_gets_no_run() {
     let repo = team_repo();
-    repo.hidden
-        .lock()
-        .expect("hidden")
-        .insert((julia().to_string(), TASK));
     let workflows = FakeWorkflows::default();
     let triggers = FakeTriggers::default();
     let automations = automations(&repo, service(&repo, &workflows), &triggers);
@@ -561,16 +562,25 @@ async fn a_task_its_creator_cannot_see_gets_no_run() {
         .create_automation(julia(), true, reply_automation(status_in_progress()))
         .await
         .expect("created");
-
-    let fired = automations
+    let busy = automations
         .fire_from_routine(&julia(), ROUTINE, routine_firing("run-1", Some(TASK)))
+        .await
+        .expect("fired");
+    assert!(busy.run_id.is_some(), "{busy:?}");
+
+    repo.hidden
+        .lock()
+        .expect("hidden")
+        .insert((julia().to_string(), TASK));
+    let fired = automations
+        .fire_from_routine(&julia(), ROUTINE, routine_firing("run-2", Some(TASK)))
         .await
         .expect("fired");
 
     assert_eq!(fired.skipped, Some(FiringSkip::Refused));
     assert_eq!(fired.run_id, None);
-    assert!(workflows.started.lock().expect("started").is_empty());
-    assert!(repo.runs.lock().expect("runs").is_empty());
+    assert_eq!(workflows.started.lock().expect("started").len(), 1);
+    assert_eq!(repo.runs.lock().expect("runs").len(), 1);
 }
 
 /// A routine the scheduler refuses takes its Automation with it, and the

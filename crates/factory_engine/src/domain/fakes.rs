@@ -20,8 +20,8 @@ use factory_records::domain::automations::{Automation, FiringEnd};
 use factory_records::domain::models::{
     CheckResult, CheckRound, CheckRoundEnd, CheckRoundOutcome, CheckRoundStart, ClaimedSession,
     ControlFileChanges, EntryId, Gate, GateAnswer, GateKind, HandBack, HandedBack, NewRun, Outcome,
-    PassedOver, Role, Run, RunEnd, RunId, RunInsert, RunOutcome, SessionStep, Step, StepEnd,
-    StepKey, StepSession, StoppingSession, TaskLink, TeamMembership,
+    PassedOver, QueueHold, QueuePlaces, Role, Run, RunEnd, RunId, RunInsert, RunOutcome,
+    SessionStep, Step, StepEnd, StepKey, StepSession, StoppingSession, TaskLink, TeamMembership,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::standing_rules::{
@@ -323,6 +323,57 @@ impl TaskDirectory for FakeRepo {
 }
 
 impl FakeRepo {
+    /// The Runs that reached a Gate, answered or not.
+    fn gated_runs(&self) -> BTreeSet<RunId> {
+        self.steps
+            .lock()
+            .expect("steps")
+            .iter()
+            .filter(|(_, step)| step.gate.is_some())
+            .map(|(run, _)| *run)
+            .collect()
+    }
+
+    /// As the database: the places `user_id` holds, counted up to `limit`
+    /// in all, Runs waiting at a Gate the stand-in has not answered first.
+    fn queue_places(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        asking_flows: &[&str],
+        limit: u16,
+    ) -> QueuePlaces {
+        let gated = self.gated_runs();
+        let waiting: BTreeSet<RunId> = self
+            .steps
+            .lock()
+            .expect("steps")
+            .iter()
+            .filter(|(_, step)| {
+                step.gate
+                    .as_ref()
+                    .is_some_and(|gate| gate.answer.is_none() && gate.stand_in.is_none())
+            })
+            .map(|(run, _)| *run)
+            .collect();
+        let flows = self.flows.lock().expect("flows").clone();
+        let mut places = QueuePlaces::default();
+        for run in self.runs.lock().expect("runs").values() {
+            if run.user_id != *user_id || run.end.is_some() || places.held() >= limit {
+                continue;
+            }
+            if waiting.contains(&run.id) {
+                places.waiting += 1;
+            } else if !gated.contains(&run.id)
+                && flows
+                    .get(&run.id)
+                    .is_some_and(|flow| asking_flows.contains(&flow.as_str()))
+            {
+                places.starting += 1;
+            }
+        }
+        places
+    }
+
     /// Fail the call `name` once, after `passing` calls of it pass.
     pub(crate) fn fail_once_after(&self, name: &'static str, passing: usize) {
         self.failing
@@ -407,13 +458,7 @@ impl RunRepository for FakeRepo {
         {
             return Ok(RunInsert::TaskBusy);
         }
-        // As the database: the places the owner holds are counted with the
-        // Run kept, and its Queue limit is not kept.
-        if let Some(limit) = standing_rules.definition.queue_limit
-            && self.queue_size(user_id, limit.saturating_add(1)).await? > limit
-        {
-            return Ok(RunInsert::QueueFull);
-        }
+        // As the database: its Queue limit is not kept.
         let mut standing_rules = standing_rules;
         standing_rules.definition.queue_limit = None;
         let run = Run {
@@ -627,30 +672,31 @@ impl RunRepository for FakeRepo {
         Ok(runs)
     }
 
-    async fn queue_size(
+    async fn insert_run_in_queue(
+        &self,
+        run: NewRun<'_>,
+        hold: QueueHold<'_>,
+    ) -> Result<RunInsert, FakeError> {
+        // As the database: the places the owner holds before it, counted up
+        // to one past the limit.
+        if let Some(limit) = hold.limit {
+            let places = self.queue_places(run.user_id, hold.asking_flows, limit.saturating_add(1));
+            if places.held() > limit {
+                return Ok(RunInsert::QueueFull(places));
+            }
+        }
+        self.insert_run(run).await
+    }
+
+    async fn list_starting_runs(
         &self,
         user_id: &MacroUserIdStr<'static>,
+        asking_flows: &[&str],
         limit: u16,
-    ) -> Result<u16, FakeError> {
-        // As the database: a Run waiting at a Gate the stand-in has not
-        // answered, or one that has not reached a Gate yet.
-        let steps = self.steps.lock().expect("steps");
-        let gated: BTreeSet<RunId> = steps
-            .iter()
-            .filter(|(_, step)| step.gate.is_some())
-            .map(|(run, _)| *run)
-            .collect();
-        let waiting: BTreeSet<RunId> = steps
-            .iter()
-            .filter(|(_, step)| {
-                step.gate
-                    .as_ref()
-                    .is_some_and(|gate| gate.answer.is_none() && gate.stand_in.is_none())
-            })
-            .map(|(run, _)| *run)
-            .collect();
-        drop(steps);
-        let size = self
+    ) -> Result<Vec<Run>, FakeError> {
+        let gated = self.gated_runs();
+        let flows = self.flows.lock().expect("flows").clone();
+        let mut runs: Vec<Run> = self
             .runs
             .lock()
             .expect("runs")
@@ -658,11 +704,16 @@ impl RunRepository for FakeRepo {
             .filter(|run| {
                 run.user_id == *user_id
                     && run.end.is_none()
-                    && (waiting.contains(&run.id) || !gated.contains(&run.id))
+                    && !gated.contains(&run.id)
+                    && flows
+                        .get(&run.id)
+                        .is_some_and(|flow| asking_flows.contains(&flow.as_str()))
             })
-            .count()
-            .min(usize::from(limit));
-        Ok(u16::try_from(size).unwrap_or(limit))
+            .cloned()
+            .collect();
+        runs.sort_by_key(|run| std::cmp::Reverse((run.created_at, run.id)));
+        runs.truncate(usize::from(limit));
+        Ok(runs)
     }
 
     async fn list_runs_steps(

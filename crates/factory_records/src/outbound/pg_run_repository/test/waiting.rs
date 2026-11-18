@@ -3,14 +3,17 @@
 
 use chrono::{TimeDelta, Utc};
 use macro_db_migrator::MACRO_DB_MIGRATIONS;
+use macro_user_id::user_id::MacroUserIdStr;
 use sqlx::PgPool;
 
 use super::{entry, insert, julia, key, outcome, teo};
 use crate::domain::gate_replies::GateReplyRepository as _;
-use crate::domain::models::{NewRun, RunId, RunInsert, RunOutcome, StandInAnswer};
+use crate::domain::models::{
+    NewRun, QueueHold, QueuePlaces, RunId, RunInsert, RunOutcome, StandInAnswer,
+};
 use crate::domain::ports::RunRepository;
-use crate::domain::standing_rules::{OrchestratorDefinition, RunRules};
-use crate::outbound::pg_run_repository::PgRunRepository;
+use crate::domain::standing_rules::RunRules;
+use crate::outbound::pg_run_repository::{PgRunRepository, queue_places};
 
 /// A Run waits on its owner from when its Gate opens until it is
 /// answered or the Run ends; Runs with no Gate, and other people's, are
@@ -92,6 +95,17 @@ async fn a_run_waits_on_its_owner_while_its_gate_is_open(pool: PgPool) {
     assert!(waiting.is_empty());
 }
 
+/// The Flows whose Runs hold a place before their first Gate, here.
+const ASKING: &[&str] = &["plan"];
+
+/// The places `user_id` holds, counted up to `limit`.
+async fn places(pool: &PgPool, user_id: &MacroUserIdStr<'static>, limit: u16) -> QueuePlaces {
+    let mut transaction = pool.begin().await.expect("begin");
+    queue_places(&mut transaction, user_id, ASKING, limit)
+        .await
+        .expect("count")
+}
+
 /// The Queue counts the owner's Runs waiting on them in person, up to its
 /// limit: not a Gate the stand-in answered while the owner may override
 /// it, an answered one, or one of a Run that ended.
@@ -100,7 +114,7 @@ async fn a_run_waits_on_its_owner_while_its_gate_is_open(pool: PgPool) {
     fixtures(path = "../fixtures", scripts("people"))
 )]
 async fn the_queue_counts_gates_waiting_on_the_owner_in_person(pool: PgPool) {
-    let repo = PgRunRepository::new(pool);
+    let repo = PgRunRepository::new(pool.clone());
     let answers = [outcome("approve"), outcome("revise")];
     let mut runs = Vec::new();
     for request in ["One", "Two", "Three", "Four"] {
@@ -114,8 +128,14 @@ async fn the_queue_counts_gates_waiting_on_the_owner_in_person(pool: PgPool) {
             .expect("open");
         runs.push(id);
     }
-    assert_eq!(repo.queue_size(&julia(), 10).await.expect("size"), 4);
-    assert_eq!(repo.queue_size(&julia(), 2).await.expect("size"), 2);
+    assert_eq!(
+        places(&pool, &julia(), 10).await,
+        QueuePlaces {
+            waiting: 4,
+            starting: 0
+        }
+    );
+    assert_eq!(places(&pool, &julia(), 2).await.held(), 2);
 
     let stand_in = StandInAnswer {
         answer: outcome("approve"),
@@ -140,21 +160,59 @@ async fn the_queue_counts_gates_waiting_on_the_owner_in_person(pool: PgPool) {
         .await
         .expect("cancel");
 
-    assert_eq!(repo.queue_size(&julia(), 10).await.expect("size"), 1);
-    assert_eq!(repo.queue_size(&teo(), 10).await.expect("size"), 0);
+    assert_eq!(
+        places(&pool, &julia(), 10).await,
+        QueuePlaces {
+            waiting: 1,
+            starting: 0
+        }
+    );
+    assert_eq!(places(&pool, &teo(), 10).await.held(), 0);
 }
 
-/// A Run that has not reached a Gate yet holds the place it will ask for;
-/// once its first Gate is answered, it holds none until it asks again.
+/// A Run of a Flow with a Gate of its own holds the place it will ask for
+/// before it reaches a Gate, and is listed as starting; once its first Gate
+/// is answered, it holds none until it asks again. A Run of a Flow with no
+/// Gate holds none while it runs.
 #[sqlx::test(
     migrator = "MACRO_DB_MIGRATIONS",
     fixtures(path = "../fixtures", scripts("people"))
 )]
 async fn a_run_holds_its_place_in_the_queue_before_its_first_gate(pool: PgPool) {
-    let repo = PgRunRepository::new(pool);
+    let repo = PgRunRepository::new(pool.clone());
     let id = RunId::generate();
     insert(&repo, id, "Plan the import").await;
-    assert_eq!(repo.queue_size(&julia(), 10).await.expect("size"), 1);
+    let RunInsert::Inserted(_) = repo
+        .insert_run(NewRun {
+            id: RunId::generate(),
+            flow: "reply",
+            request: "Say hello",
+            user_id: &julia(),
+            task_id: None,
+            repository: None,
+            created_in_person: false,
+            control_file_patterns: &[],
+            control_files_team_id: None,
+            standing_rules: RunRules::DEFAULT,
+            automation: None,
+        })
+        .await
+        .expect("insert")
+    else {
+        panic!("a run with no task is kept");
+    };
+    assert_eq!(
+        places(&pool, &julia(), 10).await,
+        QueuePlaces {
+            waiting: 0,
+            starting: 1
+        }
+    );
+    let starting = repo
+        .list_starting_runs(&julia(), ASKING, 10)
+        .await
+        .expect("list");
+    assert_eq!(starting.iter().map(|run| run.id).collect::<Vec<_>>(), [id]);
 
     repo.start_step(key(id, 1), &entry("plan"), 1)
         .await
@@ -162,46 +220,60 @@ async fn a_run_holds_its_place_in_the_queue_before_its_first_gate(pool: PgPool) 
     repo.open_gate(key(id, 1), "Approve the plan?", &[outcome("approve")])
         .await
         .expect("open");
-    assert_eq!(repo.queue_size(&julia(), 10).await.expect("size"), 1);
+    assert_eq!(
+        places(&pool, &julia(), 10).await,
+        QueuePlaces {
+            waiting: 1,
+            starting: 0
+        }
+    );
+    assert!(
+        repo.list_starting_runs(&julia(), ASKING, 10)
+            .await
+            .expect("list")
+            .is_empty()
+    );
 
     repo.answer_gate(key(id, 1), &outcome("approve"), None, &julia(), None, None)
         .await
         .expect("answer");
-    assert_eq!(repo.queue_size(&julia(), 10).await.expect("size"), 0);
+    assert_eq!(places(&pool, &julia(), 10).await.held(), 0);
 }
 
 /// Under a Queue limit, a Run is kept only while its owner holds no more
-/// places than the limit, counted with the Run kept: of starts made at
-/// the same time, one after the other, so they never all pass a limit
-/// only one of them fits under. A Run kept reads with no limit.
+/// places than the limit before it; starts made at the same time are
+/// counted one after the other, each with the places of those kept before
+/// it, so they never all pass a limit only one of them fits under. A
+/// refused start says which places were held. A Run kept reads with no
+/// limit.
 #[sqlx::test(
     migrator = "MACRO_DB_MIGRATIONS",
     fixtures(path = "../fixtures", scripts("people"))
 )]
 async fn starts_at_the_same_time_are_held_to_the_queue_limit(pool: PgPool) {
     let repo = PgRunRepository::new(pool);
-    let limited = RunRules {
-        definition: OrchestratorDefinition {
-            queue_limit: Some(1),
-            ..OrchestratorDefinition::DEFAULT
-        },
-        ..RunRules::DEFAULT
+    let hold = QueueHold {
+        limit: Some(1),
+        asking_flows: ASKING,
     };
     let owner = julia();
     let start = |id: RunId| {
-        repo.insert_run(NewRun {
-            id,
-            flow: "plan",
-            request: "Plan the import",
-            user_id: &owner,
-            task_id: None,
-            repository: None,
-            created_in_person: false,
-            control_file_patterns: &[],
-            control_files_team_id: None,
-            standing_rules: limited,
-            automation: None,
-        })
+        repo.insert_run_in_queue(
+            NewRun {
+                id,
+                flow: "plan",
+                request: "Plan the import",
+                user_id: &owner,
+                task_id: None,
+                repository: None,
+                created_in_person: false,
+                control_file_patterns: &[],
+                control_files_team_id: None,
+                standing_rules: RunRules::DEFAULT,
+                automation: None,
+            },
+            hold,
+        )
     };
 
     for round in 0..10 {
@@ -214,14 +286,17 @@ async fn starts_at_the_same_time_are_held_to_the_queue_limit(pool: PgPool) {
             .into_iter()
             .map(|result| result.expect("insert"))
             .filter_map(|insert| match insert {
-                RunInsert::Inserted(run) => {
+                RunInsert::Inserted(run) => Some(run.id),
+                RunInsert::QueueFull(places) => {
                     assert_eq!(
-                        run.standing_rules.map(|rules| rules.definition.queue_limit),
-                        Some(None)
+                        places,
+                        QueuePlaces {
+                            waiting: 0,
+                            starting: 2
+                        }
                     );
-                    Some(run.id)
+                    None
                 }
-                RunInsert::QueueFull => None,
                 other => panic!("{other:?}"),
             })
             .collect();

@@ -264,7 +264,7 @@ async fn julia_s_run(repo: &FakeRepo) -> RunId {
         RunInsert::NoSuchTask
         | RunInsert::TaskBusy
         | RunInsert::FiringStarted
-        | RunInsert::QueueFull => {
+        | RunInsert::QueueFull(_) => {
             panic!("a run with no task is kept")
         }
     }
@@ -1140,7 +1140,7 @@ async fn a_task_s_list_holds_its_owner_s_fifty_newest_runs() {
             RunInsert::NoSuchTask
             | RunInsert::TaskBusy
             | RunInsert::FiringStarted
-            | RunInsert::QueueFull => {
+            | RunInsert::QueueFull(_) => {
                 panic!("the task exists")
             }
         }

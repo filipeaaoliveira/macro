@@ -8,7 +8,7 @@ use uuid::Uuid;
 use crate::domain::models::{
     CheckResult, CheckRound, CheckRoundOutcome, CheckRoundStart, ClaimedSession,
     ControlFileChanges, EntryId, GateAnswer, HandBack, HandedBack, NewRun, Outcome, PassedOver,
-    Role, Run, RunId, RunInsert, RunOutcome, SessionStep, Step, StepKey, StepSession,
+    QueueHold, Role, Run, RunId, RunInsert, RunOutcome, SessionStep, Step, StepKey, StepSession,
     StoppingSession, TaskLink, TeamMembership,
 };
 use crate::domain::standing_rules::StandingRule;
@@ -27,6 +27,17 @@ pub trait RunRepository: Send + Sync + 'static {
     fn insert_run(
         &self,
         run: NewRun<'_>,
+    ) -> impl Future<Output = Result<RunInsert, Self::Err>> + Send;
+
+    /// Keep `run` as [`Self::insert_run`] does, held to its owner's Queue: a
+    /// start waits behind a lock on that owner's Queue, so starts at the
+    /// same time are taken one after the other, and under `hold`'s limit it
+    /// is kept only while the owner holds no more places than the limit
+    /// (`RunInsert::QueueFull` otherwise, with the places counted).
+    fn insert_run_in_queue(
+        &self,
+        run: NewRun<'_>,
+        hold: QueueHold<'_>,
     ) -> impl Future<Output = Result<RunInsert, Self::Err>> + Send;
 
     /// Link the Run to the task document `task_id`, replacing any task it
@@ -63,16 +74,15 @@ pub trait RunRepository: Send + Sync + 'static {
         limit: u16,
     ) -> impl Future<Output = Result<Vec<Run>, Self::Err>> + Send;
 
-    /// The places `user_id` holds in their Queue, counted up to `limit`:
-    /// their Runs that have not ended and wait on them in person at a Gate,
-    /// leaving out a Gate the stand-in answered, while the owner may still
-    /// override it, and those that have not reached a Gate yet, which hold
-    /// the place they will ask for.
-    fn queue_size(
+    /// `user_id`'s Runs that hold a place in their Queue before asking
+    /// anything: those of `asking_flows` that have not ended or reached a
+    /// Gate yet, newest first, up to `limit`.
+    fn list_starting_runs(
         &self,
         user_id: &MacroUserIdStr<'static>,
+        asking_flows: &[&str],
         limit: u16,
-    ) -> impl Future<Output = Result<u16, Self::Err>> + Send;
+    ) -> impl Future<Output = Result<Vec<Run>, Self::Err>> + Send;
 
     /// The Steps of the Runs `ids`, each Run's in order. A Run with no Steps
     /// has no entry.

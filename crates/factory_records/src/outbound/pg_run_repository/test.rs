@@ -61,7 +61,7 @@ pub(super) async fn insert(repo: &PgRunRepository, id: RunId, request: &str) -> 
         RunInsert::NoSuchTask
         | RunInsert::TaskBusy
         | RunInsert::FiringStarted
-        | RunInsert::QueueFull => {
+        | RunInsert::QueueFull(_) => {
             panic!("a run with no task has no task to miss")
         }
     }
@@ -1215,7 +1215,7 @@ async fn insert_on_task(
         RunInsert::NoSuchTask
         | RunInsert::TaskBusy
         | RunInsert::FiringStarted
-        | RunInsert::QueueFull => {
+        | RunInsert::QueueFull(_) => {
             panic!("the task exists")
         }
     }

@@ -13,7 +13,7 @@ static INSTRUCTIONS: &str = r##"Follow this skill when the person asks you to st
 ## What you may do
 
 - **Start a Run** when the person asks for the work: `macro.factory.flows()` lists the Flows, and `macro.factory.start({ flow, request, task, repository })` starts one. A Flow that works on a repository (`code`) needs its `https://github.com/owner/name` URL. Link the task the work is for, so its Project's Standing Rules apply.
-- **Read the Queue**: `macro.factory.queue()` lists the person's Runs that wait on them at a Gate or an agent's question, newest first. `run.waitingGate()` shows the Gate, its question and the answers it offers.
+- **Read the Queue**: `macro.factory.queue()` lists the person's Runs that wait on them at a Gate or an agent's question, newest first. `macro.factory.starting()` lists their Runs that hold a place before asking anything. `run.waitingGate()` shows the Gate, its question and the answers it offers.
 - **Steer a Run**: read it (`run.read()`), link it to a task (`run.linkTask(task)`), or cancel it (`run.cancel()`) when the person asks.
 - **Answer a Gate** only when the person told you their answer in this chat. Read the Gate with `const waiting = await run.waitingGate()`, show it to them, and pass that same Gate: `run.answer(waiting, { answer, note })`. Put in the note that the person decided, in their words. If the factory answers 409, the Gate was answered or the Run moved on: read the Run again and ask the person; never answer a newer Gate they have not seen.
 - You may always send work back (`revise`, `stop`). You may give the approving answer (`approve` on a plan, `fix` on review Blockers) only where the team's Orchestrator Definition lets the Orchestrator approve that kind of Gate; otherwise the factory refuses and the person answers it in the app.
@@ -33,7 +33,7 @@ A routine's run and a factory Step's own agent session never answer a Gate: if a
 
 ## The Queue limit
 
-A team may set a Queue limit in its Orchestrator Definition, and a Project may set its own. The Queue counts every Gate and question waiting on the person, and every Run of theirs that has not asked anything yet, across all their Projects, against the limit of the Project the new Run would start in. Above it, no new Run starts there, for the person, for you or for an Automation: the start is refused with the code `queueFull`, and the Runs under way go on. Do not retry. Tell the person how many Gates wait on them, list them from `macro.factory.queue()`, and start the Run once they have answered some.
+A team may set a Queue limit in its Orchestrator Definition, and a Project may set its own. The Queue counts the places the person holds across all their Projects: each Run waiting on them at a Gate or a question, and each Run of a Flow with a Gate that has not reached one yet (a `reply` Run holds none until it asks something). It is counted against the limit of the Project the new Run would start in. Above it, no new Run starts there, for the person, for you or for an Automation: the start is refused with the code `queueFull`, its message giving both counts, and the Runs under way go on. Do not retry. Tell the person what holds their places: the Runs waiting on them from `macro.factory.queue()`, and the Runs yet to ask anything from `macro.factory.starting()`. Start the Run once they have answered some, or cancelled a Run they no longer need.
 
 ## Report
 
