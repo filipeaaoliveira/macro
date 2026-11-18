@@ -210,11 +210,14 @@ fn web() -> Job {
             "Run Collaboration Package Biome",
             xtask_paths::repo_dir!("packages/collaboration"),
         ))
-        // Two checkers, not the compiler's default four: with four, it held the
-        // runner's whole 9Gi and stalled for twenty minutes.
+        // The TypeScript 7 compiler is a Go program, and Go's collector lets the
+        // heap grow to twice what is live unless told a limit. Without one, and
+        // with fewer checkers too, it held the runner's whole 9Gi and stalled for
+        // twenty minutes.
         .add_step(
             Step::new("Check Types")
                 .run("bun run type-check --checkers 2")
+                .add_env(("GOMEMLIMIT", "6GiB"))
                 .working_directory(xtask_paths::repo_dir!("apps/web")),
         )
         .add_step(

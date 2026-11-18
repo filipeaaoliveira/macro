@@ -819,6 +819,8 @@ jobs:
       working-directory: packages/collaboration
     - name: Check Types
       run: bun run type-check --checkers 2
+      env:
+        GOMEMLIMIT: '6GiB'
       working-directory: apps/web
     - name: Build WASM for tests
       run: |-
