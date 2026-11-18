@@ -2,12 +2,16 @@
 //! the Run's owner through the routine sessions capability, and reads the
 //! result the agent hands back from it. The session is of the first Agent
 //! the agent definition lists for the Step's Role; when an Agent cannot start
-//! for lack of quota, the next one takes the Step.
+//! for lack of quota, or its owner's quota refused it lately, the next one
+//! takes the Step.
 
 #[cfg(test)]
 mod test;
 
+mod quota_memory;
 mod reminder;
+
+use quota_memory::{NO_QUOTA_LATELY, QuotaMemory};
 
 use std::time::Duration;
 
@@ -215,6 +219,7 @@ pub struct SessionAgent<S, R> {
     sessions: S,
     repo: R,
     agents: AgentDefinition,
+    quota: QuotaMemory,
 }
 
 impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
@@ -225,6 +230,7 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
             sessions,
             repo,
             agents,
+            quota: QuotaMemory::default(),
         }
     }
 
@@ -725,7 +731,7 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
             afresh: None,
             ..task.clone()
         };
-        self.answer_in(&task, session, deadline).await
+        self.answer_in(&task, session, false, deadline).await
     }
 
     /// [`Self::finished`], for a session resumed after a wait: one that
@@ -774,37 +780,24 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
     /// Do the Step `task` in `session`, the one it claimed: open it and
     /// prompt it as its Agent, handing the Step to the next Agent of its
     /// Role while one cannot start for lack of quota, and wait for the
-    /// hand back.
+    /// hand back. `fresh` says this attempt made `session`, so no attempt
+    /// may have opened it yet.
     async fn answer_in(
         &self,
         task: &AgentTask,
         session: StepSession,
+        fresh: bool,
         deadline: tokio::time::Instant,
     ) -> Result<AgentAnswer, SessionAgentError> {
         let agents = self.agents.for_role(&task.role);
         let mut session = session;
+        let mut fresh = fresh;
         // An Agent that cannot start for lack of quota hands the Step to the
         // next Agent of its Role, in a session of its own, until one starts
         // or none is left; the Step records each Agent passed over, the last
         // one too.
         let action = loop {
             let agent = self.agent_name(&session, &task.role)?;
-            let reason = match self.start(task, &session, &agent).await {
-                Ok(action) => break action,
-                Err(SessionAgentError::NoQuota(reason)) => reason,
-                // An overlapping attempt handed the Step on while this one
-                // opened its session: go on in the session it works in now.
-                Err(SessionAgentError::Released) => {
-                    match self.moved_on(task.key, &session).await? {
-                        Some(current) => {
-                            session = current;
-                            continue;
-                        }
-                        None => return Err(SessionAgentError::Released),
-                    }
-                }
-                Err(error) => return Err(error),
-            };
             // The Agent after this one in the Role's list, or its first
             // when the definition no longer lists this one for the Role.
             let next = agents
@@ -815,9 +808,44 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
                 .get(next)
                 .map(|name| self.new_session(name))
                 .transpose()?;
+
+            // An Agent its owner's quota refused lately is passed over
+            // without its session opened, while another Agent is left to
+            // take the Step; only in a session this attempt made, which no
+            // attempt can have started work in.
+            let skipped = fresh && to.is_some() && self.quota.refused_lately(&task.owner, &agent);
+            let refusal = if skipped {
+                None
+            } else {
+                match self.start(task, &session, &agent).await {
+                    Ok(action) => {
+                        self.quota.started(&task.owner, &agent);
+                        break action;
+                    }
+                    Err(SessionAgentError::NoQuota(reason)) => {
+                        self.quota.refused(&task.owner, &agent);
+                        Some(reason)
+                    }
+                    // An overlapping attempt handed the Step on while this
+                    // one opened its session: go on in the session it works
+                    // in now.
+                    Err(SessionAgentError::Released) => {
+                        match self.moved_on(task.key, &session).await? {
+                            Some(current) => {
+                                session = current;
+                                fresh = false;
+                                continue;
+                            }
+                            None => return Err(SessionAgentError::Released),
+                        }
+                    }
+                    Err(error) => return Err(error),
+                }
+            };
+            let reason = refusal.map_or(NO_QUOTA_LATELY, DenyReason::code);
             let passed = PassedOver {
                 agent: agent.clone(),
-                reason: reason.code().to_string(),
+                reason: reason.to_string(),
             };
             let recorded = self
                 .repo
@@ -830,16 +858,19 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
                 )
                 .await
                 .map_err(Self::records)?;
+            // No Agent is left only after a refusal: the last is never
+            // skipped.
             let Some(to) = to else {
-                return Err(SessionAgentError::NoQuota(reason));
+                return Err(not_passed(refusal));
             };
             if recorded {
                 tracing::info!(
                     from = %agent,
-                    reason = reason.code(),
+                    reason,
                     "a factory step's agent could not start: the next agent takes it"
                 );
                 session = to;
+                fresh = true;
                 continue;
             }
 
@@ -847,8 +878,11 @@ impl<S: RoutineSessions, R: RunRepository> SessionAgent<S, R> {
             // its session: go on in the session it works in now, while it
             // holds it.
             match self.moved_on(task.key, &session).await? {
-                Some(current) => session = current,
-                None => return Err(SessionAgentError::NoQuota(reason)),
+                Some(current) => {
+                    session = current;
+                    fresh = false;
+                }
+                None => return Err(not_passed(refusal)),
             }
         };
         self.finished(&action, deadline).await?;
@@ -881,7 +915,7 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
         // A retried Step goes on in the session its first attempt claimed,
         // or the one a later Agent took over, so the work is never started
         // twice.
-        let session = self
+        let claimed = self
             .repo
             .claim_session(
                 task.key,
@@ -890,10 +924,10 @@ impl<S: RoutineSessions, R: RunRepository> StepAgent for SessionAgent<S, R> {
                 &task.outcomes,
             )
             .await
-            .map_err(Self::records)?
-            .session;
+            .map_err(Self::records)?;
 
-        self.answer_in(&task, session, deadline).await
+        self.answer_in(&task, claimed.session, claimed.new, deadline)
+            .await
     }
 
     #[tracing::instrument(err, skip_all, fields(run_id = %turn.key.run_id, seq = turn.key.seq))]
@@ -1109,6 +1143,16 @@ fn refusal(error: RoutineSessionError) -> SessionAgentError {
             SessionAgentError::NoQuota(reason)
         }
         error => SessionAgentError::Session(error),
+    }
+}
+
+/// Why a Step was not passed on to the next Agent of its Role: the
+/// refusal of the last Agent, for lack of quota; or, for an Agent skipped
+/// unasked, another attempt took the Step on, which a retry goes on from.
+fn not_passed(refusal: Option<DenyReason>) -> SessionAgentError {
+    match refusal {
+        Some(reason) => SessionAgentError::NoQuota(reason),
+        None => SessionAgentError::Superseded,
     }
 }
 

@@ -251,7 +251,17 @@ before any work starts) hands the Step to the next Agent of its Role, in a
 new session, and the Step records the Agent passed over with the refusal's
 code (`passed_over`, `pass_reasons`); a session that opened is deleted
 first. Only that refusal passes the Step on; when no Agent is left, the Step
-records the last one passed over too and fails for good. An attempt
+records the last one passed over too and fails for good. The worker
+remembers such a refusal per owner and Agent for 15 minutes
+(`session_agent/quota_memory.rs`, `QUOTA_COOL_DOWN`): a Step that made its
+session itself (a first attempt, or one it was just handed on to) skips an
+Agent refused lately without opening its session, recording it passed
+over as `no_quota_lately`, while another Agent of the Role is left; the
+last is always asked. Neither the harness nor billing tells ahead of a
+session whether a quota is used up, so recovery is found by asking again
+once the cool-down passed: a start forgets the refusal, another refusal
+remembers it anew, and a skip never renews it. The memory is each
+worker's own, and a restart forgets it. An attempt
 prepares, opens and prompts only the session the Step works in now, so an
 overlapping attempt never prompts a session handed on: it deletes the one
 it opened and goes on in the Step's current session. Each session keeps the
