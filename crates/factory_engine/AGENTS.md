@@ -1249,8 +1249,18 @@ every Run in flight replays as before.
   `mergeGateSeq`, the Step whose merge Gate it waits on (its latest Step,
   at a merge entry, with a Flow's Gate no one answered, while it goes). A
   pull request only a hidden Run opened is left out, as one no Run opened.
-  Macro's Reviews page reads it to mark a factory Run's pull request, and
-  merges one only through that Gate (`POST /runs/{id}/steps/{seq}/answer`).
+  It reads at most 500 Runs, newest first; past them, a pull request with
+  no Run shown is listed in `unknown`, as one whose Run may be among those
+  left unread, never as one no Run opened. The web app's pull request views
+  (Reviews, a pull request's detail and block, its Merge button) read it
+  through `PrMergeGuardProvider` to mark a factory Run's pull request, and
+  merge one only through that Gate (`POST /runs/{id}/steps/{seq}/answer`);
+  until it answered, or while a pull request is `unknown`, they merge
+  nothing. Limits: the guard is in the web app only, so GitHub itself (and
+  any client calling Macro's merge route) still merges a Run's pull
+  request; and a viewer who cannot see the Run (a teammate on a hidden
+  task, someone off the team) is not guarded, as the lookup must not tell
+  them a Run exists.
 - `flows/`: the built-in Flows, each named for its file
   (`src/domain/built_in_flows.rs`). `GET /flows` lists those whose Steps the
   worker serves, with their `description` and whether they work on a

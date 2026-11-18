@@ -39,7 +39,7 @@ const BOARD_BATCH_MIN: u16 = 50;
 /// The most Runs a lookup by pull request reads, newest first. A Run opens
 /// one pull request, so this is past [`PULL_REQUESTS_MAX`] only for pull
 /// requests that more than one Run found.
-const PULL_REQUEST_RUNS_READ: u16 = 500;
+pub(super) const PULL_REQUEST_RUNS_READ: u16 = 500;
 
 use crate::domain::ports::{
     PullRequests, RunWorkflows, StepExecutor, TaskAccess, TaskDirectory, UserDirectory,
@@ -255,7 +255,10 @@ where
             }
         }
         if asked.is_empty() {
-            return Ok(PullRequestRuns { runs: Vec::new() });
+            return Ok(PullRequestRuns {
+                runs: Vec::new(),
+                unknown: Vec::new(),
+            });
         }
 
         let team_id = self
@@ -275,6 +278,9 @@ where
             })
             .await
             .map_err(internal)?;
+        // Past the limit, older Runs went unread: a pull request with no Run
+        // shown may have one among them.
+        let cut_short = read.len() >= usize::from(PULL_REQUEST_RUNS_READ);
         let mut seen = BTreeMap::new();
         self.check_tasks(actor, &read, &mut seen).await?;
 
@@ -290,10 +296,15 @@ where
             };
             newest.entry(pull_request_key(url)).or_insert(board_run);
         }
-        let shown: Vec<(String, RecordedBoardRun)> = asked
-            .into_iter()
-            .filter_map(|(key, url)| newest.remove(&key).map(|listed| (url, listed)))
-            .collect();
+        let mut shown: Vec<(String, RecordedBoardRun)> = Vec::new();
+        let mut unknown = Vec::new();
+        for (key, url) in asked {
+            match newest.remove(&key) {
+                Some(listed) => shown.push((url, listed)),
+                None if cut_short => unknown.push(url),
+                None => {}
+            }
+        }
 
         let parts: Vec<_> = shown
             .iter()
@@ -316,7 +327,7 @@ where
                 },
             })
             .collect();
-        Ok(PullRequestRuns { runs })
+        Ok(PullRequestRuns { runs, unknown })
     }
 
     /// Whether the caller can see each live task of a team member's Run in

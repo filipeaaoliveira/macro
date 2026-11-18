@@ -8,6 +8,7 @@ use factory_records::domain::models::{
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::standing_rules::RunRules;
 
+use super::super::super::board::PULL_REQUEST_RUNS_READ;
 use super::super::code_service;
 use super::{FakeWorkflows, ana, hide, julia, keep, on_team, service, task, teo};
 use crate::domain::board::{PULL_REQUESTS_MAX, PullRequestRuns};
@@ -182,4 +183,31 @@ async fn a_lookup_names_at_most_so_many_pull_requests() {
         .await
         .expect("found");
     assert!(none.runs.is_empty());
+}
+
+/// When more Runs match than a lookup reads, a pull request whose Run may be
+/// among the older ones left unread is unknown, never "no Run"; one whose
+/// newest Run was read is shown.
+#[tokio::test]
+async fn a_pull_request_past_the_runs_read_is_unknown() {
+    let repo = FakeRepo::default();
+    let service = service(&repo, &FakeWorkflows::default());
+    let older = opened(&repo, keep(&repo, &julia(), None).await, BANNER).await;
+    let mut newest = older;
+    for _ in 0..PULL_REQUEST_RUNS_READ {
+        newest = opened(&repo, keep(&repo, &julia(), None).await, COUPON).await;
+    }
+
+    let found = service
+        .pull_request_runs(&julia(), vec![COUPON.to_string(), BANNER.to_string()])
+        .await
+        .expect("found");
+    assert_eq!(shown(&found), [(COUPON.to_string(), newest)]);
+    assert_eq!(found.unknown, [BANNER.to_string()]);
+
+    let all_read = service
+        .pull_request_runs(&julia(), vec![BANNER.to_string(), CART.to_string()])
+        .await
+        .expect("found");
+    assert!(all_read.unknown.is_empty());
 }
