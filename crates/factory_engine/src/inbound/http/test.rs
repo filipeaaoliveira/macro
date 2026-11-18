@@ -464,6 +464,7 @@ async fn alice_s_run(repo: &FakeRepo) -> RunId {
             standing_rules: RunRules::DEFAULT,
             automation: None,
             definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert")
@@ -1108,6 +1109,7 @@ async fn a_run_at_its_merge_on_a_held_base_shows_the_main_hold() {
             standing_rules: RunRules::DEFAULT,
             automation: None,
             definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert");
