@@ -14,3 +14,12 @@ fn main() -> Result<(), serde_json::Error> {
     println!("{}", openapi.to_pretty_json()?);
     Ok(())
 }
+
+#[test]
+fn scratch_print() {
+    let mut openapi = ApiDoc::openapi();
+    openapi.merge(InsightsApiDoc::openapi());
+    openapi.merge(AutomationsApiDoc::openapi());
+    openapi.merge(EvaluationApiDoc::openapi());
+    std::fs::write("/tmp/scorers-openapi.json", format!("{}\n", openapi.to_pretty_json().unwrap())).unwrap();
+}

@@ -2,6 +2,9 @@
 //! arms and the Benchmark suites of the caller's own Runs, and starting a
 //! suite.
 
+#[cfg(test)]
+mod test;
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -22,8 +25,8 @@ use serde::Deserialize;
 
 use crate::domain::evaluation::insights::{
     ArmInsight, ArmScoreInsight, BenchmarkSummary, EvaluationInsights, EvaluationService,
-    ExperimentInsight, ScorerInsight, SuiteError, SuiteInsight, SuiteStarted, TrialInsight,
-    TrialScore,
+    ExperimentInsight, RefusedTrial, ScorerInsight, SuiteError, SuiteInsight, SuiteStarted,
+    TrialInsight, TrialScore,
 };
 use crate::domain::insights::{InsightsQuery, TokenCounts};
 use crate::inbound::insights::InsightsParams;
@@ -139,8 +142,14 @@ pub struct BenchmarkPath {
 }
 
 /// Start a suite of a Benchmark: one trial Run, owned by the caller, of
-/// each of its frozen tasks, on the configuration the body gives. Each trial
-/// keeps a score and the tokens its agents used once its Run ends.
+/// each of its frozen tasks, on the configuration the body gives, each from
+/// the commit its task pins or the default branch's head as the suite
+/// starts. Each trial keeps a score and the tokens its agents used once its
+/// Run ends, and its branch is then deleted. A suite of the same Benchmark
+/// of the caller's that still runs, or more running trials than the caller
+/// may have, refuse it (409). A trial whose Run is refused stops the suite:
+/// the trials before it go on, and `refused` names it; when none started,
+/// the error is returned and nothing is kept.
 #[utoipa::path(
     post,
     tag = "factory",
@@ -192,6 +201,9 @@ impl IntoResponse for SuiteError {
                 )
             }
             SuiteError::UnknownBenchmark(_) => (StatusCode::NOT_FOUND, self.to_string()),
+            SuiteError::Running(_) | SuiteError::TooManyTrials { .. } => {
+                (StatusCode::CONFLICT, self.to_string())
+            }
             SuiteError::Configuration(_) => (StatusCode::BAD_REQUEST, self.to_string()),
         };
 
@@ -222,6 +234,7 @@ impl IntoResponse for SuiteError {
         TokenCounts,
         StartSuiteRequest,
         SuiteStarted,
+        RefusedTrial,
         RunId,
         RunOutcome,
         ErrorResponse,

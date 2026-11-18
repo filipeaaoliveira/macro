@@ -354,6 +354,14 @@ impl FactoryService for FakeService {
         Err(self.refusing(&automation.created_by))
     }
 
+    async fn benchmark_base(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        _repo_url: &str,
+    ) -> Result<String, FactoryError> {
+        Err(self.refusing(actor))
+    }
+
     async fn create_trial_run(
         &self,
         actor: MacroUserIdStr<'static>,
@@ -361,6 +369,7 @@ impl FactoryService for FakeService {
         _request: String,
         _repo_url: String,
         _trial: factory_records::domain::evaluation::TrialKey,
+        _base_commit: String,
     ) -> Result<RunDetail, FactoryError> {
         Err(self.refusing(&actor))
     }

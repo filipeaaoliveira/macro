@@ -124,6 +124,7 @@ fn input<'a>(earlier: &'a [Step]) -> StepInput<'a> {
         questions_left: 0,
         resumes: None,
         owner_notes: &[],
+        base_commit: None,
     }
 }
 
@@ -218,6 +219,32 @@ async fn an_agent_step_works_in_the_run_s_repository_on_its_branch() {
             Outcome::try_from("changes".to_string()).expect("valid"),
         ]
     );
+}
+
+/// A Benchmark trial's branch starts from the commit its suite pinned, not
+/// from its base branch's head.
+#[tokio::test]
+async fn a_pinned_run_s_branch_starts_from_its_commit() {
+    let agent = FakeAgent::ending_with("done");
+    let steps = BuiltInSteps::new(agent.clone(), pull_requests());
+    let repository = Repository {
+        url: "https://github.com/macro/app".to_string(),
+        base_branch: "trunk".to_string(),
+    };
+    let commit = "abcdefabcdefabcdefabcdefabcdefabcdefabcd";
+    let mut pinned = input(&[]);
+    pinned.repository = Some(&repository);
+    pinned.base_commit = Some(commit);
+
+    steps.run(&step("plan"), pinned).await.expect("plan");
+
+    let tasks = agent.tasks.lock().expect("tasks");
+    assert!(
+        tasks[0]
+            .prompt
+            .contains(&format!("create it from commit `{commit}`"))
+    );
+    assert!(!tasks[0].prompt.contains("from `origin/trunk`"));
 }
 
 /// A Step that only works on a repository fails for good in a Run with

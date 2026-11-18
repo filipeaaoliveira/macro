@@ -115,6 +115,10 @@ pub struct FrozenTask {
     pub name: String,
     /// What a trial of it is asked to do.
     pub request: String,
+    /// The commit its trials' write starts from, a full commit id; when
+    /// unset, the repository's default branch's head as a suite starts.
+    #[serde(default)]
+    pub base_commit: Option<String>,
 }
 
 /// A Benchmark: frozen tasks on one repository, and the Scorers that judge
@@ -194,9 +198,11 @@ pub enum EvaluationDefinitionError {
         /// The Role.
         role: Role,
     },
-    /// A Benchmark has no task, or a task's request is empty or too long.
+    /// A Benchmark has no task, or a task's request is empty or too long,
+    /// or the base commit it pins is not a full commit id.
     #[error(
-        "benchmark {0} must have tasks, each with a request of at most {MAX_REQUEST_BYTES} bytes"
+        "benchmark {0} must have tasks, each with a request of at most {MAX_REQUEST_BYTES} bytes \
+         and any base commit as 40 lowercase hex digits"
     )]
     Tasks(String),
     /// A Benchmark names a Scorer the definition does not have.
@@ -236,6 +242,14 @@ fn unique<'a>(
         }
     }
     Ok(())
+}
+
+/// Whether `commit` is a full commit id: 40 lowercase hex digits.
+pub fn is_commit_id(commit: &str) -> bool {
+    commit.len() == 40
+        && commit
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 /// Whether `flow` is a Flow people start Runs of.
@@ -305,7 +319,12 @@ impl TryFrom<EvaluationDefinitionFields> for EvaluationDefinition {
         for benchmark in &fields.benchmarks {
             unique("task", benchmark.tasks.iter().map(|task| &task.name))?;
             let unreadable = benchmark.tasks.iter().any(|task| {
-                task.request.trim().is_empty() || task.request.len() > MAX_REQUEST_BYTES
+                task.request.trim().is_empty()
+                    || task.request.len() > MAX_REQUEST_BYTES
+                    || task
+                        .base_commit
+                        .as_deref()
+                        .is_some_and(|commit| !is_commit_id(commit))
             });
             if benchmark.tasks.is_empty() || unreadable {
                 return Err(EvaluationDefinitionError::Tasks(benchmark.name.clone()));

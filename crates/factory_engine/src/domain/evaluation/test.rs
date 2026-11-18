@@ -4,8 +4,8 @@ use ai_usage::domain::session_usage::SessionTokens;
 use chrono::Utc;
 use factory_records::domain::evaluation::{EvaluationRepository, NewSuite, TrialKey, TrialTokens};
 use factory_records::domain::models::{
-    AgentName, EntryId, NewRun, Outcome, Role, RunEnd, RunId, RunInsert, RunOutcome, Step, StepEnd,
-    StepKey, StepSession, StepTerminal,
+    AgentName, EntryId, NewRun, Outcome, Repository, Role, RunEnd, RunId, RunInsert, RunOutcome,
+    Step, StepEnd, StepKey, StepSession, StepTerminal,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::standing_rules::RunRules;
@@ -16,9 +16,11 @@ use uuid::Uuid;
 use super::service::{ScoringServiceImpl, trial_score};
 use super::{EvaluationDefinition, EvaluationDefinitionError};
 use crate::domain::agents::AgentDefinition;
-use crate::domain::fakes::{FakeJudge, FakeRepo, FakeSession};
+use crate::domain::fakes::{FakeGithub, FakeJudge, FakeRepo, FakeSession};
 use crate::domain::insights::fakes::FakeUsage;
 use crate::domain::ports::ScoringService;
+
+const WIDGETS: &str = "https://github.com/acme/widgets";
 
 fn julia() -> MacroUserIdStr<'static> {
     MacroUserIdStr::try_from("macro|julia@example.com".to_string()).expect("valid user id")
@@ -236,6 +238,10 @@ async fn ended_run(
     session: Uuid,
 ) -> RunId {
     let id = RunId::generate();
+    let repository = Repository {
+        url: WIDGETS.to_string(),
+        base_branch: "main".to_string(),
+    };
     let inserted = repo
         .insert_run(NewRun {
             id,
@@ -243,7 +249,7 @@ async fn ended_run(
             request: "Fix the typo in the README.",
             user_id: &julia(),
             task_id: None,
-            repository: None,
+            repository: Some(&repository),
             created_in_person: false,
             control_file_patterns: &[],
             control_files_team_id: None,
@@ -322,6 +328,7 @@ async fn a_sampled_run_is_judged_once_by_each_scorer_that_takes_it() {
         repo.clone(),
         judge.clone(),
         usage(session),
+        FakeGithub::default(),
         Arc::new(definition()),
     );
 
@@ -362,6 +369,7 @@ async fn a_failed_judge_is_asked_again_and_a_cancelled_run_is_not_judged() {
         repo.clone(),
         judge.clone(),
         usage(session),
+        FakeGithub::default(),
         Arc::new(definition()),
     );
 
@@ -412,17 +420,26 @@ async fn a_trial_keeps_its_score_tokens_and_judgments_apart_from_the_live_scorer
         user_id: &julia(),
         benchmark: "core",
         agents: &configuration,
+        trials: 1,
     })
     .await
     .expect("suite");
-    repo.insert_trial(&trial, trial_run).await.expect("trial");
+    repo.insert_trial(
+        &trial,
+        trial_run,
+        "1111111111111111111111111111111111111111",
+    )
+    .await
+    .expect("trial");
     let judge = Arc::new(FakeJudge::default());
     judge.then(0.9);
     judge.then(0.2);
+    let github = FakeGithub::default();
     let scoring = ScoringServiceImpl::new(
         repo.clone(),
         judge.clone(),
         usage(session),
+        github.clone(),
         Arc::new(definition()),
     );
 
@@ -460,6 +477,60 @@ async fn a_trial_keeps_its_score_tokens_and_judgments_apart_from_the_live_scorer
     assert_eq!(judged[0].scorer, "correctness");
     assert_eq!(judged[0].score, 0.2);
     assert_eq!(judge.asked().len(), 2);
+    // Once scored, the trial's own branch is deleted, once; a live Run's
+    // branch is never touched.
+    assert_eq!(
+        github.state().deleted_branches,
+        [(WIDGETS.to_string(), format!("factory/{trial_run}"))]
+    );
+    assert_eq!(kept.branches_deleted, [(suite_id, "typo".to_string())]);
+}
+
+#[tokio::test]
+async fn a_cancelled_trial_keeps_a_zero_score_and_is_not_judged() {
+    let repo = FakeRepo::default();
+    let session = Uuid::from_u128(7);
+    let trial_run = ended_run(&repo, "benchmark", RunOutcome::Cancelled, "done", session).await;
+    let suite_id = Uuid::from_u128(600);
+    let configuration = [(role("writer"), agent("backup"))].into_iter().collect();
+    repo.insert_suite(&NewSuite {
+        id: suite_id,
+        user_id: &julia(),
+        benchmark: "core",
+        agents: &configuration,
+        trials: 1,
+    })
+    .await
+    .expect("suite");
+    let trial = TrialKey {
+        suite_id,
+        task: "typo".to_string(),
+    };
+    repo.insert_trial(
+        &trial,
+        trial_run,
+        "1111111111111111111111111111111111111111",
+    )
+    .await
+    .expect("trial");
+    let judge = Arc::new(FakeJudge::default());
+    let scoring = ScoringServiceImpl::new(
+        repo.clone(),
+        judge.clone(),
+        usage(session),
+        FakeGithub::default(),
+        Arc::new(definition()),
+    );
+
+    scoring.score_run(trial_run).await.expect("scored");
+
+    let kept = repo.evaluation.lock().expect("evaluation").clone();
+    assert_eq!(
+        kept.trial_results[&(suite_id, "typo".to_string())].score,
+        0.0
+    );
+    assert!(kept.trial_scores.is_empty());
+    assert!(judge.asked().is_empty());
 }
 
 #[tokio::test]
@@ -482,4 +553,113 @@ async fn a_trial_is_scored_by_how_its_write_step_ended() {
             .expect("kept");
         assert_eq!(trial_score(&subject), score, "{outcome:?} after {written}");
     }
+}
+
+/// Insights list every defined Scorer and arm, judged or not, beside the
+/// retired ones whose records remain, with their mean scores and shares.
+#[test]
+fn evaluation_insights_list_defined_and_retired_scorers_and_arms() {
+    use chrono::NaiveDate;
+    use factory_records::domain::evaluation::{ArmScore, ArmTally, EvaluationRecords, ScorerTally};
+
+    use super::insights::evaluation_insights;
+    use crate::domain::insights::InsightsQuery;
+
+    let day = |day: u32| NaiveDate::from_ymd_opt(2026, 11, day).expect("valid day");
+    let query = InsightsQuery::new(day(1), day(30), "Europe/Lisbon", None).expect("query");
+    let records = EvaluationRecords {
+        scorers: vec![
+            ScorerTally {
+                scorer: "correctness".to_string(),
+                judged: 4,
+                passed: 3,
+                mean_score: 0.7,
+            },
+            ScorerTally {
+                scorer: "retired".to_string(),
+                judged: 1,
+                passed: 0,
+                mean_score: 0.1,
+            },
+        ],
+        arms: vec![
+            ArmTally {
+                experiment: "writer-agent".to_string(),
+                arm: "backup".to_string(),
+                agents: [(role("writer"), agent("backup"))].into_iter().collect(),
+                runs: 3,
+                ended: 2,
+                succeeded: 1,
+                fell_back: 1,
+            },
+            ArmTally {
+                experiment: "writer-agent".to_string(),
+                arm: "gone".to_string(),
+                agents: Default::default(),
+                runs: 1,
+                ended: 1,
+                succeeded: 1,
+                fell_back: 0,
+            },
+            ArmTally {
+                experiment: "ended".to_string(),
+                arm: "a".to_string(),
+                agents: Default::default(),
+                runs: 2,
+                ended: 2,
+                succeeded: 0,
+                fell_back: 0,
+            },
+        ],
+        arm_scores: vec![ArmScore {
+            experiment: "writer-agent".to_string(),
+            arm: "backup".to_string(),
+            scorer: "correctness".to_string(),
+            judged: 2,
+            mean_score: 0.9,
+        }],
+        suites: Vec::new(),
+    };
+
+    let insights = evaluation_insights(&definition(), &query, records);
+
+    let scorers: Vec<_> = insights
+        .scorers
+        .iter()
+        .map(|scorer| {
+            (
+                scorer.name.as_str(),
+                scorer.judged,
+                scorer.passed,
+                scorer.mean_score,
+                scorer.sample_percent,
+            )
+        })
+        .collect();
+    assert_eq!(
+        scorers,
+        [
+            ("correctness", 4, 3, Some(0.7), Some(100)),
+            ("tidiness", 0, 0, None, Some(0)),
+            ("retired", 1, 0, Some(0.1), None),
+        ]
+    );
+
+    let names: Vec<_> = insights
+        .experiments
+        .iter()
+        .map(|experiment| (experiment.name.as_str(), experiment.running))
+        .collect();
+    assert_eq!(names, [("writer-agent", true), ("ended", false)]);
+    let arms: Vec<_> = insights.experiments[0]
+        .arms
+        .iter()
+        .map(|arm| (arm.name.as_str(), arm.runs, arm.fell_back, arm.scores.len()))
+        .collect();
+    assert_eq!(
+        arms,
+        [("control", 0, 0, 0), ("backup", 3, 1, 1), ("gone", 1, 0, 0)]
+    );
+    assert_eq!(insights.experiments[0].arms[1].scores[0].mean_score, 0.9);
+    assert_eq!(insights.benchmarks[0].tasks, ["typo", "export"]);
 }

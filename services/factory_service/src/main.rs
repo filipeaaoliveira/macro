@@ -51,7 +51,7 @@ use factory_engine::outbound::fast_gate_model::FastGateModel;
 use factory_engine::outbound::github_pull_requests::GithubPullRequests;
 use factory_engine::outbound::ingress_gate_notifier::IngressGateNotifier;
 use factory_engine::outbound::local_agent::LocalAgent;
-use factory_engine::outbound::model_run_judge::ModelRunJudge;
+use factory_engine::outbound::model_run_judge::{ModelRunJudge, checked_scorer_model};
 use factory_engine::outbound::routine_automation_triggers::RoutineAutomationTriggers;
 use factory_engine::outbound::temporal_main_watches::TemporalMainWatches;
 use factory_engine::outbound::temporal_run_workflows::TemporalRunWorkflows;
@@ -181,7 +181,10 @@ async fn run() -> Result<(), rootcause::Report> {
         gates,
         // Scorers judge with a small model on Macro's model router, as the
         // Gate model does, billed to no one.
-        judge: ModelRunJudge::new(config.factory_scorer_model.clone(), recorder),
+        judge: ModelRunJudge::new(
+            checked_scorer_model(config.factory_scorer_model.clone())?,
+            recorder,
+        ),
         evaluation,
         agents: agents.clone(),
         review_rounds: config.factory_review_rounds,
@@ -338,6 +341,7 @@ async fn serve<A: StepAgent + Clone>(
                 parts.repo.clone(),
                 parts.judge,
                 parts.usage.clone(),
+                parts.github.clone(),
                 parts.evaluation.clone(),
             ),
         },
@@ -360,7 +364,9 @@ async fn serve<A: StepAgent + Clone>(
     }
     let service = Arc::new(service.with_evaluation(parts.evaluation.clone()));
     // A Benchmark suite starts its trials through the Run API, as their
-    // starter, which holds them to the starter's Queue.
+    // starter. A trial's Flow has no Gate, so the Queue holds no place for
+    // it: a suite is held instead by the records, to one running suite of
+    // a Benchmark and `MAX_OPEN_TRIALS` running trials per person.
     let evaluation = Arc::new(EvaluationServiceImpl::new(
         parts.repo.clone(),
         service.clone(),

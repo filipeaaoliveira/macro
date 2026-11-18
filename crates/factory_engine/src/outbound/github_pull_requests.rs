@@ -325,6 +325,20 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
     }
 
     #[tracing::instrument(err, skip(self, owner))]
+    async fn delete_branch(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        branch: &str,
+    ) -> Result<bool, GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        Ok(self
+            .github
+            .delete_branch(&token, repository.owner(), repository.name(), branch)
+            .await?)
+    }
+
+    #[tracing::instrument(err, skip(self, owner))]
     async fn changed_files(
         &self,
         owner: &MacroUserIdStr<'static>,

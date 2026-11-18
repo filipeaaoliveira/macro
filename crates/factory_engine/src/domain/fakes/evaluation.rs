@@ -5,8 +5,9 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::Mutex;
 
 use factory_records::domain::evaluation::{
-    AgentChoices, EvaluationRecords, EvaluationRepository, Judgment, NewSuite, RunArm, ScoringStep,
-    ScoringSubject, SubjectTrial, TrialKey, TrialResult,
+    AgentChoices, EvaluationRecords, EvaluationRepository, Judgment, MAX_OPEN_TRIALS, NewSuite,
+    RunAgents, RunArm, ScoringStep, ScoringSubject, SubjectTrial, SuiteInsert, TrialKey,
+    TrialResult,
 };
 use factory_records::domain::insights::InsightsScope;
 use factory_records::domain::models::RunId;
@@ -17,9 +18,10 @@ use crate::domain::ports::{JudgeQuestion, JudgeVerdict, RunJudge};
 
 use super::{FakeError, FakeRepo};
 
-/// A suite kept: its Benchmark and configuration.
+/// A suite kept: whose, its Benchmark and configuration.
 #[derive(Debug, Clone)]
 pub(crate) struct FakeSuite {
+    pub(crate) owner: String,
     pub(crate) benchmark: String,
     pub(crate) agents: AgentChoices,
 }
@@ -39,6 +41,31 @@ pub(crate) struct FakeEvaluation {
     pub(crate) trial_results: BTreeMap<(Uuid, String), TrialResult>,
     /// Each trial's judgments.
     pub(crate) trial_scores: BTreeMap<(Uuid, String), Vec<Judgment>>,
+    /// The commit each trial's write starts from.
+    pub(crate) base_commits: BTreeMap<(Uuid, String), String>,
+    /// The trials whose branch was deleted.
+    pub(crate) branches_deleted: Vec<(Uuid, String)>,
+}
+
+impl FakeEvaluation {
+    /// The trial `run_id` is, with its id.
+    fn trial_of(&self, run_id: RunId) -> Option<SubjectTrial> {
+        self.trials
+            .iter()
+            .find(|(_, run)| **run == run_id)
+            .map(|((suite_id, task), _)| {
+                let key = TrialKey {
+                    suite_id: *suite_id,
+                    task: task.clone(),
+                };
+                SubjectTrial {
+                    benchmark: self.suites[suite_id].benchmark.clone(),
+                    scored: self.trial_results.contains_key(&trial_id(&key)),
+                    branch_deleted: self.branches_deleted.contains(&trial_id(&key)),
+                    key,
+                }
+            })
+    }
 }
 
 fn trial_id(trial: &TrialKey) -> (Uuid, String) {
@@ -60,11 +87,11 @@ impl EvaluationRepository for FakeRepo {
         Ok(())
     }
 
-    async fn run_agents(&self, run_id: RunId) -> Result<AgentChoices, FakeError> {
+    async fn run_agents(&self, run_id: RunId) -> Result<RunAgents, FakeError> {
         let kept = self.evaluation.lock().expect("evaluation");
-        let mut agents = AgentChoices::new();
+        let mut agents = RunAgents::default();
         for arm in kept.arms.get(&run_id).into_iter().flatten() {
-            agents.extend(arm.agents.clone());
+            agents.choices.extend(arm.agents.clone());
         }
         let suite = kept
             .trials
@@ -72,9 +99,36 @@ impl EvaluationRepository for FakeRepo {
             .find(|(_, run)| **run == run_id)
             .and_then(|((suite_id, _), _)| kept.suites.get(suite_id));
         if let Some(suite) = suite {
-            agents.extend(suite.agents.clone());
+            agents.choices.extend(suite.agents.clone());
+            agents.trial = true;
         }
         Ok(agents)
+    }
+
+    async fn trial_of(&self, run_id: RunId) -> Result<Option<SubjectTrial>, FakeError> {
+        Ok(self.evaluation.lock().expect("evaluation").trial_of(run_id))
+    }
+
+    async fn trial_base_commit(&self, run_id: RunId) -> Result<Option<String>, FakeError> {
+        let kept = self.evaluation.lock().expect("evaluation");
+        Ok(kept
+            .trial_of(run_id)
+            .and_then(|trial| kept.base_commits.get(&trial_id(&trial.key)).cloned()))
+    }
+
+    async fn record_branch_deleted(&self, trial: &TrialKey) -> Result<(), FakeError> {
+        let mut kept = self.evaluation.lock().expect("evaluation");
+        if !kept.branches_deleted.contains(&trial_id(trial)) {
+            kept.branches_deleted.push(trial_id(trial));
+        }
+        Ok(())
+    }
+
+    async fn delete_suite(&self, suite_id: Uuid) -> Result<(), FakeError> {
+        let mut kept = self.evaluation.lock().expect("evaluation");
+        kept.suites.remove(&suite_id);
+        kept.trials.retain(|(suite, _), _| *suite != suite_id);
+        Ok(())
     }
 
     async fn scoring_subject(&self, run_id: RunId) -> Result<Option<ScoringSubject>, FakeError> {
@@ -100,21 +154,7 @@ impl EvaluationRepository for FakeRepo {
             })
             .collect();
         let kept = self.evaluation.lock().expect("evaluation");
-        let trial =
-            kept.trials
-                .iter()
-                .find(|(_, run)| **run == run_id)
-                .map(|((suite_id, task), _)| {
-                    let key = TrialKey {
-                        suite_id: *suite_id,
-                        task: task.clone(),
-                    };
-                    SubjectTrial {
-                        benchmark: kept.suites[suite_id].benchmark.clone(),
-                        scored: kept.trial_results.contains_key(&trial_id(&key)),
-                        key,
-                    }
-                });
+        let trial = kept.trial_of(run_id);
         let judged = match &trial {
             Some(trial) => kept.trial_scores.get(&trial_id(&trial.key)),
             None => kept.run_scores.get(&run_id),
@@ -128,6 +168,7 @@ impl EvaluationRepository for FakeRepo {
             user_id: run.user_id,
             flow,
             request: run.request,
+            repo_url: run.repository.map(|repository| repository.url),
             outcome: run.end.map(|end| end.outcome),
             steps,
             trial,
@@ -167,21 +208,64 @@ impl EvaluationRepository for FakeRepo {
         Ok(())
     }
 
-    async fn insert_suite(&self, suite: &NewSuite<'_>) -> Result<(), FakeError> {
+    async fn insert_suite(&self, suite: &NewSuite<'_>) -> Result<SuiteInsert, FakeError> {
+        let runs = self.runs.lock().expect("runs").clone();
         let mut kept = self.evaluation.lock().expect("evaluation");
+        let owner = suite.user_id.as_ref().to_string();
+        // A suite runs while one of its trials' Runs goes, or while it has
+        // no trial yet.
+        let going = |suite_id: &Uuid| {
+            let trials: Vec<_> = kept
+                .trials
+                .iter()
+                .filter(|((suite, _), _)| suite == suite_id)
+                .map(|(_, run)| *run)
+                .collect();
+            trials.is_empty()
+                || trials
+                    .iter()
+                    .any(|run| runs.get(run).is_some_and(|run| run.end.is_none()))
+        };
+        let running = kept.suites.iter().any(|(id, kept_suite)| {
+            kept_suite.owner == owner && kept_suite.benchmark == suite.benchmark && going(id)
+        });
+        if running {
+            return Ok(SuiteInsert::Running);
+        }
+        let open = kept
+            .trials
+            .iter()
+            .filter(|((suite_id, _), run)| {
+                kept.suites[suite_id].owner == owner
+                    && runs.get(run).is_some_and(|run| run.end.is_none())
+            })
+            .count();
+        let open = u32::try_from(open).unwrap_or(u32::MAX);
+        if open + u32::from(suite.trials) > u32::from(MAX_OPEN_TRIALS) {
+            return Ok(SuiteInsert::TooManyTrials(open));
+        }
         kept.suites.entry(suite.id).or_insert_with(|| FakeSuite {
+            owner,
             benchmark: suite.benchmark.to_string(),
             agents: suite.agents.clone(),
         });
-        Ok(())
+        Ok(SuiteInsert::Inserted)
     }
 
-    async fn insert_trial(&self, trial: &TrialKey, run_id: RunId) -> Result<(), FakeError> {
+    async fn insert_trial(
+        &self,
+        trial: &TrialKey,
+        run_id: RunId,
+        base_commit: &str,
+    ) -> Result<(), FakeError> {
         if self.fails("insert_trial") {
             return Err(FakeError);
         }
         let mut kept = self.evaluation.lock().expect("evaluation");
         kept.trials.entry(trial_id(trial)).or_insert(run_id);
+        kept.base_commits
+            .entry(trial_id(trial))
+            .or_insert_with(|| base_commit.to_string());
         Ok(())
     }
 
@@ -197,11 +281,21 @@ impl EvaluationRepository for FakeRepo {
 /// given, or 0.8 once none is left, and keeps what it was asked.
 #[derive(Default)]
 pub(crate) struct FakeJudge {
+    /// Whether every call fails, as a model that is down.
+    down: bool,
     verdicts: Mutex<VecDeque<Result<JudgeVerdict, FakeError>>>,
     asked: Mutex<Vec<(MacroUserIdStr<'static>, JudgeQuestion)>>,
 }
 
 impl FakeJudge {
+    /// A judge whose every call fails.
+    pub(crate) fn down() -> Self {
+        Self {
+            down: true,
+            ..Self::default()
+        }
+    }
+
     /// Answer the next call with `score`.
     pub(crate) fn then(&self, score: f64) {
         self.verdicts
@@ -243,6 +337,9 @@ impl RunJudge for FakeJudge {
             .lock()
             .expect("asked")
             .push((owner.clone(), question.clone()));
+        if self.down {
+            return Err(FakeError);
+        }
         self.verdicts
             .lock()
             .expect("verdicts")

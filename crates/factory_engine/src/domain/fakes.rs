@@ -1377,6 +1377,8 @@ pub(crate) struct FakeGithubState {
     pub(crate) deployment_reads: Vec<(String, String)>,
     /// The pairs of commits whose second contains the first.
     pub(crate) descendants: BTreeSet<(String, String)>,
+    /// The branches deleted, by repository and branch, in order.
+    pub(crate) deleted_branches: Vec<(String, String)>,
 }
 
 /// GitHub in memory, for one Run's branch: opening its pull request makes
@@ -1596,6 +1598,22 @@ impl PullRequests for FakeGithub {
             state.branch_heads.front().cloned()
         };
         Ok(head.flatten())
+    }
+
+    async fn delete_branch(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        branch: &str,
+    ) -> Result<bool, FakeGithubError> {
+        let mut state = self.state();
+        if state.unreachable {
+            return Err(FakeGithubError::Refused);
+        }
+        state
+            .deleted_branches
+            .push((repository.url(), branch.to_string()));
+        Ok(true)
     }
 
     async fn changed_files(

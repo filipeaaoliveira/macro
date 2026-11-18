@@ -313,6 +313,15 @@ pub trait PullRequests: Send + Sync + 'static {
         branch: &str,
     ) -> impl Future<Output = Result<Option<Vec<String>>, Self::Err>> + Send;
 
+    /// Delete `branch` of `repository` as `owner`: true once it is gone,
+    /// deleted now or gone already.
+    fn delete_branch(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        branch: &str,
+    ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
+
     /// The commit `branch` of `repository` is at; none when the branch is
     /// not there.
     fn branch_head(
@@ -888,10 +897,21 @@ pub trait FactoryService: Send + Sync + 'static {
         task_id: Option<Uuid>,
     ) -> impl Future<Output = Result<RunDetail, FactoryError>> + Send;
 
+    /// The commit a Benchmark's trials on `repo_url` start from unless a
+    /// task pins one: the head of its default branch, read as `actor`, who
+    /// must reach the repository and may push to it, as each trial's Run
+    /// checks again.
+    fn benchmark_base(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        repo_url: &str,
+    ) -> impl Future<Output = Result<String, FactoryError>> + Send;
+
     /// Record and start a Benchmark trial's Run of the built-in Flow
     /// `flow`, owned by `actor`, who started its suite: as
     /// [`Self::create_run`] for a Run on no task, kept as `trial` before
-    /// its workflow starts, so its Steps run on the suite's configuration.
+    /// its workflow starts, so its Steps run on the suite's configuration
+    /// and its write starts from `base_commit`.
     fn create_trial_run(
         &self,
         actor: MacroUserIdStr<'static>,
@@ -899,6 +919,7 @@ pub trait FactoryService: Send + Sync + 'static {
         request: String,
         repo_url: String,
         trial: TrialKey,
+        base_commit: String,
     ) -> impl Future<Output = Result<RunDetail, FactoryError>> + Send;
 }
 

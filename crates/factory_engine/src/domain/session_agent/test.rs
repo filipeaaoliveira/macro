@@ -1278,6 +1278,50 @@ async fn a_run_s_arm_chooses_the_agent_its_steps_start_with() {
     assert_eq!(recorded(&repo, key).1, Some(name("primary")));
 }
 
+/// A Benchmark trial runs on its suite's configuration only: when the
+/// Agent it chose cannot start for lack of quota, no other takes the Step,
+/// which fails.
+#[tokio::test]
+async fn a_trial_s_agent_out_of_quota_fails_its_step() {
+    use factory_records::domain::evaluation::{EvaluationRepository, NewSuite, TrialKey};
+
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded)
+        .preparing(&[no_quota()]);
+    let task = plan_task(&repo).await;
+    let suite_id = Uuid::from_u128(600);
+    let configuration = [(planner(), name("spare"))].into_iter().collect();
+    repo.insert_suite(&NewSuite {
+        id: suite_id,
+        user_id: &julia(),
+        benchmark: "core",
+        agents: &configuration,
+        trials: 1,
+    })
+    .await
+    .expect("suite");
+    repo.insert_trial(
+        &TrialKey {
+            suite_id,
+            task: "typo".to_string(),
+        },
+        task.key.run_id,
+        "1111111111111111111111111111111111111111",
+    )
+    .await
+    .expect("trial");
+
+    let failed = agent(&sessions, &repo).answer(task).await;
+
+    assert!(
+        matches!(failed, Err(SessionAgentError::NoQuota(_))),
+        "{failed:?}"
+    );
+    let prepared = sessions.prepared_calls.lock().expect("prepared");
+    let bots: Vec<BotId> = prepared.iter().map(|call| call.selection.bot_id).collect();
+    assert_eq!(bots, [SPARE]);
+}
+
 /// An Agent refused its prompt for lack of quota opened a session that did
 /// no work: it is deleted, and the next Agent takes the Step.
 #[tokio::test]

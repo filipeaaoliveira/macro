@@ -8,6 +8,7 @@ use std::sync::Arc;
 use agent::Message;
 use agent::structured_output::{DynamicSchema, dynamic_structured_completion};
 use ai_usage::{AiFeature, UsageContext, UsageRecorder};
+use factory_records::domain::evaluation::MAX_MODEL_BYTES;
 use macro_user_id::user_id::MacroUserIdStr;
 use serde::Deserialize;
 use serde_json::json;
@@ -17,6 +18,20 @@ use crate::domain::ports::{JudgeQuestion, JudgeVerdict, RunJudge};
 /// The model a Scorer judges on unless told otherwise: Claude Haiku 5.5, by
 /// the id Macro's model router knows, as the Gate model.
 pub const DEFAULT_SCORER_MODEL: &str = "anthropic/claude-haiku-5-5";
+
+/// Why a Scorers' model id is refused.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("the scorer model id must be 1 to {MAX_MODEL_BYTES} bytes")]
+pub struct ScorerModelError;
+
+/// `model`, once it fits the judgments' record of it: 1 to
+/// [`MAX_MODEL_BYTES`] bytes, so a judgment is never refused for its model.
+pub fn checked_scorer_model(model: String) -> Result<String, ScorerModelError> {
+    if model.trim().is_empty() || model.len() > MAX_MODEL_BYTES {
+        return Err(ScorerModelError);
+    }
+    Ok(model)
+}
 
 /// Why a judge's call failed.
 #[derive(Debug, thiserror::Error)]
@@ -90,5 +105,18 @@ impl RunJudge for ModelRunJudge {
             score: judged.score,
             reason: judged.reason,
         })
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::{DEFAULT_SCORER_MODEL, checked_scorer_model};
+
+    #[test]
+    fn a_scorer_model_id_must_fit_its_record() {
+        assert!(checked_scorer_model(DEFAULT_SCORER_MODEL.to_string()).is_ok());
+        assert!(checked_scorer_model(String::new()).is_err());
+        assert!(checked_scorer_model("m".repeat(201)).is_err());
+        assert!(checked_scorer_model("m".repeat(200)).is_ok());
     }
 }

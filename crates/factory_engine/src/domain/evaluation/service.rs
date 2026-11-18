@@ -7,13 +7,13 @@ use ai_usage::domain::session_usage::SessionUsageReader;
 use factory_records::domain::evaluation::{
     EvaluationRepository, Judgment, ScoringSubject, SubjectTrial, TrialResult, TrialTokens,
 };
-use factory_records::domain::models::{RunId, RunOutcome};
+use factory_records::domain::models::{Outcome, RunId, RunOutcome};
 use serde_json::json;
 use uuid::Uuid;
 
 use super::{EvaluationDefinition, ScorerDefinition};
-use crate::domain::models::StepError;
-use crate::domain::ports::{JudgeQuestion, RunJudge, ScoringService};
+use crate::domain::models::{CodeRepository, StepError, run_branch};
+use crate::domain::ports::{JudgeQuestion, PullRequests, RunJudge, ScoringService};
 
 /// The entry whose Step's end gives a trial its mechanical score.
 const WRITE_ENTRY: &str = "write";
@@ -90,35 +90,69 @@ pub(crate) fn trial_score(subject: &ScoringSubject) -> f64 {
         .rev()
         .find(|step| step.entry.as_str() == WRITE_ENTRY)
         .and_then(|step| step.outcome.as_ref());
-    match written.map(|outcome| outcome.as_str()) {
-        Some("done") => GREEN_SCORE,
-        Some("red") => RED_SCORE,
+    match written {
+        Some(outcome) if *outcome == Outcome::done() => GREEN_SCORE,
+        Some(outcome) if *outcome == Outcome::red() => RED_SCORE,
         _ => 0.0,
     }
 }
 
-/// Scores Runs as they end, over the records, the Scorers' model and the
-/// agents' recorded usage.
-pub struct ScoringServiceImpl<R, J, U> {
+/// Scores Runs as they end, over the records, the Scorers' model, the
+/// agents' recorded usage, and GitHub, where a trial's branch is deleted.
+pub struct ScoringServiceImpl<R, J, U, G> {
     repo: R,
     judge: J,
     usage: U,
+    github: G,
     definition: Arc<EvaluationDefinition>,
 }
 
-impl<R, J, U> ScoringServiceImpl<R, J, U>
+impl<R, J, U, G> ScoringServiceImpl<R, J, U, G>
 where
     R: EvaluationRepository,
     J: RunJudge,
     U: SessionUsageReader,
+    G: PullRequests,
 {
     /// Score Runs with the Scorers and Benchmarks of `definition`.
-    pub fn new(repo: R, judge: J, usage: U, definition: Arc<EvaluationDefinition>) -> Self {
+    pub fn new(
+        repo: R,
+        judge: J,
+        usage: U,
+        github: G,
+        definition: Arc<EvaluationDefinition>,
+    ) -> Self {
         Self {
             repo,
             judge,
             usage,
+            github,
             definition,
+        }
+    }
+
+    /// Delete a scored trial's Run's branch, its own and no other, as the
+    /// Run's owner: a trial opens no pull request, so the branch is of no
+    /// more use. A failure is logged and leaves the branch.
+    async fn delete_trial_branch(&self, subject: &ScoringSubject, trial: &SubjectTrial) {
+        let Some(repository) = subject.repo_url.as_deref().and_then(CodeRepository::parse) else {
+            return;
+        };
+        let branch = run_branch(subject.run_id);
+        match self
+            .github
+            .delete_branch(&subject.user_id, &repository, &branch)
+            .await
+        {
+            Ok(true) => {
+                if let Err(error) = self.repo.record_branch_deleted(&trial.key).await {
+                    tracing::warn!(?error, "a deleted trial branch was not recorded");
+                }
+            }
+            Ok(false) => {}
+            Err(error) => {
+                tracing::warn!(?error, %branch, "a trial's branch was not deleted");
+            }
         }
     }
 
@@ -210,9 +244,16 @@ where
                 .await
                 .map_err(internal)?;
         }
+        if !trial.branch_deleted {
+            self.delete_trial_branch(subject, trial).await;
+        }
 
-        // A Benchmark removed from the definition since keeps its result
+        // A cancelled trial did not finish its work, so no Scorer judges it;
+        // a Benchmark removed from the definition since keeps its result
         // and is judged no more.
+        if subject.outcome == Some(RunOutcome::Cancelled) {
+            return Ok(true);
+        }
         let Some(benchmark) = self.definition.benchmark(&trial.benchmark) else {
             return Ok(true);
         };
@@ -237,14 +278,27 @@ where
     }
 }
 
-impl<R, J, U> ScoringService for ScoringServiceImpl<R, J, U>
+impl<R, J, U, G> ScoringService for ScoringServiceImpl<R, J, U, G>
 where
     R: EvaluationRepository,
     J: RunJudge,
     U: SessionUsageReader,
+    G: PullRequests,
 {
     #[tracing::instrument(err, skip(self))]
     async fn score_run(&self, run_id: RunId) -> Result<(), StepError> {
+        // With no Scorer, only a trial has anything to keep: any other Run
+        // is left without reading it.
+        if self.definition.scorers().is_empty()
+            && self
+                .repo
+                .trial_of(run_id)
+                .await
+                .map_err(internal)?
+                .is_none()
+        {
+            return Ok(());
+        }
         let Some(subject) = self.repo.scoring_subject(run_id).await.map_err(internal)? else {
             return Ok(());
         };

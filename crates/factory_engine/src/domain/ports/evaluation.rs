@@ -34,7 +34,8 @@ pub trait RunJudge: Send + Sync + 'static {
     /// The model's id, as its judgments record it.
     fn model(&self) -> &str;
 
-    /// Ask the model `question`, billed to `owner`, the Run's owner.
+    /// Ask the model `question`, its usage recorded against `owner`, the
+    /// Run's owner, and billed to no one.
     fn judge(
         &self,
         owner: &MacroUserIdStr<'static>,

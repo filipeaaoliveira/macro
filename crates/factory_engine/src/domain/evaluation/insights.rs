@@ -6,7 +6,8 @@ use std::sync::Arc;
 
 use chrono::{DateTime, NaiveDate, Utc};
 use factory_records::domain::evaluation::{
-    AgentChoices, BENCHMARK_FLOW, EvaluationRecords, EvaluationRepository, NewSuite, TrialKey,
+    AgentChoices, BENCHMARK_FLOW, EvaluationRecords, EvaluationRepository, MAX_OPEN_TRIALS,
+    NewSuite, SuiteInsert, TrialKey,
 };
 use factory_records::domain::models::{RunId, RunOutcome};
 use macro_user_id::user_id::MacroUserIdStr;
@@ -78,6 +79,9 @@ pub struct ArmInsight {
     pub ended: u32,
     /// How many ended `success`.
     pub succeeded: u32,
+    /// How many had a Step the arm's Agent could not start, which another
+    /// Agent of its Role took: their results are not the arm's alone.
+    pub fell_back: u32,
     /// The Scorers' judgments of its Runs.
     pub scores: Vec<ArmScoreInsight>,
 }
@@ -102,8 +106,6 @@ pub struct ExperimentInsight {
 pub struct BenchmarkSummary {
     /// Its name.
     pub name: String,
-    /// The repository its trials work on.
-    pub repository: String,
     /// Its frozen tasks, by name.
     pub tasks: Vec<String>,
     /// The Scorers that judge each trial.
@@ -191,6 +193,19 @@ pub struct SuiteStarted {
     pub id: Uuid,
     /// Its trials' Runs, by task.
     pub runs: BTreeMap<String, RunId>,
+    /// The task whose Run was refused, and why: the suite stopped there,
+    /// and the trials before it go on. None when every trial started.
+    pub refused: Option<RefusedTrial>,
+}
+
+/// A trial whose Run was refused.
+#[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RefusedTrial {
+    /// The frozen task.
+    pub task: String,
+    /// Why its Run was refused.
+    pub reason: String,
 }
 
 /// Errors of starting a suite.
@@ -202,9 +217,24 @@ pub enum SuiteError {
     /// The configuration names an Agent the agent definition does not have.
     #[error(transparent)]
     Configuration(#[from] super::EvaluationDefinitionError),
-    /// A trial's Run was refused.
+    /// A trial's Run was refused, or the Benchmark's repository cannot be
+    /// reached, before any trial started.
     #[error(transparent)]
     Run(#[from] FactoryError),
+    /// A suite of the Benchmark the caller started still runs.
+    #[error("a suite of benchmark {0} you started still runs")]
+    Running(String),
+    /// The suite's trials would take the caller past the running trials
+    /// they may have.
+    #[error(
+        "you have {open} trials running; a suite of {trials} more would pass the {MAX_OPEN_TRIALS} you may have"
+    )]
+    TooManyTrials {
+        /// The caller's running trials.
+        open: u32,
+        /// The suite's trials.
+        trials: u16,
+    },
     /// Anything else.
     #[error("starting a suite failed: {0:?}")]
     Internal(rootcause::Report),
@@ -317,6 +347,7 @@ pub(crate) fn evaluation_insights(
             runs: tally.runs,
             ended: tally.ended,
             succeeded: tally.succeeded,
+            fell_back: tally.fell_back,
             scores,
         });
     }
@@ -342,6 +373,7 @@ pub(crate) fn evaluation_insights(
                             runs: 0,
                             ended: 0,
                             succeeded: 0,
+                            fell_back: 0,
                             scores: Vec::new(),
                         },
                     },
@@ -372,7 +404,6 @@ pub(crate) fn evaluation_insights(
         .iter()
         .map(|benchmark| BenchmarkSummary {
             name: benchmark.name.clone(),
-            repository: benchmark.repository.clone(),
             tasks: benchmark
                 .tasks
                 .iter()
@@ -483,27 +514,48 @@ where
             self.agents.as_ref(),
         )?;
 
+        // The caller must reach the repository before anything is kept;
+        // its default branch's head, read once, is where every task that
+        // pins no commit starts, so the suite's trials replay one code.
+        let head = self
+            .runs
+            .benchmark_base(&actor, &definition.repository)
+            .await?;
+        let trials = u16::try_from(definition.tasks.len()).unwrap_or(u16::MAX);
+
         // The suite is recorded first, so each trial's Run, recorded and
         // started by the Run API, is kept with it before its workflow
         // starts. A task whose Run is refused stops the suite there: the
-        // trials already started go on.
+        // trials already started go on, and the caller is told which task
+        // was refused. A suite none of whose trials started is deleted.
         let id = Uuid::now_v7();
-        self.repo
+        let inserted = self
+            .repo
             .insert_suite(&NewSuite {
                 id,
                 user_id: &actor,
                 benchmark,
                 agents: &agents,
+                trials,
             })
             .await
             .map_err(|error| SuiteError::Internal(internal(error)))?;
+        match inserted {
+            SuiteInsert::Inserted => {}
+            SuiteInsert::Running => return Err(SuiteError::Running(benchmark.to_string())),
+            SuiteInsert::TooManyTrials(open) => {
+                return Err(SuiteError::TooManyTrials { open, trials });
+            }
+        }
         let mut runs = BTreeMap::new();
+        let mut refused = None;
         for task in &definition.tasks {
             let trial = TrialKey {
                 suite_id: id,
                 task: task.name.clone(),
             };
-            let run = self
+            let base_commit = task.base_commit.clone().unwrap_or_else(|| head.clone());
+            let started = self
                 .runs
                 .create_trial_run(
                     actor.clone(),
@@ -511,10 +563,28 @@ where
                     task.request.clone(),
                     definition.repository.clone(),
                     trial,
+                    base_commit,
                 )
-                .await?;
-            runs.insert(task.name.clone(), run.run.id);
+                .await;
+            match started {
+                Ok(run) => {
+                    runs.insert(task.name.clone(), run.run.id);
+                }
+                Err(error) if runs.is_empty() => {
+                    if let Err(cleanup) = self.repo.delete_suite(id).await {
+                        tracing::error!(error = ?cleanup, "a suite with no trial was not deleted");
+                    }
+                    return Err(error.into());
+                }
+                Err(error) => {
+                    refused = Some(RefusedTrial {
+                        task: task.name.clone(),
+                        reason: error.to_string(),
+                    });
+                    break;
+                }
+            }
         }
-        Ok(SuiteStarted { id, runs })
+        Ok(SuiteStarted { id, runs, refused })
     }
 }

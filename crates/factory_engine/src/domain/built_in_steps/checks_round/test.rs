@@ -315,6 +315,7 @@ fn input() -> StepInput<'static> {
         questions_left: 0,
         resumes: None,
         owner_notes: &[],
+        base_commit: None,
     }
 }
 

@@ -28,7 +28,8 @@ worker that walks each Run's Flow, in one process.
   (optional: how long the owner may override the stand-in, 600),
   `FACTORY_EVALUATION` (optional: the Scorers, Experiments and Benchmarks,
   as JSON; none when unset) and `FACTORY_SCORER_MODEL` (optional: the model
-  Scorers judge with, Claude Haiku 5.5 when unset).
+  Scorers judge with, Claude Haiku 5.5 when unset; an id past 200 bytes
+  stops the service from starting).
 - `src/gate_replay.rs`: the `factory_gate_replay` command, which replays
   the Gate model over the Gates people answered in `DATABASE_URL`'s
   records (`FACTORY_GATE_REPLAY_LIMIT`, 500 by default) and prints how

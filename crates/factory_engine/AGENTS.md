@@ -252,19 +252,34 @@ Flows' finished Runs: once a Run ends, the workflow asks the worker
 (`factory_score_run`, behind the `factory-scoring` patch marker, its
 failure ignored) and each sampled Scorer judges it once, from a hash of the
 Scorer and the Run, so a retry samples the same Runs and judges nothing
-twice. A cancelled Run is not judged. An Experiment splits a Flow's Runs on
+twice; the activity is tried at most three times. A cancelled Run is not
+judged, and with no Scorer only trials are read. An Experiment splits a
+Flow's Runs on
 a task into arms by a hash of the Experiment and the task (a Run on no task
 takes none); `start_run` records the arms (`factory_run_arm`) before the
 workflow starts, and `SessionAgent` starts each Step with the Agent the
 Run's arm gives its Role, the Role's own Agents following it on lack of
-quota. A Benchmark lists frozen tasks on one repository: `POST
-/benchmarks/{benchmark}/suites` (`{"agents": {role: agent}}`) records a
-suite and starts one trial Run of each task on the `benchmark` Flow (plan,
-then write, no Gate, no pull request), which runs only as a trial and is
-left out of `GET /flows`, live insights and live Scorers. Once a trial's
-Run ends it keeps its score (1 when write ended `done`, 0.5 `red`, 0
-otherwise) and its agents' tokens, and the Scorers its Benchmark names
-judge it into the trial's own record. `GET /insights/evaluation` (same
+quota; insights count an arm's Runs where that happened (`fellBack`). A
+Benchmark lists frozen tasks on one repository, each pinning a
+`baseCommit` or not: `POST /benchmarks/{benchmark}/suites`
+(`{"agents": {role: agent}}`) checks the caller reaches the repository
+and reads its default branch's head once, records a suite, and starts one
+trial Run of each task on the `benchmark` Flow (plan, then write, no Gate,
+no pull request), its branch made from the task's pinned commit or that
+head (kept on the trial, read into the prompt as `StepInput::base_commit`).
+The Flow is `unattended`: its agents ask no question, a Step whose agent
+stops without a result fails, and it runs only as a trial, left out of
+`GET /flows`, live insights and live Scorers. A trial runs on its
+configuration only: an Agent out of quota fails its Step, with no other
+of its Role taking it. One running suite of a Benchmark per person, and
+`MAX_OPEN_TRIALS` running trials per person, hold new suites (409); a
+trial whose Run is refused stops the suite, which reports it (`refused`),
+and a suite none of whose trials started is deleted. Once a trial's Run
+ends it keeps its score (1 when write ended `done`, 0.5 `red`, 0
+otherwise) and its agents' tokens, its Run's own `factory/<run>` branch is
+deleted as its owner (best effort, `PullRequests::delete_branch`), and,
+unless it was cancelled, the Scorers its Benchmark names judge it into the
+trial's own record. `GET /insights/evaluation` (same
 params as `/insights`) shows each Scorer's judgments, each Experiment's
 arms with their Runs' outcomes and scores, the Benchmarks and the caller's
 suites of the period.
@@ -1406,7 +1421,10 @@ every Run in flight replays as before.
   good, and an older harness answers `reply` as not found, so the Gate
   then says the last message could not be read: deploy the harness first.
 - Removing the `factory-scoring` patch breaks the replay of Runs that
-  were scored once they ended; Runs that ended before it replay without it.
+  were scored once they ended (`plan_scored_judge_failed`); Runs that
+  ended before it replay without it.
+- A worker older than `Flow::unattended` cannot read the `benchmark` Flow:
+  deploy every worker before the API starts a suite.
 - Removing the `factory-gate-owner` patch breaks the replay of Runs that
   told their owner of a Gate; the histories recorded before it
   (`code_rules_fixed_then_merged`, `code_waiting_at_plan_gate_with_rules`,

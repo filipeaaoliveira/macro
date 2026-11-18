@@ -105,8 +105,9 @@ struct RunOrder<'a> {
     repo_url: Option<String>,
     in_person: bool,
     automation: Option<AutomationStart<'a>>,
-    /// The Benchmark trial it is, if a suite starts it.
-    trial: Option<TrialKey>,
+    /// The Benchmark trial it is, if a suite starts it, and the commit its
+    /// write starts from.
+    trial: Option<(TrialKey, String)>,
 }
 
 /// The Run API, over the Run records, the Runs' workflows, the worker that
@@ -708,7 +709,7 @@ where
         // before its workflow starts, so its first Step already runs on
         // their Agents. A Run that cannot keep them does not start.
         let kept = match &trial {
-            Some(trial) => self.repo.insert_trial(trial, run_id).await,
+            Some((trial, base_commit)) => self.repo.insert_trial(trial, run_id, base_commit).await,
             None => {
                 let arms = self.evaluation.assign_arms(built_in.name, task_id);
                 self.repo.record_arms(run_id, &arms).await
@@ -804,6 +805,21 @@ where
         .await
     }
 
+    async fn benchmark_base(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        repo_url: &str,
+    ) -> Result<String, FactoryError> {
+        self.known(actor).await?;
+        let repository = self.reachable_repository(actor, repo_url).await?;
+        let code = CodeRepository::parse(repo_url).ok_or(FactoryError::InvalidRepository)?;
+        self.github
+            .branch_head(actor, &code, &repository.base_branch)
+            .await
+            .map_err(internal)?
+            .ok_or(FactoryError::UnreachableRepository)
+    }
+
     async fn create_trial_run(
         &self,
         actor: MacroUserIdStr<'static>,
@@ -811,6 +827,7 @@ where
         request: String,
         repo_url: String,
         trial: TrialKey,
+        base_commit: String,
     ) -> Result<RunDetail, FactoryError> {
         self.start_run(RunOrder {
             actor,
@@ -820,7 +837,7 @@ where
             repo_url: Some(repo_url),
             in_person: false,
             automation: None,
-            trial: Some(trial),
+            trial: Some((trial, base_commit)),
         })
         .await
     }
@@ -1478,7 +1495,7 @@ pub struct StepServiceImpl<R, E, N = NoOwnerGates, T = NoOwnerGates, P = NoTaskT
 
 impl<R, E> StepServiceImpl<R, E>
 where
-    R: RunRepository + ReviewRoundRepository + MainHoldRepository,
+    R: RunRepository + ReviewRoundRepository + MainHoldRepository + EvaluationRepository,
     E: StepExecutor,
 {
     /// Create the Step service, which tells no owner of a waiting Gate,
@@ -1497,7 +1514,7 @@ where
 
 impl<R, E, N, T, P> StepServiceImpl<R, E, N, T, P>
 where
-    R: RunRepository + ReviewRoundRepository + MainHoldRepository,
+    R: RunRepository + ReviewRoundRepository + MainHoldRepository + EvaluationRepository,
     E: StepExecutor,
     N: GateNotifier,
     T: TaskNotes,
@@ -1575,7 +1592,7 @@ where
 
 impl<R, E, N, T, P> StepService for StepServiceImpl<R, E, N, T, P>
 where
-    R: RunRepository + ReviewRoundRepository + MainHoldRepository,
+    R: RunRepository + ReviewRoundRepository + MainHoldRepository + EvaluationRepository,
     E: StepExecutor,
     N: GateNotifier,
     T: TaskNotes,
@@ -1624,6 +1641,13 @@ where
             .map_err(internal)?;
         let review = review_of(&rounds, &request)?;
         let owner_notes = self.owner_notes(&run, &earlier).await?;
+        // A Benchmark trial's branch starts from the commit its suite
+        // pinned, so every trial of a task replays the same code.
+        let base_commit = self
+            .repo
+            .trial_base_commit(request.key.run_id)
+            .await
+            .map_err(internal)?;
         let input = StepInput {
             key: request.key,
             role: request.role.as_ref(),
@@ -1640,6 +1664,7 @@ where
             questions_left: request.questions_left,
             resumes: request.resumes,
             owner_notes: &owner_notes,
+            base_commit: base_commit.as_deref(),
         };
         let report = self
             .executor

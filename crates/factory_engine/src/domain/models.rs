@@ -166,6 +166,9 @@ pub struct StepInput<'a> {
     /// Gate opened, oldest first: none unless the Run's owner section is
     /// on.
     pub owner_notes: &'a [OwnerNote],
+    /// The commit the Run's branch starts from, when the Run is a Benchmark
+    /// trial pinned to one; otherwise the branch starts from its base.
+    pub base_commit: Option<&'a str>,
 }
 
 /// What an agent is asked to do for one Step.

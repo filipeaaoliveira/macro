@@ -287,23 +287,37 @@ impl<S: RoutineSessions, R: RunRepository + EvaluationRepository> SessionAgent<S
     /// The Agents that take a Step of `task`'s Role in its Run, in order:
     /// the one the Run's Experiment arm or Benchmark suite chose for the
     /// Role first, then the agent definition's, which take the Step when
-    /// one cannot start for lack of quota. A choice the definition no
-    /// longer has is passed over.
+    /// one cannot start for lack of quota. A Benchmark trial takes only its
+    /// first, so every trial runs on its suite's configuration: one that
+    /// cannot start fails. A choice the definition no longer has is passed
+    /// over, and logged.
     async fn role_agents(&self, task: &AgentTask) -> Result<Vec<AgentName>, SessionAgentError> {
-        let chosen = self
+        let run = self
             .repo
             .run_agents(task.key.run_id)
             .await
             .map_err(Self::records)?;
-        let chosen = chosen
-            .get(&task.role)
-            .filter(|agent| self.agents.agent(agent).is_some());
+        let chosen = run.choices.get(&task.role).filter(|agent| {
+            let defined = self.agents.agent(agent).is_some();
+            if !defined {
+                tracing::warn!(
+                    agent = %agent,
+                    role = %task.role,
+                    "the agent a run's arm or suite chose is no longer defined"
+                );
+            }
+            defined
+        });
         let listed = self.agents.for_role(&task.role);
-        Ok(chosen
+        let mut agents: Vec<AgentName> = chosen
             .into_iter()
             .chain(listed.iter().filter(|agent| Some(*agent) != chosen))
             .cloned()
-            .collect())
+            .collect();
+        if run.trial {
+            agents.truncate(1);
+        }
+        Ok(agents)
     }
 
     /// The Agent named `name`.
