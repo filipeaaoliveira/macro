@@ -1075,6 +1075,9 @@ async fn a_code_run_merges_its_pull_request_once_a_person_approves() {
             .map(|pull_request| pull_request.state),
         Some(PullRequestState::Merged)
     );
+    // Its branch is deleted once merged.
+    assert_eq!(github.deleted_branches.len(), 1);
+    assert!(github.deleted_branches[0].starts_with("factory/"));
 }
 
 /// CI that fails is fixed by an agent, reviewed again, and merges green, on
@@ -1136,6 +1139,8 @@ async fn revising_or_cancelling_at_the_merge_question_merges_nothing() {
     let github = github.state();
     assert!(github.merges.is_empty());
     assert_eq!(github.opened, 1);
+    // A cancelled Run keeps its branch, for a person to look at.
+    assert!(github.deleted_branches.is_empty());
 }
 
 /// Review rounds that keep finding Blockers stop after three: the Run ends
@@ -1448,6 +1453,7 @@ async fn cancelling_while_ci_waits_ends_the_run_with_nothing_merged() {
         "{ended:?}"
     );
     assert!(github.state().merges.is_empty());
+    assert!(github.state().deleted_branches.is_empty());
 }
 
 /// A head that moves after the person agreed to merge is not merged: the

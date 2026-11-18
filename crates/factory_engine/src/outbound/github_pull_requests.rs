@@ -276,6 +276,7 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
             Some(RepositoryAccess {
                 default_branch: access.default_branch?,
                 can_push: access.push,
+                deletes_merged_branches: access.delete_branch_on_merge,
             })
         }))
     }
@@ -555,5 +556,19 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
             } => Merging::HeadChanged,
             GithubMergeOutcome::Rejected { message, .. } => Merging::Refused(message),
         })
+    }
+
+    #[tracing::instrument(err, skip(self, owner))]
+    async fn delete_branch(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        branch: &str,
+    ) -> Result<bool, GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        Ok(self
+            .github
+            .delete_branch(&token, repository.owner(), repository.name(), branch)
+            .await?)
     }
 }

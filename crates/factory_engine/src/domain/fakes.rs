@@ -1373,6 +1373,12 @@ pub(crate) struct FakeGithubState {
     pub(crate) deployment_reads: Vec<(String, String)>,
     /// The pairs of commits whose second contains the first.
     pub(crate) descendants: BTreeSet<(String, String)>,
+    /// Whether GitHub deletes a pull request's branch once it merges.
+    pub(crate) deletes_merged_branches: bool,
+    /// The branches deleted, in order.
+    pub(crate) deleted_branches: Vec<String>,
+    /// Whether deleting a branch fails, as GitHub down does.
+    pub(crate) delete_fails: bool,
 }
 
 /// GitHub in memory, for one Run's branch: opening its pull request makes
@@ -1488,6 +1494,7 @@ impl PullRequests for FakeGithub {
         Ok((!state.unreachable).then(|| RepositoryAccess {
             default_branch: "main".to_string(),
             can_push: !state.read_only,
+            deletes_merged_branches: state.deletes_merged_branches,
         }))
     }
 
@@ -1648,6 +1655,26 @@ impl PullRequests for FakeGithub {
         pull_request.state = PullRequestState::Merged;
         pull_request.merge_commit = Some(Self::MERGED.to_string());
         Ok(Merging::Merged)
+    }
+
+    /// Deleting the Run's branch leaves it not there for later reads.
+    async fn delete_branch(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        branch: &str,
+    ) -> Result<bool, FakeGithubError> {
+        let mut state = self.state();
+        if state.delete_fails {
+            return Err(FakeGithubError::Down);
+        }
+        let there = state.head.is_some() || state.branch_heads.iter().any(Option::is_some);
+        state.head = None;
+        state.branch_heads = [None].into();
+        if there {
+            state.deleted_branches.push(branch.to_string());
+        }
+        Ok(there)
     }
 
     async fn deployments(

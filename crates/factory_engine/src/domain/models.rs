@@ -332,6 +332,8 @@ pub struct RepositoryAccess {
     pub default_branch: String,
     /// Whether the owner may push to it.
     pub can_push: bool,
+    /// Whether GitHub deletes a pull request's branch once it merges.
+    pub deletes_merged_branches: bool,
 }
 
 /// A pull request as the Run's owner sees it on GitHub.

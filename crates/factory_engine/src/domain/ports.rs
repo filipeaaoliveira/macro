@@ -378,6 +378,15 @@ pub trait PullRequests: Send + Sync + 'static {
         number: u64,
         head_sha: &str,
     ) -> impl Future<Output = Result<Merging, Self::Err>> + Send;
+
+    /// Ask GitHub to delete `branch` of `repository`: `true` once deleted,
+    /// `false` when it was not there.
+    fn delete_branch(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        branch: &str,
+    ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
 }
 
 /// Asks the watch of a base branch's checks, which sets and clears its

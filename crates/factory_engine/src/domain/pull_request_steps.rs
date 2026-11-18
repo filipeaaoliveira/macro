@@ -17,6 +17,9 @@
 //! While a Main Hold holds the Run's base, `merge` merges nothing: it waits
 //! for the hold to clear, then ends `held`, which goes back to the merge Gate.
 //!
+//! Once its pull request merged, the Run's branch is deleted, as GitHub's
+//! "delete branch after merge" does; a Run that ends unmerged keeps it.
+//!
 //! Once merged, `deploy` waits for the deploy the repository declares
 //! (`deploy`).
 
@@ -165,6 +168,16 @@ impl Retryable for PullRequestStepError {
             | Self::ControlFiles(_) => false,
         }
     }
+}
+
+/// Who merged a Run's pull request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Merger {
+    /// The Run's `merge` Step.
+    Run,
+    /// Someone outside the Run, as a person on GitHub; or the Run, on a
+    /// retry whose merge GitHub took though its answer was lost.
+    Outside,
 }
 
 /// What a pull request's checks on its head say.
@@ -538,8 +551,74 @@ where
         pull_request: &PullRequest,
     ) -> Result<StepReport, PullRequestStepError> {
         self.merged(input, recorded, pull_request).await?;
+        self.delete_merged_branch(input, &pull_request.head_sha, Merger::Outside)
+            .await;
         let note = self.kept_note(input).await?;
         Ok(report("merged", format!("{}{note}", named(pull_request))))
+    }
+
+    /// Delete the Run's branch once its pull request merged at
+    /// `merged_head`, as GitHub's "delete branch after merge" does. It is
+    /// best effort: the pull request is merged either way, so a failure is
+    /// logged, never the Step's. Only the Run's own branch is deleted, and
+    /// only while it is at the commit merged: one pushed to since is kept.
+    /// A pull request a person merged leaves its branch to GitHub when the
+    /// repository deletes merged branches itself.
+    async fn delete_merged_branch(&self, input: &StepInput<'_>, merged_head: &str, merger: Merger) {
+        let branch = run_branch(input.key.run_id);
+        let deleted = self
+            .delete_branch_at(input, &branch, merged_head, merger)
+            .await;
+        if let Err(error) = deleted {
+            tracing::warn!(?error, %branch, "the merged run's branch was not deleted");
+        }
+    }
+
+    /// [`Self::delete_merged_branch`], with its failure.
+    async fn delete_branch_at(
+        &self,
+        input: &StepInput<'_>,
+        branch: &str,
+        merged_head: &str,
+        merger: Merger,
+    ) -> Result<(), PullRequestStepError> {
+        let (repository, _) = Self::repository(input)?;
+
+        if merger == Merger::Outside {
+            let access = self
+                .github
+                .repository_access(input.owner, &repository)
+                .await
+                .map_err(PullRequestStepError::github)?;
+            let left_to_github = access.is_none_or(|access| access.deletes_merged_branches);
+            if left_to_github {
+                return Ok(());
+            }
+        }
+
+        // A branch already gone has nothing to delete; one that moved since
+        // the merge holds commits no one merged.
+        let head = self
+            .github
+            .branch_head(input.owner, &repository, branch)
+            .await
+            .map_err(PullRequestStepError::github)?;
+        if head.as_deref() != Some(merged_head) {
+            if head.is_some() {
+                tracing::info!(%branch, "the merged run's branch moved since its merge, so it is kept");
+            }
+            return Ok(());
+        }
+
+        let deleted = self
+            .github
+            .delete_branch(input.owner, &repository, branch)
+            .await
+            .map_err(PullRequestStepError::github)?;
+        if deleted {
+            tracing::info!(%branch, "deleted the merged run's branch");
+        }
+        Ok(())
     }
 
     /// The repository the Run works on, and its record.
@@ -955,6 +1034,7 @@ where
             .map_err(PullRequestStepError::github)?;
         if merging == Merging::Merged {
             self.merged(&input, recorded, &pull_request).await?;
+            self.delete_merged_branch(&input, &head, Merger::Run).await;
         }
         Ok(match merging {
             Merging::Merged => report(
