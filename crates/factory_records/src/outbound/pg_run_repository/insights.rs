@@ -154,6 +154,7 @@ impl RunInsightsRepository for PgRunRepository {
                 FROM factory_step s
                 LEFT JOIN factory_gate g
                     ON g.run_id = s.run_id AND g.seq = s.seq AND g.rule IS NULL AND NOT g.by_stand_in
+                        AND g.agent_session_id IS NULL
                 WHERE s.run_id = ANY($1)
             ),
             by_entry AS (
@@ -247,6 +248,7 @@ impl RunInsightsRepository for PgRunRepository {
                 FROM factory_step s
                 LEFT JOIN factory_gate g
                     ON g.run_id = s.run_id AND g.seq = s.seq AND g.rule IS NULL AND NOT g.by_stand_in
+                        AND g.agent_session_id IS NULL
                 WHERE s.run_id = ANY($1) AND s.outcome IS DISTINCT FROM 'question'
             )
             SELECT entry AS "entry!", 'outcome' AS "kind!", outcome AS "value!", count(*) AS "count!"

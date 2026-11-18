@@ -153,7 +153,7 @@ export class Macro<T extends MacroOpts = MacroOpts> {
 
   /** unfurls resources and operations. */
   readonly unfurls: UnfurlNamespace;
-  /** The software factory: an agent Step's hand back. */
+  /** The software factory: start, steer and answer Runs, the Queue, and an agent Step's hand back. */
   readonly factory: FactoryNamespace;
 
   /** agents resources and operations. */
@@ -521,6 +521,7 @@ export { ExternalChatMessage } from './entities/external-chat/message';
 export { ExternalChatParticipant } from './entities/external-chat/participant';
 export { ExternalChatSend } from './entities/external-chat/send';
 export { ExternalChatUpload } from './entities/external-chat/upload';
+export { FactoryRun, type WaitingGate } from './entities/factory/run';
 export {
   GithubPullRequest,
   PullRequestChangeset,

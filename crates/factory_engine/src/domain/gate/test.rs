@@ -22,6 +22,7 @@ fn answer(seq: u16, answer: &str) -> AnswerGate {
         note: None,
         user_id: MacroUserIdStr::try_from("macro|julia@example.com".to_string()).expect("valid"),
         approved_control_files: None,
+        agent_session: None,
     }
 }
 

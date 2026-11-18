@@ -5,7 +5,9 @@
 //! keeps the definition it was created with. Its owner section says what
 //! happens to the Gates no rule answers: with it on, they go to the Run's
 //! owner (`owner_gates`). Its task thread section says whether a Run posts
-//! its updates to its task's comments (`task_thread`).
+//! its updates to its task's comments (`task_thread`). Its Queue limit says
+//! how many Gates and questions may wait on a person before no new Run of
+//! theirs starts (`queue_limit`).
 
 #[cfg(test)]
 mod test;
@@ -92,10 +94,14 @@ pub const OWNER_GATES: &str = "owner_gates";
 /// kinds.
 pub const TASK_THREAD: &str = "task_thread";
 
+/// The highest Queue limit a definition may set.
+pub const MAX_QUEUE_LIMIT: u16 = 1000;
+
 /// A workspace's Orchestrator Definition: which kinds of Gate the factory
 /// decides on its own, whether the Gates it leaves go to the Run's owner,
-/// and which the stand-in answers for the Run's owner when no rule does. A
-/// kind left off waits for a person, as every Gate did before Standing
+/// which the stand-in answers for the Run's owner when no rule does, and
+/// the Queue limit above which no new Run starts. A kind left off waits for
+/// a person, as every Gate did before Standing
 /// Rules. Whatever it says, a Tampered Run's Gates and a merge through a
 /// Main Hold stay a person's.
 #[derive(
@@ -127,10 +133,38 @@ pub struct OrchestratorDefinition {
     /// Off, as when a definition is sent without it, a Run posts nothing.
     #[serde(default)]
     pub task_thread: bool,
+    /// The Queue limit: the most Gates and questions that may wait on a
+    /// person (their Queue) for a new Run of theirs to start under this
+    /// definition. Above it, no new Run starts; Runs already going go on.
+    /// None, and a definition sent without it, sets no limit. At most
+    /// [`MAX_QUEUE_LIMIT`]. A Run does not keep it: it decides only
+    /// whether a Run starts, so a Run's rules read with none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_limit: Option<u16>,
     /// The kinds of Gate the stand-in answers for the Run's owner, after
     /// the rules and before the person; off for every kind when left out.
     #[serde(default)]
     pub stand_in: StandInKinds,
+    /// The kinds of Gate the Orchestrator, the owner's agent in Macro chat,
+    /// may give the approving answer to for them (`approve`, `fix`); off
+    /// for every kind when left out. It may always send work back, and
+    /// never approves a merge.
+    #[serde(default)]
+    pub orchestrator: OrchestratorKinds,
+}
+
+/// The kinds of Gate the Orchestrator may give the approving answer to for
+/// the Run's owner. It never approves a merge, so it has no setting for
+/// one.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, utoipa::ToSchema,
+)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OrchestratorKinds {
+    /// Approve the plan Gate.
+    pub plan: bool,
+    /// Send a review round's Blockers to be fixed.
+    pub blockers: bool,
 }
 
 /// The kinds of Gate the stand-in answers for the Run's owner: a small
@@ -155,6 +189,12 @@ const STAND_IN_PLAN: &str = "stand_in_plan";
 /// How a definition keeps that the stand-in answers the Blockers Gate.
 const STAND_IN_BLOCKERS: &str = "stand_in_blockers";
 
+/// How a definition keeps that the Orchestrator may approve the plan Gate.
+const ORCHESTRATOR_PLAN: &str = "orchestrator_plan";
+
+/// How a definition keeps that the Orchestrator may send Blockers to a fix.
+const ORCHESTRATOR_BLOCKERS: &str = "orchestrator_blockers";
+
 impl OrchestratorDefinition {
     /// The definition that applies when a team set none: the review's
     /// Blockers are fixed on their own, as they were before Standing Rules,
@@ -165,7 +205,12 @@ impl OrchestratorDefinition {
         merge: false,
         owner_gates: false,
         task_thread: false,
+        queue_limit: None,
         stand_in: StandInKinds {
+            plan: false,
+            blockers: false,
+        },
+        orchestrator: OrchestratorKinds {
             plan: false,
             blockers: false,
         },
@@ -190,10 +235,22 @@ impl OrchestratorDefinition {
         }
     }
 
+    /// Whether the Orchestrator may give a Gate of `kind` its approving
+    /// answer for the Run's owner. It never approves a merge.
+    pub fn orchestrator_approves(self, kind: RuleGateKind) -> bool {
+        match kind {
+            RuleGateKind::Plan => self.orchestrator.plan,
+            RuleGateKind::Blockers => self.orchestrator.blockers,
+            RuleGateKind::Merge => false,
+        }
+    }
+
     /// The kinds its rules decide, then [`OWNER_GATES`] when its owner
     /// section is on, then the kinds the stand-in answers
-    /// (`stand_in_plan`, `stand_in_blockers`), then [`TASK_THREAD`] when
-    /// its task thread section is on: what is stored of it.
+    /// (`stand_in_plan`, `stand_in_blockers`), then those the Orchestrator
+    /// may approve (`orchestrator_plan`, `orchestrator_blockers`), then
+    /// [`TASK_THREAD`] when its task thread section is on: what is stored of
+    /// it beside its Queue limit, which has a column of its own.
     pub fn kinds(self) -> Vec<String> {
         let ruled = [
             RuleGateKind::Plan,
@@ -211,12 +268,24 @@ impl OrchestratorDefinition {
         .into_iter()
         .filter(|(on, _)| *on)
         .map(|(_, kind)| kind.to_string());
+        let orchestrated = [
+            (self.orchestrator.plan, ORCHESTRATOR_PLAN),
+            (self.orchestrator.blockers, ORCHESTRATOR_BLOCKERS),
+        ]
+        .into_iter()
+        .filter(|(on, _)| *on)
+        .map(|(_, kind)| kind.to_string());
         let thread = self.task_thread.then(|| TASK_THREAD.to_string());
-        ruled.chain(owner).chain(stood_in).chain(thread).collect()
+        ruled
+            .chain(owner)
+            .chain(stood_in)
+            .chain(orchestrated)
+            .chain(thread)
+            .collect()
     }
 
-    /// The definition stored as `kinds` ([`Self::kinds`]); none when one is
-    /// not a name this code knows.
+    /// The definition stored as `kinds` ([`Self::kinds`]), with no Queue
+    /// limit; none when one is not a name this code knows.
     pub fn from_kinds(kinds: &[String]) -> Option<Self> {
         let mut definition = Self::default();
         for kind in kinds {
@@ -225,6 +294,8 @@ impl OrchestratorDefinition {
                 TASK_THREAD => definition.task_thread = true,
                 STAND_IN_PLAN => definition.stand_in.plan = true,
                 STAND_IN_BLOCKERS => definition.stand_in.blockers = true,
+                ORCHESTRATOR_PLAN => definition.orchestrator.plan = true,
+                ORCHESTRATOR_BLOCKERS => definition.orchestrator.blockers = true,
                 _ => match kind.parse::<RuleGateKind>().ok()? {
                     RuleGateKind::Plan => definition.plan = true,
                     RuleGateKind::Blockers => definition.blockers = true,

@@ -2,12 +2,15 @@ import { t } from '@app/lib/i18n';
 import { toast } from '@core/component/Toast/Toast';
 import { fireAndForget } from '@core/util/fireAndForget';
 import { ThrownResultError } from '@core/util/result';
-import { Button, Checkbox } from '@ui';
-import { For, Match, Show, Switch } from 'solid-js';
+import { Button, Checkbox, NumberUnitInput } from '@ui';
+import { createSignal, For, Match, Show, Switch } from 'solid-js';
 import {
+  DEFAULT_QUEUE_LIMIT,
   GATE_KINDS,
   type GateKind,
+  MAX_QUEUE_LIMIT,
   type OrchestratorDefinition,
+  type OrchestratorKinds,
   RULE_NAMES,
   STAND_IN_KINDS,
   type StandInKinds,
@@ -28,14 +31,23 @@ const STAND_IN_NAMES = {
   blockers: 'factoryRuns.standInBlockers',
 } as const satisfies Record<keyof StandInKinds, string>;
 
+const ORCHESTRATOR_NAMES = {
+  plan: 'factoryRuns.orchestratorPlan',
+  blockers: 'factoryRuns.orchestratorBlockers',
+} as const satisfies Record<keyof OrchestratorKinds, string>;
+
+/** The Orchestrator approves no kind a definition leaves out. */
+const NO_ORCHESTRATOR: OrchestratorKinds = { plan: false, blockers: false };
+
 /** The stand-in is off for every kind a definition leaves out. */
 const NO_STAND_IN: StandInKinds = { plan: false, blockers: false };
 
 /**
  * The team's Standing Rules: which kinds of Gate the factory answers on its
  * own for its Runs, whether the Gates it leaves go to the Run's owner,
- * whether its Runs post their updates to their task's thread, and which
- * the stand-in answers for the owner when no rule does.
+ * whether its Runs post their updates to their task's thread, its Queue
+ * limit, which the stand-in answers for the owner when no rule does, and
+ * which the Orchestrator may approve.
  * Its admins turn each on or off, or go back to the default; other members
  * read them. A Tampered Run always waits for a person, whatever they say.
  */
@@ -84,7 +96,10 @@ export function StandingRulesSettings() {
             ownerGates: settings().definition.ownerGates ?? false,
           });
           const toggle = (
-            kind: Exclude<keyof OrchestratorDefinition, 'standIn'>,
+            kind: Exclude<
+              keyof OrchestratorDefinition,
+              'standIn' | 'queueLimit' | 'orchestrator'
+            >,
             on: boolean
           ) =>
             fireAndForget(
@@ -92,6 +107,37 @@ export function StandingRulesSettings() {
               'factory-runs'
             );
           const standIn = () => definition().standIn ?? NO_STAND_IN;
+          const orchestrator = () =>
+            definition().orchestrator ?? NO_ORCHESTRATOR;
+          const toggleOrchestrator = (
+            kind: keyof OrchestratorKinds,
+            on: boolean
+          ) =>
+            fireAndForget(
+              save({
+                ...definition(),
+                orchestrator: { ...orchestrator(), [kind]: on },
+              }),
+              'factory-runs'
+            );
+          const queueLimit = () => definition().queueLimit ?? null;
+          const setQueueLimit = (limit: number | null) =>
+            fireAndForget(
+              save({ ...definition(), queueLimit: limit }),
+              'factory-runs'
+            );
+          // The limit typed so far, saved when the field loses focus.
+          const [typedLimit, setTypedLimit] = createSignal<number>();
+          const saveTypedLimit = () => {
+            const typed = typedLimit();
+            setTypedLimit(undefined);
+            if (typed === undefined || Number.isNaN(typed)) return;
+            const limit = Math.min(
+              Math.max(Math.round(typed), 0),
+              MAX_QUEUE_LIMIT
+            );
+            if (limit !== queueLimit()) setQueueLimit(limit);
+          };
           const toggleStandIn = (kind: keyof StandInKinds, on: boolean) =>
             fireAndForget(
               save({
@@ -154,6 +200,46 @@ export function StandingRulesSettings() {
                   </Checkbox.Description>
                 </div>
               </Checkbox>
+              <Checkbox
+                size="sm"
+                checked={queueLimit() !== null}
+                onChange={(on: boolean) =>
+                  setQueueLimit(on ? DEFAULT_QUEUE_LIMIT : null)
+                }
+                disabled={locked()}
+              >
+                <Checkbox.Control />
+                <div class="flex flex-col gap-0.5">
+                  <Checkbox.Label class="text-sm">
+                    {t('factoryRuns.queueLimit')}
+                  </Checkbox.Label>
+                  <Checkbox.Description class="text-xs text-ink-muted">
+                    {t('factoryRuns.queueLimitHint')}
+                  </Checkbox.Description>
+                </div>
+              </Checkbox>
+              <Show when={queueLimit() !== null}>
+                <NumberUnitInput
+                  class="pl-6"
+                  format={false}
+                  rawValue={typedLimit() ?? queueLimit() ?? undefined}
+                  minValue={0}
+                  maxValue={MAX_QUEUE_LIMIT}
+                  step={1}
+                  disabled={locked()}
+                  onRawValueChange={setTypedLimit}
+                >
+                  <NumberUnitInput.Frame>
+                    <NumberUnitInput.Input
+                      aria-label={t('factoryRuns.queueLimitLabel')}
+                      onBlur={saveTypedLimit}
+                    />
+                    <NumberUnitInput.Unit>
+                      {t('factoryRuns.queueLimitUnit')}
+                    </NumberUnitInput.Unit>
+                  </NumberUnitInput.Frame>
+                </NumberUnitInput>
+              </Show>
               <p class="pt-1 text-sm font-medium">
                 {t('factoryRuns.standInTitle')}
               </p>
@@ -174,6 +260,27 @@ export function StandingRulesSettings() {
               </For>
               <p class="text-xs text-ink-muted">
                 {t('factoryRuns.standInHint')}
+              </p>
+              <p class="pt-1 text-sm font-medium">
+                {t('factoryRuns.orchestratorTitle')}
+              </p>
+              <For each={STAND_IN_KINDS}>
+                {(kind) => (
+                  <Checkbox
+                    size="sm"
+                    checked={orchestrator()[kind]}
+                    onChange={(on: boolean) => toggleOrchestrator(kind, on)}
+                    disabled={locked()}
+                  >
+                    <Checkbox.Control />
+                    <Checkbox.Label class="text-sm">
+                      {t(ORCHESTRATOR_NAMES[kind])}
+                    </Checkbox.Label>
+                  </Checkbox>
+                )}
+              </For>
+              <p class="text-xs text-ink-muted">
+                {t('factoryRuns.orchestratorHint')}
               </p>
               <p class="text-xs text-ink-muted">
                 {settings().isDefault

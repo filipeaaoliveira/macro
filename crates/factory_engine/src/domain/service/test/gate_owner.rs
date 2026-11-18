@@ -116,7 +116,7 @@ async fn a_waiting_gate_is_told_to_the_run_s_owner() {
         assert_eq!(sent[0].metadata.question, "Go on?");
     }
 
-    repo.answer_gate(key, &outcome("approve"), None, &julia(), None)
+    repo.answer_gate(key, &outcome("approve"), None, &julia(), None, None)
         .await
         .expect("answer");
     steps.notify_gate(key).await.expect("notify");
@@ -144,7 +144,7 @@ async fn with_the_owner_section_off_no_gate_is_told_and_no_comment_read() {
     let steps = service(&repo, &executor, &notifier, &notes);
 
     steps.notify_gate(key).await.expect("notify");
-    repo.answer_gate(key, &outcome("approve"), None, &julia(), None)
+    repo.answer_gate(key, &outcome("approve"), None, &julia(), None, None)
         .await
         .expect("answer");
     steps
@@ -196,7 +196,7 @@ async fn the_owner_s_comments_since_the_gate_reach_the_next_step() {
         .as_ref()
         .expect("gate")
         .opened_at;
-    repo.answer_gate(key, &outcome("approve"), None, &julia(), None)
+    repo.answer_gate(key, &outcome("approve"), None, &julia(), None, None)
         .await
         .expect("answer");
     {
@@ -268,7 +268,7 @@ async fn comments_that_cannot_be_read_fail_the_attempt_for_a_retry() {
 }
 
 /// A Blocker of `role` in `path`, at `lines`, found by the Step `seq`.
-fn blocker(seq: u16, role: &str, path: &str, lines: (u32, u32)) -> ReviewFinding {
+pub(super) fn blocker(seq: u16, role: &str, path: &str, lines: (u32, u32)) -> ReviewFinding {
     ReviewFinding {
         seq,
         place: 1,
@@ -308,7 +308,11 @@ fn round(visit: u16, seq: u16, findings: Vec<ReviewFinding>) -> ReviewRound {
 /// A Run whose first review round (Step 1) found a Blocker the rule sent
 /// to a fix (Step 2), and whose second round (Step 3) found `again`, at
 /// its Blockers Gate.
-async fn second_round_finding(repo: &FakeRepo, rules: RunRules, again: ReviewFinding) -> StepKey {
+pub(super) async fn second_round_finding(
+    repo: &FakeRepo,
+    rules: RunRules,
+    again: ReviewFinding,
+) -> StepKey {
     let (run_id, _task) = run_on_task(repo, rules).await;
     let first = StepKey { run_id, seq: 1 };
     gate_at(repo, first, "review", "changes", &["fix", "stop"]).await;
@@ -409,6 +413,7 @@ async fn an_answered_gate_s_notification_is_done() {
                     note: None,
                     user_id: julia(),
                     approved_control_files: None,
+                    agent_session: None,
                 },
             })
             .await
@@ -573,7 +578,7 @@ async fn an_open_gate_s_notification_is_done_once_its_run_ends() {
         let (run_id, _task) = run_on_task(&repo, rules(owner_gates)).await;
         let plan = StepKey { run_id, seq: 1 };
         gate_at(&repo, plan, "plan", "done", &["approve", "revise"]).await;
-        repo.answer_gate(plan, &outcome("approve"), None, &julia(), None)
+        repo.answer_gate(plan, &outcome("approve"), None, &julia(), None, None)
             .await
             .expect("answer");
         let merge = StepKey { run_id, seq: 2 };

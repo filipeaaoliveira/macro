@@ -4,7 +4,7 @@
  * factory_engine
  * OpenAPI spec version: 0.1.0
  */
-
+import type { GateAnswerAgentSessionId } from './gateAnswerAgentSessionId';
 import type { GateAnswerApprovedControlFiles } from './gateAnswerApprovedControlFiles';
 import type { GateAnswerNote } from './gateAnswerNote';
 import type { GateAnswerReplyConfidence } from './gateAnswerReplyConfidence';
@@ -17,6 +17,10 @@ import type { Outcome } from './outcome';
 the stand-in's for the Run's owner.
  */
 export interface GateAnswer {
+  /** The agent session that gave the answer for the owner, when the
+Orchestrator did rather than the owner in person; it is then not
+counted among the owner's own answers. */
+  agentSessionId?: GateAnswerAgentSessionId;
   /** The answer, one the Gate offered: the outcome the Flow routes. */
   answer: Outcome;
   /** When they answered. */

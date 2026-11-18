@@ -28,6 +28,11 @@ const BLOCKERS: OrchestratorDefinition = OrchestratorDefinition {
     merge: false,
     owner_gates: false,
     task_thread: false,
+    queue_limit: None,
+    orchestrator: factory_records::domain::standing_rules::OrchestratorKinds {
+        plan: false,
+        blockers: false,
+    },
     stand_in: StandInKinds {
         plan: false,
         blockers: true,
@@ -155,6 +160,11 @@ fn with_the_owner_section_on_repeated_blockers_are_the_owner_s() {
     let owner_gates = OrchestratorDefinition {
         owner_gates: true,
         task_thread: false,
+        queue_limit: None,
+        orchestrator: factory_records::domain::standing_rules::OrchestratorKinds {
+            plan: false,
+            blockers: false,
+        },
         ..BLOCKERS
     };
     assert!(!may_stand_in(Some(owner_gates), &repeated, &fix_or_stop));

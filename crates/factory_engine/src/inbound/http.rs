@@ -29,11 +29,13 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::domain::models::{
-    ControlFilesSettings, FactoryError, FlowSummary, RunDetail, StandingRulesSettings,
+    Answerer, ControlFilesSettings, FactoryError, FlowSummary, PersonOnly, RunDetail,
+    StandingRulesSettings,
 };
 use crate::domain::ports::FactoryService;
 use factory_records::domain::standing_rules::{
-    OrchestratorDefinition, ProjectRules, RulesSource, RunRules, StandInKinds, StandingRule,
+    OrchestratorDefinition, OrchestratorKinds, ProjectRules, RulesSource, RunRules, StandInKinds,
+    StandingRule,
 };
 
 /// Router state for the Run API.
@@ -287,7 +289,9 @@ where
 }
 
 /// Create a Run of a built-in Flow, owned by the caller, and start its
-/// workflow.
+/// workflow. Above the Queue limit of the Project it would start in, it is
+/// refused (409 `queueFull`): more Gates and questions wait on the caller
+/// than the limit, and the Runs under way go on.
 #[utoipa::path(
     post,
     tag = "factory",
@@ -299,6 +303,7 @@ where
         (status = 400, body = RunErrorResponse),
         (status = 401, body = ErrorResponse),
         (status = 403, body = ErrorResponse),
+        (status = 409, body = RunErrorResponse),
         (status = 500, body = ErrorResponse),
         (status = 502, body = ErrorResponse),
         (status = 503, body = ErrorResponse),
@@ -430,8 +435,15 @@ where
 
 /// Answer, as the caller, the Gate one of their Runs waits on. The Run
 /// goes on once its workflow took the answer; reading the Run shows the
-/// answer once it is recorded. A Gate asks a person: only the owner's own
-/// signed-in session answers it (403 otherwise).
+/// answer once it is recorded. A Gate asks a person: the owner's own
+/// signed-in session answers it, and an agent session they work with
+/// (such as the Orchestrator in Macro chat), from its code, answers only
+/// what a Standing Rule could: never an agent's question, a Gate its Flow
+/// keeps for a person, approving a merge or a Tampered Run, nor an
+/// approving answer the Run's Orchestrator Definition does not allow
+/// (403 `reservedForAPerson`); only from a chat, never from a routine's
+/// run or a factory Step's own session. A Gate answered since is a
+/// conflict (409). Any other caller is refused (403).
 #[utoipa::path(
     post,
     tag = "factory",
@@ -443,7 +455,7 @@ where
         (status = 202),
         (status = 400, body = ErrorResponse),
         (status = 401, body = ErrorResponse),
-        (status = 403, body = ErrorResponse),
+        (status = 403, body = RunErrorResponse),
         (status = 404, body = ErrorResponse),
         (status = 409, body = ErrorResponse),
         (status = 500, body = ErrorResponse),
@@ -464,8 +476,9 @@ where
     Auth: MacroAuthorizationService,
 {
     // An agent works as the Run's owner, so its code could otherwise
-    // approve the plan it wrote, or the Control Files it changed.
-    let actor = in_person(caller.authorization, &headers)?;
+    // approve the plan it wrote, or the Control Files it changed: the
+    // service holds an agent's answer to what a rule could give.
+    let (actor, answerer) = answerer(caller.authorization, &headers)?;
     state
         .service
         .answer_gate(
@@ -475,6 +488,7 @@ where
             body.answer,
             body.note,
             body.approved_control_files,
+            answerer,
         )
         .await?;
     Ok(StatusCode::ACCEPTED)
@@ -537,6 +551,37 @@ fn in_person(
         return Err(FactoryError::NotAPerson);
     }
     Ok(authorization.user.macro_user_id)
+}
+
+/// Who answers a Gate: the person in their own signed-in session, or an
+/// agent session they chat with acting for them from its code, as the
+/// correlation layer validated the session against the call's credential.
+/// An internal caller, an API key or token, a routine's run, and a
+/// background run held to a scope answer nothing.
+fn answerer(
+    authorization: UserOrInternalAuthorization,
+    headers: &HeaderMap,
+) -> Result<(MacroUserIdStr<'static>, Answerer), FactoryError> {
+    if is_in_person(&authorization, headers) {
+        return Ok((authorization.user.macro_user_id, Answerer::InPerson));
+    }
+    let session = agent_correlation::context::current_session();
+    let Some(session_id) = session.filter(|_| authorization.caller == UserOrInternalCaller::User)
+    else {
+        return Err(FactoryError::NotAPerson);
+    };
+    // Only a chat with the person: a routine's run, signed for it or
+    // carrying its id, and a background run held to a scope answer
+    // nothing for them.
+    let routine = agent_correlation::context::current_routine().is_some()
+        || authorization.user.routine_id.is_some();
+    if routine || agent_correlation::context::current_scope().is_some() {
+        return Err(PersonOnly::NotAChat.into());
+    }
+    Ok((
+        authorization.user.macro_user_id,
+        Answerer::Agent { session_id },
+    ))
 }
 
 /// Whether the caller is the person in their own signed-in session: not an
@@ -691,10 +736,13 @@ impl FactoryError {
             | FactoryError::AnswerMissing
             | FactoryError::ControlFilesNotApproved
             | FactoryError::UnknownProject
+            | FactoryError::InvalidQueueLimit { .. }
             | FactoryError::InvalidControlFiles(_) => StatusCode::BAD_REQUEST,
-            FactoryError::NotTheOwner | FactoryError::NotAPerson | FactoryError::NotATeamAdmin => {
-                StatusCode::FORBIDDEN
-            }
+            FactoryError::NotTheOwner
+            | FactoryError::NotAPerson
+            | FactoryError::NotATeamAdmin
+            | FactoryError::ReservedForAPerson(_) => StatusCode::FORBIDDEN,
+            FactoryError::QueueFull { .. } => StatusCode::CONFLICT,
             FactoryError::NotFound | FactoryError::TaskNotFound => StatusCode::NOT_FOUND,
             FactoryError::RunEnded | FactoryError::AnswerRefused(_) | FactoryError::StepEnded => {
                 StatusCode::CONFLICT
@@ -718,6 +766,13 @@ pub enum RunErrorCode {
     /// The Run is Tampered, and approving its Gate needs
     /// `approvedControlFiles` listing its Tampered files.
     ControlFilesNotApproved,
+    /// More Gates and questions wait on the caller than the Queue limit of
+    /// the Project the Run would start in: no new Run starts until they
+    /// answer some.
+    QueueFull,
+    /// An agent answering for the Run's owner tried what the factory keeps
+    /// for the owner in person.
+    ReservedForAPerson,
 }
 
 /// What a refused or failed request answers: a message, and for a refusal
@@ -739,6 +794,8 @@ impl FactoryError {
             FactoryError::UnreachableRepository => Some(RunErrorCode::UnreachableRepository),
             FactoryError::NoPushAccess => Some(RunErrorCode::NoPushAccess),
             FactoryError::ControlFilesNotApproved => Some(RunErrorCode::ControlFilesNotApproved),
+            FactoryError::QueueFull { .. } => Some(RunErrorCode::QueueFull),
+            FactoryError::ReservedForAPerson(_) => Some(RunErrorCode::ReservedForAPerson),
             _ => None,
         }
     }
@@ -812,6 +869,7 @@ impl IntoResponse for FactoryError {
         StandingRulesSettings,
         OrchestratorDefinition,
         StandInKinds,
+        OrchestratorKinds,
         ProjectRules,
         RunRules,
         RulesSource,

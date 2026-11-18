@@ -83,6 +83,14 @@ describe('factoryClient routes', () => {
     expect(
       await refused({ message: 'cannot reach', code: 'unreachableRepository' })
     ).toEqual({ code: 'UNREACHABLE_REPOSITORY', message: 'cannot reach' });
+    expect(
+      await handler(
+        new Response(
+          JSON.stringify({ message: 'too many wait', code: 'queueFull' }),
+          { status: 409 }
+        )
+      )
+    ).toEqual({ code: 'QUEUE_FULL', message: 'too many wait' });
     expect(await refused({ message: 'the request must not be empty' })).toEqual(
       { code: 'HTTP_ERROR', message: 'HTTP error! status: 400' }
     );

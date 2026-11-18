@@ -17,10 +17,10 @@ use crate::domain::gate::{
 use crate::domain::gate_owner::{GateNotice, OwnerNote};
 use crate::domain::main_hold::{HoldTask, MainLook, MainWatch};
 use crate::domain::models::{
-    AgentAnswer, AgentCommand, AgentTask, AgentTurn, CodeRepository, ControlFilesSettings,
-    FactoryError, FlowSummary, HeadChecks, Merging, OpenPullRequest, Opening, PullRequest,
-    RepositoryAccess, RequiredChecks, RunDetail, RunFinish, RunStart, StandingRulesSettings,
-    StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
+    AgentAnswer, AgentCommand, AgentTask, AgentTurn, Answerer, CodeRepository,
+    ControlFilesSettings, FactoryError, FlowSummary, HeadChecks, Merging, OpenPullRequest, Opening,
+    PullRequest, RepositoryAccess, RequiredChecks, RunDetail, RunFinish, RunStart,
+    StandingRulesSettings, StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
 };
 use crate::domain::review_rounds::{ChangedFile, ReviewRoundClosing, ReviewRoundOpening};
 use crate::domain::standing_rules::RuleAnswer;
@@ -655,6 +655,11 @@ pub trait FactoryService: Send + Sync + 'static {
     /// Give `actor`'s answer to the Gate the actor's Run waits on. Approving
     /// a Gate of a Tampered Run needs `approved_control_files`: the
     /// Tampered files the actor saw and approves, which must be the Run's.
+    /// `answerer` says who gives it: the actor in person, or an agent
+    /// session answering for them, which may answer only what a Standing
+    /// Rule could and never what the factory keeps for a person
+    /// ([`PersonOnly`](crate::domain::models::PersonOnly)).
+    #[expect(clippy::too_many_arguments, reason = "each is a part of one answer")]
     fn answer_gate(
         &self,
         actor: MacroUserIdStr<'static>,
@@ -663,6 +668,7 @@ pub trait FactoryService: Send + Sync + 'static {
         answer: Outcome,
         note: Option<String>,
         approved_control_files: Option<Vec<String>>,
+        answerer: Answerer,
     ) -> impl Future<Output = Result<(), FactoryError>> + Send;
 
     /// The Control File patterns `actor`'s Runs are checked against: their

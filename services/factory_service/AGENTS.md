@@ -37,10 +37,11 @@ worker that walks each Run's Flow, in one process.
   API's).
 - Not here: Flows, the workflow and the API's handlers → `crates/factory_engine`;
   the Run tables → `crates/factory_records`.
-- Callers: people, with their own login or user API key, and internal
+- Callers: people, with their own login or user API key, internal
   services, with the internal API key and an acting user
-  (`x-internal-macro-user-id`). Either way the user owns the Runs they create.
-  Bots are refused.
+  (`x-internal-macro-user-id`), and agent sessions acting for a person
+  from code mode (the Orchestrator, through the SDK's `macro.factory`).
+  Either way the user owns the Runs they create. Bots are refused.
 
 ## Checks
 
@@ -75,9 +76,11 @@ worker that walks each Run's Flow, in one process.
   turns the stand-in on for those kinds of Gate; left out, it is off), `{"definition": null}` goes back to the default, and `PUT
   /settings/standing-rules/projects/<initiative id>` sets or removes a
   Project's own, the same way; `"ownerGates": true` in a definition turns
-  its owner section on, and `"taskThread": true` its task thread section
-  (each Run on a task posts its updates to one comment thread on it). `GET /runs/waiting` lists the caller's Runs
-  waiting at a Gate.
+  its owner section on, `"taskThread": true` its task thread section
+  (each Run on a task posts its updates to one comment thread on it), and
+  `"queueLimit": 5` sets its Queue limit (null or left out: none).
+  `GET /runs/waiting` lists the caller's Runs waiting at a Gate: their
+  Queue.
 
 ## Gotchas
 

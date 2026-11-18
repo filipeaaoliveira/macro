@@ -494,6 +494,10 @@ pub struct GateAnswer {
     /// Whether the answer is the stand-in's, which the owner let stand
     /// ([`Gate::stand_in`] says why it gave it).
     pub by_stand_in: bool,
+    /// The agent session that gave the answer for the owner, when the
+    /// Orchestrator did rather than the owner in person; it is then not
+    /// counted among the owner's own answers.
+    pub agent_session_id: Option<Uuid>,
     /// When they answered.
     pub answered_at: DateTime<Utc>,
 }

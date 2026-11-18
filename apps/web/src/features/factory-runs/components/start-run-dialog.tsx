@@ -90,6 +90,7 @@ export function StartRunDialog(props: {
         t('factoryRuns.repositoryUnreachable')
       )
       .with('noPushAccess', () => t('factoryRuns.repositoryNoPush'))
+      .with('queueFull', () => t('factoryRuns.queueFull'))
       .exhaustive();
 
   return (

@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                    UPDATE factory_gate\n                    SET answer = $3, note = $4, user_id = NULL, approved_control_files = $5,\n                        agent_session_id = $6, answered_at = now()\n                    WHERE run_id = $1 AND seq = $2 AND answer IS NULL\n                    ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Text",
+        "Text",
+        "TextArray",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b7fa0e630dc2509250516fb33b738b53eee94129d9cd9f9ddbd600604e98829e"
+}

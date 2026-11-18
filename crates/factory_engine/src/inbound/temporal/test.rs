@@ -742,6 +742,7 @@ impl CodeRun {
             note: note.map(str::to_string),
             user_id: julia(),
             approved_control_files: None,
+            agent_session: None,
         };
         for _ in 0..100 {
             let delivery = workflows
@@ -1185,6 +1186,11 @@ async fn a_run_whose_rules_decide_every_gate_merges_with_no_person_asked() {
             merge: true,
             owner_gates: false,
             task_thread: false,
+            queue_limit: None,
+            orchestrator: factory_records::domain::standing_rules::OrchestratorKinds {
+                plan: false,
+                blockers: false,
+            },
         },
         source: RulesSource::Team,
         project_id: None,
@@ -1241,6 +1247,11 @@ async fn a_gate_of_no_kind_waits_for_a_person_whatever_the_rules() {
             merge: true,
             owner_gates: false,
             task_thread: false,
+            queue_limit: None,
+            orchestrator: factory_records::domain::standing_rules::OrchestratorKinds {
+                plan: false,
+                blockers: false,
+            },
         },
         source: RulesSource::Team,
         project_id: None,

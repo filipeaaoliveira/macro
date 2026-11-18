@@ -27,6 +27,11 @@ const PLAN_AND_MERGE: OrchestratorDefinition = OrchestratorDefinition {
     merge: true,
     owner_gates: false,
     task_thread: false,
+    queue_limit: None,
+    orchestrator: crate::domain::standing_rules::OrchestratorKinds {
+        plan: false,
+        blockers: false,
+    },
     stand_in: StandInKinds {
         plan: false,
         blockers: true,
@@ -39,6 +44,11 @@ const OWNER_GATES_ON: OrchestratorDefinition = OrchestratorDefinition {
     merge: false,
     owner_gates: true,
     task_thread: false,
+    queue_limit: None,
+    orchestrator: crate::domain::standing_rules::OrchestratorKinds {
+        plan: false,
+        blockers: false,
+    },
     stand_in: StandInKinds {
         plan: false,
         blockers: false,
@@ -51,6 +61,11 @@ const EVERY_SETTING: OrchestratorDefinition = OrchestratorDefinition {
     merge: true,
     owner_gates: true,
     task_thread: true,
+    queue_limit: None,
+    orchestrator: crate::domain::standing_rules::OrchestratorKinds {
+        plan: true,
+        blockers: true,
+    },
     stand_in: StandInKinds {
         plan: true,
         blockers: true,
@@ -235,6 +250,95 @@ async fn every_setting_is_kept_together(pool: PgPool) {
     kept_everywhere(pool, EVERY_SETTING).await;
 }
 
+/// The Queue limit is kept with a team's and a Project's rules, replaced
+/// with them, and goes with the team's when they go back to the default.
+/// A Run does not keep it.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "team", "project"))
+)]
+async fn the_queue_limit_is_kept_with_the_rules(pool: PgPool) {
+    let repo = PgRunRepository::new(pool.clone());
+    let (team, project) = (id(TEAM), id(PROJECT));
+    let limited = OrchestratorDefinition {
+        queue_limit: Some(3),
+        ..PLAN_AND_MERGE
+    };
+
+    repo.set_team_rules(team, Some(limited))
+        .await
+        .expect("set the team's");
+    assert_eq!(repo.team_rules(team).await.expect("read"), Some(limited));
+    repo.set_project_rules(team, project, Some(limited))
+        .await
+        .expect("set the project's");
+    assert_eq!(
+        repo.project_rules(team, project).await.expect("read"),
+        Some(limited)
+    );
+    assert_eq!(
+        repo.list_project_rules(team).await.expect("list"),
+        [ProjectRules {
+            project_id: project,
+            definition: limited,
+        }]
+    );
+
+    // Rules saved again without a limit set none.
+    repo.set_project_rules(team, project, Some(PLAN_AND_MERGE))
+        .await
+        .expect("replace the project's");
+    assert_eq!(
+        repo.project_rules(team, project).await.expect("read"),
+        Some(PLAN_AND_MERGE)
+    );
+
+    // Control Files keep the team's row once its rules go back to the
+    // default: the limit goes with them.
+    let patterns = vec!["ci/**".to_string()];
+    repo.set_team_control_files(team, Some(&patterns))
+        .await
+        .expect("set patterns");
+    repo.set_team_rules(team, None).await.expect("clear rules");
+    assert_eq!(repo.team_rules(team).await.expect("read"), None);
+    let limit = sqlx::query_scalar!(
+        "SELECT queue_limit FROM factory_team_settings WHERE team_id = $1",
+        team,
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("read the row");
+    assert_eq!(limit, None);
+
+    let rules = RunRules {
+        definition: limited,
+        source: RulesSource::Team,
+        project_id: None,
+    };
+    let run_id = RunId::generate();
+    let RunInsert::Inserted(_) = repo
+        .insert_run(NewRun {
+            id: run_id,
+            flow: "code",
+            request: "Fix it",
+            user_id: &julia(),
+            task_id: None,
+            repository: None,
+            created_in_person: true,
+            control_file_patterns: &[],
+            control_files_team_id: None,
+            standing_rules: rules,
+        })
+        .await
+        .expect("insert")
+    else {
+        panic!("a run with no task is kept");
+    };
+    let read = repo.get_run(run_id).await.expect("get").expect("kept");
+    let kept = read.standing_rules.expect("rules");
+    assert_eq!(kept.definition, PLAN_AND_MERGE);
+}
+
 /// Keep `definition` as a team's, a Project's and a new Run's rules, and
 /// read each back the same.
 async fn kept_everywhere(pool: PgPool, definition: OrchestratorDefinition) {
@@ -313,12 +417,26 @@ async fn a_rule_answers_a_gate_once(pool: PgPool) {
         .expect("rule answer")
         .expect("the gate is recorded");
     assert_eq!(kept.rule, Some(StandingRule::ApprovePlan));
-    repo.answer_gate(key(run_id, 1), &outcome("revise"), None, &julia(), None)
-        .await
-        .expect("a person's answer after it");
-    repo.answer_gate(key(run_id, 2), &outcome("revise"), None, &julia(), None)
-        .await
-        .expect("a person's answer");
+    repo.answer_gate(
+        key(run_id, 1),
+        &outcome("revise"),
+        None,
+        &julia(),
+        None,
+        None,
+    )
+    .await
+    .expect("a person's answer after it");
+    repo.answer_gate(
+        key(run_id, 2),
+        &outcome("revise"),
+        None,
+        &julia(),
+        None,
+        None,
+    )
+    .await
+    .expect("a person's answer");
     // The person's answer stays, and is what the rule reads back.
     let kept = repo
         .answer_gate_by_rule(

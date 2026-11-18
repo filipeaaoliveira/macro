@@ -14,10 +14,33 @@ use crate::domain::standing_rules::{
 /// The foreign key from a Project's rules to its initiative.
 const PROJECT_FOREIGN_KEY: &str = "factory_project_rules_project_id_fkey";
 
-/// The definition whose rules decide the stored `kinds`.
-fn definition(kinds: Vec<String>) -> Result<OrchestratorDefinition, PgRunRepositoryErr> {
-    OrchestratorDefinition::from_kinds(&kinds)
-        .ok_or(PgRunRepositoryErr::UnknownStandingRules(kinds))
+/// The definition whose rules decide the stored `kinds`, with the stored
+/// Queue limit.
+fn definition(
+    kinds: Vec<String>,
+    queue_limit: Option<i16>,
+) -> Result<OrchestratorDefinition, PgRunRepositoryErr> {
+    let queue_limit = queue_limit
+        .map(|limit| u16::try_from(limit).map_err(|_| PgRunRepositoryErr::OutOfRange(limit.into())))
+        .transpose()?;
+    let definition = OrchestratorDefinition::from_kinds(&kinds)
+        .ok_or(PgRunRepositoryErr::UnknownStandingRules(kinds))?;
+    Ok(OrchestratorDefinition {
+        queue_limit,
+        ..definition
+    })
+}
+
+/// How the Queue limit of `definition` is stored.
+fn stored_queue_limit(
+    definition: Option<&OrchestratorDefinition>,
+) -> Result<Option<i16>, PgRunRepositoryErr> {
+    definition
+        .and_then(|definition| definition.queue_limit)
+        .map(|limit| {
+            i16::try_from(limit).map_err(|_| PgRunRepositoryErr::OutOfRange(i32::from(limit)))
+        })
+        .transpose()
 }
 
 impl StandingRulesRepository for PgRunRepository {
@@ -25,13 +48,18 @@ impl StandingRulesRepository for PgRunRepository {
 
     #[tracing::instrument(err, skip(self))]
     async fn team_rules(&self, team_id: Uuid) -> Result<Option<OrchestratorDefinition>, Self::Err> {
-        let kinds = sqlx::query_scalar!(
-            "SELECT standing_rules FROM factory_team_settings WHERE team_id = $1",
+        let row = sqlx::query!(
+            "SELECT standing_rules, queue_limit FROM factory_team_settings WHERE team_id = $1",
             team_id,
         )
         .fetch_optional(&self.pool)
         .await?;
-        kinds.flatten().map(definition).transpose()
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        row.standing_rules
+            .map(|kinds| definition(kinds, row.queue_limit))
+            .transpose()
     }
 
     // The row also keeps the team's Control Files: going back to the
@@ -43,17 +71,22 @@ impl StandingRulesRepository for PgRunRepository {
         team_id: Uuid,
         definition: Option<OrchestratorDefinition>,
     ) -> Result<(), Self::Err> {
+        let queue_limit = stored_queue_limit(definition.as_ref())?;
         let kinds = definition.map(OrchestratorDefinition::kinds);
         let mut transaction = self.pool.begin().await?;
         sqlx::query!(
             r#"
-            INSERT INTO factory_team_settings (team_id, standing_rules)
-            VALUES ($1, $2)
+            INSERT INTO factory_team_settings (team_id, standing_rules, queue_limit)
+            VALUES ($1, $2, $3)
             ON CONFLICT (team_id)
-            DO UPDATE SET standing_rules = EXCLUDED.standing_rules, updated_at = now()
+            DO UPDATE SET
+                standing_rules = EXCLUDED.standing_rules,
+                queue_limit = EXCLUDED.queue_limit,
+                updated_at = now()
             "#,
             team_id,
             kinds.as_deref(),
+            queue_limit,
         )
         .execute(&mut *transaction)
         .await?;
@@ -76,9 +109,9 @@ impl StandingRulesRepository for PgRunRepository {
         team_id: Uuid,
         project_id: Uuid,
     ) -> Result<Option<OrchestratorDefinition>, Self::Err> {
-        let kinds = sqlx::query_scalar!(
+        let row = sqlx::query!(
             r#"
-            SELECT standing_rules FROM factory_project_rules
+            SELECT standing_rules, queue_limit FROM factory_project_rules
             WHERE team_id = $1 AND project_id = $2
             "#,
             team_id,
@@ -86,14 +119,15 @@ impl StandingRulesRepository for PgRunRepository {
         )
         .fetch_optional(&self.pool)
         .await?;
-        kinds.map(definition).transpose()
+        row.map(|row| definition(row.standing_rules, row.queue_limit))
+            .transpose()
     }
 
     #[tracing::instrument(err, skip(self))]
     async fn list_project_rules(&self, team_id: Uuid) -> Result<Vec<ProjectRules>, Self::Err> {
         let rows = sqlx::query!(
             r#"
-            SELECT project_id, standing_rules FROM factory_project_rules
+            SELECT project_id, standing_rules, queue_limit FROM factory_project_rules
             WHERE team_id = $1
             ORDER BY project_id
             "#,
@@ -105,7 +139,7 @@ impl StandingRulesRepository for PgRunRepository {
             .map(|row| {
                 Ok(ProjectRules {
                     project_id: row.project_id,
-                    definition: definition(row.standing_rules)?,
+                    definition: definition(row.standing_rules, row.queue_limit)?,
                 })
             })
             .collect()
@@ -128,16 +162,21 @@ impl StandingRulesRepository for PgRunRepository {
             .await?;
             return Ok(ProjectRulesSet::Set);
         };
+        let queue_limit = stored_queue_limit(Some(&definition))?;
         let set = sqlx::query!(
             r#"
-            INSERT INTO factory_project_rules (team_id, project_id, standing_rules)
-            VALUES ($1, $2, $3)
+            INSERT INTO factory_project_rules (team_id, project_id, standing_rules, queue_limit)
+            VALUES ($1, $2, $3, $4)
             ON CONFLICT (team_id, project_id)
-            DO UPDATE SET standing_rules = EXCLUDED.standing_rules, updated_at = now()
+            DO UPDATE SET
+                standing_rules = EXCLUDED.standing_rules,
+                queue_limit = EXCLUDED.queue_limit,
+                updated_at = now()
             "#,
             team_id,
             project_id,
             &definition.kinds(),
+            queue_limit,
         )
         .execute(&self.pool)
         .await;

@@ -148,6 +148,7 @@ impl AskingRun {
             note: Some(words.to_string()),
             user_id: julia(),
             approved_control_files: None,
+            agent_session: None,
         };
         let mut delivery = AnswerDelivery::Refused("not sent".to_string());
         for _ in 0..50 {

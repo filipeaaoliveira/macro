@@ -341,6 +341,7 @@ async fn a_plan_reads_what_a_person_answered_the_last_one() {
             answer: Some(GateAnswer {
                 reply_confidence: None,
                 by_stand_in: false,
+                agent_session_id: None,
                 answer: revise,
                 note: Some("Keep the old index".to_string()),
                 user_id: None,
@@ -593,6 +594,7 @@ fn asked(seq: u16, entry: &str, question: &str, answer: &str) -> Step {
             answer: Some(GateAnswer {
                 reply_confidence: None,
                 by_stand_in: false,
+                agent_session_id: None,
                 answer: Outcome::answer(),
                 note: Some(answer.to_string()),
                 user_id: None,

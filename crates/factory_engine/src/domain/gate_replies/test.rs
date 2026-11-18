@@ -40,6 +40,11 @@ const STAND_IN_ONLY: OrchestratorDefinition = OrchestratorDefinition {
     merge: false,
     owner_gates: false,
     task_thread: false,
+    queue_limit: None,
+    orchestrator: factory_records::domain::standing_rules::OrchestratorKinds {
+        plan: false,
+        blockers: false,
+    },
     stand_in: StandInKinds {
         plan: true,
         blockers: true,
@@ -361,6 +366,7 @@ async fn the_stand_in_answers_a_routine_gate_at_or_above_its_threshold() {
         Some("Cover the edge cases"),
         &julia(),
         None,
+        None,
     )
     .await
     .expect("past answer");
@@ -555,7 +561,7 @@ async fn an_override_in_the_window_replaces_the_stand_in_s_answer() {
             .expect("it answers");
     }
 
-    repo.answer_gate(overridden, &outcome("revise"), None, &julia(), None)
+    repo.answer_gate(overridden, &outcome("revise"), None, &julia(), None, None)
         .await
         .expect("override");
     let kept = service
@@ -679,6 +685,7 @@ async fn the_stand_in_reads_past_answers_of_the_same_flow_and_kind() {
         Some("Same flow"),
         &julia(),
         None,
+        None,
     )
     .await
     .expect("past answer");
@@ -693,6 +700,7 @@ async fn the_stand_in_reads_past_answers_of_the_same_flow_and_kind() {
         &outcome("approve"),
         Some("Other flow"),
         &julia(),
+        None,
         None,
     )
     .await
@@ -723,6 +731,7 @@ async fn the_stand_in_reads_past_answers_of_the_same_flow_and_kind() {
                     approved_control_files: None,
                     reply_confidence: None,
                     by_stand_in: false,
+                    agent_session_id: None,
                     answered_at: Utc::now(),
                 }),
                 asked_back: None,

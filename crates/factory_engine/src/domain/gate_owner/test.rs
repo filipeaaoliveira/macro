@@ -78,6 +78,7 @@ fn gated(seq: u16, kind: GateKind, opened_at: u32, answer: Option<&str>) -> Step
                 approved_control_files: None,
                 reply_confidence: None,
                 by_stand_in: false,
+                agent_session_id: None,
                 answered_at: at(opened_at + 1),
             }),
             asked_back: None,

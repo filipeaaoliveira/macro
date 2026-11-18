@@ -8,6 +8,11 @@ fn a_definition_is_stored_as_the_kinds_its_rules_decide() {
         merge: true,
         owner_gates: false,
         task_thread: false,
+        queue_limit: None,
+        orchestrator: crate::domain::standing_rules::OrchestratorKinds {
+            plan: false,
+            blockers: false,
+        },
         stand_in: StandInKinds::default(),
     };
     assert_eq!(definition.kinds(), ["plan", "merge"]);
@@ -29,6 +34,11 @@ fn the_owner_section_is_stored_beside_the_kinds() {
         merge: false,
         owner_gates: true,
         task_thread: false,
+        queue_limit: None,
+        orchestrator: crate::domain::standing_rules::OrchestratorKinds {
+            plan: false,
+            blockers: false,
+        },
         stand_in: StandInKinds::default(),
     };
     assert_eq!(definition.kinds(), ["blockers", "owner_gates"]);
@@ -54,6 +64,21 @@ fn the_owner_section_is_off_by_default_and_when_a_definition_leaves_it_out() {
     )
     .expect("a definition with the section reads");
     assert!(on.owner_gates);
+}
+
+#[test]
+fn a_definition_sent_without_a_queue_limit_sets_none() {
+    let sent: OrchestratorDefinition =
+        serde_json::from_str(r#"{"plan": true, "blockers": true, "merge": false}"#)
+            .expect("a definition without the limit reads");
+    assert_eq!(sent.queue_limit, None);
+    let limited: OrchestratorDefinition = serde_json::from_str(
+        r#"{"plan": false, "blockers": true, "merge": false, "queueLimit": 4}"#,
+    )
+    .expect("a definition with the limit reads");
+    assert_eq!(limited.queue_limit, Some(4));
+    // The limit is not one of the stored names.
+    assert_eq!(limited.kinds(), ["blockers"]);
 }
 
 #[test]
@@ -92,6 +117,11 @@ fn the_kinds_the_stand_in_answers_are_stored_beside_the_rules() {
         merge: false,
         owner_gates: false,
         task_thread: false,
+        queue_limit: None,
+        orchestrator: crate::domain::standing_rules::OrchestratorKinds {
+            plan: false,
+            blockers: false,
+        },
         stand_in: StandInKinds {
             plan: true,
             blockers: false,
@@ -114,6 +144,11 @@ fn the_stand_in_never_answers_a_merge_and_is_off_by_default() {
         merge: true,
         owner_gates: false,
         task_thread: false,
+        queue_limit: None,
+        orchestrator: crate::domain::standing_rules::OrchestratorKinds {
+            plan: false,
+            blockers: false,
+        },
         stand_in: StandInKinds {
             plan: true,
             blockers: true,
@@ -141,6 +176,11 @@ fn the_owner_section_and_the_stand_in_are_stored_together() {
         merge: false,
         owner_gates: true,
         task_thread: false,
+        queue_limit: None,
+        orchestrator: crate::domain::standing_rules::OrchestratorKinds {
+            plan: false,
+            blockers: false,
+        },
         stand_in: StandInKinds {
             plan: false,
             blockers: true,
@@ -178,4 +218,26 @@ fn the_task_thread_section_is_stored_beside_the_kinds_and_off_by_default() {
     )
     .expect("a definition with the section reads");
     assert!(on.task_thread);
+}
+
+#[test]
+fn the_kinds_the_orchestrator_may_approve_are_stored_beside_the_rules() {
+    let definition = OrchestratorDefinition {
+        orchestrator: OrchestratorKinds {
+            plan: true,
+            blockers: true,
+        },
+        ..OrchestratorDefinition::DEFAULT
+    };
+    assert_eq!(
+        definition.kinds(),
+        ["blockers", "orchestrator_plan", "orchestrator_blockers"]
+    );
+    assert_eq!(
+        OrchestratorDefinition::from_kinds(&definition.kinds()),
+        Some(definition)
+    );
+    assert!(definition.orchestrator_approves(RuleGateKind::Plan));
+    assert!(!definition.orchestrator_approves(RuleGateKind::Merge));
+    assert!(!OrchestratorDefinition::DEFAULT.orchestrator_approves(RuleGateKind::Plan));
 }

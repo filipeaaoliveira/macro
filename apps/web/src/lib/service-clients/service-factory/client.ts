@@ -38,14 +38,21 @@ import type {
 const host = () => SERVER_HOSTS.factory;
 
 /** Why a Run wasn't started, when the service names the cause. */
-export type StartRunErrorCode = 'UNREACHABLE_REPOSITORY' | 'NO_PUSH_ACCESS';
+export type StartRunErrorCode =
+  | 'UNREACHABLE_REPOSITORY'
+  | 'NO_PUSH_ACCESS'
+  | 'QUEUE_FULL';
 
 /** The codes the service refuses a start with. */
-type StartRunRefusal = Exclude<RunErrorCode, 'controlFilesNotApproved'>;
+type StartRunRefusal = Exclude<
+  RunErrorCode,
+  'controlFilesNotApproved' | 'reservedForAPerson'
+>;
 
 const START_RUN_ERROR_CODES: Record<StartRunRefusal, StartRunErrorCode> = {
   unreachableRepository: 'UNREACHABLE_REPOSITORY',
   noPushAccess: 'NO_PUSH_ACCESS',
+  queueFull: 'QUEUE_FULL',
 };
 
 function isRunErrorCode(code: unknown): code is StartRunRefusal {

@@ -24,6 +24,11 @@ const PLAN_ONLY: OrchestratorDefinition = OrchestratorDefinition {
     merge: false,
     owner_gates: false,
     task_thread: false,
+    queue_limit: None,
+    orchestrator: factory_records::domain::standing_rules::OrchestratorKinds {
+        plan: false,
+        blockers: false,
+    },
 };
 
 /// A repository where Alice administers a team.
@@ -93,7 +98,7 @@ async fn only_the_admin_s_own_session_sets_the_team_s_rules() {
     assert_eq!(
         body(person).await,
         json!({
-            "definition": { "plan": true, "blockers": false, "merge": true, "ownerGates": false, "taskThread": false, "standIn": { "plan": true, "blockers": false } },
+            "definition": { "plan": true, "blockers": false, "merge": true, "ownerGates": false, "taskThread": false, "standIn": { "plan": true, "blockers": false }, "orchestrator": { "plan": false, "blockers": false } },
             "isDefault": false,
             "projects": [],
             "teamId": team_id,
@@ -114,7 +119,7 @@ async fn only_the_admin_s_own_session_sets_the_team_s_rules() {
         .expect("response");
     assert_eq!(
         body(reset).await["definition"],
-        json!({ "plan": false, "blockers": true, "merge": false, "ownerGates": false, "taskThread": false, "standIn": { "plan": false, "blockers": false } })
+        json!({ "plan": false, "blockers": true, "merge": false, "ownerGates": false, "taskThread": false, "standIn": { "plan": false, "blockers": false }, "orchestrator": { "plan": false, "blockers": false } })
     );
 }
 
@@ -169,7 +174,7 @@ async fn an_admin_sets_rules_for_a_project_they_may_edit() {
         body(set).await["projects"],
         json!([{
             "projectId": project,
-            "definition": { "plan": true, "blockers": true, "merge": true, "ownerGates": false, "taskThread": false, "standIn": { "plan": false, "blockers": false } },
+            "definition": { "plan": true, "blockers": true, "merge": true, "ownerGates": false, "taskThread": false, "standIn": { "plan": false, "blockers": false }, "orchestrator": { "plan": false, "blockers": false } },
         }])
     );
     assert!(
@@ -213,7 +218,7 @@ async fn the_rules_read_as_the_team_s_or_the_default() {
     assert_eq!(
         body(default).await,
         json!({
-            "definition": { "plan": false, "blockers": true, "merge": false, "ownerGates": false, "taskThread": false, "standIn": { "plan": false, "blockers": false } },
+            "definition": { "plan": false, "blockers": true, "merge": false, "ownerGates": false, "taskThread": false, "standIn": { "plan": false, "blockers": false }, "orchestrator": { "plan": false, "blockers": false } },
             "isDefault": true,
             "projects": [],
             "teamId": null,
@@ -231,7 +236,7 @@ async fn the_rules_read_as_the_team_s_or_the_default() {
         .expect("response");
     assert_eq!(
         body(own).await["definition"],
-        json!({ "plan": true, "blockers": false, "merge": false, "ownerGates": false, "taskThread": false, "standIn": { "plan": false, "blockers": false } })
+        json!({ "plan": true, "blockers": false, "merge": false, "ownerGates": false, "taskThread": false, "standIn": { "plan": false, "blockers": false }, "orchestrator": { "plan": false, "blockers": false } })
     );
 }
 
@@ -261,6 +266,11 @@ async fn a_new_run_keeps_its_project_s_or_its_team_s_rules() {
         merge: true,
         owner_gates: false,
         task_thread: false,
+        queue_limit: None,
+        orchestrator: factory_records::domain::standing_rules::OrchestratorKinds {
+            plan: false,
+            blockers: false,
+        },
     };
     repo.team_rules
         .lock()
@@ -304,7 +314,7 @@ async fn a_new_run_keeps_its_project_s_or_its_team_s_rules() {
     assert_eq!(
         teams,
         json!({
-            "definition": { "plan": true, "blockers": false, "merge": false, "ownerGates": false, "taskThread": false, "standIn": { "plan": false, "blockers": false } },
+            "definition": { "plan": true, "blockers": false, "merge": false, "ownerGates": false, "taskThread": false, "standIn": { "plan": false, "blockers": false }, "orchestrator": { "plan": false, "blockers": false } },
             "source": "team",
             "projectId": null,
         })

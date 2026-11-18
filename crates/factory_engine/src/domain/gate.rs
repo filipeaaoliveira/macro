@@ -7,6 +7,7 @@ use factory_records::domain::models::{Outcome, StepKey};
 use factory_records::domain::standing_rules::RuleGateKind;
 use macro_user_id::user_id::MacroUserIdStr;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 /// The Gate a Run waits on: the Step that asked, and the answers it offers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -37,6 +38,11 @@ pub struct AnswerGate {
     /// Control Files carry none.
     #[serde(default)]
     pub approved_control_files: Option<Vec<String>>,
+    /// The agent session that gave the answer for the person, when the
+    /// Orchestrator did. Left out when none, so answers read and recorded
+    /// before it are the same.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_session: Option<Uuid>,
 }
 
 /// A Gate a Run's workflow opened, for its worker to record.

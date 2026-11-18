@@ -4,13 +4,17 @@
  * factory_engine
  * OpenAPI spec version: 0.1.0
  */
+
+import type { OrchestratorDefinitionQueueLimit } from './orchestratorDefinitionQueueLimit';
+import type { OrchestratorKinds } from './orchestratorKinds';
 import type { StandInKinds } from './standInKinds';
 
 /**
  * A workspace's Orchestrator Definition: which kinds of Gate the factory
 decides on its own, whether the Gates it leaves go to the Run's owner,
-and which the stand-in answers for the Run's owner when no rule does. A
-kind left off waits for a person, as every Gate did before Standing
+which the stand-in answers for the Run's owner when no rule does, and
+the Queue limit above which no new Run starts. A kind left off waits for
+a person, as every Gate did before Standing
 Rules. Whatever it says, a Tampered Run's Gates and a merge through a
 Main Hold stay a person's.
  */
@@ -22,6 +26,11 @@ person. */
   /** Merge once CI is green, nothing is Tampered and the base branch has
 no Main Hold (`merge_when_green`). */
   merge: boolean;
+  /** The kinds of Gate the Orchestrator, the owner's agent in Macro chat,
+may give the approving answer to for them (`approve`, `fix`); off
+for every kind when left out. It may always send work back, and
+never approves a merge. */
+  orchestrator?: OrchestratorKinds;
   /** The owner section: a Gate no rule answers goes to the Run's owner.
 They are notified, and the Gate is listed as waiting on them; a
 review round whose Blockers are the round before's, unchanged after
@@ -32,6 +41,16 @@ before. A definition sent without it has it off. */
   ownerGates?: boolean;
   /** Approve the plan Gate (`approve_plan`). */
   plan: boolean;
+  /**
+   * The Queue limit: the most Gates and questions that may wait on a
+person (their Queue) for a new Run of theirs to start under this
+definition. Above it, no new Run starts; Runs already going go on.
+None, and a definition sent without it, sets no limit. At most
+[`MAX_QUEUE_LIMIT`]. A Run does not keep it: it decides only
+whether a Run starts, so a Run's rules read with none.
+   * @minimum 0
+   */
+  queueLimit?: OrchestratorDefinitionQueueLimit;
   /** The kinds of Gate the stand-in answers for the Run's owner, after
 the rules and before the person; off for every kind when left out. */
   standIn?: StandInKinds;

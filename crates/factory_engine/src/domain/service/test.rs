@@ -15,8 +15,8 @@ use crate::domain::fakes::{FakeGithub, FakeRepo};
 use crate::domain::flow::{StepName, StepUse};
 use crate::domain::gate::{AnswerGate, ReplyGate};
 use crate::domain::models::{
-    FactoryError, RunFinish, RunStart, StepEnding, StepError, StepInput, StepReport, StepRequest,
-    StepStart,
+    Answerer, FactoryError, RunFinish, RunStart, StepEnding, StepError, StepInput, StepReport,
+    StepRequest, StepStart,
 };
 use crate::domain::ports::{
     AnswerDelivery, FactoryService, Retryable, RunWorkflows, RunWorkflowsError, StepExecutor,
@@ -25,6 +25,7 @@ use crate::domain::ports::{
 
 mod control_files;
 mod gate_owner;
+mod orchestrator;
 mod standing_rules;
 mod task_thread;
 
@@ -509,7 +510,15 @@ async fn someone_else_s_run_reads_answers_and_cancels_as_missing() {
 
     let read = service.get_run(&teo(), run_id).await;
     let answered = service
-        .answer_gate(teo(), run_id, 1, Outcome::done(), None, None)
+        .answer_gate(
+            teo(),
+            run_id,
+            1,
+            Outcome::done(),
+            None,
+            None,
+            Answerer::InPerson,
+        )
         .await;
     let cancelled = service.cancel_run(&teo(), run_id).await;
     let linked = service.link_task(&teo(), run_id, Uuid::now_v7()).await;
@@ -536,6 +545,7 @@ async fn an_answer_is_sent_to_the_run_s_workflow_as_its_owner() {
             Outcome::done(),
             Some("Go ahead".to_string()),
             None,
+            Answerer::InPerson,
         )
         .await
         .expect("answer");
@@ -549,6 +559,7 @@ async fn an_answer_is_sent_to_the_run_s_workflow_as_its_owner() {
             note: Some("Go ahead".to_string()),
             user_id: julia(),
             approved_control_files: None,
+            agent_session: None,
         }]
     );
 }
@@ -563,7 +574,15 @@ async fn an_answer_the_workflow_refuses_is_a_conflict() {
     let run_id = julia_s_run(&repo).await;
 
     let refused = service(&repo, &workflows)
-        .answer_gate(julia(), run_id, 1, Outcome::done(), None, None)
+        .answer_gate(
+            julia(),
+            run_id,
+            1,
+            Outcome::done(),
+            None,
+            None,
+            Answerer::InPerson,
+        )
         .await;
 
     assert!(matches!(refused, Err(FactoryError::AnswerRefused(_))));
@@ -576,7 +595,15 @@ async fn an_answer_from_a_user_with_no_account_never_reaches_the_workflow() {
     let run_id = julia_s_run(&repo).await;
 
     let refused = service(&repo, &workflows)
-        .answer_gate(nobody(), run_id, 1, Outcome::done(), None, None)
+        .answer_gate(
+            nobody(),
+            run_id,
+            1,
+            Outcome::done(),
+            None,
+            None,
+            Answerer::InPerson,
+        )
         .await;
 
     assert!(matches!(refused, Err(FactoryError::UnknownUser)));
@@ -597,6 +624,7 @@ async fn a_note_larger_than_a_gate_keeps_is_refused() {
             Outcome::done(),
             Some("x".repeat(4_097)),
             None,
+            Answerer::InPerson,
         )
         .await;
 
@@ -876,7 +904,15 @@ async fn an_answer_the_gate_does_not_offer_never_reaches_the_workflow() {
         .expect("open");
 
     let refused = service(&repo, &workflows)
-        .answer_gate(julia(), run_id, 1, Outcome::unchanged(), None, None)
+        .answer_gate(
+            julia(),
+            run_id,
+            1,
+            Outcome::unchanged(),
+            None,
+            None,
+            Answerer::InPerson,
+        )
         .await;
 
     assert!(matches!(
@@ -1184,10 +1220,19 @@ async fn a_question_is_answered_in_words() {
             Outcome::answer(),
             Some(" ".to_string()),
             None,
+            Answerer::InPerson,
         )
         .await;
     let none = service
-        .answer_gate(julia(), run_id, 1, Outcome::answer(), None, None)
+        .answer_gate(
+            julia(),
+            run_id,
+            1,
+            Outcome::answer(),
+            None,
+            None,
+            Answerer::InPerson,
+        )
         .await;
     service
         .answer_gate(
@@ -1197,6 +1242,7 @@ async fn a_question_is_answered_in_words() {
             Outcome::answer(),
             Some("CSV".to_string()),
             None,
+            Answerer::InPerson,
         )
         .await
         .expect("answer");

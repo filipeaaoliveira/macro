@@ -222,7 +222,7 @@
     "/runs": {
       "post": {
         "tags": ["factory"],
-        "summary": "Create a Run of a built-in Flow, owned by the caller, and start its\nworkflow.",
+        "summary": "Create a Run of a built-in Flow, owned by the caller, and start its\nworkflow. Above the Queue limit of the Project it would start in, it is\nrefused (409 `queueFull`): more Gates and questions wait on the caller\nthan the limit, and the Runs under way go on.",
         "operationId": "create_factory_run",
         "requestBody": {
           "content": {
@@ -271,6 +271,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunErrorResponse"
                 }
               }
             }
@@ -553,7 +563,7 @@
     "/runs/{id}/steps/{seq}/answer": {
       "post": {
         "tags": ["factory"],
-        "summary": "Answer, as the caller, the Gate one of their Runs waits on. The Run\ngoes on once its workflow took the answer; reading the Run shows the\nanswer once it is recorded. A Gate asks a person: only the owner's own\nsigned-in session answers it (403 otherwise).",
+        "summary": "Answer, as the caller, the Gate one of their Runs waits on. The Run\ngoes on once its workflow took the answer; reading the Run shows the\nanswer once it is recorded. A Gate asks a person: the owner's own\nsigned-in session answers it, and an agent session they work with\n(such as the Orchestrator in Macro chat), from its code, answers only\nwhat a Standing Rule could: never an agent's question, a Gate its Flow\nkeeps for a person, approving a merge or a Tampered Run, nor an\napproving answer the Run's Orchestrator Definition does not allow\n(403 `reservedForAPerson`); only from a chat, never from a routine's\nrun or a factory Step's own session. A Gate answered since is a\nconflict (409). Any other caller is refused (403).",
         "operationId": "answer_factory_gate",
         "parameters": [
           {
@@ -616,7 +626,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/RunErrorResponse"
                 }
               }
             }
@@ -1752,6 +1762,11 @@
         "description": "The answer to a Gate: a person's, a Standing Rule's (a Rule Answer), or\nthe stand-in's for the Run's owner.",
         "required": ["answer", "byStandIn", "answeredAt"],
         "properties": {
+          "agentSessionId": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "The agent session that gave the answer for the owner, when the\nOrchestrator did rather than the owner in person; it is then not\ncounted among the owner's own answers."
+          },
           "answer": {
             "$ref": "#/components/schemas/Outcome",
             "description": "The answer, one the Gate offered: the outcome the Flow routes."
@@ -1957,7 +1972,7 @@
       },
       "OrchestratorDefinition": {
         "type": "object",
-        "description": "A workspace's Orchestrator Definition: which kinds of Gate the factory\ndecides on its own, whether the Gates it leaves go to the Run's owner,\nand which the stand-in answers for the Run's owner when no rule does. A\nkind left off waits for a person, as every Gate did before Standing\nRules. Whatever it says, a Tampered Run's Gates and a merge through a\nMain Hold stay a person's.",
+        "description": "A workspace's Orchestrator Definition: which kinds of Gate the factory\ndecides on its own, whether the Gates it leaves go to the Run's owner,\nwhich the stand-in answers for the Run's owner when no rule does, and\nthe Queue limit above which no new Run starts. A kind left off waits for\na person, as every Gate did before Standing\nRules. Whatever it says, a Tampered Run's Gates and a merge through a\nMain Hold stay a person's.",
         "required": ["plan", "blockers", "merge"],
         "properties": {
           "blockers": {
@@ -1968,6 +1983,10 @@
             "type": "boolean",
             "description": "Merge once CI is green, nothing is Tampered and the base branch has\nno Main Hold (`merge_when_green`)."
           },
+          "orchestrator": {
+            "$ref": "#/components/schemas/OrchestratorKinds",
+            "description": "The kinds of Gate the Orchestrator, the owner's agent in Macro chat,\nmay give the approving answer to for them (`approve`, `fix`); off\nfor every kind when left out. It may always send work back, and\nnever approves a merge."
+          },
           "ownerGates": {
             "type": "boolean",
             "description": "The owner section: a Gate no rule answers goes to the Run's owner.\nThey are notified, and the Gate is listed as waiting on them; a\nreview round whose Blockers are the round before's, unchanged after\na rule sent those to a fix, waits for them rather than another fix;\nand what they comment on the Run's task once a Gate opened reaches\nthe next agent Step. Off, the factory leaves those Gates waiting as\nbefore. A definition sent without it has it off."
@@ -1976,6 +1995,12 @@
             "type": "boolean",
             "description": "Approve the plan Gate (`approve_plan`)."
           },
+          "queueLimit": {
+            "type": ["integer", "null"],
+            "format": "int32",
+            "description": "The Queue limit: the most Gates and questions that may wait on a\nperson (their Queue) for a new Run of theirs to start under this\ndefinition. Above it, no new Run starts; Runs already going go on.\nNone, and a definition sent without it, sets no limit. At most\n[`MAX_QUEUE_LIMIT`]. A Run does not keep it: it decides only\nwhether a Run starts, so a Run's rules read with none.",
+            "minimum": 0
+          },
           "standIn": {
             "$ref": "#/components/schemas/StandInKinds",
             "description": "The kinds of Gate the stand-in answers for the Run's owner, after\nthe rules and before the person; off for every kind when left out."
@@ -1983,6 +2008,22 @@
           "taskThread": {
             "type": "boolean",
             "description": "The task thread section: a Run on a task posts its main updates\n(its start, each Step's end, its Gates, its pull request, its merge\nand how it ended) to one comment thread on the task, as its owner.\nOff, as when a definition is sent without it, a Run posts nothing."
+          }
+        },
+        "additionalProperties": false
+      },
+      "OrchestratorKinds": {
+        "type": "object",
+        "description": "The kinds of Gate the Orchestrator may give the approving answer to for\nthe Run's owner. It never approves a merge, so it has no setting for\none.",
+        "required": ["plan", "blockers"],
+        "properties": {
+          "blockers": {
+            "type": "boolean",
+            "description": "Send a review round's Blockers to be fixed."
+          },
+          "plan": {
+            "type": "boolean",
+            "description": "Approve the plan Gate."
           }
         },
         "additionalProperties": false
@@ -2437,7 +2478,9 @@
         "enum": [
           "unreachableRepository",
           "noPushAccess",
-          "controlFilesNotApproved"
+          "controlFilesNotApproved",
+          "queueFull",
+          "reservedForAPerson"
         ]
       },
       "RunErrorResponse": {

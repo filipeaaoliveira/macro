@@ -53,7 +53,7 @@ impl PgRunRepository {
         let stored = sqlx::query!(
             r#"
             SELECT answer, note, user_id, rule, approved_control_files, reply_confidence,
-                by_stand_in, answered_at
+                by_stand_in, agent_session_id, answered_at
             FROM factory_gate
             WHERE run_id = $1 AND seq = $2
             "#,
@@ -90,6 +90,7 @@ impl PgRunRepository {
             approved_control_files: stored.approved_control_files,
             reply_confidence: stored.reply_confidence.map(percent).transpose()?,
             by_stand_in: stored.by_stand_in,
+            agent_session_id: stored.agent_session_id,
             answered_at,
         }))
     }
@@ -284,6 +285,7 @@ struct StepRow {
     rule: Option<String>,
     reply_confidence: Option<i16>,
     by_stand_in: Option<bool>,
+    agent_session_id: Option<Uuid>,
     asked_back_reply: Option<String>,
     asked_back_at: Option<DateTime<Utc>>,
     stand_in_answer: Option<String>,
@@ -323,6 +325,7 @@ impl StepRow {
                     .transpose()?,
                 reply_confidence: self.reply_confidence.map(percent).transpose()?,
                 by_stand_in: self.by_stand_in.unwrap_or(false),
+                agent_session_id: self.agent_session_id,
                 answered_at,
             }),
             (None, None) => None,
@@ -690,6 +693,7 @@ impl RunRepository for PgRunRepository {
                 g.rule,
                 g.reply_confidence,
                 g.by_stand_in AS "by_stand_in?",
+                g.agent_session_id AS "agent_session_id?",
                 g.asked_back_reply,
                 g.asked_back_at,
                 g.stand_in_answer,
@@ -797,6 +801,45 @@ impl RunRepository for PgRunRepository {
         rows.into_iter().map(Run::try_from).collect()
     }
 
+    #[tracing::instrument(err, skip(self))]
+    async fn queue_size(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        limit: u16,
+    ) -> Result<u16, Self::Err> {
+        // As `list_waiting_runs`: the person's open Runs through
+        // `factory_run_user_open_idx`, each checked by the Gates' primary
+        // key, up to the limit, under a timeout.
+        let mut transaction = self.pool.begin().await?;
+        sqlx::query!("SET LOCAL statement_timeout = '5s'")
+            .execute(&mut *transaction)
+            .await?;
+        let size = sqlx::query_scalar!(
+            r#"
+            SELECT count(*) AS "size!"
+            FROM (
+                SELECT 1
+                FROM factory_run r
+                WHERE r.user_id = $1
+                    AND r.ended_at IS NULL
+                    AND EXISTS (
+                        SELECT 1 FROM factory_gate g
+                        WHERE g.run_id = r.id AND g.answer IS NULL
+                            AND g.stand_in_answer IS NULL
+                    )
+                LIMIT $2
+            ) waiting
+            "#,
+            user_id.as_ref(),
+            i64::from(limit),
+        )
+        .fetch_one(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        u16::try_from(size)
+            .map_err(|_| PgRunRepositoryErr::OutOfRange(i32::try_from(size).unwrap_or(i32::MAX)))
+    }
+
     #[tracing::instrument(err, skip(self, ids), fields(runs = ids.len()))]
     async fn list_runs_steps(
         &self,
@@ -825,6 +868,7 @@ impl RunRepository for PgRunRepository {
                 g.rule,
                 g.reply_confidence,
                 g.by_stand_in AS "by_stand_in?",
+                g.agent_session_id AS "agent_session_id?",
                 g.asked_back_reply,
                 g.asked_back_at,
                 g.stand_in_answer,
@@ -959,6 +1003,7 @@ impl RunRepository for PgRunRepository {
         note: Option<&str>,
         user_id: &MacroUserIdStr<'static>,
         approved_control_files: Option<&[String]>,
+        agent_session: Option<Uuid>,
     ) -> Result<(), Self::Err> {
         // The answer is recorded once the Run's workflow took it, so an
         // account deleted since the API checked it must not stop it: the
@@ -967,7 +1012,7 @@ impl RunRepository for PgRunRepository {
             r#"
             UPDATE factory_gate
             SET answer = $3, note = $4, user_id = $5, approved_control_files = $6,
-                answered_at = now()
+                agent_session_id = $7, answered_at = now()
             WHERE run_id = $1 AND seq = $2 AND answer IS NULL
             "#,
             key.run_id.as_uuid(),
@@ -976,6 +1021,7 @@ impl RunRepository for PgRunRepository {
             note,
             Some(user_id.as_ref()),
             approved_control_files,
+            agent_session,
         )
         .execute(&self.pool)
         .await;
@@ -988,7 +1034,7 @@ impl RunRepository for PgRunRepository {
                     r#"
                     UPDATE factory_gate
                     SET answer = $3, note = $4, user_id = NULL, approved_control_files = $5,
-                        answered_at = now()
+                        agent_session_id = $6, answered_at = now()
                     WHERE run_id = $1 AND seq = $2 AND answer IS NULL
                     "#,
                     key.run_id.as_uuid(),
@@ -996,6 +1042,7 @@ impl RunRepository for PgRunRepository {
                     answer.as_str(),
                     note,
                     approved_control_files,
+                    agent_session,
                 )
                 .execute(&self.pool)
                 .await?;

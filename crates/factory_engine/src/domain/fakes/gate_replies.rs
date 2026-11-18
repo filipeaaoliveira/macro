@@ -48,6 +48,7 @@ impl GateReplyRepository for FakeRepo {
                     approved_control_files: None,
                     reply_confidence: confidence,
                     by_stand_in: false,
+                    agent_session_id: None,
                     answered_at: Utc::now(),
                 });
             }
@@ -82,6 +83,7 @@ impl GateReplyRepository for FakeRepo {
                     approved_control_files: None,
                     reply_confidence: None,
                     by_stand_in: true,
+                    agent_session_id: None,
                     answered_at: Utc::now(),
                 });
             }
@@ -117,10 +119,9 @@ impl GateReplyRepository for FakeRepo {
             })
             .filter_map(|(_, step)| {
                 let gate = step.gate.as_ref()?;
-                let answer = gate
-                    .answer
-                    .as_ref()
-                    .filter(|answer| answer.user_id.as_ref() == Some(owner))?;
+                let answer = gate.answer.as_ref().filter(|answer| {
+                    answer.user_id.as_ref() == Some(owner) && answer.agent_session_id.is_none()
+                })?;
                 Some((
                     answer.answered_at,
                     PastAnswer {

@@ -41,10 +41,16 @@ enforced by the ordinary backend APIs.
   (`BookingLink`), settings, booked meetings (`Booking`) and insights over calendar
   `/scheduling`. Link writes carry the user's quoted `userConfirmation`, which the
   route rejects when blank; `BookingLink` handles keep their `team` for edits.
-- `src/entities/factory/`: `macro.factory.handBack`, how the agent session
-  doing a software factory Step hands back its result. It is the factory's
-  only SDK endpoint; the Run API is internal (`coverage/skipped.ts`), and the
-  service runs only on local stacks so far. Code mode is handed the factory's
+- `src/entities/factory/`: `macro.factory`, the Run API as the Orchestrator
+  (a person's agent in Macro chat) uses it: `flows`, `start`, `queue` (the
+  Runs waiting on the person), `runsOf(task)` and `FactoryRun` (`read`,
+  `waitingGate`, `answer(waiting, ...)` on the Gate the agent read,
+  `cancel`, `linkTask`), and `handBack`, how the
+  agent session doing a Step hands back its result. The factory's settings,
+  a reply in words and insights are the person's (`coverage/skipped.ts`);
+  the service refuses an agent session what it keeps for the person in
+  person. The service runs only on local stacks so far, so every method is
+  `@mcp-exclude`. Code mode is handed the factory's
   host only where the service runs (`OVERRIDE_FACTORY_SERVICE_URL`); the
   published SDK has no way to leave a namespace out, so `macro.factory`
   elsewhere reaches a gateway route that does not exist yet.

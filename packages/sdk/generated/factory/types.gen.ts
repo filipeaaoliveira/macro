@@ -356,6 +356,12 @@ export type Gate = {
  */
 export type GateAnswer = {
     /**
+     * The agent session that gave the answer for the owner, when the
+     * Orchestrator did rather than the owner in person; it is then not
+     * counted among the owner's own answers.
+     */
+    agentSessionId?: string | null;
+    /**
      * The answer, one the Gate offered: the outcome the Flow routes.
      */
     answer: Outcome;
@@ -508,8 +514,9 @@ export type NamedCount = {
 /**
  * A workspace's Orchestrator Definition: which kinds of Gate the factory
  * decides on its own, whether the Gates it leaves go to the Run's owner,
- * and which the stand-in answers for the Run's owner when no rule does. A
- * kind left off waits for a person, as every Gate did before Standing
+ * which the stand-in answers for the Run's owner when no rule does, and
+ * the Queue limit above which no new Run starts. A kind left off waits for
+ * a person, as every Gate did before Standing
  * Rules. Whatever it says, a Tampered Run's Gates and a merge through a
  * Main Hold stay a person's.
  */
@@ -526,6 +533,13 @@ export type OrchestratorDefinition = {
      */
     merge: boolean;
     /**
+     * The kinds of Gate the Orchestrator, the owner's agent in Macro chat,
+     * may give the approving answer to for them (`approve`, `fix`); off
+     * for every kind when left out. It may always send work back, and
+     * never approves a merge.
+     */
+    orchestrator?: OrchestratorKinds;
+    /**
      * The owner section: a Gate no rule answers goes to the Run's owner.
      * They are notified, and the Gate is listed as waiting on them; a
      * review round whose Blockers are the round before's, unchanged after
@@ -540,6 +554,15 @@ export type OrchestratorDefinition = {
      */
     plan: boolean;
     /**
+     * The Queue limit: the most Gates and questions that may wait on a
+     * person (their Queue) for a new Run of theirs to start under this
+     * definition. Above it, no new Run starts; Runs already going go on.
+     * None, and a definition sent without it, sets no limit. At most
+     * [`MAX_QUEUE_LIMIT`]. A Run does not keep it: it decides only
+     * whether a Run starts, so a Run's rules read with none.
+     */
+    queueLimit?: number | null;
+    /**
      * The kinds of Gate the stand-in answers for the Run's owner, after
      * the rules and before the person; off for every kind when left out.
      */
@@ -551,6 +574,22 @@ export type OrchestratorDefinition = {
      * Off, as when a definition is sent without it, a Run posts nothing.
      */
     taskThread?: boolean;
+};
+
+/**
+ * The kinds of Gate the Orchestrator may give the approving answer to for
+ * the Run's owner. It never approves a merge, so it has no setting for
+ * one.
+ */
+export type OrchestratorKinds = {
+    /**
+     * Send a review round's Blockers to be fixed.
+     */
+    blockers: boolean;
+    /**
+     * Approve the plan Gate.
+     */
+    plan: boolean;
 };
 
 /**
@@ -849,7 +888,7 @@ export type RunEnd = {
 /**
  * Why a request was refused, where a client acts on the cause.
  */
-export type RunErrorCode = 'unreachableRepository' | 'noPushAccess' | 'controlFilesNotApproved';
+export type RunErrorCode = 'unreachableRepository' | 'noPushAccess' | 'controlFilesNotApproved' | 'queueFull' | 'reservedForAPerson';
 
 /**
  * What a refused or failed request answers: a message, and for a refusal
@@ -1307,6 +1346,7 @@ export type CreateFactoryRunErrors = {
     400: RunErrorResponse;
     401: ErrorResponse;
     403: ErrorResponse;
+    409: RunErrorResponse;
     500: ErrorResponse;
     502: ErrorResponse;
     503: ErrorResponse;
@@ -1418,7 +1458,7 @@ export type AnswerFactoryGateData = {
 export type AnswerFactoryGateErrors = {
     400: ErrorResponse;
     401: ErrorResponse;
-    403: ErrorResponse;
+    403: RunErrorResponse;
     404: ErrorResponse;
     409: ErrorResponse;
     500: ErrorResponse;

@@ -9,7 +9,7 @@ use factory_records::domain::models::{
     EntryId, Outcome, Repository, Role, Run, RunId, RunOutcome, Step, StepKey,
 };
 use factory_records::domain::review_rounds::ReviewRound;
-use factory_records::domain::standing_rules::{OrchestratorDefinition, ProjectRules};
+use factory_records::domain::standing_rules::{OrchestratorDefinition, ProjectRules, RulesSource};
 use macro_user_id::user_id::MacroUserIdStr;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -596,6 +596,69 @@ pub struct FlowSummary {
     pub repository: bool,
 }
 
+/// Who answers a Gate as its Run's owner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Answerer {
+    /// The owner, in their own signed-in session.
+    InPerson,
+    /// An agent session the owner works with, such as the Orchestrator in
+    /// Macro chat, answering from its code with the owner's own access. It
+    /// answers only what a Standing Rule could: never what the factory
+    /// keeps for the person ([`PersonOnly`]).
+    Agent {
+        /// The agent session the call came from.
+        session_id: Uuid,
+    },
+}
+
+/// What the factory keeps for the Run's owner in person, which an agent
+/// answering for them may not do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum PersonOnly {
+    /// A session that is not a chat with the person: a routine's, or a
+    /// background run's.
+    #[error("only an agent the run's owner chats with answers a gate for them")]
+    NotAChat,
+    /// The session doing a Step of a Run: it would answer its own work.
+    #[error("a factory step's own agent session never answers a gate")]
+    StepSession,
+    /// An agent's question, which only the owner answers.
+    #[error("only the run's owner, signed in to Macro, answers an agent's question")]
+    Question,
+    /// A Gate its Flow keeps for a person, or one no Standing Rule could
+    /// answer.
+    #[error("only the run's owner, signed in to Macro, answers this gate")]
+    PersonsGate,
+    /// Approving a Tampered Run, or sending Control Files with an answer:
+    /// only the owner approves them.
+    #[error(
+        "the run's branch changes control files: only the run's owner, signed in to Macro, approves them"
+    )]
+    ControlFiles,
+    /// Approving a merge.
+    #[error("only the run's owner, signed in to Macro, approves a merge")]
+    Merge,
+    /// The approving answer to a kind of Gate the Run's Orchestrator
+    /// Definition does not let the Orchestrator approve.
+    #[error(
+        "the run's standing rules do not let the orchestrator approve this kind of gate: its owner answers it"
+    )]
+    NotAllowed,
+    /// Sending Blockers to a fix the `fix_blockers` rule would leave to the
+    /// owner: past its fix rounds in a row, or Blockers found again
+    /// unchanged after a fix.
+    #[error("these blockers are the run's owner's to send to another fix")]
+    OwnersBlockers,
+}
+
+/// Who set a Queue limit, in words.
+fn queue_limit_source(source: RulesSource) -> &'static str {
+    match source {
+        RulesSource::Project => "the project's standing rules",
+        RulesSource::Team | RulesSource::Default => "your team's standing rules",
+    }
+}
+
 /// Errors of the factory's Run use cases.
 #[derive(Debug, thiserror::Error)]
 pub enum FactoryError {
@@ -720,6 +783,28 @@ pub enum FactoryError {
     NoteTooLarge {
         /// The most bytes a note may hold.
         max: usize,
+    },
+    /// An agent answering for the Run's owner tried what the factory keeps
+    /// for the owner in person.
+    #[error(transparent)]
+    ReservedForAPerson(#[from] PersonOnly),
+    /// More Gates and questions wait on the person than the Queue limit of
+    /// the rules a new Run of theirs would start under.
+    #[error(
+        "more than {limit} gates and questions wait on you, the queue limit {} sets: answer some before a new run starts; runs under way go on",
+        queue_limit_source(*set_by)
+    )]
+    QueueFull {
+        /// The Queue limit.
+        limit: u16,
+        /// Whose rules set it: the team's, or the Project's.
+        set_by: RulesSource,
+    },
+    /// A Queue limit above the highest one a definition may set.
+    #[error("the queue limit must be at most {max}")]
+    InvalidQueueLimit {
+        /// The highest Queue limit.
+        max: u16,
     },
     /// The Run's workflow did not take the answer, and said why: it waits
     /// on no Gate of that Step, or the Gate was answered.

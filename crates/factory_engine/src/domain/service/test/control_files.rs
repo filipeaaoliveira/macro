@@ -11,7 +11,7 @@ use super::{FakeExecutor, FakeWorkflows, julia, julia_s_run, service, teo};
 use crate::domain::control_files::{ControlFiles, ControlFilesError};
 use crate::domain::fakes::FakeRepo;
 use crate::domain::gate::{AnswerGate, GateAnswered};
-use crate::domain::models::FactoryError;
+use crate::domain::models::{Answerer, FactoryError};
 use crate::domain::ports::{FactoryService, StepService};
 use crate::domain::service::StepServiceImpl;
 
@@ -63,7 +63,15 @@ async fn approving_a_tampered_run_needs_the_files_it_changed_approved() {
         ])),
     ] {
         let refused = service
-            .answer_gate(julia(), run_id, 4, approve(), None, seen.clone())
+            .answer_gate(
+                julia(),
+                run_id,
+                4,
+                approve(),
+                None,
+                seen.clone(),
+                Answerer::InPerson,
+            )
             .await;
 
         assert!(
@@ -86,11 +94,19 @@ async fn an_approval_carries_the_tampered_files_to_the_workflow() {
     let seen = files(&["package.json", ".github/workflows/ci.yml"]);
 
     service
-        .answer_gate(julia(), run_id, 4, approve(), None, Some(seen))
+        .answer_gate(
+            julia(),
+            run_id,
+            4,
+            approve(),
+            None,
+            Some(seen),
+            Answerer::InPerson,
+        )
         .await
         .expect("approve");
     service
-        .answer_gate(julia(), run_id, 6, revise(), None, None)
+        .answer_gate(julia(), run_id, 6, revise(), None, None, Answerer::InPerson)
         .await
         .expect("revise");
 
@@ -104,6 +120,7 @@ async fn an_approval_carries_the_tampered_files_to_the_workflow() {
                 note: None,
                 user_id: julia(),
                 approved_control_files: Some(changes().tampered),
+                agent_session: None,
             },
             AnswerGate {
                 seq: 6,
@@ -111,6 +128,7 @@ async fn an_approval_carries_the_tampered_files_to_the_workflow() {
                 note: None,
                 user_id: julia(),
                 approved_control_files: None,
+                agent_session: None,
             },
         ]
     );
@@ -130,7 +148,15 @@ async fn a_run_that_is_not_tampered_approves_no_control_files() {
     let run_id = run_changing(&repo, &named_only).await;
 
     service(&repo, &workflows)
-        .answer_gate(julia(), run_id, 4, approve(), None, None)
+        .answer_gate(
+            julia(),
+            run_id,
+            4,
+            approve(),
+            None,
+            None,
+            Answerer::InPerson,
+        )
         .await
         .expect("approve");
 
@@ -155,6 +181,7 @@ async fn the_recorded_answer_keeps_the_files_it_approved() {
                 note: None,
                 user_id: julia(),
                 approved_control_files: Some(changes().tampered),
+                agent_session: None,
             },
         })
         .await
@@ -356,7 +383,15 @@ async fn an_agent_account_is_never_in_person() {
         .await
         .expect("create");
     let answered = service
-        .answer_gate(julia(), run_id, 1, approve(), None, None)
+        .answer_gate(
+            julia(),
+            run_id,
+            1,
+            approve(),
+            None,
+            None,
+            Answerer::InPerson,
+        )
         .await;
     let set = service
         .set_control_files(julia(), Some(files(&["ci/**"])))

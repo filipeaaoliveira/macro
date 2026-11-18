@@ -27,6 +27,8 @@ export type GateAnswer = {
   replyConfidence?: number;
   /** Whether the stand-in gave it, and the owner let it stand. */
   byStandIn?: boolean;
+  /** Whether the Orchestrator, the owner's agent in chat, gave it. */
+  byOrchestrator?: boolean;
   answeredAt: string;
 };
 

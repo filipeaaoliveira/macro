@@ -70,6 +70,7 @@ function toRun(detail: RunDetail): Run {
                   replyConfidence:
                     step.gate.answer.replyConfidence ?? undefined,
                   byStandIn: step.gate.answer.byStandIn,
+                  byOrchestrator: step.gate.answer.agentSessionId != null,
                   answeredAt: step.gate.answer.answeredAt,
                 }
               : undefined,
@@ -217,6 +218,7 @@ function startFailure(
   const codes = errors.map((error) => error.code);
   if (codes.includes('NO_PUSH_ACCESS')) return 'noPushAccess';
   if (codes.includes('UNREACHABLE_REPOSITORY')) return 'unreachableRepository';
+  if (codes.includes('QUEUE_FULL')) return 'queueFull';
   return 'failed';
 }
 
