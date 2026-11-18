@@ -67,6 +67,8 @@ async fn keep(repo: &PgRunRepository, kept: Kept<'_>) -> RunId {
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
             automation: None,
+            definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert");

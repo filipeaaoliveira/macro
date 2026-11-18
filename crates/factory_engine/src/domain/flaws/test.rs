@@ -21,12 +21,15 @@ async fn ended(repo: &FakeRepo, outcome: RunOutcome) -> RunId {
             request: "Plan the export",
             user_id: &julia(),
             task_id: None,
+            project_id: None,
             repository: None,
             created_in_person: false,
             control_file_patterns: &[],
             control_files_team_id: None,
             standing_rules: RunRules::DEFAULT,
             automation: None,
+            definition: None,
+            kept_flow: None,
         })
         .await
         .expect("insert")
