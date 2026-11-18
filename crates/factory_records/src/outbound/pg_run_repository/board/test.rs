@@ -349,3 +349,112 @@ async fn a_page_starts_past_the_last_one(pool: PgPool) {
     let second_ids: Vec<RunId> = second.iter().map(|listed| listed.run.id).collect();
     assert_eq!(second_ids, kept[2..4]);
 }
+
+/// Runs created at the same time page by their ids: neither is skipped nor
+/// read twice.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn runs_created_at_once_page_by_id(pool: PgPool) {
+    let repo = PgRunRepository::new(pool.clone());
+    let first = keep(&repo, Kept::julias("One")).await;
+    let second = keep(&repo, Kept::julias("Two")).await;
+    sqlx::query!("UPDATE factory_run SET created_at = '2026-11-18T10:00:00Z'")
+        .execute(&pool)
+        .await
+        .expect("same time");
+    let mut ids = [first, second];
+    ids.sort_by_key(|id| std::cmp::Reverse(id.as_uuid()));
+
+    let page = repo
+        .board_runs(&BoardQuery {
+            limit: 1,
+            ..query(None)
+        })
+        .await
+        .expect("board");
+    assert_eq!(page.len(), 1);
+    assert_eq!(page[0].run.id, ids[0]);
+    let after = BoardCursor {
+        created_at: page[0].run.created_at,
+        id: page[0].run.id,
+    };
+    let rest = repo
+        .board_runs(&BoardQuery {
+            limit: 2,
+            after: Some(after),
+            ..query(None)
+        })
+        .await
+        .expect("board");
+    let rest: Vec<RunId> = rest.iter().map(|listed| listed.run.id).collect();
+    assert_eq!(rest, [ids[1]]);
+}
+
+/// The board reads each Run's task by its name.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "tasks"))
+)]
+async fn the_board_names_each_run_s_task(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    keep(
+        &repo,
+        Kept {
+            task_id: Some(LOGIN_TASK),
+            ..Kept::julias("Look into it")
+        },
+    )
+    .await;
+    keep(&repo, Kept::julias("No task")).await;
+
+    let names: Vec<Option<String>> = repo
+        .board_runs(&query(None))
+        .await
+        .expect("board")
+        .into_iter()
+        .map(|listed| listed.task_name)
+        .collect();
+    assert_eq!(names, [None, Some("Fix the login bug".to_string())]);
+}
+
+/// A Run keeps the page of its pull request, replaced each time, and only
+/// an `https` one.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn a_run_keeps_its_pull_request_s_page(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let id = keep(&repo, Kept::julias("Add the coupon field")).await;
+    let page = |repo: &PgRunRepository| {
+        let repo = repo.clone();
+        async move {
+            repo.get_run(id)
+                .await
+                .expect("get")
+                .expect("kept")
+                .pull_request_url
+        }
+    };
+    assert_eq!(page(&repo).await, None);
+
+    repo.set_pull_request_url(id, "https://github.com/acme/shop/pull/7")
+        .await
+        .expect("keep");
+    repo.set_pull_request_url(id, "https://github.com/acme/shop/pull/8")
+        .await
+        .expect("keep again");
+    assert_eq!(
+        page(&repo).await.as_deref(),
+        Some("https://github.com/acme/shop/pull/8")
+    );
+
+    let refused = repo.set_pull_request_url(id, "javascript:alert(1)").await;
+    assert!(refused.is_err());
+    assert_eq!(
+        page(&repo).await.as_deref(),
+        Some("https://github.com/acme/shop/pull/8")
+    );
+}

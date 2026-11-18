@@ -37,6 +37,7 @@ struct BoardRunRow {
     pull_request_url: Option<String>,
     outcome: Option<String>,
     ended_at: Option<DateTime<Utc>>,
+    task_name: Option<String>,
     state: String,
 }
 
@@ -74,7 +75,11 @@ impl TryFrom<BoardRunRow> for BoardRun {
             outcome: row.outcome,
             ended_at: row.ended_at,
         })?;
-        Ok(BoardRun { run, state })
+        Ok(BoardRun {
+            run,
+            state,
+            task_name: row.task_name,
+        })
     }
 }
 
@@ -83,98 +88,194 @@ impl RunBoardRepository for PgRunRepository {
 
     #[tracing::instrument(err, skip_all, fields(team = query.team_id.is_some(), state = ?query.state))]
     async fn board_runs(&self, query: &BoardQuery) -> Result<Vec<BoardRun>, Self::Err> {
-        // The owners are the person and, for their team's board, the
-        // team's members: each one's Runs come newest first through
+        // Each owner (the person and, for their team's board, its members)
+        // has their newest Runs past the cursor read in order through
         // `factory_run_user_created_idx`, or `factory_run_user_open_idx`
-        // for the Runs that go, and the page stops at its limit past the
-        // cursor. Where a Run is reads its Gates by primary key, its base's
-        // Main Hold by primary key and its latest Step by primary key. The
-        // timeout bounds the read all the same.
+        // for the states of Runs that go, until each has the page's limit;
+        // the owners' Runs are then merged newest first and cut to it. Where
+        // a Run is reads its Gates, its base's Main Hold, its latest Step and
+        // its task's name by primary key. A first page starts past the
+        // latest time there is. The timeout bounds the read all the same.
         let state = query.state.map(|state| state.as_ref().to_string());
         let open_only = matches!(
             query.state,
             Some(BoardState::Running | BoardState::Waiting | BoardState::Held)
         );
         let search = query.search.as_deref().map(search_pattern);
+        let created_before = query
+            .after
+            .map_or(DateTime::<Utc>::MAX_UTC, |cursor| cursor.created_at);
+        let id_before = query
+            .after
+            .map_or(Uuid::max(), |cursor| cursor.id.as_uuid());
         let mut transaction = self.pool.begin().await?;
         sqlx::query!("SET LOCAL statement_timeout = '5s'")
             .execute(&mut *transaction)
             .await?;
-        let rows = sqlx::query_as!(
-            BoardRunRow,
-            r#"
+        // The open states read only Runs that go, in their own query, so
+        // the partial index applies.
+        let rows = if open_only {
+            sqlx::query_as!(
+                BoardRunRow,
+                r#"
             SELECT
-                r.id, r.request, r.user_id, r.flow, r.created_at, r.task_id, r.project_id,
-                r.repo_url, r.base_branch, r.created_in_person,
-                r.control_file_patterns, r.control_files_team_id, r.tampered_files,
-                r.named_control_files, r.control_files_unlisted,
-                r.standing_rules, r.standing_rules_source, r.standing_rules_project_id,
-                r.automation_id, r.automation_name, r.automation_trigger, r.pull_request_url,
-                r.outcome, r.ended_at,
-                place.state AS "state!"
-            FROM factory_run r
+                r.id AS "id!", r.request AS "request!", r.user_id AS "user_id!",
+                r.flow AS "flow?", r.created_at AS "created_at!", r.task_id AS "task_id?",
+                r.project_id AS "project_id?", r.repo_url AS "repo_url?",
+                r.base_branch AS "base_branch?", r.created_in_person AS "created_in_person!",
+                r.control_file_patterns AS "control_file_patterns?",
+                r.control_files_team_id AS "control_files_team_id?",
+                r.tampered_files AS "tampered_files?",
+                r.named_control_files AS "named_control_files?",
+                r.control_files_unlisted AS "control_files_unlisted!",
+                r.standing_rules AS "standing_rules?",
+                r.standing_rules_source AS "standing_rules_source?",
+                r.standing_rules_project_id AS "standing_rules_project_id?",
+                r.automation_id AS "automation_id?", r.automation_name AS "automation_name?",
+                r.automation_trigger AS "automation_trigger?",
+                r.pull_request_url AS "pull_request_url?",
+                r.outcome AS "outcome?", r.ended_at AS "ended_at?",
+                r.task_name AS "task_name?", r.state AS "state!"
+            FROM (
+                SELECT $1::text AS user_id
+                UNION
+                SELECT tu.user_id FROM team_user tu WHERE tu.team_id = $2
+            ) member
             CROSS JOIN LATERAL (
-                SELECT CASE
-                    WHEN r.outcome IN ('success', 'cancelled') THEN 'finished'
-                    WHEN r.outcome IS NOT NULL THEN 'stopped'
-                    WHEN EXISTS (
-                        SELECT 1 FROM factory_gate g
-                        WHERE g.run_id = r.id AND g.answer IS NULL
-                    ) THEN 'waiting'
-                    WHEN EXISTS (
-                        SELECT 1 FROM factory_main_hold h
-                        WHERE h.repo_url = r.repo_url
-                            AND h.base_branch = r.base_branch
-                            AND h.held_since IS NOT NULL
-                    ) AND (
-                        SELECT s.entry FROM factory_step s
-                        WHERE s.run_id = r.id
-                        ORDER BY s.seq DESC
-                        LIMIT 1
-                    ) = ANY($3::text[]) THEN 'held'
-                    ELSE 'running'
-                END AS state
-            ) place
-            WHERE r.user_id = ANY(ARRAY(
-                    SELECT $1::text
-                    UNION
-                    SELECT tu.user_id FROM team_user tu WHERE tu.team_id = $2
-                ))
-                AND (NOT $4::bool OR r.ended_at IS NULL)
-                AND ($5::text IS NULL OR place.state = $5)
-                AND ($6::text IS NULL OR r.flow = $6)
-                AND ($7::text IS NULL OR r.repo_url = $7)
-                AND ($8::uuid IS NULL OR r.project_id = $8)
-                AND (
-                    $9::text IS NULL
-                    OR r.request ILIKE $9
-                    OR EXISTS (
-                        SELECT 1 FROM "Document" d
-                        WHERE d.id = r.task_id AND d.name ILIKE $9
-                    )
-                )
-                AND (
-                    $10::timestamptz IS NULL
-                    OR (r.created_at, r.id) < ($10, $11::uuid)
-                )
+                SELECT r.*, d.name AS task_name, place.state
+                FROM factory_run r
+                LEFT JOIN "Document" d ON d.id = r.task_id
+                CROSS JOIN LATERAL (
+                    SELECT CASE
+                        WHEN r.outcome IN ('success', 'cancelled') THEN 'finished'
+                        WHEN r.outcome IS NOT NULL THEN 'stopped'
+                        WHEN EXISTS (
+                            SELECT 1 FROM factory_gate g
+                            WHERE g.run_id = r.id AND g.answer IS NULL
+                        ) THEN 'waiting'
+                        WHEN EXISTS (
+                            SELECT 1 FROM factory_main_hold h
+                            WHERE h.repo_url = r.repo_url
+                                AND h.base_branch = r.base_branch
+                                AND h.held_since IS NOT NULL
+                        ) AND (
+                            SELECT s.entry FROM factory_step s
+                            WHERE s.run_id = r.id
+                            ORDER BY s.seq DESC
+                            LIMIT 1
+                        ) = ANY($3::text[]) THEN 'held'
+                        ELSE 'running'
+                    END AS state
+                ) place
+                WHERE r.user_id = member.user_id
+                    AND r.ended_at IS NULL
+                    AND (r.created_at, r.id) < ($4, $5)
+                    AND ($6::text IS NULL OR place.state = $6)
+                    AND ($7::text IS NULL OR r.flow = $7)
+                    AND ($8::text IS NULL OR r.repo_url = $8)
+                    AND ($9::uuid IS NULL OR r.project_id = $9)
+                    AND ($10::text IS NULL OR r.request ILIKE $10 OR d.name ILIKE $10)
+                ORDER BY r.created_at DESC, r.id DESC
+                LIMIT $11
+            ) r
             ORDER BY r.created_at DESC, r.id DESC
-            LIMIT $12
+            LIMIT $11
             "#,
-            query.user_id.as_ref(),
-            query.team_id,
-            &query.merge_entries,
-            open_only,
-            state,
-            query.flow,
-            query.repo_url,
-            query.project_id,
-            search,
-            query.after.map(|cursor| cursor.created_at),
-            query.after.map(|cursor| cursor.id.as_uuid()),
-            i64::from(query.limit),
-        )
-        .fetch_all(&mut *transaction)
-        .await?;
+                query.user_id.as_ref(),
+                query.team_id,
+                &query.merge_entries,
+                created_before,
+                id_before,
+                state,
+                query.flow,
+                query.repo_url,
+                query.project_id,
+                search,
+                i64::from(query.limit),
+            )
+            .fetch_all(&mut *transaction)
+            .await?
+        } else {
+            sqlx::query_as!(
+                BoardRunRow,
+                r#"
+            SELECT
+                r.id AS "id!", r.request AS "request!", r.user_id AS "user_id!",
+                r.flow AS "flow?", r.created_at AS "created_at!", r.task_id AS "task_id?",
+                r.project_id AS "project_id?", r.repo_url AS "repo_url?",
+                r.base_branch AS "base_branch?", r.created_in_person AS "created_in_person!",
+                r.control_file_patterns AS "control_file_patterns?",
+                r.control_files_team_id AS "control_files_team_id?",
+                r.tampered_files AS "tampered_files?",
+                r.named_control_files AS "named_control_files?",
+                r.control_files_unlisted AS "control_files_unlisted!",
+                r.standing_rules AS "standing_rules?",
+                r.standing_rules_source AS "standing_rules_source?",
+                r.standing_rules_project_id AS "standing_rules_project_id?",
+                r.automation_id AS "automation_id?", r.automation_name AS "automation_name?",
+                r.automation_trigger AS "automation_trigger?",
+                r.pull_request_url AS "pull_request_url?",
+                r.outcome AS "outcome?", r.ended_at AS "ended_at?",
+                r.task_name AS "task_name?", r.state AS "state!"
+            FROM (
+                SELECT $1::text AS user_id
+                UNION
+                SELECT tu.user_id FROM team_user tu WHERE tu.team_id = $2
+            ) member
+            CROSS JOIN LATERAL (
+                SELECT r.*, d.name AS task_name, place.state
+                FROM factory_run r
+                LEFT JOIN "Document" d ON d.id = r.task_id
+                CROSS JOIN LATERAL (
+                    SELECT CASE
+                        WHEN r.outcome IN ('success', 'cancelled') THEN 'finished'
+                        WHEN r.outcome IS NOT NULL THEN 'stopped'
+                        WHEN EXISTS (
+                            SELECT 1 FROM factory_gate g
+                            WHERE g.run_id = r.id AND g.answer IS NULL
+                        ) THEN 'waiting'
+                        WHEN EXISTS (
+                            SELECT 1 FROM factory_main_hold h
+                            WHERE h.repo_url = r.repo_url
+                                AND h.base_branch = r.base_branch
+                                AND h.held_since IS NOT NULL
+                        ) AND (
+                            SELECT s.entry FROM factory_step s
+                            WHERE s.run_id = r.id
+                            ORDER BY s.seq DESC
+                            LIMIT 1
+                        ) = ANY($3::text[]) THEN 'held'
+                        ELSE 'running'
+                    END AS state
+                ) place
+                WHERE r.user_id = member.user_id
+                    AND (r.created_at, r.id) < ($4, $5)
+                    AND ($6::text IS NULL OR place.state = $6)
+                    AND ($7::text IS NULL OR r.flow = $7)
+                    AND ($8::text IS NULL OR r.repo_url = $8)
+                    AND ($9::uuid IS NULL OR r.project_id = $9)
+                    AND ($10::text IS NULL OR r.request ILIKE $10 OR d.name ILIKE $10)
+                ORDER BY r.created_at DESC, r.id DESC
+                LIMIT $11
+            ) r
+            ORDER BY r.created_at DESC, r.id DESC
+            LIMIT $11
+            "#,
+                query.user_id.as_ref(),
+                query.team_id,
+                &query.merge_entries,
+                created_before,
+                id_before,
+                state,
+                query.flow,
+                query.repo_url,
+                query.project_id,
+                search,
+                i64::from(query.limit),
+            )
+            .fetch_all(&mut *transaction)
+            .await?
+        };
         transaction.commit().await?;
         rows.into_iter().map(BoardRun::try_from).collect()
     }

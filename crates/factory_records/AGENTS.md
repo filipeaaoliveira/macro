@@ -173,16 +173,20 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   reference, null for Runs kept before it. `pull_request_url` is the page of
   the Run's pull request, replaced by `set_pull_request_url` each time a
   pull request Step finds it.
-- `board_runs` reads one person's Runs, or theirs and their team members'
-  (`team_user` by `team_id`), newest first through
-  `factory_run_user_created_idx` (or `factory_run_user_open_idx` for the
-  states of Runs that go), past a `(created_at, id)` cursor, up to its
-  limit, under a 5 s timeout. Where a Run is (`BoardState`) is read in the
-  same query: its outcome, an unanswered Gate by primary key, and for a Run
-  whose latest Step is one of the given merge entries, its base's Main Hold
-  by primary key. A search reads the request and the task's name
-  (`"Document".name`) with `ILIKE`, its `%`, `_` and `\` literal. A held Run
-  is held only at its merge, so a merged Run is `finished`.
+- `board_runs` reads, for each owner (the person, and for a team's board
+  `team_user`'s members of `team_id`), their newest Runs past a
+  `(created_at, id)` cursor in order through `factory_run_user_created_idx`,
+  up to the limit, then merges the owners' Runs newest first and cuts them
+  to it; the states of Runs that go read through `factory_run_user_open_idx`
+  in a query of their own with a literal `ended_at IS NULL`. A first page
+  starts past the latest time there is. It runs under a 5 s timeout. Where
+  a Run is (`BoardState`) is read in the same query: its outcome, an
+  unanswered Gate, and for a Run whose latest Step is one of the given merge
+  entries, its base's Main Hold, each by primary key; it also reads the
+  task's name (`"Document".name`). A search reads the request and the
+  task's name with `ILIKE`, its `%`, `_` and `\` literal, and so reads every
+  Run of the owners. A held Run is held only at its merge, so a merged Run
+  is `finished`.
 - `read_insights` reads one person's newest Runs in a period through
   `factory_run_user_created_idx` (`user_id, created_at DESC, id DESC`), up to
   its cap (one past it, to tell whether Runs were left out), then their Steps
