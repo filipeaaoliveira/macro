@@ -546,8 +546,16 @@ async fn the_owner_is_told_quietly_while_the_stand_in_s_window_is_open() {
     assert!(!notice.push);
     assert!(notice.metadata.notify_only);
     assert_eq!(notice.task_id, task);
-    assert!(notice.metadata.question.contains("approve"));
-    assert!(notice.metadata.question.contains("10 min"));
+    // The answer by its label, and the window's end, which a retry keeps.
+    let until = gate(&repo, key).await.stand_in.expect("kept").until;
+    assert!(
+        notice.metadata.question.starts_with(&format!(
+            "The stand-in answered Approve for you; you can change it in the run until {}.",
+            until.format("%H:%M UTC")
+        )),
+        "{}",
+        notice.metadata.question
+    );
     assert!(notifier.done.lock().expect("done").is_empty());
 
     service

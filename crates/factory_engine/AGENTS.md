@@ -1060,7 +1060,8 @@ is left of its window. While the window is open the owner is told, lightly,
 whatever the owner section says (`gate_owner::stand_in_notice`): a
 notification about the Run's task, of the waiting Gate's kind flagged
 `notifyOnly` as a notify-only Gate's, not pushed to their phone, saying
-what the stand-in answered and for how many minutes they can change it,
+what the stand-in answered (by the answer's label) and until when, in
+UTC, they can change it,
 one per Gate (`gate_owner::stand_in_id`, apart from the Gate's waiting
 notice); it is marked done once the window closes, the owner answers in
 it or replies in it (words asked back end the window too), or the Run

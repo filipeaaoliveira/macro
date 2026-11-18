@@ -187,18 +187,18 @@ pub fn stand_in_id(run_id: RunId, seq: u16) -> Uuid {
 }
 
 /// The notice that the stand-in answered the Gate of `step`, of `run`,
-/// with `answer`, which the owner may change for `window_minutes`: none
-/// once the Run ended, or when it works on no task, which Macro notifies
-/// about. It is sent whatever the owner section says, since the stand-in
-/// answers in the owner's name. Like a notify-only Gate's notice it is
-/// news while the Run goes on, lighter than a waiting Gate's: flagged
-/// `notify_only`, not pushed, one per Gate ([`stand_in_id`]), and marked
-/// done once the window closes or the Gate is answered.
+/// with `answer`, which the owner may change until `until`: none once the
+/// Run ended, or when it works on no task, which Macro notifies about. It
+/// is sent whatever the owner section says, since the stand-in answers in
+/// the owner's name. Like a notify-only Gate's notice it is news while the
+/// Run goes on, lighter than a waiting Gate's: flagged `notify_only`, not
+/// pushed, one per Gate ([`stand_in_id`]), and marked done once the window
+/// closes or the Gate is answered.
 pub fn stand_in_notice(
     run: &Run,
     step: &Step,
     answer: &Outcome,
-    window_minutes: u32,
+    until: DateTime<Utc>,
 ) -> Option<GateNotice> {
     if run.end.is_some() {
         return None;
@@ -206,7 +206,9 @@ pub fn stand_in_notice(
     let gate = step.gate.as_ref()?;
     let task_id = run.task_id?;
     let told = format!(
-        "The stand-in answered {answer} for you; you can change it in the run for {window_minutes} min. {}",
+        "The stand-in answered {} for you; you can change it in the run until {}. {}",
+        answer_label(answer),
+        until.format("%H:%M UTC"),
         gate.question
     );
     Some(GateNotice {
@@ -224,6 +226,31 @@ pub fn stand_in_notice(
         },
         push: false,
     })
+}
+
+/// Words Flows use that people write in capitals.
+const ACRONYMS: [&str; 3] = ["ai", "ci", "pr"];
+
+/// A Flow's answer as the Run view labels it: `Approve`, `CI fix`.
+fn answer_label(answer: &Outcome) -> String {
+    let words: Vec<String> = answer
+        .as_str()
+        .split(['-', '_'])
+        .filter(|word| !word.is_empty())
+        .map(|word| {
+            if ACRONYMS.contains(&word) {
+                word.to_uppercase()
+            } else {
+                word.to_string()
+            }
+        })
+        .collect();
+    let label = words.join(" ");
+    let mut chars = label.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => label,
+    }
 }
 
 /// A comment the Run's owner left on the Run's task.

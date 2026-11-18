@@ -245,14 +245,12 @@ where
     }
 
     /// Tell the owner of `run` that the stand-in answered the Gate of
-    /// `key` with `kept`, which they may change until its window closes,
-    /// in the minutes left of it.
+    /// `key` with `kept`, which they may change until its window closes.
     async fn tell_stand_in(&self, run: &Run, steps: &[Step], key: StepKey, kept: &StandInAnswer) {
         let Some(step) = steps.iter().find(|step| step.seq == key.seq) else {
             return;
         };
-        let minutes = seconds_until(kept.until, Utc::now()).div_ceil(60);
-        if let Some(notice) = stand_in_notice(run, step, &kept.answer, minutes) {
+        if let Some(notice) = stand_in_notice(run, step, &kept.answer, kept.until) {
             self.notifier.notify(notice).await;
         }
     }
