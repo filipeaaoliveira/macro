@@ -9,8 +9,8 @@ use super::super::test::{insert, julia, key, outcome};
 use crate::domain::models::{NewRun, RunId, RunInsert};
 use crate::domain::ports::RunRepository;
 use crate::domain::standing_rules::{
-    OrchestratorDefinition, ProjectRules, ProjectRulesSet, RulesSource, RunRules, StandingRule,
-    StandingRulesRepository,
+    OrchestratorDefinition, ProjectRules, ProjectRulesSet, RulesSource, RunRules, StandInKinds,
+    StandingRule, StandingRulesRepository,
 };
 use crate::outbound::pg_run_repository::PgRunRepository;
 
@@ -26,6 +26,10 @@ const PLAN_AND_MERGE: OrchestratorDefinition = OrchestratorDefinition {
     blockers: false,
     merge: true,
     owner_gates: false,
+    stand_in: StandInKinds {
+        plan: false,
+        blockers: true,
+    },
 };
 
 const OWNER_GATES_ON: OrchestratorDefinition = OrchestratorDefinition {
@@ -33,6 +37,10 @@ const OWNER_GATES_ON: OrchestratorDefinition = OrchestratorDefinition {
     blockers: true,
     merge: false,
     owner_gates: true,
+    stand_in: StandInKinds {
+        plan: false,
+        blockers: false,
+    },
 };
 
 /// A team's rules and its Control Files share its settings: setting or
@@ -200,25 +208,28 @@ async fn a_run_keeps_the_rules_it_was_created_with(pool: PgPool) {
     fixtures(path = "../fixtures", scripts("people", "team", "project"))
 )]
 async fn the_owner_section_is_kept_with_the_rules(pool: PgPool) {
+    kept_everywhere(pool, OWNER_GATES_ON).await;
+}
+
+/// Keep `definition` as a team's, a Project's and a new Run's rules, and
+/// read each back the same.
+async fn kept_everywhere(pool: PgPool, definition: OrchestratorDefinition) {
     let repo = PgRunRepository::new(pool);
     let (team, project) = (id(TEAM), id(PROJECT));
-    repo.set_team_rules(team, Some(OWNER_GATES_ON))
+    repo.set_team_rules(team, Some(definition))
         .await
         .expect("set the team's");
-    assert_eq!(
-        repo.team_rules(team).await.expect("read"),
-        Some(OWNER_GATES_ON)
-    );
-    repo.set_project_rules(team, project, Some(OWNER_GATES_ON))
+    assert_eq!(repo.team_rules(team).await.expect("read"), Some(definition));
+    repo.set_project_rules(team, project, Some(definition))
         .await
         .expect("set the project's");
     assert_eq!(
         repo.project_rules(team, project).await.expect("read"),
-        Some(OWNER_GATES_ON)
+        Some(definition)
     );
 
     let rules = RunRules {
-        definition: OWNER_GATES_ON,
+        definition,
         source: RulesSource::Team,
         project_id: None,
     };

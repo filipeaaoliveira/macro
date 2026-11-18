@@ -1,6 +1,7 @@
 //! The Temporal worker that runs the Runs' workflows and their Steps.
 
 mod activities;
+mod gate_activities;
 mod main_watch;
 #[cfg(test)]
 mod test;
@@ -11,8 +12,9 @@ use std::time::Duration;
 use temporalio_client::Client;
 use temporalio_sdk::{Runtime, Worker, WorkerOptions};
 
-use crate::domain::ports::{MainWatchService, ReviewService, StepService};
+use crate::domain::ports::{GateReplyService, MainWatchService, ReviewService, StepService};
 use crate::inbound::temporal::activities::FactoryActivities;
+use crate::inbound::temporal::gate_activities::GateActivities;
 use crate::inbound::temporal::main_watch::{MainWatchActivities, MainWatchWorkflow};
 use crate::inbound::temporal::workflow::FlowWorkflow;
 use crate::temporal::TASK_QUEUE;
@@ -28,17 +30,31 @@ const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 /// this; the SDK would otherwise wait up to 80% of the heartbeat timeout.
 const MAX_HEARTBEAT_THROTTLE: Duration = Duration::from_secs(4);
 
+/// What a worker runs its activities over.
+pub struct WorkerServices<S, R, G, M> {
+    /// The Steps, and the records of Steps, Gates and Runs.
+    pub steps: S,
+    /// The review panels' rounds.
+    pub reviews: R,
+    /// Gate replies and the stand-in.
+    pub gates: G,
+    /// The watches of base branches.
+    pub watches: M,
+}
+
 /// A worker on the factory's task queue that runs the Flow workflow and its
-/// activities, over `steps` and the review panels' `reviews`, and the
-/// watches of base branches, over `watches`.
+/// activities, and the watches of base branches, over `services`.
 pub fn worker(
     runtime: &Runtime,
     client: Client,
-    steps: impl StepService,
-    reviews: impl ReviewService,
-    watches: impl MainWatchService,
+    services: WorkerServices<
+        impl StepService,
+        impl ReviewService,
+        impl GateReplyService,
+        impl MainWatchService,
+    >,
 ) -> Result<Worker, rootcause::Report> {
-    worker_on(TASK_QUEUE, runtime, client, steps, reviews, watches)
+    worker_on(TASK_QUEUE, runtime, client, services)
 }
 
 /// A worker on `task_queue`, as [`worker`] is on the factory's.
@@ -46,14 +62,24 @@ fn worker_on(
     task_queue: &str,
     runtime: &Runtime,
     client: Client,
-    steps: impl StepService,
-    reviews: impl ReviewService,
-    watches: impl MainWatchService,
+    services: WorkerServices<
+        impl StepService,
+        impl ReviewService,
+        impl GateReplyService,
+        impl MainWatchService,
+    >,
 ) -> Result<Worker, rootcause::Report> {
+    let WorkerServices {
+        steps,
+        reviews,
+        gates,
+        watches,
+    } = services;
     let options = WorkerOptions::new(task_queue)
         .register_workflow::<FlowWorkflow>()?
         .register_workflow::<MainWatchWorkflow>()?
         .register_activities(FactoryActivities::new(steps, reviews))
+        .register_activities(GateActivities::new(gates))
         .register_activities(MainWatchActivities::new(watches))
         .graceful_shutdown_period(SHUTDOWN_GRACE)
         .max_heartbeat_throttle_interval(MAX_HEARTBEAT_THROTTLE)

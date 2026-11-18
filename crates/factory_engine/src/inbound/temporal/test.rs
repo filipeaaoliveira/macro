@@ -7,6 +7,7 @@
 //! factory worker never takes its work.
 
 mod gate_owner;
+mod gate_replies;
 mod questions;
 mod replay;
 mod review_panel;
@@ -20,7 +21,7 @@ use std::time::Duration;
 
 use factory_records::domain::main_hold::MainHoldRepository;
 use factory_records::domain::models::{
-    NewRun, Outcome, Repository, Role, RunId, RunInsert, RunOutcome, StepKey,
+    Gate, NewRun, Outcome, Repository, Role, RunId, RunInsert, RunOutcome, StepKey,
 };
 use factory_records::domain::ports::RunRepository;
 use macro_user_id::user_id::MacroUserIdStr;
@@ -34,14 +35,17 @@ use temporalio_sdk::Runtime;
 use tokio::sync::Notify;
 use uuid::Uuid;
 
-use super::worker_on;
+use super::{WorkerServices, worker_on};
 use crate::domain::built_in_flows::BuiltInFlow;
 use crate::domain::built_in_steps::BuiltInSteps;
 use crate::domain::fakes::{
-    FakeGithub, FakeHoldTasks, FakeNotifier, FakeRepo, FakeTaskNotes, FakeWatches, ci,
+    FakeGateModel, FakeGithub, FakeHoldTasks, FakeNotifier, FakeRepo, FakeTaskNotes, FakeWatches,
+    ci,
 };
 use crate::domain::flow::Flow;
-use crate::domain::gate::AnswerGate;
+use crate::domain::gate::{AnswerGate, ReplyGate};
+use crate::domain::gate_replies::GateReplySettings;
+use crate::domain::gate_replies::service::GateRepliesImpl;
 use crate::domain::main_hold::{MainWatch, MainWatchServiceImpl};
 use crate::domain::models::{
     AgentAnswer, AgentTask, AgentTurn, PullRequestState, RequiredCheck, RequiredChecks, RunStart,
@@ -55,6 +59,16 @@ use crate::domain::service::StepServiceImpl;
 use crate::outbound::temporal_main_watches::TemporalMainWatches;
 use crate::outbound::temporal_run_workflows::TemporalRunWorkflows;
 use crate::temporal::{FlowWorkflowDefinition, MainWatchWorkflowDefinition};
+
+/// Gate replies and the stand-in over `repo`, with a model that fails, so
+/// no reply answers a Gate and the stand-in answers none.
+pub(super) fn gates(repo: &FakeRepo) -> GateRepliesImpl<FakeRepo, FakeGateModel> {
+    GateRepliesImpl::new(
+        repo.clone(),
+        FakeGateModel::default(),
+        GateReplySettings::default(),
+    )
+}
 
 /// How long a test waits on Temporal before it fails.
 const PATIENCE: Duration = Duration::from_secs(60);
@@ -290,9 +304,12 @@ where
         &task_queue,
         &runtime,
         client.clone(),
-        StepServiceImpl::new(repo.clone(), steps_of(agent, &repo)),
-        ReviewRoundsImpl::new(repo.clone(), FakeGithub::default(), repo.clone()),
-        watches(&repo),
+        WorkerServices {
+            steps: StepServiceImpl::new(repo.clone(), steps_of(agent, &repo)),
+            reviews: ReviewRoundsImpl::new(repo.clone(), FakeGithub::default(), repo.clone()),
+            gates: gates(&repo),
+            watches: watches(&repo),
+        },
     )
     .expect("worker");
 
@@ -486,9 +503,12 @@ async fn a_step_whose_worker_shuts_down_goes_on_at_once_on_the_next() {
             &task_queue,
             &runtime,
             client.clone(),
-            steps(),
-            reviews(),
-            watches(&repo),
+            WorkerServices {
+                steps: steps(),
+                reviews: reviews(),
+                gates: gates(&repo),
+                watches: watches(&repo),
+            },
         )
         .expect("worker");
         let reached = async {
@@ -509,9 +529,12 @@ async fn a_step_whose_worker_shuts_down_goes_on_at_once_on_the_next() {
         &task_queue,
         &runtime,
         client.clone(),
-        steps(),
-        reviews(),
-        watches(&repo),
+        WorkerServices {
+            steps: steps(),
+            reviews: reviews(),
+            gates: gates(&repo),
+            watches: watches(&repo),
+        },
     )
     .expect("worker");
     let done = Notify::new();
@@ -758,6 +781,37 @@ impl CodeRun {
         }
     }
 
+    /// Give the Gate of the Step `seq` Julia's words `reply`, sent again
+    /// for a few seconds while the workflow does not wait on it yet.
+    async fn reply(&self, seq: u16, reply: &str) {
+        let workflows = TemporalRunWorkflows::new(self.client.clone());
+        let reply = ReplyGate {
+            seq,
+            reply: reply.to_string(),
+            user_id: julia(),
+        };
+        for _ in 0..100 {
+            let delivery = workflows.reply(self.run_id, &reply).await.expect("reply");
+            if delivery == AnswerDelivery::Taken {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        panic!("the reply was not taken");
+    }
+
+    /// The Gate of the Step `seq`, as the Run's records keep it.
+    async fn gate(&self, seq: u16) -> Gate {
+        self.repo
+            .list_steps(self.run_id)
+            .await
+            .expect("read")
+            .into_iter()
+            .find(|step| step.seq == seq)
+            .and_then(|step| step.gate)
+            .expect("the gate is recorded")
+    }
+
     async fn cancel(&self) {
         self.client
             .get_workflow_handle::<FlowWorkflowDefinition>(self.run_id.to_string())
@@ -814,6 +868,9 @@ struct CodeWalk {
     questions: Option<u8>,
     /// What the Run's owner is told of its Gates, for a Run on a task.
     notifier: Option<FakeNotifier>,
+    /// The Gate model and how Gate replies and the stand-in are set, in
+    /// place of a model that fails.
+    gates: Option<(FakeGateModel, GateReplySettings)>,
 }
 
 impl Default for CodeWalk {
@@ -824,6 +881,7 @@ impl Default for CodeWalk {
             flow: None,
             questions: None,
             notifier: None,
+            gates: None,
         }
     }
 }
@@ -903,16 +961,22 @@ where
         agent.clone(),
         PullRequestSteps::new(github.clone(), repo.clone(), FakeWatches::default()),
     );
+    let notifier = walk.notifier.clone().unwrap_or_default();
+    let gate_replies = match walk.gates {
+        Some((model, settings)) => GateRepliesImpl::new(repo.clone(), model, settings),
+        None => gates(&repo),
+    };
     let worker = worker_on(
         &task_queue,
         &runtime,
         client.clone(),
-        StepServiceImpl::new(repo.clone(), steps).with_owner_gates(
-            walk.notifier.clone().unwrap_or_default(),
-            FakeTaskNotes::default(),
-        ),
-        ReviewRoundsImpl::new(repo.clone(), github.clone(), repo.clone()),
-        watches(&repo),
+        WorkerServices {
+            steps: StepServiceImpl::new(repo.clone(), steps)
+                .with_owner_gates(notifier.clone(), FakeTaskNotes::default()),
+            reviews: ReviewRoundsImpl::new(repo.clone(), github.clone(), repo.clone()),
+            gates: gate_replies.with_notifier(notifier),
+            watches: watches(&repo),
+        },
     )
     .expect("worker");
 
@@ -1102,6 +1166,10 @@ async fn a_run_whose_rules_decide_every_gate_merges_with_no_person_asked() {
     let repo = FakeRepo::default();
     let rules = RunRules {
         definition: OrchestratorDefinition {
+            stand_in: factory_records::domain::standing_rules::StandInKinds {
+                plan: false,
+                blockers: false,
+            },
             plan: true,
             blockers: true,
             merge: true,
@@ -1153,6 +1221,10 @@ async fn a_gate_of_no_kind_waits_for_a_person_whatever_the_rules() {
     let repo = FakeRepo::default();
     let rules = RunRules {
         definition: OrchestratorDefinition {
+            stand_in: factory_records::domain::standing_rules::StandInKinds {
+                plan: false,
+                blockers: false,
+            },
             plan: true,
             blockers: true,
             merge: true,
@@ -1336,9 +1408,12 @@ async fn with_watch_worker<T>(
         &task_queue,
         &runtime,
         client.clone(),
-        StepServiceImpl::new(repo.clone(), steps_of(&Agent::doing(Work::Works), repo)),
-        ReviewRoundsImpl::new(repo.clone(), github.clone(), repo.clone()),
-        MainWatchServiceImpl::new(repo.clone(), github.clone(), tasks.clone()),
+        WorkerServices {
+            steps: StepServiceImpl::new(repo.clone(), steps_of(&Agent::doing(Work::Works), repo)),
+            reviews: ReviewRoundsImpl::new(repo.clone(), github.clone(), repo.clone()),
+            gates: gates(repo),
+            watches: MainWatchServiceImpl::new(repo.clone(), github.clone(), tasks.clone()),
+        },
     )
     .expect("worker");
     let watches = TemporalMainWatches::on(client.clone(), &task_queue);

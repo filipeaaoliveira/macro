@@ -18,7 +18,17 @@ worker that walks each Run's Flow, in one process.
   review panel runs, three when unset), `FACTORY_QUESTIONS` (optional: the
   most questions each agent Step may ask the Run's owner before the next
   one ends the Run for a person, two when unset; zero offers agents no
-  question).
+  question), `FACTORY_GATE_MODEL` (optional: the model, by the id Macro's
+  model router knows, that reads a person's words on a Gate and stands in
+  for the owner; the router's fast model when unset),
+  `FACTORY_GATE_REPLY_THRESHOLD` and `FACTORY_STAND_IN_THRESHOLD` (optional:
+  how sure, in percent, the model must be before words answer a Gate, 85,
+  and before the stand-in answers one, 90), `FACTORY_STAND_IN_WINDOW_SECS`
+  (optional: how long the owner may override the stand-in, 600).
+- `src/gate_replay.rs`: the `factory_gate_replay` command, which replays
+  the Gate model over the Gates people answered in `DATABASE_URL`'s
+  records (`FACTORY_GATE_REPLAY_LIMIT`, 500 by default) and prints how
+  often it agrees and picks wrong at each threshold.
 
 ## Scope
 
@@ -44,7 +54,10 @@ worker that walks each Run's Flow, in one process.
   `GET /flows` lists), then `GET /runs/<id>`. The `plan` Flow runs the agent
   Steps `plan` and
   `write`, with a Gate between them: answer it with
-  `POST /runs/<id>/steps/<seq>/answer` and `{"answer": "approve"}`.
+  `POST /runs/<id>/steps/<seq>/answer` and `{"answer": "approve"}`, or in
+  words with `POST /runs/<id>/steps/<seq>/reply` and `{"reply": "Looks
+  right, go ahead"}`, which the Gate model reads (it needs the model
+  router's keys) or asks back on.
   `POST /runs/<id>/cancel` cancels a Run. Add
   `"taskId": "<task document id>"` to link a Run to a task, or
   `PUT /runs/<id>/task` later.
@@ -57,8 +70,9 @@ worker that walks each Run's Flow, in one process.
   their own signed-in session, as a Gate's answer does.
   `GET /settings/standing-rules` reads the Standing Rules a person's Runs
   are created with; `PUT` with
-  `{"definition": {"plan": true, "blockers": true, "merge": false}}` sets
-  the team's, `{"definition": null}` goes back to the default, and `PUT
+  `{"definition": {"plan": true, "blockers": true, "merge": false,
+  "standIn": {"plan": true, "blockers": false}}}` sets the team's (`standIn`
+  turns the stand-in on for those kinds of Gate; left out, it is off), `{"definition": null}` goes back to the default, and `PUT
   /settings/standing-rules/projects/<initiative id>` sets or removes a
   Project's own, the same way; `"ownerGates": true` in a definition turns
   its owner section on. `GET /runs/waiting` lists the caller's Runs
@@ -118,6 +132,14 @@ worker that walks each Run's Flow, in one process.
   they may not add to with the same 401 as a key it does not accept). A
   task it refuses, or one in a project the owner may not add to, is not
   made; its finding stays on the round as a follow-up.
+- The Gate model calls a model through Macro's model router, which reads
+  its provider keys from the environment as every caller of the `agent`
+  crate does (`ANTHROPIC_API_KEY` and the others `ModelRouter::try_from_env`
+  names). Without them every call fails: the factory then asks back on
+  every reply and the stand-in answers nothing, so Gates wait for a person
+  as before. Its usage is recorded against each Run's owner
+  (`AiFeature::FactoryGate`, not billable). A comment on a Run's task
+  never answers a Gate (`crates/factory_engine/AGENTS.md` says why).
 - The service tells which accounts exist with the authentication service's
   `POST /internal/get_existing_users`, so it requires the auth service's fix
   that serves that route as POST: before it, the route answered only GET,

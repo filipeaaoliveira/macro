@@ -439,6 +439,10 @@ async fn a_run_out_of_steps_at_an_answer_ends_blocked() {
 
 /// Every Standing Rule on.
 const EVERY_RULE: OrchestratorDefinition = OrchestratorDefinition {
+    stand_in: factory_records::domain::standing_rules::StandInKinds {
+        plan: false,
+        blockers: false,
+    },
     plan: true,
     blockers: true,
     merge: true,

@@ -468,7 +468,8 @@ pub struct StepEnd {
     pub ended_at: DateTime<Utc>,
 }
 
-/// The answer to a Gate: a person's, or a Standing Rule's (a Rule Answer).
+/// The answer to a Gate: a person's, a Standing Rule's (a Rule Answer), or
+/// the stand-in's for the Run's owner.
 #[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GateAnswer {
@@ -486,8 +487,41 @@ pub struct GateAnswer {
     /// empty list approves a Run whose changes GitHub could not list. None
     /// when the answer approved none.
     pub approved_control_files: Option<Vec<String>>,
+    /// For a person's answer the factory read from their words (kept as its
+    /// note), how sure it was, in percent; none for an answer given with a
+    /// button, and for any answer not a person's.
+    pub reply_confidence: Option<u8>,
+    /// Whether the answer is the stand-in's, which the owner let stand
+    /// ([`Gate::stand_in`] says why it gave it).
+    pub by_stand_in: bool,
     /// When they answered.
     pub answered_at: DateTime<Utc>,
+}
+
+/// A reply the factory could not read as one of a Gate's answers, so it
+/// asked the person back.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AskedBack {
+    /// The person's words.
+    pub reply: String,
+    /// When the factory asked back.
+    pub at: DateTime<Utc>,
+}
+
+/// The stand-in's answer to a Gate, for the Run's owner: the answer it
+/// gives, why, and until when the owner may override it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct StandInAnswer {
+    /// Its answer, one the Gate offers.
+    pub answer: Outcome,
+    /// Why, in a sentence or two.
+    pub reason: String,
+    /// How sure it was, in percent.
+    pub confidence: u8,
+    /// Until when the owner may override it; then the Run goes on with it.
+    pub until: DateTime<Utc>,
 }
 
 /// Who asks a Gate's question, which says how it is answered.
@@ -537,6 +571,12 @@ pub struct Gate {
     pub opened_at: DateTime<Utc>,
     /// The person's answer; none while the Run waits.
     pub answer: Option<GateAnswer>,
+    /// The latest reply the factory could not read as one of its answers,
+    /// and asked back for; none when it never asked back.
+    pub asked_back: Option<AskedBack>,
+    /// The stand-in's answer for the Run's owner, while the owner may
+    /// override it and after; none when the stand-in did not answer.
+    pub stand_in: Option<StandInAnswer>,
 }
 
 /// The most Steps a Run takes; past it the Run ends `blocked`, so a Flow

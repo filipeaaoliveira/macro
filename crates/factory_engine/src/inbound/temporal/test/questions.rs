@@ -20,7 +20,8 @@ use tokio::sync::Notify;
 use uuid::Uuid;
 
 use super::{
-    AgentFailed, CodeAgent, PATIENCE, client, julia, steps_of, walk_code_asking, watches, worker_on,
+    AgentFailed, CodeAgent, PATIENCE, client, gates, julia, steps_of, walk_code_asking, watches,
+    worker_on,
 };
 use crate::domain::fakes::{FakeGithub, FakeRepo, ci};
 use crate::domain::flow::Flow;
@@ -29,6 +30,7 @@ use crate::domain::models::{AgentAnswer, AgentTask, AgentTurn, RunStart};
 use crate::domain::ports::{AnswerDelivery, RunWorkflows, StepAgent};
 use crate::domain::review_rounds::ReviewRoundsImpl;
 use crate::domain::service::StepServiceImpl;
+use crate::inbound::temporal::WorkerServices;
 use crate::outbound::temporal_run_workflows::TemporalRunWorkflows;
 use crate::temporal::FlowWorkflowDefinition;
 
@@ -215,9 +217,12 @@ where
         &task_queue,
         &runtime,
         client.clone(),
-        StepServiceImpl::new(repo.clone(), steps_of(agent, &repo)),
-        ReviewRoundsImpl::new(repo.clone(), FakeGithub::default(), repo.clone()),
-        watches(&repo),
+        WorkerServices {
+            steps: StepServiceImpl::new(repo.clone(), steps_of(agent, &repo)),
+            reviews: ReviewRoundsImpl::new(repo.clone(), FakeGithub::default(), repo.clone()),
+            gates: gates(&repo),
+            watches: watches(&repo),
+        },
     )
     .expect("worker");
 

@@ -13,7 +13,7 @@ use uuid::Uuid;
 use super::{DEFAULT_QUESTIONS, FactoryServiceImpl, StepServiceImpl};
 use crate::domain::fakes::{FakeGithub, FakeRepo};
 use crate::domain::flow::{StepName, StepUse};
-use crate::domain::gate::AnswerGate;
+use crate::domain::gate::{AnswerGate, ReplyGate};
 use crate::domain::models::{
     FactoryError, RunFinish, RunStart, StepEnding, StepError, StepInput, StepReport, StepRequest,
     StepStart,
@@ -34,6 +34,7 @@ mod standing_rules;
 struct FakeWorkflows {
     started: Arc<Mutex<Vec<RunStart>>>,
     answers: Arc<Mutex<Vec<AnswerGate>>>,
+    replies: Arc<Mutex<Vec<ReplyGate>>>,
     cancelled: Arc<Mutex<Vec<RunId>>>,
     fail: bool,
     started_anyway: bool,
@@ -71,6 +72,18 @@ impl RunWorkflows for FakeWorkflows {
             return Ok(AnswerDelivery::Refused("not waiting".to_string()));
         }
         self.answers.lock().expect("answers").push(answer.clone());
+        Ok(AnswerDelivery::Taken)
+    }
+
+    async fn reply(
+        &self,
+        _run_id: RunId,
+        reply: &ReplyGate,
+    ) -> Result<AnswerDelivery, RunWorkflowsError> {
+        if self.refuse {
+            return Ok(AnswerDelivery::Refused("not waiting".to_string()));
+        }
+        self.replies.lock().expect("replies").push(reply.clone());
         Ok(AnswerDelivery::Taken)
     }
 

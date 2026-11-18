@@ -26,7 +26,7 @@ use uuid::Uuid;
 use super::{FactoryRouterState, factory_router};
 use crate::domain::built_in_steps::BuiltInSteps;
 use crate::domain::fakes::{FakeGithub, FakeRepo, FakeWatches};
-use crate::domain::gate::AnswerGate;
+use crate::domain::gate::{AnswerGate, ReplyGate};
 use crate::domain::models::{ControlFilesSettings, FactoryError, FlowSummary, RunDetail, RunStart};
 use crate::domain::ports::{AnswerDelivery, FactoryService, RunWorkflows, RunWorkflowsError};
 use crate::domain::pull_request_steps::PullRequestSteps;
@@ -237,6 +237,16 @@ impl FactoryService for FakeService {
         Err(self.refusing(&actor))
     }
 
+    async fn reply_to_gate(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        _id: RunId,
+        _seq: u16,
+        _reply: String,
+    ) -> Result<(), FactoryError> {
+        Err(self.refusing(&actor))
+    }
+
     async fn control_files(
         &self,
         actor: &MacroUserIdStr<'static>,
@@ -328,6 +338,14 @@ impl RunWorkflows for AcceptingWorkflows {
         &self,
         _run_id: RunId,
         _answer: &AnswerGate,
+    ) -> Result<AnswerDelivery, RunWorkflowsError> {
+        Ok(AnswerDelivery::Taken)
+    }
+
+    async fn reply(
+        &self,
+        _run_id: RunId,
+        _reply: &ReplyGate,
     ) -> Result<AnswerDelivery, RunWorkflowsError> {
         Ok(AnswerDelivery::Taken)
     }

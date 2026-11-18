@@ -51,6 +51,38 @@ afterEach(() => {
 });
 
 describe('StandingRulesSettings', () => {
+  it('turns the stand-in on for one kind of Gate, keeping the rules', async () => {
+    vi.mocked(factoryClient.setStandingRules).mockResolvedValueOnce(
+      ok({
+        ...teamDefault,
+        definition: {
+          plan: false,
+          blockers: true,
+          merge: false,
+          standIn: { plan: true, blockers: false },
+        },
+        isDefault: false,
+      })
+    );
+    mount(teamDefault);
+
+    const plan = await screen.findByRole('checkbox', {
+      name: 'Answer plan questions for the run’s owner',
+    });
+    expect((plan as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(plan);
+
+    await waitFor(() =>
+      expect(factoryClient.setStandingRules).toHaveBeenCalledWith({
+        plan: false,
+        blockers: true,
+        merge: false,
+        standIn: { plan: true, blockers: false },
+      })
+    );
+    await waitFor(() => expect((plan as HTMLInputElement).checked).toBe(true));
+  });
+
   it('turns an admin’s rule on, keeping the others, and goes back to the default', async () => {
     vi.mocked(factoryClient.setStandingRules)
       .mockResolvedValueOnce(

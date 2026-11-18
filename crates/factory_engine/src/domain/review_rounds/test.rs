@@ -561,6 +561,14 @@ impl crate::domain::ports::RunWorkflows for Started {
         Ok(crate::domain::ports::AnswerDelivery::Taken)
     }
 
+    async fn reply(
+        &self,
+        _run_id: RunId,
+        _reply: &crate::domain::gate::ReplyGate,
+    ) -> Result<crate::domain::ports::AnswerDelivery, crate::domain::ports::RunWorkflowsError> {
+        Ok(crate::domain::ports::AnswerDelivery::Taken)
+    }
+
     async fn cancel(
         &self,
         _run_id: RunId,

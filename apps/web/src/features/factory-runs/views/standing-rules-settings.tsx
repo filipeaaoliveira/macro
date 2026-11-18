@@ -9,6 +9,8 @@ import {
   type GateKind,
   type OrchestratorDefinition,
   RULE_NAMES,
+  STAND_IN_KINDS,
+  type StandInKinds,
 } from '../core/standing-rules';
 import {
   useSetStandingRulesMutation,
@@ -21,9 +23,18 @@ const RULE_HINTS = {
   merge: 'factoryRuns.standingRulesMergeWhenGreenHint',
 } as const satisfies Record<GateKind, string>;
 
+const STAND_IN_NAMES = {
+  plan: 'factoryRuns.standInPlan',
+  blockers: 'factoryRuns.standInBlockers',
+} as const satisfies Record<keyof StandInKinds, string>;
+
+/** The stand-in is off for every kind a definition leaves out. */
+const NO_STAND_IN: StandInKinds = { plan: false, blockers: false };
+
 /**
  * The team's Standing Rules: which kinds of Gate the factory answers on its
- * own for its Runs, and whether the Gates it leaves go to the Run's owner.
+ * own for its Runs, whether the Gates it leaves go to the Run's owner, and
+ * which the stand-in answers for the owner when no rule does.
  * Its admins turn each on or off, or go back to the default; other members
  * read them. A Tampered Run always waits for a person, whatever they say.
  */
@@ -71,9 +82,21 @@ export function StandingRulesSettings() {
             ...settings().definition,
             ownerGates: settings().definition.ownerGates ?? false,
           });
-          const toggle = (kind: keyof OrchestratorDefinition, on: boolean) =>
+          const toggle = (
+            kind: Exclude<keyof OrchestratorDefinition, 'standIn'>,
+            on: boolean
+          ) =>
             fireAndForget(
               save({ ...definition(), [kind]: on }),
+              'factory-runs'
+            );
+          const standIn = () => definition().standIn ?? NO_STAND_IN;
+          const toggleStandIn = (kind: keyof StandInKinds, on: boolean) =>
+            fireAndForget(
+              save({
+                ...definition(),
+                standIn: { ...standIn(), [kind]: on },
+              }),
               'factory-runs'
             );
           return (
@@ -114,6 +137,27 @@ export function StandingRulesSettings() {
                   </Checkbox.Description>
                 </div>
               </Checkbox>
+              <p class="pt-1 text-sm font-medium">
+                {t('factoryRuns.standInTitle')}
+              </p>
+              <For each={STAND_IN_KINDS}>
+                {(kind) => (
+                  <Checkbox
+                    size="sm"
+                    checked={standIn()[kind]}
+                    onChange={(on: boolean) => toggleStandIn(kind, on)}
+                    disabled={locked()}
+                  >
+                    <Checkbox.Control />
+                    <Checkbox.Label class="text-sm">
+                      {t(STAND_IN_NAMES[kind])}
+                    </Checkbox.Label>
+                  </Checkbox>
+                )}
+              </For>
+              <p class="text-xs text-ink-muted">
+                {t('factoryRuns.standInHint')}
+              </p>
               <p class="text-xs text-ink-muted">
                 {settings().isDefault
                   ? t('factoryRuns.standingRulesDefault')

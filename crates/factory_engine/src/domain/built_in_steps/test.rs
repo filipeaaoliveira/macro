@@ -332,11 +332,15 @@ async fn a_plan_reads_what_a_person_answered_the_last_one() {
             ended_at: Utc::now(),
         }),
         gate: Some(Gate {
+            asked_back: None,
+            stand_in: None,
             kind: GateKind::Flow,
             question: "Approve the plan?".to_string(),
             answers: vec![Outcome::done(), revise.clone()],
             opened_at: Utc::now(),
             answer: Some(GateAnswer {
+                reply_confidence: None,
+                by_stand_in: false,
                 answer: revise,
                 note: Some("Keep the old index".to_string()),
                 user_id: None,
@@ -580,11 +584,15 @@ fn asked(seq: u16, entry: &str, question: &str, answer: &str) -> Step {
             ended_at: Utc::now(),
         }),
         gate: Some(Gate {
+            asked_back: None,
+            stand_in: None,
             kind: GateKind::Question,
             question: question.to_string(),
             answers: vec![Outcome::answer()],
             opened_at: Utc::now(),
             answer: Some(GateAnswer {
+                reply_confidence: None,
+                by_stand_in: false,
                 answer: Outcome::answer(),
                 note: Some(answer.to_string()),
                 user_id: None,

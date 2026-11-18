@@ -14,10 +14,10 @@ use temporalio_client::{
 };
 use upstream_error::{UpstreamError, UpstreamFailure};
 
-use crate::domain::gate::AnswerGate;
+use crate::domain::gate::{AnswerGate, ReplyGate};
 use crate::domain::models::RunStart;
 use crate::domain::ports::{AnswerDelivery, RunWorkflows, RunWorkflowsError};
-use crate::temporal::{AnswerGateUpdate, FlowWorkflowDefinition, TASK_QUEUE};
+use crate::temporal::{AnswerGateUpdate, FlowWorkflowDefinition, ReplyGateUpdate, TASK_QUEUE};
 
 /// Why a Run's workflow is cancelled, for Temporal to show.
 const CANCEL_REASON: &str = "cancelled through the Run API";
@@ -124,6 +124,25 @@ impl RunWorkflows for TemporalRunWorkflows {
             .execute_update(
                 AnswerGateUpdate,
                 answer.clone(),
+                WorkflowExecuteUpdateOptions::default(),
+            )
+            .await;
+        delivery(sent)
+    }
+
+    #[tracing::instrument(err, skip_all, fields(run_id = %run_id, seq = reply.seq))]
+    async fn reply(
+        &self,
+        run_id: RunId,
+        reply: &ReplyGate,
+    ) -> Result<AnswerDelivery, RunWorkflowsError> {
+        let handle = self
+            .client
+            .get_workflow_handle::<FlowWorkflowDefinition>(run_id.to_string());
+        let sent = handle
+            .execute_update(
+                ReplyGateUpdate,
+                reply.clone(),
                 WorkflowExecuteUpdateOptions::default(),
             )
             .await;

@@ -55,6 +55,15 @@ pub struct IngressGateNotifier<Ingress, Reader> {
     reader: Arc<Reader>,
 }
 
+impl<Ingress, Reader> Clone for IngressGateNotifier<Ingress, Reader> {
+    fn clone(&self) -> Self {
+        Self {
+            ingress: Arc::clone(&self.ingress),
+            reader: Arc::clone(&self.reader),
+        }
+    }
+}
+
 impl<Ingress, Reader> IngressGateNotifier<Ingress, Reader> {
     /// Notify through `ingress`, and mark done through `reader`.
     pub fn new(ingress: Arc<Ingress>, reader: Arc<Reader>) -> Self {

@@ -1,9 +1,11 @@
 //! In-memory stand-ins for the factory's records, for the domain's tests.
 
 mod gate_owner;
+mod gate_replies;
 mod main_hold;
 
 pub(crate) use gate_owner::{FakeNotifier, FakeTaskNotes};
+pub(crate) use gate_replies::FakeGateModel;
 pub(crate) use main_hold::{FakeHoldTasks, FakeMain, FakeWatches};
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -105,6 +107,8 @@ pub(crate) struct FollowUpComment {
 #[derive(Clone, Default)]
 pub(crate) struct FakeRepo {
     pub(crate) runs: Arc<Mutex<BTreeMap<RunId, Run>>>,
+    /// The built-in Flow each Run walks.
+    pub(crate) flows: Arc<Mutex<BTreeMap<RunId, String>>>,
     pub(crate) steps: Arc<Mutex<Vec<(RunId, Step)>>>,
     /// Each agent Step's session, what it offers, and its latest hand back.
     pub(crate) sessions: Arc<Mutex<Vec<FakeSession>>>,
@@ -356,6 +360,7 @@ impl RunRepository for FakeRepo {
     async fn insert_run(&self, new: NewRun<'_>) -> Result<RunInsert, FakeError> {
         let NewRun {
             id,
+            flow,
             request,
             user_id,
             task_id,
@@ -386,6 +391,10 @@ impl RunRepository for FakeRepo {
             end: None,
         };
         self.runs.lock().expect("runs").insert(id, run.clone());
+        self.flows
+            .lock()
+            .expect("flows")
+            .insert(id, flow.to_string());
         Ok(RunInsert::Inserted(Box::new(run)))
     }
 
@@ -628,6 +637,8 @@ impl RunRepository for FakeRepo {
         self.with_step(key, |step| {
             let kind = GateKind::of(step.end.as_ref().map(|end| &end.outcome));
             step.gate.get_or_insert_with(|| Gate {
+                asked_back: None,
+                stand_in: None,
                 kind,
                 question: question.to_string(),
                 answers: answers.to_vec(),
@@ -652,6 +663,8 @@ impl RunRepository for FakeRepo {
                 && gate.answer.is_none()
             {
                 gate.answer = Some(GateAnswer {
+                    reply_confidence: None,
+                    by_stand_in: false,
                     answer: answer.clone(),
                     note: note.map(str::to_string),
                     user_id: Some(user_id.clone()),
@@ -679,6 +692,8 @@ impl RunRepository for FakeRepo {
             let gate = step.gate.as_mut()?;
             if gate.answer.is_none() {
                 gate.answer = Some(GateAnswer {
+                    reply_confidence: None,
+                    by_stand_in: false,
                     answer: answer.clone(),
                     note: None,
                     user_id: None,

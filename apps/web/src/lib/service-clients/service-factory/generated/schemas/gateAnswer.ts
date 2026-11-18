@@ -7,12 +7,14 @@
 
 import type { GateAnswerApprovedControlFiles } from './gateAnswerApprovedControlFiles';
 import type { GateAnswerNote } from './gateAnswerNote';
+import type { GateAnswerReplyConfidence } from './gateAnswerReplyConfidence';
 import type { GateAnswerRule } from './gateAnswerRule';
 import type { GateAnswerUserId } from './gateAnswerUserId';
 import type { Outcome } from './outcome';
 
 /**
- * The answer to a Gate: a person's, or a Standing Rule's (a Rule Answer).
+ * The answer to a Gate: a person's, a Standing Rule's (a Rule Answer), or
+the stand-in's for the Run's owner.
  */
 export interface GateAnswer {
   /** The answer, one the Gate offered: the outcome the Flow routes. */
@@ -23,8 +25,18 @@ export interface GateAnswer {
 empty list approves a Run whose changes GitHub could not list. None
 when the answer approved none. */
   approvedControlFiles?: GateAnswerApprovedControlFiles;
+  /** Whether the answer is the stand-in's, which the owner let stand
+([`Gate::stand_in`] says why it gave it). */
+  byStandIn: boolean;
   /** What the person added, for the Run's later Steps to read. */
   note?: GateAnswerNote;
+  /**
+   * For a person's answer the factory read from their words (kept as its
+note), how sure it was, in percent; none for an answer given with a
+button, and for any answer not a person's.
+   * @minimum 0
+   */
+  replyConfidence?: GateAnswerReplyConfidence;
   rule?: GateAnswerRule;
   userId?: GateAnswerUserId;
 }

@@ -164,6 +164,7 @@ function mount(options: {
     }),
     startRun: vi.fn(),
     answerGate: vi.fn(),
+    replyToGate: vi.fn(),
     cancelRun: vi.fn(),
   };
   render(() => (

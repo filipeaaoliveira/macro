@@ -1,5 +1,9 @@
 //! Ports (trait contracts) of the factory's use cases.
 
+mod gate_replies;
+
+pub use gate_replies::{GateModel, GateReplyService, ModelPick, ModelQuestion};
+
 use agent_session::domain::session_command::SessionCommandOutput;
 use agent_session::domain::session_task::TaskDocumentId;
 use factory_records::domain::models::{HandBack, Outcome, Role, RunId, StepKey};
@@ -7,7 +11,7 @@ use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
 use crate::domain::flow::{StepName, StepUse};
-use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening, GateRuling};
+use crate::domain::gate::{AnswerGate, GateAnswered, GateOpening, GateRuling, ReplyGate};
 use crate::domain::gate_owner::{GateNotice, OwnerNote};
 use crate::domain::main_hold::{HoldTask, MainLook, MainWatch};
 use crate::domain::models::{
@@ -58,6 +62,14 @@ pub trait RunWorkflows: Send + Sync + 'static {
         &self,
         run_id: RunId,
         answer: &AnswerGate,
+    ) -> impl Future<Output = Result<AnswerDelivery, RunWorkflowsError>> + Send;
+
+    /// Send a person's words, `reply`, to the workflow of `run_id`, which
+    /// takes them to read or says why not.
+    fn reply(
+        &self,
+        run_id: RunId,
+        reply: &ReplyGate,
     ) -> impl Future<Output = Result<AnswerDelivery, RunWorkflowsError>> + Send;
 
     /// Ask the workflow of `run_id` to stop its Step or Gate and end the Run
@@ -556,6 +568,18 @@ pub trait FactoryService: Send + Sync + 'static {
         id: RunId,
         task_id: Uuid,
     ) -> impl Future<Output = Result<RunDetail, FactoryError>> + Send;
+
+    /// Give `actor`'s words, `reply`, to the Gate the actor's Run waits on,
+    /// in place of one of its answers: the factory reads them as one of its
+    /// answers or asks back, and an agent's question takes them as the
+    /// answer.
+    fn reply_to_gate(
+        &self,
+        actor: MacroUserIdStr<'static>,
+        id: RunId,
+        seq: u16,
+        reply: String,
+    ) -> impl Future<Output = Result<(), FactoryError>> + Send;
 
     /// Give `actor`'s answer to the Gate the actor's Run waits on. Approving
     /// a Gate of a Tampered Run needs `approved_control_files`: the

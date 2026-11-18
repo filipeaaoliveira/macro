@@ -5,6 +5,8 @@ publish = false
 version = "0.1.0"
 
 [dependencies]
+# The model router the Gate model calls a small model through.
+agent = { path = "../agent" }
 agent_correlation = { path = "../agent_correlation" }
 agent_runtime_protocol = { path = "../agent_runtime_protocol", default-features = false }
 # `admission` names the refusal of an agent whose owner's quota is used up.

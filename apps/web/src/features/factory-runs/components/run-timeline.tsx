@@ -5,7 +5,7 @@ import { buildSimpleEntityUrl } from '@core/util/url';
 import CaretDownIcon from '@icon/system/regular/caret-down.svg';
 import { Badge, Button, Card, cn } from '@ui';
 import { CollapseTransition } from '@ui/components/CollapseTransition';
-import { createSignal, For, type JSX, Show } from 'solid-js';
+import { createSignal, For, type JSX, Match, Show, Switch } from 'solid-js';
 import { flowWordLabel, flowWordText } from '../core/flow-words';
 import {
   type BaseRequiredChecks,
@@ -205,9 +205,27 @@ function TimelineStep(props: {
             >
               <Show
                 when={answer().rule}
-                fallback={t('factoryRuns.answered', {
-                  answer: flowWordLabel(answer().answer),
-                })}
+                fallback={
+                  <Switch
+                    fallback={t('factoryRuns.answered', {
+                      answer: flowWordLabel(answer().answer),
+                    })}
+                  >
+                    <Match when={answer().byStandIn}>
+                      {t('factoryRuns.answeredByStandIn', {
+                        answer: flowWordLabel(answer().answer),
+                      })}
+                    </Match>
+                    <Match when={answer().replyConfidence}>
+                      {(confidence) =>
+                        t('factoryRuns.answeredFromReply', {
+                          answer: flowWordLabel(answer().answer),
+                          confidence: confidence(),
+                        })
+                      }
+                    </Match>
+                  </Switch>
+                }
               >
                 {(rule) =>
                   t('factoryRuns.answeredByRule', {
@@ -221,6 +239,13 @@ function TimelineStep(props: {
               {(note) => (
                 <span class="block whitespace-pre-wrap text-ink-muted">
                   {note()}
+                </span>
+              )}
+            </Show>
+            <Show when={answer().byStandIn && props.step.gate?.standIn}>
+              {(standIn) => (
+                <span class="block whitespace-pre-wrap text-ink-muted">
+                  {standIn().reason}
                 </span>
               )}
             </Show>

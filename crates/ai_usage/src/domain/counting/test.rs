@@ -1,6 +1,6 @@
 use super::*;
 
-const FEATURES: [(AiFeature, bool); 19] = [
+const FEATURES: [(AiFeature, bool); 20] = [
     (AiFeature::Chat, true),
     (AiFeature::Memory, false),
     (AiFeature::Automation, true),
@@ -20,6 +20,7 @@ const FEATURES: [(AiFeature, bool); 19] = [
     (AiFeature::EmailFocus, false),
     (AiFeature::WebSearch, true),
     (AiFeature::NonBillableAgentSession, false),
+    (AiFeature::FactoryGate, false),
 ];
 
 #[test]
@@ -35,7 +36,7 @@ fn feature_classification_preserves_billing_policy() {
         assert_eq!(is_billable_feature(feature), billable, "{feature:?}");
         assert_eq!(NON_BILLABLE_AI_FEATURES.contains(&feature), !billable);
     }
-    assert_eq!(NON_BILLABLE_AI_FEATURES.len(), 9);
+    assert_eq!(NON_BILLABLE_AI_FEATURES.len(), 10);
 }
 
 #[test]

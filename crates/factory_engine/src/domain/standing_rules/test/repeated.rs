@@ -7,7 +7,9 @@ use factory_records::domain::models::{
     EntryId, Gate, GateAnswer, GateKind, Outcome, Role, Step, StepEnd,
 };
 use factory_records::domain::review_rounds::{FindingKind, Lines, ReviewFinding, ReviewRound};
-use factory_records::domain::standing_rules::{OrchestratorDefinition, RuleGateKind, StandingRule};
+use factory_records::domain::standing_rules::{
+    OrchestratorDefinition, RuleGateKind, StandInKinds, StandingRule,
+};
 
 use super::{facts, fix_or_stop};
 use crate::domain::review_rounds::same_blockers;
@@ -93,8 +95,12 @@ fn fixed(seq: u16, rule: Option<StandingRule>) -> Step {
                 user_id: None,
                 rule,
                 approved_control_files: None,
+                reply_confidence: None,
+                by_stand_in: false,
                 answered_at: Utc::now(),
             }),
+            asked_back: None,
+            stand_in: None,
         }),
         role: None,
         agent: None,
@@ -108,6 +114,10 @@ const OWNER_GATES: OrchestratorDefinition = OrchestratorDefinition {
     blockers: true,
     merge: false,
     owner_gates: true,
+    stand_in: StandInKinds {
+        plan: false,
+        blockers: false,
+    },
 };
 
 /// With the owner section on, repeated Blockers wait for the owner; with

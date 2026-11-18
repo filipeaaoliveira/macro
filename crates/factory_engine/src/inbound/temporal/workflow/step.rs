@@ -146,6 +146,7 @@ pub(super) async fn walk_step<W: Work>(
                 };
                 let rule = Asking {
                     kind: gate.kind,
+                    person_only: gate.person_only,
                     fix_rounds: 0,
                     fix_limit: 0,
                 };

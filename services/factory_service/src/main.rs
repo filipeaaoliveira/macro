@@ -20,6 +20,8 @@ use entity_access::domain::service::EntityAccessServiceImpl;
 use entity_access::outbound::PgAccessRepository;
 use factory_engine::domain::agents::AgentDefinition;
 use factory_engine::domain::built_in_steps::BuiltInSteps;
+use factory_engine::domain::gate_replies::GateReplySettings;
+use factory_engine::domain::gate_replies::service::GateRepliesImpl;
 use factory_engine::domain::insights::InsightsServiceImpl;
 use factory_engine::domain::main_hold::MainWatchServiceImpl;
 use factory_engine::domain::ports::StepAgent;
@@ -29,10 +31,12 @@ use factory_engine::domain::service::{FactoryServiceImpl, StepServiceImpl};
 use factory_engine::domain::session_agent::SessionAgent;
 use factory_engine::inbound::http::{ApiDoc, FactoryRouterState, factory_router};
 use factory_engine::inbound::insights::{InsightsApiDoc, InsightsRouterState, insights_router};
+use factory_engine::inbound::temporal::WorkerServices;
 use factory_engine::outbound::auth_user_directory::AuthUserDirectory;
 use factory_engine::outbound::document_hold_tasks::DocumentHoldTasks;
 use factory_engine::outbound::document_task_directory::DocumentTaskDirectory;
 use factory_engine::outbound::document_task_notes::DocumentTaskNotes;
+use factory_engine::outbound::fast_gate_model::FastGateModel;
 use factory_engine::outbound::github_pull_requests::GithubPullRequests;
 use factory_engine::outbound::ingress_gate_notifier::IngressGateNotifier;
 use factory_engine::outbound::local_agent::LocalAgent;
@@ -131,8 +135,24 @@ async fn run() -> Result<(), rootcause::Report> {
         config.document_storage_service_auth_key.clone(),
         DocumentStorageServiceUrl::new()?.to_string(),
     );
+    // A person's words on a Gate, and the stand-in, go to a small model on
+    // Macro's model router; its usage is recorded against the Run's owner.
+    // The calls are not billable, so no allowance is enforced on them.
+    let recorder =
+        ai_usage::pg_recorder_with_enforcement(db.clone(), ai_usage::AiUsageEnforcement::Disabled);
+    let gate_settings = GateReplySettings::configured(
+        config.factory_gate_reply_threshold,
+        config.factory_stand_in_threshold,
+        config.factory_stand_in_window_secs.map(Duration::from_secs),
+    )?;
+    let gates = GateRepliesImpl::new(
+        repo.clone(),
+        FastGateModel::new(config.factory_gate_model.clone(), recorder),
+        gate_settings,
+    );
     let parts = Parts {
         port: config.port,
+        gates,
         review_rounds: config.factory_review_rounds,
         questions: config.factory_questions,
         repo: repo.clone(),
@@ -208,6 +228,7 @@ async fn run() -> Result<(), rootcause::Report> {
 /// What serving takes besides the Steps.
 struct Parts {
     port: u16,
+    gates: GateRepliesImpl<PgRunRepository, FastGateModel>,
     review_rounds: Option<std::num::NonZeroU8>,
     questions: Option<u8>,
     repo: PgRunRepository,
@@ -257,10 +278,17 @@ async fn serve<A: StepAgent + Clone>(
     let worker = factory_engine::inbound::temporal::worker(
         &runtime,
         parts.client.clone(),
-        StepServiceImpl::new(parts.repo.clone(), steps.clone())
-            .with_owner_gates(parts.gate_notifier, parts.task_notes),
-        reviews,
-        MainWatchServiceImpl::new(parts.repo.clone(), parts.github.clone(), parts.hold_tasks),
+        WorkerServices {
+            steps: StepServiceImpl::new(parts.repo.clone(), steps.clone())
+                .with_owner_gates(parts.gate_notifier.clone(), parts.task_notes),
+            reviews,
+            gates: parts.gates.with_notifier(parts.gate_notifier),
+            watches: MainWatchServiceImpl::new(
+                parts.repo.clone(),
+                parts.github.clone(),
+                parts.hold_tasks,
+            ),
+        },
     )?;
 
     let insights = Arc::new(InsightsServiceImpl::new(parts.repo.clone(), parts.usage));

@@ -12,6 +12,7 @@ import {
   RunCancel,
   RunContent,
   RunLoadFailed,
+  replyToGate,
 } from './shared/run-parts';
 import { formatRunTime } from './shared/run-time';
 
@@ -43,6 +44,8 @@ function RunGate(props: { controller: RunController }) {
           question={waiting().gate.question}
           asker={gateAsker(waiting().step, waiting().gate)}
           answers={waiting().gate.answers}
+          gate={waiting().gate}
+          time={formatRunTime}
           controlFiles={props.controller.controlFiles()}
           approveControlFiles={props.controller.approveControlFiles()}
           onApproveControlFilesChange={props.controller.setApproveControlFiles}
@@ -52,6 +55,8 @@ function RunGate(props: { controller: RunController }) {
           locked={props.controller.gateLocked()}
           answering={props.controller.answering()}
           onAnswer={(value) => answerGate(props.controller, value)}
+          replying={props.controller.replying()}
+          onReply={() => replyToGate(props.controller)}
         />
       )}
     </Show>

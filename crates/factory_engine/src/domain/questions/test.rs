@@ -24,11 +24,15 @@ fn asked(seq: u16, role: &str, question: &str, answer: Option<&str>) -> Step {
             ended_at: Utc::now(),
         }),
         gate: Some(Gate {
+            asked_back: None,
+            stand_in: None,
             kind: GateKind::Question,
             question: question.to_string(),
             answers: vec![Outcome::answer()],
             opened_at: Utc::now(),
             answer: answer.map(|answer| GateAnswer {
+                reply_confidence: None,
+                by_stand_in: false,
                 answer: Outcome::answer(),
                 note: Some(answer.to_string()),
                 user_id: None,

@@ -38,8 +38,9 @@ impl AiUsageEnforcement {
 /// mode choice is the Auto composer routing a prompt to Chat or Code; agent
 /// activity summary is the live status line over a running session's tool calls; email
 /// focus classifies incoming mail in the background; a non-billable agent
-/// session is background work its opener chose not to bill.
-pub const NON_BILLABLE_AI_FEATURES: [AiFeature; 9] = [
+/// session is background work its opener chose not to bill; a factory Gate
+/// is one short classification of a Gate's answer.
+pub const NON_BILLABLE_AI_FEATURES: [AiFeature; 10] = [
     AiFeature::Memory,
     AiFeature::AiProjection,
     AiFeature::CallSummary,
@@ -49,6 +50,7 @@ pub const NON_BILLABLE_AI_FEATURES: [AiFeature; 9] = [
     AiFeature::AgentActivitySummary,
     AiFeature::EmailFocus,
     AiFeature::NonBillableAgentSession,
+    AiFeature::FactoryGate,
 ];
 
 /// Whether a feature's usage is billable, independent of enforcement or identity.
@@ -63,7 +65,8 @@ pub const fn is_billable_feature(feature: AiFeature) -> bool {
         | AiFeature::AgentModeChoice
         | AiFeature::AgentActivitySummary
         | AiFeature::EmailFocus
-        | AiFeature::NonBillableAgentSession => false,
+        | AiFeature::NonBillableAgentSession
+        | AiFeature::FactoryGate => false,
         AiFeature::Chat
         | AiFeature::Automation
         | AiFeature::DynamicCompletionsApi

@@ -66,6 +66,7 @@ const DONE: RunActionResult = { ok: true, value: undefined };
 
 function mount(options: {
   answerGate?: RunsContext['answerGate'];
+  replyToGate?: RunsContext['replyToGate'];
   cancelRun?: RunsContext['cancelRun'];
   state?: Accessor<'pending' | 'error' | 'ready'>;
   retry?: () => void;
@@ -96,6 +97,7 @@ function mount(options: {
     }),
     startRun: vi.fn(),
     answerGate: options.answerGate ?? vi.fn(async () => DONE),
+    replyToGate: options.replyToGate ?? vi.fn(async () => DONE),
     cancelRun: options.cancelRun ?? vi.fn(async () => DONE),
   };
   render(() => (
@@ -408,6 +410,148 @@ describe('RunView', () => {
     ).toBe(true);
   });
 
+  it('sends the note as a reply, and keeps the Gate open for the answer it reads', async () => {
+    const replyToGate = vi.fn(async () => DONE);
+    const answerGate = vi.fn(async () => DONE);
+    mount({ replyToGate, answerGate });
+
+    const send = await screen.findByRole('button', { name: 'Send as reply' });
+    // With no words there's nothing to send.
+    expect(send.hasAttribute('disabled')).toBe(true);
+    fireEvent.input(
+      screen.getByPlaceholderText('Add a note for the next steps (optional)'),
+      { target: { value: '  Looks right, go ahead  ' } }
+    );
+    fireEvent.click(send);
+
+    await waitFor(() =>
+      expect(replyToGate).toHaveBeenCalledWith({
+        runId: 'run-1',
+        step: waitingRun.steps[0],
+        reply: 'Looks right, go ahead',
+      })
+    );
+    expect(answerGate).not.toHaveBeenCalled();
+    // The factory may ask back: the Gate still takes an answer.
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Approve' }).hasAttribute('disabled')
+      ).toBe(false)
+    );
+  });
+
+  it('shows words the factory asked back on, and the stand-in’s answer with its window', async () => {
+    const { setRun } = mount({});
+    const [first] = waitingRun.steps;
+    if (!first?.gate) throw new Error('No first Gate');
+    setRun({
+      ...waitingRun,
+      steps: [
+        {
+          ...first,
+          gate: {
+            ...first.gate,
+            askedBack: { reply: 'Hmm', at: '2026-11-16T09:02:00Z' },
+          },
+        },
+      ],
+    });
+    expect(
+      await screen.findByText(
+        'Couldn’t tell which answer “Hmm” gives. Pick an answer, or say it another way.'
+      )
+    ).toBeTruthy();
+
+    setRun({
+      ...waitingRun,
+      steps: [
+        {
+          ...first,
+          gate: {
+            ...first.gate,
+            standIn: {
+              answer: 'approve',
+              reason: 'You approved every plan like this one.',
+              confidence: 93,
+              until: '2026-11-16T09:11:00Z',
+            },
+          },
+        },
+      ],
+    });
+    expect(
+      await screen.findByText(
+        'The stand-in answered Approve for you (93% sure)'
+      )
+    ).toBeTruthy();
+    expect(
+      screen.getByText('You approved every plan like this one.')
+    ).toBeTruthy();
+    // The owner can still override it.
+    expect(
+      screen.getByRole('button', { name: 'Revise' }).hasAttribute('disabled')
+    ).toBe(false);
+  });
+
+  it('says when the stand-in answered, and when an answer was read from a reply', async () => {
+    const { setRun } = mount({});
+    const [first] = waitingRun.steps;
+    if (!first?.gate) throw new Error('No first Gate');
+    const standIn = {
+      answer: 'approve',
+      reason: 'You approved every plan like this one.',
+      confidence: 93,
+      until: '2026-11-16T09:11:00Z',
+    };
+    setRun({
+      ...waitingRun,
+      steps: [
+        {
+          ...first,
+          gate: {
+            ...first.gate,
+            standIn,
+            answer: {
+              answer: 'approve',
+              byStandIn: true,
+              answeredAt: '2026-11-16T09:11:00Z',
+            },
+          },
+        },
+        {
+          ...first,
+          seq: 2,
+          visit: 2,
+          gate: {
+            ...first.gate,
+            answer: {
+              answer: 'revise',
+              note: 'It needs tests first',
+              replyConfidence: 91,
+              answeredAt: '2026-11-16T09:12:00Z',
+            },
+          },
+        },
+        {
+          seq: 3,
+          entry: 'write',
+          visit: 1,
+          startedAt: '2026-11-16T09:12:00Z',
+        },
+      ],
+    });
+
+    expect(
+      await screen.findByText('Answered for you by the stand-in: Approve')
+    ).toBeTruthy();
+    expect(
+      screen.getByText('You approved every plan like this one.')
+    ).toBeTruthy();
+    expect(
+      screen.getByText('Answered from your reply (91% sure): Revise')
+    ).toBeTruthy();
+  });
+
   it('says so when someone else answered first', async () => {
     mount({
       answerGate: vi.fn(async () => ({
@@ -540,7 +684,8 @@ describe('RunView', () => {
     const answers = within(group)
       .getAllByRole('button')
       .map((button) => button.textContent);
-    expect(answers).toEqual(['Reject', 'Revise', 'Approve']);
+    // Sending the note as a reply comes first, apart from the answers.
+    expect(answers).toEqual(['Send as reply', 'Reject', 'Revise', 'Approve']);
   });
 
   it('shows the Role and Agent of each Step, and who was passed over', async () => {

@@ -13,6 +13,7 @@ import type {
   GetFactoryInsightsParams,
   HandBackRequest,
   LinkTaskRequest,
+  ReplyToGateRequest,
   RunDetail,
   RunErrorResponse,
   RunId,
@@ -656,6 +657,106 @@ export const answerFactoryGate = async (
     status: res.status,
     headers: res.headers,
   } as answerFactoryGateResponse;
+};
+
+/**
+ * @summary Reply, as the caller, in words to the Gate one of their Runs waits on.
+The factory reads the words as one of the Gate's answers, kept as its
+note, or asks back on the Gate, which then still waits; an agent's
+question takes them as the answer. Reading the Run shows which. Only
+the owner's own signed-in session replies (403 otherwise).
+ */
+export type replyToFactoryGateResponse202 = {
+  data: void;
+  status: 202;
+};
+
+export type replyToFactoryGateResponse400 = {
+  data: ErrorResponse;
+  status: 400;
+};
+
+export type replyToFactoryGateResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type replyToFactoryGateResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type replyToFactoryGateResponse404 = {
+  data: ErrorResponse;
+  status: 404;
+};
+
+export type replyToFactoryGateResponse409 = {
+  data: ErrorResponse;
+  status: 409;
+};
+
+export type replyToFactoryGateResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type replyToFactoryGateResponse502 = {
+  data: ErrorResponse;
+  status: 502;
+};
+
+export type replyToFactoryGateResponse503 = {
+  data: ErrorResponse;
+  status: 503;
+};
+
+export type replyToFactoryGateResponseSuccess =
+  replyToFactoryGateResponse202 & {
+    headers: Headers;
+  };
+export type replyToFactoryGateResponseError = (
+  | replyToFactoryGateResponse400
+  | replyToFactoryGateResponse401
+  | replyToFactoryGateResponse403
+  | replyToFactoryGateResponse404
+  | replyToFactoryGateResponse409
+  | replyToFactoryGateResponse500
+  | replyToFactoryGateResponse502
+  | replyToFactoryGateResponse503
+) & {
+  headers: Headers;
+};
+
+export type replyToFactoryGateResponse =
+  | replyToFactoryGateResponseSuccess
+  | replyToFactoryGateResponseError;
+
+export const getReplyToFactoryGateUrl = (id: RunId, seq: number) => {
+  return `/runs/${id}/steps/${seq}/reply`;
+};
+
+export const replyToFactoryGate = async (
+  id: RunId,
+  seq: number,
+  replyToGateRequest: ReplyToGateRequest,
+  options?: RequestInit
+): Promise<replyToFactoryGateResponse> => {
+  const res = await fetch(getReplyToFactoryGateUrl(id, seq), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(replyToGateRequest),
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: replyToFactoryGateResponse['data'] = body ? JSON.parse(body) : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as replyToFactoryGateResponse;
 };
 
 /**

@@ -88,10 +88,11 @@ pub enum StandingRule {
 pub const OWNER_GATES: &str = "owner_gates";
 
 /// A workspace's Orchestrator Definition: which kinds of Gate the factory
-/// decides on its own, and whether the Gates it leaves go to the Run's
-/// owner. A kind left off waits for a person, as every Gate did before
-/// Standing Rules. Whatever it says, a Tampered Run's Gates and a merge
-/// through a Main Hold stay a person's.
+/// decides on its own, whether the Gates it leaves go to the Run's owner,
+/// and which the stand-in answers for the Run's owner when no rule does. A
+/// kind left off waits for a person, as every Gate did before Standing
+/// Rules. Whatever it says, a Tampered Run's Gates and a merge through a
+/// Main Hold stay a person's.
 #[derive(
     Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, utoipa::ToSchema,
 )]
@@ -115,7 +116,33 @@ pub struct OrchestratorDefinition {
     /// before. A definition sent without it has it off.
     #[serde(default)]
     pub owner_gates: bool,
+    /// The kinds of Gate the stand-in answers for the Run's owner, after
+    /// the rules and before the person; off for every kind when left out.
+    #[serde(default)]
+    pub stand_in: StandInKinds,
 }
+
+/// The kinds of Gate the stand-in answers for the Run's owner: a small
+/// model that answers as the owner would, which the owner may override for
+/// a short while. It never answers a merge Gate, so it has no setting for
+/// one.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, utoipa::ToSchema,
+)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StandInKinds {
+    /// Answer the plan Gate.
+    pub plan: bool,
+    /// Answer a review round's Blockers Gate.
+    pub blockers: bool,
+}
+
+/// How a definition keeps that the stand-in answers the plan Gate, beside
+/// the kinds its rules decide.
+const STAND_IN_PLAN: &str = "stand_in_plan";
+
+/// How a definition keeps that the stand-in answers the Blockers Gate.
+const STAND_IN_BLOCKERS: &str = "stand_in_blockers";
 
 impl OrchestratorDefinition {
     /// The definition that applies when a team set none: the review's
@@ -126,6 +153,10 @@ impl OrchestratorDefinition {
         blockers: true,
         merge: false,
         owner_gates: false,
+        stand_in: StandInKinds {
+            plan: false,
+            blockers: false,
+        },
     };
 
     /// Whether the rule of `kind` decides its Gates.
@@ -137,22 +168,37 @@ impl OrchestratorDefinition {
         }
     }
 
+    /// Whether the stand-in answers Gates of `kind` for the Run's owner.
+    /// It never answers a merge Gate.
+    pub fn stands_in(self, kind: RuleGateKind) -> bool {
+        match kind {
+            RuleGateKind::Plan => self.stand_in.plan,
+            RuleGateKind::Blockers => self.stand_in.blockers,
+            RuleGateKind::Merge => false,
+        }
+    }
+
     /// The kinds its rules decide, then [`OWNER_GATES`] when its owner
-    /// section is on: what is stored of it.
+    /// section is on, then the kinds the stand-in answers
+    /// (`stand_in_plan`, `stand_in_blockers`): what is stored of it.
     pub fn kinds(self) -> Vec<String> {
-        let mut kinds: Vec<String> = [
+        let ruled = [
             RuleGateKind::Plan,
             RuleGateKind::Blockers,
             RuleGateKind::Merge,
         ]
         .into_iter()
         .filter(|kind| self.decides(*kind))
-        .map(|kind| kind.to_string())
-        .collect();
-        if self.owner_gates {
-            kinds.push(OWNER_GATES.to_string());
-        }
-        kinds
+        .map(|kind| kind.to_string());
+        let owner = self.owner_gates.then(|| OWNER_GATES.to_string());
+        let stood_in = [
+            (self.stand_in.plan, STAND_IN_PLAN),
+            (self.stand_in.blockers, STAND_IN_BLOCKERS),
+        ]
+        .into_iter()
+        .filter(|(on, _)| *on)
+        .map(|(_, kind)| kind.to_string());
+        ruled.chain(owner).chain(stood_in).collect()
     }
 
     /// The definition stored as `kinds` ([`Self::kinds`]); none when one is
@@ -160,14 +206,15 @@ impl OrchestratorDefinition {
     pub fn from_kinds(kinds: &[String]) -> Option<Self> {
         let mut definition = Self::default();
         for kind in kinds {
-            if kind == OWNER_GATES {
-                definition.owner_gates = true;
-                continue;
-            }
-            match kind.parse::<RuleGateKind>().ok()? {
-                RuleGateKind::Plan => definition.plan = true,
-                RuleGateKind::Blockers => definition.blockers = true,
-                RuleGateKind::Merge => definition.merge = true,
+            match kind.as_str() {
+                OWNER_GATES => definition.owner_gates = true,
+                STAND_IN_PLAN => definition.stand_in.plan = true,
+                STAND_IN_BLOCKERS => definition.stand_in.blockers = true,
+                _ => match kind.parse::<RuleGateKind>().ok()? {
+                    RuleGateKind::Plan => definition.plan = true,
+                    RuleGateKind::Blockers => definition.blockers = true,
+                    RuleGateKind::Merge => definition.merge = true,
+                },
             }
         }
         Some(definition)

@@ -8348,6 +8348,7 @@ dependencies = [
 name = "factory_engine"
 version = "0.1.0"
 dependencies = [
+ "agent",
  "agent_correlation",
  "agent_runtime_protocol",
  "agent_session",

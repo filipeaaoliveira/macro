@@ -3,15 +3,24 @@
 //! They need no Temporal server, so they run in CI.
 //!
 //! The histories were recorded from the ignored tests in `test.rs` on a
-//! Temporal dev server, then read with the client's `fetch_history` and `to_json`, with one null
-//! field the history reads as its default left out:
+//! Temporal dev server, then read with the client's `fetch_history` and `to_json`, with null
+//! fields the history reads as their defaults left out:
 //! - `code_merged`: a person approves the plan and the merge;
 //! - `code_revised_then_cancelled`: a person sends the merge back, and
 //!   cancels the Run at the next merge Gate;
 //! - `code_review_unresolved`: review rounds keep finding Blockers, and the
 //!   Run ends for a person;
 //! - `code_waiting_at_merge_gate`: `code_merged` cut where the Run waits on
-//!   its merge Gate, as a Run in flight is when a new worker takes it.
+//!   its merge Gate, as a Run in flight is when a new worker takes it;
+//! - `code_reply_answered`: the owner's words answer the plan Gate
+//!   (`gate_replies.rs`);
+//! - `code_reply_asked_back`: the words are asked back, and a button
+//!   answers the Gate;
+//! - `code_stand_in_answered`: the stand-in's answer to the plan Gate stands
+//!   once its window passes;
+//! - `code_stand_in_overridden`: the owner overrides it in the window;
+//! - `code_stand_in_taken_back`: the branch turns Tampered in the window,
+//!   so the stand-in's answer is taken back and the owner answers.
 //!
 //! Recorded on the workflow that asks the Run's Standing Rules about each
 //! Gate (the `factory-standing-rules` marker), before it told the owner of
@@ -86,10 +95,55 @@ async fn a_run_whose_rules_fixed_its_blockers_replays() {
 }
 
 #[tokio::test]
+async fn a_run_whose_plan_gate_a_reply_answered_replays() {
+    replays(
+        "code_reply_answered",
+        include_bytes!("histories/code_reply_answered.json"),
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn a_run_waiting_on_a_gate_the_rules_left_replays() {
     replays(
         "code_waiting_at_plan_gate_with_rules",
         include_bytes!("histories/code_waiting_at_plan_gate_with_rules.json"),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_run_whose_reply_was_asked_back_replays() {
+    replays(
+        "code_reply_asked_back",
+        include_bytes!("histories/code_reply_asked_back.json"),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_run_whose_plan_gate_the_stand_in_answered_replays() {
+    replays(
+        "code_stand_in_answered",
+        include_bytes!("histories/code_stand_in_answered.json"),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_run_whose_owner_overrode_the_stand_in_replays() {
+    replays(
+        "code_stand_in_overridden",
+        include_bytes!("histories/code_stand_in_overridden.json"),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_run_whose_stand_in_answer_was_taken_back_replays() {
+    replays(
+        "code_stand_in_taken_back",
+        include_bytes!("histories/code_stand_in_taken_back.json"),
     )
     .await;
 }

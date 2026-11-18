@@ -25,6 +25,11 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `src/outbound/pg_run_repository/standing_rules.rs`:
   `StandingRulesRepository`, teams' and Projects' Standing Rules, and the
   Gate kinds, rules and Orchestrator Definition they are made of.
+- `src/domain/gate_replies.rs` and
+  `src/outbound/pg_run_repository/gate_replies.rs`: `GateReplyRepository`,
+  a person's answer read from their words, the factory asking back, the
+  stand-in's answer, the owner's past answers and the answered Gates a
+  replay measures the model on.
 
 ## Scope
 
@@ -47,6 +52,7 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261117215724_factory_step_shared_session.sql`,
   `20261117220000_factory_follow_up_commented.sql`,
   `20261117221000_factory_standing_rules.sql`,
+  `20261118004853_factory_gate_replies.sql`,
   `20261118005054_factory_owner_gates.sql`).
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
 
@@ -177,6 +183,30 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   person's team and role from `team_user`, as other features' records do:
   a person is on at most one team, and an agent's account
   (`"User"."isAgent"`, which `is_agent_account` reads) is never an admin.
+
+- Gate replies (`20261118004853_factory_gate_replies.sql`):
+  `answer_gate_from_reply` records a person's answer read from their
+  words, which it keeps as the note, with how sure the factory was
+  (`reply_confidence`, in percent; none for a question Gate, whose answer
+  is the words); `ask_back` keeps the latest reply the factory could not
+  read (`asked_back_reply`, `asked_back_at`) while the Gate has no answer.
+  `stand_in` keeps the stand-in's answer, reason, confidence and override
+  window (`stand_in_*`) once, on a Gate with no answer;
+  `answer_gate_by_stand_in` makes it the Gate's answer (`by_stand_in`, no
+  author, note or approved Control Files) only while the Gate still has
+  none, so an owner's override in the window stands. Every write keeps the
+  Gate's first answer. The stand-in's kinds are kept in the same
+  `standing_rules` arrays as the rules and the owner section
+  (`stand_in_plan`, `stand_in_blockers`; it has none for a merge Gate). `withdraw_stand_in`
+  takes the stand-in's answer back while the Gate has no answer, when the
+  Run no longer lets it stand. `past_answers` reads the owner's own
+  answers to an entry's Gates through their newest Runs
+  (`factory_run_user_created_idx`), in Runs of the same Flow only, never
+  an agent's question asked at the entry; `answered_gates` reads every
+  Gate a person answered with a button (no answer read from words, nor the
+  stand-in's), with the Run's plan, for the offline replay measure only.
+  Run insights leave out the stand-in's answers, as they do Rule
+  Answers.
 
 - `factory_merge` keeps one row per Run that merged (`record_merge`, safe
   to repeat), with the base it merged into and the time on the worker's

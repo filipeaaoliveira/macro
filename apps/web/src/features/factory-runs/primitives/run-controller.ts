@@ -34,7 +34,10 @@ function gateKey(step: Pick<RunStep, 'seq'>): number {
  * written, and answering and cancelling with their locks.
  */
 export function createRunController(
-  context: Pick<RunsContext, 'run' | 'answerGate' | 'cancelRun'>,
+  context: Pick<
+    RunsContext,
+    'run' | 'answerGate' | 'replyToGate' | 'cancelRun'
+  >,
   runId: () => string
 ) {
   const source: RunsSource<Run> = context.run(runId);
@@ -45,6 +48,8 @@ export function createRunController(
   // past it, so a second click can't send a second answer.
   const [answeredGate, setAnsweredGate] = createSignal<number>();
   const [answering, setAnswering] = createSignal<string>();
+  // The person's words on their way to the Gate.
+  const [replying, setReplying] = createSignal(false);
   const [cancelling, setCancelling] = createSignal(false);
   // A sent cancel keeps its controls locked until the Run reads as ended.
   const [cancelSent, setCancelSent] = createSignal(false);
@@ -70,7 +75,14 @@ export function createRunController(
     const run = source.data();
     const gate = waiting();
     // A cancel on its way or sent ends the Run: the Gate takes no answer.
-    if (!run || !gate || answering() || cancelling() || cancelSent()) {
+    if (
+      !run ||
+      !gate ||
+      answering() ||
+      replying() ||
+      cancelling() ||
+      cancelSent()
+    ) {
       return undefined;
     }
     setAnswering(value);
@@ -103,6 +115,34 @@ export function createRunController(
         still !== undefined && gateKey(still.step) === gateKey(gate.step);
       if (result.reason === 'failed' || sameGate) setRescue(undefined);
     }
+    return result;
+  };
+
+  // Words don't lock the Gate once sent: the factory may ask back on it,
+  // and the person then answers or writes again.
+  const reply = async (): Promise<RunActionResult | undefined> => {
+    const run = source.data();
+    const gate = waiting();
+    const words = note().trim();
+    if (
+      !run ||
+      !gate ||
+      !words ||
+      answering() ||
+      replying() ||
+      cancelling() ||
+      cancelSent()
+    ) {
+      return undefined;
+    }
+    setReplying(true);
+    const result = await context.replyToGate({
+      runId: run.id,
+      step: gate.step,
+      reply: words,
+    });
+    setReplying(false);
+    if (result.ok) setNote('');
     return result;
   };
 
@@ -144,11 +184,14 @@ export function createRunController(
     },
     /** The answer on the wire, if one is. */
     answering,
+    /** Whether the person's words are on the wire. */
+    replying,
     gateLocked: () => {
       const gate = waiting();
       if (!gate) return true;
       return (
         answering() !== undefined ||
+        replying() ||
         answeredGate() === gateKey(gate.step) ||
         cancelling() ||
         cancelSent()
@@ -162,6 +205,7 @@ export function createRunController(
       return formatCompactRelativeTimestamp(value);
     },
     answer,
+    reply,
     cancel,
     /** Whose control a coming read takes away: this person's answer or cancel. */
     rescue,

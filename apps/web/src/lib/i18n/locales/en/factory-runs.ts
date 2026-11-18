@@ -110,6 +110,17 @@ export default {
   answerConflictDescription: 'The run has moved on and now shows where it is',
   answered: 'Answered: {{answer}}',
   answeredByRule: 'Answered by the standing rule “{{rule}}”: {{answer}}',
+  answeredByStandIn: 'Answered for you by the stand-in: {{answer}}',
+  answeredFromReply:
+    'Answered from your reply ({{confidence}}% sure): {{answer}}',
+  sendReply: 'Send as reply',
+  replyFailed: 'Couldn’t send your reply',
+  askedBack:
+    'Couldn’t tell which answer “{{reply}}” gives. Pick an answer, or say it another way.',
+  standInAnswered:
+    'The stand-in answered {{answer}} for you ({{confidence}}% sure)',
+  standInWindow:
+    'The run goes on with it at {{time}}, unless you answer first.',
   ruleApprovePlan: 'Approve plans',
   ruleFixBlockers: 'Fix review blockers',
   ruleMergeWhenGreen: 'Merge when CI is green',
@@ -172,6 +183,11 @@ export default {
   standingRulesOwnerGatesHint:
     'Notify the run’s owner when a gate waits on them, ask them instead of fixing again when a fix leaves the blockers unchanged, and give the next step their comments on the task.',
   standingRulesUseDefault: 'Use default',
+  standInTitle: 'Stand-in',
+  standInPlan: 'Answer plan questions for the run’s owner',
+  standInBlockers: 'Answer review blocker questions for the run’s owner',
+  standInHint:
+    'When no rule answers, the stand-in answers as the owner would, if it is sure enough, and says why. The owner can change its answer for ten minutes before the run goes on. It never answers a merge, a run that changes control files, or an agent’s question.',
   standingRulesSaved: 'Standing rules saved',
   standingRulesSaveFailed: 'Couldn’t save the standing rules',
 };

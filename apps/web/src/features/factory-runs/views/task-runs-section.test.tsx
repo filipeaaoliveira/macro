@@ -148,6 +148,7 @@ function mount(
         return { ok: true as const, value: started };
       }),
     answerGate: vi.fn(),
+    replyToGate: vi.fn(),
     cancelRun: vi.fn(),
   };
   render(() => (

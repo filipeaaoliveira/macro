@@ -51,6 +51,13 @@ export type AnswerGateInput = {
   approvedControlFiles?: string[];
 };
 
+export type ReplyToGateInput = {
+  runId: string;
+  step: Pick<RunStep, 'seq'>;
+  /** The person's words, in place of one of the Gate's answers. */
+  reply: string;
+};
+
 /** What the Runs views need from the factory. */
 export type RunsContext = {
   /** The task's Runs, newest first; kept current while any of them runs. */
@@ -67,6 +74,11 @@ export type RunsContext = {
   repositories: (enabled: Accessor<boolean>) => RunsSource<string[]>;
   startRun: (input: StartRunInput) => Promise<StartRunResult>;
   answerGate: (input: AnswerGateInput) => Promise<RunActionResult>;
+  /**
+   * Gives the Gate the person's words, which the factory reads as one of its
+   * answers or asks back on.
+   */
+  replyToGate: (input: ReplyToGateInput) => Promise<RunActionResult>;
   cancelRun: (runId: string) => Promise<RunActionResult>;
 };
 
