@@ -648,7 +648,7 @@ async fn a_notify_only_gate_is_told_once_per_entry_until_the_run_ends() {
             .all(|notice| notice.notification_id == told_id(run_id, &entry))
     );
     assert!(!sent[0].push);
-    assert_eq!(sent[0].task_id, task);
+    assert_eq!(sent[0].task_id, Some(task));
     assert_eq!(sent[0].metadata.question, "The plan is ready.");
     assert!(sent[0].metadata.notify_only);
     let texts = thread.texts();

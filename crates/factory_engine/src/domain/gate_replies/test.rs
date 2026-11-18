@@ -632,7 +632,7 @@ async fn the_owner_is_told_quietly_while_the_stand_in_s_window_is_open() {
     assert_ne!(notice.notification_id, notice_id(key.run_id, key.seq));
     assert!(!notice.push);
     assert!(notice.metadata.notify_only);
-    assert_eq!(notice.task_id, task);
+    assert_eq!(notice.task_id, Some(task));
     // The answer by its label; the Run view says when the window closes.
     assert_eq!(
         notice.metadata.question,

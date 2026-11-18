@@ -1181,12 +1181,12 @@ pub trait StepService: Send + Sync + 'static {
     ) -> impl Future<Output = Result<Option<RuleAnswer>, StepError>> + Send;
 
     /// Tell the Run's owner that the Gate of the Step `key` waits on them,
-    /// when the Run's owner section is on and nothing answered it yet.
+    /// unless the Run's definition is quiet or something answered it.
     /// Telling them again is the same notification.
     fn notify_gate(&self, key: StepKey) -> impl Future<Output = Result<(), StepError>> + Send;
 
-    /// Tell the Run's owner what a notify-only Gate says, when the Run's
-    /// owner section is on, and post it to the task's thread, when its
+    /// Tell the Run's owner what a notify-only Gate says, when the Run
+    /// works on a task, and post it to the task's thread, when its
     /// task thread section is on; the Run goes on either way. Telling them
     /// again is the same notification and the same comment.
     fn tell_gate(&self, telling: GateTelling)

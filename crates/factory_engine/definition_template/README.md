@@ -43,8 +43,8 @@ holds something shaped like one does not read.
 
 - `blockers`: the factory sends a review round's Blockers to be fixed, for at
   most two rounds in a row; later Blockers wait for a person.
-- `ownerGates`: a Gate no rule answers notifies the Run's owner, and their
-  comments on the Run's task reach the next agent Step.
+- `ownerGates`: the owner's comments on the Run's task reach the next agent
+  Step, and Blockers a rule's fix left unchanged wait for them.
 - `taskThread`: a Run on a task posts its main updates to the task.
 
 A Run on this repository always counts this Definition's own files as
@@ -54,6 +54,9 @@ merges, whatever `merge` says. So `controlFiles` lists at most 195
 patterns, leaving room for the 5 the Run adds.
 
 It leaves off:
+
+- `quietGates`: every Gate no rule answers notifies the Run's owner. Set it
+  to `true` to stop those notifications; the Gates still wait on the owner.
 
 - `plan`: a person approves each plan.
 - `merge`: a person merges each pull request. Turn it on only once you trust

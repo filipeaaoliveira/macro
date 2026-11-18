@@ -315,7 +315,7 @@ impl FactoryActivities {
     }
 
     /// Tell the Run's owner that a Gate no Standing Rule answered waits on
-    /// them, when the Run's owner section is on.
+    /// them, unless the Run's definition is quiet.
     #[activity(name = "factory_notify_gate")]
     pub async fn notify_gate(
         self: Arc<Self>,

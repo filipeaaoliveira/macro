@@ -1730,7 +1730,8 @@ where
 {
     /// The service, telling Runs' owners of their waiting Gates through
     /// `notifier`, and reading their comments on the Runs' tasks through
-    /// `notes`, for the Runs whose owner section is on.
+    /// `notes`, for the Runs whose owner section is on. A Run whose
+    /// definition is quiet tells no one.
     pub fn with_owner_gates<N2: GateNotifier, T2: TaskNotes>(
         self,
         notifier: N2,
@@ -1985,20 +1986,16 @@ where
             .map_err(internal)?;
 
         // A Gate its owner was told of is answered: its notification is
-        // done, whoever answered.
+        // done, whoever answered. One never sent (the Run's Gates notify no
+        // one) changes nothing.
         let run = self
             .repo
             .get_run(answered.key.run_id)
             .await
             .map_err(internal)?
             .ok_or(StepError::NoSuchRun)?;
-        let owner_gates = run
-            .standing_rules
-            .is_some_and(|rules| rules.definition.owner_gates);
-        if owner_gates {
-            let id = notice_id(answered.key.run_id, answered.key.seq);
-            self.notifier.answered(&run.user_id, id).await;
-        }
+        let id = notice_id(answered.key.run_id, answered.key.seq);
+        self.notifier.answered(&run.user_id, id).await;
         // An answer in the stand-in's window closes it, and so the notice
         // that the stand-in answered.
         let stood_in = self
@@ -2181,20 +2178,15 @@ where
             .await
             .map_err(internal)?
             .ok_or(StepError::NoSuchRun)?;
-        let owner_gates = run
-            .standing_rules
-            .is_some_and(|rules| rules.definition.owner_gates);
         let steps = self
             .repo
             .list_steps(finish.run_id)
             .await
             .map_err(internal)?;
-        if owner_gates {
-            for step in &steps {
-                if step.gate.as_ref().is_some_and(|gate| gate.answer.is_none()) {
-                    let id = notice_id(finish.run_id, step.seq);
-                    self.notifier.answered(&run.user_id, id).await;
-                }
+        for step in &steps {
+            if step.gate.as_ref().is_some_and(|gate| gate.answer.is_none()) {
+                let id = notice_id(finish.run_id, step.seq);
+                self.notifier.answered(&run.user_id, id).await;
             }
         }
 

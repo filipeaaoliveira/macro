@@ -76,8 +76,10 @@ where
     Ingress: NotificationIngress,
     Reader: MarkDone,
 {
-    /// The notification is about the Run's task, has no sender (the factory
-    /// is no user, so the owner is never dropped as their own sender), is
+    /// The notification is about the Run's task, or about the owner for a
+    /// Run started without one (as an inbox's sign-in notice is), has no
+    /// sender (the factory is no user, so the owner is never dropped as
+    /// their own sender), is
     /// delivered live, and pushed to phones when the notice says so, and
     /// keeps the notice's id, so the ingress makes one notification however
     /// often it is sent. A send that fails is logged and dropped: the Gate
@@ -86,9 +88,12 @@ where
         let run_id = notice.metadata.run_id;
         let seq = notice.metadata.seq;
         let push = notice.push;
+        let notification_entity = match notice.task_id {
+            Some(task_id) => EntityType::Document.with_entity_string(task_id.to_string()),
+            None => EntityType::User.with_entity_string(notice.owner.to_string()),
+        };
         let request = SendNotificationRequestBuilder {
-            notification_entity: EntityType::Document
-                .with_entity_string(notice.task_id.to_string()),
+            notification_entity,
             secondary_notification_entity: None,
             notification: notice.metadata,
             sender_id: None,

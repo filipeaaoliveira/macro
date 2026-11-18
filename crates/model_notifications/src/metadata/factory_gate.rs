@@ -18,6 +18,8 @@ pub struct FactoryGateWaitingMetadata {
     /// The place, among the Run's Steps, of the Step whose Gate waits.
     pub seq: u16,
     /// The task document the Run works on.
+    // Empty for a Run started without a task, whose notification is about
+    // its owner: the notification opens the Run by `run_id` either way.
     pub task_id: String,
     /// The start of what the Run was asked to do.
     pub request: String,

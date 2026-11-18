@@ -67,7 +67,7 @@ fn notice() -> GateNotice {
     GateNotice {
         notification_id: Uuid::from_u128(0x1d),
         owner: MacroUserIdStr::try_from("macro|julia@example.com".to_string()).expect("valid"),
-        task_id: Uuid::from_u128(0x7a5c),
+        task_id: Some(Uuid::from_u128(0x7a5c)),
         metadata: FactoryGateWaitingMetadata {
             run_id: Uuid::from_u128(0x2a),
             seq: 3,
@@ -107,6 +107,30 @@ async fn the_owner_is_notified_about_the_run_s_task() {
         "{request}"
     );
     assert!(request.contains("\"document\""), "{request}");
+}
+
+/// A Run started without a task notifies its owner all the same: the
+/// notification is about the owner, still pushed.
+#[tokio::test]
+async fn the_owner_of_a_run_without_a_task_is_notified_about_themselves() {
+    let ingress = std::sync::Arc::new(RecordingIngress::default());
+    let mut taskless = notice();
+    taskless.task_id = None;
+    taskless.metadata.task_id = String::new();
+    IngressGateNotifier::new(
+        ingress.clone(),
+        std::sync::Arc::new(RecordingReader::default()),
+    )
+    .notify(taskless)
+    .await;
+
+    let sent = ingress.sent.lock().expect("sent");
+    assert_eq!(sent.len(), 1);
+    let request = sent[0].to_string();
+    assert!(request.contains("factory_gate_waiting"), "{request}");
+    assert!(!request.contains("\"document\""), "{request}");
+    assert!(request.contains("\"user\""), "{request}");
+    assert!(!sent[0]["build_apns"].is_null(), "{request}");
 }
 
 /// A notify-only Gate's notice is delivered live, and not pushed.

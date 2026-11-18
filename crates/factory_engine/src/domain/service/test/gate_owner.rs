@@ -1,7 +1,8 @@
-//! The owner section at the worker: a waiting Gate told to the Run's owner,
-//! repeated Blockers left to them, and their comments on the Run's task
-//! given to the next Step, apart from their words on a Gate; and none of it
-//! with the section off.
+//! Gates and their owner at the worker: a waiting Gate told to the Run's
+//! owner by default, and to no one when the Run's definition is quiet; and
+//! with the owner section on, repeated Blockers left to them, and their
+//! comments on the Run's task given to the next Step, apart from their
+//! words on a Gate.
 
 use chrono::{TimeDelta, Utc};
 use factory_records::domain::gate_replies::GateReplyRepository;
@@ -37,6 +38,18 @@ fn rules(owner_gates: bool) -> RunRules {
     RunRules {
         definition: OrchestratorDefinition {
             owner_gates,
+            ..OrchestratorDefinition::DEFAULT
+        },
+        source: RulesSource::Team,
+        project_id: None,
+    }
+}
+
+/// The factory's default rules, whose Gates notify no one when `quiet`.
+fn quiet(quiet: bool) -> RunRules {
+    RunRules {
+        definition: OrchestratorDefinition {
+            quiet_gates: quiet,
             ..OrchestratorDefinition::DEFAULT
         },
         source: RulesSource::Team,
@@ -94,12 +107,13 @@ fn service(
         .with_owner_gates(notifier.clone(), notes.clone())
 }
 
-/// With the owner section on, a Gate waiting for a person is told to the
-/// Run's owner, about its task; once answered, nothing more is told.
+/// By default, with the owner section off, a Gate waiting for a person is
+/// told to the Run's owner, about its task, pushed; once answered, nothing
+/// more is told.
 #[tokio::test]
 async fn a_waiting_gate_is_told_to_the_run_s_owner() {
     let repo = FakeRepo::default();
-    let (run_id, task) = run_on_task(&repo, rules(true)).await;
+    let (run_id, task) = run_on_task(&repo, RunRules::DEFAULT).await;
     let key = StepKey { run_id, seq: 1 };
     gate_at(&repo, key, "plan", "done", &["approve", "revise"]).await;
     let notifier = FakeNotifier::default();
@@ -115,7 +129,8 @@ async fn a_waiting_gate_is_told_to_the_run_s_owner() {
         let sent = notifier.sent.lock().expect("sent");
         assert_eq!(sent.len(), 1);
         assert_eq!(sent[0].owner, julia());
-        assert_eq!(sent[0].task_id, task);
+        assert_eq!(sent[0].task_id, Some(task));
+        assert!(sent[0].push);
         assert_eq!(sent[0].metadata.run_id, run_id.as_uuid());
         assert_eq!(sent[0].metadata.seq, 1);
         assert_eq!(sent[0].metadata.question, "Go on?");
@@ -128,10 +143,87 @@ async fn a_waiting_gate_is_told_to_the_run_s_owner() {
     assert_eq!(notifier.sent.lock().expect("sent").len(), 1);
 }
 
-/// With the owner section off the factory behaves as before: no Gate is
-/// told to anyone, and no comment is read.
+/// A Run started without a task tells its owner of a waiting Gate all the
+/// same, about no task; a quiet Run, with or without one, tells no one, and
+/// its Gate still waits on the owner.
 #[tokio::test]
-async fn with_the_owner_section_off_no_gate_is_told_and_no_comment_read() {
+async fn a_run_without_a_task_tells_and_a_quiet_run_does_not() {
+    for quiet_gates in [false, true] {
+        let repo = FakeRepo::default();
+        let RunInsert::Inserted(run) = repo
+            .insert_run(NewRun {
+                id: RunId::generate(),
+                flow: "code",
+                request: "Fix the login bug",
+                user_id: &julia(),
+                task_id: None,
+                project_id: None,
+                repository: None,
+                created_in_person: true,
+                control_file_patterns: &[],
+                control_files_team_id: None,
+                standing_rules: quiet(quiet_gates),
+                automation: None,
+                definition: None,
+                kept_flow: None,
+            })
+            .await
+            .expect("insert")
+        else {
+            panic!("a run without a task is kept");
+        };
+        let key = StepKey {
+            run_id: run.id,
+            seq: 1,
+        };
+        gate_at(&repo, key, "plan", "done", &["approve", "revise"]).await;
+        let notifier = FakeNotifier::default();
+        let steps = service(
+            &repo,
+            &FakeExecutor::default(),
+            &notifier,
+            &FakeTaskNotes::default(),
+        );
+
+        steps.notify_gate(key).await.expect("notify");
+        let sent = notifier.sent.lock().expect("sent").clone();
+        if quiet_gates {
+            assert!(sent.is_empty(), "{sent:?}");
+        } else {
+            assert_eq!(sent.len(), 1);
+            assert_eq!(sent[0].task_id, None);
+            assert_eq!(sent[0].owner, julia());
+            assert_eq!(sent[0].notification_id, notice_id(run.id, 1));
+            assert!(sent[0].push);
+        }
+        let waiting = repo.list_steps(run.id).await.expect("steps")[0]
+            .gate
+            .clone()
+            .expect("gate");
+        assert!(waiting.answer.is_none(), "the gate still waits");
+    }
+
+    let repo = FakeRepo::default();
+    let (run_id, _task) = run_on_task(&repo, quiet(true)).await;
+    let key = StepKey { run_id, seq: 1 };
+    gate_at(&repo, key, "plan", "done", &["approve", "revise"]).await;
+    let notifier = FakeNotifier::default();
+    service(
+        &repo,
+        &FakeExecutor::default(),
+        &notifier,
+        &FakeTaskNotes::default(),
+    )
+    .notify_gate(key)
+    .await
+    .expect("notify");
+    assert!(notifier.sent.lock().expect("sent").is_empty());
+}
+
+/// With the owner section off a Gate is still told to the owner, but no
+/// comment is read.
+#[tokio::test]
+async fn with_the_owner_section_off_a_gate_is_told_and_no_comment_read() {
     let repo = FakeRepo::default();
     let (run_id, task) = run_on_task(&repo, rules(false)).await;
     let key = StepKey { run_id, seq: 1 };
@@ -158,7 +250,7 @@ async fn with_the_owner_section_off_no_gate_is_told_and_no_comment_read() {
         .expect("start");
     steps.run_step(reply_step(run_id, 2)).await.expect("run");
 
-    assert!(notifier.sent.lock().expect("sent").is_empty());
+    assert_eq!(notifier.sent.lock().expect("sent").len(), 1);
     assert!(notes.asked.lock().expect("asked").is_empty());
     assert_eq!(
         *executor.noted.lock().expect("noted"),
@@ -392,13 +484,14 @@ async fn repeated_blockers_after_a_rule_fix_wait_for_the_owner() {
     );
 }
 
-/// An answered Gate's notification is marked done, whoever answered, with
-/// the owner section on; with it off nothing is marked.
+/// An answered Gate's notification is marked done, whoever answered,
+/// whatever the definition says: marking one a quiet Run never sent
+/// changes nothing.
 #[tokio::test]
 async fn an_answered_gate_s_notification_is_done() {
-    for owner_gates in [true, false] {
+    for rules in [rules(true), rules(false), quiet(true)] {
         let repo = FakeRepo::default();
-        let (run_id, _task) = run_on_task(&repo, rules(owner_gates)).await;
+        let (run_id, _task) = run_on_task(&repo, rules).await;
         let key = StepKey { run_id, seq: 1 };
         gate_at(&repo, key, "plan", "done", &["approve", "revise"]).await;
         let notifier = FakeNotifier::default();
@@ -425,11 +518,7 @@ async fn an_answered_gate_s_notification_is_done() {
             .expect("answer");
 
         let done = notifier.done.lock().expect("done").clone();
-        if owner_gates {
-            assert_eq!(done, [notice_id(run_id, 1)]);
-        } else {
-            assert!(done.is_empty());
-        }
+        assert_eq!(done, [notice_id(run_id, 1)]);
     }
 }
 
@@ -574,13 +663,13 @@ async fn the_stand_in_leaves_the_owner_s_blockers_to_the_owner() {
 }
 
 /// A Run that ends while a Gate waits (cancelled, or ended for a person)
-/// has that Gate's notification marked done; an answered Gate's is left
-/// as its answer left it, and with the owner section off nothing is.
+/// has that Gate's notification marked done, whatever the definition
+/// says; an answered Gate's is left as its answer left it.
 #[tokio::test]
 async fn an_open_gate_s_notification_is_done_once_its_run_ends() {
-    for owner_gates in [true, false] {
+    for rules in [rules(true), rules(false), quiet(true)] {
         let repo = FakeRepo::default();
-        let (run_id, _task) = run_on_task(&repo, rules(owner_gates)).await;
+        let (run_id, _task) = run_on_task(&repo, rules).await;
         let plan = StepKey { run_id, seq: 1 };
         gate_at(&repo, plan, "plan", "done", &["approve", "revise"]).await;
         repo.answer_gate(plan, &outcome("approve"), None, &julia(), None, None)
@@ -614,11 +703,7 @@ async fn an_open_gate_s_notification_is_done_once_its_run_ends() {
             .copied()
             .filter(|id| (1..=10).any(|seq| *id == notice_id(run_id, seq)))
             .collect();
-        if owner_gates {
-            assert_eq!(done, [notice_id(run_id, 2)]);
-        } else {
-            assert!(done.is_empty());
-        }
+        assert_eq!(done, [notice_id(run_id, 2)]);
     }
 }
 
@@ -672,10 +757,16 @@ async fn the_stand_in_s_notice_is_done_when_its_window_closes_early() {
         .await
         .expect("override");
     steps.answer_gate(answer(plain)).await.expect("answer");
-    assert_eq!(
-        *notifier.done.lock().expect("done"),
-        [stand_in_id(run_id, 1)]
-    );
+    // Each answer marks its Gate's waiting notification too.
+    let stood_in_done: Vec<_> = notifier
+        .done
+        .lock()
+        .expect("done")
+        .iter()
+        .copied()
+        .filter(|id| (1..=3).any(|seq| *id == stand_in_id(run_id, seq)))
+        .collect();
+    assert_eq!(stood_in_done, [stand_in_id(run_id, 1)]);
 
     steps
         .end_run(RunFinish {

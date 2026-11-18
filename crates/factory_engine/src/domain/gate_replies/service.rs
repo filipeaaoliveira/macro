@@ -212,18 +212,13 @@ where
     }
 
     /// The Gate of `key` is answered: the notification its owner was told
-    /// of it by is done, when the Run's owner section is on, so is the
-    /// notice that the stand-in answered, when it had (`stood_in`), and the
-    /// answer is posted to its task thread, when that section is on.
+    /// of it by is done (one never sent changes nothing), so is the notice
+    /// that the stand-in answered, when it had (`stood_in`), and the answer
+    /// is posted to its task thread, when that section is on.
     async fn answered(&self, key: StepKey, stood_in: bool) -> Result<(), StepError> {
         let run = self.run(key).await?;
-        if run
-            .standing_rules
-            .is_some_and(|rules| rules.definition.owner_gates)
-        {
-            let id = notice_id(key.run_id, key.seq);
-            self.notifier.answered(&run.user_id, id).await;
-        }
+        let id = notice_id(key.run_id, key.seq);
+        self.notifier.answered(&run.user_id, id).await;
         if stood_in {
             self.window_closed(&run, key).await;
         }
