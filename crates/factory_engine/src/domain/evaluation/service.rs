@@ -155,15 +155,26 @@ where
         }
     }
 
-    /// Whether the trial's branch started from the commit its suite pinned:
-    /// the agent is told to make it from there, and this checks it did. A
-    /// branch never pushed, a trial with no pinned commit, or a GitHub read
-    /// that fails tells nothing against it.
-    async fn started_from_pin(&self, subject: &ScoringSubject) -> Result<bool, StepError> {
-        let Some(repository) = subject.repo_url.as_deref().and_then(CodeRepository::parse) else {
+    /// Whether the trial's branch started from the commit its suite pinned
+    /// and took nothing of its base branch after it: its head contains the
+    /// pin, and the newest commit it shares with the base branch's head is
+    /// the pin or older. The agent is told to branch from the pin; this
+    /// checks it did. A branch never pushed, a Run with no repository or no
+    /// pin tells nothing against it. A GitHub read that fails is an error,
+    /// for the activity to try again; on its last attempt the trial is
+    /// scored with the pin unchecked, which is logged.
+    async fn started_from_pin(
+        &self,
+        subject: &ScoringSubject,
+        last_attempt: bool,
+    ) -> Result<bool, StepError> {
+        let (Some(repository), Some(base_branch)) = (
+            subject.repo_url.as_deref().and_then(CodeRepository::parse),
+            subject.base_branch.as_deref(),
+        ) else {
             return Ok(true);
         };
-        let Some(base) = self
+        let Some(pin) = self
             .repo
             .trial_base_commit(subject.run_id)
             .await
@@ -171,30 +182,49 @@ where
         else {
             return Ok(true);
         };
-        let branch = run_branch(subject.run_id);
-        let head = match self
-            .github
-            .branch_head(&subject.user_id, &repository, &branch)
-            .await
-        {
-            Ok(Some(head)) => head,
-            Ok(None) => return Ok(true),
-            Err(error) => {
-                tracing::warn!(?error, %branch, "a trial's branch could not be read");
-                return Ok(true);
-            }
-        };
-        match self
-            .github
-            .contains(&subject.user_id, &repository, &base, &head)
-            .await
-        {
-            Ok(contains) => Ok(contains),
-            Err(error) => {
-                tracing::warn!(?error, %branch, "a trial's branch could not be compared");
+        let checked = self.pin_kept(subject, &repository, base_branch, &pin).await;
+        match checked {
+            Ok(kept) => Ok(kept),
+            Err(error) if last_attempt => {
+                tracing::error!(
+                    ?error,
+                    run_id = %subject.run_id,
+                    "a trial's pinned start could not be checked: it is scored unchecked"
+                );
                 Ok(true)
             }
+            Err(error) => Err(internal(error)),
         }
+    }
+
+    /// [`Self::started_from_pin`]'s reads of GitHub.
+    async fn pin_kept(
+        &self,
+        subject: &ScoringSubject,
+        repository: &CodeRepository,
+        base_branch: &str,
+        pin: &str,
+    ) -> Result<bool, G::Err> {
+        let owner = &subject.user_id;
+        let branch = run_branch(subject.run_id);
+        let Some(head) = self.github.branch_head(owner, repository, &branch).await? else {
+            return Ok(true);
+        };
+        if !self.github.contains(owner, repository, pin, &head).await? {
+            return Ok(false);
+        }
+        let Some(base_head) = self
+            .github
+            .branch_head(owner, repository, base_branch)
+            .await?
+        else {
+            return Ok(true);
+        };
+        let shared = self
+            .github
+            .merge_base(owner, repository, &base_head, &head)
+            .await?;
+        self.github.contains(owner, repository, &shared, pin).await
     }
 
     /// Ask `scorer` about `subject`. A call that fails or takes longer than
@@ -257,6 +287,7 @@ where
         &self,
         subject: &ScoringSubject,
         trial: &SubjectTrial,
+        last_attempt: bool,
     ) -> Result<bool, StepError> {
         if !trial.scored {
             let sessions: Vec<Uuid> = subject
@@ -277,8 +308,10 @@ where
                 tokens.cache_write += used.cache_write;
             }
             // A trial whose branch did not start from its pinned commit
-            // replayed other code: it scores nothing.
-            let score = if self.started_from_pin(subject).await? {
+            // replayed other code: it scores nothing. A cancelled trial
+            // scores nothing anyway, and GitHub is not asked.
+            let cancelled = subject.outcome == Some(RunOutcome::Cancelled);
+            let score = if cancelled || self.started_from_pin(subject, last_attempt).await? {
                 trial_score(subject)
             } else {
                 tracing::warn!(run_id = %subject.run_id, "a trial's branch left its pinned commit");
@@ -332,7 +365,7 @@ where
     G: PullRequests,
 {
     #[tracing::instrument(err, skip(self))]
-    async fn score_run(&self, run_id: RunId) -> Result<(), StepError> {
+    async fn score_run(&self, run_id: RunId, last_attempt: bool) -> Result<(), StepError> {
         // With no Scorer, only a trial has anything to keep: any other Run
         // is left without reading it.
         if self.definition.scorers().is_empty()
@@ -352,7 +385,7 @@ where
             return Ok(());
         }
         let all_judged = match &subject.trial {
-            Some(trial) => self.score_trial(&subject, trial).await?,
+            Some(trial) => self.score_trial(&subject, trial, last_attempt).await?,
             None => self.score_live(&subject).await?,
         };
         // A judge that failed is asked again on the activity's retry; the

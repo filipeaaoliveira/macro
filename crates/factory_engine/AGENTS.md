@@ -259,7 +259,8 @@ a task into arms by a hash of the Experiment and the task (a Run on no task
 takes none); `start_run` records the arms (`factory_run_arm`) before the
 workflow starts, and `SessionAgent` starts each Step with the Agent the
 Run's arm gives its Role, the Role's own Agents following it on lack of
-quota; insights count an arm's Runs where that happened (`fellBack`). A
+quota; insights count an arm's Runs where another Agent took a Step of a
+Role the arm chose for, or the chosen one was passed over (`fellBack`). A
 Benchmark lists frozen tasks on one repository, each pinning a
 `baseCommit` or not: `POST /benchmarks/{benchmark}/suites`
 (`{"agents": {role: agent}}`) checks the caller reaches the repository
@@ -267,16 +268,21 @@ and reads its default branch's head once, records a suite, and starts one
 trial Run of each task on the `benchmark` Flow (plan, then write, no Gate,
 no pull request), its branch made from the task's pinned commit or that
 head (kept on the trial, read into the prompt as `StepInput::base_commit`;
-the agent is told to branch from it, and scoring checks the pushed branch
-contains it, scoring a trial that left it 0).
+the agent is told to branch from it; scoring checks the pushed branch
+contains it and took nothing of the base branch after it (the merge base
+of the base branch's head and the branch's head is the pin or older),
+scoring a trial that fails this 0. A GitHub failure while checking fails
+the scoring attempt; its last attempt scores the trial unchecked and logs
+it. A cancelled trial's pin is not checked).
 The Flow is `unattended`: its agents ask no question, a Step whose agent
 stops without a result fails, and it runs only as a trial, left out of
 `GET /flows`, live insights and live Scorers. A trial runs on its
 configuration only: an Agent out of quota fails its Step, with no other
 of its Role taking it. One running suite of a Benchmark per person, and
 `MAX_OPEN_TRIALS` running trials per person, hold new suites (409); a
-trial whose Run is refused stops the suite, which reports it (`refused`),
-and a suite none of whose trials started is deleted. Once a trial's Run
+trial whose Run is refused stops the suite, which reports it (`refused`)
+and plans only the trials it started, and a suite none of whose trials
+started is deleted. A suite still starting counts the trials it planned. Once a trial's Run
 ends it keeps its score (1 when write ended `done`, 0.5 `red`, 0
 otherwise) and its agents' tokens, its Run's own `factory/<run>` branch is
 deleted as its owner (best effort, `PullRequests::delete_branch`), and,

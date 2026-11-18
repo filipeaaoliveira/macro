@@ -9,6 +9,7 @@ use temporalio_macros::activities;
 use temporalio_sdk::activities::{ActivityContext, ActivityError};
 
 use super::activities::failure;
+use super::workflow::SCORE_ATTEMPTS;
 use crate::domain::models::StepError;
 use crate::domain::ports::ScoringService;
 
@@ -16,13 +17,13 @@ use crate::domain::ports::ScoringService;
 /// type, as for the Step service.
 #[async_trait::async_trait]
 trait DynScoringService: Send + Sync {
-    async fn score_run(&self, run_id: RunId) -> Result<(), StepError>;
+    async fn score_run(&self, run_id: RunId, last_attempt: bool) -> Result<(), StepError>;
 }
 
 #[async_trait::async_trait]
 impl<T: ScoringService> DynScoringService for T {
-    async fn score_run(&self, run_id: RunId) -> Result<(), StepError> {
-        ScoringService::score_run(self, run_id).await
+    async fn score_run(&self, run_id: RunId, last_attempt: bool) -> Result<(), StepError> {
+        ScoringService::score_run(self, run_id, last_attempt).await
     }
 }
 
@@ -47,9 +48,13 @@ impl ScoringActivities {
     #[activity(name = "factory_score_run")]
     pub async fn score_run(
         self: Arc<Self>,
-        _ctx: ActivityContext,
+        ctx: ActivityContext,
         run_id: RunId,
     ) -> Result<(), ActivityError> {
-        self.scoring.score_run(run_id).await.map_err(failure)
+        let last_attempt = ctx.info().attempt >= SCORE_ATTEMPTS;
+        self.scoring
+            .score_run(run_id, last_attempt)
+            .await
+            .map_err(failure)
     }
 }

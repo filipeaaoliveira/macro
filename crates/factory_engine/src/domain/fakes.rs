@@ -1379,6 +1379,10 @@ pub(crate) struct FakeGithubState {
     pub(crate) descendants: BTreeSet<(String, String)>,
     /// The branches deleted, by repository and branch, in order.
     pub(crate) deleted_branches: Vec<(String, String)>,
+    /// The merge base of two commits neither contains the other of.
+    pub(crate) merge_bases: BTreeMap<(String, String), String>,
+    /// Whether reading a branch's head fails, as GitHub down.
+    pub(crate) branch_reads_fail: bool,
 }
 
 /// GitHub in memory, for one Run's branch: opening its pull request makes
@@ -1589,6 +1593,9 @@ impl PullRequests for FakeGithub {
         _branch: &str,
     ) -> Result<Option<String>, FakeGithubError> {
         let mut state = self.state();
+        if state.branch_reads_fail {
+            return Err(FakeGithubError::Down);
+        }
         if state.branch_heads.is_empty() {
             return Ok(state.head.clone());
         }
@@ -1719,6 +1726,28 @@ impl PullRequests for FakeGithub {
             || state
                 .descendants
                 .contains(&(ancestor.to_string(), head.to_string())))
+    }
+
+    async fn merge_base(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        base: &str,
+        head: &str,
+    ) -> Result<String, FakeGithubError> {
+        let state = self.state();
+        let (base, head) = (base.to_string(), head.to_string());
+        if base == head || state.descendants.contains(&(base.clone(), head.clone())) {
+            return Ok(base);
+        }
+        if state.descendants.contains(&(head.clone(), base.clone())) {
+            return Ok(head);
+        }
+        Ok(state
+            .merge_bases
+            .get(&(base.clone(), head))
+            .cloned()
+            .unwrap_or(base))
     }
 }
 

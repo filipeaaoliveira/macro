@@ -342,8 +342,8 @@ async fn a_sampled_run_is_judged_once_by_each_scorer_that_takes_it() {
         Arc::new(definition()),
     );
 
-    scoring.score_run(run).await.expect("scored");
-    scoring.score_run(run).await.expect("scored again");
+    scoring.score_run(run, false).await.expect("scored");
+    scoring.score_run(run, false).await.expect("scored again");
 
     // `tidiness` samples none of `code`'s Runs; `correctness` judged once.
     let kept = repo.evaluation.lock().expect("evaluation").clone();
@@ -383,7 +383,10 @@ async fn a_failed_judge_is_asked_again_and_a_cancelled_run_is_not_judged() {
         Arc::new(definition()),
     );
 
-    scoring.score_run(run).await.expect_err("the judge failed");
+    scoring
+        .score_run(run, false)
+        .await
+        .expect_err("the judge failed");
     assert!(
         repo.evaluation
             .lock()
@@ -391,7 +394,10 @@ async fn a_failed_judge_is_asked_again_and_a_cancelled_run_is_not_judged() {
             .run_scores
             .is_empty()
     );
-    scoring.score_run(run).await.expect("scored on the retry");
+    scoring
+        .score_run(run, false)
+        .await
+        .expect("scored on the retry");
     assert_eq!(
         repo.evaluation.lock().expect("evaluation").run_scores[&run].len(),
         1
@@ -399,7 +405,7 @@ async fn a_failed_judge_is_asked_again_and_a_cancelled_run_is_not_judged() {
 
     let cancelled = ended_run(&repo, "code", RunOutcome::Cancelled, "done", session).await;
     scoring
-        .score_run(cancelled)
+        .score_run(cancelled, false)
         .await
         .expect("nothing to judge");
     assert!(
@@ -453,16 +459,22 @@ async fn a_trial_keeps_its_score_tokens_and_judgments_apart_from_the_live_scorer
         Arc::new(definition()),
     );
 
-    scoring.score_run(live).await.expect("live run scored");
+    scoring
+        .score_run(live, false)
+        .await
+        .expect("live run scored");
     let live_scores = repo
         .evaluation
         .lock()
         .expect("evaluation")
         .run_scores
         .clone();
-    scoring.score_run(trial_run).await.expect("trial scored");
     scoring
-        .score_run(trial_run)
+        .score_run(trial_run, false)
+        .await
+        .expect("trial scored");
+    scoring
+        .score_run(trial_run, false)
         .await
         .expect("trial scored again");
 
@@ -496,55 +508,131 @@ async fn a_trial_keeps_its_score_tokens_and_judgments_apart_from_the_live_scorer
     assert_eq!(kept.branches_deleted, [(suite_id, "typo".to_string())]);
 }
 
-/// A trial whose pushed branch does not contain its pinned commit replayed
-/// other code, and scores nothing; one that does keeps its score.
-#[tokio::test]
-async fn a_trial_whose_branch_left_its_pinned_commit_scores_nothing() {
+/// A trial's pinned start, as GitHub shows its branch's head and its base
+/// branch's head.
+struct PinCase {
+    /// The trial branch's head, or none when it was never pushed.
+    head: Option<&'static str>,
+    /// The commits each of which the second contains, besides itself.
+    descendants: &'static [(&'static str, &'static str)],
+    /// The merge base of the base branch's head and the trial's head.
+    merge_base: Option<&'static str>,
+}
+
+const PIN: &str = "1111111111111111111111111111111111111111";
+const NEWER_MAIN: &str = "2222222222222222222222222222222222222222";
+const TRIAL_HEAD: &str = "3333333333333333333333333333333333333333";
+
+/// Score a trial on `case`, its write ended `done`, `last_attempt` or not.
+async fn score_pinned(case: &PinCase, fails: bool, last_attempt: bool) -> Option<f64> {
     let repo = FakeRepo::default();
     let session = Uuid::from_u128(7);
-    let pinned = "1111111111111111111111111111111111111111";
+    let run = ended_run(&repo, "benchmark", RunOutcome::Success, "done", session).await;
     let configuration = [(role("writer"), agent("backup"))].into_iter().collect();
-    let mut trials = Vec::new();
-    for (suite, task) in [(600u128, "off"), (601, "on")] {
-        let run = ended_run(&repo, "benchmark", RunOutcome::Success, "done", session).await;
-        repo.insert_suite(&NewSuite {
-            id: Uuid::from_u128(suite),
-            user_id: &julia(),
-            benchmark: "core",
-            agents: &configuration,
-            trials: 1,
-        })
-        .await
-        .expect("suite");
-        let key = TrialKey {
-            suite_id: Uuid::from_u128(suite),
-            task: task.to_string(),
-        };
-        repo.insert_trial(&key, run, pinned).await.expect("trial");
-        trials.push((run, key));
-    }
+    repo.insert_suite(&NewSuite {
+        id: Uuid::from_u128(600),
+        user_id: &julia(),
+        benchmark: "core",
+        agents: &configuration,
+        trials: 1,
+    })
+    .await
+    .expect("suite");
+    let key = TrialKey {
+        suite_id: Uuid::from_u128(600),
+        task: "typo".to_string(),
+    };
+    repo.insert_trial(&key, run, PIN).await.expect("trial");
     let github = FakeGithub::default();
-    let head = "2222222222222222222222222222222222222222";
-    github.state().head = Some(head.to_string());
+    {
+        let mut state = github.state();
+        // The trial branch's head is read first, then the base branch's.
+        state.branch_heads = [case.head.map(str::to_string), Some(NEWER_MAIN.to_string())]
+            .into_iter()
+            .collect();
+        for (ancestor, descendant) in case.descendants {
+            state
+                .descendants
+                .insert((ancestor.to_string(), descendant.to_string()));
+        }
+        if let Some(shared) = case.merge_base {
+            state.merge_bases.insert(
+                (NEWER_MAIN.to_string(), TRIAL_HEAD.to_string()),
+                shared.to_string(),
+            );
+        }
+        state.branch_reads_fail = fails;
+    }
     let scoring = ScoringServiceImpl::new(
         repo.clone(),
         Arc::new(FakeJudge::default()),
         usage(session),
-        github.clone(),
+        github,
         Arc::new(EvaluationDefinition::default()),
     );
-
-    scoring.score_run(trials[0].0).await.expect("scored");
-    github
-        .state()
-        .descendants
-        .insert((pinned.to_string(), head.to_string()));
-    scoring.score_run(trials[1].0).await.expect("scored");
-
+    let scored = scoring.score_run(run, last_attempt).await;
     let kept = repo.evaluation.lock().expect("evaluation").clone();
-    let score = |key: &TrialKey| kept.trial_results[&(key.suite_id, key.task.clone())].score;
-    assert_eq!(score(&trials[0].1), 0.0);
-    assert_eq!(score(&trials[1].1), 1.0);
+    let result = kept
+        .trial_results
+        .get(&(key.suite_id, key.task.clone()))
+        .map(|result| result.score);
+    assert_eq!(scored.is_ok(), result.is_some(), "{scored:?}");
+    result
+}
+
+/// A trial scores only when its branch starts from its pinned commit and
+/// takes nothing of its base branch after it.
+#[tokio::test]
+async fn a_trial_scores_only_from_its_pinned_commit() {
+    // From the pin, with main moved on beside it: it keeps its score.
+    let from_pin = PinCase {
+        head: Some(TRIAL_HEAD),
+        descendants: &[(PIN, TRIAL_HEAD), (PIN, NEWER_MAIN)],
+        merge_base: Some(PIN),
+    };
+    assert_eq!(score_pinned(&from_pin, false, false).await, Some(1.0));
+    // Not containing the pin: it replayed other code.
+    let elsewhere = PinCase {
+        head: Some(TRIAL_HEAD),
+        descendants: &[],
+        merge_base: None,
+    };
+    assert_eq!(score_pinned(&elsewhere, false, false).await, Some(0.0));
+    // From a newer main, which contains the pin: it took main's later work.
+    let from_newer_main = PinCase {
+        head: Some(TRIAL_HEAD),
+        descendants: &[
+            (PIN, NEWER_MAIN),
+            (NEWER_MAIN, TRIAL_HEAD),
+            (PIN, TRIAL_HEAD),
+        ],
+        merge_base: None,
+    };
+    assert_eq!(
+        score_pinned(&from_newer_main, false, false).await,
+        Some(0.0)
+    );
+    // Never pushed: nothing tells against it.
+    let never_pushed = PinCase {
+        head: None,
+        descendants: &[],
+        merge_base: None,
+    };
+    assert_eq!(score_pinned(&never_pushed, false, false).await, Some(1.0));
+}
+
+/// GitHub failing while the pin is checked fails the attempt, so the
+/// activity tries again, and keeps no result; its last attempt scores the
+/// trial with the pin unchecked.
+#[tokio::test]
+async fn a_pin_github_cannot_check_is_tried_again_then_scored_unchecked() {
+    let case = PinCase {
+        head: Some(TRIAL_HEAD),
+        descendants: &[],
+        merge_base: None,
+    };
+    assert_eq!(score_pinned(&case, true, false).await, None);
+    assert_eq!(score_pinned(&case, true, true).await, Some(1.0));
 }
 
 #[tokio::test]
@@ -583,7 +671,7 @@ async fn a_cancelled_trial_keeps_a_zero_score_and_is_not_judged() {
         Arc::new(definition()),
     );
 
-    scoring.score_run(trial_run).await.expect("scored");
+    scoring.score_run(trial_run, false).await.expect("scored");
 
     let kept = repo.evaluation.lock().expect("evaluation").clone();
     assert_eq!(

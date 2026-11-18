@@ -148,7 +148,7 @@ const SCORE_TOTAL: Duration = Duration::from_secs(30 * 60);
 
 /// How many times scoring a Run is tried: a judge that keeps failing is
 /// given up on, rather than called again for half an hour.
-const SCORE_ATTEMPTS: u32 = 3;
+pub(crate) const SCORE_ATTEMPTS: u32 = 3;
 
 /// How long one attempt to stop a Step's agent may take: past the agent's
 /// own watch of its stopped session, and the session's delete.

@@ -502,6 +502,21 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
             .await?)
     }
 
+    #[tracing::instrument(err, skip(self, owner))]
+    async fn merge_base(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        base: &str,
+        head: &str,
+    ) -> Result<String, GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        Ok(self
+            .github
+            .merge_base(&token, repository.owner(), repository.name(), base, head)
+            .await?)
+    }
+
     #[tracing::instrument(err, skip(self, owner, pull_request), fields(branch = %pull_request.branch))]
     async fn open(
         &self,

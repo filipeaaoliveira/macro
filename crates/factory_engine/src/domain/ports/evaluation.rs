@@ -48,6 +48,11 @@ pub trait RunJudge: Send + Sync + 'static {
 pub trait ScoringService: Send + Sync + 'static {
     /// Score the Run that ended: a trial gets its result and its
     /// Benchmark's Scorers' judgments; any other Run, the judgments of the
-    /// Scorers whose sample takes it.
-    fn score_run(&self, run_id: RunId) -> impl Future<Output = Result<(), StepError>> + Send;
+    /// Scorers whose sample takes it. `last_attempt` says no retry follows,
+    /// so what cannot be checked is kept unchecked rather than failed.
+    fn score_run(
+        &self,
+        run_id: RunId,
+        last_attempt: bool,
+    ) -> impl Future<Output = Result<(), StepError>> + Send;
 }
