@@ -1,5 +1,5 @@
 use super::{BUILT_IN_FLOWS, BuiltInFlow, built_in_roles};
-use crate::domain::built_in_steps::BuiltInSteps;
+use crate::domain::built_in_steps::{BuiltInSteps, built_in_step_use};
 use crate::domain::fakes::{FakeGithub, FakeRepo, FakeWatches};
 use crate::domain::ports::StepExecutor;
 use crate::domain::pull_request_steps::PullRequestSteps;
@@ -23,6 +23,34 @@ fn every_built_in_flow_reads_and_describes_itself() {
             read.check_merges(),
             Ok(()),
             "flow {} merges without a merge gate's approval",
+            flow.name
+        );
+    }
+}
+
+/// Each built-in Flow passes the checks a Factory Definition's Flow is
+/// held to, as the starter Definition's copies of them must: it names only
+/// Steps a worker serves, none past a merge, no Role on a worker's own
+/// Step, and merges only through a merge Gate's approval.
+#[test]
+fn every_built_in_flow_passes_a_definition_s_checks() {
+    for flow in BUILT_IN_FLOWS {
+        let read = flow
+            .read(built_in_step_use)
+            .unwrap_or_else(|error| panic!("flow {} does not read: {error}", flow.name));
+
+        assert_eq!(read.check_merges(), Ok(()), "flow {}", flow.name);
+        assert_eq!(
+            read.check_work_roles(built_in_step_use),
+            Ok(()),
+            "flow {}",
+            flow.name
+        );
+        assert!(
+            read.entries
+                .iter()
+                .all(|entry| !["deploy", "verify"].contains(&entry.step.as_str())),
+            "flow {} runs a Step past its merge",
             flow.name
         );
     }
