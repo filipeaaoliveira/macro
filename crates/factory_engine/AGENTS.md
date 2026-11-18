@@ -618,7 +618,9 @@ its merge, and by `ready_to_merge` or `merge` when they find the pull
 request merged outside the Run, unless the repository has GitHub delete
 merged branches itself (`delete_branch_on_merge`). Only the Run's own
 branch is deleted, and only while it is at the commit merged: a branch
-pushed to since keeps its commits. A branch an open pull request is
+pushed to since keeps its commits. That check is best effort: GitHub's
+API deletes a branch on no condition, so a push in the moment between the
+read of its head and the deletion is lost with the branch. A branch an open pull request is
 based on is kept too: deleting it through the API would close that pull
 request, where GitHub's own deletion moves it to the base. The deletion
 is best effort: a failure

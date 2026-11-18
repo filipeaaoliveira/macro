@@ -42,7 +42,7 @@ use crate::domain::main_hold::{MainWatch, held_note};
 use crate::domain::models::{
     BranchDeletion, CheckState, CheckSuite, CodeRepository, HeadChecks, Merging, OpenPullRequest,
     Opening, PullRequest, PullRequestState, RequiredCheck, RequiredChecks, StepInput, StepReport,
-    run_branch,
+    is_run_branch, run_branch,
 };
 use crate::domain::ports::{MainWatches, PullRequests, Retryable};
 
@@ -562,12 +562,16 @@ where
     /// best effort: the pull request is merged either way, so a failure is
     /// logged, never the Step's. Only the Run's own branch is deleted, and
     /// only while it is at the commit merged: one pushed to since is kept.
+    /// That check is best effort too: GitHub deletes a branch on no
+    /// condition, so a push between the read of its head and the deletion
+    /// is lost with the branch.
     /// A pull request a person merged leaves its branch to GitHub when the
     /// repository deletes merged branches itself. A branch an open pull
     /// request is based on is kept: deleting it through the API would close
     /// that pull request, where GitHub's own deletion moves it to the base.
     async fn delete_merged_branch(&self, input: &StepInput<'_>, merged_head: &str, merger: Merger) {
         let branch = run_branch(input.key.run_id);
+        debug_assert!(is_run_branch(&branch), "{branch} is not a run's branch");
         let _ = self
             .delete_branch_at(input, &branch, merged_head, merger)
             .await
