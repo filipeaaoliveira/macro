@@ -4,7 +4,8 @@
 //! team may give one Project (an initiative) a definition of its own. A Run
 //! keeps the definition it was created with. Its owner section says what
 //! happens to the Gates no rule answers: with it on, they go to the Run's
-//! owner (`owner_gates`).
+//! owner (`owner_gates`). Its Queue limit says how many Gates and questions
+//! may wait on a person before no new Run of theirs starts (`queue_limit`).
 
 #[cfg(test)]
 mod test;
@@ -87,10 +88,14 @@ pub enum StandingRule {
 /// The name the owner section is stored under, beside the Gate kinds.
 pub const OWNER_GATES: &str = "owner_gates";
 
+/// The highest Queue limit a definition may set.
+pub const MAX_QUEUE_LIMIT: u16 = 1000;
+
 /// A workspace's Orchestrator Definition: which kinds of Gate the factory
 /// decides on its own, whether the Gates it leaves go to the Run's owner,
-/// and which the stand-in answers for the Run's owner when no rule does. A
-/// kind left off waits for a person, as every Gate did before Standing
+/// which the stand-in answers for the Run's owner when no rule does, and
+/// the Queue limit above which no new Run starts. A kind left off waits for
+/// a person, as every Gate did before Standing
 /// Rules. Whatever it says, a Tampered Run's Gates and a merge through a
 /// Main Hold stay a person's.
 #[derive(
@@ -116,6 +121,14 @@ pub struct OrchestratorDefinition {
     /// before. A definition sent without it has it off.
     #[serde(default)]
     pub owner_gates: bool,
+    /// The Queue limit: the most Gates and questions that may wait on a
+    /// person (their Queue) for a new Run of theirs to start under this
+    /// definition. Above it, no new Run starts; Runs already going go on.
+    /// None, and a definition sent without it, sets no limit. At most
+    /// [`MAX_QUEUE_LIMIT`]. A Run does not keep it: it decides only
+    /// whether a Run starts, so a Run's rules read with none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_limit: Option<u16>,
     /// The kinds of Gate the stand-in answers for the Run's owner, after
     /// the rules and before the person; off for every kind when left out.
     #[serde(default)]
@@ -153,6 +166,7 @@ impl OrchestratorDefinition {
         blockers: true,
         merge: false,
         owner_gates: false,
+        queue_limit: None,
         stand_in: StandInKinds {
             plan: false,
             blockers: false,
@@ -180,7 +194,8 @@ impl OrchestratorDefinition {
 
     /// The kinds its rules decide, then [`OWNER_GATES`] when its owner
     /// section is on, then the kinds the stand-in answers
-    /// (`stand_in_plan`, `stand_in_blockers`): what is stored of it.
+    /// (`stand_in_plan`, `stand_in_blockers`): what is stored of it beside
+    /// its Queue limit, which has a column of its own.
     pub fn kinds(self) -> Vec<String> {
         let ruled = [
             RuleGateKind::Plan,
@@ -201,8 +216,8 @@ impl OrchestratorDefinition {
         ruled.chain(owner).chain(stood_in).collect()
     }
 
-    /// The definition stored as `kinds` ([`Self::kinds`]); none when one is
-    /// not a name this code knows.
+    /// The definition stored as `kinds` ([`Self::kinds`]), with no Queue
+    /// limit; none when one is not a name this code knows.
     pub fn from_kinds(kinds: &[String]) -> Option<Self> {
         let mut definition = Self::default();
         for kind in kinds {

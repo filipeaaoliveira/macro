@@ -1,12 +1,17 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT standing_rules FROM factory_team_settings WHERE team_id = $1",
+  "query": "SELECT standing_rules, queue_limit FROM factory_team_settings WHERE team_id = $1",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
         "name": "standing_rules",
         "type_info": "TextArray"
+      },
+      {
+        "ordinal": 1,
+        "name": "queue_limit",
+        "type_info": "Int2"
       }
     ],
     "parameters": {
@@ -15,8 +20,9 @@
       ]
     },
     "nullable": [
+      true,
       true
     ]
   },
-  "hash": "a642bddf25bd04cf16d2a5c27912aef93d664ec5819f18b9e25548f9195efe8d"
+  "hash": "4d126f88120d2969fde69f2c719c382dbcbb2b753c2fc0784aed506fcc4eba0d"
 }

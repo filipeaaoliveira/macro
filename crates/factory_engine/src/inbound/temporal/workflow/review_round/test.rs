@@ -508,6 +508,7 @@ const EVERY_RULE: OrchestratorDefinition = OrchestratorDefinition {
     blockers: true,
     merge: true,
     owner_gates: false,
+    queue_limit: None,
 };
 
 /// The review panel of three reviewers, at most three rounds, with the

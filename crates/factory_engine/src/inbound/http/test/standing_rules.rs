@@ -23,6 +23,7 @@ const PLAN_ONLY: OrchestratorDefinition = OrchestratorDefinition {
     blockers: false,
     merge: false,
     owner_gates: false,
+    queue_limit: None,
 };
 
 /// A repository where Alice administers a team.
@@ -259,6 +260,7 @@ async fn a_new_run_keeps_its_project_s_or_its_team_s_rules() {
         blockers: true,
         merge: true,
         owner_gates: false,
+        queue_limit: None,
     };
     repo.team_rules
         .lock()

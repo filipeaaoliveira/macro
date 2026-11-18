@@ -114,6 +114,7 @@ const OWNER_GATES: OrchestratorDefinition = OrchestratorDefinition {
     blockers: true,
     merge: false,
     owner_gates: true,
+    queue_limit: None,
     stand_in: StandInKinds {
         plan: false,
         blockers: false,
@@ -136,6 +137,7 @@ fn repeated_blockers_go_to_the_owner_only_with_the_owner_section_on() {
 
     let off = OrchestratorDefinition {
         owner_gates: false,
+        queue_limit: None,
         ..OWNER_GATES
     };
     assert_eq!(

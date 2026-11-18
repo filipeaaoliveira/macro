@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT standing_rules, queue_limit FROM factory_project_rules\n            WHERE team_id = $1 AND project_id = $2\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "standing_rules",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 1,
+        "name": "queue_limit",
+        "type_info": "Int2"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "9d1506428d21f8d0bdd5035e08b27dc15046f7fa38371b05858172c21fa28a29"
+}

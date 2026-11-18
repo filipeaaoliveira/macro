@@ -27,6 +27,7 @@ const BLOCKERS: OrchestratorDefinition = OrchestratorDefinition {
     blockers: false,
     merge: false,
     owner_gates: false,
+    queue_limit: None,
     stand_in: StandInKinds {
         plan: false,
         blockers: true,
@@ -153,6 +154,7 @@ fn with_the_owner_section_on_repeated_blockers_are_the_owner_s() {
     };
     let owner_gates = OrchestratorDefinition {
         owner_gates: true,
+        queue_limit: None,
         ..BLOCKERS
     };
     assert!(!may_stand_in(Some(owner_gates), &repeated, &fix_or_stop));
