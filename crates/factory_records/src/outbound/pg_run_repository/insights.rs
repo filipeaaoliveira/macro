@@ -185,7 +185,7 @@ impl RunInsightsRepository for PgRunRepository {
             ),
             visits AS (
                 SELECT entry, count(*) FILTER (WHERE visit) AS visits,
-                       bool_or(outcome = 'failed') AS failed
+                       bool_or(outcome IN ('failed', 'fail', 'deploy_failed')) AS failed
                 FROM steps
                 GROUP BY entry, run_id
             ),
@@ -299,7 +299,7 @@ impl RunInsightsRepository for PgRunRepository {
                     SELECT
                         entry,
                         run_id,
-                        coalesce(bool_or(outcome = 'failed'), false) AS failed,
+                        coalesce(bool_or(outcome IN ('failed', 'fail', 'deploy_failed')), false) AS failed,
                         count(*) FILTER (WHERE outcome IS DISTINCT FROM 'question') AS visits
                     FROM factory_step
                     WHERE run_id = ANY($1)
