@@ -129,6 +129,8 @@ export default {
   modelLeaned: 'It leaned to {{answer}} ({{confidence}}% sure).',
   modelCouldNotTell:
     'It couldn’t tell which answer fits ({{confidence}}% sure).',
+  askedBackTampered:
+    'This run changed its Control Files, so approving it needs the Approve button, which lists them.',
   modelDidNotAnswer: 'It didn’t answer.',
   ruleApprovePlan: 'Approve plans',
   ruleFixBlockers: 'Fix review blockers',

@@ -349,6 +349,9 @@ export function GateStatus(props: {
                     <p>
                       {t('factoryRuns.askedBack', { reply: asked().reply })}
                     </p>
+                    <Show when={asked().refusedTampered}>
+                      <p>{t('factoryRuns.askedBackTampered')}</p>
+                    </Show>
                     <Show when={asked().reading}>
                       {(reading) => <ModelReadingLine reading={reading()} />}
                     </Show>

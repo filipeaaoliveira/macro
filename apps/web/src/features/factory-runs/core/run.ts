@@ -71,10 +71,16 @@ export type Gate = {
   openedAt: string;
   answer?: GateAnswer;
   /**
-   * The person's latest words the factory couldn't read as an answer, and
-   * how the Gate model read them.
+   * The person's latest words the factory couldn't read as an answer, how
+   * the Gate model read them, and whether they approved a Tampered Run,
+   * which only the Approve button does.
    */
-  askedBack?: { reply: string; at: string; reading?: GateModelReading };
+  askedBack?: {
+    reply: string;
+    at: string;
+    reading?: GateModelReading;
+    refusedTampered?: boolean;
+  };
   /** The stand-in's answer, while the owner may override it and after. */
   standIn?: StandInAnswer;
   /** How the Gate model read the Gate when the stand-in left it to the owner. */

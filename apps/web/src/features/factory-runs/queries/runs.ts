@@ -96,6 +96,7 @@ function toRun(detail: RunDetail): Run {
                   reply: step.gate.askedBack.reply,
                   at: step.gate.askedBack.at,
                   reading: modelReading(step.gate.askedBack.reading),
+                  refusedTampered: step.gate.askedBack.refusedTampered,
                 }
               : undefined,
             standIn: step.gate.standIn ?? undefined,

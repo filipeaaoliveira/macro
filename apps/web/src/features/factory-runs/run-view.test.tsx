@@ -551,6 +551,34 @@ describe('RunView', () => {
     expect(await screen.findByText('It didn’t answer.')).toBeTruthy();
   });
 
+  it('says why words approving a Tampered Run were asked back', async () => {
+    const { setRun } = mount({});
+    const [first] = waitingRun.steps;
+    if (!first?.gate) throw new Error('No first Gate');
+    setRun({
+      ...waitingRun,
+      steps: [
+        {
+          ...first,
+          gate: {
+            ...first.gate,
+            askedBack: {
+              reply: 'Approve',
+              at: '2026-11-16T09:05:00Z',
+              reading: { pick: 'approve', confidence: 98, reason: 'Clear.' },
+              refusedTampered: true,
+            },
+          },
+        },
+      ],
+    });
+    expect(
+      await screen.findByText(
+        'This run changed its Control Files, so approving it needs the Approve button, which lists them.'
+      )
+    ).toBeTruthy();
+  });
+
   it('shows words asked back on in the stand-in’s window, not the window', async () => {
     const { setRun } = mount({});
     const [first] = waitingRun.steps;
