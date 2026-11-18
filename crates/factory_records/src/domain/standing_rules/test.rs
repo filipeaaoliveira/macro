@@ -128,3 +128,25 @@ fn a_definition_sent_without_the_stand_in_leaves_it_off() {
             .expect("an older definition reads");
     assert_eq!(definition.stand_in, StandInKinds::default());
 }
+
+#[test]
+fn the_owner_section_and_the_stand_in_are_stored_together() {
+    let definition = OrchestratorDefinition {
+        plan: true,
+        blockers: false,
+        merge: false,
+        owner_gates: true,
+        stand_in: StandInKinds {
+            plan: false,
+            blockers: true,
+        },
+    };
+    assert_eq!(
+        definition.kinds(),
+        ["plan", "owner_gates", "stand_in_blockers"]
+    );
+    assert_eq!(
+        OrchestratorDefinition::from_kinds(&definition.kinds()),
+        Some(definition)
+    );
+}

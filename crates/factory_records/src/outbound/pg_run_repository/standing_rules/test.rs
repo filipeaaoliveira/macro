@@ -43,6 +43,17 @@ const OWNER_GATES_ON: OrchestratorDefinition = OrchestratorDefinition {
     },
 };
 
+const EVERY_SETTING: OrchestratorDefinition = OrchestratorDefinition {
+    plan: true,
+    blockers: true,
+    merge: true,
+    owner_gates: true,
+    stand_in: StandInKinds {
+        plan: true,
+        blockers: true,
+    },
+};
+
 /// A team's rules and its Control Files share its settings: setting or
 /// clearing either leaves the other as it was, and clearing both removes
 /// the team's settings.
@@ -209,6 +220,16 @@ async fn a_run_keeps_the_rules_it_was_created_with(pool: PgPool) {
 )]
 async fn the_owner_section_is_kept_with_the_rules(pool: PgPool) {
     kept_everywhere(pool, OWNER_GATES_ON).await;
+}
+
+/// A definition with every setting on, the owner section and the stand-in
+/// among them, is kept as a team's, a Project's and a Run's.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "team", "project"))
+)]
+async fn every_setting_is_kept_together(pool: PgPool) {
+    kept_everywhere(pool, EVERY_SETTING).await;
 }
 
 /// Keep `definition` as a team's, a Project's and a new Run's rules, and

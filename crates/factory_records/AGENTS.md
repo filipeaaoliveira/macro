@@ -53,7 +53,8 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261117220000_factory_follow_up_commented.sql`,
   `20261117221000_factory_standing_rules.sql`,
   `20261118004853_factory_gate_replies.sql`,
-  `20261118005054_factory_owner_gates.sql`).
+  `20261118005054_factory_owner_gates.sql`,
+  `20261118120000_factory_owner_gates_and_stand_in.sql`).
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
 
 ## Boundaries
@@ -197,7 +198,9 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   none, so an owner's override in the window stands. Every write keeps the
   Gate's first answer. The stand-in's kinds are kept in the same
   `standing_rules` arrays as the rules and the owner section
-  (`stand_in_plan`, `stand_in_blockers`; it has none for a merge Gate). `withdraw_stand_in`
+  (`stand_in_plan`, `stand_in_blockers`; it has none for a merge Gate);
+  `20261118120000_factory_owner_gates_and_stand_in.sql` checks those
+  arrays against every name of both. `withdraw_stand_in`
   takes the stand-in's answer back while the Gate has no answer, when the
   Run no longer lets it stand. `past_answers` reads the owner's own
   answers to an entry's Gates through their newest Runs
