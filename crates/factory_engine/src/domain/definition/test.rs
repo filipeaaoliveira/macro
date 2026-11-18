@@ -439,6 +439,31 @@ async fn a_merge_needs_a_merge_gate_s_approval() {
     );
 }
 
+/// A token hidden behind JSON escapes, or under a newer prefix, is still
+/// a secret; a word that only ends like a prefix is not.
+#[tokio::test]
+async fn an_escaped_or_newer_token_is_a_secret() {
+    let escaped = AGENTS.replace("large-model", r"ghp\u005f0123456789abcdefABCDEF0123");
+    let gitlab = AGENTS.replace("large-model", concat!("glpat-", "0123456789abcdefABCD"));
+    let words = AGENTS.replace("large-model", "a task-runner-for-every-long-check");
+
+    assert_eq!(
+        read(with("agents.json", &escaped)).await,
+        Err(DefinitionError::Secret {
+            path: "agents.json".to_string(),
+            kind: "ghp_",
+        })
+    );
+    assert_eq!(
+        read(with("agents.json", &gitlab)).await,
+        Err(DefinitionError::Secret {
+            path: "agents.json".to_string(),
+            kind: "glpat-",
+        })
+    );
+    assert!(read(with("agents.json", &words)).await.is_ok());
+}
+
 /// The starter's Control Files are the factory's default and its own
 /// files, so a Run that changes its rules waits for a person.
 #[tokio::test]

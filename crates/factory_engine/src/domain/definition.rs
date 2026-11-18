@@ -73,20 +73,25 @@ pub const MAX_SCORERS: usize = 64;
 pub const MAX_FILE_BYTES: usize = 256 * 1024;
 
 /// The beginnings of keys and tokens that must never be in a Definition:
-/// a file holding one followed by [`SECRET_TAIL`] or more characters of a
-/// token does not read.
-const SECRET_PREFIXES: [&str; 11] = [
+/// a file holding one at the start of a word, followed by [`SECRET_TAIL`]
+/// or more characters of a token, does not read. The more specific come
+/// first, so the error names them.
+const SECRET_PREFIXES: [&str; 15] = [
     "ghp_",
     "gho_",
     "ghu_",
     "ghs_",
     "ghr_",
     "github_pat_",
+    "glpat-",
     "sk-ant-",
     "sk-proj-",
+    "sk-",
     "xoxb-",
     "xoxp-",
+    "xapp-",
     "AKIA",
+    "AIza",
 ];
 
 /// How many token characters after a prefix make it a secret.
@@ -259,13 +264,32 @@ fn secret_in(text: &str) -> Option<&'static str> {
     }
     SECRET_PREFIXES.into_iter().find(|prefix| {
         text.match_indices(prefix).any(|(at, _)| {
+            // Only at the start of a word: `task-` holds no `sk-` token.
+            let word_start = text[..at]
+                .chars()
+                .next_back()
+                .is_none_or(|before| !before.is_ascii_alphanumeric());
             let tail = &text[at + prefix.len()..];
-            tail.bytes()
-                .take_while(|byte| byte.is_ascii_alphanumeric() || b"-_".contains(byte))
-                .count()
-                >= SECRET_TAIL
+            word_start
+                && tail
+                    .bytes()
+                    .take_while(|byte| byte.is_ascii_alphanumeric() || b"-_".contains(byte))
+                    .count()
+                    >= SECRET_TAIL
         })
     })
+}
+
+/// How the first secret a string of `value` holds begins, keys included.
+fn secret_in_value(value: &serde_json::Value) -> Option<&'static str> {
+    match value {
+        serde_json::Value::String(text) => secret_in(text),
+        serde_json::Value::Array(items) => items.iter().find_map(secret_in_value),
+        serde_json::Value::Object(fields) => fields
+            .iter()
+            .find_map(|(key, field)| secret_in(key).or_else(|| secret_in_value(field))),
+        serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Number(_) => None,
+    }
 }
 
 /// The text of `path`, checked for its size and for secrets; none when
@@ -299,10 +323,21 @@ async fn json<F: DefinitionFiles, T: serde::de::DeserializeOwned>(
     let Some(text) = text(files, path).await? else {
         return Ok(None);
     };
-    let read = serde_json::from_str(&text).map_err(|error| DefinitionError::Unreadable {
+    let unreadable = |error: serde_json::Error| DefinitionError::Unreadable {
         path: path.to_string(),
         error: error.to_string(),
-    })?;
+    };
+    let value: serde_json::Value = serde_json::from_str(&text).map_err(unreadable)?;
+    // JSON escapes (`\u005f`) hide a token from the text: its strings are
+    // checked again once decoded.
+    if let Some(kind) = secret_in_value(&value) {
+        return Err(DefinitionError::Secret {
+            path: path.to_string(),
+            kind,
+        }
+        .into());
+    }
+    let read = serde_json::from_value(value).map_err(unreadable)?;
     Ok(Some(read))
 }
 
@@ -350,6 +385,7 @@ pub async fn read_definition<F: DefinitionFiles>(
         let path = flow_path(&name);
         let definition: serde_json::Value = required(files, &path).await?;
         let flow = Flow::parse(definition, &serves)
+            .and_then(|flow| flow.check_merges().map(|()| flow))
             .map_err(|error| DefinitionError::Flow { path, error })?;
         flows.insert(name, flow);
     }
@@ -396,7 +432,6 @@ pub async fn read_definition<F: DefinitionFiles>(
         flows,
         agents,
         rules,
-            .and_then(|flow| flow.check_merges().map(|()| flow))
         scorers,
     })
 }
