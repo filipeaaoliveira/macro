@@ -39,6 +39,7 @@ vi.stubGlobal(
 const waitingRun: Run = {
   id: 'run-1',
   request: 'Add a due date column\n\nShow it in the task list.',
+  ownerId: 'macro|julia@example.com',
   createdAt: '2026-11-16T09:00:00Z',
   taskId: 'task-1',
   steps: [
@@ -73,6 +74,7 @@ function mount(options: {
 }) {
   const [run, setRun] = createSignal<Run | undefined>(waitingRun);
   const context: RunsContext = {
+    viewerId: () => 'macro|julia@example.com',
     taskRuns: () => ({
       state: () => 'ready',
       data: () => [waitingRun],

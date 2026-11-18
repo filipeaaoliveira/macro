@@ -202,12 +202,11 @@ export function createRunController(
   };
 
   // Only its owner answers, cancels or steers a Run; a team member reads it.
-  // A Run that names its owner is the person's only once they are known.
+  // The Run is the person's only once both its owner and they are known.
   const owned = () => {
     const owner = source.data()?.ownerId;
-    if (owner === undefined) return true;
     const viewer = context.viewerId?.();
-    return viewer !== undefined && owner === viewer;
+    return owner !== undefined && viewer !== undefined && owner === viewer;
   };
 
   return {
