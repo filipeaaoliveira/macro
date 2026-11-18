@@ -18,6 +18,12 @@ import {
 import type { Run, RunStep } from './core/run';
 import { RunView } from './run-view';
 
+const touch = vi.hoisted(() => ({ device: false }));
+
+vi.mock('@core/mobile/isTouchDevice', () => ({
+  isTouchDevice: () => touch.device,
+}));
+
 vi.mock('@core/component/Toast/Toast', () => ({
   toast: { alert: vi.fn(), failure: vi.fn(), success: vi.fn() },
 }));
@@ -72,10 +78,11 @@ function mount(options: {
   markRunFlawed?: RunsContext['markRunFlawed'];
   state?: Accessor<'pending' | 'error' | 'ready'>;
   retry?: () => void;
+  viewerId?: string;
 }) {
   const [run, setRun] = createSignal<Run | undefined>(waitingRun);
   const context: RunsContext = {
-    viewerId: () => 'macro|julia@example.com',
+    viewerId: () => options.viewerId ?? 'macro|julia@example.com',
     taskRuns: () => ({
       state: () => 'ready',
       data: () => [waitingRun],
@@ -116,6 +123,7 @@ function mount(options: {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  touch.device = false;
 });
 
 describe('RunView', () => {
@@ -1379,6 +1387,35 @@ describe('RunView', () => {
     ).toBeTruthy();
     expect(markRunFlawed).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ['dialog', false],
+    ['phone sheet', true],
+  ])(
+    'offers the flaw mark in the %s only to the run’s owner',
+    async (_, device) => {
+      touch.device = device;
+      const succeeded: Run = {
+        ...waitingRun,
+        end: { outcome: 'success', endedAt: '2026-11-16T09:10:00Z' },
+      };
+      const teammate = mount({ viewerId: 'macro|teo@example.com' });
+      teammate.setRun(succeeded);
+
+      expect(
+        await screen.findAllByText('Add a due date column')
+      ).not.toHaveLength(0);
+      expect(screen.queryByRole('button', { name: 'Mark flawed' })).toBeNull();
+
+      cleanup();
+      const owner = mount({});
+      owner.setRun(succeeded);
+
+      expect(
+        await screen.findByRole('button', { name: 'Mark flawed' })
+      ).toBeTruthy();
+    }
+  );
 
   it('offers no flaw mark for a run that did not end done', async () => {
     const { setRun } = mount({});

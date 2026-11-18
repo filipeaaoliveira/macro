@@ -140,6 +140,7 @@ export function MobileRunSheet(props: {
           </Show>
           <Show
             when={
+              props.controller.owned() &&
               source.data()?.end?.outcome === 'success'
                 ? source.data()
                 : undefined

@@ -141,7 +141,11 @@ export function RunDialog(props: {
                     <RunCancel controller={props.controller} />
                   </ActionDialogShell.Footer>
                 </Show>
-                <Show when={run().end?.outcome === 'success'}>
+                <Show
+                  when={
+                    props.controller.owned() && run().end?.outcome === 'success'
+                  }
+                >
                   <ActionDialogShell.Footer>
                     <MarkRunFlawed runId={run().id} />
                   </ActionDialogShell.Footer>
