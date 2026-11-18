@@ -36,10 +36,13 @@ const BOARD_ROUNDS: usize = 5;
 /// rounds.
 const BOARD_BATCH_MIN: u16 = 50;
 
-/// The most Runs a lookup by pull request reads, newest first. A Run opens
-/// one pull request, so this is past [`PULL_REQUESTS_MAX`] only for pull
-/// requests that more than one Run found.
-pub(super) const PULL_REQUEST_RUNS_READ: u16 = 500;
+/// The most Runs a lookup by pull request reads for each pull request,
+/// newest first: the newest of each owner and task, as only those can be
+/// the one shown. A pull request that many owners' or tasks' Runs found, none
+/// of them one the caller sees, is `unknown`, as the one shown may be among
+/// those left unread; each pull request is read on its own, so another's
+/// Runs never change its answer.
+pub(super) const PULL_REQUEST_RUNS_READ: u16 = 10;
 
 use crate::domain::ports::{
     PullRequests, RunWorkflows, StepExecutor, TaskAccess, TaskDirectory, UserDirectory,
@@ -278,9 +281,18 @@ where
             })
             .await
             .map_err(internal)?;
-        // Past the limit, older Runs went unread: a pull request with no Run
-        // shown may have one among them.
-        let cut_short = read.len() >= usize::from(PULL_REQUEST_RUNS_READ);
+        // A pull request whose Runs reached the limit may have older ones
+        // left unread: with no Run shown, whether one the caller sees opened
+        // it is not known. Each is counted from its own Runs alone.
+        let mut read_of: HashMap<String, usize> = HashMap::new();
+        for board_run in &read {
+            if let Some(url) = board_run.run.pull_request_url.as_deref() {
+                *read_of.entry(pull_request_key(url)).or_default() += 1;
+            }
+        }
+        let cut_short = |key: &str| {
+            read_of.get(key).copied().unwrap_or_default() >= usize::from(PULL_REQUEST_RUNS_READ)
+        };
         let mut seen = BTreeMap::new();
         self.check_tasks(actor, &read, &mut seen).await?;
 
@@ -301,7 +313,7 @@ where
         for (key, url) in asked {
             match newest.remove(&key) {
                 Some(listed) => shown.push((url, listed)),
-                None if cut_short => unknown.push(url),
+                None if cut_short(&key) => unknown.push(url),
                 None => {}
             }
         }

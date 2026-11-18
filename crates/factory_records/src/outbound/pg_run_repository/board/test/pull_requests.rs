@@ -16,6 +16,8 @@ use crate::outbound::pg_run_repository::PgRunRepository;
 
 const COUPON: &str = "https://github.com/Acme/Shop/pull/7";
 const BANNER: &str = "https://github.com/acme/shop/pull/8";
+const LOGIN_TASK: &str = "00000000-0000-7000-8000-000000000101";
+const DARK_MODE_TASK: &str = "00000000-0000-7000-8000-000000000102";
 
 fn query(team_id: Option<&str>, urls: &[&str]) -> PullRequestRunsQuery {
     PullRequestRunsQuery {
@@ -133,4 +135,85 @@ async fn a_team_member_s_run_is_read_only_for_their_team(pool: PgPool) {
         ids(read(&repo, &query(Some(&other_team), &[COUPON, BANNER])).await),
         [julias]
     );
+}
+
+/// Each pull request reads only the newest Run of each owner and task, so a
+/// pile of one owner's Runs on one task never pushes an older Run of
+/// another owner past the limit.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../../fixtures", scripts("people", "team", "tasks"))
+)]
+async fn a_pull_request_reads_the_newest_run_of_each_owner_and_task(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let julias = keep(&repo, Kept::julias("Add the coupon field")).await;
+    repo.set_pull_request_url(julias, COUPON)
+        .await
+        .expect("keep");
+    let mut teos = julias;
+    for _ in 0..5 {
+        teos = keep(
+            &repo,
+            Kept {
+                user_id: teo(),
+                task_id: Some(LOGIN_TASK),
+                ..Kept::julias("Fix the login bug")
+            },
+        )
+        .await;
+        repo.set_pull_request_url(teos, COUPON).await.expect("keep");
+    }
+
+    let ids: Vec<RunId> = read(
+        &repo,
+        &PullRequestRunsQuery {
+            limit: 2,
+            ..query(Some(TEAM), &[COUPON])
+        },
+    )
+    .await
+    .into_iter()
+    .map(|(id, _)| id)
+    .collect();
+    assert_eq!(ids, [teos, julias]);
+}
+
+/// The limit holds for each pull request on its own: one pull request's
+/// newer Runs never push another's past it.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../../fixtures", scripts("people", "tasks"))
+)]
+async fn one_pull_request_s_runs_never_crowd_out_another_s(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let banner = keep(&repo, Kept::julias("Ship the banner")).await;
+    repo.set_pull_request_url(banner, BANNER)
+        .await
+        .expect("keep");
+    let mut coupons = Vec::new();
+    for task_id in [None, Some(LOGIN_TASK), Some(DARK_MODE_TASK)] {
+        let id = keep(
+            &repo,
+            Kept {
+                task_id,
+                ..Kept::julias("Add the coupon field")
+            },
+        )
+        .await;
+        repo.set_pull_request_url(id, COUPON).await.expect("keep");
+        coupons.push(id);
+    }
+
+    let ids: Vec<RunId> = read(
+        &repo,
+        &PullRequestRunsQuery {
+            limit: 2,
+            ..query(None, &[COUPON, BANNER])
+        },
+    )
+    .await
+    .into_iter()
+    .map(|(id, _)| id)
+    .collect();
+    assert_eq!(ids, [coupons[2], coupons[1], banner]);
 }

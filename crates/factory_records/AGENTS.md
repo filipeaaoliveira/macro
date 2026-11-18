@@ -194,11 +194,14 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   task's name with `ILIKE`, its `%`, `_` and `\` literal, and so reads
   every Run of the owners (some 200 ms on 280k). A held Run is held only at
   its merge, so a merged Run is `finished`.
-- `pull_request_runs` reads the Runs whose `lower(pull_request_url)` is one
-  of the keys asked (`pull_request_key`), through
-  `factory_run_pull_request_url_idx`, of the person or a member of the team
-  given, newest first up to the limit, each where it is as `board_runs`
-  reads it.
+- `pull_request_runs` reads, for each key asked (`pull_request_key`) on its
+  own, the Runs whose `lower(pull_request_url)` is that key, through
+  `factory_run_pull_request_url_idx` (one index search per key), of the
+  person or a member of the team given: only the newest Run of each owner
+  and task (`DISTINCT ON`, since whether a caller sees a Run depends only on
+  those), newest first up to the limit for that key, so one pull request's
+  Runs never crowd out another's. Each is where it is as `board_runs` reads
+  it; the rows come newest first across keys.
 - `read_insights` reads one person's newest Runs in a period through
   `factory_run_user_created_idx` (`user_id, created_at DESC, id DESC`), up to
   its cap (one past it, to tell whether Runs were left out), then their Steps

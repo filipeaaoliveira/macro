@@ -95,14 +95,24 @@ impl RunBoardRepository for FakeRepo {
             limit: u16::MAX,
         };
         let mut listed = self.board_runs(&board).await?;
+        // As the database reads them: for each pull request, the newest Run
+        // of each owner and task, up to the limit.
+        let mut heads = std::collections::HashSet::new();
+        let mut read_of: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
         listed.retain(|listed| {
-            listed
-                .run
-                .pull_request_url
-                .as_deref()
-                .is_some_and(|url| query.urls.contains(&pull_request_key(url)))
+            let Some(key) = listed.run.pull_request_url.as_deref().map(pull_request_key) else {
+                return false;
+            };
+            if !query.urls.contains(&key)
+                || !heads.insert((key.clone(), listed.run.user_id.clone(), listed.run.task_id))
+            {
+                return false;
+            }
+            let count = read_of.entry(key).or_default();
+            *count += 1;
+            *count <= usize::from(query.limit)
         });
-        listed.truncate(usize::from(query.limit));
         Ok(listed)
     }
 }

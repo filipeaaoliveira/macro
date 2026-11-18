@@ -1249,9 +1249,13 @@ every Run in flight replays as before.
   `mergeGateSeq`, the Step whose merge Gate it waits on (its latest Step,
   at a merge entry, with a Flow's Gate no one answered, while it goes). A
   pull request only a hidden Run opened is left out, as one no Run opened.
-  It reads at most 500 Runs, newest first; past them, a pull request with
-  no Run shown is listed in `unknown`, as one whose Run may be among those
-  left unread, never as one no Run opened. The web app's pull request views
+  It reads each pull request on its own: the newest Run of each owner and
+  task, at most 10 (`PULL_REQUEST_RUNS_READ`), newest first; a pull request
+  whose read reached that with no Run shown is listed in `unknown`, as one
+  whose Run may be among those left unread, never as one no Run opened.
+  Another pull request's Runs never change its answer, though a pull request
+  with Runs on ten or more owners' or tasks' the caller cannot see reads as
+  `unknown`, not as no Run. The web app's pull request views
   (Reviews, a pull request's detail and block, its Merge button) read it
   through `PrMergeGuardProvider` to mark a factory Run's pull request, and
   merge one only through that Gate (`POST /runs/{id}/steps/{seq}/answer`);

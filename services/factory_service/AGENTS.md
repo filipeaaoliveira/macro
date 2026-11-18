@@ -94,7 +94,7 @@ worker that walks each Run's Flow, in one process.
   `POST /runs/by-pull-requests` (`{"urls"}`, at most 100) finds the Run
   that opened each pull request, among those the caller's team board
   shows, with the merge Gate it waits on (`mergeGateSeq`); `unknown`
-  lists the pull requests whose Runs it could not all read.
+  lists the pull requests whose own Runs it could not all read.
 
 ## Gotchas
 

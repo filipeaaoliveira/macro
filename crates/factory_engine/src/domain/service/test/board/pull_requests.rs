@@ -185,29 +185,95 @@ async fn a_lookup_names_at_most_so_many_pull_requests() {
     assert!(none.runs.is_empty());
 }
 
-/// When more Runs match than a lookup reads, a pull request whose Run may be
-/// among the older ones left unread is unknown, never "no Run"; one whose
-/// newest Run was read is shown.
+/// Each pull request is read on its own: however many Runs another pull
+/// request has, a pull request a hidden Run opened reads exactly as one no
+/// Run opened, and is never `unknown` because of the other's Runs.
 #[tokio::test]
-async fn a_pull_request_past_the_runs_read_is_unknown() {
+async fn a_pull_request_s_answer_never_depends_on_another_s_runs() {
     let repo = FakeRepo::default();
     let service = service(&repo, &FakeWorkflows::default());
-    let older = opened(&repo, keep(&repo, &julia(), None).await, BANNER).await;
-    let mut newest = older;
-    for _ in 0..PULL_REQUEST_RUNS_READ {
-        newest = opened(&repo, keep(&repo, &julia(), None).await, COUPON).await;
+    on_team(&repo, &julia());
+    on_team(&repo, &teo());
+    let hidden_task = task(&repo);
+    hide(&repo, &julia(), hidden_task);
+    // Julia's own Runs on the coupon pull request, each on a task of its
+    // own, one fewer than a pull request's read.
+    let mut newest = None;
+    for _ in 1..PULL_REQUEST_RUNS_READ {
+        newest = Some(
+            opened(
+                &repo,
+                keep(&repo, &julia(), Some(task(&repo))).await,
+                COUPON,
+            )
+            .await,
+        );
+    }
+    let _hidden = opened(&repo, keep(&repo, &teo(), Some(hidden_task)).await, BANNER).await;
+
+    let with_hidden = service
+        .pull_request_runs(&julia(), vec![COUPON.to_string(), BANNER.to_string()])
+        .await
+        .expect("found");
+    let with_none = service
+        .pull_request_runs(&julia(), vec![COUPON.to_string(), CART.to_string()])
+        .await
+        .expect("found");
+
+    let newest = newest.expect("kept");
+    assert_eq!(shown(&with_hidden), [(COUPON.to_string(), newest)]);
+    assert_eq!(shown(&with_none), [(COUPON.to_string(), newest)]);
+    assert!(with_hidden.unknown.is_empty());
+    assert!(with_none.unknown.is_empty());
+}
+
+/// Only the newest Run of each owner and task can be the one shown, so many
+/// Runs of one owner on one task never hide an older Run the person sees:
+/// Julia's Run shows behind a pile of Teo's newer Runs on a task hidden
+/// from her, which are not `unknown` either.
+#[tokio::test]
+async fn many_runs_of_one_owner_and_task_never_hide_another_s() {
+    let repo = FakeRepo::default();
+    let service = service(&repo, &FakeWorkflows::default());
+    on_team(&repo, &julia());
+    on_team(&repo, &teo());
+    let hidden_task = task(&repo);
+    hide(&repo, &julia(), hidden_task);
+    let own = opened(&repo, keep(&repo, &julia(), None).await, COUPON).await;
+    for _ in 0..PULL_REQUEST_RUNS_READ * 3 {
+        opened(&repo, keep(&repo, &teo(), Some(hidden_task)).await, COUPON).await;
+        opened(&repo, keep(&repo, &teo(), Some(hidden_task)).await, BANNER).await;
     }
 
     let found = service
         .pull_request_runs(&julia(), vec![COUPON.to_string(), BANNER.to_string()])
         .await
         .expect("found");
-    assert_eq!(shown(&found), [(COUPON.to_string(), newest)]);
-    assert_eq!(found.unknown, [BANNER.to_string()]);
+    assert_eq!(shown(&found), [(COUPON.to_string(), own)]);
+    assert!(found.unknown.is_empty());
+}
 
-    let all_read = service
-        .pull_request_runs(&julia(), vec![BANNER.to_string(), CART.to_string()])
+/// A pull request whose Runs on more owners' or tasks' than one pull
+/// request's read are all hidden from the person, with none shown, is
+/// `unknown`: the Run she sees may be among the older ones left unread. A
+/// pull request asked beside it is not.
+#[tokio::test]
+async fn a_pull_request_past_its_runs_read_is_unknown() {
+    let repo = FakeRepo::default();
+    let service = service(&repo, &FakeWorkflows::default());
+    on_team(&repo, &julia());
+    on_team(&repo, &teo());
+    let _older_own = opened(&repo, keep(&repo, &julia(), None).await, COUPON).await;
+    for _ in 0..PULL_REQUEST_RUNS_READ {
+        let hidden_task = task(&repo);
+        hide(&repo, &julia(), hidden_task);
+        opened(&repo, keep(&repo, &teo(), Some(hidden_task)).await, COUPON).await;
+    }
+
+    let found = service
+        .pull_request_runs(&julia(), vec![COUPON.to_string(), BANNER.to_string()])
         .await
         .expect("found");
-    assert!(all_read.unknown.is_empty());
+    assert!(found.runs.is_empty());
+    assert_eq!(found.unknown, [COUPON.to_string()]);
 }

@@ -330,10 +330,14 @@ impl RunBoardRepository for PgRunRepository {
         &self,
         query: &PullRequestRunsQuery,
     ) -> Result<Vec<BoardRun>, Self::Err> {
-        // The pull requests' Runs are read through
-        // `factory_run_pull_request_url_idx`, then kept when the person or
-        // a member of their team owns them; where each is reads as the
-        // board's read does.
+        // Each pull request's Runs are read on their own, through
+        // `factory_run_pull_request_url_idx`, kept when the person or a
+        // member of their team owns them. Whether the caller sees a Run
+        // depends only on its owner and task, so only the newest Run of each
+        // owner and task can be the one shown: those are read, newest first,
+        // up to the limit for each pull request, so one pull request's Runs
+        // never crowd out another's. Where each is reads as the board's
+        // read does.
         let rows = sqlx::query_as!(
             BoardRunRow,
             r#"
@@ -357,7 +361,23 @@ impl RunBoardRepository for PgRunRepository {
                 CASE WHEN task.live THEN d.name END AS "task_name?",
                 task.live AS "task_live!",
                 place.state AS "state!"
-            FROM factory_run r
+            FROM (SELECT DISTINCT url FROM unnest($3::text[]) AS asked(url)) asked
+            CROSS JOIN LATERAL (
+                SELECT heads.* FROM (
+                    SELECT DISTINCT ON (o.user_id, o.task_id) o.*
+                    FROM factory_run o
+                    WHERE lower(o.pull_request_url) = asked.url
+                        AND (
+                            o.user_id = $1
+                            OR o.user_id IN (
+                                SELECT tu.user_id FROM team_user tu WHERE tu.team_id = $2
+                            )
+                        )
+                    ORDER BY o.user_id, o.task_id, o.created_at DESC, o.id DESC
+                ) heads
+                ORDER BY heads.created_at DESC, heads.id DESC
+                LIMIT $5
+            ) r
             LEFT JOIN "Document" d ON d.id = r.task_id
             CROSS JOIN LATERAL (
                 SELECT d.id IS NOT NULL
@@ -389,15 +409,7 @@ impl RunBoardRepository for PgRunRepository {
                     ELSE 'running'
                 END AS state
             ) place
-            WHERE lower(r.pull_request_url) = ANY($3::text[])
-                AND (
-                    r.user_id = $1
-                    OR r.user_id IN (
-                        SELECT tu.user_id FROM team_user tu WHERE tu.team_id = $2
-                    )
-                )
             ORDER BY r.created_at DESC, r.id DESC
-            LIMIT $5
             "#,
             query.user_id.as_ref(),
             query.team_id,

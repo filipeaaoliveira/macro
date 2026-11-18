@@ -105,7 +105,8 @@ pub struct PullRequestRunsQuery {
     pub urls: Vec<String>,
     /// The Flow entries that merge a Run's change, as the board's.
     pub merge_entries: Vec<String>,
-    /// The most Runs read.
+    /// The most Runs read for each pull request: the newest of each owner
+    /// and task, since only those can be the one a caller is shown.
     pub limit: u16,
 }
 
@@ -121,7 +122,9 @@ pub trait RunBoardRepository: Send + Sync + 'static {
     ) -> impl Future<Output = Result<Vec<BoardRun>, Self::Err>> + Send;
 
     /// The Runs whose pull request is one of `query`'s, each read as the
-    /// board reads it, newest first, up to its limit.
+    /// board reads it, newest first: for each pull request, the newest Run
+    /// of each owner and task, up to the query's limit, so one pull
+    /// request's Runs never shape another's answer.
     fn pull_request_runs(
         &self,
         query: &PullRequestRunsQuery,

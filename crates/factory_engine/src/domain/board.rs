@@ -135,7 +135,8 @@ pub struct PullRequestRuns {
     /// such Run opened.
     pub runs: Vec<PullRequestRun>,
     /// The pull requests, as the lookup named them, whose Runs were not all
-    /// read, as more Runs matched than one lookup reads: whether a Run the
-    /// caller sees opened one is not known, so it must not read as none.
+    /// read, as more of its own Runs matched than a lookup reads for one
+    /// pull request: whether a Run the caller sees opened one is not known,
+    /// so it must not read as none.
     pub unknown: Vec<String>,
 }
