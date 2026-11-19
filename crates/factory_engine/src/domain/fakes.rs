@@ -11,12 +11,14 @@ pub(crate) mod self_improvement;
 mod standing_acts;
 mod steering;
 mod task_thread;
+mod token_budget;
 
 pub(crate) use evaluation::{FakeEvaluation, FakeJudge};
 pub(crate) use gate_owner::{FakeNotifier, FakeTaskNotes};
 pub(crate) use gate_replies::FakeGateModel;
 pub(crate) use main_hold::{FakeHoldTasks, FakeMain, FakeWatches};
 pub(crate) use task_thread::FakeTaskThread;
+pub(crate) use token_budget::FakeRunTokens;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
@@ -25,11 +27,11 @@ use agent_session::domain::session_task::TaskDocumentId;
 use chrono::Utc;
 use factory_records::domain::automations::{Automation, FiringEnd};
 use factory_records::domain::models::{
-    CheckResult, CheckRound, CheckRoundEnd, CheckRoundOutcome, CheckRoundStart, ClaimedSession,
-    ControlFileChanges, EntryId, Gate, GateAnswer, GateKind, HandBack, HandedBack, NewRun,
-    NewSteer, Outcome, PassedOver, QueueHold, QueuePlaces, Role, Run, RunDefinition, RunEnd,
-    RunFlow, RunId, RunInsert, RunOutcome, SessionStep, SteerRefusal, Steered, Step, StepEnd,
-    StepKey, StepSession, StepSteering, StoppingSession, TaskLink, TeamMembership,
+    BudgetStop, CheckResult, CheckRound, CheckRoundEnd, CheckRoundOutcome, CheckRoundStart,
+    ClaimedSession, ControlFileChanges, EntryId, Gate, GateAnswer, GateKind, HandBack, HandedBack,
+    NewRun, NewSteer, Outcome, PassedOver, QueueHold, QueuePlaces, Role, Run, RunDefinition,
+    RunEnd, RunFlow, RunId, RunInsert, RunOutcome, SessionStep, SteerRefusal, Steered, Step,
+    StepEnd, StepKey, StepSession, StepSteering, StoppingSession, TaskLink, TeamMembership,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::standing_rules::{
@@ -562,6 +564,7 @@ impl RunRepository for FakeRepo {
                 commit: definition.commit.to_string(),
             }),
             end: None,
+            budget_stop: None,
         };
         if let Some(kept) = kept_flow {
             self.kept_flows
@@ -1504,6 +1507,32 @@ impl RunRepository for FakeRepo {
                     .is_some_and(|end| end.outcome == CheckRoundOutcome::Failed)
         });
         Ok(failed.map(|(_, kept)| *kept.fix_action_id.get_or_insert(fix_action_id)))
+    }
+
+    async fn step_sessions(&self, id: RunId) -> Result<Vec<Uuid>, FakeError> {
+        let mut sessions: Vec<Uuid> = self
+            .sessions
+            .lock()
+            .expect("sessions")
+            .iter()
+            .filter(|claimed| claimed.key.run_id == id)
+            .map(|claimed| claimed.session.session_id)
+            .collect();
+        sessions.sort();
+        sessions.dedup();
+        Ok(sessions)
+    }
+
+    async fn record_budget_stop(&self, id: RunId, stop: BudgetStop) -> Result<(), FakeError> {
+        if let Some(run) = self.runs.lock().expect("runs").get_mut(&id) {
+            let budgeted = run
+                .standing_rules
+                .is_some_and(|rules| rules.definition.token_budget.is_some());
+            if budgeted && run.budget_stop.is_none() {
+                run.budget_stop = Some(stop);
+            }
+        }
+        Ok(())
     }
 
     async fn record_cancel_sender(&self, id: RunId, in_person: bool) -> Result<(), FakeError> {

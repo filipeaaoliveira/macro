@@ -40,6 +40,7 @@ use crate::domain::review_rounds::{ChangedFile, ReviewRoundClosing, ReviewRoundO
 use crate::domain::standing_rules::RuleAnswer;
 use crate::domain::step_terminal::TerminalRequest;
 use crate::domain::task_thread::ThreadComment;
+use crate::domain::token_budget::{BudgetCheck, BudgetVerdict};
 use factory_records::domain::standing_rules::OrchestratorDefinition;
 
 /// What a Run's workflow did with an answer it was sent.
@@ -1260,4 +1261,11 @@ pub trait StepService: Send + Sync + 'static {
 
     /// Record how a Run ended.
     fn end_run(&self, finish: RunFinish) -> impl Future<Output = Result<(), StepError>> + Send;
+
+    /// Check the token budget of the Run `check` names before its next
+    /// agent Step: whether it is used, and when it is, keep why.
+    fn check_budget(
+        &self,
+        check: BudgetCheck,
+    ) -> impl Future<Output = Result<BudgetVerdict, StepError>> + Send;
 }

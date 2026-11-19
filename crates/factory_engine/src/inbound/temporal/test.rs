@@ -13,6 +13,7 @@ mod questions;
 mod replay;
 mod review_panel;
 mod task_thread;
+mod token_budget;
 
 use factory_records::domain::standing_rules::{
     OrchestratorDefinition, RulesSource, RunRules, StandingRule,
@@ -290,6 +291,7 @@ async fn plan_run(repo: &FakeRepo) -> RunStart {
     RunStart {
         run_id: run.id,
         flow,
+        token_budget: false,
     }
 }
 
@@ -1094,6 +1096,7 @@ where
     let start = RunStart {
         run_id: run.id,
         flow,
+        token_budget: false,
     };
     let task_queue = format!("factory-test-{}", Uuid::now_v7());
     let runtime = Runtime::from_current_tokio(Default::default()).expect("runtime");
@@ -1391,6 +1394,7 @@ async fn failed_acceptance_goes_to_the_blockers_rule_and_is_fixed() {
             quiet_gates: false,
             task_thread: false,
             queue_limit: None,
+            token_budget: None,
             orchestrator: factory_records::domain::standing_rules::OrchestratorKinds {
                 plan: false,
                 blockers: false,
@@ -1461,6 +1465,7 @@ async fn a_run_whose_rules_decide_every_gate_merges_with_no_person_asked() {
             quiet_gates: false,
             task_thread: false,
             queue_limit: None,
+            token_budget: None,
             orchestrator: factory_records::domain::standing_rules::OrchestratorKinds {
                 plan: false,
                 blockers: false,
@@ -1523,6 +1528,7 @@ async fn a_gate_of_no_kind_waits_for_a_person_whatever_the_rules() {
             quiet_gates: false,
             task_thread: false,
             queue_limit: None,
+            token_budget: None,
             orchestrator: factory_records::domain::standing_rules::OrchestratorKinds {
                 plan: false,
                 blockers: false,

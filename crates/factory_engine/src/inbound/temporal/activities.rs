@@ -15,6 +15,7 @@ use crate::domain::models::{RunFinish, StepEnding, StepError, StepReport, StepRe
 use crate::domain::ports::{ReviewService, StepService};
 use crate::domain::review_rounds::{ReviewRoundClosing, ReviewRoundOpening};
 use crate::domain::standing_rules::RuleAnswer;
+use crate::domain::token_budget::{BudgetCheck, BudgetVerdict};
 use factory_records::domain::models::{Outcome, StepKey};
 
 /// How often a Step's work tells Temporal its worker is alive. The worker
@@ -49,6 +50,8 @@ trait DynStepService: Send + Sync {
     async fn tell_gate(&self, telling: GateTelling) -> Result<(), StepError>;
 
     async fn end_run(&self, finish: RunFinish) -> Result<(), StepError>;
+
+    async fn check_budget(&self, check: BudgetCheck) -> Result<BudgetVerdict, StepError>;
 }
 
 #[async_trait::async_trait]
@@ -95,6 +98,10 @@ impl<T: StepService> DynStepService for T {
 
     async fn end_run(&self, finish: RunFinish) -> Result<(), StepError> {
         StepService::end_run(self, finish).await
+    }
+
+    async fn check_budget(&self, check: BudgetCheck) -> Result<BudgetVerdict, StepError> {
+        StepService::check_budget(self, check).await
     }
 }
 
@@ -367,5 +374,16 @@ impl FactoryActivities {
         finish: RunFinish,
     ) -> Result<(), ActivityError> {
         self.steps.end_run(finish).await.map_err(failure)
+    }
+
+    /// Check a Run's token budget before its next agent Step, and keep why
+    /// it ends the Run when it does.
+    #[activity(name = "factory_check_budget")]
+    pub async fn check_budget(
+        self: Arc<Self>,
+        _ctx: ActivityContext,
+        check: BudgetCheck,
+    ) -> Result<BudgetVerdict, ActivityError> {
+        self.steps.check_budget(check).await.map_err(failure)
     }
 }

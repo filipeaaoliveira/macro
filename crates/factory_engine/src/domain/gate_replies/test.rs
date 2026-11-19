@@ -44,6 +44,7 @@ const STAND_IN_ONLY: OrchestratorDefinition = OrchestratorDefinition {
     quiet_gates: false,
     task_thread: false,
     queue_limit: None,
+    token_budget: None,
     orchestrator: factory_records::domain::standing_rules::OrchestratorKinds {
         plan: false,
         blockers: false,

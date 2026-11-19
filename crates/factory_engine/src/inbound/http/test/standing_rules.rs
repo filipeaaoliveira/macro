@@ -26,6 +26,7 @@ const PLAN_ONLY: OrchestratorDefinition = OrchestratorDefinition {
     quiet_gates: false,
     task_thread: false,
     queue_limit: None,
+    token_budget: None,
     orchestrator: factory_records::domain::standing_rules::OrchestratorKinds {
         plan: false,
         blockers: false,
@@ -271,6 +272,7 @@ async fn a_new_run_keeps_its_project_s_or_its_team_s_rules() {
         quiet_gates: false,
         task_thread: false,
         queue_limit: None,
+        token_budget: None,
         orchestrator: factory_records::domain::standing_rules::OrchestratorKinds {
             plan: false,
             blockers: false,

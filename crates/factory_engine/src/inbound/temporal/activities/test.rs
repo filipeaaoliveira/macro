@@ -118,6 +118,13 @@ impl StepService for Steps {
     async fn end_run(&self, _finish: RunFinish) -> Result<(), StepError> {
         Ok(())
     }
+
+    async fn check_budget(
+        &self,
+        _check: crate::domain::token_budget::BudgetCheck,
+    ) -> Result<crate::domain::token_budget::BudgetVerdict, StepError> {
+        Ok(crate::domain::token_budget::BudgetVerdict::Within)
+    }
 }
 
 fn plan_request() -> StepRequest {

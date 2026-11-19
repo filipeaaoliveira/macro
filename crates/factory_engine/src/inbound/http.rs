@@ -1191,6 +1191,7 @@ impl FactoryError {
             | FactoryError::ControlFilesNotApproved
             | FactoryError::UnknownProject
             | FactoryError::InvalidQueueLimit { .. }
+            | FactoryError::InvalidTokenBudget { .. }
             | FactoryError::InvalidControlFiles(_)
             | FactoryError::NoTeam
             | FactoryError::InvalidAutomation(_)

@@ -30,8 +30,8 @@ use factory_records::domain::review_rounds::{ReviewRound, ReviewRoundRepository}
 use factory_records::domain::self_improvement::{IMPROVE_FLOW, SelfImprovementRepository};
 use factory_records::domain::standing_acts::{StandingAct, StandingActRepository, StandingActor};
 use factory_records::domain::standing_rules::{
-    MAX_QUEUE_LIMIT, MIN_QUEUE_LIMIT, OrchestratorDefinition, ProjectRulesSet, RuleGateKind,
-    RulesSource, RunRules, StandingRulesRepository,
+    MAX_QUEUE_LIMIT, MAX_TOKEN_BUDGET, MIN_QUEUE_LIMIT, MIN_TOKEN_BUDGET, OrchestratorDefinition,
+    ProjectRulesSet, RuleGateKind, RulesSource, RunRules, StandingRulesRepository,
 };
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
@@ -70,6 +70,10 @@ use crate::domain::step_terminal::{
     resume_prompt,
 };
 use crate::domain::task_thread::{RunUpdate, post_update};
+use crate::domain::token_budget::{
+    BudgetCheck, BudgetVerdict, RunTokenBudget, RunTokens, UsageLog, budget_notice, budget_of,
+    verdict,
+};
 use definition::PinnedDefinition;
 
 fn internal(error: impl std::error::Error + Send + Sync + 'static) -> rootcause::Report {
@@ -163,6 +167,7 @@ pub struct FactoryServiceImpl<R, W, E, U, T, G> {
     questions: u8,
     task_views: board::TaskViews,
     evaluation: Arc<EvaluationDefinition>,
+    usage: Option<UsageLog>,
 }
 
 impl<R, W, E, U, T, G> FactoryServiceImpl<R, W, E, U, T, G>
@@ -196,7 +201,15 @@ where
             questions: DEFAULT_QUESTIONS,
             task_views: board::TaskViews::default(),
             evaluation: Arc::default(),
+            usage: None,
         }
+    }
+
+    /// Read what a Run's agent Steps used of its token budget from `usage`,
+    /// for the Run API; without it, a read Run's use reads as unknown.
+    pub fn with_usage(mut self, usage: impl RunTokens + 'static) -> Self {
+        self.usage = Some(UsageLog(Arc::new(usage)));
+        self
     }
 
     /// Keep the board's task views for `kept` each, in place of 30 s.
@@ -504,6 +517,7 @@ where
             .map_err(internal)?
             .remove(&run.id)
             .unwrap_or_default();
+        let token_budget = self.token_budget(&run).await?;
         Ok(RunDetail {
             run,
             steps: with_pause_ends(steps),
@@ -511,7 +525,35 @@ where
             base_required_checks: base.required,
             review_rounds,
             standing_acts,
+            token_budget,
         })
+    }
+
+    /// The token budget `run` keeps, with what its agent Steps used of it
+    /// so far, read from the usage log: unknown when it cannot be read,
+    /// which the Run's read survives.
+    async fn token_budget(&self, run: &Run) -> Result<Option<RunTokenBudget>, FactoryError> {
+        let Some(budget) = budget_of(run) else {
+            return Ok(None);
+        };
+        let used = match &self.usage {
+            Some(usage) => {
+                let sessions = self.repo.step_sessions(run.id).await.map_err(internal)?;
+                match usage.0.used(&run.user_id, &sessions).await {
+                    Ok(used) => Some(used),
+                    Err(error) => {
+                        tracing::warn!(?error, run_id = %run.id, "a run's token use was not read");
+                        None
+                    }
+                }
+            }
+            None => None,
+        };
+        Ok(Some(RunTokenBudget {
+            budget,
+            used,
+            stop: run.budget_stop,
+        }))
     }
 
     /// `runs`, each with its Steps, its review rounds, and what was read of
@@ -541,6 +583,13 @@ where
                 .base_shown(&run, &steps, flows.get(&run.id), &mut known)
                 .await?;
             let standing_acts = standing_acts.remove(&run.id).unwrap_or_default();
+            // A list shows each Run's budget, not its use: reading the
+            // usage log for every Run listed would cost a read each.
+            let token_budget = budget_of(&run).map(|budget| RunTokenBudget {
+                budget,
+                used: None,
+                stop: run.budget_stop,
+            });
             details.push(RunDetail {
                 run,
                 steps,
@@ -548,6 +597,7 @@ where
                 base_required_checks: base.required,
                 review_rounds,
                 standing_acts,
+                token_budget,
             });
         }
         Ok(details)
@@ -1024,7 +1074,11 @@ where
 
         // The Run is recorded before its workflow starts, so the workflow can
         // record its Steps against it.
-        let start = RunStart { run_id, flow };
+        let start = RunStart {
+            run_id,
+            flow,
+            token_budget: budget_of(&run).is_some(),
+        };
         if let Err(error) = self.workflows.start(&start).await {
             self.forget_unstarted(run_id).await;
             return Err(error.into());
@@ -1849,6 +1903,7 @@ where
         definition: Option<OrchestratorDefinition>,
     ) -> Result<StandingRulesSettings, FactoryError> {
         valid_queue_limit(definition.as_ref())?;
+        valid_token_budget(definition.as_ref())?;
         let team = self.settings_team(&actor).await?;
         self.repo
             .set_team_rules(team.team_id, definition)
@@ -1865,6 +1920,7 @@ where
         definition: Option<OrchestratorDefinition>,
     ) -> Result<StandingRulesSettings, FactoryError> {
         valid_queue_limit(definition.as_ref())?;
+        valid_token_budget(definition.as_ref())?;
         let team = self.settings_team(&actor).await?;
         // A Project the admin may not edit is not theirs to give rules: it
         // reads as one that does not exist.
@@ -1964,6 +2020,21 @@ fn valid_queue_limit(definition: Option<&OrchestratorDefinition>) -> Result<(), 
     Ok(())
 }
 
+/// Fails when `definition` sets a token budget below [`MIN_TOKEN_BUDGET`]
+/// or above [`MAX_TOKEN_BUDGET`].
+fn valid_token_budget(definition: Option<&OrchestratorDefinition>) -> Result<(), FactoryError> {
+    let out_of_range = definition
+        .and_then(|definition| definition.token_budget)
+        .is_some_and(|budget| !(MIN_TOKEN_BUDGET..=MAX_TOKEN_BUDGET).contains(&budget));
+    if out_of_range {
+        return Err(FactoryError::InvalidTokenBudget {
+            min: MIN_TOKEN_BUDGET,
+            max: MAX_TOKEN_BUDGET,
+        });
+    }
+    Ok(())
+}
+
 /// How many questions an agent Step may ask the Run's owner, unless the
 /// service is told otherwise: the next one ends the Run for a person.
 pub const DEFAULT_QUESTIONS: u8 = 2;
@@ -1981,6 +2052,7 @@ pub struct StepServiceImpl<R, E, N = NoOwnerGates, T = NoOwnerGates, P = NoTaskT
     notifier: N,
     notes: T,
     thread: P,
+    usage: Option<UsageLog>,
 }
 
 impl<R, E> StepServiceImpl<R, E>
@@ -2002,6 +2074,7 @@ where
             notifier: NoOwnerGates,
             notes: NoOwnerGates,
             thread: NoTaskThread,
+            usage: None,
         }
     }
 }
@@ -2033,6 +2106,7 @@ where
             notifier,
             notes,
             thread: self.thread,
+            usage: self.usage,
         }
     }
 
@@ -2045,7 +2119,17 @@ where
             notifier: self.notifier,
             notes: self.notes,
             thread,
+            usage: self.usage,
         }
+    }
+
+    /// The service, checking Runs' token budgets against what `usage`
+    /// records their agent sessions used. Without it, a Run with a budget
+    /// reads as unread at each check, and ends once it has been unread for
+    /// too many in a row.
+    pub fn with_usage(mut self, usage: impl RunTokens + 'static) -> Self {
+        self.usage = Some(UsageLog(Arc::new(usage)));
+        self
     }
 
     /// Post `update` of the Run `run_id` to its task's thread, once what it
@@ -2575,8 +2659,58 @@ where
             let id = told_id(finish.run_id, entry);
             self.notifier.answered(&run.user_id, id).await;
         }
+        // A Run its token budget ended tells its owner, once it reads as
+        // ended: the same notice on a retry.
+        if let Some(notice) = budget_notice(&run) {
+            self.notifier.notify(notice).await;
+        }
         self.post(finish.run_id, RunUpdate::Ended).await;
         Ok(())
+    }
+
+    #[tracing::instrument(err, skip_all, fields(run_id = %check.run_id, unread = check.unread))]
+    async fn check_budget(&self, check: BudgetCheck) -> Result<BudgetVerdict, StepError> {
+        let run = self
+            .repo
+            .get_run(check.run_id)
+            .await
+            .map_err(internal)?
+            .ok_or(StepError::NoSuchRun)?;
+        // A retry after the stop was kept finds it kept, whatever the log
+        // reads now.
+        if run.budget_stop.is_some() {
+            return Ok(BudgetVerdict::Stopped);
+        }
+        let Some(budget) = budget_of(&run) else {
+            return Ok(BudgetVerdict::Within);
+        };
+        let used = match &self.usage {
+            Some(usage) => {
+                let sessions = self.repo.step_sessions(run.id).await.map_err(internal)?;
+                usage.0.used(&run.user_id, &sessions).await
+            }
+            None => Err(rootcause::report!("no usage log to read")),
+        };
+        let used = match used {
+            Ok(used) => Some(used),
+            Err(error) => {
+                tracing::warn!(
+                    ?error,
+                    "a run's token use was not read: its step goes on unchecked"
+                );
+                None
+            }
+        };
+        match verdict(budget, used, check.unread) {
+            Ok(verdict) => Ok(verdict),
+            Err(stop) => {
+                self.repo
+                    .record_budget_stop(run.id, stop)
+                    .await
+                    .map_err(internal)?;
+                Ok(BudgetVerdict::Stopped)
+            }
+        }
     }
 }
 

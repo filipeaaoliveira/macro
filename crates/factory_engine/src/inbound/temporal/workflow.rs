@@ -67,6 +67,15 @@
 //! whose history ended before it replays `failed`. A review round fails so
 //! only when every reviewer that failed did so for infrastructure.
 //!
+//! A Run that keeps a token budget (`RunStart::token_budget`) has it
+//! checked before each agent Step, a review round's reviewers together
+//! (`factory_check_budget`, behind the [`TOKEN_BUDGET_PATCH`] marker): a
+//! Run that used it ends `blocked` before the Step starts. A check whose
+//! usage log could not be read, or that failed outright, lets the Step run
+//! and is counted; the worker ends the Run once too many in a row could
+//! not read it. A Run without a budget never asks, so its history is as
+//! before.
+//!
 //! Cancelling the workflow cancels the running Step, whose activity drops
 //! its work before the cancellation completes, or the wait for an answer.
 //! The workflow then stops the Step's agent, which only it can tell was
@@ -103,6 +112,7 @@ use crate::domain::gate::{
 use crate::domain::interpreter::{Interpreter, NextStep};
 use crate::domain::models::{RunFinish, RunStart, StepReport, StepRequest};
 use crate::domain::questions::gate_question;
+use crate::domain::token_budget::{BudgetCheck, BudgetVerdict};
 use crate::inbound::temporal::activities::FactoryActivities;
 use crate::inbound::temporal::gate_activities::GateActivities;
 use crate::inbound::temporal::scoring_activities::ScoringActivities;
@@ -207,6 +217,19 @@ pub(crate) const NO_RESULT_PATCH: &str = "factory-no-result-gates";
 /// network reason. Renaming it breaks the replay of Runs that passed it.
 pub(crate) const INFRASTRUCTURE_PATCH: &str = "factory-infrastructure-outcome";
 
+/// The marker of the workflow that checks a Run's token budget before each
+/// agent Step (`factory_check_budget`). Renaming it breaks the replay of
+/// Runs that passed it.
+pub(crate) const TOKEN_BUDGET_PATCH: &str = "factory-token-budget";
+
+/// How long one budget check may take: two reads of the records and one of
+/// the usage log.
+const BUDGET_CHECK_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How long a budget check may take in all, across its attempts, before
+/// the Step runs unchecked and the check counts as unread.
+const BUDGET_CHECK_TOTAL: Duration = Duration::from_secs(2 * 60);
+
 /// The workflow of one Run.
 #[workflow]
 #[derive(Default)]
@@ -257,6 +280,8 @@ impl FlowWorkflow {
         // Whether the Run ends `infrastructure`, from the rounds the Flow
         // routes.
         let mut ending = RunEnding::default();
+        // How many budget checks in a row could not read the usage log.
+        let mut unread: u8 = 0;
         let outcome = loop {
             let next = match interpreter.next_step(&mut state) {
                 Ok(next) => next,
@@ -269,6 +294,20 @@ impl FlowWorkflow {
                 NextStep::End(outcome) => break outcome,
                 NextStep::Run { entry, visit, seq } => (entry, visit, seq),
             };
+            // An agent Step of a Run with a token budget runs only while
+            // the Run has not used it.
+            let agent = entry.role.is_some() || !entry.reviewers.is_empty();
+            if agent && start.token_budget && ctx.patched(TOKEN_BUDGET_PATCH) {
+                let check = BudgetCheck {
+                    run_id: start.run_id,
+                    unread,
+                };
+                match check_budget(ctx, check).await {
+                    BudgetVerdict::Within => unread = 0,
+                    BudgetVerdict::Unread => unread = unread.saturating_add(1),
+                    BudgetVerdict::Stopped => break RunOutcome::Blocked,
+                }
+            }
             let temporal = TemporalWork {
                 ctx,
                 work_options: &work_options,
@@ -647,6 +686,21 @@ async fn ask(
 /// never went out leaves the Gate waiting all the same: it is listed as
 /// waiting on them. A Run whose history waited on this Gate before the
 /// marker existed replays without telling.
+/// Check the Run's token budget before an agent Step, for at most
+/// [`BUDGET_CHECK_TOTAL`]: a check that fails outright reads as unread, so
+/// the Step runs, and counts towards the worker ending the Run unread.
+async fn check_budget(ctx: &WorkflowContext<FlowWorkflow>, check: BudgetCheck) -> BudgetVerdict {
+    let options =
+        ActivityOptions::with_close_timeouts(ActivityCloseTimeouts::ScheduleAndStartToClose {
+            schedule_to_close: BUDGET_CHECK_TOTAL,
+            start_to_close: BUDGET_CHECK_TIMEOUT,
+        })
+        .build();
+    ctx.execute_activity(FactoryActivities::check_budget, check, options)
+        .await
+        .unwrap_or(BudgetVerdict::Unread)
+}
+
 async fn tell_owner(ctx: &WorkflowContext<FlowWorkflow>, key: StepKey) {
     if ctx.patched(GATE_OWNER_PATCH) {
         let _ = ctx

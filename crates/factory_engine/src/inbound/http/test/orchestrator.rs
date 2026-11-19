@@ -418,6 +418,7 @@ async fn a_run_refused_at_the_queue_limit_says_why() {
         team_id,
         OrchestratorDefinition {
             queue_limit: Some(1),
+            token_budget: None,
             ..OrchestratorDefinition::DEFAULT
         },
     );
