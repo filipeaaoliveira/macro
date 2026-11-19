@@ -460,12 +460,20 @@ fn prepare_tests() -> Step<Run> {
 /// profile. Without a timeout a test that waits forever holds the runner until
 /// the job's timeout, and the log of a job that never ends is lost with it.
 /// Every failure is reported, so one run shows all of them.
+///
+/// The email repository's paging tests compare many pages of one query on
+/// Postgres, which shares two CPUs with Redis here: beside the rest of the
+/// suite several took between two and five minutes, so they get ten.
 const NEXTEST_PROFILE: &str = indoc::indoc! {r#"
     [profile.fork-ci]
     slow-timeout = { period = "60s", terminate-after = 5 }
     leak-timeout = "1s"
     fail-fast = false
     failure-output = "immediate-final"
+
+    [[profile.fork-ci.overrides]]
+    filter = "package(email) & test(/^outbound::email_pg_repo::/)"
+    slow-timeout = { period = "120s", terminate-after = 5 }
 "#};
 
 fn run_tests() -> Step<Run> {

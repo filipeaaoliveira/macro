@@ -784,6 +784,10 @@ jobs:
         leak-timeout = "1s"
         fail-fast = false
         failure-output = "immediate-final"
+
+        [[profile.fork-ci.overrides]]
+        filter = "package(email) & test(/^outbound::email_pg_repo::/)"
+        slow-timeout = { period = "120s", terminate-after = 5 }
         EOF
         export NEXTEST_TOOL_CONFIG="fork-ci:$config" NEXTEST_PROFILE=fork-ci
         set -euo pipefail
