@@ -388,7 +388,10 @@ impl RunBoardRepository for PgRunRepository {
         // owner and task can be the one shown: those are read, newest first,
         // up to the limit for each pull request, so one pull request's Runs
         // never crowd out another's. Where each is reads as the board's
-        // read does.
+        // read does: a flawed Run finished, and one at its merge by the Flow
+        // it kept. A Benchmark's trials, which the board leaves out, are
+        // read: a trial opens no pull request, and a page kept on one by
+        // hand still guards its merge.
         let rows = sqlx::query_as!(
             BoardRunRow,
             r#"
@@ -444,7 +447,7 @@ impl RunBoardRepository for PgRunRepository {
             ) task
             CROSS JOIN LATERAL (
                 SELECT CASE
-                    WHEN r.outcome IN ('success', 'cancelled') THEN 'finished'
+                    WHEN r.outcome IN ('success', 'cancelled', 'flawed') THEN 'finished'
                     WHEN r.outcome IS NOT NULL THEN 'stopped'
                     WHEN EXISTS (
                         SELECT 1 FROM factory_gate g
@@ -456,11 +459,21 @@ impl RunBoardRepository for PgRunRepository {
                             AND h.base_branch = r.base_branch
                             AND h.held_since IS NOT NULL
                     ) AND (
-                        SELECT s.entry FROM factory_step s
+                        SELECT CASE
+                            WHEN r.flow_definition IS NULL
+                                THEN s.entry = ANY($4::text[])
+                            ELSE EXISTS (
+                                SELECT 1
+                                FROM jsonb_array_elements(r.flow_definition -> 'entries') e
+                                WHERE e ->> 'id' = s.entry
+                                    AND e ->> 'step' IN ('ready_to_merge', 'merge')
+                            )
+                        END
+                        FROM factory_step s
                         WHERE s.run_id = r.id
                         ORDER BY s.seq DESC
                         LIMIT 1
-                    ) = ANY($4::text[]) THEN 'held'
+                    ) THEN 'held'
                     ELSE 'running'
                 END AS state
             ) place
@@ -469,7 +482,7 @@ impl RunBoardRepository for PgRunRepository {
             query.user_id.as_ref(),
             query.team_id,
             &query.urls,
-            &query.merge_entries,
+            &query.built_in_merge_entries,
             i64::from(query.limit),
         )
         .fetch_all(&self.pool)

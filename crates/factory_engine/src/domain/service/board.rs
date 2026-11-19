@@ -285,7 +285,7 @@ where
                 user_id: actor.clone(),
                 team_id,
                 urls: asked.iter().map(|(key, _)| key.clone()).collect(),
-                merge_entries: self.built_in_merge_entries(),
+                built_in_merge_entries: self.built_in_merge_entries(),
                 limit: PULL_REQUEST_RUNS_READ,
             })
             .await

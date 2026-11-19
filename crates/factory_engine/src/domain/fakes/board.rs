@@ -13,7 +13,9 @@ use super::{FakeError, FakeRepo};
 impl FakeRepo {
     fn board_state(&self, run: &Run) -> BoardState {
         match run.end.as_ref().map(|end| end.outcome) {
-            Some(RunOutcome::Success | RunOutcome::Cancelled) => BoardState::Finished,
+            Some(RunOutcome::Success | RunOutcome::Cancelled | RunOutcome::Flawed) => {
+                BoardState::Finished
+            }
             Some(_) => BoardState::Stopped,
             None => {
                 let waiting = self.steps.lock().expect("steps").iter().any(|(id, step)| {
@@ -90,7 +92,7 @@ impl RunBoardRepository for FakeRepo {
             repo_url: None,
             project_id: None,
             search: None,
-            merge_entries: query.merge_entries.clone(),
+            built_in_merge_entries: query.built_in_merge_entries.clone(),
             after: None,
             limit: u16::MAX,
         };

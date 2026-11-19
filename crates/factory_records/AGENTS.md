@@ -209,8 +209,8 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   task's name with `ILIKE`, its `%`, `_` and `\` literal, and so reads
   every Run of the owners (some 200 ms on 280k). A held Run is held only at
   its merge, so a merged Run is `finished`, as is a `flawed` one. A
-  Benchmark's trials (Flow `benchmark`) are no one's work: neither query
-  reads them.
+  Benchmark's trials (Flow `benchmark`) are no one's work: neither of its
+  queries reads them.
 - `pull_request_runs` reads, for each key asked (`pull_request_key`) on its
   own, the Runs whose `lower(pull_request_url)` is that key, through
   `factory_run_pull_request_url_idx` (one index search per key), of the
@@ -218,7 +218,10 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   and task (`DISTINCT ON`, since whether a caller sees a Run depends only on
   those), newest first up to the limit for that key, so one pull request's
   Runs never crowd out another's. Each is where it is as `board_runs` reads
-  it; the rows come newest first across keys.
+  it (a flawed Run finished, one at its merge by the Flow it kept); the rows
+  come newest first across keys. A Benchmark's trials are read: a trial
+  opens no pull request, and a page kept on one by hand still guards its
+  merge.
 - `read_insights` reads one person's newest Runs in a period through
   `factory_run_user_created_idx` (`user_id, created_at DESC, id DESC`), up to
   its cap (one past it, to tell whether Runs were left out), then their Steps

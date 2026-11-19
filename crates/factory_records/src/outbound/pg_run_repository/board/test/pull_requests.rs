@@ -1,6 +1,7 @@
 //! The Runs that opened some pull requests: whose, in what case, and where
 //! each one is.
 
+use chrono::Utc;
 use macro_db_migrator::MACRO_DB_MIGRATIONS;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -10,7 +11,10 @@ use super::{Kept, REPO, TEAM, keep};
 use crate::domain::board::{
     BoardState, PullRequestRunsQuery, RunBoardRepository, pull_request_key,
 };
-use crate::domain::models::RunId;
+use crate::domain::evaluation::BENCHMARK_FLOW;
+use crate::domain::flaws::{FlawMarking, FlawRepository};
+use crate::domain::main_hold::MainHoldRepository;
+use crate::domain::models::{FlawMarker, Repository, RunId, RunOutcome};
 use crate::domain::ports::RunRepository;
 use crate::outbound::pg_run_repository::PgRunRepository;
 
@@ -24,7 +28,7 @@ fn query(team_id: Option<&str>, urls: &[&str]) -> PullRequestRunsQuery {
         user_id: julia(),
         team_id: team_id.map(|team| Uuid::parse_str(team).expect("team id")),
         urls: urls.iter().map(|url| pull_request_key(url)).collect(),
-        merge_entries: vec!["merge".to_string()],
+        built_in_merge_entries: vec!["merge".to_string()],
         limit: 50,
     }
 }
@@ -216,4 +220,121 @@ async fn one_pull_request_s_runs_never_crowd_out_another_s(pool: PgPool) {
     .map(|(id, _)| id)
     .collect();
     assert_eq!(ids, [coupons[2], coupons[1], banner]);
+}
+
+/// A pull request's Run ended as the board reads it: one marked flawed
+/// after it merged finished its work; one that ended for a machine reason
+/// stopped.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../../fixtures", scripts("people"))
+)]
+async fn a_pull_request_s_ended_run_reads_as_the_board_reads_it(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let flawed = keep(&repo, Kept::julias("Add the coupon field")).await;
+    repo.set_pull_request_url(flawed, COUPON)
+        .await
+        .expect("keep");
+    repo.end_run(flawed, RunOutcome::Success)
+        .await
+        .expect("end");
+    let marked = repo
+        .mark_flawed(
+            flawed,
+            &FlawMarker::Person { user_id: julia() },
+            "The coupon is applied twice",
+        )
+        .await
+        .expect("mark");
+    assert!(matches!(marked, FlawMarking::Flawed(_)), "flawed");
+    let broken = keep(&repo, Kept::julias("Ship the banner")).await;
+    repo.set_pull_request_url(broken, BANNER)
+        .await
+        .expect("keep");
+    repo.end_run(broken, RunOutcome::Infrastructure)
+        .await
+        .expect("end");
+
+    assert_eq!(
+        read(&repo, &query(None, &[COUPON, BANNER])).await,
+        [
+            (broken, BoardState::Stopped),
+            (flawed, BoardState::Finished)
+        ]
+    );
+}
+
+/// A pull request's Run that kept its Flow is held at its merge by that
+/// Flow's entries, not the built-in Flows': a Definition's merge entry
+/// `land` is held, and its entry `merge`, which writes, goes on.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../../fixtures", scripts("people"))
+)]
+async fn a_pull_request_s_run_is_held_by_the_flow_it_kept(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let flow = serde_json::json!({
+        "repository": true,
+        "entries": [
+            { "id": "merge", "step": "write", "role": "writer" },
+            { "id": "land", "step": "merge" }
+        ]
+    });
+    let mut at = Vec::new();
+    for (entry_id, url) in [("land", COUPON), ("merge", BANNER)] {
+        let id = keep(
+            &repo,
+            Kept {
+                flow: "ship",
+                repo_url: Some(REPO),
+                kept_flow: Some(&flow),
+                ..Kept::julias("Add the coupon field")
+            },
+        )
+        .await;
+        repo.set_pull_request_url(id, url).await.expect("keep");
+        repo.start_step(key(id, 1), &entry(entry_id), 1)
+            .await
+            .expect("start");
+        at.push(id);
+    }
+    let base = Repository {
+        url: REPO.to_string(),
+        base_branch: "main".to_string(),
+    };
+    repo.hold_main(&base, &"a".repeat(40), "build: failed", Utc::now())
+        .await
+        .expect("hold");
+
+    assert_eq!(
+        read(&repo, &query(None, &[COUPON, BANNER])).await,
+        [(at[1], BoardState::Running), (at[0], BoardState::Held)]
+    );
+}
+
+/// A Benchmark's trial, which the board leaves out, is read for a pull
+/// request it keeps the page of: a trial opens none, and a page kept on one
+/// by hand still guards its merge.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../../fixtures", scripts("people"))
+)]
+async fn a_benchmark_trial_s_pull_request_is_read(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let trial = keep(
+        &repo,
+        Kept {
+            flow: BENCHMARK_FLOW,
+            ..Kept::julias("Replay the coupon task")
+        },
+    )
+    .await;
+    repo.set_pull_request_url(trial, COUPON)
+        .await
+        .expect("keep");
+
+    assert_eq!(
+        read(&repo, &query(None, &[COUPON])).await,
+        [(trial, BoardState::Running)]
+    );
 }

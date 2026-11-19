@@ -106,8 +106,9 @@ pub struct PullRequestRunsQuery {
     pub team_id: Option<Uuid>,
     /// The pull requests' pages, as [`pull_request_key`] reads each.
     pub urls: Vec<String>,
-    /// The Flow entries that merge a Run's change, as the board's.
-    pub merge_entries: Vec<String>,
+    /// The built-in Flows' entries that merge a Run's change, for a Run
+    /// that kept no Flow of its own, as the board's.
+    pub built_in_merge_entries: Vec<String>,
     /// The most Runs read for each pull request: the newest of each owner
     /// and task, since only those can be the one a caller is shown.
     pub limit: u16,
