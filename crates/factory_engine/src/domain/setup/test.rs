@@ -49,6 +49,9 @@ fn a_command_runs_with_the_env_under_its_timeout() {
     );
 }
 
+/// Whether an error is the one a case expects.
+type Expected = fn(&SetupFileError) -> bool;
+
 #[test]
 fn a_file_that_breaks_the_rules_says_why() {
     let long_run = "x".repeat(4097);
@@ -60,7 +63,7 @@ fn a_file_that_breaks_the_rules_says_why() {
     let many_env = format!(r#"{{"env":{{{}}}}}"#, many_env.join(","));
     let long_value = format!(r#"{{"env":{{"A":"{}"}}}}"#, "x".repeat(1025));
     let long_run = format!(r#"{{"setup":[{{"name":"a","run":"{long_run}"}}]}}"#);
-    let cases: Vec<(&str, fn(&SetupFileError) -> bool)> = vec![
+    let cases: Vec<(&str, Expected)> = vec![
         ("{", |e| matches!(e, SetupFileError::Unreadable(_))),
         (r#"{"setup":[],"archive":[]}"#, |e| {
             matches!(e, SetupFileError::Unreadable(_))
