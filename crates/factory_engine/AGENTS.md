@@ -689,12 +689,20 @@ file its first round read (`factory_check_round.setup`), and a verified
 round runs its commands in the round's worktree, under the round's lock,
 after setting it up and before the checks, within the same time limits as
 a check. Each command's run is recorded among the round's results as
-`setup:<name>`, so a retry, whose worktree at the same commit keeps what
-the setup made (`reset --hard`, never cleaned), runs only the commands
-still to run: a long setup and a long check fit in two attempts. A command
-that fails ends the round failed, as a red check: its
-report, which goes to the agent's fix, shows the command and the end of its
-output, and says the checks did not run.
+`setup:<name>`, so a retry runs only the commands still to run: a long
+setup and a long check fit in two attempts. A retry's worktree at the same
+commit is `reset --hard`, never cleaned, so it keeps the untracked files
+the setup made (`node_modules`, ignored build output) but not its edits to
+tracked files, which the reset undoes and no command passed runs again: a
+setup whose output is checked in (a `just generate` whose files are
+committed) leaves a retry's checks the committed files. A command that
+fails ends the round failed, as a red check: its report, which goes to the
+agent's fix, shows the command and the end of its output, and says the
+checks did not run. The round keeps the setup's text, not what was read
+from it, and reads it again on each attempt, as it does the checks file: a
+deploy whose rules refuse more (a newly refused `env` name) fails the Step
+of a round in flight that kept such a text ("a recorded setup file does
+not read").
 
 An entry with `reviewers` is a review panel (`src/domain/review_rounds.rs`,
 `factory_review_round` and `factory_review_finding` in `factory_records`).
