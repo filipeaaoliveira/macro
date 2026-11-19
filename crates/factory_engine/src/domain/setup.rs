@@ -32,6 +32,7 @@ use serde::Deserialize;
 
 use crate::domain::checks::{DEFAULT_CHECK_TIMEOUT_SECS, MAX_CHECK_TIMEOUT_SECS, kept_output};
 use crate::domain::definition::{UniqueKeys, secret_in, secret_in_value};
+use crate::domain::shell_lock::take_lock;
 
 /// Where a repository declares its setup, from its root.
 pub const SETUP_FILE: &str = ".macro/setup.json";
@@ -258,7 +259,26 @@ impl RepositorySetup {
             shell_quote(&format!("{}{}", self.exports(), command.run))
         )
     }
+
+    /// [`Self::shell`] run from the root of a session's checkout, holding
+    /// the checkout's setup lock ([`crate::domain::shell_lock`]), waited for
+    /// at most `lock_wait_secs` before the command's timeout starts: a
+    /// retry's command never runs alongside one an attempt it replaces left
+    /// running.
+    pub fn locked_shell(&self, command: &SetupCommand, lock_wait_secs: u64) -> String {
+        format!(
+            "{SESSION_LOCK}{}{} 9>&-",
+            take_lock(lock_wait_secs),
+            self.shell(command)
+        )
+    }
 }
+
+/// Where a session's setup keeps its lock, in the shell: in the checkout's
+/// git directory, where nothing the agent commits reaches it, else at the
+/// checkout's root.
+const SESSION_LOCK: &str =
+    "lock=$(git rev-parse --git-path macro-setup.lock 2>/dev/null) || lock=.macro-setup.lock\n";
 
 /// What stands in a setup's output for a line that looks like a secret.
 pub const REDACTED: &str = "(a line that looks like a secret is left out)";

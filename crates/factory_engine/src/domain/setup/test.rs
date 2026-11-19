@@ -1,6 +1,7 @@
 use agent_session::domain::session_command::SessionCommandOutput;
 
 use super::{REDACTED, RepositorySetup, SetupFileError, output_tail};
+use crate::domain::shell_lock::{LOCK_BUSY, LOCK_BUSY_STATUS};
 
 const SETUP: &str = r#"{
     "setup": [
@@ -222,4 +223,64 @@ fn a_setup_s_output_tail_leaves_secrets_and_control_characters_out() {
     assert!(!tail.contains("ghp_"));
     assert!(tail.len() <= 4096);
     assert!(tail.starts_with('x'));
+}
+
+/// Run by bash in a git checkout of its own, a session's setup command
+/// that finds the checkout's setup lock held by a live run (here the
+/// `mkdir` lock, which every machine has) gives up, saying so, without
+/// running.
+#[test]
+fn a_session_setup_command_waits_for_the_checkout_s_lock() {
+    use std::process::Command;
+
+    let root = std::env::temp_dir().join(format!("macro-setup-lock-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .args(args)
+            .current_dir(&root)
+            .output()
+            .unwrap()
+    };
+    assert!(git(&["init", "--quiet"]).status.success());
+    let lock = String::from_utf8(git(&["rev-parse", "--git-path", "macro-setup.lock"]).stdout)
+        .unwrap()
+        .trim()
+        .to_owned();
+    let holder = Command::new("sleep").arg("30").spawn().unwrap();
+    let held = root.join(format!("{lock}.d"));
+    std::fs::create_dir_all(&held).unwrap();
+    std::fs::write(held.join("pid"), holder.id().to_string()).unwrap();
+    let setup = RepositorySetup::parse(r#"{ "setup": [{ "name": "a", "run": "echo ran" }] }"#)
+        .expect("parse");
+    // Without `flock` on its `PATH`, the run takes the `mkdir` lock.
+    let tools = root.join("tools");
+    std::fs::create_dir_all(&tools).unwrap();
+    for tool in ["git", "mkdir", "cat", "mv", "rm", "sleep", "bash", "timeout"] {
+        let found = Command::new("bash")
+            .args(["-c", &format!("command -v {tool}")])
+            .output()
+            .unwrap();
+        let found = String::from_utf8(found.stdout).unwrap();
+        if !found.trim().is_empty() {
+            let _ = std::os::unix::fs::symlink(found.trim(), tools.join(tool));
+        }
+    }
+
+    let busy = Command::new("/bin/bash")
+        .args(["--noprofile", "--norc", "-c", &setup.locked_shell(&setup.setup[0], 1)])
+        .current_dir(&root)
+        .env("PATH", &tools)
+        .output()
+        .unwrap();
+    let mut holder = holder;
+    let _ = holder.kill();
+    let _ = holder.wait();
+    let _ = std::fs::remove_dir_all(&root);
+
+    let stderr = String::from_utf8_lossy(&busy.stderr);
+    assert_eq!(busy.status.code(), Some(LOCK_BUSY_STATUS), "{stderr}");
+    assert!(stderr.contains(LOCK_BUSY), "{stderr}");
+    assert!(!String::from_utf8_lossy(&busy.stdout).contains("ran"));
 }

@@ -29,6 +29,7 @@ pub mod review_rounds;
 pub mod service;
 pub mod session_agent;
 pub mod setup;
+pub mod shell_lock;
 pub mod stand_in;
 pub mod standing_rules;
 pub mod step_terminal;

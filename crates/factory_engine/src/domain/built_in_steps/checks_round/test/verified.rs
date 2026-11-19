@@ -491,7 +491,7 @@ async fn a_run_that_found_the_lock_held_is_retried() {
         vec![Ok(SessionCommandOutput {
             exit_code: 75,
             stdout: String::new(),
-            stderr: "macro-check: another run holds the lock on this worktree\n".to_string(),
+            stderr: "macro: another run holds this lock\n".to_string(),
         })],
         Vec::new(),
     );

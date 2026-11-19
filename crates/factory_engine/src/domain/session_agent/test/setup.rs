@@ -63,16 +63,19 @@ async fn a_new_session_runs_the_setup_before_its_first_prompt() {
     let answer = agent(&sessions, &repo).answer(task).await.expect("answer");
 
     assert_eq!(answer.text, the_plan().output);
-    assert_eq!(
-        commands(&sessions),
-        [
-            "timeout --kill-after=10 600 bash --noprofile --norc -c 'export CACHE_DIR='\\''/tmp/cache'\\''\nbun install'",
-            "timeout --kill-after=10 300 bash --noprofile --norc -c 'export CACHE_DIR='\\''/tmp/cache'\\''\njust generate'",
-        ]
-    );
+    let ran = commands(&sessions);
+    assert_eq!(ran.len(), 2);
+    for (command, shell) in ran.iter().zip([
+        "timeout --kill-after=10 600 bash --noprofile --norc -c 'export CACHE_DIR='\\''/tmp/cache'\\''\nbun install' 9>&-",
+        "timeout --kill-after=10 300 bash --noprofile --norc -c 'export CACHE_DIR='\\''/tmp/cache'\\''\njust generate' 9>&-",
+    ]) {
+        assert!(command.ends_with(shell), "{command}");
+        assert!(command.contains("macro-setup.lock"), "{command}");
+        assert!(command.contains("flock -w 60 9"), "{command}");
+    }
     let calls = sessions.exec_calls.lock().expect("execs");
     assert!(calls.iter().all(|call| call.command.cwd == "."));
-    assert_eq!(calls[1].command.timeout_secs, 320);
+    assert_eq!(calls[1].command.timeout_secs, 380);
     assert!(calls.iter().all(|call| call.action.bot_id == PRIMARY));
     assert_eq!(sessions.prompts(), 1);
     let claimed = repo.sessions.lock().expect("sessions");
@@ -139,7 +142,7 @@ async fn a_retry_in_the_same_session_skips_the_setup_that_passed() {
     agent.answer(task.clone()).await.expect("retried");
     let ran = commands(&sessions);
     assert_eq!(ran.len(), 3);
-    assert!(ran[2].ends_with("just generate'"), "{}", ran[2]);
+    assert!(ran[2].ends_with("just generate' 9>&-"), "{}", ran[2]);
     assert_eq!(sessions.prompts(), 1);
 
     agent.answer(task).await.expect("retried again");
@@ -275,5 +278,76 @@ async fn a_setup_command_past_the_step_s_time_ends_the_step() {
         "{report}"
     );
     assert!(commands(&sessions).is_empty());
+    assert_eq!(sessions.prompts(), 0);
+}
+
+/// A setup command whose run finds the checkout's setup lock held past its
+/// wait, by a run an attempt lost with its worker left going, fails the
+/// attempt for a retry, which goes on with that command; nothing is
+/// recorded passed and the agent is not prompted.
+#[tokio::test]
+async fn a_setup_command_that_finds_the_lock_held_is_retried() {
+    let repo = FakeRepo::default();
+    let sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
+    sessions.exec_replies.lock().expect("replies").extend([
+        ended(0, ""),
+        ended(75, &format!("{}\n", crate::domain::shell_lock::LOCK_BUSY)),
+    ]);
+    let task = task_with_setup(&repo).await;
+    let agent = agent(&sessions, &repo);
+
+    let first = agent.answer(task.clone()).await;
+
+    let Err(error) = first else {
+        panic!("the lock was held");
+    };
+    assert!(
+        matches!(&error, SessionAgentError::SetupLockBusy(name) if name == "generate"),
+        "{error:?}"
+    );
+    assert!(error.retryable());
+    assert_eq!(sessions.prompts(), 0);
+
+    sessions
+        .exec_replies
+        .lock()
+        .expect("replies")
+        .push_back(ended(0, ""));
+    agent.answer(task).await.expect("retried");
+    let ran = commands(&sessions);
+    assert_eq!(ran.len(), 3);
+    assert!(ran[2].ends_with("just generate' 9>&-"), "{}", ran[2]);
+}
+
+/// A command that the attempt has no time left for, while the Step has,
+/// fails the attempt for a retry, which has a fresh attempt's time: it
+/// does not end the Step.
+#[tokio::test(start_paused = true)]
+async fn a_setup_command_past_the_attempt_s_time_is_retried() {
+    let repo = FakeRepo::default();
+    let mut sessions = FakeSessions::new(&repo, Some(the_plan()), RoutineActionStatus::Succeeded);
+    sessions.exec_takes = Some(std::time::Duration::from_secs(26 * 60));
+    sessions
+        .exec_replies
+        .lock()
+        .expect("replies")
+        .extend([ended(0, ""), ended(0, "")]);
+    let task = AgentTask {
+        answer_by: Some(chrono::Utc::now() + chrono::TimeDelta::minutes(90)),
+        ..task_with_setup(&repo).await
+    };
+    let agent = agent(&sessions, &repo);
+
+    let first = agent.answer(task.clone()).await;
+
+    let Err(error) = first else {
+        panic!("no time left in the attempt");
+    };
+    assert!(
+        matches!(&error, SessionAgentError::SetupOutOfTime(name) if name == "generate"),
+        "{error:?}"
+    );
+    assert!(error.retryable());
+    assert_eq!(commands(&sessions).len(), 1);
     assert_eq!(sessions.prompts(), 0);
 }

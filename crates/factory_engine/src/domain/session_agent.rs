@@ -36,6 +36,7 @@ use uuid::Uuid;
 
 use crate::domain::agents::{Agent, AgentDefinition};
 use crate::domain::setup::{RepositorySetup, SETUP_FILE, SetupCommand, output_tail};
+use crate::domain::shell_lock::{LOCK_WAIT_SECS, lock_busy};
 use agent_session::domain::session_command::{SessionCommand, SessionCommandOutput};
 
 use crate::domain::models::{AgentAnswer, AgentCommand, AgentTask, AgentTurn, SessionSteer};
@@ -181,6 +182,11 @@ pub enum SessionAgentError {
     /// goes on with the commands still to run.
     #[error("no time was left in the attempt for setup command {0}")]
     SetupOutOfTime(String),
+    /// Another run of a setup command, as one an attempt lost with its
+    /// worker left running, held the checkout's setup lock past its wait:
+    /// a retry goes on once it ended.
+    #[error("another run of setup command {0} still holds the checkout's setup lock")]
+    SetupLockBusy(String),
 }
 
 impl Retryable for SessionAgentError {
@@ -207,6 +213,7 @@ impl Retryable for SessionAgentError {
         match self {
             SessionAgentError::Records(_)
             | SessionAgentError::SetupOutOfTime(_)
+            | SessionAgentError::SetupLockBusy(_)
             | SessionAgentError::Overdue
             | SessionAgentError::Superseded
             | SessionAgentError::NotOpened
@@ -912,9 +919,13 @@ impl<S: RoutineSessions, R: RunRepository + EvaluationRepository> SessionAgent<S
     ///
     /// A command that fails ends the Step with the command, its exit code
     /// and the end of its output; a runtime that runs no command ends it
-    /// saying the setup cannot run there. A command starts only with its
-    /// whole timeout left before `deadline`; otherwise the attempt fails,
-    /// and its retry goes on with the commands still to run.
+    /// saying the setup cannot run there. Each command holds the
+    /// checkout's setup lock while it runs, so a retry's never runs
+    /// alongside one an attempt lost with its worker left running: a lock
+    /// still held past its wait fails the attempt for a retry. A command
+    /// starts only with its whole timeout left before `deadline`;
+    /// otherwise the attempt fails, and its retry goes on with the commands
+    /// still to run.
     async fn set_up(
         &self,
         task: &AgentTask,
@@ -957,7 +968,7 @@ impl<S: RoutineSessions, R: RunRepository + EvaluationRepository> SessionAgent<S
                     },
                     command: SessionCommand {
                         cwd: ".".to_string(),
-                        command: setup.shell(command),
+                        command: setup.locked_shell(command, LOCK_WAIT_SECS),
                         timeout_secs: run_for.as_secs(),
                     },
                 })
@@ -971,6 +982,9 @@ impl<S: RoutineSessions, R: RunRepository + EvaluationRepository> SessionAgent<S
                 }
                 Err(error) => return Err(error.into()),
             };
+            if lock_busy(output.exit_code, &output.stdout, &output.stderr) {
+                return Err(SessionAgentError::SetupLockBusy(command.name.clone()));
+            }
             if output.exit_code != 0 {
                 return Err(SessionAgentError::SetupFailed(setup_failure(
                     command, &output,
@@ -1629,8 +1643,9 @@ fn prompt(text: &str, outcomes: &[Outcome]) -> String {
 }
 
 /// What a setup command's session command may take beyond the command's own
-/// timeout: `timeout`'s ten seconds before it kills, and a margin.
-const SETUP_MARGIN: Duration = Duration::from_secs(20);
+/// timeout: the lock's wait, `timeout`'s ten seconds before it kills, and a
+/// margin.
+const SETUP_MARGIN: Duration = Duration::from_secs(LOCK_WAIT_SECS + 20);
 
 /// What the Run's owner is shown when the session's runtime runs no
 /// command, so the repository's setup cannot run.

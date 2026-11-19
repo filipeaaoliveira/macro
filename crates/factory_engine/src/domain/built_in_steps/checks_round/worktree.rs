@@ -22,24 +22,13 @@ use std::time::Duration;
 
 use uuid::Uuid;
 
-/// How long a check waits for the worktree's lock before it gives the run
-/// up to a retry, in seconds: on top of the check's own timeout.
-pub(super) const LOCK_WAIT_SECS: u64 = 60;
+use crate::domain::shell_lock::take_lock;
+
+pub(super) use crate::domain::shell_lock::{LOCK_BUSY, LOCK_BUSY_STATUS, LOCK_WAIT_SECS, NO_FLOCK};
 
 /// What a check's session command may take beyond the check's own timeout:
 /// the lock's wait, `timeout`'s ten seconds before it kills, and a margin.
 pub(super) const RUN_MARGIN: Duration = Duration::from_secs(LOCK_WAIT_SECS + 20);
-
-/// The exit status a check's run takes when another run holds the lock.
-pub(super) const LOCK_BUSY_STATUS: i32 = 75;
-
-/// What a check's run says when another run holds the lock.
-pub(super) const LOCK_BUSY: &str = "macro-check: another run holds the lock on this worktree";
-
-/// What a check's run says when the machine has no `flock`. Both messages
-/// go in single quotes in the shell, so neither has an apostrophe.
-pub(super) const NO_FLOCK: &str =
-    "macro-check: this machine has no flock; the run locks with mkdir";
 
 /// What setting the worktree up says once it is at the commit.
 const READY: &str = "macro-check: worktree at";
@@ -133,28 +122,10 @@ pub(super) fn check_command(
     format!(
         "{BASE}worktree=\"$base/{round}\"
 lock=\"$worktree.lock\"
-if command -v flock >/dev/null 2>&1; then
-  exec 9>\"$lock\" && flock -w {lock_wait_secs} 9 || {{ echo '{LOCK_BUSY}' >&2; exit {LOCK_BUSY_STATUS}; }}
-else
-  echo '{NO_FLOCK}' >&2
-  waited=0
-  until mkdir \"$lock.d\" 2>/dev/null; do
-    holder=$(cat \"$lock.d/pid\" 2>/dev/null)
-    if [ -n \"$holder\" ] && ! kill -0 \"$holder\" 2>/dev/null; then
-      stale=\"$lock.d.stale.$$\"
-      mv \"$lock.d\" \"$stale\" 2>/dev/null && rm -rf \"$stale\"
-      continue
-    fi
-    waited=$((waited + 1))
-    if [ \"$waited\" -ge {lock_wait_secs} ]; then echo '{LOCK_BUSY}' >&2; exit {LOCK_BUSY_STATUS}; fi
-    sleep 1
-  done
-  echo $$ > \"$lock.d/pid\"
-  trap 'rm -rf \"$lock.d\"' EXIT
-fi
-cd \"$worktree\" || exit 1
+{take_lock}cd \"$worktree\" || exit 1
 timeout --kill-after=10 {timeout_secs} bash --noprofile --norc -c {run} 9>&-",
         run = shell_quote(run),
+        take_lock = take_lock(lock_wait_secs),
     )
 }
 

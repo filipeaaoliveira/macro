@@ -100,6 +100,8 @@ struct FakeSessions {
     /// `command_output` answers the rest.
     exec_replies: Arc<Mutex<VecDeque<Result<SessionCommandOutput, RoutineSessionError>>>>,
     exec_calls: Arc<Mutex<Vec<ExecRoutineSession>>>,
+    /// How long each command run in the session takes.
+    exec_takes: Option<std::time::Duration>,
     /// A follow-up lands, but the session's runtime then stays
     /// disconnected, as one the harness could not restore, until the
     /// session is deleted.
@@ -140,6 +142,7 @@ impl FakeSessions {
             command_output: None,
             exec_replies: Arc::default(),
             exec_calls: Arc::default(),
+            exec_takes: None,
             follow_up_loses: false,
             lost: Arc::default(),
             last_words: None,
@@ -338,6 +341,9 @@ impl RoutineSessions for FakeSessions {
         command: ExecRoutineSession,
     ) -> Result<SessionCommandOutput, RoutineSessionError> {
         self.exec_calls.lock().expect("execs").push(command);
+        if let Some(takes) = self.exec_takes {
+            tokio::time::sleep(takes).await;
+        }
         if let Some(reply) = self.exec_replies.lock().expect("exec replies").pop_front() {
             return reply;
         }
