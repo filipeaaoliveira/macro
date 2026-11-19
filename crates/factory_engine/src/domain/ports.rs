@@ -994,12 +994,18 @@ pub trait FactoryService: Send + Sync + 'static {
     /// keeping which Automation started it. `TaskBusy` when a Run another
     /// Automation started runs on the task, `FiringRepeated` when the
     /// firing started one already.
+    ///
+    /// The agent `acting`, when one fires it (a routine run for an agent),
+    /// starts it as for [`Self::create_run`]: under a Definition with
+    /// Standing Roles, its bot must fill one that allows `start`. The
+    /// schedule, an event and a webhook fire it as its creator.
     fn create_automation_run(
         &self,
         automation: &Automation,
         firing_key: &str,
         request: String,
         task_id: Option<Uuid>,
+        acting: Option<ActingAgent>,
     ) -> impl Future<Output = Result<RunDetail, FactoryError>> + Send;
 
     /// The commit a Benchmark's trials on `repo_url` start from unless a
@@ -1145,12 +1151,14 @@ pub trait AutomationService: Send + Sync + 'static {
     ) -> impl Future<Output = Result<(), FactoryError>> + Send;
 
     /// Fire the Automation the routine `routine_id` fires, from one of its
-    /// runs, which acts as `actor`.
+    /// runs, which acts as `actor`, or as the agent `acting` for them when
+    /// the run is an agent's.
     fn fire_from_routine(
         &self,
         actor: &MacroUserIdStr<'static>,
         routine_id: Uuid,
         firing: RoutineFiring,
+        acting: Option<ActingAgent>,
     ) -> impl Future<Output = Result<FiringResult, FactoryError>> + Send;
 
     /// Fire the webhook Automation `id` from a call whose `body` is signed

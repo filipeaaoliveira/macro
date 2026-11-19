@@ -29,8 +29,8 @@ use crate::domain::models::{ActingAgent, Answerer, FactoryError, PersonOnly};
 use crate::domain::ports::{FactoryService, StepService};
 use crate::domain::service::StepServiceImpl;
 
-const PRIMARY_BOT: Uuid = Uuid::from_u128(0xc1a0);
-const BACKUP_BOT: Uuid = Uuid::from_u128(0xc0de);
+pub(super) const PRIMARY_BOT: Uuid = Uuid::from_u128(0xc1a0);
+pub(super) const BACKUP_BOT: Uuid = Uuid::from_u128(0xc0de);
 
 /// The Agents `primary` and `backup`, with `standing` as their Standing
 /// Roles when given.
@@ -551,7 +551,7 @@ async fn a_cancel_that_is_not_taken_keeps_no_standing_act() {
 
 /// GitHub holding a Definition at `FIRST` with one Flow, `notes`, and the
 /// split Standing Roles over the `primary` and `backup` Agents.
-fn notes_definition() -> FakeGithub {
+pub(super) fn notes_definition() -> FakeGithub {
     let github = github_at(FIRST);
     let flow = r#"{
         "entries": [{

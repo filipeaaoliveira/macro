@@ -952,13 +952,20 @@ pub(crate) fn acting_agent(
     if is_in_person(authorization, headers) || authorization.caller != UserOrInternalCaller::User {
         return None;
     }
+    program_agent(&authorization.user)
+}
+
+/// The agent a program's call acts as, for a caller never in person (a
+/// routine's run): its agent session, or else the bot its credential is
+/// signed for, unless that only labels the person's own client.
+pub(crate) fn program_agent(
+    user: &macro_authorization::MacroUserAuthentication,
+) -> Option<ActingAgent> {
     agent_correlation::context::current_session()
         .map(ActingAgent::Session)
         .or_else(|| {
-            authorization
-                .user
-                .agent_id
-                .filter(|_| !signed_for_the_person(&authorization.user))
+            user.agent_id
+                .filter(|_| !signed_for_the_person(user))
                 .map(ActingAgent::Bot)
         })
 }

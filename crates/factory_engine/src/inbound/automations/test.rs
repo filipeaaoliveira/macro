@@ -7,6 +7,7 @@ use agent_correlation::context::{Attribution, scope_attribution};
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use bot_id::BotId;
 use factory_records::domain::automations::Automation;
 use macro_authorization::{
     AuthorizedUserApiKey, CredentialOrigin, InternalAuthConfig, JwtValidator,
@@ -22,11 +23,12 @@ use super::{AutomationsRouterState, automations_router};
 use crate::domain::automations::{
     AutomationRequest, AutomationsSettings, CreatedAutomation, FiringResult, RoutineFiring,
 };
-use crate::domain::models::FactoryError;
+use crate::domain::models::{ActingAgent, FactoryError};
 use crate::domain::ports::AutomationService;
 
 const ALICE: &str = "macro|alice@example.com";
 const ROUTINE: Uuid = Uuid::from_u128(0x2007);
+const AGENT_BOT: BotId = BotId::new_from_uuid(Uuid::from_u128(0xB07A));
 
 /// Accepts `alice`, her own session, and `sdk`, her Macro API token.
 #[derive(Clone, Copy)]
@@ -39,13 +41,13 @@ impl JwtValidator for Tokens {
     ) -> Result<ValidatedCredential, Report<MacroAuthorizationError>> {
         let origin = match jwt {
             "alice" => CredentialOrigin::Session,
-            "sdk" => CredentialOrigin::MacroApiJwt,
+            "sdk" | "routine-agent" => CredentialOrigin::MacroApiJwt,
             _ => return Err(Report::new(MacroAuthorizationError::InvalidCredentials)),
         };
         Ok(ValidatedCredential {
             origin,
             identity: ValidatedIdentity {
-                agent_id: None,
+                agent_id: (jwt == "routine-agent").then_some(AGENT_BOT),
                 agent_via: None,
                 routine_id: None,
                 user_id: ALICE.to_string(),
@@ -74,6 +76,7 @@ impl UserApiKeyAuthorizer for NoApiKeys {
 struct FakeAutomations {
     created_in_person: Mutex<Vec<bool>>,
     routine_firings: Mutex<Vec<(String, Uuid)>>,
+    acting: Mutex<Vec<Option<ActingAgent>>>,
     webhook_calls: Mutex<Vec<WebhookCall>>,
 }
 
@@ -132,7 +135,9 @@ impl AutomationService for FakeAutomations {
         actor: &MacroUserIdStr<'static>,
         routine_id: Uuid,
         _firing: RoutineFiring,
+        acting: Option<ActingAgent>,
     ) -> Result<FiringResult, FactoryError> {
+        self.acting.lock().expect("acting").push(acting);
         self.routine_firings
             .lock()
             .expect("firings")
@@ -232,6 +237,42 @@ async fn only_a_routine_s_credential_fires_an_automation() {
     assert_eq!(
         *service.routine_firings.lock().expect("firings"),
         vec![(ALICE.to_string(), ROUTINE)]
+    );
+}
+
+/// A routine run as its creator fires an Automation as them; one signed
+/// for an agent, or run in an agent session, fires it as that agent, for
+/// Standing Roles to check as `POST /runs` does.
+#[tokio::test]
+async fn a_routine_run_for_an_agent_fires_as_that_agent() {
+    let service = Arc::new(FakeAutomations::default());
+    let session_id = Uuid::now_v7();
+    let fire = |token: &'static str, session_id: Option<Uuid>| {
+        scope_attribution(
+            Attribution {
+                routine_id: Some(ROUTINE),
+                session_id,
+                ..Attribution::default()
+            },
+            router(&service).oneshot(post("/automations/fire", Some(token), FIRING)),
+        )
+    };
+
+    for response in [
+        fire("sdk", None).await,
+        fire("routine-agent", None).await,
+        fire("sdk", Some(session_id)).await,
+    ] {
+        assert_eq!(response.expect("response").status(), StatusCode::OK);
+    }
+
+    assert_eq!(
+        *service.acting.lock().expect("acting"),
+        [
+            None,
+            Some(ActingAgent::Bot(AGENT_BOT)),
+            Some(ActingAgent::Session(session_id)),
+        ]
     );
 }
 

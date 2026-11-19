@@ -19,7 +19,7 @@ use super::{
     MAX_WEBHOOK_BODY_BYTES, RoutineFiring, TEAM_AUTOMATIONS_LISTED, WEBHOOK_TOLERANCE_SECS,
     WebhookFiring, run_request,
 };
-use crate::domain::models::FactoryError;
+use crate::domain::models::{ActingAgent, FactoryError};
 use crate::domain::ports::{
     AutomationService, AutomationTriggerError, AutomationTriggers, FactoryService,
 };
@@ -110,6 +110,7 @@ where
         &self,
         automation: &Automation,
         firing: Firing,
+        acting: Option<ActingAgent>,
     ) -> Result<FiringResult, FactoryError> {
         let claim = self
             .repo
@@ -122,7 +123,7 @@ where
             FiringClaim::Ended(end) => return Ok(result(end, true)),
         }
 
-        let end = self.start(automation, &firing).await?;
+        let end = self.start(automation, &firing, acting).await?;
         self.repo
             .end_firing(automation.id, &firing.key, end)
             .await
@@ -140,6 +141,7 @@ where
         &self,
         automation: &Automation,
         firing: &Firing,
+        acting: Option<ActingAgent>,
     ) -> Result<FiringEnd, FactoryError> {
         if !automation.enabled {
             return Ok(FiringEnd::Skipped(FiringSkip::Disabled));
@@ -164,7 +166,7 @@ where
         let request = run_request(automation, firing);
         match self
             .runs
-            .create_automation_run(automation, &firing.key, request, firing.task_id)
+            .create_automation_run(automation, &firing.key, request, firing.task_id, acting)
             .await
         {
             Ok(detail) => Ok(FiringEnd::Started(detail.run.id)),
@@ -390,12 +392,13 @@ where
         self.repo.delete_automation(id).await.map_err(internal)
     }
 
-    #[tracing::instrument(skip(self, actor, firing))]
+    #[tracing::instrument(skip(self, actor, firing, acting))]
     async fn fire_from_routine(
         &self,
         actor: &MacroUserIdStr<'static>,
         routine_id: Uuid,
         firing: RoutineFiring,
+        acting: Option<ActingAgent>,
     ) -> Result<FiringResult, FactoryError> {
         // The routine is its creator's: a run of it acts as them.
         let automation = self
@@ -420,7 +423,7 @@ where
             return Err(FactoryError::NotFound);
         }
         let firing = firing.firing(&automation)?;
-        self.fire(&automation, firing).await
+        self.fire(&automation, firing, acting).await
     }
 
     #[tracing::instrument(skip(self, timestamp, signature, body))]
@@ -474,7 +477,9 @@ where
             cause: "a call to its webhook".to_string(),
             own_branch: false,
         };
-        let result = self.fire(&automation, firing).await?;
+        // A webhook call carries no login: whoever holds the secret fires
+        // it as its creator.
+        let result = self.fire(&automation, firing, None).await?;
         if result.repeated {
             return Err(FactoryError::FiringRepeated);
         }

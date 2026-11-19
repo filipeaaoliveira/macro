@@ -415,6 +415,7 @@ impl FactoryService for FakeService {
         _firing_key: &str,
         _request: String,
         _task_id: Option<Uuid>,
+        _acting: Option<ActingAgent>,
     ) -> Result<RunDetail, FactoryError> {
         Err(self.refusing(&automation.created_by))
     }

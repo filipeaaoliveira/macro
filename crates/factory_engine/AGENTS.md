@@ -217,7 +217,8 @@ bots fill it. The Run keeps it with its Agents (`definition_agents`);
 `FACTORY_AGENTS` takes none (`StandingOutsideDefinition`), as a Run under no
 Definition keeps no Agents. The section governs bots. A call not in person
 acts as an agent (`acting_agent` for start, cancel and link, an
-`ActingAgent`; `Answerer::Agent` for an answer): code in an agent session
+`ActingAgent`, and for a start through a Benchmark suite or a routine
+firing an Automation, `program_agent`; `Answerer::Agent` for an answer): code in an agent session
 (the correlation layer's session on a person's credential) acts as that
 session, and the service reads its bot (`StandingActRepository::session_bot`,
 the owner's sessions only); code in no session whose credential is signed
@@ -1476,7 +1477,13 @@ triggers:
   `macro.factory.fireAutomation` (`POST /automations/fire`), skipping a dry
   run; the factory takes the routine from the credential the scheduler
   signed for it (`agent_correlation::context::current_routine`, never the
-  body) and fires the Automation of that routine only for its creator. A
+  body) and fires the Automation of that routine only for its creator.
+  The schedule, an event, a person and a webhook (which carries no login)
+  fire it as its creator, unchecked by Standing Roles. A routine run for an
+  agent (its credential signed for a bot) or in an agent session fires it
+  as that agent (`program_agent`): under a Definition with Standing Roles
+  its bot must fill one that allows `start`, else the firing is skipped as
+  `refused`; the Run keeps the agent as its start. A
   routine the scheduler refuses (an invalid cron, event routines the
   creator may not have, no linked GitHub account) takes its Automation
   with it, and the refusal says why (400). Only people's actions start

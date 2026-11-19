@@ -1243,6 +1243,7 @@ where
         firing_key: &str,
         request: String,
         task_id: Option<Uuid>,
+        acting: Option<ActingAgent>,
     ) -> Result<RunDetail, FactoryError> {
         let started_by = RunAutomation {
             id: automation.id,
@@ -1250,7 +1251,8 @@ where
             trigger: automation.trigger.kind(),
         };
         // An Automation acts as its creator, never in their signed-in
-        // session: its request names no Control File.
+        // session: its request names no Control File. An agent that fires
+        // it starts its Run as any Run it starts, under Standing Roles.
         self.start_run(RunOrder {
             actor: automation.created_by.clone(),
             flow: automation.flow.clone(),
@@ -1258,7 +1260,7 @@ where
             task_id,
             repo_url: automation.repo_url.clone(),
             in_person: false,
-            starter: Starter::Acting(None),
+            starter: Starter::Acting(acting),
             automation: Some(AutomationStart {
                 automation: &started_by,
                 firing_key,
