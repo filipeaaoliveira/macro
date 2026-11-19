@@ -6,6 +6,7 @@ use factory_records::domain::standing_rules::RunRules;
 
 use super::{JULIA, PullRequestStepError, input, outcome, steps};
 use crate::domain::fakes::{FakeGithub, FakeRepo, ci};
+use crate::domain::models::PullRequestState;
 use crate::domain::ports::Retryable;
 
 async fn keep_run(repo: &FakeRepo) -> RunId {
@@ -131,6 +132,54 @@ async fn ci_keeps_the_same_page_once_across_its_polls() {
 
     assert_eq!(outcome(&report), "green");
     assert!(github.state().reads >= 3);
+    assert_eq!(
+        kept_page(&repo, run_id).await.as_deref(),
+        Some("https://github.com/macro/app/pull/7")
+    );
+}
+
+/// A pull request a person merged on GitHub while `ci` waited: `ci` keeps
+/// its page and calls it green, and the merge Gate's Step finds it merged,
+/// so the Run ends at the merge and its branch is deleted. That Step keeps
+/// the page before it records the merge or deletes the branch, so a write
+/// that fails there fails the Step with nothing done, and its retry does
+/// it all once.
+#[tokio::test(start_paused = true)]
+async fn a_pull_request_merged_during_the_wait_keeps_its_page_to_the_end() {
+    let github = FakeGithub::with_open_pull_request(ci(Some("success")));
+    github.state().changed = Some(Vec::new());
+    github.state().head = Some(FakeGithub::HEAD.to_string());
+    if let Some(pull_request) = github.state().pull_request.as_mut() {
+        pull_request.state = PullRequestState::Merged;
+    }
+    let repo = FakeRepo::default();
+    let run_id = keep_run(&repo).await;
+    repo.fail_once_after("set_pull_request_url", 1);
+
+    let report = steps(&github, &repo).ci(input(run_id)).await.expect("ci");
+    assert_eq!(outcome(&report), "green");
+    assert_eq!(
+        kept_page(&repo, run_id).await.as_deref(),
+        Some("https://github.com/macro/app/pull/7")
+    );
+
+    let error = steps(&github, &repo)
+        .ready_to_merge(input(run_id))
+        .await
+        .expect_err("the page was not kept");
+    assert!(error.retryable());
+    assert!(github.state().deleted_branches.is_empty());
+
+    let report = steps(&github, &repo)
+        .ready_to_merge(input(run_id))
+        .await
+        .expect("ready to merge again");
+    assert_eq!(outcome(&report), "merged");
+    assert!(github.state().merges.is_empty());
+    assert_eq!(
+        github.state().deleted_branches,
+        [format!("factory/{run_id}")]
+    );
     assert_eq!(
         kept_page(&repo, run_id).await.as_deref(),
         Some("https://github.com/macro/app/pull/7")
