@@ -302,7 +302,10 @@ impl GithubOauthImpl {
             .read(
                 access_token,
                 &format!("/repos/{owner}/{repo}/compare/{base}...{head}"),
-                &[],
+                // One commit to a page: the commits are not read, and
+                // GitHub lists the files on the first page whatever its
+                // size.
+                &[("per_page", "1")],
                 "failed to compare commits",
             )
             .await?;

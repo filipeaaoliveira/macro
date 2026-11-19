@@ -183,7 +183,7 @@ async fn compared_changes_keep_the_merge_base_and_both_sides_of_a_rename() {
     );
     assert!(changes.complete);
     assert!(server.finish().starts_with(
-        "GET /repos/macro/app/compare/main...1111111111111111111111111111111111111111 HTTP/1.1"
+        "GET /repos/macro/app/compare/main...1111111111111111111111111111111111111111?per_page=1 HTTP/1.1"
     ));
 }
 
