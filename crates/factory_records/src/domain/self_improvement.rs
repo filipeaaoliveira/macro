@@ -243,6 +243,13 @@ pub trait SelfImprovementRepository: Send + Sync + 'static {
         team_id: Uuid,
     ) -> impl Future<Output = Result<Option<Improvement>, Self::Err>> + Send;
 
+    /// The team's latest `limit` self-improvement Runs, newest first.
+    fn recent_improvements(
+        &self,
+        team_id: Uuid,
+        limit: u32,
+    ) -> impl Future<Output = Result<Vec<Improvement>, Self::Err>> + Send;
+
     /// Keep a self-improvement Run `id` of the team as starting, on its
     /// Definition `repo_url`, holding its oldest `limit` pending failures
     /// under it: in one write, so two at once keep one.

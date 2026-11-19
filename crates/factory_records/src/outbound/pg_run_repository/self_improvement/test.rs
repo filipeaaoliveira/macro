@@ -299,3 +299,55 @@ async fn a_runs_failure_facts_read_its_judgments(pool: PgPool) {
         None
     );
 }
+
+/// A team's latest self-improvement Runs are read newest first, at most
+/// the number asked for, and only the team's.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "team"))
+)]
+async fn recent_improvements_read_newest_first(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let mut ids = Vec::new();
+    for settlement in [
+        Settlement::Merged,
+        Settlement::Closed,
+        Settlement::Refused("the run could not start".to_string()),
+    ] {
+        failing_run(&repo, &[flawed()]).await;
+        let id = Uuid::now_v7();
+        let begun = repo
+            .begin_improvement(id, team(), REPO_URL, 50)
+            .await
+            .expect("begin");
+        assert!(matches!(begun, ImprovementBegin::Claimed(_)), "{begun:?}");
+        repo.settle_improvement(id, &settlement)
+            .await
+            .expect("settle");
+        ids.push(id);
+    }
+
+    let recent = repo.recent_improvements(team(), 2).await.expect("recent");
+    let states: Vec<_> = recent
+        .iter()
+        .map(|improvement| (improvement.id, improvement.state))
+        .collect();
+    assert_eq!(
+        states,
+        vec![
+            (ids[2], ImprovementState::Refused),
+            (ids[1], ImprovementState::Closed),
+        ]
+    );
+    assert!(
+        recent
+            .iter()
+            .all(|improvement| improvement.settled_at.is_some())
+    );
+    assert!(
+        repo.recent_improvements(Uuid::now_v7(), 8)
+            .await
+            .expect("recent")
+            .is_empty()
+    );
+}

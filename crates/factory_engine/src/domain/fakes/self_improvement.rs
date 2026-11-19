@@ -222,6 +222,24 @@ impl SelfImprovementRepository for FakeRepo {
             .cloned())
     }
 
+    async fn recent_improvements(
+        &self,
+        team_id: Uuid,
+        limit: u32,
+    ) -> Result<Vec<Improvement>, FakeError> {
+        Ok(self
+            .improvement
+            .lock()
+            .expect("improvement")
+            .improvements
+            .iter()
+            .rev()
+            .filter(|improvement| improvement.team_id == team_id)
+            .take(limit as usize)
+            .cloned()
+            .collect())
+    }
+
     async fn begin_improvement(
         &self,
         id: Uuid,

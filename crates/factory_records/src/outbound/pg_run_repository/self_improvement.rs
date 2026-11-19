@@ -260,6 +260,42 @@ impl SelfImprovementRepository for PgRunRepository {
     }
 
     #[tracing::instrument(err, skip(self))]
+    async fn recent_improvements(
+        &self,
+        team_id: Uuid,
+        limit: u32,
+    ) -> Result<Vec<Improvement>, Self::Err> {
+        let rows = sqlx::query!(
+            r#"
+            SELECT id, team_id, repo_url, run_id, state, refusal, created_at, settled_at, failures
+            FROM factory_improvement
+            WHERE team_id = $1
+            ORDER BY created_at DESC, id DESC
+            LIMIT $2
+            "#,
+            team_id,
+            i64::from(limit),
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter()
+            .map(|row| {
+                improvement(
+                    row.id,
+                    row.team_id,
+                    row.repo_url,
+                    row.run_id,
+                    row.state,
+                    row.refusal,
+                    row.created_at,
+                    row.settled_at,
+                    row.failures,
+                )
+            })
+            .collect()
+    }
+
+    #[tracing::instrument(err, skip(self))]
     async fn begin_improvement(
         &self,
         id: Uuid,
