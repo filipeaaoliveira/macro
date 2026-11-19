@@ -37,7 +37,7 @@ Outside the files, all must be done:
 - Self-improvement Runs: the admin who names the Definition owns them. Their
   linked GitHub account must push to this repository, and they must be
   allowed to use both Agents' bots. Without push access, each such Run is
-  refused, and Insights shows it could not start.
+  refused, and Run insights shows it could not start.
 
 `agents.json`:
 
@@ -205,9 +205,10 @@ as a failure for self-improvement (below).
 Run insights opens from the chart button in a task's Runs section, or at
 `/app/factory/insights`. It shows the Runs you started, by Flow and
 period: their success rate, how long each Step took, where Runs stop, and
-the tokens the agents used. Its Scorers, Self-improvement, Experiments and
-Benchmarks sections are the team's. The template's one Scorer is listed,
-with no judgments while its `samplePercent` is 0.
+the tokens the agents used. Its Scorers, Experiments and Benchmarks
+sections list the team's, with the results of your own Runs and suites;
+its Self-improvement section is the team's. The template's one Scorer is
+listed, with no judgments while its `samplePercent` is 0.
 
 Change one setting at a time, and repeat a Run before you compare: one
 Run says little. To compare Agents on the same kind of work, use an
