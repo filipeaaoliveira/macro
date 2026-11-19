@@ -1188,6 +1188,75 @@
         }
       }
     },
+    "/runs/by-pull-requests": {
+      "post": {
+        "tags": ["factory"],
+        "summary": "Find the Runs that opened some pull requests: for each one, the newest\nRun the caller can see on their team's board (theirs, or a team\nmember's on a task they can see), with its Steps, where it is, and the\nmerge Gate it waits on. A pull request no such Run opened is left out,\nwhether no Run opened it or one the caller cannot see did.",
+        "operationId": "find_pull_request_runs",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PullRequestUrls"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PullRequestRuns"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/runs/waiting": {
       "get": {
         "tags": ["factory"],
@@ -4393,6 +4462,62 @@
             "type": "string",
             "format": "uuid",
             "description": "The Project: an initiative's id."
+          }
+        }
+      },
+      "PullRequestRun": {
+        "type": "object",
+        "description": "The Run that opened a pull request, as the board shows it.",
+        "required": ["url", "listed"],
+        "properties": {
+          "listed": {
+            "$ref": "#/components/schemas/BoardRun",
+            "description": "The Run, where it is, and its task's name."
+          },
+          "mergeGateSeq": {
+            "type": ["integer", "null"],
+            "format": "int32",
+            "description": "The Step whose merge Gate the Run waits on, by its place among the\nRun's Steps: approving it is how the pull request merges. None while\nthe Run is anywhere else.",
+            "minimum": 0
+          },
+          "url": {
+            "type": "string",
+            "description": "The pull request's page, as the lookup named it."
+          }
+        }
+      },
+      "PullRequestRuns": {
+        "type": "object",
+        "description": "The Runs that opened some pull requests.",
+        "required": ["runs", "unknown"],
+        "properties": {
+          "runs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PullRequestRun"
+            },
+            "description": "One for each pull request a Run the caller can see opened, its\nnewest such Run, in the lookup's order; none for a pull request no\nsuch Run opened."
+          },
+          "unknown": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The pull requests, as the lookup named them, whose Runs were not all\nread, as more of its own Runs matched than a lookup reads for one\npull request: whether a Run the caller sees opened one is not known,\nso it must not read as none."
+          }
+        }
+      },
+      "PullRequestUrls": {
+        "type": "object",
+        "description": "GitHub pull requests, by their pages.",
+        "required": ["urls"],
+        "properties": {
+          "urls": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The pull requests' pages, such as\n`https://github.com/owner/repo/pull/12`: at most 100."
           }
         }
       },

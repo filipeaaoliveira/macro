@@ -1169,6 +1169,56 @@ export type ProjectRules = {
 };
 
 /**
+ * The Run that opened a pull request, as the board shows it.
+ */
+export type PullRequestRun = {
+    /**
+     * The Run, where it is, and its task's name.
+     */
+    listed: BoardRun;
+    /**
+     * The Step whose merge Gate the Run waits on, by its place among the
+     * Run's Steps: approving it is how the pull request merges. None while
+     * the Run is anywhere else.
+     */
+    mergeGateSeq?: number | null;
+    /**
+     * The pull request's page, as the lookup named it.
+     */
+    url: string;
+};
+
+/**
+ * The Runs that opened some pull requests.
+ */
+export type PullRequestRuns = {
+    /**
+     * One for each pull request a Run the caller can see opened, its
+     * newest such Run, in the lookup's order; none for a pull request no
+     * such Run opened.
+     */
+    runs: Array<PullRequestRun>;
+    /**
+     * The pull requests, as the lookup named them, whose Runs were not all
+     * read, as more of its own Runs matched than a lookup reads for one
+     * pull request: whether a Run the caller sees opened one is not known,
+     * so it must not read as none.
+     */
+    unknown: Array<string>;
+};
+
+/**
+ * GitHub pull requests, by their pages.
+ */
+export type PullRequestUrls = {
+    /**
+     * The pull requests' pages, such as
+     * `https://github.com/owner/repo/pull/12`: at most 100.
+     */
+    urls: Array<string>;
+};
+
+/**
  * A trial whose Run was refused.
  */
 export type RefusedTrial = {
@@ -2558,6 +2608,28 @@ export type CreateFactoryRunResponses = {
 };
 
 export type CreateFactoryRunResponse = CreateFactoryRunResponses[keyof CreateFactoryRunResponses];
+
+export type FindPullRequestRunsData = {
+    body: PullRequestUrls;
+    path?: never;
+    query?: never;
+    url: '/runs/by-pull-requests';
+};
+
+export type FindPullRequestRunsErrors = {
+    400: ErrorResponse;
+    401: ErrorResponse;
+    403: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type FindPullRequestRunsError = FindPullRequestRunsErrors[keyof FindPullRequestRunsErrors];
+
+export type FindPullRequestRunsResponses = {
+    200: PullRequestRuns;
+};
+
+export type FindPullRequestRunsResponse = FindPullRequestRunsResponses[keyof FindPullRequestRunsResponses];
 
 export type ListFactoryWaitingRunsData = {
     body?: never;
