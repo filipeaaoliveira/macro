@@ -389,12 +389,14 @@ async fn an_improvement_run_merges_only_by_a_person() {
     for pattern in crate::domain::definition::DEFINITION_FILE_PATTERNS {
         assert!(patterns.iter().any(|kept| kept == pattern), "{pattern}");
     }
-    let rules = run.standing_rules.clone().expect("rules");
+    let rules = run.standing_rules.expect("rules");
     assert!(rules.definition.merge, "the team's rules merge on green");
 
     // Published through the worker's Steps, its change to a Flow's prompt
     // is Tampered, though its request names the folder: no rule answers
-    // its merge Gate, nor its plan's.
+    // its merge Gate as Tampered (its plan Gate opens before any change is
+    // listed: `an_improvement_run_s_plan_and_merge_wait_for_a_person_whatever_it_changes`
+    // covers it).
     bench.github.state().changed = Some(vec!["flows/notes.json".to_string()]);
     let worker = StepServiceImpl::new(
         bench.repo.clone(),
@@ -431,7 +433,8 @@ async fn an_improvement_run_merges_only_by_a_person() {
         .cloned()
         .expect("control files kept");
     assert_eq!(kept.tampered, vec!["flows/notes.json".to_string()]);
-    for kind in [RuleGateKind::Merge, RuleGateKind::Plan] {
+    {
+        let kind = RuleGateKind::Merge;
         let facts = GateFacts {
             kind,
             fix_rounds: 0,
