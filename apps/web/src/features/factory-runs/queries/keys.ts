@@ -1,6 +1,7 @@
 import { createQueryKeys } from '@lukemorales/query-key-factory';
 import type { BoardFilters } from '../core/board';
 import type { InsightsParams } from '../core/insights';
+import type { QualityParams } from '../core/quality';
 
 export const factoryRunKeys = createQueryKeys('factoryRuns', {
   task: (taskId: string) => ({ queryKey: [taskId] }),
@@ -30,5 +31,14 @@ export const factoryRunKeys = createQueryKeys('factoryRuns', {
   }),
   evaluation: (params: InsightsParams) => ({
     queryKey: [params.from, params.to, params.timeZone, params.flow ?? ''],
+  }),
+  quality: (params: QualityParams) => ({
+    queryKey: [
+      params.from,
+      params.to,
+      params.timeZone,
+      params.flow ?? '',
+      params.repository ?? '',
+    ],
   }),
 });

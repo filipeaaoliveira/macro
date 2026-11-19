@@ -2,6 +2,7 @@ import type { Accessor } from 'solid-js';
 import { createContext, useContext } from 'solid-js';
 import type { EvaluationInsights } from '../core/evaluation';
 import type { InsightsParams, RunInsights } from '../core/insights';
+import type { QualityInsights, QualityParams } from '../core/quality';
 import type { RunsSource } from './runs-context';
 
 /** What the insights view needs from the factory. */
@@ -20,6 +21,13 @@ export type InsightsContext = {
   evaluation: (
     params: Accessor<InsightsParams>
   ) => RunsSource<EvaluationInsights> & { updating: Accessor<boolean> };
+  /**
+   * CI health, review quality, cost and autonomy of the person's Runs over
+   * the period, of one repository or of all.
+   */
+  quality: (
+    params: Accessor<QualityParams>
+  ) => RunsSource<QualityInsights> & { updating: Accessor<boolean> };
   /** The Flows a Run can be started from, to filter by. */
   flowNames: () => RunsSource<string[]>;
 };

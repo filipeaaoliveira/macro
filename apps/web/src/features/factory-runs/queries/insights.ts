@@ -7,6 +7,7 @@ import {
 } from '@tanstack/solid-query';
 import type { InsightsContext } from '../context/insights-context';
 import type { InsightsParams } from '../core/insights';
+import type { QualityParams } from '../core/quality';
 import { factoryRunKeys } from './keys';
 import { flowsOptions, toSource } from './runs';
 
@@ -54,6 +55,27 @@ export function evaluationOptions(params: InsightsParams) {
   });
 }
 
+export function qualityOptions(params: QualityParams) {
+  return queryOptions({
+    queryKey: factoryRunKeys.quality(params).queryKey,
+    queryFn: ({ signal }) =>
+      throwOnErr(() =>
+        factoryClient.getQuality(
+          {
+            from: params.from,
+            to: params.to,
+            timeZone: params.timeZone,
+            flow: params.flow,
+            repository: params.repository,
+          },
+          signal
+        )
+      ),
+    staleTime: INSIGHTS_STALE_MS,
+    placeholderData: keepPreviousData,
+  });
+}
+
 /** The insights context on the factory service. */
 export function createAppInsightsContext(): InsightsContext {
   return {
@@ -67,6 +89,14 @@ export function createAppInsightsContext(): InsightsContext {
 
     evaluation: (params) => {
       const query = useQuery(() => evaluationOptions(params()));
+      return {
+        ...toSource(query),
+        updating: () => query.isPlaceholderData,
+      };
+    },
+
+    quality: (params) => {
+      const query = useQuery(() => qualityOptions(params()));
       return {
         ...toSource(query),
         updating: () => query.isPlaceholderData,

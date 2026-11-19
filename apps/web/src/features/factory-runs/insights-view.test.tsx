@@ -19,6 +19,7 @@ import {
 } from './context/runs-context';
 import type { EvaluationInsights } from './core/evaluation';
 import type { InsightsParams, RunInsights } from './core/insights';
+import type { QualityInsights, QualityParams } from './core/quality';
 import type { Run } from './core/run';
 import { RunInsightsView } from './insights-view';
 
@@ -233,6 +234,7 @@ function mount(options: {
   evaluation?: EvaluationInsights;
   evaluationState?: Accessor<'pending' | 'error' | 'ready'>;
   evaluationRetry?: () => void;
+  quality?: (params: QualityParams) => QualityInsights;
   retry?: () => void;
   queue?: RunsQueue;
 }) {
@@ -254,6 +256,12 @@ function mount(options: {
         (() => (options.evaluation ? 'ready' : 'pending')),
       data: () => options.evaluation,
       retry: options.evaluationRetry ?? vi.fn(),
+      updating: () => false,
+    }),
+    quality: (params) => ({
+      state: () => (options.quality ? 'ready' : 'pending'),
+      data: () => options.quality?.(params()),
+      retry: vi.fn(),
       updating: () => false,
     }),
     flowNames: () => ({
@@ -621,4 +629,243 @@ describe('RunInsightsView', () => {
     fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }));
     expect(retry).toHaveBeenCalledOnce();
   });
+
+  it('lists a setup failure on two pull requests once, as setup, beside a flaky test and a pull request’s own failure', () => {
+    mount({
+      insights: november,
+      quality: () => ({ ...quality(), repository: APP }),
+    });
+
+    const recurring = screen.getByRole('list', {
+      name: 'Failed on two or more pull requests',
+    });
+    const rows = within(recurring).getAllByRole('heading');
+    expect(rows.map((row) => row.textContent)).toEqual([
+      'build · Set up job',
+      'test · Run tests',
+    ]);
+    const setup = rows[0]?.parentElement as HTMLElement;
+    expect(within(setup).getByText('Setup')).toBeTruthy();
+    expect(setup.parentElement?.textContent).toContain(
+      '2 failures on 2 pull requests'
+    );
+    const flaky = rows[1]?.parentElement as HTMLElement;
+    expect(within(flaky).getByText('Flaky')).toBeTruthy();
+
+    const e2e = screen.getByRole('rowheader', { name: 'e2e' });
+    expect(e2e.parentElement?.textContent).toContain('100%');
+    expect(e2e.parentElement?.textContent).toContain('The pull request’s 1');
+    expect(figure('Red waits')).toBe('50%');
+    expect(figure('First push to green')).toBe('2hr');
+    expect(figure('CI fix rounds')).toBe('2');
+    expect(figure('Review fix rounds')).toBe('1');
+  });
+
+  it('shows review rounds, blockers by reviewer and agent, and recurring blocker texts', () => {
+    mount({ insights: november, quality: () => quality() });
+
+    const reviewers = screen.getByRole('table', {
+      name: 'Blockers by reviewer',
+    });
+    const correctness = within(reviewers).getByRole('rowheader', {
+      name: 'correctness-reviewer',
+    });
+    expect(
+      [...(correctness.parentElement?.querySelectorAll('td') ?? [])].map(
+        (cell) => cell.textContent
+      )
+    ).toEqual(['4', '3', '0.8']);
+    const agents = screen.getByRole('table', { name: 'Blockers by agent' });
+    expect(
+      within(agents).getByRole('rowheader', { name: 'backup' })
+    ).toBeTruthy();
+    const recurring = screen.getByRole('list', {
+      name: 'Blockers found in two or more runs',
+    });
+    expect(recurring.textContent).toContain('The empty string panics');
+    expect(recurring.textContent).toContain('2 runs · correctness-reviewer');
+    expect(figure('Rounds per run')).toBe('1.3');
+    expect(figure('Clean after the first round')).toBe('33%');
+    expect(figure('Repeated blockers')).toBe('1');
+  });
+
+  it('reads cost per merged pull request in money when priced and in tokens otherwise, beside the autonomy rate', () => {
+    mount({ insights: november, quality: () => quality() });
+    expect(screen.getByTestId('cost-per-merged').textContent).toBe('$2.50');
+    expect(figure('Autonomy rate')).toBe('25%');
+    expect(figure('Merged pull requests')).toBe('1');
+    expect(
+      screen.getByText('1 run with a gate a person answered')
+    ).toBeTruthy();
+    cleanup();
+
+    const read = quality();
+    mount({
+      insights: november,
+      quality: () => ({
+        ...read,
+        delivery: {
+          ...read.delivery,
+          costPerMergedUsd: null,
+          unpricedCalls: 3,
+        },
+      }),
+    });
+    expect(screen.getByText('Tokens per merged pull request')).toBeTruthy();
+    expect(screen.getByTestId('cost-per-merged').textContent).toBe('1.5K');
+    expect(
+      screen.getByText('3 model calls have no price, so cost reads in tokens.')
+    ).toBeTruthy();
+  });
+
+  it('reads one repository once it is picked', async () => {
+    const asked: (string | undefined)[] = [];
+    mount({
+      insights: november,
+      quality: (params) => {
+        asked.push(params.repository);
+        return quality();
+      },
+    });
+
+    const picker = screen.getByRole('button', { name: /Repository/ });
+    fireEvent.keyDown(picker, { key: 'Enter' });
+    fireEvent.keyDown(
+      await screen.findByRole('option', { name: 'macro/site' }),
+      { key: 'Enter' }
+    );
+
+    expect(asked.at(-1)).toBe('https://github.com/macro/site');
+  });
 });
+
+const APP = 'https://github.com/macro/app';
+
+/** The figure a Metric shows beside its label. */
+function figure(label: string) {
+  return screen
+    .getByText(label)
+    .closest('div')
+    ?.parentElement?.querySelector('p')?.textContent;
+}
+
+function quality(): QualityInsights {
+  const link = {
+    id: 'run-quality',
+    title: 'Collapse repeated dashes',
+    createdAt: '2026-11-10T09:00:00Z',
+    outcome: 'success' as const,
+  };
+  const causes = (own: number, setup: number, flaky: number) => ({
+    own,
+    setup,
+    flaky,
+    cancelled: 0,
+  });
+  return {
+    from: '2026-10-13',
+    to: '2026-11-11',
+    timeZone: 'Europe/Lisbon',
+    flow: null,
+    repository: null,
+    repositories: [APP, 'https://github.com/macro/site'],
+    runCap: 1000,
+    capped: false,
+    ci: {
+      waits: 4,
+      redWaits: 2,
+      runs: 2,
+      causes: { own: 1, setup: 2, flaky: 2, cancelled: 1 },
+      jobs: [
+        {
+          repository: APP,
+          name: 'e2e',
+          finished: 1,
+          red: 1,
+          redRate: 1,
+          causes: causes(1, 0, 0),
+          pullRequestsFailed: 1,
+        },
+        {
+          repository: APP,
+          name: 'build',
+          finished: 2,
+          red: 2,
+          redRate: 1,
+          causes: causes(0, 2, 0),
+          pullRequestsFailed: 2,
+        },
+      ],
+      firstPushToGreen: { count: 2, medianSeconds: 7200, p90Seconds: 10800 },
+      ciFixRounds: 2,
+      runsWithCiFixes: 2,
+      reviewFixRounds: 1,
+      recurring: [
+        {
+          repository: APP,
+          job: 'build',
+          step: 'Set up job',
+          cause: 'setup',
+          pullRequests: 2,
+          failures: 2,
+          lastFailedAt: '2026-11-02T10:00:00Z',
+          runs: [link],
+        },
+        {
+          repository: APP,
+          job: 'test',
+          step: 'Run tests',
+          cause: 'flaky',
+          pullRequests: 2,
+          failures: 2,
+          lastFailedAt: '2026-11-02T10:00:00Z',
+          runs: [link],
+        },
+      ],
+    },
+    review: {
+      reviewedRuns: 3,
+      rounds: 4,
+      roundsPerRun: 4 / 3,
+      firstRounds: 3,
+      cleanFirstRounds: 1,
+      cleanFirstRate: 1 / 3,
+      blockers: 4,
+      newBlockers: 3,
+      repeatedBlockers: 1,
+      byReviewer: [
+        { name: 'correctness-reviewer', reviews: 4, blockers: 3 },
+        { name: 'scope-reviewer', reviews: 1, blockers: 1 },
+      ],
+      byAgent: [
+        { name: 'backup', reviews: 2, blockers: 2 },
+        { name: 'primary', reviews: 3, blockers: 2 },
+      ],
+      recurring: [
+        {
+          text: 'The empty string panics',
+          runs: 2,
+          blockers: 3,
+          reviewers: ['correctness-reviewer'],
+          lastFoundAt: '2026-11-02T02:00:00Z',
+          runLinks: [link],
+        },
+      ],
+    },
+    delivery: {
+      endedRuns: 4,
+      merged: 1,
+      autonomous: 1,
+      autonomyRate: 0.25,
+      personAnswered: 1,
+      steered: 1,
+      manual: 1,
+      measuredRuns: 2,
+      tokens: { input: 1500, output: 0, cacheRead: 0, cacheWrite: 0 },
+      costUsd: 2.5,
+      unpricedCalls: 0,
+      costPerMergedUsd: 2.5,
+      tokensPerMerged: 1500,
+    },
+  };
+}
