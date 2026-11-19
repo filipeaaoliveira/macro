@@ -6,10 +6,13 @@ import { Button, Checkbox, NumberUnitInput } from '@ui';
 import { createSignal, For, Match, Show, Switch } from 'solid-js';
 import {
   DEFAULT_QUEUE_LIMIT,
+  DEFAULT_TOKEN_BUDGET,
   GATE_KINDS,
   type GateKind,
   MAX_QUEUE_LIMIT,
+  MAX_TOKEN_BUDGET,
   MIN_QUEUE_LIMIT,
+  MIN_TOKEN_BUDGET,
   type OrchestratorDefinition,
   type OrchestratorKinds,
   RULE_NAMES,
@@ -47,7 +50,7 @@ const NO_STAND_IN: StandInKinds = { plan: false, blockers: false };
  * The team's Standing Rules: which kinds of Gate the factory answers on its
  * own for its Runs, whether the Gates it leaves go to the Run's owner,
  * whether its Runs post their updates to their task's thread, its Queue
- * limit, which the stand-in answers for the owner when no rule does, and
+ * limit, its token budget, which the stand-in answers for the owner when no rule does, and
  * which the Orchestrator may approve.
  * Its admins turn each on or off, or go back to the default; other members
  * read them. A Tampered Run always waits for a person, whatever they say.
@@ -105,7 +108,7 @@ export function StandingRulesSettings() {
           const toggle = (
             kind: Exclude<
               keyof OrchestratorDefinition,
-              'standIn' | 'queueLimit' | 'orchestrator'
+              'standIn' | 'queueLimit' | 'tokenBudget' | 'orchestrator'
             >,
             on: boolean
           ) =>
@@ -144,6 +147,24 @@ export function StandingRulesSettings() {
               MAX_QUEUE_LIMIT
             );
             if (limit !== queueLimit()) setQueueLimit(limit);
+          };
+          const tokenBudget = () => definition().tokenBudget ?? null;
+          const setTokenBudget = (budget: number | null) =>
+            fireAndForget(
+              save({ ...definition(), tokenBudget: budget }),
+              'factory-runs'
+            );
+          // The budget typed so far, saved when the field loses focus.
+          const [typedBudget, setTypedBudget] = createSignal<number>();
+          const saveTypedBudget = () => {
+            const typed = typedBudget();
+            setTypedBudget(undefined);
+            if (typed === undefined || Number.isNaN(typed)) return;
+            const budget = Math.min(
+              Math.max(Math.round(typed), MIN_TOKEN_BUDGET),
+              MAX_TOKEN_BUDGET
+            );
+            if (budget !== tokenBudget()) setTokenBudget(budget);
           };
           const toggleStandIn = (kind: keyof StandInKinds, on: boolean) =>
             fireAndForget(
@@ -259,6 +280,46 @@ export function StandingRulesSettings() {
                     />
                     <NumberUnitInput.Unit>
                       {t('factoryRuns.queueLimitUnit')}
+                    </NumberUnitInput.Unit>
+                  </NumberUnitInput.Frame>
+                </NumberUnitInput>
+              </Show>
+              <Checkbox
+                size="sm"
+                checked={tokenBudget() !== null}
+                onChange={(on: boolean) =>
+                  setTokenBudget(on ? DEFAULT_TOKEN_BUDGET : null)
+                }
+                disabled={locked()}
+              >
+                <Checkbox.Control />
+                <div class="flex flex-col gap-0.5">
+                  <Checkbox.Label class="text-sm">
+                    {t('factoryRuns.tokenBudgetSetting')}
+                  </Checkbox.Label>
+                  <Checkbox.Description class="text-xs text-ink-muted">
+                    {t('factoryRuns.tokenBudgetHint')}
+                  </Checkbox.Description>
+                </div>
+              </Checkbox>
+              <Show when={tokenBudget() !== null}>
+                <NumberUnitInput
+                  class="pl-6"
+                  format={false}
+                  rawValue={typedBudget() ?? tokenBudget() ?? undefined}
+                  minValue={MIN_TOKEN_BUDGET}
+                  maxValue={MAX_TOKEN_BUDGET}
+                  step={1}
+                  disabled={locked()}
+                  onRawValueChange={setTypedBudget}
+                >
+                  <NumberUnitInput.Frame>
+                    <NumberUnitInput.Input
+                      aria-label={t('factoryRuns.tokenBudgetLabel')}
+                      onBlur={saveTypedBudget}
+                    />
+                    <NumberUnitInput.Unit>
+                      {t('factoryRuns.tokenBudgetUnit')}
                     </NumberUnitInput.Unit>
                   </NumberUnitInput.Frame>
                 </NumberUnitInput>

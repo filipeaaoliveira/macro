@@ -30,6 +30,12 @@ export type OrchestratorDefinition = {
    * None sets no limit.
    */
   queueLimit?: number | null;
+  /**
+   * The token budget: the most tokens a Run's agents may use, counted as
+   * Insights counts them. Before each agent Step, a Run that used as many
+   * ends blocked. A Run keeps the budget it started with. None sets none.
+   */
+  tokenBudget?: number | null;
   /** The kinds of Gate the Orchestrator may approve for the Run's owner. */
   orchestrator?: OrchestratorKinds;
 };
@@ -48,6 +54,7 @@ export type GateKind = Exclude<
   | 'taskThread'
   | 'standIn'
   | 'queueLimit'
+  | 'tokenBudget'
   | 'orchestrator'
 >;
 
@@ -59,6 +66,15 @@ export const MIN_QUEUE_LIMIT = 1;
 
 /** The highest Queue limit the factory takes. */
 export const MAX_QUEUE_LIMIT = 1000;
+
+/** The token budget a team starts from when it turns the budget on. */
+export const DEFAULT_TOKEN_BUDGET = 5_000_000;
+
+/** The smallest token budget the factory takes. */
+export const MIN_TOKEN_BUDGET = 10_000;
+
+/** The largest token budget the factory takes. */
+export const MAX_TOKEN_BUDGET = 10_000_000_000;
 
 /** The kinds of Gate the stand-in answers for the Run's owner. */
 export type StandInKinds = {

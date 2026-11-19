@@ -171,6 +171,14 @@ export function toRun(detail: RunDetail): Run {
         }
       : undefined,
     baseRequiredChecks: detail.baseRequiredChecks ?? undefined,
+    // A Run with no budget, and a service older than budgets, send none.
+    tokenBudget: detail.tokenBudget
+      ? {
+          budget: detail.tokenBudget.budget,
+          used: detail.tokenBudget.used ?? undefined,
+          stop: detail.tokenBudget.stop ?? undefined,
+        }
+      : undefined,
     // A service older than Standing Roles sends none.
     standingActs: (detail.standingActs ?? []).map((standing) => ({
       act: standing.act,

@@ -850,6 +850,45 @@ describe('RunView', () => {
     expect(screen.getByText('macro-inc/app, from develop')).toBeTruthy();
   });
 
+  it('shows a Run’s token budget, what its agents used, and why it stopped', () => {
+    const { setRun } = mount({});
+    expect(screen.queryByText('Token budget')).toBeNull();
+
+    setRun({
+      ...waitingRun,
+      tokenBudget: { budget: 2_000_000, used: 1_250_000 },
+    });
+    expect(screen.getByText('Token budget')).toBeTruthy();
+    expect(screen.getByText('1.3M of 2M tokens used')).toBeTruthy();
+
+    setRun({ ...waitingRun, tokenBudget: { budget: 2_000_000 } });
+    expect(screen.getByText('2M tokens')).toBeTruthy();
+
+    setRun({
+      ...waitingRun,
+      tokenBudget: {
+        budget: 2_000_000,
+        used: 2_100_000,
+        stop: { reason: 'spent', used: 2_050_000 },
+      },
+    });
+    expect(
+      screen.getByText(
+        'Stopped at its budget: its agents used 2.1M of 2M tokens'
+      )
+    ).toBeTruthy();
+
+    setRun({
+      ...waitingRun,
+      tokenBudget: { budget: 2_000_000, stop: { reason: 'unread' } },
+    });
+    expect(
+      screen.getByText(
+        'Stopped: its token use couldn’t be read, so its budget of 2M tokens couldn’t be checked'
+      )
+    ).toBeTruthy();
+  });
+
   it('retries a Run that couldn’t be loaded', () => {
     const [state, setState] = createSignal<'pending' | 'error' | 'ready'>(
       'error'

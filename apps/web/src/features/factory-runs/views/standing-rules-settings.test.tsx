@@ -282,6 +282,52 @@ describe('StandingRulesSettings', () => {
     );
   });
 
+  it('sets a token budget, keeping the rules, and holds it to its range', async () => {
+    const budgeted = {
+      ...teamDefault,
+      definition: { ...teamDefault.definition, tokenBudget: 5_000_000 },
+      isDefault: false,
+    };
+    vi.mocked(factoryClient.setStandingRules)
+      .mockResolvedValueOnce(ok(budgeted))
+      .mockResolvedValueOnce(
+        ok({
+          ...budgeted,
+          definition: { ...budgeted.definition, tokenBudget: 10_000 },
+        })
+      );
+    mount(teamDefault);
+
+    const budget = await screen.findByRole('checkbox', {
+      name: 'Stop a run at a token budget',
+    });
+    expect((budget as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(budget);
+    await waitFor(() =>
+      expect(factoryClient.setStandingRules).toHaveBeenCalledWith({
+        plan: false,
+        blockers: true,
+        merge: false,
+        ownerGates: false,
+        tokenBudget: 5_000_000,
+      })
+    );
+
+    // A budget below the smallest the factory takes is saved as it.
+    const field = await screen.findByLabelText('Token budget');
+    fireEvent.input(field, { target: { value: '50' } });
+    fireEvent.blur(field);
+    await waitFor(() =>
+      expect(factoryClient.setStandingRules).toHaveBeenLastCalledWith({
+        plan: false,
+        blockers: true,
+        merge: false,
+        ownerGates: false,
+        tokenBudget: 10_000,
+      })
+    );
+  });
+
   it('lets the Orchestrator approve plans, keeping the rules', async () => {
     vi.mocked(factoryClient.setStandingRules).mockResolvedValueOnce(
       ok({

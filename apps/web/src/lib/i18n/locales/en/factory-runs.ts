@@ -261,6 +261,11 @@ export default {
     'Once this many of a person’s runs wait on them, or have yet to ask them anything, no new run of theirs starts, whoever starts it: the person, the Orchestrator or an automation. A run that never asks anything holds no place until it does. Runs under way go on.',
   queueLimitLabel: 'Queue limit',
   queueLimitUnit: 'waiting',
+  tokenBudgetSetting: 'Stop a run at a token budget',
+  tokenBudgetHint:
+    'Before each agent step, a run whose agents used this many tokens or more stops, and its owner is told. Tokens count as in Insights: input, output and cached input. A run keeps the budget it started with.',
+  tokenBudgetLabel: 'Token budget',
+  tokenBudgetUnit: 'tokens',
   orchestratorTitle: 'Orchestrator',
   orchestratorPlan: 'Let the Orchestrator approve plans you approve in chat',
   orchestratorBlockers:
@@ -272,6 +277,13 @@ export default {
   // A Run an Automation started.
   startedBy: 'Started by',
   startedByAutomation: 'The automation “{{name}}”, {{trigger}}',
+  tokenBudget: 'Token budget',
+  tokenBudgetUsed: '{{used}} of {{budget}} tokens used',
+  tokenBudgetOf: '{{budget}} tokens',
+  tokenBudgetSpent:
+    'Stopped at its budget: its agents used {{used}} of {{budget}} tokens',
+  tokenBudgetUnread:
+    'Stopped: its token use couldn’t be read, so its budget of {{budget}} tokens couldn’t be checked',
   standingActs: 'Done by agents',
   standingActStart: 'Started by agent {{agent}} as {{role}}, {{time}}',
   standingActCancel: 'Cancelled by agent {{agent}} as {{role}}, {{time}}',
