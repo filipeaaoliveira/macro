@@ -222,7 +222,9 @@ holds something shaped like one does not read.
 `rules.json` turns on:
 
 - `blockers`: the factory sends a review round's Blockers to be fixed, for at
-  most two rounds in a row; later Blockers wait for a person.
+  most two rounds in a row. With the `code` Flow's three review rounds,
+  Blockers the third round finds end the Run, and leave the branch to a
+  person.
 - `ownerGates`: the owner's comments on the Run's task reach the next agent
   Step, and Blockers a rule's fix left unchanged wait for them.
 - `taskThread`: a Run on a task posts its main updates to the task.
@@ -333,10 +335,12 @@ request groups the failures, and its pull request lists them under
 A person approves its plan and merges it, whatever it changes: no
 standing rule, stand-in or Orchestrator answers its plan or merge, and its
 changes to this Definition's files are Tampered too. Once it merges, its
-failures are addressed. One that does not merge (its pull request closed,
-the Run cancelled or ended without one, or refused) sends them back, and
-the next Run waits a day, twice as long after each more in a row, up to a
-week, until one merges. The admin who named the Definition must still be a
+failures are addressed. Its pull request closed unmerged, or its Run
+cancelled by its owner in person, rejects it: its failures are dismissed
+for good, and new ones still count. One that ends without merging
+otherwise (no pull request, cancelled by an agent, or refused) sends them
+back. After either, the next Run waits a day, twice
+as long after each more in a row, up to a week, until one merges. The admin who named the Definition must still be a
 team admin for a Run to start. Thresholds are read from this repository as
 it is now.
 
