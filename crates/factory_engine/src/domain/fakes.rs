@@ -1587,12 +1587,22 @@ impl RunRepository for FakeRepo {
 /// branch opens in it.
 #[derive(Default)]
 pub(crate) struct FakeGithubState {
-    /// The CI jobs that finished on the head, as CI health reads them.
+    /// The CI jobs that finished on a commit, as CI health reads them,
+    /// unless [`Self::finished_on`] names that commit.
     pub(crate) finished: Vec<FinishedJob>,
+    /// The CI jobs that finished on each commit named here.
+    pub(crate) finished_on: BTreeMap<String, Vec<FinishedJob>>,
     /// Whether reading them fails, as an outage would.
     pub(crate) finished_fails: bool,
+    /// How long reading them takes, as a slow GitHub would.
+    pub(crate) finished_delay: Option<std::time::Duration>,
     /// The commits whose finished jobs were read, in order.
     pub(crate) finished_reads: Vec<String>,
+    /// Whether each read of finished jobs asked for details, in order.
+    pub(crate) finished_details: Vec<bool>,
+    /// The commit each read of the open pull request finds its head at
+    /// next, in order; the last one stays. Empty keeps its head.
+    pub(crate) heads: VecDeque<String>,
     /// Whether the Run's owner cannot reach the repository.
     pub(crate) unreachable: bool,
     /// Whether the Run's owner may only read the repository.
@@ -1724,6 +1734,14 @@ impl FakeGithub {
             } else {
                 state.checks.front().cloned()
             };
+            let head = if state.heads.len() > 1 {
+                state.heads.pop_front()
+            } else {
+                state.heads.front().cloned()
+            };
+            if let (Some(head), Some(pull_request)) = (head, state.pull_request.as_mut()) {
+                pull_request.head_sha = head;
+            }
             state
                 .pull_request
                 .clone()
@@ -1827,14 +1845,27 @@ impl PullRequests for FakeGithub {
         _owner: &MacroUserIdStr<'static>,
         _repository: &CodeRepository,
         sha: &str,
-        _details: bool,
+        details: bool,
     ) -> Result<Vec<FinishedJob>, FakeGithubError> {
-        let mut state = self.state();
-        state.finished_reads.push(sha.to_string());
-        if state.finished_fails {
-            return Err(FakeGithubError::Down);
+        let (delay, read) = {
+            let mut state = self.state();
+            state.finished_reads.push(sha.to_string());
+            state.finished_details.push(details);
+            let read = if state.finished_fails {
+                Err(FakeGithubError::Down)
+            } else {
+                Ok(state
+                    .finished_on
+                    .get(sha)
+                    .cloned()
+                    .unwrap_or_else(|| state.finished.clone()))
+            };
+            (state.finished_delay, read)
+        };
+        if let Some(delay) = delay {
+            tokio::time::sleep(delay).await;
         }
-        Ok(state.finished.clone())
+        read
     }
 
     async fn branch_checks(

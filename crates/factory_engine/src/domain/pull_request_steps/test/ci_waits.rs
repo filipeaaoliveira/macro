@@ -7,6 +7,7 @@ use factory_records::domain::quality::{CiJob, CiJobResult, CiVerdict};
 use super::{input, outcome, steps};
 use crate::domain::fakes::{FakeGithub, FakeRepo, ci};
 use crate::domain::models::{CheckState, FinishedJob};
+use crate::domain::pull_request_steps::CI_RECORD_BOUND;
 
 fn finished(name: &str, state: CheckState, failed_step: Option<&str>) -> FinishedJob {
     FinishedJob {
@@ -142,3 +143,182 @@ async fn keeping_a_wait_never_holds_the_run_up() {
     assert!(refusing.ci_waits.lock().expect("waits").is_empty());
 }
 
+const REPLACED: &str = "2222222222222222222222222222222222222222";
+
+fn cancelled_job(name: &str) -> CiJob {
+    CiJob {
+        name: name.to_string(),
+        result: CiJobResult::Cancelled,
+        failed_step: None,
+        failure: None,
+        replaced: true,
+    }
+}
+
+/// A GitHub that answers slowly holds the verdict up no longer than the
+/// keeping's bound: the wait is kept without its jobs, and the Step routes
+/// the verdict it read.
+#[tokio::test(start_paused = true)]
+async fn a_slow_github_never_holds_the_verdict_past_the_bound() {
+    let github = FakeGithub::with_open_pull_request(ci(Some("failure")));
+    github.state().finished = vec![finished("test", failed("failure"), Some("Run tests"))];
+    github.state().finished_delay = Some(std::time::Duration::from_secs(10 * 60));
+    let repo = FakeRepo::default();
+    let started = tokio::time::Instant::now();
+
+    let report = steps(&github, &repo)
+        .ci(input(RunId::generate()))
+        .await
+        .expect("ci");
+
+    assert_eq!(outcome(&report), "red");
+    assert!(
+        started.elapsed() <= CI_RECORD_BOUND,
+        "the verdict waited {:?}",
+        started.elapsed()
+    );
+    let waits = repo.ci_waits.lock().expect("waits").clone();
+    assert_eq!(waits.len(), 1);
+    assert_eq!(waits[0].verdict, CiVerdict::Red);
+    assert!(waits[0].jobs.is_empty());
+}
+
+/// A wait that ends near its deadline reads its jobs without their steps
+/// and annotations; one that ends early reads them.
+#[tokio::test(start_paused = true)]
+async fn a_wait_near_its_deadline_reads_no_details() {
+    let late = FakeGithub::with_open_pull_request(ci(None));
+    // Pending on every read but the last before the deadline.
+    let mut checks: std::collections::VecDeque<_> = (0..75).map(|_| ci(None)).collect();
+    checks.push_back(ci(Some("failure")));
+    late.state().checks = checks;
+    let early = FakeGithub::with_open_pull_request(ci(Some("failure")));
+    let repo = FakeRepo::default();
+
+    let late_report = steps(&late, &repo)
+        .ci(input(RunId::generate()))
+        .await
+        .expect("ci");
+    steps(&early, &repo)
+        .ci(input(RunId::generate()))
+        .await
+        .expect("ci");
+
+    assert_eq!(outcome(&late_report), "red");
+    assert_eq!(late.state().finished_details, vec![false]);
+    assert_eq!(early.state().finished_details, vec![true]);
+}
+
+/// A push during the wait replaces the head: the runs it cancelled on the
+/// head it replaced are kept, marked replaced, beside the new head's jobs;
+/// that head's runs that finished otherwise are not.
+#[tokio::test(start_paused = true)]
+async fn runs_a_push_during_the_wait_cancelled_are_kept() {
+    let github = FakeGithub::with_open_pull_request(ci(None));
+    github.state().checks = [ci(None), ci(Some("failure"))].into();
+    github.state().heads = [REPLACED.to_string(), FakeGithub::HEAD.to_string()].into();
+    github.state().finished_on = [
+        (
+            REPLACED.to_string(),
+            vec![
+                finished("test", failed("cancelled"), None),
+                finished("lint", CheckState::Passed, None),
+            ],
+        ),
+        (
+            FakeGithub::HEAD.to_string(),
+            vec![finished("test", failed("failure"), Some("Run tests"))],
+        ),
+    ]
+    .into();
+    let repo = FakeRepo::default();
+
+    let report = steps(&github, &repo)
+        .ci(input(RunId::generate()))
+        .await
+        .expect("ci");
+
+    assert_eq!(outcome(&report), "red");
+    let waits = repo.ci_waits.lock().expect("waits").clone();
+    assert_eq!(waits[0].head_sha, FakeGithub::HEAD);
+    assert_eq!(
+        waits[0].jobs,
+        vec![
+            CiJob {
+                name: "test".to_string(),
+                result: CiJobResult::Failed,
+                failed_step: Some("Run tests".to_string()),
+                failure: None,
+                replaced: false,
+            },
+            cancelled_job("test"),
+        ]
+    );
+    // The replaced head is read once, without details.
+    assert_eq!(
+        github.state().finished_reads,
+        vec![FakeGithub::HEAD.to_string(), REPLACED.to_string()]
+    );
+    assert_eq!(github.state().finished_details, vec![true, false]);
+}
+
+/// A push between two waits, as a fix's, replaces the head the last wait
+/// read: the runs it cancelled there are kept with the next wait.
+#[tokio::test(start_paused = true)]
+async fn runs_a_push_since_the_last_wait_cancelled_are_kept() {
+    let github = FakeGithub::with_open_pull_request(ci(Some("success")));
+    github.state().finished_on = [(
+        REPLACED.to_string(),
+        vec![
+            finished("e2e", failed("cancelled"), None),
+            finished("test", failed("failure"), Some("Run tests")),
+        ],
+    )]
+    .into();
+    let repo = FakeRepo::default();
+    let run_id = RunId::generate();
+    repo.ci_waits
+        .lock()
+        .expect("waits")
+        .push(factory_records::domain::quality::CiWait {
+            key: StepKey { run_id, seq: 3 },
+            head_sha: REPLACED.to_string(),
+            verdict: CiVerdict::Red,
+            jobs: Vec::new(),
+        });
+
+    let report = steps(&github, &repo).ci(input(run_id)).await.expect("ci");
+
+    assert_eq!(outcome(&report), "green");
+    let waits = repo.ci_waits.lock().expect("waits").clone();
+    let kept = waits
+        .iter()
+        .find(|wait| wait.key.seq == 5)
+        .expect("this wait");
+    assert_eq!(kept.verdict, CiVerdict::Green);
+    assert!(kept.jobs.contains(&cancelled_job("e2e")));
+    assert!(
+        !kept
+            .jobs
+            .iter()
+            .any(|job| job.replaced && job.name == "test")
+    );
+}
+
+/// A retry of the Step that reads green on the head an earlier attempt
+/// called red keeps the green: the verdict the Step routes.
+#[tokio::test(start_paused = true)]
+async fn a_retry_that_reads_green_keeps_green() {
+    let github = FakeGithub::with_open_pull_request(ci(Some("failure")));
+    let repo = FakeRepo::default();
+    let run_id = RunId::generate();
+
+    steps(&github, &repo).ci(input(run_id)).await.expect("ci");
+    github.state().checks = [ci(Some("success"))].into();
+    let retried = steps(&github, &repo).ci(input(run_id)).await.expect("ci");
+
+    assert_eq!(outcome(&retried), "green");
+    let waits = repo.ci_waits.lock().expect("waits").clone();
+    assert_eq!(waits.len(), 1);
+    assert_eq!(waits[0].verdict, CiVerdict::Green);
+}

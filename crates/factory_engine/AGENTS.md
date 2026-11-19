@@ -302,12 +302,21 @@ merged pull request and the autonomy rate. Each wait of `ci` that ends
 `green`, `red` or `timeout` keeps the jobs that finished on its head
 (`PullRequests::finished_jobs`, `RunRepository::record_ci_wait`): passed,
 failed, cancelled, or `setup` when the step that failed sets the job up
-(`SETUP_STEPS`) or its output tells of a failed download
-(`DOWNLOAD_ERRORS`). Keeping it is best effort and never fails the Step;
-a retry keeps the first wait. Insights then class a failed job as flaky
-when the same job and step failed on two or more pull requests of the
-period, else as its pull request's own, and list those that did, newest
-first. They measure a pull request's first wait to its first green one,
+(`SETUP_STEPS`) or GitHub Actions says, at the start of a line, that it
+could not download or resolve an action (`SETUP_ERRORS`); a bare `404` or
+network error is a test's own output. A failed job keeps the first test its
+check run annotated as failed, by file and name. Beside them the wait keeps,
+marked replaced, the runs cancelled on a head a newer push replaced: earlier
+heads of the wait, and the head of the Run's last wait (`last_ci_head`), at
+most two, read without details. Keeping it is best effort and never fails
+the Step: all of it is bounded to 25 s (`CI_RECORD_BOUND`, the jobs' reads
+to 20 s), at most six reads of failed jobs' steps and annotations, and none
+once the keeping would end past the wait's deadline. A retry that reads
+another head or verdict replaces the kept wait. Insights then class a
+failed job as flaky when the same test, or a step named for something
+narrower than the job's whole work (not "Run tests" or a bare command),
+failed in that job on two or more pull requests of the period, else as its
+pull request's own, and list those that did, newest first. They measure a pull request's first wait to its first green one,
 count red waits as CI fix rounds and review rounds that ended `changes` as
 review fix rounds, count rounds per Run, the share clean after the first
 round, Blockers by reviewer Role and by Agent, repeated Blockers (the same
