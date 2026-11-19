@@ -9,22 +9,27 @@
 -- take on it is brief. Give up rather than queue behind a long transaction.
 SET LOCAL lock_timeout = '5s';
 
--- A Run in the queue of the base branch it merges to. entered_at is when it
--- first reached its merge, and keeps its place; left_at is when it last left
--- the merge (to update its branch, or asked again), and is cleared when it
--- comes back. A Run that merged leaves the queue; one that ended is passed
--- over. Times are the database's.
+-- A Run in the queue of the base branch it merges to. A base is its
+-- repository's URL lower-cased, trimmed and without a `.git` ending, as
+-- GitHub names one repository whatever the case, and its branch. place is
+-- a serial taken as the Run first reached its merge, and keeps its place,
+-- so two that reached it in the same instant keep the order they entered
+-- in; entered_at is when that was. left_at is when it last left the merge
+-- (to update its branch, or asked again), and is cleared when it comes
+-- back. A Run that merged or ended leaves the queue. Times are the
+-- database's.
 CREATE TABLE factory_merge_queue (
     run_id uuid PRIMARY KEY REFERENCES factory_run (id) ON DELETE CASCADE,
     repo_url text NOT NULL CHECK (repo_url ~ '^https://github\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$'),
     base_branch text NOT NULL CHECK (octet_length(base_branch) BETWEEN 1 AND 255),
+    place bigint GENERATED ALWAYS AS IDENTITY,
     entered_at timestamptz NOT NULL DEFAULT now(),
     left_at timestamptz
 );
 
 -- A base's queue is read in order.
 CREATE INDEX factory_merge_queue_base_idx
-    ON factory_merge_queue (repo_url, base_branch, entered_at, run_id);
+    ON factory_merge_queue (repo_url, base_branch, place);
 
 -- An update Step's merge of its base into the Run's branch: the base's head
 -- it merges, the branch's head it started from, whether GitHub could merge
@@ -41,3 +46,4 @@ CREATE TABLE factory_branch_update (
     PRIMARY KEY (run_id, seq),
     CONSTRAINT factory_branch_update_head CHECK (NOT (conflict AND updated_head IS NOT NULL))
 );
+
