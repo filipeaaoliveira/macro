@@ -6,17 +6,100 @@ default branch when a Run starts, and the Run keeps the commit it read. A
 change to them reaches new Runs once it is merged; a Run already going keeps
 the Definition it started with.
 
-## Start from this template
+## Customize the template
 
-1. Copy this folder into a new repository, at its root.
-2. In `agents.json`, replace each `bot` with the id of a Macro agent your
-   team's members may use, and set its `model` and `instructions` if you want.
-3. Protect the default branch: require a pull request and the `definition`
-   check before a merge. Nothing else stops a push from changing the rules.
-4. Check the Definition (below), then merge it.
-5. In Macro, an admin of the team sets the repository in the factory's team
-   settings (Factory Definition). Every member who starts Runs must be able
-   to read the repository with the GitHub account they linked to Macro.
+Every value a team must or may change, file by file. "Left as is" says what
+happens when you do not change it.
+
+Outside the files, all must be done:
+
+- The repository: copy this folder to the root of a new GitHub repository.
+- Branch protection: require a pull request on the default branch, and a
+  status check that runs `factory_definition_check .`. The factory reports
+  no check to GitHub, so add a CI job that runs it. Left as is, a push
+  changes the team's rules unreviewed, and the Factory definition setting
+  says so.
+- The validator: `factory_definition_check` on the `PATH` of the CI runner
+  and of every machine a Run's agent works on (Check the Definition, below).
+  Left as is, the `definition` check fails, and a Run on this repository
+  never gets past its checks.
+- The team setting: an admin of the team names the repository in team
+  settings, Factory definition. Left as is, the team's Runs take Macro's
+  built-in Flows and Agents and the team's own settings.
+- Linked GitHub accounts: each member who starts Runs links GitHub in
+  Settings, Connected. That account must read this repository, and reach
+  and push to each repository a `code` Run works on. Left as is, their Runs
+  do not start, and New run says why.
+
+`agents.json`:
+
+- `agents.primary.bot` and `agents.backup.bot` (must): the id of a Macro
+  agent each member who starts Runs may use. The zero ids name no agent,
+  and the check does not refuse them: replace them yourself.
+- `model` (may): left out, the agent's own default model.
+- `instructions` (may): what every session of the Agent is told before the
+  Step's prompt. Left as is, `primary` is told to work in small commits.
+- `roles` (may): the Agents of each Role, in order. A Step works with the
+  first; the next takes over only when Macro refuses the first for lack of
+  quota. Keep `planner`, `writer`, `reviewer` and `fixer` filled: a
+  self-improvement Run needs them. A review panel's Role and `verifier`,
+  when not listed, take `reviewer`'s Agents. Left as is, `primary` plans,
+  writes and fixes, and `backup` reviews and verifies.
+- `standing` (may): the Standing Roles (below). Left out, any of your
+  agents may start, cancel and link Runs, and answer plan and Blockers
+  Gates where `rules.json` lets it.
+
+`factory.json`:
+
+- `version` (keep): 1, the only format this factory reads.
+- `description` (may): what the Definition is for.
+- `flows` (may): the Flows members can start. Remove one you do not use,
+  with its file. No Flow may be named `benchmark` or `improve`. Left as is,
+  `code`, `plan` and `reply`.
+
+`flows/{name}.json` (may):
+
+- `max_visits`: how many times a Run comes back to an entry before it is
+  handed to you. Left as is, 3 for `plan`, `review`, `accept`, `ci-fix`
+  and `merge-gate`.
+- A Gate's `question`: the words the owner reads.
+- Keep the merge Gate on the `ready_to_merge` entry: the check refuses a
+  Flow that merges another way.
+
+`rules.json` (may; left out whole, the factory's defaults apply):
+
+- `standingRules.plan`, `blockers` and `merge`: the three must all be there
+  when `standingRules` is. Left as is, a person approves each plan and each
+  merge, and the factory sends Blockers to be fixed, for at most two rounds
+  in a row.
+- `ownerGates` and `taskThread`: left as is, both on (The rules this
+  template sets, below).
+- `quietGates`: left out, every Gate no rule or stand-in answers notifies
+  the Run's owner.
+- `queueLimit`: from 1 to 1000, how many of a person's Runs may wait on
+  them before no new Run of theirs starts. Left out, no limit.
+- `standIn`: `{"plan": true, "blockers": true}` lets a small model answer
+  those Gates as the owner would. Left out, it answers none.
+- `orchestrator`: the same two kinds, which the owner's agent in Macro chat
+  may approve for them. Left out, it approves none; it may always send work
+  back.
+- `controlFiles`: the Control File patterns. A list replaces the factory's
+  default whole, holds at most 195 patterns, and an empty list checks no
+  file. Left as is, the factory's default and this Definition's own files.
+
+`scorers.json` (may):
+
+- `samplePercent`: the share of finished `code` Runs the
+  `does-what-was-asked` Scorer judges. Left at 0, it judges none, and only
+  Runs a person marks flawed count as failures for self-improvement.
+- `experiments` and `benchmarks`: left empty, the team has none.
+- `selfImprovement`: left out, on, starting a Run at 25 pending failures or
+  when the oldest is 7 days old.
+
+`.macro/checks.json` (keep): the `definition` check every Run on this
+repository runs. It needs the validator on the `PATH`, as above.
+
+## Use the Definition
 
 While the team names a Definition, it is the only source of the team's
 Flows, Agents and rules. A Definition that does not read, or a repository a
