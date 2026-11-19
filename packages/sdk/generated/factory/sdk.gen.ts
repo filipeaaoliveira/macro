@@ -91,7 +91,9 @@ export class Sdk extends HeyApiClient {
      * scheduler signed for the routine (403 for any other caller). It starts
      * a Run as the Automation's creator, once per routine run, unless the
      * Automation is switched off, the queue is full or a Run already runs on
-     * the task.
+     * the task. A routine run for an agent, or in an agent session, starts it
+     * as that agent: under a Definition with Standing Roles its bot must fill
+     * one that allows `start`, or the firing is skipped as `refused`.
      */
     public fireFactoryAutomation<ThrowOnError extends boolean = false>(options: Options<FireFactoryAutomationData, ThrowOnError>): RequestResult<FireFactoryAutomationResponses, FireFactoryAutomationErrors, ThrowOnError> {
         return (options.client ?? this.client).post<FireFactoryAutomationResponses, FireFactoryAutomationErrors, ThrowOnError>({
@@ -159,7 +161,10 @@ export class Sdk extends HeyApiClient {
      * of the caller's that still runs, or more running trials than the caller
      * may have, refuse it (409). A trial whose Run is refused stops the suite:
      * the trials before it go on, and `refused` names it; when none started,
-     * the error is returned and nothing is kept.
+     * the error is returned and nothing is kept. An agent acting for the
+     * caller, under a Definition with Standing Roles, must fill one that
+     * allows `start` (403 `notInStandingRole` otherwise, before anything is
+     * kept); each trial keeps it as its start.
      */
     public startFactoryBenchmarkSuite<ThrowOnError extends boolean = false>(options: Options<StartFactoryBenchmarkSuiteData, ThrowOnError>): RequestResult<StartFactoryBenchmarkSuiteResponses, StartFactoryBenchmarkSuiteErrors, ThrowOnError> {
         return (options.client ?? this.client).post<StartFactoryBenchmarkSuiteResponses, StartFactoryBenchmarkSuiteErrors, ThrowOnError>({

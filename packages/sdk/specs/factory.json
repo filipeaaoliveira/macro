@@ -128,7 +128,7 @@
     "/automations/fire": {
       "post": {
         "tags": ["factory"],
-        "summary": "Fire the Automation whose routine this run is: only the code step of a\nrun of an Automation's routine calls it, with the credential the\nscheduler signed for the routine (403 for any other caller). It starts\na Run as the Automation's creator, once per routine run, unless the\nAutomation is switched off, the queue is full or a Run already runs on\nthe task.",
+        "summary": "Fire the Automation whose routine this run is: only the code step of a\nrun of an Automation's routine calls it, with the credential the\nscheduler signed for the routine (403 for any other caller). It starts\na Run as the Automation's creator, once per routine run, unless the\nAutomation is switched off, the queue is full or a Run already runs on\nthe task. A routine run for an agent, or in an agent session, starts it\nas that agent: under a Definition with Standing Roles its bot must fill\none that allows `start`, or the firing is skipped as `refused`.",
         "operationId": "fire_factory_automation",
         "requestBody": {
           "content": {
@@ -499,7 +499,7 @@
     "/benchmarks/{benchmark}/suites": {
       "post": {
         "tags": ["factory"],
-        "summary": "Start a suite of a Benchmark: one trial Run, owned by the caller, of\neach of its frozen tasks, on the configuration the body gives, each from\nthe commit its task pins or the default branch's head as the suite\nstarts. Each trial keeps a score and the tokens its agents used once its\nRun ends, and its branch is then deleted. A suite of the same Benchmark\nof the caller's that still runs, or more running trials than the caller\nmay have, refuse it (409). A trial whose Run is refused stops the suite:\nthe trials before it go on, and `refused` names it; when none started,\nthe error is returned and nothing is kept.",
+        "summary": "Start a suite of a Benchmark: one trial Run, owned by the caller, of\neach of its frozen tasks, on the configuration the body gives, each from\nthe commit its task pins or the default branch's head as the suite\nstarts. Each trial keeps a score and the tokens its agents used once its\nRun ends, and its branch is then deleted. A suite of the same Benchmark\nof the caller's that still runs, or more running trials than the caller\nmay have, refuse it (409). A trial whose Run is refused stops the suite:\nthe trials before it go on, and `refused` names it; when none started,\nthe error is returned and nothing is kept. An agent acting for the\ncaller, under a Definition with Standing Roles, must fill one that\nallows `start` (403 `notInStandingRole` otherwise, before anything is\nkept); each trial keeps it as its start.",
         "operationId": "start_factory_benchmark_suite",
         "parameters": [
           {

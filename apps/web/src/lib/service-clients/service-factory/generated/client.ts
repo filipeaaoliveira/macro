@@ -195,7 +195,9 @@ run of an Automation's routine calls it, with the credential the
 scheduler signed for the routine (403 for any other caller). It starts
 a Run as the Automation's creator, once per routine run, unless the
 Automation is switched off, the queue is full or a Run already runs on
-the task.
+the task. A routine run for an agent, or in an agent session, starts it
+as that agent: under a Definition with Standing Roles its bot must fill
+one that allows `start`, or the firing is skipped as `refused`.
  */
 export type fireFactoryAutomationResponse200 = {
   data: FiringResult;
@@ -544,7 +546,10 @@ Run ends, and its branch is then deleted. A suite of the same Benchmark
 of the caller's that still runs, or more running trials than the caller
 may have, refuse it (409). A trial whose Run is refused stops the suite:
 the trials before it go on, and `refused` names it; when none started,
-the error is returned and nothing is kept.
+the error is returned and nothing is kept. An agent acting for the
+caller, under a Definition with Standing Roles, must fill one that
+allows `start` (403 `notInStandingRole` otherwise, before anything is
+kept); each trial keeps it as its start.
  */
 export type startFactoryBenchmarkSuiteResponse201 = {
   data: SuiteStarted;
