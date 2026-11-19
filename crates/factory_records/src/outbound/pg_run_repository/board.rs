@@ -46,6 +46,9 @@ struct BoardRunRow {
     flawed_by_user_id: Option<String>,
     flawed_by_scorer: Option<String>,
     flaw_reason: Option<String>,
+    token_budget: Option<i64>,
+    token_budget_stop: Option<String>,
+    token_budget_used: Option<i64>,
     task_name: Option<String>,
     task_live: bool,
     state: String,
@@ -90,6 +93,9 @@ impl TryFrom<BoardRunRow> for BoardRun {
             flawed_by_user_id: row.flawed_by_user_id,
             flawed_by_scorer: row.flawed_by_scorer,
             flaw_reason: row.flaw_reason,
+            token_budget: row.token_budget,
+            token_budget_stop: row.token_budget_stop,
+            token_budget_used: row.token_budget_used,
         })?;
         Ok(BoardRun {
             run,
@@ -165,6 +171,8 @@ impl RunBoardRepository for PgRunRepository {
                 r.outcome AS "outcome?", r.ended_at AS "ended_at?",
                 r.flawed_at AS "flawed_at?", r.flawed_by_user_id AS "flawed_by_user_id?",
                 r.flawed_by_scorer AS "flawed_by_scorer?", r.flaw_reason AS "flaw_reason?",
+                r.token_budget AS "token_budget?", r.token_budget_stop AS "token_budget_stop?",
+                r.token_budget_used AS "token_budget_used?",
                 r.task_name AS "task_name?", r.task_live AS "task_live!",
                 r.state AS "state!"
             FROM (
@@ -281,6 +289,8 @@ impl RunBoardRepository for PgRunRepository {
                 r.outcome AS "outcome?", r.ended_at AS "ended_at?",
                 r.flawed_at AS "flawed_at?", r.flawed_by_user_id AS "flawed_by_user_id?",
                 r.flawed_by_scorer AS "flawed_by_scorer?", r.flaw_reason AS "flaw_reason?",
+                r.token_budget AS "token_budget?", r.token_budget_stop AS "token_budget_stop?",
+                r.token_budget_used AS "token_budget_used?",
                 r.task_name AS "task_name?", r.task_live AS "task_live!",
                 r.state AS "state!"
             FROM (
@@ -416,6 +426,8 @@ impl RunBoardRepository for PgRunRepository {
                 r.outcome AS "outcome?", r.ended_at AS "ended_at?",
                 r.flawed_at AS "flawed_at?", r.flawed_by_user_id AS "flawed_by_user_id?",
                 r.flawed_by_scorer AS "flawed_by_scorer?", r.flaw_reason AS "flaw_reason?",
+                r.token_budget AS "token_budget?", r.token_budget_stop AS "token_budget_stop?",
+                r.token_budget_used AS "token_budget_used?",
                 CASE WHEN task.live THEN d.name END AS "task_name?",
                 task.live AS "task_live!",
                 place.state AS "state!"

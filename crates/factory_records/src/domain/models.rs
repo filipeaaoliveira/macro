@@ -427,6 +427,24 @@ pub struct Run {
     pub definition: Option<RunDefinition>,
     /// How and when it ended; none while it runs.
     pub end: Option<RunEnd>,
+    /// Why its token budget ended it, when it did; none for a Run it did
+    /// not end, or that has none.
+    pub budget_stop: Option<BudgetStop>,
+}
+
+/// Why a Run's token budget ended it, before an agent Step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(tag = "reason", rename_all = "camelCase")]
+pub enum BudgetStop {
+    /// Its agent Steps had used its budget or more.
+    #[serde(rename_all = "camelCase")]
+    Spent {
+        /// The tokens they had used, as Insights counts them.
+        used: u64,
+    },
+    /// The usage log could not be read for as many agent Steps in a row
+    /// as the factory lets a Run go on unchecked.
+    Unread,
 }
 
 /// The Factory Definition a Run started under: the repository its owner's

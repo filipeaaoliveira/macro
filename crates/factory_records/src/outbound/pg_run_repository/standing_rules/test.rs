@@ -6,7 +6,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use super::super::test::{insert, julia, key, outcome};
-use crate::domain::models::{NewRun, RunId, RunInsert};
+use crate::domain::models::{BudgetStop, NewRun, RunId, RunInsert};
 use crate::domain::ports::RunRepository;
 use crate::domain::standing_rules::{
     OrchestratorDefinition, ProjectRules, ProjectRulesSet, RulesSource, RunRules, StandInKinds,
@@ -29,6 +29,7 @@ const PLAN_AND_MERGE: OrchestratorDefinition = OrchestratorDefinition {
     quiet_gates: false,
     task_thread: false,
     queue_limit: None,
+    token_budget: None,
     orchestrator: crate::domain::standing_rules::OrchestratorKinds {
         plan: false,
         blockers: false,
@@ -47,6 +48,7 @@ const OWNER_GATES_ON: OrchestratorDefinition = OrchestratorDefinition {
     quiet_gates: false,
     task_thread: false,
     queue_limit: None,
+    token_budget: None,
     orchestrator: crate::domain::standing_rules::OrchestratorKinds {
         plan: false,
         blockers: false,
@@ -65,6 +67,7 @@ const EVERY_SETTING: OrchestratorDefinition = OrchestratorDefinition {
     quiet_gates: true,
     task_thread: true,
     queue_limit: None,
+    token_budget: None,
     orchestrator: crate::domain::standing_rules::OrchestratorKinds {
         plan: true,
         blockers: true,
@@ -269,6 +272,7 @@ async fn the_queue_limit_is_kept_with_the_rules(pool: PgPool) {
     let (team, project) = (id(TEAM), id(PROJECT));
     let limited = OrchestratorDefinition {
         queue_limit: Some(3),
+        token_budget: None,
         ..PLAN_AND_MERGE
     };
 
@@ -564,4 +568,131 @@ async fn a_rule_answers_a_gate_once(pool: PgPool) {
     assert_eq!(person.answer, outcome("revise"));
     assert_eq!(person.rule, None);
     assert_eq!(person.user_id, Some(julia()));
+}
+
+/// Keep a new Run of Julia's with no task under `rules`.
+async fn insert_under(repo: &PgRunRepository, rules: RunRules) -> RunId {
+    let run_id = RunId::generate();
+    let RunInsert::Inserted(_) = repo
+        .insert_run(NewRun {
+            id: run_id,
+            flow: "code",
+            request: "Fix it",
+            user_id: &julia(),
+            task_id: None,
+            project_id: None,
+            repository: None,
+            created_in_person: true,
+            control_file_patterns: &[],
+            control_files_team_id: None,
+            standing_rules: rules,
+            automation: None,
+            definition: None,
+            kept_flow: None,
+        })
+        .await
+        .expect("insert")
+    else {
+        panic!("a run with no task is kept");
+    };
+    run_id
+}
+
+/// The token budget is kept with a team's and a Project's rules, and a Run
+/// keeps it with the rules it started with, whatever they say later.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "team", "project"))
+)]
+async fn the_token_budget_is_kept_with_the_rules_and_the_run(pool: PgPool) {
+    let repo = PgRunRepository::new(pool.clone());
+    let (team, project) = (id(TEAM), id(PROJECT));
+    let budgeted = OrchestratorDefinition {
+        token_budget: Some(2_000_000),
+        ..PLAN_AND_MERGE
+    };
+
+    repo.set_team_rules(team, Some(budgeted))
+        .await
+        .expect("set the team's");
+    assert_eq!(repo.team_rules(team).await.expect("read"), Some(budgeted));
+    repo.set_project_rules(team, project, Some(budgeted))
+        .await
+        .expect("set the project's");
+    assert_eq!(
+        repo.project_rules(team, project).await.expect("read"),
+        Some(budgeted)
+    );
+    assert_eq!(
+        repo.list_project_rules(team).await.expect("list")[0].definition,
+        budgeted
+    );
+
+    let run_id = insert_under(
+        &repo,
+        RunRules {
+            definition: budgeted,
+            source: RulesSource::Team,
+            project_id: None,
+        },
+    )
+    .await;
+
+    // Rules saved again without a budget set none, and the Run keeps its.
+    repo.set_team_rules(team, Some(PLAN_AND_MERGE))
+        .await
+        .expect("replace the team's");
+    assert_eq!(
+        repo.team_rules(team).await.expect("read"),
+        Some(PLAN_AND_MERGE)
+    );
+    let read = repo.get_run(run_id).await.expect("get").expect("kept");
+    let kept = read.standing_rules.expect("rules");
+    assert_eq!(kept.definition, budgeted);
+    assert_eq!(read.budget_stop, None);
+}
+
+/// A Run its budget ends keeps why, once: a retry keeps the first stop. A
+/// Run with no budget keeps none.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn a_budget_stop_is_kept_once_and_only_with_a_budget(pool: PgPool) {
+    let repo = PgRunRepository::new(pool.clone());
+    let budgeted = RunRules {
+        definition: OrchestratorDefinition {
+            token_budget: Some(50_000),
+            ..PLAN_AND_MERGE
+        },
+        source: RulesSource::Team,
+        project_id: None,
+    };
+    let spent = insert_under(&repo, budgeted).await;
+    let unread = insert_under(&repo, budgeted).await;
+    let unbudgeted = insert_under(&repo, RunRules::DEFAULT).await;
+
+    repo.record_budget_stop(spent, BudgetStop::Spent { used: 61_234 })
+        .await
+        .expect("record");
+    repo.record_budget_stop(spent, BudgetStop::Unread)
+        .await
+        .expect("record again");
+    repo.record_budget_stop(unread, BudgetStop::Unread)
+        .await
+        .expect("record");
+    repo.record_budget_stop(unbudgeted, BudgetStop::Spent { used: 1 })
+        .await
+        .expect("record without a budget");
+
+    let read = |id| {
+        let repo = repo.clone();
+        async move { repo.get_run(id).await.expect("get").expect("kept") }
+    };
+    assert_eq!(
+        read(spent).await.budget_stop,
+        Some(BudgetStop::Spent { used: 61_234 })
+    );
+    assert_eq!(read(unread).await.budget_stop, Some(BudgetStop::Unread));
+    assert_eq!(read(unbudgeted).await.budget_stop, None);
 }

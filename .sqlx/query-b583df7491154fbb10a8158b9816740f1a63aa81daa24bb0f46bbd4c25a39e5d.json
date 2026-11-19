@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                id, request, user_id, flow, created_at, task_id, project_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,\n                standing_rules, standing_rules_source, standing_rules_project_id,\n                automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,\n                pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason\n            FROM factory_run\n            WHERE id = $1\n            ",
+  "query": "\n            SELECT\n                id, request, user_id, flow, created_at, task_id, project_id, repo_url, base_branch, created_in_person,\n                control_file_patterns, control_files_team_id, tampered_files, named_control_files, control_files_unlisted,\n                standing_rules, standing_rules_source, standing_rules_project_id,\n                automation_id, automation_name, automation_trigger, definition_repo_url, definition_commit,\n                pull_request_url, outcome, ended_at, flawed_at, flawed_by_user_id, flawed_by_scorer, flaw_reason,\n                token_budget, token_budget_stop, token_budget_used\n            FROM factory_run r\n            WHERE r.user_id = $1\n                AND r.ended_at IS NULL\n                AND COALESCE(r.flow_asks, r.flow = ANY($2))\n                AND NOT EXISTS (SELECT 1 FROM factory_gate g WHERE g.run_id = r.id)\n            ORDER BY r.created_at DESC, r.id DESC\n            LIMIT $3\n            ",
   "describe": {
     "columns": [
       {
@@ -152,11 +152,28 @@
         "ordinal": 29,
         "name": "flaw_reason",
         "type_info": "Text"
+      },
+      {
+        "ordinal": 30,
+        "name": "token_budget",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 31,
+        "name": "token_budget_stop",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 32,
+        "name": "token_budget_used",
+        "type_info": "Int8"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Text",
+        "TextArray",
+        "Int8"
       ]
     },
     "nullable": [
@@ -189,8 +206,11 @@
       true,
       true,
       true,
+      true,
+      true,
+      true,
       true
     ]
   },
-  "hash": "0310f3a68a79db635cd3b52ee1e50644ca8a04de461540ba760f482463b34f1b"
+  "hash": "b583df7491154fbb10a8158b9816740f1a63aa81daa24bb0f46bbd4c25a39e5d"
 }

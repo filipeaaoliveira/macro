@@ -6,7 +6,7 @@ use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
 use crate::domain::models::{
-    CheckResult, CheckRound, CheckRoundOutcome, CheckRoundStart, ClaimedSession,
+    BudgetStop, CheckResult, CheckRound, CheckRoundOutcome, CheckRoundStart, ClaimedSession,
     ControlFileChanges, EntryId, GateAnswer, HandBack, HandedBack, NewRun, NewSteer, Outcome,
     PassedOver, QueueHold, Role, Run, RunFlow, RunId, RunInsert, RunOutcome, SessionStep,
     SteerRefusal, Steered, Step, StepKey, StepSession, StepSteering, StoppingSession, TaskLink,
@@ -524,6 +524,21 @@ pub trait RunRepository: Send + Sync + 'static {
         &self,
         id: RunId,
         outcome: RunOutcome,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// The agent sessions the Run `id`'s Steps worked in, each once, as
+    /// Insights reads them: a Step that went on from its agent's question
+    /// shares the asking Step's session.
+    fn step_sessions(&self, id: RunId)
+    -> impl Future<Output = Result<Vec<Uuid>, Self::Err>> + Send;
+
+    /// Keep why the Run `id`'s token budget ends it, before its end is
+    /// recorded. A Run that already has a budget stop keeps the first, so a
+    /// retry changes nothing; a Run with no budget keeps none.
+    fn record_budget_stop(
+        &self,
+        id: RunId,
+        stop: BudgetStop,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// Keep whether the cancel about to be sent to the Run `id` comes from

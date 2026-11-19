@@ -105,7 +105,9 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261119010000_factory_quiet_gates.sql`,
   `20261119020000_factory_self_improvement.sql`,
   `20261119020100_factory_improvement_failure_dismissed.sql`,
-  `20261119030000_factory_run_cancelled_in_person.sql`), `factory_step_steer`,
+  `20261119030000_factory_run_cancelled_in_person.sql`,
+  `20261119050000_factory_token_budget.sql`,
+  `20261119050100_factory_token_budget_validate.sql`), `factory_step_steer`,
   `factory_run_score`, `factory_run_arm`, `factory_benchmark_suite`,
   `factory_benchmark_trial`, `factory_benchmark_trial_score`,
   `factory_improvement` and `factory_improvement_failure`.
@@ -299,7 +301,19 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   to `MAX_QUEUE_LIMIT`, 1 to 1000, by
   `20261118160000_factory_queue_limit_minimum.sql`), null
   for no limit, and none on a team's row without Standing Rules; a Run
-  does not keep it, so a Run's rules read with none. The kinds the
+  does not keep it, so a Run's rules read with none. The definition's
+  token budget has a column of its own too (`token_budget`,
+  `20261119050000_factory_token_budget.sql`, from `MIN_TOKEN_BUDGET` to
+  `MAX_TOKEN_BUDGET`, 10,000 to 10,000,000,000, null for none, and none on
+  a team's row without Standing Rules), and, unlike the Queue limit, a Run
+  keeps it: `insert_run` writes the rules' budget to
+  `factory_run.token_budget`, which the Run's rules read back, so a change
+  to the definition later does not change it. `record_budget_stop` keeps
+  why the budget ended a Run (`token_budget_stop`: `spent` with
+  `token_budget_used`, or `unread`), only on a Run with a budget and only
+  the first time (`BudgetStop` on the Run). `step_sessions` reads the
+  agent sessions a Run's Steps worked in, each once, as Insights does. The
+  kinds the
   Orchestrator may approve are kept in the same arrays as the rules
   (`orchestrator_plan`, `orchestrator_blockers`), and on the Run.
 - `answer_gate` keeps the agent session that gave an answer for the owner

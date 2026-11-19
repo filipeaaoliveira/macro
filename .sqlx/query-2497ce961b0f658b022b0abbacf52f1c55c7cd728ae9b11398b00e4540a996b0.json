@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT standing_rules, queue_limit FROM factory_team_settings WHERE team_id = $1",
+  "query": "\n            SELECT standing_rules, queue_limit, token_budget FROM factory_project_rules\n            WHERE team_id = $1 AND project_id = $2\n            ",
   "describe": {
     "columns": [
       {
@@ -12,17 +12,24 @@
         "ordinal": 1,
         "name": "queue_limit",
         "type_info": "Int2"
+      },
+      {
+        "ordinal": 2,
+        "name": "token_budget",
+        "type_info": "Int8"
       }
     ],
     "parameters": {
       "Left": [
+        "Uuid",
         "Uuid"
       ]
     },
     "nullable": [
+      false,
       true,
       true
     ]
   },
-  "hash": "4d126f88120d2969fde69f2c719c382dbcbb2b753c2fc0784aed506fcc4eba0d"
+  "hash": "2497ce961b0f658b022b0abbacf52f1c55c7cd728ae9b11398b00e4540a996b0"
 }

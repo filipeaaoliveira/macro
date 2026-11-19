@@ -11,7 +11,8 @@
 //! how many places a person may hold in their Queue (Runs waiting on them
 //! at a Gate or a question, and Runs of a Flow with a Gate yet to reach
 //! one): a new Run of theirs starts only while they hold fewer places than
-//! the limit (`queue_limit`).
+//! the limit (`queue_limit`). Its token budget says how many tokens a Run's
+//! agent Steps may use before the Run ends `blocked` (`token_budget`).
 
 #[cfg(test)]
 mod test;
@@ -111,6 +112,13 @@ pub const MIN_QUEUE_LIMIT: u16 = 1;
 /// The highest Queue limit a definition may set.
 pub const MAX_QUEUE_LIMIT: u16 = 1000;
 
+/// The smallest token budget a definition may set: less would end a Run
+/// before its first agent Step did any work.
+pub const MIN_TOKEN_BUDGET: u64 = 10_000;
+
+/// The largest token budget a definition may set.
+pub const MAX_TOKEN_BUDGET: u64 = 10_000_000_000;
+
 /// A workspace's Orchestrator Definition: which kinds of Gate the factory
 /// decides on its own, whether the Gates it leaves go to the Run's owner,
 /// which the stand-in answers for the Run's owner when no rule does, and
@@ -166,6 +174,16 @@ pub struct OrchestratorDefinition {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(minimum = 1, maximum = 1000)]
     pub queue_limit: Option<u16>,
+    /// The token budget: the most tokens a Run's agent Steps may use, as
+    /// Insights counts them (input, output, and input read from or written
+    /// to the prompt cache). Before each agent Step, a Run that used as
+    /// many or more ends `blocked`. None, and a definition sent without it,
+    /// sets no budget. From [`MIN_TOKEN_BUDGET`] to [`MAX_TOKEN_BUDGET`].
+    /// A Run keeps it with its rules, so a change to the definition does
+    /// not change a Run under way.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(minimum = 10000, maximum = 10000000000_i64)]
+    pub token_budget: Option<u64>,
     /// The kinds of Gate the stand-in answers for the Run's owner, after
     /// the rules and before the person; off for every kind when left out.
     #[serde(default)]
@@ -232,6 +250,7 @@ impl OrchestratorDefinition {
         quiet_gates: false,
         task_thread: false,
         queue_limit: None,
+        token_budget: None,
         stand_in: StandInKinds {
             plan: false,
             blockers: false,
@@ -277,7 +296,8 @@ impl OrchestratorDefinition {
     /// (`stand_in_plan`, `stand_in_blockers`), then those the Orchestrator
     /// may approve (`orchestrator_plan`, `orchestrator_blockers`), then
     /// [`TASK_THREAD`] when its task thread section is on: what is stored of
-    /// it beside its Queue limit, which has a column of its own.
+    /// it beside its Queue limit and token budget, which have columns of
+    /// their own.
     pub fn kinds(self) -> Vec<String> {
         let ruled = [
             RuleGateKind::Plan,
@@ -314,7 +334,8 @@ impl OrchestratorDefinition {
     }
 
     /// The definition stored as `kinds` ([`Self::kinds`]), with no Queue
-    /// limit; none when one is not a name this code knows.
+    /// limit and no token budget; none when one is not a name this code
+    /// knows.
     pub fn from_kinds(kinds: &[String]) -> Option<Self> {
         let mut definition = Self::default();
         for kind in kinds {

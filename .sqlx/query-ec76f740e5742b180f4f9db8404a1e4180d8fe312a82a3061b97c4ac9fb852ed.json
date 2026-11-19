@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE factory_run\n            SET token_budget_stop = $2, token_budget_used = $3\n            WHERE id = $1 AND token_budget IS NOT NULL AND token_budget_stop IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ec76f740e5742b180f4f9db8404a1e4180d8fe312a82a3061b97c4ac9fb852ed"
+}
