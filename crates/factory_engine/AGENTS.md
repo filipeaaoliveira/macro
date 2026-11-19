@@ -2340,8 +2340,10 @@ Definition.
   provider's usage limit) is out of quota but not a refusal to start: once
   the turn called a tool, no other Agent takes the Step. A worker older
   than the routine status `usage_limit` does not read it from a newer
-  `agent_harness_service`: its Step fails once five reads in a row have
-  not, as a failed turn failed it before, so either may deploy first.
+  `agent_harness_service`: the read fails as a transient error, so
+  Temporal retries the attempt until its retries or its time run out, and
+  the Step fails as a failed turn failed it before, only later. Either may
+  deploy first.
 - Deploy `agent_harness_service` with an SDK that has
   `macro.factory.fireAutomation` before a factory that makes Automations:
   saving the routine type-checks its code step against the harness's SDK.

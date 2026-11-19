@@ -247,9 +247,10 @@ impl Retryable for SessionAgentError {
 
 impl AgentFailure for SessionAgentError {
     /// A refusal for lack of quota, and a turn the usage limit of the
-    /// runtime's own provider account ended (a Codex or Claude Code
-    /// subscription signed in on the machine): either way the Agent cannot
-    /// do the work now, which is not the work's failure.
+    /// runtime's own provider account ended (a Codex subscription signed in
+    /// on the machine; Claude Code's adapter does not report its limit
+    /// yet): either way the Agent cannot do the work now, which is not the
+    /// work's failure.
     fn out_of_quota(&self) -> bool {
         matches!(
             self,
