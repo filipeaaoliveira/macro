@@ -942,7 +942,9 @@ fn answerer(
 /// the signature names it, so it cannot be forged. A program signed only
 /// for the person (their own API key or token, a routine running as them
 /// with no agent) is the person acting, which Standing Roles do not
-/// govern.
+/// govern. So is a public MCP credential in no session: Macro signs the
+/// person's own MCP client or API key, directly or through code mode, for
+/// the Macro bot only to label its posts (`signed_for_the_person`).
 fn acting_agent(
     authorization: &UserOrInternalAuthorization,
     headers: &HeaderMap,
@@ -952,7 +954,21 @@ fn acting_agent(
     }
     agent_correlation::context::current_session()
         .map(ActingAgent::Session)
-        .or_else(|| authorization.user.agent_id.map(ActingAgent::Bot))
+        .or_else(|| {
+            authorization
+                .user
+                .agent_id
+                .filter(|_| !signed_for_the_person(&authorization.user))
+                .map(ActingAgent::Bot)
+        })
+}
+
+/// Whether a credential in no session names the Macro bot only as the
+/// label of the person's own client: public MCP signs the person's MCP
+/// client or API key for `MACRO_AI_BOT_ID`, with no routine, where a
+/// self-hosted agent's call is signed for its own bot.
+fn signed_for_the_person(user: &macro_authorization::MacroUserAuthentication) -> bool {
+    user.agent_id == Some(bot_id::MACRO_AI_BOT_ID) && user.routine_id.is_none()
 }
 
 /// Whether the caller is the person in their own signed-in session: not an

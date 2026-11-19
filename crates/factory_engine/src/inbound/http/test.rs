@@ -54,8 +54,10 @@ const ROBOT: &str = "macro|robot@example.com";
 /// session, `robot`: an agent account's session, `sdk`: Alice's Macro API
 /// token, `agent`: that token carrying an agent's attribution, as code mode
 /// mints, `routine` and `routine-session`: a routine's token, and one that
-/// reads as a session yet signs a routine, and `routine-agent`: a routine's
-/// token signed for an agent.
+/// reads as a session yet signs a routine, `routine-agent`: a routine's
+/// token signed for an agent, and `mcp-client` and `mcp-key`: what public
+/// MCP signs for Alice's own MCP client and API key, the Macro bot as
+/// their label, with the client's name and without.
 #[derive(Clone, Copy)]
 struct Tokens;
 
@@ -66,6 +68,7 @@ impl JwtValidator for Tokens {
     ) -> Result<ValidatedCredential, Report<MacroAuthorizationError>> {
         let agent = BotId::new_from_uuid(Uuid::from_u128(0xB07A));
         let routine = Uuid::from_u128(0x2007);
+        let macro_bot = Some(bot_id::MACRO_AI_BOT_ID);
         let (user_id, origin, agent_id, routine_id) = match jwt {
             "alice" => (ALICE, CredentialOrigin::Session, None, None),
             "eve" => (EVE, CredentialOrigin::Session, None, None),
@@ -80,13 +83,14 @@ impl JwtValidator for Tokens {
                 Some(agent),
                 Some(routine),
             ),
+            "mcp-client" | "mcp-key" => (ALICE, CredentialOrigin::MacroApiJwt, macro_bot, None),
             _ => return Err(Report::new(MacroAuthorizationError::InvalidCredentials)),
         };
         Ok(ValidatedCredential {
             origin,
             identity: ValidatedIdentity {
                 agent_id,
-                agent_via: None,
+                agent_via: (jwt == "mcp-client").then(|| "Some client".to_string()),
                 routine_id,
                 user_id: user_id.to_string(),
                 fusion_user_id: format!("fusion-{jwt}"),

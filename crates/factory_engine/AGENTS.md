@@ -224,7 +224,11 @@ for a bot (`agent_id`: a self-hosted agent's code-mode call, a routine's run
 for an agent) acts as that bot, which the signature names. A program signed
 only for the person (their API key or token, a routine running as them with
 no agent) is the person acting, which the section does not govern; nor an
-internal caller. A Gate answer still takes an agent session. When the
+internal caller. Public MCP signs the person's own MCP client or API key,
+direct or through code mode, for the Macro bot (`MACRO_AI_BOT_ID`) only to
+label its posts, so such a credential in no session and no routine is the
+person too (`signed_for_the_person`); in an agent session it acts as that
+session. A Gate answer still takes an agent session. When the
 Definition the Run starts under, or the one it kept, has the section, the
 act is taken only when the bot is an Agent of a Standing Role that allows
 it; else 403 `notInStandingRole`, naming the act and the Standing Roles that

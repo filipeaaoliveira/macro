@@ -276,6 +276,62 @@ async fn sessionless_code_signed_for_a_bot_acts_as_that_bot() {
     );
 }
 
+/// Public MCP signs the person's own MCP client and API key for the Macro
+/// bot only to label their posts: code from either in no session, through
+/// MCP code mode or not, is the person acting and reaches the service as
+/// no agent. The same credential in an agent session acts as that session.
+#[tokio::test]
+async fn the_person_s_own_mcp_client_acts_as_the_person() {
+    let (router, service) = router(|| FactoryError::NotFound);
+    let run = factory_records::domain::models::RunId::generate();
+    let cancel_path = format!("/runs/{run}/cancel");
+    let session_id = Uuid::now_v7();
+    let mcp = |token: &'static str, code_mode: bool| {
+        let mut request = call(
+            "POST",
+            &cancel_path,
+            Caller::User(token),
+            serde_json::json!({}),
+        );
+        if code_mode {
+            request
+                .headers_mut()
+                .insert(CODE_EXECUTION_HEADER, "true".parse().expect("header"));
+        }
+        request
+    };
+
+    for request in [
+        mcp("mcp-client", true),
+        mcp("mcp-key", true),
+        mcp("mcp-client", false),
+        mcp("mcp-key", false),
+        call(
+            "POST",
+            "/runs",
+            Caller::User("mcp-client"),
+            serde_json::json!({ "flow": "reply", "request": "Say hello" }),
+        ),
+    ] {
+        let response = router.clone().oneshot(request).await.expect("response");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+    let in_a_session = in_session(&router, session_id, mcp("mcp-client", true)).await;
+    assert_eq!(in_a_session.status(), StatusCode::NOT_FOUND);
+
+    assert_eq!(
+        *service.acting.lock().expect("acting"),
+        [
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(ActingAgent::Session(session_id))
+        ]
+    );
+}
+
 /// An agent's question is the person's to answer: an agent session's
 /// answer is refused with a code it acts on, and the reason in words.
 #[tokio::test]
