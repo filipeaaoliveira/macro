@@ -125,6 +125,16 @@ pub struct CiWait {
     pub jobs: Vec<CiJob>,
 }
 
+/// The head the Run's last kept `ci` wait read, with the jobs it kept
+/// there: a job it kept finished before a newer push replaced the head.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LastCiWait {
+    /// The commit whose checks it read last.
+    pub head_sha: String,
+    /// The names of the jobs it kept on that commit, in order.
+    pub jobs: Vec<String>,
+}
+
 /// The Runs CI health and review quality read: those of an
 /// [`InsightsScope`], of one repository or of all of them.
 #[derive(Debug, Clone, PartialEq)]

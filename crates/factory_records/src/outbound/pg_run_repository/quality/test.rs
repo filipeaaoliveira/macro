@@ -8,7 +8,8 @@ use crate::domain::insights::InsightsScope;
 use crate::domain::models::{RunId, StepKey};
 use crate::domain::ports::RunRepository;
 use crate::domain::quality::{
-    CiJob, CiJobResult, CiVerdict, CiWait, QualityRecords, QualityScope, RunQualityRepository,
+    CiJob, CiJobResult, CiVerdict, CiWait, LastCiWait, QualityRecords, QualityScope,
+    RunQualityRepository,
 };
 use crate::domain::review_rounds::ReviewRoundOutcome;
 use crate::outbound::pg_run_repository::PgRunRepository;
@@ -293,20 +294,43 @@ async fn a_ci_wait_is_kept_with_its_jobs_and_a_retry_keeps_its_final_verdict(poo
     migrator = "MACRO_DB_MIGRATIONS",
     fixtures(path = "../fixtures", scripts("people", "quality"))
 )]
-async fn the_last_ci_head_is_the_latest_wait_before_a_step(pool: PgPool) {
+async fn the_last_ci_wait_is_the_latest_before_a_step_with_its_heads_jobs(pool: PgPool) {
     let repo = PgRunRepository::new(pool);
+    // A job of a head the wait replaced is not one of its head's.
+    repo.record_ci_wait(&CiWait {
+        key: StepKey {
+            run_id: run(SPACES),
+            seq: 2,
+        },
+        head_sha: "6666666666666666666666666666666666666666".to_string(),
+        verdict: CiVerdict::Red,
+        jobs: vec![
+            job("test", CiJobResult::Failed, None),
+            CiJob {
+                replaced: true,
+                ..job("e2e", CiJobResult::Cancelled, None)
+            },
+        ],
+    })
+    .await
+    .expect("record");
 
-    let before_second = repo.last_ci_head(run(DASHES), 7).await.expect("read");
-    let after_both = repo.last_ci_head(run(DASHES), 9).await.expect("read");
-    let before_any = repo.last_ci_head(run(DASHES), 6).await.expect("read");
+    let before_second = repo.last_ci_wait(run(DASHES), 7).await.expect("read");
+    let after_both = repo.last_ci_wait(run(DASHES), 9).await.expect("read");
+    let before_any = repo.last_ci_wait(run(DASHES), 6).await.expect("read");
+    let spaces = repo.last_ci_wait(run(SPACES), 5).await.expect("read");
 
     assert_eq!(
-        before_second.as_deref(),
-        Some("1111111111111111111111111111111111111111")
+        before_second,
+        Some(LastCiWait {
+            head_sha: "1111111111111111111111111111111111111111".to_string(),
+            jobs: vec!["build".to_string(), "test".to_string()],
+        })
     );
     assert_eq!(
-        after_both.as_deref(),
+        after_both.map(|wait| wait.head_sha).as_deref(),
         Some("2222222222222222222222222222222222222222")
     );
     assert_eq!(before_any, None);
+    assert_eq!(spaces.map(|wait| wait.jobs), Some(vec!["test".to_string()]));
 }

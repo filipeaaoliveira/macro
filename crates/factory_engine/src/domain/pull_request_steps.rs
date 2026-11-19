@@ -1018,8 +1018,8 @@ where
     /// The jobs a wait keeps: those that finished on the last of `heads`
     /// (none for a timeout, whose jobs had not finished), and those
     /// cancelled on the heads a newer push replaced: earlier heads of this
-    /// wait, and the head the Run's last wait read, the newest first, at
-    /// most [`REPLACED_HEADS_READ`].
+    /// wait, and the head the Run's last wait read, less the jobs that wait
+    /// kept there, the newest first, at most [`REPLACED_HEADS_READ`].
     async fn ci_wait_jobs(
         &self,
         input: &StepInput<'_>,
@@ -1047,25 +1047,35 @@ where
             }
         };
 
-        let mut replaced: Vec<&String> = earlier.iter().rev().collect();
         let last_wait = match self
             .repo
-            .last_ci_head(input.key.run_id, input.key.seq)
+            .last_ci_wait(input.key.run_id, input.key.seq)
             .await
         {
             Ok(last) => last,
             Err(error) => {
-                tracing::warn!(%error, "the run's last ci head could not be read");
+                tracing::warn!(%error, "the run's last ci wait could not be read");
                 None
             }
         };
+        // Each replaced head, with the jobs a wait already kept there: those
+        // finished, cancelled as a matrix's fail-fast does, before the push
+        // replaced it, so the push cancelled none of them.
+        let none: &[String] = &[];
+        let mut replaced: Vec<(&str, &[String])> = earlier
+            .iter()
+            .rev()
+            .map(|sha| (sha.as_str(), none))
+            .collect();
         if let Some(last) = &last_wait
-            && last != head
-            && !replaced.contains(&last)
+            && last.head_sha != *head
         {
-            replaced.push(last);
+            match replaced.iter_mut().find(|(sha, _)| *sha == last.head_sha) {
+                Some(seen) => seen.1 = &last.jobs,
+                None => replaced.push((&last.head_sha, &last.jobs)),
+            }
         }
-        for sha in replaced.into_iter().take(REPLACED_HEADS_READ) {
+        for (sha, kept_before) in replaced.into_iter().take(REPLACED_HEADS_READ) {
             match self
                 .github
                 .finished_jobs(input.owner, repository, sha, false)
@@ -1074,9 +1084,10 @@ where
                 Ok(finished) => {
                     for job in ci_jobs(&finished) {
                         let cancelled = job.result == CiJobResult::Cancelled;
-                        let kept = jobs
-                            .iter()
-                            .any(|other| other.replaced && other.name == job.name);
+                        let kept = kept_before.contains(&job.name)
+                            || jobs
+                                .iter()
+                                .any(|other| other.replaced && other.name == job.name);
                         if cancelled && !kept {
                             jobs.push(CiJob {
                                 replaced: true,

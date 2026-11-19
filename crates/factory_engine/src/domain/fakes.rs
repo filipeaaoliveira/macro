@@ -626,8 +626,12 @@ impl RunRepository for FakeRepo {
         Ok(())
     }
 
-    async fn last_ci_head(&self, run_id: RunId, before: u16) -> Result<Option<String>, FakeError> {
-        if self.fails("last_ci_head") {
+    async fn last_ci_wait(
+        &self,
+        run_id: RunId,
+        before: u16,
+    ) -> Result<Option<factory_records::domain::quality::LastCiWait>, FakeError> {
+        if self.fails("last_ci_wait") {
             return Err(FakeError);
         }
         Ok(self
@@ -637,7 +641,15 @@ impl RunRepository for FakeRepo {
             .iter()
             .filter(|kept| kept.key.run_id == run_id && kept.key.seq < before)
             .max_by_key(|kept| kept.key.seq)
-            .map(|kept| kept.head_sha.clone()))
+            .map(|kept| factory_records::domain::quality::LastCiWait {
+                head_sha: kept.head_sha.clone(),
+                jobs: kept
+                    .jobs
+                    .iter()
+                    .filter(|job| !job.replaced)
+                    .map(|job| job.name.clone())
+                    .collect(),
+            }))
     }
 
     async fn set_pull_request_url(&self, id: RunId, url: &str) -> Result<(), FakeError> {

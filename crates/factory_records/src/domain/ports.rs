@@ -437,12 +437,12 @@ pub trait RunRepository: Send + Sync + 'static {
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// The head the Run's last kept `ci` wait before the Step at `before`
-    /// read, if one was kept.
-    fn last_ci_head(
+    /// read, with the jobs it kept there, if one was kept.
+    fn last_ci_wait(
         &self,
         run_id: RunId,
         before: u16,
-    ) -> impl Future<Output = Result<Option<String>, Self::Err>> + Send;
+    ) -> impl Future<Output = Result<Option<crate::domain::quality::LastCiWait>, Self::Err>> + Send;
 
     /// Keep the Control Files the Run's branch changed, as last read,
     /// replacing what was kept before: none clears it. Keeping it again

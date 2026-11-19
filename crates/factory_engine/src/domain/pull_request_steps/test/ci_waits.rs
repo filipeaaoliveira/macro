@@ -322,3 +322,57 @@ async fn a_retry_that_reads_green_keeps_green() {
     assert_eq!(waits.len(), 1);
     assert_eq!(waits[0].verdict, CiVerdict::Green);
 }
+
+/// A job the last wait already kept on its head, as a sibling a matrix's
+/// fail-fast cancelled, finished before the push: the next wait does not
+/// keep it again as cancelled by that push.
+#[tokio::test(start_paused = true)]
+async fn runs_the_last_wait_kept_are_not_blamed_on_the_push() {
+    let github = FakeGithub::with_open_pull_request(ci(Some("success")));
+    github.state().finished_on = [(
+        REPLACED.to_string(),
+        vec![
+            finished("test (1)", failed("failure"), Some("Run tests")),
+            finished("test (2)", failed("cancelled"), None),
+            finished("e2e", failed("cancelled"), None),
+        ],
+    )]
+    .into();
+    let repo = FakeRepo::default();
+    let run_id = RunId::generate();
+    let kept_before = |name: &str, result| CiJob {
+        name: name.to_string(),
+        result,
+        failed_step: None,
+        failure: None,
+        replaced: false,
+    };
+    repo.ci_waits
+        .lock()
+        .expect("waits")
+        .push(factory_records::domain::quality::CiWait {
+            key: StepKey { run_id, seq: 3 },
+            head_sha: REPLACED.to_string(),
+            verdict: CiVerdict::Red,
+            jobs: vec![
+                kept_before("test (1)", CiJobResult::Failed),
+                kept_before("test (2)", CiJobResult::Cancelled),
+            ],
+        });
+
+    steps(&github, &repo).ci(input(run_id)).await.expect("ci");
+
+    let waits = repo.ci_waits.lock().expect("waits").clone();
+    let kept = waits
+        .iter()
+        .find(|wait| wait.key.seq == 5)
+        .expect("this wait");
+    let replaced: Vec<_> = kept
+        .jobs
+        .iter()
+        .filter(|job| job.replaced)
+        .map(|job| job.name.as_str())
+        .collect();
+    // Only the run still going when the last wait ended was the push's.
+    assert_eq!(replaced, vec!["e2e"]);
+}

@@ -16,8 +16,8 @@ use crate::domain::evaluation::BENCHMARK_FLOW;
 use crate::domain::insights::{RunSummary, TITLE_CHARS};
 use crate::domain::models::{RunId, RunOutcome};
 use crate::domain::quality::{
-    BlockerRecord, CiJob, CiJobResult, CiVerdict, CiWait, CiWaitRecord, QualityRecords, QualityRun,
-    QualityScope, ReviewRoundRecord, ReviewerRecord, RunQualityRepository,
+    BlockerRecord, CiJob, CiJobResult, CiVerdict, CiWait, CiWaitRecord, LastCiWait, QualityRecords,
+    QualityRun, QualityScope, ReviewRoundRecord, ReviewerRecord, RunQualityRepository,
 };
 use crate::domain::review_rounds::ReviewRoundOutcome;
 
@@ -93,25 +93,41 @@ pub(super) async fn record_ci_wait(pool: &PgPool, wait: &CiWait) -> Result<(), P
     Ok(())
 }
 
-/// The head of `run_id`'s last kept wait before the Step at `before`.
-pub(super) async fn last_ci_head(
+/// The head of `run_id`'s last kept wait before the Step at `before`, with
+/// the jobs it kept there (not those of heads it replaced).
+pub(super) async fn last_ci_wait(
     pool: &PgPool,
     run_id: RunId,
     before: u16,
-) -> Result<Option<String>, PgRunRepositoryErr> {
-    Ok(sqlx::query_scalar!(
+) -> Result<Option<LastCiWait>, PgRunRepositoryErr> {
+    let row = sqlx::query!(
         r#"
-        SELECT head_sha
-        FROM factory_ci_wait
-        WHERE run_id = $1 AND seq < $2
-        ORDER BY seq DESC
-        LIMIT 1
+        SELECT
+            w.head_sha,
+            coalesce(
+                array_agg(j.name ORDER BY j.name) FILTER (WHERE j.name IS NOT NULL),
+                '{}'
+            ) AS "jobs!"
+        FROM (
+            SELECT run_id, seq, head_sha
+            FROM factory_ci_wait
+            WHERE run_id = $1 AND seq < $2
+            ORDER BY seq DESC
+            LIMIT 1
+        ) w
+        LEFT JOIN factory_ci_job j
+            ON j.run_id = w.run_id AND j.seq = w.seq AND NOT j.replaced
+        GROUP BY w.head_sha
         "#,
         run_id.as_uuid(),
         i32::from(before),
     )
     .fetch_optional(pool)
-    .await?)
+    .await?;
+    Ok(row.map(|row| LastCiWait {
+        head_sha: row.head_sha,
+        jobs: row.jobs,
+    }))
 }
 
 struct QualityRunRow {
