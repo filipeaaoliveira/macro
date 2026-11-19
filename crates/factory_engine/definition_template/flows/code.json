@@ -390,7 +390,10 @@
 						"to": {
 							"kind": "entry",
 							"entry": "update"
-						}
+						},
+						"reset": [
+							"merge-gate"
+						]
 					}
 				],
 				"merged": [
@@ -492,7 +495,7 @@
 			"id": "update",
 			"step": "update",
 			"role": "writer",
-			"max_visits": 5,
+			"max_visits": 10,
 			"on_exhausted": [
 				{
 					"to": {

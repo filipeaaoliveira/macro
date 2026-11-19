@@ -859,7 +859,8 @@ the owner whether to merge; `merge` merges only that commit, naming it to
 GitHub, and a merged pull request reads as merged. A head that moved goes back
 to `ci`, and a person's `revise` goes to `fix` with the review's visits reset.
 The merge-gate entry runs at most three times, including visits that end
-`changed` without asking; then the Run ends for a person.
+`changed` without asking; then the Run ends for a person. `held` and
+`behind` start its visits over (below).
 
 A Run never merges a head its base moved past, and Runs merge into one
 base one after the other (`pull_request_steps.rs`, `built_in_steps/update.rs`,
@@ -913,8 +914,15 @@ its Flow does not route above `merge` would fall through to the merge):
   `retry` runs `update` again, which finds the branch holding its base
   through the person's commits and ends `resolved`, so a person's
   resolution is reviewed and accepted before the merge Gate asks, and a
-  `merge_when_green` rule never merges it on CI alone. At most five updates a Run, then it
-  ends for a person.
+  `merge_when_green` rule never merges it on CI alone. A `behind` from the
+  merge Gate or from `merge` starts the merge Gate's visits over, so a base
+  people keep merging into never uses up its three askings; what bounds
+  that loop is `update`'s ten visits a Run (a conflict's `retry`s count
+  too), then the Run ends for a person. Each update is a full checks round
+  and CI run, so ten in a row means the base moves faster than the Run's CI
+  can follow, which a person settles (holding merges, or merging it by
+  hand); the merge queue keeps other factory Runs from overtaking one at
+  the front, so only merges made outside the factory use it up there.
 - The merge Gate's approval never carries over an update (a wait in the
   queue keeps it, below): whatever came in, the merge Gate asks again (a `merge_when_green` rule answers it as
   before). Telling "unchanged apart from the base" apart would mean

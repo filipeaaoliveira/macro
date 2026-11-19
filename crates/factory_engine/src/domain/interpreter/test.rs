@@ -657,7 +657,7 @@ fn a_branch_behind_its_base_is_updated_and_checked_before_it_merges() {
             "merge-gate#1",
             "update#1",
             "ci#2",
-            "merge-gate#2",
+            "merge-gate#1",
             "merge#1",
             "merge#2",
             "update#2",
@@ -704,7 +704,7 @@ fn a_queued_merge_keeps_its_approval_and_asks_again_after_twelve_waits() {
 }
 
 /// A conflict no one resolves ends the Run for a person; so do updates
-/// past their five visits.
+/// past their ten visits.
 #[test]
 fn a_conflict_left_alone_or_endless_updates_end_for_a_person() {
     let (_, stopped) = walk(
@@ -722,25 +722,39 @@ fn a_conflict_left_alone_or_endless_updates_end_for_a_person() {
     );
     assert_eq!(stopped, Ok(RunOutcome::Manual));
 
-    let (steps, endless) = walk(
-        &flow(CODE_FLOW),
-        &[
-            "approve",
-            "done",
-            "pass",
-            "pass",
-            "published",
-            "green",
-            "behind",
-            "retry",
-            "retry",
-            "retry",
-            "retry",
-            "retry",
-        ],
-    );
-    assert_eq!(steps.last().map(String::as_str), Some("update#5"));
+    let mut retries = vec!["approve", "done", "pass", "pass", "published", "green", "behind"];
+    retries.extend(["retry"; 10]);
+    let (steps, endless) = walk(&flow(CODE_FLOW), &retries);
+    assert_eq!(steps.last().map(String::as_str), Some("update#10"));
     assert_eq!(endless, Ok(RunOutcome::Manual));
+}
+
+/// A base people keep merging into leaves the merge Gate's visits alone:
+/// each `behind` starts them over, so its three visits bound only how
+/// often a person sends the change back or its head moves. The updates'
+/// own ten visits bound a base that moves faster than the Run's CI.
+#[test]
+fn a_base_that_keeps_moving_never_exhausts_the_merge_gate() {
+    let mut outcomes = vec!["approve", "done", "pass", "pass", "published", "green"];
+    for _ in 0..4 {
+        outcomes.extend(["behind", "done", "green"]);
+    }
+    outcomes.extend(["approve", "merged"]);
+    let (steps, end) = walk(&flow(CODE_FLOW), &outcomes);
+    assert_eq!(end, Ok(RunOutcome::Success));
+    assert_eq!(
+        steps.iter().filter(|step| step.starts_with("merge-gate")).last().map(String::as_str),
+        Some("merge-gate#1")
+    );
+
+    let mut chasing = vec!["approve", "done", "pass", "pass", "published", "green"];
+    for _ in 0..10 {
+        chasing.extend(["behind", "done", "green"]);
+    }
+    chasing.push("behind");
+    let (steps, end) = walk(&flow(CODE_FLOW), &chasing);
+    assert_eq!(steps.last().map(String::as_str), Some("merge-gate#1"));
+    assert_eq!(end, Ok(RunOutcome::Manual), "the eleventh update is past the bound");
 }
 
 /// A review panel whose blockers stay unresolved, or whose review failed,
