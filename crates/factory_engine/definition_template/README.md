@@ -55,9 +55,9 @@ patterns, leaving room for the 5 the Run adds.
 
 It leaves off:
 
-- `quietGates`: every Gate no rule answers notifies the Run's owner. Set it
-  to `true` to stop those notifications; the Gates still wait on the owner.
-
+- `quietGates`: every Gate no rule or stand-in answers notifies the Run's
+  owner. Set it to `true` to stop those notifications; the Gates still wait
+  on the owner.
 - `plan`: a person approves each plan.
 - `merge`: a person merges each pull request. Turn it on only once you trust
   the Flow's checks and review.
