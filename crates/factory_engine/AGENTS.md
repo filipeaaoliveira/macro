@@ -1490,9 +1490,13 @@ that user (Soup's `user_gate`), each such Run on a row of its own
 (`notification_inbox`'s `place_about_the_viewer`), so the notices reach
 the owner in the inbox as well as live (and, for a waiting Gate, by push),
 open the Run from there, and are marked done or withdrawn as a task's are,
-the lighter ones once the Run ends at the latest. Its waiting Gate also
-shows in "Waiting on you" (`GET /runs/waiting`), which lists every waiting
-Run, with a task or without.
+the lighter ones once the Run ends at the latest. Such a Run's waiting Gate
+also shows in "Waiting on you" (`GET /runs/waiting`), which lists every
+waiting Run, with a task or without. A Run without a task that was already
+running when Runs without a task began sending the lighter notices sent
+none before then, so it closes notices it never sent: each leaves one
+harmless withdrawal row, at most one per Gate, notify-only entry and
+stand-in answer.
 
 A team's Orchestrator Definition also has an owner section
 (`owner_gates`, `ownerGates` in `PUT /settings/standing-rules` and its
