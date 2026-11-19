@@ -50,7 +50,8 @@ use uuid::Uuid;
 
 use super::{BuiltInStepError, BuiltInSteps, agent_role, cut};
 use crate::domain::checks::{
-    CHECKS_FILE, DEFAULT_CHECK_TIMEOUT_SECS, RepositoryCheck, RepositoryChecks, kept_output,
+    CHECKS_FILE, DEFAULT_CHECK_TIMEOUT_SECS, RepositoryCheck, RepositoryChecks, fence_for,
+    kept_output,
 };
 use crate::domain::flow::StepName;
 use crate::domain::setup::{RepositorySetup, SETUP_FILE, redacted};
@@ -1072,11 +1073,11 @@ fn verified_end(round: &CheckRound, results: &[CheckResult]) -> (CheckRoundOutco
             .position(|name| *name == result.name)
             .and_then(|at| round.commands.get(at))
             .map_or("", String::as_str);
+        let output = result.output.trim_end();
+        let fence = fence_for(output);
         report.push_str(&format!(
-            "\n### `{}`: `{command}` exited with status {}\n\n```\n{}\n```\n",
-            result.name,
-            result.exit_code,
-            result.output.trim_end()
+            "\n### `{}`: `{command}` exited with status {}\n\n{fence}\n{output}\n{fence}\n",
+            result.name, result.exit_code,
         ));
     }
     if !not_run.is_empty() {
@@ -1117,10 +1118,11 @@ fn setup_failed_report(
             .iter()
             .find(|command| command.name == name)
             .map_or("", |command| command.run.as_str());
+        let output = result.output.trim_end();
+        let fence = fence_for(output);
         report.push_str(&format!(
-            "\n### setup `{name}`: `{command}` exited with status {}\n\n```\n{}\n```\n",
+            "\n### setup `{name}`: `{command}` exited with status {}\n\n{fence}\n{output}\n{fence}\n",
             result.exit_code,
-            result.output.trim_end()
         ));
     }
     report.push_str(&format!(

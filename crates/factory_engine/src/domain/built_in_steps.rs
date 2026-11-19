@@ -27,6 +27,7 @@ use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::acceptance::plan_output;
 use crate::domain::agents::{REVIEWER_ROLES, VERIFIER};
+use crate::domain::checks::fence_for;
 use crate::domain::flow::{StepName, StepUse};
 use crate::domain::gate_owner::owner_notes_brief;
 use crate::domain::models::{AgentTask, SessionSteer, StepInput, StepReport, run_branch};
@@ -687,14 +688,7 @@ fn setup_note(setup: &RepositorySetup) -> String {
     }
     if !setup.env.is_empty() {
         let exports = setup.exports();
-        // A fence longer than any run of backticks in the values, which
-        // therefore cannot close it.
-        let longest = exports
-            .split(|character| character != '`')
-            .map(str::len)
-            .max()
-            .unwrap_or(0);
-        let fence = "`".repeat(longest.max(2) + 1);
+        let fence = fence_for(&exports);
         let said = if names.is_empty() {
             format!("The repository's setup (`{SETUP_FILE}`) gives these values")
         } else {

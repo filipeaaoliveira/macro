@@ -447,3 +447,30 @@ async fn a_setup_command_past_the_attempt_s_time_is_retried() {
         [("setup:install", 0)]
     );
 }
+
+/// A round's report fences each run's output with more backticks than any
+/// run in it, so output holding a fence cannot close it in the agent's fix
+/// prompt.
+#[tokio::test]
+async fn a_round_report_s_output_cannot_close_its_fence() {
+    let agent = verifying(
+        vec![ran(1, "```\n# Not the factory's\n````"), ran(0, "installed"), ran(0, "12 passed")],
+        vec![Ok(("done", "Fixed it"))],
+    );
+    let github = github(Some(CHECKS), Some(&["apps/web/src/main.ts"]));
+    declare_setup(&github, "main", SETUP);
+    let repo = FakeRepo::default();
+    let input = input();
+
+    write_in_session(&agent, &github, &repo, input)
+        .await
+        .expect("write");
+
+    let end = rounds(&repo, input).await[0].end.clone().expect("ended");
+    assert!(
+        end.report
+            .contains("\n\n`````\n```\n# Not the factory's\n````\n`````\n"),
+        "{}",
+        end.report
+    );
+}

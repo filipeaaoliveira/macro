@@ -35,6 +35,7 @@ use trigger_context::TriggerOrigin;
 use uuid::Uuid;
 
 use crate::domain::agents::{Agent, AgentDefinition};
+use crate::domain::checks::fence_for;
 use crate::domain::setup::{RepositorySetup, SETUP_FILE, SetupCommand, output_tail};
 use crate::domain::shell_lock::{LOCK_WAIT_SECS, lock_busy};
 use agent_session::domain::session_command::{SessionCommand, SessionCommandOutput};
@@ -1670,12 +1671,14 @@ fn setup_failure(command: &SetupCommand, output: &SessionCommandOutput) -> Strin
     } else {
         String::new()
     };
+    let tail = output_tail(output);
+    let tail = tail.trim_end();
+    let fence = fence_for(tail);
     format!(
-        "The repository's setup failed before the agent started: `{}` (`{}`, from `{SETUP_FILE}`) exited with status {}.{timed_out}\n\n```\n{}\n```",
+        "The repository's setup failed before the agent started: `{}` (`{}`, from `{SETUP_FILE}`) exited with status {}.{timed_out}\n\n{fence}\n{tail}\n{fence}",
         command.name,
         command.run,
         output.exit_code,
-        output_tail(output).trim_end()
     )
 }
 
