@@ -249,8 +249,17 @@ async fn a_run_whose_turn_does_not_come_ends_queued() {
         .expect("merge");
 
     assert_eq!(outcome(&report), "queued");
+    // The Run ahead may be another person's: its id, and how many Runs are
+    // ahead, stay out of what this Run's readers see.
     assert!(
-        report.output.contains(&first.to_string()),
+        !report.output.contains(&first.to_string()),
+        "{}",
+        report.output
+    );
+    let (_, note) = report.output.split_once("\n\n").expect("a note");
+    assert!(!note.chars().any(|c| c.is_ascii_digit()), "{note}");
+    assert!(
+        report.output.contains("have not merged yet"),
         "{}",
         report.output
     );

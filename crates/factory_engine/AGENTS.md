@@ -2092,7 +2092,9 @@ Definition.
   in the workflow changed, so no patch marker is needed and the recorded
   histories replay as before.
 - The merge queue is per repository and base branch across owners: a Run
-  waits on another person's Run ahead of it, which it cannot see. A Run
+  waits on another person's Run ahead of it, which it cannot see: `queued`
+  says only that earlier Runs into the base have not merged yet, never
+  which, nor how many. A Run
   stuck at its merge holds the Runs behind it until it ends, merges, or
   has been away from its merge longer than `QUEUE_PLACE_KEPT`.
 - A worker older than `accept` cannot serve a Run of the `code` Flow that

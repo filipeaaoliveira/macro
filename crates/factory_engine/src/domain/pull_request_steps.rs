@@ -1121,20 +1121,25 @@ where
     }
 
     /// Wait until no Run is ahead of this one in its base's merge queue, up
-    /// to `deadline`: the Runs still ahead then, none once it is its turn.
+    /// to `deadline`: whether its turn came. Which Runs are ahead is never
+    /// told: they may be other people's, which this Run's readers may not
+    /// see.
     async fn wait_for_turn(
         &self,
         input: &StepInput<'_>,
         deadline: tokio::time::Instant,
-    ) -> Result<Vec<factory_records::domain::models::RunId>, PullRequestStepError> {
+    ) -> Result<bool, PullRequestStepError> {
         loop {
             let ahead = self
                 .repo
                 .merge_queue_ahead(input.key.run_id, QUEUE_PLACE_KEPT)
                 .await
                 .map_err(PullRequestStepError::records)?;
-            if ahead.is_empty() || tokio::time::Instant::now() + QUEUE_POLL > deadline {
-                return Ok(ahead);
+            if ahead.is_empty() {
+                return Ok(true);
+            }
+            if tokio::time::Instant::now() + QUEUE_POLL > deadline {
+                return Ok(false);
             }
             tokio::time::sleep(QUEUE_POLL).await;
         }
@@ -1454,22 +1459,17 @@ where
                 .enter_merge_queue(input.key.run_id)
                 .await
                 .map_err(PullRequestStepError::records)?;
-            let ahead = self.wait_for_turn(&input, started + QUEUE_WAIT).await?;
-            if !ahead.is_empty() {
+            // The Runs ahead may be anyone's: what this Run's readers see
+            // names none of them, nor how many there are.
+            if !self.wait_for_turn(&input, started + QUEUE_WAIT).await? {
                 return Ok(report(
                     QUEUED,
                     format!(
-                        "{}\n\nIt was not merged: {} of the runs merging into {} reached their merge \
-                         before it and have not merged yet ({}). It keeps its place in the queue, \
-                         and the merge Gate asks again.",
+                        "{}\n\nIt was not merged: runs that reached their merge into {} before it \
+                         have not merged yet. It keeps its place in the queue, and the merge Gate \
+                         asks again.",
                         named(&pull_request),
-                        ahead.len(),
                         recorded.base_branch,
-                        ahead
-                            .iter()
-                            .map(ToString::to_string)
-                            .collect::<Vec<_>>()
-                            .join(", ")
                     ),
                 ));
             }
