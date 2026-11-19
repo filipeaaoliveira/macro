@@ -125,6 +125,7 @@ const SENDS: &[(&str, &str)] = &[
     ("POST", "/automations"),
     ("PUT", "/automations/{id}/enabled"),
     ("POST", "/automations/fire"),
+    ("POST", "/automations/{id}/webhook"),
     ("POST", "/agent-conversations/{id}/{id}/start-fresh"),
     ("POST", "/agent-conversations/{id}/{id}/turns/{id}/retry"),
     (

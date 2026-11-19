@@ -83,6 +83,8 @@ const UNOBSERVED_PR_WORKFLOWS: &[&str] = &[
     "CI Gate Reminder",
     "CLA",
     "Cleanup Preview",
+    // Runs only in a fork, which has no telemetry to export to.
+    "Fork CI",
     "PR Privacy Check",
     "Pull Request",
 ];

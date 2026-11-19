@@ -3941,9 +3941,13 @@ impl crate::domain::ports::CommandForwarder for RecordingForwarder {
     ) -> crate::domain::error::Result<agent_session::domain::session_command::SessionCommandOutput>
     {
         self.runs.lock().unwrap().push((replica, session));
-        Ok(agent_session::domain::session_command::SessionCommandOutput::new(
-            3, b"on the peer", b"",
-        ))
+        Ok(
+            agent_session::domain::session_command::SessionCommandOutput::new(
+                3,
+                b"on the peer",
+                b"",
+            ),
+        )
     }
 }
 
