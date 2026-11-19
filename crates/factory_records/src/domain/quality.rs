@@ -47,13 +47,14 @@ impl CiVerdict {
 pub enum CiJobResult {
     /// It passed, or was skipped or neutral.
     Passed,
-    /// It failed in its own work: the pull request's, unless the same job
-    /// and step fail on other pull requests too.
+    /// It failed in its own work: the pull request's, unless the same test,
+    /// or the same named step, fails on other pull requests too.
     Failed,
     /// It failed setting up, before its work ran: a step that sets up the
-    /// job, or a download that failed.
+    /// job, or an action that could not be downloaded.
     Setup,
-    /// It was cancelled, as when a newer push replaced its run.
+    /// It was cancelled: by a person, or, on a head a newer push replaced,
+    /// by that push.
     Cancelled,
 }
 
@@ -99,6 +100,14 @@ pub struct CiJob {
     /// For a job that failed, the first of its steps that failed, when it
     /// could be read. At most [`CI_NAME_BYTES`].
     pub failed_step: Option<String>,
+    /// For a job that failed, what failed finer than its step, when the
+    /// check run annotated it: the first test that failed, by its file and
+    /// name. At most [`CI_NAME_BYTES`].
+    pub failure: Option<String>,
+    /// Whether it ran on a head a newer push replaced while the Step
+    /// waited, or since the Run's last wait, rather than on the head the
+    /// wait read last: such a job is kept only cancelled.
+    pub replaced: bool,
 }
 
 /// How one wait of a `ci` Step on its pull request's checks ended.
@@ -110,8 +119,9 @@ pub struct CiWait {
     pub head_sha: String,
     /// How it ended.
     pub verdict: CiVerdict,
-    /// The jobs it saw finish on that commit; none for a timeout, or when
-    /// they could not be read.
+    /// The jobs it saw finish on that commit, and those a newer push
+    /// cancelled on a head it replaced; none for a timeout, or when they
+    /// could not be read. A name is kept once per head.
     pub jobs: Vec<CiJob>,
 }
 

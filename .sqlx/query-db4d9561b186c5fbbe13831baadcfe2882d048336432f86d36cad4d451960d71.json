@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO factory_ci_job (run_id, seq, name, result, failed_step, failure, replaced)\n        SELECT $1, $2, job.name, job.result, job.failed_step, job.failure, job.replaced\n        FROM unnest($3::text[], $4::text[], $5::text[], $6::text[], $7::bool[])\n            WITH ORDINALITY AS job(name, result, failed_step, failure, replaced, place)\n        ORDER BY job.place\n        ON CONFLICT (run_id, seq, replaced, name) DO NOTHING\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "TextArray",
+        "TextArray",
+        "TextArray",
+        "TextArray",
+        "BoolArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "db4d9561b186c5fbbe13831baadcfe2882d048336432f86d36cad4d451960d71"
+}

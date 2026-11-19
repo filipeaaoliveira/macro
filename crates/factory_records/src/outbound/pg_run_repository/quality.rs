@@ -21,8 +21,8 @@ use crate::domain::quality::{
 };
 use crate::domain::review_rounds::ReviewRoundOutcome;
 
-/// Keep `wait`, unless its Step kept one already: a retry keeps the first,
-/// with the jobs it saw.
+/// Keep `wait`, replacing the one its Step kept unless that read the same
+/// head and verdict: the last attempt's wait is the one the Step routed.
 pub(super) async fn record_ci_wait(pool: &PgPool, wait: &CiWait) -> Result<(), PgRunRepositoryErr> {
     let names: Vec<String> = wait.jobs.iter().map(|job| job.name.clone()).collect();
     let results: Vec<String> = wait
@@ -35,34 +35,83 @@ pub(super) async fn record_ci_wait(pool: &PgPool, wait: &CiWait) -> Result<(), P
         .iter()
         .map(|job| job.failed_step.clone())
         .collect();
-    // One statement: the jobs are kept only with the wait that keeps them.
-    // A name seen twice, as a check run and a commit status of the same
-    // name, keeps its first.
-    sqlx::query!(
+    let failures: Vec<Option<String>> = wait.jobs.iter().map(|job| job.failure.clone()).collect();
+    let replaced: Vec<bool> = wait.jobs.iter().map(|job| job.replaced).collect();
+    let mut transaction = pool.begin().await?;
+    // A wait of the same head and verdict is kept as it was, with its jobs
+    // and the time it ended; another replaces it.
+    let changed = sqlx::query_scalar!(
         r#"
-        WITH wait AS (
-            INSERT INTO factory_ci_wait (run_id, seq, head_sha, verdict)
-            VALUES ($1, $2, $3, $4)
-            ON CONFLICT (run_id, seq) DO NOTHING
-            RETURNING run_id, seq
-        )
-        INSERT INTO factory_ci_job (run_id, seq, name, result, failed_step)
-        SELECT wait.run_id, wait.seq, job.name, job.result, job.failed_step
-        FROM wait
-        CROSS JOIN unnest($5::text[], $6::text[], $7::text[]) AS job(name, result, failed_step)
-        ON CONFLICT (run_id, seq, name) DO NOTHING
+        INSERT INTO factory_ci_wait (run_id, seq, head_sha, verdict)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (run_id, seq) DO UPDATE
+        SET head_sha = EXCLUDED.head_sha, verdict = EXCLUDED.verdict, recorded_at = now()
+        WHERE (factory_ci_wait.head_sha, factory_ci_wait.verdict)
+            IS DISTINCT FROM (EXCLUDED.head_sha, EXCLUDED.verdict)
+        RETURNING seq
         "#,
         wait.key.run_id.as_uuid(),
         i32::from(wait.key.seq),
         wait.head_sha,
         wait.verdict.as_str(),
+    )
+    .fetch_optional(&mut *transaction)
+    .await?;
+    if changed.is_none() {
+        transaction.commit().await?;
+        return Ok(());
+    }
+    sqlx::query!(
+        "DELETE FROM factory_ci_job WHERE run_id = $1 AND seq = $2",
+        wait.key.run_id.as_uuid(),
+        i32::from(wait.key.seq),
+    )
+    .execute(&mut *transaction)
+    .await?;
+    // A name seen twice on one head, as a check run and a commit status of
+    // the same name, keeps its first.
+    sqlx::query!(
+        r#"
+        INSERT INTO factory_ci_job (run_id, seq, name, result, failed_step, failure, replaced)
+        SELECT $1, $2, job.name, job.result, job.failed_step, job.failure, job.replaced
+        FROM unnest($3::text[], $4::text[], $5::text[], $6::text[], $7::bool[])
+            WITH ORDINALITY AS job(name, result, failed_step, failure, replaced, place)
+        ORDER BY job.place
+        ON CONFLICT (run_id, seq, replaced, name) DO NOTHING
+        "#,
+        wait.key.run_id.as_uuid(),
+        i32::from(wait.key.seq),
         &names,
         &results,
         &steps as &[Option<String>],
+        &failures as &[Option<String>],
+        &replaced,
     )
-    .execute(pool)
+    .execute(&mut *transaction)
     .await?;
+    transaction.commit().await?;
     Ok(())
+}
+
+/// The head of `run_id`'s last kept wait before the Step at `before`.
+pub(super) async fn last_ci_head(
+    pool: &PgPool,
+    run_id: RunId,
+    before: u16,
+) -> Result<Option<String>, PgRunRepositoryErr> {
+    Ok(sqlx::query_scalar!(
+        r#"
+        SELECT head_sha
+        FROM factory_ci_wait
+        WHERE run_id = $1 AND seq < $2
+        ORDER BY seq DESC
+        LIMIT 1
+        "#,
+        run_id.as_uuid(),
+        i32::from(before),
+    )
+    .fetch_optional(pool)
+    .await?)
 }
 
 struct QualityRunRow {
@@ -285,10 +334,10 @@ impl RunQualityRepository for PgRunRepository {
         .await?;
         let jobs = sqlx::query!(
             r#"
-            SELECT run_id, seq, name, result, failed_step
+            SELECT run_id, seq, name, result, failed_step, failure, replaced
             FROM factory_ci_job
             WHERE run_id = ANY($1)
-            ORDER BY run_id, seq, name
+            ORDER BY run_id, seq, replaced, name
             "#,
             &ids,
         )
@@ -303,6 +352,8 @@ impl RunQualityRepository for PgRunRepository {
                     name: row.name,
                     result: job_result(row.result)?,
                     failed_step: row.failed_step,
+                    failure: row.failure,
+                    replaced: row.replaced,
                 });
         }
         let ci_waits = waits

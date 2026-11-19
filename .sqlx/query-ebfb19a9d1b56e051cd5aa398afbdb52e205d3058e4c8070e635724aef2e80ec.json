@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT run_id, seq, name, result, failed_step\n            FROM factory_ci_job\n            WHERE run_id = ANY($1)\n            ORDER BY run_id, seq, name\n            ",
+  "query": "\n            SELECT run_id, seq, name, result, failed_step, failure, replaced\n            FROM factory_ci_job\n            WHERE run_id = ANY($1)\n            ORDER BY run_id, seq, replaced, name\n            ",
   "describe": {
     "columns": [
       {
@@ -27,6 +27,16 @@
         "ordinal": 4,
         "name": "failed_step",
         "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "failure",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "replaced",
+        "type_info": "Bool"
       }
     ],
     "parameters": {
@@ -39,8 +49,10 @@
       false,
       false,
       false,
-      true
+      true,
+      true,
+      false
     ]
   },
-  "hash": "87af9aa26a7f780327ffd7c7b21672aa153ae22dff30b407b3270eaf413e9a5a"
+  "hash": "ebfb19a9d1b56e051cd5aa398afbdb52e205d3058e4c8070e635724aef2e80ec"
 }

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT head_sha\n        FROM factory_ci_wait\n        WHERE run_id = $1 AND seq < $2\n        ORDER BY seq DESC\n        LIMIT 1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "head_sha",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "49474c9a313b751644a3c21fa39b08fd161268148834f53a3bd3fcd92eb1ffe5"
+}

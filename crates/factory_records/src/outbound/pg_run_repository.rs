@@ -810,6 +810,11 @@ impl RunRepository for PgRunRepository {
         quality::record_ci_wait(&self.pool, wait).await
     }
 
+    #[tracing::instrument(err, skip(self))]
+    async fn last_ci_head(&self, run_id: RunId, before: u16) -> Result<Option<String>, Self::Err> {
+        quality::last_ci_head(&self.pool, run_id, before).await
+    }
+
     #[tracing::instrument(err, skip(self, changes))]
     async fn set_control_file_changes(
         &self,

@@ -55,6 +55,8 @@ fn job(name: &str, result: CiJobResult, failed_step: Option<&str>) -> CiJob {
         name: name.to_string(),
         result,
         failed_step: failed_step.map(str::to_string),
+        failure: None,
+        replaced: false,
     }
 }
 
@@ -208,7 +210,7 @@ async fn a_repository_narrows_the_runs_but_not_the_repositories_to_pick(pool: Pg
     migrator = "MACRO_DB_MIGRATIONS",
     fixtures(path = "../fixtures", scripts("people", "quality"))
 )]
-async fn a_ci_wait_is_kept_once_with_its_jobs(pool: PgPool) {
+async fn a_ci_wait_is_kept_with_its_jobs_and_a_retry_keeps_its_final_verdict(pool: PgPool) {
     let repo = PgRunRepository::new(pool);
     let key = StepKey {
         run_id: run(SPACES),
@@ -220,25 +222,80 @@ async fn a_ci_wait_is_kept_once_with_its_jobs(pool: PgPool) {
         verdict: CiVerdict::Red,
         jobs: vec![
             job("lint", CiJobResult::Passed, None),
-            job("test", CiJobResult::Failed, Some("Run tests")),
+            CiJob {
+                failure: Some("src/parser.rs: parser::test::empty".to_string()),
+                ..job("test", CiJobResult::Failed, Some("Run tests"))
+            },
+            // The same name, cancelled on the head a newer push replaced.
+            CiJob {
+                replaced: true,
+                ..job("test", CiJobResult::Cancelled, None)
+            },
         ],
     };
-    // A retry that read another verdict keeps the first.
-    let retried = CiWait {
+    let kept = |records: &QualityRecords| {
+        records
+            .ci_waits
+            .iter()
+            .find(|kept| kept.run_id == key.run_id && kept.seq == key.seq)
+            .cloned()
+            .expect("kept")
+    };
+
+    repo.record_ci_wait(&wait).await.expect("record");
+    let first = kept(&repo.read_quality(&julia(None)).await.expect("read"));
+    // The same head and verdict again keeps the wait as it was.
+    let again = CiWait {
+        jobs: vec![job("test", CiJobResult::Failed, None)],
+        ..wait.clone()
+    };
+    repo.record_ci_wait(&again).await.expect("record again");
+    let unchanged = kept(&repo.read_quality(&julia(None)).await.expect("read"));
+    // A retry that saw the failed job pass on the same head replaces it.
+    let green = CiWait {
         verdict: CiVerdict::Green,
         jobs: vec![job("test", CiJobResult::Passed, None)],
         ..wait.clone()
     };
+    repo.record_ci_wait(&green).await.expect("record green");
+    repo.record_ci_wait(&green)
+        .await
+        .expect("record green again");
+    let last = kept(&repo.read_quality(&julia(None)).await.expect("read"));
 
-    repo.record_ci_wait(&wait).await.expect("record");
-    repo.record_ci_wait(&retried).await.expect("record again");
+    assert_eq!(first.verdict, CiVerdict::Red);
+    assert_eq!(
+        first.jobs,
+        vec![
+            wait.jobs[0].clone(),
+            wait.jobs[1].clone(),
+            wait.jobs[2].clone()
+        ]
+    );
+    assert_eq!(unchanged, first);
+    assert_eq!(last.verdict, CiVerdict::Green);
+    assert_eq!(last.jobs, green.jobs);
+    assert!(last.ended_at >= first.ended_at);
+}
 
-    let records = repo.read_quality(&julia(None)).await.expect("read");
-    let kept = records
-        .ci_waits
-        .iter()
-        .find(|kept| kept.run_id == key.run_id && kept.seq == key.seq)
-        .expect("kept");
-    assert_eq!(kept.verdict, CiVerdict::Red);
-    assert_eq!(kept.jobs, wait.jobs);
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "quality"))
+)]
+async fn the_last_ci_head_is_the_latest_wait_before_a_step(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+
+    let before_second = repo.last_ci_head(run(DASHES), 7).await.expect("read");
+    let after_both = repo.last_ci_head(run(DASHES), 9).await.expect("read");
+    let before_any = repo.last_ci_head(run(DASHES), 6).await.expect("read");
+
+    assert_eq!(
+        before_second.as_deref(),
+        Some("1111111111111111111111111111111111111111")
+    );
+    assert_eq!(
+        after_both.as_deref(),
+        Some("2222222222222222222222222222222222222222")
+    );
+    assert_eq!(before_any, None);
 }
