@@ -1871,30 +1871,38 @@ where
     }
 
     /// Whether the Gate of `run`'s Step `seq` is one the Run's own Flow
-    /// keeps for a person (`person_only`): no Standing Rule answers it.
+    /// keeps for a person (`person_only`): no Standing Rule answers it. A
+    /// self-improvement Run's Gates, and a Gate whose Step or Flow does not
+    /// read, are taken as kept for a person: a lost Flow never lets a rule
+    /// answer.
     async fn kept_for_a_person(
         &self,
         run: &Run,
         steps: &[Step],
         seq: u16,
     ) -> Result<bool, StepError> {
+        if run.flow.as_deref() == Some(IMPROVE_FLOW) {
+            return Ok(true);
+        }
         let Some(entry) = steps
             .iter()
             .find(|step| step.seq == seq)
             .map(|step| &step.entry)
         else {
-            return Ok(false);
+            return Ok(true);
         };
         let Some(kept) = self.repo.run_flow(run.id).await.map_err(internal)? else {
-            return Ok(false);
+            return Ok(true);
         };
-        Ok(walked_flow(run.id, kept).is_some_and(|flow| {
-            flow.entries
-                .iter()
-                .find(|asking| asking.id == *entry)
-                .and_then(|asking| asking.gate.as_ref())
-                .is_some_and(|gate| gate.person_only)
-        }))
+        let Some(flow) = walked_flow(run.id, kept) else {
+            return Ok(true);
+        };
+        Ok(flow
+            .entries
+            .iter()
+            .find(|asking| asking.id == *entry)
+            .and_then(|asking| asking.gate.as_ref())
+            .is_some_and(|gate| gate.person_only))
     }
 
     async fn run_of(&self, request: &StepRequest) -> Result<Run, StepError> {
