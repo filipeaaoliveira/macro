@@ -200,6 +200,14 @@ async fn a_repository_narrows_the_runs_but_not_the_repositories_to_pick(pool: Pg
     .execute(&pool)
     .await
     .expect("rename");
+    // Two Runs on one repository, written in two cases, list it once.
+    sqlx::query!(
+        "UPDATE factory_run SET repo_url = 'https://github.com/Macro/App' WHERE id = $1",
+        run(SPACES).as_uuid(),
+    )
+    .execute(&pool)
+    .await
+    .expect("rename");
     let repo = PgRunRepository::new(pool);
 
     let site = repo.read_quality(&julia(Some(SITE))).await.expect("site");
@@ -211,8 +219,15 @@ async fn a_repository_narrows_the_runs_but_not_the_repositories_to_pick(pool: Pg
     assert_eq!(ids(&site), vec![run(FOOTER)]);
     assert!(site.ci_waits.is_empty());
     assert_eq!(
-        site.repositories,
-        vec![APP.to_string(), "https://github.com/Macro/Site".to_string()]
+        site.repositories
+            .iter()
+            .map(|named| named.to_lowercase())
+            .collect::<Vec<_>>(),
+        vec![APP.to_string(), SITE.to_string()]
+    );
+    assert!(
+        site.repositories
+            .contains(&"https://github.com/Macro/Site".to_string())
     );
     assert!(none.runs.is_empty());
     assert_eq!(none.repositories.len(), 2);

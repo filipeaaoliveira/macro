@@ -266,10 +266,11 @@ impl RunQualityRepository for PgRunRepository {
         runs.truncate(usize::from(runs_scope.cap));
 
         // The repositories of the same Runs, whatever the repository the
-        // scope names, to pick one from.
+        // scope names, to pick one from: each once whatever its case, as
+        // GitHub names repositories case-insensitively.
         let repositories = sqlx::query_scalar!(
             r#"
-            SELECT DISTINCT repo_url AS "repo_url!"
+            SELECT min(repo_url) AS "repo_url!"
             FROM (
                 SELECT repo_url
                 FROM factory_run
@@ -282,7 +283,8 @@ impl RunQualityRepository for PgRunRepository {
                 LIMIT $5
             ) runs
             WHERE repo_url IS NOT NULL
-            ORDER BY 1
+            GROUP BY lower(repo_url)
+            ORDER BY lower(repo_url)
             LIMIT $7
             "#,
             runs_scope.user_id.as_ref(),
