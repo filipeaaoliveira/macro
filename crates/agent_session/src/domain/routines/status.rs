@@ -1,7 +1,9 @@
 //! Derive action completion from effective history, not connection state.
 
 use agent_fold::domain::lifecycle::LifecycleFold;
-use agent_fold::domain::model::{Author, PendingInteraction, StopReason, TurnSignal};
+use agent_fold::domain::model::{
+    Author, FailureNoticeKind, PendingInteraction, StopReason, TurnSignal,
+};
 use agent_runtime_protocol::domain::action::AgentActionId;
 use agent_runtime_protocol::domain::schema::v0::SystemEvent;
 
@@ -81,6 +83,12 @@ fn classify_stop(stop: &StopReason) -> RoutineActionStatus {
         StopReason::Refusal => RoutineFailureReason::Refusal,
         StopReason::MaxTokens => RoutineFailureReason::MaxTokens,
         StopReason::MaxTurnRequests => RoutineFailureReason::MaxTurnRequests,
+        StopReason::Failed {
+            notice: Some(notice),
+            ..
+        } if notice.kind == FailureNoticeKind::ProviderUsageLimit => {
+            RoutineFailureReason::UsageLimit
+        }
         StopReason::Failed { .. } => RoutineFailureReason::RuntimeError,
         StopReason::Other { .. } => RoutineFailureReason::UnknownStopReason,
     };

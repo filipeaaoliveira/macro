@@ -82,6 +82,52 @@ fn classifies_every_stop_reason_from_history() {
     assert!(!serde_json::to_string(&status).unwrap().contains("private"));
 }
 
+/// A turn the runtime's provider account ran out of usage on fails as the
+/// usage limit, whether the runtime classified it with Macro's notice (a
+/// cloud agent) or Codex's adapter said so in its own error data, and the
+/// status carries none of the provider's words.
+#[test]
+fn a_provider_usage_limit_is_its_own_failure() {
+    let action = AgentActionId::mint();
+    for data in [
+        json!({"kind": "provider_usage_limit", "title": "Usage limit reached", "body": "private body"}),
+        json!({"message": "private: You've hit your usage limit.", "codexErrorInfo": "usageLimitExceeded"}),
+        json!({"message": "private: You've hit your usage limit.", "codex_error_info": "usage_limit_exceeded"}),
+    ] {
+        let failure = frame(
+            "to_server",
+            json!({"id": action, "error": {"code": -32603, "message": "Internal error", "data": data}}),
+        );
+        let status = action_status(
+            vec![prompt(action), failure],
+            action,
+            &SessionStatus::NoMessages,
+        );
+        assert_eq!(
+            status,
+            RoutineActionStatus::Failed(RoutineFailureReason::UsageLimit),
+            "{data}"
+        );
+        assert!(!serde_json::to_string(&status).unwrap().contains("private"));
+    }
+
+    // Another class of Codex error is a runtime error.
+    let failure = frame(
+        "to_server",
+        json!({"id": action, "error": {"code": -32603, "message": "Internal error", "data": {
+            "message": "rate limited", "codexErrorInfo": "rateLimitExceeded"
+        }}}),
+    );
+    assert_eq!(
+        action_status(
+            vec![prompt(action), failure],
+            action,
+            &SessionStatus::NoMessages
+        ),
+        RoutineActionStatus::Failed(RoutineFailureReason::RuntimeError)
+    );
+}
+
 #[test]
 fn completion_before_first_read_survives_later_turns_and_disconnect() {
     let initial = AgentActionId::mint();
