@@ -706,3 +706,160 @@ async fn insights_show_pending_failures_and_the_last_improvement_run() {
         .expect("insights");
     assert_eq!(none.self_improvement, None);
 }
+
+/// Whatever an improve Run changes, even only a file outside the
+/// Definition's (no Control File, so not Tampered), its plan and merge
+/// Gates are a person's: no Standing Rule answers them, the stand-in may
+/// not, and the Orchestrator may not approve its plan or its merge, though
+/// the team's rules turn all of them on.
+#[tokio::test]
+async fn an_improvement_run_s_plan_and_merge_wait_for_a_person_whatever_it_changes() {
+    use crate::domain::gate::GateRuling;
+    use crate::domain::models::Answerer;
+    use crate::domain::stand_in::{StandInFacts, may_stand_in};
+
+    let rules = r#"{ "standingRules": {
+        "plan": true, "blockers": true, "merge": true,
+        "standIn": { "plan": true, "blockers": true },
+        "orchestrator": { "plan": true, "blockers": true }
+    } }"#;
+    let bench = Bench::new(team_repo(true), AGENTS, Some(rules));
+    bench.judged_run(0.2).await;
+    bench.judged_run(0.2).await;
+    let started = bench.improvement_runs();
+    assert_eq!(started.len(), 1);
+    let run_id = started[0];
+
+    // It changes only the README: nothing Tampered.
+    bench.github.state().changed = Some(vec!["README.md".to_string()]);
+    let worker = StepServiceImpl::new(
+        bench.repo.clone(),
+        BuiltInSteps::new(
+            LocalAgent,
+            PullRequestSteps::new(
+                bench.github.clone(),
+                bench.repo.clone(),
+                FakeWatches::default(),
+            ),
+        ),
+    );
+    let publish = StepRequest {
+        key: StepKey { run_id, seq: 1 },
+        entry: EntryId::try_from("publish".to_string()).expect("valid"),
+        step: StepName::try_from("publish".to_string()).expect("valid"),
+        role: None,
+        visit: 1,
+        round: None,
+        may_ask: false,
+        questions_left: 0,
+        resumes: None,
+    };
+    worker.run_step(publish).await.expect("published");
+    let kept = bench
+        .repo
+        .get_run(run_id)
+        .await
+        .expect("read")
+        .expect("kept");
+    assert!(
+        !kept
+            .control_files
+            .as_ref()
+            .is_some_and(|changes| changes.is_tampered()),
+        "a README change is no Control File's"
+    );
+    let rules = kept.standing_rules.expect("rules").definition;
+    assert!(rules.plan && rules.merge && rules.stand_in.plan && rules.orchestrator.plan);
+
+    let flow = bench
+        .service
+        .run_flow(run_id)
+        .await
+        .expect("read")
+        .expect("its flow");
+    let offered = [
+        Outcome::try_from("approve".to_string()).expect("valid"),
+        Outcome::try_from("revise".to_string()).expect("valid"),
+    ];
+    for (seq, entry, kind) in [
+        (2, "plan", RuleGateKind::Plan),
+        (3, "merge-gate", RuleGateKind::Merge),
+    ] {
+        let key = StepKey { run_id, seq };
+        let entry_id = EntryId::try_from(entry.to_string()).expect("valid");
+        bench
+            .repo
+            .start_step(key, &entry_id, 1)
+            .await
+            .expect("start");
+        bench
+            .repo
+            .open_gate(key, "Approve?", &offered)
+            .await
+            .expect("open");
+
+        // No Standing Rule answers it.
+        let ruled = worker
+            .rule_gate(GateRuling {
+                key,
+                kind,
+                fix_rounds: 0,
+                fix_limit: 0,
+                answers: offered.to_vec(),
+            })
+            .await
+            .expect("rule");
+        assert_eq!(ruled, None, "{entry}");
+
+        // The stand-in is never asked: its Flow keeps the Gate for a person.
+        let gate = flow
+            .entries
+            .iter()
+            .find(|asking| asking.id == entry_id)
+            .and_then(|asking| asking.gate.as_ref())
+            .expect("the entry's gate");
+        assert_eq!(gate.kind, Some(kind));
+        let facts = StandInFacts {
+            kind,
+            person_only: gate.person_only,
+            tampered: false,
+            held: false,
+            fix_rounds: 0,
+            fix_limit: 0,
+            repeated_blockers: false,
+        };
+        assert!(!may_stand_in(Some(rules), &facts, &offered), "{entry}");
+
+        // Nor does the Orchestrator approve it.
+        let by_agent = bench
+            .service
+            .answer_gate(
+                julia(),
+                run_id,
+                seq,
+                offered[0].clone(),
+                None,
+                None,
+                Answerer::Agent {
+                    session_id: Uuid::now_v7(),
+                },
+            )
+            .await;
+        assert!(
+            matches!(by_agent, Err(FactoryError::ReservedForAPerson(_))),
+            "{entry}: {by_agent:?}"
+        );
+    }
+
+    // The merge waits for a person, who may give it.
+    let merge_gate = bench
+        .repo
+        .list_steps(run_id)
+        .await
+        .expect("steps")
+        .into_iter()
+        .find(|step| step.seq == 3)
+        .and_then(|step| step.gate)
+        .expect("the merge gate");
+    assert_eq!(merge_gate.answer, None);
+}

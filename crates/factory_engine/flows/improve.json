@@ -1,5 +1,5 @@
 {
-	"description": "Improves the team's own Factory Definition from the failures its runs met: plans changes to the Definition's flows, agent instructions and rules that address the grouped Scorer failures and flawed runs its request lists, and asks a person to approve the plan; writes them on the run's branch of the Definition's repository and runs its checks, has a panel of reviewers review them, fixes the blockers they find, opens a pull request whose description lists the regressions it addresses, waits for its checks, then asks a person whether to merge. The Definition's own files are always Control Files of such a run, so no standing rule merges it: a person does. The factory starts it on its own once a team's failures reach the Definition's threshold; no one else does.",
+	"description": "Improves the team's own Factory Definition from the failures its runs met: plans changes to the Definition's flows, agent instructions and rules that address the grouped Scorer failures and flawed runs its request lists, and asks a person to approve the plan; writes them on the run's branch of the Definition's repository and runs its checks, has a panel of reviewers review them, fixes the blockers they find, opens a pull request whose description lists the regressions it addresses, waits for its checks, then asks a person whether to merge. Its plan and merge gates are a person's alone, whatever it changes: no standing rule, stand-in or orchestrator answers them, so a person approves its plan and merges it. The Definition's own files are also Control Files of such a run. The factory starts it on its own once a team's failures reach the Definition's threshold; no one else does.",
 	"repository": true,
 	"entries": [
 		{
@@ -17,6 +17,7 @@
 			],
 			"gate": {
 				"kind": "plan",
+				"person_only": true,
 				"question": "Approve this plan, or send it back with a note on what to change?",
 				"answers": [
 					"approve",
@@ -270,6 +271,7 @@
 			],
 			"gate": {
 				"kind": "merge",
+				"person_only": true,
 				"question": "Merge this pull request, or send it back with a note on what to change?",
 				"answers": [
 					"approve",

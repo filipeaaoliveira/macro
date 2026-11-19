@@ -35,7 +35,7 @@ use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
 use crate::domain::board::{BoardFilter, BoardPage, PullRequestRuns};
-use crate::domain::built_in_flows::BUILT_IN_FLOWS;
+use crate::domain::built_in_flows::{BUILT_IN_FLOWS, walked_flow};
 use crate::domain::control_files::ControlFiles;
 use crate::domain::definition::{DEFINITION_FILE_PATTERNS, DefinitionError};
 use crate::domain::evaluation::{EvaluationDefinition, TeamEvaluation};
@@ -1870,6 +1870,33 @@ where
             .collect())
     }
 
+    /// Whether the Gate of `run`'s Step `seq` is one the Run's own Flow
+    /// keeps for a person (`person_only`): no Standing Rule answers it.
+    async fn kept_for_a_person(
+        &self,
+        run: &Run,
+        steps: &[Step],
+        seq: u16,
+    ) -> Result<bool, StepError> {
+        let Some(entry) = steps
+            .iter()
+            .find(|step| step.seq == seq)
+            .map(|step| &step.entry)
+        else {
+            return Ok(false);
+        };
+        let Some(kept) = self.repo.run_flow(run.id).await.map_err(internal)? else {
+            return Ok(false);
+        };
+        Ok(walked_flow(run.id, kept).is_some_and(|flow| {
+            flow.entries
+                .iter()
+                .find(|asking| asking.id == *entry)
+                .and_then(|asking| asking.gate.as_ref())
+                .is_some_and(|gate| gate.person_only)
+        }))
+    }
+
     async fn run_of(&self, request: &StepRequest) -> Result<Run, StepError> {
         self.repo
             .get_run(request.key.run_id)
@@ -2144,6 +2171,11 @@ where
         let Some(rules) = run.standing_rules else {
             return Ok(None);
         };
+        // A Gate the Run's own Flow keeps for a person (an improve Run's
+        // plan and merge) takes no Rule Answer, whatever the Run changes.
+        if self.kept_for_a_person(&run, &steps, key.seq).await? {
+            return Ok(None);
+        }
         let held = match (&run.repository, ruling.kind) {
             (Some(base), RuleGateKind::Merge) => {
                 self.repo.main_hold(base).await.map_err(internal)?.is_some()
