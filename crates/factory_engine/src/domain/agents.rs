@@ -77,8 +77,19 @@ pub struct AgentDefinition {
 struct AgentDefinitionFields {
     agents: BTreeMap<AgentName, Agent>,
     roles: BTreeMap<Role, Vec<AgentName>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present_standing")]
     standing: Option<BTreeMap<StandingRoleName, StandingRoleFields>>,
+}
+
+/// A `standing` section that is written: `null` is refused rather than
+/// read as no section, which would leave every act open.
+fn present_standing<'de, D>(
+    deserializer: D,
+) -> Result<Option<BTreeMap<StandingRoleName, StandingRoleFields>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    BTreeMap::deserialize(deserializer).map(Some)
 }
 
 /// What is wrong with an agent definition.

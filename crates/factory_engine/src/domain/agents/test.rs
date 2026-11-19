@@ -373,9 +373,33 @@ fn standing_roles_that_do_not_hold_together_are_refused() {
         ),
     ];
 
+    let null = with_standing(serde_json::Value::Null).expect_err("a null standing section");
+    assert!(null.contains("invalid type: null"), "{null}");
+
     for (standing, why) in refused {
         let error = with_standing(standing).expect_err(why);
         assert!(error.contains(why), "{error}");
+    }
+}
+
+/// An empty `standing` section is Standing Roles that allow nothing: every
+/// agent act is refused, naming no Standing Role.
+#[test]
+fn an_empty_standing_section_refuses_every_agent_act() {
+    let definition = with_standing(json!({})).expect("an empty standing section");
+
+    assert!(definition.has_standing_roles());
+    for act in [
+        StandingAct::Start,
+        StandingAct::Cancel,
+        StandingAct::Link,
+        StandingAct::AnswerPlan,
+        StandingAct::AnswerBlockers,
+    ] {
+        assert_eq!(
+            definition.standing_check(act, Some(bot(PRIMARY_BOT))),
+            StandingCheck::Refused { allowing: vec![] }
+        );
     }
 }
 

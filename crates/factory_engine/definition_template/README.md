@@ -125,6 +125,9 @@ still decides whether an agent may approve that kind at all. Each Run keeps
 the Standing Roles it started with, and shows which agent did each act, as
 which Standing Role.
 
+An empty section, `"standing": {}`, allows no agent any of these acts;
+leave the section out to allow them all. `"standing": null` is refused.
+
 The check refuses an act not in that list, any act that names a merge, a
 Standing Role with no act or no Agent, an Agent `agents` does not define,
 and a name given twice.
