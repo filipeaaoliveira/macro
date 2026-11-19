@@ -124,7 +124,8 @@ pub struct StepSessionRef {
     pub run_id: RunId,
     /// The Step's entry.
     pub entry: EntryId,
-    /// The agent session the Step worked in.
+    /// An agent session the Step worked in: its current one, or one it
+    /// left for a new one.
     pub session_id: Uuid,
 }
 

@@ -122,12 +122,13 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261119044000_factory_ci_job_failure.sql`,
   `20261119045000_factory_ci_job_replaced.sql`,
   `20261119050000_factory_token_budget.sql`,
-  `20261119050100_factory_token_budget_validate.sql`), `factory_step_steer`,
+  `20261119050100_factory_token_budget_validate.sql`,
+  `20261119080000_factory_step_used_session.sql`), `factory_step_steer`,
   `factory_run_score`, `factory_run_arm`, `factory_benchmark_suite`,
   `factory_benchmark_trial`, `factory_benchmark_trial_score`,
   `factory_improvement`, `factory_improvement_failure`, `factory_merge_queue`,
-  `factory_branch_update`, `factory_reviewed_head`, `factory_ci_wait` and
-  `factory_ci_job`.
+  `factory_branch_update`, `factory_reviewed_head`, `factory_ci_wait`,
+  `factory_ci_job` and `factory_step_used_session`.
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
 
 ## Boundaries
@@ -329,7 +330,19 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   why the budget ended a Run (`token_budget_stop`: `spent` with
   `token_budget_used`, or `unread`), only on a Run with a budget and only
   the first time (`BudgetStop` on the Run). `step_sessions` reads the
-  agent sessions a Run's Steps worked in, each once, as Insights does. The
+  agent sessions a Run's Steps worked in, each once, as Insights does.
+  `factory_step.session_id` is only a Step's current session, which
+  `pass_session` replaces when the Step goes on in a new one (its session
+  was lost, or its Agent could not start); `factory_step_used_session`
+  keeps every session a Step worked in, written in the same statement as
+  `claim_session` and `pass_session` (both the session left and the new
+  one), so a session lost after its agent worked in it still counts.
+  `20261119080000_factory_step_used_session.sql` backfilled each Step's
+  current session; the sessions Steps left before it were never kept. The
+  reads (`step_sessions`, and Insights' `read_insights` and
+  `read_quality`) take the union of both, so a session counts once
+  however many Steps or rows keep it, and a Step claimed by a build
+  older than the table still counts its current session. The
   kinds the
   Orchestrator may approve are kept in the same arrays as the rules
   (`orchestrator_plan`, `orchestrator_blockers`), and on the Run.

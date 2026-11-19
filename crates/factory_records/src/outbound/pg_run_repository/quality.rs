@@ -310,10 +310,11 @@ impl RunQualityRepository for PgRunRepository {
 
         // The Runs' agent sessions, through `factory_step`'s primary key; a
         // Step that went on after a question shares the asking Step's
-        // session, which counts once.
+        // session, which counts once. The sessions Steps left count too, as
+        // the Run's token budget counts them.
         let sessions = sqlx::query!(
             r#"
-            SELECT DISTINCT run_id, session_id AS "session_id!"
+            SELECT run_id AS "run_id!", session_id AS "session_id!"
             FROM (
                 SELECT run_id, session_id
                 FROM factory_step
@@ -321,6 +322,10 @@ impl RunQualityRepository for PgRunRepository {
                 OFFSET 0
             ) steps
             WHERE session_id IS NOT NULL
+            UNION
+            SELECT run_id, session_id
+            FROM factory_step_used_session
+            WHERE run_id = ANY($1)
             "#,
             &ids,
         )

@@ -356,10 +356,11 @@ impl RunInsightsRepository for PgRunRepository {
         // Fenced, so the Runs' ids find their Steps by primary key, rather
         // than every agent Step being walked through the session index. A
         // Step that went on after its agent's question works in the asking
-        // Step's session, whose usage counts once.
+        // Step's session, whose usage counts once. A Step counts the sessions
+        // it left too, as one that was lost after its agent worked in it.
         let sessions = sqlx::query!(
             r#"
-            SELECT DISTINCT run_id, entry, session_id AS "session_id!"
+            SELECT run_id AS "run_id!", entry AS "entry!", session_id AS "session_id!"
             FROM (
                 SELECT run_id, entry, session_id
                 FROM factory_step
@@ -367,6 +368,11 @@ impl RunInsightsRepository for PgRunRepository {
                 OFFSET 0
             ) steps
             WHERE session_id IS NOT NULL
+            UNION
+            SELECT u.run_id, s.entry, u.session_id
+            FROM factory_step_used_session u
+            JOIN factory_step s ON s.run_id = u.run_id AND s.seq = u.seq
+            WHERE u.run_id = ANY($1)
             "#,
             &ids,
         )

@@ -14,6 +14,7 @@ use crate::domain::ports::RunRepository;
 
 mod control_files;
 mod definition;
+mod used_sessions;
 mod waiting;
 
 const LOGIN_TASK: &str = "00000000-0000-7000-8000-000000000101";

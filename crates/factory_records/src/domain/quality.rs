@@ -163,7 +163,8 @@ pub struct QualityRun {
     /// Whether its owner steered one of its Steps in the Step Terminal: a
     /// note, a pause, a resume or a stop.
     pub steered: bool,
-    /// The agent sessions its Steps worked in.
+    /// The agent sessions its Steps worked in, each once, those they left
+    /// for a new one included.
     pub sessions: Vec<Uuid>,
 }
 
