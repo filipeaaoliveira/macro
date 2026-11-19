@@ -235,10 +235,20 @@ section an agent's every answer to a merge Gate is refused
 (`PersonOnly::Merge`). Without the section, or for the person in person or an
 internal caller, nothing changes. The Run keeps who did each act, with its bot,
 Agent, Standing Role and session, if any (`factory_standing_act`): a start before its workflow
-starts (a start whose record fails is removed as unstarted), a cancel before it
-is sent, a link once linked, and an answer in `factory_answer_gate`, from
+starts (a start whose record fails is removed as unstarted), a cancel once the
+workflow takes it, a link once linked, and an answer in `factory_answer_gate`, from
 `AnswerGate::standing` (left out when none, so histories replay as before; the
 workflow only hands it on). The Run API lists them as `standingActs`.
+
+Deploy order and rollback: before Standing Roles, `AgentDefinitionFields` is
+`deny_unknown_fields`, and an agent Step reads its Run's kept Agents
+(`SessionAgent::run_agents`). A worker from before them fails every agent Step
+of a Run that kept a `standing` section (`DefinitionAgents`). Roll every
+service and worker task onto this code before any team's Definition adds the
+section. Once a Run has kept one, rolling back below this code fails that
+Run's later agent Steps (a Run keeps the section it started with, so removing
+it from the Definition does not help them): remove it, then let the Runs that
+kept it end, or cancel them, before rolling back.
 
 A person's Queue is their Runs waiting on them at a Gate or an agent's
 question (`GET /runs/waiting`, Insights' "Waiting on you"). A team's
