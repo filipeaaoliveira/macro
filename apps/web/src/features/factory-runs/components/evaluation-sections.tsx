@@ -385,7 +385,9 @@ function SelfImprovementBody(props: {
         </p>
       </Show>
       <Show
-        when={props.improvement.enabled && namerProblem(props.improvement.namer)}
+        when={
+          props.improvement.enabled && namerProblem(props.improvement.namer)
+        }
       >
         {(problem) => <p class="text-xs text-ink-muted">{problem()}</p>}
       </Show>
