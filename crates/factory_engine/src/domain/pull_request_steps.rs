@@ -404,6 +404,26 @@ pub(crate) enum Update {
     Ended(StepReport),
 }
 
+/// What asking GitHub for an update came to: the update to keep, or the
+/// Step's end.
+enum Asked {
+    Update(BranchUpdate),
+    Ended(StepReport),
+}
+
+/// Where a kept update leaves the Step without waiting on GitHub: a
+/// conflict, for the agent, or a merge whose head is known; none while
+/// GitHub's merge has not shown yet.
+fn settled(update: &BranchUpdate) -> Option<Update> {
+    if update.conflict {
+        return Some(Update::Conflict(update.clone()));
+    }
+    update
+        .updated_head
+        .is_some()
+        .then(|| Update::Merged(update.clone()))
+}
+
 fn changes_note(changes: &ControlFileChanges) -> String {
     if changes.unlisted {
         return "\n\nGitHub could not list this branch's changes in full, so it may change Control \
@@ -1156,6 +1176,14 @@ where
     /// rewrites the branch nor merges over a push made since. The update is
     /// kept before the Step goes on, so a retry goes on the way it started.
     ///
+    /// GitHub merges after it answers, and may never do it (its merge failed
+    /// later, or someone pushed in between): once its merge has not shown
+    /// within [`UPDATE_SHOWS_WITHIN`], the branch is read again and GitHub
+    /// asked again from the head it is at now, which replaces the update
+    /// kept. One that still has not shown fails the attempt for a retry,
+    /// which waits and asks the same way, so each attempt asks GitHub at
+    /// most twice, and the Step's retries bound the whole.
+    ///
     /// [`Update::Merged`] with the head GitHub's merge made (or the head, when
     /// it already held its base); [`Update::Conflict`] when GitHub could not
     /// merge them, for the agent to resolve; [`Update::Ended`] when the pull
@@ -1173,112 +1201,149 @@ where
         let update = match kept {
             Some(kept) => kept,
             None => {
-                let pull_request = self
-                    .find(input, &repository)
-                    .await?
-                    .ok_or(PullRequestStepError::NoPullRequest)?;
-                match pull_request.state {
-                    PullRequestState::Merged => {
-                        let merged = self.merged_outside(input, recorded, &pull_request).await?;
-                        return Ok(Update::Ended(merged));
-                    }
-                    PullRequestState::Closed => {
-                        return Ok(Update::Ended(report(
-                            "closed",
-                            format!("{}\n\nIt was closed without merging.", named(&pull_request)),
-                        )));
-                    }
-                    PullRequestState::Open => {}
-                }
-                let head = pull_request.head_sha.clone();
-                let base_sha = self
-                    .github
-                    .branch_head(input.owner, &repository, &recorded.base_branch)
-                    .await
-                    .map_err(PullRequestStepError::github)?
-                    .ok_or(PullRequestStepError::NoBase)?;
-                let update = if self.contains(input, &repository, &base_sha, &head).await? {
-                    // Someone brought it up to date already: there is
-                    // nothing to merge, and its checks still run again.
-                    BranchUpdate {
-                        base_sha,
-                        from_head: head.clone(),
-                        conflict: false,
-                        updated_head: Some(head),
-                    }
-                } else {
-                    let updating = self
-                        .github
-                        .update_branch(input.owner, &repository, pull_request.number, &head)
-                        .await
-                        .map_err(PullRequestStepError::github)?;
-                    match updating {
-                        BranchUpdating::Started => BranchUpdate {
-                            base_sha,
-                            from_head: head,
-                            conflict: false,
-                            updated_head: None,
-                        },
-                        BranchUpdating::Declined(why) => {
-                            return Err(PullRequestStepError::UpdateDeclined(why));
-                        }
-                        BranchUpdating::Conflict(why) => {
-                            tracing::info!(%why, "the run's base conflicts with its branch");
-                            BranchUpdate {
-                                base_sha,
-                                from_head: head,
-                                conflict: true,
-                                updated_head: None,
-                            }
-                        }
-                        BranchUpdating::HeadMoved => {
-                            return Err(PullRequestStepError::BranchMoving(
-                                "someone pushed to it".to_string(),
-                            ));
-                        }
-                    }
+                let asked = match self.ask_update(input, &repository, recorded).await? {
+                    Asked::Ended(report) => return Ok(Update::Ended(report)),
+                    Asked::Update(update) => update,
                 };
                 self.repo
-                    .keep_branch_update(input.key, &update)
+                    .keep_branch_update(input.key, &asked)
                     .await
                     .map_err(PullRequestStepError::records)?
             }
         };
+        if let Some(settled) = settled(&update) {
+            return Ok(settled);
+        }
+        if let Some(shown) = self.merge_shown(input, &repository, update).await? {
+            return Ok(shown);
+        }
 
-        if update.conflict {
-            return Ok(Update::Conflict(update));
+        // GitHub's merge never showed: read the branch, and ask again from
+        // where it is now.
+        let asked = match self.ask_update(input, &repository, recorded).await? {
+            Asked::Ended(report) => return Ok(Update::Ended(report)),
+            Asked::Update(update) => update,
+        };
+        let update = self
+            .repo
+            .restart_branch_update(input.key, &asked)
+            .await
+            .map_err(PullRequestStepError::records)?;
+        if let Some(settled) = settled(&update) {
+            return Ok(settled);
         }
-        if update.updated_head.is_some() {
-            return Ok(Update::Merged(update));
+        if let Some(shown) = self.merge_shown(input, &repository, update).await? {
+            return Ok(shown);
         }
-        // GitHub merges after it answers: the merge shows once the branch
-        // moved from its start to a commit that holds the base.
+        Err(PullRequestStepError::BranchMoving(
+            "github's merge of the base has not shown on it, though asked again".to_string(),
+        ))
+    }
+
+    /// Read the Run's pull request, its branch's head and its base's, and
+    /// ask GitHub to merge the base into the branch: the update to keep, or
+    /// the Step's end when the pull request was merged or closed.
+    async fn ask_update(
+        &self,
+        input: &StepInput<'_>,
+        repository: &CodeRepository,
+        recorded: &Repository,
+    ) -> Result<Asked, PullRequestStepError> {
+        let pull_request = self
+            .find(input, repository)
+            .await?
+            .ok_or(PullRequestStepError::NoPullRequest)?;
+        match pull_request.state {
+            PullRequestState::Merged => {
+                let merged = self.merged_outside(input, recorded, &pull_request).await?;
+                return Ok(Asked::Ended(merged));
+            }
+            PullRequestState::Closed => {
+                return Ok(Asked::Ended(report(
+                    "closed",
+                    format!("{}\n\nIt was closed without merging.", named(&pull_request)),
+                )));
+            }
+            PullRequestState::Open => {}
+        }
+        let head = pull_request.head_sha.clone();
+        let base_sha = self
+            .github
+            .branch_head(input.owner, repository, &recorded.base_branch)
+            .await
+            .map_err(PullRequestStepError::github)?
+            .ok_or(PullRequestStepError::NoBase)?;
+        if self.contains(input, repository, &base_sha, &head).await? {
+            // Someone brought it up to date already: there is nothing to
+            // merge, and the head is not a merge the factory made.
+            return Ok(Asked::Update(BranchUpdate {
+                base_sha,
+                from_head: head.clone(),
+                conflict: false,
+                updated_head: Some(head),
+            }));
+        }
+        let updating = self
+            .github
+            .update_branch(input.owner, repository, pull_request.number, &head)
+            .await
+            .map_err(PullRequestStepError::github)?;
+        let conflict = match updating {
+            BranchUpdating::Started => false,
+            BranchUpdating::Conflict(why) => {
+                tracing::info!(%why, "the run's base conflicts with its branch");
+                true
+            }
+            BranchUpdating::Declined(why) => {
+                return Err(PullRequestStepError::UpdateDeclined(why));
+            }
+            BranchUpdating::HeadMoved => {
+                return Err(PullRequestStepError::BranchMoving(
+                    "someone pushed to it".to_string(),
+                ));
+            }
+        };
+        Ok(Asked::Update(BranchUpdate {
+            base_sha,
+            from_head: head,
+            conflict,
+            updated_head: None,
+        }))
+    }
+
+    /// Wait up to [`UPDATE_SHOWS_WITHIN`] for GitHub's merge of `update`
+    /// to show: the branch moved from its start to a commit that holds the
+    /// base. The update with that head, kept; none when it did not show.
+    async fn merge_shown(
+        &self,
+        input: &StepInput<'_>,
+        repository: &CodeRepository,
+        update: BranchUpdate,
+    ) -> Result<Option<Update>, PullRequestStepError> {
         let deadline = tokio::time::Instant::now() + UPDATE_SHOWS_WITHIN;
         loop {
             let head = self
                 .github
-                .branch_head(input.owner, &repository, &run_branch(input.key.run_id))
+                .branch_head(input.owner, repository, &run_branch(input.key.run_id))
                 .await
                 .map_err(PullRequestStepError::github)?;
             if let Some(head) = head
                 && head != update.from_head
                 && self
-                    .contains(input, &repository, &update.base_sha, &head)
+                    .contains(input, repository, &update.base_sha, &head)
                     .await?
             {
                 self.repo
                     .set_updated_head(input.key, &head)
                     .await
                     .map_err(PullRequestStepError::records)?;
-                return Ok(Update::Merged(BranchUpdate {
+                return Ok(Some(Update::Merged(BranchUpdate {
                     updated_head: Some(head),
                     ..update
-                }));
+                })));
             }
             if tokio::time::Instant::now() + UPDATE_POLL > deadline {
-                return Err(PullRequestStepError::BranchMoving(
-                    "github's merge of the base has not shown on it".to_string(),
-                ));
+                return Ok(None);
             }
             tokio::time::sleep(UPDATE_POLL).await;
         }

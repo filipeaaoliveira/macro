@@ -438,7 +438,9 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   merge or left it within the place kept, all on the database's clock.
   `leave_merge_queue` keeps the first time it left; `drop_from_merge_queue`
   takes a merged Run out. `factory_branch_update` keeps an update Step's
-  first update (`keep_branch_update`, by `(run_id, seq)`), and
+  first update (`keep_branch_update`, by `(run_id, seq)`), replaced only
+  while GitHub's merge of it never showed (`restart_branch_update`: no
+  conflict, no head recorded), and
   `set_updated_head` records the head GitHub's merge made once, only for an
   update with no conflict.
 

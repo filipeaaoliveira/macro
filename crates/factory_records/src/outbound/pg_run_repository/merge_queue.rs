@@ -133,6 +133,32 @@ impl MergeQueueRepository for PgRunRepository {
     }
 
     #[tracing::instrument(err, skip(self))]
+    async fn restart_branch_update(
+        &self,
+        key: StepKey,
+        update: &BranchUpdate,
+    ) -> Result<BranchUpdate, Self::Err> {
+        sqlx::query!(
+            r#"
+            UPDATE factory_branch_update
+            SET base_sha = $3, from_head = $4, conflict = $5, updated_head = $6
+            WHERE run_id = $1 AND seq = $2 AND NOT conflict AND updated_head IS NULL
+            "#,
+            key.run_id.as_uuid(),
+            i32::from(key.seq),
+            update.base_sha,
+            update.from_head,
+            update.conflict,
+            update.updated_head,
+        )
+        .execute(&self.pool)
+        .await?;
+        self.branch_update(key)
+            .await?
+            .ok_or(PgRunRepositoryErr::MissingBranchUpdate)
+    }
+
+    #[tracing::instrument(err, skip(self))]
     async fn set_updated_head(&self, key: StepKey, head: &str) -> Result<(), Self::Err> {
         sqlx::query!(
             r#"

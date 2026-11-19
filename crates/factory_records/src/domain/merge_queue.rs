@@ -78,6 +78,16 @@ pub trait MergeQueueRepository: Send + Sync + 'static {
         update: &BranchUpdate,
     ) -> impl Future<Output = Result<BranchUpdate, Self::Err>> + Send;
 
+    /// Replace the Step `key`'s update with `update`, asked again because
+    /// GitHub's merge of the one kept never showed: only an update with no
+    /// conflict and no head GitHub's merge made is replaced, as nothing was
+    /// asked of an agent for it yet. The update it keeps, either way.
+    fn restart_branch_update(
+        &self,
+        key: StepKey,
+        update: &BranchUpdate,
+    ) -> impl Future<Output = Result<BranchUpdate, Self::Err>> + Send;
+
     /// Record the branch's head GitHub's merge made for the Step `key`'s
     /// update, which merged with no conflict.
     fn set_updated_head(

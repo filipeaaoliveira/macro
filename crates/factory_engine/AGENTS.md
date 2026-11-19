@@ -889,7 +889,13 @@ its Flow does not route above `merge` would fall through to the merge):
   to) is no conflict: it fails the Step for good with GitHub's message
   (`UpdateDeclined`). The update is
   kept before the agent is asked (`factory_branch_update`), so a retry goes
-  on the way it started. Then the repository's checks round runs on the
+  on the way it started. GitHub merges after it answers, and may never
+  merge (its merge failed later, or someone pushed in between): once its
+  merge has not shown on the branch within `UPDATE_SHOWS_WITHIN` (two
+  minutes), the branch is read again and GitHub asked again from its head
+  now, which replaces the update kept; still nothing shown fails the
+  attempt for a retry, which does the same, so the Step's retries bound
+  it. Then the repository's checks round runs on the
   branch, as for `write` and `fix`. It ends `done` when the branch's head
   is still the one GitHub's merge made and the checks passed (only the base
   came in: the Run goes back through `ci` to the merge Gate, which asks

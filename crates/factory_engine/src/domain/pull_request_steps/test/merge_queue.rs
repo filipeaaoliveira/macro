@@ -326,6 +326,82 @@ async fn an_update_github_cannot_merge_is_a_conflict() {
     assert_eq!(github.state().updates.len(), 1);
 }
 
+/// A head someone pushed while the update kept waited for GitHub's merge.
+const PUSHED: &str = "dddddddddddddddddddddddddddddddddddddddd";
+
+/// An update GitHub took but whose merge never shows, because someone
+/// pushed in between, is not polled for until retries run out: once its
+/// wait is over the branch is read again and GitHub asked again from the
+/// head it is at now, and the update kept is replaced by that one.
+#[tokio::test(start_paused = true)]
+async fn an_update_that_never_shows_is_asked_again_from_the_branch_now() {
+    let github = github_on(NEW_BASE, false);
+    let repo = FakeRepo::default();
+    let run_id = RunId::generate();
+    let key = input(run_id).key;
+    repo.keep_branch_update(
+        key,
+        &BranchUpdate {
+            base_sha: NEW_BASE.to_string(),
+            from_head: FakeGithub::HEAD.to_string(),
+            conflict: false,
+            updated_head: None,
+        },
+    )
+    .await
+    .expect("keep");
+    {
+        let mut state = github.state();
+        state.head = Some(PUSHED.to_string());
+        if let Some(pull_request) = state.pull_request.as_mut() {
+            pull_request.head_sha = PUSHED.to_string();
+        }
+        state.updated_head = Some(UPDATED.to_string());
+        state
+            .descendants
+            .insert((PUSHED.to_string(), UPDATED.to_string()));
+    }
+
+    let update = steps(&github, &repo)
+        .update_branch(&input(run_id))
+        .await
+        .expect("update");
+
+    let merged = BranchUpdate {
+        base_sha: NEW_BASE.to_string(),
+        from_head: PUSHED.to_string(),
+        conflict: false,
+        updated_head: Some(UPDATED.to_string()),
+    };
+    assert_eq!(update, Update::Merged(merged.clone()));
+    assert_eq!(github.state().updates, vec![PUSHED.to_string()]);
+    assert_eq!(repo.queue().updates.get(&key), Some(&merged));
+}
+
+/// GitHub taking an update it never applies is asked again within the
+/// attempt; still nothing shown fails the attempt for a retry, which asks
+/// the same way.
+#[tokio::test(start_paused = true)]
+async fn an_update_github_never_applies_is_asked_again() {
+    let github = github_on(NEW_BASE, false);
+    // GitHub answers it took the update, and never merges.
+    github.state().update_answer = Some(BranchUpdating::Started);
+    let repo = FakeRepo::default();
+    let run_id = RunId::generate();
+
+    let first = steps(&github, &repo).update_branch(&input(run_id)).await;
+
+    assert!(
+        matches!(first, Err(PullRequestStepError::BranchMoving(_))),
+        "{first:?}"
+    );
+    assert_eq!(
+        github.state().updates,
+        vec![FakeGithub::HEAD.to_string(), FakeGithub::HEAD.to_string()],
+        "asked once, then again once its merge did not show"
+    );
+}
+
 /// GitHub declining an update for a reason other than a conflict, as for
 /// a token that lacks a scope, fails the Step with GitHub's reason, for
 /// good: it is no conflict for the writer or a person, and nothing is kept.

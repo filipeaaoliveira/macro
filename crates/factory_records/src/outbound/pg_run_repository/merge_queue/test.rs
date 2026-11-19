@@ -194,3 +194,62 @@ async fn a_step_keeps_its_first_branch_update(pool: PgPool) {
         Some(conflict)
     );
 }
+
+/// An update asked again replaces one whose merge never showed, and never
+/// one that is a conflict or whose merge showed.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn an_update_asked_again_replaces_only_one_still_waiting(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let run_id = code_run(&repo, Some(&branch_of_app("main"))).await;
+    let waiting = StepKey { run_id, seq: 9 };
+    let shown = StepKey { run_id, seq: 10 };
+    let conflict = StepKey { run_id, seq: 11 };
+    let started = BranchUpdate {
+        base_sha: BASE.to_string(),
+        from_head: HEAD.to_string(),
+        conflict: false,
+        updated_head: None,
+    };
+    let pushed = "4444444444444444444444444444444444444444";
+    let again = BranchUpdate {
+        from_head: pushed.to_string(),
+        ..started.clone()
+    };
+    for key in [waiting, shown] {
+        repo.keep_branch_update(key, &started).await.expect("keep");
+    }
+    let merged = "3333333333333333333333333333333333333333";
+    repo.set_updated_head(shown, merged).await.expect("head");
+    let conflicted = BranchUpdate {
+        conflict: true,
+        ..started.clone()
+    };
+    repo.keep_branch_update(conflict, &conflicted)
+        .await
+        .expect("keep");
+
+    assert_eq!(
+        repo.restart_branch_update(waiting, &again)
+            .await
+            .expect("again"),
+        again
+    );
+    assert_eq!(
+        repo.restart_branch_update(shown, &again)
+            .await
+            .expect("again"),
+        BranchUpdate {
+            updated_head: Some(merged.to_string()),
+            ..started.clone()
+        }
+    );
+    assert_eq!(
+        repo.restart_branch_update(conflict, &again)
+            .await
+            .expect("again"),
+        conflicted
+    );
+}
