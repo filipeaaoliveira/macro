@@ -43,13 +43,15 @@ impl StandingActRepository for PgRunRepository {
         actor: &StandingActor,
     ) -> Result<(), Self::Err> {
         // A start, a cancel or an answer done again (a retried activity, a
-        // second cancel) keeps the first: the unique index takes one.
+        // second cancel) keeps the first: the partial unique index
+        // `factory_standing_act_once_idx` takes one. Only that conflict is
+        // let go; any other fails.
         sqlx::query!(
             r#"
             INSERT INTO factory_standing_act
                 (run_id, act, seq, bot_id, agent, standing_role, session_id)
             VALUES ($1, $2, $3, $4, $5, $6, $7)
-            ON CONFLICT DO NOTHING
+            ON CONFLICT (run_id, act, (coalesce(seq, -1))) WHERE act <> 'link' DO NOTHING
             "#,
             run_id.as_uuid(),
             act.as_ref(),

@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO factory_standing_act\n                (run_id, act, seq, bot_id, agent, standing_role, session_id)\n            VALUES ($1, $2, $3, $4, $5, $6, $7)\n            ON CONFLICT (run_id, act, (coalesce(seq, -1))) WHERE act <> 'link' DO NOTHING\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int4",
+        "Uuid",
+        "Text",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c421b59ce4f78587559d48f4113bc8b382d59527ec7587102966a92f9a55730e"
+}
