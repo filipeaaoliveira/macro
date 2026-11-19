@@ -107,8 +107,9 @@ cannot share the normal target: building them there would replace the
 normal artifacts. The web side costs about 20 seconds.
 
 The whole workspace was not measured. `factory_service` reaches 828 of the
-lockfile's 1747 packages and 3 of 377 workspace members, about 55 thousand
-of 2.5 million lines of non-test Rust. Building and testing every member
+lockfile's 1747 packages and 3 of 377 workspace members; the factory crates
+hold about 55 thousand lines of non-test Rust, against 2.5 million lines of
+Rust (tests included) in all members' sources. Building and testing every member
 instrumented would cost several CPU-hours and tens of GB of target on this
 machine, so the checks should score changed packages only.
 
@@ -117,8 +118,8 @@ machine, so the checks should score changed packages only.
 - Fail a change when a function it adds or changes scores above 30, or when a
   function's score rises against the committed baseline
   (`cargo crap --baseline … --fail-regression`). 30 is cargo-crap's default
-  and crap4ts's lenient level; on this baseline it flags 14 of 1554 Rust
-  functions (0.9%) and no TypeScript one once crap4ts's missed coverage is
+  and crap4ts's lenient level; on this baseline it flags 14 of the 1554
+  functions in the two factory crates (0.9%) and no TypeScript one once crap4ts's missed coverage is
   corrected. The TypeScript check has to correct it, or it fails on covered
   functions.
 - Leave the functions already above 30 to the baseline; don't fail every
