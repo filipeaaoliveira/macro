@@ -119,6 +119,8 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261119030000_factory_run_cancelled_in_person.sql`,
   `20261119040000_factory_merge_queue.sql`,
   `20261119043000_factory_ci_wait.sql`,
+  `20261119044000_factory_ci_job_failure.sql`,
+  `20261119045000_factory_ci_job_replaced.sql`,
   `20261119050000_factory_token_budget.sql`,
   `20261119050100_factory_token_budget_validate.sql`), `factory_step_steer`,
   `factory_run_score`, `factory_run_arm`, `factory_benchmark_suite`,
