@@ -368,7 +368,6 @@ fn named(pull_request: &PullRequest) -> String {
     )
 }
 
-/// What a person reads of the Control Files a Run's branch changed.
 /// The outcome of `ready_to_merge` and `merge` for a head that lacks a
 /// commit of its base.
 pub(crate) const BEHIND: &str = "behind";
@@ -424,6 +423,7 @@ fn settled(update: &BranchUpdate) -> Option<Update> {
         .then(|| Update::Merged(update.clone()))
 }
 
+/// What a person reads of the Control Files a Run's branch changed.
 fn changes_note(changes: &ControlFileChanges) -> String {
     if changes.unlisted {
         return "\n\nGitHub could not list this branch's changes in full, so it may change Control \
