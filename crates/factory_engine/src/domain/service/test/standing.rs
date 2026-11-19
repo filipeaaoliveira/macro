@@ -4,6 +4,7 @@
 //! Role that allows the act, and the Run keeps which bot and Standing Role
 //! did it. With no `standing` section, every act goes on as before.
 
+use bot_id::BotId;
 use factory_records::domain::models::{
     AgentName, EntryId, NewRun, Outcome, Repository, RunId, RunInsert, StepKey,
 };
@@ -19,7 +20,7 @@ use super::definition::{DEFINITION_REPO, FIRST, github_at, team_repo};
 use super::{FakeExecutor, FakeWorkflows, code_service, julia, teo};
 use crate::domain::fakes::{FakeGithub, FakeRepo};
 use crate::domain::gate::{AnswerGate, GateAnswered, StandingAnswer};
-use crate::domain::models::{Answerer, FactoryError, PersonOnly};
+use crate::domain::models::{ActingAgent, Answerer, FactoryError, PersonOnly};
 use crate::domain::ports::{FactoryService, StepService};
 use crate::domain::service::StepServiceImpl;
 
@@ -241,7 +242,7 @@ async fn only_a_bot_in_a_standing_role_that_allows_it_answers_a_gate() {
         Some(StandingAnswer {
             act: StandingAct::AnswerPlan,
             by: StandingActor {
-                session_id: primary,
+                session_id: Some(primary),
                 bot_id: PRIMARY_BOT,
                 agent: AgentName::try_from("primary".to_string()).expect("valid"),
                 standing_role: standing_role("gatekeeper"),
@@ -369,7 +370,7 @@ async fn the_recorded_answer_keeps_its_standing_role() {
     .await;
     let primary = session_of(&repo, PRIMARY_BOT);
     let by = StandingActor {
-        session_id: primary,
+        session_id: Some(primary),
         bot_id: PRIMARY_BOT,
         agent: AgentName::try_from("primary".to_string()).expect("valid"),
         standing_role: standing_role("gatekeeper"),
@@ -399,7 +400,7 @@ async fn the_recorded_answer_keeps_its_standing_role() {
     let kept = &detail.standing_acts[0];
     assert_eq!(
         (kept.act, kept.seq, kept.bot_id, kept.session_id),
-        (StandingAct::AnswerPlan, Some(1), PRIMARY_BOT, primary)
+        (StandingAct::AnswerPlan, Some(1), PRIMARY_BOT, Some(primary))
     );
     assert_eq!(kept.agent, by.agent);
     assert_eq!(kept.standing_role, by.standing_role);
@@ -428,16 +429,24 @@ async fn cancel_and_link_take_a_bot_in_a_standing_role_that_allows_them() {
     let backup = session_of(&repo, BACKUP_BOT);
 
     let link_refused = service
-        .link_task(&julia(), run_id, task, Some(primary))
+        .link_task(&julia(), run_id, task, Some(ActingAgent::Session(primary)))
         .await;
-    let cancel_refused = service.cancel_run(&julia(), run_id, Some(primary)).await;
+    let cancel_refused = service
+        .cancel_run(&julia(), run_id, Some(ActingAgent::Session(primary)))
+        .await;
     let in_person = service.link_task(&julia(), run_id, task, None).await;
     let linked = service
-        .link_task(&julia(), run_id, task, Some(backup))
+        .link_task(&julia(), run_id, task, Some(ActingAgent::Session(backup)))
         .await;
-    let cancelled = service.cancel_run(&julia(), run_id, Some(backup)).await;
-    let open_linked = service.link_task(&julia(), open, task, Some(primary)).await;
-    let open_cancelled = service.cancel_run(&julia(), open, Some(primary)).await;
+    let cancelled = service
+        .cancel_run(&julia(), run_id, Some(ActingAgent::Session(backup)))
+        .await;
+    let open_linked = service
+        .link_task(&julia(), open, task, Some(ActingAgent::Session(primary)))
+        .await;
+    let open_cancelled = service
+        .cancel_run(&julia(), open, Some(ActingAgent::Session(primary)))
+        .await;
 
     let Err(FactoryError::NotInStandingRole { act, allowing }) = link_refused else {
         panic!("a bot in no standing role that links is refused");
@@ -507,20 +516,23 @@ async fn a_cancel_that_is_not_taken_keeps_no_standing_act() {
     let backup = session_of(&repo, BACKUP_BOT);
 
     let too_late = code_service(&repo, &ended, &github)
-        .cancel_run(&julia(), run_id, Some(backup))
+        .cancel_run(&julia(), run_id, Some(ActingAgent::Session(backup)))
         .await;
     let failed = code_service(&repo, &failing, &github)
-        .cancel_run(&julia(), run_id, Some(backup))
+        .cancel_run(&julia(), run_id, Some(ActingAgent::Session(backup)))
         .await;
 
-    assert!(matches!(too_late, Err(FactoryError::RunEnded)), "{too_late:?}");
+    assert!(
+        matches!(too_late, Err(FactoryError::RunEnded)),
+        "{too_late:?}"
+    );
     assert!(failed.is_err(), "{failed:?}");
     assert!(repo.standing_acts.lock().expect("acts").is_empty());
 
     let other = session_of(&repo, BACKUP_BOT);
     let service = code_service(&repo, &taking, &github);
     service
-        .cancel_run(&julia(), run_id, Some(other))
+        .cancel_run(&julia(), run_id, Some(ActingAgent::Session(other)))
         .await
         .expect("the operator cancels");
     let detail = service.get_run(&julia(), run_id).await.expect("read");
@@ -529,7 +541,7 @@ async fn a_cancel_that_is_not_taken_keeps_no_standing_act() {
         .iter()
         .map(|act| (act.act, act.session_id))
         .collect();
-    assert_eq!(kept, [(StandingAct::Cancel, other)]);
+    assert_eq!(kept, [(StandingAct::Cancel, Some(other))]);
 }
 
 /// Starting a Run of a Definition with Standing Roles takes a bot that
@@ -575,20 +587,22 @@ async fn starting_a_run_takes_a_bot_in_a_standing_role_that_allows_it() {
     let backup = Uuid::now_v7();
     repo.add_session_bot(primary, teo().as_ref(), PRIMARY_BOT);
     repo.add_session_bot(backup, teo().as_ref(), BACKUP_BOT);
-    let start = |session: Option<Uuid>| {
+    let start = |acting: Option<ActingAgent>| {
         service.create_run(
             teo(),
             "notes".to_string(),
             "Note it".to_string(),
             None,
             None,
-            session.is_none(),
-            session,
+            acting.is_none(),
+            acting,
         )
     };
 
-    let refused = start(Some(primary)).await;
-    let started = start(Some(backup)).await.expect("the intake starts");
+    let refused = start(Some(ActingAgent::Session(primary))).await;
+    let started = start(Some(ActingAgent::Session(backup)))
+        .await
+        .expect("the intake starts");
     let in_person = start(None).await.expect("the owner starts in person");
 
     let Err(FactoryError::NotInStandingRole { act, allowing }) = refused else {
@@ -621,7 +635,74 @@ async fn starting_a_run_takes_a_bot_in_a_standing_role_that_allows_it() {
         .collect();
     assert_eq!(
         kept,
-        [(StandingAct::Start, "intake".to_string(), BACKUP_BOT, backup)]
+        [(
+            StandingAct::Start,
+            "intake".to_string(),
+            BACKUP_BOT,
+            Some(backup)
+        )]
     );
     assert!(in_person.standing_acts.is_empty());
+}
+
+/// Code signed for a bot that runs in no agent session is checked as that
+/// bot: under Standing Roles it cancels and links only through one that
+/// allows the act, and the Run keeps the bot with no session.
+#[tokio::test]
+async fn a_sessionless_bot_takes_a_standing_role_that_allows_the_act() {
+    let repo = FakeRepo::default();
+    let workflows = FakeWorkflows::default();
+    let service = code_service(&repo, &workflows, &FakeGithub::default());
+    let task = Uuid::now_v7();
+    repo.tasks.lock().expect("tasks").insert(task);
+    let run_id = waiting_run(
+        &repo,
+        Some(agents(Some(split_roles()))),
+        "plan",
+        "done",
+        &["approve", "revise"],
+    )
+    .await;
+    let primary = Some(ActingAgent::Bot(BotId::new_from_uuid(PRIMARY_BOT)));
+    let backup = Some(ActingAgent::Bot(BotId::new_from_uuid(BACKUP_BOT)));
+    let unknown = Some(ActingAgent::Bot(BotId::new_from_uuid(Uuid::now_v7())));
+
+    let cancel_refused = service.cancel_run(&julia(), run_id, primary).await;
+    let link_refused = service.link_task(&julia(), run_id, task, unknown).await;
+    let linked = service.link_task(&julia(), run_id, task, backup).await;
+    let cancelled = service.cancel_run(&julia(), run_id, backup).await;
+
+    let Err(FactoryError::NotInStandingRole { act, allowing }) = cancel_refused else {
+        panic!("a sessionless bot in no standing role that cancels is refused");
+    };
+    assert_eq!(
+        (act, allowing),
+        (StandingAct::Cancel, vec![standing_role("operator")])
+    );
+    assert!(
+        matches!(
+            link_refused,
+            Err(FactoryError::NotInStandingRole {
+                act: StandingAct::Link,
+                ..
+            })
+        ),
+        "{link_refused:?}"
+    );
+    linked.expect("the intake links");
+    cancelled.expect("the operator cancels");
+    assert_eq!(*workflows.cancelled.lock().expect("cancels"), [run_id]);
+    let detail = service.get_run(&julia(), run_id).await.expect("read");
+    let kept: Vec<_> = detail
+        .standing_acts
+        .iter()
+        .map(|act| (act.act, act.bot_id, act.session_id))
+        .collect();
+    assert_eq!(
+        kept,
+        [
+            (StandingAct::Link, BACKUP_BOT, None),
+            (StandingAct::Cancel, BACKUP_BOT, None),
+        ]
+    );
 }

@@ -28,11 +28,11 @@ use crate::domain::gate::{
 use crate::domain::gate_owner::{GateNotice, OwnerNote};
 use crate::domain::main_hold::{HoldTask, MainLook, MainWatch};
 use crate::domain::models::{
-    AgentAnswer, AgentCommand, AgentTask, AgentTurn, Answerer, BranchDeletion, CodeRepository,
-    ControlFilesSettings, DefinitionSettings, FactoryError, FlowSummary, HeadChecks, Merging,
-    OpenPullRequest, Opening, PullRequest, RepositoryAccess, RequiredChecks, RunDetail, RunFinish,
-    RunStart, SessionSteer, SessionStepRef, StandingRulesSettings, StepEnding, StepError,
-    StepInput, StepReport, StepRequest, StepStart,
+    ActingAgent, AgentAnswer, AgentCommand, AgentTask, AgentTurn, Answerer, BranchDeletion,
+    CodeRepository, ControlFilesSettings, DefinitionSettings, FactoryError, FlowSummary,
+    HeadChecks, Merging, OpenPullRequest, Opening, PullRequest, RepositoryAccess, RequiredChecks,
+    RunDetail, RunFinish, RunStart, SessionSteer, SessionStepRef, StandingRulesSettings,
+    StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
 };
 use crate::domain::review_rounds::{ChangedFile, ReviewRoundClosing, ReviewRoundOpening};
 use crate::domain::standing_rules::RuleAnswer;
@@ -726,9 +726,9 @@ pub trait FactoryService: Send + Sync + 'static {
     /// and start it. The actor must have an account, see the task, and
     /// reach the repository with their GitHub account. `in_person` says
     /// whether they create it in their own signed-in session.
-    /// `agent_session` is the agent session the call came from, when an
-    /// agent creates it for them: under a Definition with Standing Roles,
-    /// its bot must fill one that allows `start`.
+    /// `acting` is the agent that creates it for them, when one does
+    /// ([`ActingAgent`]): under a Definition with Standing Roles, its bot
+    /// must fill one that allows `start`.
     #[expect(clippy::too_many_arguments, reason = "each is a part of one start")]
     fn create_run(
         &self,
@@ -738,7 +738,7 @@ pub trait FactoryService: Send + Sync + 'static {
         task_id: Option<Uuid>,
         repo_url: Option<String>,
         in_person: bool,
-        agent_session: Option<Uuid>,
+        acting: Option<ActingAgent>,
     ) -> impl Future<Output = Result<RunDetail, FactoryError>> + Send;
 
     /// `actor`'s Run and the Steps it took, or a team member's on a task
@@ -806,15 +806,15 @@ pub trait FactoryService: Send + Sync + 'static {
     ) -> impl Future<Output = Result<PullRequestRuns, FactoryError>> + Send;
 
     /// Link `actor`'s Run to the task document `task_id`, replacing any task
-    /// it had. The actor must see the task. From the agent session
-    /// `agent_session`, on a Run whose Definition has Standing Roles, its
-    /// bot must fill one that allows `link`.
+    /// it had. The actor must see the task. For the agent `acting`, on a
+    /// Run whose Definition has Standing Roles, its bot must fill one that
+    /// allows `link`.
     fn link_task(
         &self,
         actor: &MacroUserIdStr<'static>,
         id: RunId,
         task_id: Uuid,
-        agent_session: Option<Uuid>,
+        acting: Option<ActingAgent>,
     ) -> impl Future<Output = Result<RunDetail, FactoryError>> + Send;
 
     /// The Step of one of `actor`'s Runs that works, or worked, in the agent
@@ -948,14 +948,13 @@ pub trait FactoryService: Send + Sync + 'static {
     ) -> impl Future<Output = Result<bool, FactoryError>> + Send;
 
     /// Cancel `actor`'s Run. Cancelling a Run that ended cancelled changes
-    /// nothing. From the agent session `agent_session`, on a Run whose
-    /// Definition has Standing Roles, its bot must fill one that allows
-    /// `cancel`.
+    /// nothing. For the agent `acting`, on a Run whose Definition has
+    /// Standing Roles, its bot must fill one that allows `cancel`.
     fn cancel_run(
         &self,
         actor: &MacroUserIdStr<'static>,
         id: RunId,
-        agent_session: Option<Uuid>,
+        acting: Option<ActingAgent>,
     ) -> impl Future<Output = Result<(), FactoryError>> + Send;
 
     /// Mark `actor`'s Run flawed, for `reason`, in their own name: it

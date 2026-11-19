@@ -51,8 +51,8 @@ use crate::domain::gate_owner::{
     told_id,
 };
 use crate::domain::models::{
-    Answerer, CodeRepository, ControlFilesSettings, DefinitionSettings, FactoryError, FlowSummary,
-    PersonOnly, RunDetail, RunFinish, RunStart, SessionSteer, SessionStepRef,
+    ActingAgent, Answerer, CodeRepository, ControlFilesSettings, DefinitionSettings, FactoryError,
+    FlowSummary, PersonOnly, RunDetail, RunFinish, RunStart, SessionSteer, SessionStepRef,
     StandingRulesSettings, StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
 };
 use crate::domain::ports::{
@@ -117,9 +117,8 @@ struct RunOrder<'a> {
     task_id: Option<Uuid>,
     repo_url: Option<String>,
     in_person: bool,
-    /// The agent session the start came from, when an agent starts the Run
-    /// for its owner.
-    agent_session: Option<Uuid>,
+    /// The agent that starts the Run for its owner, when one does.
+    acting: Option<ActingAgent>,
     automation: Option<AutomationStart<'a>>,
     /// The Benchmark trial it is, if a suite starts it, and the commit its
     /// write starts from.
@@ -707,7 +706,7 @@ where
             task_id,
             repo_url,
             in_person,
-            agent_session,
+            acting,
             automation,
             trial,
         } = order;
@@ -734,7 +733,7 @@ where
                 &actor,
                 definition.as_ref().map(|pinned| &pinned.definition.agents),
                 StandingAct::Start,
-                agent_session,
+                acting,
             )
             .await?;
         if request.trim().is_empty() {
@@ -999,7 +998,7 @@ where
         task_id: Option<Uuid>,
         repo_url: Option<String>,
         in_person: bool,
-        agent_session: Option<Uuid>,
+        acting: Option<ActingAgent>,
     ) -> Result<RunDetail, FactoryError> {
         self.start_run(RunOrder {
             actor,
@@ -1008,7 +1007,7 @@ where
             task_id,
             repo_url,
             in_person,
-            agent_session,
+            acting,
             automation: None,
             trial: None,
         })
@@ -1058,7 +1057,7 @@ where
             task_id: None,
             repo_url: Some(repo_url),
             in_person: false,
-            agent_session: None,
+            acting: None,
             automation: None,
             trial: Some((trial, base_commit)),
         })
@@ -1110,7 +1109,7 @@ where
             task_id,
             repo_url: automation.repo_url.clone(),
             in_person: false,
-            agent_session: None,
+            acting: None,
             automation: Some(AutomationStart {
                 automation: &started_by,
                 firing_key,
@@ -1255,12 +1254,12 @@ where
         actor: &MacroUserIdStr<'static>,
         id: RunId,
         task_id: Uuid,
-        agent_session: Option<Uuid>,
+        acting: Option<ActingAgent>,
     ) -> Result<RunDetail, FactoryError> {
         self.owned_run(actor, id).await?;
         let agents = self.kept_agents(id).await?;
         let linked_by = self
-            .standing_actor(actor, agents.as_ref(), StandingAct::Link, agent_session)
+            .standing_actor(actor, agents.as_ref(), StandingAct::Link, acting)
             .await?;
         self.visible_task(actor, task_id).await?;
 
@@ -1486,7 +1485,12 @@ where
             match act {
                 Some(act) => {
                     standing = self
-                        .standing_actor(&actor, agents.as_ref(), act, Some(session_id))
+                        .standing_actor(
+                            &actor,
+                            agents.as_ref(),
+                            act,
+                            Some(ActingAgent::Session(session_id)),
+                        )
                         .await?
                         .map(|by| StandingAnswer { act, by });
                 }
@@ -1736,12 +1740,12 @@ where
         &self,
         actor: &MacroUserIdStr<'static>,
         id: RunId,
-        agent_session: Option<Uuid>,
+        acting: Option<ActingAgent>,
     ) -> Result<(), FactoryError> {
         let run = self.owned_run(actor, id).await?;
         let agents = self.kept_agents(id).await?;
         let cancelled_by = self
-            .standing_actor(actor, agents.as_ref(), StandingAct::Cancel, agent_session)
+            .standing_actor(actor, agents.as_ref(), StandingAct::Cancel, acting)
             .await?;
         match run.end.map(|end| end.outcome) {
             None => {

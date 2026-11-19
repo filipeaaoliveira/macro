@@ -1,6 +1,8 @@
 //! Standing Roles on the acts an agent does for a Run's owner from its
 //! code: which bot may start, cancel or link a Run, or answer its plan or
 //! Blockers Gate, by the Standing Roles of the Run's Factory Definition.
+//! The bot is the agent session's, or, for code in no session, the one
+//! its credential is signed for.
 
 use bot_id::BotId;
 use factory_records::domain::automations::AutomationRepository;
@@ -13,11 +15,10 @@ use factory_records::domain::review_rounds::ReviewRoundRepository;
 use factory_records::domain::standing_acts::{StandingAct, StandingActRepository, StandingActor};
 use factory_records::domain::standing_rules::StandingRulesRepository;
 use macro_user_id::user_id::MacroUserIdStr;
-use uuid::Uuid;
 
 use super::{FactoryServiceImpl, internal};
 use crate::domain::agents::{AgentDefinition, StandingCheck};
-use crate::domain::models::FactoryError;
+use crate::domain::models::{ActingAgent, FactoryError};
 use crate::domain::ports::{
     PullRequests, RunWorkflows, StepExecutor, TaskDirectory, UserDirectory,
 };
@@ -57,36 +58,45 @@ where
         Ok(Some(agents))
     }
 
-    /// Who does `act` for `actor` from the agent session `session`, when a
-    /// Standing Role of `agents` lets its bot: none when the caller is no
-    /// agent session, or the Definition has no Standing Roles, so the act
-    /// goes on as before them. Fails when no Standing Role the session's
-    /// bot fills allows the act, naming those that do; a session that is
-    /// not `actor`'s fills none.
+    /// Who does `act` for `actor` as the agent `acting`, when a Standing
+    /// Role of `agents` lets its bot: none when no agent acts (the person,
+    /// an internal caller, or a program signed only for the person), or
+    /// the Definition has no Standing Roles, so the act goes on as before
+    /// them. Fails when no Standing Role the agent's bot fills allows the
+    /// act, naming those that do; a session that is not `actor`'s fills
+    /// none.
     pub(super) async fn standing_actor(
         &self,
         actor: &MacroUserIdStr<'static>,
         agents: Option<&AgentDefinition>,
         act: StandingAct,
-        session: Option<Uuid>,
+        acting: Option<ActingAgent>,
     ) -> Result<Option<StandingActor>, FactoryError> {
-        let (Some(session_id), Some(agents)) = (session, agents) else {
+        let (Some(acting), Some(agents)) = (acting, agents) else {
             return Ok(None);
         };
         if !agents.has_standing_roles() {
             return Ok(None);
         }
 
-        let bot = self
-            .repo
-            .session_bot(session_id, actor)
-            .await
-            .map_err(internal)?;
-        match agents.standing_check(act, bot.map(BotId::new_from_uuid)) {
+        // A sessionless bot is the one its credential is signed for: the
+        // signature, not the caller, names it.
+        let (session_id, bot) = match acting {
+            ActingAgent::Session(session_id) => {
+                let bot = self
+                    .repo
+                    .session_bot(session_id, actor)
+                    .await
+                    .map_err(internal)?;
+                (Some(session_id), bot.map(BotId::new_from_uuid))
+            }
+            ActingAgent::Bot(bot) => (None, Some(bot)),
+        };
+        match agents.standing_check(act, bot) {
             StandingCheck::Open => Ok(None),
-            StandingCheck::Filled { role, agent } => Ok(bot.map(|bot_id| StandingActor {
+            StandingCheck::Filled { role, agent } => Ok(bot.map(|bot| StandingActor {
                 session_id,
-                bot_id,
+                bot_id: bot.as_uuid(),
                 agent,
                 standing_role: role,
             })),

@@ -3,6 +3,7 @@
 #[cfg(test)]
 mod test;
 
+use bot_id::BotId;
 use chrono::{DateTime, Utc};
 use factory_records::domain::main_hold::{MainHold, RequiredChecksState};
 use factory_records::domain::models::{
@@ -710,6 +711,24 @@ pub enum Answerer {
         /// The agent session the call came from.
         session_id: Uuid,
     },
+}
+
+/// The agent a program acts as when it starts, cancels or links one of
+/// its owner's Runs: what Standing Roles check. None acts for a person in
+/// their own signed-in session, an internal caller, or a program signed
+/// only for the person (their own API key or token, a routine running as
+/// them with no agent): that is the person acting, which Standing Roles do
+/// not govern.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActingAgent {
+    /// Code in an agent session, as the correlation layer validated it
+    /// against the call's credential: its bot acts, when the owner owns
+    /// the session.
+    Session(Uuid),
+    /// Code signed for a bot that runs in no agent session, such as a
+    /// self-hosted agent's code-mode call or a routine's run for an agent:
+    /// the bot its credential is signed for acts.
+    Bot(BotId),
 }
 
 /// What the factory keeps for the Run's owner in person, which an agent

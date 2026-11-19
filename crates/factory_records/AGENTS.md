@@ -33,7 +33,7 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   the bot behind an agent session of a Run's owner (`agent_session.bot_id`)
   and what agents did to Runs under a Factory Definition's Standing Roles
   (`factory_standing_act`): one start, one cancel and one answer per Gate,
-  every link.
+  every link, each with its bot and its agent session, if it came from one.
 - `src/domain/automations.rs` and
   `src/outbound/pg_run_repository/automations.rs`: `AutomationRepository`,
   teams' Automations and each time one fired.

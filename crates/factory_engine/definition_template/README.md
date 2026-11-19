@@ -94,7 +94,11 @@ To say which agents may do which, add a `standing` section to
 `agents.json`. Each Standing Role names the acts it allows (`acts`) and the
 Agents whose bots fill it (`agents`). An agent whose bot fills no Standing
 Role that allows an act is refused that act, and the refusal names the
-Standing Roles that allow it. For example, beside `agents` and `roles`:
+Standing Roles that allow it. This holds for an agent's code in a chat
+session and for code signed for an agent outside one, such as a routine
+that runs for an agent. Your own API key, and a routine that runs as you
+with no agent, act as you: Standing Roles do not limit them. For example,
+beside `agents` and `roles`:
 
 ```json
 "standing": {

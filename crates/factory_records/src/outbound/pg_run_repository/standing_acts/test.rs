@@ -48,7 +48,7 @@ async fn run(repo: &PgRunRepository) -> RunId {
     id
 }
 
-fn gatekeeper(session_id: Uuid, bot_id: Uuid) -> StandingActor {
+fn gatekeeper(session_id: Option<Uuid>, bot_id: Uuid) -> StandingActor {
     StandingActor {
         session_id,
         bot_id,
@@ -98,8 +98,8 @@ async fn standing_acts_keep_one_start_and_answer_and_every_link(pool: PgPool) {
     let repo = PgRunRepository::new(pool);
     let run_id = run(&repo).await;
     let other_run = run(&repo).await;
-    let first = gatekeeper(Uuid::now_v7(), Uuid::now_v7());
-    let second = gatekeeper(Uuid::now_v7(), Uuid::now_v7());
+    let first = gatekeeper(Some(Uuid::now_v7()), Uuid::now_v7());
+    let second = gatekeeper(Some(Uuid::now_v7()), Uuid::now_v7());
 
     for (act, seq, actor) in [
         (StandingAct::Start, None, &first),
@@ -137,4 +137,28 @@ async fn standing_acts_keep_one_start_and_answer_and_every_link(pool: PgPool) {
     assert_eq!(kept[0].agent.as_str(), "primary");
     assert_eq!(kept[0].session_id, first.session_id);
     assert!(!acts.contains_key(&other_run));
+}
+
+/// An act from a bot's code that ran in no agent session keeps its bot,
+/// with no session.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn a_standing_act_from_no_session_keeps_its_bot(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let run_id = run(&repo).await;
+    let sessionless = gatekeeper(None, Uuid::now_v7());
+
+    repo.record_standing_act(run_id, StandingAct::Cancel, None, &sessionless)
+        .await
+        .expect("record");
+
+    let acts = repo.runs_standing_acts(&[run_id]).await.expect("read");
+    let kept = acts.get(&run_id).expect("the run's acts");
+    let read: Vec<_> = kept
+        .iter()
+        .map(|record| (record.act, record.bot_id, record.session_id))
+        .collect();
+    assert_eq!(read, [(StandingAct::Cancel, sessionless.bot_id, None)]);
 }

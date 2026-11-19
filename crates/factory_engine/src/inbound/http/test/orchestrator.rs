@@ -8,6 +8,7 @@ use agent_correlation::scope::SessionScope;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use bot_id::BotId;
 use factory_records::domain::models::{EntryId, Outcome, StepKey, TeamMembership};
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::standing_acts::{StandingAct, StandingRoleName};
@@ -19,7 +20,7 @@ use uuid::Uuid;
 
 use super::{ALICE, Caller, alice_s_run, body, call, records_router, router};
 use crate::domain::fakes::FakeRepo;
-use crate::domain::models::{Answerer, FactoryError};
+use crate::domain::models::{ActingAgent, Answerer, FactoryError};
 
 /// A request made from code in the agent session `session_id`, as the
 /// correlation layer accepts it.
@@ -162,9 +163,10 @@ async fn an_agent_session_answers_for_the_person_and_only_it() {
 }
 
 /// A start, a cancel and a link from code in an agent session reach the
-/// service with the session, for its Standing Roles to check; the person
-/// in their own session, code with no session, and an internal caller in
-/// one, with none. A refusal says which Standing Roles allow the act.
+/// service as that session, for its Standing Roles to check; a refusal
+/// says which Standing Roles allow the act. The person in their own
+/// session, and an internal caller even in a session, reach it as no
+/// agent.
 #[tokio::test]
 async fn starts_cancels_and_links_carry_the_calling_agent_session() {
     let (router, service) = router(|| FactoryError::NotInStandingRole {
@@ -196,11 +198,6 @@ async fn starts_cancels_and_links_carry_the_calling_agent_session() {
         ))
         .await
         .expect("response");
-    let sessionless = router
-        .clone()
-        .oneshot(from_code("PUT", &link_path, link.clone()))
-        .await
-        .expect("response");
     let internal = in_session(
         &router,
         session_id,
@@ -218,19 +215,64 @@ async fn starts_cancels_and_links_carry_the_calling_agent_session() {
                 .is_some_and(|message| message.contains("operator"))
         );
     }
-    for other in [person, sessionless, internal] {
+    for other in [person, internal] {
         assert_eq!(other.status(), StatusCode::FORBIDDEN);
     }
+    let session = Some(ActingAgent::Session(session_id));
     assert_eq!(
-        *service.agent_sessions.lock().expect("agent sessions"),
-        [
-            Some(session_id),
-            Some(session_id),
-            Some(session_id),
-            None,
-            None,
-            None
-        ]
+        *service.acting.lock().expect("acting"),
+        [session, session, session, None, None]
+    );
+}
+
+/// Code signed for a bot that runs in no agent session acts as that bot:
+/// a self-hosted agent's code-mode call, and a routine's run signed for an
+/// agent, reach the service with the bot their credential is signed for,
+/// so Standing Roles check it. Code signed only for the person, their API
+/// key and a routine running as them with no agent, is the person acting
+/// and reaches it as no agent.
+#[tokio::test]
+async fn sessionless_code_signed_for_a_bot_acts_as_that_bot() {
+    let (router, service) = router(|| FactoryError::NotFound);
+    let run = factory_records::domain::models::RunId::generate();
+    let cancel_path = format!("/runs/{run}/cancel");
+    let link_path = format!("/runs/{run}/task");
+    let start = serde_json::json!({ "flow": "reply", "request": "Say hello" });
+    let link = serde_json::json!({ "taskId": Uuid::now_v7() });
+
+    for request in [
+        from_code("POST", "/runs", start.clone()),
+        from_code("POST", &cancel_path, serde_json::json!({})),
+        from_code("PUT", &link_path, link.clone()),
+        call(
+            "POST",
+            &cancel_path,
+            Caller::User("routine-agent"),
+            serde_json::json!({}),
+        ),
+        call(
+            "POST",
+            &cancel_path,
+            Caller::User("routine"),
+            serde_json::json!({}),
+        ),
+        call(
+            "POST",
+            &cancel_path,
+            Caller::ApiKey("alice-key"),
+            serde_json::json!({}),
+        ),
+    ] {
+        let response = router.clone().oneshot(request).await.expect("response");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    let bot = Some(ActingAgent::Bot(BotId::new_from_uuid(Uuid::from_u128(
+        0xB07A,
+    ))));
+    assert_eq!(
+        *service.acting.lock().expect("acting"),
+        [bot, bot, bot, bot, None, None]
     );
 }
 

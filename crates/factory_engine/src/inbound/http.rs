@@ -36,8 +36,8 @@ use crate::domain::board::{
     BoardNext, BoardPage, BoardRun, BoardScope, PullRequestRun, PullRequestRuns,
 };
 use crate::domain::models::{
-    Answerer, ControlFilesSettings, DefinitionSettings, FactoryError, FlowSummary, PersonOnly,
-    RunDetail, SessionStepRef, StandingRulesSettings,
+    ActingAgent, Answerer, ControlFilesSettings, DefinitionSettings, FactoryError, FlowSummary,
+    PersonOnly, RunDetail, SessionStepRef, StandingRulesSettings,
 };
 use crate::domain::ports::FactoryService;
 use crate::domain::step_terminal::TerminalRequest;
@@ -425,7 +425,7 @@ where
     // request names: an agent could otherwise name the file it means to
     // weaken.
     let created_in_person = is_in_person(&caller.authorization, &headers);
-    let agent_session = acting_session(&caller.authorization, &headers);
+    let acting = acting_agent(&caller.authorization, &headers);
     // The id is lowercase, whatever case the caller named it in: a
     // `MacroUserIdStr` lowercases what it parses, as `"User".id` is stored.
     let actor = caller.authorization.user.macro_user_id;
@@ -438,7 +438,7 @@ where
             body.task_id,
             body.repo_url,
             created_in_person,
-            agent_session,
+            acting,
         )
         .await?;
     Ok((StatusCode::CREATED, Json(created)))
@@ -933,19 +933,26 @@ fn answerer(
     ))
 }
 
-/// The agent session a call came from, when an agent acts for the caller
-/// from its code, as the correlation layer validated the session against
-/// the call's credential: none for the person in their own signed-in
-/// session, and for an internal caller. Under a Factory Definition with
-/// Standing Roles, its bot must fill one that allows the act.
-fn acting_session(
+/// The agent a call acts as for the caller, for Standing Roles to check:
+/// none for the person in their own signed-in session and for an internal
+/// caller. A program in an agent session acts as that session, as the
+/// correlation layer validated it against the call's credential. A program
+/// in no session whose credential is signed for a bot (a self-hosted
+/// agent's code-mode call, a routine's run for an agent) acts as that bot:
+/// the signature names it, so it cannot be forged. A program signed only
+/// for the person (their own API key or token, a routine running as them
+/// with no agent) is the person acting, which Standing Roles do not
+/// govern.
+fn acting_agent(
     authorization: &UserOrInternalAuthorization,
     headers: &HeaderMap,
-) -> Option<Uuid> {
+) -> Option<ActingAgent> {
     if is_in_person(authorization, headers) || authorization.caller != UserOrInternalCaller::User {
         return None;
     }
     agent_correlation::context::current_session()
+        .map(ActingAgent::Session)
+        .or_else(|| authorization.user.agent_id.map(ActingAgent::Bot))
 }
 
 /// Whether the caller is the person in their own signed-in session: not an
@@ -993,12 +1000,9 @@ where
     S: FactoryService,
     Auth: MacroAuthorizationService,
 {
-    let agent_session = acting_session(&caller.authorization, &headers);
+    let acting = acting_agent(&caller.authorization, &headers);
     let actor = caller.authorization.user.macro_user_id;
-    state
-        .service
-        .cancel_run(&actor, params.id, agent_session)
-        .await?;
+    state.service.cancel_run(&actor, params.id, acting).await?;
     Ok(StatusCode::ACCEPTED)
 }
 
@@ -1074,12 +1078,12 @@ where
     S: FactoryService,
     Auth: MacroAuthorizationService,
 {
-    let agent_session = acting_session(&caller.authorization, &headers);
+    let acting = acting_agent(&caller.authorization, &headers);
     let actor = caller.authorization.user.macro_user_id;
     Ok(Json(
         state
             .service
-            .link_task(&actor, params.id, body.task_id, agent_session)
+            .link_task(&actor, params.id, body.task_id, acting)
             .await?,
     ))
 }

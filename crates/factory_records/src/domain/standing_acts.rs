@@ -1,8 +1,9 @@
 //! Standing acts: what an agent working for a Run's owner did to the Run
 //! from its code (start it, cancel it, link it to a task, answer its plan
 //! or Blockers Gate) under a Standing Role of the Run's Factory Definition.
-//! Each keeps the bot whose session acted, its Agent, and the Standing Role
-//! that allowed it.
+//! Each keeps the bot that acted (the agent session's, or the one a
+//! sessionless call is signed for), its Agent, and the Standing Role that
+//! allowed it.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -84,15 +85,18 @@ impl fmt::Display for StandingRoleName {
     }
 }
 
-/// Who did a standing act: the agent session it came from, the bot that
-/// runs that session, the Agent of the Definition that bot is, and the
+/// Who did a standing act: the agent session it came from, if any, the
+/// bot that acted, the Agent of the Definition that bot is, and the
 /// Standing Role that allowed the act.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StandingActor {
-    /// The agent session the call came from.
-    pub session_id: Uuid,
-    /// The bot that runs the session.
+    /// The agent session the call came from; none for a bot's code that
+    /// runs in no agent session (its credential is signed for the bot).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<Uuid>,
+    /// The bot that acted: the session's, or the one the credential is
+    /// signed for.
     pub bot_id: Uuid,
     /// The Agent the Definition names for that bot.
     pub agent: AgentName,
@@ -108,14 +112,15 @@ pub struct StandingActRecord {
     pub act: StandingAct,
     /// The Step whose Gate was answered, for an answer; none otherwise.
     pub seq: Option<u16>,
-    /// The bot whose session did it.
+    /// The bot that did it.
     pub bot_id: Uuid,
     /// The Agent the Run's Definition names for that bot.
     pub agent: AgentName,
     /// The Standing Role that allowed it.
     pub standing_role: StandingRoleName,
-    /// The agent session it came from.
-    pub session_id: Uuid,
+    /// The agent session it came from; none for a bot's code that ran in
+    /// no agent session.
+    pub session_id: Option<Uuid>,
     /// When it was recorded.
     pub at: DateTime<Utc>,
 }

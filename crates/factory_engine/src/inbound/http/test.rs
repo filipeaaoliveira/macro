@@ -28,8 +28,8 @@ use crate::domain::built_in_steps::BuiltInSteps;
 use crate::domain::fakes::{FakeGithub, FakeRepo, FakeWatches};
 use crate::domain::gate::{AnswerGate, ReplyGate};
 use crate::domain::models::{
-    Answerer, ControlFilesSettings, DefinitionSettings, FactoryError, FlowSummary, RunDetail,
-    RunStart,
+    ActingAgent, Answerer, ControlFilesSettings, DefinitionSettings, FactoryError, FlowSummary,
+    RunDetail, RunStart,
 };
 use crate::domain::ports::{AnswerDelivery, FactoryService, RunWorkflows, RunWorkflowsError};
 use crate::domain::pull_request_steps::PullRequestSteps;
@@ -53,8 +53,9 @@ const ROBOT: &str = "macro|robot@example.com";
 /// Accepts the bearer tokens `alice` and `eve`, each its person's own
 /// session, `robot`: an agent account's session, `sdk`: Alice's Macro API
 /// token, `agent`: that token carrying an agent's attribution, as code mode
-/// mints, and `routine` and `routine-session`: a routine's token, and one
-/// that reads as a session yet signs a routine.
+/// mints, `routine` and `routine-session`: a routine's token, and one that
+/// reads as a session yet signs a routine, and `routine-agent`: a routine's
+/// token signed for an agent.
 #[derive(Clone, Copy)]
 struct Tokens;
 
@@ -73,6 +74,12 @@ impl JwtValidator for Tokens {
             "agent" => (ALICE, CredentialOrigin::MacroApiJwt, Some(agent), None),
             "routine" => (ALICE, CredentialOrigin::MacroApiJwt, None, Some(routine)),
             "routine-session" => (ALICE, CredentialOrigin::Session, None, Some(routine)),
+            "routine-agent" => (
+                ALICE,
+                CredentialOrigin::MacroApiJwt,
+                Some(agent),
+                Some(routine),
+            ),
             _ => return Err(Report::new(MacroAuthorizationError::InvalidCredentials)),
         };
         Ok(ValidatedCredential {
@@ -175,8 +182,8 @@ struct FakeService {
     answer: fn() -> FactoryError,
     actors: Mutex<Vec<String>>,
     answerers: Mutex<Vec<Answerer>>,
-    /// The agent session each start, cancel and link came from, in order.
-    agent_sessions: Mutex<Vec<Option<Uuid>>>,
+    /// The agent each start, cancel and link acted as, in order.
+    acting: Mutex<Vec<Option<ActingAgent>>>,
 }
 
 impl FakeService {
@@ -202,12 +209,9 @@ impl FactoryService for FakeService {
         _task_id: Option<Uuid>,
         _repo_url: Option<String>,
         _in_person: bool,
-        agent_session: Option<Uuid>,
+        acting: Option<ActingAgent>,
     ) -> Result<RunDetail, FactoryError> {
-        self.agent_sessions
-            .lock()
-            .expect("agent sessions")
-            .push(agent_session);
+        self.acting.lock().expect("acting").push(acting);
         Err(self.refusing(&actor))
     }
 
@@ -262,12 +266,9 @@ impl FactoryService for FakeService {
         actor: &MacroUserIdStr<'static>,
         _id: RunId,
         _task_id: Uuid,
-        agent_session: Option<Uuid>,
+        acting: Option<ActingAgent>,
     ) -> Result<RunDetail, FactoryError> {
-        self.agent_sessions
-            .lock()
-            .expect("agent sessions")
-            .push(agent_session);
+        self.acting.lock().expect("acting").push(acting);
         Err(self.refusing(actor))
     }
 
@@ -380,12 +381,9 @@ impl FactoryService for FakeService {
         &self,
         actor: &MacroUserIdStr<'static>,
         _id: RunId,
-        agent_session: Option<Uuid>,
+        acting: Option<ActingAgent>,
     ) -> Result<(), FactoryError> {
-        self.agent_sessions
-            .lock()
-            .expect("agent sessions")
-            .push(agent_session);
+        self.acting.lock().expect("acting").push(acting);
         Err(self.refusing(actor))
     }
 
@@ -458,7 +456,7 @@ fn router(answer: fn() -> FactoryError) -> (Router, Arc<FakeService>) {
         answer,
         actors: Mutex::new(Vec::new()),
         answerers: Mutex::new(Vec::new()),
-        agent_sessions: Mutex::new(Vec::new()),
+        acting: Mutex::new(Vec::new()),
     });
     let state = FactoryRouterState::new(Arc::clone(&service), authorization());
     (factory_router(state), service)
