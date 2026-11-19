@@ -30,7 +30,11 @@ const ALICE: &str = "macro|alice@example.com";
 const ROUTINE: Uuid = Uuid::from_u128(0x2007);
 const AGENT_BOT: BotId = BotId::new_from_uuid(Uuid::from_u128(0xB07A));
 
-/// Accepts `alice`, her own session, and `sdk`, her Macro API token.
+/// Accepts `alice`, her own session, and `sdk`, her Macro API token;
+/// `routine-agent` is a token signed for an agent's bot, and `routine-macro`
+/// the token the scheduler signs for an `Agent` routine's code step, as for
+/// an Automation's own routine: for the Macro routine bot, naming the
+/// routine.
 #[derive(Clone, Copy)]
 struct Tokens;
 
@@ -41,15 +45,19 @@ impl JwtValidator for Tokens {
     ) -> Result<ValidatedCredential, Report<MacroAuthorizationError>> {
         let origin = match jwt {
             "alice" => CredentialOrigin::Session,
-            "sdk" | "routine-agent" => CredentialOrigin::MacroApiJwt,
+            "sdk" | "routine-agent" | "routine-macro" => CredentialOrigin::MacroApiJwt,
             _ => return Err(Report::new(MacroAuthorizationError::InvalidCredentials)),
         };
         Ok(ValidatedCredential {
             origin,
             identity: ValidatedIdentity {
-                agent_id: (jwt == "routine-agent").then_some(AGENT_BOT),
+                agent_id: match jwt {
+                    "routine-agent" => Some(AGENT_BOT),
+                    "routine-macro" => Some(bot_id::MACRO_NEW_BOT_ID),
+                    _ => None,
+                },
                 agent_via: None,
-                routine_id: None,
+                routine_id: (jwt == "routine-macro").then_some(ROUTINE),
                 user_id: ALICE.to_string(),
                 fusion_user_id: format!("fusion-{jwt}"),
                 organization_id: None,
@@ -262,6 +270,7 @@ async fn a_routine_run_for_an_agent_fires_as_that_agent() {
         fire("sdk", None).await,
         fire("routine-agent", None).await,
         fire("sdk", Some(session_id)).await,
+        fire("routine-macro", None).await,
     ] {
         assert_eq!(response.expect("response").status(), StatusCode::OK);
     }
@@ -272,6 +281,8 @@ async fn a_routine_run_for_an_agent_fires_as_that_agent() {
             None,
             Some(ActingAgent::Bot(AGENT_BOT)),
             Some(ActingAgent::Session(session_id)),
+            // The service tells an Automation's own routine from an agent.
+            Some(ActingAgent::Bot(bot_id::MACRO_NEW_BOT_ID)),
         ]
     );
 }

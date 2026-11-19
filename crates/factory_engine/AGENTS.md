@@ -1479,9 +1479,12 @@ triggers:
   signed for it (`agent_correlation::context::current_routine`, never the
   body) and fires the Automation of that routine only for its creator.
   The schedule, an event, a person and a webhook (which carries no login)
-  fire it as its creator, unchecked by Standing Roles. A routine run for an
-  agent (its credential signed for a bot) or in an agent session fires it
-  as that agent (`program_agent`): under a Definition with Standing Roles
+  fire it as its creator, unchecked by Standing Roles. The routine is made
+  as an `Agent` routine, so the scheduler signs its code step for the Macro
+  routine bot (`MACRO_NEW_BOT_ID`) and the routine: on the Automation's own
+  routine that bot is the routine firing it as its creator
+  (`is_own_routine_run`). A routine run for any other bot or in an agent
+  session fires it as that agent (`program_agent`): under a Definition with Standing Roles
   its bot must fill one that allows `start`, else the firing is skipped as
   `refused`; the Run keeps the agent as its start. A
   routine the scheduler refuses (an invalid cron, event routines the

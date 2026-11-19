@@ -82,7 +82,7 @@ fn standing_role(name: &str) -> StandingRoleName {
 }
 
 /// A new agent session of Julia's, run by `bot`.
-fn session_of(repo: &FakeRepo, bot: Uuid) -> Uuid {
+pub(super) fn session_of(repo: &FakeRepo, bot: Uuid) -> Uuid {
     let session = Uuid::now_v7();
     repo.add_session_bot(session, julia().as_ref(), bot);
     session

@@ -714,7 +714,9 @@ async fn the_routine_of_a_deleted_automation_is_switched_off() {
 /// them, unchecked; one fired by a routine run for an agent starts it as
 /// that agent, which under a Definition with Standing Roles must fill one
 /// that allows `start`, or the firing is skipped as refused and nothing
-/// starts. A webhook call, with no login, fires it as its creator.
+/// starts; so does code in an agent session. The Automation's own routine,
+/// signed for the Macro routine bot, fires it as its creator. A webhook
+/// call, with no login, fires it as its creator.
 #[tokio::test]
 async fn an_agent_fires_an_automation_only_through_a_standing_role() {
     let repo = super::definition::team_repo();
@@ -763,12 +765,42 @@ async fn an_agent_fires_an_automation_only_through_a_standing_role() {
         .fire_from_routine(&julia(), ROUTINE, routine_firing("run-3", None), None)
         .await
         .expect("fired");
+    // The factory's own routine is an `Agent` routine: the scheduler signs
+    // its code step for the Macro routine bot, which is the schedule
+    // firing it as its creator, not an agent.
+    let own_routine = automations
+        .fire_from_routine(
+            &julia(),
+            ROUTINE,
+            routine_firing("run-4", None),
+            Some(ActingAgent::Bot(bot_id::MACRO_NEW_BOT_ID)),
+        )
+        .await
+        .expect("fired");
+    // Code in an agent session on that routine still acts as its agent.
+    let in_session = automations
+        .fire_from_routine(
+            &julia(),
+            ROUTINE,
+            routine_firing("run-5", None),
+            Some(ActingAgent::Session(super::standing::session_of(
+                &repo,
+                super::standing::PRIMARY_BOT,
+            ))),
+        )
+        .await
+        .expect("fired");
 
     assert_eq!(refused.run_id, None);
     assert_eq!(refused.skipped, Some(FiringSkip::Refused));
+    assert_eq!(in_session.run_id, None);
+    assert_eq!(in_session.skipped, Some(FiringSkip::Refused));
     let intake = intake.run_id.expect("the intake starts it");
     let scheduled = scheduled.run_id.expect("the schedule starts it");
-    assert_eq!(workflows.started.lock().expect("started").len(), 2);
+    let own_routine = own_routine
+        .run_id
+        .expect("the Automation's own routine starts it as its creator");
+    assert_eq!(workflows.started.lock().expect("started").len(), 3);
     let acts = repo.standing_acts.lock().expect("standing acts").clone();
     let kept: Vec<_> = acts
         .iter()
@@ -790,5 +822,8 @@ async fn an_agent_fires_an_automation_only_through_a_standing_role() {
             super::standing::BACKUP_BOT
         )]
     );
-    assert!(acts.iter().all(|(run, _)| *run != scheduled));
+    assert!(
+        acts.iter()
+            .all(|(run, _)| *run != scheduled && *run != own_routine)
+    );
 }
