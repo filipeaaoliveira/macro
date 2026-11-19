@@ -19,10 +19,11 @@ use super::{
     transport_error, unexpected,
 };
 use crate::domain::models::{
-    GithubBranchDeletion, GithubCheckRun, GithubCheckRunResult, GithubCheckSuite,
-    GithubCommitStatus, GithubError, GithubJobStep, GithubListing, GithubOpenPullRequest,
-    GithubOpenPullRequestOutcome, GithubPullRequestHead, GithubRepositoryAccess,
-    GithubRequiredCheck, GithubRequiredChecks, GithubWorkflowRun, GithubWorkflowRunStatus,
+    GithubBranchDeletion, GithubCheckAnnotation, GithubCheckRun, GithubCheckRunResult,
+    GithubCheckSuite, GithubCommitStatus, GithubError, GithubJobStep, GithubListing,
+    GithubOpenPullRequest, GithubOpenPullRequestOutcome, GithubPullRequestHead,
+    GithubRepositoryAccess, GithubRequiredCheck, GithubRequiredChecks, GithubWorkflowRun,
+    GithubWorkflowRunStatus,
 };
 
 #[cfg(test)]
@@ -264,6 +265,14 @@ struct CheckRunResultApp {
 struct CheckRunOutput {
     title: Option<String>,
     summary: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct CheckAnnotationResponse {
+    path: String,
+    annotation_level: Option<String>,
+    title: Option<String>,
+    message: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -823,6 +832,37 @@ impl GithubOauthImpl {
             .map(|step| GithubJobStep {
                 name: step.name,
                 conclusion: step.conclusion,
+            })
+            .collect())
+    }
+
+    /// The first `limit` annotations, at most 100, of the check run
+    /// `check_run_id`: one page, in GitHub's order.
+    #[tracing::instrument(skip(self, access_token), err)]
+    pub async fn check_run_annotations(
+        &self,
+        access_token: &str,
+        owner: &str,
+        repo: &str,
+        check_run_id: u64,
+        limit: usize,
+    ) -> Result<Vec<GithubCheckAnnotation>, GithubError> {
+        let per_page = limit.clamp(1, PAGE_SIZE).to_string();
+        let annotations: Vec<CheckAnnotationResponse> = self
+            .read(
+                access_token,
+                &format!("/repos/{owner}/{repo}/check-runs/{check_run_id}/annotations"),
+                &[("per_page", per_page.as_str())],
+                "failed to list check run annotations",
+            )
+            .await?;
+        Ok(annotations
+            .into_iter()
+            .map(|annotation| GithubCheckAnnotation {
+                path: annotation.path,
+                level: annotation.annotation_level.unwrap_or_default(),
+                title: annotation.title.filter(|title| !title.trim().is_empty()),
+                message: annotation.message.unwrap_or_default(),
             })
             .collect())
     }

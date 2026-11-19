@@ -142,3 +142,18 @@ pub struct GithubJobStep {
     /// How it concluded, once completed.
     pub conclusion: Option<String>,
 }
+
+/// An annotation a check run left on the code, such as a test that failed:
+/// GitHub Actions adds one for each error a step reports.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GithubCheckAnnotation {
+    /// The file it is on, from the repository's root; GitHub Actions puts
+    /// its own errors on `.github`.
+    pub path: String,
+    /// `notice`, `warning` or `failure`.
+    pub level: String,
+    /// Its title, when it has one.
+    pub title: Option<String>,
+    /// What it says.
+    pub message: String,
+}

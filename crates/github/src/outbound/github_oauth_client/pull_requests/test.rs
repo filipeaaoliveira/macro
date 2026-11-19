@@ -811,3 +811,30 @@ async fn check_run_results_and_an_actions_jobs_steps_are_read() {
     );
     assert!(job_request.starts_with("GET /repos/macro/app/actions/jobs/41 "));
 }
+
+/// A check run's annotations are read from one page, with their level,
+/// and a blank title is none.
+#[tokio::test]
+async fn a_check_runs_annotations_are_read() {
+    let (server, client) = answering(
+        "200 OK",
+        r#"[{"path":"src/parser.rs","start_line":3,"end_line":3,"annotation_level":"failure","title":"parser::test::empty","message":"assertion failed","raw_details":null},{"path":".github","start_line":1,"end_line":1,"annotation_level":"failure","title":"","message":"Process completed with exit code 101."}]"#,
+    );
+
+    let annotations = client
+        .check_run_annotations("token", "macro", "app", 41, 20)
+        .await
+        .unwrap();
+    let request = server.finish();
+
+    assert!(
+        request.starts_with("GET /repos/macro/app/check-runs/41/annotations?per_page=20 "),
+        "{request}"
+    );
+    assert_eq!(annotations.len(), 2);
+    assert_eq!(annotations[0].path, "src/parser.rs");
+    assert_eq!(annotations[0].level, "failure");
+    assert_eq!(annotations[0].title.as_deref(), Some("parser::test::empty"));
+    assert_eq!(annotations[0].message, "assertion failed");
+    assert_eq!(annotations[1].title, None);
+}

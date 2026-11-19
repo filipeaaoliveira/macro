@@ -20,9 +20,9 @@ pub use changes::{
     github_key_of,
 };
 pub use checks::{
-    GithubCheckRun, GithubCheckRunResult, GithubCheckSuite, GithubCommitStatus, GithubJobStep,
-    GithubListing, GithubRequiredCheck, GithubRequiredChecks, GithubWorkflowRun,
-    GithubWorkflowRunStatus,
+    GithubCheckAnnotation, GithubCheckRun, GithubCheckRunResult, GithubCheckSuite,
+    GithubCommitStatus, GithubJobStep, GithubListing, GithubRequiredCheck, GithubRequiredChecks,
+    GithubWorkflowRun, GithubWorkflowRunStatus,
 };
 pub use diff::{
     ChangesetRange, GitRef, GithubPullRequestDiff, GithubPullRequestDiffError, PullRequestRef,
