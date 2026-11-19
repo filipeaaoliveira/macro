@@ -238,11 +238,11 @@ async fn arms_are_counted_with_their_scores_and_trials_are_left_out_of_live_insi
 
 /// A Run of Julia's of the benchmark Flow, still going.
 async fn going_trial_run(pool: &PgPool, id: &str) {
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO factory_run (id, user_id, flow, request) \
          VALUES ($1, 'macro|julia@example.com', 'benchmark', 'Fix the typo')",
+        Uuid::parse_str(id).expect("valid run id"),
     )
-    .bind(Uuid::parse_str(id).expect("valid run id"))
     .execute(pool)
     .await
     .expect("run recorded");
@@ -335,11 +335,13 @@ async fn a_suite_keeps_its_trials_runs_and_base_and_a_suite_still_running_holds_
         to: at("2100-01-01T00:00:00Z"),
         ..november()
     };
-    sqlx::query("UPDATE factory_run SET outcome = 'success', ended_at = now() WHERE id = $1")
-        .bind(Uuid::parse_str(TYPO_TRIAL).expect("valid run id"))
-        .execute(&pool)
-        .await
-        .expect("ended");
+    sqlx::query!(
+        "UPDATE factory_run SET outcome = 'success', ended_at = now() WHERE id = $1",
+        Uuid::parse_str(TYPO_TRIAL).expect("valid run id"),
+    )
+    .execute(&pool)
+    .await
+    .expect("ended");
     assert_eq!(
         repo.insert_suite(&suite(Uuid::from_u128(9), 1))
             .await
@@ -366,15 +368,15 @@ async fn a_suite_keeps_its_trials_runs_and_base_and_a_suite_still_running_holds_
 )]
 async fn an_arm_counts_its_runs_whose_chosen_agent_was_passed_over(pool: PgPool) {
     let repo = PgRunRepository::new(pool.clone());
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO factory_step (run_id, seq, entry, visit, started_at, outcome, output, ended_at, \
              session_id, action_id, offered, role, agent, passed_over, pass_reasons) \
          VALUES ($1, 1, 'write', 1, '2026-11-11 09:00Z', 'done', 'Written', '2026-11-11 09:30Z', \
              $2, $3, '{done}', 'writer', 'primary', '{backup}', '{ai_allowance_exhausted}')",
+        Uuid::parse_str(IMPORT).expect("valid run id"),
+        Uuid::from_u128(0x701),
+        Uuid::from_u128(0x702),
     )
-    .bind(Uuid::parse_str(IMPORT).expect("valid run id"))
-    .bind(Uuid::from_u128(0x701))
-    .bind(Uuid::from_u128(0x702))
     .execute(&pool)
     .await
     .expect("step recorded");
@@ -453,7 +455,7 @@ async fn a_suite_still_starting_counts_the_trials_it_plans_and_keeps_them(pool: 
         SuiteInsert::Inserted
     );
     // Once the suites started long ago, only the running trial counts.
-    sqlx::query("UPDATE factory_benchmark_suite SET created_at = now() - interval '10 minutes'")
+    sqlx::query!("UPDATE factory_benchmark_suite SET created_at = now() - interval '10 minutes'")
         .execute(&pool)
         .await
         .expect("backdated");
@@ -487,15 +489,15 @@ async fn an_arm_counts_its_runs_whose_chosen_agent_was_replaced_as_fallen_back(p
     let repo = PgRunRepository::new(pool.clone());
     // The arm chose `backup` for the writer; `primary` took the Step with
     // no Agent passed over, as when the definition no longer has `backup`.
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO factory_step (run_id, seq, entry, visit, started_at, outcome, output, ended_at, \
              session_id, action_id, offered, role, agent) \
          VALUES ($1, 1, 'write', 1, '2026-11-11 09:00Z', 'done', 'Written', '2026-11-11 09:30Z', \
              $2, $3, '{done}', 'writer', 'primary')",
+        Uuid::parse_str(IMPORT).expect("valid run id"),
+        Uuid::from_u128(0x711),
+        Uuid::from_u128(0x712),
     )
-    .bind(Uuid::parse_str(IMPORT).expect("valid run id"))
-    .bind(Uuid::from_u128(0x711))
-    .bind(Uuid::from_u128(0x712))
     .execute(&pool)
     .await
     .expect("step recorded");
@@ -517,15 +519,15 @@ async fn an_arm_counts_its_runs_whose_chosen_agent_was_passed_over_with_none_aft
     let repo = PgRunRepository::new(pool.clone());
     // The arm chose `backup` for the writer; it was passed over and no other
     // Agent was left: the Step keeps it as both its Agent and passed over.
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO factory_step (run_id, seq, entry, visit, started_at, outcome, output, ended_at, \
              session_id, action_id, offered, role, agent, passed_over, pass_reasons) \
          VALUES ($1, 1, 'write', 1, '2026-11-11 09:00Z', 'failed', 'No quota', '2026-11-11 09:30Z', \
              $2, $3, '{done}', 'writer', 'backup', '{backup}', '{ai_allowance_exhausted}')",
+        Uuid::parse_str(IMPORT).expect("valid run id"),
+        Uuid::from_u128(0x721),
+        Uuid::from_u128(0x722),
     )
-    .bind(Uuid::parse_str(IMPORT).expect("valid run id"))
-    .bind(Uuid::from_u128(0x721))
-    .bind(Uuid::from_u128(0x722))
     .execute(&pool)
     .await
     .expect("step recorded");
@@ -548,20 +550,20 @@ async fn an_arm_counts_its_runs_whose_chosen_agent_was_passed_over_with_none_aft
 )]
 async fn an_arm_leaves_its_runs_that_ended_for_infrastructure_out_of_its_ended(pool: PgPool) {
     let lost = Uuid::parse_str("00000000-0000-7000-8000-000000000404").expect("valid run id");
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO factory_run (id, user_id, flow, request, created_at, outcome, ended_at) \
          VALUES ($1, 'macro|julia@example.com', 'code', 'Add the search', \
                  '2026-11-13 09:00Z', 'infrastructure', '2026-11-13 09:01Z')",
+        lost,
     )
-    .bind(lost)
     .execute(&pool)
     .await
     .expect("run recorded");
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO factory_run_arm (run_id, experiment, arm, agents) \
          VALUES ($1, 'writer', 'backup', '{\"writer\": \"backup\"}')",
+        lost,
     )
-    .bind(lost)
     .execute(&pool)
     .await
     .expect("arm recorded");
