@@ -203,3 +203,10 @@ runner, and the machine a factory Run's agent works on.
 A merge needs a merge Gate's approval: a Flow whose way into its `merge`
 Step skips the `ready_to_merge` entry's merge Gate, or that gives that
 Gate another kind, does not read.
+
+The `code` Flow's merge Gate and `merge` route `behind` to an `update` entry,
+which merges the base into a branch the base moved past (the `writer`
+resolves a conflict, or a person at its Gate), and `merge` routes `queued`
+back to the merge Gate, so Runs merge into a base one at a time. A Flow
+that routes neither merges as before: never in a queue, and without
+checking that its branch holds its base.

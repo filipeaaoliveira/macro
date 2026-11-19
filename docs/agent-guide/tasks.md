@@ -1442,7 +1442,16 @@ that lists the merges since they last passed once it is filed; the Run
 merges nothing until they pass, even once its merge is approved, and asks
 again if they still fail after its wait. When the checks the base requires
 couldn't be read, or it requires none, a note says its merge doesn't wait
-on them. A review round shows on its first
+on them. Runs merge into a base branch one at a time, in the order they
+reached their merge: a Run whose turn hasn't come waits at its **Merge**
+Step, and after its wait shows `queued` and asks again. A branch its base
+moved past is never merged: its merge Gate Step (or **Merge**) shows
+`behind`, and an **Update** Step merges the base into the branch, then runs
+the repository's checks; `done` goes back through CI to the merge Gate,
+`resolved` (the writer resolved a conflict, or something else changed)
+through review and acceptance, and `conflict` asks the owner to resolve it
+on the branch (**Retry**) or **Stop**. An approval never carries over an
+update: the merge Gate asks again. A review round shows on its first
 reviewer's Step (`Review round 2`, its outcome, whether it reviewed the whole
 change or the fix since a commit, and how many blockers and follow-ups it
 found), and each reviewer's findings on its own Step: Blocker, Follow-up or
