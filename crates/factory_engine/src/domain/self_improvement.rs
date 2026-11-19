@@ -15,11 +15,14 @@
 //! the workflow: the check runs in the scoring activity a Run's end already
 //! calls.
 //!
-//! A person merges it: a Run on its team's Definition repository has the
-//! Definition's files as Control Files that are always Tampered, so no
-//! Standing Rule or Orchestrator answer approves its merge. Its failures
-//! are addressed when its pull request merged, and go back to pending when
-//! it closed unmerged or the Run could not start.
+//! A person approves its plan and merges it, whatever it changes: the
+//! `improve` Flow keeps those Gates for a person (`person_only`), which no
+//! Standing Rule, stand-in or Orchestrator answers. Its failures are
+//! addressed when its pull request merged, and go back to pending when it
+//! closed unmerged, its Run ended without one, or could not start; then the
+//! team's next waits ([`paused_until`]). The thresholds are the team's
+//! Definition's as it is now, read as its namer, who must still be an admin
+//! of the team ([`namer_standing`]).
 
 #[cfg(test)]
 mod test;

@@ -97,10 +97,15 @@ Roles. The Run is owned by the admin who named the Definition in Macro. Its
 request groups the failures, and its pull request lists them under
 "Regressions addressed". A team has at most one such Run open at a time.
 
-Its changes to this Definition's files are always Tampered, so no rule
-merges it: a person reviews and merges it. Once it merges, its failures are
-addressed. A pull request closed unmerged sends them back to wait for the
-next Run.
+A person approves its plan and merges it, whatever it changes: no
+standing rule, stand-in or Orchestrator answers its plan or merge, and its
+changes to this Definition's files are Tampered too. Once it merges, its
+failures are addressed. One that does not merge (its pull request closed,
+the Run cancelled or ended without one, or refused) sends them back, and
+the next Run waits a day, twice as long after each more in a row, up to a
+week, until one merges. The admin who named the Definition must still be a
+team admin for a Run to start. Thresholds are read from this repository as
+it is now.
 
 ```json
 "selfImprovement": { "enabled": true, "failures": 25, "oldestDays": 7 }
@@ -108,7 +113,7 @@ next Run.
 
 Those are the defaults when `selfImprovement` is left out. `failures` is
 from 1 to 1000, and `oldestDays` from 1 to 365. `"enabled": false` turns it
-off.
+off: failures are still kept, and count once it is on again.
 
 ## Check the Definition
 

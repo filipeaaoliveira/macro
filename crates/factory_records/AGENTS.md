@@ -374,7 +374,9 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   with `scorer` ''), with its team and the Definition repository it ran
   under. A failure is pending while `improvement_id` is null;
   `pending_failures` counts them through
-  `factory_improvement_failure_pending_idx` (team, oldest first).
+  `factory_improvement_failure_pending_idx` (team, oldest first), matching
+  the Definition's repository ignoring case, as `begin_improvement`'s claim
+  does.
   `begin_improvement` keeps a self-improvement Run as `starting` and
   claims the oldest pending failures in one transaction;
   `factory_improvement_open_idx` holds a team to one `starting` or `open`
@@ -383,7 +385,11 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   Run, only while starting. `settle_improvement` settles an open one once:
   `merged` marks its failures addressed (`addressed_at`), `closed` and
   `refused` (with why) clear their `improvement_id`, so they are pending
-  again. `failures` keeps how many it claimed. Both tables go with the
+  again. `failures` keeps how many it claimed. `recent_improvements` reads
+  a team's latest ones, newest first, for the pause after those that did
+  not merge (`factory_improvement_team_created_idx`). Neither table decides
+  who merges: the `improve` Flow keeps its plan and merge Gates for a
+  person (`crates/factory_engine`). Both tables go with the
   team; a failure goes with its Run, and an improvement's Run is cleared
   when the Run goes.
 

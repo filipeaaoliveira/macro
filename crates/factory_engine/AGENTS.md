@@ -1017,7 +1017,8 @@ visit routes `unresolved`, which asks nothing.
 Once a Gate is recorded, and before a person may answer it, the workflow
 asks the worker (`factory_rule_gate`, behind the `factory-standing-rules`
 patch marker) whether the Run's rules answer it. The worker reads the Run:
-no rule approves a Tampered Run's plan or merge (a Rule Answer approves no
+no rule answers a Gate the Run's own Flow keeps for a person
+(`person_only`, as the `improve` Flow's plan and merge), no rule approves a Tampered Run's plan or merge (a Rule Answer approves no
 Control Files, so `merge` would not merge it either), though its Blockers
 may still go to a fix, which approves nothing; `merge_when_green` answers
 nothing while the base branch has a Main Hold (and `merge` holds anyway);
@@ -1433,12 +1434,20 @@ a self-improvement Run (`collect`). Each is kept once per Run and source
 it. The scoring activity the workflow already calls once a Run ends
 (`factory_score_run`) runs the Scorers, then `SelfImprovement::after_run_end`
 (`ImprovingScoring`): it keeps the Run's failures, settles the team's open
-self-improvement Run, and, unless the team's last one was refused less than
-`REFUSED_PAUSE` (a day) ago, starts one when the pending failures reach the
-Definition's `selfImprovement` thresholds in `scorers.json` (`failures`, 25,
-or the oldest `oldestDays`, 7, old; `enabled`, on; the Run's kept
-`scorers.json` gives them). `POST /runs/{id}/flaw` keeps the flaw at once;
-it counts at the next Run's end. A team that names no Definition keeps and
+self-improvement Run, and, unless the team is paused (`paused_until`), starts
+one when the pending failures reach the `selfImprovement` thresholds in
+`scorers.json` of the team's Definition as it is now, read at its head as
+the namer, as Insights reads it (`failures`, 25, or the oldest
+`oldestDays`, 7, old; `enabled`, on), never a copy an ended Run kept.
+Failures are kept while `enabled` is off, so they count once it is on
+again. After a self-improvement Run that settled without merging (closed
+or cancelled by a person, ended without a pull request, refused, or kept
+starting too long), the next waits `UNMERGED_PAUSE` (a day) from that
+settlement, doubled for each more such Run in a row since the last merged
+one, up to `MAX_UNMERGED_PAUSE` (a week); a merged one ends the wait. The
+pause is read after settling, so a rejection never starts another in the
+same call, and no improvement loops unattended. `POST /runs/{id}/flaw`
+keeps the flaw at once; it counts at the next Run's end. A team that names no Definition keeps and
 starts nothing, and neither do Runs of any other team. Nothing in the
 workflow changed, so Runs in flight replay as before; a failed
 self-improvement step fails the scoring attempt, which is retried with it.
@@ -1446,9 +1455,10 @@ self-improvement step fails the scoring attempt, which is retried with it.
 The Run (`create_improvement_run`) walks the built-in `improve` Flow
 (`flows/improve.json`: `code` without `accept`, which has no task to verify)
 on the Definition's repository, owned by the admin who named the Definition
-(`factory_team_definition.named_by_user_id`) while they are on the team;
-none starts for a Definition with no namer kept (named before this), which
-Insights says. It is created as an Automation's Run is, not in person, and
+(`factory_team_definition.named_by_user_id`) while they are still an admin
+of the team (`namer_standing`); none starts for a Definition with no namer
+kept (named before this), a namer who left the team, or one no longer an
+admin, which Insights says (`namer`). It is created as an Automation's Run is, not in person, and
 counts in its owner's Queue. A team has at most one starting or open
 (`factory_improvement_open_idx`): it claims the oldest
 `MAX_GROUPED_FAILURES` (50) pending failures and is kept as starting before
@@ -1459,27 +1469,39 @@ then lists them under "Regressions addressed", by Scorer and then the
 flawed Runs, each linking its Run in the app (`/app/factory/runs/{id}`)
 and the Scorers' judgments (`/app/factory/insights`), each reason on one
 line; `publish` puts the request in the pull request's description, so the
-section is there. A Run refused (its Agents do not fill the Flow's Roles,
+section is there; each `@` and `#` in a quoted reason is followed by a
+word joiner, so the description mentions no one and links no issue. A Run
+refused (its Agents do not fill the Flow's Roles,
 `DefinitionError::ImprovementAgents`; no push access; a full Queue) is kept
-`refused` with why, and its failures go back. One kept starting longer
-than `STARTING_STALE_AFTER` (10 minutes) is refused the same way. Only
+`refused` with a short reason (`refusal_reason`, never the error's own
+words, which Insights shows the whole team), and its failures go back. A
+start whose error came after its Run was kept and linked, while the Run
+still exists (its workflow may have started), stays open and is settled by
+that Run. One kept starting longer than `STARTING_STALE_AFTER` (10
+minutes) is refused the same way. Naming another Definition, or none,
+settles the team's open one as closed, so its failures do not wait on a
+Definition the team no longer names; its Run goes on for its owner. Only
 the factory starts one: `improve` is never listed or started by name
 (`UnknownFlow`), and a Definition names no Flow `improve`
 (`ReservedFlow`).
 
-A person merges it: the Run is on its team's Definition repository, so the
-Definition's files are its Control Files and any change to one is Tampered
-(`ControlFiles::changes_guarding`), which no Standing Rule, stand-in or
-Orchestrator approves on its plan or merge Gate. Once its Run ends, the next
+A person approves its plan and merges it, whatever it changes: the
+`improve` Flow keeps its plan and merge Gates for a person (`person_only`),
+so no Standing Rule (`rule_gate` reads the Gate's `person_only` from the
+Run's own Flow), stand-in or Orchestrator answers them, even for a change
+outside the Definition's files. The Run is also on its team's Definition
+repository, so the Definition's files are its Control Files and any change
+to one is Tampered (`ControlFiles::changes_guarding`). Once its Run ends, the next
 `after_run_end` of the team settles it: a Run that ended `success` (its
 `merge` merged) or `flawed` addressed its failures (`merged`); otherwise
 its pull request is read as its owner: merged addresses them, open keeps
 the Run open (no other starts), and closed, or none, sends them back to
-pending (`closed`). A pull request a person merges or closes after its Run
-ended is seen only at the team's next Run's end. `GET
-/insights/evaluation` shows the team's self-improvement
-(`selfImprovement`: thresholds, pending failures by source, whether a
-namer is kept, and the last Run with its state), none for a team with no
+pending (`closed`), pausing the next as above. A pull request a person
+merges or closes after its Run ended is seen only at the team's next Run's
+end. Pending failures are matched to the Definition's repository ignoring
+case. `GET /insights/evaluation` shows the team's self-improvement
+(`selfImprovement`: thresholds, pending failures by source, where the
+namer stands, and the last Run with its state), none for a team with no
 Definition.
 
 ## Start here
