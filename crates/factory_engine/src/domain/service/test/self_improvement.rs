@@ -985,6 +985,17 @@ async fn an_improvement_run_s_plan_and_merge_wait_for_a_person_whatever_it_chang
     assert_eq!(merge_gate.answer, None);
 }
 
+/// A judgment at exactly the pass score is no failure; one just below it
+/// is.
+#[tokio::test]
+async fn a_judgment_at_the_pass_score_is_no_failure() {
+    let bench = Bench::new(team_repo(true), AGENTS, None);
+    bench.judged_run(0.5).await;
+    assert_eq!(bench.pending().await, 0);
+    bench.judged_run(0.49).await;
+    assert_eq!(bench.pending().await, 1);
+}
+
 /// The namer starts a self-improvement Run only while an admin of the
 /// team: demoted, or gone from it, starts none, and the failures stay
 /// pending until an admin names the Definition again.
@@ -1004,6 +1015,34 @@ async fn only_an_admin_namer_starts_an_improvement_run() {
         bench.judged_run(0.9).await;
         assert_eq!(bench.improvement_runs().len(), 1, "{admin:?}");
     }
+}
+
+/// No one starts a Run of the improve Flow by name, on a team with no
+/// Definition too, where the built-in Flow would otherwise be found.
+#[tokio::test]
+async fn no_one_starts_an_improve_run_without_a_definition() {
+    let repo = team_repo(false);
+    repo.team_definitions
+        .lock()
+        .expect("team definitions")
+        .remove(&TEAM);
+    let bench = Bench::new(repo, AGENTS, None);
+    let by_name = bench
+        .service
+        .create_run(
+            julia(),
+            IMPROVE_FLOW.to_string(),
+            "Improve it".to_string(),
+            None,
+            Some(DEFINITION_REPO.to_string()),
+            true,
+        )
+        .await;
+    assert!(
+        matches!(by_name, Err(FactoryError::UnknownFlow)),
+        "{by_name:?}"
+    );
+    assert!(bench.improvement_runs().is_empty());
 }
 
 /// Whether and when a Run starts is the team's Definition's as it is now,
