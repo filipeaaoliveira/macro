@@ -13,12 +13,15 @@ use crate::domain::models::{RunId, StepKey};
 impl MergeQueueRepository for PgRunRepository {
     type Err = PgRunRepositoryErr;
 
+    /// The queue is keyed by the Run's repository URL lower-cased, trimmed
+    /// and without a `.git` ending, so one repository is one queue whatever
+    /// the case a Run named it in.
     #[tracing::instrument(err, skip(self))]
     async fn enter_merge_queue(&self, run_id: RunId) -> Result<(), Self::Err> {
         sqlx::query!(
             r#"
             INSERT INTO factory_merge_queue (run_id, repo_url, base_branch)
-            SELECT id, repo_url, base_branch
+            SELECT id, lower(regexp_replace(btrim(repo_url), '\.git$', '')), base_branch
             FROM factory_run
             WHERE id = $1 AND repo_url IS NOT NULL AND base_branch IS NOT NULL
             ON CONFLICT (run_id) DO UPDATE SET left_at = NULL
@@ -46,13 +49,13 @@ impl MergeQueueRepository for PgRunRepository {
             JOIN factory_merge_queue other
                 ON other.repo_url = mine.repo_url
                 AND other.base_branch = mine.base_branch
-                AND (other.entered_at, other.run_id) < (mine.entered_at, mine.run_id)
+                AND other.place < mine.place
             JOIN factory_run run ON run.id = other.run_id
             WHERE mine.run_id = $1
                 AND run.ended_at IS NULL
                 AND (other.left_at IS NULL
                     OR other.left_at > now() - make_interval(secs => $2))
-            ORDER BY other.entered_at, other.run_id
+            ORDER BY other.place
             "#,
             run_id.as_uuid(),
             kept_secs,

@@ -253,3 +253,45 @@ async fn an_update_asked_again_replaces_only_one_still_waiting(pool: PgPool) {
         conflicted
     );
 }
+
+/// Runs that reached their merge in the same instant keep the order they
+/// entered the queue in, whatever their ids.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn runs_that_entered_in_the_same_instant_keep_their_order(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let main = branch_of_app("main");
+    // Ids sort in the order they are made: the later one enters first.
+    let earlier_id = code_run(&repo, Some(&main)).await;
+    let later_id = code_run(&repo, Some(&main)).await;
+    repo.enter_merge_queue(later_id).await.expect("enter");
+    repo.enter_merge_queue(earlier_id).await.expect("enter");
+    sqlx::query!("UPDATE factory_merge_queue SET entered_at = '2026-11-19T04:00:00Z'")
+        .execute(&repo.pool)
+        .await
+        .expect("same instant");
+
+    assert_eq!(ahead(&repo, later_id).await, Vec::<RunId>::new());
+    assert_eq!(ahead(&repo, earlier_id).await, vec![later_id]);
+}
+
+/// One repository is one queue, whatever the case a Run named it in.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn a_repository_named_in_another_case_is_one_queue(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let first = code_run(&repo, Some(&branch_of_app("main"))).await;
+    let shouted = Repository {
+        url: "https://github.com/Macro/App".to_string(),
+        base_branch: "main".to_string(),
+    };
+    let second = code_run(&repo, Some(&shouted)).await;
+    repo.enter_merge_queue(first).await.expect("enter");
+    repo.enter_merge_queue(second).await.expect("enter");
+
+    assert_eq!(ahead(&repo, second).await, vec![first]);
+}

@@ -35,15 +35,18 @@ pub trait MergeQueueRepository: Send + Sync + 'static {
     type Err: std::error::Error + Send + Sync + 'static;
 
     /// Put the Run `run_id` in the queue of the base branch it works on, at
-    /// the end, or, when it was in it before, back at its place. A Run that
-    /// works on no repository is put in none.
+    /// the end, or, when it was in it before, back at its place. A base is
+    /// its repository's URL, lower-cased, trimmed and without a `.git`
+    /// ending, and its branch. A Run that works on no repository is put in
+    /// none.
     fn enter_merge_queue(
         &self,
         run_id: RunId,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// The Runs ahead of `run_id` in its base's queue, first first: those
-    /// that entered it before it, have not ended, and are at their merge or
+    /// that entered it before it (in the order they entered, which a serial
+    /// keeps total even for Runs that entered in the same instant), have not ended, and are at their merge or
     /// left it less than `place_kept` ago. Empty for a Run not in a queue.
     fn merge_queue_ahead(
         &self,

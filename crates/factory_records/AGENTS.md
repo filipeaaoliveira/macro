@@ -109,7 +109,8 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261119020000_factory_self_improvement.sql`,
   `20261119020100_factory_improvement_failure_dismissed.sql`,
   `20261119030000_factory_run_cancelled_in_person.sql`,
-  `20261119040000_factory_merge_queue.sql`), `factory_step_steer`,
+  `20261119040000_factory_merge_queue.sql`,
+  `20261119040100_factory_merge_queue_place.sql`), `factory_step_steer`,
   `factory_run_score`, `factory_run_arm`, `factory_benchmark_suite`,
   `factory_benchmark_trial`, `factory_benchmark_trial_score`,
   `factory_improvement`, `factory_improvement_failure`, `factory_merge_queue`
@@ -430,10 +431,14 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   when the Run goes.
 
 - `factory_merge_queue` keeps one row per Run that reached its merge
-  (`enter_merge_queue`, safe to repeat, keeps `entered_at`, its place, and
-  clears `left_at`), with its base as the Run kept it; it goes with its Run.
+  (`enter_merge_queue`, safe to repeat, keeps `entered_at` and `place`, and
+  clears `left_at`), with its base: the Run's repository URL lower-cased,
+  trimmed and without a `.git` ending, and its branch; it goes with its
+  Run. `factory_main_hold` still keys a base by the URL as the Run kept it,
+  so the same repository named in another case is held apart.
   `merge_queue_ahead` reads, from the Run's own row, the Runs of the same
-  base before it (`(entered_at, run_id)` order, through
+  base before it (by `place`, a serial taken as each entered, so Runs that
+  entered in the same instant keep their order, through
   `factory_merge_queue_base_idx`) that have not ended and are at their
   merge or left it within the place kept, all on the database's clock.
   `leave_merge_queue` keeps the first time it left; `drop_from_merge_queue`

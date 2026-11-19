@@ -39,7 +39,11 @@ impl FakeRepo {
             .expect("runs")
             .get(&run_id)
             .and_then(|run| run.repository.clone())
-            .map(|base| (base.url, base.base_branch))
+            .map(|base| {
+                let url = base.url.trim().to_lowercase();
+                let url = url.strip_suffix(".git").unwrap_or(&url).to_string();
+                (url, base.base_branch)
+            })
             .unwrap_or_default()
     }
 
