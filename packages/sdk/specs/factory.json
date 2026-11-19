@@ -3947,13 +3947,13 @@
           "autonomous": {
             "type": "integer",
             "format": "int32",
-            "description": "Runs that merged with no person stepping in: no Gate a person\nanswered, no Step they steered, and no manual end.",
+            "description": "Runs that merged with no person stepping in: no Gate a person\nanswered, no Step they steered, and no manual end. A Run found\nflawed afterwards, cancelled, or ended for infrastructure is not.",
             "minimum": 0
           },
           "autonomyRate": {
             "type": ["number", "null"],
             "format": "double",
-            "description": "The share of ended Runs that did, from 0 to 1."
+            "description": "Their share, from 0 to 1, of the Runs whose work ended on its own,\nas the success rate counts them: Runs a person cancelled and Runs\nthat ended for infrastructure are left out. None while no Run ended\nthat way."
           },
           "costPerMergedUsd": {
             "type": ["number", "null"],
