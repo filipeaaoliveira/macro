@@ -564,8 +564,8 @@ where
     /// `stop`). It gives the approving answer (`approve`, `fix`) only where
     /// the Run's Orchestrator Definition lets it, for that kind, never for
     /// a merge, never approving a Tampered Run, and never sending Blockers
-    /// to a fix the `fix_blockers` rule would leave to the owner. The kind
-    /// of the Gate it may answer.
+    /// to a fix the `fix_blockers` rule would leave to the owner. Gives
+    /// the kind of the Gate when it may answer it.
     async fn agent_may_answer(
         &self,
         run: &Run,
