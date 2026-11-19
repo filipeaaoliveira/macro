@@ -152,6 +152,27 @@ fn a_run_without_rules_or_a_task_notifies_too() {
     assert!(notice.push);
 }
 
+/// A definition kept before notices became the default, with the owner
+/// section off (stored as the kinds it decides, without `quiet_gates`),
+/// now notifies the owner of a Gate that waits on them, pushed.
+#[test]
+fn a_saved_definition_with_the_owner_section_off_notifies() {
+    let saved = OrchestratorDefinition::from_kinds(&["plan".to_string(), "merge".to_string()])
+        .expect("known kinds");
+    assert!(!saved.owner_gates && !saved.quiet_gates);
+    let kept = Run {
+        standing_rules: Some(RunRules {
+            definition: saved,
+            source: RulesSource::Team,
+            project_id: None,
+        }),
+        ..run(false)
+    };
+    let notice = gate_notice(&kept, &gated(2, GateKind::Flow, 5, None)).expect("notified");
+    assert!(notice.push);
+    assert_eq!(notice.task_id, Some(TASK));
+}
+
 /// Nothing is sent when the Run's definition turns its Gates'
 /// notifications off, for an answered Gate, or for an ended Run.
 #[test]
