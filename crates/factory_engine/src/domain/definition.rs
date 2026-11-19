@@ -317,7 +317,7 @@ fn is_name(name: &str) -> bool {
 }
 
 /// How the first secret `text` holds begins, if it holds one.
-fn secret_in(text: &str) -> Option<&'static str> {
+pub(crate) fn secret_in(text: &str) -> Option<&'static str> {
     // A certificate or a public key is public: only a private key's block
     // (an RSA, EC or PGP one, whose label holds `PRIVATE KEY`) is a secret.
     let private_block = text.match_indices(PEM_BEGIN).any(|(at, _)| {
@@ -365,7 +365,7 @@ fn secret_in(text: &str) -> Option<&'static str> {
 /// A JSON document whose every object names each key once: serde reads a
 /// key named twice as the last, which would let a file say one thing to a
 /// reader and another to the factory.
-struct UniqueKeys;
+pub(crate) struct UniqueKeys;
 
 impl<'de> Deserialize<'de> for UniqueKeys {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -426,7 +426,7 @@ impl<'de> serde::de::Visitor<'de> for UniqueKeysVisitor {
 }
 
 /// How the first secret a string of `value` holds begins, keys included.
-fn secret_in_value(value: &serde_json::Value) -> Option<&'static str> {
+pub(crate) fn secret_in_value(value: &serde_json::Value) -> Option<&'static str> {
     match value {
         serde_json::Value::String(text) => secret_in(text),
         serde_json::Value::Array(items) => items.iter().find_map(secret_in_value),

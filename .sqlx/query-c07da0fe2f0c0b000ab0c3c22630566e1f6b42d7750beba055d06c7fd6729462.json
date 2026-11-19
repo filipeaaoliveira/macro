@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                run_id, seq, round, work_output, checks, commands, declared, check_action_id,\n                started_at,\n                outcome, report, ended_at, fix_action_id, quota_ran_out, verified, results,\n                checked_commit\n            FROM factory_check_round\n            WHERE run_id = $1 AND seq = $2\n            ORDER BY round\n            ",
+  "query": "\n            SELECT\n                run_id, seq, round, work_output, checks, commands, declared, setup,\n                check_action_id, started_at,\n                outcome, report, ended_at, fix_action_id, quota_ran_out, verified, results,\n                checked_commit\n            FROM factory_check_round\n            WHERE run_id = $1 AND seq = $2\n            ORDER BY round\n            ",
   "describe": {
     "columns": [
       {
@@ -40,51 +40,56 @@
       },
       {
         "ordinal": 7,
+        "name": "setup",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
         "name": "check_action_id",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "started_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "outcome",
         "type_info": "Text"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "report",
         "type_info": "Text"
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "ended_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "fix_action_id",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 13,
+        "ordinal": 14,
         "name": "quota_ran_out",
         "type_info": "Bool"
       },
       {
-        "ordinal": 14,
+        "ordinal": 15,
         "name": "verified",
         "type_info": "Bool"
       },
       {
-        "ordinal": 15,
+        "ordinal": 16,
         "name": "results",
         "type_info": "Jsonb"
       },
       {
-        "ordinal": 16,
+        "ordinal": 17,
         "name": "checked_commit",
         "type_info": "Text"
       }
@@ -103,6 +108,7 @@
       false,
       false,
       false,
+      true,
       false,
       false,
       true,
@@ -115,5 +121,5 @@
       true
     ]
   },
-  "hash": "35a6397326614bea00abf8781d4e2f0225344788ee8e1bf84ca3ddfeb101ecf1"
+  "hash": "c07da0fe2f0c0b000ab0c3c22630566e1f6b42d7750beba055d06c7fd6729462"
 }

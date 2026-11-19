@@ -34,6 +34,13 @@ its built-in Flows or the team's own settings. Team settings say why.
 | `scorers.json` | Optional. The team's Scorers, Experiments and Benchmarks, in the factory's evaluation format (below). Left out, the team has none. |
 | `.macro/checks.json` | The check a Run on this repository runs: it validates the Definition. |
 
+A repository a Run works on may also hold `.macro/setup.json`: the commands
+that prepare a fresh checkout (install dependencies, generate files), each a
+`name`, a `run` and an optional `timeout`, and plain `env` values. The
+factory reads it from the Run's base, runs it before each agent session's
+first prompt and before each checks round's checks, and counts it as a
+Control File by default. It holds no secrets.
+
 Secrets never go here: no field takes an API key or a token, and a file that
 holds something shaped like one does not read.
 

@@ -375,19 +375,33 @@ function StepMarkdown(props: { markdown: string }) {
   );
 }
 
+/** What begins the name of a setup command's run among a round's results. */
+const SETUP_RESULT = 'setup:';
+
 /**
  * A round of checks: which it ran, who ran them, and how they went. A round
  * the factory ran on the pushed commit names each check that failed with its
- * exit code. A round with no end runs only while its Step does.
+ * exit code, and first each command of the repository's setup that failed
+ * there, before any check ran. A round with no end runs only while its Step
+ * does.
  */
 function CheckRoundNote(props: { round: CheckRound; stepEnded: boolean }) {
-  const checks = () =>
-    props.round.checks.map((name) => {
+  const checks = () => [
+    ...props.round.results
+      .filter((ran) => ran.name.startsWith(SETUP_RESULT) && ran.exitCode !== 0)
+      .map((ran) =>
+        t('factoryRuns.setupExited', {
+          command: ran.name.slice(SETUP_RESULT.length),
+          code: ran.exitCode,
+        })
+      ),
+    ...props.round.checks.map((name) => {
       const result = props.round.results.find((ran) => ran.name === name);
       return result && result.exitCode !== 0
         ? t('factoryRuns.checkExited', { check: name, code: result.exitCode })
         : name;
-    });
+    }),
+  ];
 
   // Who ran the round's checks: the factory on the pushed commit, or the
   // agent, which is known only once its report ends the round.

@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE factory_step\n            SET setup_session_id = $3, setup_passed = $4\n            WHERE run_id = $1 AND seq = $2\n                AND session_id = $3 AND session_released_at IS NULL AND ended_at IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Uuid",
+        "Int2"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "66b78a252156954ff2018851ac14299368a7388c9b5fac6cb4bc2fd72a1ab4f6"
+}

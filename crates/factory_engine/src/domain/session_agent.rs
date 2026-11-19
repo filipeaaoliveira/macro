@@ -35,7 +35,10 @@ use trigger_context::TriggerOrigin;
 use uuid::Uuid;
 
 use crate::domain::agents::{Agent, AgentDefinition};
-use agent_session::domain::session_command::SessionCommandOutput;
+use crate::domain::checks::fence_for;
+use crate::domain::setup::{RepositorySetup, SETUP_FILE, SetupCommand, output_tail};
+use crate::domain::shell_lock::{LOCK_WAIT_SECS, lock_busy};
+use agent_session::domain::session_command::{SessionCommand, SessionCommandOutput};
 
 use crate::domain::models::{AgentAnswer, AgentCommand, AgentTask, AgentTurn, SessionSteer};
 use crate::domain::ports::PauseNotices;
@@ -167,6 +170,24 @@ pub enum SessionAgentError {
     /// The Step stayed paused past its work's time.
     #[error("the step stayed paused past its time")]
     PausedTooLong,
+    /// A command of the repository's setup failed in the session before its
+    /// first prompt. It holds what the Run's owner is shown: the command,
+    /// its exit code and the end of its output.
+    #[error("the repository's setup failed")]
+    SetupFailed(String),
+    /// The repository has a setup, and the session's runtime runs no
+    /// command, so the setup cannot run. It holds what the owner is shown.
+    #[error("the agent session cannot run the repository's setup")]
+    SetupUnsupported(String),
+    /// The attempt had no time left for the next setup command: a retry
+    /// goes on with the commands still to run.
+    #[error("no time was left in the attempt for setup command {0}")]
+    SetupOutOfTime(String),
+    /// Another run of a setup command, as one an attempt lost with its
+    /// worker left running, held the checkout's setup lock past its wait:
+    /// a retry goes on once it ended.
+    #[error("another run of setup command {0} still holds the checkout's setup lock")]
+    SetupLockBusy(String),
 }
 
 impl Retryable for SessionAgentError {
@@ -192,6 +213,8 @@ impl Retryable for SessionAgentError {
     fn retryable(&self) -> bool {
         match self {
             SessionAgentError::Records(_)
+            | SessionAgentError::SetupOutOfTime(_)
+            | SessionAgentError::SetupLockBusy(_)
             | SessionAgentError::Overdue
             | SessionAgentError::Superseded
             | SessionAgentError::NotOpened
@@ -210,7 +233,9 @@ impl Retryable for SessionAgentError {
             | SessionAgentError::SessionLost
             | SessionAgentError::TooSlow(_)
             | SessionAgentError::StoppedByOwner
-            | SessionAgentError::PausedTooLong => false,
+            | SessionAgentError::PausedTooLong
+            | SessionAgentError::SetupFailed(_)
+            | SessionAgentError::SetupUnsupported(_) => false,
         }
     }
 }
@@ -227,6 +252,15 @@ impl AgentFailure for SessionAgentError {
     fn stopped_without_result(&self) -> Option<&str> {
         match self {
             SessionAgentError::StoppedWithoutResult(last_words) => Some(last_words),
+            _ => None,
+        }
+    }
+
+    fn setup_failed(&self) -> Option<&str> {
+        match self {
+            SessionAgentError::SetupFailed(report) | SessionAgentError::SetupUnsupported(report) => {
+                Some(report)
+            }
             _ => None,
         }
     }
@@ -801,6 +835,7 @@ impl<S: RoutineSessions, R: RunRepository + EvaluationRepository> SessionAgent<S
         task: &AgentTask,
         session: &StepSession,
         agent_name: &AgentName,
+        deadline: tokio::time::Instant,
     ) -> Result<RoutineSessionAction, SessionAgentError> {
         let agent = Self::agent(agents, agent_name)?;
         let action = Self::action(
@@ -848,6 +883,11 @@ impl<S: RoutineSessions, R: RunRepository + EvaluationRepository> SessionAgent<S
             .record_open(task.key, session.session_id)
             .await
             .map_err(Self::records)?;
+        // The repository's setup prepares the checkout before the agent
+        // reads its first prompt.
+        if let Some(setup) = task.setup.as_ref().filter(|setup| !setup.setup.is_empty()) {
+            self.set_up(task, setup, session, &action, deadline).await?;
+        }
         let prompted = self
             .sessions
             .prompt(PromptRoutineSession {
@@ -867,6 +907,119 @@ impl<S: RoutineSessions, R: RunRepository + EvaluationRepository> SessionAgent<S
             return Err(error);
         }
         Ok(action)
+    }
+}
+
+impl<S: RoutineSessions, R: RunRepository + EvaluationRepository> SessionAgent<S, R> {
+    /// Run the repository's `setup` in the Step's new session `session`,
+    /// through its bot (`action`), before its first prompt: each command not
+    /// yet recorded passed in this session, in order, from the checkout's
+    /// root, recorded passed as it ends. A session whose first prompt
+    /// landed already, as one prompted before Steps ran setups, is not set
+    /// up again: the agent works in it.
+    ///
+    /// A command that fails ends the Step with the command, its exit code
+    /// and the end of its output; a runtime that runs no command ends it
+    /// saying the setup cannot run there. Each command holds the
+    /// checkout's setup lock while it runs, so a retry's never runs
+    /// alongside one an attempt lost with its worker left running: a lock
+    /// still held past its wait fails the attempt for a retry. A command
+    /// starts only with its whole timeout left before `deadline`;
+    /// otherwise the attempt fails, and its retry goes on with the commands
+    /// still to run.
+    async fn set_up(
+        &self,
+        task: &AgentTask,
+        setup: &RepositorySetup,
+        session: &StepSession,
+        action: &RoutineSessionAction,
+        deadline: tokio::time::Instant,
+    ) -> Result<(), SessionAgentError> {
+        let passed = self
+            .repo
+            .setup_passed(task.key, session.session_id)
+            .await
+            .map_err(Self::records)?;
+        let passed = usize::from(passed);
+        if passed >= setup.setup.len() || self.prompt_landed(action).await {
+            return Ok(());
+        }
+
+        for (at, command) in setup.setup.iter().enumerate().skip(passed) {
+            let timeout = Duration::from_secs(command.timeout);
+            let run_for = timeout + SETUP_MARGIN;
+            if deadline.saturating_duration_since(tokio::time::Instant::now()) < run_for {
+                // Short of the time the Step gives its work, a retry has no
+                // more: the Step ends, saying so, as a checks round does.
+                if task.answer_by.is_some_and(|answer_by| until(answer_by) < run_for) {
+                    return Err(SessionAgentError::SetupFailed(format!(
+                        "The step's time ran out before setup command `{}` (`{}`, from `{SETUP_FILE}`) could run its {} seconds, so the agent did not start.",
+                        command.name, command.run, command.timeout
+                    )));
+                }
+                return Err(SessionAgentError::SetupOutOfTime(command.name.clone()));
+            }
+            self.still_holds(task.key, session.session_id).await?;
+            let ran = self
+                .sessions
+                .exec(ExecRoutineSession {
+                    action: RoutineSessionAction {
+                        action_id: AgentActionId::from_uuid(Uuid::now_v7()),
+                        ..action.clone()
+                    },
+                    command: SessionCommand {
+                        cwd: ".".to_string(),
+                        command: setup.locked_shell(command, LOCK_WAIT_SECS),
+                        timeout_secs: run_for.as_secs(),
+                    },
+                })
+                .await;
+            let output = match ran {
+                Ok(output) => output,
+                Err(RoutineSessionError::CommandUnsupported) => {
+                    return Err(SessionAgentError::SetupUnsupported(
+                        setup_unsupported(),
+                    ));
+                }
+                Err(error) => return Err(error.into()),
+            };
+            if lock_busy(output.exit_code, &output.stdout, &output.stderr) {
+                return Err(SessionAgentError::SetupLockBusy(command.name.clone()));
+            }
+            if output.exit_code != 0 {
+                return Err(SessionAgentError::SetupFailed(setup_failure(
+                    command, &output,
+                )));
+            }
+            let recorded = self
+                .repo
+                .record_setup_passed(
+                    task.key,
+                    session.session_id,
+                    u16::try_from(at + 1).unwrap_or(u16::MAX),
+                )
+                .await
+                .map_err(Self::records)?;
+            if !recorded {
+                return Err(SessionAgentError::Released);
+            }
+        }
+        Ok(())
+    }
+
+    /// Whether the session shows its first prompt landed: a turn that runs,
+    /// waits on a person, or ended. A status that does not read says no.
+    async fn prompt_landed(&self, action: &RoutineSessionAction) -> bool {
+        matches!(
+            self.sessions.status(action.clone()).await,
+            Ok(RoutineActionStatus::Succeeded
+                | RoutineActionStatus::Failed(_)
+                | RoutineActionStatus::Pending(
+                    RoutinePendingReason::Running
+                        | RoutinePendingReason::Permission
+                        | RoutinePendingReason::Elicitation
+                ))
+        )
     }
 }
 
@@ -1071,7 +1224,7 @@ impl<S: RoutineSessions, R: RunRepository + EvaluationRepository> SessionAgent<S
             let refusal = if skipped {
                 None
             } else {
-                match self.start(agents, task, &session, &agent).await {
+                match self.start(agents, task, &session, &agent, deadline).await {
                     Ok(action) => {
                         self.quota.started(&task.owner, &agent);
                         break action;
@@ -1489,3 +1642,43 @@ fn prompt(text: &str, outcomes: &[Outcome]) -> String {
         .replace("OUTCOME", first);
     format!("{text}{hand_back}")
 }
+
+/// What a setup command's session command may take beyond the command's own
+/// timeout: the lock's wait, `timeout`'s ten seconds before it kills, and a
+/// margin.
+const SETUP_MARGIN: Duration = Duration::from_secs(LOCK_WAIT_SECS + 20);
+
+/// What the Run's owner is shown when the session's runtime runs no
+/// command, so the repository's setup cannot run.
+fn setup_unsupported() -> String {
+    format!(
+        "The repository declares a setup in `{SETUP_FILE}`, and this agent's session runs no command \
+         (a paired machine, a workspace sessions share, or a cloud agent), so the factory cannot run \
+         the setup before the agent starts. Run the step's Agent in a managed sandbox or a Macro \
+         computer session with a worktree of its own, or remove the setup."
+    )
+}
+
+/// What the Run's owner is shown when `command` of the repository's setup
+/// ended with `output`, a failure: the command, its exit code and the end
+/// of its output.
+fn setup_failure(command: &SetupCommand, output: &SessionCommandOutput) -> String {
+    let timed_out = if matches!(output.exit_code, 124 | 137) {
+        format!(
+            "\n\nIt may have run past its {} seconds and been stopped.",
+            command.timeout
+        )
+    } else {
+        String::new()
+    };
+    let tail = output_tail(output);
+    let tail = tail.trim_end();
+    let fence = fence_for(tail);
+    format!(
+        "The repository's setup failed before the agent started: `{}` (`{}`, from `{SETUP_FILE}`) exited with status {}.{timed_out}\n\n{fence}\n{tail}\n{fence}",
+        command.name,
+        command.run,
+        output.exit_code,
+    )
+}
+

@@ -236,6 +236,7 @@ async fn an_old_verify_ends_the_round_it_left_open() {
             checks: vec!["acceptance-1".to_string()],
             commands: vec!["bun test toggle".to_string()],
             declared: "{}".to_string(),
+            setup: None,
             check_action_id: uuid::Uuid::now_v7(),
         },
     )

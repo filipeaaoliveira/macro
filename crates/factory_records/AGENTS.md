@@ -89,7 +89,9 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261118213200_factory_run_definition_evaluation.sql`,
   `20261118220000_factory_run_outcome_kinds.sql`,
   `20261118233000_factory_run_pull_request_url_index.sql`,
-  `20261119000000_factory_standing_act.sql`), `factory_step_steer`,
+  `20261119000000_factory_standing_act.sql`,
+  `20261119000100_factory_standing_act_sessionless.sql`,
+  `20261119003000_factory_repository_setup.sql`), `factory_step_steer`,
   `factory_run_score`, `factory_run_arm`, `factory_benchmark_suite`,
   `factory_benchmark_trial` and `factory_benchmark_trial_score`.
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.

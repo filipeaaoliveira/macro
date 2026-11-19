@@ -13,6 +13,7 @@
     ".circleci/**",
     ".macro/checks.json",
     ".macro/verify.json",
+    ".macro/setup.json",
     "**/AGENTS.md",
     "**/CLAUDE.md",
     ".claude/**",

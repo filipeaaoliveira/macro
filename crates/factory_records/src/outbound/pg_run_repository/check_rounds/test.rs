@@ -258,6 +258,7 @@ async fn a_round_keeps_its_first_record_end_and_fix(pool: PgPool) {
         checks: vec!["web".to_string(), "rust".to_string()],
         commands: vec!["bun run check".to_string(), "cargo test".to_string()],
         declared: r#"{"checks":[]}"#.to_string(),
+        setup: Some(r#"{"setup":[]}"#.to_string()),
         check_action_id: Uuid::now_v7(),
     };
     let fix = Uuid::now_v7();
@@ -303,6 +304,7 @@ async fn a_round_keeps_its_first_record_end_and_fix(pool: PgPool) {
     assert_eq!(round.checks, ["web", "rust"]);
     assert_eq!(round.commands, ["bun run check", "cargo test"]);
     assert_eq!(round.declared, r#"{"checks":[]}"#);
+    assert_eq!(round.setup.as_deref(), Some(r#"{"setup":[]}"#));
     assert_eq!(round.fix_action_id, Some(fix));
     let end = round.end.as_ref().expect("the round ended");
     assert_eq!(end.outcome, CheckRoundOutcome::Failed);
@@ -333,6 +335,7 @@ async fn a_round_the_quota_ended_is_kept_as_ended_by_it(pool: PgPool) {
             checks: vec!["web".to_string()],
             commands: vec!["bun run check".to_string()],
             declared: r#"{"checks":[]}"#.to_string(),
+            setup: None,
             check_action_id: Uuid::now_v7(),
         };
         repo.start_check_round(key, &start).await.expect("start");
@@ -391,6 +394,7 @@ async fn a_verified_round_keeps_each_checks_run(pool: PgPool) {
                 checks: vec!["web".to_string(), "lint".to_string()],
                 commands: vec!["bun test".to_string(), "just check".to_string()],
                 declared: "{}".to_string(),
+                setup: None,
                 check_action_id: Uuid::now_v7(),
             },
         )

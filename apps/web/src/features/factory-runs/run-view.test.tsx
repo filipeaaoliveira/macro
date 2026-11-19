@@ -381,6 +381,38 @@ describe('RunView', () => {
     expect(screen.getByText('Checks running…')).toBeTruthy();
   });
 
+  it('names the setup command that failed before the round ran its checks', async () => {
+    const { setRun } = mount({});
+    setRun({
+      ...waitingRun,
+      steps: [
+        {
+          seq: 1,
+          entry: 'write',
+          visit: 1,
+          startedAt: '2026-11-16T09:00:00Z',
+          checks: [
+            {
+              round: 1,
+              checks: ['web'],
+              startedAt: '2026-11-16T09:30:00Z',
+              verified: true,
+              checkedCommit: '0123456789abcdef0123456789abcdef01234567',
+              results: [{ name: 'setup:install', exitCode: 1 }],
+              end: {
+                outcome: 'failed',
+                report: 'the setup failed',
+                endedAt: '2026-11-16T09:40:00Z',
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(await screen.findByText('setup install exited 1, web')).toBeTruthy();
+  });
+
   it('answers the open Gate once, with the note', async () => {
     let finish!: (result: RunActionResult) => void;
     const answerGate = vi.fn(

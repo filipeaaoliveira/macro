@@ -122,6 +122,13 @@ pub trait AgentFailure: Retryable {
     fn stopped_without_result(&self) -> Option<&str> {
         None
     }
+
+    /// What the Run's owner is shown when the repository's setup failed, or
+    /// could not run, in a new session before its first prompt: the Step
+    /// then ends `failed` with it.
+    fn setup_failed(&self) -> Option<&str> {
+        None
+    }
 }
 
 /// Does the work of a Flow's Steps.

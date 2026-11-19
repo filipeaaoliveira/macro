@@ -1661,6 +1661,54 @@ impl RunRepository for PgRunRepository {
     }
 
     #[tracing::instrument(err, skip(self))]
+    async fn setup_passed(&self, key: StepKey, session_id: Uuid) -> Result<u16, Self::Err> {
+        let passed = sqlx::query_scalar!(
+            r#"
+            SELECT setup_passed AS "setup_passed!"
+            FROM factory_step
+            WHERE run_id = $1 AND seq = $2 AND setup_session_id = $3
+            "#,
+            key.run_id.as_uuid(),
+            i32::from(key.seq),
+            session_id,
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        passed
+            .map(|passed| {
+                u16::try_from(passed).map_err(|_| PgRunRepositoryErr::OutOfRange(i32::from(passed)))
+            })
+            .transpose()
+            .map(Option::unwrap_or_default)
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn record_setup_passed(
+        &self,
+        key: StepKey,
+        session_id: Uuid,
+        passed: u16,
+    ) -> Result<bool, Self::Err> {
+        // Kept only while the Step holds the session; a session the Step
+        // went on to starts from none, as its setup is its own.
+        let recorded = sqlx::query!(
+            r#"
+            UPDATE factory_step
+            SET setup_session_id = $3, setup_passed = $4
+            WHERE run_id = $1 AND seq = $2
+                AND session_id = $3 AND session_released_at IS NULL AND ended_at IS NULL
+            "#,
+            key.run_id.as_uuid(),
+            i32::from(key.seq),
+            session_id,
+            i16::try_from(passed).unwrap_or(i16::MAX),
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(recorded.rows_affected() == 1)
+    }
+
+    #[tracing::instrument(err, skip(self))]
     async fn stopping_session(
         &self,
         key: StepKey,

@@ -27,6 +27,7 @@ use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::acceptance::plan_output;
 use crate::domain::agents::{REVIEWER_ROLES, VERIFIER};
+use crate::domain::checks::fence_for;
 use crate::domain::flow::{StepName, StepUse};
 use crate::domain::gate_owner::owner_notes_brief;
 use crate::domain::models::{AgentTask, SessionSteer, StepInput, StepReport, run_branch};
@@ -39,6 +40,7 @@ use crate::domain::questions::{
     SESSION_LOST_NOTE, answers_brief, ask_instructions, going_on_prompt,
 };
 use crate::domain::review_rounds::{blockers_brief, escape, fenced_review};
+use crate::domain::setup::{RepositorySetup, SETUP_FILE};
 use crate::domain::verification::{VerifyFile, VerifyFileError};
 
 /// What a `deploy` or `verify` Step reports: a Run ends at its merge, and
@@ -242,6 +244,10 @@ pub enum BuiltInStepError {
     /// to.
     #[error("step {0}'s question has no answer to go on with")]
     Unanswered(u16),
+    /// The repository's setup does not read, failed, or cannot run where
+    /// the agent works: the Step ends `failed` with this, for its owner.
+    #[error("the repository's setup failed: {0}")]
+    Setup(String),
 }
 
 impl BuiltInStepError {
@@ -264,7 +270,8 @@ impl Retryable for BuiltInStepError {
             | BuiltInStepError::NotAnAgentStep(_)
             | BuiltInStepError::NoRepository(_)
             | BuiltInStepError::UnexpectedOutcome { .. }
-            | BuiltInStepError::Unanswered(_) => false,
+            | BuiltInStepError::Unanswered(_)
+            | BuiltInStepError::Setup(_) => false,
         }
     }
 }
@@ -278,7 +285,8 @@ impl AgentFailure for BuiltInStepError {
             | BuiltInStepError::NoRepository(_)
             | BuiltInStepError::UnexpectedOutcome { .. }
             | BuiltInStepError::PullRequest(_)
-            | BuiltInStepError::Unanswered(_) => false,
+            | BuiltInStepError::Unanswered(_)
+            | BuiltInStepError::Setup(_) => false,
         }
     }
 
@@ -290,7 +298,8 @@ impl AgentFailure for BuiltInStepError {
             | BuiltInStepError::NoRepository(_)
             | BuiltInStepError::UnexpectedOutcome { .. }
             | BuiltInStepError::PullRequest(_)
-            | BuiltInStepError::Unanswered(_) => false,
+            | BuiltInStepError::Unanswered(_)
+            | BuiltInStepError::Setup(_) => false,
         }
     }
 }
@@ -368,6 +377,13 @@ where
             }
             None => prompt(instructions, &outcomes, input),
         };
+        let setup = self.setup(input).await?;
+        let asked_prompt = match &setup {
+            Some(setup) if input.resumes.is_none() => {
+                format!("{asked_prompt}{}", setup_note(setup))
+            }
+            _ => asked_prompt,
+        };
         let task = AgentTask {
             key: input.key,
             owner: input.owner.clone(),
@@ -384,11 +400,13 @@ where
             // earlier session's work may be lost.
             afresh: input.resumes.map(|_| {
                 format!(
-                    "{}{}",
+                    "{}{}{}",
                     prompt(instructions, &outcomes, input),
+                    setup.as_ref().map(setup_note).unwrap_or_default(),
                     SESSION_LOST_NOTE
                 )
             }),
+            setup,
         };
         let answer = match self.agent.answer(task).await {
             Ok(answer) => answer,
@@ -397,6 +415,9 @@ where
             // the workflow to ask the Run's owner. A reviewer's fails the
             // Step as before: its review round asks no one.
             Err(error) => {
+                if let Some(report) = error.setup_failed() {
+                    return Err(BuiltInStepError::Setup(report.to_string()));
+                }
                 if !input.reviewer
                     && let Some(last_words) = error.stopped_without_result()
                 {
@@ -419,6 +440,28 @@ where
             outcome: answer.outcome,
             output: answer.text,
         })
+    }
+
+    /// The setup the Run's base declares for its repository, which each
+    /// new agent session of the Step runs before its first prompt: none
+    /// when the Run works on no repository, or the base declares none or an
+    /// empty one. A file that does not read fails the Step, saying why.
+    async fn setup(
+        &self,
+        input: StepInput<'_>,
+    ) -> Result<Option<RepositorySetup>, BuiltInStepError> {
+        if input.repository.is_none() {
+            return Ok(None);
+        }
+        let Some(text) = self.pull_requests.declared_setup(&input).await? else {
+            return Ok(None);
+        };
+        let setup = RepositorySetup::parse(&text).map_err(|error| {
+            BuiltInStepError::Setup(format!(
+                "The repository's setup could not run, so the agent did not start: {error}"
+            ))
+        })?;
+        Ok(Some(setup).filter(|setup| !setup.is_empty()))
     }
 
     /// [`Self::ask_agent`] for a Step that only makes sense on the Run's
@@ -451,6 +494,82 @@ where
     }
 
     async fn run(
+        &self,
+        step: &StepName,
+        input: StepInput<'_>,
+    ) -> Result<StepReport, BuiltInStepError> {
+        // A setup that does not read, fails or cannot run ends the Step
+        // `failed`, with what its owner needs to see, rather than a
+        // failure's fixed output; no agent turn was spent on it.
+        match self.run_built_in(step, input).await {
+            Err(BuiltInStepError::Setup(output)) => Ok(StepReport {
+                outcome: Outcome::failed(),
+                output,
+            }),
+            ran => ran,
+        }
+    }
+
+    async fn stop(
+        &self,
+        step: &StepName,
+        role: Option<&Role>,
+        key: StepKey,
+        owner: &MacroUserIdStr<'static>,
+    ) -> Result<(), BuiltInStepError> {
+        match agent_role(step, role) {
+            Some(role) => self
+                .agent
+                .stop(key, &role, owner)
+                .await
+                .map_err(BuiltInStepError::agent),
+            // A reply is done before anything could stop it, and a pull
+            // request Step holds nothing: a cancelled one is dropped.
+            None => Ok(()),
+        }
+    }
+
+    async fn release(
+        &self,
+        step: &StepName,
+        role: Option<&Role>,
+        key: StepKey,
+        owner: &MacroUserIdStr<'static>,
+    ) -> Result<(), BuiltInStepError> {
+        match agent_role(step, role) {
+            Some(role) => self
+                .agent
+                .release(key, &role, owner)
+                .await
+                .map_err(BuiltInStepError::agent),
+            // Only an agent Step holds a session.
+            None => Ok(()),
+        }
+    }
+
+    async fn steer(
+        &self,
+        role: &Role,
+        key: StepKey,
+        owner: &MacroUserIdStr<'static>,
+        session: &StepSession,
+        steer: SessionSteer,
+    ) -> Result<(), BuiltInStepError> {
+        self.agent
+            .steer(key, role, owner, session, steer)
+            .await
+            .map_err(BuiltInStepError::agent)
+    }
+}
+
+impl<A, G, R, M> BuiltInSteps<A, G, R, M>
+where
+    A: StepAgent,
+    G: PullRequests,
+    R: RunRepository + MainHoldRepository + ReviewRoundRepository,
+    M: MainWatches,
+{
+    async fn run_built_in(
         &self,
         step: &StepName,
         input: StepInput<'_>,
@@ -549,56 +668,37 @@ where
         }
     }
 
-    async fn stop(
-        &self,
-        step: &StepName,
-        role: Option<&Role>,
-        key: StepKey,
-        owner: &MacroUserIdStr<'static>,
-    ) -> Result<(), BuiltInStepError> {
-        match agent_role(step, role) {
-            Some(role) => self
-                .agent
-                .stop(key, &role, owner)
-                .await
-                .map_err(BuiltInStepError::agent),
-            // A reply is done before anything could stop it, and a pull
-            // request Step holds nothing: a cancelled one is dropped.
-            None => Ok(()),
-        }
-    }
+}
 
-    async fn release(
-        &self,
-        step: &StepName,
-        role: Option<&Role>,
-        key: StepKey,
-        owner: &MacroUserIdStr<'static>,
-    ) -> Result<(), BuiltInStepError> {
-        match agent_role(step, role) {
-            Some(role) => self
-                .agent
-                .release(key, &role, owner)
-                .await
-                .map_err(BuiltInStepError::agent),
-            // Only an agent Step holds a session.
-            None => Ok(()),
-        }
+/// What the agent is told of the repository's `setup`, which ran in its
+/// checkout before its first prompt: the commands, and the values they ran
+/// with, which its own commands may need too.
+fn setup_note(setup: &RepositorySetup) -> String {
+    let mut note = String::from("\n");
+    let names: Vec<&str> = setup
+        .setup
+        .iter()
+        .map(|command| command.name.as_str())
+        .collect();
+    if !names.is_empty() {
+        note.push_str(&format!(
+            "The factory ran the repository's setup (`{SETUP_FILE}`) in your checkout before this prompt: {}.\n",
+            names.join(", ")
+        ));
     }
-
-    async fn steer(
-        &self,
-        role: &Role,
-        key: StepKey,
-        owner: &MacroUserIdStr<'static>,
-        session: &StepSession,
-        steer: SessionSteer,
-    ) -> Result<(), BuiltInStepError> {
-        self.agent
-            .steer(key, role, owner, session, steer)
-            .await
-            .map_err(BuiltInStepError::agent)
+    if !setup.env.is_empty() {
+        let exports = setup.exports();
+        let fence = fence_for(&exports);
+        let said = if names.is_empty() {
+            format!("The repository's setup (`{SETUP_FILE}`) gives these values")
+        } else {
+            "It ran with these values".to_string()
+        };
+        note.push_str(&format!(
+            "{said}; run your own commands with them too:\n\n{fence}sh\n{exports}{fence}\n"
+        ));
     }
+    note
 }
 
 /// What the planner is told when the repository's verify file turns

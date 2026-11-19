@@ -612,6 +612,79 @@ async fn a_retried_step_keeps_the_session_its_first_attempt_claimed(pool: PgPool
     assert!(!step.ended);
 }
 
+/// A Step keeps how many setup commands passed in the session it works
+/// in: a session it went on to starts from none, and one it let go of
+/// records no more.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "fixtures", scripts("people"))
+)]
+async fn a_step_keeps_the_setup_its_session_passed(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let id = RunId::generate();
+    insert(&repo, id, "Plan the dark mode toggle").await;
+    repo.start_step(key(id, 1), &entry("plan"), 1)
+        .await
+        .expect("start");
+    let first = repo
+        .claim_session(key(id, 1), session(), &planner(), &[outcome("done")])
+        .await
+        .expect("claim")
+        .session;
+
+    let before = repo
+        .setup_passed(key(id, 1), first.session_id)
+        .await
+        .expect("read");
+    let recorded = repo
+        .record_setup_passed(key(id, 1), first.session_id, 2)
+        .await
+        .expect("record");
+
+    assert_eq!(before, 0);
+    assert!(recorded);
+    assert_eq!(
+        repo.setup_passed(key(id, 1), first.session_id)
+            .await
+            .expect("read"),
+        2
+    );
+
+    let next = session_of("backup");
+    repo.pass_session(
+        key(id, 1),
+        first.session_id,
+        &planner(),
+        &passed("primary"),
+        Some(&next),
+    )
+    .await
+    .expect("pass");
+    assert_eq!(
+        repo.setup_passed(key(id, 1), next.session_id)
+            .await
+            .expect("read"),
+        0,
+        "the next session runs its own setup"
+    );
+    assert!(
+        !repo
+            .record_setup_passed(key(id, 1), first.session_id, 3)
+            .await
+            .expect("record"),
+        "the session handed on records no more"
+    );
+
+    repo.release_session(key(id, 1)).await.expect("release");
+    assert!(
+        !repo
+            .record_setup_passed(key(id, 1), next.session_id, 1)
+            .await
+            .expect("record"),
+        "a session let go of records no more"
+    );
+}
+
 /// A Step whose Agent could not start goes on in a session of the next
 /// Agent, and keeps its Role, the Agent that took it, and the one passed
 /// over with why. Only the session the Step works in is handed on, once.

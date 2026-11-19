@@ -33,6 +33,7 @@ mod going_on;
 mod quota_memory;
 mod reminder;
 mod run_check;
+mod setup;
 mod step_terminal;
 
 /// What happens to one call: it works, or fails with this error. A call
@@ -95,7 +96,12 @@ struct FakeSessions {
     /// How a command run in the session ends: none for a runtime that runs
     /// no command.
     command_output: Option<SessionCommandOutput>,
+    /// How each command run in the session ends, in order, before
+    /// `command_output` answers the rest.
+    exec_replies: Arc<Mutex<VecDeque<Result<SessionCommandOutput, RoutineSessionError>>>>,
     exec_calls: Arc<Mutex<Vec<ExecRoutineSession>>>,
+    /// How long each command run in the session takes.
+    exec_takes: Option<std::time::Duration>,
     /// A follow-up lands, but the session's runtime then stays
     /// disconnected, as one the harness could not restore, until the
     /// session is deleted.
@@ -134,7 +140,9 @@ impl FakeSessions {
             follow_up_handed: None,
             follow_up_calls: Arc::default(),
             command_output: None,
+            exec_replies: Arc::default(),
             exec_calls: Arc::default(),
+            exec_takes: None,
             follow_up_loses: false,
             lost: Arc::default(),
             last_words: None,
@@ -333,6 +341,12 @@ impl RoutineSessions for FakeSessions {
         command: ExecRoutineSession,
     ) -> Result<SessionCommandOutput, RoutineSessionError> {
         self.exec_calls.lock().expect("execs").push(command);
+        if let Some(takes) = self.exec_takes {
+            tokio::time::sleep(takes).await;
+        }
+        if let Some(reply) = self.exec_replies.lock().expect("exec replies").pop_front() {
+            return reply;
+        }
         self.command_output
             .clone()
             .ok_or(RoutineSessionError::CommandUnsupported)
@@ -466,6 +480,7 @@ async fn plan_task(repo: &FakeRepo) -> AgentTask {
         answer_by: None,
         resumes: None,
         afresh: None,
+        setup: None,
     }
 }
 

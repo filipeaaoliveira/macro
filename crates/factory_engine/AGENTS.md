@@ -683,6 +683,79 @@ agent's work, cut to the 64 KiB a Step keeps. The rounds show on the Step
 `LocalAgent` runs no command, and answers a round of checks `failed`: no
 check ran.
 
+A repository prepares a fresh checkout for the factory in `.macro/setup.json`
+on its base branch (`src/domain/setup.rs`): `setup`, a list of commands, each
+a `name`, a `run` from the repository's root and an optional `timeout`
+(seconds, 1 to 1200, default 600), at most 16; and `env`, at most 32 plain
+values, `export`ed inside the script `bash` runs for each command and each
+check (never before `timeout` or `bash`), single-quoted and so never
+expanded: `$PATH` in a value stays that text. It is read as the
+checks file is, from the Run's recorded base branch, never the Run's branch,
+and is a default Control File. A file that does not read (over 16 KiB, not
+JSON, a key named twice or not known, a bad name, command or timeout, an
+`env` name that is not a shell variable's, or one that changes the shell
+(`BASH_ENV`, `ENV`, `SHELLOPTS`, `BASHOPTS`, `PS4`, `BASH_XTRACEFD`), the
+home (`HOME`), where git finds the repository, its objects or its
+configuration (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`,
+`GIT_CEILING_DIRECTORIES`, `GIT_COMMON_DIR`, `GIT_OBJECT_DIRECTORY`,
+`GIT_ALTERNATE_OBJECT_DIRECTORIES`, `GIT_CONFIG*`, `XDG_CONFIG_HOME`), what
+git runs (`GIT_EXEC_PATH`, `GIT_SSH_COMMAND`, `GIT_SSH`, `GIT_ASKPASS`,
+`GIT_TEMPLATE_DIR`), the linker (`LD_*`, `DYLD_*`) or is the factory's own
+(`MACRO_*`); `PATH` and harmless git values such as `GIT_TERMINAL_PROMPT`
+are allowed; a value over 1 KiB or with a control character) ends the Step
+`failed`, saying why. Secrets never live there: a file holding something
+shaped like a key or a token (the Definition's check), or an `env` name
+that says it holds one (`TOKEN`, `SECRET`, `PASSWORD`, `API_KEY`, ...), does
+not read. A base with no file, or one that asks for nothing, runs no setup,
+as before.
+
+Each agent Step on a repository reads it (`BuiltInSteps::setup`) and hands it
+to its agent (`AgentTask::setup`); its first prompt names the commands that
+ran and the `env` values. `SessionAgent` runs the commands in each new
+session after it opens and before its first prompt, in order, through the
+routine sessions' `exec` (`bash --noprofile --norc` under the command's
+`timeout`), recording on the Step how many passed in that session
+(`factory_step.setup_session_id`, `setup_passed`), so a retry in the same
+session skips those, and a new session (handed to the next Agent, or one
+that went on afresh after a lost session) runs them again. A session whose
+first prompt already landed is never set up. Each command holds a lock in
+the checkout's git directory (`macro-setup.lock`, taken as a check takes
+its round's: `flock -w 60`, else `mkdir`; `src/domain/shell_lock.rs`), so a
+retry's command never runs beside one an attempt lost with its worker left
+running; a lock still held after 60 s fails the attempt for a retry. A
+command starts only with its
+whole timeout left in the attempt (`SESSION_DEADLINE`, or the time the Step
+gives): otherwise the attempt fails, and its retry goes on with the commands
+still to run. A command that fails ends the Step `failed`, with the
+command, its exit code and the end of its output (4 KiB; each line that
+looks like a secret left out, and a private key's block whole, to its
+`-----END` or the output's end) as its output, and
+no agent turn spent; so does a runtime that runs no command (a workspace
+macrod shares, a paired machine, Cursor, Codex, `LocalAgent`), saying the
+setup cannot run there: the Step never goes on without it. A reviewer's
+failure fails its round. Either is the Step's report, not a work failure,
+so the workflow and its replay are unchanged.
+
+A checks round (and `accept`'s round of acceptance checks) keeps the setup
+file its first round read (`factory_check_round.setup`), and a verified
+round runs its commands in the round's worktree, under the round's lock,
+after setting it up and before the checks, within the same time limits as
+a check. Each command's run is recorded among the round's results as
+`setup:<name>`, so a retry runs only the commands still to run: a long
+setup and a long check fit in two attempts. A retry's worktree at the same
+commit is `reset --hard`, never cleaned, so it keeps the untracked files
+the setup made (`node_modules`, ignored build output) but not its edits to
+tracked files, which the reset undoes and no command passed runs again: a
+setup whose output is checked in (a `just generate` whose files are
+committed) leaves a retry's checks the committed files. A command that
+fails ends the round failed, as a red check: its report, which goes to the
+agent's fix, shows the command and the end of its output, and says the
+checks did not run. The round keeps the setup's text, not what was read
+from it, and reads it again on each attempt, as it does the checks file: a
+deploy whose rules refuse more (a newly refused `env` name) fails the Step
+of a round in flight that kept such a text ("a recorded setup file does
+not read").
+
 An entry with `reviewers` is a review panel (`src/domain/review_rounds.rs`,
 `factory_review_round` and `factory_review_finding` in `factory_records`).
 Each visit is a review round: the workflow opens it
@@ -808,7 +881,8 @@ Control Files (`src/domain/control_files.rs`) are the files that decide
 whether a repository's checks pass: tests and what they compare against
 (snapshots, fixtures), test and lint configuration, CI workflows, package and
 build scripts, agent instructions and their tools' settings (`AGENTS.md`,
-`CLAUDE.md`, `.claude/`, `.agents/`, `.cursor/`) and `.macro/checks.json`.
+`CLAUDE.md`, `.claude/`, `.agents/`, `.cursor/`), `.macro/checks.json`,
+`.macro/verify.json` and `.macro/setup.json`.
 They are glob patterns matched against each changed path from the root,
 ignoring case (`*` within a folder, `**` across folders, `**/name` also at
 the root). `DEFAULT_CONTROL_FILES` applies until an admin or the owner of
