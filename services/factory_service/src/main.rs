@@ -31,6 +31,7 @@ use factory_engine::domain::main_hold::MainWatchServiceImpl;
 use factory_engine::domain::ports::StepAgent;
 use factory_engine::domain::pull_request_steps::PullRequestSteps;
 use factory_engine::domain::review_rounds::ReviewRoundsImpl;
+use factory_engine::domain::self_improvement::{ImprovingScoring, SelfImprovementServiceImpl};
 use factory_engine::domain::service::{FactoryServiceImpl, StepServiceImpl};
 use factory_engine::domain::session_agent::SessionAgent;
 use factory_engine::inbound::automations::{
@@ -203,6 +204,8 @@ async fn run() -> Result<(), rootcause::Report> {
         // A Run whose task thread section is on posts its updates to its
         // task as its owner.
         task_thread: DocumentTaskThread::new(documents, AppServiceUrl::new()?.as_ref()),
+        // A self-improvement Run's request links the failing Runs there.
+        app_url: AppServiceUrl::new()?.as_ref().to_string(),
         // A Gate left for a person tells the Run's owner through the
         // notification ingress, as every Macro producer notifies; once it
         // is answered, the notifications' reader marks it done and clears
@@ -290,6 +293,7 @@ struct Parts {
         PgNotificationWithdrawal,
     >,
     automation_triggers: RoutineAutomationTriggers,
+    app_url: String,
     client: Client,
     authorization_state: MacroAuthorizationState<Authorization>,
     correlation: CorrelationState,
@@ -319,6 +323,30 @@ async fn serve<A: StepAgent + Clone>(
     >,
 ) -> Result<(), rootcause::Report> {
     let runtime = Runtime::from_current_tokio(Default::default())?;
+    let mut service = FactoryServiceImpl::new(
+        parts.repo.clone(),
+        TemporalRunWorkflows::new(parts.client.clone()),
+        steps.clone(),
+        parts.users,
+        parts.tasks.clone(),
+        parts.github.clone(),
+    );
+    if let Some(rounds) = parts.review_rounds {
+        service = service.with_review_rounds(rounds);
+    }
+    if let Some(questions) = parts.questions {
+        service = service.with_questions(questions);
+    }
+    let service = Arc::new(service.with_evaluation(parts.evaluation.clone()));
+    // Once a Run ended and was scored, its team's failures under its
+    // Definition may start a self-improvement Run, through the Run API as
+    // the Definition's namer.
+    let self_improvement = SelfImprovementServiceImpl::new(
+        parts.repo.clone(),
+        service.clone(),
+        parts.github.clone(),
+        &parts.app_url,
+    );
     // A review round reads the Run's branch on GitHub, and makes a task of
     // each finding outside the diff it reviewed.
     let reviews = ReviewRoundsImpl::new(
@@ -344,32 +372,20 @@ async fn serve<A: StepAgent + Clone>(
                 parts.github.clone(),
                 parts.hold_tasks,
             ),
-            scoring: ScoringServiceImpl::new(
-                parts.repo.clone(),
-                parts.judge,
-                parts.usage.clone(),
-                parts.github.clone(),
-                parts.evaluation.clone(),
+            scoring: ImprovingScoring::new(
+                ScoringServiceImpl::new(
+                    parts.repo.clone(),
+                    parts.judge,
+                    parts.usage.clone(),
+                    parts.github.clone(),
+                    parts.evaluation.clone(),
+                ),
+                self_improvement,
             ),
         },
     )?;
 
     let insights = Arc::new(InsightsServiceImpl::new(parts.repo.clone(), parts.usage));
-    let mut service = FactoryServiceImpl::new(
-        parts.repo.clone(),
-        TemporalRunWorkflows::new(parts.client),
-        steps,
-        parts.users,
-        parts.tasks,
-        parts.github,
-    );
-    if let Some(rounds) = parts.review_rounds {
-        service = service.with_review_rounds(rounds);
-    }
-    if let Some(questions) = parts.questions {
-        service = service.with_questions(questions);
-    }
-    let service = Arc::new(service.with_evaluation(parts.evaluation.clone()));
     // A Benchmark suite starts its trials through the Run API, as their
     // starter. A trial's Flow has no Gate, so the Queue holds no place for
     // it: a suite is held instead by the records, to one running suite of

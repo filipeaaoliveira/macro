@@ -10,14 +10,17 @@ use factory_records::domain::evaluation::{
     NewSuite, SuiteInsert, TrialKey,
 };
 use factory_records::domain::models::{RunId, RunOutcome};
+use factory_records::domain::ports::RunRepository;
+use factory_records::domain::self_improvement::{ImprovementState, SelfImprovementRepository};
 use macro_user_id::user_id::MacroUserIdStr;
 use serde::Serialize;
 use uuid::Uuid;
 
-use super::{EvaluationDefinition, check_choices};
+use super::{EvaluationDefinition, SelfImprovementDefinition, check_choices};
 use crate::domain::insights::{InsightsError, InsightsQuery, TokenCounts};
 use crate::domain::models::FactoryError;
 use crate::domain::ports::FactoryService;
+use crate::domain::self_improvement::{NamerStanding, namer_standing};
 
 fn internal(error: impl std::error::Error + Send + Sync + 'static) -> rootcause::Report {
     rootcause::Report::new(error).into_dynamic()
@@ -191,6 +194,67 @@ pub struct EvaluationInsights {
     pub benchmarks: Vec<BenchmarkSummary>,
     /// The suites started in the period, newest first.
     pub suites: Vec<SuiteInsight>,
+    /// The caller's team's self-improvement: its pending failures and its
+    /// latest self-improvement Run; none when the team names no Factory
+    /// Definition.
+    pub self_improvement: Option<SelfImprovementInsight>,
+}
+
+/// How many of a team's pending failures come from one source.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingSource {
+    /// The Scorer's name, or `flawed` for the Runs marked flawed.
+    pub source: String,
+    /// How many.
+    pub count: u32,
+}
+
+/// A team's latest self-improvement Run.
+#[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ImprovementInsight {
+    /// Its Run; none while it starts, when it was refused, or once the
+    /// Run is gone. Only its owner reads it.
+    pub run_id: Option<RunId>,
+    /// Where it is.
+    pub state: ImprovementState,
+    /// Why its Run could not start, when refused.
+    pub refusal: Option<String>,
+    /// How many failures it groups.
+    pub failures: u32,
+    /// When it began.
+    pub created_at: DateTime<Utc>,
+    /// When it was settled.
+    pub settled_at: Option<DateTime<Utc>>,
+}
+
+/// A team's self-improvement against its Factory Definition: the failures
+/// waiting for a Run, what starts one, and the latest one.
+#[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SelfImprovementInsight {
+    /// The Definition's repository.
+    pub repo_url: String,
+    /// Whether the Definition improves itself.
+    pub enabled: bool,
+    /// How many pending failures start a Run.
+    pub failures_threshold: u16,
+    /// How many days old the oldest pending failure is before a Run starts
+    /// with fewer.
+    pub oldest_days: u16,
+    /// Where the admin who named the Definition stands: its
+    /// self-improvement Runs are theirs, and none starts unless they are
+    /// still an admin of the team.
+    pub namer: NamerStanding,
+    /// How many failures wait.
+    pub pending: u32,
+    /// When the oldest was kept.
+    pub oldest_pending_at: Option<DateTime<Utc>>,
+    /// How many wait from each source, most first.
+    pub pending_by_source: Vec<PendingSource>,
+    /// The latest self-improvement Run, open or not.
+    pub last: Option<ImprovementInsight>,
 }
 
 /// A suite that started.
@@ -493,12 +557,78 @@ pub(crate) fn evaluation_insights(
         experiments,
         benchmarks,
         suites,
+        self_improvement: None,
+    }
+}
+
+impl<R, F> EvaluationServiceImpl<R, F>
+where
+    R: RunRepository + SelfImprovementRepository,
+{
+    /// `actor`'s team's self-improvement under `thresholds`; none when the
+    /// team names no Definition.
+    async fn self_improvement(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        thresholds: SelfImprovementDefinition,
+    ) -> Result<Option<SelfImprovementInsight>, InsightsError> {
+        let Some(team) = self
+            .repo
+            .team_of(actor)
+            .await
+            .map_err(|error| InsightsError::Internal(internal(error)))?
+        else {
+            return Ok(None);
+        };
+        let Some(naming) = self
+            .repo
+            .definition_naming(team.team_id)
+            .await
+            .map_err(|error| InsightsError::Internal(internal(error)))?
+        else {
+            return Ok(None);
+        };
+        let (namer, _) = namer_standing(&self.repo, team.team_id, &naming)
+            .await
+            .map_err(|error| InsightsError::Internal(internal(error)))?;
+        let pending = self
+            .repo
+            .pending_failures(team.team_id, &naming.repo_url)
+            .await
+            .map_err(|error| InsightsError::Internal(internal(error)))?;
+        let last = self
+            .repo
+            .latest_improvement(team.team_id)
+            .await
+            .map_err(|error| InsightsError::Internal(internal(error)))?;
+        Ok(Some(SelfImprovementInsight {
+            repo_url: naming.repo_url,
+            enabled: thresholds.enabled,
+            failures_threshold: thresholds.failures,
+            oldest_days: thresholds.oldest_days,
+            namer,
+            pending: pending.count,
+            oldest_pending_at: pending.oldest,
+            pending_by_source: pending
+                .by_source
+                .into_iter()
+                .map(|(source, count)| PendingSource { source, count })
+                .collect(),
+            last: last.map(|last| ImprovementInsight {
+                run_id: last.run_id,
+                state: last.state,
+                refusal: last.refusal,
+                failures: last.failures,
+                created_at: last.created_at,
+                settled_at: last.settled_at,
+            }),
+        }))
     }
 }
 
 impl<R, F> EvaluationService for EvaluationServiceImpl<R, F>
 where
-    R: EvaluationRepository,
+    R: EvaluationRepository + RunRepository + SelfImprovementRepository,
     F: FactoryService,
 {
     #[tracing::instrument(skip(self, actor))]
@@ -525,7 +655,15 @@ where
             .read_evaluation(&scope)
             .await
             .map_err(|error| InsightsError::Internal(internal(error)))?;
-        Ok(evaluation_insights(definition, &query, records))
+        let mut insights = evaluation_insights(definition, &query, records);
+        // Only a Definition improves itself, under its own thresholds; one
+        // that does not read shows the defaults.
+        let thresholds = team
+            .as_ref()
+            .map(EvaluationDefinition::self_improvement)
+            .unwrap_or_default();
+        insights.self_improvement = self.self_improvement(actor, thresholds).await?;
+        Ok(insights)
     }
 
     #[tracing::instrument(skip(self, actor, agents))]

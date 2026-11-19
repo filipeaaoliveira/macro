@@ -149,6 +149,70 @@ pub struct EvaluationDefinition {
     scorers: Vec<ScorerDefinition>,
     experiments: Vec<ExperimentDefinition>,
     benchmarks: Vec<BenchmarkDefinition>,
+    #[serde(skip_serializing_if = "SelfImprovementDefinition::is_default")]
+    self_improvement: SelfImprovementDefinition,
+}
+
+/// The fewest failures, by default, that start a self-improvement Run.
+pub const DEFAULT_IMPROVEMENT_FAILURES: u16 = 25;
+
+/// How old, in days by default, the oldest pending failure is before a
+/// self-improvement Run starts with fewer.
+pub const DEFAULT_IMPROVEMENT_OLDEST_DAYS: u16 = 7;
+
+/// The most failures a self-improvement Run may wait for.
+pub const MAX_IMPROVEMENT_FAILURES: u16 = 1000;
+
+/// The most days a self-improvement Run may wait for its oldest failure.
+pub const MAX_IMPROVEMENT_OLDEST_DAYS: u16 = 365;
+
+/// When a team's Factory Definition starts a self-improvement Run against
+/// itself: once its pending failures (Scorers' judgments below the pass
+/// score, and Runs marked flawed) reach `failures`, or the oldest is
+/// `oldest_days` old. Only a Definition's `scorers.json` is read for it: a
+/// team that names none starts none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SelfImprovementDefinition {
+    /// Whether the Definition improves itself at all; on by default.
+    #[serde(default = "on")]
+    pub enabled: bool,
+    /// How many pending failures start a Run, from 1 to
+    /// [`MAX_IMPROVEMENT_FAILURES`].
+    #[serde(default = "default_failures")]
+    pub failures: u16,
+    /// How many days old the oldest pending failure is before a Run starts
+    /// with fewer, from 1 to [`MAX_IMPROVEMENT_OLDEST_DAYS`].
+    #[serde(default = "default_oldest_days")]
+    pub oldest_days: u16,
+}
+
+fn on() -> bool {
+    true
+}
+
+fn default_failures() -> u16 {
+    DEFAULT_IMPROVEMENT_FAILURES
+}
+
+fn default_oldest_days() -> u16 {
+    DEFAULT_IMPROVEMENT_OLDEST_DAYS
+}
+
+impl Default for SelfImprovementDefinition {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            failures: DEFAULT_IMPROVEMENT_FAILURES,
+            oldest_days: DEFAULT_IMPROVEMENT_OLDEST_DAYS,
+        }
+    }
+}
+
+impl SelfImprovementDefinition {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 /// A team's Factory Definition's Scorers, Experiments and Benchmarks, with
@@ -171,6 +235,8 @@ struct EvaluationDefinitionFields {
     experiments: Vec<ExperimentDefinition>,
     #[serde(default)]
     benchmarks: Vec<BenchmarkDefinition>,
+    #[serde(default)]
+    self_improvement: SelfImprovementDefinition,
 }
 
 /// What is wrong with an evaluation definition.
@@ -220,6 +286,12 @@ pub enum EvaluationDefinitionError {
     /// A Benchmark has more tasks than a person may have trials running.
     #[error("benchmark {0} must have at most {MAX_OPEN_TRIALS} tasks")]
     TooManyTasks(String),
+    /// The self-improvement thresholds are out of range.
+    #[error(
+        "selfImprovement must wait for 1 to {MAX_IMPROVEMENT_FAILURES} failures and 1 to \
+         {MAX_IMPROVEMENT_OLDEST_DAYS} days"
+    )]
+    SelfImprovement,
     /// A Benchmark names a Scorer the definition does not have.
     #[error("benchmark {benchmark} names scorer {scorer}, which the definition does not have")]
     UnknownScorer {
@@ -348,10 +420,18 @@ impl TryFrom<EvaluationDefinitionFields> for EvaluationDefinition {
             }
         }
 
+        let improvement = fields.self_improvement;
+        if !(1..=MAX_IMPROVEMENT_FAILURES).contains(&improvement.failures)
+            || !(1..=MAX_IMPROVEMENT_OLDEST_DAYS).contains(&improvement.oldest_days)
+        {
+            return Err(EvaluationDefinitionError::SelfImprovement);
+        }
+
         Ok(Self {
             scorers: fields.scorers,
             experiments: fields.experiments,
             benchmarks: fields.benchmarks,
+            self_improvement: improvement,
         })
     }
 }
@@ -429,6 +509,11 @@ impl EvaluationDefinition {
     /// Its Benchmarks.
     pub fn benchmarks(&self) -> &[BenchmarkDefinition] {
         &self.benchmarks
+    }
+
+    /// When a Definition with it starts a self-improvement Run.
+    pub fn self_improvement(&self) -> SelfImprovementDefinition {
+        self.self_improvement
     }
 
     /// The Scorer named `name`.

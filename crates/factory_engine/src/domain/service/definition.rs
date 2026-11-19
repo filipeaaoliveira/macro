@@ -13,6 +13,7 @@ use std::collections::BTreeMap;
 use factory_records::domain::models::{NewRunDefinition, RunFlow, RunId, TeamMembership};
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::ReviewRoundRepository;
+use factory_records::domain::self_improvement::SelfImprovementRepository;
 use factory_records::domain::standing_rules::StandingRulesRepository;
 use macro_user_id::user_id::MacroUserIdStr;
 
@@ -118,7 +119,8 @@ where
         + FlawRepository
         + RunBoardRepository
         + EvaluationRepository
-        + StandingActRepository,
+        + StandingActRepository
+        + SelfImprovementRepository,
     W: RunWorkflows,
     E: StepExecutor,
     U: UserDirectory,
@@ -387,9 +389,11 @@ where
         };
         let repo_url = pinned.as_ref().map(|pinned| pinned.repo_url.clone());
         self.repo
-            .set_team_definition(team.team_id, repo_url.as_deref())
+            .set_team_definition(team.team_id, repo_url.as_deref(), &actor)
             .await
             .map_err(internal)?;
+        // The same write settles a self-improvement Run open on a
+        // Definition the team no longer names.
         // An administered team's admin is never an agent's account.
         self.settings_of(&actor, Some(team), true, repo_url, pinned.map(Ok))
             .await

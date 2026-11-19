@@ -6,7 +6,11 @@ import type {
   BenchmarkSummary,
   EvaluationInsights,
   ExperimentInsight,
+  ImprovementInsight,
+  ImprovementState,
+  NamerStanding,
   ScorerInsight,
+  SelfImprovementInsight,
   SuiteInsight,
 } from '../core/evaluation';
 import { flowWordLabel } from '../core/flow-words';
@@ -265,6 +269,144 @@ function BenchmarkRow(props: { benchmark: BenchmarkSummary }) {
   );
 }
 
+const IMPROVEMENT_STATE_LABELS: Record<ImprovementState, () => string> = {
+  starting: () => t('factoryEvaluation.improvementStarting'),
+  open: () => t('factoryEvaluation.improvementOpen'),
+  merged: () => t('factoryEvaluation.improvementMerged'),
+  closed: () => t('factoryEvaluation.improvementClosed'),
+  refused: () => t('factoryEvaluation.improvementRefused'),
+};
+
+/** The flawed Runs' source reads as words; a Scorer by its name. */
+function sourceLabel(source: string): string {
+  return source === 'flawed' ? t('factoryEvaluation.flawedSource') : source;
+}
+
+function LastImprovement(props: {
+  last: ImprovementInsight;
+  onOpenRun: (runId: string) => void;
+}) {
+  return (
+    <div class="flex flex-col gap-1.5 border-t border-edge-muted pt-3">
+      <h3 class="text-xs text-ink-muted">
+        {t('factoryEvaluation.lastImprovement')}
+      </h3>
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+        <span class="font-medium">
+          {IMPROVEMENT_STATE_LABELS[props.last.state]()}
+        </span>
+        <span class="text-xs text-ink-muted">
+          {formatRunDate(props.last.createdAt)}
+          {' · '}
+          {t('factoryEvaluation.improvementFailures', {
+            count: props.last.failures,
+          })}
+        </span>
+        <Show when={props.last.runId}>
+          {(runId) => (
+            <button
+              type="button"
+              class="rounded-md px-2 py-1 text-xs font-medium not-touch:hover:bg-hover focus-visible:outline-2 focus-visible:outline-ink touch:min-h-11"
+              onClick={() => props.onOpenRun(runId())}
+            >
+              {t('factoryEvaluation.openImprovement')}
+            </button>
+          )}
+        </Show>
+      </div>
+      <Show when={props.last.refusal}>
+        {(refusal) => (
+          <p class="text-xs text-ink-muted line-clamp-2">{refusal()}</p>
+        )}
+      </Show>
+    </div>
+  );
+}
+
+/**
+ * Why no self-improvement run starts as the admin who named the factory
+ * definition; none while they are still an admin of the team.
+ */
+function namerProblem(namer: NamerStanding): string | undefined {
+  switch (namer) {
+    case 'admin':
+      return undefined;
+    case 'none':
+      return t('factoryEvaluation.improvementNoOwner');
+    case 'left_team':
+      return t('factoryEvaluation.improvementNamerLeft');
+    case 'not_admin':
+      return t('factoryEvaluation.improvementNamerNotAdmin');
+  }
+}
+
+/**
+ * The team's self-improvement: the failures waiting for a run against its
+ * factory definition, what starts one, and the latest one.
+ */
+function SelfImprovementBody(props: {
+  improvement: SelfImprovementInsight;
+  onOpenRun: (runId: string) => void;
+}) {
+  return (
+    <div class="flex flex-col gap-3 px-4 py-4 sm:px-5">
+      <dl class="grid grid-cols-3 gap-x-4 gap-y-3">
+        <Figure label={t('factoryEvaluation.pendingFailures')}>
+          {props.improvement.pending}
+        </Figure>
+        <Figure label={t('factoryEvaluation.startsAt')}>
+          {t('factoryEvaluation.startsAtValue', {
+            count: props.improvement.failuresThreshold,
+            days: props.improvement.oldestDays,
+          })}
+        </Figure>
+        <Figure label={t('factoryEvaluation.oldestPending')}>
+          {props.improvement.oldestPendingAt
+            ? formatRunDate(props.improvement.oldestPendingAt)
+            : '–'}
+        </Figure>
+      </dl>
+      <Show when={props.improvement.pendingBySource.length > 0}>
+        <p class="text-xs text-ink-muted">
+          <For each={props.improvement.pendingBySource}>
+            {(source, index) => (
+              <>
+                <Show when={index() > 0}>{' · '}</Show>
+                <span>{sourceLabel(source.source)}</span>{' '}
+                <span class="tabular-nums text-ink">{source.count}</span>
+              </>
+            )}
+          </For>
+        </p>
+      </Show>
+      <Show when={!props.improvement.enabled}>
+        <p class="text-xs text-ink-muted">
+          {t('factoryEvaluation.improvementOff')}
+        </p>
+      </Show>
+      <Show
+        when={
+          props.improvement.enabled && namerProblem(props.improvement.namer)
+        }
+      >
+        {(problem) => <p class="text-xs text-ink-muted">{problem()}</p>}
+      </Show>
+      <Show
+        when={props.improvement.last}
+        fallback={
+          <p class="border-t border-edge-muted pt-3 text-xs text-ink-muted">
+            {t('factoryEvaluation.noImprovement')}
+          </p>
+        }
+      >
+        {(last) => (
+          <LastImprovement last={last()} onOpenRun={props.onOpenRun} />
+        )}
+      </Show>
+    </div>
+  );
+}
+
 /**
  * How the period's Runs were judged and compared: each Scorer's judgments,
  * each Experiment's arms side by side, and the Benchmarks with the suites
@@ -289,6 +431,19 @@ export function EvaluationSections(props: {
           </For>
         </ul>
       </InsightSection>
+      <Show when={props.evaluation.selfImprovement}>
+        {(improvement) => (
+          <InsightSection
+            title={t('factoryEvaluation.selfImprovement')}
+            description={t('factoryEvaluation.selfImprovementDescription')}
+          >
+            <SelfImprovementBody
+              improvement={improvement()}
+              onOpenRun={props.onOpenRun}
+            />
+          </InsightSection>
+        )}
+      </Show>
       <InsightSection
         title={t('factoryEvaluation.experiments')}
         description={t('factoryEvaluation.experimentsDescription')}

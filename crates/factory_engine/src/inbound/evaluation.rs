@@ -25,11 +25,12 @@ use serde::Deserialize;
 
 use crate::domain::evaluation::insights::{
     ArmInsight, ArmScoreInsight, BenchmarkSummary, EvaluationInsights, EvaluationService,
-    ExperimentInsight, RefusedTrial, ScorerInsight, SuiteError, SuiteInsight, SuiteStarted,
-    TrialInsight, TrialScore,
+    ExperimentInsight, ImprovementInsight, PendingSource, RefusedTrial, ScorerInsight,
+    SelfImprovementInsight, SuiteError, SuiteInsight, SuiteStarted, TrialInsight, TrialScore,
 };
 use crate::domain::insights::{InsightsQuery, TokenCounts};
 use crate::inbound::insights::InsightsParams;
+use factory_records::domain::self_improvement::ImprovementState;
 
 /// Router state for evaluation.
 pub struct EvaluationRouterState<S, Auth> {
@@ -231,6 +232,10 @@ impl IntoResponse for SuiteError {
         SuiteInsight,
         TrialInsight,
         TrialScore,
+        SelfImprovementInsight,
+        PendingSource,
+        ImprovementInsight,
+        ImprovementState,
         TokenCounts,
         StartSuiteRequest,
         SuiteStarted,

@@ -313,6 +313,7 @@ async fn ended_run(
         released: false,
         prepared_at: None,
         opened: true,
+        setup: None,
     });
     repo.runs
         .lock()

@@ -24,7 +24,7 @@ pub struct BuiltInFlow {
 }
 
 /// Every built-in Flow, by name.
-pub const BUILT_IN_FLOWS: [BuiltInFlow; 4] = [
+pub const BUILT_IN_FLOWS: [BuiltInFlow; 5] = [
     BuiltInFlow {
         name: "code",
         definition: include_str!("../../flows/code.json"),
@@ -41,6 +41,12 @@ pub const BUILT_IN_FLOWS: [BuiltInFlow; 4] = [
     BuiltInFlow {
         name: "benchmark",
         definition: include_str!("../../flows/benchmark.json"),
+    },
+    // Runs only as a team's self-improvement Run, against its Factory
+    // Definition: never offered to people.
+    BuiltInFlow {
+        name: "improve",
+        definition: include_str!("../../flows/improve.json"),
     },
 ];
 

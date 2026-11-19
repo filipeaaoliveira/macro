@@ -1,0 +1,377 @@
+{
+	"description": "Improves the team's own Factory Definition from the failures its runs met: plans changes to the Definition's flows, agent instructions and rules that address the grouped Scorer failures and flawed runs its request lists, and asks a person to approve the plan; writes them on the run's branch of the Definition's repository and runs its checks, has a panel of reviewers review them, fixes the blockers they find, opens a pull request whose description lists the regressions it addresses, waits for its checks, then asks a person whether to merge. Its plan and merge gates are a person's alone, whatever it changes: no standing rule, stand-in or orchestrator answers them, so a person approves its plan and merges it. The Definition's own files are also Control Files of such a run. The factory starts it on its own once a team's failures reach the Definition's threshold; no one else does.",
+	"repository": true,
+	"entries": [
+		{
+			"id": "plan",
+			"step": "plan",
+			"role": "planner",
+			"max_visits": 3,
+			"on_exhausted": [
+				{
+					"to": {
+						"kind": "end",
+						"outcome": "manual"
+					}
+				}
+			],
+			"gate": {
+				"kind": "plan",
+				"person_only": true,
+				"question": "Approve this plan, or send it back with a note on what to change?",
+				"answers": [
+					"approve",
+					"revise"
+				]
+			},
+			"on": {
+				"approve": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "write"
+						}
+					}
+				],
+				"revise": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "plan"
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "write",
+			"step": "write",
+			"role": "writer",
+			"on": {
+				"done": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "review"
+						}
+					}
+				],
+				"unchanged": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				],
+				"red": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "review",
+			"step": "review",
+			"reviewers": [
+				"correctness-reviewer",
+				"scope-reviewer",
+				"tests-reviewer"
+			],
+			"max_visits": 3,
+			"on_exhausted": [
+				{
+					"to": {
+						"kind": "end",
+						"outcome": "manual"
+					}
+				}
+			],
+			"gate": {
+				"kind": "blockers",
+				"after": "changes",
+				"question": "The reviewers found blockers. Send them to be fixed and reviewed again, or stop and leave the branch to you?",
+				"answers": [
+					"fix",
+					"stop"
+				]
+			},
+			"on": {
+				"pass": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "publish"
+						}
+					}
+				],
+				"fix": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "fix"
+						}
+					}
+				],
+				"stop": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				],
+				"unresolved": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				],
+				"failed": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "fix",
+			"step": "fix",
+			"role": "fixer",
+			"next": {
+				"kind": "entry",
+				"entry": "review"
+			},
+			"on": {
+				"red": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "publish",
+			"step": "publish",
+			"on": {
+				"published": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "ci"
+						}
+					}
+				],
+				"closed": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				],
+				"refused": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "ci",
+			"step": "ci",
+			"on": {
+				"green": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "merge-gate"
+						}
+					}
+				],
+				"red": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "ci-fix"
+						}
+					}
+				],
+				"timeout": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				],
+				"closed": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "ci-fix",
+			"step": "ci_fix",
+			"role": "fixer",
+			"max_visits": 3,
+			"on_exhausted": [
+				{
+					"to": {
+						"kind": "end",
+						"outcome": "manual"
+					}
+				}
+			],
+			"on": {
+				"done": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "review"
+						},
+						"reset": [
+							"review"
+						]
+					}
+				]
+			}
+		},
+		{
+			"id": "merge-gate",
+			"step": "ready_to_merge",
+			"max_visits": 3,
+			"on_exhausted": [
+				{
+					"to": {
+						"kind": "end",
+						"outcome": "manual"
+					}
+				}
+			],
+			"gate": {
+				"kind": "merge",
+				"person_only": true,
+				"question": "Merge this pull request, or send it back with a note on what to change?",
+				"answers": [
+					"approve",
+					"revise"
+				]
+			},
+			"on": {
+				"approve": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "merge"
+						}
+					}
+				],
+				"revise": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "fix"
+						},
+						"reset": [
+							"review"
+						]
+					}
+				],
+				"changed": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "ci"
+						}
+					}
+				],
+				"merged": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "success"
+						}
+					}
+				],
+				"closed": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "merge",
+			"step": "merge",
+			"on": {
+				"merged": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "success"
+						}
+					}
+				],
+				"changed": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "ci"
+						}
+					}
+				],
+				"refused": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				],
+				"held": [
+					{
+						"to": {
+							"kind": "entry",
+							"entry": "merge-gate"
+						},
+						"reset": [
+							"merge-gate"
+						]
+					}
+				],
+				"closed": [
+					{
+						"to": {
+							"kind": "end",
+							"outcome": "manual"
+						}
+					}
+				]
+			}
+		}
+	]
+}

@@ -35,6 +35,7 @@ use std::future::Future;
 
 use factory_records::domain::evaluation::BENCHMARK_FLOW;
 use factory_records::domain::models::Role;
+use factory_records::domain::self_improvement::IMPROVE_FLOW;
 use factory_records::domain::standing_rules::{
     MAX_QUEUE_LIMIT, MIN_QUEUE_LIMIT, OrchestratorDefinition,
 };
@@ -280,9 +281,16 @@ pub enum DefinitionError {
     /// The Queue limit is out of range.
     #[error("{RULES_FILE}: queueLimit must be from {MIN_QUEUE_LIMIT} to {MAX_QUEUE_LIMIT}")]
     QueueLimit,
-    /// `factory.json` names a Flow the factory keeps for itself.
-    #[error("{MANIFEST_FILE} names flow {0}, which only a benchmark's trials walk")]
+    /// `factory.json` names a Flow the factory keeps for itself: the
+    /// benchmark Flow, or the self-improvement Flow.
+    #[error(
+        "{MANIFEST_FILE} names flow {0}, which only the factory's own runs (a benchmark's trials, self-improvement) walk"
+    )]
     ReservedFlow(String),
+    /// Its Agents do not fill a Role of the self-improvement Flow, which a
+    /// Run against the Definition walks.
+    #[error("{AGENTS_FILE}: a self-improvement run walks the improve flow: {0}")]
+    ImprovementAgents(AgentDefinitionError),
     /// The Definition has Benchmarks, and its Agents do not fill a Role of
     /// the benchmark Flow its trials walk.
     #[error("{AGENTS_FILE}: a benchmark's trials walk the benchmark flow: {0}")]
@@ -537,9 +545,10 @@ pub async fn read_definition<F: DefinitionFiles>(
         if flows.contains_key(&name) {
             return Err(DefinitionError::DuplicateFlow(name).into());
         }
-        // Only a Benchmark's trials walk the benchmark Flow, the factory's
-        // own, which no one starts.
-        if name == BENCHMARK_FLOW {
+        // Only a Benchmark's trials walk the benchmark Flow, and only a
+        // self-improvement Run the improve Flow: the factory's own, which
+        // no one starts.
+        if name == BENCHMARK_FLOW || name == IMPROVE_FLOW {
             return Err(DefinitionError::ReservedFlow(name).into());
         }
         let path = flow_path(&name);

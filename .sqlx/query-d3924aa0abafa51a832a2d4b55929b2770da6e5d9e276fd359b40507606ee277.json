@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE factory_improvement_failure SET improvement_id = NULL\n            WHERE improvement_id = $1 AND addressed_at IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d3924aa0abafa51a832a2d4b55929b2770da6e5d9e276fd359b40507606ee277"
+}

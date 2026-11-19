@@ -21,6 +21,10 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   who marked it (its owner, or a Scorer by name), why and when.
 - `src/domain/insights.rs` and `src/outbound/pg_run_repository/insights.rs`:
   `RunInsightsRepository`, the reads behind Run insights.
+- `src/domain/self_improvement.rs` and
+  `src/outbound/pg_run_repository/self_improvement.rs`:
+  `SelfImprovementRepository`, a team's failures under its Factory
+  Definition and the self-improvement Runs that address them.
 - `src/domain/main_hold.rs` and `src/outbound/pg_run_repository/main_hold.rs`:
   `MainHoldRepository`, the merges Runs made and the Main Holds on the base
   branches they merge to.
@@ -92,9 +96,11 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261119000000_factory_standing_act.sql`,
   `20261119000100_factory_standing_act_sessionless.sql`,
   `20261119003000_factory_repository_setup.sql`,
-  `20261119010000_factory_quiet_gates.sql`), `factory_step_steer`,
+  `20261119010000_factory_quiet_gates.sql`,
+  `20261119020000_factory_self_improvement.sql`), `factory_step_steer`,
   `factory_run_score`, `factory_run_arm`, `factory_benchmark_suite`,
-  `factory_benchmark_trial` and `factory_benchmark_trial_score`.
+  `factory_benchmark_trial`, `factory_benchmark_trial_score`,
+  `factory_improvement` and `factory_improvement_failure`.
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
 
 ## Boundaries
@@ -374,6 +380,38 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   a claim back when filing failed, and `record_hold_task` keeps the task's
   id and when it was filed (`task_filed_at`), which a deleted task document
   leaves set, so it is not filed again.
+
+- Self-improvement (`20261119020000_factory_self_improvement.sql`):
+  `factory_team_definition.named_by_user_id` keeps who named a team's
+  Definition (`set_team_definition`; null for one named before, or once
+  their account is gone). In the same transaction, `set_team_definition`
+  settles the team's open improvement on another repository (ignoring
+  case), or any when it names none, as `closed`. `record_failures` keeps a Run's failure once per
+  Run and source (`kind` `scorer` with its name and score, or `flawed`
+  with `scorer` ''), with its team and the Definition repository it ran
+  under. A failure is pending while `improvement_id` is null;
+  `pending_failures` counts them through
+  `factory_improvement_failure_pending_idx` (team, oldest first), matching
+  the Definition's repository ignoring case, as `begin_improvement`'s claim
+  does.
+  `begin_improvement` keeps a self-improvement Run as `starting` and
+  claims the oldest pending failures in one transaction;
+  `factory_improvement_open_idx` holds a team to one `starting` or `open`
+  Run, so a second begin keeps nothing (`AlreadyOpen`), and one with
+  nothing pending keeps nothing. `link_improvement_run` opens it with its
+  Run, only while starting. `settle_improvement` settles an open one once:
+  `merged` marks its failures addressed (`addressed_at`), a person's
+  rejection (`Settlement::Rejected`, kept `closed`) dismisses them
+  (`dismissed_at`, `20261119020100_factory_improvement_failure_dismissed.sql`;
+  they keep its `improvement_id`, so they are never pending again), and
+  `closed` and `refused` (with why) clear their `improvement_id`, so they
+  are pending again. `failures` keeps how many it claimed. `recent_improvements` reads
+  a team's latest ones, newest first, for the pause after those that did
+  not merge (`factory_improvement_team_created_idx`). Neither table decides
+  who merges: the `improve` Flow keeps its plan and merge Gates for a
+  person (`crates/factory_engine`). Both tables go with the
+  team; a failure goes with its Run, and an improvement's Run is cleared
+  when the Run goes.
 
 ## Related
 

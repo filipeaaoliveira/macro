@@ -31,7 +31,7 @@ its built-in Flows or the team's own settings. Team settings say why.
 | `flows/{name}.json` | Each Flow `factory.json` names, in the factory's Flow format. |
 | `agents.json` | The Agents (`bot`, optional `model` and `instructions`) and, for each Role, the Agents that fill it, in order. It must fill every Role a Flow names. Optional `standing`: the Standing Roles (below). |
 | `rules.json` | Optional. `standingRules`: which Gates the factory answers on its own. `controlFiles`: the Control File patterns, which replace the factory's default whole; this template lists the default and this Definition's own files. Each left out takes the factory's default. |
-| `scorers.json` | Optional. The team's Scorers, Experiments and Benchmarks, in the factory's evaluation format (below). Left out, the team has none. |
+| `scorers.json` | Optional. The team's Scorers, Experiments and Benchmarks, in the factory's evaluation format, and when its failures start a self-improvement Run (below). Left out, the team has none, and the defaults apply. |
 | `.macro/checks.json` | The check a Run on this repository runs: it validates the Definition. |
 
 A repository a Run works on may also hold `.macro/setup.json`: the commands
@@ -142,6 +142,38 @@ leave the section out to allow them all. `"standing": null` is refused.
 The check refuses an act not in that list, any act that names a merge, a
 Standing Role with no act or no Agent, an Agent `agents` does not define,
 and a name given twice.
+
+## Self-improvement
+
+The factory learns from its failures here. A failure is a Scorer's
+judgment below 0.5, or a Run its owner marked flawed, of a Run that started
+under this Definition. The factory keeps each one until a pull request
+against this repository addresses it. Once the pending failures reach
+`selfImprovement.failures`, or the oldest is `selfImprovement.oldestDays`
+old, the factory starts one self-improvement Run against this repository.
+It walks the factory's own `improve` Flow, which no Flow here may be named,
+so `agents.json` must fill its `planner`, `writer`, `reviewer` and `fixer`
+Roles. The Run is owned by the admin who named the Definition in Macro. Its
+request groups the failures, and its pull request lists them under
+"Regressions addressed". A team has at most one such Run open at a time.
+
+A person approves its plan and merges it, whatever it changes: no
+standing rule, stand-in or Orchestrator answers its plan or merge, and its
+changes to this Definition's files are Tampered too. Once it merges, its
+failures are addressed. One that does not merge (its pull request closed,
+the Run cancelled or ended without one, or refused) sends them back, and
+the next Run waits a day, twice as long after each more in a row, up to a
+week, until one merges. The admin who named the Definition must still be a
+team admin for a Run to start. Thresholds are read from this repository as
+it is now.
+
+```json
+"selfImprovement": { "enabled": true, "failures": 25, "oldestDays": 7 }
+```
+
+Those are the defaults when `selfImprovement` is left out. `failures` is
+from 1 to 1000, and `oldestDays` from 1 to 365. `"enabled": false` turns it
+off: failures are still kept, and count once it is on again.
 
 ## Check the Definition
 
