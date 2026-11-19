@@ -913,7 +913,9 @@ its Flow does not route above `merge` would fall through to the merge):
   it returns. After `QUEUE_WAIT` (25 minutes) still behind someone, `merge`
   ends `queued`, which goes back to the merge Gate (its visits reset). A
   Run that merged leaves the queue; one that leaves its merge otherwise
-  keeps its place. A hold set while it waited holds it still.
+  keeps its place. The wait for a Main Hold and the queue's share those 25
+  minutes, short of a Step attempt's 30; a hold set while it waited ends
+  it `held` at once.
 
 Once its pull request merged, the Run's branch `factory/{run id}` is
 deleted, as GitHub's "delete branch after merge" does: by `merge` after

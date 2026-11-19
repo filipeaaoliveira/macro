@@ -3,6 +3,7 @@
 
 use std::time::Duration;
 
+use factory_records::domain::main_hold::MainHoldRepository;
 use factory_records::domain::merge_queue::{BranchUpdate, MergeQueueRepository};
 use factory_records::domain::models::{Outcome, RunId};
 use factory_records::domain::ports::RunRepository;
@@ -362,4 +363,47 @@ async fn an_update_of_a_branch_up_to_date_or_merged_merges_nothing() {
         matches!(&ended, Update::Ended(report) if report.outcome.as_str() == "merged"),
         "{ended:?}"
     );
+}
+
+/// A hold set on the base while a Run waited for its turn holds it still:
+/// it merges nothing and goes back to its Gate at once, within the one wait
+/// the hold and the queue share.
+#[tokio::test(start_paused = true)]
+async fn a_hold_set_while_a_run_waited_its_turn_holds_it() {
+    let github = github_on(OLD_BASE, true);
+    let repo = FakeRepo::default();
+    let first = RunId::generate();
+    let second = RunId::generate();
+    approved(&repo, second).await;
+    repo.enter_merge_queue(first).await.expect("enter");
+
+    let started = tokio::time::Instant::now();
+    let waiting = tokio::spawn({
+        let step = steps(&github, &repo);
+        async move {
+            let routes = routes();
+            step.merge(crate::domain::models::StepInput {
+                routes: &routes,
+                ..input(second)
+            })
+            .await
+        }
+    });
+    tokio::time::sleep(Duration::from_secs(90)).await;
+    repo.hold_main(
+        &super::REPOSITORY,
+        NEW_BASE,
+        "- test (failure)",
+        chrono::Utc::now(),
+    )
+    .await
+    .expect("hold");
+    repo.drop_from_merge_queue(first)
+        .await
+        .expect("first merged");
+    let report = waiting.await.expect("join").expect("merge");
+
+    assert_eq!(outcome(&report), "held");
+    assert!(started.elapsed() < QUEUE_WAIT);
+    assert!(github.state().merges.is_empty());
 }

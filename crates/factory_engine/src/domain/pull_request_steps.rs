@@ -68,8 +68,8 @@ pub const HOLD_WAIT: Duration = Duration::from_secs(25 * 60);
 const HOLD_POLL: Duration = Duration::from_secs(30);
 
 /// How long `merge` waits for the Runs ahead of it in its base's merge
-/// queue: short of a Step attempt's 30 minutes, so the Step ends `queued`
-/// rather than failing.
+/// queue, from its start, the wait for a Main Hold included: short of a
+/// Step attempt's 30 minutes, so the Step ends `queued` rather than failing.
 pub const QUEUE_WAIT: Duration = Duration::from_secs(25 * 60);
 
 /// How long `merge` waits between two reads of its base's merge queue.
@@ -1121,13 +1121,12 @@ where
     }
 
     /// Wait until no Run is ahead of this one in its base's merge queue, up
-    /// to [`QUEUE_WAIT`]: the Runs still ahead then, none once it is its
-    /// turn.
+    /// to `deadline`: the Runs still ahead then, none once it is its turn.
     async fn wait_for_turn(
         &self,
         input: &StepInput<'_>,
+        deadline: tokio::time::Instant,
     ) -> Result<Vec<factory_records::domain::models::RunId>, PullRequestStepError> {
-        let deadline = tokio::time::Instant::now() + QUEUE_WAIT;
         loop {
             let ahead = self
                 .repo
@@ -1280,8 +1279,8 @@ where
         &self,
         input: &StepInput<'_>,
         recorded: &Repository,
+        deadline: tokio::time::Instant,
     ) -> Result<Option<MainHold>, PullRequestStepError> {
-        let deadline = tokio::time::Instant::now() + HOLD_WAIT;
         let mut watched = false;
         loop {
             let Some(hold) = self
@@ -1433,7 +1432,13 @@ where
             }
         }
 
-        if let Some(hold) = self.wait_out_hold(&input, recorded).await? {
+        // The hold's wait and the queue's share one deadline, short of the
+        // Step attempt's 30 minutes.
+        let started = tokio::time::Instant::now();
+        if let Some(hold) = self
+            .wait_out_hold(&input, recorded, started + HOLD_WAIT)
+            .await?
+        {
             return Ok(report(
                 "held",
                 format!(
@@ -1449,7 +1454,7 @@ where
                 .enter_merge_queue(input.key.run_id)
                 .await
                 .map_err(PullRequestStepError::records)?;
-            let ahead = self.wait_for_turn(&input).await?;
+            let ahead = self.wait_for_turn(&input, started + QUEUE_WAIT).await?;
             if !ahead.is_empty() {
                 return Ok(report(
                     QUEUED,
@@ -1468,8 +1473,14 @@ where
                     ),
                 ));
             }
-            // A hold set while it waited holds it still.
-            if let Some(hold) = self.wait_out_hold(&input, recorded).await? {
+            // A hold set while it waited holds it still: it waits no more,
+            // as its time went to the queue, and goes back to its Gate.
+            let held = self
+                .repo
+                .main_hold(recorded)
+                .await
+                .map_err(PullRequestStepError::records)?;
+            if let Some(hold) = held {
                 return Ok(report(
                     "held",
                     format!(
