@@ -1376,7 +1376,7 @@
             }
           },
           "422": {
-            "description": "",
+            "description": "The owner or repo is not a GitHub repository name, or GitHub declined the request",
             "content": {
               "application/json": {
                 "schema": {
