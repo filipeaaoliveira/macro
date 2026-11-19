@@ -8,9 +8,14 @@
 //! the merged pull requests.
 //!
 //! A CI job's failure is the CI's setup when it failed setting up (as the
-//! `ci` Step recorded it), flaky when the same job and step failed on two or
-//! more pull requests of the period, cancelled when a newer push replaced
-//! its run, and otherwise its own pull request's.
+//! `ci` Step recorded it), and cancelled when it was cancelled, as a newer
+//! push does to the runs of the head it replaces. A failure that names what
+//! failed (the test its check run annotated, or else a step named for its
+//! own work rather than a generic one such as "Run tests") is flaky when the
+//! same job failed the same way on two or more pull requests of the period.
+//! Every other failure is its own pull request's: two pull requests that
+//! each broke a test under the same generic step, or a job whose step could
+//! not be read, broke their own.
 
 #[cfg(test)]
 mod test;
@@ -32,7 +37,7 @@ use crate::domain::insights::{
     DurationStats, INSIGHTS_RUN_CAP, InsightsError, InsightsQuery, RunLink, TokenCounts,
     duration_stats,
 };
-use crate::domain::models::{CheckState, CodeRepository, FinishedJob};
+use crate::domain::models::{CheckState, CodeRepository, FailureAnnotation, FinishedJob};
 
 /// The most agent sessions one usage read sums up.
 const SESSIONS_PER_READ: usize = 1000;
@@ -47,7 +52,7 @@ const RECURRING_LISTED: usize = 20;
 /// How many Runs a recurring failure or Blocker links to.
 const RUNS_LINKED: usize = 5;
 
-/// On how many pull requests the same job and step must fail to be flaky,
+/// On how many pull requests the same failure must happen to be flaky,
 /// rather than the pull request's own.
 const FLAKY_PULL_REQUESTS: usize = 2;
 
@@ -67,19 +72,42 @@ const SETUP_STEPS: [&str; 9] = [
     "checkout",
 ];
 
-/// What a failed job's output says when a download failed, before its own
-/// work could run.
-const DOWNLOAD_ERRORS: [&str; 9] = [
-    "404",
-    "failed to download",
-    "unable to download",
-    "could not download",
-    "download failed",
-    "error downloading",
-    "could not resolve host",
-    "econnreset",
-    "etimedout",
+/// How a line of a failed job's output, or of an annotation, starts when
+/// GitHub Actions could not set the job up: an action it could not download
+/// or resolve, before any of the job's own work ran. Only these phrases
+/// count, at the start of a line: a test's own output may say `404` or
+/// name a network error, and that is its pull request's failure.
+const SETUP_ERRORS: [&str; 5] = [
+    "unable to download action",
+    "unable to resolve action",
+    "failed to download action",
+    "failed to resolve action download info",
+    "an action could not be found at the uri",
 ];
+
+/// Words of a step's name that say it runs the project's own work as a
+/// whole, as tests, a build or a linter: two pull requests failing in such
+/// a step may have broken two different things.
+const GENERIC_STEP_WORDS: [&str; 15] = [
+    "test",
+    "tests",
+    "testing",
+    "spec",
+    "specs",
+    "check",
+    "checks",
+    "lint",
+    "clippy",
+    "typecheck",
+    "build",
+    "compile",
+    "e2e",
+    "ci",
+    "make",
+];
+
+/// Where GitHub Actions annotates its own errors, which name no test.
+const ACTIONS_ANNOTATION_PATH: &str = ".github";
 
 /// `text` cut to at most [`CI_NAME_BYTES`], on a character's boundary.
 fn kept_name(text: &str) -> &str {
@@ -90,9 +118,69 @@ fn kept_name(text: &str) -> &str {
     &text[..end]
 }
 
+/// Whether `line` starts with one of [`SETUP_ERRORS`], after an `Error:`
+/// GitHub Actions may put first.
+fn setup_error(line: &str) -> bool {
+    let line = line.trim().to_lowercase();
+    let line = line.strip_prefix("##[error]").unwrap_or(&line).trim_start();
+    let line = line.strip_prefix("error:").unwrap_or(line).trim_start();
+    SETUP_ERRORS.iter().any(|error| line.starts_with(error))
+}
+
+/// Whether the step `step` runs the project's own work as a whole, so its
+/// name tells no failure from another: an unnamed `run` step, which GitHub
+/// names `Run` and its command, or one named for tests, a build or a linter.
+/// An action's step, `Run owner/name@ref`, is named for the action.
+pub(crate) fn generic_step(step: &str) -> bool {
+    let step = step.trim().to_lowercase();
+    if let Some(command) = step.strip_prefix("run ") {
+        let mut words = command.split_whitespace();
+        let action = words
+            .next()
+            .is_some_and(|word| word.contains('/') && word.contains('@'))
+            && words.next().is_none();
+        if !action {
+            return true;
+        }
+    }
+    step.split(|c: char| !c.is_ascii_alphanumeric())
+        .any(|word| GENERIC_STEP_WORDS.contains(&word))
+}
+
+/// The first failure `annotations` name, as `path: name`, in a fixed order
+/// whatever order GitHub gives: a test that failed, by its file and its
+/// title, else its message's first line. GitHub Actions' own errors name no
+/// test and are left out.
+fn failure_of(annotations: &[FailureAnnotation]) -> Option<String> {
+    annotations
+        .iter()
+        .filter_map(|annotation| {
+            let path = annotation.path.trim();
+            if path.is_empty() || path == ACTIONS_ANNOTATION_PATH {
+                return None;
+            }
+            let name = annotation
+                .title
+                .as_deref()
+                .map(str::trim)
+                .filter(|title| !title.is_empty())
+                .or_else(|| {
+                    annotation
+                        .message
+                        .lines()
+                        .map(str::trim)
+                        .find(|line| !line.is_empty())
+                })?;
+            Some(format!("{path}: {name}"))
+        })
+        .min()
+        .map(|failure| kept_name(&failure).to_string())
+}
+
 /// How the finished `job` is kept: none for one still running, or with no
 /// name. A failure is the CI's setup when the step that failed sets the job
-/// up, or the job's output tells of a failed download.
+/// up, or its output or an annotation says GitHub Actions could not set it
+/// up; it names the first test its check run annotated as failed.
 pub(crate) fn ci_job(job: &FinishedJob) -> Option<CiJob> {
     let name = kept_name(job.name.trim());
     if name.is_empty() {
@@ -112,11 +200,19 @@ pub(crate) fn ci_job(job: &FinishedJob) -> Option<CiJob> {
                 let step = step.to_lowercase();
                 SETUP_STEPS.iter().any(|setup| step.starts_with(setup))
             });
-            let download = job.detail.as_deref().is_some_and(|detail| {
-                let detail = detail.to_lowercase();
-                DOWNLOAD_ERRORS.iter().any(|error| detail.contains(error))
-            });
-            if setup_step || download {
+            let setup_error = job
+                .detail
+                .iter()
+                .flat_map(|detail| detail.lines())
+                .chain(job.annotations.iter().flat_map(|annotation| {
+                    annotation
+                        .title
+                        .iter()
+                        .map(String::as_str)
+                        .chain(annotation.message.lines())
+                }))
+                .any(setup_error);
+            if setup_step || setup_error {
                 CiJobResult::Setup
             } else {
                 CiJobResult::Failed
@@ -124,10 +220,17 @@ pub(crate) fn ci_job(job: &FinishedJob) -> Option<CiJob> {
         }
     };
     let failed_step = failed_step.filter(|_| result.is_red());
+    let failure = if result.is_red() {
+        failure_of(&job.annotations)
+    } else {
+        None
+    };
     Some(CiJob {
         name: name.to_string(),
         result,
         failed_step,
+        failure,
+        replaced: false,
     })
 }
 
@@ -193,7 +296,8 @@ pub enum CiCause {
     Own,
     /// The CI's setup: it failed before its own work ran.
     Setup,
-    /// Flaky: the same job and step failed on two or more pull requests.
+    /// Flaky: the same job failed the same way, in the same test or the
+    /// same named step, on two or more pull requests.
     Flaky,
     /// Cancelled, as when a newer push replaced its run.
     Cancelled,
@@ -246,7 +350,8 @@ pub struct CiJobHealth {
     pub pull_requests_failed: u32,
 }
 
-/// A job and step that failed on two or more pull requests of the period.
+/// A failure of a job, by the test or the named step that failed, on two or
+/// more pull requests of the period.
 #[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RecurringCiFailure {
@@ -256,6 +361,8 @@ pub struct RecurringCiFailure {
     pub job: String,
     /// The step that failed, when it was read.
     pub step: Option<String>,
+    /// The test that failed, as its check run annotated it: `path: name`.
+    pub failure: Option<String>,
     /// The CI's setup, or flaky.
     pub cause: CiCause,
     /// How many pull requests it failed on.
@@ -292,8 +399,8 @@ pub struct CiHealth {
     pub runs_with_ci_fixes: u32,
     /// Rounds Runs spent fixing reviewers' Blockers, apart from CI.
     pub review_fix_rounds: u32,
-    /// Jobs and steps that failed on two or more pull requests, newest
-    /// first.
+    /// Failures, by test or named step, on two or more pull requests,
+    /// newest first.
     pub recurring: Vec<RecurringCiFailure>,
 }
 
@@ -485,10 +592,38 @@ fn share(part: u32, whole: u32) -> Option<f64> {
     (whole > 0).then(|| f64::from(part) / f64::from(whole))
 }
 
-/// A job and step, in a repository, failing the same way.
-type FailureKey = (Option<String>, String, Option<String>);
+/// A job, in a repository, failing the same way: in a step, and a test.
+type FailureKey = (Option<String>, String, Option<String>, Option<String>);
 
-/// What one job and step's failures add up to.
+/// What tells the red `job`'s failure from another pull request's: its
+/// step and the test that failed. A setup failure is told by its step. A
+/// failure of the job's own work needs a test, or a step named for
+/// something narrower than the job's whole work; none otherwise, as for a
+/// generic step like "Run tests" or a step that could not be read, which
+/// is its pull request's own failure.
+fn failure_identity(job: &CiJob) -> Option<(Option<String>, Option<String>)> {
+    match job.result {
+        CiJobResult::Setup => Some((job.failed_step.clone(), job.failure.clone())),
+        CiJobResult::Failed => {
+            let named_step = job
+                .failed_step
+                .as_deref()
+                .is_some_and(|step| !generic_step(step));
+            (job.failure.is_some() || named_step)
+                .then(|| (job.failed_step.clone(), job.failure.clone()))
+        }
+        CiJobResult::Passed | CiJobResult::Cancelled => None,
+    }
+}
+
+/// The key `job`'s failure is counted under, in `repository`, if it has an
+/// identity.
+fn failure_key(repository: &Option<String>, job: &CiJob) -> Option<FailureKey> {
+    let (step, failure) = failure_identity(job)?;
+    Some((repository.clone(), job.name.clone(), step, failure))
+}
+
+/// What one failure's occurrences add up to.
 #[derive(Default)]
 struct Failures {
     pull_requests: BTreeSet<String>,
@@ -499,16 +634,15 @@ struct Failures {
 }
 
 fn ci_health(records: &QualityRecords, runs: &HashMap<RunId, &QualityRun>) -> CiHealth {
-    // The pull requests each job and step failed on, first, to tell a
-    // flaky failure from the pull request's own.
+    // The pull requests each failure happened on, first, to tell a flaky
+    // failure from the pull request's own.
     let mut failures: BTreeMap<FailureKey, Failures> = BTreeMap::new();
     for wait in &records.ci_waits {
-        for job in wait.jobs.iter().filter(|job| job.result.is_red()) {
-            let key = (
-                repository_of(runs, wait.run_id),
-                job.name.clone(),
-                job.failed_step.clone(),
-            );
+        let repository = repository_of(runs, wait.run_id);
+        for job in &wait.jobs {
+            let Some(key) = failure_key(&repository, job) else {
+                continue;
+            };
             let failed = failures.entry(key).or_insert_with(|| Failures {
                 all_setup: true,
                 ..Failures::default()
@@ -527,13 +661,8 @@ fn ci_health(records: &QualityRecords, runs: &HashMap<RunId, &QualityRun>) -> Ci
         CiJobResult::Cancelled => Some(CiCause::Cancelled),
         CiJobResult::Setup => Some(CiCause::Setup),
         CiJobResult::Failed => {
-            let key = (
-                repository.clone(),
-                job.name.clone(),
-                job.failed_step.clone(),
-            );
-            let spread = failures
-                .get(&key)
+            let spread = failure_key(repository, job)
+                .and_then(|key| failures.get(&key))
                 .map_or(0, |failed| failed.pull_requests.len());
             Some(if spread >= FLAKY_PULL_REQUESTS {
                 CiCause::Flaky
@@ -632,11 +761,12 @@ fn ci_health(records: &QualityRecords, runs: &HashMap<RunId, &QualityRun>) -> Ci
     let mut recurring: Vec<RecurringCiFailure> = failures
         .into_iter()
         .filter(|(_, failed)| failed.pull_requests.len() >= FLAKY_PULL_REQUESTS)
-        .filter_map(|((repository, job, step), failed)| {
+        .filter_map(|((repository, job, step, failure), failed)| {
             Some(RecurringCiFailure {
                 repository,
                 job,
                 step,
+                failure,
                 cause: if failed.all_setup {
                     CiCause::Setup
                 } else {

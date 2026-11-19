@@ -154,6 +154,7 @@ export * from './qualityInsightsFlow';
 export * from './qualityInsightsRepository';
 export * from './recurringBlocker';
 export * from './recurringCiFailure';
+export * from './recurringCiFailureFailure';
 export * from './recurringCiFailureRepository';
 export * from './recurringCiFailureStep';
 export * from './refusedTrial';

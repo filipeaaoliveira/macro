@@ -5,16 +5,20 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { CiCause } from './ciCause';
+import type { RecurringCiFailureFailure } from './recurringCiFailureFailure';
 import type { RecurringCiFailureRepository } from './recurringCiFailureRepository';
 import type { RecurringCiFailureStep } from './recurringCiFailureStep';
 import type { RunLink } from './runLink';
 
 /**
- * A job and step that failed on two or more pull requests of the period.
+ * A failure of a job, by the test or the named step that failed, on two or
+more pull requests of the period.
  */
 export interface RecurringCiFailure {
   /** The CI's setup, or flaky. */
   cause: CiCause;
+  /** The test that failed, as its check run annotated it: `path: name`. */
+  failure?: RecurringCiFailureFailure;
   /**
    * How many times it failed.
    * @minimum 0

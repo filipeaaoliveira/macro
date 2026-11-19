@@ -14,6 +14,7 @@ fn finished(name: &str, state: CheckState, failed_step: Option<&str>) -> Finishe
         state,
         failed_step: failed_step.map(str::to_string),
         detail: None,
+        annotations: Vec::new(),
     }
 }
 
@@ -51,21 +52,29 @@ async fn a_red_wait_is_kept_with_its_jobs_classed() {
                 name: "test".to_string(),
                 result: CiJobResult::Failed,
                 failed_step: Some("Run tests".to_string()),
+                failure: None,
+                replaced: false,
             },
             CiJob {
                 name: "build".to_string(),
                 result: CiJobResult::Setup,
                 failed_step: Some("Set up job".to_string()),
+                failure: None,
+                replaced: false,
             },
             CiJob {
                 name: "e2e".to_string(),
                 result: CiJobResult::Cancelled,
                 failed_step: None,
+                failure: None,
+                replaced: false,
             },
             CiJob {
                 name: "lint".to_string(),
                 result: CiJobResult::Passed,
                 failed_step: None,
+                failure: None,
+                replaced: false,
             },
         ]
     );
@@ -132,3 +141,4 @@ async fn keeping_a_wait_never_holds_the_run_up() {
     assert_eq!(outcome(&still_red), "red");
     assert!(refusing.ci_waits.lock().expect("waits").is_empty());
 }
+

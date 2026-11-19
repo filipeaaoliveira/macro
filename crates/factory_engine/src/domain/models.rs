@@ -418,6 +418,21 @@ pub struct FinishedJob {
     /// What a check run that failed says of itself: its output's title and
     /// summary.
     pub detail: Option<String>,
+    /// The failures a check run that failed annotated, such as the tests
+    /// that failed, when they could be read.
+    pub annotations: Vec<FailureAnnotation>,
+}
+
+/// A failure a check run annotated: a test that failed, or an error of the
+/// CI itself, which GitHub Actions puts on `.github`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FailureAnnotation {
+    /// The file it is on, from the repository's root.
+    pub path: String,
+    /// Its title, when it has one, such as the test's name.
+    pub title: Option<String>,
+    /// What it says.
+    pub message: String,
 }
 
 /// The checks a pull request's base requires, as far as they could be read.

@@ -16,9 +16,9 @@ use github::outbound::github_oauth_client::{FileTooLarge, GithubOauthImpl};
 use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::models::{
-    BranchDeletion, Check, CheckState, CheckSuite, CodeRepository, CommitStatus, FinishedJob,
-    HeadChecks, Merging, OpenPullRequest, Opening, PullRequest, PullRequestState, RepositoryAccess,
-    RequiredCheck, RequiredChecks, run_branch,
+    BranchDeletion, Check, CheckState, CheckSuite, CodeRepository, CommitStatus, FailureAnnotation,
+    FinishedJob, HeadChecks, Merging, OpenPullRequest, Opening, PullRequest, PullRequestState,
+    RepositoryAccess, RequiredCheck, RequiredChecks, run_branch,
 };
 use crate::domain::ports::{FileRefusal, PullRequests, Retryable};
 use crate::domain::review_rounds::ChangedFile;
@@ -26,9 +26,15 @@ use crate::domain::review_rounds::ChangedFile;
 /// GitHub Actions' app, whose workflow runs say whether a run still waits.
 const ACTIONS_APP: &str = "github-actions";
 
-/// The most failed GitHub Actions jobs whose steps one read of finished jobs
-/// reads.
-const MAX_JOB_STEP_READS: usize = 10;
+/// The most reads of failed jobs' details, an Actions job's steps or a
+/// check run's annotations, one read of finished jobs makes: with the
+/// listings of the commit's check runs and statuses, a wait's record asks
+/// GitHub a few times, however wide the matrix that failed.
+const MAX_DETAIL_READS: usize = 6;
+
+/// How many annotations of a failed check run are read: the first page,
+/// enough to find the failures among the warnings.
+const ANNOTATIONS_READ: usize = 50;
 
 /// Why GitHub could not be asked as the Run's owner.
 #[derive(Debug, thiserror::Error)]
@@ -400,6 +406,7 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
         owner: &MacroUserIdStr<'static>,
         repository: &CodeRepository,
         sha: &str,
+        details: bool,
     ) -> Result<Vec<FinishedJob>, GithubPullRequestsErr> {
         let token = self.token(owner).await?;
         let (owner_name, name) = (repository.owner(), repository.name());
@@ -413,7 +420,9 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
             .await?;
 
         let mut jobs = Vec::new();
-        let mut steps_read = 0;
+        // Reads of failed jobs' steps and annotations left: each is best
+        // effort, and bounded, so a wide matrix that failed costs a few.
+        let mut detail_reads = if details { MAX_DETAIL_READS } else { 0 };
         for run in runs.items {
             let state = CheckState::of_check(&run.status, run.conclusion.as_deref());
             if state == CheckState::Waiting {
@@ -423,13 +432,9 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
                 matches!(&state, CheckState::Failed(conclusion) if conclusion != "cancelled");
             let mut failed_step = None;
             // A failed GitHub Actions job names the step that failed; its
-            // check run has the job's id. Reading them is best effort, and
-            // bounded, so a wide matrix that failed costs a few reads.
-            if failed
-                && run.app_slug.as_deref() == Some(ACTIONS_APP)
-                && steps_read < MAX_JOB_STEP_READS
-            {
-                steps_read += 1;
+            // check run has the job's id.
+            if failed && run.app_slug.as_deref() == Some(ACTIONS_APP) && detail_reads > 0 {
+                detail_reads -= 1;
                 match self
                     .github
                     .actions_job_steps(&token, owner_name, name, run.id)
@@ -443,6 +448,31 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
                     }
                     Err(error) => {
                         tracing::warn!(%error, job = run.id, "an actions job's steps could not be read");
+                    }
+                }
+            }
+            // Any app's check run may annotate what failed, as a test.
+            let mut annotations = Vec::new();
+            if failed && detail_reads > 0 {
+                detail_reads -= 1;
+                match self
+                    .github
+                    .check_run_annotations(&token, owner_name, name, run.id, ANNOTATIONS_READ)
+                    .await
+                {
+                    Ok(read) => {
+                        annotations = read
+                            .into_iter()
+                            .filter(|annotation| annotation.level == "failure")
+                            .map(|annotation| FailureAnnotation {
+                                path: annotation.path,
+                                title: annotation.title,
+                                message: annotation.message,
+                            })
+                            .collect();
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, check_run = run.id, "a check run's annotations could not be read");
                     }
                 }
             }
@@ -461,6 +491,7 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
                 state,
                 failed_step,
                 detail,
+                annotations,
             });
         }
         for status in statuses.items {
@@ -473,6 +504,7 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
                 state,
                 failed_step: None,
                 detail: None,
+                annotations: Vec::new(),
             });
         }
         Ok(jobs)

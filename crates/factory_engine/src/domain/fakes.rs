@@ -131,7 +131,7 @@ pub(crate) struct FakeRepo {
     pub(crate) sessions: Arc<Mutex<Vec<FakeSession>>>,
     /// Each Step's steering by its owner.
     pub(crate) steering: Arc<Mutex<HashMap<StepKey, steering::FakeSteering>>>,
-    /// The CI waits kept, in order, the first of each Step.
+    /// The CI waits kept, in order, the last of each Step.
     pub(crate) ci_waits: Arc<Mutex<Vec<factory_records::domain::quality::CiWait>>>,
     /// Each Step's rounds of checks, in order.
     pub(crate) check_rounds: Arc<Mutex<Vec<(StepKey, CheckRound)>>>,
@@ -618,10 +618,26 @@ impl RunRepository for FakeRepo {
             return Err(FakeError);
         }
         let mut waits = self.ci_waits.lock().expect("ci waits");
-        if !waits.iter().any(|kept| kept.key == wait.key) {
-            waits.push(wait.clone());
+        match waits.iter_mut().find(|kept| kept.key == wait.key) {
+            Some(kept) if (&kept.head_sha, kept.verdict) == (&wait.head_sha, wait.verdict) => {}
+            Some(kept) => *kept = wait.clone(),
+            None => waits.push(wait.clone()),
         }
         Ok(())
+    }
+
+    async fn last_ci_head(&self, run_id: RunId, before: u16) -> Result<Option<String>, FakeError> {
+        if self.fails("last_ci_head") {
+            return Err(FakeError);
+        }
+        Ok(self
+            .ci_waits
+            .lock()
+            .expect("ci waits")
+            .iter()
+            .filter(|kept| kept.key.run_id == run_id && kept.key.seq < before)
+            .max_by_key(|kept| kept.key.seq)
+            .map(|kept| kept.head_sha.clone()))
     }
 
     async fn set_pull_request_url(&self, id: RunId, url: &str) -> Result<(), FakeError> {
@@ -1811,6 +1827,7 @@ impl PullRequests for FakeGithub {
         _owner: &MacroUserIdStr<'static>,
         _repository: &CodeRepository,
         sha: &str,
+        _details: bool,
     ) -> Result<Vec<FinishedJob>, FakeGithubError> {
         let mut state = self.state();
         state.finished_reads.push(sha.to_string());

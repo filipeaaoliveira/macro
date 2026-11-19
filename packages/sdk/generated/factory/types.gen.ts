@@ -472,8 +472,8 @@ export type CiHealth = {
      */
     jobs: Array<CiJobHealth>;
     /**
-     * Jobs and steps that failed on two or more pull requests, newest
-     * first.
+     * Failures, by test or named step, on two or more pull requests,
+     * newest first.
      */
     recurring: Array<RecurringCiFailure>;
     /**
@@ -1547,13 +1547,18 @@ export type RecurringBlocker = {
 };
 
 /**
- * A job and step that failed on two or more pull requests of the period.
+ * A failure of a job, by the test or the named step that failed, on two or
+ * more pull requests of the period.
  */
 export type RecurringCiFailure = {
     /**
      * The CI's setup, or flaky.
      */
     cause: CiCause;
+    /**
+     * The test that failed, as its check run annotated it: `path: name`.
+     */
+    failure?: string | null;
     /**
      * How many times it failed.
      */

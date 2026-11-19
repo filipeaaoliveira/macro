@@ -10,10 +10,10 @@ use factory_records::domain::review_rounds::ReviewRoundOutcome;
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
-use super::{CiCause, QualityQuery, ci_job, summarize_quality};
+use super::{CiCause, QualityQuery, ci_job, generic_step, summarize_quality};
 use crate::domain::insights::fakes::{FakeRecords, FakeUsage};
 use crate::domain::insights::{InsightsError, InsightsQuery, InsightsService, InsightsServiceImpl};
-use crate::domain::models::{CheckState, FinishedJob};
+use crate::domain::models::{CheckState, FailureAnnotation, FinishedJob};
 
 const APP: &str = "https://github.com/macro/app";
 
@@ -72,6 +72,16 @@ fn job(name: &str, result: CiJobResult, step: Option<&str>) -> CiJob {
         name: name.to_string(),
         result,
         failed_step: step.map(str::to_string),
+        failure: None,
+        replaced: false,
+    }
+}
+
+/// The job `name` that failed in `step`, in the test `failure`.
+fn failing(name: &str, step: &str, failure: &str) -> CiJob {
+    CiJob {
+        failure: Some(failure.to_string()),
+        ..job(name, CiJobResult::Failed, Some(step))
     }
 }
 
@@ -112,11 +122,20 @@ fn finished(state: CheckState, step: Option<&str>, detail: Option<&str>) -> Fini
         state,
         failed_step: step.map(str::to_string),
         detail: detail.map(str::to_string),
+        annotations: Vec::new(),
+    }
+}
+
+fn annotation(path: &str, title: Option<&str>, message: &str) -> FailureAnnotation {
+    FailureAnnotation {
+        path: path.to_string(),
+        title: title.map(str::to_string),
+        message: message.to_string(),
     }
 }
 
 /// A failure is the CI's setup when a step that sets the job up failed, or
-/// its output tells of a failed download; the job's own otherwise.
+/// GitHub Actions says it could not get an action; the job's own otherwise.
 #[test]
 fn a_finished_job_is_classed_by_the_step_that_failed_and_its_output() {
     let failure = || CheckState::Failed("failure".to_string());
@@ -138,10 +157,21 @@ fn a_finished_job_is_classed_by_the_step_that_failed_and_its_output() {
         result(finished(
             failure(),
             None,
-            Some("Error: Unable to download artifact: 404 Not Found")
+            Some(
+                "Error: Unable to resolve action `actions/checkout@v9`, unable to find version `v9`"
+            )
         )),
         Some(CiJobResult::Setup)
     );
+    let unresolved = FinishedJob {
+        annotations: vec![annotation(
+            ".github",
+            None,
+            "Unable to download action 'https://api.github.com/repos/actions/cache/tarball/v4'",
+        )],
+        ..finished(failure(), None, None)
+    };
+    assert_eq!(result(unresolved), Some(CiJobResult::Setup));
     assert_eq!(
         result(finished(
             CheckState::Failed("cancelled".to_string()),
@@ -157,10 +187,189 @@ fn a_finished_job_is_classed_by_the_step_that_failed_and_its_output() {
     assert_eq!(result(finished(CheckState::Waiting, None, None)), None);
 }
 
+/// A test's own output that mentions a 404, a run of tests, or a network
+/// error is the pull request's failure, not the CI's setup: only a setup
+/// step, or GitHub Actions' own words about an action, is setup.
+#[test]
+fn a_tests_output_is_never_read_as_setup() {
+    let failure = || CheckState::Failed("failure".to_string());
+    let result = |job: FinishedJob| ci_job(&job).map(|job| job.result);
+    for detail in [
+        "Ran 1404 tests: 1 failed",
+        "assertion failed: expected 200, got 404",
+        "Error: connect ETIMEDOUT 10.0.0.7:5432",
+        "read ECONNRESET",
+        "Could not resolve host: api.example.com",
+        "Error: failed to download fixture from the test server: 404 Not Found",
+        "the job says: unable to download action, but not at the start of a line",
+    ] {
+        assert_eq!(
+            result(finished(failure(), Some("Run tests"), Some(detail))),
+            Some(CiJobResult::Failed),
+            "{detail}"
+        );
+        assert_eq!(
+            result(finished(failure(), None, Some(detail))),
+            Some(CiJobResult::Failed),
+            "{detail}"
+        );
+        let annotated = FinishedJob {
+            annotations: vec![annotation("src/client.rs", Some("client::fetch"), detail)],
+            ..finished(failure(), None, None)
+        };
+        assert_eq!(result(annotated), Some(CiJobResult::Failed), "{detail}");
+    }
+}
+
+/// A failed job names the first test its check run annotated, by file and
+/// title, else its message's first line, in the same order however GitHub
+/// lists them; GitHub Actions' own errors name none.
+#[test]
+fn a_failed_job_names_the_first_test_it_annotated() {
+    let failure = || CheckState::Failed("failure".to_string());
+    let named = |annotations: Vec<FailureAnnotation>| {
+        ci_job(&FinishedJob {
+            annotations,
+            ..finished(failure(), Some("Run tests"), None)
+        })
+        .and_then(|job| job.failure)
+    };
+
+    assert_eq!(
+        named(vec![
+            annotation(".github", None, "Process completed with exit code 101."),
+            annotation(
+                "src/parser.rs",
+                Some("parser::test::empty"),
+                "assertion failed"
+            ),
+            annotation(
+                "src/lexer.rs",
+                None,
+                "\nlexer::test::spaces panicked\nat line 3"
+            ),
+        ]),
+        Some("src/lexer.rs: lexer::test::spaces panicked".to_string())
+    );
+    assert_eq!(
+        named(vec![annotation(
+            ".github",
+            None,
+            "Process completed with exit code 1."
+        )]),
+        None
+    );
+    let passed = ci_job(&FinishedJob {
+        annotations: vec![annotation("src/parser.rs", Some("parser"), "fine")],
+        ..finished(CheckState::Passed, None, None)
+    })
+    .expect("kept");
+    assert_eq!(passed.failure, None);
+}
+
+/// A step that runs the project's work as a whole is generic; one named for
+/// something narrower, or for an action, is not.
+#[test]
+fn generic_steps_are_told_from_named_ones() {
+    for step in [
+        "Run tests",
+        "Run cargo test --workspace",
+        "Run npm ci && npm test",
+        "Test",
+        "Build",
+        "cargo clippy",
+        "Typecheck",
+        "Run e2e",
+    ] {
+        assert!(generic_step(step), "{step}");
+    }
+    for step in [
+        "Upload coverage",
+        "Deploy preview",
+        "Run codecov/codecov-action@v4",
+        "Wait for Postgres",
+    ] {
+        assert!(!generic_step(step), "{step}");
+    }
+}
+
+/// Two pull requests that broke two different tests under the same generic
+/// step each failed in their own work: neither is flaky, and nothing recurs.
+#[test]
+fn different_tests_failing_under_the_same_step_are_each_their_own() {
+    let records = QualityRecords {
+        runs: vec![run(2), run(1)],
+        ci_waits: vec![
+            wait(
+                1,
+                5,
+                (9, 10),
+                CiVerdict::Red,
+                vec![failing(
+                    "test",
+                    "Run tests",
+                    "src/parser.rs: parser::test::empty",
+                )],
+            ),
+            wait(
+                2,
+                5,
+                (9, 10),
+                CiVerdict::Red,
+                vec![failing(
+                    "test",
+                    "Run tests",
+                    "src/lexer.rs: lexer::test::spaces",
+                )],
+            ),
+        ],
+        ..QualityRecords::default()
+    };
+
+    let ci = summarize_quality(&query(None), records, &[]).ci;
+
+    assert_eq!(ci.causes.own, 2);
+    assert_eq!(ci.causes.flaky, 0);
+    assert!(ci.recurring.is_empty());
+}
+
+/// A failure with nothing finer than its job, a generic step, or no step
+/// read at all (a commit status, another app's check, or a job past the
+/// reads' cap), is its pull request's own however many pull requests fail
+/// so.
+#[test]
+fn a_failure_with_no_identity_is_its_pull_requests_own() {
+    let records = QualityRecords {
+        runs: vec![run(3), run(2), run(1)],
+        ci_waits: [1, 2, 3]
+            .into_iter()
+            .map(|n| {
+                wait(
+                    n,
+                    5,
+                    (9, 10),
+                    CiVerdict::Red,
+                    vec![
+                        job("test", CiJobResult::Failed, Some("Run tests")),
+                        job("ci/status", CiJobResult::Failed, None),
+                    ],
+                )
+            })
+            .collect(),
+        ..QualityRecords::default()
+    };
+
+    let ci = summarize_quality(&query(None), records, &[]).ci;
+
+    assert_eq!(ci.causes.own, 6);
+    assert_eq!(ci.causes.flaky, 0);
+    assert!(ci.recurring.is_empty());
+}
+
 /// A setup failure on two pull requests is listed once, as setup; the same
-/// test failing on two pull requests is flaky; a failure on one pull
-/// request is that pull request's own; a cancelled run is neither red nor
-/// the pull request's.
+/// test, or the same named step, failing on two pull requests is flaky; a
+/// failure on one pull request is that pull request's own; a cancelled run
+/// is neither red nor the pull request's.
 #[test]
 fn ci_failures_are_classed_by_how_many_pull_requests_they_hit() {
     let records = QualityRecords {
@@ -173,7 +382,8 @@ fn ci_failures_are_classed_by_how_many_pull_requests_they_hit() {
                 CiVerdict::Red,
                 vec![
                     job("build", CiJobResult::Setup, Some("Set up job")),
-                    job("test", CiJobResult::Failed, Some("Run tests")),
+                    failing("test", "Run tests", "src/net.rs: net::test::retry"),
+                    job("upload", CiJobResult::Failed, Some("Upload coverage")),
                     job("lint", CiJobResult::Passed, None),
                 ],
             ),
@@ -184,7 +394,8 @@ fn ci_failures_are_classed_by_how_many_pull_requests_they_hit() {
                 CiVerdict::Red,
                 vec![
                     job("build", CiJobResult::Setup, Some("Set up job")),
-                    job("test", CiJobResult::Failed, Some("Run tests")),
+                    failing("test", "Run tests", "src/net.rs: net::test::retry"),
+                    job("upload", CiJobResult::Failed, Some("Upload coverage")),
                     job("e2e", CiJobResult::Failed, Some("Run e2e")),
                     job("lint", CiJobResult::Cancelled, None),
                 ],
@@ -196,7 +407,7 @@ fn ci_failures_are_classed_by_how_many_pull_requests_they_hit() {
     let ci = summarize_quality(&query(None), records, &[]).ci;
 
     assert_eq!(ci.causes.setup, 2);
-    assert_eq!(ci.causes.flaky, 2);
+    assert_eq!(ci.causes.flaky, 4);
     assert_eq!(ci.causes.own, 1);
     assert_eq!(ci.causes.cancelled, 1);
     let recurring: Vec<_> = ci
@@ -206,6 +417,7 @@ fn ci_failures_are_classed_by_how_many_pull_requests_they_hit() {
             (
                 failure.job.as_str(),
                 failure.step.as_deref(),
+                failure.failure.as_deref(),
                 failure.cause,
                 failure.pull_requests,
             )
@@ -214,8 +426,15 @@ fn ci_failures_are_classed_by_how_many_pull_requests_they_hit() {
     assert_eq!(
         recurring,
         vec![
-            ("build", Some("Set up job"), CiCause::Setup, 2),
-            ("test", Some("Run tests"), CiCause::Flaky, 2),
+            ("build", Some("Set up job"), None, CiCause::Setup, 2),
+            (
+                "test",
+                Some("Run tests"),
+                Some("src/net.rs: net::test::retry"),
+                CiCause::Flaky,
+                2
+            ),
+            ("upload", Some("Upload coverage"), None, CiCause::Flaky, 2),
         ]
     );
     let e2e = ci.jobs.iter().find(|job| job.name == "e2e").expect("e2e");

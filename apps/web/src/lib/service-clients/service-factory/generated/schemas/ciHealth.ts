@@ -24,8 +24,8 @@ fixed.
   firstPushToGreen?: CiHealthFirstPushToGreen;
   /** Each job, the reddest first. */
   jobs: CiJobHealth[];
-  /** Jobs and steps that failed on two or more pull requests, newest
-first. */
+  /** Failures, by test or named step, on two or more pull requests,
+newest first. */
   recurring: RecurringCiFailure[];
   /**
    * Those that ended red.

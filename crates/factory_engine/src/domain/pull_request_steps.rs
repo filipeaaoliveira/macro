@@ -956,7 +956,7 @@ where
         } else {
             match self
                 .github
-                .finished_jobs(input.owner, repository, head)
+                .finished_jobs(input.owner, repository, head, true)
                 .await
             {
                 Ok(jobs) => ci_jobs(&jobs),

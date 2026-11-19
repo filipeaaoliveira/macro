@@ -3685,7 +3685,7 @@
             "items": {
               "$ref": "#/components/schemas/RecurringCiFailure"
             },
-            "description": "Jobs and steps that failed on two or more pull requests, newest\nfirst."
+            "description": "Failures, by test or named step, on two or more pull requests,\nnewest first."
           },
           "redWaits": {
             "type": "integer",
@@ -5113,7 +5113,7 @@
       },
       "RecurringCiFailure": {
         "type": "object",
-        "description": "A job and step that failed on two or more pull requests of the period.",
+        "description": "A failure of a job, by the test or the named step that failed, on two or\nmore pull requests of the period.",
         "required": [
           "job",
           "cause",
@@ -5126,6 +5126,10 @@
           "cause": {
             "$ref": "#/components/schemas/CiCause",
             "description": "The CI's setup, or flaky."
+          },
+          "failure": {
+            "type": ["string", "null"],
+            "description": "The test that failed, as its check run annotated it: `path: name`."
           },
           "failures": {
             "type": "integer",
