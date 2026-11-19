@@ -286,6 +286,48 @@ workflow never started ends it. An Automation's firing on a task meets the
 `task_busy` check only once its creator may see the task. A Gate in the seconds before its rule or the stand-in decides counts:
 the limit holds the Queue back, not to the exact count.
 
+A team's Orchestrator Definition, or a Project's own, may set a token
+budget (`tokenBudget`, 10,000 to 10,000,000,000 tokens, else 400
+`InvalidTokenBudget`; a Factory Definition's `rules.json` is checked the
+same, `DefinitionError::TokenBudget`; none by default), which
+bounds what a Run's agents spend as `MAX_STEPS` bounds its Steps
+(`src/domain/token_budget.rs`). A Run keeps the budget with its rules
+when it is created (`factory_run.token_budget`), so a change to the
+definition, or a task linked later, does not change a Run under way, and
+`RunStart::token_budget` tells its workflow to check it. Before each
+agent Step (an entry with a `role`, or a review panel, whose reviewers are
+checked once, together), the workflow asks the worker
+(`factory_check_budget`, behind the `factory-token-budget` patch marker,
+for at most two minutes): the worker reads the sessions of the Run's
+Steps (`step_sessions`, each once) and sums what the usage log recorded
+for them as the Run's owner (`ai_usage`'s `SessionUsageReader`), as
+Insights counts tokens: input, output, and input read from or written to
+the prompt cache, all of which the model bills, so a Run's spend is the
+one Insights shows for it. A Run that used its budget or more keeps why
+(`record_budget_stop`, `BudgetStop::Spent` with what it used) and ends
+`blocked` before the Step starts. A usage log that cannot be read is
+logged and lets the Step run; the workflow counts such checks in a row
+(a check whose activity failed outright counts too) and hands the count
+to the next, and the worker ends the Run, as `BudgetStop::Unread`, at
+the `MAX_UNREAD_CHECKS`th (3), so at most two agent Steps in a row run
+unchecked. A check retried after the stop was kept finds it and stops
+again, whatever the log reads then. Steps that go on from a question,
+or a `retry` after `no_result`, are the same visit and are not checked
+again. Once the Run's end is recorded, `factory_end_run` tells its owner
+through the Gate notice's path (`token_budget::budget_notice`: a
+`factory_gate_waiting` notification, pushed, one per Run, whose text says
+how much was used of the budget, or that the use could not be read),
+unless the Run's definition is quiet. A Run with no budget is never
+checked: its workflow asks for no marker and calls no activity, so its
+history is what it was, and its Steps run as before. The Run API shows a
+Run's budget (`tokenBudget`: `budget`, what its agents `used` so far, read
+from the usage log when one Run is read, none when it cannot be read or
+the Runs are listed, and `stop` when the budget ended it), and the Run
+view shows it under the Run's header. The marker is taken only by a Run
+with a budget, which only a service with this code starts; a worker from
+before it ignores `RunStart::token_budget` and walks such a Run
+unchecked, and a newer worker replays that history without the marker.
+
 `GET /insights?from=&to=&timeZone=&flow=` (`inbound/insights.rs`,
 `domain/insights.rs`) sums up how the caller's own Runs went over a period of
 at most 366 days in a time zone: Runs by day, outcome and Flow, Run and Step

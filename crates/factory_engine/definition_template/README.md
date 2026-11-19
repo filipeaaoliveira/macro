@@ -30,7 +30,7 @@ its built-in Flows or the team's own settings. Team settings say why.
 | `factory.json` | The format's `version` (1), a `description`, and the Flows, by name. |
 | `flows/{name}.json` | Each Flow `factory.json` names, in the factory's Flow format. |
 | `agents.json` | The Agents (`bot`, optional `model` and `instructions`) and, for each Role, the Agents that fill it, in order. It must fill every Role a Flow names. Optional `standing`: the Standing Roles (below). |
-| `rules.json` | Optional. `standingRules`: which Gates the factory answers on its own. `controlFiles`: the Control File patterns, which replace the factory's default whole; this template lists the default and this Definition's own files. Each left out takes the factory's default. |
+| `rules.json` | Optional. `standingRules`: which Gates the factory answers on its own, and the Queue limit and token budget. `controlFiles`: the Control File patterns, which replace the factory's default whole; this template lists the default and this Definition's own files. Each left out takes the factory's default. |
 | `scorers.json` | Optional. The team's Scorers, Experiments and Benchmarks, in the factory's evaluation format, and when its failures start a self-improvement Run (below). Left out, the team has none, and the defaults apply. |
 | `.macro/checks.json` | The check a Run on this repository runs: it validates the Definition. |
 
@@ -68,6 +68,15 @@ It leaves off:
 - `plan`: a person approves each plan.
 - `merge`: a person merges each pull request. Turn it on only once you trust
   the Flow's checks and review.
+- `tokenBudget`: no Run is stopped for the tokens its agents use. Set it to
+  the most tokens a Run's agents may use, from 10000 to 10000000000, counted
+  as Insights counts them: input, output, and input read from or written to
+  the prompt cache. Before each agent Step, a Run that used as many or more
+  ends `blocked`, its run page says how much it used, and its owner is
+  told. A Run keeps the budget it started with: changing it here changes
+  only the Runs that start after the change merges. A Run whose usage
+  cannot be read for three agent Steps in a row ends too, as its budget
+  cannot be checked. The check refuses a budget out of that range.
 
 ## Scorers, Experiments and Benchmarks
 
