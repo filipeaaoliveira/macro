@@ -265,6 +265,12 @@ export type PassedOver = {
   reason: string;
 };
 
+/**
+ * Why an Agent was passed over when it started and its runtime's own usage
+ * limit ended its first turn before it did any work.
+ */
+export const USAGE_LIMIT_REASON = 'usage_limit';
+
 /** The GitHub repository a Run works on. */
 export type RunRepository = {
   /** Its `https://github.com/owner/name` URL. */

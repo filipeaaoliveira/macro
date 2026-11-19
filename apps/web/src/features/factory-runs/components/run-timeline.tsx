@@ -23,6 +23,7 @@ import {
   type SteerAction,
   steerableSession,
   terminalState,
+  USAGE_LIMIT_REASON,
   WHOLE_CHANGE,
 } from '../core/run';
 import { RULE_NAMES } from '../core/standing-rules';
@@ -221,10 +222,16 @@ function TimelineStep(props: {
             <For each={props.step.passedOver}>
               {(passed) => (
                 <span class="block text-ink-muted">
-                  {t('factoryRuns.passedOver', {
-                    agent: passed.agent,
-                    reason: flowWordText(passed.reason),
-                  })}
+                  {/* An Agent at its usage limit did start: its first
+                      turn ended before it did any work. */}
+                  {passed.reason === USAGE_LIMIT_REASON
+                    ? t('factoryRuns.passedOverUsageLimit', {
+                        agent: passed.agent,
+                      })
+                    : t('factoryRuns.passedOver', {
+                        agent: passed.agent,
+                        reason: flowWordText(passed.reason),
+                      })}
                 </span>
               )}
             </For>
