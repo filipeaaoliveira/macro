@@ -1,0 +1,911 @@
+//! CI health, review quality, cost per merged pull request and the autonomy
+//! rate of a person's Runs over a period, of one repository or of all.
+//!
+//! The records give the Runs, each `ci` Step's waits with the jobs they saw
+//! finish, the review rounds with their reviewers and Blockers, and whether
+//! a person stepped into a Run; agent usage comes per session. This module
+//! classes each CI failure, counts review rounds and Blockers, and prices
+//! the merged pull requests.
+//!
+//! A CI job's failure is the CI's setup when it failed setting up (as the
+//! `ci` Step recorded it), flaky when the same job and step failed on two or
+//! more pull requests of the period, cancelled when a newer push replaced
+//! its run, and otherwise its own pull request's.
+
+#[cfg(test)]
+mod test;
+
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+
+use ai_usage::domain::session_usage::{SessionTokens, SessionUsageReader};
+use chrono::{DateTime, NaiveDate, Utc};
+use factory_records::domain::models::{RunId, RunOutcome};
+use factory_records::domain::quality::{
+    CI_NAME_BYTES, CiJob, CiJobResult, CiVerdict, QualityRecords, QualityRun, QualityScope,
+};
+use factory_records::domain::review_rounds::ReviewRoundOutcome;
+use macro_user_id::user_id::MacroUserIdStr;
+use serde::Serialize;
+use uuid::Uuid;
+
+use crate::domain::insights::{
+    DurationStats, INSIGHTS_RUN_CAP, InsightsError, InsightsQuery, RunLink, TokenCounts,
+    duration_stats,
+};
+use crate::domain::models::{CheckState, CodeRepository, FinishedJob};
+
+/// The most agent sessions one usage read sums up.
+const SESSIONS_PER_READ: usize = 1000;
+
+/// How many CI jobs [`CiHealth::jobs`] lists, the reddest first.
+const JOBS_LISTED: usize = 50;
+
+/// How many failures [`CiHealth::recurring`] and Blocker texts
+/// [`ReviewQuality::recurring`] list.
+const RECURRING_LISTED: usize = 20;
+
+/// How many Runs a recurring failure or Blocker links to.
+const RUNS_LINKED: usize = 5;
+
+/// On how many pull requests the same job and step must fail to be flaky,
+/// rather than the pull request's own.
+const FLAKY_PULL_REQUESTS: usize = 2;
+
+// What CI health records.
+
+/// Steps a CI job takes before its own work, by how their names start: a
+/// failure in one is the CI's setup, not the pull request's.
+const SETUP_STEPS: [&str; 9] = [
+    "set up ",
+    "setup ",
+    "run actions/checkout",
+    "run actions/setup-",
+    "run actions/cache",
+    "install ",
+    "download ",
+    "initialize containers",
+    "checkout",
+];
+
+/// What a failed job's output says when a download failed, before its own
+/// work could run.
+const DOWNLOAD_ERRORS: [&str; 9] = [
+    "404",
+    "failed to download",
+    "unable to download",
+    "could not download",
+    "download failed",
+    "error downloading",
+    "could not resolve host",
+    "econnreset",
+    "etimedout",
+];
+
+/// `text` cut to at most [`CI_NAME_BYTES`], on a character's boundary.
+fn kept_name(text: &str) -> &str {
+    let mut end = text.len().min(CI_NAME_BYTES);
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
+}
+
+/// How the finished `job` is kept: none for one still running, or with no
+/// name. A failure is the CI's setup when the step that failed sets the job
+/// up, or the job's output tells of a failed download.
+pub(crate) fn ci_job(job: &FinishedJob) -> Option<CiJob> {
+    let name = kept_name(job.name.trim());
+    if name.is_empty() {
+        return None;
+    }
+    let failed_step = job
+        .failed_step
+        .as_deref()
+        .map(|step| kept_name(step.trim()).to_string())
+        .filter(|step| !step.is_empty());
+    let result = match &job.state {
+        CheckState::Waiting => return None,
+        CheckState::Passed => CiJobResult::Passed,
+        CheckState::Failed(conclusion) if conclusion == "cancelled" => CiJobResult::Cancelled,
+        CheckState::Failed(_) => {
+            let setup_step = failed_step.as_deref().is_some_and(|step| {
+                let step = step.to_lowercase();
+                SETUP_STEPS.iter().any(|setup| step.starts_with(setup))
+            });
+            let download = job.detail.as_deref().is_some_and(|detail| {
+                let detail = detail.to_lowercase();
+                DOWNLOAD_ERRORS.iter().any(|error| detail.contains(error))
+            });
+            if setup_step || download {
+                CiJobResult::Setup
+            } else {
+                CiJobResult::Failed
+            }
+        }
+    };
+    let failed_step = failed_step.filter(|_| result.is_red());
+    Some(CiJob {
+        name: name.to_string(),
+        result,
+        failed_step,
+    })
+}
+
+/// How the finished `jobs` are kept, each name once.
+pub(crate) fn ci_jobs(jobs: &[FinishedJob]) -> Vec<CiJob> {
+    let mut kept: Vec<CiJob> = Vec::new();
+    for job in jobs.iter().filter_map(ci_job) {
+        if !kept.iter().any(|other| other.name == job.name) {
+            kept.push(job);
+        }
+    }
+    kept
+}
+
+// The query.
+
+/// The period, Flow and repository CI health and review quality are asked
+/// for.
+#[derive(Debug, Clone, PartialEq)]
+pub struct QualityQuery {
+    period: InsightsQuery,
+    repository: Option<String>,
+}
+
+impl QualityQuery {
+    /// The Runs of `period`, of the repository `repository` names
+    /// (`owner/name` or `https://github.com/owner/name`), or of every
+    /// repository.
+    pub fn new(period: InsightsQuery, repository: Option<String>) -> Result<Self, InsightsError> {
+        let repository = repository
+            .map(|named| {
+                let url = if named.starts_with("https://") {
+                    named.clone()
+                } else {
+                    format!("https://github.com/{named}")
+                };
+                CodeRepository::parse(&url)
+                    .map(|repository| repository.url())
+                    .ok_or(InsightsError::InvalidRepository(named))
+            })
+            .transpose()?;
+        Ok(Self { period, repository })
+    }
+
+    pub(crate) fn scope(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+    ) -> Result<QualityScope, InsightsError> {
+        Ok(QualityScope {
+            runs: self.period.scope(actor)?,
+            repository: self.repository.clone(),
+        })
+    }
+}
+
+// What the person reads.
+
+/// What a CI job's failure was.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CiCause {
+    /// The pull request's own: no other pull request failed the same way.
+    Own,
+    /// The CI's setup: it failed before its own work ran.
+    Setup,
+    /// Flaky: the same job and step failed on two or more pull requests.
+    Flaky,
+    /// Cancelled, as when a newer push replaced its run.
+    Cancelled,
+}
+
+/// How many CI failures had each cause.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CiCauseCounts {
+    /// The pull request's own.
+    pub own: u32,
+    /// The CI's setup.
+    pub setup: u32,
+    /// Flaky.
+    pub flaky: u32,
+    /// Cancelled.
+    pub cancelled: u32,
+}
+
+impl CiCauseCounts {
+    fn add(&mut self, cause: CiCause) {
+        let count = match cause {
+            CiCause::Own => &mut self.own,
+            CiCause::Setup => &mut self.setup,
+            CiCause::Flaky => &mut self.flaky,
+            CiCause::Cancelled => &mut self.cancelled,
+        };
+        *count += 1;
+    }
+}
+
+/// One CI job across the period's waits.
+#[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CiJobHealth {
+    /// The repository it runs in, by URL.
+    pub repository: Option<String>,
+    /// Its name.
+    pub name: String,
+    /// How many times it finished, passed or red; a cancelled run is not
+    /// counted.
+    pub finished: u32,
+    /// How many of those were red.
+    pub red: u32,
+    /// The share of them that were red, from 0 to 1.
+    pub red_rate: f64,
+    /// Its failures by cause, cancelled runs included.
+    pub causes: CiCauseCounts,
+    /// How many pull requests it was red on.
+    pub pull_requests_failed: u32,
+}
+
+/// A job and step that failed on two or more pull requests of the period.
+#[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RecurringCiFailure {
+    /// The repository, by URL.
+    pub repository: Option<String>,
+    /// The job.
+    pub job: String,
+    /// The step that failed, when it was read.
+    pub step: Option<String>,
+    /// The CI's setup, or flaky.
+    pub cause: CiCause,
+    /// How many pull requests it failed on.
+    pub pull_requests: u32,
+    /// How many times it failed.
+    pub failures: u32,
+    /// When it last failed.
+    pub last_failed_at: DateTime<Utc>,
+    /// The newest Runs it failed in.
+    pub runs: Vec<RunLink>,
+}
+
+/// How the period's pull requests fared in CI.
+#[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CiHealth {
+    /// Waits on CI that ended: green, red or timed out.
+    pub waits: u32,
+    /// Those that ended red.
+    pub red_waits: u32,
+    /// Runs that waited on CI.
+    pub runs: u32,
+    /// The jobs' failures by cause.
+    pub causes: CiCauseCounts,
+    /// Each job, the reddest first.
+    pub jobs: Vec<CiJobHealth>,
+    /// From a pull request's first wait on CI, once it was pushed, to the
+    /// end of its first green wait.
+    pub first_push_to_green: Option<DurationStats>,
+    /// Rounds Runs spent fixing CI: each red wait sends the change to be
+    /// fixed.
+    pub ci_fix_rounds: u32,
+    /// Runs that spent one or more.
+    pub runs_with_ci_fixes: u32,
+    /// Rounds Runs spent fixing reviewers' Blockers, apart from CI.
+    pub review_fix_rounds: u32,
+    /// Jobs and steps that failed on two or more pull requests, newest
+    /// first.
+    pub recurring: Vec<RecurringCiFailure>,
+}
+
+/// One reviewer's, or one Agent's, Blockers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockerCount {
+    /// The reviewer's Role, or the Agent.
+    pub name: String,
+    /// The reviews it made: its reviewer Steps.
+    pub reviews: u32,
+    /// The Blockers it found.
+    pub blockers: u32,
+}
+
+/// A Blocker text found in two or more Runs.
+#[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RecurringBlocker {
+    /// The text, as last written.
+    pub text: String,
+    /// In how many Runs it was found.
+    pub runs: u32,
+    /// How many times.
+    pub blockers: u32,
+    /// The reviewers' Roles that found it.
+    pub reviewers: Vec<String>,
+    /// When its round last started.
+    pub last_found_at: DateTime<Utc>,
+    /// The newest Runs it was found in.
+    pub run_links: Vec<RunLink>,
+}
+
+/// How the period's review rounds went.
+#[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewQuality {
+    /// Runs with one or more review rounds.
+    pub reviewed_runs: u32,
+    /// Their rounds.
+    pub rounds: u32,
+    /// Rounds per reviewed Run.
+    pub rounds_per_run: Option<f64>,
+    /// Runs whose first round ended.
+    pub first_rounds: u32,
+    /// Those whose first round found no Blocker.
+    pub clean_first_rounds: u32,
+    /// The share of them clean, from 0 to 1.
+    pub clean_first_rate: Option<f64>,
+    /// Blockers found.
+    pub blockers: u32,
+    /// Blockers no earlier round of their Run found.
+    pub new_blockers: u32,
+    /// Blockers an earlier round of their Run found too: not fixed.
+    pub repeated_blockers: u32,
+    /// Blockers by reviewer Role, most first.
+    pub by_reviewer: Vec<BlockerCount>,
+    /// Blockers by Agent, most first.
+    pub by_agent: Vec<BlockerCount>,
+    /// Blocker texts found in two or more Runs, in the most Runs first.
+    pub recurring: Vec<RecurringBlocker>,
+}
+
+/// What merging cost, and how often it took no person.
+#[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DeliveryInsight {
+    /// Runs that ended.
+    pub ended_runs: u32,
+    /// Runs that merged their pull request.
+    pub merged: u32,
+    /// Runs that merged with no person stepping in: no Gate a person
+    /// answered, no Step they steered, and no manual end.
+    pub autonomous: u32,
+    /// The share of ended Runs that did, from 0 to 1.
+    pub autonomy_rate: Option<f64>,
+    /// Ended Runs with a Gate a person answered.
+    pub person_answered: u32,
+    /// Ended Runs with a Step their owner steered.
+    pub steered: u32,
+    /// Runs that ended for a person to take over.
+    pub manual: u32,
+    /// Runs with usage recorded.
+    pub measured_runs: u32,
+    /// The tokens every Run's agents used.
+    pub tokens: TokenCounts,
+    /// What their priced model calls cost, in US dollars.
+    pub cost_usd: f64,
+    /// Their model calls with no price.
+    pub unpriced_calls: u64,
+    /// What every Run cost per merged pull request, in US dollars; none
+    /// unless every call was priced.
+    pub cost_per_merged_usd: Option<f64>,
+    /// The tokens every Run used per merged pull request.
+    pub tokens_per_merged: Option<u64>,
+}
+
+/// CI health, review quality, cost and autonomy of a person's Runs over a
+/// period.
+#[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct QualityInsights {
+    /// The period's first day.
+    pub from: NaiveDate,
+    /// Its last day.
+    pub to: NaiveDate,
+    /// The time zone its days are in.
+    pub time_zone: String,
+    /// The Flow read, or none for every Flow.
+    pub flow: Option<String>,
+    /// The repository read, by URL, or none for every repository.
+    pub repository: Option<String>,
+    /// The repositories the period's Runs work on, to pick one from.
+    pub repositories: Vec<String>,
+    /// The most Runs read: the newest in the period.
+    pub run_cap: u16,
+    /// Whether the period had more Runs than that.
+    pub capped: bool,
+    /// How their pull requests fared in CI.
+    pub ci: CiHealth,
+    /// How their review rounds went.
+    pub review: ReviewQuality,
+    /// What merging cost, and how often it took no person.
+    pub delivery: DeliveryInsight,
+}
+
+/// Read the usage of `sessions`, `actor`'s, in reads of at most
+/// [`SESSIONS_PER_READ`].
+pub(crate) async fn read_usage<U: SessionUsageReader>(
+    usage: &U,
+    actor: &MacroUserIdStr<'static>,
+    sessions: &[Uuid],
+) -> Result<Vec<SessionTokens>, U::Err> {
+    let mut tokens = Vec::new();
+    for chunk in sessions.chunks(SESSIONS_PER_READ) {
+        tokens.extend(usage.session_tokens(actor, chunk).await?);
+    }
+    Ok(tokens)
+}
+
+/// Sum up `records` for `query`, with `tokens` the usage of their sessions.
+pub(crate) fn summarize_quality(
+    query: &QualityQuery,
+    records: QualityRecords,
+    tokens: &[SessionTokens],
+) -> QualityInsights {
+    let runs: HashMap<RunId, &QualityRun> =
+        records.runs.iter().map(|run| (run.run.id, run)).collect();
+    QualityInsights {
+        from: query.period.from(),
+        to: query.period.to(),
+        time_zone: query.period.time_zone().to_string(),
+        flow: query.period.flow().map(str::to_string),
+        repository: query.repository.clone(),
+        repositories: records.repositories.clone(),
+        run_cap: INSIGHTS_RUN_CAP,
+        capped: records.capped,
+        ci: ci_health(&records, &runs),
+        review: review_quality(&records, &runs),
+        delivery: delivery(&records, tokens),
+    }
+}
+
+/// The pull request a Run opened, to tell pull requests apart: its page,
+/// or the Run itself when it kept none.
+fn pull_request_of(runs: &HashMap<RunId, &QualityRun>, run_id: RunId) -> String {
+    runs.get(&run_id)
+        .and_then(|run| run.pull_request.clone())
+        .unwrap_or_else(|| run_id.to_string())
+}
+
+fn repository_of(runs: &HashMap<RunId, &QualityRun>, run_id: RunId) -> Option<String> {
+    runs.get(&run_id).and_then(|run| run.repository.clone())
+}
+
+/// Links to `run_ids`' Runs, newest first, at most [`RUNS_LINKED`].
+fn run_links(runs: &HashMap<RunId, &QualityRun>, run_ids: &BTreeSet<RunId>) -> Vec<RunLink> {
+    let mut links: Vec<RunLink> = run_ids
+        .iter()
+        .filter_map(|run_id| runs.get(run_id))
+        .map(|run| RunLink::from(&run.run))
+        .collect();
+    links.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    links.truncate(RUNS_LINKED);
+    links
+}
+
+fn share(part: u32, whole: u32) -> Option<f64> {
+    (whole > 0).then(|| f64::from(part) / f64::from(whole))
+}
+
+/// A job and step, in a repository, failing the same way.
+type FailureKey = (Option<String>, String, Option<String>);
+
+/// What one job and step's failures add up to.
+#[derive(Default)]
+struct Failures {
+    pull_requests: BTreeSet<String>,
+    runs: BTreeSet<RunId>,
+    count: u32,
+    all_setup: bool,
+    last: Option<DateTime<Utc>>,
+}
+
+fn ci_health(records: &QualityRecords, runs: &HashMap<RunId, &QualityRun>) -> CiHealth {
+    // The pull requests each job and step failed on, first, to tell a
+    // flaky failure from the pull request's own.
+    let mut failures: BTreeMap<FailureKey, Failures> = BTreeMap::new();
+    for wait in &records.ci_waits {
+        for job in wait.jobs.iter().filter(|job| job.result.is_red()) {
+            let key = (
+                repository_of(runs, wait.run_id),
+                job.name.clone(),
+                job.failed_step.clone(),
+            );
+            let failed = failures.entry(key).or_insert_with(|| Failures {
+                all_setup: true,
+                ..Failures::default()
+            });
+            failed
+                .pull_requests
+                .insert(pull_request_of(runs, wait.run_id));
+            failed.runs.insert(wait.run_id);
+            failed.count += 1;
+            failed.all_setup &= job.result == CiJobResult::Setup;
+            failed.last = failed.last.max(Some(wait.ended_at));
+        }
+    }
+    let cause_of = |repository: &Option<String>, job: &CiJob| match job.result {
+        CiJobResult::Passed => None,
+        CiJobResult::Cancelled => Some(CiCause::Cancelled),
+        CiJobResult::Setup => Some(CiCause::Setup),
+        CiJobResult::Failed => {
+            let key = (
+                repository.clone(),
+                job.name.clone(),
+                job.failed_step.clone(),
+            );
+            let spread = failures
+                .get(&key)
+                .map_or(0, |failed| failed.pull_requests.len());
+            Some(if spread >= FLAKY_PULL_REQUESTS {
+                CiCause::Flaky
+            } else {
+                CiCause::Own
+            })
+        }
+    };
+
+    struct JobTally {
+        finished: u32,
+        red: u32,
+        causes: CiCauseCounts,
+        pull_requests: BTreeSet<String>,
+    }
+    let mut jobs: BTreeMap<(Option<String>, String), JobTally> = BTreeMap::new();
+    let mut causes = CiCauseCounts::default();
+    let mut red_by_run: BTreeMap<RunId, u32> = BTreeMap::new();
+    let mut waited: BTreeSet<RunId> = BTreeSet::new();
+    let mut red_waits = 0;
+    // Each Run's first wait's start, and its first green wait's end.
+    let mut first_wait: HashMap<RunId, (u16, DateTime<Utc>)> = HashMap::new();
+    let mut first_green: HashMap<RunId, (u16, DateTime<Utc>)> = HashMap::new();
+    for wait in &records.ci_waits {
+        waited.insert(wait.run_id);
+        let earlier = |kept: &(u16, DateTime<Utc>)| kept.0 < wait.seq;
+        if !first_wait.get(&wait.run_id).is_some_and(earlier) {
+            first_wait.insert(wait.run_id, (wait.seq, wait.started_at));
+        }
+        match wait.verdict {
+            CiVerdict::Red => {
+                red_waits += 1;
+                *red_by_run.entry(wait.run_id).or_default() += 1;
+            }
+            CiVerdict::Green => {
+                if !first_green.get(&wait.run_id).is_some_and(earlier) {
+                    first_green.insert(wait.run_id, (wait.seq, wait.ended_at));
+                }
+            }
+            CiVerdict::Timeout => {}
+        }
+        let repository = repository_of(runs, wait.run_id);
+        for job in &wait.jobs {
+            let tally = jobs
+                .entry((repository.clone(), job.name.clone()))
+                .or_insert_with(|| JobTally {
+                    finished: 0,
+                    red: 0,
+                    causes: CiCauseCounts::default(),
+                    pull_requests: BTreeSet::new(),
+                });
+            if job.result != CiJobResult::Cancelled {
+                tally.finished += 1;
+            }
+            if job.result.is_red() {
+                tally.red += 1;
+                tally
+                    .pull_requests
+                    .insert(pull_request_of(runs, wait.run_id));
+            }
+            if let Some(cause) = cause_of(&repository, job) {
+                tally.causes.add(cause);
+                causes.add(cause);
+            }
+        }
+    }
+
+    let mut jobs: Vec<CiJobHealth> = jobs
+        .into_iter()
+        .map(|((repository, name), tally)| CiJobHealth {
+            repository,
+            name,
+            finished: tally.finished,
+            red: tally.red,
+            red_rate: share(tally.red, tally.finished).unwrap_or(0.0),
+            causes: tally.causes,
+            pull_requests_failed: u32::try_from(tally.pull_requests.len()).unwrap_or(u32::MAX),
+        })
+        .collect();
+    jobs.sort_by(|a, b| {
+        b.red
+            .cmp(&a.red)
+            .then_with(|| b.red_rate.total_cmp(&a.red_rate))
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    jobs.truncate(JOBS_LISTED);
+
+    let to_green: Vec<f64> = first_green
+        .iter()
+        .filter_map(|(run_id, (_, green_at))| {
+            let (_, started_at) = first_wait.get(run_id)?;
+            Some((*green_at - *started_at).num_milliseconds().max(0) as f64 / 1000.0)
+        })
+        .collect();
+
+    let mut recurring: Vec<RecurringCiFailure> = failures
+        .into_iter()
+        .filter(|(_, failed)| failed.pull_requests.len() >= FLAKY_PULL_REQUESTS)
+        .filter_map(|((repository, job, step), failed)| {
+            Some(RecurringCiFailure {
+                repository,
+                job,
+                step,
+                cause: if failed.all_setup {
+                    CiCause::Setup
+                } else {
+                    CiCause::Flaky
+                },
+                pull_requests: u32::try_from(failed.pull_requests.len()).unwrap_or(u32::MAX),
+                failures: failed.count,
+                last_failed_at: failed.last?,
+                runs: run_links(runs, &failed.runs),
+            })
+        })
+        .collect();
+    recurring.sort_by(|a, b| {
+        b.last_failed_at
+            .cmp(&a.last_failed_at)
+            .then_with(|| a.job.cmp(&b.job))
+    });
+    recurring.truncate(RECURRING_LISTED);
+
+    let review_fix_rounds = records
+        .review_rounds
+        .iter()
+        .filter(|round| round.outcome == Some(ReviewRoundOutcome::Changes))
+        .count();
+
+    CiHealth {
+        waits: u32::try_from(records.ci_waits.len()).unwrap_or(u32::MAX),
+        red_waits,
+        runs: u32::try_from(waited.len()).unwrap_or(u32::MAX),
+        causes,
+        jobs,
+        first_push_to_green: duration_stats(to_green),
+        ci_fix_rounds: red_by_run.values().sum(),
+        runs_with_ci_fixes: u32::try_from(red_by_run.len()).unwrap_or(u32::MAX),
+        review_fix_rounds: u32::try_from(review_fix_rounds).unwrap_or(u32::MAX),
+        recurring,
+    }
+}
+
+/// A Blocker's text as compared with others: in lower case, its spaces
+/// collapsed and its closing stop dropped.
+fn blocker_text(problem: &str) -> String {
+    problem
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+        .trim_end_matches(['.', ':', ';', '!'])
+        .to_string()
+}
+
+fn by_count(counts: BTreeMap<String, (u32, u32)>) -> Vec<BlockerCount> {
+    let mut counts: Vec<BlockerCount> = counts
+        .into_iter()
+        .map(|(name, (reviews, blockers))| BlockerCount {
+            name,
+            reviews,
+            blockers,
+        })
+        .collect();
+    counts.sort_by(|a, b| {
+        b.blockers
+            .cmp(&a.blockers)
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    counts
+}
+
+/// A reviewer Step's Role and Agent, when it recorded them.
+type ReviewerNames<'a> = (Option<&'a str>, Option<&'a str>);
+
+fn review_quality(records: &QualityRecords, runs: &HashMap<RunId, &QualityRun>) -> ReviewQuality {
+    // Rounds, and each Run's first.
+    let mut first_round: BTreeMap<RunId, (u16, Option<ReviewRoundOutcome>)> = BTreeMap::new();
+    let mut round_started: HashMap<(RunId, u16), DateTime<Utc>> = HashMap::new();
+    for round in &records.review_rounds {
+        round_started.insert((round.run_id, round.seq), round.started_at);
+        let first = first_round
+            .entry(round.run_id)
+            .or_insert((round.seq, round.outcome));
+        if round.seq < first.0 {
+            *first = (round.seq, round.outcome);
+        }
+    }
+    let first_rounds = first_round
+        .values()
+        .filter(|(_, outcome)| outcome.is_some())
+        .count();
+    let clean_first_rounds = first_round
+        .values()
+        .filter(|(_, outcome)| *outcome == Some(ReviewRoundOutcome::Pass))
+        .count();
+    let reviewed_runs = u32::try_from(first_round.len()).unwrap_or(u32::MAX);
+    let rounds = u32::try_from(records.review_rounds.len()).unwrap_or(u32::MAX);
+    let first_rounds = u32::try_from(first_rounds).unwrap_or(u32::MAX);
+    let clean_first_rounds = u32::try_from(clean_first_rounds).unwrap_or(u32::MAX);
+
+    // Reviews by reviewer Role and by Agent.
+    let mut by_reviewer: BTreeMap<String, (u32, u32)> = BTreeMap::new();
+    let mut by_agent: BTreeMap<String, (u32, u32)> = BTreeMap::new();
+    let mut reviewer_of: HashMap<(RunId, u16), ReviewerNames<'_>> = HashMap::new();
+    for reviewer in &records.reviewers {
+        reviewer_of.insert(
+            (reviewer.run_id, reviewer.seq),
+            (reviewer.role.as_deref(), reviewer.agent.as_deref()),
+        );
+        if let Some(role) = &reviewer.role {
+            by_reviewer.entry(role.clone()).or_default().0 += 1;
+        }
+        if let Some(agent) = &reviewer.agent {
+            by_agent.entry(agent.clone()).or_default().0 += 1;
+        }
+    }
+
+    // Blockers, in their rounds' order: one an earlier round of its Run
+    // found too is repeated.
+    let mut ordered: Vec<_> = records.blockers.iter().collect();
+    ordered.sort_by_key(|blocker| (blocker.run_id, blocker.round_seq, blocker.seq));
+    let mut found_before: HashMap<RunId, BTreeMap<String, u16>> = HashMap::new();
+    let mut new_blockers = 0;
+    let mut repeated_blockers = 0;
+    struct Recurring {
+        text: String,
+        runs: BTreeSet<RunId>,
+        count: u32,
+        reviewers: BTreeSet<String>,
+        last: DateTime<Utc>,
+    }
+    let mut texts: BTreeMap<String, Recurring> = BTreeMap::new();
+    for blocker in ordered {
+        let text = blocker_text(&blocker.problem);
+        let earlier = found_before.entry(blocker.run_id).or_default();
+        let repeated = earlier
+            .get(&text)
+            .is_some_and(|round| *round < blocker.round_seq);
+        if repeated {
+            repeated_blockers += 1;
+        } else {
+            new_blockers += 1;
+            earlier.entry(text.clone()).or_insert(blocker.round_seq);
+        }
+        let (role, agent) = reviewer_of
+            .get(&(blocker.run_id, blocker.seq))
+            .copied()
+            .unwrap_or_default();
+        if let Some(role) = role {
+            by_reviewer.entry(role.to_string()).or_default().1 += 1;
+        }
+        if let Some(agent) = agent {
+            by_agent.entry(agent.to_string()).or_default().1 += 1;
+        }
+        let found_at = round_started
+            .get(&(blocker.run_id, blocker.round_seq))
+            .copied()
+            .or_else(|| runs.get(&blocker.run_id).map(|run| run.run.created_at))
+            .unwrap_or_default();
+        let recurring = texts.entry(text).or_insert_with(|| Recurring {
+            text: blocker.problem.clone(),
+            runs: BTreeSet::new(),
+            count: 0,
+            reviewers: BTreeSet::new(),
+            last: found_at,
+        });
+        recurring.runs.insert(blocker.run_id);
+        recurring.count += 1;
+        if let Some(role) = role {
+            recurring.reviewers.insert(role.to_string());
+        }
+        if found_at >= recurring.last {
+            recurring.last = found_at;
+            recurring.text = blocker.problem.clone();
+        }
+    }
+    let mut recurring: Vec<RecurringBlocker> = texts
+        .into_values()
+        .filter(|text| text.runs.len() >= 2)
+        .map(|text| RecurringBlocker {
+            text: text.text,
+            runs: u32::try_from(text.runs.len()).unwrap_or(u32::MAX),
+            blockers: text.count,
+            reviewers: text.reviewers.into_iter().collect(),
+            last_found_at: text.last,
+            run_links: run_links(runs, &text.runs),
+        })
+        .collect();
+    recurring.sort_by(|a, b| {
+        b.runs
+            .cmp(&a.runs)
+            .then_with(|| b.last_found_at.cmp(&a.last_found_at))
+    });
+    recurring.truncate(RECURRING_LISTED);
+
+    ReviewQuality {
+        reviewed_runs,
+        rounds,
+        rounds_per_run: (reviewed_runs > 0).then(|| f64::from(rounds) / f64::from(reviewed_runs)),
+        first_rounds,
+        clean_first_rounds,
+        clean_first_rate: share(clean_first_rounds, first_rounds),
+        blockers: new_blockers + repeated_blockers,
+        new_blockers,
+        repeated_blockers,
+        by_reviewer: by_count(by_reviewer),
+        by_agent: by_count(by_agent),
+        recurring,
+    }
+}
+
+fn delivery(records: &QualityRecords, tokens: &[SessionTokens]) -> DeliveryInsight {
+    let by_session: HashMap<Uuid, &SessionTokens> = tokens
+        .iter()
+        .map(|tokens| (tokens.session_id, tokens))
+        .collect();
+    let mut ended_runs = 0;
+    let mut merged = 0;
+    let mut autonomous = 0;
+    let mut person_answered = 0;
+    let mut steered = 0;
+    let mut manual = 0;
+    let mut measured_runs = 0;
+    let mut used = TokenCounts::default();
+    let mut cost_usd = 0.0;
+    let mut unpriced_calls = 0;
+    for run in &records.runs {
+        let outcome = run.run.end.map(|(outcome, _)| outcome);
+        let ended = outcome.is_some();
+        let is_manual = outcome == Some(RunOutcome::Manual);
+        if ended {
+            ended_runs += 1;
+            person_answered += u32::from(run.person_answered);
+            steered += u32::from(run.steered);
+            manual += u32::from(is_manual);
+        }
+        if run.merged {
+            merged += 1;
+            if ended && !run.person_answered && !run.steered && !is_manual {
+                autonomous += 1;
+            }
+        }
+        let mut measured = false;
+        for session in &run.sessions {
+            if let Some(session) = by_session.get(session) {
+                measured = true;
+                used.input += session.input;
+                used.output += session.output;
+                used.cache_read += session.cache_read;
+                used.cache_write += session.cache_write;
+                cost_usd += session.cost_usd;
+                unpriced_calls += session.unpriced_calls;
+            }
+        }
+        measured_runs += u32::from(measured);
+    }
+    let total_tokens = used.input + used.output + used.cache_read + used.cache_write;
+    let priced = measured_runs > 0 && unpriced_calls == 0;
+    DeliveryInsight {
+        ended_runs,
+        merged,
+        autonomous,
+        autonomy_rate: share(autonomous, ended_runs),
+        person_answered,
+        steered,
+        manual,
+        measured_runs,
+        tokens: used,
+        cost_usd,
+        unpriced_calls,
+        cost_per_merged_usd: (merged > 0 && priced).then(|| cost_usd / f64::from(merged)),
+        tokens_per_merged: (merged > 0 && measured_runs > 0)
+            .then(|| total_tokens / u64::from(merged)),
+    }
+}

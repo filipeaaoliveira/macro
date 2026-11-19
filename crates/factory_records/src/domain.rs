@@ -9,6 +9,7 @@ pub mod insights;
 pub mod main_hold;
 pub mod models;
 pub mod ports;
+pub mod quality;
 pub mod review_rounds;
 pub mod self_improvement;
 pub mod standing_acts;

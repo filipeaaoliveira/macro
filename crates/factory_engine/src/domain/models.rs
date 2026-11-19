@@ -404,6 +404,22 @@ pub struct HeadChecks {
     pub actions_unread: bool,
 }
 
+/// A CI job that finished on a commit, as CI health records it: a check
+/// run's latest, or a commit status.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FinishedJob {
+    /// Its name: the check run's, or the commit status's context.
+    pub name: String,
+    /// How it ended: [`CheckState::Passed`] or [`CheckState::Failed`].
+    pub state: CheckState,
+    /// For a GitHub Actions job that failed, the first of its steps that
+    /// failed, when its steps could be read.
+    pub failed_step: Option<String>,
+    /// What a check run that failed says of itself: its output's title and
+    /// summary.
+    pub detail: Option<String>,
+}
+
 /// The checks a pull request's base requires, as far as they could be read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequiredChecks {

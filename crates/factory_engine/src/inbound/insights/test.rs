@@ -246,3 +246,40 @@ async fn a_bad_period_time_zone_or_flow_is_refused() {
     }
     assert!(asked(&scopes).is_empty());
 }
+
+#[tokio::test]
+async fn quality_answers_in_the_web_apps_shape_and_refuses_a_bad_repository() {
+    let (app, _scopes) = app();
+
+    let response = app
+        .clone()
+        .oneshot(
+            get(
+                "/insights/quality?from=2026-11-01&to=2026-11-30&timeZone=UTC&repository=macro/app",
+            )
+            .header("authorization", "Bearer alice")
+            .body(Body::empty())
+            .expect("request"),
+        )
+        .await
+        .expect("response");
+    let refused = app
+        .oneshot(
+            get("/insights/quality?from=2026-11-01&to=2026-11-30&timeZone=UTC&repository=macro")
+                .header("authorization", "Bearer alice")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json(response).await;
+    assert_eq!(body["repository"], "https://github.com/macro/app");
+    assert_eq!(body["runCap"], 1000);
+    assert_eq!(body["ci"]["causes"]["setup"], 0);
+    assert_eq!(body["ci"]["recurring"], serde_json::json!([]));
+    assert_eq!(body["review"]["cleanFirstRate"], serde_json::Value::Null);
+    assert_eq!(body["delivery"]["autonomyRate"], serde_json::Value::Null);
+    assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
+}

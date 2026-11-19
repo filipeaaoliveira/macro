@@ -20,11 +20,13 @@ use factory_records::domain::insights::{
     RunSummary,
 };
 use factory_records::domain::models::{RunId, RunOutcome, checked_name};
+use factory_records::domain::quality::RunQualityRepository;
 use macro_user_id::user_id::MacroUserIdStr;
 use serde::Serialize;
 
 use crate::domain::built_in_flows::{BUILT_IN_FLOWS, BuiltInFlow};
 use crate::domain::flow::StepUse;
+use crate::domain::quality::{QualityInsights, QualityQuery, read_usage, summarize_quality};
 
 /// The most Runs insights read for one period: the newest in it.
 pub const INSIGHTS_RUN_CAP: u16 = 1000;
@@ -47,6 +49,9 @@ pub enum InsightsError {
     /// The Flow filter is not a Flow name.
     #[error(transparent)]
     InvalidFlow(#[from] factory_records::domain::models::InvalidName),
+    /// The repository filter names no GitHub repository.
+    #[error("{0} is not a GitHub repository: name it owner/name")]
+    InvalidRepository(String),
     /// Anything else.
     #[error("insights failed: {0:?}")]
     Internal(rootcause::Report),
@@ -414,6 +419,14 @@ pub trait InsightsService: Send + Sync + 'static {
         actor: &MacroUserIdStr<'static>,
         query: InsightsQuery,
     ) -> impl Future<Output = Result<RunInsights, InsightsError>> + Send;
+
+    /// CI health, review quality, cost and autonomy of `actor`'s own Runs
+    /// over the period of `query`, of its repository or of all.
+    fn quality(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        query: QualityQuery,
+    ) -> impl Future<Output = Result<QualityInsights, InsightsError>> + Send;
 }
 
 /// Insights over the Run records and the agent usage log.
@@ -431,7 +444,7 @@ impl<R, U> InsightsServiceImpl<R, U> {
 
 impl<R, U> InsightsService for InsightsServiceImpl<R, U>
 where
-    R: RunInsightsRepository,
+    R: RunInsightsRepository + RunQualityRepository,
     U: SessionUsageReader,
 {
     #[tracing::instrument(skip(self, actor))]
@@ -459,6 +472,25 @@ where
         }
 
         Ok(summarize(&query, records, &tokens))
+    }
+
+    #[tracing::instrument(skip(self, actor))]
+    async fn quality(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        query: QualityQuery,
+    ) -> Result<QualityInsights, InsightsError> {
+        let scope = query.scope(actor)?;
+        let records = self.repo.read_quality(&scope).await.map_err(internal)?;
+        let sessions: Vec<_> = records
+            .runs
+            .iter()
+            .flat_map(|run| run.sessions.iter().copied())
+            .collect();
+        let tokens = read_usage(&self.usage, actor, &sessions)
+            .await
+            .map_err(internal)?;
+        Ok(summarize_quality(&query, records, &tokens))
     }
 }
 
@@ -498,7 +530,7 @@ fn percentile(sorted: &[f64], p: f64) -> Option<f64> {
     Some((value * 1000.0).round() / 1000.0)
 }
 
-fn duration_stats(mut seconds: Vec<f64>) -> Option<DurationStats> {
+pub(crate) fn duration_stats(mut seconds: Vec<f64>) -> Option<DurationStats> {
     seconds.sort_by(f64::total_cmp);
     Some(DurationStats {
         count: u32::try_from(seconds.len()).ok()?,

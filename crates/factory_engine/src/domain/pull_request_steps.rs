@@ -29,6 +29,7 @@ use chrono::{DateTime, Utc};
 use factory_records::domain::main_hold::{MainHold, MainHoldRepository};
 use factory_records::domain::models::{ControlFileChanges, Outcome, Repository};
 use factory_records::domain::ports::RunRepository;
+use factory_records::domain::quality::{CiVerdict, CiWait};
 use github::domain::models::MacroTaskId;
 
 use crate::domain::checks::CHECKS_FILE;
@@ -42,6 +43,7 @@ use crate::domain::models::{
 };
 use crate::domain::ports::{MainWatches, PullRequests, Retryable};
 use crate::domain::setup::SETUP_FILE;
+use crate::domain::quality::ci_jobs;
 use crate::domain::verification::{VERIFY_FILE, VerifyFile, VerifyFileError};
 
 /// How long `ci` waits for a pull request's checks to finish: short of a
@@ -887,6 +889,8 @@ where
                             .set_merge_head(input.key.run_id, &head)
                             .await
                             .map_err(PullRequestStepError::records)?;
+                        self.keep_ci_wait(&input, &repository, &head, CiVerdict::Green)
+                            .await;
                         return Ok(report(
                             "green",
                             format!(
@@ -898,6 +902,8 @@ where
                     last_green = Some(seen);
                 }
                 Verdict::Red(failed) => {
+                    self.keep_ci_wait(&input, &repository, &head, CiVerdict::Red)
+                        .await;
                     return Ok(report(
                         "red",
                         format!(
@@ -917,6 +923,8 @@ where
             }
 
             if tokio::time::Instant::now() + CI_POLL > deadline {
+                self.keep_ci_wait(&input, &repository, &head, CiVerdict::Timeout)
+                    .await;
                 return Ok(report(
                     "timeout",
                     format!(
@@ -927,6 +935,45 @@ where
                 ));
             }
             tokio::time::sleep(CI_POLL).await;
+        }
+    }
+
+    /// Keep how this wait of the `ci` Step ended, with the jobs that
+    /// finished on `head`, for CI health. It is best effort, so insights
+    /// never hold a Run up: jobs that cannot be read are left out, and a
+    /// wait that cannot be kept is only logged. A retried Step keeps its
+    /// first wait.
+    async fn keep_ci_wait(
+        &self,
+        input: &StepInput<'_>,
+        repository: &CodeRepository,
+        head: &str,
+        verdict: CiVerdict,
+    ) {
+        // A timeout's jobs had not finished.
+        let jobs = if verdict == CiVerdict::Timeout {
+            Vec::new()
+        } else {
+            match self
+                .github
+                .finished_jobs(input.owner, repository, head)
+                .await
+            {
+                Ok(jobs) => ci_jobs(&jobs),
+                Err(error) => {
+                    tracing::warn!(%error, "the finished CI jobs could not be read");
+                    Vec::new()
+                }
+            }
+        };
+        let wait = CiWait {
+            key: input.key,
+            head_sha: head.to_string(),
+            verdict,
+            jobs,
+        };
+        if let Err(error) = self.repo.record_ci_wait(&wait).await {
+            tracing::warn!(%error, "the ci wait could not be kept");
         }
     }
 

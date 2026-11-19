@@ -295,6 +295,30 @@ from the usage log by session id (`ai_usage`'s `SessionUsageReader`). It
 reads the newest `INSIGHTS_RUN_CAP` Runs of the period. A bad period, time
 zone or Flow name is 400.
 
+`GET /insights/quality?from=&to=&timeZone=&flow=&repository=`
+(`domain/quality.rs`) reads the same Runs, of one repository
+(`owner/name` or its URL) or of all, for CI health, review quality, cost per
+merged pull request and the autonomy rate. Each wait of `ci` that ends
+`green`, `red` or `timeout` keeps the jobs that finished on its head
+(`PullRequests::finished_jobs`, `RunRepository::record_ci_wait`): passed,
+failed, cancelled, or `setup` when the step that failed sets the job up
+(`SETUP_STEPS`) or its output tells of a failed download
+(`DOWNLOAD_ERRORS`). Keeping it is best effort and never fails the Step;
+a retry keeps the first wait. Insights then class a failed job as flaky
+when the same job and step failed on two or more pull requests of the
+period, else as its pull request's own, and list those that did, newest
+first. They measure a pull request's first wait to its first green one,
+count red waits as CI fix rounds and review rounds that ended `changes` as
+review fix rounds, count rounds per Run, the share clean after the first
+round, Blockers by reviewer Role and by Agent, repeated Blockers (the same
+text an earlier round of the Run found) and texts found in two or more
+Runs. A Run merged with no person stepping in when it merged and ended
+with no Gate a person answered (not a Standing Rule, the stand-in or an
+agent), no Step its owner steered, and no `manual` end. Cost per merged
+pull request is every Run's usage over the merged ones: in dollars when
+every model call was priced, in tokens otherwise. A repository that names
+none is 400.
+
 Evaluation (`src/domain/evaluation.rs`, `evaluation/service.rs`,
 `evaluation/insights.rs`, `inbound/evaluation.rs`): an
 `EvaluationDefinition` names Scorers, Experiments and Benchmarks. A team
@@ -1814,6 +1838,9 @@ Definition.
 - `src/domain/self_improvement.rs`: self-improvement: the failures a
   Run's end keeps, when a self-improvement Run starts, its request, and how
   it is settled.
+- `src/domain/quality.rs`: CI health, review quality, cost per merged
+  pull request and the autonomy rate (`GET /insights/quality`), and how a
+  `ci` wait's finished jobs are classed before they are kept.
 - `src/domain/evaluation.rs`: Scorers, Experiments and Benchmarks, their
   sampling and arm assignment; `evaluation/service.rs` scores a Run that
   ended; `evaluation/insights.rs` the evaluation insights and suites.

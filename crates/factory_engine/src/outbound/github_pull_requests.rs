@@ -16,8 +16,8 @@ use github::outbound::github_oauth_client::{FileTooLarge, GithubOauthImpl};
 use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::models::{
-    BranchDeletion, Check, CheckState, CheckSuite, CodeRepository, CommitStatus, HeadChecks,
-    Merging, OpenPullRequest, Opening, PullRequest, PullRequestState, RepositoryAccess,
+    BranchDeletion, Check, CheckState, CheckSuite, CodeRepository, CommitStatus, FinishedJob,
+    HeadChecks, Merging, OpenPullRequest, Opening, PullRequest, PullRequestState, RepositoryAccess,
     RequiredCheck, RequiredChecks, run_branch,
 };
 use crate::domain::ports::{FileRefusal, PullRequests, Retryable};
@@ -25,6 +25,10 @@ use crate::domain::review_rounds::ChangedFile;
 
 /// GitHub Actions' app, whose workflow runs say whether a run still waits.
 const ACTIONS_APP: &str = "github-actions";
+
+/// The most failed GitHub Actions jobs whose steps one read of finished jobs
+/// reads.
+const MAX_JOB_STEP_READS: usize = 10;
 
 /// Why GitHub could not be asked as the Run's owner.
 #[derive(Debug, thiserror::Error)]
@@ -388,6 +392,90 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
             .checks_on(&token, repository, &pull_request.head_sha, all_runs)
             .await?;
         Ok(Some((pull_request, checks)))
+    }
+
+    #[tracing::instrument(err, skip(self, owner))]
+    async fn finished_jobs(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        sha: &str,
+    ) -> Result<Vec<FinishedJob>, GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        let (owner_name, name) = (repository.owner(), repository.name());
+        let runs = self
+            .github
+            .list_check_run_results(&token, owner_name, name, sha)
+            .await?;
+        let statuses = self
+            .github
+            .list_commit_statuses(&token, owner_name, name, sha)
+            .await?;
+
+        let mut jobs = Vec::new();
+        let mut steps_read = 0;
+        for run in runs.items {
+            let state = CheckState::of_check(&run.status, run.conclusion.as_deref());
+            if state == CheckState::Waiting {
+                continue;
+            }
+            let failed =
+                matches!(&state, CheckState::Failed(conclusion) if conclusion != "cancelled");
+            let mut failed_step = None;
+            // A failed GitHub Actions job names the step that failed; its
+            // check run has the job's id. Reading them is best effort, and
+            // bounded, so a wide matrix that failed costs a few reads.
+            if failed
+                && run.app_slug.as_deref() == Some(ACTIONS_APP)
+                && steps_read < MAX_JOB_STEP_READS
+            {
+                steps_read += 1;
+                match self
+                    .github
+                    .actions_job_steps(&token, owner_name, name, run.id)
+                    .await
+                {
+                    Ok(steps) => {
+                        failed_step = steps
+                            .into_iter()
+                            .find(|step| step.conclusion.as_deref() == Some("failure"))
+                            .map(|step| step.name);
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, job = run.id, "an actions job's steps could not be read");
+                    }
+                }
+            }
+            let detail = failed
+                .then(|| {
+                    [run.output_title, run.output_summary]
+                        .into_iter()
+                        .flatten()
+                        .filter(|text| !text.trim().is_empty())
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                })
+                .filter(|detail| !detail.is_empty());
+            jobs.push(FinishedJob {
+                name: run.name,
+                state,
+                failed_step,
+                detail,
+            });
+        }
+        for status in statuses.items {
+            let state = CheckState::of_status(&status.state);
+            if state == CheckState::Waiting {
+                continue;
+            }
+            jobs.push(FinishedJob {
+                name: status.context,
+                state,
+                failed_step: None,
+                detail: None,
+            });
+        }
+        Ok(jobs)
     }
 
     #[tracing::instrument(err, skip(self, owner))]

@@ -11,7 +11,7 @@ use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::{GithubPullRequests, GithubPullRequestsErr, OwnerTokens};
-use crate::domain::models::{BranchDeletion, CodeRepository, HeadChecks};
+use crate::domain::models::{BranchDeletion, CheckState, CodeRepository, HeadChecks};
 use crate::domain::ports::{PullRequests, Retryable};
 
 /// An owner's linked token, or none, counting the reads of it.
@@ -278,4 +278,99 @@ async fn a_failing_actions_read_is_an_outage() {
         GithubPullRequestsErr::Github(GithubError::Upstream(_))
     ));
     assert!(error.retryable());
+}
+
+/// The jobs that finished on a commit: a failed GitHub Actions job names
+/// the step that failed and what its output says, a cancelled one and
+/// another app's are read without their steps, a running one is left out,
+/// and a commit status counts as a job.
+#[tokio::test]
+async fn finished_jobs_name_a_failed_actions_jobs_step() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/macro/app/commits/abc123/check-runs"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "total_count": 4,
+            "check_runs": [
+                { "id": 41, "name": "test", "status": "completed", "conclusion": "failure",
+                  "app": { "id": 15368, "slug": "github-actions" },
+                  "output": { "title": "Process completed with exit code 1", "summary": "" } },
+                { "id": 42, "name": "e2e", "status": "completed", "conclusion": "cancelled",
+                  "app": { "id": 15368, "slug": "github-actions" } },
+                { "id": 43, "name": "deploy-preview", "status": "completed", "conclusion": "failure",
+                  "app": { "id": 9, "slug": "previews" } },
+                { "id": 44, "name": "lint", "status": "in_progress", "conclusion": null,
+                  "app": { "id": 15368, "slug": "github-actions" } }
+            ]
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/repos/macro/app/commits/abc123/status"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(
+            r#"{"state":"success","statuses":[{"context":"ci/docs","state":"success","target_url":null},{"context":"ci/wait","state":"pending","target_url":null}]}"#,
+        ))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/repos/macro/app/actions/jobs/41"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": 41,
+            "steps": [
+                { "name": "Set up job", "conclusion": "success" },
+                { "name": "Run tests", "conclusion": "failure" },
+                { "name": "Post checkout", "conclusion": "skipped" }
+            ]
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let github = GithubPullRequests::with_client(
+        Tokens {
+            linked: Some("token"),
+            ..Tokens::default()
+        },
+        GithubOauthImpl::with_api_base_url(server.uri()),
+    );
+
+    let jobs = github
+        .finished_jobs(&julia(), &repository(), "abc123")
+        .await
+        .expect("read");
+
+    let read: Vec<_> = jobs
+        .iter()
+        .map(|job| {
+            (
+                job.name.as_str(),
+                job.state.clone(),
+                job.failed_step.as_deref(),
+                job.detail.as_deref(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        read,
+        vec![
+            (
+                "test",
+                CheckState::Failed("failure".to_string()),
+                Some("Run tests"),
+                Some("Process completed with exit code 1"),
+            ),
+            (
+                "e2e",
+                CheckState::Failed("cancelled".to_string()),
+                None,
+                None
+            ),
+            (
+                "deploy-preview",
+                CheckState::Failed("failure".to_string()),
+                None,
+                None,
+            ),
+            ("ci/docs", CheckState::Passed, None, None),
+        ]
+    );
 }

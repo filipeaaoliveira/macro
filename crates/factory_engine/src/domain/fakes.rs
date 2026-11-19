@@ -39,9 +39,9 @@ use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
 use crate::domain::models::{
-    BranchDeletion, Check, CheckState, CheckSuite, CodeRepository, HeadChecks, Merging,
-    OpenPullRequest, Opening, PullRequest, PullRequestState, RepositoryAccess, RequiredChecks,
-    run_branch,
+    BranchDeletion, Check, CheckState, CheckSuite, CodeRepository, FinishedJob, HeadChecks,
+    Merging, OpenPullRequest, Opening, PullRequest, PullRequestState, RepositoryAccess,
+    RequiredChecks, run_branch,
 };
 use crate::domain::ports::{
     FileRefusal, FollowUpTask, PullRequests, Retryable, TaskAccess, TaskDirectory, UserDirectory,
@@ -131,6 +131,8 @@ pub(crate) struct FakeRepo {
     pub(crate) sessions: Arc<Mutex<Vec<FakeSession>>>,
     /// Each Step's steering by its owner.
     pub(crate) steering: Arc<Mutex<HashMap<StepKey, steering::FakeSteering>>>,
+    /// The CI waits kept, in order, the first of each Step.
+    pub(crate) ci_waits: Arc<Mutex<Vec<factory_records::domain::quality::CiWait>>>,
     /// Each Step's rounds of checks, in order.
     pub(crate) check_rounds: Arc<Mutex<Vec<(StepKey, CheckRound)>>>,
     /// The task documents that exist.
@@ -605,6 +607,20 @@ impl RunRepository for FakeRepo {
             .lock()
             .expect("merge heads")
             .insert(id, sha.to_string());
+        Ok(())
+    }
+
+    async fn record_ci_wait(
+        &self,
+        wait: &factory_records::domain::quality::CiWait,
+    ) -> Result<(), FakeError> {
+        if self.fails("record_ci_wait") {
+            return Err(FakeError);
+        }
+        let mut waits = self.ci_waits.lock().expect("ci waits");
+        if !waits.iter().any(|kept| kept.key == wait.key) {
+            waits.push(wait.clone());
+        }
         Ok(())
     }
 
@@ -1555,6 +1571,12 @@ impl RunRepository for FakeRepo {
 /// branch opens in it.
 #[derive(Default)]
 pub(crate) struct FakeGithubState {
+    /// The CI jobs that finished on the head, as CI health reads them.
+    pub(crate) finished: Vec<FinishedJob>,
+    /// Whether reading them fails, as an outage would.
+    pub(crate) finished_fails: bool,
+    /// The commits whose finished jobs were read, in order.
+    pub(crate) finished_reads: Vec<String>,
     /// Whether the Run's owner cannot reach the repository.
     pub(crate) unreachable: bool,
     /// Whether the Run's owner may only read the repository.
@@ -1782,6 +1804,20 @@ impl PullRequests for FakeGithub {
         _all_runs: bool,
     ) -> Result<Option<(PullRequest, HeadChecks)>, FakeGithubError> {
         Ok(self.read())
+    }
+
+    async fn finished_jobs(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        sha: &str,
+    ) -> Result<Vec<FinishedJob>, FakeGithubError> {
+        let mut state = self.state();
+        state.finished_reads.push(sha.to_string());
+        if state.finished_fails {
+            return Err(FakeGithubError::Down);
+        }
+        Ok(state.finished.clone())
     }
 
     async fn branch_checks(
