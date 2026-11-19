@@ -13,7 +13,8 @@ use crate::domain::session_usage::{SessionTokens, SessionUsageReader};
 /// time.
 pub const MAX_SESSIONS: usize = 10_000;
 
-/// Reads the tokens recorded for agent sessions from `ai_usage`.
+/// Reads the tokens recorded for agent sessions from `ai_usage`, and what
+/// the priced calls cost.
 #[derive(Debug, Clone)]
 pub struct PgSessionUsageReader {
     pool: PgPool,
@@ -77,11 +78,13 @@ impl SessionUsageReader for PgSessionUsageReader {
                 sum(calls.input_tokens)::bigint AS "input!",
                 sum(calls.output_tokens)::bigint AS "output!",
                 sum(calls.cache_read_input_tokens)::bigint AS "cache_read!",
-                sum(calls.cache_write_input_tokens)::bigint AS "cache_write!"
+                sum(calls.cache_write_input_tokens)::bigint AS "cache_write!",
+                coalesce(sum(calls.total::float8), 0)::float8 AS "cost_usd!",
+                count(*) FILTER (WHERE calls.total IS NULL) AS "unpriced_calls!"
             FROM unnest($1::uuid[]) AS sessions(id)
             CROSS JOIN LATERAL (
                 SELECT user_id, input_tokens, output_tokens, cache_read_input_tokens,
-                       cache_write_input_tokens
+                       cache_write_input_tokens, total
                 FROM ai_usage
                 WHERE agent_session_id = sessions.id
                 OFFSET 0
@@ -104,6 +107,8 @@ impl SessionUsageReader for PgSessionUsageReader {
                 output: tokens(row.output),
                 cache_read: tokens(row.cache_read),
                 cache_write: tokens(row.cache_write),
+                cost_usd: row.cost_usd,
+                unpriced_calls: tokens(row.unpriced_calls),
             })
             .collect())
     }
