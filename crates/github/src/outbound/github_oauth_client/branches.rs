@@ -65,6 +65,13 @@ struct CompareResponse {
 }
 
 #[derive(serde::Deserialize)]
+struct CompareChangesResponse {
+    merge_base_commit: BranchCommit,
+    #[serde(default)]
+    files: Option<Vec<CompareFile>>,
+}
+
+#[derive(serde::Deserialize)]
 struct CompareFile {
     filename: String,
     #[serde(default)]
@@ -83,6 +90,20 @@ pub struct ComparedFile {
     /// Its unified diff's hunks; none when GitHub gives none, as for a
     /// binary file or one too large to show.
     pub patch: Option<String>,
+}
+
+/// What one commit changed against its merge base with another, as
+/// GitHub's comparison lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComparedChanges {
+    /// The merge base: the commit the paths changed against.
+    pub merge_base: String,
+    /// The paths changed, a renamed file under both its names, the earlier
+    /// first; as many as GitHub listed.
+    pub paths: Vec<String>,
+    /// Whether the paths are every change: GitHub lists at most 300 files
+    /// of a comparison, and none of one too large to list.
+    pub complete: bool,
 }
 
 impl GithubOauthImpl {
@@ -263,6 +284,45 @@ impl GithubOauthImpl {
             paths.push(file.filename);
         }
         Ok(Some(paths))
+    }
+
+    /// What `head` changed against its merge base with `base`: the merge
+    /// base, and the paths GitHub lists, a renamed file under both its
+    /// names, with whether they are all of them.
+    #[tracing::instrument(skip(self, access_token), err)]
+    pub async fn compare_changes(
+        &self,
+        access_token: &str,
+        owner: &str,
+        repo: &str,
+        base: &str,
+        head: &str,
+    ) -> Result<ComparedChanges, GithubError> {
+        let compared: CompareChangesResponse = self
+            .read(
+                access_token,
+                &format!("/repos/{owner}/{repo}/compare/{base}...{head}"),
+                &[],
+                "failed to compare commits",
+            )
+            .await?;
+        // GitHub answers a comparison too large to list with no files, and
+        // cuts a longer list at the most it lists.
+        let complete = compared
+            .files
+            .as_ref()
+            .is_some_and(|files| files.len() < COMPARE_FILES_LISTED);
+        let files = compared.files.unwrap_or_default();
+        let mut paths = Vec::new();
+        for file in files {
+            paths.extend(file.previous_filename);
+            paths.push(file.filename);
+        }
+        Ok(ComparedChanges {
+            merge_base: compared.merge_base_commit.sha,
+            paths,
+            complete,
+        })
     }
 
     /// The best common ancestor of the commits `base` and `head`, both full
