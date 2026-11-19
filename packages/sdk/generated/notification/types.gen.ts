@@ -783,6 +783,11 @@ export type FactoryGateWaitingMetadata = {
      */
     asker?: string | null;
     /**
+     * Whether the Run's token budget ended it: no Gate waits, and the
+     * notice tells the owner why the Run stopped; absent otherwise.
+     */
+    budgetStopped?: boolean;
+    /**
      * Whether the Gate only tells the owner, for their information, and
      * the Run goes on without an answer; absent for a Gate that waits.
      */

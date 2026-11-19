@@ -16,6 +16,11 @@ export interface RunTokenBudget {
    * @minimum 0
    */
   budget: number;
+  /** False when the Run's agent sessions recorded no usage at all, as an
+agent whose runtime is not measured (local, self-hosted) records
+none: its use reads as 0, and the budget never stops it. True when
+it was measured, or not read. */
+  measured: boolean;
   stop?: RunTokenBudgetStop;
   /**
    * The tokens they used so far, as Insights counts them; none when

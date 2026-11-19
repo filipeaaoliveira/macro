@@ -2486,6 +2486,12 @@ export const listTypedNotificationsResponse = zod
                             .describe(
                               "For an agent's question, the Role of the agent that asks; absent\nfor a Gate of the Run's Flow."
                             ),
+                          budgetStopped: zod
+                            .boolean()
+                            .optional()
+                            .describe(
+                              "Whether the Run's token budget ended it: no Gate waits, and the\nnotice tells the owner why the Run stopped; absent otherwise."
+                            ),
                           notifyOnly: zod
                             .boolean()
                             .optional()
@@ -4842,6 +4848,12 @@ export const bulkGetTypedNotificationsByEventItemIdsResponse = zod
                             .describe(
                               "For an agent's question, the Role of the agent that asks; absent\nfor a Gate of the Run's Flow."
                             ),
+                          budgetStopped: zod
+                            .boolean()
+                            .optional()
+                            .describe(
+                              "Whether the Run's token budget ended it: no Gate waits, and the\nnotice tells the owner why the Run stopped; absent otherwise."
+                            ),
                           notifyOnly: zod
                             .boolean()
                             .optional()
@@ -7148,6 +7160,12 @@ export const getTypedNotificationsByEventItemIdResponse = zod
                             .describe(
                               "For an agent's question, the Role of the agent that asks; absent\nfor a Gate of the Run's Flow."
                             ),
+                          budgetStopped: zod
+                            .boolean()
+                            .optional()
+                            .describe(
+                              "Whether the Run's token budget ended it: no Gate waits, and the\nnotice tells the owner why the Run stopped; absent otherwise."
+                            ),
                           notifyOnly: zod
                             .boolean()
                             .optional()
@@ -9281,6 +9299,12 @@ export const getTypedNotificationByIdResponse = zod
                     .nullish()
                     .describe(
                       "For an agent's question, the Role of the agent that asks; absent\nfor a Gate of the Run's Flow."
+                    ),
+                  budgetStopped: zod
+                    .boolean()
+                    .optional()
+                    .describe(
+                      "Whether the Run's token budget ended it: no Gate waits, and the\nnotice tells the owner why the Run stopped; absent otherwise."
                     ),
                   notifyOnly: zod
                     .boolean()

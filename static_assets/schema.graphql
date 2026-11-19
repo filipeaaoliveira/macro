@@ -5582,6 +5582,10 @@ type GraphqlFactoryGateWaitingMetadata {
 	an answer.
 	"""
 	notifyOnly: Boolean!
+	"""
+	Whether the Run's token budget ended it: no Gate waits.
+	"""
+	budgetStopped: Boolean!
 }
 
 """
