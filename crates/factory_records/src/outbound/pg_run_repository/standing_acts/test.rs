@@ -66,12 +66,12 @@ async fn a_session_reads_as_its_bot_for_its_owner_only(pool: PgPool) {
     let repo = PgRunRepository::new(pool.clone());
     let session = Uuid::now_v7();
     let bot = Uuid::now_v7();
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO agent_session (id, owner_id, bot_id, model, harness, workspace)
          VALUES ($1, 'macro|julia@example.com', $2, 'test', 'test', '/workspace')",
+        session,
+        bot,
     )
-    .bind(session)
-    .bind(bot)
     .execute(&pool)
     .await
     .expect("session");
