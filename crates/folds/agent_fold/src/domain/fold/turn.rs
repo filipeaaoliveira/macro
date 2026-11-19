@@ -1,6 +1,7 @@
 //! Opening, closing, and failing turns.
 
 use crate::domain::error::FoldError;
+use crate::domain::harness::codex;
 use crate::domain::model::{Author, FailureNotice, FoldedMessage, MessagePart, StopReason, TurnId};
 use agent_client_protocol::RawJsonRpcParams;
 use agent_client_protocol::schema::v1::{Error, PromptRequest, RequestId};
@@ -313,10 +314,19 @@ impl FoldState {
             Some(agent) => (agent, Changed::updated(agent)),
             None => self.mint_agent_message(turn.id),
         };
-        self.messages[agent].stop = Some(StopReason::Failed {
-            message: error.message.clone(),
-            notice: FailureNotice::from_error_data(error.data.as_ref()),
-        });
+        // Codex's adapter answers with JSON-RPC's bare `Internal error` and
+        // puts Codex's own message and the error's class in `data`.
+        let (message, notice) = match codex::turn_failure(error.data.as_ref()) {
+            Some(codex) => (
+                codex.message.unwrap_or_else(|| error.message.clone()),
+                codex.notice,
+            ),
+            None => (
+                error.message.clone(),
+                FailureNotice::from_error_data(error.data.as_ref()),
+            ),
+        };
+        self.messages[agent].stop = Some(StopReason::Failed { message, notice });
         self.messages[agent].posted_at = self.finished_at(logged_at);
         Some(changed)
     }
