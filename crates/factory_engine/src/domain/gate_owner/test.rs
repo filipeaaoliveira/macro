@@ -50,6 +50,7 @@ fn run(quiet_gates: bool) -> Run {
         automation: None,
         definition: None,
         end: None,
+        budget_stop: None,
     }
 }
 

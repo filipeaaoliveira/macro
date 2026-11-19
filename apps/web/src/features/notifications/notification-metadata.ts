@@ -135,9 +135,13 @@ export function getNotificationAction(n: UnifiedNotification): string {
           : 'could not be set up';
       })
       // A notify-only Gate tells the owner something while the Run goes
-      // on; any other waits on their answer.
+      // on, and a Run its token budget ended waits on no one; any other
+      // waits on their answer.
       .with('factory_gate_waiting', () => {
         const meta = n.notification_metadata;
+        if (meta.tag === 'factory_gate_waiting' && meta.content.budgetStopped) {
+          return 'stopped at its token budget in';
+        }
         if (meta.tag === 'factory_gate_waiting' && meta.content.notifyOnly) {
           return 'for your information — the run goes on in';
         }

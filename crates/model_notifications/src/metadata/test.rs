@@ -1743,10 +1743,24 @@ fn factory_gate_waiting_serializes_with_the_run_and_its_gate() {
     assert_eq!(json["notifyOnly"], true);
     let waiting = serde_json::to_value(FactoryGateWaitingMetadata {
         notify_only: false,
-        ..told
+        ..told.clone()
     })
     .unwrap();
     assert!(waiting.get("notifyOnly").is_none());
+    assert!(waiting.get("budgetStopped").is_none());
+
+    // A Run its token budget ended says it stopped, whatever else the
+    // notice carries, and keeps its flag through the queue.
+    let stopped = FactoryGateWaitingMetadata {
+        budget_stopped: true,
+        ..told
+    };
+    assert_eq!(
+        stopped.format_title(None).unwrap(),
+        "A factory run stopped at its token budget"
+    );
+    let json = serde_json::to_value(&stopped).unwrap();
+    assert_eq!(json["budgetStopped"], true);
 }
 
 #[test]

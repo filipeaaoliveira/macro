@@ -14,6 +14,9 @@ export interface FactoryGateWaitingMetadata {
   /** For an agent's question, the Role of the agent that asks; absent
 for a Gate of the Run's Flow. */
   asker?: FactoryGateWaitingMetadataAsker;
+  /** Whether the Run's token budget ended it: no Gate waits, and the
+notice tells the owner why the Run stopped; absent otherwise. */
+  budgetStopped?: boolean;
   /** Whether the Gate only tells the owner, for their information, and
 the Run goes on without an answer; absent for a Gate that waits. */
   notifyOnly?: boolean;

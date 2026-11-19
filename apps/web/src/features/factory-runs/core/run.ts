@@ -346,6 +346,31 @@ export type RunStandingAct = {
   at: string;
 };
 
+/**
+ * Why a Run's token budget ended it: its agents used the budget or more
+ * (`used`, counted as Insights counts tokens), or its usage could not be
+ * read for too many agent Steps in a row.
+ */
+export type BudgetStop =
+  | { reason: 'spent'; used: number }
+  | { reason: 'unread' };
+
+/**
+ * A Run's token budget: the most tokens its agents may use, what they used
+ * so far (unknown when the usage couldn't be read, or the Run was listed),
+ * and why the budget ended the Run, when it did.
+ */
+export type RunTokenBudget = {
+  budget: number;
+  used?: number;
+  /**
+   * False when the Run's agent sessions record no token use at all (an
+   * agent whose runtime is not measured): its budget cannot apply.
+   */
+  measured?: boolean;
+  stop?: BudgetStop;
+};
+
 /** The Automation that started a Run, as it was then. */
 export type RunAutomation = {
   id: string;
@@ -389,6 +414,8 @@ export type Run = {
   reviewRounds?: ReviewRound[];
   /** What agents did to it under its Definition's Standing Roles, in order. */
   standingActs?: RunStandingAct[];
+  /** Its token budget; none for a Run that keeps none. */
+  tokenBudget?: RunTokenBudget;
 };
 
 /** A Flow a person can start a Run of. */

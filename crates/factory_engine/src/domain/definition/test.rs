@@ -105,6 +105,7 @@ async fn a_definition_reads_its_flows_agents_rules_and_scorers() {
         Some(OrchestratorDefinition {
             blockers: true,
             queue_limit: Some(5),
+            token_budget: None,
             ..OrchestratorDefinition::default()
         })
     );
@@ -297,6 +298,38 @@ async fn rules_the_factory_does_not_take_do_not_read() {
         ))
         .await,
         Err(DefinitionError::QueueLimit)
+    );
+    for budget in ["9999", "10000000001"] {
+        assert_eq!(
+            read(with(
+                "rules.json",
+                &format!(
+                    r#"{{ "standingRules": {{ "plan": false, "blockers": false, "merge": false, "tokenBudget": {budget} }} }}"#
+                )
+            ))
+            .await,
+            Err(DefinitionError::TokenBudget),
+            "a budget of {budget}"
+        );
+    }
+}
+
+/// A token budget in range reads with the rules, and is kept on each Run
+/// that starts under them.
+#[tokio::test]
+async fn a_token_budget_in_range_reads() {
+    let definition = read(with(
+        "rules.json",
+        r#"{ "standingRules": { "plan": false, "blockers": true, "merge": false, "tokenBudget": 2000000 } }"#,
+    ))
+    .await
+    .expect("a definition with a budget");
+    assert_eq!(
+        definition
+            .rules
+            .standing_rules
+            .and_then(|rules| rules.token_budget),
+        Some(2_000_000)
     );
 }
 

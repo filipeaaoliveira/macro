@@ -407,6 +407,7 @@ async fn at_the_queue_limit_no_new_run_starts() {
         &repo,
         OrchestratorDefinition {
             queue_limit: Some(2),
+            token_budget: None,
             ..OrchestratorDefinition::DEFAULT
         },
     );
@@ -546,6 +547,7 @@ async fn a_queue_limit_out_of_range_is_refused() {
     let with_limit = |limit: u16| {
         Some(OrchestratorDefinition {
             queue_limit: Some(limit),
+            token_budget: None,
             ..OrchestratorDefinition::DEFAULT
         })
     };

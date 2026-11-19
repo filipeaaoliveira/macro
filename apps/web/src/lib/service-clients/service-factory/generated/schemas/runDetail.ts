@@ -9,6 +9,7 @@ import type { ReviewRound } from './reviewRound';
 import type { Run } from './run';
 import type { RunDetailBaseRequiredChecks } from './runDetailBaseRequiredChecks';
 import type { RunDetailMainHold } from './runDetailMainHold';
+import type { RunDetailTokenBudget } from './runDetailTokenBudget';
 import type { StandingActRecord } from './standingActRecord';
 import type { Step } from './step';
 
@@ -28,4 +29,5 @@ its Gates. */
   standingActs: StandingActRecord[];
   /** Its Steps, in the order they started. */
   steps: Step[];
+  tokenBudget?: RunDetailTokenBudget;
 }

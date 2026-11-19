@@ -22,6 +22,7 @@ use crate::domain::definition::DefinitionError;
 use crate::domain::flow::{Entry, Flow, FlowError, StepName};
 use crate::domain::gate_owner::OwnerNote;
 use crate::domain::setup::RepositorySetup;
+use crate::domain::token_budget::RunTokenBudget;
 
 /// What a Run's workflow starts with. The Run's request stays in its
 /// records, so a Run's history carries ids, not its text.
@@ -31,6 +32,11 @@ pub struct RunStart {
     pub run_id: RunId,
     /// The Flow it walks.
     pub flow: Flow,
+    /// Whether the Run keeps a token budget, which the workflow checks
+    /// before each agent Step. Left out when it keeps none, so the start of
+    /// a Run without one reads as before.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub token_budget: bool,
 }
 
 /// One Step for a worker to run. A field it does not know is refused, so a
@@ -617,6 +623,9 @@ pub struct RunDetail {
     /// Roles, in order: who started, cancelled or linked it, and answered
     /// its Gates.
     pub standing_acts: Vec<StandingActRecord>,
+    /// Its token budget and what its agent Steps used of it; none for a
+    /// Run that keeps no budget.
+    pub token_budget: Option<RunTokenBudget>,
 }
 
 /// The Control File patterns a person's Runs are checked against: their
@@ -1014,6 +1023,15 @@ pub enum FactoryError {
         min: u16,
         /// The highest Queue limit.
         max: u16,
+    },
+    /// A token budget below the smallest or above the largest one a
+    /// definition may set.
+    #[error("the token budget must be from {min} to {max}")]
+    InvalidTokenBudget {
+        /// The smallest token budget.
+        min: u64,
+        /// The largest token budget.
+        max: u64,
     },
     /// A Run already runs on the task, so an Automation starts none.
     #[error("a run is already running on this task")]

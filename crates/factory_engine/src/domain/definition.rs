@@ -37,7 +37,7 @@ use factory_records::domain::evaluation::BENCHMARK_FLOW;
 use factory_records::domain::models::Role;
 use factory_records::domain::self_improvement::IMPROVE_FLOW;
 use factory_records::domain::standing_rules::{
-    MAX_QUEUE_LIMIT, MIN_QUEUE_LIMIT, OrchestratorDefinition,
+    MAX_QUEUE_LIMIT, MAX_TOKEN_BUDGET, MIN_QUEUE_LIMIT, MIN_TOKEN_BUDGET, OrchestratorDefinition,
 };
 use serde::Deserialize;
 
@@ -281,6 +281,9 @@ pub enum DefinitionError {
     /// The Queue limit is out of range.
     #[error("{RULES_FILE}: queueLimit must be from {MIN_QUEUE_LIMIT} to {MAX_QUEUE_LIMIT}")]
     QueueLimit,
+    /// The token budget is out of range.
+    #[error("{RULES_FILE}: tokenBudget must be from {MIN_TOKEN_BUDGET} to {MAX_TOKEN_BUDGET}")]
+    TokenBudget,
     /// `factory.json` names a Flow the factory keeps for itself: the
     /// benchmark Flow, or the self-improvement Flow.
     #[error(
@@ -637,6 +640,12 @@ pub async fn read_definition<F: DefinitionFiles>(
         .and_then(|standing_rules| standing_rules.queue_limit);
     if queue_limit.is_some_and(|limit| !(MIN_QUEUE_LIMIT..=MAX_QUEUE_LIMIT).contains(&limit)) {
         return Err(DefinitionError::QueueLimit.into());
+    }
+    let token_budget = rules
+        .standing_rules
+        .and_then(|standing_rules| standing_rules.token_budget);
+    if token_budget.is_some_and(|budget| !(MIN_TOKEN_BUDGET..=MAX_TOKEN_BUDGET).contains(&budget)) {
+        return Err(DefinitionError::TokenBudget.into());
     }
 
     // A Definition's Scorers and Experiments judge and split its own
