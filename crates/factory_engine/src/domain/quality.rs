@@ -59,18 +59,30 @@ const FLAKY_PULL_REQUESTS: usize = 2;
 // What CI health records.
 
 /// Steps a CI job takes before its own work, by how their names start: a
-/// failure in one is the CI's setup, not the pull request's.
-const SETUP_STEPS: [&str; 9] = [
-    "set up ",
-    "setup ",
+/// failure in one is the CI's setup, not the pull request's. Only steps
+/// GitHub Actions or a known action names: one named "Setup test database"
+/// may run the pull request's own migrations.
+const SETUP_STEPS: [&str; 8] = [
+    "set up job",
+    "initialize containers",
+    "checkout",
     "run actions/checkout",
     "run actions/setup-",
     "run actions/cache",
-    "install ",
-    "download ",
-    "initialize containers",
-    "checkout",
+    "cache dependencies",
+    "install dependencies",
 ];
+
+/// Toolchains a step named "Set up", "Setup" or "Install" and one of them
+/// installs, as `actions/setup-node` does under the name "Setup Node.js".
+const SETUP_TOOLCHAINS: [&str; 16] = [
+    "node", "node.js", "nodejs", "python", "go", "java", "jdk", "rust", "bun", "deno", "ruby",
+    "dotnet", ".net", "pnpm", "yarn", "uv",
+];
+
+/// The most bytes a failure's name is kept to: a test's file and title are
+/// shorter, and more is likely log output.
+const FAILURE_BYTES: usize = 200;
 
 /// How a line of a failed job's output, or of an annotation, starts when
 /// GitHub Actions could not set the job up: an action it could not download
@@ -111,7 +123,12 @@ const ACTIONS_ANNOTATION_PATH: &str = ".github";
 
 /// `text` cut to at most [`CI_NAME_BYTES`], on a character's boundary.
 fn kept_name(text: &str) -> &str {
-    let mut end = text.len().min(CI_NAME_BYTES);
+    cut(text, CI_NAME_BYTES)
+}
+
+/// `text` cut to at most `bytes`, on a character's boundary.
+fn cut(text: &str, bytes: usize) -> &str {
+    let mut end = text.len().min(bytes);
     while !text.is_char_boundary(end) {
         end -= 1;
     }
@@ -147,10 +164,26 @@ pub(crate) fn generic_step(step: &str) -> bool {
         .any(|word| GENERIC_STEP_WORDS.contains(&word))
 }
 
-/// The first failure `annotations` name, as `path: name`, in a fixed order
+/// Whether the step `step` sets the job up rather than running the pull
+/// request's own work: one of [`SETUP_STEPS`], or "Set up", "Setup" or
+/// "Install" and a known toolchain.
+fn setup_step(step: &str) -> bool {
+    let step = step.trim().to_lowercase();
+    if SETUP_STEPS.iter().any(|setup| step.starts_with(setup)) {
+        return true;
+    }
+    let tool = ["set up ", "setup ", "install "]
+        .iter()
+        .find_map(|verb| step.strip_prefix(verb));
+    tool.and_then(|tool| tool.split_whitespace().next())
+        .is_some_and(|tool| SETUP_TOOLCHAINS.contains(&tool))
+}
+
+/// The first failure `annotations` name, as `path: title`, in a fixed order
 /// whatever order GitHub gives: a test that failed, by its file and its
-/// title, else its message's first line. GitHub Actions' own errors name no
-/// test and are left out.
+/// title, at most [`FAILURE_BYTES`]. An annotation with no title names none:
+/// its message is log output, which another app may not mask. GitHub
+/// Actions' own errors name no test and are left out.
 fn failure_of(annotations: &[FailureAnnotation]) -> Option<String> {
     annotations
         .iter()
@@ -159,22 +192,16 @@ fn failure_of(annotations: &[FailureAnnotation]) -> Option<String> {
             if path.is_empty() || path == ACTIONS_ANNOTATION_PATH {
                 return None;
             }
-            let name = annotation
+            let title = annotation
                 .title
                 .as_deref()
+                .and_then(|title| title.lines().next())
                 .map(str::trim)
-                .filter(|title| !title.is_empty())
-                .or_else(|| {
-                    annotation
-                        .message
-                        .lines()
-                        .map(str::trim)
-                        .find(|line| !line.is_empty())
-                })?;
-            Some(format!("{path}: {name}"))
+                .filter(|title| !title.is_empty())?;
+            Some(format!("{path}: {title}"))
         })
         .min()
-        .map(|failure| kept_name(&failure).to_string())
+        .map(|failure| cut(&failure, FAILURE_BYTES).to_string())
 }
 
 /// How the finished `job` is kept: none for one still running, or with no
@@ -196,10 +223,7 @@ pub(crate) fn ci_job(job: &FinishedJob) -> Option<CiJob> {
         CheckState::Passed => CiJobResult::Passed,
         CheckState::Failed(conclusion) if conclusion == "cancelled" => CiJobResult::Cancelled,
         CheckState::Failed(_) => {
-            let setup_step = failed_step.as_deref().is_some_and(|step| {
-                let step = step.to_lowercase();
-                SETUP_STEPS.iter().any(|setup| step.starts_with(setup))
-            });
+            let setup_step = failed_step.as_deref().is_some_and(setup_step);
             let setup_error = job
                 .detail
                 .iter()

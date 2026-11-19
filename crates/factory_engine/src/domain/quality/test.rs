@@ -222,8 +222,8 @@ fn a_tests_output_is_never_read_as_setup() {
 }
 
 /// A failed job names the first test its check run annotated, by file and
-/// title, else its message's first line, in the same order however GitHub
-/// lists them; GitHub Actions' own errors name none.
+/// title, in the same order however GitHub lists them; GitHub Actions' own
+/// errors, and an annotation with no title, name none.
 #[test]
 fn a_failed_job_names_the_first_test_it_annotated() {
     let failure = || CheckState::Failed("failure".to_string());
@@ -249,8 +249,22 @@ fn a_failed_job_names_the_first_test_it_annotated() {
                 "\nlexer::test::spaces panicked\nat line 3"
             ),
         ]),
-        Some("src/lexer.rs: lexer::test::spaces panicked".to_string())
+        Some("src/parser.rs: parser::test::empty".to_string())
     );
+    // A message is log output, never kept: an annotation with no title
+    // names no test.
+    assert_eq!(
+        named(vec![annotation(
+            "src/lexer.rs",
+            None,
+            "token=abc123 lexer::test::spaces panicked"
+        )]),
+        None
+    );
+    // A long title is cut to a test's name's length.
+    let long = named(vec![annotation("src/a.rs", Some(&"é".repeat(300)), "")]).expect("named");
+    assert!(long.len() <= 200, "{}", long.len());
+    assert!(long.starts_with("src/a.rs: é"));
     assert_eq!(
         named(vec![annotation(
             ".github",
@@ -265,6 +279,39 @@ fn a_failed_job_names_the_first_test_it_annotated() {
     })
     .expect("kept");
     assert_eq!(passed.failure, None);
+}
+
+/// Only steps that set the job up are setup: GitHub Actions' own, checkout,
+/// cache, installing dependencies or a known toolchain. A step named "Setup"
+/// that runs the pull request's own work, as its database migrations, is
+/// the pull request's failure.
+#[test]
+fn only_steps_that_set_the_job_up_are_setup() {
+    let failure = || CheckState::Failed("failure".to_string());
+    let result = |step: &str| ci_job(&finished(failure(), Some(step), None)).map(|job| job.result);
+    for step in [
+        "Set up job",
+        "Checkout",
+        "Run actions/checkout@v4",
+        "Run actions/setup-python@v5",
+        "Run actions/cache@v4",
+        "Install dependencies",
+        "Setup Node.js",
+        "Set up Go 1.23",
+        "Install Rust",
+        "Initialize containers",
+    ] {
+        assert_eq!(result(step), Some(CiJobResult::Setup), "{step}");
+    }
+    for step in [
+        "Setup test database",
+        "Set up database schema",
+        "Install the app's migrations",
+        "Download fixtures",
+        "Setup",
+    ] {
+        assert_eq!(result(step), Some(CiJobResult::Failed), "{step}");
+    }
 }
 
 /// A step that runs the project's work as a whole is generic; one named for

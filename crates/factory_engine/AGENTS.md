@@ -302,13 +302,17 @@ merged pull request and the autonomy rate. Each wait of `ci` that ends
 `green`, `red` or `timeout` keeps the jobs that finished on its head
 (`PullRequests::finished_jobs`, `RunRepository::record_ci_wait`): passed,
 failed, cancelled, or `setup` when the step that failed sets the job up
-(`SETUP_STEPS`) or GitHub Actions says, at the start of a line, that it
+(`SETUP_STEPS`: GitHub Actions' own, checkout, cache, installing
+dependencies or a known toolchain, never a step named "Setup" that runs
+the pull request's work) or GitHub Actions says, at the start of a line, that it
 could not download or resolve an action (`SETUP_ERRORS`); a bare `404` or
 network error is a test's own output. A failed job keeps the first test its
-check run annotated as failed, by file and name. Beside them the wait keeps,
+check run annotated as failed, as `path: title`, at most 200 bytes (never
+its message, which is log output). Beside them the wait keeps,
 marked replaced, the runs cancelled on a head a newer push replaced: earlier
-heads of the wait, and the head of the Run's last wait (`last_ci_head`), at
-most two, read without details. Keeping it is best effort and never fails
+heads of the wait, and the head of the Run's last wait (`last_ci_wait`),
+less the jobs that wait kept there (a matrix's fail-fast cancels before
+any push), at most two, read without details. Keeping it is best effort and never fails
 the Step: all of it is bounded to 25 s (`CI_RECORD_BOUND`, the jobs' reads
 to 20 s), at most six reads of failed jobs' steps and annotations, and none
 once the keeping would end past the wait's deadline. A retry that reads
