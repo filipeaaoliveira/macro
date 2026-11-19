@@ -621,6 +621,11 @@ jobs:
     - name: show sccache stats
       if: always()
       run: sccache --show-stats || true
+    - name: show cache sizes
+      if: always()
+      run: |-
+        cache="${CI_CACHE_DIR:-$RUNNER_TEMP/cache}"
+        du -sh "$cache"/* "$cache"/target/* 2>/dev/null || true
     - name: Teardown Nix
       if: always()
       uses: './.github/actions/teardown-nix'
@@ -637,7 +642,7 @@ jobs:
       CARGO_PROFILE_TEST_DEBUG: '0'
       RUSTFLAGS: '-Dwarnings -C link-arg=-fuse-ld=mold'
       SCCACHE_IDLE_TIMEOUT: '0'
-    timeout-minutes: 240
+    timeout-minutes: 180
     services:
       postgres:
         image: pgvector/pgvector:pg14
@@ -766,6 +771,15 @@ jobs:
     - name: run tests
       run: |
         export CARGO_TARGET_DIR="$CARGO_TARGET_ROOT/test"
+        config="$RUNNER_TEMP/nextest-fork-ci.toml"
+        cat > "$config" <<'EOF'
+        [profile.fork-ci]
+        slow-timeout = { period = "60s", terminate-after = 5 }
+        leak-timeout = "1s"
+        fail-fast = false
+        failure-output = "immediate-final"
+        EOF
+        export NEXTEST_TOOL_CONFIG="fork-ci:$config" NEXTEST_PROFILE=fork-ci
         set -euo pipefail
 
         # --no-tests=pass: a package filter can legitimately select a crate with no
@@ -804,6 +818,12 @@ jobs:
           common+=(--test-threads "$NEXTEST_TEST_THREADS")
         fi
 
+        # A workflow can add a nextest profile from its own config file, such as one
+        # that stops a test that hangs: NEXTEST_TOOL_CONFIG is `tool:/absolute/path`.
+        if [ -n "${NEXTEST_TOOL_CONFIG:-}" ]; then
+          common+=(--tool-config-file "$NEXTEST_TOOL_CONFIG")
+        fi
+
         if [ "$RUST_PACKAGES" = "all" ]; then
           cargo nextest run --workspace --exclude sync_service --tests "${common[@]}"
           exit 0
@@ -820,9 +840,15 @@ jobs:
         fi
 
         cargo nextest run "${common[@]}" "${pkg_args[@]}"
+      timeout-minutes: 150
     - name: show sccache stats
       if: always()
       run: sccache --show-stats || true
+    - name: show cache sizes
+      if: always()
+      run: |-
+        cache="${CI_CACHE_DIR:-$RUNNER_TEMP/cache}"
+        du -sh "$cache"/* "$cache"/target/* 2>/dev/null || true
     - name: Teardown Nix
       if: always()
       uses: './.github/actions/teardown-nix'

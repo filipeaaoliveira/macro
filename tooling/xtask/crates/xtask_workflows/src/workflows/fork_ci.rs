@@ -164,13 +164,14 @@ fn rust_check() -> Job {
         .add_step(Step::new("unused dependencies").run("cargo shear --format github"))
         .add_step(cargo_clippy())
         .add_step(steps::show_sccache_stats())
+        .add_step(show_cache_sizes())
         .add_step(steps::teardown_nix())
 }
 
 /// The tests of the affected packages, after every migration runs on an empty
 /// Postgres. Skipped when no package is affected, or only `.sqlx` changed.
 /// A change to a widely used crate selects dozens of packages, which take this
-/// runner's 4 CPUs well over an hour to build and test, hence the timeout.
+/// runner's 4 CPUs over an hour to build and test cold, hence the timeout.
 fn rust_test() -> Job {
     Job::default()
         .needs(vec!["changes".to_string()])
@@ -180,7 +181,7 @@ fn rust_test() -> Job {
              && needs.changes.outputs.skip_tests != 'true' && ({TRUSTED})"
         )))
         .runs_on(RUNNER)
-        .timeout_minutes(240u32)
+        .timeout_minutes(180u32)
         .add_env((
             "RUST_PACKAGES",
             "${{ needs.changes.outputs.rust_packages }}",
@@ -203,6 +204,7 @@ fn rust_test() -> Job {
         .add_step(prepare_tests())
         .add_step(run_tests())
         .add_step(steps::show_sccache_stats())
+        .add_step(show_cache_sizes())
         .add_step(steps::teardown_nix())
 }
 
@@ -443,11 +445,42 @@ fn prepare_tests() -> Step<Run> {
         .run("just setup_test_envs && just initialize_dbs && just setup_test_template")
 }
 
+/// The nextest profile of the test job, on top of the repository's default
+/// profile. Without a timeout a test that waits forever holds the runner until
+/// the job's timeout, and the log of a job that never ends is lost with it.
+/// Every failure is reported, so one run shows all of them.
+const NEXTEST_PROFILE: &str = indoc::indoc! {r#"
+    [profile.fork-ci]
+    slow-timeout = { period = "60s", terminate-after = 5 }
+    leak-timeout = "1s"
+    fail-fast = false
+    failure-output = "immediate-final"
+"#};
+
 fn run_tests() -> Step<Run> {
-    Step::new("run tests").run(format!(
-        "export CARGO_TARGET_DIR=\"$CARGO_TARGET_ROOT/test\"\n{}",
-        include_str!("scripts/run_tests.sh")
-    ))
+    Step::new("run tests")
+        .run(format!(
+            "export CARGO_TARGET_DIR=\"$CARGO_TARGET_ROOT/test\"\n\
+             config=\"$RUNNER_TEMP/nextest-fork-ci.toml\"\n\
+             cat > \"$config\" <<'EOF'\n{NEXTEST_PROFILE}EOF\n\
+             export NEXTEST_TOOL_CONFIG=\"fork-ci:$config\" NEXTEST_PROFILE=fork-ci\n{}",
+            include_str!("scripts/run_tests.sh")
+        ))
+        .timeout_minutes(RUN_TESTS_TIMEOUT_MINUTES)
+}
+
+/// Below the job's timeout, so the steps after it still report.
+const RUN_TESTS_TIMEOUT_MINUTES: u32 = 150;
+
+/// The size of each cache in the runner's cache slot. The node empties a slot
+/// over its cap when the next job starts, which makes that job cold.
+fn show_cache_sizes() -> Step<Run> {
+    Step::new("show cache sizes")
+        .run(
+            "cache=\"${CI_CACHE_DIR:-$RUNNER_TEMP/cache}\"\n\
+             du -sh \"$cache\"/* \"$cache\"/target/* 2>/dev/null || true",
+        )
+        .if_condition(Expression::new("always()"))
 }
 
 /// Biome on the files changed since the base revision, as `Web App Pr Checks`
