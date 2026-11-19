@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT pg_try_advisory_xact_lock(hashtextextended(\n                'factory_merge_turn:'\n                    || lower(regexp_replace(btrim(repo_url), '\\.git$', ''))\n                    || ' ' || base_branch,\n                0\n            )) AS \"taken!\"\n            FROM factory_run\n            WHERE id = $1 AND repo_url IS NOT NULL AND base_branch IS NOT NULL\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "taken!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "03b264beeff1fb846e755588002f61c1722d2528ce70d607ff56c3beb6a9793f"
+}

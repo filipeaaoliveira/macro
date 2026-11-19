@@ -1,6 +1,7 @@
 use factory_records::domain::standing_rules::RunRules;
 use std::num::NonZeroU8;
 
+use factory_records::domain::merge_queue::MergeQueueRepository;
 use factory_records::domain::models::{
     EntryId, NewRun, Outcome, Repository, Role, RunId, RunInsert, StepKey,
 };
@@ -381,6 +382,12 @@ async fn a_round_whose_findings_are_all_follow_ups_passes() {
     let round = repo.review_rounds(run_id).await.expect("rounds").remove(0);
     assert_eq!(round.findings[0].kind, Some(FindingKind::FollowUp));
     assert_eq!(round.findings[0].follow_up_task_id, None);
+    // The head it passed on is the one an update of the branch is told
+    // apart from.
+    assert_eq!(
+        repo.reviewed_head(run_id).await.expect("read").as_deref(),
+        Some("aaa")
+    );
 }
 
 /// A diff GitHub cannot list lets no finding go: each blocks. A round
@@ -408,6 +415,11 @@ async fn an_unlisted_diff_blocks_and_a_failed_reviewer_fails_the_round() {
     let routed = rounds.close_round(closing(run_id, 3)).await.expect("close");
     assert_eq!(routed, outcome("changes"));
     assert!(repo.follow_ups.lock().expect("follow ups").is_empty());
+    assert_eq!(
+        repo.reviewed_head(run_id).await.expect("read"),
+        None,
+        "a round with Blockers passed on no head"
+    );
 
     rounds
         .open_round(opening(run_id, 6, 2))

@@ -30,6 +30,7 @@ pub const INVALID_REPOSITORY: &str = "owner or repo is not a GitHub repository n
 mod branches;
 pub use branches::{ComparedChanges, ComparedFile, FileTooLarge};
 mod pull_requests;
+pub use pull_requests::GithubBranchUpdate;
 #[cfg(test)]
 mod test;
 

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM factory_merge_queue WHERE run_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "10fe2b3ab64f64fe7fcbf0ab6f1d7acc83c2cf24ed0602a46a0d9d3f725461c4"
+}

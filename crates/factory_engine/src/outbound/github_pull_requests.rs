@@ -12,12 +12,12 @@ use github::domain::models::{
     GithubOpenPullRequest, GithubOpenPullRequestOutcome, GithubPullRequestHead,
 };
 use github::domain::ports::GithubOauth;
-use github::outbound::github_oauth_client::{FileTooLarge, GithubOauthImpl};
+use github::outbound::github_oauth_client::{FileTooLarge, GithubBranchUpdate, GithubOauthImpl};
 use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::check_context::ComparedChanges;
 use crate::domain::models::{
-    BranchDeletion, Check, CheckState, CheckSuite, CodeRepository, CommitStatus, FailureAnnotation,
+    BranchDeletion, BranchUpdating, Check, CheckState, CheckSuite, CodeRepository, CommitStatus, FailureAnnotation,
     FinishedJob, HeadChecks, Merging, OpenPullRequest, Opening, PullRequest, PullRequestState,
     RepositoryAccess, RequiredCheck, RequiredChecks, run_branch,
 };
@@ -605,6 +605,20 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
             .await?)
     }
 
+    #[tracing::instrument(err, skip(self, owner))]
+    async fn commit_parents(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        sha: &str,
+    ) -> Result<Option<Vec<String>>, GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        Ok(self
+            .github
+            .commit_parents(&token, repository.owner(), repository.name(), sha)
+            .await?)
+    }
+
     #[tracing::instrument(err, skip(self, owner, pull_request), fields(branch = %pull_request.branch))]
     async fn open(
         &self,
@@ -671,6 +685,33 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
                 ..
             } => Merging::HeadChanged,
             GithubMergeOutcome::Rejected { message, .. } => Merging::Refused(message),
+        })
+    }
+
+    #[tracing::instrument(err, skip(self, owner))]
+    async fn update_branch(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        number: u64,
+        expected_head: &str,
+    ) -> Result<BranchUpdating, GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        let updated = self
+            .github
+            .update_pull_request_branch(
+                &token,
+                repository.owner(),
+                repository.name(),
+                number,
+                expected_head,
+            )
+            .await?;
+        Ok(match updated {
+            GithubBranchUpdate::Started => BranchUpdating::Started,
+            GithubBranchUpdate::HeadMoved => BranchUpdating::HeadMoved,
+            GithubBranchUpdate::Conflict(why) => BranchUpdating::Conflict(why),
+            GithubBranchUpdate::Declined(why) => BranchUpdating::Declined(why),
         })
     }
 

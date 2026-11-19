@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO factory_merge_queue (run_id, repo_url, base_branch)\n            SELECT id, lower(regexp_replace(btrim(repo_url), '\\.git$', '')), base_branch\n            FROM factory_run\n            WHERE id = $1 AND repo_url IS NOT NULL AND base_branch IS NOT NULL\n            ON CONFLICT (run_id) DO UPDATE SET left_at = NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5dc7efce574ab6bc8f3a30afb16b5ed5fcf5e9dd281d858dfcaa3b5e416d48b9"
+}

@@ -8,6 +8,7 @@ pub mod gate_replies;
 pub mod insights;
 pub mod main_hold;
 pub mod merge_guard;
+pub mod merge_queue;
 pub mod models;
 pub mod ports;
 pub mod quality;

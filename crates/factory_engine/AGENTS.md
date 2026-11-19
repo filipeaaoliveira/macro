@@ -579,7 +579,9 @@ acknowledges the request; `plan`, `write`, `review`, `fix` and `ci_fix`, which
 hand an agent a prompt built from the Step's instructions
 (`built_in_steps/*.md`), the Run's request, and what the Run's earlier Steps
 produced; and `publish`, `ci`, `ready_to_merge` and `merge`, which take the
-Run's branch to a merged pull request (`src/domain/pull_request_steps.rs`). The
+Run's branch to a merged pull request (`src/domain/pull_request_steps.rs`),
+and `update`, which brings a branch behind its base up to date
+(`src/domain/built_in_steps/update.rs`). The
 agent is the `StepAgent` port.
 Each entry an agent does names the Role it fills (`"role": "planner"`), or
 the Roles of its review panel (`"reviewers": [...]`): a Flow that leaves
@@ -998,7 +1000,115 @@ the owner whether to merge; `merge` merges only that commit, naming it to
 GitHub, and a merged pull request reads as merged. A head that moved goes back
 to `ci`, and a person's `revise` goes to `fix` with the review's visits reset.
 The merge-gate entry runs at most three times, including visits that end
-`changed` without asking; then the Run ends for a person.
+`changed` without asking; then the Run ends for a person. `held` and
+`behind` start its visits over (below).
+
+A Run never merges a head its base moved past, and Runs merge into one
+base one after the other (`pull_request_steps.rs`, `built_in_steps/update.rs`,
+`factory_records`' `merge_queue.rs`). Both apply only where the Flow the Run
+kept as it started routes them (`StepInput::routes`, read from
+`factory_run.flow_definition`; a Run that kept none is told nothing, since
+it walks an older Flow than the built-in one of its name, and an outcome
+its Flow does not route above `merge` would fall through to the merge):
+
+- `ready_to_merge` and `merge` end `behind` when the head lacks the commit
+  the base branch is at (`PullRequests::merge_base`), so a person is never
+  asked about, and `merge` never merges, a head whose checks ran without a
+  commit the base gained; `merge` also reads a refused merge whose base
+  moved meanwhile (a branch protection that wants branches up to date) as
+  `behind`. The base can still move between `merge`'s read and GitHub's
+  merge, by a merge made outside the factory: only that protection closes
+  that window.
+- `update` (the writer's Step) merges the base into the branch, never
+  rebases it: the branch keeps every commit it had, so nothing anyone
+  pushed is lost, nothing is force-pushed, and the commits review rounds
+  and checks recorded stay reachable. GitHub merges it (`update_branch`,
+  "Update branch", only while the branch's head is the one read; a push
+  since fails the attempt for a retry); when GitHub answers with a merge
+  conflict, the writer resolves it in its session (`resolve.md`: `git
+  merge` the base's head, no rebase, reset or force-push). Any other
+  refusal from GitHub (a token without a scope, a branch it may not push
+  to) is no conflict an agent resolves: the Step ends `conflict` with
+  GitHub's message, which opens the entry's Gate for the owner (below),
+  so a person grants what GitHub asks and answers `retry`, rather than
+  the Run failing. Nothing is kept for it, so `retry` asks GitHub again. The update is
+  kept before the agent is asked (`factory_branch_update`), so a retry goes
+  on the way it started. GitHub merges after it answers, and may never
+  merge (its merge failed later, or someone pushed in between): once its
+  merge has not shown on the branch within `UPDATE_SHOWS_WITHIN` (two
+  minutes), the branch is read again and GitHub asked again from its head
+  now, which replaces the update kept; still nothing shown fails the
+  attempt for a retry, which does the same, so the Step's retries bound
+  it. Then the repository's checks round runs on the
+  branch, as for `write` and `fix`. It ends `done` only when the branch's
+  head is a merge commit whose parents are exactly, in order, the Run's
+  reviewed head and the base's commit the update asked GitHub to merge
+  (`PullRequests::commit_parents`, GitHub's git database), the branch's
+  head is still that merge, and the checks passed: only the base came in,
+  so the Run goes back through `ci` to the merge Gate, which asks again,
+  and the merge becomes the reviewed head, for the next update to merge
+  into. The reviewed head (`factory_reviewed_head`) is the head a review
+  round last passed on (`ReviewRoundsImpl::close_round`) or such a merge;
+  nothing else writes it, so asking GitHub again from a head someone
+  pushed (`restart_branch_update`) never makes that head reviewed. Where
+  the update started does not count: the head GitHub was asked from may be
+  anyone's. Anything else ends it `resolved`, which goes back through
+  `review` and `accept`, their visits reset, then `publish`, `ci` and the
+  merge Gate: an agent's resolution, a fix a checks round asked for,
+  someone's push after the merge or during the wait for it (even one that
+  merged the base itself), a person's resolution GitHub merged a moved
+  base into after their `retry`, a branch that already held its base when
+  the update started, and a Run that keeps no reviewed head (its review
+  passed before the factory kept one). A merge made by hand with exactly
+  those two parents and changes of its own is the one case the parents do
+  not tell apart from GitHub's. `conflict` when the writer could not resolve it, or what it
+  pushed does not hold both the base's head and the branch's former head,
+  opens the entry's Gate (no kind, so no rule, stand-in or Orchestrator
+  answers it): `stop`, or `retry` once a person resolved it on the branch.
+  `retry` runs `update` again, which finds the branch holding its base
+  through the person's commits and ends `resolved`, so a person's
+  resolution is reviewed and accepted before the merge Gate asks, and a
+  `merge_when_green` rule never merges it on CI alone. A `behind` from the
+  merge Gate or from `merge` starts the merge Gate's visits over, so a base
+  people keep merging into never uses up its three askings; what bounds
+  that loop is `update`'s ten visits a Run (a conflict's `retry`s count
+  too), then the Run ends for a person. Each update is a full checks round
+  and CI run, so ten in a row means the base moves faster than the Run's CI
+  can follow, which a person settles (holding merges, or merging it by
+  hand); the merge queue keeps other factory Runs from overtaking one at
+  the front, so only merges made outside the factory use it up there.
+- The merge Gate's approval never carries over an update (a wait in the
+  queue keeps it, below): whatever came in, the merge Gate asks again (a `merge_when_green` rule answers it as
+  before). Telling "unchanged apart from the base" apart would mean
+  trusting a textual merge that can still break the change, and every way
+  into `merge` stays that Gate's `approve` (`Flow::check_merges`).
+- `merge` enters its base's queue (`factory_merge_queue`) once Control
+  Files and the Main Hold let it, keeping its place from the first time it
+  reached its merge, and waits while a Run that reached it first is ahead:
+  one that has not ended and is at its merge or left it less than
+  `QUEUE_PLACE_KEPT` (90 minutes) ago, to update its branch or be asked
+  again, so the Runs behind it do not merge first and leave it behind
+  again. A Run past that goes on without it, and gets its place back when
+  it returns. One Run of a base merges at a time: its turn
+  (`MergeQueueRepository::take_merge_turn`, an advisory lock per base) is
+  taken before it reads the Runs ahead and held through GitHub's merge,
+  so a Run that comes back to its place just as another passed its turn
+  waits for that merge, then finds its head behind the base, rather than
+  merge beside it untested; it is let go on every path, by being dropped. After `QUEUE_WAIT` (25 minutes) still behind someone, `merge`
+  ends `queued`, which `code` routes back to `merge` itself with the
+  approval it has, asking no one (`Flow::check_merges` lets a `merge`
+  entry's `queued` lead only back to that entry). The approval holds only
+  while nothing changed: `merge` merges the approved head only while its
+  checks still pass (else `changed`, back through `ci` to the Gate), the
+  head holds its base (else `behind`), and GitHub's merge names that head
+  (a push since is `changed`). `merge` runs at most twelve times per
+  approval (each `approve` resets its visits; about five hours of waits),
+  then its merge Gate asks again; the Gate's three visits bound a Run's
+  queue waits to some fifteen hours before it ends for a person. A Run
+  that merged leaves the queue; one that leaves its merge otherwise keeps
+  its place. The wait for a Main Hold and the queue's share those 25
+  minutes, short of a Step attempt's 30; a hold set while it waited ends
+  it `held` at once.
 
 Once its pull request merged, the Run's branch `factory/{run id}` is
 deleted, as GitHub's "delete branch after merge" does: by `merge` after
@@ -1730,7 +1840,8 @@ from it (`built_in_flows::walked_flow`; a Run kept before falls back to the
 built-in Flow of its name). A Definition's Flow must merge only through a
 merge Gate (`Flow::check_merges`, which a test holds the built-in Flows
 to): a Gate on `ready_to_merge` or `merge` is of kind `merge`, a `merge` Gate is only on
-`ready_to_merge`, every way into `merge` is that Gate's `approve`, and the
+`ready_to_merge`, every way into `merge` is that Gate's `approve` (or a
+`merge` entry's `queued` back to itself, which keeps that approval), and the
 entry above `merge`, with no `next`, is that Gate's, never skipped and
 routing every other outcome; so the Orchestrator never approves a merge
 and only the `merge_when_green` rule merges without a person. A Run on its
@@ -1869,7 +1980,9 @@ Definition.
   prompts.
 - `src/domain/session_agent.rs`: an agent Step in a Macro agent session.
 - `src/domain/pull_request_steps.rs`: `publish`, `ci`, `ready_to_merge` and
-  `merge`, over the `PullRequests` port.
+  `merge`, over the `PullRequests` port, with the merge queue and the
+  engine's half of `update`; `src/domain/built_in_steps/update.rs`: the
+  `update` Step.
 - `src/domain/review_rounds.rs`: review rounds: what a reviewer hands
   back, the diff a finding is in, and opening and closing a round.
 - `src/domain/built_in_steps/checks_round.rs` and `src/domain/checks.rs`:
@@ -2187,6 +2300,22 @@ Definition.
   Event routines need the creator's `enable-event-routines` flag in
   PostHog, and the harness starts no event intake without PostHog: then a
   repository event's or a Task event's routine is refused, or never runs.
+- Deploy the `factory_merge_queue` migration, then every worker, and only
+  then the API: a Run started on the new `code` Flow against an older
+  worker fails at the unknown `update` Step for good. A Run whose review
+  passed on an older worker keeps no reviewed head, so its first update
+  goes back through review. Runs started before
+  keep walking their Flow, take no queue, and never end `behind`. Nothing
+  in the workflow changed, so no patch marker is needed and the recorded
+  histories replay as before.
+- The merge queue is per repository and base branch across owners: a Run
+  waits on another person's Run ahead of it, which it cannot see: `queued`
+  says only that earlier Runs into the base have not merged yet, never
+  which, nor how many. That much shows by design: a shared queue tells
+  each Run's readers that some Run they may not see is ahead of it on
+  that base. A Run
+  stuck at its merge holds the Runs behind it until it ends, merges, or
+  has been away from its merge longer than `QUEUE_PLACE_KEPT`.
 - A worker older than `accept` cannot serve a Run of the `code` Flow that
   names it: deploy every worker before the API starts such Runs. A Run
   started before it never reaches it.

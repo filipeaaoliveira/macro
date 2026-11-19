@@ -286,6 +286,8 @@ fn the_built_in_flows_name_their_gates_kinds() {
             ("review".to_string(), Some(RuleGateKind::Blockers)),
             ("accept".to_string(), Some(RuleGateKind::Blockers)),
             ("merge-gate".to_string(), Some(RuleGateKind::Merge)),
+            // A conflict no agent resolved is a person's: no rule answers it.
+            ("update".to_string(), None),
         ]
     );
     assert_eq!(

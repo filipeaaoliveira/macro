@@ -1,5 +1,6 @@
 use super::super::GithubOauthImpl;
 use super::super::test::{MockResponse, MockServer};
+use super::GithubBranchUpdate;
 use crate::domain::models::{
     GithubBranchDeletion, GithubError, GithubOpenPullRequest, GithubOpenPullRequestOutcome,
     GithubRepositoryAccess, GithubRequiredCheck, GithubRequiredChecks, GithubWorkflowRunStatus,
@@ -837,4 +838,115 @@ async fn a_check_runs_annotations_are_read() {
     assert_eq!(annotations[0].title.as_deref(), Some("parser::test::empty"));
     assert_eq!(annotations[0].message, "assertion failed");
     assert_eq!(annotations[1].title, None);
+}
+
+/// Updating a pull request's branch names the head it may update, so a
+/// push made since is never merged over.
+#[tokio::test]
+async fn update_pull_request_branch_names_the_head_it_updates() {
+    let (server, client) = answering(
+        "202 Accepted",
+        r#"{"message":"Updating pull request branch.","url":"https://github.com/macro/app/pull/7"}"#,
+    );
+
+    let updated = client
+        .update_pull_request_branch(
+            "token",
+            "macro",
+            "app",
+            7,
+            "1111111111111111111111111111111111111111",
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(updated, GithubBranchUpdate::Started);
+    let request = server.finish();
+    assert!(
+        request.starts_with("PUT /repos/macro/app/pulls/7/update-branch HTTP/1.1"),
+        "{request}"
+    );
+    assert!(
+        request.contains(r#"{"expected_head_sha":"1111111111111111111111111111111111111111"}"#),
+        "{request}"
+    );
+}
+
+/// A head that moved, a base that conflicts with the branch, and any other
+/// refusal are GitHub's answers about the branch, told apart: only GitHub's
+/// merge-conflict answer is a conflict.
+#[tokio::test]
+async fn update_pull_request_branch_reads_github_s_refusals() {
+    let (moved, client) = answering(
+        "422 Unprocessable Entity",
+        r#"{"message":"expected head sha didn't match current head ref."}"#,
+    );
+    let answer = client
+        .update_pull_request_branch(
+            "token",
+            "macro",
+            "app",
+            7,
+            "1111111111111111111111111111111111111111",
+        )
+        .await
+        .unwrap();
+    assert_eq!(answer, GithubBranchUpdate::HeadMoved);
+    moved.finish();
+
+    let (conflict, client) = answering(
+        "422 Unprocessable Entity",
+        r#"{"message":"merge conflict between base and head"}"#,
+    );
+    let answer = client
+        .update_pull_request_branch(
+            "token",
+            "macro",
+            "app",
+            7,
+            "1111111111111111111111111111111111111111",
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        answer,
+        GithubBranchUpdate::Conflict("merge conflict between base and head".to_string())
+    );
+    conflict.finish();
+
+    // Any other 422 is no conflict, and says what GitHub said.
+    let (scope, client) = answering(
+        "422 Unprocessable Entity",
+        r#"{"message":"Resource not accessible: the token lacks the workflow scope"}"#,
+    );
+    let answer = client
+        .update_pull_request_branch(
+            "token",
+            "macro",
+            "app",
+            7,
+            "1111111111111111111111111111111111111111",
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        answer,
+        GithubBranchUpdate::Declined(
+            "Resource not accessible: the token lacks the workflow scope".to_string()
+        )
+    );
+    scope.finish();
+
+    let (forbidden, client) = answering("403 Forbidden", r#"{"message":"Forbidden"}"#);
+    let answer = client
+        .update_pull_request_branch(
+            "token",
+            "macro",
+            "app",
+            7,
+            "1111111111111111111111111111111111111111",
+        )
+        .await;
+    assert!(matches!(answer, Err(GithubError::Forbidden)), "{answer:?}");
+    forbidden.finish();
 }

@@ -8,6 +8,7 @@
 mod test;
 
 use factory_records::domain::main_hold::MainHoldRepository;
+use factory_records::domain::merge_queue::MergeQueueRepository;
 use factory_records::domain::models::{Outcome, Role};
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::{ReviewFinding, ReviewRound, ReviewRoundRepository};
@@ -30,7 +31,7 @@ impl<A, G, R, M> BuiltInSteps<A, G, R, M>
 where
     A: StepAgent,
     G: PullRequests,
-    R: RunRepository + MainHoldRepository + ReviewRoundRepository,
+    R: RunRepository + MainHoldRepository + MergeQueueRepository + ReviewRoundRepository,
     M: MainWatches,
 {
     /// Have the reviewer of `input` review in `round`, record what it found

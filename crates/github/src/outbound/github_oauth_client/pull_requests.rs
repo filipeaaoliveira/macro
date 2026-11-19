@@ -39,6 +39,34 @@ const MAX_PAGES: usize = 10;
 /// GitHub's message for a branch it does not have, on a ref's deletion.
 const MISSING_REFERENCE: &str = "Reference does not exist";
 
+/// What GitHub's message starts with when a pull request's branch is not
+/// updated because its head is no longer the commit the caller named.
+const EXPECTED_HEAD_MOVED: &str = "expected head sha didn";
+
+/// What GitHub's message holds, in any case, when a pull request's branch
+/// is not updated because its base and it conflict ("merge conflict between
+/// base and head").
+const MERGE_CONFLICT: &str = "merge conflict";
+
+/// What GitHub did when asked to merge a pull request's base into its
+/// branch ([`GithubOauthImpl::update_pull_request_branch`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GithubBranchUpdate {
+    /// GitHub took the request: it merges the base into the branch, as a
+    /// commit of its own on top of the head the caller named, shortly.
+    Started,
+    /// The branch's head is no longer the commit the caller named: someone
+    /// pushed to it, and nothing was merged.
+    HeadMoved,
+    /// The base and the branch conflict, with GitHub's message: nothing
+    /// was merged, and someone resolves it by hand.
+    Conflict(String),
+    /// GitHub declined for another reason, with its message, as for a
+    /// token that lacks a scope or a branch it may not push to: no
+    /// conflict, and asking again changes nothing.
+    Declined(String),
+}
+
 /// Whether git takes `branch` as a branch's name, by the rules of
 /// `git check-ref-format --branch`: no empty part and none that starts with
 /// `.` or ends with `.lock`, no `..` or `@{`, no control character, space,
@@ -949,6 +977,85 @@ impl GithubOauthImpl {
                 "failed to open pull request",
             )),
         }
+    }
+
+    /// Asks GitHub to merge the base of pull request `number` into its
+    /// branch as the user, only while the branch's head is
+    /// `expected_head`: GitHub's "Update branch". It adds a merge commit on
+    /// top of that head, so it never rewrites the branch; a head that moved
+    /// since is left alone. The merge happens after GitHub answers: read the
+    /// branch's head to see it.
+    #[tracing::instrument(skip(self, access_token))]
+    pub async fn update_pull_request_branch(
+        &self,
+        access_token: &str,
+        owner: &str,
+        repo: &str,
+        number: u64,
+        expected_head: &str,
+    ) -> Result<GithubBranchUpdate, GithubError> {
+        #[derive(serde::Serialize)]
+        struct UpdateRequest<'a> {
+            expected_head_sha: &'a str,
+        }
+
+        if !is_repository_part(owner) || !is_repository_part(repo) {
+            return Err(GithubError::Internal(anyhow::anyhow!(
+                "not a repository: {owner:?}/{repo:?}"
+            )));
+        }
+        let response = self
+            .client
+            .put(format!(
+                "{}/repos/{owner}/{repo}/pulls/{number}/update-branch",
+                self.api_base_url()
+            ))
+            .header("Authorization", format!("Bearer {access_token}"))
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", USER_AGENT)
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .json(&UpdateRequest {
+                expected_head_sha: expected_head,
+            })
+            .timeout(REQUEST_TIMEOUT)
+            .send()
+            .await
+            .map_err(transport_error)?;
+
+        let status = response.status();
+        if status.is_success() {
+            return Ok(GithubBranchUpdate::Started);
+        }
+        let headers = response.headers().clone();
+        let body = response_text(response).await;
+        if throttling(status, &headers, &body).is_some() {
+            return Err(unexpected(
+                status,
+                &headers,
+                body,
+                "failed to update a pull request's branch",
+            ));
+        }
+        if status == StatusCode::UNPROCESSABLE_ENTITY {
+            let message = serde_json::from_str::<GithubErrorBody>(&body)
+                .map(|error| error.message)
+                .unwrap_or_else(|_| "GitHub declined to update the branch.".to_string());
+            if message.starts_with(EXPECTED_HEAD_MOVED) {
+                return Ok(GithubBranchUpdate::HeadMoved);
+            }
+            if message.to_ascii_lowercase().contains(MERGE_CONFLICT) {
+                return Ok(GithubBranchUpdate::Conflict(message));
+            }
+            return Ok(GithubBranchUpdate::Declined(message));
+        }
+        Err(refusal(status).unwrap_or_else(|| {
+            unexpected(
+                status,
+                &headers,
+                body,
+                "failed to update a pull request's branch",
+            )
+        }))
     }
 
     /// Deletes `branch` as the user, or finds it missing, as when it was

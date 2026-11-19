@@ -40,6 +40,7 @@ use std::time::Duration;
 use agent_session::domain::session_command::{SessionCommand, SessionCommandOutput};
 use chrono::{DateTime, Utc};
 use factory_records::domain::main_hold::MainHoldRepository;
+use factory_records::domain::merge_queue::MergeQueueRepository;
 use factory_records::domain::models::{
     CheckResult, CheckRound, CheckRoundOutcome, CheckRoundStart, HandedBack, MAX_OUTPUT_BYTES,
     Outcome, Role,
@@ -153,7 +154,7 @@ impl<A, G, R, M> BuiltInSteps<A, G, R, M>
 where
     A: StepAgent,
     G: PullRequests,
-    R: RunRepository + MainHoldRepository,
+    R: RunRepository + MainHoldRepository + MergeQueueRepository,
     M: MainWatches,
 {
     /// Have the agent do `step`'s work, then run the repository's checks on

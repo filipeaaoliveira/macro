@@ -54,6 +54,10 @@ the Gates they asked people in MacroDB, and defines the names Flows use
 - `src/domain/evaluation.rs` and
   `src/outbound/pg_run_repository/evaluation.rs`: `EvaluationRepository`,
   Experiment arms, Scorers' judgments, Benchmark suites and trials.
+- `src/domain/merge_queue.rs` and
+  `src/outbound/pg_run_repository/merge_queue.rs`: `MergeQueueRepository`,
+  each base branch's merge queue and merge turn, the updates of Runs'
+  branches, and the head each Run's review last passed on.
 - `src/domain/gate_replies.rs` and
   `src/outbound/pg_run_repository/gate_replies.rs`: `GateReplyRepository`,
   a person's answer read from their words, the factory asking back, the
@@ -113,13 +117,15 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261119020000_factory_self_improvement.sql`,
   `20261119020100_factory_improvement_failure_dismissed.sql`,
   `20261119030000_factory_run_cancelled_in_person.sql`,
+  `20261119040000_factory_merge_queue.sql`,
   `20261119043000_factory_ci_wait.sql`,
   `20261119050000_factory_token_budget.sql`,
   `20261119050100_factory_token_budget_validate.sql`), `factory_step_steer`,
   `factory_run_score`, `factory_run_arm`, `factory_benchmark_suite`,
   `factory_benchmark_trial`, `factory_benchmark_trial_score`,
-  `factory_improvement`, `factory_improvement_failure`, `factory_ci_wait`
-  and `factory_ci_job`.
+  `factory_improvement`, `factory_improvement_failure`, `factory_merge_queue`,
+  `factory_branch_update`, `factory_reviewed_head`, `factory_ci_wait` and
+  `factory_ci_job`.
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
 
 ## Boundaries
@@ -446,6 +452,37 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   person (`crates/factory_engine`). Both tables go with the
   team; a failure goes with its Run, and an improvement's Run is cleared
   when the Run goes.
+
+- `factory_merge_queue` keeps one row per Run that reached its merge
+  (`enter_merge_queue`, safe to repeat, keeps `entered_at` and `place`, and
+  clears `left_at`), with its base: the Run's repository URL lower-cased,
+  trimmed and without a `.git` ending, and its branch; it goes with its
+  Run. `factory_main_hold` still keys a base by the URL as the Run kept it,
+  so the same repository named in another case is held apart.
+  `merge_queue_ahead` reads, from the Run's own row, the Runs of the same
+  base before it (by `place`, a serial taken as each entered, so Runs that
+  entered in the same instant keep their order, through
+  `factory_merge_queue_base_idx`) that have not ended and are at their
+  merge or left it within the place kept, all on the database's clock.
+  `leave_merge_queue` keeps the first time it left; `drop_from_merge_queue`
+  takes a merged Run out, and `end_run` one that ended unmerged.
+  `take_merge_turn` takes a base's merge turn: a transaction holding
+  `pg_try_advisory_xact_lock` on the base as the queue keys it (`None`
+  while another Run holds it; never waited on, so no connection blocks).
+  The turn is the transaction: dropping it rolls back, which lets the
+  lock go once the pool takes the connection back, on every path, and the
+  transaction's `idle_in_transaction_session_timeout` (five minutes) ends
+  one a stopped worker left open. It holds a pooled connection while a
+  merge runs, one per base merging. `factory_branch_update` keeps an update Step's
+  first update (`keep_branch_update`, by `(run_id, seq)`), replaced only
+  while GitHub's merge of it never showed (`restart_branch_update`: no
+  conflict, no head recorded), and
+  `set_updated_head` records the head GitHub's merge made once, only for an
+  update with no conflict. `factory_reviewed_head` keeps one head per Run
+  (`set_reviewed_head` replaces it, `reviewed_head` reads it): written only
+  when a review round passes and when an update merged only the base into
+  it, never by `restart_branch_update`, so an update asked again from a
+  pushed head leaves it as the review left it.
 
 ## Related
 
