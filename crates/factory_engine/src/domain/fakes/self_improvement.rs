@@ -192,7 +192,7 @@ impl SelfImprovementRepository for FakeRepo {
         for failure in kept
             .failures
             .iter()
-            .filter(|kept| kept.team_id == team_id && kept.repo_url == repo_url)
+            .filter(|kept| kept.team_id == team_id && kept.repo_url.eq_ignore_ascii_case(repo_url))
             .filter(|kept| kept.improvement.is_none())
         {
             pending.count += 1;
@@ -259,7 +259,9 @@ impl SelfImprovementRepository for FakeRepo {
             .failures
             .iter_mut()
             .filter(|kept| {
-                kept.team_id == team_id && kept.repo_url == repo_url && kept.improvement.is_none()
+                kept.team_id == team_id
+                    && kept.repo_url.eq_ignore_ascii_case(repo_url)
+                    && kept.improvement.is_none()
             })
             .collect();
         if pending.is_empty() {

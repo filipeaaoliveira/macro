@@ -300,6 +300,33 @@ async fn a_runs_failure_facts_read_its_judgments(pool: PgPool) {
     );
 }
 
+/// Pending failures are matched to the Definition's repository ignoring
+/// case, as a team naming it again in other letters would: counted and
+/// claimed alike.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "team"))
+)]
+async fn pending_failures_match_the_repository_in_any_case(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    failing_run(&repo, &[scorer_failure("tests", 0.2), flawed()]).await;
+    let upper = REPO_URL.replace("macro/factory-definition", "Macro/Factory-Definition");
+
+    let pending = repo
+        .pending_failures(team(), &upper)
+        .await
+        .expect("pending");
+    assert_eq!(pending.count, 2);
+    let begun = repo
+        .begin_improvement(Uuid::now_v7(), team(), &upper, 50)
+        .await
+        .expect("begin");
+    assert!(
+        matches!(&begun, ImprovementBegin::Claimed(failures) if failures.len() == 2),
+        "{begun:?}"
+    );
+}
+
 /// A team's latest self-improvement Runs are read newest first, at most
 /// the number asked for, and only the team's.
 #[sqlx::test(

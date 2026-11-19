@@ -206,7 +206,7 @@ impl SelfImprovementRepository for PgRunRepository {
             SELECT CASE WHEN kind = 'flawed' THEN 'flawed' ELSE scorer END AS "label!",
                 count(*) AS "count!", min(failed_at) AS "oldest!"
             FROM factory_improvement_failure
-            WHERE team_id = $1 AND improvement_id IS NULL AND repo_url = $2
+            WHERE team_id = $1 AND improvement_id IS NULL AND lower(repo_url) = lower($2)
             GROUP BY 1
             ORDER BY 2 DESC, 1
             LIMIT $3
@@ -329,7 +329,7 @@ impl SelfImprovementRepository for PgRunRepository {
             FROM (
                 SELECT run_id, kind, scorer
                 FROM factory_improvement_failure
-                WHERE team_id = $2 AND improvement_id IS NULL AND repo_url = $3
+                WHERE team_id = $2 AND improvement_id IS NULL AND lower(repo_url) = lower($3)
                 ORDER BY failed_at, run_id, kind, scorer
                 LIMIT $4
                 FOR UPDATE
