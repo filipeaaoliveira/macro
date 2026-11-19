@@ -23,9 +23,14 @@ export default {
     other: '{{count}} failures or {{days}} days',
   },
   oldestPending: 'Oldest pending',
-  improvementOff: 'Turned off in the factory definition.',
+  improvementOff:
+    'Turned off in the factory definition: failures are still kept, and no run starts.',
   improvementNoOwner:
     'No one is kept as naming the factory definition, so no run starts. An admin names it again in team settings.',
+  improvementNamerLeft:
+    'The admin who named the factory definition left the team, so no run starts. An admin names it again in team settings.',
+  improvementNamerNotAdmin:
+    'The person who named the factory definition is no longer a team admin, so no run starts. An admin names it again in team settings.',
   flawedSource: 'Marked flawed',
   lastImprovement: 'Last self-improvement run',
   noImprovement: 'No self-improvement run yet.',

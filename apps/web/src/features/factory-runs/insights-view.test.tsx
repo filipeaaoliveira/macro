@@ -540,7 +540,7 @@ describe('RunInsightsView', () => {
           enabled: true,
           failuresThreshold: 25,
           oldestDays: 7,
-          hasOwner: true,
+          namer: 'admin',
           pending: 4,
           oldestPendingAt: '2026-11-05T09:00:00Z',
           pendingBySource: [
@@ -568,6 +568,30 @@ describe('RunInsightsView', () => {
 
     fireEvent.click(within(section).getByRole('button', { name: 'Open run' }));
     expect(await screen.findByText('No steps yet')).toBeTruthy();
+  });
+
+  it('says no self-improvement run starts once the definition’s namer left the team', () => {
+    mount({
+      insights: november,
+      evaluation: {
+        ...judged,
+        selfImprovement: {
+          repoUrl: 'https://github.com/macro/factory-definition',
+          enabled: true,
+          failuresThreshold: 25,
+          oldestDays: 7,
+          namer: 'left_team',
+          pending: 30,
+          pendingBySource: [{ source: 'correctness', count: 30 }],
+        },
+      },
+    });
+
+    expect(
+      screen.getByText(
+        'The admin who named the factory definition left the team, so no run starts. An admin names it again in team settings.'
+      )
+    ).toBeTruthy();
   });
 
   it('shows no self-improvement for a team with no factory definition', () => {

@@ -5,6 +5,7 @@ export type {
   ExperimentInsight,
   ImprovementInsight,
   ImprovementState,
+  NamerStanding,
   ScorerInsight,
   SelfImprovementInsight,
   SuiteInsight,

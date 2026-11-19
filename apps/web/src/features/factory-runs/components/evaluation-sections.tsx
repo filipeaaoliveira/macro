@@ -8,6 +8,7 @@ import type {
   ExperimentInsight,
   ImprovementInsight,
   ImprovementState,
+  NamerStanding,
   ScorerInsight,
   SelfImprovementInsight,
   SuiteInsight,
@@ -323,6 +324,23 @@ function LastImprovement(props: {
 }
 
 /**
+ * Why no self-improvement run starts as the admin who named the factory
+ * definition; none while they are still an admin of the team.
+ */
+function namerProblem(namer: NamerStanding): string | undefined {
+  switch (namer) {
+    case 'admin':
+      return undefined;
+    case 'none':
+      return t('factoryEvaluation.improvementNoOwner');
+    case 'left_team':
+      return t('factoryEvaluation.improvementNamerLeft');
+    case 'not_admin':
+      return t('factoryEvaluation.improvementNamerNotAdmin');
+  }
+}
+
+/**
  * The team's self-improvement: the failures waiting for a run against its
  * factory definition, what starts one, and the latest one.
  */
@@ -366,10 +384,10 @@ function SelfImprovementBody(props: {
           {t('factoryEvaluation.improvementOff')}
         </p>
       </Show>
-      <Show when={props.improvement.enabled && !props.improvement.hasOwner}>
-        <p class="text-xs text-ink-muted">
-          {t('factoryEvaluation.improvementNoOwner')}
-        </p>
+      <Show
+        when={props.improvement.enabled && namerProblem(props.improvement.namer)}
+      >
+        {(problem) => <p class="text-xs text-ink-muted">{problem()}</p>}
       </Show>
       <Show
         when={props.improvement.last}
