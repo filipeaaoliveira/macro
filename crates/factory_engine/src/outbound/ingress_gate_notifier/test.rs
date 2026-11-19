@@ -350,3 +350,38 @@ async fn a_gate_answered_after_its_notice_is_created_marks_it_done() {
     );
     assert!(notifications.withdrawn.lock().expect("withdrawn").is_empty());
 }
+
+/// Withdraws through `notifications` once the ingress has read every
+/// queued notice: a notice created between the first mark and its
+/// withdrawal.
+struct CreatedWhileWithdrawing(Arc<Notifications>);
+
+impl NotificationWithdrawal for CreatedWhileWithdrawing {
+    async fn withdraw(&self, notification_id: Uuid) -> Result<(), rootcause::Report> {
+        self.0.deliver();
+        self.0.withdraw(notification_id).await
+    }
+}
+
+/// A notice the ingress creates after the first mark found nothing, and
+/// before its withdrawal, is marked done by the second mark: nothing is
+/// left open.
+#[tokio::test]
+async fn a_notice_created_while_it_is_withdrawn_is_marked_done() {
+    let notifications = Arc::new(Notifications::default());
+    let sender = IngressGateNotifier::new(
+        notifications.clone(),
+        notifications.clone(),
+        Arc::new(CreatedWhileWithdrawing(notifications.clone())),
+    );
+    sender.notify(notice()).await;
+    sender
+        .answered(&notice().owner, notice().notification_id)
+        .await;
+
+    assert_eq!(
+        *notifications.pushed.lock().expect("pushed"),
+        [notice().notification_id]
+    );
+    assert!(notifications.open().is_empty(), "{:?}", notifications.open());
+}
