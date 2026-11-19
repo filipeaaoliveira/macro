@@ -19,10 +19,10 @@ use super::{
     transport_error, unexpected,
 };
 use crate::domain::models::{
-    GithubBranchDeletion, GithubCheckRun, GithubCheckSuite, GithubCommitStatus, GithubError,
-    GithubListing, GithubOpenPullRequest, GithubOpenPullRequestOutcome, GithubPullRequestHead,
-    GithubRepositoryAccess, GithubRequiredCheck, GithubRequiredChecks, GithubWorkflowRun,
-    GithubWorkflowRunStatus,
+    GithubBranchDeletion, GithubCheckRun, GithubCheckRunResult, GithubCheckSuite,
+    GithubCommitStatus, GithubError, GithubJobStep, GithubListing, GithubOpenPullRequest,
+    GithubOpenPullRequestOutcome, GithubPullRequestHead, GithubRepositoryAccess,
+    GithubRequiredCheck, GithubRequiredChecks, GithubWorkflowRun, GithubWorkflowRunStatus,
 };
 
 #[cfg(test)]
@@ -237,6 +237,45 @@ struct CheckRunResponse {
 #[derive(serde::Deserialize)]
 struct CheckRunApp {
     id: u64,
+}
+
+#[derive(serde::Deserialize)]
+struct CheckRunResultsResponse {
+    check_runs: Vec<CheckRunResultResponse>,
+}
+
+#[derive(serde::Deserialize)]
+struct CheckRunResultResponse {
+    id: u64,
+    name: String,
+    status: String,
+    conclusion: Option<String>,
+    app: Option<CheckRunResultApp>,
+    #[serde(default)]
+    output: Option<CheckRunOutput>,
+}
+
+#[derive(serde::Deserialize)]
+struct CheckRunResultApp {
+    slug: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct CheckRunOutput {
+    title: Option<String>,
+    summary: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct ActionsJobResponse {
+    #[serde(default)]
+    steps: Vec<ActionsJobStepResponse>,
+}
+
+#[derive(serde::Deserialize)]
+struct ActionsJobStepResponse {
+    name: String,
+    conclusion: Option<String>,
 }
 
 impl GithubOauthImpl {
@@ -716,6 +755,76 @@ impl GithubOauthImpl {
                 })
                 .collect(),
         })
+    }
+
+    /// The latest check run of each name on the commit `sha`, with its id,
+    /// its app and what its output says, for recording how CI went.
+    #[tracing::instrument(skip(self, access_token), err)]
+    pub async fn list_check_run_results(
+        &self,
+        access_token: &str,
+        owner: &str,
+        repo: &str,
+        sha: &str,
+    ) -> Result<GithubListing<GithubCheckRunResult>, GithubError> {
+        let runs = self
+            .read_pages(
+                access_token,
+                &format!("/repos/{owner}/{repo}/commits/{sha}/check-runs"),
+                "failed to list check run results",
+                |page: CheckRunResultsResponse| page.check_runs,
+            )
+            .await?;
+        Ok(GithubListing {
+            complete: runs.complete,
+            items: runs
+                .items
+                .into_iter()
+                .map(|run| {
+                    let (output_title, output_summary) = run
+                        .output
+                        .map(|output| (output.title, output.summary))
+                        .unwrap_or_default();
+                    GithubCheckRunResult {
+                        id: run.id,
+                        name: run.name,
+                        status: run.status,
+                        conclusion: run.conclusion,
+                        app_slug: run.app.and_then(|app| app.slug),
+                        output_title,
+                        output_summary,
+                    }
+                })
+                .collect(),
+        })
+    }
+
+    /// The steps of the GitHub Actions job `job_id`, in order: a check run
+    /// GitHub Actions runs has its job's id.
+    #[tracing::instrument(skip(self, access_token), err)]
+    pub async fn actions_job_steps(
+        &self,
+        access_token: &str,
+        owner: &str,
+        repo: &str,
+        job_id: u64,
+    ) -> Result<Vec<GithubJobStep>, GithubError> {
+        let job: ActionsJobResponse = self
+            .read(
+                access_token,
+                &format!("/repos/{owner}/{repo}/actions/jobs/{job_id}"),
+                &[],
+                "failed to read actions job",
+            )
+            .await?;
+        Ok(job
+            .steps
+            .into_iter()
+            .map(|step| GithubJobStep {
+                name: step.name,
+                conclusion: step.conclusion,
+            })
+            .collect())
     }
 
     /// Opens a pull request as the user. GitHub declining it is a
