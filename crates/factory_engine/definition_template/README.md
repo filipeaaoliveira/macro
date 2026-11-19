@@ -16,7 +16,8 @@ Outside the files, all must be done:
 - The repository: copy this folder to the root of a new GitHub repository.
 - A CI job: the factory reports no check to GitHub, so add a CI job that
   runs the validator, `factory_definition_check .`, with the validator
-  installed on the runner.
+  installed on the runner. It fails until the `bot` ids in `agents.json`
+  are replaced.
 - Branch protection: require a pull request on the default branch, and
   that CI job's check. GitHub offers only a check that has reported, so
   let the job run once first. Left as is, a push changes the team's rules
@@ -42,8 +43,9 @@ Outside the files, all must be done:
 `agents.json`:
 
 - `agents.primary.bot` and `agents.backup.bot` (must): the id of a Macro
-  agent each member who starts Runs may use. The zero ids name no agent,
-  and the validator does not refuse them: replace them yourself.
+  agent each member who starts Runs may use. The zero ids name no agent:
+  until you replace them, the validator fails, naming `agents.json` and
+  the Agent, team settings refuse the Definition, and no Run starts.
 - `model` (may): left out, the agent's own default model.
 - `instructions` (may): what every session of the Agent is told before the
   Step's prompt. Left as is, `primary` is told to work in small commits.
@@ -123,8 +125,9 @@ From this template to a first merged pull request:
    its default branch.
 2. Build the validator (Check the Definition, below).
 3. Add a CI job that runs the validator, `factory_definition_check .`, and
-   let it run once. Then protect the default branch: require a pull
-   request and that job's check.
+   let it run once: it fails, as the `bot` ids are still the template's.
+   Then protect the default branch: require a pull request and that job's
+   check.
 4. On a branch, replace the two `bot` ids in `agents.json`, and anything
    else from Customize the template you want now.
 5. Check it: `factory_definition_check .` prints `.: the definition reads:
@@ -395,6 +398,17 @@ when there is one. Build it from the Macro repository with
 `definition` check in `.macro/checks.json` runs it by name, so it must be on
 the `PATH` of every machine that runs this repository's checks: the CI
 runner, and the machine a factory Run's agent works on.
+
+An Agent whose `bot` is a placeholder id, all zeros but its last two
+digits as the template ships them, does not read:
+
+```text
+.: agents.json: agent backup has the template's placeholder bot id 00000000-0000-0000-0000-000000000002: replace it with the id of a Macro agent each member who starts runs may use
+```
+
+The validator has no mode that lets them through: the template as shipped
+fails it on purpose. Team settings and a Run read the Definition the same
+way, so a copy that keeps them never starts a Run.
 
 A merge needs a merge Gate's approval: a Flow whose way into its `merge`
 Step skips the `ready_to_merge` entry's merge Gate, or that gives that

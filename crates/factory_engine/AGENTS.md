@@ -1602,7 +1602,9 @@ Flow goes into the workflow's input as a built-in one does, so the workflow
 and the interpreter did not change, and Runs in flight replay as before. A
 starter Definition is in `definition_template/` (the built-in Flows, with no
 post-merge Steps in `code`; `primary` and `backup` Agents whose bots must be
-replaced; a person merges), which a test reads; `factory_definition_check`
+replaced: `read_definition` refuses a placeholder bot id, all zeros but its
+last two digits (`is_placeholder_bot`), so the template as shipped does not
+read; a person merges), which a test reads with its bots replaced; `factory_definition_check`
 (`services/factory_service`) checks one in a folder.
 
 Self-improvement (`src/domain/self_improvement.rs`): a team's Definition
