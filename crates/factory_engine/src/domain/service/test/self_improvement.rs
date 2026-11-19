@@ -1333,3 +1333,20 @@ async fn an_improvement_whose_pull_request_stays_unread_is_closed() {
     assert_eq!(bench.latest_state(), Some(ImprovementState::Closed));
     assert_eq!(bench.pending().await, 2);
 }
+
+/// The team's current Definition is read from GitHub once for a while, not
+/// at every Run's end.
+#[tokio::test]
+async fn the_current_definition_is_read_once_for_a_while() {
+    let bench = Bench::new(team_repo(true), AGENTS, None);
+    let run = bench.judged_run(0.2).await;
+    let improvement = bench.improvement();
+    let reads = || bench.github.state().file_reads.len();
+
+    improvement.after_run_end(run).await.expect("after");
+    let first = reads();
+    assert!(first > 0, "the definition is read");
+    improvement.after_run_end(run).await.expect("after");
+    improvement.after_run_end(run).await.expect("after");
+    assert_eq!(reads(), first, "read once");
+}

@@ -27,7 +27,9 @@
 #[cfg(test)]
 mod test;
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use chrono::{DateTime, Utc};
 use factory_records::domain::evaluation::PASS_SCORE;
@@ -78,6 +80,11 @@ pub const NO_STEP_STALE_AFTER: chrono::TimeDelta = chrono::TimeDelta::hours(2);
 /// cannot be read (its owner's GitHub access revoked, say) stays open
 /// before it is closed.
 pub const UNREAD_STALE_AFTER: chrono::TimeDelta = chrono::TimeDelta::days(7);
+
+/// How long the thresholds read from a team's current Definition are kept
+/// before it is read from GitHub again: a Run's end of the team reads
+/// them at most this often.
+pub const THRESHOLDS_KEPT_FOR: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 
 /// The most characters of a failure's reason the request quotes.
 const REASON_CHARS: usize = 400;
@@ -362,6 +369,11 @@ pub trait SelfImprovement: Send + Sync + 'static {
     fn after_run_end(&self, run_id: RunId) -> impl Future<Output = Result<(), StepError>> + Send;
 }
 
+/// The thresholds of a team's Definition, by team and Definition
+/// repository: none for a team the Run API found naming none. Each with
+/// when it was read.
+type KeptThresholds = HashMap<(Uuid, String), (Instant, Option<SelfImprovementDefinition>)>;
+
 /// Self-improvement over the records, the Run API (which starts the Run as
 /// any Run, as the Definition's namer), and GitHub, where an ended Run's
 /// pull request is read.
@@ -370,6 +382,8 @@ pub struct SelfImprovementServiceImpl<R, F, G> {
     runs: Arc<F>,
     github: G,
     app_url: String,
+    /// The thresholds read lately, kept [`THRESHOLDS_KEPT_FOR`].
+    thresholds: Mutex<KeptThresholds>,
 }
 
 impl<R, F, G> SelfImprovementServiceImpl<R, F, G> {
@@ -380,6 +394,7 @@ impl<R, F, G> SelfImprovementServiceImpl<R, F, G> {
             runs,
             github,
             app_url: app_url.trim_end_matches('/').to_string(),
+            thresholds: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -455,6 +470,38 @@ where
                     .then_some(Settlement::Closed)
             }
         })
+    }
+
+    /// The `selfImprovement` thresholds of the team's Definition as it is
+    /// now, read as `owner`, its namer, as Insights reads them, never a
+    /// copy an ended Run kept; kept [`THRESHOLDS_KEPT_FOR`]. None when the
+    /// team names none, or it did not read.
+    async fn current_thresholds(
+        &self,
+        team_id: Uuid,
+        naming: &DefinitionNaming,
+        owner: &MacroUserIdStr<'static>,
+    ) -> Result<Option<SelfImprovementDefinition>, StepError> {
+        let key = (team_id, naming.repo_url.to_ascii_lowercase());
+        let now = Instant::now();
+        if let Ok(mut kept) = self.thresholds.lock() {
+            kept.retain(|_, (read_at, _)| now.duration_since(*read_at) < THRESHOLDS_KEPT_FOR);
+            if let Some((_, thresholds)) = kept.get(&key) {
+                return Ok(*thresholds);
+            }
+        }
+        let thresholds = match self.runs.team_evaluation(owner).await {
+            Ok(team) => team.map(|team| team.evaluation.self_improvement()),
+            Err(error @ FactoryError::Internal(_)) => return Err(internal(error)),
+            Err(error) => {
+                tracing::warn!(%error, %team_id, "the team's definition did not read: no self-improvement run");
+                return Ok(None);
+            }
+        };
+        if let Ok(mut kept) = self.thresholds.lock() {
+            kept.insert(key, (now, thresholds));
+        }
+        Ok(thresholds)
     }
 
     /// Start the team's self-improvement Run of the failures it claims, as
@@ -572,16 +619,8 @@ where
             tracing::info!(%team_id, ?standing, "the definition's namer may not start a self-improvement run");
             return Ok(());
         };
-        // The thresholds are the team's Definition's as it is now, as
-        // Insights reads them, never a copy an ended Run kept.
-        let thresholds = match self.runs.team_evaluation(&owner).await {
-            Ok(Some(team)) => team.evaluation.self_improvement(),
-            Ok(None) => return Ok(()),
-            Err(error @ FactoryError::Internal(_)) => return Err(internal(error)),
-            Err(error) => {
-                tracing::warn!(%error, %team_id, "the team's definition did not read: no self-improvement run");
-                return Ok(());
-            }
+        let Some(thresholds) = self.current_thresholds(team_id, &naming, &owner).await? else {
+            return Ok(());
         };
         if !is_due(thresholds, pending.count, pending.oldest, Utc::now()) {
             return Ok(());

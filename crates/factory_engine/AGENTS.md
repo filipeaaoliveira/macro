@@ -1438,7 +1438,10 @@ self-improvement Run, and, unless the team is paused (`paused_until`), starts
 one when the pending failures reach the `selfImprovement` thresholds in
 `scorers.json` of the team's Definition as it is now, read at its head as
 the namer, as Insights reads it (`failures`, 25, or the oldest
-`oldestDays`, 7, old; `enabled`, on), never a copy an ended Run kept.
+`oldestDays`, 7, old; `enabled`, on), never a copy an ended Run kept; the
+worker keeps what it read per team and Definition for
+`THRESHOLDS_KEPT_FOR` (5 minutes), so a team's Run ends call GitHub at
+most that often.
 Failures are kept while `enabled` is off, so they count once it is on
 again. After a self-improvement Run that settled without merging (closed
 or cancelled by a person, ended without a pull request, refused, or kept
