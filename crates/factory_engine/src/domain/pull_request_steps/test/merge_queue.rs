@@ -403,8 +403,8 @@ async fn an_update_github_never_applies_is_asked_again() {
 }
 
 /// GitHub declining an update for a reason other than a conflict, as for
-/// a token that lacks a scope, fails the Step with GitHub's reason, for
-/// good: it is no conflict for the writer or a person, and nothing is kept.
+/// a token that lacks a scope, is no conflict for the writer: it is its
+/// refusal with GitHub's reason, for a person, and nothing is kept.
 #[tokio::test]
 async fn an_update_github_declines_is_no_conflict() {
     let github = github_on(NEW_BASE, false);
@@ -415,21 +415,12 @@ async fn an_update_github_declines_is_no_conflict() {
 
     let declined = steps(&github, &repo)
         .update_branch(&input(RunId::generate()))
-        .await;
+        .await
+        .expect("update");
 
-    let Err(error) = declined else {
-        panic!("a declined update is no conflict: {declined:?}");
-    };
-    assert!(
-        matches!(error, PullRequestStepError::UpdateDeclined(_)),
-        "{error:?}"
-    );
-    assert!(!crate::domain::ports::Retryable::retryable(&error));
-    assert!(
-        error
-            .to_string()
-            .contains("Resource not accessible by integration"),
-        "{error}"
+    assert_eq!(
+        declined,
+        Update::Declined("Resource not accessible by integration".to_string())
     );
     assert!(repo.queue().updates.is_empty());
 }

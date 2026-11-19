@@ -24,7 +24,9 @@
 //!   fix a checks round asked for: the change itself changed, so its review
 //!   and acceptance run again;
 //! - `conflict` when the agent could not resolve the conflict, or what it
-//!   pushed does not hold the base and every commit the branch had;
+//!   pushed does not hold the base and every commit the branch had, and
+//!   when GitHub refused the update for another reason (its message is the
+//!   output), both for a person at the entry's Gate;
 //! - `red` when the checks never passed, and `merged` or `closed` when the
 //!   pull request was merged or closed meanwhile.
 
@@ -69,6 +71,14 @@ where
         }
         match self.pull_requests.update_branch(&input).await? {
             Update::Ended(report) => Ok(report),
+            Update::Declined(why) => Ok(StepReport {
+                outcome: outcome(CONFLICT),
+                output: format!(
+                    "GitHub refused to merge the base into the branch, and said: {why}\n\nThis \
+                     is no conflict an agent resolves: a person settles it, as by granting the \
+                     access GitHub asks for, then answers `retry`."
+                ),
+            }),
             Update::Merged(update) => {
                 let head = update.updated_head.clone().unwrap_or_default();
                 let instructions = UPDATE_INSTRUCTIONS

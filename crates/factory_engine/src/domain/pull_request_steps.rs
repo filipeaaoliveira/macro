@@ -124,10 +124,6 @@ pub enum PullRequestStepError {
     /// reads the branch again.
     #[error("the run's branch moved while it was updated: {0}")]
     BranchMoving(String),
-    /// GitHub declined to merge the Run's base into its branch for a reason
-    /// other than a conflict, as for a token that lacks a scope.
-    #[error("github declined to merge the base into the run's branch: {0}")]
-    UpdateDeclined(String),
     /// GitHub could not be asked.
     #[error("github failed: {report:?}")]
     Github {
@@ -186,7 +182,6 @@ impl Retryable for PullRequestStepError {
             | Self::NoPullRequest
             | Self::NoMergeHead
             | Self::NoBase
-            | Self::UpdateDeclined(_)
             | Self::ControlFiles(_) => false,
         }
     }
@@ -399,14 +394,19 @@ pub(crate) enum Update {
     /// GitHub could not merge them: the update kept, for the agent to
     /// resolve.
     Conflict(BranchUpdate),
+    /// GitHub refused to merge them for a reason other than a conflict, as
+    /// for a token that lacks a scope or a branch it may not push to: its
+    /// message, for a person. Nothing is kept, so a retry asks again.
+    Declined(String),
     /// The pull request was merged or closed meanwhile: the Step's end.
     Ended(StepReport),
 }
 
-/// What asking GitHub for an update came to: the update to keep, or the
-/// Step's end.
+/// What asking GitHub for an update came to: the update to keep, GitHub's
+/// refusal, or the Step's end.
 enum Asked {
     Update(BranchUpdate),
+    Declined(String),
     Ended(StepReport),
 }
 
@@ -1186,8 +1186,9 @@ where
     ///
     /// [`Update::Merged`] with the head GitHub's merge made (or the head, when
     /// it already held its base); [`Update::Conflict`] when GitHub could not
-    /// merge them, for the agent to resolve; [`Update::Ended`] when the pull
-    /// request was merged or closed meanwhile.
+    /// merge them, for the agent to resolve; [`Update::Declined`] when GitHub
+    /// refused for another reason; [`Update::Ended`] when the pull request
+    /// was merged or closed meanwhile.
     pub(crate) async fn update_branch(
         &self,
         input: &StepInput<'_>,
@@ -1203,6 +1204,7 @@ where
             None => {
                 let asked = match self.ask_update(input, &repository, recorded).await? {
                     Asked::Ended(report) => return Ok(Update::Ended(report)),
+                    Asked::Declined(why) => return Ok(Update::Declined(why)),
                     Asked::Update(update) => update,
                 };
                 self.repo
@@ -1222,6 +1224,7 @@ where
         // where it is now.
         let asked = match self.ask_update(input, &repository, recorded).await? {
             Asked::Ended(report) => return Ok(Update::Ended(report)),
+            Asked::Declined(why) => return Ok(Update::Declined(why)),
             Asked::Update(update) => update,
         };
         let update = self
@@ -1294,9 +1297,7 @@ where
                 tracing::info!(%why, "the run's base conflicts with its branch");
                 true
             }
-            BranchUpdating::Declined(why) => {
-                return Err(PullRequestStepError::UpdateDeclined(why));
-            }
+            BranchUpdating::Declined(why) => return Ok(Asked::Declined(why)),
             BranchUpdating::HeadMoved => {
                 return Err(PullRequestStepError::BranchMoving(
                     "someone pushed to it".to_string(),

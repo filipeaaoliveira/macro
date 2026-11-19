@@ -406,3 +406,33 @@ async fn an_update_of_a_run_with_no_reviewed_head_ends_resolved() {
 
     assert_eq!(report.outcome.as_str(), "resolved", "{}", report.output);
 }
+
+/// GitHub refusing the update for a reason other than a conflict, as for a
+/// token that lacks a scope, ends `conflict` with GitHub's message, which
+/// opens the entry's Gate for a person: the Run does not fail, and no agent
+/// is asked.
+#[tokio::test]
+async fn an_update_github_refuses_goes_to_a_person() {
+    let github = behind();
+    github.state().update_answer = Some(BranchUpdating::Declined(
+        "Resource not accessible by integration".to_string(),
+    ));
+    let agent = FakeAgent::ending_with("done");
+    let repository = repository();
+    let mut update = input(&[]);
+    update.repository = Some(&repository);
+
+    let report = run_update(&agent, &github, &FakeRepo::default(), update)
+        .await
+        .expect("update");
+
+    assert_eq!(report.outcome.as_str(), "conflict");
+    assert!(
+        report
+            .output
+            .contains("Resource not accessible by integration"),
+        "{}",
+        report.output
+    );
+    assert!(agent.tasks.lock().expect("tasks").is_empty());
+}

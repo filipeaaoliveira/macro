@@ -474,7 +474,7 @@
 			],
 			"gate": {
 				"after": "conflict",
-				"question": "The base branch moved and conflicts with the change, and the agent could not resolve it. Resolve the conflict on the run's branch and try again, or stop and leave the branch to you?",
+				"question": "The base branch moved and the run's branch could not be brought up to date: it conflicts with the change and the agent could not resolve it, or GitHub refused to update it (the step's output gives its message). Resolve the conflict on the run's branch, or settle what GitHub asks, and try again, or stop and leave the branch to you?",
 				"answers": ["retry", "stop"]
 			},
 			"on": {
