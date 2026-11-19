@@ -190,3 +190,35 @@ async fn a_conflict_no_one_resolved_goes_to_a_person() {
         report.output
     );
 }
+
+/// A branch that holds its base already when the update starts, as once a
+/// person resolved the conflict and answered the Gate's `retry`, holds
+/// commits the factory did not make: it ends `resolved`, so it is reviewed
+/// and accepted again, never sent through CI alone to a merge.
+#[tokio::test]
+async fn a_branch_someone_else_brought_up_to_date_ends_resolved() {
+    let github = behind();
+    {
+        let mut state = github.state();
+        state.head = Some(RESOLVED.to_string());
+        if let Some(pull_request) = state.pull_request.as_mut() {
+            pull_request.head_sha = RESOLVED.to_string();
+        }
+    }
+    let agent = FakeAgent::ending_with("done");
+    let repository = repository();
+    let mut update = input(&[]);
+    update.repository = Some(&repository);
+
+    let report = run_update(&agent, &github, &FakeRepo::default(), update)
+        .await
+        .expect("update");
+
+    assert_eq!(report.outcome.as_str(), "resolved");
+    assert!(
+        report.output.contains("the factory did not make"),
+        "{}",
+        report.output
+    );
+    assert!(github.state().updates.is_empty(), "nothing to merge");
+}

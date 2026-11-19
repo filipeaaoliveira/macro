@@ -12,12 +12,14 @@
 //! Flow asks about at a Gate).
 //!
 //! The Step ends:
-//! - `done` when the branch's head is still the one GitHub's merge made
-//!   and its checks passed: only the base came in, so the Run goes on to
-//!   CI, and the merge Gate asks again;
+//! - `done` when the branch's head is still the one the merge GitHub made
+//!   on the factory's asking made, and its checks passed: only the base
+//!   came in, so the Run goes on to CI, and the merge Gate asks again;
 //! - `resolved` when anything else is on it now, as an agent's resolution
-//!   of a conflict, or a fix a checks round asked for: the change itself
-//!   changed, so its review and acceptance run again;
+//!   of a conflict, a person's pushed before the conflict Gate's `retry`
+//!   (the branch then holds its base already), or a fix a checks round
+//!   asked for: the change itself changed, so its review and acceptance
+//!   run again;
 //! - `conflict` when the agent could not resolve the conflict, or what it
 //!   pushed does not hold the base and every commit the branch had;
 //! - `red` when the checks never passed, and `merged` or `closed` when the
@@ -66,6 +68,12 @@ where
             Update::Ended(report) => Ok(report),
             Update::Merged(update) => {
                 let head = update.updated_head.clone().unwrap_or_default();
+                // Only a merge GitHub made on the factory's asking moved the
+                // branch from where the update started; a branch that held
+                // its base already holds someone else's commits (a person's
+                // or an agent's resolution after the conflict Gate's
+                // `retry`), which no review has seen.
+                let factory_merge = update.from_head != head;
                 let instructions = UPDATE_INSTRUCTIONS
                     .replace("{base_sha}", &update.base_sha)
                     .replace("{head}", &head);
@@ -74,6 +82,16 @@ where
                     .await?;
                 if checked.outcome != Outcome::done() {
                     return Ok(checked);
+                }
+                if !factory_merge {
+                    return Ok(StepReport {
+                        outcome: outcome(RESOLVED),
+                        output: format!(
+                            "The branch already held the base at {head}, through commits the \
+                             factory did not make, so its review runs again.\n\n{}",
+                            checked.output
+                        ),
+                    });
                 }
                 let now = self.pull_requests.branch_head(&input).await?;
                 if now.as_deref() == Some(head.as_str()) {

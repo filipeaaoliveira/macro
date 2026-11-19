@@ -896,16 +896,24 @@ its Flow does not route above `merge` would fall through to the merge):
   now, which replaces the update kept; still nothing shown fails the
   attempt for a retry, which does the same, so the Step's retries bound
   it. Then the repository's checks round runs on the
-  branch, as for `write` and `fix`. It ends `done` when the branch's head
-  is still the one GitHub's merge made and the checks passed (only the base
-  came in: the Run goes back through `ci` to the merge Gate, which asks
-  again); `resolved` when anything else is on it (an agent's resolution, a
-  fix a checks round asked for, someone's push), which goes back through
-  `review` and `accept`, their visits reset; `conflict` when the writer
-  could not resolve it, or what it pushed does not hold both the base's head
-  and the branch's former head, which opens the entry's Gate (no kind, so
-  no rule, stand-in or Orchestrator answers it): `retry` once a person
-  resolved it on the branch, or `stop`. At most five updates a Run, then it
+  branch, as for `write` and `fix`. It ends `done` only when the update
+  merged the base itself (GitHub's merge on the factory's asking moved
+  the branch from the head the update started at), the branch's head is
+  still that merge, and the checks passed: only the base came in, so the
+  Run goes back through `ci` to the merge Gate, which asks again. Any
+  commit the factory's own update did not make ends it `resolved`, which
+  goes back through `review` and `accept`, their visits reset, then
+  `publish`, `ci` and the merge Gate: an agent's resolution, a fix a checks
+  round asked for, someone's push after the merge, and a branch that
+  already held its base when the update started (someone else merged the
+  base in). `conflict` when the writer could not resolve it, or what it
+  pushed does not hold both the base's head and the branch's former head,
+  opens the entry's Gate (no kind, so no rule, stand-in or Orchestrator
+  answers it): `stop`, or `retry` once a person resolved it on the branch.
+  `retry` runs `update` again, which finds the branch holding its base
+  through the person's commits and ends `resolved`, so a person's
+  resolution is reviewed and accepted before the merge Gate asks, and a
+  `merge_when_green` rule never merges it on CI alone. At most five updates a Run, then it
   ends for a person.
 - The merge Gate's approval never carries over an update: whatever came
   in, the merge Gate asks again (a `merge_when_green` rule answers it as
