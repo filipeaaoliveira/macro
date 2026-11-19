@@ -939,6 +939,14 @@ jobs:
         printf '%s\n' "$compare_rev" > /tmp/base-revision
         git diff --name-only --no-renames "$compare_rev" "$GITHUB_SHA" > /tmp/changed-files
       shell: bash
+    - name: fetch the blobs of the change's diff
+      if: github.event_name == 'pull_request'
+      run: |
+        set -euo pipefail
+        if [ ! -f /tmp/base-revision ]; then
+          exit 0
+        fi
+        git diff --name-only -z "$(cat /tmp/base-revision)...HEAD" > /dev/null
     - name: Setup Nix
       uses: './.github/actions/setup-nix'
     - name: Setup Prereqs

@@ -236,6 +236,7 @@ fn web() -> Job {
         // Before the dev shell: its LD_LIBRARY_PATH points the runner's
         // git-remote-https at Nix's glibc, which aborts `git fetch`.
         .add_step(changed_files_on_pull_request())
+        .add_step(fetch_diff_blobs())
         .add_step(steps::setup_nix())
         .add_step(
             steps::setup_reqs_web("Setup Prereqs", false)
@@ -553,6 +554,24 @@ fn biome(name: &str, dir: xtask_paths::RepoDir<'_>) -> Step<Run> {
             biome ci "${changed[@]}" --no-errors-on-unmatched --error-on-warnings
         "#})
         .working_directory(dir)
+}
+
+/// Fetches the blobs that the diff against the base revision reads, before the
+/// dev shell. The web job's checkout has no blobs, and `vitest --changed` runs
+/// `git diff --name-only -z <base>...HEAD`, whose rename detection reads the
+/// blobs of added and deleted files. Inside the dev shell, git fetches them
+/// with the runner's git-remote-https under Nix's LD_LIBRARY_PATH, which
+/// aborts. The same diff here, outside it, fetches them in one batch.
+fn fetch_diff_blobs() -> Step<Run> {
+    Step::new("fetch the blobs of the change's diff")
+        .run(indoc::indoc! {r#"
+            set -euo pipefail
+            if [ ! -f /tmp/base-revision ]; then
+              exit 0
+            fi
+            git diff --name-only -z "$(cat /tmp/base-revision)...HEAD" > /dev/null
+        "#})
+        .if_condition(Expression::new("github.event_name == 'pull_request'"))
 }
 
 /// The tests that import a changed file, directly or not. Without a base
