@@ -54,8 +54,9 @@ const TRUSTED: &str = "github.event_name == 'workflow_dispatch' || \
 const FILTER_CACHE_DIR: RuntimePath<'static> =
     xtask_paths::runtime_path!("/home/runner/.cache/macro-nextest-filter");
 
-/// Nextest's threads on the self-hosted runner, which has 4 CPUs.
-const NEXTEST_TEST_THREADS: u32 = 8;
+/// Nextest's threads on the self-hosted runner, which has 4 CPUs. More than
+/// the CPUs: most tests wait on Postgres in the Docker sidecar.
+const NEXTEST_TEST_THREADS: u32 = 12;
 
 /// Build the workflow.
 pub fn fork_ci() -> Workflow {
@@ -80,7 +81,8 @@ pub fn fork_ci() -> Workflow {
         )
         .map(vars::with_global_env)
         .add_job("changes", changes())
-        .add_job("rust", rust())
+        .add_job("rust-check", rust_check())
+        .add_job("rust-test", rust_test())
         .add_job("web", web())
         .add_job("gate", gate())
 }
@@ -138,15 +140,47 @@ fn changes() -> Job {
         .add_step(compute_nextest_filter().if_condition(Expression::new(scope_rust)))
 }
 
-/// fmt, unused dependencies, clippy and the tests of the affected packages.
-/// Clippy runs with `SQLX_OFFLINE=true`, so a missing or stale `.sqlx` entry
-/// fails it. The tests run every migration on an empty Postgres first.
-fn rust() -> Job {
-    let tests = "needs.changes.outputs.rust_packages != 'none' \
-         && needs.changes.outputs.skip_tests != 'true'";
-
+/// fmt, unused dependencies and clippy on the affected packages. Clippy runs
+/// with `SQLX_OFFLINE=true`, so a missing or stale `.sqlx` entry fails it. Its
+/// own job, so it runs beside the tests on the other runner instead of before
+/// them.
+fn rust_check() -> Job {
     self_hosted_job("rust")
-        .timeout_minutes(90u32)
+        .timeout_minutes(120u32)
+        .add_env((
+            "RUST_PACKAGES",
+            "${{ needs.changes.outputs.rust_packages }}",
+        ))
+        .map(code_check_cloud_storage::with_test_compile_env)
+        .add_step(steps::checkout(false, false).add_with(("fetch-depth", 2)))
+        // Before the dev shell, as in `web`.
+        .add_step(changed_files_on_pull_request())
+        .add_step(steps::setup_nix())
+        .add_step(steps::setup_dev_shell().timeout_minutes(vars::DEV_SHELL_TIMEOUT_MINUTES))
+        .add_step(use_runner_cache())
+        .add_step(steps::start_sccache_server())
+        .add_step(steps::code_mode_assets())
+        .add_step(cargo_fmt())
+        .add_step(Step::new("unused dependencies").run("cargo shear --format github"))
+        .add_step(cargo_clippy())
+        .add_step(steps::show_sccache_stats())
+        .add_step(steps::teardown_nix())
+}
+
+/// The tests of the affected packages, after every migration runs on an empty
+/// Postgres. Skipped when no package is affected, or only `.sqlx` changed.
+/// A change to a widely used crate selects dozens of packages, which take this
+/// runner's 4 CPUs well over an hour to build and test, hence the timeout.
+fn rust_test() -> Job {
+    Job::default()
+        .needs(vec!["changes".to_string()])
+        .cond(Expression::new(format!(
+            "needs.changes.outputs.rust == 'true' \
+             && needs.changes.outputs.rust_packages != 'none' \
+             && needs.changes.outputs.skip_tests != 'true' && ({TRUSTED})"
+        )))
+        .runs_on(RUNNER)
+        .timeout_minutes(240u32)
         .add_env((
             "RUST_PACKAGES",
             "${{ needs.changes.outputs.rust_packages }}",
@@ -159,22 +193,15 @@ fn rust() -> Job {
         .add_env(("SCCACHE_IDLE_TIMEOUT", "0"))
         .add_service("postgres", code_check_cloud_storage::postgres_service())
         .add_service("redis", code_check_cloud_storage::redis_service())
-        .add_step(steps::checkout(false, false).add_with(("fetch-depth", 2)))
-        // Before the dev shell, as in `web`.
-        .add_step(changed_files_on_pull_request())
+        .add_step(steps::checkout(false, false))
         .add_step(steps::setup_nix())
         .add_step(steps::setup_dev_shell().timeout_minutes(vars::DEV_SHELL_TIMEOUT_MINUTES))
         .add_step(use_runner_cache())
         .add_step(steps::start_sccache_server())
         .add_step(steps::code_mode_assets())
-        .add_step(cargo_fmt())
-        .add_step(Step::new("unused dependencies").run("cargo shear --format github"))
-        .add_step(cargo_clippy())
-        .add_step(
-            code_check_cloud_storage::configure_postgres().if_condition(Expression::new(tests)),
-        )
-        .add_step(prepare_tests().if_condition(Expression::new(tests)))
-        .add_step(run_tests().if_condition(Expression::new(tests)))
+        .add_step(code_check_cloud_storage::configure_postgres())
+        .add_step(prepare_tests())
+        .add_step(run_tests())
         .add_step(steps::show_sccache_stats())
         .add_step(steps::teardown_nix())
 }
@@ -237,7 +264,8 @@ fn gate() -> Job {
         .name(GATE_NAME)
         .needs(vec![
             "changes".to_string(),
-            "rust".to_string(),
+            "rust-check".to_string(),
+            "rust-test".to_string(),
             "web".to_string(),
         ])
         .cond(Expression::new("always()"))

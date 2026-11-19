@@ -32,7 +32,7 @@ fn self_hosted_jobs_run_only_trusted_code() {
         .map(|(id, _)| id)
         .collect();
 
-    assert_eq!(self_hosted, ["rust", "web"]);
+    assert_eq!(self_hosted, ["rust-check", "rust-test", "web"]);
 
     for id in self_hosted {
         let condition = jobs[id]["if"].as_str().unwrap();
