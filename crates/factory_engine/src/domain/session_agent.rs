@@ -78,6 +78,11 @@ const RESUME_SETTLE: Duration = Duration::from_secs(5 * 60);
 /// session, as its passed-over Agent records it.
 pub const SESSION_LOST: &str = "session_lost";
 
+/// Why a Step passed over an Agent whose first turn the usage limit of its
+/// runtime's own provider account ended before it called any tool, as the
+/// passed-over Agent records it.
+pub const USAGE_LIMIT: &str = "usage_limit";
+
 /// How long a stopped Step's session is watched, to stop it again if a
 /// prompt still on its way started it.
 const STOP_WATCH: Duration = Duration::from_secs(60);
@@ -241,8 +246,16 @@ impl Retryable for SessionAgentError {
 }
 
 impl AgentFailure for SessionAgentError {
+    /// A refusal for lack of quota, and a turn the usage limit of the
+    /// runtime's own provider account ended (a Codex or Claude Code
+    /// subscription signed in on the machine): either way the Agent cannot
+    /// do the work now, which is not the work's failure.
     fn out_of_quota(&self) -> bool {
-        matches!(self, SessionAgentError::NoQuota(_))
+        matches!(
+            self,
+            SessionAgentError::NoQuota(_)
+                | SessionAgentError::TurnFailed(RoutineFailureReason::UsageLimit)
+        )
     }
 
     fn overdue(&self) -> bool {
@@ -1199,104 +1212,206 @@ impl<S: RoutineSessions, R: RunRepository + EvaluationRepository> SessionAgent<S
         let listed = self.role_agents(agents, task).await?;
         let mut session = session;
         let mut fresh = fresh;
-        // An Agent that cannot start for lack of quota hands the Step to the
-        // next Agent of its Role, in a session of its own, until one starts
-        // or none is left; the Step records each Agent passed over, the last
-        // one too.
-        let action = loop {
-            let agent = Self::agent_name(agents, &session, &task.role)?;
-            // The Agent after this one in the Role's list, or its first
-            // when the definition no longer lists this one for the Role.
-            let next = listed
-                .iter()
-                .position(|name| *name == agent)
-                .map_or(0, |place| place + 1);
-            let to = listed
-                .get(next)
-                .map(|name| Self::new_session(agents, name))
-                .transpose()?;
+        loop {
+            // An Agent that cannot start for lack of quota hands the Step to the
+            // next Agent of its Role, in a session of its own, until one starts
+            // or none is left; the Step records each Agent passed over, the last
+            // one too.
+            let (action, started) = loop {
+                let agent = Self::agent_name(agents, &session, &task.role)?;
+                // The Agent after this one in the Role's list, or its first
+                // when the definition no longer lists this one for the Role.
+                let next = listed
+                    .iter()
+                    .position(|name| *name == agent)
+                    .map_or(0, |place| place + 1);
+                let to = listed
+                    .get(next)
+                    .map(|name| Self::new_session(agents, name))
+                    .transpose()?;
 
-            // An Agent its owner's quota refused lately is passed over
-            // without its session opened, while another Agent is left to
-            // take the Step; only in a session this attempt made, which no
-            // attempt can have started work in.
-            let skipped = fresh && to.is_some() && self.quota.refused_lately(&task.owner, &agent);
-            let refusal = if skipped {
-                None
-            } else {
-                match self.start(agents, task, &session, &agent, deadline).await {
-                    Ok(action) => {
-                        self.quota.started(&task.owner, &agent);
-                        break action;
-                    }
-                    Err(SessionAgentError::NoQuota(reason)) => {
-                        self.quota.refused(&task.owner, &agent);
-                        Some(reason)
-                    }
-                    // An overlapping attempt handed the Step on while this
-                    // one opened its session: go on in the session it works
-                    // in now.
-                    Err(SessionAgentError::Released) => {
-                        match self.moved_on(task.key, &session).await? {
-                            Some(current) => {
-                                session = current;
-                                fresh = false;
-                                continue;
+                // An Agent its owner's quota refused lately is passed over
+                // without its session opened, while another Agent is left to
+                // take the Step; only in a session this attempt made, which no
+                // attempt can have started work in.
+                let skipped =
+                    fresh && to.is_some() && self.quota.refused_lately(&task.owner, &agent);
+                let refusal = if skipped {
+                    None
+                } else {
+                    match self.start(agents, task, &session, &agent, deadline).await {
+                        Ok(action) => {
+                            self.quota.started(&task.owner, &agent);
+                            break (action, agent);
+                        }
+                        Err(SessionAgentError::NoQuota(reason)) => {
+                            self.quota.refused(&task.owner, &agent);
+                            Some(reason)
+                        }
+                        // An overlapping attempt handed the Step on while this
+                        // one opened its session: go on in the session it works
+                        // in now.
+                        Err(SessionAgentError::Released) => {
+                            match self.moved_on(task.key, &session).await? {
+                                Some(current) => {
+                                    session = current;
+                                    fresh = false;
+                                    continue;
+                                }
+                                None => return Err(SessionAgentError::Released),
                             }
-                            None => return Err(SessionAgentError::Released),
+                        }
+                        Err(error) => return Err(error),
+                    }
+                };
+                let reason = refusal.map_or(NO_QUOTA_LATELY, DenyReason::code);
+                let passed = PassedOver {
+                    agent: agent.clone(),
+                    reason: reason.to_string(),
+                };
+                let recorded = self
+                    .repo
+                    .pass_session(
+                        task.key,
+                        session.session_id,
+                        &task.role,
+                        &passed,
+                        to.as_ref(),
+                    )
+                    .await
+                    .map_err(Self::records)?;
+                // No Agent is left only after a refusal: the last is never
+                // skipped.
+                let Some(to) = to else {
+                    return Err(not_passed(refusal));
+                };
+                if recorded {
+                    tracing::info!(
+                        from = %agent,
+                        reason,
+                        "a factory step's agent could not start: the next agent takes it"
+                    );
+                    session = to;
+                    fresh = true;
+                    continue;
+                }
+
+                // Another attempt handed the Step on already, or it let go of
+                // its session: go on in the session it works in now, while it
+                // holds it.
+                match self.moved_on(task.key, &session).await? {
+                    Some(current) => {
+                        session = current;
+                        fresh = false;
+                    }
+                    None => return Err(not_passed(refusal)),
+                }
+            };
+            let waited = match self.first_wait(task, &action, deadline, false).await {
+                Err(SessionAgentError::TurnFailed(RoutineFailureReason::UsageLimit)) => {
+                    // The usage limit of the runtime's own provider account
+                    // ended the first turn: remembered as a refusal is, so the
+                    // Steps after it start with another Agent while it lasts.
+                    self.quota.refused(&task.owner, &started);
+                    match self
+                        .pass_on_usage_limit(agents, task, &listed, &session, &started, &action)
+                        .await?
+                    {
+                        Some((to, made)) => {
+                            session = to;
+                            fresh = made;
+                            continue;
+                        }
+                        None => {
+                            return Err(SessionAgentError::TurnFailed(
+                                RoutineFailureReason::UsageLimit,
+                            ));
                         }
                     }
-                    Err(error) => return Err(error),
                 }
+                waited => waited?,
             };
-            let reason = refusal.map_or(NO_QUOTA_LATELY, DenyReason::code);
-            let passed = PassedOver {
-                agent: agent.clone(),
-                reason: reason.to_string(),
-            };
-            let recorded = self
-                .repo
-                .pass_session(
-                    task.key,
-                    session.session_id,
-                    &task.role,
-                    &passed,
-                    to.as_ref(),
-                )
-                .await
-                .map_err(Self::records)?;
-            // No Agent is left only after a refusal: the last is never
-            // skipped.
-            let Some(to) = to else {
-                return Err(not_passed(refusal));
-            };
-            if recorded {
-                tracing::info!(
-                    from = %agent,
-                    reason,
-                    "a factory step's agent could not start: the next agent takes it"
-                );
-                session = to;
-                fresh = true;
-                continue;
-            }
 
-            // Another attempt handed the Step on already, or it let go of
-            // its session: go on in the session it works in now, while it
-            // holds it.
-            match self.moved_on(task.key, &session).await? {
-                Some(current) => {
-                    session = current;
-                    fresh = false;
-                }
-                None => return Err(not_passed(refusal)),
+            // The session stays until the Step's end is recorded: a retry of an
+            // attempt whose answer Temporal lost goes on in it.
+            let answered = self.answer_or_remind(task, &action, waited).await;
+            if matches!(
+                answered,
+                Err(SessionAgentError::TurnFailed(
+                    RoutineFailureReason::UsageLimit
+                ))
+            ) {
+                self.quota.refused(&task.owner, &started);
             }
+            return answered;
+        }
+    }
+
+    /// Hand the Step `task` on from the Agent `agent`, whose first turn in
+    /// `session` (`action`) the usage limit of its runtime's own provider
+    /// account ended, to the next Agent of its Role (`listed`), in a new
+    /// session: only when that turn called no tool, so it changed nothing
+    /// and the next Agent starts the work afresh, as after a refusal. The
+    /// session the Step works in next, and whether this attempt made it;
+    /// none when the Step stays with `agent` and ends out of quota: no
+    /// Agent is left, the turn did work, or its work could not be read.
+    async fn pass_on_usage_limit(
+        &self,
+        agents: &AgentDefinition,
+        task: &AgentTask,
+        listed: &[AgentName],
+        session: &StepSession,
+        agent: &AgentName,
+        action: &RoutineSessionAction,
+    ) -> Result<Option<(StepSession, bool)>, SessionAgentError> {
+        let next = listed
+            .iter()
+            .position(|name| name == agent)
+            .map_or(0, |place| place + 1);
+        let Some(to) = listed
+            .get(next)
+            .map(|name| Self::new_session(agents, name))
+            .transpose()?
+        else {
+            return Ok(None);
         };
-        let waited = self.first_wait(task, &action, deadline, false).await?;
-
-        // The session stays until the Step's end is recorded: a retry of an
-        // attempt whose answer Temporal lost goes on in it.
-        self.answer_or_remind(task, &action, waited).await
+        match self.sessions.activity(action.clone()).await {
+            Ok(activity) if activity.tool_calls == 0 => {}
+            Ok(_) => return Ok(None),
+            Err(error) => {
+                tracing::warn!(
+                    ?error,
+                    "a factory step's session was not read after its usage limit: the step stays with its agent"
+                );
+                return Ok(None);
+            }
+        }
+        // As after a refused prompt: the session did nothing the next Agent
+        // needs, and the Step stops pointing at it once handed on.
+        self.delete(action).await;
+        let passed = PassedOver {
+            agent: agent.clone(),
+            reason: USAGE_LIMIT.to_string(),
+        };
+        let recorded = self
+            .repo
+            .pass_session(task.key, session.session_id, &task.role, &passed, Some(&to))
+            .await
+            .map_err(Self::records)?;
+        if recorded {
+            tracing::info!(
+                from = %agent,
+                reason = USAGE_LIMIT,
+                "a factory step's agent ran into its usage limit: the next agent takes it"
+            );
+            return Ok(Some((to, true)));
+        }
+        // Another attempt handed the Step on already: go on in the session
+        // it works in now, while the Step holds it.
+        Ok(self
+            .moved_on(task.key, session)
+            .await?
+            .map(|current| (current, false)))
     }
 }
 
