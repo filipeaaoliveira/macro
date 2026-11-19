@@ -54,7 +54,8 @@ Outside the files, all must be done:
   (`macrod service --agent codex`, or a second profile beside a Claude
   Code one), and give an Agent that machine's agent's `bot` id. Codex's
   cloud agent (`00000000-0000-0000-0000-00000000c0de`) cannot take a Step:
-  its sessions cannot hand a result back, and the validator refuses it.
+  its sessions cannot hand a result back, and the validator refuses an
+  Agent on it that a Role lists (one only a Standing Role lists reads).
 - `instructions` (may): what every session of the Agent is told before the
   Step's prompt. Left as is, `primary` is told to work in small commits.
 - `roles` (may): the Agents of each Role, in order. A Step works with the
@@ -453,8 +454,8 @@ every such Agent, in the order `agents.json` lists them:
 .: agents.json: agents primary, backup have the template's placeholder bot ids: replace them with the ids of Macro agents each member who starts runs may use
 ```
 
-An Agent on Codex's cloud agent does not read either, each named the same
-way, with how to run Codex through macrod instead.
+An Agent on Codex's cloud agent that a Role lists does not read either,
+each named the same way, with how to run Codex through macrod instead.
 
 The validator has no mode that lets them through: the template as shipped
 fails it on purpose. Team settings and a Run read the Definition the same

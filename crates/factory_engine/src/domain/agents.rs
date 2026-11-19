@@ -198,11 +198,12 @@ pub enum AgentDefinitionError {
     /// definition lists them.
     #[error("{}", placeholder_bots_message(.0))]
     PlaceholderBots(Vec<AgentName>),
-    /// Agents whose bot is Codex's cloud agent ([`CODEX_BOT_ID`]), in the
-    /// order the definition lists them: its sessions work in a cloud
-    /// environment of their own, outside the Run's checkout, and are handed
-    /// no Macro tools, so they can never hand a Step's result back. Codex
-    /// takes a Role through macrod on a machine (`--agent codex`).
+    /// Agents a work Role lists whose bot is Codex's cloud agent
+    /// ([`CODEX_BOT_ID`]), in the order the definition lists them: its
+    /// sessions work in a cloud environment of their own, outside the Run's
+    /// checkout, and are handed no Macro tools, so they can never hand a
+    /// Step's result back. Codex takes a Role through macrod on a machine
+    /// (`--agent codex`).
     #[error("{}", cloud_codex_message(.0))]
     CloudCodex(Vec<AgentName>),
 }
@@ -331,13 +332,16 @@ impl AgentDefinition {
             .collect()
     }
 
-    /// The Agents, by name, whose bot is Codex's cloud agent
-    /// ([`CODEX_BOT_ID`]), which cannot do a Step
-    /// ([`AgentDefinitionError::CloudCodex`]).
+    /// The Agents, by name, that a work Role lists and whose bot is Codex's
+    /// cloud agent ([`CODEX_BOT_ID`]), which cannot do a Step
+    /// ([`AgentDefinitionError::CloudCodex`]). An Agent only a Standing Role
+    /// lists takes no Step, so nothing waits on it to hand back.
     pub fn cloud_codex_agents(&self) -> Vec<AgentName> {
         self.agents
             .iter()
-            .filter(|(_, agent)| agent.bot == CODEX_BOT_ID)
+            .filter(|(name, agent)| {
+                agent.bot == CODEX_BOT_ID && self.roles.values().any(|listed| listed.contains(name))
+            })
             .map(|(name, _)| name.clone())
             .collect()
     }

@@ -652,10 +652,11 @@ reads `usageLimitExceeded` as a `ProviderUsageLimit` notice
 (`agent_fold`'s `harness/codex.rs`), so the Step is out of quota as above.
 Codex's cloud agent (`bot_id::CODEX_BOT_ID`) cannot take a Step: its
 sessions work in a cloud environment of their own and are handed no Macro
-tools, so they never hand back. An agent definition naming it does not
-read: `FACTORY_AGENTS` stops the service, and a Definition's `agents.json`
-is refused, each naming the Agents on it
-(`AgentDefinitionError::CloudCodex`). Neither a Codex nor a Claude Code
+tools, so they never hand back. An agent definition whose work Roles list
+an Agent on it does not read: `FACTORY_AGENTS` stops the service, and a
+Definition's `agents.json` is refused, each naming the Agents on it
+(`AgentDefinitionError::CloudCodex`). An Agent on it that only a Standing
+Role lists reads: it takes no Step, so nothing waits on it. Neither a Codex nor a Claude Code
 Agent signed in with its owner's own login records token use, so their
 Steps are unmeasured (below). An attempt
 prepares, opens and prompts only the session the Step works in now, so an

@@ -795,6 +795,28 @@ async fn an_agent_on_the_codex_cloud_agent_does_not_read() {
     assert!(read(with("agents.json", &on_a_machine)).await.is_ok());
 }
 
+/// An Agent on Codex's cloud agent that only a Standing Role lists reads:
+/// it takes no Step, so nothing waits on it to hand back.
+#[tokio::test]
+async fn an_agent_on_the_codex_cloud_agent_reads_in_a_standing_role_only() {
+    let agents = r#"{
+        "agents": {
+            "primary": { "bot": "00000000-0000-0000-0000-00000000c1a0" },
+            "backup": { "bot": "00000000-0000-0000-0000-00000000c0de" }
+        },
+        "roles": { "planner": ["primary"], "writer": ["primary"] },
+        "standing": {
+            "intake": { "acts": ["start", "link"], "agents": ["backup"] }
+        }
+    }"#;
+
+    let definition = read(with("agents.json", agents))
+        .await
+        .expect("a cloud agent in a standing role only reads");
+    assert!(definition.agents.has_standing_roles());
+    assert!(definition.agents.cloud_codex_agents().is_empty());
+}
+
 /// The starter's Control Files are the factory's default and its own
 /// files, so a Run that changes its rules waits for a person.
 #[tokio::test]
