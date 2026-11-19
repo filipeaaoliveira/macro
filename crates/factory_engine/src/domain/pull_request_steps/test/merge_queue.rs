@@ -567,3 +567,46 @@ async fn a_queued_merge_whose_head_moved_is_not_merged() {
     assert!(report.output.contains(UPDATED), "{}", report.output);
     assert!(github.state().merges.is_empty(), "GitHub is never asked");
 }
+
+/// A Run whose turn came waits while another Run of its base is merging, as
+/// one that came back to its place just as this one read the queue: it
+/// merges only once that merge ended.
+#[tokio::test(start_paused = true)]
+async fn a_run_whose_turn_came_waits_for_a_merge_in_flight() {
+    let github = github_on(OLD_BASE, true);
+    let repo = FakeRepo::default();
+    let merging = RunId::generate();
+    let second = RunId::generate();
+    approved(&repo, second).await;
+    // The other Run is past the queue, merging; it is not ahead of this one.
+    let turn = repo
+        .take_merge_turn(merging)
+        .await
+        .expect("take")
+        .expect("free");
+
+    let waiting = tokio::spawn({
+        let step = steps(&github, &repo);
+        async move {
+            let routes = routes();
+            step.merge(crate::domain::models::StepInput {
+                routes: &routes,
+                ..input(second)
+            })
+            .await
+        }
+    });
+    tokio::time::sleep(Duration::from_secs(90)).await;
+    assert!(
+        github.state().merges.is_empty(),
+        "no merge beside one in flight"
+    );
+
+    drop(turn);
+    let report = waiting.await.expect("join").expect("merge");
+    assert_eq!(outcome(&report), "merged");
+    assert!(
+        repo.take_merge_turn(second).await.expect("take").is_some(),
+        "the turn is let go once the merge ended"
+    );
+}

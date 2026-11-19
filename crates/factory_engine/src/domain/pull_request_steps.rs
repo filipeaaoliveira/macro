@@ -1145,26 +1145,37 @@ where
         Ok(merge_base.as_deref() == Some(commit))
     }
 
-    /// Wait until no Run is ahead of this one in its base's merge queue, up
-    /// to `deadline`: whether its turn came. Which Runs are ahead is never
-    /// told: they may be other people's, which this Run's readers may not
-    /// see.
+    /// Wait until no Run is ahead of this one in its base's merge queue and
+    /// no other Run of the base is merging, up to `deadline`: the base's
+    /// merge turn once its turn came, none when it did not. The turn is
+    /// taken before the queue is read and held through the merge, so a Run
+    /// that comes back to its place ahead meanwhile waits for this merge,
+    /// then finds its head behind the base, rather than merge beside it.
+    /// Which Runs are ahead is never told: they may be other people's, which
+    /// this Run's readers may not see.
     async fn wait_for_turn(
         &self,
         input: &StepInput<'_>,
         deadline: tokio::time::Instant,
-    ) -> Result<bool, PullRequestStepError> {
+    ) -> Result<Option<R::Turn>, PullRequestStepError> {
         loop {
-            let ahead = self
+            let turn = self
                 .repo
-                .merge_queue_ahead(input.key.run_id, QUEUE_PLACE_KEPT)
+                .take_merge_turn(input.key.run_id)
                 .await
                 .map_err(PullRequestStepError::records)?;
-            if ahead.is_empty() {
-                return Ok(true);
+            if let Some(turn) = turn {
+                let ahead = self
+                    .repo
+                    .merge_queue_ahead(input.key.run_id, QUEUE_PLACE_KEPT)
+                    .await
+                    .map_err(PullRequestStepError::records)?;
+                if ahead.is_empty() {
+                    return Ok(Some(turn));
+                }
             }
             if tokio::time::Instant::now() + QUEUE_POLL > deadline {
-                return Ok(false);
+                return Ok(None);
             }
             tokio::time::sleep(QUEUE_POLL).await;
         }
@@ -1600,14 +1611,16 @@ where
             ));
         }
 
-        if input.routes(QUEUED) {
+        // The base's merge turn, held through GitHub's merge, and let go on
+        // every path that ends before it.
+        let turn = if input.routes(QUEUED) {
             self.repo
                 .enter_merge_queue(input.key.run_id)
                 .await
                 .map_err(PullRequestStepError::records)?;
             // The Runs ahead may be anyone's: what this Run's readers see
             // names none of them, nor how many there are.
-            if !self.wait_for_turn(&input, started + QUEUE_WAIT).await? {
+            let Some(turn) = self.wait_for_turn(&input, started + QUEUE_WAIT).await? else {
                 return Ok(report(
                     QUEUED,
                     format!(
@@ -1618,7 +1631,7 @@ where
                         recorded.base_branch,
                     ),
                 ));
-            }
+            };
             // A hold set while it waited holds it still: it waits no more,
             // as its time went to the queue, and goes back to its Gate.
             let held = self
@@ -1636,7 +1649,10 @@ where
                     ),
                 ));
             }
-        }
+            Some(turn)
+        } else {
+            None
+        };
 
         // A merge that waited its turn merges the head approved only while
         // its checks still pass: a check that failed since (a re-run) goes
@@ -1679,6 +1695,9 @@ where
             .merge(input.owner, &repository, pull_request.number, &head)
             .await
             .map_err(PullRequestStepError::github)?;
+        // GitHub's answer says where the base is: the next Run of the base
+        // may read it now.
+        drop(turn);
         // GitHub refuses a merge whose base moved under a branch protection
         // that wants branches up to date: that is a branch behind its base.
         if let Merging::Refused(_) = &merging
