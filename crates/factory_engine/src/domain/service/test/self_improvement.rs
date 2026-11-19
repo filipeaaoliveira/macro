@@ -1129,6 +1129,7 @@ async fn a_failed_start_with_a_kept_run_stays_open() {
         .expect("read")
         .expect("kept");
     assert_eq!(latest.state, ImprovementState::Refused);
+    assert_eq!(latest.refusal.as_deref(), Some("the run could not start"));
     assert_eq!(bench.pending().await, 2);
 }
 

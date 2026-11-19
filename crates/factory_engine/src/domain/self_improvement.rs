@@ -38,6 +38,7 @@ use uuid::Uuid;
 
 use macro_user_id::user_id::MacroUserIdStr;
 
+use crate::domain::definition::DefinitionError;
 use crate::domain::evaluation::SelfImprovementDefinition;
 use crate::domain::models::{
     CodeRepository, FactoryError, PullRequestState, StepError, run_branch,
@@ -174,6 +175,24 @@ where
         Some(team) if team.team_id == team_id => (NamerStanding::NotAdmin, None),
         _ => (NamerStanding::LeftTeam, None),
     })
+}
+
+/// What the team is shown of why a self-improvement Run could not start:
+/// a short reason, never the error's own words.
+fn refusal_reason(error: &FactoryError) -> &'static str {
+    match error {
+        FactoryError::InvalidDefinition(DefinitionError::ImprovementAgents(_)) => {
+            "the definition's agents do not fill the improve flow's roles"
+        }
+        FactoryError::InvalidDefinition(_) | FactoryError::UnreachableDefinition => {
+            "the definition does not read"
+        }
+        FactoryError::QueueFull { .. } => "the namer's queue is full",
+        FactoryError::NoPushAccess
+        | FactoryError::UnreachableRepository
+        | FactoryError::InvalidRepository => "the namer cannot push to the definition's repository",
+        _ => "the run could not start",
+    }
 }
 
 /// Keep the failures of the Run `run_id` for its team, when it ran under
@@ -438,8 +457,9 @@ where
                     return Ok(());
                 }
                 tracing::warn!(%error, %team_id, "a self-improvement run was refused");
+                let why = refusal_reason(&error).to_string();
                 self.repo
-                    .settle_improvement(id, &Settlement::Refused(error.to_string()))
+                    .settle_improvement(id, &Settlement::Refused(why))
                     .await
                     .map_err(internal)?;
             }
