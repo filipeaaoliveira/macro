@@ -4,7 +4,7 @@
 //! without a Temporal server. Either way a walk issues the same activities
 //! in the same order, so a replay walks it the same way.
 
-use factory_records::domain::models::Outcome;
+use factory_records::domain::models::{Outcome, RunId};
 use temporalio_common::error::{ActivityExecutionError, IncomingError, TimeoutError, TimeoutType};
 use temporalio_sdk::workflows::join_all;
 use temporalio_sdk::{
@@ -14,7 +14,7 @@ use temporalio_sdk::{
 use super::{
     Asking, CLOSE_ROUND_TIMEOUT, CLOSE_ROUND_TOTAL, FlowWorkflow, NO_RESULT_PATCH,
     NOTIFY_ONLY_PATCH, OPEN_ROUND_TIMEOUT, STEP_HEARTBEAT_TIMEOUT, ask, is_cancelled,
-    notify_options, stop,
+    notify_options, stop, within_budget,
 };
 use crate::domain::gate::{GateOpening, GateTelling};
 use crate::domain::models::{StepEnding, StepReport, StepRequest, StepStart};
@@ -95,6 +95,10 @@ pub(super) trait Work {
     /// such a Step before the workflow asked.
     fn asks_on_no_result(&self) -> bool;
 
+    /// Whether the Run `run_id` may take its next agent Step: false once
+    /// its token budget stopped it.
+    async fn within_budget(&self, run_id: RunId) -> bool;
+
     /// Open the round: whether it opened.
     async fn open(&self, opening: ReviewRoundOpening) -> Result<bool, Self::Failure>;
 
@@ -138,6 +142,8 @@ pub(super) trait Work {
 /// The activities and Gates on the workflow's context.
 pub(super) struct TemporalWork<'a> {
     pub(super) ctx: &'a WorkflowContext<FlowWorkflow>,
+    /// Whether the Run keeps a token budget to check.
+    pub(super) token_budget: bool,
     pub(super) work_options: &'a ActivityOptions,
     pub(super) record_options: &'a ActivityOptions,
 }
@@ -151,6 +157,10 @@ impl Work for TemporalWork<'_> {
 
     fn asks_on_no_result(&self) -> bool {
         self.ctx.patched(NO_RESULT_PATCH)
+    }
+
+    async fn within_budget(&self, run_id: RunId) -> bool {
+        within_budget(self.ctx, run_id, self.token_budget).await
     }
 
     async fn open(&self, opening: ReviewRoundOpening) -> Result<bool, Self::Failure> {

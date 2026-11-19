@@ -239,6 +239,11 @@ async fn walk_round<W: Work>(
                     return Err(error);
                 }
             }
+            // The reviewer that goes on is an agent: a Run that used its
+            // token budget ends here, as at its most Steps.
+            if !work.within_budget(panel.run_id).await {
+                return stop_round(work, panel, RunOutcome::Blocked).await;
+            }
             let Some(seq) = resume() else {
                 return stop_round(work, panel, RunOutcome::Blocked).await;
             };
