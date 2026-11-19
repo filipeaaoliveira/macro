@@ -82,6 +82,9 @@ export function getEntityClickContent(entity: EntityData): SplitContent {
     .with({ type: 'team' }, () => {
       throw new Error('teams are not openable as attachments');
     })
+    .with({ type: 'user' }, () => {
+      throw new Error('users are not openable as attachments');
+    })
     .with({ type: 'form' }, (e) => ({ type: 'form' as const, id: e.id }))
     .exhaustive();
 }

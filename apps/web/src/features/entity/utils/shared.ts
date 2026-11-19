@@ -18,6 +18,7 @@ const OWNER_PRINCIPAL_ROW = [
 
 const UNSHARED_ROW = [
   'team',
+  'user',
   'call',
   'channel',
   'channel_message',

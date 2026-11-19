@@ -121,5 +121,8 @@ export function macroEntityToPropertyEntityType(
     .with({ type: 'team' }, () => {
       throw new Error('teams do not support properties');
     })
+    .with({ type: 'user' }, () => {
+      throw new Error('users do not support properties');
+    })
     .exhaustive();
 }

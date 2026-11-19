@@ -16,6 +16,7 @@ export type ItemType =
   | 'routine'
   | 'harness'
   | 'team'
+  | 'user'
   | 'calendar_event'
   | 'foreign'
   | 'crm_company'

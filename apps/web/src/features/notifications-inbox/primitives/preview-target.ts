@@ -18,7 +18,8 @@ const previewSelection = (
   entity.type === 'calendar_event' ||
   entity.type === 'initiative' ||
   entity.type === 'harness' ||
-  entity.type === 'team'
+  entity.type === 'team' ||
+  entity.type === 'user'
     ? undefined
     : entity;
 

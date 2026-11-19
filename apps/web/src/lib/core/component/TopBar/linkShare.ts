@@ -50,6 +50,9 @@ export function getShareItemNoun(itemType: ShareItemType): string {
     .with('team', () => {
       throw new Error('teams do not support entity link sharing');
     })
+    .with('user', () => {
+      throw new Error('users do not support entity link sharing');
+    })
     .with('external_chat', () => 'chat')
     .with(
       'document',

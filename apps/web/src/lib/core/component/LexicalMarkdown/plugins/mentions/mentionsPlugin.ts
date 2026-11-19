@@ -382,6 +382,9 @@ const blockItemType = (blockName: string): ItemMention['itemType'] => {
     .with('team', () => {
       throw new Error('teams cannot be document mentions');
     })
+    .with('user', () => {
+      throw new Error('users cannot be document mentions');
+    })
     .with('crm_company', () => 'crm_company')
     .with('crm_contact', () => 'crm_contact')
     .with('crm_pipeline', () => 'crm_pipeline')

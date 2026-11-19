@@ -2477,6 +2477,19 @@ export function mapGraphqlSoupItem(
         }) as SoupApiItem
     )
     .with(
+      { __typename: 'GraphqlSoupUser' },
+      (entity) =>
+        ({
+          tag: 'user',
+          frecency_score: frecency,
+          is_favorited: entity.isFavorited,
+          data: {
+            id: entity.id,
+            notifications: mapGraphqlNotifications(entity.notifications),
+          },
+        }) as SoupApiItem
+    )
+    .with(
       { __typename: 'GraphqlSoupForeignEntity' },
       (entity) =>
         ({
