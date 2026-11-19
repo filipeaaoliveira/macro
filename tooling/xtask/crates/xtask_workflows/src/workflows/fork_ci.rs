@@ -184,10 +184,6 @@ fn rust() -> Job {
 fn web() -> Job {
     self_hosted_job("web")
         .timeout_minutes(45u32)
-        // As `Web App Pr Checks`: debug info is most of what the wasm test
-        // builds write, and mold links them.
-        .add_env(("CARGO_PROFILE_DEV_DEBUG", "0"))
-        .add_env(("RUSTFLAGS", "-C link-arg=-fuse-ld=mold"))
         // Full history, as `Web App Pr Checks`' Typecheck: the entity icon check
         // reads every committed list of icon names. Without blobs, which git
         // fetches as it reads them.
@@ -222,7 +218,10 @@ fn web() -> Job {
         )
         .add_step(
             Step::new("Build WASM for tests")
-                .run("just build-agent-fold-wasm\njust build-natural-time-wasm")
+                // The workflow's RUSTFLAGS name a host linker, which the wasm
+                // linker rejects. Unset, cargo reads the wasm target's own flags
+                // from .cargo/config.toml, as `Web App Pr Checks` builds them.
+                .run("unset RUSTFLAGS\njust build-agent-fold-wasm\njust build-natural-time-wasm")
                 .working_directory(xtask_paths::repo_dir!("apps/web"))
                 .timeout_minutes(15u32),
         )

@@ -731,9 +731,6 @@ jobs:
     - changes
     if: needs.changes.outputs.web == 'true' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: macro-fork
-    env:
-      CARGO_PROFILE_DEV_DEBUG: '0'
-      RUSTFLAGS: '-C link-arg=-fuse-ld=mold'
     timeout-minutes: 45
     steps:
     - name: Checkout
@@ -824,6 +821,7 @@ jobs:
       working-directory: apps/web
     - name: Build WASM for tests
       run: |-
+        unset RUSTFLAGS
         just build-agent-fold-wasm
         just build-natural-time-wasm
       timeout-minutes: 15
