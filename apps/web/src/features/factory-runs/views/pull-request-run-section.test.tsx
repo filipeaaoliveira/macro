@@ -138,6 +138,100 @@ describe('PullRequestRunMark', () => {
   });
 });
 
+describe('PullRequestRunMark for a Run that ended or has no task', () => {
+  it('reads a flawed Run as finished, with no warning on merging', () => {
+    const flawed: PullRequestRun = {
+      ...atGate,
+      state: 'finished',
+      mergeGateSeq: undefined,
+      run: {
+        ...atGate.run,
+        end: {
+          outcome: 'flawed',
+          endedAt: '2026-11-18T11:00:00Z',
+          flaw: {
+            by: { kind: 'scorer', name: 'tests' },
+            reason: 'The coupon is applied twice.',
+            markedAt: '2026-11-18T12:00:00Z',
+          },
+        },
+      },
+    };
+    const merge = pullRequestMerge({ kind: 'run', found: flawed }, JULIA);
+    expect(merge).toEqual({ kind: 'github' });
+    render(() => (
+      <PullRequestRunMark found={flawed} merge={merge} ownerName="you" />
+    ));
+
+    expect(screen.getByText('Flawed')).toBeTruthy();
+    expect(screen.queryByText(/Its run stopped/)).toBeNull();
+  });
+
+  it('warns that merging skips a Run that stopped on an infrastructure failure', () => {
+    const broken: PullRequestRun = {
+      ...atGate,
+      state: 'stopped',
+      mergeGateSeq: undefined,
+      run: {
+        ...atGate.run,
+        end: { outcome: 'infrastructure', endedAt: '2026-11-18T11:00:00Z' },
+      },
+    };
+    render(() => (
+      <PullRequestRunMark
+        found={broken}
+        merge={pullRequestMerge({ kind: 'run', found: broken }, JULIA)}
+        ownerName="you"
+      />
+    ));
+
+    expect(screen.getByText('Infrastructure failure')).toBeTruthy();
+    expect(
+      screen.getByText(
+        'Its run stopped (Infrastructure failure): merging skips its merge gate and the checks it held'
+      )
+    ).toBeTruthy();
+  });
+
+  it('marks a going Run with no task, as a Benchmark trial, and merges nothing outside its Gate', () => {
+    const trial: PullRequestRun = {
+      id: 'trial-1',
+      state: 'running',
+      run: {
+        id: 'trial-1',
+        request: 'Replay the coupon task',
+        createdAt: '2026-11-18T10:00:00Z',
+        ownerId: JULIA,
+        flow: 'benchmark',
+        pullRequestUrl: 'https://github.com/acme/shop/pull/7',
+        steps: [
+          {
+            seq: 2,
+            entry: 'write',
+            visit: 1,
+            startedAt: '2026-11-18T10:10:00Z',
+          },
+        ],
+      },
+    };
+    const merge = pullRequestMerge({ kind: 'run', found: trial }, JULIA);
+    expect(merge).toMatchObject({ kind: 'refused', why: 'notAtGate' });
+    const openRun = vi.fn();
+    render(() => (
+      <PullRequestRunMark
+        found={trial}
+        merge={merge}
+        ownerName="you"
+        onOpenRun={openRun}
+      />
+    ));
+
+    expect(screen.getByText('Factory')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Open run' }));
+    expect(openRun).toHaveBeenCalledWith('trial-1');
+  });
+});
+
 describe('PullRequestRunSection', () => {
   it('shows the Run’s review rounds and findings, and opens its merge Gate for its owner', () => {
     const answerGate = vi.fn();
