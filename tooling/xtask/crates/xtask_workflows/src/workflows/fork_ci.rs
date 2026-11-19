@@ -482,21 +482,18 @@ fn run_tests() -> Step<Run> {
 /// Below the job's timeout, so the steps after it still report.
 const RUN_TESTS_TIMEOUT_MINUTES: u32 = 150;
 
-/// The size of each cache in the runner's cache slot, and how close the job
-/// came to the runner's memory limit. The node empties a slot over its cap
-/// when the next job starts, which makes that job cold; a job at its memory
-/// limit pages instead of building.
+/// The size of each cache in the runner's cache slot, and of each target
+/// directory in it. The node empties a slot over its cap when the next job
+/// starts, which makes that job cold.
 fn show_cache_sizes() -> Step<Run> {
-    Step::new("show cache sizes and memory")
+    Step::new("show cache sizes")
         .run(indoc::indoc! {r#"
             cache="${CI_CACHE_DIR:-$RUNNER_TEMP/cache}"
-            du -sh "$cache"/* "$cache"/target/* 2>/dev/null || true
-            for file in memory.max memory.peak memory.events memory.pressure; do
-              if [ -r "/sys/fs/cgroup/$file" ]; then
-                echo "$file: $(tr '\n' ' ' < "/sys/fs/cgroup/$file")"
-              fi
+            du -sh "$cache" 2>/dev/null || true
+            # One du per directory: du counts a directory once per call.
+            for dir in "$cache"/* "$cache"/target/*; do
+              du -sh "$dir" 2>/dev/null || true
             done
-            grep -E '^(pgmajfault|workingset_refault_file) ' /sys/fs/cgroup/memory.stat || true
         "#})
         .if_condition(Expression::new("always()"))
 }

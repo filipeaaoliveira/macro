@@ -621,17 +621,15 @@ jobs:
     - name: show sccache stats
       if: always()
       run: sccache --show-stats || true
-    - name: show cache sizes and memory
+    - name: show cache sizes
       if: always()
       run: |
         cache="${CI_CACHE_DIR:-$RUNNER_TEMP/cache}"
-        du -sh "$cache"/* "$cache"/target/* 2>/dev/null || true
-        for file in memory.max memory.peak memory.events memory.pressure; do
-          if [ -r "/sys/fs/cgroup/$file" ]; then
-            echo "$file: $(tr '\n' ' ' < "/sys/fs/cgroup/$file")"
-          fi
+        du -sh "$cache" 2>/dev/null || true
+        # One du per directory: du counts a directory once per call.
+        for dir in "$cache"/* "$cache"/target/*; do
+          du -sh "$dir" 2>/dev/null || true
         done
-        grep -E '^(pgmajfault|workingset_refault_file) ' /sys/fs/cgroup/memory.stat || true
     - name: Teardown Nix
       if: always()
       uses: './.github/actions/teardown-nix'
@@ -852,17 +850,15 @@ jobs:
     - name: show sccache stats
       if: always()
       run: sccache --show-stats || true
-    - name: show cache sizes and memory
+    - name: show cache sizes
       if: always()
       run: |
         cache="${CI_CACHE_DIR:-$RUNNER_TEMP/cache}"
-        du -sh "$cache"/* "$cache"/target/* 2>/dev/null || true
-        for file in memory.max memory.peak memory.events memory.pressure; do
-          if [ -r "/sys/fs/cgroup/$file" ]; then
-            echo "$file: $(tr '\n' ' ' < "/sys/fs/cgroup/$file")"
-          fi
+        du -sh "$cache" 2>/dev/null || true
+        # One du per directory: du counts a directory once per call.
+        for dir in "$cache"/* "$cache"/target/*; do
+          du -sh "$dir" 2>/dev/null || true
         done
-        grep -E '^(pgmajfault|workingset_refault_file) ' /sys/fs/cgroup/memory.stat || true
     - name: Teardown Nix
       if: always()
       uses: './.github/actions/teardown-nix'
