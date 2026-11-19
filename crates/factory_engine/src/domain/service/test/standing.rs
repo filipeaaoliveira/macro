@@ -552,6 +552,19 @@ async fn a_cancel_that_is_not_taken_keeps_no_standing_act() {
 /// GitHub holding a Definition at `FIRST` with one Flow, `notes`, and the
 /// split Standing Roles over the `primary` and `backup` Agents.
 pub(super) fn notes_definition() -> FakeGithub {
+    notes_definition_with(json!({
+        "agents": {
+            "primary": { "bot": PRIMARY_BOT.to_string() },
+            "backup": { "bot": BACKUP_BOT.to_string() }
+        },
+        "roles": { "writer": ["primary"] },
+        "standing": split_roles()
+    }))
+}
+
+/// GitHub holding a Definition at `FIRST` with one Flow, `notes`, and
+/// `agents` as its Agents file.
+pub(super) fn notes_definition_with(agents: serde_json::Value) -> FakeGithub {
     let github = github_at(FIRST);
     let flow = r#"{
         "entries": [{
@@ -560,14 +573,6 @@ pub(super) fn notes_definition() -> FakeGithub {
             "on": { "done": [{ "to": { "kind": "end", "outcome": "success" } }] }
         }]
     }"#;
-    let agents = json!({
-        "agents": {
-            "primary": { "bot": PRIMARY_BOT.to_string() },
-            "backup": { "bot": BACKUP_BOT.to_string() }
-        },
-        "roles": { "writer": ["primary"] },
-        "standing": split_roles()
-    });
     {
         let mut state = github.state();
         for (path, text) in [

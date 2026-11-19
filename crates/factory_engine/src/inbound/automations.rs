@@ -309,8 +309,8 @@ where
     // A routine the scheduler runs as its creator acts as them; one run for
     // an agent, or in an agent session, acts as that agent, which Standing
     // Roles check as for `POST /runs`. The Automation's own routine is an
-    // `Agent` routine signed for the Macro routine bot: the service, which
-    // knows the routine is the Automation's, reads that as its creator.
+    // `Agent` routine signed for the Macro routine bot, which acts as that
+    // bot.
     let acting = program_agent(&caller.authorization);
     Ok(Json(
         state

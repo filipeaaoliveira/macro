@@ -281,7 +281,7 @@ async fn a_routine_run_for_an_agent_fires_as_that_agent() {
             None,
             Some(ActingAgent::Bot(AGENT_BOT)),
             Some(ActingAgent::Session(session_id)),
-            // The service tells an Automation's own routine from an agent.
+            // An Automation's own routine acts as the Macro routine bot.
             Some(ActingAgent::Bot(bot_id::MACRO_NEW_BOT_ID)),
         ]
     );

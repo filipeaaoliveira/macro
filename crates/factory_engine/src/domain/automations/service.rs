@@ -197,16 +197,6 @@ where
     }
 }
 
-/// Whether a run of an Automation's own routine acts as the routine
-/// itself rather than as an agent: the factory makes the routine an
-/// `Agent` routine, whose code step the scheduler signs for the Macro
-/// routine bot (`MACRO_NEW_BOT_ID`), so that bot on the Automation's own
-/// routine is its schedule or event firing it as its creator. Any other
-/// bot, and code in an agent session, acts as that agent.
-fn is_own_routine_run(acting: &ActingAgent) -> bool {
-    matches!(acting, ActingAgent::Bot(bot) if *bot == bot_id::MACRO_NEW_BOT_ID)
-}
-
 /// What a change to an Automation does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Change {
@@ -429,11 +419,10 @@ where
             }
             return Err(FactoryError::NotFound);
         };
-        if automation.created_by != *actor || automation.routine_id != Some(routine_id) {
+        if automation.created_by != *actor {
             return Err(FactoryError::NotFound);
         }
         let firing = firing.firing(&automation)?;
-        let acting = acting.filter(|acting| !is_own_routine_run(acting));
         self.fire(&automation, firing, acting).await
     }
 

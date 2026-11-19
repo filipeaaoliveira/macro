@@ -714,9 +714,9 @@ async fn the_routine_of_a_deleted_automation_is_switched_off() {
 /// them, unchecked; one fired by a routine run for an agent starts it as
 /// that agent, which under a Definition with Standing Roles must fill one
 /// that allows `start`, or the firing is skipped as refused and nothing
-/// starts; so does code in an agent session. The Automation's own routine,
-/// signed for the Macro routine bot, fires it as its creator. A webhook
-/// call, with no login, fires it as its creator.
+/// starts; so do code in an agent session and the Automation's own routine,
+/// signed for the Macro routine bot, which no Standing Role here lists. A
+/// webhook call, with no login, fires it as its creator.
 #[tokio::test]
 async fn an_agent_fires_an_automation_only_through_a_standing_role() {
     let repo = super::definition::team_repo();
@@ -766,8 +766,7 @@ async fn an_agent_fires_an_automation_only_through_a_standing_role() {
         .await
         .expect("fired");
     // The factory's own routine is an `Agent` routine: the scheduler signs
-    // its code step for the Macro routine bot, which is the schedule
-    // firing it as its creator, not an agent.
+    // its code step for the Macro routine bot, which acts as that bot.
     let own_routine = automations
         .fire_from_routine(
             &julia(),
@@ -795,12 +794,11 @@ async fn an_agent_fires_an_automation_only_through_a_standing_role() {
     assert_eq!(refused.skipped, Some(FiringSkip::Refused));
     assert_eq!(in_session.run_id, None);
     assert_eq!(in_session.skipped, Some(FiringSkip::Refused));
+    assert_eq!(own_routine.run_id, None);
+    assert_eq!(own_routine.skipped, Some(FiringSkip::Refused));
     let intake = intake.run_id.expect("the intake starts it");
     let scheduled = scheduled.run_id.expect("the schedule starts it");
-    let own_routine = own_routine
-        .run_id
-        .expect("the Automation's own routine starts it as its creator");
-    assert_eq!(workflows.started.lock().expect("started").len(), 3);
+    assert_eq!(workflows.started.lock().expect("started").len(), 2);
     let acts = repo.standing_acts.lock().expect("standing acts").clone();
     let kept: Vec<_> = acts
         .iter()
@@ -822,8 +820,110 @@ async fn an_agent_fires_an_automation_only_through_a_standing_role() {
             super::standing::BACKUP_BOT
         )]
     );
-    assert!(
-        acts.iter()
-            .all(|(run, _)| *run != scheduled && *run != own_routine)
+    assert!(acts.iter().all(|(run, _)| *run != scheduled));
+}
+
+/// Julia's schedule Automation of the `notes` Flow fired by its own
+/// routine run: the claims the scheduler signs for an `Agent` routine's
+/// code step, the Macro routine bot on the Automation's routine.
+async fn fire_own_routine(
+    repo: &FakeRepo,
+    workflows: &FakeWorkflows,
+    github: &FakeGithub,
+) -> crate::domain::automations::FiringResult {
+    let triggers = FakeTriggers::default();
+    let automations = automations(repo, code_service(repo, workflows, github), &triggers);
+    automations
+        .create_automation(
+            julia(),
+            true,
+            AutomationRequest {
+                name: "Note it".to_string(),
+                trigger: AutomationTrigger::Schedule {
+                    cron: "0 0 9 * * Mon-Fri".to_string(),
+                    timezone: "Europe/Lisbon".to_string(),
+                },
+                flow: "notes".to_string(),
+                repo_url: None,
+                request_template: "Note it".to_string(),
+            },
+        )
+        .await
+        .expect("created");
+    automations
+        .fire_from_routine(
+            &julia(),
+            ROUTINE,
+            routine_firing("run-1", None),
+            Some(ActingAgent::Bot(bot_id::MACRO_NEW_BOT_ID)),
+        )
+        .await
+        .expect("fired")
+}
+
+/// Under Standing Roles, an Automation's own routine run starts its Run
+/// once the Definition gives the Macro routine bot a Role that allows
+/// `start`, and the Run keeps that bot's standing act.
+#[tokio::test]
+async fn a_standing_role_for_the_routine_bot_lets_its_own_routine_fire() {
+    let repo = super::definition::team_repo();
+    let workflows = FakeWorkflows::default();
+    let github = super::standing::notes_definition_with(serde_json::json!({
+        "agents": {
+            "primary": { "bot": super::standing::PRIMARY_BOT.to_string() },
+            "routine": { "bot": bot_id::MACRO_NEW_BOT_ID.as_uuid().to_string() }
+        },
+        "roles": { "writer": ["primary"] },
+        "standing": {
+            "scheduler": { "acts": ["start"], "agents": ["routine"] }
+        }
+    }));
+
+    let fired = fire_own_routine(&repo, &workflows, &github).await;
+
+    let run = fired.run_id.expect("the routine bot's Role starts it");
+    assert_eq!(fired.skipped, None);
+    assert_eq!(workflows.started.lock().expect("started").len(), 1);
+    let acts: Vec<_> = repo
+        .standing_acts
+        .lock()
+        .expect("standing acts")
+        .iter()
+        .map(|(run, act)| {
+            (
+                *run,
+                act.act,
+                act.standing_role.as_str().to_string(),
+                act.bot_id,
+            )
+        })
+        .collect();
+    assert_eq!(
+        acts,
+        [(
+            run,
+            StandingAct::Start,
+            "scheduler".to_string(),
+            bot_id::MACRO_NEW_BOT_ID.as_uuid()
+        )]
     );
+}
+
+/// Without Standing Roles, an Automation's own routine run starts its Run
+/// unchecked, keeping no standing act.
+#[tokio::test]
+async fn without_standing_roles_its_own_routine_fires() {
+    let repo = super::definition::team_repo();
+    let workflows = FakeWorkflows::default();
+    let github = super::standing::notes_definition_with(serde_json::json!({
+        "agents": { "primary": { "bot": super::standing::PRIMARY_BOT.to_string() } },
+        "roles": { "writer": ["primary"] }
+    }));
+
+    let fired = fire_own_routine(&repo, &workflows, &github).await;
+
+    assert!(fired.run_id.is_some(), "it starts unchecked");
+    assert_eq!(fired.skipped, None);
+    assert_eq!(workflows.started.lock().expect("started").len(), 1);
+    assert!(repo.standing_acts.lock().expect("standing acts").is_empty());
 }
