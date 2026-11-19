@@ -221,6 +221,13 @@ inputs cannot select an agent, and ordinary user credentials remain unattributed
   request onto the desktop signup link and always sets
   `signup_flow=mobile_email`. The web app keeps that set on the PostHog person
   when the account is identified. Do not take `signup_flow` from the request.
+- `POST /github_pull_requests/merge` refuses a pull request a factory Run
+  opened while that Run has not ended, whoever calls it
+  (`domain/factory_merge_guard.rs`, the Runs read through
+  `factory_records`): 409 naming the Run to a caller who sees the pull
+  request on GitHub, 404 `Not Found` to anyone else, and 500 when the Runs
+  cannot be read. The factory merges on GitHub itself, not through this
+  route, so it is never refused here.
 - Answer third-party failures as 502/503, not 500: match
   `GithubError::Upstream(error)` before a route's 500 catch-all, and answer a
   `FusionAuthClientError` whose `upstream()` is set with that error's

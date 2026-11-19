@@ -20,6 +20,10 @@ use model::response::ErrorResponse;
 use upstream_error::UpstreamErrorResponse;
 
 use crate::api::context::{ApiContext, AuthorizationService};
+use crate::domain::factory_merge_guard::FactoryMergeRefusal;
+
+#[cfg(test)]
+mod test;
 
 #[derive(thiserror::Error, Debug)]
 pub enum EnrichGithubPullRequestsProxyError {
@@ -58,11 +62,34 @@ impl IntoResponse for EnrichGithubPullRequestsProxyError {
 pub enum MergeGithubPullRequestError {
     #[error(transparent)]
     Github(#[from] GithubError),
+    #[error(transparent)]
+    Factory(#[from] FactoryMergeRefusal),
 }
 
 impl IntoResponse for MergeGithubPullRequestError {
     fn into_response(self) -> Response {
         let (status_code, message) = match self {
+            Self::Factory(FactoryMergeRefusal::LiveRun(run)) => (
+                StatusCode::CONFLICT,
+                format!(
+                    "Factory Run {run} opened this pull request and has not ended: \
+                     merge it through the Run's merge Gate."
+                ),
+            ),
+            // Answered as GitHub answers a pull request it hides.
+            Self::Factory(FactoryMergeRefusal::NotVisible) => {
+                (StatusCode::NOT_FOUND, "Not Found".to_string())
+            }
+            Self::Factory(FactoryMergeRefusal::Github(error)) => {
+                return Self::Github(error).into_response();
+            }
+            Self::Factory(error @ FactoryMergeRefusal::Lookup(_)) => {
+                tracing::error!(error=?error, "failed to check the factory Run of a pull request");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "internal error".to_string(),
+                )
+            }
             Self::Github(GithubError::NoLinkFound) => {
                 (StatusCode::NOT_FOUND, "no github link found".to_string())
             }
@@ -186,6 +213,11 @@ pub async fn handler(
 /// Merges a GitHub pull request as the authenticated user, with their own
 /// GitHub grant. GitHub applies the user's permissions and the repository's
 /// branch protections; a refusal is returned with GitHub's message.
+///
+/// A pull request a factory Run opened and that Run has not ended is never
+/// merged here, whoever asks: the Run merges it through its merge Gate. The
+/// refusal names the Run to a caller who sees the pull request on GitHub,
+/// and answers anyone else as GitHub answers a pull request it hides.
 #[utoipa::path(
     post,
     path = "/github_pull_requests/merge",
@@ -196,7 +228,7 @@ pub async fn handler(
         (status = 401, body = ErrorResponse),
         (status = 403, description = "The user cannot push to the repository", body = ErrorResponse),
         (status = 404, description = "No GitHub link, or the pull request is not visible to the user", body = ErrorResponse),
-        (status = 409, description = "The pull request is not mergeable as it stands, or its head moved", body = ErrorResponse),
+        (status = 409, description = "The pull request is not mergeable as it stands, its head moved, or a factory Run that has not ended opened it", body = ErrorResponse),
         (status = 422, body = ErrorResponse),
         (status = 428, body = ErrorResponse),
         (status = 500, body = ErrorResponse),
@@ -212,9 +244,12 @@ pub async fn merge_handler(
 ) -> Result<Json<MergeGithubPullRequestResponse>, MergeGithubPullRequestError> {
     tracing::info!("merge_github_pull_request");
 
+    let user = &authorization.authorization.user.macro_user_id;
+    ctx.factory_merge_guard.check(user, &request).await?;
+
     let response = ctx
         .github_link_service
-        .merge_pull_request(&authorization.authorization.user.macro_user_id, request)
+        .merge_pull_request(user, request)
         .await?;
 
     Ok(Json(response))

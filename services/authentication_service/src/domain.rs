@@ -1,5 +1,6 @@
 //! Authentication use cases and the ports they require.
 
 pub mod computer_billing;
+pub mod factory_merge_guard;
 pub mod microsoft;
 pub mod stripe_consumers;
