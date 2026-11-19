@@ -44,6 +44,9 @@ impl StandingActRepository for FakeRepo {
         seq: Option<u16>,
         actor: &StandingActor,
     ) -> Result<(), FakeError> {
+        if self.fails("record_standing_act") {
+            return Err(FakeError);
+        }
         let mut acts = self.standing_acts.lock().expect("standing acts");
         // As the records keep it: one start, cancel and answer per Gate.
         let kept = acts

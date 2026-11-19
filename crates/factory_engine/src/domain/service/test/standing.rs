@@ -581,43 +581,6 @@ fn notes_definition() -> FakeGithub {
     github
 }
 
-/// GitHub holding a Definition at `FIRST` with one Flow, `notes`, and the
-/// split Standing Roles over the `primary` and `backup` Agents.
-fn notes_definition() -> FakeGithub {
-    let github = github_at(FIRST);
-    let flow = r#"{
-        "entries": [{
-            "id": "reply",
-            "step": "reply",
-            "on": { "done": [{ "to": { "kind": "end", "outcome": "success" } }] }
-        }]
-    }"#;
-    let agents = json!({
-        "agents": {
-            "primary": { "bot": PRIMARY_BOT.to_string() },
-            "backup": { "bot": BACKUP_BOT.to_string() }
-        },
-        "roles": { "writer": ["primary"] },
-        "standing": split_roles()
-    });
-    {
-        let mut state = github.state();
-        for (path, text) in [
-            (
-                "factory.json",
-                r#"{ "version": 1, "flows": ["notes"] }"#.to_string(),
-            ),
-            ("flows/notes.json", flow.to_string()),
-            ("agents.json", agents.to_string()),
-        ] {
-            state
-                .files
-                .insert((FIRST.to_string(), path.to_string()), text);
-        }
-    }
-    github
-}
-
 /// A cancel that was taken keeps who sent it through a record that fails
 /// for a moment: the record is tried again, since a caller's retry would
 /// find the Run cancelled and keep no one. A record that keeps failing

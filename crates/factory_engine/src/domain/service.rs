@@ -27,7 +27,7 @@ use factory_records::domain::models::{
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::{ReviewRound, ReviewRoundRepository};
-use factory_records::domain::standing_acts::{StandingAct, StandingActRepository};
+use factory_records::domain::standing_acts::{StandingAct, StandingActRepository, StandingActor};
 use factory_records::domain::standing_rules::{
     MAX_QUEUE_LIMIT, MIN_QUEUE_LIMIT, OrchestratorDefinition, ProjectRulesSet, RuleGateKind,
     RulesSource, RunRules, StandingRulesRepository,
@@ -107,6 +107,14 @@ pub const WAITING_RUNS_LISTED: u16 = 50;
 /// How old a Run with no Step and no workflow must be before it counts as
 /// one whose workflow never started.
 const UNSTARTED_AFTER: chrono::TimeDelta = chrono::TimeDelta::minutes(5);
+
+/// How many times a cancel's standing act is tried before who sent the
+/// cancel is given up as lost.
+const CANCEL_RECORD_ATTEMPTS: u8 = 3;
+
+/// The wait before the second try of a cancel's standing act, and the
+/// step it grows by for each later one.
+const CANCEL_RECORD_BACKOFF: std::time::Duration = std::time::Duration::from_millis(200);
 
 /// A Run to record and start: what [`FactoryService::create_run`] takes,
 /// and the Automation that starts it, if one does.
@@ -692,6 +700,45 @@ where
             self.workflows.cancel(id).await?;
         }
         Ok(())
+    }
+
+    /// Keep `actor` as who cancelled the Run `id`, once its cancel was
+    /// taken. The cancel cannot be taken back, and a caller's retry finds
+    /// the Run cancelled, which keeps no one, so a failed record is tried
+    /// again here, `CANCEL_RECORD_ATTEMPTS` times in all, and one that
+    /// still fails is logged as lost before its error is answered.
+    async fn record_cancel(&self, id: RunId, actor: &StandingActor) -> Result<(), FactoryError> {
+        let mut attempt: u8 = 1;
+        loop {
+            match self
+                .repo
+                .record_standing_act(id, StandingAct::Cancel, None, actor)
+                .await
+            {
+                Ok(()) => return Ok(()),
+                Err(error) if attempt < CANCEL_RECORD_ATTEMPTS => {
+                    tracing::warn!(
+                        ?error,
+                        run_id = %id,
+                        attempt,
+                        "recording who cancelled a run failed; trying again"
+                    );
+                    tokio::time::sleep(CANCEL_RECORD_BACKOFF * u32::from(attempt)).await;
+                    attempt += 1;
+                }
+                Err(error) => {
+                    tracing::error!(
+                        ?error,
+                        run_id = %id,
+                        bot_id = %actor.bot_id,
+                        session_id = ?actor.session_id,
+                        standing_role = %actor.standing_role,
+                        "a run's cancel was taken but who sent it was not recorded"
+                    );
+                    return Err(internal(error).into());
+                }
+            }
+        }
     }
 
     /// Record the Run `order` asks for and start it, as
@@ -1752,14 +1799,9 @@ where
                 self.send_cancel(id).await?;
                 // The agent that asked for the cancel is kept once the
                 // cancel is accepted, so a refused or failed one names no
-                // one; a Run keeps the first cancel's. A failed record
-                // answers an error for a cancel that went through, and only
-                // loses who sent it.
+                // one; a Run keeps the first cancel's.
                 if let Some(cancelled_by) = &cancelled_by {
-                    self.repo
-                        .record_standing_act(id, StandingAct::Cancel, None, cancelled_by)
-                        .await
-                        .map_err(internal)?;
+                    self.record_cancel(id, cancelled_by).await?;
                 }
                 Ok(())
             }
