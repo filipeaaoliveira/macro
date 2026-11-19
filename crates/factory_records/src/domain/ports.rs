@@ -460,7 +460,11 @@ pub trait RunRepository: Send + Sync + 'static {
 
     /// Name `repo_url` as the team `team_id`'s Factory Definition, kept as
     /// named by `named_by`, whose self-improvement Runs are theirs; none
-    /// names none, so its Runs go back to the team's settings.
+    /// names none, so its Runs go back to the team's settings. In the same
+    /// write, the team's open self-improvement Run on another Definition
+    /// (repository names compared in any case) is settled as closed, its
+    /// failures back to pending: it would hold them until the team named
+    /// that Definition again. Its Run, if any, goes on for its owner.
     fn set_team_definition(
         &self,
         team_id: Uuid,

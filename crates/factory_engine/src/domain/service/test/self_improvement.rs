@@ -1232,3 +1232,32 @@ async fn un_naming_the_definition_settles_its_open_improvement() {
         .count();
     assert_eq!(held, 0);
 }
+
+/// Un-naming the Definition changes it and settles its open
+/// self-improvement Run in one write: no separate settle can fail after
+/// the Definition changed.
+#[tokio::test]
+async fn un_naming_settles_in_the_same_write() {
+    let bench = Bench::new(team_repo(true), AGENTS, None);
+    bench.judged_run(0.2).await;
+    bench.judged_run(0.2).await;
+    assert_eq!(bench.latest_state(), Some(ImprovementState::Open));
+
+    bench.repo.fail_once_after("settle_improvement", 0);
+    bench
+        .service
+        .set_definition(julia(), None)
+        .await
+        .expect("un-named");
+    assert_eq!(bench.latest_state(), Some(ImprovementState::Closed));
+    assert!(
+        bench
+            .repo
+            .improvement
+            .lock()
+            .expect("improvement")
+            .failures
+            .iter()
+            .all(|failure| failure.improvement.is_none())
+    );
+}

@@ -400,52 +400,90 @@ impl SelfImprovementRepository for PgRunRepository {
 
     #[tracing::instrument(err, skip(self))]
     async fn settle_improvement(&self, id: Uuid, settlement: &Settlement) -> Result<(), Self::Err> {
-        let (state, refusal) = match settlement {
-            Settlement::Merged => (ImprovementState::Merged, None),
-            Settlement::Closed => (ImprovementState::Closed, None),
-            Settlement::Refused(why) => (
-                ImprovementState::Refused,
-                Some(cut_bytes(why, MAX_FAILURE_REASON_BYTES)),
-            ),
-        };
         let mut tx = self.pool.begin().await?;
-        let settled = sqlx::query!(
-            r#"
-            UPDATE factory_improvement
-            SET state = $2, refusal = $3, settled_at = now()
-            WHERE id = $1 AND state IN ('starting', 'open')
-            "#,
-            id,
-            state.as_ref(),
-            refusal,
-        )
-        .execute(&mut *tx)
-        .await?;
-        if settled.rows_affected() == 0 {
-            return Ok(());
-        }
-        if state == ImprovementState::Merged {
-            sqlx::query!(
-                r#"
-                UPDATE factory_improvement_failure SET addressed_at = now()
-                WHERE improvement_id = $1 AND addressed_at IS NULL
-                "#,
-                id,
-            )
-            .execute(&mut *tx)
-            .await?;
-        } else {
-            sqlx::query!(
-                r#"
-                UPDATE factory_improvement_failure SET improvement_id = NULL
-                WHERE improvement_id = $1 AND addressed_at IS NULL
-                "#,
-                id,
-            )
-            .execute(&mut *tx)
-            .await?;
-        }
+        settle(&mut tx, id, settlement).await?;
         tx.commit().await?;
         Ok(())
     }
+}
+
+/// Settle the open self-improvement Run `id` in `tx`: its failures are
+/// addressed when it merged, else pending again. Settling one settled
+/// already changes nothing.
+async fn settle(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    id: Uuid,
+    settlement: &Settlement,
+) -> Result<(), PgRunRepositoryErr> {
+    let (state, refusal) = match settlement {
+        Settlement::Merged => (ImprovementState::Merged, None),
+        Settlement::Closed => (ImprovementState::Closed, None),
+        Settlement::Refused(why) => (
+            ImprovementState::Refused,
+            Some(cut_bytes(why, MAX_FAILURE_REASON_BYTES)),
+        ),
+    };
+    let settled = sqlx::query!(
+        r#"
+        UPDATE factory_improvement
+        SET state = $2, refusal = $3, settled_at = now()
+        WHERE id = $1 AND state IN ('starting', 'open')
+        "#,
+        id,
+        state.as_ref(),
+        refusal,
+    )
+    .execute(&mut **tx)
+    .await?;
+    if settled.rows_affected() == 0 {
+        return Ok(());
+    }
+    if state == ImprovementState::Merged {
+        sqlx::query!(
+            r#"
+            UPDATE factory_improvement_failure SET addressed_at = now()
+            WHERE improvement_id = $1 AND addressed_at IS NULL
+            "#,
+            id,
+        )
+        .execute(&mut **tx)
+        .await?;
+    } else {
+        sqlx::query!(
+            r#"
+            UPDATE factory_improvement_failure SET improvement_id = NULL
+            WHERE improvement_id = $1 AND addressed_at IS NULL
+            "#,
+            id,
+        )
+        .execute(&mut **tx)
+        .await?;
+    }
+    Ok(())
+}
+
+/// Settle as closed, in `tx`, the team `team_id`'s open self-improvement
+/// Run on a Definition other than `repo_url` (compared in any case), or on
+/// any when `repo_url` is none.
+pub(super) async fn close_other_open(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    team_id: Uuid,
+    repo_url: Option<&str>,
+) -> Result<(), PgRunRepositoryErr> {
+    let open = sqlx::query_scalar!(
+        r#"
+        SELECT id FROM factory_improvement
+        WHERE team_id = $1 AND state IN ('starting', 'open')
+            AND ($2::text IS NULL OR lower(repo_url) <> lower($2))
+        FOR UPDATE
+        "#,
+        team_id,
+        repo_url,
+    )
+    .fetch_optional(&mut **tx)
+    .await?;
+    if let Some(id) = open {
+        settle(tx, id, &Settlement::Closed).await?;
+    }
+    Ok(())
 }

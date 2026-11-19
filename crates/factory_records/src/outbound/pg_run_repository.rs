@@ -901,6 +901,7 @@ impl RunRepository for PgRunRepository {
         repo_url: Option<&str>,
         named_by: &MacroUserIdStr<'static>,
     ) -> Result<(), Self::Err> {
+        let mut tx = self.pool.begin().await?;
         match repo_url {
             Some(repo_url) => {
                 sqlx::query!(
@@ -915,7 +916,7 @@ impl RunRepository for PgRunRepository {
                     repo_url,
                     named_by.as_ref(),
                 )
-                .execute(&self.pool)
+                .execute(&mut *tx)
                 .await?;
             }
             None => {
@@ -923,10 +924,12 @@ impl RunRepository for PgRunRepository {
                     "DELETE FROM factory_team_definition WHERE team_id = $1",
                     team_id,
                 )
-                .execute(&self.pool)
+                .execute(&mut *tx)
                 .await?;
             }
         }
+        self::self_improvement::close_other_open(&mut tx, team_id, repo_url).await?;
+        tx.commit().await?;
         Ok(())
     }
 

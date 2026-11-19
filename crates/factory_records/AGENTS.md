@@ -369,7 +369,9 @@ the Gates they asked people in MacroDB, and defines the names Flows use
 - Self-improvement (`20261119020000_factory_self_improvement.sql`):
   `factory_team_definition.named_by_user_id` keeps who named a team's
   Definition (`set_team_definition`; null for one named before, or once
-  their account is gone). `record_failures` keeps a Run's failure once per
+  their account is gone). In the same transaction, `set_team_definition`
+  settles the team's open improvement on another repository (ignoring
+  case), or any when it names none, as `closed`. `record_failures` keeps a Run's failure once per
   Run and source (`kind` `scorer` with its name and score, or `flawed`
   with `scorer` ''), with its team and the Definition repository it ran
   under. A failure is pending while `improvement_id` is null;

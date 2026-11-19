@@ -1479,8 +1479,9 @@ start whose error came after its Run was kept and linked, while the Run
 still exists (its workflow may have started), stays open and is settled by
 that Run. One kept starting longer than `STARTING_STALE_AFTER` (10
 minutes) is refused the same way. Naming another Definition, or none,
-settles the team's open one as closed, so its failures do not wait on a
-Definition the team no longer names; its Run goes on for its owner. Only
+settles the team's open one as closed in the same write
+(`set_team_definition`), so its failures do not wait on a Definition the
+team no longer names; its Run goes on for its owner. Only
 the factory starts one: `improve` is never listed or started by name
 (`UnknownFlow`), and a Definition names no Flow `improve`
 (`ReservedFlow`).

@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 use factory_records::domain::models::{NewRunDefinition, RunFlow, RunId, TeamMembership};
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::ReviewRoundRepository;
-use factory_records::domain::self_improvement::{SelfImprovementRepository, Settlement};
+use factory_records::domain::self_improvement::SelfImprovementRepository;
 use factory_records::domain::standing_rules::StandingRulesRepository;
 use macro_user_id::user_id::MacroUserIdStr;
 
@@ -390,27 +390,8 @@ where
             .set_team_definition(team.team_id, repo_url.as_deref(), &actor)
             .await
             .map_err(internal)?;
-        // A self-improvement Run open on a Definition the team no longer
-        // names would hold its failures until the team named it again: it
-        // is settled now, as closed unmerged, and its failures go back.
-        // Its Run, if any, goes on for its owner.
-        let open = self
-            .repo
-            .latest_improvement(team.team_id)
-            .await
-            .map_err(internal)?
-            .filter(|latest| latest.state.is_open())
-            .filter(|latest| {
-                !repo_url
-                    .as_deref()
-                    .is_some_and(|named| named.eq_ignore_ascii_case(&latest.repo_url))
-            });
-        if let Some(open) = open {
-            self.repo
-                .settle_improvement(open.id, &Settlement::Closed)
-                .await
-                .map_err(internal)?;
-        }
+        // The same write settles a self-improvement Run open on a
+        // Definition the team no longer names.
         // An administered team's admin is never an agent's account.
         self.settings_of(&actor, Some(team), true, repo_url, pinned.map(Ok))
             .await

@@ -378,3 +378,56 @@ async fn recent_improvements_read_newest_first(pool: PgPool) {
             .is_empty()
     );
 }
+
+/// Naming another Definition, or none, settles the team's open
+/// self-improvement Run as closed in the same write, its failures back to
+/// pending; naming the same one in another case settles nothing.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "team"))
+)]
+async fn naming_another_definition_closes_the_open_improvement(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    repo.set_team_definition(team(), Some(REPO_URL), &julia())
+        .await
+        .expect("name");
+    failing_run(&repo, &[scorer_failure("tests", 0.2)]).await;
+    let id = Uuid::now_v7();
+    let begun = repo
+        .begin_improvement(id, team(), REPO_URL, 10)
+        .await
+        .expect("begin");
+    assert!(matches!(begun, ImprovementBegin::Claimed(_)));
+
+    repo.set_team_definition(
+        team(),
+        Some("https://github.com/Macro/Factory-Definition"),
+        &julia(),
+    )
+    .await
+    .expect("same, in another case");
+    let latest = repo
+        .latest_improvement(team())
+        .await
+        .expect("read")
+        .expect("kept");
+    assert_eq!(latest.state, ImprovementState::Starting);
+
+    repo.set_team_definition(team(), None, &julia())
+        .await
+        .expect("un-name");
+    let latest = repo
+        .latest_improvement(team())
+        .await
+        .expect("read")
+        .expect("kept");
+    assert_eq!(latest.state, ImprovementState::Closed);
+    assert!(latest.settled_at.is_some());
+    assert_eq!(
+        repo.pending_failures(team(), REPO_URL)
+            .await
+            .expect("pending")
+            .count,
+        1
+    );
+}

@@ -305,33 +305,66 @@ impl SelfImprovementRepository for FakeRepo {
     }
 
     async fn settle_improvement(&self, id: Uuid, settlement: &Settlement) -> Result<(), FakeError> {
-        let mut kept = self.improvement.lock().expect("improvement");
-        let Some(improvement) = kept
-            .improvements
-            .iter_mut()
-            .find(|improvement| improvement.id == id && improvement.state.is_open())
-        else {
-            return Ok(());
-        };
-        let (state, refusal) = match settlement {
-            Settlement::Merged => (ImprovementState::Merged, None),
-            Settlement::Closed => (ImprovementState::Closed, None),
-            Settlement::Refused(why) => (ImprovementState::Refused, Some(why.clone())),
-        };
-        improvement.state = state;
-        improvement.refusal = refusal;
-        improvement.settled_at = Some(Utc::now());
-        for failure in kept
-            .failures
-            .iter_mut()
-            .filter(|failure| failure.improvement == Some(id) && !failure.addressed)
-        {
-            if state == ImprovementState::Merged {
-                failure.addressed = true;
-            } else {
-                failure.improvement = None;
-            }
+        if self.fails("settle_improvement") {
+            return Err(FakeError);
         }
+        settle(
+            &mut self.improvement.lock().expect("improvement"),
+            id,
+            settlement,
+        );
         Ok(())
+    }
+}
+
+/// Settle the open self-improvement Run `id` in `kept`, as the Postgres
+/// repository does.
+fn settle(kept: &mut FakeImprovement, id: Uuid, settlement: &Settlement) {
+    let Some(improvement) = kept
+        .improvements
+        .iter_mut()
+        .find(|improvement| improvement.id == id && improvement.state.is_open())
+    else {
+        return;
+    };
+    let (state, refusal) = match settlement {
+        Settlement::Merged => (ImprovementState::Merged, None),
+        Settlement::Closed => (ImprovementState::Closed, None),
+        Settlement::Refused(why) => (ImprovementState::Refused, Some(why.clone())),
+    };
+    improvement.state = state;
+    improvement.refusal = refusal;
+    improvement.settled_at = Some(Utc::now());
+    for failure in kept
+        .failures
+        .iter_mut()
+        .filter(|failure| failure.improvement == Some(id) && !failure.addressed)
+    {
+        if state == ImprovementState::Merged {
+            failure.addressed = true;
+        } else {
+            failure.improvement = None;
+        }
+    }
+}
+
+impl FakeRepo {
+    /// Settle as closed the team's open self-improvement Run on a
+    /// Definition other than `repo_url`, as naming one does.
+    pub(crate) fn close_other_open(&self, team_id: Uuid, repo_url: Option<&str>) {
+        let mut kept = self.improvement.lock().expect("improvement");
+        let open = kept
+            .improvements
+            .iter()
+            .find(|improvement| {
+                improvement.team_id == team_id
+                    && improvement.state.is_open()
+                    && !repo_url
+                        .is_some_and(|named| named.eq_ignore_ascii_case(&improvement.repo_url))
+            })
+            .map(|improvement| improvement.id);
+        if let Some(id) = open {
+            settle(&mut kept, id, &Settlement::Closed);
+        }
     }
 }

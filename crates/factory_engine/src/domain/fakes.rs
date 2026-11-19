@@ -707,18 +707,21 @@ impl RunRepository for FakeRepo {
         repo_url: Option<&str>,
         named_by: &MacroUserIdStr<'static>,
     ) -> Result<(), FakeError> {
-        let mut kept = self.team_definitions.lock().expect("team definitions");
-        let mut namers = self.definition_namers.lock().expect("definition namers");
-        match repo_url {
-            Some(repo_url) => {
-                kept.insert(team_id, repo_url.to_string());
-                namers.insert(team_id, named_by.as_ref().to_string());
-            }
-            None => {
-                kept.remove(&team_id);
-                namers.remove(&team_id);
-            }
-        };
+        {
+            let mut kept = self.team_definitions.lock().expect("team definitions");
+            let mut namers = self.definition_namers.lock().expect("definition namers");
+            match repo_url {
+                Some(repo_url) => {
+                    kept.insert(team_id, repo_url.to_string());
+                    namers.insert(team_id, named_by.as_ref().to_string());
+                }
+                None => {
+                    kept.remove(&team_id);
+                    namers.remove(&team_id);
+                }
+            };
+        }
+        self.close_other_open(team_id, repo_url);
         Ok(())
     }
 
