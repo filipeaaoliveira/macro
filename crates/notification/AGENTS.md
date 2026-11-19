@@ -109,8 +109,9 @@ through the same service.
   adapter is compiled in.
 - Ingress records publication completion only after the queue accepts the
   notification. Retries preserve original IDs, recipients, and lifecycle state.
-- Access-request withdrawals suppress delayed ingress and queued push/realtime
-  delivery; keep tombstone checks when changing either delivery boundary.
+- Withdrawals of access requests and factory Gate notices suppress delayed
+  ingress and queued push/realtime delivery (egress `WITHDRAWABLE_TYPES`); keep
+  tombstone checks when changing either delivery boundary.
 - Channel join requests count in both top-level and channel-feed notification
   filters; keep these filters aligned with the web notification classifier.
 - A `calendar_event_join_request` insert is skipped by a `notification` trigger

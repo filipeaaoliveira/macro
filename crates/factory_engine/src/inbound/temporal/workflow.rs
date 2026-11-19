@@ -32,8 +32,9 @@
 //! question, is told to the Run's owner once the workflow takes its
 //! answers (`factory_notify_gate`, behind the [`GATE_OWNER_PATCH`]
 //! marker); a Gate the stand-in answers tells no one. The worker notifies
-//! only for a Run whose owner section is on, and its result changes
-//! nothing the workflow decides. A Run whose
+//! unless the Run's definition is quiet (by default it notifies, whatever
+//! the owner section says), and its result changes nothing the workflow
+//! decides, so the default changed with no new marker. A Run whose
 //! history waited on a Gate before the marker replays without it.
 //!
 //! A notify-only Gate (`GateDefinition::notify_only`) never waits: once

@@ -91,7 +91,8 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261118233000_factory_run_pull_request_url_index.sql`,
   `20261119000000_factory_standing_act.sql`,
   `20261119000100_factory_standing_act_sessionless.sql`,
-  `20261119003000_factory_repository_setup.sql`), `factory_step_steer`,
+  `20261119003000_factory_repository_setup.sql`,
+  `20261119010000_factory_quiet_gates.sql`), `factory_step_steer`,
   `factory_run_score`, `factory_run_arm`, `factory_benchmark_suite`,
   `factory_benchmark_trial` and `factory_benchmark_trial_score`.
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
@@ -269,12 +270,16 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   team. `factory_project_rules` keeps a team's rules for one Project (an
   initiative), and goes with either. Rules are stored as the Gate kinds
   they decide (`plan`, `blockers`, `merge`), `owner_gates` when the
-  definition's owner section is on, the kinds the Orchestrator may approve
+  definition's owner section is on, `quiet_gates` when its Gates notify
+  no one, the kinds the Orchestrator may approve
   (`orchestrator_plan`, `orchestrator_blockers`), and `task_thread` when its
   task thread section is on (`OrchestratorDefinition::kinds`), checked
-  against those names (`20261118150000_factory_standing_rules_names.sql`
+  against those names (`20261119010000_factory_quiet_gates.sql`
   allows every one of them). A definition kept before a section has none of
-  it, and reads with it off. The definition's Queue limit has a
+  it, and reads with it off. `quiet_gates` is an opt-out, so a definition
+  without it notifies: the migration that added it set it on no row, so
+  every kept definition (a team's, a Project's and a Run's), its owner
+  section off or on, notifies until an admin turns it off. The definition's Queue limit has a
   column of its own beside them (`queue_limit`,
   `20261118131500_factory_queue_limit.sql`, held from `MIN_QUEUE_LIMIT`
   to `MAX_QUEUE_LIMIT`, 1 to 1000, by

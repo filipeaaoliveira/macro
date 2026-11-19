@@ -1039,13 +1039,12 @@ export type OrchestratorDefinition = {
      */
     orchestrator?: OrchestratorKinds;
     /**
-     * The owner section: a Gate no rule answers goes to the Run's owner.
-     * They are notified, and the Gate is listed as waiting on them; a
-     * review round whose Blockers are the round before's, unchanged after
-     * a rule sent those to a fix, waits for them rather than another fix;
-     * and what they comment on the Run's task once a Gate opened reaches
-     * the next agent Step. Off, the factory leaves those Gates waiting as
-     * before. A definition sent without it has it off.
+     * The owner section: a review round whose Blockers are the round
+     * before's, unchanged after a rule sent those to a fix, waits for the
+     * Run's owner rather than another fix; and what they comment on the
+     * Run's task once a Gate opened reaches the next agent Step. Off, the
+     * factory fixes those Blockers again, and the Steps read no comment. A
+     * definition sent without it has it off.
      */
     ownerGates?: boolean;
     /**
@@ -1063,6 +1062,16 @@ export type OrchestratorDefinition = {
      * whether a Run starts, so a Run's rules read with none.
      */
     queueLimit?: number | null;
+    /**
+     * Whether the Run's owner is left unnotified when a Gate waits on
+     * them: off, as when a definition is sent without it, every Gate no
+     * rule or stand-in answers (a Flow's Gate or an agent's question)
+     * notifies them, pushed to their phone, whether or not the Run has a
+     * task. On, they are not notified; the Gate still waits on them and
+     * is listed as waiting. A notify-only Gate's notice and the
+     * stand-in's are sent either way.
+     */
+    quietGates?: boolean;
     /**
      * The kinds of Gate the stand-in answers for the Run's owner, after
      * the rules and before the person; off for every kind when left out.

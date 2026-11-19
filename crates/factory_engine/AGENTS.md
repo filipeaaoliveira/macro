@@ -64,8 +64,9 @@ flagged `notifyOnly`, so its title and the inbox say the Run goes on
 rather than waits on an answer), lighter:
 not pushed to their phone, one per entry and Run however often its Gate
 tells (`gate_owner::told_id`), and marked done in `factory_end_run`
-(every entry's, since no record says which told; one never sent changes
-nothing). It is sent whatever the owner section says, since the Gate
+(no record says which told, so each visited entry whose Gate the Run's
+Flow makes notify-only, and none for a Run without a task, which sends
+none: `gate_owner::told_entries`). It is sent whatever the definition says, since the Gate
 exists only to tell the owner (`gate_owner::gate_told`); the worker also
 posts the notice to the task thread when that section is on. No built-in
 Flow has one.
@@ -1171,6 +1172,62 @@ the rules: the workflow asks `factory_rule_gate` only about a Flow's Gate
 worker answers none for a Gate `GateKind::answered_only_by_a_person` keeps
 for the owner, whatever the ruling names.
 
+A Gate left for a person (a Flow's Gate no rule or stand-in answered, or
+an agent's question) notifies the Run's owner by default
+(`src/domain/gate_owner.rs`): once the workflow takes its answers it calls
+`factory_notify_gate` (behind the `factory-gate-owner` patch marker; tried
+for at most five minutes, and a failure leaves the Gate waiting), and the
+worker sends a `factory_gate_waiting` notification through the
+notification ingress (`outbound/ingress_gate_notifier.rs`), pushed to the
+owner's phone, that opens the Run, with an id derived from the Run and the
+Step, so a retry is one notification. It is about the Run's task, or, for
+a Run started without one, about the owner (the metadata's `taskId` is
+then empty). A Run whose Orchestrator Definition is quiet (`quiet_gates`,
+`quietGates` in `PUT /settings/standing-rules` and its Project route; off
+by default and when a definition leaves it out) notifies no one: its Gates
+still wait on the owner and are listed as waiting. The setting is an
+opt-out: a team or Project that never set rules, the factory's default and
+a Run created before Runs kept rules notify. Only the owner section
+notified before; notices are now on for everyone and turning them off is
+new, so `20261119010000_factory_quiet_gates.sql` only allows the name and
+makes no kept definition quiet: one with the owner section off, a Run's
+under way included, notifies from now on. Rolling the service back past
+`quiet_gates` once one is stored is not clean: the older build reads a
+definition naming it as no definition at all (`from_kinds` returns `None`),
+and its `deny_unknown_fields` refuses a `PUT` carrying `quietGates`, as with
+every name added to the definition before it. The marker and the activity run for every
+Gate left to a person, whatever the definition says: a quiet Run's worker
+sends nothing, so the workflow and its histories are as they were. Once
+the Gate is answered (`factory_answer_gate`, or `factory_read_gate_reply`
+for words, by whoever answers), or the Run ends with it open
+(`factory_end_run`), the worker marks its notification done through the
+notifications' reader, as the owner marking it done would, which also
+clears its push. The ingress creates the notification only when it reads
+the message, so an answer or a cancel within moments of the notice can
+come first: when there is no notification to mark, the worker withdraws
+its id (`NotificationWithdrawal`, a row in `notification_withdrawal`), so
+the ingress never creates or pushes it, and the egress drops a push queued
+before the withdrawal; it then marks it done again in case it was created
+in between. So the worker closes only notices that may have gone out
+(`gate_owner::notice_may_be_out`, `stand_in_notice_may_be_out`,
+`told_entries`): none on a quiet Run, none for a Gate a rule or the
+stand-in answered or while the stand-in's answer stood, no notify-only or
+stand-in notice for a Run without a task, and a notify-only notice only for
+the entries the Run's Flow gives a notify-only Gate. A notice marked done
+leaves no row; one closed before the ingress created it leaves one small
+row for good: only the rare notice that lost that race, at most one per
+Gate, notify-only entry and stand-in answer of a Run. A Gate a
+Standing Rule or the stand-in answers was never left to a person, so it
+sent no such notification. `GET /runs/waiting` lists the caller's Runs
+waiting at an unanswered Gate, whatever the definition says.
+
+A Run started without a task files its notice under the owner's User
+entity, which the inbox does not list (`notification_inbox`'s
+`CANDIDATE_TYPES`; a User is no item the inbox can show or check access
+to), so that notice reaches the owner only live and by push, and opens the
+Run from there. Its Gate still shows in "Waiting on you" (`GET
+/runs/waiting`), which lists every waiting Run, with a task or without.
+
 A team's Orchestrator Definition also has an owner section
 (`owner_gates`, `ownerGates` in `PUT /settings/standing-rules` and its
 Project route; off by default and when a definition leaves it out, so a
@@ -1178,21 +1235,6 @@ team's or a Project's definition saved before it keeps it off until an
 admin turns it on there), kept on the Run with its rules
 (`src/domain/gate_owner.rs`). With it on:
 
-- a Gate left for a person (a Flow's Gate no rule answered, or an agent's
-  question) tells the Run's owner: once the workflow takes its answers it
-  calls `factory_notify_gate` (behind the `factory-gate-owner` patch
-  marker; tried for at most five minutes, and a failure leaves the Gate
-  waiting), and the worker sends a `factory_gate_waiting` notification
-  about the Run's task through the notification ingress
-  (`outbound/ingress_gate_notifier.rs`), with an id derived from the Run
-  and the Step, so a retry is one notification. A Run with no task has
-  nothing to notify about. The marker and the activity run for every Gate
-  left to a person, whatever the section says: with it off the worker
-  sends nothing. Once the Gate is answered (`factory_answer_gate`, or
-  `factory_read_gate_reply` for words, by whoever answers), the worker marks its notification done through the
-  notifications' reader, as the owner marking it done would, which also
-  clears its push; one never sent changes nothing. `GET /runs/waiting` lists the caller's Runs
-  waiting at an unanswered Gate, whatever the section says;
 - a review round whose Blockers are the round before's, unchanged, after
   the `fix_blockers` rule sent those to a fix, is left for the owner
   rather than fixed again (`standing_rules::repeated_blockers`), on top of
@@ -1338,7 +1380,7 @@ how the model read it (`stand_in_declined`: its pick, how sure it was and
 why, none of them when it did not answer), which the
 Run view shows the owner. A retry returns the answer kept first, with what
 is left of its window. While the window is open the owner is told, lightly,
-whatever the owner section says (`gate_owner::stand_in_notice`): a
+whatever the definition says (`gate_owner::stand_in_notice`): a
 notification about the Run's task, of the waiting Gate's kind flagged
 `notifyOnly` as a notify-only Gate's, not pushed to their phone, saying
 what the stand-in answered (by the answer's label,
@@ -1588,7 +1630,7 @@ replaced; a person merges), which a test reads; `factory_definition_check`
 - `src/domain/automations.rs` and `automations/service.rs`: Automations,
   their triggers and firings; `outbound/routine_automation_triggers.rs`:
   the routines that fire them.
-- `src/domain/gate_owner.rs`: the owner section: the notice a waiting Gate
+- `src/domain/gate_owner.rs`: Gates and their owner: the notice a waiting Gate
   sends, a notify-only Gate's lighter one, and the owner's notes a Step
   reads. Project rules are set through the API only: team
   settings show how many Projects have their own.

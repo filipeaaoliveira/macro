@@ -148,6 +148,14 @@ pub struct NotificationEgressService<Q, N, RT, M, E, R, S, D> {
     pub digest_batcher: D,
 }
 
+/// The notification types a producer may withdraw before or after the
+/// ingress creates them (`notification_withdrawal`): delivering one checks
+/// it was not withdrawn, so a push queued before its withdrawal is dropped
+/// rather than landing after its clear. An access request is withdrawn when
+/// a newer one replaces it, a factory Gate's notice when the Gate is
+/// answered before its notification was there to mark done.
+const WITHDRAWABLE_TYPES: [&str; 2] = ["entity_access_requested", "factory_gate_waiting"];
+
 impl<Q, N, RT, M, E, R, S, D> NotificationEgressService<Q, N, RT, M, E, R, S, D>
 where
     Q: NotificationQueue,
@@ -170,10 +178,10 @@ where
         &self,
         message: QueueMessage<'static, serde_json::Value, serde_json::Value>,
     ) -> Vec<Result<DeliverySuccess, Report<DeliveryFailure>>> {
-        let access_request = message.message_type() == "entity_access_requested";
+        let withdrawable = WITHDRAWABLE_TYPES.contains(&message.message_type());
         let message_type = message.message_type().to_owned();
         let content = message.into_inner();
-        if access_request {
+        if withdrawable {
             let notification_id = match &content {
                 NotificationChannel::ConnGateway(conn) => conn.notif.notification_id,
                 NotificationChannel::Ios(apns) => {
@@ -187,8 +195,10 @@ where
                     }
                 }
                 NotificationChannel::Email(_) => {
-                    return vec![Err(report!("access requests do not use email delivery")
-                        .context(DeliveryFailure::Other))];
+                    return vec![Err(report!(
+                        "withdrawable notices do not use email delivery"
+                    )
+                    .context(DeliveryFailure::Other))];
                 }
             };
             match self

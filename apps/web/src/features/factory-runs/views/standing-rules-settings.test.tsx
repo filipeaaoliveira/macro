@@ -149,6 +149,41 @@ describe('StandingRulesSettings', () => {
     );
   });
 
+  it('notifies the run’s owner by default, and turns that off, keeping the rules', async () => {
+    vi.mocked(factoryClient.setStandingRules).mockResolvedValueOnce(
+      ok({
+        ...teamDefault,
+        definition: { ...teamDefault.definition, quietGates: true },
+        isDefault: false,
+      })
+    );
+    mount(teamDefault);
+
+    const notify = await screen.findByRole('checkbox', {
+      name: 'Notify the run’s owner when a gate waits on them',
+    });
+    expect((notify as HTMLInputElement).checked).toBe(true);
+    // It says which runs it reaches, which gates notify, and what replaces it.
+    const hint = screen.getByText(/runs started from now on/).textContent;
+    expect(hint).toContain('no rule or stand-in answers');
+    expect(hint).toContain('A project’s own rules');
+    expect(hint).toContain('rules.json');
+    fireEvent.click(notify);
+
+    await waitFor(() =>
+      expect(factoryClient.setStandingRules).toHaveBeenCalledWith({
+        plan: false,
+        blockers: true,
+        merge: false,
+        ownerGates: false,
+        quietGates: true,
+      })
+    );
+    await waitFor(() =>
+      expect((notify as HTMLInputElement).checked).toBe(false)
+    );
+  });
+
   it('turns the task thread on, keeping the rules and the owner section', async () => {
     const ownerOn: Settings = {
       ...teamDefault,

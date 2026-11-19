@@ -1,6 +1,7 @@
-//! The owner section on a running Temporal: the Gates a person answers are
-//! told to the Run's owner, and none with the section off; a Gate the
-//! stand-in answers is told to no one, unless its answer is taken back.
+//! Gates and their owner on a running Temporal: the Gates a person answers
+//! are told to the Run's owner by default, whatever the owner section says,
+//! and none when the Run's definition is quiet; a Gate the stand-in answers
+//! is told to no one, unless its answer is taken back.
 
 use std::time::Duration;
 
@@ -25,10 +26,22 @@ fn rules(owner_gates: bool) -> RunRules {
     }
 }
 
+/// The factory's default rules, whose Gates notify no one.
+fn quiet() -> RunRules {
+    RunRules {
+        definition: OrchestratorDefinition {
+            quiet_gates: true,
+            ..OrchestratorDefinition::DEFAULT
+        },
+        source: RulesSource::Team,
+        project_id: None,
+    }
+}
+
 /// Walk a `code` Run whose review finds Blockers once, which the rule
 /// sends to a fix, and whose owner approves the plan and the merge; return
 /// the places of the Gates its owner was told of.
-async fn told_of(owner_gates: bool) -> Vec<u16> {
+async fn told_of(rules: RunRules) -> Vec<u16> {
     let github = FakeGithub::default();
     github.state().checks = [ci(Some("success"))].into();
     let agent = CodeAgent::new(&github);
@@ -40,7 +53,7 @@ async fn told_of(owner_gates: bool) -> Vec<u16> {
         &github,
         &FakeRepo::default(),
         CodeWalk {
-            rules: rules(owner_gates),
+            rules,
             notifier: Some(notifier.clone()),
             ..CodeWalk::default()
         },
@@ -56,24 +69,26 @@ async fn told_of(owner_gates: bool) -> Vec<u16> {
     sent.iter().map(|notice| notice.metadata.seq).collect()
 }
 
-/// With the owner section on, the plan and merge Gates, which wait for a
-/// person, are each told to the owner once; the Blockers Gate the rule
-/// answered is not.
+/// By default, with the owner section off or on, the plan and merge
+/// Gates, which wait for a person, are each told to the owner once; the
+/// Blockers Gate the rule answered is not.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "Temporal doesn't exist in CI"]
 async fn the_gates_a_person_answers_are_told_to_the_owner() {
-    let told = told_of(true).await;
-    assert_eq!(told.len(), 2, "{told:?}");
-    assert_eq!(told[0], 1, "the plan's Gate");
-    assert!(told[1] > told[0], "{told:?}");
+    for owner_gates in [false, true] {
+        let told = told_of(rules(owner_gates)).await;
+        assert_eq!(told.len(), 2, "{told:?}");
+        assert_eq!(told[0], 1, "the plan's Gate");
+        assert!(told[1] > told[0], "{told:?}");
+    }
 }
 
-/// With the owner section off, the Run walks as before and no Gate is
-/// told to anyone.
+/// A Run whose definition is quiet walks as before and no Gate is told to
+/// anyone.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "Temporal doesn't exist in CI"]
-async fn with_the_owner_section_off_no_gate_is_told() {
-    assert_eq!(told_of(false).await, Vec::<u16>::new());
+async fn a_quiet_run_tells_no_gate() {
+    assert_eq!(told_of(quiet()).await, Vec::<u16>::new());
 }
 
 /// Rules that fix Blockers, with the owner section on and the stand-in

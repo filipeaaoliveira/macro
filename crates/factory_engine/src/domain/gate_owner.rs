@@ -1,10 +1,17 @@
-//! Gates that go to the Run's owner: what the owner section of a Run's
-//! Orchestrator Definition (`owner_gates`) does with the Gates no Standing
-//! Rule answers. With it on:
+//! Gates that go to the Run's owner.
 //!
-//! - a Gate that waits for a person, a Flow's Gate no rule answered or an
-//!   agent's question, notifies the Run's owner ([`gate_notice`]): a Macro
-//!   notification about the Run's task that opens the Run, once per Gate;
+//! A Gate that waits for a person, a Flow's Gate no rule or stand-in
+//! answered or an agent's question, notifies the Run's owner
+//! ([`gate_notice`]): a Macro notification pushed to their phone that opens
+//! the Run, once per Gate, about the Run's task, or about the owner for a
+//! Run started without one. It is on by default: a Run whose Orchestrator
+//! Definition turns it off (`quiet_gates`) notifies no one, and its Gates
+//! still wait on the owner. A notified Gate's notification is marked done
+//! once the Gate is answered or the Run ends.
+//!
+//! The owner section of a Run's Orchestrator Definition (`owner_gates`)
+//! does more with the Gates no Standing Rule answers. With it on:
+//!
 //! - a review round whose Blockers are the round before's, unchanged after
 //!   the rule sent those to a fix, waits for the owner rather than another
 //!   fix (`standing_rules::repeated_blockers`);
@@ -12,34 +19,34 @@
 //!   the agent Steps after it ([`notes_since`], [`owner_notes_brief`]), as
 //!   data, as their answers to agents' questions do. Comments the factory
 //!   posted as the owner carry [`FACTORY_SIGNATURE`] and are not their
-//!   notes;
-//! - a notified Gate's notification is marked done once the Gate is
-//!   answered.
+//!   notes.
 //!
-//! With it off, as for a Run created before it, none of this happens:
-//! every Gate a rule leaves waits for a person, as before.
+//! With it off, as for a Run created before it, neither happens.
 //!
 //! The stand-in's answer, which the owner may change while its window is
-//! open, tells the owner too ([`stand_in_notice`]), whatever the section
-//! says, the same light way as a notify-only Gate's notice.
+//! open, tells the owner too ([`stand_in_notice`]), whatever the
+//! definition says, the same light way as a notify-only Gate's notice.
 //!
 //! A notify-only Gate tells the owner what it says ([`gate_told`])
-//! whatever the section says, since it exists only to tell them: with the
-//! same kind of notification, lighter: one per entry and Run, not pushed to
-//! their phone, saying the Run goes on, and marked done once the Run ends.
+//! whatever the definition says, since it exists only to tell them: with
+//! the same kind of notification, lighter: one per entry and Run, not
+//! pushed to their phone, saying the Run goes on, and marked done once the
+//! Run ends. Both lighter notices are about the Run's task, so a Run
+//! without one sends neither.
 //!
 //! Which Runs wait on their owner is read from the records whatever the
-//! section says: a Run waiting at a Gate no one answered.
+//! definition says: a Run waiting at a Gate no one answered.
 
 #[cfg(test)]
 mod test;
 
 use chrono::{DateTime, Utc};
-use factory_records::domain::models::{EntryId, GateKind, Outcome, Run, RunId, Step};
+use factory_records::domain::models::{EntryId, Gate, GateKind, Outcome, Run, RunId, Step};
 use macro_user_id::user_id::MacroUserIdStr;
 use model_notifications::FactoryGateWaitingMetadata;
 use uuid::Uuid;
 
+use crate::domain::flow::Flow;
 use crate::domain::review_rounds::escape;
 
 /// The namespace a Gate's notification id is derived in, from its Run and
@@ -88,8 +95,9 @@ pub struct GateNotice {
     /// The Run's owner, who is told.
     pub owner: MacroUserIdStr<'static>,
     /// The task document the Run works on, which the notification is
-    /// about.
-    pub task_id: Uuid,
+    /// about; none for a Run started without a task, whose notification
+    /// is about the owner.
+    pub task_id: Option<Uuid>,
     /// What the notification carries.
     pub metadata: FactoryGateWaitingMetadata,
     /// Whether it is pushed to the owner's phone: a Gate that waits on
@@ -97,19 +105,19 @@ pub struct GateNotice {
     pub push: bool,
 }
 
-/// The notice the Gate of `step`, of the Run `run`, warrants: none unless
-/// the Run's owner section is on, the Run has not ended, the Gate waits
-/// for its answer, and the Run works on a task, which is what Macro
-/// notifies about.
+/// The notice the Gate of `step`, of the Run `run`, warrants: none once
+/// the Run ended, when the Gate does not wait for its answer, or when the
+/// Run's Orchestrator Definition turns its Gates' notifications off
+/// (`quiet_gates`). A Run with no kept rules notifies, as the factory's
+/// default does, and so does a Run started without a task.
 pub fn gate_notice(run: &Run, step: &Step) -> Option<GateNotice> {
-    let owner_gates = run
+    let quiet = run
         .standing_rules
-        .is_some_and(|rules| rules.definition.owner_gates);
-    if !owner_gates || run.end.is_some() {
+        .is_some_and(|rules| rules.definition.quiet_gates);
+    if quiet || run.end.is_some() {
         return None;
     }
     let gate = step.gate.as_ref().filter(|gate| gate.answer.is_none())?;
-    let task_id = run.task_id?;
 
     // An agent's question names the Role that asks; a Flow's Gate is the
     // Run's own.
@@ -124,11 +132,13 @@ pub fn gate_notice(run: &Run, step: &Step) -> Option<GateNotice> {
     Some(GateNotice {
         notification_id: notice_id(run.id, step.seq),
         owner: run.user_id.clone(),
-        task_id,
+        task_id: run.task_id,
         metadata: FactoryGateWaitingMetadata {
             run_id: run.id.as_uuid(),
             seq: step.seq,
-            task_id: task_id.to_string(),
+            // Empty for a Run without a task: the notification opens the
+            // Run by its id, whatever task it names.
+            task_id: run.task_id.map(|task| task.to_string()).unwrap_or_default(),
             request: FactoryGateWaitingMetadata::excerpt(&run.request),
             question: FactoryGateWaitingMetadata::excerpt(&gate.question),
             asker,
@@ -149,7 +159,7 @@ pub fn told_id(run_id: RunId, entry: &EntryId) -> Uuid {
 
 /// The notice the notify-only Gate of the Step `step` of `run`, which says
 /// `question`, warrants: none once the Run ended, or when it works on no
-/// task, which Macro notifies about. It is sent whatever the owner section
+/// task, which Macro notifies about. It is sent whatever the definition
 /// says, since the Gate exists only to tell the owner. The notice is the
 /// waiting Gate's kind, lighter: flagged `notify_only`, so it reads as news
 /// rather than a question, one per entry and Run ([`told_id`]), and not
@@ -162,7 +172,7 @@ pub fn gate_told(run: &Run, step: &Step, question: &str) -> Option<GateNotice> {
     Some(GateNotice {
         notification_id: told_id(run.id, &step.entry),
         owner: run.user_id.clone(),
-        task_id,
+        task_id: Some(task_id),
         metadata: FactoryGateWaitingMetadata {
             run_id: run.id.as_uuid(),
             seq: step.seq,
@@ -190,7 +200,7 @@ pub fn stand_in_id(run_id: RunId, seq: u16) -> Uuid {
 /// with `answer`, which the owner may change while its window is open (the
 /// Run view says until when, in the viewer's time): none once the
 /// Run ended, or when it works on no task, which Macro notifies about. It
-/// is sent whatever the owner section says, since the stand-in answers in
+/// is sent whatever the definition says, since the stand-in answers in
 /// the owner's name. Like a notify-only Gate's notice it is news while the
 /// Run goes on, lighter than a waiting Gate's: flagged `notify_only`, not
 /// pushed, one per Gate ([`stand_in_id`]), and marked done once the window
@@ -210,7 +220,7 @@ pub fn stand_in_notice(run: &Run, step: &Step, answer: &Outcome) -> Option<GateN
     Some(GateNotice {
         notification_id: stand_in_id(run.id, step.seq),
         owner: run.user_id.clone(),
-        task_id,
+        task_id: Some(task_id),
         metadata: FactoryGateWaitingMetadata {
             run_id: run.id.as_uuid(),
             seq: step.seq,
@@ -222,6 +232,54 @@ pub fn stand_in_notice(run: &Run, step: &Step, answer: &Outcome) -> Option<GateN
         },
         push: false,
     })
+}
+
+/// Whether the waiting notice of `gate`, of `run`, may have gone out
+/// ([`gate_notice`]): only then is it marked done, or withdrawn while it is
+/// still on its way, once the Gate is closed. None went out on a quiet Run,
+/// for a Gate a Standing Rule or the stand-in answered, or while the
+/// stand-in's answer stood: the Gate is told only once it waits for its
+/// owner, or once the owner's words in the stand-in's window were asked
+/// back.
+pub fn notice_may_be_out(run: &Run, gate: &Gate) -> bool {
+    let quiet = run
+        .standing_rules
+        .is_some_and(|rules| rules.definition.quiet_gates);
+    let not_a_person_s = gate
+        .answer
+        .as_ref()
+        .is_some_and(|answer| answer.rule.is_some() || answer.by_stand_in);
+    let stood_in = gate.stand_in.is_some() && gate.asked_back.is_none();
+    !quiet && !not_a_person_s && !stood_in
+}
+
+/// Whether the notice that the stand-in answered `gate`, of `run`, may have
+/// gone out ([`stand_in_notice`]): only when the stand-in answered, and
+/// never for a Run without a task.
+pub fn stand_in_notice_may_be_out(run: &Run, gate: &Gate) -> bool {
+    run.task_id.is_some() && gate.stand_in.is_some()
+}
+
+/// The entries among `visited` whose notify-only Gate may have told the
+/// owner ([`gate_told`]), of `run` walking `flow`: none for a Run without a
+/// task, which tells no one so. A Run whose Flow does not read (`None`)
+/// counts every entry it visited, so no notice is left open.
+pub fn told_entries<'a>(
+    run: &Run,
+    flow: Option<&Flow>,
+    visited: impl IntoIterator<Item = &'a EntryId>,
+) -> Vec<&'a EntryId> {
+    if run.task_id.is_none() {
+        return Vec::new();
+    }
+    let tells = |entry: &EntryId| {
+        flow.is_none_or(|flow| {
+            flow.entries.iter().any(|defined| {
+                defined.id == *entry && defined.gate.as_ref().is_some_and(|gate| gate.notify_only)
+            })
+        })
+    };
+    visited.into_iter().filter(|entry| tells(entry)).collect()
 }
 
 /// Words Flows use that people write in capitals.

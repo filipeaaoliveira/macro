@@ -15,7 +15,7 @@ use crate::domain::built_in_steps::cut;
 use factory_records::domain::standing_rules::RuleGateKind;
 
 use crate::domain::gate::{ReplyRead, ReplyReading, StandInAsking, StandInKeeping, StandingIn};
-use crate::domain::gate_owner::{notice_id, stand_in_id, stand_in_notice};
+use crate::domain::gate_owner::{notice_id, notice_may_be_out, stand_in_id, stand_in_notice};
 use crate::domain::models::StepError;
 use crate::domain::ports::{
     GateModel, GateNotifier, GateReplyService, ModelPick, ModelQuestion, NoOwnerGates,
@@ -191,15 +191,16 @@ where
     }
 
     /// Answer the Gate of `key` with `answer`, read from `reading`'s words,
-    /// and return the answer it keeps. `stood_in` says whether the
-    /// stand-in had answered the Gate, whose window the answer closes.
+    /// and return the answer it keeps. `gate` is the Gate as it was read
+    /// before: whether the stand-in had answered it, whose window the answer
+    /// closes, and whether its owner was told of it.
     async fn answer_from_reply(
         &self,
         key: StepKey,
         answer: &Outcome,
         reading: &ReplyReading,
         confidence: Option<u8>,
-        stood_in: bool,
+        gate: &Gate,
     ) -> Result<ReplyRead, StepError> {
         let kept = self
             .repo
@@ -207,24 +208,22 @@ where
             .await
             .map_err(internal)?
             .ok_or_else(|| StepError::Internal(rootcause::report!("the gate is not recorded")))?;
-        self.answered(key, stood_in).await?;
+        self.answered(key, gate).await?;
         Ok(ReplyRead::Answered(kept.answer))
     }
 
-    /// The Gate of `key` is answered: the notification its owner was told
-    /// of it by is done, when the Run's owner section is on, so is the
-    /// notice that the stand-in answered, when it had (`stood_in`), and the
-    /// answer is posted to its task thread, when that section is on.
-    async fn answered(&self, key: StepKey, stood_in: bool) -> Result<(), StepError> {
+    /// The Gate of `key`, `gate` as it was read, is answered: the
+    /// notification its owner was told of it by is done, so is the notice
+    /// that the stand-in answered, when it had, and the answer is posted to
+    /// its task thread, when that section is on. A notice that never went
+    /// out is left alone, as closing it would leave a withdrawal behind.
+    async fn answered(&self, key: StepKey, gate: &Gate) -> Result<(), StepError> {
         let run = self.run(key).await?;
-        if run
-            .standing_rules
-            .is_some_and(|rules| rules.definition.owner_gates)
-        {
+        if notice_may_be_out(&run, gate) {
             let id = notice_id(key.run_id, key.seq);
             self.notifier.answered(&run.user_id, id).await;
         }
-        if stood_in {
+        if gate.stand_in.is_some() {
             self.window_closed(&run, key).await;
         }
         self.post_answered(key).await;
@@ -232,9 +231,12 @@ where
     }
 
     /// The stand-in's window on the Gate of `key` closed: the notice that
-    /// the stand-in answered, if one was sent, is done. Marking a notice
-    /// never sent changes nothing.
+    /// the stand-in answered is done. A Run without a task sent none, and
+    /// closing one never sent would leave a withdrawal behind.
     async fn window_closed(&self, run: &Run, key: StepKey) {
+        if run.task_id.is_none() {
+            return;
+        }
         let id = stand_in_id(key.run_id, key.seq);
         self.notifier.answered(&run.user_id, id).await;
     }
@@ -310,12 +312,12 @@ where
         // was lost: that answer stands.
         let stood_in = gate.stand_in.is_some();
         if let Some(answer) = &gate.answer {
-            self.answered(key, stood_in).await?;
+            self.answered(key, gate).await?;
             return Ok(ReplyRead::Answered(answer.answer.clone()));
         }
         if reading.question {
             return self
-                .answer_from_reply(key, &Outcome::answer(), &reading, None, stood_in)
+                .answer_from_reply(key, &Outcome::answer(), &reading, None, gate)
                 .await;
         }
 
@@ -333,7 +335,7 @@ where
             Decision::Decided { answer, confidence } if !tampered || answer.as_str() != APPROVE => {
                 tracing::info!(%answer, confidence, "a reply answered a gate");
                 return self
-                    .answer_from_reply(key, answer, &reading, Some(*confidence), stood_in)
+                    .answer_from_reply(key, answer, &reading, Some(*confidence), gate)
                     .await;
             }
             Decision::Decided { .. } => true,

@@ -7,6 +7,7 @@ fn a_definition_is_stored_as_the_kinds_its_rules_decide() {
         blockers: false,
         merge: true,
         owner_gates: false,
+        quiet_gates: false,
         task_thread: false,
         queue_limit: None,
         orchestrator: crate::domain::standing_rules::OrchestratorKinds {
@@ -33,6 +34,7 @@ fn the_owner_section_is_stored_beside_the_kinds() {
         blockers: true,
         merge: false,
         owner_gates: true,
+        quiet_gates: false,
         task_thread: false,
         queue_limit: None,
         orchestrator: crate::domain::standing_rules::OrchestratorKinds {
@@ -116,6 +118,7 @@ fn the_kinds_the_stand_in_answers_are_stored_beside_the_rules() {
         blockers: true,
         merge: false,
         owner_gates: false,
+        quiet_gates: false,
         task_thread: false,
         queue_limit: None,
         orchestrator: crate::domain::standing_rules::OrchestratorKinds {
@@ -143,6 +146,7 @@ fn the_stand_in_never_answers_a_merge_and_is_off_by_default() {
         blockers: true,
         merge: true,
         owner_gates: false,
+        quiet_gates: false,
         task_thread: false,
         queue_limit: None,
         orchestrator: crate::domain::standing_rules::OrchestratorKinds {
@@ -175,6 +179,7 @@ fn the_owner_section_and_the_stand_in_are_stored_together() {
         blockers: false,
         merge: false,
         owner_gates: true,
+        quiet_gates: false,
         task_thread: false,
         queue_limit: None,
         orchestrator: crate::domain::standing_rules::OrchestratorKinds {
@@ -218,6 +223,41 @@ fn the_task_thread_section_is_stored_beside_the_kinds_and_off_by_default() {
     )
     .expect("a definition with the section reads");
     assert!(on.task_thread);
+}
+
+/// Gates notify the owner unless a definition says it is quiet: an
+/// opt-out, stored only when on, so a definition kept or sent without it,
+/// and the factory's default, notify.
+#[test]
+fn quiet_gates_are_an_opt_out_stored_beside_the_kinds() {
+    const { assert!(!OrchestratorDefinition::DEFAULT.quiet_gates) };
+    assert!(
+        !OrchestratorDefinition::from_kinds(&["blockers".to_string()])
+            .expect("known")
+            .quiet_gates
+    );
+    let quiet = OrchestratorDefinition {
+        quiet_gates: true,
+        ..OrchestratorDefinition::DEFAULT
+    };
+    assert_eq!(quiet.kinds(), ["blockers", "quiet_gates"]);
+    assert_eq!(
+        OrchestratorDefinition::from_kinds(&quiet.kinds()),
+        Some(quiet)
+    );
+    let sent: OrchestratorDefinition =
+        serde_json::from_str(r#"{"plan": false, "blockers": true, "merge": false}"#)
+            .expect("a definition without it reads");
+    assert!(!sent.quiet_gates);
+    let off: OrchestratorDefinition = serde_json::from_str(
+        r#"{"plan": false, "blockers": true, "merge": false, "quietGates": true}"#,
+    )
+    .expect("a definition with it reads");
+    assert!(off.quiet_gates);
+    assert_eq!(
+        serde_json::to_value(off).expect("serializes")["quietGates"],
+        true
+    );
 }
 
 #[test]

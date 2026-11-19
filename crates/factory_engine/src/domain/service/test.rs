@@ -243,6 +243,30 @@ fn nobody() -> MacroUserIdStr<'static> {
     MacroUserIdStr::try_from("macro|nobody@example.com".to_string()).expect("valid")
 }
 
+/// Keep for the Run `run_id` a Flow whose `reply` entry has a notify-only
+/// Gate, as a Run started on such a Flow keeps it.
+fn keep_notify_only_reply(repo: &FakeRepo, run_id: RunId) {
+    let mut flow = crate::domain::built_in_flows::BuiltInFlow::named("code")
+        .expect("built in")
+        .read(|_| Some(StepUse::Work))
+        .expect("valid flow");
+    let entry = &mut flow.entries[0];
+    entry.id = EntryId::try_from("reply".to_string()).expect("valid");
+    entry.gate = Some(crate::domain::flow::GateDefinition {
+        question: "The plan is ready.".to_string(),
+        answers: Vec::new(),
+        after: None,
+        kind: None,
+        person_only: false,
+        notify_only: true,
+    });
+    let kept = serde_json::to_value(&flow).expect("flows serialize");
+    repo.kept_flows
+        .lock()
+        .expect("kept flows")
+        .insert(run_id, (kept, false));
+}
+
 fn reply_step(run_id: RunId, seq: u16) -> StepRequest {
     StepRequest {
         key: StepKey { run_id, seq },

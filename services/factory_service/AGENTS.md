@@ -86,7 +86,8 @@ worker that walks each Run's Flow, in one process.
   turns the stand-in on for those kinds of Gate; left out, it is off), `{"definition": null}` goes back to the default, and `PUT
   /settings/standing-rules/projects/<initiative id>` sets or removes a
   Project's own, the same way; `"ownerGates": true` in a definition turns
-  its owner section on, `"taskThread": true` its task thread section
+  its owner section on, `"quietGates": true` stops the notification a Gate
+  waiting on the Run's owner sends them (left out: they are notified), `"taskThread": true` its task thread section
   (each Run on a task posts its updates to one comment thread on it), and
   `"queueLimit": 5` sets its Queue limit (1 to 1000, else 400; null or
   left out: none): the most places a person may hold. Once they hold that
@@ -220,8 +221,8 @@ worker that walks each Run's Flow, in one process.
   through `POST /documents/{id}/comments/text`, as the Run's owner with the
   internal key, so the service needs that service's public routes reachable
   at `DocumentStorageServiceUrl`.
-- A Gate left for a person, on a Run whose owner section is on, notifies
-  its owner through the notification ingress queue
+- A Gate left for a person notifies the Run's owner, unless the Run's
+  definition is quiet (`quietGates`), through the notification ingress queue
   (`NotificationIngressQueue`, over SQS as every Macro producer), so the
   service needs `sqs:SendMessage` on it once it deploys. An answered Gate's
   notification is marked done through the notifications' reader over

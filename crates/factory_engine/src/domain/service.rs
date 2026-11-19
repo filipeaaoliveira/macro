@@ -37,7 +37,7 @@ use uuid::Uuid;
 
 use crate::domain::agents::AgentDefinition;
 use crate::domain::board::{BoardFilter, BoardPage, PullRequestRuns};
-use crate::domain::built_in_flows::BUILT_IN_FLOWS;
+use crate::domain::built_in_flows::{BUILT_IN_FLOWS, walked_flow};
 use crate::domain::control_files::ControlFiles;
 use crate::domain::definition::DEFINITION_FILE_PATTERNS;
 use crate::domain::evaluation::{EvaluationDefinition, TeamEvaluation};
@@ -47,8 +47,8 @@ use crate::domain::gate::{
     AnswerGate, GateAnswered, GateOpening, GateRuling, GateTelling, ReplyGate, StandingAnswer,
 };
 use crate::domain::gate_owner::{
-    OwnerNote, gate_notice, gate_told, is_factory_comment, notes_since, notice_id, stand_in_id,
-    told_id,
+    OwnerNote, gate_notice, gate_told, is_factory_comment, notes_since, notice_id,
+    notice_may_be_out, stand_in_id, stand_in_notice_may_be_out, told_entries, told_id,
 };
 use crate::domain::models::{
     ActingAgent, Answerer, CodeRepository, ControlFilesSettings, DefinitionSettings, FactoryError,
@@ -1898,7 +1898,8 @@ where
 {
     /// The service, telling Runs' owners of their waiting Gates through
     /// `notifier`, and reading their comments on the Runs' tasks through
-    /// `notes`, for the Runs whose owner section is on.
+    /// `notes`, for the Runs whose owner section is on. A Run whose
+    /// definition is quiet tells no one.
     pub fn with_owner_gates<N2: GateNotifier, T2: TaskNotes>(
         self,
         notifier: N2,
@@ -2170,32 +2171,33 @@ where
         }
 
         // A Gate its owner was told of is answered: its notification is
-        // done, whoever answered.
+        // done, whoever answered. One that never went out is left alone,
+        // as closing it would leave a withdrawal behind.
         let run = self
             .repo
             .get_run(answered.key.run_id)
             .await
             .map_err(internal)?
             .ok_or(StepError::NoSuchRun)?;
-        let owner_gates = run
-            .standing_rules
-            .is_some_and(|rules| rules.definition.owner_gates);
-        if owner_gates {
-            let id = notice_id(answered.key.run_id, answered.key.seq);
-            self.notifier.answered(&run.user_id, id).await;
-        }
-        // An answer in the stand-in's window closes it, and so the notice
-        // that the stand-in answered.
-        let stood_in = self
+        let gate = self
             .repo
             .list_steps(answered.key.run_id)
             .await
             .map_err(internal)?
             .into_iter()
             .find(|step| step.seq == answered.key.seq)
-            .and_then(|step| step.gate)
-            .is_some_and(|gate| gate.stand_in.is_some());
-        if stood_in {
+            .and_then(|step| step.gate);
+        if let Some(gate) = &gate
+            && notice_may_be_out(&run, gate)
+        {
+            let id = notice_id(answered.key.run_id, answered.key.seq);
+            self.notifier.answered(&run.user_id, id).await;
+        }
+        // An answer in the stand-in's window closes it, and so the notice
+        // that the stand-in answered.
+        if let Some(gate) = &gate
+            && stand_in_notice_may_be_out(&run, gate)
+        {
             let id = stand_in_id(answered.key.run_id, answered.key.seq);
             self.notifier.answered(&run.user_id, id).await;
         }
@@ -2358,28 +2360,28 @@ where
 
         // A Gate left open when the Run ended (cancelled, or ended for a
         // person) waits on no one now: the notification its owner was told
-        // of it by is done, as an answer would make it. One never sent
-        // changes nothing, so a retry marks the same ones again.
+        // of it by is done, as an answer would make it. Only notices that
+        // may have gone out are closed, as closing one never sent leaves a
+        // withdrawal behind; a retry closes the same ones again.
         let run = self
             .repo
             .get_run(finish.run_id)
             .await
             .map_err(internal)?
             .ok_or(StepError::NoSuchRun)?;
-        let owner_gates = run
-            .standing_rules
-            .is_some_and(|rules| rules.definition.owner_gates);
         let steps = self
             .repo
             .list_steps(finish.run_id)
             .await
             .map_err(internal)?;
-        if owner_gates {
-            for step in &steps {
-                if step.gate.as_ref().is_some_and(|gate| gate.answer.is_none()) {
-                    let id = notice_id(finish.run_id, step.seq);
-                    self.notifier.answered(&run.user_id, id).await;
-                }
+        for step in &steps {
+            let open = step
+                .gate
+                .as_ref()
+                .is_some_and(|gate| gate.answer.is_none() && notice_may_be_out(&run, gate));
+            if open {
+                let id = notice_id(finish.run_id, step.seq);
+                self.notifier.answered(&run.user_id, id).await;
             }
         }
 
@@ -2387,10 +2389,9 @@ where
         // that the stand-in answered is done, as the window closing would
         // make it.
         for step in &steps {
-            let in_window = step
-                .gate
-                .as_ref()
-                .is_some_and(|gate| gate.answer.is_none() && gate.stand_in.is_some());
+            let in_window = step.gate.as_ref().is_some_and(|gate| {
+                gate.answer.is_none() && stand_in_notice_may_be_out(&run, gate)
+            });
             if in_window {
                 let id = stand_in_id(finish.run_id, step.seq);
                 self.notifier.answered(&run.user_id, id).await;
@@ -2398,11 +2399,17 @@ where
         }
 
         // A notify-only Gate's notice is news of a Run under way: once the
-        // Run ends it is done. No record says which entries told, and
-        // marking a notice never sent changes nothing, so each entry's is
-        // marked, whatever the owner section says, as the notice was sent.
-        let entries: BTreeSet<_> = steps.iter().map(|step| &step.entry).collect();
-        for entry in entries {
+        // Run ends it is done. No record says which entries told, so each
+        // visited entry whose Gate is notify-only in the Run's Flow is
+        // closed, whatever the owner section says, as the notice was sent.
+        let flow = self
+            .repo
+            .run_flow(finish.run_id)
+            .await
+            .map_err(internal)?
+            .and_then(|kept| walked_flow(finish.run_id, kept));
+        let visited: BTreeSet<_> = steps.iter().map(|step| &step.entry).collect();
+        for entry in told_entries(&run, flow.as_ref(), visited) {
             let id = told_id(finish.run_id, entry);
             self.notifier.answered(&run.user_id, id).await;
         }
