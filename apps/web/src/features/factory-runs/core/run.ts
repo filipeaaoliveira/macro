@@ -363,6 +363,11 @@ export type BudgetStop =
 export type RunTokenBudget = {
   budget: number;
   used?: number;
+  /**
+   * False when the Run's agent sessions record no token use at all (an
+   * agent whose runtime is not measured): its budget cannot apply.
+   */
+  measured?: boolean;
   stop?: BudgetStop;
 };
 

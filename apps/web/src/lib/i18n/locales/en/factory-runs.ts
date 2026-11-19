@@ -280,6 +280,8 @@ export default {
   tokenBudget: 'Token budget',
   tokenBudgetUsed: '{{used}} of {{budget}} tokens used',
   tokenBudgetOf: '{{budget}} tokens',
+  tokenBudgetUnmeasured:
+    '{{budget}} tokens, not measured: its agents record no token use, so the budget can’t stop it',
   tokenBudgetSpent:
     'Stopped at its budget: its agents used {{used}} of {{budget}} tokens',
   tokenBudgetUnread:

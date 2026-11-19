@@ -866,6 +866,16 @@ describe('RunView', () => {
 
     setRun({
       ...waitingRun,
+      tokenBudget: { budget: 2_000_000, used: 0, measured: false },
+    });
+    expect(
+      screen.getByText(
+        '2M tokens, not measured: its agents record no token use, so the budget can’t stop it'
+      )
+    ).toBeTruthy();
+
+    setRun({
+      ...waitingRun,
       tokenBudget: {
         budget: 2_000_000,
         used: 2_100_000,

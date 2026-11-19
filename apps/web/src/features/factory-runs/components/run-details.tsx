@@ -61,6 +61,9 @@ export function tokenBudgetLine(budget: RunTokenBudget): string {
   if (budget.used === undefined) {
     return t('factoryRuns.tokenBudgetOf', { budget: limit });
   }
+  if (budget.measured === false) {
+    return t('factoryRuns.tokenBudgetUnmeasured', { budget: limit });
+  }
   return t('factoryRuns.tokenBudgetUsed', {
     used: formatTokens(budget.used),
     budget: limit,
