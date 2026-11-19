@@ -189,6 +189,7 @@ fn notice() -> GateNotice {
             question: "Approve the plan?".to_string(),
             asker: None,
             notify_only: false,
+            budget_stopped: false,
         },
         push: true,
     }

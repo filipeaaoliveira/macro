@@ -1434,6 +1434,7 @@ function mapGraphqlNotificationMetadata(
             question: metadata.factoryGateWaitingQuestion,
             asker: metadata.factoryGateWaitingAsker ?? undefined,
             notifyOnly: metadata.factoryGateWaitingNotifyOnly,
+            budgetStopped: metadata.factoryGateWaitingBudgetStopped,
           },
         }) satisfies NotifEventMember<'factory_gate_waiting'>
     )

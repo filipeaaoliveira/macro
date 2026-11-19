@@ -206,6 +206,7 @@ async fn the_owner_is_told_once_their_run_ends_at_its_budget() {
         assert_eq!(notice.metadata.run_id, told.as_uuid());
         assert!(notice.push);
         assert!(!notice.metadata.notify_only);
+        assert!(notice.metadata.budget_stopped);
         assert!(
             notice
                 .metadata

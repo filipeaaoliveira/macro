@@ -211,6 +211,7 @@ async fn a_run_at_its_budget_ends_blocked_before_its_next_agent_step() {
     let sent = walked.notifier.sent.lock().expect("sent").clone();
     assert_eq!(sent.len(), 1, "{sent:?}");
     assert!(sent[0].metadata.question.contains("token budget"));
+    assert!(sent[0].metadata.budget_stopped);
     assert!(walked.history.contains(MARKER_IN_HISTORY));
     assert!(walked.history.contains("factory_check_budget"));
     record_history(walked.run_id, "plan_stopped_at_token_budget").await;

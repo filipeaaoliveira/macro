@@ -193,6 +193,7 @@ pub fn budget_notice(run: &Run) -> Option<GateNotice> {
             question: FactoryGateWaitingMetadata::excerpt(&stop_text(budget, stop)),
             asker: None,
             notify_only: false,
+            budget_stopped: true,
         },
         push: true,
     })
