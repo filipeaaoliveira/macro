@@ -1479,11 +1479,12 @@ Standing Rule or the stand-in answers was never left to a person, so it
 sent no such notification. `GET /runs/waiting` lists the caller's Runs
 waiting at an unanswered Gate, whatever the definition says.
 
-A Run started without a task files its notice under the owner's User
-entity, which the inbox does not list (`notification_inbox`'s
-`CANDIDATE_TYPES`; a User is no item the inbox can show or check access
-to), so that notice reaches the owner only live and by push, and opens the
-Run from there. Its Gate still shows in "Waiting on you" (`GET
+A Run started without a task files its notice under the owner's own User
+entity. The inbox lists a User's notices only to that user (Soup's
+`user_gate`), each such Run on a row of its own (`notification_inbox`'s
+`place_about_the_viewer`), so the notice reaches the owner in the inbox as
+well as live and by push, opens the Run from there, and is marked done or
+withdrawn as a task's is. Its Gate also shows in "Waiting on you" (`GET
 /runs/waiting`), which lists every waiting Run, with a task or without.
 
 A team's Orchestrator Definition also has an owner section

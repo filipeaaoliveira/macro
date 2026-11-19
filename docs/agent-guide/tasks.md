@@ -1540,7 +1540,8 @@ to the run's owner** (off by default). With it on, a Gate no rule answers,
 or an agent's question, sends the Run's owner a notification about the
 Run's task (**A factory run waits on your answer**, or **The planner asks
 you a question**), shown on the task's row in the inbox; opening it opens
-the Run. A review that finds the same blockers again after a rule's fix
+the Run. A Run started without a task has a row of its own in its owner's
+inbox, which only they see, and opening it opens the Run too. A review that finds the same blockers again after a rule's fix
 waits for the owner, and the owner's comments on the task after a Gate
 opened are given to the next agent step.
 

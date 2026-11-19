@@ -55599,6 +55599,22 @@ export const getItemsSoupResponse = zod
               tag: zod.enum(['team']),
             })
             .describe('Team, listed only by attention feeds.'),
+          zod
+            .object({
+              data: zod
+                .object({
+                  id: zod
+                    .string()
+                    .describe(
+                      "The viewer's Macro user id, which their notices are filed under."
+                    ),
+                })
+                .describe(
+                  "The viewer, listed only by attention feeds: a notice about the viewer\nalone (a factory Run started without a task waiting on its owner) is\nfiled under their User entity, which has no page of its own. Only the\nviewer is ever listed, so no one sees another person's."
+                ),
+              tag: zod.enum(['user']),
+            })
+            .describe('The viewer, listed only by attention feeds.'),
         ])
         .describe('A single item in the Soup feed.')
         .and(
@@ -60803,6 +60819,22 @@ export const postItemsSoupResponse = zod
               tag: zod.enum(['team']),
             })
             .describe('Team, listed only by attention feeds.'),
+          zod
+            .object({
+              data: zod
+                .object({
+                  id: zod
+                    .string()
+                    .describe(
+                      "The viewer's Macro user id, which their notices are filed under."
+                    ),
+                })
+                .describe(
+                  "The viewer, listed only by attention feeds: a notice about the viewer\nalone (a factory Run started without a task waiting on its owner) is\nfiled under their User entity, which has no page of its own. Only the\nviewer is ever listed, so no one sees another person's."
+                ),
+              tag: zod.enum(['user']),
+            })
+            .describe('The viewer, listed only by attention feeds.'),
         ])
         .describe('A single item in the Soup feed.')
         .and(
@@ -65420,6 +65452,22 @@ export const postItemsSoupAstResponse = zod
               tag: zod.enum(['team']),
             })
             .describe('Team, listed only by attention feeds.'),
+          zod
+            .object({
+              data: zod
+                .object({
+                  id: zod
+                    .string()
+                    .describe(
+                      "The viewer's Macro user id, which their notices are filed under."
+                    ),
+                })
+                .describe(
+                  "The viewer, listed only by attention feeds: a notice about the viewer\nalone (a factory Run started without a task waiting on its owner) is\nfiled under their User entity, which has no page of its own. Only the\nviewer is ever listed, so no one sees another person's."
+                ),
+              tag: zod.enum(['user']),
+            })
+            .describe('The viewer, listed only by attention feeds.'),
         ])
         .describe('A single item in the Soup feed.')
         .and(
@@ -70627,6 +70675,22 @@ export const postItemsSoupAstGroupedResponse = zod
                     tag: zod.enum(['team']),
                   })
                   .describe('Team, listed only by attention feeds.'),
+                zod
+                  .object({
+                    data: zod
+                      .object({
+                        id: zod
+                          .string()
+                          .describe(
+                            "The viewer's Macro user id, which their notices are filed under."
+                          ),
+                      })
+                      .describe(
+                        "The viewer, listed only by attention feeds: a notice about the viewer\nalone (a factory Run started without a task waiting on its owner) is\nfiled under their User entity, which has no page of its own. Only the\nviewer is ever listed, so no one sees another person's."
+                      ),
+                    tag: zod.enum(['user']),
+                  })
+                  .describe('The viewer, listed only by attention feeds.'),
               ])
               .describe('A single item in the Soup feed.')
               .and(
@@ -75216,6 +75280,22 @@ export const postItemsSoupAstGroupedResponse = zod
                     tag: zod.enum(['team']),
                   })
                   .describe('Team, listed only by attention feeds.'),
+                zod
+                  .object({
+                    data: zod
+                      .object({
+                        id: zod
+                          .string()
+                          .describe(
+                            "The viewer's Macro user id, which their notices are filed under."
+                          ),
+                      })
+                      .describe(
+                        "The viewer, listed only by attention feeds: a notice about the viewer\nalone (a factory Run started without a task waiting on its owner) is\nfiled under their User entity, which has no page of its own. Only the\nviewer is ever listed, so no one sees another person's."
+                      ),
+                    tag: zod.enum(['user']),
+                  })
+                  .describe('The viewer, listed only by attention feeds.'),
               ])
               .describe('A single item in the Soup feed.')
               .and(

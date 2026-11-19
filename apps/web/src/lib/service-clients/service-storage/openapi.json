@@ -63632,6 +63632,21 @@
                 "enum": ["team"]
               }
             }
+          },
+          {
+            "type": "object",
+            "description": "The viewer, listed only by attention feeds.",
+            "required": ["data", "tag"],
+            "properties": {
+              "data": {
+                "$ref": "#/components/schemas/SoupUser",
+                "description": "The viewer, listed only by attention feeds."
+              },
+              "tag": {
+                "type": "string",
+                "enum": ["user"]
+              }
+            }
           }
         ],
         "description": "A single item in the Soup feed."
@@ -63988,6 +64003,17 @@
             "type": "string",
             "format": "date-time",
             "description": "Update timestamp."
+          }
+        }
+      },
+      "SoupUser": {
+        "type": "object",
+        "description": "The viewer, listed only by attention feeds: a notice about the viewer\nalone (a factory Run started without a task waiting on its owner) is\nfiled under their User entity, which has no page of its own. Only the\nviewer is ever listed, so no one sees another person's.",
+        "required": ["id"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The viewer's Macro user id, which their notices are filed under."
           }
         }
       },

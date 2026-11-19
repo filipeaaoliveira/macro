@@ -15,6 +15,17 @@ fn row_ids_round_trip() {
 }
 
 #[test]
+fn a_row_id_under_a_user_whose_id_holds_a_hash_round_trips() {
+    let id = InboxRowId {
+        group: FeedKey::new(
+            EntityType::User.with_entity_string("macro|a#b@example.com".to_string()),
+        ),
+        slot: format!("factory_run:{}", uuid(2)),
+    };
+    assert_eq!(InboxRowId::parse(&id.id()).unwrap(), id);
+}
+
+#[test]
 fn malformed_row_ids_are_rejected() {
     for id in [
         "",

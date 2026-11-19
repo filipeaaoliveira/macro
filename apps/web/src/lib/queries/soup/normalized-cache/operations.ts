@@ -744,8 +744,9 @@ export async function refetchSoupEntity(
     notified?: boolean;
   }
 ): Promise<void> {
-  // Team notifications hydrate through their inbox feed, never the generic REST cache.
-  if (entityType === 'team') return;
+  // Team and viewer notifications hydrate through their inbox feed, never the
+  // generic REST cache.
+  if (entityType === 'team' || entityType === 'user') return;
 
   if (options?.refreshGraphql) {
     fireAndForget(refreshActiveGraphqlSoupQueries(), 'soup-normalized-cache');
@@ -928,6 +929,9 @@ export function buildSingleEntityFilter(
     .with('team', () => {
       throw new Error('Teams are notification-only GraphQL Soup entries');
     })
+    .with('user', () => {
+      throw new Error('The viewer is a notification-only GraphQL Soup entry');
+    })
     .exhaustive(() => {
       throw new Error(`Unknown soup entity type: ${entityType}`);
     });
@@ -991,7 +995,13 @@ export function optimisticUpdateSoupItemUpdatedAt(
   updatedAt: string
 ): SoupTransaction | undefined {
   const current = getSoupEntityById(itemId);
-  if (!current || current.tag !== tag || current.tag === 'team') return;
+  if (
+    !current ||
+    current.tag !== tag ||
+    current.tag === 'team' ||
+    current.tag === 'user'
+  )
+    return;
 
   if (current.tag === 'channel') {
     if (

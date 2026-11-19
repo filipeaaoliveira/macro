@@ -32,6 +32,7 @@ use models_soup::{
     item::SoupItem,
     project::SoupProject,
     team::SoupTeam,
+    user::SoupUser,
 };
 use predicate_index::RecordKey;
 use serde_json::Value;
@@ -321,6 +322,7 @@ impl<E: SoupEntityEdges> GraphqlSoupEntity<E> {
             Self::DatabaseRow(entity) => entity.2 = score,
             Self::Harness(entity) => entity.2 = score,
             Self::Team(entity) => entity.2 = score,
+            Self::User(entity) => entity.2 = score,
             Self::Reminder(entity) => match entity.0 {},
         }
         self
@@ -344,7 +346,8 @@ impl<E: SoupEntityEdges> GraphqlSoupEntity<E> {
             | Self::AgentSession(_)
             | Self::DatabaseRow(_)
             | Self::Harness(_)
-            | Self::Team(_) => {}
+            | Self::Team(_)
+            | Self::User(_) => {}
             Self::Reminder(entity) => match entity.0 {},
         }
         self
@@ -481,6 +484,8 @@ pub enum GraphqlSoupEntity<E: SoupEntityEdges> {
     Harness(GraphqlSoupHarness<E>),
     /// Team, listed only by attention feeds.
     Team(GraphqlSoupTeam<E>),
+    /// The viewer, listed only by attention feeds.
+    User(GraphqlSoupUser<E>),
     /// Removed reminder entity, never constructed.
     Reminder(GraphqlSoupReminder<E>),
 }
@@ -512,6 +517,7 @@ where
                 GraphqlSoupEntityType::DatabaseRow => GraphqlSoupDatabaseRow::<E>::type_name(),
                 GraphqlSoupEntityType::Harness => GraphqlSoupHarness::<E>::type_name(),
                 GraphqlSoupEntityType::Team => GraphqlSoupTeam::<E>::type_name(),
+                GraphqlSoupEntityType::User => GraphqlSoupUser::<E>::type_name(),
                 GraphqlSoupEntityType::OutsideSoup => return None,
             }
             .into_owned(),
@@ -647,6 +653,12 @@ where
                     model_entity::EntityType::Team.with_entity_string(item.id.to_string()),
                 );
                 Self::Team(GraphqlSoupTeam(item, edges, None))
+            }
+            SoupItem::User(item) => {
+                let edges = E::from_entity(
+                    model_entity::EntityType::User.with_entity_string(item.id.clone()),
+                );
+                Self::User(GraphqlSoupUser(item, edges, None))
             }
         }
     }
@@ -1326,6 +1338,60 @@ impl<E: SoupEntityEdges> GraphqlSoupTeam<E> {
     /// The user who owns the team.
     async fn owner_id(&self) -> &str {
         &self.0.owner_id
+    }
+
+    /// Common entity edges.
+    #[graphql(flatten)]
+    async fn edges(&self) -> E {
+        self.1.clone()
+    }
+
+    /// The viewer's frecency score for this entity, when loaded.
+    async fn frecency_score(&self) -> Option<f64> {
+        self.2
+    }
+}
+
+/// GraphQL entity of the viewer themself.
+pub struct GraphqlSoupUser<E: SoupEntityEdges>(SoupUser, E, Option<f64>);
+
+/// The viewer. Only attention feeds list it, for notices about them alone
+/// filed under their User, such as a factory Run without a task waiting on
+/// them; no one is listed another person's.
+#[Object(name = "GraphqlSoupUser")]
+impl<E: SoupEntityEdges> GraphqlSoupUser<E> {
+    /// The viewer's Macro user id.
+    async fn id(&self) -> ID {
+        ID(self.0.id.clone())
+    }
+
+    /// Canonical entity kind.
+    async fn entity_type(&self) -> GraphqlSoupEntityType {
+        GraphqlSoupEntityType::User
+    }
+
+    /// Server-only projection facts are unavailable for users.
+    async fn cache_projection(&self) -> Option<SoupCacheProjection> {
+        None
+    }
+
+    /// No name: a row filed under the viewer names what its notice is about.
+    async fn display_name(&self) -> Option<String> {
+        None
+    }
+
+    /// Common metadata; the viewer owns their own notices, and records no
+    /// timestamps here.
+    async fn metadata(&self) -> GraphqlEntityMetadata {
+        GraphqlEntityMetadata {
+            owner_id: Some(self.0.id.clone()),
+            owner_type: Some(GraphqlOwnerType::User),
+            parent: None,
+            created_at: None,
+            updated_at: None,
+            viewed_at: None,
+            deleted_at: None,
+        }
     }
 
     /// Common entity edges.
@@ -2893,6 +2959,7 @@ impl_common_interface_edges!(
     GraphqlSoupDatabaseRow,
     GraphqlSoupHarness,
     GraphqlSoupTeam,
+    GraphqlSoupUser,
     GraphqlSoupReminder,
 );
 

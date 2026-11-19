@@ -65,7 +65,8 @@ async function fetchRecentlyViewed(
       item.tag === 'calendarEvent' ||
       item.tag === 'databaseRow' ||
       item.tag === 'harness' ||
-      item.tag === 'team'
+      item.tag === 'team' ||
+      item.tag === 'user'
     ) {
       return [];
     }

@@ -227,6 +227,7 @@ export function getEntityType(entity: CombinedEntity): EntityType | undefined {
           'form',
           'harness',
           'team',
+          'user',
           'routine',
           'foreign'
         ),

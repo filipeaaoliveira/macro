@@ -101,9 +101,10 @@ impl InboxRowId {
         format!("{}#{}", self.group.id(), self.slot)
     }
 
-    /// Parse an id produced by [`Self::id`].
+    /// Parse an id produced by [`Self::id`]. A slot never holds a `#`, but
+    /// a User group's id, a Macro user id, may.
     pub fn parse(id: &str) -> Result<Self, InvalidInboxRowId> {
-        let (group, slot) = id.split_once('#').ok_or(InvalidInboxRowId)?;
+        let (group, slot) = id.rsplit_once('#').ok_or(InvalidInboxRowId)?;
         if slot.is_empty() {
             return Err(InvalidInboxRowId);
         }

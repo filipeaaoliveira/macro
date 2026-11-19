@@ -38,6 +38,7 @@ function isSoupEntityTag(
       'initiative',
       'harness',
       'team',
+      'user',
       () => false
     )
     .with('document', 'chat', 'project', 'channel', 'call', () => true)

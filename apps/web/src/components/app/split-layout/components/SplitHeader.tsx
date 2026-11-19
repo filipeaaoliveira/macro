@@ -81,6 +81,7 @@ function getEntitySplitContent(data: EntityDragEvent['draggable']['data']):
       // A runtime opens in Settings → Machines, not a block of its own.
       .with({ type: 'harness' }, () => undefined)
       .with({ type: 'team' }, () => undefined)
+      .with({ type: 'user' }, () => undefined)
       // The full calendar opening path supplies the event range to focus.
       .with({ type: 'calendar_event' }, () => ({
         type: 'component',

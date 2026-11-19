@@ -77,8 +77,9 @@ async function openStackNotification(
       options.splitHandle
     ));
   if (!opened || opened.isErr()) {
-    // Notification-only teams never fall back to a generic entity page.
-    if (entity.type === 'team') return;
+    // Notification-only teams and the viewer never fall back to a generic
+    // entity page.
+    if (entity.type === 'team' || entity.type === 'user') return;
     await openEntityInSplitFromUnifiedList(rowEntity(row, notification), {
       openInNewSplit: options.newSplit,
       splitHandle: options.splitHandle,
@@ -112,13 +113,15 @@ export function openNotificationInSplit(
       ))
   )
     return;
-  // A runtime or team has no page of its own: its newest notification opens
-  // its target (Settings → Machines, or the vault item a request is about).
+  // A runtime, team or the viewer has no page of its own: its newest
+  // notification opens its target (Settings → Machines, the vault item a
+  // request is about, or the factory Run a notice about the viewer names).
   // A factory Run waiting on its owner is answered on the Run, not on the task
   // the notification is filed under.
+  const entityType = row.content.entity.type;
   const notification =
     options.notification ??
-    (row.content.entity.type === 'harness' || row.content.entity.type === 'team'
+    (entityType === 'harness' || entityType === 'team' || entityType === 'user'
       ? row.content.notifications[0]
       : runNotification(row));
   fireAndForget(

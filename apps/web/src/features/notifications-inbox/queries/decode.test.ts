@@ -609,3 +609,72 @@ describe('toInboxGroup for a team', () => {
     });
   });
 });
+
+describe('toInboxGroup for the viewer', () => {
+  it('lists a factory Run without a task, filed under the viewer, as a row about it', () => {
+    const group = toInboxGroup({
+      groupId: 'user:macro|viewer@example.com',
+      sortAt: '2026-02-01T10:09:00Z',
+      entity: {
+        __typename: 'GraphqlSoupUser',
+        id: 'macro|viewer@example.com',
+        entityType: 'USER',
+      },
+      rows: [
+        {
+          id: 'user:macro|viewer@example.com#factory_run:run-1',
+          rowType: 'TASK',
+          alsoListedAs: [],
+          revision: 'rev',
+          latestAt: '2026-02-01T10:09:00Z',
+          unseen: true,
+          count: 1,
+          actor: { kind: 'MACRO', principalId: null, name: null },
+          actions: [],
+          notifications: [
+            {
+              id: 'n-1',
+              eventType: 'factory_gate_waiting',
+              entityType: 'USER',
+              targetEntityType: 'USER',
+              entityId: 'macro|viewer@example.com',
+              sent: false,
+              state: 'UNSEEN',
+              createdAt: '2026-02-01T10:09:00Z',
+              viewedAt: null,
+              updatedAt: '2026-02-01T10:09:00Z',
+              senderId: null,
+              metadata: {
+                __typename: 'GraphqlFactoryGateWaitingMetadata',
+                factoryGateWaitingRunId: 'run-1',
+                factoryGateWaitingSeq: 2,
+                factoryGateWaitingTaskId: '',
+                factoryGateWaitingRequest: 'Fix the login bug',
+                factoryGateWaitingQuestion: 'Approve the plan?',
+                factoryGateWaitingAsker: null,
+                factoryGateWaitingNotifyOnly: false,
+              },
+            },
+          ],
+        },
+      ],
+    } as unknown as NotificationInboxEntryFieldsFragment);
+
+    expect(group?.rows).toHaveLength(1);
+    expect(group?.rows[0]).toMatchObject({
+      type: 'task',
+      content: {
+        entity: { type: 'user', id: 'macro|viewer@example.com' },
+        notifications: [
+          {
+            entity_type: 'user',
+            notification_metadata: {
+              tag: 'factory_gate_waiting',
+              content: { runId: 'run-1', taskId: '' },
+            },
+          },
+        ],
+      },
+    });
+  });
+});

@@ -98,8 +98,9 @@ where
     Reader: MarkDone,
     Withdrawal: NotificationWithdrawal,
 {
-    /// The notification is about the Run's task, or about the owner for a
-    /// Run started without one (as an inbox's sign-in notice is), has no
+    /// The notification is about the Run's task, or, for a Run started
+    /// without one, filed under the owner's own User, which the inbox lists
+    /// to the owner alone, a row per Run. It has no
     /// sender (the factory is no user, so the owner is never dropped as
     /// their own sender), is
     /// delivered live, and pushed to phones when the notice says so, and

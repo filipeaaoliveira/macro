@@ -148,6 +148,8 @@ attention_page AS (
         WHEN 'harness' THEN {harness_gate}
         -- Teams too: only team-scoped notifications place them.
         WHEN 'team' THEN {team_gate}
+        -- And the viewer: only notices about them alone place them.
+        WHEN 'user' THEN {user_gate}
         ELSE FALSE
     END
     ORDER BY nc.attention_at DESC, nc.entity_id DESC

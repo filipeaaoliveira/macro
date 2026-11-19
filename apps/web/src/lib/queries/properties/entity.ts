@@ -226,6 +226,7 @@ function optimisticUpdateSoupEntityProperties(
     current.tag === 'calendarEvent' ||
     current.tag === 'harness' ||
     current.tag === 'team' ||
+    current.tag === 'user' ||
     !current.data.properties
   ) {
     return undefined;

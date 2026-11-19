@@ -276,6 +276,49 @@ it("opens a waiting factory Run's notification chosen in a stack", async () => {
   expect(mocks.entity).not.toHaveBeenCalled();
 });
 
+function taskless(id: string, runId: string): UnifiedNotification {
+  const waiting = gateWaiting(id, runId);
+  if (waiting.notification_metadata.tag !== 'factory_gate_waiting') {
+    throw new Error('Fixture is not a waiting Run');
+  }
+  return {
+    ...waiting,
+    entity_type: 'user',
+    entity_id: 'viewer',
+    notification_metadata: {
+      tag: 'factory_gate_waiting',
+      content: { ...waiting.notification_metadata.content, taskId: '' },
+    },
+  };
+}
+function viewerRow(notifications: UnifiedNotification[]): NotificationInboxRow {
+  return {
+    ...taskRow(notifications),
+    id: 'user:viewer#factory_run:run-1',
+    content: {
+      entity: { type: 'user', id: 'viewer', name: '', ownerId: 'viewer' },
+      notifications,
+    },
+  };
+}
+
+it('opens a Run without a task from its row under the viewer, never a page of the viewer', async () => {
+  const { manager, splitHandle } = layout();
+  const row = viewerRow([taskless('gate-1', 'run-1')]);
+  mocks.open.mockResolvedValueOnce(err('not_found'));
+  openNotificationInSplit(row, { splitHandle, newSplit: false });
+  expect(mocks.open).toHaveBeenCalledExactlyOnceWith(
+    row.content.notifications[0],
+    manager,
+    false,
+    expect.anything(),
+    splitHandle
+  );
+  // Await the exact open operation before checking the fallback path.
+  await mocks.open.mock.results.at(-1)?.value;
+  expect(mocks.entity).not.toHaveBeenCalled();
+});
+
 it('still opens the task of a row whose newest notification is not a waiting Run', () => {
   const { splitHandle } = layout();
   const row = taskRow([taskAssigned(), gateWaiting()]);

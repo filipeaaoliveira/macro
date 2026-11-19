@@ -751,6 +751,7 @@ export function getEntityIconType(entity: EntityIconData): EntityWithValidIcon {
     .with({ type: 'form' }, () => 'form')
     .with({ type: 'harness' }, () => 'default')
     .with({ type: 'team' }, () => 'default')
+    .with({ type: 'user' }, () => 'default')
     .exhaustive(() => 'default');
 }
 

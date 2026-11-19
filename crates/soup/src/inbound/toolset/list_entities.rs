@@ -363,6 +363,9 @@ impl EntityItem {
             SoupItem::Team(_) => {
                 unreachable!("ListEntities tool does not surface teams")
             }
+            SoupItem::User(_) => {
+                unreachable!("ListEntities tool does not surface users")
+            }
             SoupItem::ForeignEntity(foreign_entity) => EntityItem::ForeignEntity {
                 id: foreign_entity.id,
                 foreign_entity_id: foreign_entity.foreign_entity_id,
@@ -417,7 +420,8 @@ fn any_item_has_tags(items: &[EnrichedSoupItem]) -> bool {
             | SoupItem::AgentSession(_)
             | SoupItem::DatabaseRow(_)
             | SoupItem::Harness(_)
-            | SoupItem::Team(_) => return false,
+            | SoupItem::Team(_)
+            | SoupItem::User(_) => return false,
         };
         properties
             .iter()

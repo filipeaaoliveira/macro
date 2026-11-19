@@ -56,6 +56,7 @@ function extractRawTitle(entity: EntityData): JSX.Element {
     )
     .with({ type: 'harness' }, (entity) => entity.name)
     .with({ type: 'team' }, (entity) => entity.name)
+    .with({ type: 'user' }, (entity) => entity.name)
     .exhaustive(() => 'Untitled');
 }
 

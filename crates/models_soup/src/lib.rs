@@ -36,5 +36,7 @@ pub mod project;
 pub mod properties;
 /// Team models for attention feeds.
 pub mod team;
+/// The viewer, for attention feeds.
+pub mod user;
 
 pub use properties::SoupProperty;
