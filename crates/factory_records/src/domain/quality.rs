@@ -164,7 +164,17 @@ pub struct QualityRun {
     /// note, a pause, a resume or a stop.
     pub steered: bool,
     /// The agent sessions its Steps worked in.
-    pub sessions: Vec<Uuid>,
+    pub sessions: Vec<QualitySession>,
+}
+
+/// An agent session a Run's Steps worked in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QualitySession {
+    /// The session.
+    pub id: Uuid,
+    /// The bot that ran it; none for a Step from before Steps recorded
+    /// their bot.
+    pub bot: Option<Uuid>,
 }
 
 /// A wait of a `ci` Step, as read back.

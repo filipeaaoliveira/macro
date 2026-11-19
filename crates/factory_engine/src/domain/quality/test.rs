@@ -4,7 +4,7 @@ use factory_records::domain::insights::RunSummary;
 use factory_records::domain::models::{RunId, RunOutcome};
 use factory_records::domain::quality::{
     BlockerRecord, CiJob, CiJobResult, CiVerdict, CiWaitRecord, QualityRecords, QualityRun,
-    ReviewRoundRecord, ReviewerRecord,
+    QualitySession, ReviewRoundRecord, ReviewerRecord,
 };
 use factory_records::domain::review_rounds::ReviewRoundOutcome;
 use macro_user_id::user_id::MacroUserIdStr;
@@ -27,6 +27,18 @@ fn run_id(n: u128) -> RunId {
 
 fn session(n: u128) -> Uuid {
     Uuid::from_u128(1000 + n)
+}
+
+/// A bot whose runtime records its model calls' usage.
+const HOSTED: Uuid = Uuid::from_u128(0xb07);
+
+/// A bot on a machine's runtime under its owner's own login, which records
+/// none.
+const ON_A_MACHINE: Uuid = Uuid::from_u128(0xc0d3);
+
+/// The session `id`, run by `bot`.
+fn on(id: Uuid, bot: Option<Uuid>) -> QualitySession {
+    QualitySession { id, bot }
 }
 
 fn julia() -> MacroUserIdStr<'static> {
@@ -63,7 +75,7 @@ fn run(n: u128) -> QualityRun {
         merged: true,
         person_answered: false,
         steered: false,
-        sessions: vec![session(n)],
+        sessions: vec![on(session(n), Some(HOSTED))],
     }
 }
 
@@ -737,8 +749,11 @@ fn cost_per_merged_pull_request_is_money_where_priced_and_tokens_otherwise() {
 #[test]
 fn cost_per_merged_pull_request_needs_every_run_s_sessions_measured() {
     let mut mixed = run(2);
-    // The writer's session recorded usage; the reviewer's did not.
-    mixed.sessions.push(Uuid::from_u128(0xc0d3));
+    // The writer's session recorded usage; the reviewer's, on a machine,
+    // did not.
+    mixed
+        .sessions
+        .push(on(Uuid::from_u128(0x5e55), Some(ON_A_MACHINE)));
     let records = QualityRecords {
         runs: vec![run(1), mixed],
         ..QualityRecords::default()
@@ -755,6 +770,36 @@ fn cost_per_merged_pull_request_needs_every_run_s_sessions_measured() {
     assert_eq!(delivery.measured_runs, 2);
     assert_eq!(delivery.tokens.input, 1500);
     assert_eq!(delivery.cost_usd, 2.0);
+    assert_eq!(delivery.cost_per_merged_usd, None);
+    assert_eq!(delivery.tokens_per_merged, None);
+}
+
+/// A session whose bot's other sessions recorded usage, but which recorded
+/// none, failed before its first model call: it cost nothing, and the
+/// figure per merged pull request is still given. One whose bot is not
+/// known is not measured.
+#[test]
+fn a_session_that_made_no_model_call_costs_nothing() {
+    let mut failed_early = run(2);
+    failed_early
+        .sessions
+        .push(on(Uuid::from_u128(0x5e55), Some(HOSTED)));
+    let records = |second: QualityRun| QualityRecords {
+        runs: vec![run(1), second],
+        ..QualityRecords::default()
+    };
+    let usage = [tokens(1, 1000, 1.5, 0), tokens(2, 500, 0.5, 0)];
+
+    let delivery = summarize_quality(&query(None), records(failed_early.clone()), &usage).delivery;
+
+    assert_eq!(delivery.measured_runs, 2);
+    assert_eq!(delivery.cost_per_merged_usd, Some(1.0));
+    assert_eq!(delivery.tokens_per_merged, Some(750));
+
+    let mut unknown_bot = run(2);
+    unknown_bot.sessions.push(on(Uuid::from_u128(0x5e55), None));
+    let delivery = summarize_quality(&query(None), records(unknown_bot), &usage).delivery;
+
     assert_eq!(delivery.cost_per_merged_usd, None);
     assert_eq!(delivery.tokens_per_merged, None);
 }

@@ -20,7 +20,7 @@
 #[cfg(test)]
 mod test;
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use ai_usage::domain::session_usage::{SessionTokens, SessionUsageReader};
 use chrono::{DateTime, NaiveDate, Utc};
@@ -1030,10 +1030,21 @@ fn delivery(records: &QualityRecords, tokens: &[SessionTokens]) -> DeliveryInsig
     let mut person_answered = 0;
     let mut steered = 0;
     let mut manual = 0;
+    // The bots one of whose sessions recorded usage: their runtime records
+    // it, so a session of theirs that recorded none made no model call (it
+    // failed before its first) and cost nothing.
+    let measured_bots: HashSet<Uuid> = records
+        .runs
+        .iter()
+        .flat_map(|run| &run.sessions)
+        .filter(|session| by_session.contains_key(&session.id))
+        .filter_map(|session| session.bot)
+        .collect();
     let mut measured_runs = 0;
-    // Runs with an agent session that recorded no usage: a runtime on
-    // someone's own login (Codex or Claude Code through macrod) records
-    // none, so what those Runs spent is not known.
+    // Runs with an agent session that recorded no usage on a runtime that
+    // records none: one on someone's own login (Codex or Claude Code
+    // through macrod), so what those Runs spent is not known. A session
+    // whose bot is not known counts too.
     let mut unmeasured_runs = 0;
     let mut used = TokenCounts::default();
     let mut cost_usd = 0.0;
@@ -1057,8 +1068,8 @@ fn delivery(records: &QualityRecords, tokens: &[SessionTokens]) -> DeliveryInsig
         let mut measured = false;
         let mut unmeasured = false;
         for session in &run.sessions {
-            let Some(session) = by_session.get(session) else {
-                unmeasured = true;
+            let Some(session) = by_session.get(&session.id) else {
+                unmeasured |= !session.bot.is_some_and(|bot| measured_bots.contains(&bot));
                 continue;
             };
             measured = true;

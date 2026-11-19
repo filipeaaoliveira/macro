@@ -9,7 +9,7 @@ use crate::domain::models::{RunId, StepKey};
 use crate::domain::ports::RunRepository;
 use crate::domain::quality::{
     CiJob, CiJobResult, CiVerdict, CiWait, LastCiWait, QualityRecords, QualityScope,
-    RunQualityRepository,
+    QualitySession, RunQualityRepository,
 };
 use crate::domain::review_rounds::ReviewRoundOutcome;
 use crate::outbound::pg_run_repository::PgRunRepository;
@@ -96,13 +96,20 @@ async fn the_persons_runs_say_whether_they_merged_and_whether_a_person_stepped_i
         records.runs[3].pull_request.as_deref(),
         Some("https://github.com/macro/app/pull/1")
     );
+    // Each session once, with the bot that ran it; the scope reviewer's
+    // Step is from before Steps recorded their bot.
+    let session = |id: &str, bot: Option<&str>| QualitySession {
+        id: Uuid::parse_str(id).unwrap(),
+        bot: bot.map(|bot| Uuid::parse_str(bot).unwrap()),
+    };
+    let bot = Some("00000000-0000-7000-8000-000000000a01");
     assert_eq!(
         records.runs[3].sessions,
         vec![
-            Uuid::parse_str("00000000-0000-7000-8000-000000000501").unwrap(),
-            Uuid::parse_str("00000000-0000-7000-8000-000000000502").unwrap(),
-            Uuid::parse_str("00000000-0000-7000-8000-000000000503").unwrap(),
-            Uuid::parse_str("00000000-0000-7000-8000-000000000504").unwrap(),
+            session("00000000-0000-7000-8000-000000000501", bot),
+            session("00000000-0000-7000-8000-000000000502", bot),
+            session("00000000-0000-7000-8000-000000000503", None),
+            session("00000000-0000-7000-8000-000000000504", bot),
         ]
     );
     assert_eq!(

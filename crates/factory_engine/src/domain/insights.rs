@@ -485,7 +485,7 @@ where
         let sessions: Vec<_> = records
             .runs
             .iter()
-            .flat_map(|run| run.sessions.iter().copied())
+            .flat_map(|run| run.sessions.iter().map(|session| session.id))
             .collect();
         let tokens = read_usage(&self.usage, actor, &sessions)
             .await

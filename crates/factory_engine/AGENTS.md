@@ -394,7 +394,10 @@ pull request is every Run's usage over the merged ones: in dollars when
 every model call was priced, in tokens otherwise, and neither while a Run
 of the period has an agent session that recorded no usage (a Step on a
 runtime its owner signed in to, as Codex or Claude Code through macrod),
-whose spend is unknown, not nothing. A repository that names
+whose spend is unknown, not nothing. A session that recorded none, of a
+bot another session of the period recorded usage for (its Step's
+`bot_id`), made no model call, as one that failed before its first: it
+cost nothing and does not withhold the figure. A repository that names
 none is 400.
 
 Evaluation (`src/domain/evaluation.rs`, `evaluation/service.rs`,

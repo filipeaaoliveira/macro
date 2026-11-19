@@ -22,26 +22,26 @@ INSERT INTO factory_run (id, user_id, flow, request, repo_url, base_branch, pull
      'Teo''s change', 'https://github.com/macro/app', 'main',
      'https://github.com/macro/app/pull/5', '2026-11-13 09:00Z', 'success', '2026-11-13 10:00Z');
 
-INSERT INTO factory_step (run_id, seq, entry, visit, started_at, outcome, output, ended_at, session_id, action_id, offered, role, agent) VALUES
+INSERT INTO factory_step (run_id, seq, entry, visit, started_at, outcome, output, ended_at, session_id, action_id, offered, role, agent, bot_id) VALUES
     ('00000000-0000-7000-8000-000000000401', 1, 'write', 1, '2026-11-10 09:00Z', 'done', 'Written', '2026-11-10 09:10Z',
-     '00000000-0000-7000-8000-000000000501', '00000000-0000-7000-8000-000000000601', '{done}', 'writer', 'primary'),
+     '00000000-0000-7000-8000-000000000501', '00000000-0000-7000-8000-000000000601', '{done}', 'writer', 'primary', '00000000-0000-7000-8000-000000000a01'),
     ('00000000-0000-7000-8000-000000000401', 2, 'review', 1, '2026-11-10 09:10Z', 'changes', 'Found', '2026-11-10 09:20Z',
-     '00000000-0000-7000-8000-000000000502', '00000000-0000-7000-8000-000000000602', '{pass,changes}', 'correctness-reviewer', 'primary'),
+     '00000000-0000-7000-8000-000000000502', '00000000-0000-7000-8000-000000000602', '{pass,changes}', 'correctness-reviewer', 'primary', '00000000-0000-7000-8000-000000000a01'),
     ('00000000-0000-7000-8000-000000000401', 3, 'review', 1, '2026-11-10 09:10Z', 'pass', 'Clean', '2026-11-10 09:20Z',
-     '00000000-0000-7000-8000-000000000503', '00000000-0000-7000-8000-000000000603', '{pass,changes}', 'scope-reviewer', 'backup'),
-    ('00000000-0000-7000-8000-000000000401', 4, 'fix', 1, '2026-11-10 09:20Z', 'done', 'Fixed', '2026-11-10 09:30Z', NULL, NULL, NULL, NULL, NULL),
+     '00000000-0000-7000-8000-000000000503', '00000000-0000-7000-8000-000000000603', '{pass,changes}', 'scope-reviewer', 'backup', NULL),
+    ('00000000-0000-7000-8000-000000000401', 4, 'fix', 1, '2026-11-10 09:20Z', 'done', 'Fixed', '2026-11-10 09:30Z', NULL, NULL, NULL, NULL, NULL, NULL),
     ('00000000-0000-7000-8000-000000000401', 5, 'review', 2, '2026-11-10 09:30Z', 'changes', 'Found again', '2026-11-10 09:40Z',
-     '00000000-0000-7000-8000-000000000504', '00000000-0000-7000-8000-000000000604', '{pass,changes}', 'correctness-reviewer', 'primary'),
-    ('00000000-0000-7000-8000-000000000401', 6, 'ci', 1, '2026-11-10 10:00Z', 'red', 'Red', '2026-11-10 10:20Z', NULL, NULL, NULL, NULL, NULL),
-    ('00000000-0000-7000-8000-000000000401', 7, 'ci', 2, '2026-11-10 10:30Z', 'green', 'Green', '2026-11-10 10:50Z', NULL, NULL, NULL, NULL, NULL),
-    ('00000000-0000-7000-8000-000000000401', 8, 'merge-gate', 1, '2026-11-10 10:50Z', 'done', 'Ready', '2026-11-10 10:51Z', NULL, NULL, NULL, NULL, NULL),
-    ('00000000-0000-7000-8000-000000000402', 1, 'ci', 1, '2026-11-11 09:10Z', 'green', 'Green', '2026-11-11 09:40Z', NULL, NULL, NULL, NULL, NULL),
-    ('00000000-0000-7000-8000-000000000402', 2, 'merge-gate', 1, '2026-11-11 09:40Z', 'done', 'Ready', '2026-11-11 09:41Z', NULL, NULL, NULL, NULL, NULL),
-    ('00000000-0000-7000-8000-000000000403', 1, 'ci', 1, '2026-11-12 09:10Z', 'red', 'Red', '2026-11-12 09:30Z', NULL, NULL, NULL, NULL, NULL),
+     '00000000-0000-7000-8000-000000000504', '00000000-0000-7000-8000-000000000604', '{pass,changes}', 'correctness-reviewer', 'primary', '00000000-0000-7000-8000-000000000a01'),
+    ('00000000-0000-7000-8000-000000000401', 6, 'ci', 1, '2026-11-10 10:00Z', 'red', 'Red', '2026-11-10 10:20Z', NULL, NULL, NULL, NULL, NULL, NULL),
+    ('00000000-0000-7000-8000-000000000401', 7, 'ci', 2, '2026-11-10 10:30Z', 'green', 'Green', '2026-11-10 10:50Z', NULL, NULL, NULL, NULL, NULL, NULL),
+    ('00000000-0000-7000-8000-000000000401', 8, 'merge-gate', 1, '2026-11-10 10:50Z', 'done', 'Ready', '2026-11-10 10:51Z', NULL, NULL, NULL, NULL, NULL, NULL),
+    ('00000000-0000-7000-8000-000000000402', 1, 'ci', 1, '2026-11-11 09:10Z', 'green', 'Green', '2026-11-11 09:40Z', NULL, NULL, NULL, NULL, NULL, NULL),
+    ('00000000-0000-7000-8000-000000000402', 2, 'merge-gate', 1, '2026-11-11 09:40Z', 'done', 'Ready', '2026-11-11 09:41Z', NULL, NULL, NULL, NULL, NULL, NULL),
+    ('00000000-0000-7000-8000-000000000403', 1, 'ci', 1, '2026-11-12 09:10Z', 'red', 'Red', '2026-11-12 09:30Z', NULL, NULL, NULL, NULL, NULL, NULL),
     ('00000000-0000-7000-8000-000000000403', 2, 'ci-fix', 1, '2026-11-12 09:30Z', 'done', 'Fixed', '2026-11-12 09:50Z',
-     '00000000-0000-7000-8000-000000000505', '00000000-0000-7000-8000-000000000605', '{done}', 'fixer', 'primary'),
-    ('00000000-0000-7000-8000-000000000404', 1, 'merge-gate', 1, '2026-11-13 09:40Z', 'done', 'Ready', '2026-11-13 09:41Z', NULL, NULL, NULL, NULL, NULL),
-    ('00000000-0000-7000-8000-000000000405', 1, 'ci', 1, '2026-11-13 09:10Z', 'red', 'Red', '2026-11-13 09:30Z', NULL, NULL, NULL, NULL, NULL);
+     '00000000-0000-7000-8000-000000000505', '00000000-0000-7000-8000-000000000605', '{done}', 'fixer', 'primary', '00000000-0000-7000-8000-000000000a01'),
+    ('00000000-0000-7000-8000-000000000404', 1, 'merge-gate', 1, '2026-11-13 09:40Z', 'done', 'Ready', '2026-11-13 09:41Z', NULL, NULL, NULL, NULL, NULL, NULL),
+    ('00000000-0000-7000-8000-000000000405', 1, 'ci', 1, '2026-11-13 09:10Z', 'red', 'Red', '2026-11-13 09:30Z', NULL, NULL, NULL, NULL, NULL, NULL);
 
 INSERT INTO factory_gate (run_id, seq, question, answers, opened_at, answer, user_id, rule, agent_session_id, answered_at) VALUES
     ('00000000-0000-7000-8000-000000000401', 8, 'Merge?', '{approve,revise}', '2026-11-10 10:51Z', 'approve', NULL, 'merge_when_green', NULL, '2026-11-10 10:51Z'),
