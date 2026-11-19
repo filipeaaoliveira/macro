@@ -34,6 +34,22 @@ pub trait MergeQueueRepository: Send + Sync + 'static {
     /// The error type returned by reads and writes.
     type Err: std::error::Error + Send + Sync + 'static;
 
+    /// A Run's hold on its base's merge turn: no other Run of that base
+    /// takes it until this is dropped, on whatever path that is.
+    type Turn: Send + 'static;
+
+    /// Take the merge turn of the base `run_id` works on, unless another
+    /// Run holds it: none then. One Run of a base holds it at a time, from
+    /// reading that no Run is ahead of it to its merge's end, so a Run that
+    /// comes back to its place meanwhile waits for that merge rather than
+    /// merge beside it. A Run that works on no repository takes a turn no
+    /// other Run waits for. A turn held past a few minutes, as by a worker
+    /// that stopped answering, is let go.
+    fn take_merge_turn(
+        &self,
+        run_id: RunId,
+    ) -> impl Future<Output = Result<Option<Self::Turn>, Self::Err>> + Send;
+
     /// Put the Run `run_id` in the queue of the base branch it works on, at
     /// the end, or, when it was in it before, back at its place. A base is
     /// its repository's URL, lower-cased, trimmed and without a `.git`
@@ -90,6 +106,25 @@ pub trait MergeQueueRepository: Send + Sync + 'static {
         key: StepKey,
         update: &BranchUpdate,
     ) -> impl Future<Output = Result<BranchUpdate, Self::Err>> + Send;
+
+    /// The head of the Run `run_id`'s branch its review last passed on, or
+    /// GitHub's merge of its base into that head since; none before a
+    /// review of it passed.
+    fn reviewed_head(
+        &self,
+        run_id: RunId,
+    ) -> impl Future<Output = Result<Option<String>, Self::Err>> + Send;
+
+    /// Keep `head` as the head of the Run `run_id`'s branch its review last
+    /// passed on, replacing the one kept: when a review round passes on it,
+    /// or once GitHub merged the base into that head and nothing else came
+    /// in. Nothing else writes it, so an update asked again from a head
+    /// someone pushed never makes that head reviewed.
+    fn set_reviewed_head(
+        &self,
+        run_id: RunId,
+        head: &str,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// Record the branch's head GitHub's merge made for the Step `key`'s
     /// update, which merged with no conflict.

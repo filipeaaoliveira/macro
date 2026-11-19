@@ -295,3 +295,101 @@ async fn a_repository_named_in_another_case_is_one_queue(pool: PgPool) {
 
     assert_eq!(ahead(&repo, second).await, vec![first]);
 }
+
+/// One Run of a base holds its merge turn at a time: another Run of that
+/// base, in whatever case its repository is named, takes none until the
+/// turn is dropped; a Run of another base takes its own meanwhile.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn one_run_of_a_base_holds_its_merge_turn_at_a_time(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let main = branch_of_app("main");
+    let first = code_run(&repo, Some(&main)).await;
+    let shouting = Repository {
+        url: "https://github.com/Macro/App.git".to_string(),
+        base_branch: "main".to_string(),
+    };
+    let second = code_run(&repo, Some(&shouting)).await;
+    let elsewhere = code_run(&repo, Some(&branch_of_app("release"))).await;
+
+    let turn = repo.take_merge_turn(first).await.expect("take");
+    assert!(turn.is_some(), "the first Run takes the turn");
+    assert!(
+        repo.take_merge_turn(second).await.expect("take").is_none(),
+        "the base's turn is held"
+    );
+    assert!(
+        repo.take_merge_turn(elsewhere)
+            .await
+            .expect("take")
+            .is_some(),
+        "another base's turn is its own"
+    );
+
+    // Dropping the turn rolls its transaction back as the connection goes
+    // back to the pool, which lets the lock go.
+    drop(turn);
+    let mut taken = None;
+    for _ in 0..50 {
+        taken = repo.take_merge_turn(second).await.expect("take");
+        if taken.is_some() {
+            break;
+        }
+        // A wait that yields, so the pool's return of the connection runs.
+        sqlx::query!(r#"SELECT pg_sleep(0.1)::text AS "slept""#)
+            .fetch_one(&repo.pool)
+            .await
+            .expect("wait");
+    }
+    assert!(taken.is_some(), "a dropped turn is let go");
+}
+
+/// The head a Run's review passed on is kept until another replaces it;
+/// asking an update again from a pushed head never touches it.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn a_reviewed_head_is_kept_until_replaced(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let run_id = code_run(&repo, Some(&branch_of_app("main"))).await;
+    assert_eq!(repo.reviewed_head(run_id).await.expect("read"), None);
+
+    repo.set_reviewed_head(run_id, HEAD).await.expect("set");
+    let key = StepKey { run_id, seq: 9 };
+    repo.keep_branch_update(
+        key,
+        &BranchUpdate {
+            base_sha: BASE.to_string(),
+            from_head: HEAD.to_string(),
+            conflict: false,
+            updated_head: None,
+        },
+    )
+    .await
+    .expect("keep");
+    let pushed = "3333333333333333333333333333333333333333";
+    repo.restart_branch_update(
+        key,
+        &BranchUpdate {
+            base_sha: BASE.to_string(),
+            from_head: pushed.to_string(),
+            conflict: false,
+            updated_head: None,
+        },
+    )
+    .await
+    .expect("restart");
+    assert_eq!(
+        repo.reviewed_head(run_id).await.expect("read").as_deref(),
+        Some(HEAD)
+    );
+
+    repo.set_reviewed_head(run_id, pushed).await.expect("set");
+    assert_eq!(
+        repo.reviewed_head(run_id).await.expect("read").as_deref(),
+        Some(pushed)
+    );
+}

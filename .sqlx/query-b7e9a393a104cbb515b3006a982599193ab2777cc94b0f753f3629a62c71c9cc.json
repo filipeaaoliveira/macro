@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO factory_reviewed_head (run_id, head_sha)\n            VALUES ($1, $2)\n            ON CONFLICT (run_id) DO UPDATE\n            SET head_sha = EXCLUDED.head_sha, reviewed_at = now()\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b7e9a393a104cbb515b3006a982599193ab2777cc94b0f753f3629a62c71c9cc"
+}

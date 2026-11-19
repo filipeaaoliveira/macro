@@ -1550,6 +1550,8 @@ impl RunRepository for FakeRepo {
                 }
             }
         }
+        // As the database: a Run that ended holds no place in a queue.
+        self.queue().queued.retain(|queued| queued.run_id != id);
         Ok(())
     }
 }

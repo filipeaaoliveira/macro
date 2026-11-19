@@ -1,7 +1,8 @@
 //! In-memory stand-ins for the merge queue and the updates of Runs'
 //! branches.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
+use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, TimeDelta, Utc};
 use factory_records::domain::merge_queue::{BranchUpdate, MergeQueueRepository};
@@ -24,6 +25,22 @@ pub(crate) struct FakeQueue {
     pub(crate) queued: Vec<FakeQueued>,
     /// Each update Step's update.
     pub(crate) updates: HashMap<StepKey, BranchUpdate>,
+    /// The head each Run's review last passed on.
+    pub(crate) reviewed: HashMap<RunId, String>,
+    /// The bases whose merge turn a Run holds.
+    pub(crate) turns: Arc<Mutex<BTreeSet<(String, String)>>>,
+}
+
+/// A Run's hold on its base's merge turn, let go when dropped.
+pub(crate) struct FakeTurn {
+    turns: Arc<Mutex<BTreeSet<(String, String)>>>,
+    base: (String, String),
+}
+
+impl Drop for FakeTurn {
+    fn drop(&mut self) {
+        self.turns.lock().expect("turns").remove(&self.base);
+    }
 }
 
 impl FakeRepo {
@@ -58,6 +75,16 @@ impl FakeRepo {
 
 impl MergeQueueRepository for FakeRepo {
     type Err = FakeError;
+    type Turn = FakeTurn;
+
+    async fn take_merge_turn(&self, run_id: RunId) -> Result<Option<FakeTurn>, FakeError> {
+        let base = self.base_of(run_id);
+        let turns = self.queue().turns.clone();
+        if !turns.lock().expect("turns").insert(base.clone()) {
+            return Ok(None);
+        }
+        Ok(Some(FakeTurn { turns, base }))
+    }
 
     async fn enter_merge_queue(&self, run_id: RunId) -> Result<(), FakeError> {
         let base = self.base_of(run_id);
@@ -149,6 +176,15 @@ impl MergeQueueRepository for FakeRepo {
             *kept = update.clone();
         }
         Ok(kept.clone())
+    }
+
+    async fn reviewed_head(&self, run_id: RunId) -> Result<Option<String>, FakeError> {
+        Ok(self.queue().reviewed.get(&run_id).cloned())
+    }
+
+    async fn set_reviewed_head(&self, run_id: RunId, head: &str) -> Result<(), FakeError> {
+        self.queue().reviewed.insert(run_id, head.to_string());
+        Ok(())
     }
 
     async fn set_updated_head(&self, key: StepKey, head: &str) -> Result<(), FakeError> {

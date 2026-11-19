@@ -10,8 +10,63 @@ use super::{PgRunRepository, PgRunRepositoryErr};
 use crate::domain::merge_queue::{BranchUpdate, MergeQueueRepository};
 use crate::domain::models::{RunId, StepKey};
 
+/// How long a merge turn is held at most: a transaction idle longer, as
+/// one a worker that stopped answering left open, is ended by the
+/// database, which lets the turn go. A merge's reads and GitHub's merge take
+/// seconds.
+const TURN_HELD_AT_MOST: &str = "300000";
+
+/// A Run's merge turn: a transaction that holds its base's advisory lock,
+/// rolled back, and so let go, when it is dropped.
+pub struct PgMergeTurn {
+    _transaction: sqlx::Transaction<'static, sqlx::Postgres>,
+}
+
+impl std::fmt::Debug for PgMergeTurn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("PgMergeTurn")
+    }
+}
+
 impl MergeQueueRepository for PgRunRepository {
     type Err = PgRunRepositoryErr;
+    type Turn = PgMergeTurn;
+
+    /// The turn is a transaction-scoped advisory lock keyed by the base as
+    /// the queue keys it, tried rather than waited for, so no connection
+    /// waits on it.
+    #[tracing::instrument(err, skip(self))]
+    async fn take_merge_turn(&self, run_id: RunId) -> Result<Option<PgMergeTurn>, Self::Err> {
+        let mut transaction = self.pool.begin().await?;
+        sqlx::query_scalar!(
+            r#"SELECT set_config('idle_in_transaction_session_timeout', $1, true) AS "set!""#,
+            TURN_HELD_AT_MOST,
+        )
+        .fetch_one(&mut *transaction)
+        .await?;
+        let taken = sqlx::query_scalar!(
+            r#"
+            SELECT pg_try_advisory_xact_lock(hashtextextended(
+                'factory_merge_turn:'
+                    || lower(regexp_replace(btrim(repo_url), '\.git$', ''))
+                    || ' ' || base_branch,
+                0
+            )) AS "taken!"
+            FROM factory_run
+            WHERE id = $1 AND repo_url IS NOT NULL AND base_branch IS NOT NULL
+            "#,
+            run_id.as_uuid(),
+        )
+        .fetch_optional(&mut *transaction)
+        .await?;
+        // A Run on no repository has no base another Run merges into.
+        if taken == Some(false) {
+            return Ok(None);
+        }
+        Ok(Some(PgMergeTurn {
+            _transaction: transaction,
+        }))
+    }
 
     /// The queue is keyed by the Run's repository URL lower-cased, trimmed
     /// and without a `.git` ending, so one repository is one queue whatever
@@ -159,6 +214,34 @@ impl MergeQueueRepository for PgRunRepository {
         self.branch_update(key)
             .await?
             .ok_or(PgRunRepositoryErr::MissingBranchUpdate)
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn reviewed_head(&self, run_id: RunId) -> Result<Option<String>, Self::Err> {
+        let head = sqlx::query_scalar!(
+            "SELECT head_sha FROM factory_reviewed_head WHERE run_id = $1",
+            run_id.as_uuid(),
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(head)
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn set_reviewed_head(&self, run_id: RunId, head: &str) -> Result<(), Self::Err> {
+        sqlx::query!(
+            r#"
+            INSERT INTO factory_reviewed_head (run_id, head_sha)
+            VALUES ($1, $2)
+            ON CONFLICT (run_id) DO UPDATE
+            SET head_sha = EXCLUDED.head_sha, reviewed_at = now()
+            "#,
+            run_id.as_uuid(),
+            head,
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     #[tracing::instrument(err, skip(self))]

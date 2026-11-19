@@ -9,6 +9,7 @@ mod gate_replies;
 mod insights;
 mod main_hold;
 mod merge_queue;
+pub use merge_queue::PgMergeTurn;
 mod review_rounds;
 mod self_improvement;
 mod standing_acts;
