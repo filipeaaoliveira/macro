@@ -23,6 +23,7 @@ pub(crate) struct FakeFailure {
     pub(crate) failure: Failure,
     pub(crate) improvement: Option<Uuid>,
     pub(crate) addressed: bool,
+    pub(crate) dismissed: bool,
 }
 
 /// What [`FakeRepo`] keeps of failures and self-improvement Runs.
@@ -78,6 +79,7 @@ impl FakeRepo {
                 },
                 improvement: None,
                 addressed: false,
+                dismissed: false,
             });
     }
 }
@@ -329,7 +331,7 @@ fn settle(kept: &mut FakeImprovement, id: Uuid, settlement: &Settlement) {
     };
     let (state, refusal) = match settlement {
         Settlement::Merged => (ImprovementState::Merged, None),
-        Settlement::Closed => (ImprovementState::Closed, None),
+        Settlement::Closed | Settlement::Rejected => (ImprovementState::Closed, None),
         Settlement::Refused(why) => (ImprovementState::Refused, Some(why.clone())),
     };
     improvement.state = state;
@@ -342,6 +344,8 @@ fn settle(kept: &mut FakeImprovement, id: Uuid, settlement: &Settlement) {
     {
         if state == ImprovementState::Merged {
             failure.addressed = true;
+        } else if *settlement == Settlement::Rejected {
+            failure.dismissed = true;
         } else {
             failure.improvement = None;
         }

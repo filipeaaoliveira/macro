@@ -431,3 +431,44 @@ async fn naming_another_definition_closes_the_open_improvement(pool: PgPool) {
         1
     );
 }
+
+/// A rejected improvement is kept closed and dismisses its failures: they
+/// are not pending, and keeping the same failure again leaves it so. A new
+/// failure of the same Scorer is pending.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "team"))
+)]
+async fn a_rejected_improvement_dismisses_its_failures(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let failed = failing_run(&repo, &[scorer_failure("tests", 0.2)]).await;
+    let id = Uuid::now_v7();
+    repo.begin_improvement(id, team(), REPO_URL, 10)
+        .await
+        .expect("begin");
+    repo.settle_improvement(id, &Settlement::Rejected)
+        .await
+        .expect("reject");
+    let latest = repo
+        .latest_improvement(team())
+        .await
+        .expect("read")
+        .expect("kept");
+    assert_eq!(latest.state, ImprovementState::Closed);
+    assert!(latest.settled_at.is_some());
+    let pending = || async {
+        repo.pending_failures(team(), REPO_URL)
+            .await
+            .expect("pending")
+            .count
+    };
+    assert_eq!(pending().await, 0);
+
+    repo.record_failures(team(), REPO_URL, failed, &[scorer_failure("tests", 0.1)])
+        .await
+        .expect("again");
+    assert_eq!(pending().await, 0);
+
+    failing_run(&repo, &[scorer_failure("tests", 0.2)]).await;
+    assert_eq!(pending().await, 1);
+}

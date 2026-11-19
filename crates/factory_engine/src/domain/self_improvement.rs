@@ -18,9 +18,11 @@
 //! A person approves its plan and merges it, whatever it changes: the
 //! `improve` Flow keeps those Gates for a person (`person_only`), which no
 //! Standing Rule, stand-in or Orchestrator answers. Its failures are
-//! addressed when its pull request merged, and go back to pending when it
-//! closed unmerged, its Run ended without one, or could not start; then the
-//! team's next waits ([`paused_until`]). The thresholds are the team's
+//! addressed when its pull request merged, dismissed when a person
+//! rejected it (closed its pull request unmerged, or cancelled its Run), so
+//! they never start another, and go back to pending when its Run ended
+//! without a pull request or could not start; then the team's next waits
+//! ([`paused_until`]). New failures, of the same Scorer too, still count. The thresholds are the team's
 //! Definition's as it is now, read as its namer, who must still be an admin
 //! of the team ([`namer_standing`]).
 
@@ -428,6 +430,13 @@ where
         let Some(facts) = self.repo.failure_facts(run_id).await.map_err(internal)? else {
             return Ok(Some(Settlement::Closed));
         };
+        // How it settles with no pull request: rejected when a person
+        // cancelled its Run.
+        let without_pull_request = if facts.outcome == Some(RunOutcome::Cancelled) {
+            Settlement::Rejected
+        } else {
+            Settlement::Closed
+        };
         match facts.outcome {
             // A Run kept, but whose workflow never started (its start
             // failed, and whether it was kept could not be read), would
@@ -443,7 +452,7 @@ where
         // A Run that ended for a person may leave its pull request open,
         // which they may still merge or close.
         let Some(repository) = facts.repo_url.as_deref().and_then(CodeRepository::parse) else {
-            return Ok(Some(Settlement::Closed));
+            return Ok(Some(without_pull_request));
         };
         let found = self
             .github
@@ -453,9 +462,10 @@ where
             Ok(Some(pull_request)) => match pull_request.state {
                 PullRequestState::Merged => Some(Settlement::Merged),
                 PullRequestState::Open => None,
-                PullRequestState::Closed => Some(Settlement::Closed),
+                // A person closed it unmerged.
+                PullRequestState::Closed => Some(Settlement::Rejected),
             },
-            Ok(None) => Some(Settlement::Closed),
+            Ok(None) => Some(without_pull_request),
             Err(error) => {
                 tracing::warn!(?error, %run_id, "a self-improvement run's pull request was not read");
                 let ended_at = self

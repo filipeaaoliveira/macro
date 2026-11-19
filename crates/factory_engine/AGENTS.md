@@ -1503,8 +1503,11 @@ to one is Tampered (`ControlFiles::changes_guarding`). Once its Run ends, the ne
 `after_run_end` of the team settles it: a Run that ended `success` (its
 `merge` merged) or `flawed` addressed its failures (`merged`); otherwise
 its pull request is read as its owner: merged addresses them, open keeps
-the Run open (no other starts), and closed, or none, sends them back to
-pending (`closed`), pausing the next as above. A pull request a person
+the Run open (no other starts), closed unmerged, or none after a person
+cancelled the Run, is a person's rejection (`Settlement::Rejected`, kept
+`closed`) that dismisses them for good, and none otherwise sends them back
+to pending (`closed`); each pauses the next as above. Dismissed failures
+never start another Run; new failures, of the same Scorer too, count. A pull request a person
 merges or closes after its Run ended is seen only at the team's next Run's
 end. Pending failures are matched to the Definition's repository ignoring
 case. `GET /insights/evaluation` shows the team's self-improvement

@@ -456,9 +456,9 @@ async fn an_improvement_run_merges_only_by_a_person() {
 }
 
 /// A pull request a person merged after its Run ended addresses the
-/// Run's failures; one closed unmerged, or a Run cancelled with none, lets
-/// them go back to pending but starts no other Run at once: the next waits
-/// a day, two after a second such Run in a row, and a merge ends the wait.
+/// Run's failures; one closed unmerged, or a Run cancelled with none,
+/// dismisses them and starts no other Run at once: the next waits a day,
+/// two after a second such Run in a row, and a merge ends the wait.
 #[tokio::test]
 async fn the_pull_request_settles_the_failures() {
     let bench = Bench::new(team_repo(true), AGENTS, None);
@@ -516,8 +516,8 @@ async fn the_pull_request_settles_the_failures() {
     assert_eq!(bench.improvement_runs().len(), 2);
     let second = bench.improvement_runs()[1];
 
-    // Cancelled with no pull request: closed, its failures back, and no
-    // other starts, though they are due.
+    // Cancelled with no pull request: closed, its failures dismissed, and
+    // no other starts at once.
     bench
         .repo
         .end_run(second, RunOutcome::Cancelled)
@@ -529,14 +529,14 @@ async fn the_pull_request_settles_the_failures() {
         .await
         .expect("after");
     assert_eq!(bench.latest_state(), Some(ImprovementState::Closed));
-    assert_eq!(bench.pending().await, 2);
+    assert_eq!(bench.pending().await, 0);
     assert_eq!(bench.improvement_runs().len(), 2, "no other at once");
     bench.judged_run(0.2).await;
     assert_eq!(bench.improvement_runs().len(), 2, "none within the day");
 
-    // A day later, the next Run's end starts one.
+    // A day later, the next failure's Run end starts one.
     bench.settled_hours_ago(25);
-    bench.judged_run(0.9).await;
+    bench.judged_run(0.2).await;
     assert_eq!(bench.improvement_runs().len(), 3);
     let third = bench.improvement_runs()[2];
 
@@ -560,10 +560,10 @@ async fn the_pull_request_settles_the_failures() {
         .expect("after");
     assert_eq!(bench.latest_state(), Some(ImprovementState::Closed));
     bench.settled_hours_ago(25);
-    bench.judged_run(0.9).await;
+    bench.judged_run(0.2).await;
     assert_eq!(bench.improvement_runs().len(), 3, "two days after two");
     bench.settled_hours_ago(49);
-    bench.judged_run(0.9).await;
+    bench.judged_run(0.2).await;
     assert_eq!(bench.improvement_runs().len(), 4);
 
     // Merged by its merge Step: addressed, and the wait is over.
@@ -1349,4 +1349,92 @@ async fn the_current_definition_is_read_once_for_a_while() {
     improvement.after_run_end(run).await.expect("after");
     improvement.after_run_end(run).await.expect("after");
     assert_eq!(reads(), first, "read once");
+}
+
+/// Failures a person rejected, by closing the pull request unmerged or
+/// cancelling the Run, are dismissed, not pending: they never start
+/// another Run once the pause ends. A new failure of the same Scorer still
+/// counts; failures of a Run that ended on its own without a pull request
+/// go back to pending.
+#[tokio::test]
+async fn failures_a_person_rejected_do_not_come_back() {
+    let bench = Bench::new(team_repo(true), AGENTS, None);
+    bench.judged_run(0.2).await;
+    bench.judged_run(0.2).await;
+    let first = bench.improvement_runs()[0];
+
+    // A person closes its pull request.
+    bench
+        .repo
+        .end_run(first, RunOutcome::Manual)
+        .await
+        .expect("end");
+    bench.github.state().pull_request = Some(PullRequest {
+        number: 9,
+        url: "https://github.com/macro/factory-definition/pull/9".to_string(),
+        state: PullRequestState::Closed,
+        head_sha: HEAD.to_string(),
+    });
+    bench
+        .improvement()
+        .after_run_end(first)
+        .await
+        .expect("after");
+    assert_eq!(bench.latest_state(), Some(ImprovementState::Closed));
+    assert_eq!(bench.pending().await, 0, "dismissed, not pending");
+    let dismissed = bench
+        .repo
+        .improvement
+        .lock()
+        .expect("improvement")
+        .failures
+        .iter()
+        .filter(|failure| failure.dismissed)
+        .count();
+    assert_eq!(dismissed, 2);
+
+    // Past the pause, they start nothing; new failures of the same Scorer
+    // count and do.
+    bench.github.state().pull_request = None;
+    bench.settled_hours_ago(25);
+    bench.judged_run(0.9).await;
+    assert_eq!(bench.improvement_runs().len(), 1);
+    bench.judged_run(0.2).await;
+    assert_eq!(bench.pending().await, 1);
+    bench.judged_run(0.2).await;
+    assert_eq!(bench.improvement_runs().len(), 2);
+    let second = bench.improvement_runs()[1];
+
+    // A person cancels it, with no pull request: dismissed too.
+    bench
+        .repo
+        .end_run(second, RunOutcome::Cancelled)
+        .await
+        .expect("end");
+    bench
+        .improvement()
+        .after_run_end(second)
+        .await
+        .expect("after");
+    assert_eq!(bench.latest_state(), Some(ImprovementState::Closed));
+    assert_eq!(bench.pending().await, 0);
+
+    // One that failed on its own lets its failures go back.
+    bench.settled_hours_ago(49);
+    bench.judged_run(0.2).await;
+    bench.judged_run(0.2).await;
+    assert_eq!(bench.improvement_runs().len(), 3);
+    let third = bench.improvement_runs()[2];
+    bench
+        .repo
+        .end_run(third, RunOutcome::Failed)
+        .await
+        .expect("end");
+    bench
+        .improvement()
+        .after_run_end(third)
+        .await
+        .expect("after");
+    assert_eq!(bench.latest_state(), Some(ImprovementState::Closed));
+    assert_eq!(bench.pending().await, 2);
 }

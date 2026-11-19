@@ -5,9 +5,10 @@
 //!
 //! A failure is a live Scorer's judgment below [`PASS_SCORE`] or a Run
 //! marked flawed. It is pending while no self-improvement Run holds it,
-//! held while one is open, and addressed once that Run's pull request
-//! merged; a Run whose pull request closed unmerged, or that could not
-//! start, lets its failures go back to pending.
+//! held while one is open, addressed once that Run's pull request merged,
+//! and dismissed once a person rejected that Run (closed its pull request
+//! unmerged, or cancelled it); a Run that ended without a pull request, or
+//! could not start, lets its failures go back to pending.
 //!
 //! [`PASS_SCORE`]: crate::domain::evaluation::PASS_SCORE
 
@@ -140,8 +141,8 @@ pub enum ImprovementState {
     Open,
     /// Its pull request merged: its failures are addressed.
     Merged,
-    /// Its pull request closed unmerged, or its Run ended without one: its
-    /// failures went back to pending.
+    /// A person rejected it (its failures are dismissed), or its Run ended
+    /// without a pull request (they went back to pending).
     Closed,
     /// Its Run could not start: its failures went back to pending.
     Refused,
@@ -194,8 +195,12 @@ pub enum ImprovementBegin {
 pub enum Settlement {
     /// Its pull request merged: its failures are addressed.
     Merged,
-    /// Its pull request closed unmerged, or its Run ended without one.
+    /// Its Run ended without a pull request, or it no longer applies: its
+    /// failures go back to pending.
     Closed,
+    /// A person closed its pull request unmerged, or cancelled its Run: it
+    /// is kept closed, and its failures are dismissed, never pending again.
+    Rejected,
     /// Its Run could not start, for this reason.
     Refused(String),
 }
@@ -270,8 +275,8 @@ pub trait SelfImprovementRepository: Send + Sync + 'static {
     ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
 
     /// Settle the open self-improvement Run `id`: its failures are
-    /// addressed when it merged, else pending again. Settling one settled
-    /// already changes nothing.
+    /// addressed when it merged, dismissed when rejected, else pending
+    /// again. Settling one settled already changes nothing.
     fn settle_improvement(
         &self,
         id: Uuid,

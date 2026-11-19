@@ -385,9 +385,12 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   Run, so a second begin keeps nothing (`AlreadyOpen`), and one with
   nothing pending keeps nothing. `link_improvement_run` opens it with its
   Run, only while starting. `settle_improvement` settles an open one once:
-  `merged` marks its failures addressed (`addressed_at`), `closed` and
-  `refused` (with why) clear their `improvement_id`, so they are pending
-  again. `failures` keeps how many it claimed. `recent_improvements` reads
+  `merged` marks its failures addressed (`addressed_at`), a person's
+  rejection (`Settlement::Rejected`, kept `closed`) dismisses them
+  (`dismissed_at`, `20261119020100_factory_improvement_failure_dismissed.sql`;
+  they keep its `improvement_id`, so they are never pending again), and
+  `closed` and `refused` (with why) clear their `improvement_id`, so they
+  are pending again. `failures` keeps how many it claimed. `recent_improvements` reads
   a team's latest ones, newest first, for the pause after those that did
   not merge (`factory_improvement_team_created_idx`). Neither table decides
   who merges: the `improve` Flow keeps its plan and merge Gates for a

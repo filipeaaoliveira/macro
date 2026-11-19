@@ -408,7 +408,7 @@ impl SelfImprovementRepository for PgRunRepository {
 }
 
 /// Settle the open self-improvement Run `id` in `tx`: its failures are
-/// addressed when it merged, else pending again. Settling one settled
+/// addressed when it merged, dismissed when rejected, else pending again. Settling one settled
 /// already changes nothing.
 async fn settle(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -417,7 +417,7 @@ async fn settle(
 ) -> Result<(), PgRunRepositoryErr> {
     let (state, refusal) = match settlement {
         Settlement::Merged => (ImprovementState::Merged, None),
-        Settlement::Closed => (ImprovementState::Closed, None),
+        Settlement::Closed | Settlement::Rejected => (ImprovementState::Closed, None),
         Settlement::Refused(why) => (
             ImprovementState::Refused,
             Some(cut_bytes(why, MAX_FAILURE_REASON_BYTES)),
@@ -442,6 +442,17 @@ async fn settle(
         sqlx::query!(
             r#"
             UPDATE factory_improvement_failure SET addressed_at = now()
+            WHERE improvement_id = $1 AND addressed_at IS NULL
+            "#,
+            id,
+        )
+        .execute(&mut **tx)
+        .await?;
+    } else if *settlement == Settlement::Rejected {
+        // Held by the rejected improvement, they are never pending again.
+        sqlx::query!(
+            r#"
+            UPDATE factory_improvement_failure SET dismissed_at = now()
             WHERE improvement_id = $1 AND addressed_at IS NULL
             "#,
             id,
