@@ -144,3 +144,19 @@ fn the_web_job_runs_on_a_hosted_runner() {
 
     assert_eq!(job["runs-on"], HOSTED_RUNNER);
 }
+
+/// Teardown Nix kills every process on the file system that holds /nix, for
+/// a cache volume to unmount. On a hosted runner that is the root file
+/// system, the runner's own processes included, so the web job leaves it out.
+#[test]
+fn the_web_job_does_not_tear_down_nix() {
+    let job = serde_json::to_value(web()).unwrap();
+    let names: Vec<&str> = job["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|step| step["name"].as_str())
+        .collect();
+
+    assert!(!names.contains(&"Teardown Nix"), "{names:?}");
+}

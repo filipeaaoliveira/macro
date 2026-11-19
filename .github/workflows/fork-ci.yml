@@ -1004,9 +1004,6 @@ jobs:
       env:
         NODE_OPTIONS: '--max-old-space-size=6144'
       working-directory: apps/web
-    - name: Teardown Nix
-      if: always()
-      uses: './.github/actions/teardown-nix'
   gate:
     needs:
     - changes

@@ -279,7 +279,9 @@ fn web() -> Job {
                 .timeout_minutes(15u32),
         )
         .add_step(vitest())
-        .add_step(steps::teardown_nix())
+        // No `teardown_nix`: it frees /nix for a cache volume to unmount, and on a
+        // hosted runner, where /nix is on the root file system, its `fuser -km
+        // /nix` kills every process on it, the runner's own included.
 }
 
 /// Passes when every check that had something to check passed. A job skipped
