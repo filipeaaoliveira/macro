@@ -38,10 +38,13 @@ const BOARD_BATCH_MIN: u16 = 50;
 
 /// The most Runs a lookup by pull request reads for each pull request,
 /// newest first: the newest of each owner and task, as only those can be
-/// the one shown. A pull request that many owners' or tasks' Runs found, none
-/// of them one the caller sees, is `unknown`, as the one shown may be among
-/// those left unread; each pull request is read on its own, so another's
-/// Runs never change its answer.
+/// the one shown. A Run opens its pull request from its own branch, so the
+/// engine gives a pull request one Run, and so one owner and task; a pull
+/// request that many owners' or tasks' Runs found, none of them one the
+/// caller sees, can only come from records written by hand, and is
+/// `unknown` rather than no Run's, as the one shown may be among those left
+/// unread. Each pull request is read on its own, so another's Runs never
+/// change its answer.
 pub(super) const PULL_REQUEST_RUNS_READ: u16 = 10;
 
 use crate::domain::ports::{

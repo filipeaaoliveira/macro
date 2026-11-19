@@ -1253,23 +1253,27 @@ every Run in flight replays as before.
   task, at most 10 (`PULL_REQUEST_RUNS_READ`), newest first; a pull request
   whose read reached that with no Run shown is listed in `unknown`, as one
   whose Run may be among those left unread, never as one no Run opened.
-  Another pull request's Runs never change its answer, though a pull request
-  with Runs on ten or more owners' or tasks' the caller cannot see reads as
-  `unknown`, not as no Run. The web app's pull request views
-  (Reviews, a pull request's detail and block, its Merge button) read it
-  through `PrMergeGuardProvider` to mark a factory Run's pull request, and
-  merge one only through that Gate (`POST /runs/{id}/steps/{seq}/answer`);
-  until it answered, or while a pull request is `unknown`, they merge
-  nothing. A view rendered outside the provider merges nothing either for a
-  person who may have the factory (`usePrMergeGuard`'s default), and the
-  provider wraps the app's ownerless dialogs too. Limits: the guard is in the web app only, so GitHub itself (and
-  any client calling Macro's merge route) still merges a Run's pull
+  Another pull request's Runs never change its answer. A Run opens its pull
+  request from its own branch (`factory/<run_id>`), and only that sets its
+  page, so a pull request has one Run and one owner and task: `unknown`
+  guards against records written by hand, a state the engine can't create.
+  The web app's pull request views (Reviews, a pull request's detail and
+  block, its Merge button) read it through `PrMergeGuardProvider` to mark a
+  factory Run's pull request, and merge one only through that Gate
+  (`POST /runs/{id}/steps/{seq}/answer`); until it answered, or while a pull
+  request is `unknown`, they merge nothing. A view rendered outside the
+  provider merges nothing either for a person who may have the factory
+  (`usePrMergeGuard`'s default), and the provider wraps the app's ownerless
+  dialogs too. Limits: the guard is in the web app only, so GitHub itself
+  (and any client calling Macro's merge route) still merges a Run's pull
   request; and a viewer who cannot see the Run (a teammate on a hidden
   task, someone off the team) is not guarded, as the lookup must not tell
   them a Run exists. A Step that finds the Run's pull request keeps its page
-  (`keep_page`), and a write that fails fails the Step, which is retried, so
-  a Run's pull request is not left unguarded; the guard still cannot see a
-  pull request in the moment between GitHub opening it and that write.
+  (`keep_page`); `ci` writes it once per wait, not on every poll. A write
+  that fails fails the Step, which is retried until the Step's time runs out
+  (`STEP_TOTAL`, 2 hours), and then fails as usual. Until the write lands,
+  or if it never does, the pull request is open on GitHub and the guard
+  cannot see it, so it merges as no Run's.
 - `flows/`: the built-in Flows, each named for its file
   (`src/domain/built_in_flows.rs`). `GET /flows` lists those whose Steps the
   worker serves, with their `description` and whether they work on a
