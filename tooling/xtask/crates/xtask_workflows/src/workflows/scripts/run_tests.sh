@@ -36,6 +36,12 @@ else
   common+=(--test-threads "$NEXTEST_TEST_THREADS")
 fi
 
+# A workflow can add a nextest profile from its own config file, such as one
+# that stops a test that hangs: NEXTEST_TOOL_CONFIG is `tool:/absolute/path`.
+if [ -n "${NEXTEST_TOOL_CONFIG:-}" ]; then
+  common+=(--tool-config-file "$NEXTEST_TOOL_CONFIG")
+fi
+
 if [ "$RUST_PACKAGES" = "all" ]; then
   cargo nextest run --workspace --exclude sync_service --tests "${common[@]}"
   exit 0

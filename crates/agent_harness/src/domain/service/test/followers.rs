@@ -130,6 +130,7 @@ async fn an_out_of_sight_prompt_follows_the_session_for_no_one() {
             actor: Some(sender()),
             context: None,
             client: None,
+            prompter: agent_session::domain::model::PrompterKind::User,
         },
     );
     let (result, ()) = tokio::join!(prompted, agent.completes_prompt());
@@ -148,6 +149,7 @@ async fn an_out_of_sight_prompt_follows_the_session_for_no_one() {
             actor: Some(sender()),
             context: None,
             client: None,
+            prompter: agent_session::domain::model::PrompterKind::User,
         },
     );
     let (result, ()) = tokio::join!(typed, agent.completes_prompt());
