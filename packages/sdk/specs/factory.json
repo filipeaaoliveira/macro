@@ -4326,7 +4326,7 @@
           },
           "ownerGates": {
             "type": "boolean",
-            "description": "The owner section: a Gate no rule answers goes to the Run's owner.\nThey are notified, and the Gate is listed as waiting on them; a\nreview round whose Blockers are the round before's, unchanged after\na rule sent those to a fix, waits for them rather than another fix;\nand what they comment on the Run's task once a Gate opened reaches\nthe next agent Step. Off, the factory leaves those Gates waiting as\nbefore. A definition sent without it has it off."
+            "description": "The owner section: a review round whose Blockers are the round\nbefore's, unchanged after a rule sent those to a fix, waits for the\nRun's owner rather than another fix; and what they comment on the\nRun's task once a Gate opened reaches the next agent Step. Off, the\nfactory fixes those Blockers again, and the Steps read no comment. A\ndefinition sent without it has it off."
           },
           "plan": {
             "type": "boolean",
@@ -4338,6 +4338,10 @@
             "description": "The Queue limit: the most places a person may hold in their Queue\nunder this definition. A place is a Run of theirs waiting on them at\na Gate or a question, or a Run of a Flow with a Gate that has not\nreached one yet. A new Run of theirs starts only while they hold\nfewer places than the limit; Runs already going go on. None, and a\ndefinition sent without it, sets no limit. From [`MIN_QUEUE_LIMIT`]\nto [`MAX_QUEUE_LIMIT`]. A Run does not keep it: it decides only\nwhether a Run starts, so a Run's rules read with none.",
             "maximum": 1000,
             "minimum": 1
+          },
+          "quietGates": {
+            "type": "boolean",
+            "description": "Whether the Run's owner is left unnotified when a Gate waits on\nthem: off, as when a definition is sent without it, every Gate no\nrule or stand-in answers (a Flow's Gate or an agent's question)\nnotifies them, pushed to their phone, whether or not the Run has a\ntask. On, they are not notified; the Gate still waits on them and\nis listed as waiting. A notify-only Gate's notice and the\nstand-in's are sent either way."
           },
           "standIn": {
             "$ref": "#/components/schemas/StandInKinds",
