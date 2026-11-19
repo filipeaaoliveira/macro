@@ -128,12 +128,39 @@ async fn rules_and_scorers_left_out_take_the_defaults() {
     assert_eq!(definition.evaluation, EvaluationDefinition::default());
 }
 
+/// The Definition template, as shipped.
+fn template() -> LocalDefinitionFiles {
+    LocalDefinitionFiles::new(concat!(env!("CARGO_MANIFEST_DIR"), "/definition_template"))
+}
+
+/// A team's copy of a Definition whose placeholder bot ids it replaced
+/// with real ones, and changed nothing else.
+struct Customized(LocalDefinitionFiles);
+
+impl DefinitionFiles for Customized {
+    type Err = std::io::Error;
+
+    async fn read(&self, path: &str) -> Result<Option<String>, std::io::Error> {
+        let text = self.0.read(path).await?;
+        if path != "agents.json" {
+            return Ok(text);
+        }
+        Ok(text.map(|text| {
+            text.replace("00000000-0000-0000-0000-000000000001", PRIMARY_BOT)
+                .replace("00000000-0000-0000-0000-000000000002", BACKUP_BOT)
+        }))
+    }
+}
+
+const PRIMARY_BOT: &str = "00000000-0000-0000-0000-00000000c1a0";
+
+const BACKUP_BOT: &str = "00000000-0000-0000-0000-00000000c0de";
+
 #[tokio::test]
 async fn the_starter_definition_reads() {
-    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/definition_template");
-    let definition = read_definition(&LocalDefinitionFiles::new(root), built_in_step_use)
+    let definition = read_definition(&Customized(template()), built_in_step_use)
         .await
-        .expect("the starter definition reads");
+        .expect("the starter definition reads once its bots are replaced");
 
     assert_eq!(
         definition.flows.keys().collect::<Vec<_>>(),
@@ -589,14 +616,70 @@ async fn an_escaped_or_newer_token_is_a_secret() {
     assert!(read(with("agents.json", &words)).await.is_ok());
 }
 
+/// A team that copies the template and leaves its placeholder bot ids
+/// can't save it as its Definition or start a Run of it: the validator,
+/// the team setting and a Run all read it this way.
+#[tokio::test]
+async fn the_starter_definition_s_placeholder_bots_do_not_read() {
+    let error = match read_definition(&template(), built_in_step_use).await {
+        Err(DefinitionReadError::Invalid(error)) => error,
+        Err(DefinitionReadError::Files(error)) => panic!("the starter's files: {error}"),
+        Ok(_) => panic!("the starter's placeholder bots must not read"),
+    };
+
+    assert_eq!(
+        error.to_string(),
+        "agents.json: agent backup has the template's placeholder bot id \
+         00000000-0000-0000-0000-000000000002: replace it with the id of a Macro agent \
+         each member who starts runs may use"
+    );
+}
+
+/// An Agent whose bot is all zeros but its last two digits names no
+/// agent, and the error names `agents.json` and the Agent; one past them
+/// is an id like any other.
+#[tokio::test]
+async fn a_placeholder_bot_id_does_not_read() {
+    let agents = |bot: &str| AGENTS.replace("00000000-0000-0000-0000-00000000c1a0", bot);
+    let primary = AgentName::try_from("primary".to_string()).expect("an agent");
+
+    for bot in [
+        "00000000-0000-0000-0000-000000000000",
+        "00000000-0000-0000-0000-000000000001",
+        "00000000-0000-0000-0000-0000000000ff",
+    ] {
+        let error = read(with("agents.json", &agents(bot)))
+            .await
+            .expect_err("a placeholder bot");
+        assert_eq!(
+            error,
+            DefinitionError::Agents(AgentDefinitionError::PlaceholderBot {
+                agent: primary.clone(),
+                bot: bot.parse().expect("a bot id"),
+            }),
+            "{bot}"
+        );
+        assert!(
+            error
+                .to_string()
+                .starts_with("agents.json: agent primary has the template's placeholder bot id"),
+            "{error}"
+        );
+    }
+
+    let real = "00000000-0000-0000-0000-000000000100";
+    assert!(read(with("agents.json", &agents(real))).await.is_ok());
+    let random = "6f1c2a9e-4b7d-4e2a-9c3f-0d8e5b1a7c42";
+    assert!(read(with("agents.json", &agents(random))).await.is_ok());
+}
+
 /// The starter's Control Files are the factory's default and its own
 /// files, so a Run that changes its rules waits for a person.
 #[tokio::test]
 async fn the_starter_s_control_files_keep_the_default_and_its_own_files() {
-    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/definition_template");
-    let definition = read_definition(&LocalDefinitionFiles::new(root), built_in_step_use)
+    let definition = read_definition(&Customized(template()), built_in_step_use)
         .await
-        .expect("the starter definition reads");
+        .expect("the starter definition reads once its bots are replaced");
     let patterns = definition.rules.control_files.expect("its own list");
 
     for pattern in ControlFiles::default_patterns()

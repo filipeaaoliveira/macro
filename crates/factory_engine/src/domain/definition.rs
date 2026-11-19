@@ -512,9 +512,9 @@ pub fn flow_path(name: &str) -> String {
 
 /// Read the Factory Definition `files` hold, and check it: every file
 /// reads, every Flow holds together and names only Steps `serves` says a
-/// worker serves, its Agents fill every Role its Flows name, its rules are
-/// ones the factory takes, and its Scorers, Experiments and Benchmarks
-/// name only its own Flows and Agents.
+/// worker serves, its Agents have no placeholder bot id and fill every Role
+/// its Flows name, its rules are ones the factory takes, and its Scorers,
+/// Experiments and Benchmarks name only its own Flows and Agents.
 pub async fn read_definition<F: DefinitionFiles>(
     files: &F,
     serves: impl Fn(&StepName) -> Option<StepUse>,
@@ -562,6 +562,9 @@ pub async fn read_definition<F: DefinitionFiles>(
 
     // The Agents must fill every Role an entry of its Flows names.
     let agents: AgentDefinition = required(files, AGENTS_FILE).await?;
+    // An Agent whose bot is the template's placeholder names no agent: a
+    // Run would start and then fail at its first Step.
+    agents.check_bots().map_err(DefinitionError::Agents)?;
     let roles: BTreeSet<&Role> = flows
         .values()
         .flat_map(|flow| &flow.entries)
