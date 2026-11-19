@@ -41,11 +41,12 @@
 mod test;
 
 use chrono::{DateTime, Utc};
-use factory_records::domain::models::{EntryId, GateKind, Outcome, Run, RunId, Step};
+use factory_records::domain::models::{EntryId, Gate, GateKind, Outcome, Run, RunId, Step};
 use macro_user_id::user_id::MacroUserIdStr;
 use model_notifications::FactoryGateWaitingMetadata;
 use uuid::Uuid;
 
+use crate::domain::flow::Flow;
 use crate::domain::review_rounds::escape;
 
 /// The namespace a Gate's notification id is derived in, from its Run and
@@ -231,6 +232,54 @@ pub fn stand_in_notice(run: &Run, step: &Step, answer: &Outcome) -> Option<GateN
         },
         push: false,
     })
+}
+
+/// Whether the waiting notice of `gate`, of `run`, may have gone out
+/// ([`gate_notice`]): only then is it marked done, or withdrawn while it is
+/// still on its way, once the Gate is closed. None went out on a quiet Run,
+/// for a Gate a Standing Rule or the stand-in answered, or while the
+/// stand-in's answer stood: the Gate is told only once it waits for its
+/// owner, or once the owner's words in the stand-in's window were asked
+/// back.
+pub fn notice_may_be_out(run: &Run, gate: &Gate) -> bool {
+    let quiet = run
+        .standing_rules
+        .is_some_and(|rules| rules.definition.quiet_gates);
+    let not_a_person_s = gate
+        .answer
+        .as_ref()
+        .is_some_and(|answer| answer.rule.is_some() || answer.by_stand_in);
+    let stood_in = gate.stand_in.is_some() && gate.asked_back.is_none();
+    !quiet && !not_a_person_s && !stood_in
+}
+
+/// Whether the notice that the stand-in answered `gate`, of `run`, may have
+/// gone out ([`stand_in_notice`]): only when the stand-in answered, and
+/// never for a Run without a task.
+pub fn stand_in_notice_may_be_out(run: &Run, gate: &Gate) -> bool {
+    run.task_id.is_some() && gate.stand_in.is_some()
+}
+
+/// The entries among `visited` whose notify-only Gate may have told the
+/// owner ([`gate_told`]), of `run` walking `flow`: none for a Run without a
+/// task, which tells no one so. A Run whose Flow does not read (`None`)
+/// counts every entry it visited, so no notice is left open.
+pub fn told_entries<'a>(
+    run: &Run,
+    flow: Option<&Flow>,
+    visited: impl IntoIterator<Item = &'a EntryId>,
+) -> Vec<&'a EntryId> {
+    if run.task_id.is_none() {
+        return Vec::new();
+    }
+    let tells = |entry: &EntryId| {
+        flow.is_none_or(|flow| {
+            flow.entries.iter().any(|defined| {
+                defined.id == *entry && defined.gate.as_ref().is_some_and(|gate| gate.notify_only)
+            })
+        })
+    };
+    visited.into_iter().filter(|entry| tells(entry)).collect()
 }
 
 /// Words Flows use that people write in capitals.

@@ -11,7 +11,8 @@
 //! is withdrawn first ([`NotificationWithdrawal`]): the ingress then never
 //! creates or pushes it, and marking it done again catches one created in
 //! between. Only a notice closed with no notification to mark leaves a
-//! withdrawal row: the ones that lost that race, and the ones never sent.
+//! withdrawal row, so the factory closes only notices that may have gone
+//! out, and a row is left only by one that lost that race.
 
 #[cfg(test)]
 mod test;
@@ -133,7 +134,7 @@ where
     }
 
     /// A notification there is to mark is marked done. One that is not
-    /// there yet (still on the ingress queue, or never sent) is withdrawn,
+    /// there yet (still on the ingress queue) is withdrawn,
     /// so the ingress never creates or pushes it, then marked done again,
     /// in case the ingress created it in between.
     async fn answered(&self, owner: &MacroUserIdStr<'static>, notification_id: Uuid) {

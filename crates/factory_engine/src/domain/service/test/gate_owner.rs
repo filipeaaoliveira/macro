@@ -16,12 +16,12 @@ use factory_records::domain::standing_rules::{
 };
 use uuid::Uuid;
 
-use super::{FakeExecutor, julia, reply_step};
+use super::{FakeExecutor, julia, keep_notify_only_reply, reply_step};
 use crate::domain::fakes::{FakeGateModel, FakeNotifier, FakeRepo, FakeTaskNotes};
 use crate::domain::gate::{
     AnswerGate, GateAnswered, GateRuling, ReplyRead, ReplyReading, StandInAsking,
 };
-use crate::domain::gate_owner::{OwnerNote, factory_signed, notice_id, stand_in_id};
+use crate::domain::gate_owner::{OwnerNote, factory_signed, notice_id, stand_in_id, told_id};
 use crate::domain::gate_replies::GateReplySettings;
 use crate::domain::gate_replies::service::GateRepliesImpl;
 use crate::domain::models::{RunFinish, StepEnding, StepError, StepReport};
@@ -484,12 +484,16 @@ async fn repeated_blockers_after_a_rule_fix_wait_for_the_owner() {
     );
 }
 
-/// An answered Gate's notification is marked done, whoever answered,
-/// whatever the definition says: marking one a quiet Run never sent
-/// changes nothing.
+/// An answered Gate's notification is marked done, whoever answered; a
+/// quiet Run sent none, so it closes none, which would leave a withdrawal
+/// behind.
 #[tokio::test]
 async fn an_answered_gate_s_notification_is_done() {
-    for rules in [rules(true), rules(false), quiet(true)] {
+    for (rules, told) in [
+        (rules(true), true),
+        (rules(false), true),
+        (quiet(true), false),
+    ] {
         let repo = FakeRepo::default();
         let (run_id, _task) = run_on_task(&repo, rules).await;
         let key = StepKey { run_id, seq: 1 };
@@ -518,7 +522,8 @@ async fn an_answered_gate_s_notification_is_done() {
             .expect("answer");
 
         let done = notifier.done.lock().expect("done").clone();
-        assert_eq!(done, [notice_id(run_id, 1)]);
+        let expected: &[Uuid] = if told { &[notice_id(run_id, 1)] } else { &[] };
+        assert_eq!(done, expected);
     }
 }
 
@@ -663,11 +668,15 @@ async fn the_stand_in_leaves_the_owner_s_blockers_to_the_owner() {
 }
 
 /// A Run that ends while a Gate waits (cancelled, or ended for a person)
-/// has that Gate's notification marked done, whatever the definition
-/// says; an answered Gate's is left as its answer left it.
+/// has that Gate's notification marked done, unless its definition is
+/// quiet and sent none; an answered Gate's is left as its answer left it.
 #[tokio::test]
 async fn an_open_gate_s_notification_is_done_once_its_run_ends() {
-    for rules in [rules(true), rules(false), quiet(true)] {
+    for (rules, told) in [
+        (rules(true), true),
+        (rules(false), true),
+        (quiet(true), false),
+    ] {
         let repo = FakeRepo::default();
         let (run_id, _task) = run_on_task(&repo, rules).await;
         let plan = StepKey { run_id, seq: 1 };
@@ -693,17 +702,9 @@ async fn an_open_gate_s_notification_is_done_once_its_run_ends() {
             .await
             .expect("end");
 
-        // The waiting Gates' notifications, apart from the notify-only
-        // notices every Run's end marks done.
-        let done: Vec<_> = notifier
-            .done
-            .lock()
-            .expect("done")
-            .iter()
-            .copied()
-            .filter(|id| (1..=10).any(|seq| *id == notice_id(run_id, seq)))
-            .collect();
-        assert_eq!(done, [notice_id(run_id, 2)]);
+        let done = notifier.done.lock().expect("done").clone();
+        let expected: &[Uuid] = if told { &[notice_id(run_id, 2)] } else { &[] };
+        assert_eq!(done, expected);
     }
 }
 
@@ -757,7 +758,11 @@ async fn the_stand_in_s_notice_is_done_when_its_window_closes_early() {
         .await
         .expect("override");
     steps.answer_gate(answer(plain)).await.expect("answer");
-    // Each answer marks its Gate's waiting notification too.
+    // The answer that overrode the stand-in closes no waiting notice: the
+    // Gate told no one while the stand-in's answer stood.
+    let done = notifier.done.lock().expect("done").clone();
+    assert!(!done.contains(&notice_id(run_id, 1)), "{done:?}");
+    assert!(done.contains(&notice_id(run_id, 3)), "{done:?}");
     let stood_in_done: Vec<_> = notifier
         .done
         .lock()
@@ -778,4 +783,152 @@ async fn the_stand_in_s_notice_is_done_when_its_window_closes_early() {
     let done = notifier.done.lock().expect("done").clone();
     assert!(done.contains(&stand_in_id(run_id, 2)), "{done:?}");
     assert!(!done.contains(&stand_in_id(run_id, 3)), "{done:?}");
+}
+
+/// A Run of Julia's started without a task, with the factory's default
+/// rules.
+async fn run_without_task(repo: &FakeRepo) -> RunId {
+    let RunInsert::Inserted(run) = repo
+        .insert_run(NewRun {
+            id: RunId::generate(),
+            flow: "code",
+            request: "Fix the login bug",
+            user_id: &julia(),
+            task_id: None,
+            project_id: None,
+            repository: None,
+            created_in_person: true,
+            control_file_patterns: &[],
+            control_files_team_id: None,
+            standing_rules: rules(false),
+            automation: None,
+            definition: None,
+            kept_flow: None,
+        })
+        .await
+        .expect("insert")
+    else {
+        panic!("a run without a task is kept");
+    };
+    run.id
+}
+
+/// A Run whose Gates were all answered ends closing no notice: every
+/// waiting one was closed by its answer, and its entries' Gates tell no
+/// one. Each notice closed that was never sent would be withdrawn, and
+/// leave a withdrawal row behind for good.
+#[tokio::test]
+async fn a_run_s_normal_end_closes_no_notice_never_sent() {
+    let repo = FakeRepo::default();
+    let (run_id, _task) = run_on_task(&repo, rules(false)).await;
+    for (seq, entry) in [(1, "plan"), (2, "write"), (3, "merge")] {
+        let key = StepKey { run_id, seq };
+        gate_at(&repo, key, entry, "done", &["approve", "revise"]).await;
+        repo.answer_gate(key, &outcome("approve"), None, &julia(), None, None)
+            .await
+            .expect("answer");
+    }
+    let notifier = FakeNotifier::default();
+    let steps = service(
+        &repo,
+        &FakeExecutor::default(),
+        &notifier,
+        &FakeTaskNotes::default(),
+    );
+
+    steps
+        .end_run(RunFinish {
+            run_id,
+            outcome: RunOutcome::Success,
+        })
+        .await
+        .expect("end");
+
+    assert!(notifier.done.lock().expect("done").is_empty());
+}
+
+/// A Run without a task sends no notify-only or stand-in notice, so its
+/// end closes neither; a Gate open in the stand-in's window told no one
+/// either.
+#[tokio::test]
+async fn a_run_without_a_task_closes_no_lighter_notice() {
+    let repo = FakeRepo::default();
+    let run_id = run_without_task(&repo).await;
+    keep_notify_only_reply(&repo, run_id);
+    let notifier = FakeNotifier::default();
+    let steps = service(
+        &repo,
+        &FakeExecutor::default(),
+        &notifier,
+        &FakeTaskNotes::default(),
+    );
+    steps
+        .start_step(reply_step(run_id, 1))
+        .await
+        .expect("start");
+    let plan = StepKey { run_id, seq: 2 };
+    gate_at(&repo, plan, "plan", "done", &["approve", "revise"]).await;
+    repo.stand_in(
+        plan,
+        &StandInAnswer {
+            answer: outcome("approve"),
+            reason: "The plan matches the request.".to_string(),
+            confidence: 95,
+            until: Utc::now() + TimeDelta::minutes(10),
+        },
+    )
+    .await
+    .expect("stand in");
+
+    steps
+        .end_run(RunFinish {
+            run_id,
+            outcome: RunOutcome::Cancelled,
+        })
+        .await
+        .expect("end");
+
+    let done = notifier.done.lock().expect("done").clone();
+    let reply = EntryId::try_from("reply".to_string()).expect("valid");
+    assert!(!done.contains(&told_id(run_id, &reply)), "{done:?}");
+    assert!(done.is_empty(), "{done:?}");
+}
+
+/// A Run on a task closes, once it ends, the notify-only notice of an
+/// entry its Flow gives a notify-only Gate, and of no other entry.
+#[tokio::test]
+async fn a_run_s_end_closes_only_its_notify_only_entries_notices() {
+    let repo = FakeRepo::default();
+    let (run_id, _task) = run_on_task(&repo, rules(false)).await;
+    keep_notify_only_reply(&repo, run_id);
+    let notifier = FakeNotifier::default();
+    let steps = service(
+        &repo,
+        &FakeExecutor::default(),
+        &notifier,
+        &FakeTaskNotes::default(),
+    );
+    steps
+        .start_step(reply_step(run_id, 1))
+        .await
+        .expect("start");
+    let plan = StepKey { run_id, seq: 2 };
+    gate_at(&repo, plan, "plan", "done", &["approve", "revise"]).await;
+    repo.answer_gate(plan, &outcome("approve"), None, &julia(), None, None)
+        .await
+        .expect("answer");
+
+    steps
+        .end_run(RunFinish {
+            run_id,
+            outcome: RunOutcome::Success,
+        })
+        .await
+        .expect("end");
+
+    let reply = EntryId::try_from("reply".to_string()).expect("valid");
+    assert_eq!(
+        *notifier.done.lock().expect("done"),
+        [told_id(run_id, &reply)]
+    );
 }

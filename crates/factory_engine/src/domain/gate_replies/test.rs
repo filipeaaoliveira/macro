@@ -844,7 +844,9 @@ async fn an_override_in_the_window_replaces_the_stand_in_s_answer() {
 async fn words_in_the_window_close_the_stand_in_s_notice() {
     for (choice, confidence) in [(None, 0.9), (Some("revise"), 0.95)] {
         let repo = FakeRepo::default();
-        let key = run_at_plan_gate(&repo, Some(STAND_IN_ONLY), None).await;
+        let task = Uuid::now_v7();
+        repo.tasks.lock().expect("tasks").insert(task);
+        let key = run_at_plan_gate(&repo, Some(STAND_IN_ONLY), Some(task)).await;
         let model = FakeGateModel::picking(Some("approve"), 0.95);
         model.then(choice, confidence);
         let notifier = FakeNotifier::default();
@@ -1033,4 +1035,25 @@ async fn the_stand_in_reads_past_answers_of_the_same_flow_and_kind() {
     assert!(prompt.contains("Same flow"));
     assert!(!prompt.contains("Other flow"));
     assert!(!prompt.contains("A question's answer"));
+}
+
+/// A Run without a task sent no notice that the stand-in answered, so
+/// words in its window close none: closing it would leave a withdrawal
+/// behind.
+#[tokio::test]
+async fn words_in_the_window_of_a_run_without_a_task_close_no_notice() {
+    let repo = FakeRepo::default();
+    let key = run_at_plan_gate(&repo, Some(STAND_IN_ONLY), None).await;
+    let model = FakeGateModel::picking(Some("approve"), 0.95);
+    model.then(None, 0.9);
+    let notifier = FakeNotifier::default();
+    let service = gates(&repo, &model).with_notifier(notifier.clone());
+    service.stand_in(plan_asking(key)).await.expect("stand in");
+
+    service
+        .read_reply(reading(key, "Hmm, not that"))
+        .await
+        .expect("read");
+
+    assert!(notifier.done.lock().expect("done").is_empty());
 }

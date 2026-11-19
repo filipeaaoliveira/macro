@@ -462,8 +462,9 @@ pub trait GateNotifier: Send + Sync + 'static {
     fn notify(&self, notice: GateNotice) -> impl Future<Output = ()> + Send;
 
     /// Mark the notification `notification_id` of `owner` done: its Gate
-    /// was answered. One never sent changes nothing; one that cannot be
-    /// marked is logged and left.
+    /// was answered. One not created yet is withdrawn, so it never is,
+    /// which leaves a withdrawal behind: call it only for a notice that may
+    /// have gone out. One that cannot be marked is logged and left.
     fn answered(
         &self,
         owner: &MacroUserIdStr<'static>,

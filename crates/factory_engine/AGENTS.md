@@ -64,8 +64,9 @@ flagged `notifyOnly`, so its title and the inbox say the Run goes on
 rather than waits on an answer), lighter:
 not pushed to their phone, one per entry and Run however often its Gate
 tells (`gate_owner::told_id`), and marked done in `factory_end_run`
-(every entry's, since no record says which told; one never sent changes
-nothing). It is sent whatever the definition says, since the Gate
+(no record says which told, so each visited entry whose Gate the Run's
+Flow makes notify-only, and none for a Run without a task, which sends
+none: `gate_owner::told_entries`). It is sent whatever the definition says, since the Gate
 exists only to tell the owner (`gate_owner::gate_told`); the worker also
 posts the notice to the task thread when that section is on. No built-in
 Flow has one.
@@ -1075,14 +1076,20 @@ the Gate is answered (`factory_answer_gate`, or `factory_read_gate_reply`
 for words, by whoever answers), or the Run ends with it open
 (`factory_end_run`), the worker marks its notification done through the
 notifications' reader, as the owner marking it done would, which also
-clears its push; one never sent (a quiet Run's) changes nothing. The
-ingress creates the notification only when it reads the message, so an
-answer or a cancel within moments of the notice can come first: when there
-is no notification to mark, the worker withdraws its id
-(`NotificationWithdrawal`, a row in `notification_withdrawal`), so the
-ingress never creates or pushes it, and marks it done again in case it was
-created in between. A notice marked done leaves no row; one closed before
-it existed, or never sent, leaves one small row for good, at most one per
+clears its push. The ingress creates the notification only when it reads
+the message, so an answer or a cancel within moments of the notice can
+come first: when there is no notification to mark, the worker withdraws
+its id (`NotificationWithdrawal`, a row in `notification_withdrawal`), so
+the ingress never creates or pushes it, and the egress drops a push queued
+before the withdrawal; it then marks it done again in case it was created
+in between. So the worker closes only notices that may have gone out
+(`gate_owner::notice_may_be_out`, `stand_in_notice_may_be_out`,
+`told_entries`): none on a quiet Run, none for a Gate a rule or the
+stand-in answered or while the stand-in's answer stood, no notify-only or
+stand-in notice for a Run without a task, and a notify-only notice only for
+the entries the Run's Flow gives a notify-only Gate. A notice marked done
+leaves no row; one closed before the ingress created it leaves one small
+row for good: only the rare notice that lost that race, at most one per
 Gate, notify-only entry and stand-in answer of a Run. A Gate a
 Standing Rule or the stand-in answers was never left to a person, so it
 sent no such notification. `GET /runs/waiting` lists the caller's Runs

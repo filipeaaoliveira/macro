@@ -16,7 +16,7 @@ use factory_records::domain::standing_rules::{
 };
 use uuid::Uuid;
 
-use super::{FakeExecutor, julia, reply_step};
+use super::{FakeExecutor, julia, keep_notify_only_reply, reply_step};
 use crate::domain::fakes::{FakeGithub, FakeNotifier, FakeRepo, FakeTaskNotes, FakeTaskThread};
 use crate::domain::flow::StepName;
 use crate::domain::gate::{AnswerGate, GateAnswered, GateRuling, GateTelling};
@@ -619,6 +619,7 @@ async fn an_orchestrator_answer_is_posted_as_the_orchestrator_s() {
 async fn a_notify_only_gate_is_told_once_per_entry_until_the_run_ends() {
     let repo = FakeRepo::default();
     let (run_id, task) = run_on_task(&repo, rules(true, false)).await;
+    keep_notify_only_reply(&repo, run_id);
     let notifier = FakeNotifier::default();
     let thread = FakeTaskThread::default();
     let steps = service(&repo, &notifier, &thread);
