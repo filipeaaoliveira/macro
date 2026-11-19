@@ -69,10 +69,13 @@ const SECRET_NAMES: [&[&str]; 9] = [
 ];
 
 /// The `env` names a setup may not set: those that change what
-/// `bash --noprofile --norc` runs or traces, where the home is, and where
-/// git finds the repository. `PATH` is allowed: the values are exported
-/// inside the script, so it never reaches `timeout` or `bash`.
-const RESERVED_NAMES: [&str; 11] = [
+/// `bash --noprofile --norc` runs or traces, where the home is, where git
+/// finds the repository, its objects or its configuration
+/// (`XDG_CONFIG_HOME` holds `git/config`), and what git runs. Harmless git
+/// values (`GIT_TERMINAL_PROMPT`, `GIT_LFS_SKIP_SMUDGE`) are allowed.
+/// `PATH` is allowed: the values are exported inside the script, so it
+/// never reaches `timeout` or `bash`.
+const RESERVED_NAMES: [&str; 20] = [
     "BASH_ENV",
     "ENV",
     "SHELLOPTS",
@@ -80,10 +83,19 @@ const RESERVED_NAMES: [&str; 11] = [
     "PS4",
     "BASH_XTRACEFD",
     "HOME",
+    "XDG_CONFIG_HOME",
     "GIT_DIR",
     "GIT_WORK_TREE",
     "GIT_INDEX_FILE",
     "GIT_CEILING_DIRECTORIES",
+    "GIT_COMMON_DIR",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_TEMPLATE_DIR",
+    "GIT_EXEC_PATH",
+    "GIT_SSH_COMMAND",
+    "GIT_SSH",
+    "GIT_ASKPASS",
 ];
 
 /// The beginnings of the names a setup may not set: the factory's own

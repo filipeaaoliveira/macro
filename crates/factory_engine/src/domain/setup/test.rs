@@ -141,6 +141,34 @@ fn a_file_that_breaks_the_rules_says_why() {
     }
 }
 
+/// The names that change where git finds the repository, its objects or
+/// its configuration, or what git runs, are refused in any case; harmless
+/// git values are not.
+#[test]
+fn git_s_repository_and_program_names_are_refused() {
+    for name in [
+        "GIT_COMMON_DIR",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_EXEC_PATH",
+        "GIT_SSH_COMMAND",
+        "GIT_SSH",
+        "GIT_ASKPASS",
+        "GIT_TEMPLATE_DIR",
+        "XDG_CONFIG_HOME",
+        "git_ssh_command",
+    ] {
+        let text = format!(r#"{{"env":{{"{name}":"/tmp/x"}}}}"#);
+        let error = RepositorySetup::parse(&text).expect_err(&text);
+        assert!(matches!(error, SetupFileError::EnvName(_)), "{name}: {error}");
+    }
+    let allowed = RepositorySetup::parse(
+        r#"{"env":{"GIT_TERMINAL_PROMPT":"0","GIT_LFS_SKIP_SMUDGE":"1","XDG_CACHE_HOME":"/tmp/c"}}"#,
+    )
+    .expect("parse");
+    assert_eq!(allowed.env.len(), 3);
+}
+
 #[test]
 fn a_file_over_its_size_does_not_read() {
     let text = format!(r#"{{"env":{{"A":"{}"}}}}"#, " ".repeat(16 * 1024));
