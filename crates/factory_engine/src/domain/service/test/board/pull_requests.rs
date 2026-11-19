@@ -3,7 +3,7 @@
 
 use factory_records::domain::board::BoardState;
 use factory_records::domain::models::{
-    EntryId, NewRun, Outcome, RunId, RunInsert, RunOutcome, StepKey,
+    EntryId, KeptFlow, NewRun, Outcome, RunId, RunInsert, RunOutcome, StepKey,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::standing_rules::RunRules;
@@ -96,71 +96,114 @@ async fn a_pull_request_shows_only_a_run_the_person_sees() {
     assert_ne!(teos.runs[0].listed.detail.run.id, shared);
 }
 
+/// A Run of julia's, with no task, whose first Step ran `entry` and waits
+/// at its Gate; it walks `kept_flow` when one is given, else `code`.
+async fn waiting_at(repo: &FakeRepo, entry: &str, kept_flow: Option<&serde_json::Value>) -> RunId {
+    let entry = EntryId::try_from(entry.to_string()).expect("valid");
+    let RunInsert::Inserted(run) = repo
+        .insert_run(NewRun {
+            id: RunId::generate(),
+            flow: "code",
+            request: "Add the coupon field",
+            user_id: &julia(),
+            task_id: None,
+            project_id: None,
+            repository: None,
+            created_in_person: true,
+            control_file_patterns: &[],
+            control_files_team_id: None,
+            standing_rules: RunRules::DEFAULT,
+            automation: None,
+            definition: None,
+            kept_flow: kept_flow.map(|definition| KeptFlow {
+                definition,
+                asks: false,
+            }),
+        })
+        .await
+        .expect("insert")
+    else {
+        panic!("a run with no task is kept");
+    };
+    let key = StepKey {
+        run_id: run.id,
+        seq: 1,
+    };
+    let done = Outcome::try_from("done".to_string()).expect("valid");
+    let answers = [
+        Outcome::try_from("approve".to_string()).expect("valid"),
+        Outcome::try_from("revise".to_string()).expect("valid"),
+    ];
+    repo.start_step(key, &entry, 1).await.expect("start");
+    repo.end_step(key, &done, "Ready").await.expect("end");
+    repo.open_gate(key, "Merge?", &answers).await.expect("open");
+    run.id
+}
+
+/// The merge Gate each pull request's Run waits on, in the order asked.
+async fn merge_gates(service: &impl FactoryService, urls: &[&str]) -> Vec<(RunId, Option<u16>)> {
+    service
+        .pull_request_runs(&julia(), urls.iter().map(ToString::to_string).collect())
+        .await
+        .expect("found")
+        .runs
+        .iter()
+        .map(|found| (found.listed.detail.run.id, found.merge_gate_seq))
+        .collect()
+}
+
 /// A Run waiting at its merge Gate names the Step it waits on; a Run at
 /// another Gate, or one that ended, names none.
 #[tokio::test]
 async fn a_run_at_its_merge_gate_names_it() {
     let repo = FakeRepo::default();
     let service = code_service(&repo, &FakeWorkflows::default(), &FakeGithub::default());
-    let at = |entry: &str| {
-        let repo = repo.clone();
-        let entry = EntryId::try_from(entry.to_string()).expect("valid");
-        async move {
-            let RunInsert::Inserted(run) = repo
-                .insert_run(NewRun {
-                    id: RunId::generate(),
-                    flow: "code",
-                    request: "Add the coupon field",
-                    user_id: &julia(),
-                    task_id: None,
-                    project_id: None,
-                    repository: None,
-                    created_in_person: true,
-                    control_file_patterns: &[],
-                    control_files_team_id: None,
-                    standing_rules: RunRules::DEFAULT,
-                    automation: None,
-                    definition: None,
-                    kept_flow: None,
-                })
-                .await
-                .expect("insert")
-            else {
-                panic!("a run with no task is kept");
-            };
-            let key = StepKey {
-                run_id: run.id,
-                seq: 1,
-            };
-            let done = Outcome::try_from("done".to_string()).expect("valid");
-            let answers = [
-                Outcome::try_from("approve".to_string()).expect("valid"),
-                Outcome::try_from("revise".to_string()).expect("valid"),
-            ];
-            repo.start_step(key, &entry, 1).await.expect("start");
-            repo.end_step(key, &done, "Ready").await.expect("end");
-            repo.open_gate(key, "Merge?", &answers).await.expect("open");
-            run.id
-        }
-    };
-    let merging = opened(&repo, at("merge-gate").await, COUPON).await;
-    let planning = opened(&repo, at("plan").await, BANNER).await;
-    let ended = opened(&repo, at("merge-gate").await, CART).await;
+    let merging = opened(&repo, waiting_at(&repo, "merge-gate", None).await, COUPON).await;
+    let planning = opened(&repo, waiting_at(&repo, "plan", None).await, BANNER).await;
+    let ended = opened(&repo, waiting_at(&repo, "merge-gate", None).await, CART).await;
     repo.end_run(ended, RunOutcome::Manual).await.expect("end");
 
-    let found = service
-        .pull_request_runs(
-            &julia(),
-            vec![COUPON.to_string(), BANNER.to_string(), CART.to_string()],
-        )
-        .await
-        .expect("found");
-    let gates: Vec<(RunId, Option<u16>)> = found
-        .runs
-        .iter()
-        .map(|found| (found.listed.detail.run.id, found.merge_gate_seq))
-        .collect();
-    assert_eq!(gates, [(merging, Some(1)), (planning, None), (ended, None)]);
+    assert_eq!(
+        merge_gates(&service, &[COUPON, BANNER, CART]).await,
+        [(merging, Some(1)), (planning, None), (ended, None)]
+    );
+}
+
+/// A Run that kept its Flow, as a Factory Definition's Runs do, waits at
+/// its merge Gate by that Flow's entries, not the built-in Flows': its
+/// entry `land`, which runs `ready_to_merge`, is its merge Gate, and its
+/// entry `merge-gate`, which writes, is not. A Run whose kept Flow does not
+/// read waits at no merge Gate, so it merges nothing.
+#[tokio::test]
+async fn a_kept_flow_says_where_a_run_s_merge_gate_is() {
+    let repo = FakeRepo::default();
+    let service = code_service(&repo, &FakeWorkflows::default(), &FakeGithub::default());
+    let flow = serde_json::json!({
+        "repository": true,
+        "entries": [
+            { "id": "merge-gate", "step": "write", "role": "writer" },
+            { "id": "land", "step": "ready_to_merge" }
+        ]
+    });
+    let unreadable = serde_json::json!({ "entries": "none" });
+    let landing = opened(&repo, waiting_at(&repo, "land", Some(&flow)).await, COUPON).await;
+    let writing = opened(
+        &repo,
+        waiting_at(&repo, "merge-gate", Some(&flow)).await,
+        BANNER,
+    )
+    .await;
+    let unread = opened(
+        &repo,
+        waiting_at(&repo, "merge-gate", Some(&unreadable)).await,
+        CART,
+    )
+    .await;
+
+    assert_eq!(
+        merge_gates(&service, &[COUPON, BANNER, CART]).await,
+        [(landing, Some(1)), (writing, None), (unread, None)]
+    );
 }
 
 /// A lookup names at most so many pull requests, and none reads nothing.

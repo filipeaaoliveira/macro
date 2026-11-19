@@ -13,7 +13,7 @@ use factory_records::domain::board::{
 use factory_records::domain::evaluation::EvaluationRepository;
 use factory_records::domain::flaws::FlawRepository;
 use factory_records::domain::main_hold::MainHoldRepository;
-use factory_records::domain::models::{GateKind, Run, Step};
+use factory_records::domain::models::{GateKind, Run, RunId, Step};
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::ReviewRoundRepository;
 use factory_records::domain::standing_rules::StandingRulesRepository;
@@ -26,6 +26,7 @@ use crate::domain::board::{
     PullRequestRuns,
 };
 use crate::domain::built_in_flows::BUILT_IN_FLOWS;
+use crate::domain::flow::Flow;
 use crate::domain::models::FactoryError;
 
 /// How many rounds of Runs a page reads at most, looking past Runs the
@@ -334,13 +335,23 @@ where
         let details = self
             .details(shown.into_iter().map(|(_, listed)| listed.run).collect())
             .await?;
-        let merge_entries = self.built_in_merge_entries();
+        // Whether a Run is at its merge is read from the Flow it walks, so
+        // a Definition's merge entry counts by its own id. A Run whose Flow
+        // does not read waits at no merge Gate, and so merges nothing.
+        let going: Vec<RunId> = details
+            .iter()
+            .filter(|detail| detail.run.end.is_none())
+            .map(|detail| detail.run.id)
+            .collect();
+        let flows = self.runs_flows(&going).await?;
         let runs = parts
             .into_iter()
             .zip(details)
             .map(|((url, state, task_name), detail)| PullRequestRun {
                 url,
-                merge_gate_seq: merge_gate(&detail.run, &detail.steps, &merge_entries),
+                merge_gate_seq: flows
+                    .get(&detail.run.id)
+                    .and_then(|flow| merge_gate(&detail.run, &detail.steps, flow)),
                 listed: BoardRun {
                     state,
                     task_name,
@@ -415,18 +426,18 @@ fn is_seen(
 }
 
 /// The place of the Step whose merge Gate `run` waits on: its latest Step,
-/// at one of `merge_entries`, with a Flow's Gate no one answered, while the
-/// Run goes.
-fn merge_gate(run: &Run, steps: &[Step], merge_entries: &[String]) -> Option<u16> {
+/// at an entry that runs `ready_to_merge` or `merge` in `flow`, the Flow the
+/// Run walks, with a Flow's Gate no one answered, while the Run goes.
+fn merge_gate(run: &Run, steps: &[Step], flow: &Flow) -> Option<u16> {
     if run.end.is_some() {
         return None;
     }
     let latest = steps.last()?;
     let gate = latest.gate.as_ref()?;
     let waits = gate.kind == GateKind::Flow && gate.answer.is_none();
-    let at_merge = merge_entries
-        .iter()
-        .any(|entry| *entry == latest.entry.to_string());
+    let at_merge = flow.entries.iter().any(|entry| {
+        entry.id == latest.entry && matches!(entry.step.as_str(), "ready_to_merge" | "merge")
+    });
     (waits && at_merge).then_some(latest.seq)
 }
 

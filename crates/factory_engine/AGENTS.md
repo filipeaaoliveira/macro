@@ -1495,7 +1495,9 @@ replaced; a person merges), which a test reads; `factory_definition_check`
   newest Run on the caller's team board they see (theirs, or a team
   member's on a task they can see, as above), with where it is and
   `mergeGateSeq`, the Step whose merge Gate it waits on (its latest Step,
-  at a merge entry, with a Flow's Gate no one answered, while it goes). A
+  at an entry that runs `ready_to_merge` or `merge` in the Flow the Run
+  walks, read in one `runs_flows` read, with a Flow's Gate no one answered,
+  while it goes; a Run whose kept Flow does not read waits at none). A
   pull request only a hidden Run opened is left out, as one no Run opened.
   It reads each pull request on its own: the newest Run of each owner and
   task, at most 10 (`PULL_REQUEST_RUNS_READ`), newest first; a pull request
