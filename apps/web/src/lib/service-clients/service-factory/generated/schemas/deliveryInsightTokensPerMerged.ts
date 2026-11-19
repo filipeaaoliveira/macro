@@ -6,7 +6,8 @@
  */
 
 /**
- * The tokens every Run used per merged pull request.
+ * The tokens every Run used per merged pull request; none unless every
+Run's agent sessions recorded their usage.
  * @minimum 0
  */
 export type DeliveryInsightTokensPerMerged = number | null;

@@ -698,7 +698,8 @@ export type DeliveryInsight = {
     autonomyRate?: number | null;
     /**
      * What every Run cost per merged pull request, in US dollars; none
-     * unless every call was priced.
+     * unless every Run's agent sessions recorded their usage and every
+     * call was priced.
      */
     costPerMergedUsd?: number | null;
     /**
@@ -734,7 +735,8 @@ export type DeliveryInsight = {
      */
     tokens: TokenCounts;
     /**
-     * The tokens every Run used per merged pull request.
+     * The tokens every Run used per merged pull request; none unless every
+     * Run's agent sessions recorded their usage.
      */
     tokensPerMerged?: number | null;
     /**

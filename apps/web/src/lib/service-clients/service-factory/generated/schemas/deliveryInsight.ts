@@ -22,7 +22,8 @@ answered, no Step they steered, and no manual end.
   /** The share of ended Runs that did, from 0 to 1. */
   autonomyRate?: DeliveryInsightAutonomyRate;
   /** What every Run cost per merged pull request, in US dollars; none
-unless every call was priced. */
+unless every Run's agent sessions recorded their usage and every
+call was priced. */
   costPerMergedUsd?: DeliveryInsightCostPerMergedUsd;
   /** What their priced model calls cost, in US dollars. */
   costUsd: number;
@@ -59,7 +60,8 @@ unless every call was priced. */
   /** The tokens every Run's agents used. */
   tokens: TokenCounts;
   /**
-   * The tokens every Run used per merged pull request.
+   * The tokens every Run used per merged pull request; none unless every
+Run's agent sessions recorded their usage.
    * @minimum 0
    */
   tokensPerMerged?: DeliveryInsightTokensPerMerged;
