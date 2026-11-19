@@ -705,7 +705,9 @@ where
             .map(|_| ())
     }
 
-    #[tracing::instrument(err, skip(self))]
+    // The request names its user, whose id is an email: the span records
+    // only how many notifications it asks to change.
+    #[tracing::instrument(err, skip_all, fields(notifications = req.notification_ids.len()))]
     async fn update_notifications_and_return<T: DeserializeOwned + Send>(
         &self,
         req: UpdateNotificationsRequest<'_>,
