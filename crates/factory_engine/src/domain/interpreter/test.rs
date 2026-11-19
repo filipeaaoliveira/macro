@@ -761,8 +761,7 @@ fn a_base_that_keeps_moving_never_exhausts_the_merge_gate() {
     assert_eq!(
         steps
             .iter()
-            .filter(|step| step.starts_with("merge-gate"))
-            .last()
+            .rfind(|step| step.starts_with("merge-gate"))
             .map(String::as_str),
         Some("merge-gate#1")
     );
