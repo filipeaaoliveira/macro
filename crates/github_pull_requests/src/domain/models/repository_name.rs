@@ -12,9 +12,10 @@ const OWNER_MAX: usize = 39;
 /// The longest repository name GitHub allows.
 const REPOSITORY_MAX: usize = 100;
 
-/// Whether `owner` is a GitHub account name: letters, digits and `-`.
+/// Whether `owner` is a GitHub account name: letters, digits, `-`, and `_`,
+/// which Enterprise Managed Users' accounts end with (`handle_shortcode`).
 pub fn is_github_owner(owner: &str) -> bool {
-    let allowed = |c: char| c.is_ascii_alphanumeric() || c == '-';
+    let allowed = |c: char| c.is_ascii_alphanumeric() || matches!(c, '-' | '_');
     !owner.is_empty() && owner.len() <= OWNER_MAX && owner.chars().all(allowed)
 }
 

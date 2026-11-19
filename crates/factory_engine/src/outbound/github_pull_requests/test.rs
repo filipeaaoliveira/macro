@@ -143,6 +143,47 @@ async fn a_run_merges_its_pull_request_on_github_with_its_owner_s_token() {
     server.verify().await;
 }
 
+/// A Run on an Enterprise Managed User's repository, whose owner ends
+/// `_shortcode`, still merges its pull request on GitHub.
+#[tokio::test]
+async fn a_run_merges_a_pull_request_of_an_owner_with_an_underscore() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme_labs/widgets"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "allow_merge_commit": true,
+            "allow_squash_merge": false,
+            "allow_rebase_merge": false,
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path("/repos/acme_labs/widgets/pulls/7/merge"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "sha": "def456",
+            "message": "Pull Request successfully merged",
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let github = GithubPullRequests::with_client(
+        Tokens {
+            linked: Some("token"),
+            ..Tokens::default()
+        },
+        GithubOauthImpl::with_api_base_url(server.uri()),
+    );
+    let repository = CodeRepository::parse("https://github.com/acme_labs/widgets").expect("valid");
+
+    let merging = github
+        .merge(&julia(), &repository, 7, "abc123")
+        .await
+        .expect("merged");
+
+    assert_eq!(merging, Merging::Merged);
+    server.verify().await;
+}
+
 /// GitHub failing or throttling, and a token that could not be read, are
 /// tried again; a token GitHub no longer takes, a refusal, and a repository
 /// out of reach are not.

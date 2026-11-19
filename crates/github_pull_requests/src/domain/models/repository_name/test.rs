@@ -5,6 +5,7 @@ use super::{is_github_owner, is_github_repository_name};
 fn github_names_are_accepted() {
     assert!(is_github_owner("acme"));
     assert!(is_github_owner("Acme-Labs2"));
+    assert!(is_github_owner("acme_labs"));
     assert!(is_github_repository_name("widgets"));
     assert!(is_github_repository_name("my_widgets.v2-beta"));
     assert!(is_github_repository_name(".github"));
@@ -22,7 +23,6 @@ fn crafted_parts_are_refused() {
         "ac%6De",
         "acme?x=",
         "acme.labs",
-        "acme_labs",
         "a".repeat(40).as_str(),
     ] {
         assert!(!is_github_owner(owner), "{owner:?}");
