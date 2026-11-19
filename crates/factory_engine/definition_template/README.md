@@ -14,15 +14,17 @@ happens when you do not change it.
 Outside the files, all must be done:
 
 - The repository: copy this folder to the root of a new GitHub repository.
-- Branch protection: require a pull request on the default branch, and a
-  status check that runs `factory_definition_check .`. The factory reports
-  no check to GitHub, so add a CI job that runs it. Left as is, a push
-  changes the team's rules unreviewed, and the Factory definition setting
-  says so.
-- The validator: `factory_definition_check` on the `PATH` of the CI runner
-  and of every machine a Run's agent works on (Check the Definition, below).
-  Left as is, the `definition` check fails, and a Run on this repository
-  never gets past its checks.
+- A CI job: the factory reports no check to GitHub, so add a CI job that
+  runs the validator, `factory_definition_check .`, with the validator
+  installed on the runner.
+- Branch protection: require a pull request on the default branch, and
+  that CI job's check. GitHub offers only a check that has reported, so
+  let the job run once first. Left as is, a push changes the team's rules
+  unreviewed, and the Factory definition setting says so.
+- The validator on the `PATH` of every machine a Run's agent works on
+  (Check the Definition, below). A `.macro/setup.json` here can install it
+  before each Run's checks. Left as is, the `definition` check fails, and a
+  Run on this repository never gets past its checks.
 - The team setting: an admin of the team names the repository in team
   settings, Factory definition. Left as is, the team's Runs take Macro's
   built-in Flows and Agents and the team's own settings.
@@ -30,21 +32,28 @@ Outside the files, all must be done:
   Settings, Connected. That account must read this repository, and reach
   and push to each repository a `code` Run works on. Left as is, their Runs
   do not start, and New run says why.
+- Macro's GitHub App: it must have access to each repository a `code` Run
+  works on. Left as is, New run lists no repository.
+- Self-improvement Runs: the admin who names the Definition owns them. Their
+  linked GitHub account must push to this repository, and they must be
+  allowed to use both Agents' bots. Without push access, each such Run is
+  refused, and Insights shows it could not start.
 
 `agents.json`:
 
 - `agents.primary.bot` and `agents.backup.bot` (must): the id of a Macro
   agent each member who starts Runs may use. The zero ids name no agent,
-  and the check does not refuse them: replace them yourself.
+  and the validator does not refuse them: replace them yourself.
 - `model` (may): left out, the agent's own default model.
 - `instructions` (may): what every session of the Agent is told before the
   Step's prompt. Left as is, `primary` is told to work in small commits.
 - `roles` (may): the Agents of each Role, in order. A Step works with the
   first; the next takes over only when Macro refuses the first for lack of
   quota. Keep `planner`, `writer`, `reviewer` and `fixer` filled: a
-  self-improvement Run needs them. A review panel's Role and `verifier`,
-  when not listed, take `reviewer`'s Agents. Left as is, `primary` plans,
-  writes and fixes, and `backup` reviews and verifies.
+  self-improvement Run needs them, and the validator does not check them
+  (a Run that lacks one is refused when it starts). A review panel's Role
+  and `verifier`, when not listed, take `reviewer`'s Agents. Left as is,
+  `primary` plans, writes and fixes, and `backup` reviews and verifies.
 - `standing` (may): the Standing Roles (below). Left out, any of your
   agents may start, cancel and link Runs, and answer plan and Blockers
   Gates where `rules.json` lets it.
@@ -59,11 +68,11 @@ Outside the files, all must be done:
 
 `flows/{name}.json` (may):
 
-- `max_visits`: how many times a Run comes back to an entry before it is
-  handed to you. Left as is, 3 for `plan`, `review`, `accept`, `ci-fix`
-  and `merge-gate`.
+- `max_visits`: how many times a Run may visit an entry, the first visit
+  included. Past that, the Run ends Handed off. Left as is, 3 for `plan`,
+  `review`, `accept`, `ci-fix` and `merge-gate`.
 - A Gate's `question`: the words the owner reads.
-- Keep the merge Gate on the `ready_to_merge` entry: the check refuses a
+- Keep the merge Gate on the `ready_to_merge` entry: the validator refuses a
   Flow that merges another way.
 
 `rules.json` (may; left out whole, the factory's defaults apply):
@@ -110,23 +119,29 @@ its built-in Flows or the team's own settings. Team settings say why.
 
 From this template to a first merged pull request:
 
-1. Copy this folder to the root of a new GitHub repository.
-2. Replace the two `bot` ids in `agents.json`, and anything else from
-   Customize the template you want now.
-3. Check it: `factory_definition_check .` prints `.: the definition reads:
-   flows code, plan, reply, 1 scorers, 0 experiments, 0 benchmarks`.
-4. Protect the default branch, and merge.
-5. An admin names the repository in team settings, Factory definition, and
+1. Copy this folder to the root of a new GitHub repository, and push it to
+   its default branch.
+2. Build the validator (Check the Definition, below).
+3. Add a CI job that runs the validator, `factory_definition_check .`, and
+   let it run once. Then protect the default branch: require a pull
+   request and that job's check.
+4. On a branch, replace the two `bot` ids in `agents.json`, and anything
+   else from Customize the template you want now.
+5. Check it: `factory_definition_check .` prints `.: the definition reads:
+   flows code, plan, reply, 1 scorers, 0 experiments, 0 benchmarks`. Open
+   a pull request, and merge it once its check passes.
+6. An admin names the repository in team settings, Factory definition, and
    saves. Macro reads it first and refuses one that does not read, saying
    why. It then shows the commit Runs read, and whether the default branch
    requires a pull request.
-6. Pick a repository for the Run to change, one your linked GitHub account
-   can push to. Its `.macro/checks.json` holds the checks `write` and `fix`
-   run on the change.
-7. Open a small task. In its Runs section, choose New run, the `code` Flow
-   and that repository, and write the request.
-8. Answer the plan Gate, then the merge Gate (below).
-9. Read the Run in Insights (below).
+7. Pick a repository for the Run to change: one Macro's GitHub App can
+   access and your linked GitHub account can push to. Its
+   `.macro/checks.json` holds the checks `write` and `fix` run on the
+   change.
+8. Open a small task. In its Runs section, choose New run, then the `code`
+   Flow and that repository, write the request, and press Start run.
+9. Answer the plan Gate, then the merge Gate (below).
+10. Read the Run in Run insights (below).
 
 ### A sample task
 
@@ -150,7 +165,8 @@ What each Step of the `code` Flow does with it:
 | `fix` | `primary` | Commits that fix the Blockers, checked and reviewed again. |
 | `accept` | `backup` | The verifier checks each Done-when clause on the branch, and the factory runs the plan's acceptance checks. |
 | `publish` | the factory | The pull request, opened with the owner's linked GitHub account. |
-| `ci` | the factory | Waits for the pull request's checks. Failing checks go to `ci_fix`, then back to `review`. |
+| `ci` | the factory | Waits for the pull request's checks. Failing checks go to `ci_fix`. |
+| `ci_fix` | `primary` | Commits that fix the failing checks, then back to `review`. |
 | `ready_to_merge` | the factory | The merge Gate, once the checks pass. |
 | `merge` | the factory | Merges once the base branch's required checks pass. The Run ends Done. |
 
@@ -175,24 +191,28 @@ notifies you, and a Run on a task posts its updates to the task.
 1. The plan Gate comes first, and no commit lands on the branch before
    you approve it.
 2. Nothing merges until you approve the merge Gate.
-3. A change to a Control File the request does not name (`Cargo.toml`,
-   say) is held: the merge Gate lists it under Control files changed, and
-   only the Approve button, which lists it, approves it.
+3. A change to a Control File the request does not name
+   (`.github/workflows/ci.yml`, say) is held: the merge Gate lists it under
+   Control files changed, and Approve stays disabled until you tick "I
+   approve these changes".
 4. The Run view shows this repository and the commit the Run read.
 
 A Run that ended Done with a wrong result: mark it flawed. It then counts
 as a failure for self-improvement (below).
 
-### Read Insights
+### Read Run insights
 
-Insights (Factory, Insights) shows the team's Runs by Flow and period:
-their success rate, how long each Step took, where Runs stop, and the
-tokens the agents used. Its Scorers, Experiments and Benchmarks sections
-fill once `scorers.json` has them.
+Run insights opens from the chart button in a task's Runs section, or at
+`/app/factory/insights`. It shows the Runs you started, by Flow and
+period: their success rate, how long each Step took, where Runs stop, and
+the tokens the agents used. Its Scorers, Self-improvement, Experiments and
+Benchmarks sections are the team's. The template's one Scorer is listed,
+with no judgments while its `samplePercent` is 0.
 
 Change one setting at a time, and repeat a Run before you compare: one
 Run says little. To compare Agents on the same kind of work, use an
-Experiment, which splits a Flow's Runs across arms. To compare a change on
+Experiment, which splits a Flow's Runs on a task across arms; a Run with
+no task takes no arm. To compare a change on
 fixed tasks, use a Benchmark, which replays them on one setup and scores
 each trial with the tokens it used.
 
@@ -241,7 +261,7 @@ It leaves off:
   owner. Set it to `true` to stop those notifications; the Gates still wait
   on the owner.
 - `plan`: a person approves each plan.
-- `merge`: a person merges each pull request. Turn it on only once you trust
+- `merge`: a person approves each merge Gate. Turn it on only once you trust
   the Flow's checks and review.
 
 ## Scorers, Experiments and Benchmarks
@@ -314,7 +334,7 @@ which Standing Role.
 An empty section, `"standing": {}`, allows no agent any of these acts;
 leave the section out to allow them all. `"standing": null` is refused.
 
-The check refuses an act not in that list, any act that names a merge, a
+The validator refuses an act not in that list, any act that names a merge, a
 Standing Role with no act or no Agent, an Agent `agents` does not define,
 and a name given twice.
 
@@ -334,15 +354,23 @@ request groups the failures, and its pull request lists them under
 
 A person approves its plan and merges it, whatever it changes: no
 standing rule, stand-in or Orchestrator answers its plan or merge, and its
-changes to this Definition's files are Tampered too. Once it merges, its
-failures are addressed. Its pull request closed unmerged, or its Run
-cancelled by its owner in person, rejects it: its failures are dismissed
-for good, and new ones still count. One that ends without merging
-otherwise (no pull request, cancelled by an agent, or refused) sends them
-back. After either, the next Run waits a day, twice
-as long after each more in a row, up to a week, until one merges. The admin who named the Definition must still be a
-team admin for a Run to start. Thresholds are read from this repository as
-it is now.
+changes to this Definition's files are Tampered too. What happens to its
+failures once its Run ends depends on its pull request:
+
+- Merged: they are addressed.
+- Open, even after the Run ended Handed off or was cancelled: the Run
+  stays open, and no other self-improvement Run starts until a person
+  merges or closes the pull request.
+- Closed unmerged: a person rejected it. Its failures are dismissed for
+  good; new ones still count.
+- None: rejected the same way when its owner cancelled the Run in person.
+  Otherwise (cancelled by an agent, ended without one, or refused) its
+  failures go back to pending.
+
+After a rejection or a return to pending, the next Run waits a day, twice
+as long after each more in a row, up to a week, until one merges. The
+admin who named the Definition must still be a team admin for a Run to
+start. Thresholds are read from this repository as it is now.
 
 ```json
 "selfImprovement": { "enabled": true, "failures": 25, "oldestDays": 7 }
