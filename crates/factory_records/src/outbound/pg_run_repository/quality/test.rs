@@ -192,10 +192,10 @@ async fn ci_waits_review_rounds_and_blockers_are_read_with_their_runs(pool: PgPo
 )]
 async fn a_repository_narrows_the_runs_but_not_the_repositories_to_pick(pool: PgPool) {
     // A Run keeps its repository as it was written, in any case.
-    sqlx::query(
+    sqlx::query!(
         "UPDATE factory_run SET repo_url = 'https://github.com/Macro/Site' WHERE repo_url = $1",
+        SITE,
     )
-    .bind(SITE)
     .execute(&pool)
     .await
     .expect("rename");
