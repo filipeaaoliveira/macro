@@ -106,6 +106,96 @@ Flows, Agents and rules. A Definition that does not read, or a repository a
 member cannot reach, starts no Run for them: the factory never falls back to
 its built-in Flows or the team's own settings. Team settings say why.
 
+## Your first Run
+
+From this template to a first merged pull request:
+
+1. Copy this folder to the root of a new GitHub repository.
+2. Replace the two `bot` ids in `agents.json`, and anything else from
+   Customize the template you want now.
+3. Check it: `factory_definition_check .` prints `.: the definition reads:
+   flows code, plan, reply, 1 scorers, 0 experiments, 0 benchmarks`.
+4. Protect the default branch, and merge.
+5. An admin names the repository in team settings, Factory definition, and
+   saves. Macro reads it first and refuses one that does not read, saying
+   why. It then shows the commit Runs read, and whether the default branch
+   requires a pull request.
+6. Pick a repository for the Run to change, one your linked GitHub account
+   can push to. Its `.macro/checks.json` holds the checks `write` and `fix`
+   run on the change.
+7. Open a small task. In its Runs section, choose New run, the `code` Flow
+   and that repository, and write the request.
+8. Answer the plan Gate, then the merge Gate (below).
+9. Read the Run in Insights (below).
+
+### A sample task
+
+A request that names its Done-when clauses and the files it asks for:
+
+```text
+Add a --version flag to the command-line tool.
+
+Done when:
+1. `tool --version` prints the version in Cargo.toml and exits 0.
+2. tests/version.rs runs `tool --version` and checks what it prints.
+```
+
+What each Step of the `code` Flow does with it:
+
+| Step | Who | What it produces |
+| --- | --- | --- |
+| `plan` | `primary` | A plan, ending with one acceptance check per Done-when clause: a command that exits 0 only when the clause holds. Then the plan Gate. |
+| `write` | `primary` | Commits on the Run's branch, `factory/{run id}`, then the repository's checks, run up to 3 rounds. |
+| `review` | `backup` | Three reviewers (correctness, scope, tests) review the change at once. Blockers go to `fix`; a finding outside the change becomes a follow-up task. |
+| `fix` | `primary` | Commits that fix the Blockers, checked and reviewed again. |
+| `accept` | `backup` | The verifier checks each Done-when clause on the branch, and the factory runs the plan's acceptance checks. |
+| `publish` | the factory | The pull request, opened with the owner's linked GitHub account. |
+| `ci` | the factory | Waits for the pull request's checks. Failing checks go to `ci_fix`, then back to `review`. |
+| `ready_to_merge` | the factory | The merge Gate, once the checks pass. |
+| `merge` | the factory | Merges once the base branch's required checks pass. The Run ends Done. |
+
+The Gates the owner sees, in order:
+
+1. The plan Gate: approve, or revise with a note. Nothing is written
+   before you approve.
+2. A Blockers Gate, only when the rules leave Blockers to you: a review
+   round finds the same Blockers a rule's fix left unchanged (`ownerGates`).
+   Fix sends them to `fix`; stop leaves the branch to you.
+3. The merge Gate: approve, or revise with a note.
+
+The `blockers` rule fixes the first two rounds' Blockers. Blockers the
+third review round still finds, or a third failing acceptance round, end
+the Run Handed off, with the branch left to you.
+
+An agent may also ask you a question mid-Step. Each Gate no rule answers
+notifies you, and a Run on a task posts its updates to the task.
+
+### First-run checks
+
+1. The plan Gate comes first, and no commit lands on the branch before
+   you approve it.
+2. Nothing merges until you approve the merge Gate.
+3. A change to a Control File the request does not name (`Cargo.toml`,
+   say) is held: the merge Gate lists it under Control files changed, and
+   only the Approve button, which lists it, approves it.
+4. The Run view shows this repository and the commit the Run read.
+
+A Run that ended Done with a wrong result: mark it flawed. It then counts
+as a failure for self-improvement (below).
+
+### Read Insights
+
+Insights (Factory, Insights) shows the team's Runs by Flow and period:
+their success rate, how long each Step took, where Runs stop, and the
+tokens the agents used. Its Scorers, Experiments and Benchmarks sections
+fill once `scorers.json` has them.
+
+Change one setting at a time, and repeat a Run before you compare: one
+Run says little. To compare Agents on the same kind of work, use an
+Experiment, which splits a Flow's Runs across arms. To compare a change on
+fixed tasks, use a Benchmark, which replays them on one setup and scores
+each trial with the tokens it used.
+
 ## The files
 
 | File | What it holds |
