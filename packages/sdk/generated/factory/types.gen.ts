@@ -740,6 +740,12 @@ export type DeliveryInsight = {
      */
     tokensPerMerged?: number | null;
     /**
+     * Runs with an agent session whose usage is not known: one on a
+     * runtime that records none, as Codex or Claude Code on its owner's
+     * own login. While any, no figure per merged pull request is given.
+     */
+    unmeasuredRuns: number;
+    /**
      * Their model calls with no price.
      */
     unpricedCalls: number;

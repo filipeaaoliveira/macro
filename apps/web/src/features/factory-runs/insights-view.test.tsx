@@ -881,6 +881,7 @@ function quality(): QualityInsights {
       steered: 1,
       manual: 1,
       measuredRuns: 2,
+      unmeasuredRuns: 0,
       tokens: { input: 1500, output: 0, cacheRead: 0, cacheWrite: 0 },
       costUsd: 2.5,
       unpricedCalls: 0,

@@ -66,6 +66,13 @@ Run's agent sessions recorded their usage.
    */
   tokensPerMerged?: DeliveryInsightTokensPerMerged;
   /**
+   * Runs with an agent session whose usage is not known: one on a
+runtime that records none, as Codex or Claude Code on its owner's
+own login. While any, no figure per merged pull request is given.
+   * @minimum 0
+   */
+  unmeasuredRuns: number;
+  /**
    * Their model calls with no price.
    * @minimum 0
    */
