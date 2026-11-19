@@ -544,6 +544,70 @@ fn a_factory_run_waiting_on_its_owner_shows_on_its_task_s_row_from_macro() {
     assert_eq!(listed[0].actor, Some(InboxActor::Macro));
 }
 
+const OWNER: u128 = 0x0E;
+
+#[test]
+fn a_factory_run_without_a_task_has_a_row_of_its_own_under_its_owner() {
+    let waiting = |id: u128, run: u128, seq: u16, minute: u32| {
+        notification(
+            id,
+            entity(EntityType::User, OWNER),
+            "factory_gate_waiting",
+            json!({
+                "runId": uuid(run),
+                "seq": seq,
+                "taskId": "",
+                "request": "Fix the login bug",
+                "question": "Approve the plan?",
+            }),
+            minute,
+            NotificationState::Unseen,
+        )
+    };
+    // Anything else filed under a User has no row, as before Users were
+    // listed.
+    let other = notification(
+        4,
+        entity(EntityType::User, OWNER),
+        "invite_to_team",
+        json!({
+            "teamName": "Team",
+            "teamId": uuid(TEAM),
+            "teamInviteId": uuid(0x1A),
+            "invitedBy": "macro|other@example.com",
+        }),
+        4,
+        NotificationState::Unseen,
+    );
+    let owner = group(EntityType::User, OWNER);
+    let listed = rows_of(
+        &owner,
+        &[
+            waiting(1, 0xF1, 1, 1),
+            waiting(2, 0xF2, 2, 2),
+            waiting(3, 0xF1, 5, 3),
+            other,
+        ],
+    );
+
+    assert_eq!(
+        shape(&listed),
+        vec![
+            (InboxRowType::Task, vec![uuid(3), uuid(1)], vec![]),
+            (InboxRowType::Task, vec![uuid(2)], vec![]),
+        ]
+    );
+    assert_eq!(
+        listed[0].id.id(),
+        format!("user:{}#factory_run:{}", uuid(OWNER), uuid(0xF1))
+    );
+    assert_eq!(
+        listed[1].id.id(),
+        format!("user:{}#factory_run:{}", uuid(OWNER), uuid(0xF2))
+    );
+    assert_eq!(listed[0].actor, Some(InboxActor::Macro));
+}
+
 const TEAM: u128 = 0x7E;
 
 #[test]

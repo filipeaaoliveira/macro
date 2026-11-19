@@ -5,6 +5,8 @@
 //! notification has exactly one home: the channel's top-level row or one
 //! thread row. Every other notification lives in its entity's slot (a
 //! discussion thread, the email thread, the task, one access request, ...).
+//! A notice about the viewer alone is filed under their own User: a factory
+//! Run started without a task has a row of its own there.
 //! Within its home a notification is shown or hidden:
 //!
 //! - **One message, one row.** A channel message or discussion comment that
@@ -58,6 +60,9 @@ enum Slot {
     Email,
     Agent,
     Task,
+    /// One factory Run started without a task, by its id: its notices are
+    /// filed under its owner, so each Run gets a row of its own there.
+    FactoryRun(Uuid),
     PullRequest,
     CalendarEvent,
     CalendarJoinRequest(Uuid),
@@ -78,6 +83,7 @@ impl Slot {
             Self::Email => "email".to_string(),
             Self::Agent => "agent".to_string(),
             Self::Task => "task".to_string(),
+            Self::FactoryRun(run) => format!("factory_run:{run}"),
             Self::PullRequest => "pull_request".to_string(),
             Self::CalendarEvent => "calendar_event".to_string(),
             Self::CalendarJoinRequest(id) => format!("calendar_join_request:{id}"),
@@ -444,6 +450,25 @@ fn occurrence_ended(reminder: &CalendarEventReminderMetadata, now: DateTime<Utc>
     }
 }
 
+/// Place the notices filed under the viewer's own User. Only a factory Run
+/// without a task files one there for the inbox, a row per Run; anything
+/// else filed under a User, such as an inbox reconnection notice, has no
+/// row, as it had none before Users were listed.
+fn place_about_the_viewer(notifications: &[FeedNotification]) -> Vec<Placed> {
+    notifications
+        .iter()
+        .filter_map(|notification| match &notification.notification_metadata {
+            NotifEvent::FactoryGateWaiting(waiting) => Some(Placed {
+                notification: notification.clone(),
+                slot: Slot::FactoryRun(waiting.run_id),
+                shown: true,
+                mention: false,
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
 /// The slot and visibility of a notification that is neither channel
 /// activity nor discussion. `None` for kinds the inbox never shows.
 fn place_event(notification: &FeedNotification, now: DateTime<Utc>) -> Option<(Slot, bool)> {
@@ -516,7 +541,7 @@ fn row_type(slot: &Slot, channel: bool, mention: bool) -> InboxRowType {
         (Slot::Thread(_), false, false) => InboxRowType::DiscussionThread,
         (Slot::Email, ..) => InboxRowType::Email,
         (Slot::Agent, ..) => InboxRowType::Agent,
-        (Slot::Task, ..) => InboxRowType::Task,
+        (Slot::Task | Slot::FactoryRun(_), ..) => InboxRowType::Task,
         (Slot::PullRequest, ..) => InboxRowType::PullRequest,
         (Slot::CalendarEvent, ..) => InboxRowType::CalendarEvent,
         (Slot::CalendarJoinRequest(_), ..) => InboxRowType::CalendarJoinRequest,
@@ -670,6 +695,8 @@ pub fn rows(
     let channel = group.entity().entity_type == EntityType::Channel;
     let placed: Vec<Placed> = if channel {
         place_channel(notifications, viewer)
+    } else if group.entity().entity_type == EntityType::User {
+        place_about_the_viewer(notifications)
     } else {
         let mut placed =
             place_discussions(notifications.iter().filter_map(discussion_view).collect());
