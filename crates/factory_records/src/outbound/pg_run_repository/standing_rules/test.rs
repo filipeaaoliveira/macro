@@ -696,3 +696,52 @@ async fn a_budget_stop_is_kept_once_and_only_with_a_budget(pool: PgPool) {
     assert_eq!(read(unread).await.budget_stop, Some(BudgetStop::Unread));
     assert_eq!(read(unbudgeted).await.budget_stop, None);
 }
+
+/// A Run's Step sessions are read each once, a session two Steps shared
+/// (one went on from the other's question) among them, without the Steps
+/// that worked in none, nor another Run's.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn a_run_s_step_sessions_are_read_each_once(pool: PgPool) {
+    let repo = PgRunRepository::new(pool.clone());
+    let run_id = RunId::generate();
+    insert(&repo, run_id, "Plan it").await;
+    let other = RunId::generate();
+    insert(&repo, other, "Plan another").await;
+    let (shared, own, others) = (
+        Uuid::from_u128(0x801),
+        Uuid::from_u128(0x802),
+        Uuid::from_u128(0x803),
+    );
+    for (run, seq, session, action) in [
+        (run_id, 1, Some(shared), 0x901),
+        (run_id, 2, Some(shared), 0x902),
+        (run_id, 3, None, 0),
+        (run_id, 4, Some(own), 0x904),
+        (other, 1, Some(others), 0x905),
+    ] {
+        sqlx::query!(
+            "INSERT INTO factory_step (run_id, seq, entry, visit, started_at, outcome, output, \
+                 ended_at, session_id, action_id, offered) \
+             VALUES ($1, $2, 'plan', 1, '2026-11-11 09:00Z', 'done', 'Planned', \
+                 '2026-11-11 09:30Z', $3, $4, CASE WHEN $3::uuid IS NULL THEN NULL ELSE '{done}'::text[] END)",
+            run.as_uuid(),
+            seq,
+            session,
+            session.map(|_| Uuid::from_u128(action)),
+        )
+        .execute(&pool)
+        .await
+        .expect("step recorded");
+    }
+
+    let mut sessions = repo.step_sessions(run_id).await.expect("read");
+    sessions.sort();
+    assert_eq!(sessions, [shared, own]);
+    assert_eq!(
+        repo.step_sessions(RunId::generate()).await.expect("read"),
+        Vec::<Uuid>::new()
+    );
+}
