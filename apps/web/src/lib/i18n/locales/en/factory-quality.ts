@@ -26,7 +26,7 @@ export default {
   causeFlaky: 'Flaky',
   causeCancelled: 'Cancelled',
   causesNote:
-    'Setup: the job failed before its own work ran. Flaky: the same test, or the same named step, failed on two or more pull requests. Cancelled: a newer push replaced the run, or a person cancelled it.',
+    'Setup: the job failed before its own work ran. Flaky: the same test, or the same named step, failed on two or more pull requests. Cancelled: a newer push replaced the run, a matrix stopped it when another of its jobs failed, a concurrency group cancelled it, or a person did.',
   jobs: 'Jobs',
   job: 'Job',
   finished: 'Finished',
