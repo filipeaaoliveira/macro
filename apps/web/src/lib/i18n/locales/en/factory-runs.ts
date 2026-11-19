@@ -114,6 +114,7 @@ export default {
   checksVerifiedOn: 'Run on pushed commit {{commit}}',
   checksReported: 'Reported by the agent',
   checkExited: '{{check}} exited {{code}}',
+  setupExited: 'setup {{command}} exited {{code}}',
   cancelRun: 'Cancel run',
   cancelTitle: 'Cancel this run?',
   cancelBody:
