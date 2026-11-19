@@ -445,7 +445,10 @@ async fn a_run_that_ended_for_infrastructure_is_not_judged() {
         Arc::new(definition()),
     );
 
-    scoring.score_run(lost, false).await.expect("nothing to judge");
+    scoring
+        .score_run(lost, false)
+        .await
+        .expect("nothing to judge");
 
     assert!(
         !repo
@@ -742,7 +745,14 @@ async fn a_cancelled_trial_keeps_a_zero_score_and_is_not_judged() {
 async fn a_trial_that_ended_for_infrastructure_keeps_no_score_and_is_not_judged() {
     let repo = FakeRepo::default();
     let session = Uuid::from_u128(7);
-    let trial_run = ended_run(&repo, "benchmark", RunOutcome::Infrastructure, "done", session).await;
+    let trial_run = ended_run(
+        &repo,
+        "benchmark",
+        RunOutcome::Infrastructure,
+        "done",
+        session,
+    )
+    .await;
     let suite_id = Uuid::from_u128(600);
     let configuration = [(role("writer"), agent("backup"))].into_iter().collect();
     repo.insert_suite(&NewSuite {

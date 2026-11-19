@@ -12,7 +12,9 @@ use crate::domain::board::{BoardCursor, BoardQuery, BoardState, RunBoardReposito
 use crate::domain::evaluation::BENCHMARK_FLOW;
 use crate::domain::flaws::{FlawMarking, FlawRepository};
 use crate::domain::main_hold::MainHoldRepository;
-use crate::domain::models::{FlawMarker, KeptFlow, NewRun, Repository, RunId, RunInsert, RunOutcome};
+use crate::domain::models::{
+    FlawMarker, KeptFlow, NewRun, Repository, RunId, RunInsert, RunOutcome,
+};
 use crate::domain::ports::RunRepository;
 use crate::domain::standing_rules::RunRules;
 use crate::outbound::pg_run_repository::PgRunRepository;
@@ -646,11 +648,12 @@ async fn a_benchmark_trial_is_not_on_the_board(pool: PgPool) {
         },
     )
     .await;
-    repo.end_run(ended, RunOutcome::Success)
-        .await
-        .expect("end");
+    repo.end_run(ended, RunOutcome::Success).await.expect("end");
 
-    assert_eq!(read(&repo, &query(None)).await, [(own, BoardState::Running)]);
+    assert_eq!(
+        read(&repo, &query(None)).await,
+        [(own, BoardState::Running)]
+    );
     let running = BoardQuery {
         state: Some(BoardState::Running),
         ..query(None)

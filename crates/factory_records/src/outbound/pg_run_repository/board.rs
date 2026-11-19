@@ -8,8 +8,8 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use super::{PgRunRepository, PgRunRepositoryErr, RunRow};
-use crate::domain::evaluation::BENCHMARK_FLOW;
 use crate::domain::board::{BoardQuery, BoardRun, BoardState, RunBoardRepository, search_pattern};
+use crate::domain::evaluation::BENCHMARK_FLOW;
 use crate::domain::models::Run;
 
 /// A Run row with where the board finds it.
