@@ -922,6 +922,56 @@ async fn a_run_without_a_task_tells_and_closes_its_lighter_notices() {
     }
 }
 
+/// The owner's answer in the stand-in's window on a Run without a task
+/// closes the notice that the stand-in answered, as on a Run on a task,
+/// and no waiting notice, which the Gate never sent while it stood.
+#[tokio::test]
+async fn an_answer_in_the_window_of_a_run_without_a_task_closes_its_notice() {
+    let repo = FakeRepo::default();
+    let run_id = run_without_task(&repo, rules(false)).await;
+    let plan = StepKey { run_id, seq: 1 };
+    gate_at(&repo, plan, "plan", "done", &["approve", "revise"]).await;
+    repo.stand_in(
+        plan,
+        &StandInAnswer {
+            answer: outcome("approve"),
+            reason: "The plan matches the request.".to_string(),
+            confidence: 95,
+            until: Utc::now() + TimeDelta::minutes(10),
+        },
+    )
+    .await
+    .expect("stand in");
+    let notifier = FakeNotifier::default();
+    let steps = service(
+        &repo,
+        &FakeExecutor::default(),
+        &notifier,
+        &FakeTaskNotes::default(),
+    );
+
+    steps
+        .answer_gate(GateAnswered {
+            key: plan,
+            answer: AnswerGate {
+                seq: 1,
+                answer: outcome("revise"),
+                note: None,
+                user_id: julia(),
+                approved_control_files: None,
+                agent_session: None,
+                standing: None,
+            },
+        })
+        .await
+        .expect("answer");
+
+    assert_eq!(
+        *notifier.done.lock().expect("done"),
+        [stand_in_id(run_id, 1)]
+    );
+}
+
 /// A Run on a task closes, once it ends, the notify-only notice of an
 /// entry its Flow gives a notify-only Gate, and of no other entry.
 #[tokio::test]
