@@ -1257,7 +1257,7 @@ where
         acting: Option<ActingAgent>,
     ) -> Result<RunDetail, FactoryError> {
         self.owned_run(actor, id).await?;
-        let agents = self.kept_agents(id).await?;
+        let agents = self.acting_agents(id, acting).await?;
         let linked_by = self
             .standing_actor(actor, agents.as_ref(), StandingAct::Link, acting)
             .await?;
@@ -1743,7 +1743,7 @@ where
         acting: Option<ActingAgent>,
     ) -> Result<(), FactoryError> {
         let run = self.owned_run(actor, id).await?;
-        let agents = self.kept_agents(id).await?;
+        let agents = self.acting_agents(id, acting).await?;
         let cancelled_by = self
             .standing_actor(actor, agents.as_ref(), StandingAct::Cancel, acting)
             .await?;

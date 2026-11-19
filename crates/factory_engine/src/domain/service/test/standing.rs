@@ -706,3 +706,41 @@ async fn a_sessionless_bot_takes_a_standing_role_that_allows_the_act() {
         ]
     );
 }
+
+/// The owner in person cancels and links a Run whatever Agents it kept:
+/// they are read only for an agent's act, so Agents that no longer read
+/// stop no one but an agent.
+#[tokio::test]
+async fn the_owner_in_person_acts_whatever_agents_the_run_kept() {
+    let repo = FakeRepo::default();
+    let workflows = FakeWorkflows::default();
+    let service = code_service(&repo, &workflows, &FakeGithub::default());
+    let task = Uuid::now_v7();
+    repo.tasks.lock().expect("tasks").insert(task);
+    let run_id = waiting_run(
+        &repo,
+        Some(json!({ "agents": "no longer reads" })),
+        "plan",
+        "done",
+        &["approve"],
+    )
+    .await;
+
+    service
+        .link_task(&julia(), run_id, task, None)
+        .await
+        .expect("the owner links in person");
+    service
+        .cancel_run(&julia(), run_id, None)
+        .await
+        .expect("the owner cancels in person");
+    let agent = service
+        .cancel_run(
+            &julia(),
+            run_id,
+            Some(ActingAgent::Bot(BotId::new_from_uuid(PRIMARY_BOT))),
+        )
+        .await;
+
+    assert!(matches!(agent, Err(FactoryError::Internal(_))), "{agent:?}");
+}

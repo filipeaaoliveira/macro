@@ -58,6 +58,20 @@ where
         Ok(Some(agents))
     }
 
+    /// The Agents the Run `run_id` kept, for Standing Roles to check the
+    /// agent `acting`: read only when an agent acts, so the person in
+    /// person and an internal caller act whatever the Run kept.
+    pub(super) async fn acting_agents(
+        &self,
+        run_id: RunId,
+        acting: Option<ActingAgent>,
+    ) -> Result<Option<AgentDefinition>, FactoryError> {
+        match acting {
+            Some(_) => self.kept_agents(run_id).await,
+            None => Ok(None),
+        }
+    }
+
     /// Who does `act` for `actor` as the agent `acting`, when a Standing
     /// Role of `agents` lets its bot: none when no agent acts (the person,
     /// an internal caller, or a program signed only for the person), or
