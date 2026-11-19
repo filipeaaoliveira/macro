@@ -1478,15 +1478,19 @@ triggers:
   run; the factory takes the routine from the credential the scheduler
   signed for it (`agent_correlation::context::current_routine`, never the
   body) and fires the Automation of that routine only for its creator.
-  The schedule, an event, a person and a webhook (which carries no login)
-  fire it as its creator, unchecked by Standing Roles. The routine is made
-  as an `Agent` routine, so the scheduler signs its code step for the Macro
-  routine bot (`MACRO_NEW_BOT_ID`) and the routine: on the Automation's own
-  routine that bot is the routine firing it as its creator
-  (`is_own_routine_run`). A routine run for any other bot or in an agent
-  session fires it as that agent (`program_agent`): under a Definition with Standing Roles
-  its bot must fill one that allows `start`, else the firing is skipped as
-  `refused`; the Run keeps the agent as its start. A
+  A person firing it by hand in person and a webhook (which carries no
+  login) fire it as its creator, unchecked by Standing Roles. A routine run
+  for a bot or in an agent session fires it as that agent
+  (`program_agent`): under a Definition with Standing Roles its bot must
+  fill one that allows `start`, else the firing is skipped as `refused`;
+  the Run keeps the agent as its start. That includes the schedule and
+  events: the routine is made as an `Agent` routine, so the scheduler signs
+  its code step for the Macro routine bot (`MACRO_NEW_BOT_ID`,
+  `00000000-0000-0000-0000-00000000a2a2`), and a Run Now or edited routine
+  code carries the same claims, so they are not told apart. Under Standing
+  Roles, to keep schedule and event Automations firing, give that bot an
+  Agent in a Standing Role that allows `start`. Known limit, with a
+  follow-up: let only the scheduler's own firing act as the creator. A
   routine the scheduler refuses (an invalid cron, event routines the
   creator may not have, no linked GitHub account) takes its Automation
   with it, and the refusal says why (400). Only people's actions start
@@ -1693,7 +1697,8 @@ to pending (`closed`); each pauses the next as above. A cancel is in person only
 from the owner in their own signed-in session, from an account that is not
 an agent's (`factory_run.cancelled_in_person`, kept by `cancel_run` before
 the cancel is sent, before the Run's end; once a person's cancel is kept, a
-later one by an agent does not undo it); a cancel by
+later one by an agent does not undo it, so an agent's cancel sent long after
+still leaves the person's earlier rejection standing); a cancel by
 an agent, a bot under a Standing Role, an internal caller or a program only
 means the Run did not finish, so its failures are pending again. Dismissed failures
 never start another Run; new failures, of the same Scorer too, count. A pull request a person

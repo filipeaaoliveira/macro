@@ -139,6 +139,16 @@ which Standing Role.
 An empty section, `"standing": {}`, allows no agent any of these acts;
 leave the section out to allow them all. `"standing": null` is refused.
 
+Schedule and event Automations fire through a Macro routine that runs for
+the Macro routine bot (`00000000-0000-0000-0000-00000000a2a2`), so with a
+`standing` section they start a Run only when that bot is the `bot` of an
+Agent in a Standing Role that allows `start`; otherwise each firing is
+skipped as refused. To keep them firing, add that Agent, for example
+`"routine": { "bot": "00000000-0000-0000-0000-00000000a2a2" }` in `agents`
+and `"scheduler": { "acts": ["start"], "agents": ["routine"] }` in
+`standing`. This is a known limit: a later change is to let only the
+scheduler's own firing start a Run as the Automation's creator.
+
 The check refuses an act not in that list, any act that names a merge, a
 Standing Role with no act or no Agent, an Agent `agents` does not define,
 and a name given twice.
