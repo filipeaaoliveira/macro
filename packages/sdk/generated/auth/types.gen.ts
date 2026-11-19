@@ -3465,7 +3465,7 @@ export type MergeGithubPullRequestErrors = {
      */
     404: ErrorResponse;
     /**
-     * The pull request is not mergeable as it stands, or its head moved
+     * The pull request is not mergeable as it stands, its head moved, or a factory Run that has not ended opened it
      */
     409: ErrorResponse;
     422: ErrorResponse;

@@ -353,6 +353,11 @@ export class Sdk extends HeyApiClient {
      * Merges a GitHub pull request as the authenticated user, with their own
      * GitHub grant. GitHub applies the user's permissions and the repository's
      * branch protections; a refusal is returned with GitHub's message.
+     *
+     * A pull request a factory Run opened and that Run has not ended is never
+     * merged here, whoever asks: the Run merges it through its merge Gate. The
+     * refusal names the Run to a caller who sees the pull request on GitHub,
+     * and answers anyone else as GitHub answers a pull request it hides.
      */
     public mergeGithubPullRequest<ThrowOnError extends boolean = false>(options: Options<MergeGithubPullRequestData, ThrowOnError>): RequestResult<MergeGithubPullRequestResponses, MergeGithubPullRequestErrors, ThrowOnError> {
         return (options.client ?? this.client).post<MergeGithubPullRequestResponses, MergeGithubPullRequestErrors, ThrowOnError>({
