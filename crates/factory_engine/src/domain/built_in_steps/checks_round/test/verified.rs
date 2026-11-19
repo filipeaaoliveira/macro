@@ -566,3 +566,143 @@ async fn a_step_verified_before_never_falls_back_to_the_agent() {
     assert_eq!(rounds.len(), 2);
     assert!(rounds[1].end.is_none());
 }
+
+/// The merge base GitHub gives of the Run's base and the pushed commit.
+const BASE: &str = "3333333333333333333333333333333333333333";
+
+/// What the agent's machine was sent: the commands that set the round's
+/// worktree up, and those that ran its checks, whole.
+fn sent(agent: &ScriptedAgent) -> (Vec<String>, Vec<String>) {
+    let set_ups = agent.set_ups.lock().expect("set ups").clone();
+    let checks = agent
+        .commands
+        .lock()
+        .expect("commands")
+        .iter()
+        .map(|command| command.command.command.clone())
+        .collect();
+    (set_ups, checks)
+}
+
+/// Each check runs told the change: `MACRO_CHECK_BASE`, the merge base of
+/// the Run's base branch and the pushed commit, and `MACRO_CHECK_CHANGED`,
+/// the file beside the worktree that setting it up wrote, listing the
+/// paths GitHub compared under a first line that says the list is
+/// complete. Both are exported in the check's shell, outside the check's
+/// own command, which the round keeps as written.
+#[tokio::test]
+async fn each_check_is_told_the_change_s_base_and_paths() {
+    let agent = verifying(vec![ran(0, "12 passed"), ran(0, "ok")], Vec::new());
+    let github = github(Some(CHECKS), Some(BOTH));
+    github.state().check_base = Some(BASE.to_string());
+    let repo = FakeRepo::default();
+    let input = input();
+
+    let report = run_in_session(&agent, &github, &repo, input)
+        .await
+        .expect("write");
+
+    assert_eq!(report.outcome, Outcome::done(), "{}", report.output);
+    assert_eq!(
+        github.state().compared_changes,
+        [("main".to_string(), HEAD.to_string())]
+    );
+    let (set_ups, checks) = sent(&agent);
+    assert_eq!(set_ups.len(), 1);
+    assert!(
+        set_ups[0].contains(&format!("check_base='{BASE}'\n")),
+        "{}",
+        set_ups[0]
+    );
+    assert!(
+        set_ups[0].contains(
+            "printf '%s\\n' 'complete' 'apps/web/src/main.ts' 'crates/app/src/lib.rs' > \"$worktree.changed.new\" && mv -f \"$worktree.changed.new\" \"$worktree.changed\""
+        ),
+        "{}",
+        set_ups[0]
+    );
+    assert_eq!(checks.len(), 2);
+    for check in &checks {
+        assert!(
+            check.contains(&format!(
+                "\nexport MACRO_CHECK_BASE='{BASE}' MACRO_CHECK_CHANGED=\"$worktree.changed\"\ntimeout "
+            )),
+            "{check}"
+        );
+    }
+    assert_eq!(
+        commands(&agent),
+        ["bun run check", "cargo test -p app"],
+        "the check's own command is unchanged"
+    );
+}
+
+/// A Benchmark trial's Run is compared against the commit it is pinned
+/// to, not its base branch's head.
+#[tokio::test]
+async fn a_pinned_run_is_compared_against_its_commit() {
+    let agent = verifying(vec![ran(0, "12 passed"), ran(0, "ok")], Vec::new());
+    let github = github(Some(CHECKS), Some(BOTH));
+    let repo = FakeRepo::default();
+    let input = StepInput {
+        base_commit: Some(BASE),
+        ..input()
+    };
+
+    run_in_session(&agent, &github, &repo, input)
+        .await
+        .expect("write");
+
+    assert_eq!(
+        github.state().compared_changes,
+        [(BASE.to_string(), HEAD.to_string())]
+    );
+}
+
+/// A list GitHub gave in part says so on the file's first line.
+#[tokio::test]
+async fn a_list_github_gave_in_part_says_so() {
+    let agent = verifying(vec![ran(0, "12 passed"), ran(0, "ok")], Vec::new());
+    let github = github(Some(CHECKS), None);
+    github.state().check_base = Some(BASE.to_string());
+    let repo = FakeRepo::default();
+
+    run_in_session(&agent, &github, &repo, input())
+        .await
+        .expect("write");
+
+    let (set_ups, _) = sent(&agent);
+    assert!(
+        set_ups[0].contains("printf '%s\\n' 'partial' > \"$worktree.changed.new\""),
+        "{}",
+        set_ups[0]
+    );
+}
+
+/// A comparison that fails holds no check up: the checks run, told the
+/// list is unavailable, with an empty base.
+#[tokio::test]
+async fn a_failed_comparison_runs_the_checks_told_the_list_is_unavailable() {
+    let agent = verifying(vec![ran(0, "12 passed")], Vec::new());
+    let github = github(Some(CHECKS), Some(&["apps/web/src/main.ts"]));
+    github.state().compare_fails = true;
+    let repo = FakeRepo::default();
+
+    let report = run_in_session(&agent, &github, &repo, input())
+        .await
+        .expect("write");
+
+    assert_eq!(report.outcome, Outcome::done(), "{}", report.output);
+    let (set_ups, checks) = sent(&agent);
+    assert!(set_ups[0].contains("check_base=''\n"), "{}", set_ups[0]);
+    assert!(
+        set_ups[0].contains("printf '%s\\n' 'unavailable' > "),
+        "{}",
+        set_ups[0]
+    );
+    assert!(
+        checks[0].contains("export MACRO_CHECK_BASE='' MACRO_CHECK_CHANGED="),
+        "{}",
+        checks[0]
+    );
+}

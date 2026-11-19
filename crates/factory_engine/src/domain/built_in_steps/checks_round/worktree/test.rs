@@ -103,6 +103,22 @@ impl Machine {
         self.bash_with_path(script, &path)
     }
 
+    /// Run `script` with bash from `dir`, as the session runs it there.
+    fn bash_in(&self, dir: &Path, script: &str) -> Output {
+        let path = format!(
+            "{}:{}",
+            self.root.join("bin").display(),
+            std::env::var_os("PATH").unwrap().to_string_lossy()
+        );
+        Command::new("/bin/bash")
+            .args(["--noprofile", "--norc", "-c", script])
+            .current_dir(dir)
+            .env("XDG_CACHE_HOME", self.cache())
+            .env("PATH", path)
+            .output()
+            .unwrap()
+    }
+
     fn bash_with_path(&self, script: &str, path: &str) -> Output {
         Command::new("/bin/bash")
             .args(["--noprofile", "--norc", "-c", script])
@@ -140,10 +156,20 @@ impl Machine {
     }
 
     fn prepare(&self, commit: &str) -> Output {
-        let output = self.bash(&prepare_command(ROUND, commit));
+        self.prepare_told(commit, &unknown())
+    }
+
+    /// Set the worktree up at `commit` for checks told `context`.
+    fn prepare_told(&self, commit: &str, context: &CheckContext) -> Output {
+        let output = self.bash(&prepare_command(ROUND, commit, context));
         assert!(output.status.success(), "{output:?}");
         assert!(prepared(&text(&output.stdout), commit));
         output
+    }
+
+    /// The file listing the changed paths, beside the worktree.
+    fn changed(&self) -> PathBuf {
+        PathBuf::from(format!("{}.changed", self.worktree().display()))
     }
 
     /// Hold the worktree's lock as a run still going would, for `seconds`,
@@ -204,6 +230,20 @@ fn has(tool: &str) -> bool {
         .success()
 }
 
+/// What checks are told when the comparison failed and no base is known.
+fn unknown() -> CheckContext {
+    CheckContext::unavailable(None)
+}
+
+/// What checks are told of a comparison against `base` that lists `paths`.
+fn told(base: &str, paths: &[&str], complete: bool) -> CheckContext {
+    CheckContext::compared(crate::domain::check_context::ComparedChanges {
+        merge_base: base.to_string(),
+        paths: paths.iter().map(|path| path.to_string()).collect(),
+        complete,
+    })
+}
+
 fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
@@ -223,6 +263,7 @@ fn checks_run_on_the_pushed_commit_whatever_the_checkout_holds() {
         "cat a.txt; git status --porcelain",
         5,
         5,
+        None,
     ));
     assert!(checked.status.success(), "{checked:?}");
     assert_eq!(text(&checked.stdout), "pushed\n");
@@ -293,7 +334,7 @@ fn a_commit_that_cannot_be_fetched_sets_nothing_up() {
     let machine = Machine::new("missing");
     let missing = "dddddddddddddddddddddddddddddddddddddddd";
 
-    let failed = machine.bash(&prepare_command(ROUND, missing));
+    let failed = machine.bash(&prepare_command(ROUND, missing, &unknown()));
 
     assert_eq!(failed.status.code(), Some(1));
     assert!(!prepared(&text(&failed.stdout), missing));
@@ -308,7 +349,7 @@ fn a_run_that_finds_the_lock_held_gives_up() {
     machine.prepare(&machine.pushed);
     let holder = machine.hold_lock(30);
 
-    let busy = machine.bash(&check_command(ROUND, "echo ran", 5, 1));
+    let busy = machine.bash(&check_command(ROUND, "echo ran", 5, 1, None));
     stop(holder);
 
     assert_eq!(busy.status.code(), Some(LOCK_BUSY_STATUS));
@@ -324,7 +365,7 @@ fn waiting_for_the_lock_is_not_the_check_s_time() {
     machine.prepare(&machine.pushed);
     machine.hold_lock(2);
 
-    let ran = machine.bash(&check_command(ROUND, "echo ran", 1, 10));
+    let ran = machine.bash(&check_command(ROUND, "echo ran", 1, 10, None));
 
     assert!(ran.status.success(), "{ran:?}");
     assert_eq!(text(&ran.stdout), "ran\n");
@@ -345,7 +386,7 @@ fn a_directory_lock_whose_holder_died_is_taken() {
     {}
 
     let ran = machine.bash_with_path(
-        &check_command(ROUND, "echo ran", 5, 1),
+        &check_command(ROUND, "echo ran", 5, 1, None),
         &machine.path_without_flock(),
     );
 
@@ -353,4 +394,136 @@ fn a_directory_lock_whose_holder_died_is_taken() {
     assert_eq!(text(&ran.stdout), "ran\n");
     assert!(text(&ran.stderr).contains(NO_FLOCK));
     assert!(!Path::new(&format!("{}.lock.d", machine.worktree().display())).exists());
+}
+
+/// A check runs with the change's base and the file listing its paths in
+/// its environment: the file is outside the worktree's tree, so git sees
+/// nothing new there, holds each path on a line of its own after the line
+/// that says the list is complete, quotes and spaces kept, and the base is
+/// a commit git reads there. Removing the worktree removes the file.
+#[test]
+fn a_check_is_told_the_change_s_base_and_paths() {
+    let machine = Machine::new("told");
+    let context = told(
+        &machine.pushed,
+        &["a.txt", "docs/it's here.md", "$(touch pwned)"],
+        true,
+    );
+    machine.prepare_told(&machine.later, &context);
+
+    let checked = machine.bash(&check_command(
+        ROUND,
+        "echo \"$MACRO_CHECK_BASE\"; echo \"$MACRO_CHECK_CHANGED\"; cat \"$MACRO_CHECK_CHANGED\"; git status --porcelain --untracked-files=all; git diff --name-only \"$MACRO_CHECK_BASE\" HEAD",
+        5,
+        5,
+        Some(&context),
+    ));
+
+    assert!(checked.status.success(), "{checked:?}");
+    assert_eq!(
+        text(&checked.stdout),
+        format!(
+            "{}\n{}\ncomplete\na.txt\ndocs/it's here.md\n$(touch pwned)\na.txt\n",
+            machine.pushed,
+            machine.changed().display()
+        )
+    );
+    assert!(!machine.worktree().join("pwned").exists());
+    assert!(!machine.repo().join("pwned").exists());
+
+    let removed = machine.bash(&remove_command(ROUND));
+    assert!(removed.status.success(), "{removed:?}");
+    assert!(!machine.changed().exists());
+}
+
+/// A list GitHub gave in part says so on its first line; one the
+/// comparison could not give says it is unavailable, with no base. A
+/// later attempt writes the file afresh.
+#[test]
+fn a_partial_or_unavailable_list_says_so_on_its_first_line() {
+    let machine = Machine::new("partial");
+    machine.prepare_told(&machine.pushed, &told(&machine.pushed, &["a.txt"], false));
+    assert_eq!(
+        std::fs::read_to_string(machine.changed()).unwrap(),
+        "partial\na.txt\n"
+    );
+
+    machine.prepare_told(&machine.pushed, &unknown());
+    assert_eq!(
+        std::fs::read_to_string(machine.changed()).unwrap(),
+        "unavailable\n"
+    );
+    let checked = machine.bash(&check_command(
+        ROUND,
+        "echo \"[$MACRO_CHECK_BASE]\"",
+        5,
+        5,
+        Some(&unknown()),
+    ));
+    assert_eq!(text(&checked.stdout), "[]\n");
+}
+
+/// A setup command is not told the change: only checks are.
+#[test]
+fn a_command_told_nothing_runs_without_the_change_s_variables() {
+    let machine = Machine::new("untold");
+    machine.prepare_told(&machine.later, &told(&machine.pushed, &["a.txt"], true));
+
+    let checked = machine.bash(&check_command(
+        ROUND,
+        "echo \"[${MACRO_CHECK_BASE-unset}${MACRO_CHECK_CHANGED-unset}]\"",
+        5,
+        5,
+        None,
+    ));
+
+    assert_eq!(text(&checked.stdout), "[unsetunset]\n");
+}
+
+/// In a shallow clone that lacks the base, the base is fetched, at depth
+/// 1, so a check can diff against it.
+#[test]
+fn a_shallow_clone_fetches_the_base() {
+    let machine = Machine::new("shallow");
+    let clone = machine.root.join("clone");
+    let cloned = Command::new("git")
+        .args(["clone", "--quiet", "--depth=1", "--no-local"])
+        .arg(format!("file://{}", machine.repo().display()))
+        .arg(&clone)
+        .output()
+        .unwrap();
+    assert!(cloned.status.success(), "{cloned:?}");
+    let context = told(&machine.pushed, &["a.txt"], true);
+
+    let set_up = machine.bash_in(&clone, &prepare_command(ROUND, &machine.later, &context));
+    assert!(set_up.status.success(), "{set_up:?}");
+
+    let checked = machine.bash_in(
+        &clone,
+        &check_command(
+            ROUND,
+            "git diff --name-only \"$MACRO_CHECK_BASE\" HEAD",
+            5,
+            5,
+            Some(&context),
+        ),
+    );
+    assert!(checked.status.success(), "{checked:?}");
+    assert_eq!(text(&checked.stdout), "a.txt\n");
+}
+
+/// A base the repository lacks and cannot fetch is said, and the worktree
+/// is set up all the same: the list of paths is still there.
+#[test]
+fn a_base_that_cannot_be_fetched_still_sets_the_worktree_up() {
+    let machine = Machine::new("no-base");
+    let missing = "dddddddddddddddddddddddddddddddddddddddd";
+
+    let set_up = machine.prepare_told(&machine.pushed, &told(missing, &["a.txt"], true));
+
+    assert!(text(&set_up.stderr).contains("could not fetch the base"));
+    assert_eq!(
+        std::fs::read_to_string(machine.changed()).unwrap(),
+        "complete\na.txt\n"
+    );
 }

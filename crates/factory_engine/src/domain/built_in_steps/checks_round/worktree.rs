@@ -13,7 +13,9 @@
 //! round left behind for four hours are removed. Each check holds the
 //! worktree's lock for its run, waiting a bounded time for a run still
 //! going (a retry's) before its own timeout starts, never around a read of
-//! the repository.
+//! the repository. Beside the worktree, outside the repository's tree, a
+//! file lists the paths the change touched, which each check is told of
+//! with the change's base ([`crate::domain::check_context`]).
 
 #[cfg(test)]
 mod test;
@@ -22,6 +24,8 @@ use std::time::Duration;
 
 use uuid::Uuid;
 
+pub(super) use crate::domain::check_context::is_commit;
+use crate::domain::check_context::{BASE_VARIABLE, CHANGED_VARIABLE, CheckContext};
 use crate::domain::shell_lock::take_lock;
 
 pub(super) use crate::domain::shell_lock::{LOCK_BUSY, LOCK_BUSY_STATUS, LOCK_WAIT_SECS, NO_FLOCK};
@@ -62,8 +66,12 @@ fetch_commit() { env -u GIT_CONFIG_GLOBAL \"$git_bin\" -c core.fsmonitor= -c cor
 /// command runs in: remove worktrees left behind for four hours, fetch the
 /// commit when the repository lacks it (only its own depth in a shallow
 /// clone), keep a worktree an earlier attempt left at the same commit
-/// (reset to it), and replace one at another commit.
-pub(super) fn prepare_command(round: Uuid, commit: &str) -> String {
+/// (reset to it), and replace one at another commit. Then, for the checks,
+/// fetch `context`'s base the same way when the repository lacks it (a
+/// fetch that fails is said and changes nothing else), and write the file
+/// listing the changed paths beside the worktree, outside the repository's
+/// tree ([`changed_file_command`]).
+pub(super) fn prepare_command(round: Uuid, commit: &str, context: &CheckContext) -> String {
     format!(
         "{GIT}{BASE}commit={commit}
 worktree=\"$base/{round}\"
@@ -94,8 +102,41 @@ if g -C \"$worktree\" ls-files -v | grep -qE '^([a-z]|S) '; then
   echo 'macro-check: the worktree has entries git is told to skip' >&2
   exit 1
 fi
+check_base={check_base}
+if [ -n \"$check_base\" ] && ! g cat-file -e \"$check_base^{{commit}}\" 2>/dev/null; then
+  if [ \"$(g rev-parse --is-shallow-repository)\" = true ]; then
+    ( commit=$check_base; fetch_commit --depth=1 )
+  else
+    ( commit=$check_base; fetch_commit )
+  fi || echo \"macro-check: could not fetch the base $check_base\" >&2
+fi
+{changed}
 echo \"{READY} $commit\"",
         commit = shell_quote(commit),
+        check_base = shell_quote(&context.base),
+        changed = changed_file_command(context),
+    )
+}
+
+/// Write `context`'s list of changed paths to the file beside the
+/// worktree (`$worktree.changed`), through a file of its own moved into
+/// place, so a check never reads half of it.
+fn changed_file_command(context: &CheckContext) -> String {
+    let lines: Vec<String> = context.lines().map(shell_quote).collect();
+    format!(
+        "printf '%s\\n' {} > \"$worktree.changed.new\" && mv -f \"$worktree.changed.new\" \"$worktree.changed\" || {{ echo 'macro-check: the list of changed paths could not be written' >&2; exit 1; }}",
+        lines.join(" ")
+    )
+}
+
+/// What a check is told of the change, `context`, as shell that exports
+/// it in the check command's own shell, before the check and the
+/// repository's setup `env` run: [`BASE_VARIABLE`], and
+/// [`CHANGED_VARIABLE`] naming the file [`prepare_command`] wrote.
+fn context_exports(context: &CheckContext) -> String {
+    format!(
+        "export {BASE_VARIABLE}={} {CHANGED_VARIABLE}=\"$worktree.changed\"\n",
+        shell_quote(&context.base)
     )
 }
 
@@ -112,41 +153,36 @@ pub(super) fn prepared(stdout: &str, commit: &str) -> bool {
 /// hold. The lock is waited for at most `lock_wait_secs` before the check's
 /// timeout starts; a run that waits that long gives up with
 /// [`LOCK_BUSY_STATUS`] and [`LOCK_BUSY`]. The check does not inherit the
-/// lock, so nothing it leaves running holds it.
+/// lock, so nothing it leaves running holds it. A check, told the change's
+/// `context`, runs with it exported ([`context_exports`]); a setup command,
+/// told none, without.
 pub(super) fn check_command(
     round: Uuid,
     run: &str,
     timeout_secs: u64,
     lock_wait_secs: u64,
+    context: Option<&CheckContext>,
 ) -> String {
     format!(
         "{BASE}worktree=\"$base/{round}\"
 lock=\"$worktree.lock\"
 {take_lock}cd \"$worktree\" || exit 1
-timeout --kill-after=10 {timeout_secs} bash --noprofile --norc -c {run} 9>&-",
+{exports}timeout --kill-after=10 {timeout_secs} bash --noprofile --norc -c {run} 9>&-",
         run = shell_quote(run),
         take_lock = take_lock(lock_wait_secs),
+        exports = context.map(context_exports).unwrap_or_default(),
     )
 }
 
-/// Remove the round `round`'s worktree, and its lock, from the checkout the
-/// command runs in.
+/// Remove the round `round`'s worktree, its lock and its list of changed
+/// paths, from the checkout the command runs in.
 pub(super) fn remove_command(round: Uuid) -> String {
     format!(
         "{GIT}{BASE}worktree=\"$base/{round}\"
 g worktree remove --force \"$worktree\" 2>/dev/null || rm -rf \"$worktree\"
 g worktree prune
-rm -rf \"$worktree.lock\" \"$worktree.lock.d\""
+rm -rf \"$worktree.lock\" \"$worktree.lock.d\" \"$worktree.changed\" \"$worktree.changed.new\""
     )
-}
-
-/// Whether `commit` names a commit as GitHub gives it: 40 or 64 lowercase
-/// hex digits.
-pub(super) fn is_commit(commit: &str) -> bool {
-    matches!(commit.len(), 40 | 64)
-        && commit
-            .bytes()
-            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
 }
 
 /// `text` as one single-quoted shell word.
