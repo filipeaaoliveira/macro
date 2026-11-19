@@ -670,7 +670,9 @@ command starts only with its
 whole timeout left in the attempt (`SESSION_DEADLINE`, or the time the Step
 gives): otherwise the attempt fails, and its retry goes on with the commands
 still to run. A command that fails ends the Step `failed`, with the
-command, its exit code and the end of its output (4 KiB) as its output, and
+command, its exit code and the end of its output (4 KiB; each line that
+looks like a secret left out, and a private key's block whole, to its
+`-----END` or the output's end) as its output, and
 no agent turn spent; so does a runtime that runs no command (a workspace
 macrod shares, a paired machine, Cursor, Codex, `LocalAgent`), saying the
 setup cannot run there: the Step never goes on without it. A reviewer's

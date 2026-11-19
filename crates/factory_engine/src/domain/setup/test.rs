@@ -1,6 +1,6 @@
 use agent_session::domain::session_command::SessionCommandOutput;
 
-use super::{REDACTED, RepositorySetup, SetupFileError, output_tail};
+use super::{REDACTED, RepositorySetup, SetupFileError, output_tail, redacted};
 use crate::domain::shell_lock::{LOCK_BUSY, LOCK_BUSY_STATUS};
 
 const SETUP: &str = r#"{
@@ -283,4 +283,32 @@ fn a_session_setup_command_waits_for_the_checkout_s_lock() {
     assert_eq!(busy.status.code(), Some(LOCK_BUSY_STATUS), "{stderr}");
     assert!(stderr.contains(LOCK_BUSY), "{stderr}");
     assert!(!String::from_utf8_lossy(&busy.stdout).contains("ran"));
+}
+
+/// A private key's block is left out whole, its body too, whose lines
+/// match no marker of their own; what follows its end is kept, and a block
+/// that never ends is left out to the end of the output.
+#[test]
+fn a_private_key_s_whole_block_is_left_out() {
+    let body = "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7";
+    let text = format!(
+        "generating\n-----BEGIN OPENSSH PRIVATE KEY-----\n{body}\n{body}\n-----END OPENSSH PRIVATE KEY-----\ndone\n-----BEGIN RSA PRIVATE KEY-----\n{body}"
+    );
+
+    let kept = redacted(&text);
+
+    assert!(!kept.contains(body), "{kept}");
+    let lines: Vec<&str> = kept.split('\n').collect();
+    assert_eq!(lines[0], "generating");
+    assert!(lines[1..5].iter().all(|line| *line == REDACTED), "{kept}");
+    assert_eq!(lines[5], "done");
+    assert!(lines[6..].iter().all(|line| *line == REDACTED), "{kept}");
+}
+
+/// A certificate's block is public, and kept.
+#[test]
+fn a_certificate_s_block_is_kept() {
+    let text = "-----BEGIN CERTIFICATE-----\nMIIBszCCAVmgAwIBAgIU\n-----END CERTIFICATE-----";
+
+    assert_eq!(redacted(text), text);
 }

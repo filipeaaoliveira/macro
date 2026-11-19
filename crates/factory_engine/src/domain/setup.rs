@@ -298,12 +298,41 @@ pub fn output_tail(output: &SessionCommandOutput) -> String {
 }
 
 /// `text` with each line that looks like a secret (the Definition's check)
-/// replaced by [`REDACTED`].
+/// replaced by [`REDACTED`], and so is every line of a private key's block:
+/// from the line that opens it (`-----BEGIN … PRIVATE KEY-----`) through
+/// the one that ends it (`-----END`), or to the end of `text` when none
+/// does, since its body's lines match no marker of their own.
 pub fn redacted(text: &str) -> String {
+    let mut in_key = false;
     text.split('\n')
-        .map(|line| if secret_in(line).is_some() { REDACTED } else { line })
+        .map(|line| {
+            if in_key {
+                in_key = !line.contains(PEM_END);
+                return REDACTED;
+            }
+            if let Some(at) = private_key_opens(line) {
+                in_key = !line[at..].contains(PEM_END);
+                return REDACTED;
+            }
+            if secret_in(line).is_some() { REDACTED } else { line }
+        })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// What ends a key's block.
+const PEM_END: &str = "-----END";
+
+/// Where in `line` a private key's block opens, if it does.
+fn private_key_opens(line: &str) -> Option<usize> {
+    line.match_indices("-----BEGIN")
+        .map(|(at, _)| at)
+        .find(|&at| {
+            line[at..]
+                .split("-----")
+                .nth(1)
+                .is_some_and(|label| label.contains("PRIVATE KEY"))
+        })
 }
 
 /// Whether `name` is a shell variable's name the setup may set.
