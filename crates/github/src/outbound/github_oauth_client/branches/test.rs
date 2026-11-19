@@ -346,3 +346,53 @@ async fn merge_base_refuses_an_owner_or_repository_github_would_not_take() {
         );
     }
 }
+
+/// A commit's parents are read from the git database, in their order; a
+/// commit GitHub does not have has none, and an id that is not a full
+/// commit id is never sent.
+#[tokio::test]
+async fn a_commit_s_parents_are_read_in_their_order() {
+    let merge = "3333333333333333333333333333333333333333";
+    let (server, client) = answering(
+        "200 OK",
+        r#"{"sha":"3333333333333333333333333333333333333333","parents":[{"sha":"1111111111111111111111111111111111111111"},{"sha":"2222222222222222222222222222222222222222"}]}"#,
+    );
+    let parents = client
+        .commit_parents("token", "macro", "app", merge)
+        .await
+        .unwrap();
+    assert_eq!(
+        parents,
+        Some(vec![
+            "1111111111111111111111111111111111111111".to_string(),
+            "2222222222222222222222222222222222222222".to_string(),
+        ])
+    );
+    assert!(server.finish().starts_with(&format!(
+        "GET /repos/macro/app/git/commits/{merge} HTTP/1.1"
+    )));
+
+    let (missing, client) = answering("404 Not Found", r#"{"message":"Not Found"}"#);
+    assert_eq!(
+        client
+            .commit_parents("token", "macro", "app", merge)
+            .await
+            .unwrap(),
+        None
+    );
+    missing.finish();
+
+    let (_unused, client) = answering("200 OK", "{}");
+    assert_eq!(
+        client
+            .commit_parents("token", "macro", "app", "main")
+            .await
+            .unwrap(),
+        None
+    );
+    let client = GithubOauthImpl::with_api_base_url("http://127.0.0.1:9".to_string());
+    assert!(matches!(
+        client.commit_parents("token", "..", "app", merge).await,
+        Err(GithubError::Internal(_))
+    ));
+}

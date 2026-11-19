@@ -59,6 +59,11 @@ struct CompareMergeBase {
 }
 
 #[derive(serde::Deserialize)]
+struct GitCommit {
+    parents: Vec<BranchCommit>,
+}
+
+#[derive(serde::Deserialize)]
 struct CompareResponse {
     #[serde(default)]
     files: Option<Vec<CompareFile>>,
@@ -297,6 +302,50 @@ impl GithubOauthImpl {
             .await;
         match compared {
             Ok(compared) => Ok(Some(compared.merge_base_commit.sha)),
+            Err(GithubError::RepositoryUnavailable) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// The parents of the commit `sha`, a full commit id, in their order: a
+    /// merge commit's first is the branch merged into, the second the one
+    /// merged in. `None` when the repository has no such commit (GitHub
+    /// answers 404), and for an id that is not a full commit id. It reads
+    /// the git database, which lists no files, so the read stays small
+    /// whatever the commit changed. An owner or repository name GitHub would
+    /// not take is refused before any request.
+    #[tracing::instrument(skip(self, access_token), err)]
+    pub async fn commit_parents(
+        &self,
+        access_token: &str,
+        owner: &str,
+        repo: &str,
+        sha: &str,
+    ) -> Result<Option<Vec<String>>, GithubError> {
+        if !is_repository_part(owner) || !is_repository_part(repo) {
+            return Err(GithubError::Internal(anyhow::anyhow!(
+                "not a repository: {owner:?}/{repo:?}"
+            )));
+        }
+        if !is_commit_id(sha) {
+            return Ok(None);
+        }
+        let commit: Result<GitCommit, GithubError> = self
+            .read(
+                access_token,
+                &format!("/repos/{owner}/{repo}/git/commits/{sha}"),
+                &[],
+                "failed to read a commit",
+            )
+            .await;
+        match commit {
+            Ok(commit) => Ok(Some(
+                commit
+                    .parents
+                    .into_iter()
+                    .map(|parent| parent.sha)
+                    .collect(),
+            )),
             Err(GithubError::RepositoryUnavailable) => Ok(None),
             Err(error) => Err(error),
         }
