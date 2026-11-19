@@ -69,6 +69,16 @@ const RECENT_READ: u32 = 8;
 /// for one whose start was lost, and refused.
 pub const STARTING_STALE_AFTER: chrono::TimeDelta = chrono::TimeDelta::minutes(10);
 
+/// How long an open self-improvement Run's Run may keep no Step before it
+/// is taken for one whose workflow never started, and closed: as long as a
+/// Step's work may take in all, so a started workflow has kept its first.
+pub const NO_STEP_STALE_AFTER: chrono::TimeDelta = chrono::TimeDelta::hours(2);
+
+/// How long after its Run ended a self-improvement Run whose pull request
+/// cannot be read (its owner's GitHub access revoked, say) stays open
+/// before it is closed.
+pub const UNREAD_STALE_AFTER: chrono::TimeDelta = chrono::TimeDelta::days(7);
+
 /// The most characters of a failure's reason the request quotes.
 const REASON_CHARS: usize = 400;
 
@@ -382,9 +392,11 @@ where
 {
     /// How the open self-improvement Run `open` is settled now, if it is:
     /// merged once its Run succeeded or its pull request merged; closed
-    /// once its pull request closed, or its Run ended without one; refused
-    /// when it stayed starting too long. None while its Run goes on, or its
-    /// pull request is open.
+    /// once its pull request closed, its Run ended without one, its Run
+    /// kept no Step for [`NO_STEP_STALE_AFTER`], or its pull request stayed
+    /// unread [`UNREAD_STALE_AFTER`] after its Run ended; refused when it
+    /// stayed starting too long. None while its Run goes on, or its pull
+    /// request is open.
     async fn settlement(&self, open: &Improvement) -> Result<Option<Settlement>, StepError> {
         let Some(run_id) = open.run_id else {
             return Ok(match open.state {
@@ -402,6 +414,13 @@ where
             return Ok(Some(Settlement::Closed));
         };
         match facts.outcome {
+            // A Run kept, but whose workflow never started (its start
+            // failed, and whether it was kept could not be read), would
+            // hold its failures for good.
+            None if Utc::now() - open.created_at > NO_STEP_STALE_AFTER => {
+                let steps = self.repo.list_steps(run_id).await.map_err(internal)?;
+                return Ok(steps.is_empty().then_some(Settlement::Closed));
+            }
             None => return Ok(None),
             Some(RunOutcome::Success | RunOutcome::Flawed) => return Ok(Some(Settlement::Merged)),
             Some(_) => {}
@@ -424,7 +443,16 @@ where
             Ok(None) => Some(Settlement::Closed),
             Err(error) => {
                 tracing::warn!(?error, %run_id, "a self-improvement run's pull request was not read");
-                None
+                let ended_at = self
+                    .repo
+                    .get_run(run_id)
+                    .await
+                    .map_err(internal)?
+                    .and_then(|run| run.end)
+                    .map(|end| end.ended_at);
+                ended_at
+                    .is_none_or(|ended_at| Utc::now() - ended_at > UNREAD_STALE_AFTER)
+                    .then_some(Settlement::Closed)
             }
         })
     }

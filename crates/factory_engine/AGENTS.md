@@ -1478,7 +1478,11 @@ words, which Insights shows the whole team), and its failures go back. A
 start whose error came after its Run was kept and linked, while the Run
 still exists (its workflow may have started), stays open and is settled by
 that Run. One kept starting longer than `STARTING_STALE_AFTER` (10
-minutes) is refused the same way. Naming another Definition, or none,
+minutes) is refused the same way. So none stays open for good, an open one
+is settled `closed` when its Run kept no Step for `NO_STEP_STALE_AFTER`
+(2 hours, a Step's whole budget: its workflow never started), or its pull
+request could not be read (its owner's GitHub access revoked, say) for
+`UNREAD_STALE_AFTER` (a week) after its Run ended. Naming another Definition, or none,
 settles the team's open one as closed in the same write
 (`set_team_definition`), so its failures do not wait on a Definition the
 team no longer names; its Run goes on for its owner. Only

@@ -1261,3 +1261,75 @@ async fn un_naming_settles_in_the_same_write() {
             .all(|failure| failure.improvement.is_none())
     );
 }
+
+/// An open self-improvement Run whose Run kept no Step for longer than a
+/// Step may take (its workflow never started) is settled as closed, its
+/// failures back to pending; one whose Run has a Step stays open.
+#[tokio::test]
+async fn an_improvement_whose_run_never_stepped_is_closed() {
+    let bench = Bench::new(team_repo(true), AGENTS, None);
+    bench.judged_run(0.2).await;
+    bench.judged_run(0.2).await;
+    let run_id = bench.improvement_runs()[0];
+    let created_ago = |hours| {
+        let mut kept = bench.repo.improvement.lock().expect("improvement");
+        let latest = kept.improvements.last_mut().expect("an improvement");
+        latest.created_at = Utc::now() - TimeDelta::hours(hours);
+    };
+
+    // Within the Step deadline, it waits.
+    created_ago(1);
+    bench.judged_run(0.9).await;
+    assert_eq!(bench.latest_state(), Some(ImprovementState::Open));
+
+    // Past it, with a Step, its Run goes on.
+    created_ago(3);
+    let entry = EntryId::try_from("plan".to_string()).expect("valid");
+    bench
+        .repo
+        .start_step(StepKey { run_id, seq: 1 }, &entry, 1)
+        .await
+        .expect("start");
+    bench.judged_run(0.9).await;
+    assert_eq!(bench.latest_state(), Some(ImprovementState::Open));
+
+    // Past it, with none, it is closed.
+    bench.repo.steps.lock().expect("steps").clear();
+    bench.judged_run(0.9).await;
+    assert_eq!(bench.latest_state(), Some(ImprovementState::Closed));
+    assert_eq!(bench.pending().await, 2);
+}
+
+/// An ended self-improvement Run whose pull request cannot be read stays
+/// open for a while, then is settled as closed, so a revoked credential
+/// does not hold its failures forever.
+#[tokio::test]
+async fn an_improvement_whose_pull_request_stays_unread_is_closed() {
+    let bench = Bench::new(team_repo(true), AGENTS, None);
+    bench.judged_run(0.2).await;
+    bench.judged_run(0.2).await;
+    let run_id = bench.improvement_runs()[0];
+    bench
+        .repo
+        .end_run(run_id, RunOutcome::Manual)
+        .await
+        .expect("end");
+    bench.github.state().find_fails = true;
+
+    bench.judged_run(0.9).await;
+    assert_eq!(bench.latest_state(), Some(ImprovementState::Open));
+
+    if let Some(end) = bench
+        .repo
+        .runs
+        .lock()
+        .expect("runs")
+        .get_mut(&run_id)
+        .and_then(|run| run.end.as_mut())
+    {
+        end.ended_at = Utc::now() - TimeDelta::days(8);
+    }
+    bench.judged_run(0.9).await;
+    assert_eq!(bench.latest_state(), Some(ImprovementState::Closed));
+    assert_eq!(bench.pending().await, 2);
+}

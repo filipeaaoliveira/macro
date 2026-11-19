@@ -1559,6 +1559,8 @@ pub(crate) struct FakeGithubState {
     pub(crate) access_fails: bool,
     /// Whether reading the head of the Run's branch fails.
     pub(crate) branch_head_fails: bool,
+    /// Whether finding a branch's pull request fails, as GitHub down does.
+    pub(crate) find_fails: bool,
     /// When set, each deletion of a branch waits to be let go.
     pub(crate) delete_gate: Option<Arc<tokio::sync::Semaphore>>,
     /// Whether the default branch takes changes only through a pull
@@ -1702,6 +1704,9 @@ impl PullRequests for FakeGithub {
         _repository: &CodeRepository,
         _branch: &str,
     ) -> Result<Option<PullRequest>, FakeGithubError> {
+        if self.state().find_fails {
+            return Err(FakeGithubError::Down);
+        }
         Ok(self.read().map(|(pull_request, _)| pull_request))
     }
 
