@@ -1204,3 +1204,31 @@ async fn a_stale_starting_improvement_pauses_the_next() {
         "the refusal pauses the next"
     );
 }
+
+/// Naming another Definition, or none, settles the team's open
+/// self-improvement Run: its failures go back rather than wait on a
+/// Definition the team no longer names.
+#[tokio::test]
+async fn un_naming_the_definition_settles_its_open_improvement() {
+    let bench = Bench::new(team_repo(true), AGENTS, None);
+    bench.judged_run(0.2).await;
+    bench.judged_run(0.2).await;
+    assert_eq!(bench.latest_state(), Some(ImprovementState::Open));
+
+    bench
+        .service
+        .set_definition(julia(), None)
+        .await
+        .expect("un-named");
+    assert_eq!(bench.latest_state(), Some(ImprovementState::Closed));
+    let held = bench
+        .repo
+        .improvement
+        .lock()
+        .expect("improvement")
+        .failures
+        .iter()
+        .filter(|failure| failure.improvement.is_some())
+        .count();
+    assert_eq!(held, 0);
+}
