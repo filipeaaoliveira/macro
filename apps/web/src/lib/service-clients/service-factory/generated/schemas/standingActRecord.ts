@@ -8,6 +8,7 @@
 import type { AgentName } from './agentName';
 import type { StandingAct } from './standingAct';
 import type { StandingActRecordSeq } from './standingActRecordSeq';
+import type { StandingActRecordSessionId } from './standingActRecordSessionId';
 import type { StandingRoleName } from './standingRoleName';
 
 /**
@@ -20,15 +21,16 @@ export interface StandingActRecord {
   agent: AgentName;
   /** When it was recorded. */
   at: string;
-  /** The bot whose session did it. */
+  /** The bot that did it. */
   botId: string;
   /**
    * The Step whose Gate was answered, for an answer; none otherwise.
    * @minimum 0
    */
   seq?: StandingActRecordSeq;
-  /** The agent session it came from. */
-  sessionId: string;
+  /** The agent session it came from; none for a bot's code that ran in
+no agent session. */
+  sessionId?: StandingActRecordSessionId;
   /** The Standing Role that allowed it. */
   standingRole: StandingRoleName;
 }

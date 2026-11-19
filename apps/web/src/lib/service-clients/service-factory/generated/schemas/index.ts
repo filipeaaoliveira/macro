@@ -201,6 +201,7 @@ export * from './standInKinds';
 export * from './standingAct';
 export * from './standingActRecord';
 export * from './standingActRecordSeq';
+export * from './standingActRecordSessionId';
 export * from './standingRoleName';
 export * from './standingRule';
 export * from './standingRulesSettings';

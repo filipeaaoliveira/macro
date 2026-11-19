@@ -1847,7 +1847,7 @@ export type StandingActRecord = {
      */
     at: string;
     /**
-     * The bot whose session did it.
+     * The bot that did it.
      */
     botId: string;
     /**
@@ -1855,9 +1855,10 @@ export type StandingActRecord = {
      */
     seq?: number | null;
     /**
-     * The agent session it came from.
+     * The agent session it came from; none for a bot's code that ran in
+     * no agent session.
      */
-    sessionId: string;
+    sessionId?: string | null;
     /**
      * The Standing Role that allowed it.
      */

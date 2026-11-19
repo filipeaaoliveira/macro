@@ -5411,14 +5411,7 @@
       "StandingActRecord": {
         "type": "object",
         "description": "A standing act a Run keeps, as the Run API shows it.",
-        "required": [
-          "act",
-          "botId",
-          "agent",
-          "standingRole",
-          "sessionId",
-          "at"
-        ],
+        "required": ["act", "botId", "agent", "standingRole", "at"],
         "properties": {
           "act": {
             "$ref": "#/components/schemas/StandingAct",
@@ -5436,7 +5429,7 @@
           "botId": {
             "type": "string",
             "format": "uuid",
-            "description": "The bot whose session did it."
+            "description": "The bot that did it."
           },
           "seq": {
             "type": ["integer", "null"],
@@ -5445,9 +5438,9 @@
             "minimum": 0
           },
           "sessionId": {
-            "type": "string",
+            "type": ["string", "null"],
             "format": "uuid",
-            "description": "The agent session it came from."
+            "description": "The agent session it came from; none for a bot's code that ran in\nno agent session."
           },
           "standingRole": {
             "$ref": "#/components/schemas/StandingRoleName",
