@@ -489,7 +489,7 @@ fn show_cache_sizes() -> Step<Run> {
     Step::new("show cache sizes")
         .run(indoc::indoc! {r#"
             cache="${CI_CACHE_DIR:-$RUNNER_TEMP/cache}"
-            du -sh "$cache" 2>/dev/null || true
+            du -sh "$cache/" 2>/dev/null || true
             # One du per directory: du counts a directory once per call.
             for dir in "$cache"/* "$cache"/target/*; do
               du -sh "$dir" 2>/dev/null || true
