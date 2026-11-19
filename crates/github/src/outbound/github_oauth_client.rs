@@ -24,6 +24,7 @@ use crate::domain::{
 mod branches;
 pub use branches::{ComparedFile, FileTooLarge};
 mod pull_requests;
+pub use pull_requests::GithubBranchUpdate;
 #[cfg(test)]
 mod test;
 

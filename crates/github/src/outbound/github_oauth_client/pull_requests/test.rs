@@ -1,5 +1,6 @@
 use super::super::GithubOauthImpl;
 use super::super::test::{MockResponse, MockServer};
+use super::GithubBranchUpdate;
 use crate::domain::models::{
     GithubBranchDeletion, GithubError, GithubOpenPullRequest, GithubOpenPullRequestOutcome,
     GithubRepositoryAccess, GithubRequiredCheck, GithubRequiredChecks, GithubWorkflowRunStatus,
@@ -761,4 +762,91 @@ async fn a_branch_requires_a_pull_request_by_ruleset_or_protection() {
     ));
     assert_eq!(unprotected, Some(false));
     assert_eq!(unknown, None);
+}
+
+/// Updating a pull request's branch names the head it may update, so a
+/// push made since is never merged over.
+#[tokio::test]
+async fn update_pull_request_branch_names_the_head_it_updates() {
+    let (server, client) = answering(
+        "202 Accepted",
+        r#"{"message":"Updating pull request branch.","url":"https://github.com/macro/app/pull/7"}"#,
+    );
+
+    let updated = client
+        .update_pull_request_branch(
+            "token",
+            "macro",
+            "app",
+            7,
+            "1111111111111111111111111111111111111111",
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(updated, GithubBranchUpdate::Started);
+    let request = server.finish();
+    assert!(
+        request.starts_with("PUT /repos/macro/app/pulls/7/update-branch HTTP/1.1"),
+        "{request}"
+    );
+    assert!(
+        request.contains(r#"{"expected_head_sha":"1111111111111111111111111111111111111111"}"#),
+        "{request}"
+    );
+}
+
+/// A head that moved, and a base that conflicts with the branch, are
+/// GitHub's answers about the branch, told apart.
+#[tokio::test]
+async fn update_pull_request_branch_reads_github_s_refusals() {
+    let (moved, client) = answering(
+        "422 Unprocessable Entity",
+        r#"{"message":"expected head sha didn't match current head ref."}"#,
+    );
+    let answer = client
+        .update_pull_request_branch(
+            "token",
+            "macro",
+            "app",
+            7,
+            "1111111111111111111111111111111111111111",
+        )
+        .await
+        .unwrap();
+    assert_eq!(answer, GithubBranchUpdate::HeadMoved);
+    moved.finish();
+
+    let (conflict, client) = answering(
+        "422 Unprocessable Entity",
+        r#"{"message":"merge conflict between base and head"}"#,
+    );
+    let answer = client
+        .update_pull_request_branch(
+            "token",
+            "macro",
+            "app",
+            7,
+            "1111111111111111111111111111111111111111",
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        answer,
+        GithubBranchUpdate::Refused("merge conflict between base and head".to_string())
+    );
+    conflict.finish();
+
+    let (forbidden, client) = answering("403 Forbidden", r#"{"message":"Forbidden"}"#);
+    let answer = client
+        .update_pull_request_branch(
+            "token",
+            "macro",
+            "app",
+            7,
+            "1111111111111111111111111111111111111111",
+        )
+        .await;
+    assert!(matches!(answer, Err(GithubError::Forbidden)), "{answer:?}");
+    forbidden.finish();
 }
