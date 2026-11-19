@@ -348,7 +348,7 @@ async fn a_round_the_agent_was_asked_to_run_stays_the_agents() {
 
 /// Make the Step `key` as old as `minutes`: its rounds have 105 minus that
 /// left.
-async fn started_ago(repo: &FakeRepo, key: StepKey, minutes: i64) {
+pub(super) async fn started_ago(repo: &FakeRepo, key: StepKey, minutes: i64) {
     let entry = EntryId::try_from("write".to_string()).expect("valid");
     repo.start_step(key, &entry, 1).await.expect("start");
     let mut steps = repo.steps.lock().expect("steps");

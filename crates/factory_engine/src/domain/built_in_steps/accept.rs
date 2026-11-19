@@ -25,7 +25,7 @@
 //! the Flow then goes on as if it passed. The file is read on the base
 //! branch, which the Run has not merged into.
 
-use std::time::Instant;
+use tokio::time::Instant;
 
 use factory_records::domain::main_hold::MainHoldRepository;
 use factory_records::domain::models::{CheckRound, CheckRoundOutcome, MAX_OUTPUT_BYTES, Outcome};

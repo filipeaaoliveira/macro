@@ -102,6 +102,9 @@ struct ScriptedAgent {
     /// for a runtime that runs no command, as a paired machine's.
     checkout: Option<Arc<Mutex<VecDeque<Ran>>>>,
     commands: Arc<Mutex<Vec<AgentCommand>>>,
+    /// How long each command run in the worktree, a check's or a setup
+    /// command's, takes.
+    run_takes: Option<std::time::Duration>,
     /// What setting a round's worktree up answers: by default, that it is
     /// at the branch's [`HEAD`].
     set_up: Option<Ran>,
@@ -230,6 +233,9 @@ impl StepAgent for ScriptedAgent {
             .push(format!("check {run}"));
         let key = command.key;
         self.commands.lock().expect("commands").push(command);
+        if let Some(takes) = self.run_takes {
+            tokio::time::sleep(takes).await;
+        }
         let ran = checkout
             .lock()
             .expect("checkout")

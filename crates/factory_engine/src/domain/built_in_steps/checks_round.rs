@@ -35,7 +35,7 @@
 mod test;
 mod worktree;
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use agent_session::domain::session_command::{SessionCommand, SessionCommandOutput};
 use chrono::{DateTime, Utc};
@@ -45,6 +45,7 @@ use factory_records::domain::models::{
     MAX_OUTPUT_BYTES, Outcome, Role,
 };
 use factory_records::domain::ports::RunRepository;
+use tokio::time::Instant;
 use uuid::Uuid;
 
 use super::{BuiltInStepError, BuiltInSteps, agent_role, cut};

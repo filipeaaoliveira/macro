@@ -380,3 +380,70 @@ async fn a_round_whose_setup_does_not_read_ends_red() {
     );
     assert!(rounds(&repo, input).await.is_empty());
 }
+
+/// A setup command that would run past the Step's rounds ends the round
+/// and the Step red at once, running nothing that would be cut short; the
+/// report says which checks did not run.
+#[tokio::test]
+async fn a_round_short_of_a_setup_command_s_timeout_ends_the_step_red() {
+    let agent = verifying(vec![ran(0, "never run")], Vec::new());
+    let github = github(Some(CHECKS), Some(&["apps/web/src/main.ts"]));
+    declare_setup(&github, "main", SETUP);
+    let repo = FakeRepo::default();
+    let input = input();
+    // Five minutes of the Step's rounds are left, short of the setup
+    // command's ten.
+    super::verified::started_ago(&repo, input.key, 100).await;
+
+    let report = write_in_session(&agent, &github, &repo, input)
+        .await
+        .expect("write");
+
+    assert_eq!(report.outcome, outcome("red"), "{}", report.output);
+    assert!(commands(&agent).is_empty());
+    let end = rounds(&repo, input).await[0].end.clone().expect("ended");
+    assert_eq!(end.outcome, CheckRoundOutcome::Failed);
+    assert!(
+        end.report
+            .contains("The step's time ran out before these ran: web."),
+        "{}",
+        end.report
+    );
+}
+
+/// A setup command the attempt has no time left for, while the Step's
+/// rounds have, fails the attempt for a retry and leaves the round open,
+/// with the commands that passed recorded: the retry goes on from there.
+#[tokio::test(start_paused = true)]
+async fn a_setup_command_past_the_attempt_s_time_is_retried() {
+    let mut agent = verifying(vec![ran(0, "installed")], Vec::new());
+    // The first command takes 20 of the attempt's 25 minutes, so the
+    // second's ten no longer fit.
+    agent.run_takes = Some(std::time::Duration::from_secs(20 * 60));
+    let github = github(Some(CHECKS), Some(&["apps/web/src/main.ts"]));
+    declare_setup(
+        &github,
+        "main",
+        r#"{"setup":[{"name":"install","run":"bun install"},{"name":"generate","run":"just generate"}]}"#,
+    );
+    let repo = FakeRepo::default();
+    let input = input();
+
+    let failed = write_in_session(&agent, &github, &repo, input).await;
+
+    let Err(error) = failed else {
+        panic!("no time left in the attempt");
+    };
+    assert!(error.retryable(), "{error:?}");
+    assert_eq!(commands(&agent).len(), 1);
+    let round = rounds(&repo, input).await.remove(0);
+    assert!(round.end.is_none(), "the round stays open for the retry");
+    assert_eq!(
+        round
+            .results
+            .iter()
+            .map(|result| (result.name.as_str(), result.exit_code))
+            .collect::<Vec<_>>(),
+        [("setup:install", 0)]
+    );
+}
