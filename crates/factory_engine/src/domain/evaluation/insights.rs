@@ -18,7 +18,7 @@ use uuid::Uuid;
 
 use super::{EvaluationDefinition, SelfImprovementDefinition, check_choices};
 use crate::domain::insights::{InsightsError, InsightsQuery, TokenCounts};
-use crate::domain::models::FactoryError;
+use crate::domain::models::{ActingAgent, FactoryError};
 use crate::domain::ports::FactoryService;
 use crate::domain::self_improvement::{NamerStanding, namer_standing};
 
@@ -323,12 +323,15 @@ pub trait EvaluationService: Send + Sync + 'static {
     ) -> impl Future<Output = Result<EvaluationInsights, InsightsError>> + Send;
 
     /// Start a suite of `benchmark` as `actor`, on the configuration
-    /// `agents`: one trial Run for each of its frozen tasks.
+    /// `agents`: one trial Run for each of its frozen tasks. For the agent
+    /// `acting`, under a Definition with Standing Roles, its bot must fill
+    /// one that allows `start`, as for any Run it starts.
     fn start_suite(
         &self,
         actor: MacroUserIdStr<'static>,
         benchmark: &str,
         agents: AgentChoices,
+        acting: Option<ActingAgent>,
     ) -> impl Future<Output = Result<SuiteStarted, SuiteError>> + Send;
 }
 
@@ -666,12 +669,13 @@ where
         Ok(insights)
     }
 
-    #[tracing::instrument(skip(self, actor, agents))]
+    #[tracing::instrument(skip(self, actor, agents, acting))]
     async fn start_suite(
         &self,
         actor: MacroUserIdStr<'static>,
         benchmark: &str,
         agents: AgentChoices,
+        acting: Option<ActingAgent>,
     ) -> Result<SuiteStarted, SuiteError> {
         // A team's Definition holds its own Benchmarks and the Agents a
         // configuration chooses among; a team with none takes the
@@ -689,6 +693,14 @@ where
             &agents,
             defined_agents,
         )?;
+        // Each trial is a Run the caller starts: an agent starting the
+        // suite for them must hold a Standing Role that allows `start`,
+        // checked once, before anything is kept, and kept as each trial's
+        // start.
+        let started_by = self
+            .runs
+            .standing_start(&actor, defined_agents, acting)
+            .await?;
 
         // The caller must reach the repository before anything is kept;
         // its default branch's head, read once, is where every task that
@@ -740,6 +752,7 @@ where
                     definition.repository.clone(),
                     trial,
                     base_commit,
+                    started_by.clone(),
                 )
                 .await;
             match started {

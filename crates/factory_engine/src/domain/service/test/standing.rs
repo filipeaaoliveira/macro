@@ -4,9 +4,12 @@
 //! Role that allows the act, and the Run keeps which bot and Standing Role
 //! did it. With no `standing` section, every act goes on as before.
 
+use std::sync::Arc;
+
 use bot_id::BotId;
+use factory_records::domain::evaluation::AgentChoices;
 use factory_records::domain::models::{
-    AgentName, EntryId, NewRun, Outcome, Repository, RunId, RunInsert, StepKey,
+    AgentName, EntryId, NewRun, Outcome, Repository, Role, RunId, RunInsert, StepKey,
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::standing_acts::{StandingAct, StandingActor, StandingRoleName};
@@ -18,6 +21,8 @@ use uuid::Uuid;
 
 use super::definition::{DEFINITION_REPO, FIRST, github_at, team_repo};
 use super::{FakeExecutor, FakeWorkflows, code_service, julia, teo};
+use crate::domain::evaluation::EvaluationDefinition;
+use crate::domain::evaluation::insights::{EvaluationService, EvaluationServiceImpl, SuiteError};
 use crate::domain::fakes::{FakeGithub, FakeRepo};
 use crate::domain::gate::{AnswerGate, GateAnswered, StandingAnswer};
 use crate::domain::models::{ActingAgent, Answerer, FactoryError, PersonOnly};
@@ -852,4 +857,116 @@ async fn the_owner_in_person_acts_whatever_agents_the_run_kept() {
         .await;
 
     assert!(matches!(agent, Err(FactoryError::Internal(_))), "{agent:?}");
+}
+
+/// A Benchmark suite starts a trial Run of each task as its caller: an
+/// agent starting one under a Definition with Standing Roles takes a bot
+/// that fills one allowing `start`, checked once, before anything is kept,
+/// and each trial keeps who started it. A bot in no such Standing Role is
+/// refused as `POST /runs` refuses it, and nothing is kept.
+#[tokio::test]
+async fn a_suite_takes_a_bot_in_a_standing_role_that_allows_start() {
+    let repo = team_repo();
+    let workflows = FakeWorkflows::default();
+    let github = notes_definition();
+    {
+        let mut state = github.state();
+        let agents = json!({
+            "agents": {
+                "primary": { "bot": PRIMARY_BOT.to_string() },
+                "backup": { "bot": BACKUP_BOT.to_string() }
+            },
+            "roles": { "planner": ["primary"], "writer": ["primary"] },
+            "standing": split_roles()
+        });
+        state.files.insert(
+            (FIRST.to_string(), "agents.json".to_string()),
+            agents.to_string(),
+        );
+        state.files.insert(
+            (FIRST.to_string(), "scorers.json".to_string()),
+            r#"{
+                "benchmarks": [{
+                    "name": "core", "repository": "https://github.com/macro/widgets",
+                    "tasks": [
+                        { "name": "typo", "request": "Fix the typo." },
+                        { "name": "export", "request": "Add an export." }
+                    ]
+                }]
+            }"#
+            .to_string(),
+        );
+    }
+    let suites = EvaluationServiceImpl::new(
+        repo.clone(),
+        Arc::new(code_service(&repo, &workflows, &github)),
+        Arc::new(EvaluationDefinition::default()),
+        None,
+    );
+    let writer: AgentChoices = [(
+        Role::try_from("writer".to_string()).expect("valid"),
+        AgentName::try_from("primary".to_string()).expect("valid"),
+    )]
+    .into_iter()
+    .collect();
+    let primary = Uuid::now_v7();
+    let backup = Uuid::now_v7();
+    repo.add_session_bot(primary, teo().as_ref(), PRIMARY_BOT);
+    repo.add_session_bot(backup, teo().as_ref(), BACKUP_BOT);
+
+    let refused = suites
+        .start_suite(
+            teo(),
+            "core",
+            writer.clone(),
+            Some(ActingAgent::Session(primary)),
+        )
+        .await;
+    let Err(SuiteError::Run(FactoryError::NotInStandingRole { act, allowing })) = refused else {
+        panic!("a bot in no standing role that starts is refused: {refused:?}");
+    };
+    assert_eq!(
+        (act, allowing),
+        (StandingAct::Start, vec![standing_role("intake")])
+    );
+    assert!(repo.runs.lock().expect("runs").is_empty());
+    assert!(
+        repo.evaluation
+            .lock()
+            .expect("evaluation")
+            .suites
+            .is_empty()
+    );
+    assert!(workflows.started.lock().expect("started").is_empty());
+
+    let started = suites
+        .start_suite(teo(), "core", writer, Some(ActingAgent::Session(backup)))
+        .await
+        .expect("the intake starts a suite");
+
+    assert_eq!(started.runs.len(), 2);
+    let acts = repo.standing_acts.lock().expect("standing acts").clone();
+    for run in started.runs.values() {
+        let kept: Vec<_> = acts
+            .iter()
+            .filter(|(id, _)| id == run)
+            .map(|(_, act)| {
+                (
+                    act.act,
+                    act.standing_role.as_str().to_string(),
+                    act.bot_id,
+                    act.session_id,
+                )
+            })
+            .collect();
+        assert_eq!(
+            kept,
+            [(
+                StandingAct::Start,
+                "intake".to_string(),
+                BACKUP_BOT,
+                Some(backup)
+            )]
+        );
+    }
 }

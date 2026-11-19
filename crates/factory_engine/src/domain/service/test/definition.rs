@@ -772,13 +772,15 @@ async fn a_suite_of_a_definition_s_benchmark_walks_the_benchmark_flow() {
         .collect()
     };
 
-    let refused = suites.start_suite(teo(), "core", writer("elsewhere")).await;
+    let refused = suites
+        .start_suite(teo(), "core", writer("elsewhere"), None)
+        .await;
     assert!(
         matches!(refused, Err(SuiteError::Configuration(_))),
         "{refused:?}"
     );
     let started = suites
-        .start_suite(teo(), "core", writer("primary"))
+        .start_suite(teo(), "core", writer("primary"), None)
         .await
         .expect("a suite of the definition's benchmark");
 

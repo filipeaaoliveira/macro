@@ -344,7 +344,12 @@ team that names a Factory Definition, keeping the Definition, whose Agents
 take its Steps: a Definition names no Flow `benchmark`, and one with
 Benchmarks must fill the benchmark Flow's Roles. A trial runs on its
 configuration only: an Agent out of quota fails its Step, with no other
-of its Role taking it. One running suite of a Benchmark per person, and
+of its Role taking it. Each trial is a Run its caller starts: the suite
+reads the agent acting for them as `POST /runs` does (`acting_agent`), and
+under a Definition with Standing Roles checks `start` once, before it keeps
+anything (403 `notInStandingRole`); each trial keeps that agent as its start
+(`FactoryService::standing_start`, `create_trial_run`'s `started_by`). One
+running suite of a Benchmark per person, and
 `MAX_OPEN_TRIALS` running trials per person, hold new suites (409); a
 trial whose Run is refused stops the suite, which reports it (`refused`)
 and plans only the trials it started, and a suite none of whose trials

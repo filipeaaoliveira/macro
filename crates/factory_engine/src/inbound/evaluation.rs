@@ -11,7 +11,7 @@ use std::sync::Arc;
 use axum::{
     Json, Router,
     extract::{FromRef, Path, Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::{get, post},
 };
@@ -29,6 +29,7 @@ use crate::domain::evaluation::insights::{
     SelfImprovementInsight, SuiteError, SuiteInsight, SuiteStarted, TrialInsight, TrialScore,
 };
 use crate::domain::insights::{InsightsQuery, TokenCounts};
+use crate::inbound::http::acting_agent;
 use crate::inbound::insights::InsightsParams;
 use factory_records::domain::self_improvement::ImprovementState;
 
@@ -150,7 +151,10 @@ pub struct BenchmarkPath {
 /// of the caller's that still runs, or more running trials than the caller
 /// may have, refuse it (409). A trial whose Run is refused stops the suite:
 /// the trials before it go on, and `refused` names it; when none started,
-/// the error is returned and nothing is kept.
+/// the error is returned and nothing is kept. An agent acting for the
+/// caller, under a Definition with Standing Roles, must fill one that
+/// allows `start` (403 `notInStandingRole` otherwise, before anything is
+/// kept); each trial keeps it as its start.
 #[utoipa::path(
     post,
     tag = "factory",
@@ -174,6 +178,7 @@ pub struct BenchmarkPath {
 pub async fn start_suite_handler<S, Auth>(
     State(state): State<EvaluationRouterState<S, Auth>>,
     caller: MacroAuthorizationExtractor<Auth, UserOrInternal>,
+    headers: HeaderMap,
     Path(path): Path<BenchmarkPath>,
     Json(body): Json<StartSuiteRequest>,
 ) -> Result<(StatusCode, Json<SuiteStarted>), SuiteError>
@@ -181,11 +186,14 @@ where
     S: EvaluationService,
     Auth: MacroAuthorizationService,
 {
+    // Each trial is a Run the caller starts: an agent acting for them is
+    // checked against Standing Roles as `POST /runs` checks it.
+    let acting = acting_agent(&caller.authorization, &headers);
     let actor = caller.authorization.user.macro_user_id;
     let agents: AgentChoices = body.agents;
     let started = state
         .service
-        .start_suite(actor, &path.benchmark, agents)
+        .start_suite(actor, &path.benchmark, agents, acting)
         .await?;
     Ok((StatusCode::CREATED, Json(started)))
 }

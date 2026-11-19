@@ -442,8 +442,18 @@ impl FactoryService for FakeService {
         _repo_url: String,
         _trial: factory_records::domain::evaluation::TrialKey,
         _base_commit: String,
+        _started_by: Option<factory_records::domain::standing_acts::StandingActor>,
     ) -> Result<RunDetail, FactoryError> {
         Err(self.refusing(&actor))
+    }
+
+    async fn standing_start(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        _agents: Option<&crate::domain::agents::AgentDefinition>,
+        _acting: Option<ActingAgent>,
+    ) -> Result<Option<factory_records::domain::standing_acts::StandingActor>, FactoryError> {
+        Err(self.refusing(actor))
     }
 
     async fn create_improvement_run(

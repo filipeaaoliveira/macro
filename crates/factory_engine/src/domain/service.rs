@@ -126,8 +126,9 @@ struct RunOrder<'a> {
     task_id: Option<Uuid>,
     repo_url: Option<String>,
     in_person: bool,
-    /// The agent that starts the Run for its owner, when one does.
-    acting: Option<ActingAgent>,
+    /// Who starts the Run for its owner, and whether Standing Roles were
+    /// checked for it already.
+    starter: Starter,
     automation: Option<AutomationStart<'a>>,
     /// The Benchmark trial it is, if a suite starts it, and the commit its
     /// write starts from.
@@ -135,6 +136,16 @@ struct RunOrder<'a> {
     /// The self-improvement Run it is, kept as starting, if the factory
     /// starts it against its team's Definition.
     improvement: Option<Uuid>,
+}
+
+/// Who starts a Run, for Standing Roles' `start`.
+enum Starter {
+    /// The agent that starts it for its owner, if one does: checked as
+    /// the Run starts.
+    Acting(Option<ActingAgent>),
+    /// The agent a suite's check let start its trials, if one did,
+    /// checked once for the suite before it kept anything.
+    Checked(Option<StandingActor>),
 }
 
 /// The Run API, over the Run records, the Runs' workflows, the worker that
@@ -758,7 +769,7 @@ where
             task_id,
             repo_url,
             in_person,
-            acting,
+            starter,
             automation,
             trial,
             improvement,
@@ -807,14 +818,18 @@ where
         }
         // An agent starts a Run under a Definition with Standing Roles only
         // when its bot fills one that allows it.
-        let started_by = self
-            .standing_actor(
-                &actor,
-                definition.as_ref().map(|pinned| &pinned.definition.agents),
-                StandingAct::Start,
-                acting,
-            )
-            .await?;
+        let started_by = match starter {
+            Starter::Acting(acting) => {
+                self.standing_actor(
+                    &actor,
+                    definition.as_ref().map(|pinned| &pinned.definition.agents),
+                    StandingAct::Start,
+                    acting,
+                )
+                .await?
+            }
+            Starter::Checked(started_by) => started_by,
+        };
         if request.trim().is_empty() {
             return Err(FactoryError::EmptyRequest);
         }
@@ -1106,12 +1121,22 @@ where
             task_id,
             repo_url,
             in_person,
-            acting,
+            starter: Starter::Acting(acting),
             automation: None,
             trial: None,
             improvement: None,
         })
         .await
+    }
+
+    async fn standing_start(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        agents: Option<&AgentDefinition>,
+        acting: Option<ActingAgent>,
+    ) -> Result<Option<StandingActor>, FactoryError> {
+        self.standing_actor(actor, agents, StandingAct::Start, acting)
+            .await
     }
 
     async fn benchmark_base(
@@ -1149,6 +1174,7 @@ where
         repo_url: String,
         trial: TrialKey,
         base_commit: String,
+        started_by: Option<StandingActor>,
     ) -> Result<RunDetail, FactoryError> {
         self.start_run(RunOrder {
             actor,
@@ -1157,7 +1183,7 @@ where
             task_id: None,
             repo_url: Some(repo_url),
             in_person: false,
-            acting: None,
+            starter: Starter::Checked(started_by),
             automation: None,
             trial: Some((trial, base_commit)),
             improvement: None,
@@ -1179,7 +1205,7 @@ where
             task_id: None,
             repo_url: Some(repo_url),
             in_person: false,
-            acting: None,
+            starter: Starter::Acting(None),
             automation: None,
             trial: None,
             improvement: Some(improvement),
@@ -1232,7 +1258,7 @@ where
             task_id,
             repo_url: automation.repo_url.clone(),
             in_person: false,
-            acting: None,
+            starter: Starter::Acting(None),
             automation: Some(AutomationStart {
                 automation: &started_by,
                 firing_key,

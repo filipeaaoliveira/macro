@@ -142,6 +142,7 @@ async fn the_benchmark_flow_runs_only_as_a_suite_s_trial() {
             REPO_URL.to_string(),
             trial,
             BASE.to_string(),
+            None,
         )
         .await
         .expect("trial started");
@@ -211,7 +212,7 @@ async fn a_suite_starts_a_trial_of_each_task_from_its_pinned_commit_or_the_head(
     let service = suites(&repo, &FakeGithub::default());
 
     let started = service
-        .start_suite(julia(), "core", writer("primary"))
+        .start_suite(julia(), "core", writer("primary"), None)
         .await
         .expect("started");
 
@@ -226,7 +227,7 @@ async fn a_suite_starts_a_trial_of_each_task_from_its_pinned_commit_or_the_head(
 
     // Its trials still run: a second suite of the Benchmark waits.
     let again = service
-        .start_suite(julia(), "core", writer("primary"))
+        .start_suite(julia(), "core", writer("primary"), None)
         .await;
     assert!(matches!(again, Err(SuiteError::Running(_))), "{again:?}");
 }
@@ -238,20 +239,22 @@ async fn a_suite_is_refused_for_an_unknown_benchmark_agent_or_repository() {
     let service = suites(&repo, &github);
 
     let unknown = service
-        .start_suite(julia(), "nope", writer("primary"))
+        .start_suite(julia(), "nope", writer("primary"), None)
         .await;
     assert!(
         matches!(unknown, Err(SuiteError::UnknownBenchmark(_))),
         "{unknown:?}"
     );
-    let agent = service.start_suite(julia(), "core", writer("nobody")).await;
+    let agent = service
+        .start_suite(julia(), "core", writer("nobody"), None)
+        .await;
     assert!(
         matches!(agent, Err(SuiteError::Configuration(_))),
         "{agent:?}"
     );
     github.state().unreachable = true;
     let unreachable = service
-        .start_suite(julia(), "core", writer("primary"))
+        .start_suite(julia(), "core", writer("primary"), None)
         .await;
     assert!(
         matches!(
@@ -276,7 +279,7 @@ async fn a_refused_trial_stops_the_suite_and_a_suite_with_none_started_is_not_ke
 
     repo.fail_once_after("insert_trial", 1);
     let partial = service
-        .start_suite(julia(), "core", writer("primary"))
+        .start_suite(julia(), "core", writer("primary"), None)
         .await
         .expect("the first trial started");
     assert_eq!(partial.runs.keys().collect::<Vec<_>>(), ["export"]);
@@ -292,7 +295,7 @@ async fn a_refused_trial_stops_the_suite_and_a_suite_with_none_started_is_not_ke
     let service = suites(&other, &FakeGithub::default());
     other.fail_once_after("insert_trial", 0);
     let none = service
-        .start_suite(julia(), "core", writer("primary"))
+        .start_suite(julia(), "core", writer("primary"), None)
         .await;
     assert!(matches!(none, Err(SuiteError::Run(_))), "{none:?}");
     assert!(

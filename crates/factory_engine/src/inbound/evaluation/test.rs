@@ -1,15 +1,16 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
+use agent_correlation::context::{Attribution, scope_attribution};
 use axum::Router;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode};
 use factory_records::domain::evaluation::AgentChoices;
 use macro_authorization::{
-    AuthorizedUserApiKey, CredentialOrigin, INTERNAL_API_KEY_HEADER, INTERNAL_MACRO_USER_ID_HEADER,
-    InternalAuthConfig, JwtValidator, MacroAuthorizationError, MacroAuthorizationServiceImpl,
-    MacroAuthorizationState, NoBotAuthorizer, UserApiKeyAuthorizer, ValidatedCredential,
-    ValidatedIdentity,
+    AuthorizedUserApiKey, CODE_EXECUTION_HEADER, CredentialOrigin, INTERNAL_API_KEY_HEADER,
+    INTERNAL_MACRO_USER_ID_HEADER, InternalAuthConfig, JwtValidator, MacroAuthorizationError,
+    MacroAuthorizationServiceImpl, MacroAuthorizationState, NoBotAuthorizer, UserApiKeyAuthorizer,
+    ValidatedCredential, ValidatedIdentity,
 };
 use macro_user_id::user_id::MacroUserIdStr;
 use rootcause::Report;
@@ -22,7 +23,7 @@ use crate::domain::evaluation::insights::{
     EvaluationInsights, EvaluationService, SuiteError, SuiteStarted,
 };
 use crate::domain::insights::{InsightsError, InsightsQuery};
-use crate::domain::models::FactoryError;
+use crate::domain::models::{ActingAgent, FactoryError};
 
 const KEY: &str = "test-internal-key";
 const ALICE: &str = "macro|alice@example.com";
@@ -74,6 +75,7 @@ impl UserApiKeyAuthorizer for NoApiKeys {
 struct FakeEvaluation {
     read_by: Mutex<Vec<String>>,
     started_by: Mutex<Vec<(String, String)>>,
+    acting: Mutex<Vec<Option<ActingAgent>>>,
 }
 
 /// `core` starts; `missing` is no Benchmark; `bad` names an unknown Agent;
@@ -106,7 +108,9 @@ impl EvaluationService for Arc<FakeEvaluation> {
         actor: MacroUserIdStr<'static>,
         benchmark: &str,
         _agents: AgentChoices,
+        acting: Option<ActingAgent>,
     ) -> Result<SuiteStarted, SuiteError> {
+        self.acting.lock().expect("acting").push(acting);
         self.started_by
             .lock()
             .expect("started")
@@ -237,5 +241,46 @@ async fn a_refused_suite_says_why_with_its_status() {
     assert_eq!(
         status(&app, unknown_field).await,
         StatusCode::UNPROCESSABLE_ENTITY
+    );
+}
+
+/// Each trial of a suite is a Run the caller starts, so the suite's start
+/// reads who acts for them as `POST /runs` does: code in an agent session
+/// reaches the service as that session, for Standing Roles to check; the
+/// person in their own session and an internal caller as no agent.
+#[tokio::test]
+async fn an_agent_session_starts_a_suite_as_that_session() {
+    let (app, service) = app();
+    let session_id = Uuid::now_v7();
+    let body = || Body::from(r#"{"agents":{"writer":"primary"}}"#);
+
+    let from_code = start("core")
+        .header("authorization", "Bearer alice")
+        .header(CODE_EXECUTION_HEADER, "true")
+        .body(body())
+        .expect("request");
+    let attribution = Attribution {
+        session_id: Some(session_id),
+        ..Attribution::default()
+    };
+    let in_session = scope_attribution(attribution, app.clone().oneshot(from_code))
+        .await
+        .expect("response");
+    let in_person = start("core")
+        .header("authorization", "Bearer alice")
+        .body(body())
+        .expect("request");
+    let internal = start("core")
+        .header(INTERNAL_API_KEY_HEADER, KEY)
+        .header(INTERNAL_MACRO_USER_ID_HEADER, ALICE)
+        .body(body())
+        .expect("request");
+
+    assert_eq!(in_session.status(), StatusCode::CREATED);
+    assert_eq!(status(&app, in_person).await, StatusCode::CREATED);
+    assert_eq!(status(&app, internal).await, StatusCode::CREATED);
+    assert_eq!(
+        *service.acting.lock().expect("acting"),
+        [Some(ActingAgent::Session(session_id)), None, None]
     );
 }

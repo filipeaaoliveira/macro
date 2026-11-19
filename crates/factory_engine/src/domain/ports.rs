@@ -13,9 +13,11 @@ use agent_session::domain::session_task::TaskDocumentId;
 use factory_records::domain::automations::Automation;
 use factory_records::domain::evaluation::TrialKey;
 use factory_records::domain::models::{HandBack, Outcome, Role, RunId, StepKey, StepSession};
+use factory_records::domain::standing_acts::StandingActor;
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
+use crate::domain::agents::AgentDefinition;
 use crate::domain::automations::{
     AutomationRequest, AutomationsSettings, CreatedAutomation, FiringResult, RoutineFiring,
 };
@@ -1018,11 +1020,27 @@ pub trait FactoryService: Send + Sync + 'static {
         actor: &MacroUserIdStr<'static>,
     ) -> impl Future<Output = Result<Option<TeamEvaluation>, FactoryError>> + Send;
 
+    /// Who starts Runs for `actor` as the agent `acting`, under the Agents
+    /// `agents` of `actor`'s team's Definition, by its Standing Roles, as
+    /// [`Self::create_run`] checks its `start`: none for the person, an
+    /// internal caller, or a Definition with no Standing Roles. Fails with
+    /// `NotInStandingRole` when no Standing Role the agent's bot fills
+    /// allows `start`. A suite checks it once, before it keeps anything.
+    fn standing_start(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        agents: Option<&AgentDefinition>,
+        acting: Option<ActingAgent>,
+    ) -> impl Future<Output = Result<Option<StandingActor>, FactoryError>> + Send;
+
     /// Record and start a Benchmark trial's Run of the built-in Flow
     /// `flow`, owned by `actor`, who started its suite: as
     /// [`Self::create_run`] for a Run on no task, kept as `trial` before
     /// its workflow starts, so its Steps run on the suite's configuration
-    /// and its write starts from `base_commit`.
+    /// and its write starts from `base_commit`. `started_by`, the agent
+    /// [`Self::standing_start`] let start the suite, is kept as the
+    /// trial's start; its Standing Roles are not checked again.
+    #[expect(clippy::too_many_arguments, reason = "each is a part of one trial")]
     fn create_trial_run(
         &self,
         actor: MacroUserIdStr<'static>,
@@ -1031,6 +1049,7 @@ pub trait FactoryService: Send + Sync + 'static {
         repo_url: String,
         trial: TrialKey,
         base_commit: String,
+        started_by: Option<StandingActor>,
     ) -> impl Future<Output = Result<RunDetail, FactoryError>> + Send;
 
     /// Record and start the self-improvement Run `improvement`, kept as

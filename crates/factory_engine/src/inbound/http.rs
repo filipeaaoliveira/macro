@@ -945,7 +945,7 @@ fn answerer(
 /// govern. So is a public MCP credential in no session: Macro signs the
 /// person's own MCP client or API key, directly or through code mode, for
 /// the Macro bot only to label its posts (`signed_for_the_person`).
-fn acting_agent(
+pub(crate) fn acting_agent(
     authorization: &UserOrInternalAuthorization,
     headers: &HeaderMap,
 ) -> Option<ActingAgent> {
