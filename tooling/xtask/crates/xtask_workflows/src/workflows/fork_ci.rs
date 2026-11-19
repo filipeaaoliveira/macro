@@ -58,9 +58,10 @@ const FILTER_CACHE_DIR: RuntimePath<'static> =
 /// the CPUs: most tests wait on Postgres in the Docker sidecar.
 const NEXTEST_TEST_THREADS: u32 = 12;
 
-/// Cargo's jobs in the test job, below the runner's 4 CPUs to keep the build
-/// inside its memory.
-const TEST_BUILD_JOBS: u32 = 3;
+/// Cargo's jobs in the test job, half the runner's 4 CPUs to keep the build
+/// inside its memory: one compiler of a large crate alone held 4.4 GiB, and
+/// with three of them the kernel killed the runner, job and all.
+const TEST_BUILD_JOBS: u32 = 2;
 
 /// Build the workflow.
 pub fn fork_ci() -> Workflow {
@@ -194,7 +195,7 @@ fn rust_test() -> Job {
         // The runner has 9 GiB. Four rustc or linker processes on the large
         // service crates fill it, and the job then spends its time paging
         // instead of building: one run held the runner for three hours on half an
-        // hour of CPU. Three compilers and one link at a time aim to stay below it.
+        // hour of CPU. Two compilers and one link at a time aim to stay below it.
         .add_env(("CARGO_BUILD_JOBS", TEST_BUILD_JOBS))
         .add_env(("MOLD_JOBS", 1u32))
         .add_env(("REDIS_URI", "redis://127.0.0.1:6379"))

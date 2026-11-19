@@ -641,7 +641,7 @@ jobs:
     env:
       RUST_PACKAGES: ${{ needs.changes.outputs.rust_packages }}
       NEXTEST_TEST_THREADS: '12'
-      CARGO_BUILD_JOBS: '3'
+      CARGO_BUILD_JOBS: '2'
       MOLD_JOBS: '1'
       REDIS_URI: redis://127.0.0.1:6379
       CARGO_PROFILE_DEV_DEBUG: '0'
