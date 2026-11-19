@@ -661,7 +661,12 @@ routine sessions' `exec` (`bash --noprofile --norc` under the command's
 (`factory_step.setup_session_id`, `setup_passed`), so a retry in the same
 session skips those, and a new session (handed to the next Agent, or one
 that went on afresh after a lost session) runs them again. A session whose
-first prompt already landed is never set up. A command starts only with its
+first prompt already landed is never set up. Each command holds a lock in
+the checkout's git directory (`macro-setup.lock`, taken as a check takes
+its round's: `flock -w 60`, else `mkdir`; `src/domain/shell_lock.rs`), so a
+retry's command never runs beside one an attempt lost with its worker left
+running; a lock still held after 60 s fails the attempt for a retry. A
+command starts only with its
 whole timeout left in the attempt (`SESSION_DEADLINE`, or the time the Step
 gives): otherwise the attempt fails, and its retry goes on with the commands
 still to run. A command that fails ends the Step `failed`, with the
