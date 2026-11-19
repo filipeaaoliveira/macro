@@ -1801,16 +1801,32 @@ Definition.
   request is `unknown`, they merge nothing. A view rendered outside the
   provider merges nothing either for a person who may have the factory
   (`usePrMergeGuard`'s default), and the provider wraps the app's ownerless
-  dialogs too. Limits: the guard is in the web app only, so GitHub itself
-  (and any client calling Macro's merge route) still merges a Run's pull
-  request; and a viewer who cannot see the Run (a teammate on a hidden
-  task, someone off the team) is not guarded, as the lookup must not tell
-  them a Run exists. A Step that finds the Run's pull request keeps its page
+  dialogs too. Macro's GitHub merge route (`POST
+  /github_pull_requests/merge` in `services/authentication_service`) refuses
+  too, whoever calls it, the web app, an agent or another client: a pull
+  request whose page a Run that has not ended keeps
+  (`factory_records::domain::merge_guard`, any owner's Run) is refused
+  before GitHub is asked, 409 naming the Run and its merge Gate to a caller
+  who sees the pull request on GitHub (its branch, `factory/<run_id>`,
+  already shows them the id), and 404 `Not Found`, as GitHub answers, to
+  anyone else, so the refusal tells no one of a Run they could not find on
+  GitHub. A read of the Runs that fails refuses the merge (500): they are in
+  the database the route reads the caller's GitHub grant from, so the
+  merge would rarely get further, and no pull request's head is known
+  there to tell a Run's branch without asking GitHub. A pull request whose
+  Runs all ended, or that no Run opened, merges as before. The engine never
+  calls that route: the `merge` Step (whether a person or
+  `merge_when_green` answered its Gate) merges on GitHub itself, with the
+  owner's token (`outbound/github_pull_requests.rs`), so the refusal never
+  stands in its way. Limits: GitHub itself still merges a Run's pull
+  request; and in the web app a viewer who cannot see the Run (a teammate
+  on a hidden task, someone off the team) sees no mark, as the lookup must
+  not tell them a Run exists, though the route refuses their merge. A Step that finds the Run's pull request keeps its page
   (`keep_page`); `ci` writes it once per wait, not on every poll. A write
   that fails fails the Step, which is retried until the Step's time runs out
   (`STEP_TOTAL`, 2 hours), and then fails as usual. Until the write lands,
-  or if it never does, the pull request is open on GitHub and the guard
-  cannot see it, so it merges as no Run's.
+  or if it never does, the pull request is open on GitHub and neither guard
+  can see it, so it merges as no Run's.
 - `src/domain/self_improvement.rs`: self-improvement: the failures a
   Run's end keeps, when a self-improvement Run starts, its request, and how
   it is settled.

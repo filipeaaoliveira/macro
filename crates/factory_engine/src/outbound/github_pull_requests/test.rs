@@ -7,11 +7,11 @@ use github::outbound::github_oauth_client::GithubOauthImpl;
 use macro_user_id::user_id::MacroUserIdStr;
 use upstream_error::{UpstreamError, UpstreamFailure};
 
-use wiremock::matchers::{method, path, query_param};
+use wiremock::matchers::{body_partial_json, header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::{GithubPullRequests, GithubPullRequestsErr, OwnerTokens};
-use crate::domain::models::{BranchDeletion, CodeRepository, HeadChecks};
+use crate::domain::models::{BranchDeletion, CodeRepository, HeadChecks, Merging};
 use crate::domain::ports::{PullRequests, Retryable};
 
 /// An owner's linked token, or none, counting the reads of it.
@@ -93,6 +93,53 @@ async fn a_run_s_branch_is_deleted_by_its_id() {
         .expect("deleted");
 
     assert_eq!(deletion, BranchDeletion::Deleted);
+    server.verify().await;
+}
+
+/// A Run merges its pull request on GitHub itself, with its owner's token
+/// and at the head its checks passed, never through Macro's GitHub merge
+/// route, which refuses to merge under a Run that goes on.
+#[tokio::test]
+async fn a_run_merges_its_pull_request_on_github_with_its_owner_s_token() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/macro/app"))
+        .and(header("Authorization", "Bearer token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "allow_merge_commit": false,
+            "allow_squash_merge": true,
+            "allow_rebase_merge": false,
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path("/repos/macro/app/pulls/7/merge"))
+        .and(header("Authorization", "Bearer token"))
+        .and(body_partial_json(serde_json::json!({
+            "merge_method": "squash",
+            "sha": "abc123",
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "sha": "def456",
+            "message": "Pull Request successfully merged",
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let github = GithubPullRequests::with_client(
+        Tokens {
+            linked: Some("token"),
+            ..Tokens::default()
+        },
+        GithubOauthImpl::with_api_base_url(server.uri()),
+    );
+
+    let merging = github
+        .merge(&julia(), &repository(), 7, "abc123")
+        .await
+        .expect("merged");
+
+    assert_eq!(merging, Merging::Merged);
     server.verify().await;
 }
 
