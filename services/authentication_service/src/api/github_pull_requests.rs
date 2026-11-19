@@ -20,7 +20,12 @@ use model::response::ErrorResponse;
 use upstream_error::UpstreamErrorResponse;
 
 use crate::api::context::{ApiContext, AuthorizationService};
-use crate::domain::factory_merge_guard::FactoryMergeRefusal;
+use crate::domain::factory_merge_guard::{
+    FactoryMergeGuard, FactoryMergeRefusal, PullRequestSight,
+};
+use factory_records::domain::merge_guard::MergeGuardRepository;
+use github::outbound::github_oauth_client::INVALID_REPOSITORY;
+use macro_user_id::{lowercased::Lowercase, user_id::MacroUserId};
 
 #[cfg(test)]
 mod test;
@@ -64,6 +69,8 @@ pub enum MergeGithubPullRequestError {
     Github(#[from] GithubError),
     #[error(transparent)]
     Factory(#[from] FactoryMergeRefusal),
+    #[error("{INVALID_REPOSITORY}")]
+    InvalidRepository,
 }
 
 impl IntoResponse for MergeGithubPullRequestError {
@@ -73,8 +80,13 @@ impl IntoResponse for MergeGithubPullRequestError {
                 StatusCode::CONFLICT,
                 format!(
                     "Factory Run {run} opened this pull request and has not ended: \
-                     merge it through the Run's merge Gate."
+                     merge it through the Run's merge Gate, or cancel the Run \
+                     (/app/factory/runs/{run})."
                 ),
+            ),
+            Self::InvalidRepository => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                INVALID_REPOSITORY.to_string(),
             ),
             // Answered as GitHub answers a pull request it hides.
             Self::Factory(FactoryMergeRefusal::NotVisible) => {
@@ -229,7 +241,7 @@ pub async fn handler(
         (status = 403, description = "The user cannot push to the repository", body = ErrorResponse),
         (status = 404, description = "No GitHub link, or the pull request is not visible to the user", body = ErrorResponse),
         (status = 409, description = "The pull request is not mergeable as it stands, its head moved, or a factory Run that has not ended opened it", body = ErrorResponse),
-        (status = 422, body = ErrorResponse),
+        (status = 422, description = "The owner or repo is not a GitHub repository name, or GitHub declined the request", body = ErrorResponse),
         (status = 428, body = ErrorResponse),
         (status = 500, body = ErrorResponse),
         (status = 502, body = UpstreamErrorResponse),
@@ -245,14 +257,36 @@ pub async fn merge_handler(
     tracing::info!("merge_github_pull_request");
 
     let user = &authorization.authorization.user.macro_user_id;
-    ctx.factory_merge_guard.check(user, &request).await?;
-
-    let response = ctx
-        .github_link_service
-        .merge_pull_request(user, request)
-        .await?;
+    let response = merge_unless_held(&ctx.factory_merge_guard, user, request, |request| {
+        ctx.github_link_service.merge_pull_request(user, request)
+    })
+    .await?;
 
     Ok(Json(response))
+}
+
+/// Merges `request` with `merge`, unless its owner or repository is not a
+/// name GitHub gives (written into GitHub's path as they come, either could
+/// reach another pull request than the one `guard` checks), or a factory
+/// Run that has not ended holds it.
+async fn merge_unless_held<R, S, F, Fut>(
+    guard: &FactoryMergeGuard<R, S>,
+    user: &MacroUserId<Lowercase<'static>>,
+    request: MergeGithubPullRequestRequest,
+    merge: F,
+) -> Result<MergeGithubPullRequestResponse, MergeGithubPullRequestError>
+where
+    R: MergeGuardRepository,
+    S: PullRequestSight,
+    F: FnOnce(MergeGithubPullRequestRequest) -> Fut,
+    Fut: Future<Output = Result<MergeGithubPullRequestResponse, GithubError>>,
+{
+    if !request.names_a_repository() {
+        return Err(MergeGithubPullRequestError::InvalidRepository);
+    }
+    guard.check(user, &request).await?;
+
+    Ok(merge(request).await?)
 }
 
 /// Converts a GitHub pull request to a draft, or marks it ready for review,

@@ -227,7 +227,12 @@ inputs cannot select an agent, and ordinary user credentials remain unattributed
   `factory_records`): 409 naming the Run to a caller who sees the pull
   request on GitHub, 404 `Not Found` to anyone else, and 500 when the Runs
   cannot be read. The factory merges on GitHub itself, not through this
-  route, so it is never refused here.
+  route, so it is never refused here. The route first refuses (422) an
+  `owner` or `repo` that is not a name GitHub gives
+  (`MergeGithubPullRequestRequest::names_a_repository`): both go into
+  GitHub's path as they come, so a `/`, `..`, `%`, `?`, `#` or a `.git`
+  ending could merge another pull request than the one the Runs were
+  looked up by.
 - Answer third-party failures as 502/503, not 500: match
   `GithubError::Upstream(error)` before a route's 500 catch-all, and answer a
   `FusionAuthClientError` whose `upstream()` is set with that error's
