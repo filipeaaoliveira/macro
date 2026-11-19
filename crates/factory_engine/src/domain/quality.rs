@@ -507,9 +507,13 @@ pub struct DeliveryInsight {
     /// Runs that merged their pull request.
     pub merged: u32,
     /// Runs that merged with no person stepping in: no Gate a person
-    /// answered, no Step they steered, and no manual end.
+    /// answered, no Step they steered, and no manual end. A Run found
+    /// flawed afterwards, cancelled, or ended for infrastructure is not.
     pub autonomous: u32,
-    /// The share of ended Runs that did, from 0 to 1.
+    /// Their share, from 0 to 1, of the Runs whose work ended on its own,
+    /// as the success rate counts them: Runs a person cancelled and Runs
+    /// that ended for infrastructure are left out. None while no Run ended
+    /// that way.
     pub autonomy_rate: Option<f64>,
     /// Ended Runs with a Gate a person answered.
     pub person_answered: u32,
@@ -1017,12 +1021,28 @@ fn review_quality(records: &QualityRecords, runs: &HashMap<RunId, &QualityRun>) 
     }
 }
 
+/// Whether a Run's work ended on its own, so the success and autonomy rates
+/// count it: a Run a person cancelled and one that ended for infrastructure,
+/// a machine, quota or network reason, measure the factory's plumbing, not
+/// its work.
+fn ended_on_its_own(outcome: RunOutcome) -> bool {
+    match outcome {
+        RunOutcome::Success
+        | RunOutcome::Flawed
+        | RunOutcome::Manual
+        | RunOutcome::Blocked
+        | RunOutcome::Failed => true,
+        RunOutcome::Cancelled | RunOutcome::Infrastructure => false,
+    }
+}
+
 fn delivery(records: &QualityRecords, tokens: &[SessionTokens]) -> DeliveryInsight {
     let by_session: HashMap<Uuid, &SessionTokens> = tokens
         .iter()
         .map(|tokens| (tokens.session_id, tokens))
         .collect();
     let mut ended_runs = 0;
+    let mut ended_on_their_own = 0;
     let mut merged = 0;
     let mut autonomous = 0;
     let mut person_answered = 0;
@@ -1036,15 +1056,22 @@ fn delivery(records: &QualityRecords, tokens: &[SessionTokens]) -> DeliveryInsig
         let outcome = run.run.end.map(|(outcome, _)| outcome);
         let ended = outcome.is_some();
         let is_manual = outcome == Some(RunOutcome::Manual);
+        let on_its_own = outcome.is_some_and(ended_on_its_own);
         if ended {
             ended_runs += 1;
+            ended_on_their_own += u32::from(on_its_own);
             person_answered += u32::from(run.person_answered);
             steered += u32::from(run.steered);
             manual += u32::from(is_manual);
         }
         if run.merged {
             merged += 1;
-            if ended && !run.person_answered && !run.steered && !is_manual {
+            if on_its_own
+                && outcome != Some(RunOutcome::Flawed)
+                && !run.person_answered
+                && !run.steered
+                && !is_manual
+            {
                 autonomous += 1;
             }
         }
@@ -1068,7 +1095,7 @@ fn delivery(records: &QualityRecords, tokens: &[SessionTokens]) -> DeliveryInsig
         ended_runs,
         merged,
         autonomous,
-        autonomy_rate: share(autonomous, ended_runs),
+        autonomy_rate: share(autonomous, ended_on_their_own),
         person_answered,
         steered,
         manual,

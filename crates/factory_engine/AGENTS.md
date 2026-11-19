@@ -358,8 +358,13 @@ zone or Flow name is 400.
 `GET /insights/quality?from=&to=&timeZone=&flow=&repository=`
 (`domain/quality.rs`) reads the same Runs, of one repository
 (`owner/name` or its URL) or of all, for CI health, review quality, cost per
-merged pull request and the autonomy rate. Each wait of `ci` that ends
-`green`, `red` or `timeout` keeps the jobs that finished on its head
+merged pull request and the autonomy rate. The autonomy rate is the share
+of Runs that merged with no person stepping in (no Gate a person answered,
+no Step they steered, no manual end) and were not found flawed, of the
+Runs whose work ended on its own: as the success rate does, it leaves out
+Runs a person cancelled and Runs that ended `infrastructure`. Each wait of
+`ci` that ends `green`, `red` or `timeout` keeps the jobs that finished on
+its head
 (`PullRequests::finished_jobs`, `RunRepository::record_ci_wait`): passed,
 failed, cancelled, or `setup` when the step that failed sets the job up
 (`SETUP_STEPS`: GitHub Actions' own, checkout, cache, installing
