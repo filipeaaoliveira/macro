@@ -629,9 +629,8 @@ async fn the_starter_definition_s_placeholder_bots_do_not_read() {
 
     assert_eq!(
         error.to_string(),
-        "agents.json: agent backup has the template's placeholder bot id \
-         00000000-0000-0000-0000-000000000002: replace it with the id of a Macro agent \
-         each member who starts runs may use"
+        "agents.json: agents primary, backup have the template's placeholder bot ids: \
+         replace them with the ids of Macro agents each member who starts runs may use"
     );
 }
 
@@ -653,17 +652,13 @@ async fn a_placeholder_bot_id_does_not_read() {
             .expect_err("a placeholder bot");
         assert_eq!(
             error,
-            DefinitionError::Agents(AgentDefinitionError::PlaceholderBot {
-                agent: primary.clone(),
-                bot: bot.parse().expect("a bot id"),
-            }),
+            DefinitionError::Agents(AgentDefinitionError::PlaceholderBots(vec![primary.clone()])),
             "{bot}"
         );
-        assert!(
-            error
-                .to_string()
-                .starts_with("agents.json: agent primary has the template's placeholder bot id"),
-            "{error}"
+        assert_eq!(
+            error.to_string(),
+            "agents.json: agent primary has the template's placeholder bot id: replace it \
+             with the id of a Macro agent each member who starts runs may use",
         );
     }
 
@@ -671,6 +666,28 @@ async fn a_placeholder_bot_id_does_not_read() {
     assert!(read(with("agents.json", &agents(real))).await.is_ok());
     let random = "6f1c2a9e-4b7d-4e2a-9c3f-0d8e5b1a7c42";
     assert!(read(with("agents.json", &agents(random))).await.is_ok());
+}
+
+/// Every Agent that keeps a placeholder bot id is named, in the order
+/// `agents.json` lists them rather than by name.
+#[tokio::test]
+async fn every_placeholder_bot_is_named_in_the_file_s_order() {
+    let agents = r#"{
+        "agents": {
+            "primary": { "bot": "00000000-0000-0000-0000-000000000001" },
+            "spare": { "bot": "00000000-0000-0000-0000-00000000c0de" },
+            "backup": { "bot": "00000000-0000-0000-0000-000000000002" }
+        },
+        "roles": { "planner": ["primary"], "writer": ["primary"] }
+    }"#;
+    let name = |name: &str| AgentName::try_from(name.to_string()).expect("an agent");
+
+    assert_eq!(
+        read(with("agents.json", agents)).await,
+        Err(DefinitionError::Agents(
+            AgentDefinitionError::PlaceholderBots(vec![name("primary"), name("backup")])
+        ))
+    );
 }
 
 /// The starter's Control Files are the factory's default and its own

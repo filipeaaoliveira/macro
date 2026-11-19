@@ -127,7 +127,9 @@ From this template to a first merged pull request:
 3. Add a CI job that runs the validator, `factory_definition_check .`, and
    let it run once: it fails, as the `bot` ids are still the template's.
    Then protect the default branch: require a pull request and that job's
-   check.
+   check. The template itself stays green where it is kept: its tests
+   check that the validator refuses the placeholder ids, and that the rest
+   of the template reads once they are replaced.
 4. On a branch, replace the two `bot` ids in `agents.json`, and anything
    else from Customize the template you want now.
 5. Check it: `factory_definition_check .` prints `.: the definition reads:
@@ -400,10 +402,11 @@ the `PATH` of every machine that runs this repository's checks: the CI
 runner, and the machine a factory Run's agent works on.
 
 An Agent whose `bot` is a placeholder id, all zeros but its last two
-digits as the template ships them, does not read:
+digits as the template ships them, does not read. The validator names
+every such Agent, in the order `agents.json` lists them:
 
 ```text
-.: agents.json: agent backup has the template's placeholder bot id 00000000-0000-0000-0000-000000000002: replace it with the id of a Macro agent each member who starts runs may use
+.: agents.json: agents primary, backup have the template's placeholder bot ids: replace them with the ids of Macro agents each member who starts runs may use
 ```
 
 The validator has no mode that lets them through: the template as shipped

@@ -510,6 +510,42 @@ pub fn flow_path(name: &str) -> String {
     format!("flows/{name}.json")
 }
 
+/// `agents.json`'s Agents' names, in the order it lists them.
+#[derive(Deserialize)]
+struct ListedAgents {
+    agents: KeysInOrder,
+}
+
+/// A JSON object's keys, in the order it holds them.
+struct KeysInOrder(Vec<String>);
+
+impl<'de> Deserialize<'de> for KeysInOrder {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Keys;
+
+        impl<'de> serde::de::Visitor<'de> for Keys {
+            type Value = KeysInOrder;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("an object")
+            }
+
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<KeysInOrder, A::Error> {
+                let mut keys = Vec::new();
+                while let Some((key, _)) = map.next_entry::<String, serde::de::IgnoredAny>()? {
+                    keys.push(key);
+                }
+                Ok(KeysInOrder(keys))
+            }
+        }
+
+        deserializer.deserialize_map(Keys)
+    }
+}
+
 /// Read the Factory Definition `files` hold, and check it: every file
 /// reads, every Flow holds together and names only Steps `serves` says a
 /// worker serves, its Agents have no placeholder bot id and fill every Role
@@ -563,8 +599,25 @@ pub async fn read_definition<F: DefinitionFiles>(
     // The Agents must fill every Role an entry of its Flows names.
     let agents: AgentDefinition = required(files, AGENTS_FILE).await?;
     // An Agent whose bot is the template's placeholder names no agent: a
-    // Run would start and then fail at its first Step.
-    agents.check_bots().map_err(DefinitionError::Agents)?;
+    // Run would start and then fail at its first Step. The error lists
+    // them as the file does, which only its text still holds.
+    let mut placeholders = agents.placeholder_bots();
+    if !placeholders.is_empty() {
+        let listed = text(files, AGENTS_FILE)
+            .await?
+            .and_then(|text| serde_json::from_str::<ListedAgents>(&text).ok())
+            .map(|listed| listed.agents.0)
+            .unwrap_or_default();
+        placeholders.sort_by_key(|name| {
+            listed
+                .iter()
+                .position(|listed| listed == name.as_str())
+                .unwrap_or(usize::MAX)
+        });
+        return Err(
+            DefinitionError::Agents(AgentDefinitionError::PlaceholderBots(placeholders)).into(),
+        );
+    }
     let roles: BTreeSet<&Role> = flows
         .values()
         .flat_map(|flow| &flow.entries)
