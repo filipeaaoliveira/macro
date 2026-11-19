@@ -437,20 +437,20 @@ async fn cancel_and_link_take_a_bot_in_a_standing_role_that_allows_them() {
         .link_task(&julia(), run_id, task, Some(ActingAgent::Session(primary)))
         .await;
     let cancel_refused = service
-        .cancel_run(&julia(), run_id, Some(ActingAgent::Session(primary)))
+        .cancel_run(&julia(), run_id, Some(ActingAgent::Session(primary)), false)
         .await;
     let in_person = service.link_task(&julia(), run_id, task, None).await;
     let linked = service
         .link_task(&julia(), run_id, task, Some(ActingAgent::Session(backup)))
         .await;
     let cancelled = service
-        .cancel_run(&julia(), run_id, Some(ActingAgent::Session(backup)))
+        .cancel_run(&julia(), run_id, Some(ActingAgent::Session(backup)), false)
         .await;
     let open_linked = service
         .link_task(&julia(), open, task, Some(ActingAgent::Session(primary)))
         .await;
     let open_cancelled = service
-        .cancel_run(&julia(), open, Some(ActingAgent::Session(primary)))
+        .cancel_run(&julia(), open, Some(ActingAgent::Session(primary)), false)
         .await;
 
     let Err(FactoryError::NotInStandingRole { act, allowing }) = link_refused else {
@@ -521,10 +521,10 @@ async fn a_cancel_that_is_not_taken_keeps_no_standing_act() {
     let backup = session_of(&repo, BACKUP_BOT);
 
     let too_late = code_service(&repo, &ended, &github)
-        .cancel_run(&julia(), run_id, Some(ActingAgent::Session(backup)))
+        .cancel_run(&julia(), run_id, Some(ActingAgent::Session(backup)), false)
         .await;
     let failed = code_service(&repo, &failing, &github)
-        .cancel_run(&julia(), run_id, Some(ActingAgent::Session(backup)))
+        .cancel_run(&julia(), run_id, Some(ActingAgent::Session(backup)), false)
         .await;
 
     assert!(
@@ -537,7 +537,7 @@ async fn a_cancel_that_is_not_taken_keeps_no_standing_act() {
     let other = session_of(&repo, BACKUP_BOT);
     let service = code_service(&repo, &taking, &github);
     service
-        .cancel_run(&julia(), run_id, Some(ActingAgent::Session(other)))
+        .cancel_run(&julia(), run_id, Some(ActingAgent::Session(other)), false)
         .await
         .expect("the operator cancels");
     let detail = service.get_run(&julia(), run_id).await.expect("read");
@@ -610,7 +610,7 @@ async fn a_taken_cancel_keeps_its_sender_through_a_failing_record() {
         .insert("record_standing_act", (0, 2));
 
     service
-        .cancel_run(&julia(), run_id, backup)
+        .cancel_run(&julia(), run_id, backup, false)
         .await
         .expect("the operator cancels");
 
@@ -634,7 +634,7 @@ async fn a_taken_cancel_keeps_its_sender_through_a_failing_record() {
         .lock()
         .expect("failing")
         .insert("record_standing_act", (0, 3));
-    let lost = service.cancel_run(&julia(), other, backup).await;
+    let lost = service.cancel_run(&julia(), other, backup, false).await;
     assert!(lost.is_err(), "{lost:?}");
 }
 
@@ -781,10 +781,10 @@ async fn a_sessionless_bot_takes_a_standing_role_that_allows_the_act() {
     let backup = Some(ActingAgent::Bot(BotId::new_from_uuid(BACKUP_BOT)));
     let unknown = Some(ActingAgent::Bot(BotId::new_from_uuid(Uuid::now_v7())));
 
-    let cancel_refused = service.cancel_run(&julia(), run_id, primary).await;
+    let cancel_refused = service.cancel_run(&julia(), run_id, primary, false).await;
     let link_refused = service.link_task(&julia(), run_id, task, unknown).await;
     let linked = service.link_task(&julia(), run_id, task, backup).await;
-    let cancelled = service.cancel_run(&julia(), run_id, backup).await;
+    let cancelled = service.cancel_run(&julia(), run_id, backup, false).await;
 
     let Err(FactoryError::NotInStandingRole { act, allowing }) = cancel_refused else {
         panic!("a sessionless bot in no standing role that cancels is refused");
@@ -845,7 +845,7 @@ async fn the_owner_in_person_acts_whatever_agents_the_run_kept() {
         .await
         .expect("the owner links in person");
     service
-        .cancel_run(&julia(), run_id, None)
+        .cancel_run(&julia(), run_id, None, true)
         .await
         .expect("the owner cancels in person");
     let agent = service
@@ -853,6 +853,7 @@ async fn the_owner_in_person_acts_whatever_agents_the_run_kept() {
             &julia(),
             run_id,
             Some(ActingAgent::Bot(BotId::new_from_uuid(PRIMARY_BOT))),
+            false,
         )
         .await;
 

@@ -1998,6 +1998,22 @@ impl RunRepository for PgRunRepository {
     }
 
     #[tracing::instrument(err, skip(self))]
+    async fn record_cancel_sender(&self, id: RunId, in_person: bool) -> Result<(), Self::Err> {
+        sqlx::query!(
+            r#"
+            UPDATE factory_run
+            SET cancelled_in_person = $2
+            WHERE id = $1 AND outcome IS NULL
+            "#,
+            id.as_uuid(),
+            in_person,
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    #[tracing::instrument(err, skip(self))]
     async fn end_run(&self, id: RunId, outcome: RunOutcome) -> Result<(), Self::Err> {
         // The Run's end and, for a cancelled Run, its open Steps' ends land
         // together, so a Step can't end after the Run that cancelled it.

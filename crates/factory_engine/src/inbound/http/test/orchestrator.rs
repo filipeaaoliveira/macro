@@ -225,6 +225,38 @@ async fn starts_cancels_and_links_carry_the_calling_agent_session() {
     );
 }
 
+/// A cancel is in person only from the person in their own session: an
+/// agent session's code, their API key and an internal caller for them
+/// are not, so none of them rejects a self-improvement Run.
+#[tokio::test]
+async fn only_the_person_in_their_session_cancels_in_person() {
+    let (router, service) = router(|| FactoryError::NotFound);
+    let run = factory_records::domain::models::RunId::generate();
+    let cancel_path = format!("/runs/{run}/cancel");
+    let cancel = |caller| call("POST", &cancel_path, caller, serde_json::json!({}));
+
+    for request in [
+        cancel(Caller::User("alice")),
+        cancel(Caller::ApiKey("alice-key")),
+        cancel(Caller::Internal(Some(ALICE))),
+    ] {
+        let response = router.clone().oneshot(request).await.expect("response");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+    let from_a_session = in_session(
+        &router,
+        Uuid::now_v7(),
+        from_code("POST", &cancel_path, serde_json::json!({})),
+    )
+    .await;
+    assert_eq!(from_a_session.status(), StatusCode::NOT_FOUND);
+
+    assert_eq!(
+        *service.cancels_in_person.lock().expect("cancels in person"),
+        [true, false, false, false]
+    );
+}
+
 /// Code signed for a bot that runs in no agent session acts as that bot:
 /// a self-hosted agent's code-mode call, and a routine's run signed for an
 /// agent, reach the service with the bot their credential is signed for,

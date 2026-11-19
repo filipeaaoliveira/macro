@@ -525,4 +525,13 @@ pub trait RunRepository: Send + Sync + 'static {
         id: RunId,
         outcome: RunOutcome,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// Keep whether the cancel about to be sent to the Run `id` comes from
+    /// its owner in person, replacing an earlier cancel's, while the Run
+    /// has not ended: the last cancel before its end says who cancelled it.
+    fn record_cancel_sender(
+        &self,
+        id: RunId,
+        in_person: bool,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 }

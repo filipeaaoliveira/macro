@@ -103,6 +103,10 @@ pub struct RunFailureFacts {
     pub definition_evaluation: Option<serde_json::Value>,
     /// How it ended; none while it runs.
     pub outcome: Option<RunOutcome>,
+    /// Whether the last cancel sent to it before it ended came from its
+    /// owner in person: never for an agent's, a bot's under a Standing
+    /// Role, an internal caller's or a program's.
+    pub cancelled_in_person: bool,
     /// Why it was marked flawed, if it was.
     pub flaw_reason: Option<String>,
     /// The live Scorers' judgments of it: Scorer, score and reason.

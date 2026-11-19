@@ -430,13 +430,16 @@ where
         let Some(facts) = self.repo.failure_facts(run_id).await.map_err(internal)? else {
             return Ok(Some(Settlement::Closed));
         };
-        // How it settles with no pull request: rejected when a person
-        // cancelled its Run.
-        let without_pull_request = if facts.outcome == Some(RunOutcome::Cancelled) {
-            Settlement::Rejected
-        } else {
-            Settlement::Closed
-        };
+        // How it settles with no pull request: rejected when its owner
+        // cancelled its Run in person. A cancel by an agent, a bot under a
+        // Standing Role, an internal caller or a program only means it did
+        // not finish: its failures are pending again.
+        let without_pull_request =
+            if facts.outcome == Some(RunOutcome::Cancelled) && facts.cancelled_in_person {
+                Settlement::Rejected
+            } else {
+                Settlement::Closed
+            };
         match facts.outcome {
             // A Run kept, but whose workflow never started (its start
             // failed, and whether it was kept could not be read), would

@@ -1683,10 +1683,15 @@ to one is Tampered (`ControlFiles::changes_guarding`). Once its Run ends, the ne
 `after_run_end` of the team settles it: a Run that ended `success` (its
 `merge` merged) or `flawed` addressed its failures (`merged`); otherwise
 its pull request is read as its owner: merged addresses them, open keeps
-the Run open (no other starts), closed unmerged, or none after a person
-cancelled the Run, is a person's rejection (`Settlement::Rejected`, kept
+the Run open (no other starts), closed unmerged, or none after its owner
+cancelled the Run in person, is a person's rejection (`Settlement::Rejected`, kept
 `closed`) that dismisses them for good, and none otherwise sends them back
-to pending (`closed`); each pauses the next as above. Dismissed failures
+to pending (`closed`); each pauses the next as above. A cancel is in person only
+from the owner in their own signed-in session, from an account that is not
+an agent's (`factory_run.cancelled_in_person`, kept by `cancel_run` before
+the cancel is sent, the last one before the Run's end winning); a cancel by
+an agent, a bot under a Standing Role, an internal caller or a program only
+means the Run did not finish, so its failures are pending again. Dismissed failures
 never start another Run; new failures, of the same Scorer too, count. A pull request a person
 merges or closes after its Run ended is seen only at the team's next Run's
 end. Pending failures are matched to the Definition's repository ignoring

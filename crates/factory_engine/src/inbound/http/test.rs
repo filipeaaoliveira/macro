@@ -188,6 +188,8 @@ struct FakeService {
     answerers: Mutex<Vec<Answerer>>,
     /// The agent each start, cancel and link acted as, in order.
     acting: Mutex<Vec<Option<ActingAgent>>>,
+    /// Whether each cancel came from the person in their own session.
+    cancels_in_person: Mutex<Vec<bool>>,
 }
 
 impl FakeService {
@@ -386,8 +388,13 @@ impl FactoryService for FakeService {
         actor: &MacroUserIdStr<'static>,
         _id: RunId,
         acting: Option<ActingAgent>,
+        in_person: bool,
     ) -> Result<(), FactoryError> {
         self.acting.lock().expect("acting").push(acting);
+        self.cancels_in_person
+            .lock()
+            .expect("cancels in person")
+            .push(in_person);
         Err(self.refusing(actor))
     }
 
@@ -482,6 +489,7 @@ fn router(answer: fn() -> FactoryError) -> (Router, Arc<FakeService>) {
         actors: Mutex::new(Vec::new()),
         answerers: Mutex::new(Vec::new()),
         acting: Mutex::new(Vec::new()),
+        cancels_in_person: Mutex::new(Vec::new()),
     });
     let state = FactoryRouterState::new(Arc::clone(&service), authorization());
     (factory_router(state), service)

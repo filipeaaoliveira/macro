@@ -118,7 +118,7 @@ impl SelfImprovementRepository for PgRunRepository {
         let row = sqlx::query!(
             r#"
             SELECT user_id, flow, repo_url, definition_repo_url, definition_evaluation, outcome,
-                flaw_reason
+                cancelled_in_person, flaw_reason
             FROM factory_run
             WHERE id = $1
             "#,
@@ -154,6 +154,7 @@ impl SelfImprovementRepository for PgRunRepository {
             definition_repo_url: row.definition_repo_url,
             definition_evaluation: row.definition_evaluation,
             outcome,
+            cancelled_in_person: row.cancelled_in_person,
             flaw_reason: row.flaw_reason,
             judgments,
         }))

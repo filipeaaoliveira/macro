@@ -1893,6 +1893,7 @@ where
         actor: &MacroUserIdStr<'static>,
         id: RunId,
         acting: Option<ActingAgent>,
+        in_person: bool,
     ) -> Result<(), FactoryError> {
         let run = self.owned_run(actor, id).await?;
         let agents = self.acting_agents(id, acting).await?;
@@ -1901,6 +1902,17 @@ where
             .await?;
         match run.end.map(|end| end.outcome) {
             None => {
+                // Whether the owner cancelled it in person is kept before the
+                // cancel is sent, so its end, which may come at once, reads
+                // it: only a person's cancel rejects a self-improvement Run.
+                // An agent's account is never its owner in person.
+                let in_person = in_person
+                    && acting.is_none()
+                    && !self.repo.is_agent_account(actor).await.map_err(internal)?;
+                self.repo
+                    .record_cancel_sender(id, in_person)
+                    .await
+                    .map_err(internal)?;
                 self.send_cancel(id).await?;
                 // The agent that asked for the cancel is kept once the
                 // cancel is accepted, so a refused or failed one names no

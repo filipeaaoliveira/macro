@@ -4,6 +4,7 @@
 
 use std::sync::Arc;
 
+use bot_id::BotId;
 use chrono::{TimeDelta, Utc};
 use factory_records::domain::models::{
     EntryId, Outcome, RunId, RunOutcome, StepKey, TeamMembership,
@@ -23,7 +24,7 @@ use crate::domain::fakes::FakeWatches;
 use crate::domain::fakes::{FakeGithub, FakeJudge, FakeRepo};
 use crate::domain::flow::StepName;
 use crate::domain::insights::fakes::FakeUsage;
-use crate::domain::models::StepRequest;
+use crate::domain::models::{ActingAgent, StepRequest};
 use crate::domain::models::{FactoryError, PullRequest, PullRequestState};
 use crate::domain::ports::StepService;
 use crate::domain::ports::{FactoryService, ScoringService};
@@ -274,6 +275,26 @@ impl Bench {
             .map(|latest| latest.state)
     }
 
+    /// Cancel the Run `run` as its owner, through the agent `acting` or
+    /// `in_person`, and end it cancelled, as its workflow would.
+    async fn cancel(&self, run: RunId, acting: Option<ActingAgent>, in_person: bool) {
+        let owner = self
+            .repo
+            .get_run(run)
+            .await
+            .expect("read")
+            .expect("the run")
+            .user_id;
+        self.service
+            .cancel_run(&owner, run, acting, in_person)
+            .await
+            .expect("cancelled");
+        self.repo
+            .end_run(run, RunOutcome::Cancelled)
+            .await
+            .expect("end");
+    }
+
     async fn pending(&self) -> u32 {
         self.repo
             .pending_failures(TEAM, DEFINITION_REPO)
@@ -517,13 +538,9 @@ async fn the_pull_request_settles_the_failures() {
     assert_eq!(bench.improvement_runs().len(), 2);
     let second = bench.improvement_runs()[1];
 
-    // Cancelled with no pull request: closed, its failures dismissed, and
-    // no other starts at once.
-    bench
-        .repo
-        .end_run(second, RunOutcome::Cancelled)
-        .await
-        .expect("end");
+    // Cancelled by a person with no pull request: closed, its failures
+    // dismissed, and no other starts at once.
+    bench.cancel(second, None, true).await;
     bench
         .improvement()
         .after_run_end(second)
@@ -1409,12 +1426,8 @@ async fn failures_a_person_rejected_do_not_come_back() {
     assert_eq!(bench.improvement_runs().len(), 2);
     let second = bench.improvement_runs()[1];
 
-    // A person cancels it, with no pull request: dismissed too.
-    bench
-        .repo
-        .end_run(second, RunOutcome::Cancelled)
-        .await
-        .expect("end");
+    // A person cancels it in person, with no pull request: dismissed too.
+    bench.cancel(second, None, true).await;
     bench
         .improvement()
         .after_run_end(second)
@@ -1441,4 +1454,49 @@ async fn failures_a_person_rejected_do_not_come_back() {
         .expect("after");
     assert_eq!(bench.latest_state(), Some(ImprovementState::Closed));
     assert_eq!(bench.pending().await, 2);
+}
+
+/// Only the owner's cancel in person rejects a self-improvement Run. One an
+/// agent sends from its session, a bot signed for itself, or a program or
+/// internal caller sends for the owner, only means the Run did not finish:
+/// its failures are pending again, never dismissed.
+#[tokio::test]
+async fn a_cancel_not_in_person_does_not_dismiss_the_failures() {
+    let bench = Bench::new(team_repo(true), AGENTS, None);
+    let session = Uuid::now_v7();
+    let bot = BotId::new_from_uuid(Uuid::from_u128(0xc1a0));
+    let senders = [
+        (Some(ActingAgent::Session(session)), false),
+        (Some(ActingAgent::Bot(bot)), false),
+        (None, false),
+        // An agent's call is never its owner in person, however it came.
+        (Some(ActingAgent::Bot(bot)), true),
+    ];
+
+    for (round, (acting, in_person)) in senders.into_iter().enumerate() {
+        if round > 0 {
+            bench.settled_hours_ago(24 * 8);
+        }
+        bench.judged_run(0.2).await;
+        bench.judged_run(0.2).await;
+        let improving = bench.improvement_runs();
+        assert_eq!(improving.len(), round + 1, "round {round}");
+        let run = improving[round];
+
+        bench.cancel(run, acting, in_person).await;
+        bench.improvement().after_run_end(run).await.expect("after");
+
+        assert_eq!(bench.latest_state(), Some(ImprovementState::Closed));
+        let dismissed = bench
+            .repo
+            .improvement
+            .lock()
+            .expect("improvement")
+            .failures
+            .iter()
+            .filter(|failure| failure.dismissed)
+            .count();
+        assert_eq!(dismissed, 0, "round {round}: not dismissed");
+        assert!(bench.pending().await >= 2, "round {round}: pending again");
+    }
 }

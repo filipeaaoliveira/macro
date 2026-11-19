@@ -180,6 +180,8 @@ pub(crate) struct FakeRepo {
     /// The bot of each agent session, with the session's owner, by the
     /// session's id.
     pub(crate) session_bots: Arc<Mutex<BTreeMap<Uuid, (String, Uuid)>>>,
+    /// Whether each Run's last cancel came from its owner in person.
+    pub(crate) cancelled_in_person: Arc<Mutex<BTreeMap<RunId, bool>>>,
     /// The standing acts kept, in order.
     pub(crate) standing_acts: Arc<
         Mutex<
@@ -1502,6 +1504,22 @@ impl RunRepository for FakeRepo {
                     .is_some_and(|end| end.outcome == CheckRoundOutcome::Failed)
         });
         Ok(failed.map(|(_, kept)| *kept.fix_action_id.get_or_insert(fix_action_id)))
+    }
+
+    async fn record_cancel_sender(&self, id: RunId, in_person: bool) -> Result<(), FakeError> {
+        let open = self
+            .runs
+            .lock()
+            .expect("runs")
+            .get(&id)
+            .is_some_and(|run| run.end.is_none());
+        if open {
+            self.cancelled_in_person
+                .lock()
+                .expect("cancelled in person")
+                .insert(id, in_person);
+        }
+        Ok(())
     }
 
     async fn end_run(&self, id: RunId, outcome: RunOutcome) -> Result<(), FakeError> {

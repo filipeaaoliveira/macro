@@ -104,7 +104,8 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261119003000_factory_repository_setup.sql`,
   `20261119010000_factory_quiet_gates.sql`,
   `20261119020000_factory_self_improvement.sql`,
-  `20261119020100_factory_improvement_failure_dismissed.sql`), `factory_step_steer`,
+  `20261119020100_factory_improvement_failure_dismissed.sql`,
+  `20261119030000_factory_run_cancelled_in_person.sql`), `factory_step_steer`,
   `factory_run_score`, `factory_run_arm`, `factory_benchmark_suite`,
   `factory_benchmark_trial`, `factory_benchmark_trial_score`,
   `factory_improvement` and `factory_improvement_failure`.
@@ -408,7 +409,10 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   nothing pending keeps nothing. `link_improvement_run` opens it with its
   Run, only while starting. `settle_improvement` settles an open one once:
   `merged` marks its failures addressed (`addressed_at`), a person's
-  rejection (`Settlement::Rejected`, kept `closed`) dismisses them
+  rejection (`Settlement::Rejected`, kept `closed`; a cancel is one only
+  when `failure_facts` reads `cancelled_in_person`, which
+  `record_cancel_sender` sets or clears for each cancel while the Run has
+  not ended, `20261119030000_factory_run_cancelled_in_person.sql`) dismisses them
   (`dismissed_at`, `20261119020100_factory_improvement_failure_dismissed.sql`;
   they keep its `improvement_id`, so they are never pending again), and
   `closed` and `refused` (with why) clear their `improvement_id`, so they

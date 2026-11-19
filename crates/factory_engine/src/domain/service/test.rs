@@ -614,7 +614,7 @@ async fn someone_else_s_run_reads_answers_and_cancels_as_missing() {
             Answerer::InPerson,
         )
         .await;
-    let cancelled = service.cancel_run(&teo(), run_id, None).await;
+    let cancelled = service.cancel_run(&teo(), run_id, None, true).await;
     let linked = service
         .link_task(&teo(), run_id, Uuid::now_v7(), None)
         .await;
@@ -738,17 +738,19 @@ async fn cancelling_a_run_twice_is_one_cancel_and_an_ended_run_is_not_cancelled(
     let service = service(&repo, &workflows);
 
     service
-        .cancel_run(&julia(), cancelled_run, None)
+        .cancel_run(&julia(), cancelled_run, None, true)
         .await
         .expect("cancel");
     repo.end_run(cancelled_run, RunOutcome::Cancelled)
         .await
         .expect("the workflow ends it");
-    let again = service.cancel_run(&julia(), cancelled_run, None).await;
+    let again = service
+        .cancel_run(&julia(), cancelled_run, None, true)
+        .await;
     repo.end_run(finished_run, RunOutcome::Success)
         .await
         .expect("end");
-    let finished = service.cancel_run(&julia(), finished_run, None).await;
+    let finished = service.cancel_run(&julia(), finished_run, None, true).await;
 
     assert!(again.is_ok());
     assert!(matches!(finished, Err(FactoryError::RunEnded)));
@@ -1106,7 +1108,7 @@ async fn cancelling_a_run_whose_workflow_completed_is_a_conflict() {
     let run_id = julia_s_run(&repo).await;
 
     let refused = service(&repo, &workflows)
-        .cancel_run(&julia(), run_id, None)
+        .cancel_run(&julia(), run_id, None, true)
         .await;
 
     assert!(matches!(refused, Err(FactoryError::RunEnded)));
@@ -1124,7 +1126,7 @@ async fn cancelling_a_run_whose_workflow_never_started_ends_it_cancelled() {
     let run_id = julia_s_run(&repo).await;
 
     service(&repo, &workflows)
-        .cancel_run(&julia(), run_id, None)
+        .cancel_run(&julia(), run_id, None, true)
         .await
         .expect("cancel");
     let started = StepServiceImpl::new(repo.clone(), FakeExecutor::default())
@@ -1159,7 +1161,7 @@ async fn a_workflow_that_starts_as_its_run_is_cancelled_is_cancelled_too() {
     let run_id = julia_s_run(&repo).await;
 
     service(&repo, &workflows)
-        .cancel_run(&julia(), run_id, None)
+        .cancel_run(&julia(), run_id, None, true)
         .await
         .expect("cancel");
 
@@ -1177,7 +1179,7 @@ async fn a_workflow_that_started_after_the_cancel_was_sent_is_cancelled() {
     let run_id = julia_s_run(&repo).await;
 
     service(&repo, &workflows)
-        .cancel_run(&julia(), run_id, None)
+        .cancel_run(&julia(), run_id, None, true)
         .await
         .expect("cancel");
 

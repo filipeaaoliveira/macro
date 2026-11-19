@@ -300,6 +300,57 @@ async fn a_runs_failure_facts_read_its_judgments(pool: PgPool) {
     );
 }
 
+/// A Run keeps whether the last cancel sent to it before it ended came
+/// from its owner in person: a later cancel replaces an earlier one's,
+/// and none after its end changes it. A Run never cancelled reads as not.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "team"))
+)]
+async fn a_run_keeps_whether_its_last_cancel_was_in_person(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+    let in_person = RunId::generate();
+    let by_agent = RunId::generate();
+    insert(&repo, in_person, "Add dark mode").await;
+    insert(&repo, by_agent, "Fix the login bug").await;
+    let kept = |id| {
+        let repo = &repo;
+        async move {
+            repo.failure_facts(id)
+                .await
+                .expect("read")
+                .expect("found")
+                .cancelled_in_person
+        }
+    };
+    assert!(!kept(in_person).await, "not cancelled");
+
+    repo.record_cancel_sender(in_person, false)
+        .await
+        .expect("agent's");
+    repo.record_cancel_sender(in_person, true)
+        .await
+        .expect("person's");
+    repo.end_run(in_person, RunOutcome::Cancelled)
+        .await
+        .expect("end");
+    repo.record_cancel_sender(in_person, false)
+        .await
+        .expect("after its end");
+    repo.record_cancel_sender(by_agent, true)
+        .await
+        .expect("person's");
+    repo.record_cancel_sender(by_agent, false)
+        .await
+        .expect("agent's");
+    repo.end_run(by_agent, RunOutcome::Cancelled)
+        .await
+        .expect("end");
+
+    assert!(kept(in_person).await);
+    assert!(!kept(by_agent).await);
+}
+
 /// Pending failures are matched to the Definition's repository ignoring
 /// case, as a team naming it again in other letters would: counted and
 /// claimed alike.

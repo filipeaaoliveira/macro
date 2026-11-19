@@ -959,12 +959,16 @@ pub trait FactoryService: Send + Sync + 'static {
 
     /// Cancel `actor`'s Run. Cancelling a Run that ended cancelled changes
     /// nothing. For the agent `acting`, on a Run whose Definition has
-    /// Standing Roles, its bot must fill one that allows `cancel`.
+    /// Standing Roles, its bot must fill one that allows `cancel`. The Run
+    /// keeps whether its cancel came from its owner `in_person` (and from
+    /// an account that is not an agent's): only theirs rejects a
+    /// self-improvement Run.
     fn cancel_run(
         &self,
         actor: &MacroUserIdStr<'static>,
         id: RunId,
         acting: Option<ActingAgent>,
+        in_person: bool,
     ) -> impl Future<Output = Result<(), FactoryError>> + Send;
 
     /// Mark `actor`'s Run flawed, for `reason`, in their own name: it

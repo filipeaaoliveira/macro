@@ -152,6 +152,13 @@ impl SelfImprovementRepository for FakeRepo {
             definition_repo_url: run.definition.as_ref().map(|kept| kept.repo_url.clone()),
             definition_evaluation,
             outcome: run.end.as_ref().map(|end| end.outcome),
+            cancelled_in_person: self
+                .cancelled_in_person
+                .lock()
+                .expect("cancelled in person")
+                .get(&run_id)
+                .copied()
+                .unwrap_or(false),
             flaw_reason: run
                 .end
                 .as_ref()

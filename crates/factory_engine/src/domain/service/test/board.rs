@@ -541,7 +541,7 @@ async fn a_team_member_reads_a_run_on_a_task_they_see() {
         let refused = service.get_run(&julia(), id).await;
         assert!(matches!(refused, Err(FactoryError::NotFound)), "{id}");
     }
-    let cancel = service.cancel_run(&julia(), shared, None).await;
+    let cancel = service.cancel_run(&julia(), shared, None, true).await;
     assert!(matches!(cancel, Err(FactoryError::NotFound)));
 }
 
