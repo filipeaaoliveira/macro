@@ -220,7 +220,8 @@ async fn the_owner_is_notified_about_the_run_s_task() {
 }
 
 /// A Run started without a task notifies its owner all the same: the
-/// notification is about the owner, still pushed.
+/// notification is filed under the owner's own User, which the inbox lists
+/// to them alone, and still pushed.
 #[tokio::test]
 async fn the_owner_of_a_run_without_a_task_is_notified_about_themselves() {
     let ingress = Arc::new(RecordingIngress::default());
@@ -237,6 +238,11 @@ async fn the_owner_of_a_run_without_a_task_is_notified_about_themselves() {
     assert!(request.contains("factory_gate_waiting"), "{request}");
     assert!(!request.contains("\"document\""), "{request}");
     assert!(request.contains("\"user\""), "{request}");
+    // Filed under the owner themself, the only one the inbox lists it to.
+    assert_eq!(
+        sent[0]["req"]["notification_entity"]["entity_id"], "macro|julia@example.com",
+        "{request}"
+    );
     assert!(!sent[0]["build_apns"].is_null(), "{request}");
 }
 
