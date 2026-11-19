@@ -20,6 +20,7 @@ use super::{EvaluationDefinition, SelfImprovementDefinition, check_choices};
 use crate::domain::insights::{InsightsError, InsightsQuery, TokenCounts};
 use crate::domain::models::FactoryError;
 use crate::domain::ports::FactoryService;
+use crate::domain::self_improvement::{NamerStanding, namer_standing};
 
 fn internal(error: impl std::error::Error + Send + Sync + 'static) -> rootcause::Report {
     rootcause::Report::new(error).into_dynamic()
@@ -242,9 +243,10 @@ pub struct SelfImprovementInsight {
     /// How many days old the oldest pending failure is before a Run starts
     /// with fewer.
     pub oldest_days: u16,
-    /// Whether someone is kept as naming the Definition: its
-    /// self-improvement Runs are theirs, and none starts without them.
-    pub has_owner: bool,
+    /// Where the admin who named the Definition stands: its
+    /// self-improvement Runs are theirs, and none starts unless they are
+    /// still an admin of the team.
+    pub namer: NamerStanding,
     /// How many failures wait.
     pub pending: u32,
     /// When the oldest was kept.
@@ -586,6 +588,9 @@ where
         else {
             return Ok(None);
         };
+        let (namer, _) = namer_standing(&self.repo, team.team_id, &naming)
+            .await
+            .map_err(|error| InsightsError::Internal(internal(error)))?;
         let pending = self
             .repo
             .pending_failures(team.team_id, &naming.repo_url)
@@ -601,7 +606,7 @@ where
             enabled: thresholds.enabled,
             failures_threshold: thresholds.failures,
             oldest_days: thresholds.oldest_days,
-            has_owner: naming.named_by.is_some(),
+            namer,
             pending: pending.count,
             oldest_pending_at: pending.oldest,
             pending_by_source: pending

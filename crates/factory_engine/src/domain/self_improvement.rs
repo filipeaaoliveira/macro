@@ -36,6 +36,8 @@ use factory_records::domain::self_improvement::{
 };
 use uuid::Uuid;
 
+use macro_user_id::user_id::MacroUserIdStr;
+
 use crate::domain::evaluation::{EvaluationDefinition, SelfImprovementDefinition};
 use crate::domain::models::{CodeRepository, PullRequestState, StepError, run_branch};
 use crate::domain::ports::{FactoryService, PullRequests, ScoringService};
@@ -144,6 +146,43 @@ pub fn paused_until(recent: &[Improvement]) -> Option<DateTime<Utc>> {
         .unwrap_or(MAX_UNMERGED_PAUSE)
         .min(MAX_UNMERGED_PAUSE);
     Some(settled_at + pause)
+}
+
+/// Whether a self-improvement Run may be started as the Definition's
+/// namer, and why not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NamerStanding {
+    /// The namer is an admin of the team: their Runs start.
+    Admin,
+    /// No one is kept as naming the Definition (named before this was
+    /// kept, or their account is gone).
+    None,
+    /// The namer left the team.
+    LeftTeam,
+    /// The namer is on the team but no longer an admin of it.
+    NotAdmin,
+}
+
+/// Where the namer of `naming`, the team `team_id`'s Definition, stands,
+/// with their id when they may start its self-improvement Run.
+pub async fn namer_standing<R>(
+    repo: &R,
+    team_id: Uuid,
+    naming: &DefinitionNaming,
+) -> Result<(NamerStanding, Option<MacroUserIdStr<'static>>), StepError>
+where
+    R: RunRepository,
+{
+    let Some(namer) = naming.named_by.clone() else {
+        return Ok((NamerStanding::None, None));
+    };
+    let membership = repo.team_of(&namer).await.map_err(internal)?;
+    Ok(match membership {
+        Some(team) if team.team_id == team_id && team.admin => (NamerStanding::Admin, Some(namer)),
+        Some(team) if team.team_id == team_id => (NamerStanding::NotAdmin, None),
+        _ => (NamerStanding::LeftTeam, None),
+    })
 }
 
 /// Keep the failures of the Run `run_id` for its team, when it ran under
@@ -359,25 +398,14 @@ where
     }
 
     /// Start the team's self-improvement Run of the failures it claims, as
-    /// the Definition's namer; refused, and its failures back to pending,
-    /// when the Run does not start.
-    async fn start(&self, team_id: Uuid, naming: &DefinitionNaming) -> Result<(), StepError> {
-        let Some(owner) = naming.named_by.clone() else {
-            tracing::info!(%team_id, "no one is kept as naming the team's definition: no self-improvement run");
-            return Ok(());
-        };
-        // The namer starts it only while on the team, whose Definition
-        // their Run reads.
-        let on_team = self
-            .repo
-            .team_of(&owner)
-            .await
-            .map_err(internal)?
-            .is_some_and(|team| team.team_id == team_id);
-        if !on_team {
-            tracing::info!(%team_id, "the definition's namer left the team: no self-improvement run");
-            return Ok(());
-        }
+    /// `owner`, the Definition's namer; refused, and its failures back to
+    /// pending, when the Run does not start.
+    async fn start(
+        &self,
+        team_id: Uuid,
+        naming: &DefinitionNaming,
+        owner: MacroUserIdStr<'static>,
+    ) -> Result<(), StepError> {
         let id = Uuid::now_v7();
         let claimed = self
             .repo
@@ -457,10 +485,20 @@ where
             .pending_failures(team_id, &naming.repo_url)
             .await
             .map_err(internal)?;
+        if pending.count == 0 {
+            return Ok(());
+        }
+        // The namer starts it only while an admin of the team, whose
+        // Definition their Run reads.
+        let (standing, owner) = namer_standing(&self.repo, team_id, &naming).await?;
+        let Some(owner) = owner else {
+            tracing::info!(%team_id, ?standing, "the definition's namer may not start a self-improvement run");
+            return Ok(());
+        };
         if !is_due(thresholds, pending.count, pending.oldest, Utc::now()) {
             return Ok(());
         }
-        self.start(team_id, &naming).await
+        self.start(team_id, &naming, owner).await
     }
 }
 

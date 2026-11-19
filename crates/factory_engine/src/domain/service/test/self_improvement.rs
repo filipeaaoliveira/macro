@@ -120,6 +120,26 @@ fn team_repo(named: bool) -> FakeRepo {
     repo
 }
 
+/// Keep Julia on the team as an admin (`Some(true)`), a member
+/// (`Some(false)`), or off it (`None`).
+fn set_julia(repo: &FakeRepo, admin: Option<bool>) {
+    let mut teams = repo.teams.lock().expect("teams");
+    match admin {
+        Some(admin) => {
+            teams.insert(
+                julia().to_string(),
+                TeamMembership {
+                    team_id: TEAM,
+                    admin,
+                },
+            );
+        }
+        None => {
+            teams.remove(&julia().to_string());
+        }
+    }
+}
+
 /// What a test drives: the records, GitHub, the started workflows, the Run
 /// API and the scoring the scoring activity calls.
 struct Bench {
@@ -724,6 +744,7 @@ async fn a_refused_improvement_run_waits_and_people_cannot_start_one() {
 async fn insights_show_pending_failures_and_the_last_improvement_run() {
     use crate::domain::evaluation::insights::{EvaluationService, EvaluationServiceImpl};
     use crate::domain::insights::InsightsQuery;
+    use crate::domain::self_improvement::NamerStanding;
 
     let bench = Bench::new(team_repo(true), AGENTS, None);
     let today = Utc::now().date_naive();
@@ -746,7 +767,8 @@ async fn insights_show_pending_failures_and_the_last_improvement_run() {
     assert_eq!(shown.pending, 1);
     assert_eq!(shown.failures_threshold, 2);
     assert_eq!(shown.oldest_days, 7);
-    assert!(shown.enabled && shown.has_owner);
+    assert!(shown.enabled);
+    assert_eq!(shown.namer, NamerStanding::Admin);
     assert_eq!(shown.pending_by_source[0].source, "reads-well");
     assert_eq!(shown.last, None);
 
@@ -762,6 +784,28 @@ async fn insights_show_pending_failures_and_the_last_improvement_run() {
     assert_eq!(last.state, ImprovementState::Open);
     assert_eq!(last.failures, 2);
     assert_eq!(last.run_id, bench.improvement_runs().first().copied());
+
+    // The namer demoted, then gone from the team, then none kept.
+    let namer = || async {
+        insights
+            .evaluation(&teo(), query())
+            .await
+            .expect("insights")
+            .self_improvement
+            .expect("the team names a definition")
+            .namer
+    };
+    set_julia(&bench.repo, Some(false));
+    assert_eq!(namer().await, NamerStanding::NotAdmin);
+    set_julia(&bench.repo, None);
+    assert_eq!(namer().await, NamerStanding::LeftTeam);
+    bench
+        .repo
+        .definition_namers
+        .lock()
+        .expect("namers")
+        .remove(&TEAM);
+    assert_eq!(namer().await, NamerStanding::None);
 
     bench
         .repo
@@ -931,6 +975,27 @@ async fn an_improvement_run_s_plan_and_merge_wait_for_a_person_whatever_it_chang
         .and_then(|step| step.gate)
         .expect("the merge gate");
     assert_eq!(merge_gate.answer, None);
+}
+
+/// The namer starts a self-improvement Run only while an admin of the
+/// team: demoted, or gone from it, starts none, and the failures stay
+/// pending until an admin names the Definition again.
+#[tokio::test]
+async fn only_an_admin_namer_starts_an_improvement_run() {
+    for admin in [Some(false), None] {
+        let bench = Bench::new(team_repo(true), AGENTS, None);
+        set_julia(&bench.repo, admin);
+        bench.judged_run(0.2).await;
+        bench.judged_run(0.2).await;
+        bench.judged_run(0.2).await;
+        assert!(bench.improvement_runs().is_empty(), "{admin:?}");
+        assert_eq!(bench.latest_state(), None, "{admin:?}");
+        assert_eq!(bench.pending().await, 3, "{admin:?}");
+
+        set_julia(&bench.repo, Some(true));
+        bench.judged_run(0.9).await;
+        assert_eq!(bench.improvement_runs().len(), 1, "{admin:?}");
+    }
 }
 
 /// A self-improvement Run kept starting too long is refused, and the next
