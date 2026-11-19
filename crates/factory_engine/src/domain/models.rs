@@ -777,6 +777,12 @@ pub enum FactoryError {
     /// A page of the board names half of where it starts.
     #[error("afterCreatedAt and afterId go together")]
     HalfCursor,
+    /// A lookup by pull request names more of them than it reads.
+    #[error("at most {max} pull requests are looked up at once")]
+    TooManyPullRequests {
+        /// The most pull requests one lookup names.
+        max: usize,
+    },
     /// No task the Run's owner can see has this id.
     #[error("no task the run's owner can see has this id")]
     UnknownTask,

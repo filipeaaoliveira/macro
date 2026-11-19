@@ -12,6 +12,9 @@ export const factoryRunKeys = createQueryKeys('factoryRuns', {
   standingRules: null,
   automations: null,
   sessionStep: (sessionId: string) => ({ queryKey: [sessionId] }),
+  pullRequests: (urls: readonly string[]) => ({
+    queryKey: [urls.join('\n')],
+  }),
   board: (filters: BoardFilters) => ({
     queryKey: [
       filters.scope,

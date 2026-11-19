@@ -7,12 +7,13 @@ use std::time::{Duration, Instant};
 use agent_session::domain::session_task::TaskDocumentId;
 use factory_records::domain::automations::AutomationRepository;
 use factory_records::domain::board::{
-    BoardCursor, BoardQuery, BoardRun as RecordedBoardRun, RunBoardRepository,
+    BoardCursor, BoardQuery, BoardRun as RecordedBoardRun, PullRequestRunsQuery,
+    RunBoardRepository, pull_request_key,
 };
 use factory_records::domain::evaluation::EvaluationRepository;
 use factory_records::domain::flaws::FlawRepository;
 use factory_records::domain::main_hold::MainHoldRepository;
-use factory_records::domain::models::Run;
+use factory_records::domain::models::{GateKind, Run, Step};
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::ReviewRoundRepository;
 use factory_records::domain::standing_rules::StandingRulesRepository;
@@ -20,7 +21,10 @@ use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
 use super::{FactoryServiceImpl, internal};
-use crate::domain::board::{BoardFilter, BoardNext, BoardPage, BoardRun, BoardScope};
+use crate::domain::board::{
+    BoardFilter, BoardNext, BoardPage, BoardRun, BoardScope, PULL_REQUESTS_MAX, PullRequestRun,
+    PullRequestRuns,
+};
 use crate::domain::built_in_flows::BUILT_IN_FLOWS;
 use crate::domain::models::FactoryError;
 
@@ -33,6 +37,17 @@ const BOARD_ROUNDS: usize = 5;
 /// The fewest Runs a round reads, so a page of hidden Runs is passed in few
 /// rounds.
 const BOARD_BATCH_MIN: u16 = 50;
+
+/// The most Runs a lookup by pull request reads for each pull request,
+/// newest first: the newest of each owner and task, as only those can be
+/// the one shown. A Run opens its pull request from its own branch, so the
+/// engine gives a pull request one Run, and so one owner and task; a pull
+/// request that many owners' or tasks' Runs found, none of them one the
+/// caller sees, can only come from records written by hand, and is
+/// `unknown` rather than no Run's, as the one shown may be among those left
+/// unread. Each pull request is read on its own, so another's Runs never
+/// change its answer.
+pub(super) const PULL_REQUEST_RUNS_READ: u16 = 10;
 
 use crate::domain::ports::{
     PullRequests, RunWorkflows, StepExecutor, TaskAccess, TaskDirectory, UserDirectory,
@@ -178,12 +193,7 @@ where
             });
             self.check_tasks(actor, &read, &mut seen).await?;
             for board_run in read {
-                let visible = board_run.run.user_id == *actor
-                    || board_run
-                        .run
-                        .task_id
-                        .is_some_and(|task_id| seen.get(&task_id) == Some(&true));
-                if visible {
+                if is_seen(actor, &board_run, &seen) {
                     listed.push(board_run);
                 }
                 if listed.len() > limit {
@@ -227,6 +237,118 @@ where
             next,
             stopped_early: unfiltered && stopped_early && !more,
         })
+    }
+
+    /// The Runs that opened the pull requests at `urls`, as
+    /// [`FactoryService::pull_request_runs`] reads them.
+    ///
+    /// The Runs are read from the team's board as a team's board reads
+    /// them: a team member's Run on a task the caller cannot see is passed
+    /// over, so it reads as no Run, and an older one they see stands for its
+    /// pull request.
+    ///
+    /// [`FactoryService::pull_request_runs`]: crate::domain::ports::FactoryService::pull_request_runs
+    pub(super) async fn pull_request_runs_of(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        urls: Vec<String>,
+    ) -> Result<PullRequestRuns, FactoryError> {
+        if urls.len() > PULL_REQUESTS_MAX {
+            return Err(FactoryError::TooManyPullRequests {
+                max: PULL_REQUESTS_MAX,
+            });
+        }
+        // Each pull request once, by its key, under the page first named.
+        let mut asked: Vec<(String, String)> = Vec::with_capacity(urls.len());
+        for url in urls {
+            let key = pull_request_key(&url);
+            if !asked.iter().any(|(known, _)| *known == key) {
+                asked.push((key, url));
+            }
+        }
+        if asked.is_empty() {
+            return Ok(PullRequestRuns {
+                runs: Vec::new(),
+                unknown: Vec::new(),
+            });
+        }
+
+        let team_id = self
+            .repo
+            .team_of(actor)
+            .await
+            .map_err(internal)?
+            .map(|team| team.team_id);
+        let read = self
+            .repo
+            .pull_request_runs(&PullRequestRunsQuery {
+                user_id: actor.clone(),
+                team_id,
+                urls: asked.iter().map(|(key, _)| key.clone()).collect(),
+                merge_entries: self.built_in_merge_entries(),
+                limit: PULL_REQUEST_RUNS_READ,
+            })
+            .await
+            .map_err(internal)?;
+        // A pull request whose Runs reached the limit may have older ones
+        // left unread: with no Run shown, whether one the caller sees opened
+        // it is not known. Each is counted from its own Runs alone.
+        let mut read_of: HashMap<String, usize> = HashMap::new();
+        for board_run in &read {
+            if let Some(url) = board_run.run.pull_request_url.as_deref() {
+                *read_of.entry(pull_request_key(url)).or_default() += 1;
+            }
+        }
+        let cut_short = |key: &str| {
+            read_of.get(key).copied().unwrap_or_default() >= usize::from(PULL_REQUEST_RUNS_READ)
+        };
+        let mut seen = BTreeMap::new();
+        self.check_tasks(actor, &read, &mut seen).await?;
+
+        // The Runs come newest first: the first one the caller sees of each
+        // pull request is the one shown.
+        let mut newest: HashMap<String, RecordedBoardRun> = HashMap::new();
+        for board_run in read {
+            if !is_seen(actor, &board_run, &seen) {
+                continue;
+            }
+            let Some(url) = board_run.run.pull_request_url.as_deref() else {
+                continue;
+            };
+            newest.entry(pull_request_key(url)).or_insert(board_run);
+        }
+        let mut shown: Vec<(String, RecordedBoardRun)> = Vec::new();
+        let mut unknown = Vec::new();
+        for (key, url) in asked {
+            match newest.remove(&key) {
+                Some(listed) => shown.push((url, listed)),
+                None if cut_short(&key) => unknown.push(url),
+                None => {}
+            }
+        }
+
+        let parts: Vec<_> = shown
+            .iter()
+            .map(|(url, listed)| (url.clone(), listed.state, listed.task_name.clone()))
+            .collect();
+        let details = self
+            .details(shown.into_iter().map(|(_, listed)| listed.run).collect())
+            .await?;
+        let merge_entries = self.built_in_merge_entries();
+        let runs = parts
+            .into_iter()
+            .zip(details)
+            .map(|((url, state, task_name), detail)| PullRequestRun {
+                url,
+                merge_gate_seq: merge_gate(&detail.run, &detail.steps, &merge_entries),
+                listed: BoardRun {
+                    state,
+                    task_name,
+                    detail,
+                },
+            })
+            .collect();
+        Ok(PullRequestRuns { runs, unknown })
     }
 
     /// Whether the caller can see each live task of a team member's Run in
@@ -276,6 +398,36 @@ where
         }
         Ok(())
     }
+}
+
+/// Whether `actor` sees `board_run`: theirs, or on a task `seen` says they
+/// can see.
+fn is_seen(
+    actor: &MacroUserIdStr<'static>,
+    board_run: &RecordedBoardRun,
+    seen: &BTreeMap<Uuid, bool>,
+) -> bool {
+    board_run.run.user_id == *actor
+        || board_run
+            .run
+            .task_id
+            .is_some_and(|task_id| seen.get(&task_id) == Some(&true))
+}
+
+/// The place of the Step whose merge Gate `run` waits on: its latest Step,
+/// at one of `merge_entries`, with a Flow's Gate no one answered, while the
+/// Run goes.
+fn merge_gate(run: &Run, steps: &[Step], merge_entries: &[String]) -> Option<u16> {
+    if run.end.is_some() {
+        return None;
+    }
+    let latest = steps.last()?;
+    let gate = latest.gate.as_ref()?;
+    let waits = gate.kind == GateKind::Flow && gate.answer.is_none();
+    let at_merge = merge_entries
+        .iter()
+        .any(|entry| *entry == latest.entry.to_string());
+    (waits && at_merge).then_some(latest.seq)
 }
 
 /// How long a task view decided for the board is kept.

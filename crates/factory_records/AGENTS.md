@@ -32,7 +32,8 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `src/outbound/pg_run_repository/automations.rs`: `AutomationRepository`,
   teams' Automations and each time one fired.
 - `src/domain/board.rs` and `src/outbound/pg_run_repository/board.rs`:
-  `RunBoardRepository`, the board's read of Runs across tasks.
+  `RunBoardRepository`, the board's read of Runs across tasks, and of the
+  Runs that opened some pull requests.
 - `src/domain/evaluation.rs` and
   `src/outbound/pg_run_repository/evaluation.rs`: `EvaluationRepository`,
   Experiment arms, Scorers' judgments, Benchmark suites and trials.
@@ -79,7 +80,8 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261118210100_factory_benchmark_trial_base.sql`,
   `20261118213000_factory_definition.sql`,
   `20261118213200_factory_run_definition_evaluation.sql`,
-  `20261118220000_factory_run_outcome_kinds.sql`), `factory_step_steer`,
+  `20261118220000_factory_run_outcome_kinds.sql`,
+  `20261118233000_factory_run_pull_request_url_index.sql`), `factory_step_steer`,
   `factory_run_score`, `factory_run_arm`, `factory_benchmark_suite`,
   `factory_benchmark_trial` and `factory_benchmark_trial_score`.
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
@@ -209,6 +211,14 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   its merge, so a merged Run is `finished`, as is a `flawed` one. A
   Benchmark's trials (Flow `benchmark`) are no one's work: neither query
   reads them.
+- `pull_request_runs` reads, for each key asked (`pull_request_key`) on its
+  own, the Runs whose `lower(pull_request_url)` is that key, through
+  `factory_run_pull_request_url_idx` (one index search per key), of the
+  person or a member of the team given: only the newest Run of each owner
+  and task (`DISTINCT ON`, since whether a caller sees a Run depends only on
+  those), newest first up to the limit for that key, so one pull request's
+  Runs never crowd out another's. Each is where it is as `board_runs` reads
+  it; the rows come newest first across keys.
 - `read_insights` reads one person's newest Runs in a period through
   `factory_run_user_created_idx` (`user_id, created_at DESC, id DESC`), up to
   its cap (one past it, to tell whether Runs were left out), then their Steps

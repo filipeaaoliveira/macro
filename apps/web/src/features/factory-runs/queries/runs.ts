@@ -285,8 +285,8 @@ function startFailure(
 }
 
 /**
- * Reads the Run, its task's list, the Queue and the board again; resolves
- * once they are read.
+ * Reads the Run, its task's list, the Queue, the board and the Runs of pull
+ * requests again; resolves once they are read.
  */
 function refreshRun(
   client: QueryClient,
@@ -297,6 +297,7 @@ function refreshRun(
     client.invalidateQueries({ queryKey: factoryRunKeys.run(runId).queryKey }),
     client.invalidateQueries({ queryKey: factoryRunKeys.waiting.queryKey }),
     client.invalidateQueries({ queryKey: factoryRunKeys.board._def }),
+    client.invalidateQueries({ queryKey: factoryRunKeys.pullRequests._def }),
   ];
   if (taskId) {
     reads.push(

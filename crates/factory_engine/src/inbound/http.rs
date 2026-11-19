@@ -32,7 +32,9 @@ use model_error_response::ErrorResponse;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::domain::board::{BoardNext, BoardPage, BoardRun, BoardScope};
+use crate::domain::board::{
+    BoardNext, BoardPage, BoardRun, BoardScope, PullRequestRun, PullRequestRuns,
+};
 use crate::domain::models::{
     Answerer, ControlFilesSettings, DefinitionSettings, FactoryError, FlowSummary, PersonOnly,
     RunDetail, SessionStepRef, StandingRulesSettings,
@@ -88,6 +90,8 @@ impl<S, Auth> FromRef<FactoryRouterState<S, Auth>> for MacroAuthorizationState<A
 /// - `GET /flows` — the built-in Flows a Run can be started of.
 /// - `GET /runs` — a page of the board: the caller's Runs, or their
 ///   team's on tasks they can see, newest first, by where each one is.
+/// - `POST /runs/by-pull-requests` — the Runs that opened some pull
+///   requests, among those the caller's team board shows.
 /// - `POST /runs` — create a Run of a built-in Flow, owned by the acting
 ///   user, and start it, unless it holds as many places in its Queue as the
 ///   Queue limit: Runs waiting on it, and Runs yet to reach their first Gate.
@@ -141,6 +145,10 @@ where
         .route(
             "/runs",
             get(board::list_board_handler::<S, Auth>).post(create_run_handler::<S, Auth>),
+        )
+        .route(
+            "/runs/by-pull-requests",
+            post(board::pull_request_runs_handler::<S, Auth>),
         )
         .route(
             "/tasks/{task_id}/runs",
@@ -1102,6 +1110,7 @@ impl FactoryError {
             FactoryError::InvalidFlow(_)
             | FactoryError::EmptyRequest
             | FactoryError::HalfCursor
+            | FactoryError::TooManyPullRequests { .. }
             | FactoryError::RequestTooLarge { .. }
             | FactoryError::NoteTooLarge { .. }
             | FactoryError::EmptyNote
@@ -1249,6 +1258,7 @@ impl IntoResponse for FactoryError {
         list_task_runs_handler,
         list_waiting_runs_handler,
         board::list_board_handler,
+        board::pull_request_runs_handler,
         create_run_handler,
         get_run_handler,
         answer_gate_handler,
@@ -1277,6 +1287,9 @@ impl IntoResponse for FactoryError {
         WaitingRunsResponse,
         BoardPage,
         BoardRun,
+        PullRequestRuns,
+        PullRequestRun,
+        board::PullRequestUrls,
         BoardNext,
         BoardState,
         BoardScope,

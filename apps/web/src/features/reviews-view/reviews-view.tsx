@@ -19,6 +19,7 @@ import {
 import { usePending } from '@app/observability/flow';
 import { reviewsPrRoute, reviewsSplitRoute } from '@app/routes/routes';
 import { PR_ORIGIN_TOOLS } from '@block-pr/data/pr-origin';
+import { usePrMergeGuard } from '@block-pr/primitives/pr-merge-guard-context';
 import {
   prLinksTarget,
   usePrLinksQuery,
@@ -300,6 +301,11 @@ function ReviewsRoot() {
         : [],
     boardVisible
   );
+  // Whoever else owns some of the board's pull requests' merges (a factory
+  // Run's merge Gate): their marks, and the merges they take.
+  const guard = usePrMergeGuard(() =>
+    boardVisible() ? source.reviews().map((review) => review.metadata.url) : []
+  );
   const loadMore = async () => {
     if (source.isLoadingMore() || !source.hasMore()) return;
     try {
@@ -469,6 +475,7 @@ function ReviewsRoot() {
               </div>
             </Match>
             <Match when={true}>
+              {guard.gate()}
               <ReviewsBoard
                 reviews={reviews()}
                 mergeability={mergeability.mergeability}
@@ -482,6 +489,11 @@ function ReviewsRoot() {
                 isLoadingMore={source.isLoadingMore()}
                 onLoadMore={() => fireAndForget(loadMore(), 'reviews-view')}
                 onOpen={openReview}
+                cardAddon={(review) => guard.mark(review.metadata.url)}
+                takeMerge={(review) => guard.merge(review.metadata.url)}
+                mergeWarning={(review) =>
+                  guard.mergeWarning(review.metadata.url)
+                }
               />
             </Match>
           </Switch>

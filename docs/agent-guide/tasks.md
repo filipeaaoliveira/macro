@@ -807,6 +807,27 @@ failing, Conflicts, and Ready to merge take no drops, and merged cards cannot be
 dragged. A refusal shows GitHub's message and the card returns. **Load more pull
 requests** fetches the next page.
 
+With factory runs on (`enable-factory-runs`), a PR a factory run opened, and
+that the person can see on their team's factory board, is marked on its board
+card: **Factory**, where the run is (its step, who it waits on, or **Held** by
+a Main Hold), its latest review round, its open blockers, and an
+**Open run** button that opens the run in a pane. Its columns stay GitHub's.
+While the run goes, the PR merges only through the run's merge gate: dropping
+it on **Merged**, or the PR's Merge button, opens the run's gate for its owner
+while the run waits there (with its Control Files and Main Hold, as in the
+run), and otherwise merges nothing and says why on a toast and on the card
+(**Only … can merge this**, the step or gate the run is at, or the held
+branch); the Merge button is disabled with the same reason. Until the factory
+has answered for a PR (its flag or code still loading, its lookup pending or
+failed with nothing read yet), no PR merges: **Checking for a factory run…**.
+The same holds for a PR's own page and block and its Merge button elsewhere.
+Once the run ended, the PR merges as any other; when it stopped for a person,
+the card says so and the merge confirmation warns that the merge skips the
+run's merge gate. The PR detail's side panel shows a **Factory run**
+section above Checks: the same mark, **Answer merge gate** for the owner while
+the run waits there, and the run's review rounds with each finding. PRs no run
+opened are unchanged.
+
 Pull requests can no longer be favorited. PRs favorited earlier still appear in
 a collapsible Favorites section below the views (hidden when there are none).
 Favorite rows open the PR in Reviews (Shift-click opens another split), and their

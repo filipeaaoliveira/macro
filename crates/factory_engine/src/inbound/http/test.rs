@@ -242,6 +242,14 @@ impl FactoryService for FakeService {
         Err(self.refusing(actor))
     }
 
+    async fn pull_request_runs(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        _urls: Vec<String>,
+    ) -> Result<crate::domain::board::PullRequestRuns, FactoryError> {
+        Err(self.refusing(actor))
+    }
+
     async fn link_task(
         &self,
         actor: &MacroUserIdStr<'static>,

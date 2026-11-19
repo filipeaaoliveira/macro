@@ -102,3 +102,63 @@ async fn the_board_lists_the_caller_s_runs_a_page_at_a_time() {
     let no_one = list("/runs", Caller::Nobody).await;
     assert_eq!(no_one.status(), StatusCode::UNAUTHORIZED);
 }
+
+/// `POST /runs/by-pull-requests` finds the Run that opened each pull
+/// request the caller names, in their order, under the page they named;
+/// another person finds none of them, more than so many pages is a bad
+/// request, and a caller signed in as no one is refused.
+#[tokio::test]
+async fn the_caller_finds_the_runs_that_opened_their_pull_requests() {
+    let repo = FakeRepo::default();
+    let router = records_router(&repo);
+    let coupon = alice_s_run(&repo).await;
+    repo.set_pull_request_url(coupon, "https://github.com/acme/shop/pull/7")
+        .await
+        .expect("keep");
+    let _no_pull_request = alice_s_run(&repo).await;
+    let find = |caller, urls: serde_json::Value| {
+        let router = router.clone();
+        async move {
+            router
+                .oneshot(call(
+                    "POST",
+                    "/runs/by-pull-requests",
+                    caller,
+                    serde_json::json!({ "urls": urls }),
+                ))
+                .await
+                .expect("response")
+        }
+    };
+    let urls = serde_json::json!([
+        "https://github.com/acme/shop/pull/8",
+        "https://github.com/Acme/Shop/pull/7",
+    ]);
+
+    let found = find(Caller::User("alice"), urls.clone()).await;
+    assert_eq!(found.status(), StatusCode::OK);
+    let found = body(found).await;
+    assert_eq!(found["runs"].as_array().expect("runs").len(), 1);
+    assert_eq!(
+        found["runs"][0]["url"],
+        "https://github.com/Acme/Shop/pull/7"
+    );
+    assert_eq!(
+        found["runs"][0]["listed"]["detail"]["run"]["id"],
+        serde_json::to_value(coupon).expect("id")
+    );
+    assert_eq!(found["runs"][0]["listed"]["state"], "running");
+    assert_eq!(found["runs"][0]["mergeGateSeq"], serde_json::Value::Null);
+
+    let eve_s = body(find(Caller::User("eve"), urls.clone()).await).await;
+    assert_eq!(eve_s["runs"], serde_json::json!([]));
+
+    let too_many: Vec<String> = (0..=100)
+        .map(|number| format!("https://github.com/acme/shop/pull/{number}"))
+        .collect();
+    let refused = find(Caller::User("alice"), serde_json::json!(too_many)).await;
+    assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
+
+    let no_one = find(Caller::Nobody, urls).await;
+    assert_eq!(no_one.status(), StatusCode::UNAUTHORIZED);
+}

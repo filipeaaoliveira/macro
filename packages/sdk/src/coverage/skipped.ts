@@ -513,6 +513,9 @@ export const factoryExcluded = [
   // The board is the web app's page of Runs across tasks; an agent reads a
   // task's Runs and those waiting on the person.
   'listFactoryBoard',
+  // The Reviews page's lookup of the Runs behind its pull requests; an agent
+  // reads a Run by its task.
+  'findPullRequestRuns',
   // Only the person in their own session makes an Automation, which starts
   // Runs as them later, or switches one on; a webhook's calls come from
   // outside Macro, signed with its secret.

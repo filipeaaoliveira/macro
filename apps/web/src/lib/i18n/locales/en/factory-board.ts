@@ -56,4 +56,26 @@ export default {
   loadMore: 'Show more',
   stoppedEarly:
     'Older runs may be missing: the board stopped past many runs you can’t see.',
+  // A pull request a Run opened, on the Reviews page.
+  pullRequestRun: 'Factory run',
+  pullRequestMark: 'Factory',
+  openRun: 'Open run',
+  waitingToMerge: 'Waiting on {{owner}} to merge',
+  reviewRound: 'Review round {{round}}',
+  mergeAtGate: 'Merging answers its run’s merge gate',
+  answerMergeGate: 'Answer merge gate',
+  mergeOnlyOwner: 'Only {{owner}} can merge this, at its run’s merge gate',
+  mergeOnlyTheOwner: 'Only its run’s owner can merge this, at its merge gate',
+  mergeHeld: 'Merges once {{branch}} is green again',
+  mergeNotAtGate: 'Merges at its run’s merge gate, once the run gets there',
+  mergeNotAtGateStep:
+    'Merges at its run’s merge gate, once the run gets there: it’s at {{step}}',
+  noReviewRounds: 'No review rounds yet',
+  mergeChecking: 'Checking for a factory run…',
+  mergeLoadFailed: 'Couldn’t check for a factory run. Reload the page to merge',
+  mergeUnguarded: 'Open this pull request in Macro’s Reviews to merge it',
+  mergeAfterOtherGate:
+    'Merges at its run’s merge gate: the run waits at {{step}} first',
+  mergeRunStopped:
+    'Its run stopped ({{outcome}}): merging skips its merge gate and the checks it held',
 };

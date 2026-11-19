@@ -3,7 +3,9 @@
 //! A Run is running, waiting at an open Gate, stopped or finished; the
 //! Postgres repository's tests cover a held one.
 
-use factory_records::domain::board::{BoardQuery, BoardRun, BoardState, RunBoardRepository};
+use factory_records::domain::board::{
+    BoardQuery, BoardRun, BoardState, PullRequestRunsQuery, RunBoardRepository, pull_request_key,
+};
 use factory_records::domain::models::{Run, RunOutcome};
 
 use super::{FakeError, FakeRepo};
@@ -73,6 +75,44 @@ impl RunBoardRepository for FakeRepo {
             .collect();
         listed.sort_by_key(|listed| std::cmp::Reverse((listed.run.created_at, listed.run.id)));
         listed.truncate(usize::from(query.limit));
+        Ok(listed)
+    }
+
+    async fn pull_request_runs(
+        &self,
+        query: &PullRequestRunsQuery,
+    ) -> Result<Vec<BoardRun>, FakeError> {
+        let board = BoardQuery {
+            user_id: query.user_id.clone(),
+            team_id: query.team_id,
+            state: None,
+            flow: None,
+            repo_url: None,
+            project_id: None,
+            search: None,
+            merge_entries: query.merge_entries.clone(),
+            after: None,
+            limit: u16::MAX,
+        };
+        let mut listed = self.board_runs(&board).await?;
+        // As the database reads them: for each pull request, the newest Run
+        // of each owner and task, up to the limit.
+        let mut heads = std::collections::HashSet::new();
+        let mut read_of: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+        listed.retain(|listed| {
+            let Some(key) = listed.run.pull_request_url.as_deref().map(pull_request_key) else {
+                return false;
+            };
+            if !query.urls.contains(&key)
+                || !heads.insert((key.clone(), listed.run.user_id.clone(), listed.run.task_id))
+            {
+                return false;
+            }
+            let count = read_of.entry(key).or_default();
+            *count += 1;
+            *count <= usize::from(query.limit)
+        });
         Ok(listed)
     }
 }

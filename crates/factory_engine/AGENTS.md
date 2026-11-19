@@ -1489,6 +1489,39 @@ replaced; a person merges), which a test reads; `factory_definition_check`
   viewable_documents`, entity access's batch receipts), and each answer is
   kept 30 s. Only the owner's read of a Run whose workflow never started
   ends it.
+  `POST /runs/by-pull-requests` (`{"urls"}`, at most `PULL_REQUESTS_MAX`,
+  100, else 400) finds the Runs that opened some pull requests, by the
+  page each Run keeps (`pull_request_url`), in any case: for each, the
+  newest Run on the caller's team board they see (theirs, or a team
+  member's on a task they can see, as above), with where it is and
+  `mergeGateSeq`, the Step whose merge Gate it waits on (its latest Step,
+  at a merge entry, with a Flow's Gate no one answered, while it goes). A
+  pull request only a hidden Run opened is left out, as one no Run opened.
+  It reads each pull request on its own: the newest Run of each owner and
+  task, at most 10 (`PULL_REQUEST_RUNS_READ`), newest first; a pull request
+  whose read reached that with no Run shown is listed in `unknown`, as one
+  whose Run may be among those left unread, never as one no Run opened.
+  Another pull request's Runs never change its answer. A Run opens its pull
+  request from its own branch (`factory/<run_id>`), and only that sets its
+  page, so a pull request has one Run and one owner and task: `unknown`
+  guards against records written by hand, a state the engine can't create.
+  The web app's pull request views (Reviews, a pull request's detail and
+  block, its Merge button) read it through `PrMergeGuardProvider` to mark a
+  factory Run's pull request, and merge one only through that Gate
+  (`POST /runs/{id}/steps/{seq}/answer`); until it answered, or while a pull
+  request is `unknown`, they merge nothing. A view rendered outside the
+  provider merges nothing either for a person who may have the factory
+  (`usePrMergeGuard`'s default), and the provider wraps the app's ownerless
+  dialogs too. Limits: the guard is in the web app only, so GitHub itself
+  (and any client calling Macro's merge route) still merges a Run's pull
+  request; and a viewer who cannot see the Run (a teammate on a hidden
+  task, someone off the team) is not guarded, as the lookup must not tell
+  them a Run exists. A Step that finds the Run's pull request keeps its page
+  (`keep_page`); `ci` writes it once per wait, not on every poll. A write
+  that fails fails the Step, which is retried until the Step's time runs out
+  (`STEP_TOTAL`, 2 hours), and then fails as usual. Until the write lands,
+  or if it never does, the pull request is open on GitHub and the guard
+  cannot see it, so it merges as no Run's.
 - `src/domain/evaluation.rs`: Scorers, Experiments and Benchmarks, their
   sampling and arm assignment; `evaluation/service.rs` scores a Run that
   ended; `evaluation/insights.rs` the evaluation insights and suites.

@@ -33,7 +33,7 @@ use factory_records::domain::standing_rules::{
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
-use crate::domain::board::{BoardFilter, BoardPage};
+use crate::domain::board::{BoardFilter, BoardPage, PullRequestRuns};
 use crate::domain::built_in_flows::BUILT_IN_FLOWS;
 use crate::domain::control_files::ControlFiles;
 use crate::domain::definition::DEFINITION_FILE_PATTERNS;
@@ -1122,6 +1122,15 @@ where
         filter: BoardFilter,
     ) -> Result<BoardPage, FactoryError> {
         self.board_page(actor, filter).await
+    }
+
+    #[tracing::instrument(skip(self, actor, urls), fields(urls = urls.len()))]
+    async fn pull_request_runs(
+        &self,
+        actor: &MacroUserIdStr<'static>,
+        urls: Vec<String>,
+    ) -> Result<PullRequestRuns, FactoryError> {
+        self.pull_request_runs_of(actor, urls).await
     }
 
     async fn list_starting_runs(
