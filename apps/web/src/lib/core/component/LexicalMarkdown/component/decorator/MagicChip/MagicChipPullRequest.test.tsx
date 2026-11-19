@@ -10,6 +10,11 @@ import { Suspense } from 'solid-js';
 import { afterEach, expect, it, vi } from 'vitest';
 import { MagicChipPullRequest } from './MagicChipPullRequest';
 
+// The factory flag off: outside a merge guard provider, GitHub merges.
+vi.mock('@app/lib/analytics/posthog', () => ({
+  useFeatureFlag: () => () => ({ enabled: false, loading: false }),
+}));
+
 vi.mock('@queries/agent-session/list-sync', () => ({
   refreshAgentSessionLists: vi.fn(async () => {}),
 }));
