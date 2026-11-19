@@ -998,6 +998,74 @@ async fn only_an_admin_namer_starts_an_improvement_run() {
     }
 }
 
+/// Whether and when a Run starts is the team's Definition's as it is now,
+/// as Insights shows it: Runs that kept a copy saying otherwise change
+/// nothing. While it is turned off, failures are still kept.
+#[tokio::test]
+async fn the_definition_as_it_is_now_decides() {
+    let bench = Bench::new(team_repo(true), AGENTS, None);
+    // The Runs start under the Definition at two failures.
+    let first = bench.judged_run(0.2).await;
+    assert!(
+        bench
+            .repo
+            .definition_evaluations
+            .lock()
+            .expect("kept")
+            .contains_key(&first),
+        "the run keeps the definition's scorers"
+    );
+
+    // The Definition then turns self-improvement off.
+    let scorers = r#"{
+        "scorers": [{
+            "name": "reads-well", "instructions": "Do the notes read well?",
+            "flows": ["notes"], "samplePercent": 100
+        }],
+        "selfImprovement": { "enabled": false, "failures": 2, "oldestDays": 7 }
+    }"#;
+    bench.github.state().files.insert(
+        (HEAD.to_string(), "scorers.json".to_string()),
+        scorers.to_string(),
+    );
+    bench
+        .improvement()
+        .after_run_end(first)
+        .await
+        .expect("after");
+    bench.repo.keep_failure_at(
+        TEAM,
+        DEFINITION_REPO,
+        first,
+        NewFailure {
+            source: FailureSource::Flawed,
+            reason: "Wrong".to_string(),
+        },
+        Utc::now(),
+    );
+    bench
+        .improvement()
+        .after_run_end(first)
+        .await
+        .expect("after");
+    assert!(bench.improvement_runs().is_empty(), "turned off now");
+    bench.judged_run(0.2).await;
+    assert!(bench.improvement_runs().is_empty());
+    assert_eq!(bench.pending().await, 3, "failures are still kept");
+
+    // Turned on again with a higher count: still not due at three.
+    let higher = scorers.replace(r#""enabled": false, "failures": 2"#, r#""failures": 4"#);
+    bench
+        .github
+        .state()
+        .files
+        .insert((HEAD.to_string(), "scorers.json".to_string()), higher);
+    bench.judged_run(0.9).await;
+    assert!(bench.improvement_runs().is_empty(), "below the count now");
+    bench.judged_run(0.2).await;
+    assert_eq!(bench.improvement_runs().len(), 1);
+}
+
 /// A self-improvement Run kept starting too long is refused, and the next
 /// waits a day from then, in the same Run's end.
 #[tokio::test]

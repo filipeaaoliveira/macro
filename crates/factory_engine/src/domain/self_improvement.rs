@@ -38,8 +38,10 @@ use uuid::Uuid;
 
 use macro_user_id::user_id::MacroUserIdStr;
 
-use crate::domain::evaluation::{EvaluationDefinition, SelfImprovementDefinition};
-use crate::domain::models::{CodeRepository, PullRequestState, StepError, run_branch};
+use crate::domain::evaluation::SelfImprovementDefinition;
+use crate::domain::models::{
+    CodeRepository, FactoryError, PullRequestState, StepError, run_branch,
+};
 use crate::domain::ports::{FactoryService, PullRequests, ScoringService};
 
 /// The most failures one self-improvement Run groups: the oldest.
@@ -107,17 +109,6 @@ fn counts_against(facts: &RunFailureFacts, naming: &DefinitionNaming) -> bool {
             .definition_repo_url
             .as_deref()
             .is_some_and(|repo_url| repo_url.eq_ignore_ascii_case(&naming.repo_url))
-}
-
-/// The self-improvement thresholds the Run kept with its Definition; the
-/// defaults when it kept none that reads.
-fn kept_thresholds(facts: &RunFailureFacts) -> SelfImprovementDefinition {
-    facts
-        .definition_evaluation
-        .clone()
-        .and_then(|kept| serde_json::from_value::<EvaluationDefinition>(kept).ok())
-        .map(|evaluation| evaluation.self_improvement())
-        .unwrap_or_default()
 }
 
 /// Until when the team's next self-improvement Run waits, given its
@@ -448,7 +439,7 @@ where
 {
     #[tracing::instrument(err, skip(self))]
     async fn after_run_end(&self, run_id: RunId) -> Result<(), StepError> {
-        let Some((facts, team_id, naming)) = collect(&self.repo, run_id).await? else {
+        let Some((_, team_id, naming)) = collect(&self.repo, run_id).await? else {
             return Ok(());
         };
 
@@ -479,7 +470,6 @@ where
             return Ok(());
         }
 
-        let thresholds = kept_thresholds(&facts);
         let pending = self
             .repo
             .pending_failures(team_id, &naming.repo_url)
@@ -494,6 +484,17 @@ where
         let Some(owner) = owner else {
             tracing::info!(%team_id, ?standing, "the definition's namer may not start a self-improvement run");
             return Ok(());
+        };
+        // The thresholds are the team's Definition's as it is now, as
+        // Insights reads them, never a copy an ended Run kept.
+        let thresholds = match self.runs.team_evaluation(&owner).await {
+            Ok(Some(team)) => team.evaluation.self_improvement(),
+            Ok(None) => return Ok(()),
+            Err(error @ FactoryError::Internal(_)) => return Err(internal(error)),
+            Err(error) => {
+                tracing::warn!(%error, %team_id, "the team's definition did not read: no self-improvement run");
+                return Ok(());
+            }
         };
         if !is_due(thresholds, pending.count, pending.oldest, Utc::now()) {
             return Ok(());
