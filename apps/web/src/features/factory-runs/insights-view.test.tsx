@@ -651,6 +651,11 @@ describe('RunInsightsView', () => {
     );
     const flaky = rows[1]?.parentElement as HTMLElement;
     expect(within(flaky).getByText('Flaky')).toBeTruthy();
+    // A flaky failure names the test that failed on both pull requests.
+    expect(flaky.parentElement?.textContent).toContain(
+      'src/net.rs: net::test::retry'
+    );
+    expect(setup.parentElement?.textContent).not.toContain('src/');
 
     const e2e = screen.getByRole('rowheader', { name: 'e2e' });
     expect(e2e.parentElement?.textContent).toContain('100%');
@@ -675,6 +680,13 @@ describe('RunInsightsView', () => {
         (cell) => cell.textContent
       )
     ).toEqual(['4', '3', '0.8']);
+    // Written for the interface's locale, with its grouping.
+    const style = within(reviewers).getByRole('rowheader', {
+      name: 'style-reviewer',
+    });
+    expect(
+      style.parentElement?.querySelector('td:last-child')?.textContent
+    ).toBe('1,234.5');
     const agents = screen.getByRole('table', { name: 'Blockers by agent' });
     expect(
       within(agents).getByRole('rowheader', { name: 'backup' })
@@ -693,6 +705,12 @@ describe('RunInsightsView', () => {
     mount({ insights: november, quality: () => quality() });
     expect(screen.getByTestId('cost-per-merged').textContent).toBe('$2.50');
     expect(figure('Autonomy rate')).toBe('25%');
+    // The rate is of the ended runs, not of the merged ones.
+    expect(
+      screen.getByText(
+        'What merging cost, and the share of ended runs that merged with no person stepping in'
+      )
+    ).toBeTruthy();
     expect(figure('Merged pull requests')).toBe('1');
     expect(
       screen.getByText('1 run with a gate a person answered')
@@ -815,6 +833,7 @@ function quality(): QualityInsights {
           repository: APP,
           job: 'test',
           step: 'Run tests',
+          failure: 'src/net.rs: net::test::retry',
           cause: 'flaky',
           pullRequests: 2,
           failures: 2,
@@ -836,6 +855,7 @@ function quality(): QualityInsights {
       byReviewer: [
         { name: 'correctness-reviewer', reviews: 4, blockers: 3 },
         { name: 'scope-reviewer', reviews: 1, blockers: 1 },
+        { name: 'style-reviewer', reviews: 10, blockers: 12345 },
       ],
       byAgent: [
         { name: 'backup', reviews: 2, blockers: 2 },

@@ -35,6 +35,14 @@ export function ciCauseLabel(cause: CiCause): string {
   return CAUSE_LABELS[cause]();
 }
 
+/** Blockers per review, to one decimal: `1.5`, or `1,5` in German. */
+function formatPerReview(perReview: number): string {
+  return new Intl.NumberFormat(formatLocale(), {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  }).format(perReview);
+}
+
 /** An amount in US dollars: `$1.25`. */
 function formatUsd(usd: number): string {
   return new Intl.NumberFormat(formatLocale(), {
@@ -237,6 +245,16 @@ function CiSection(props: {
                     {ciCauseLabel(failure.cause)}
                   </span>
                 </div>
+                <Show when={failure.failure}>
+                  {(test) => (
+                    <p
+                      class="min-w-0 truncate font-mono text-xs"
+                      title={test()}
+                    >
+                      {test()}
+                    </p>
+                  )}
+                </Show>
                 <p class="text-xs text-ink-muted">
                   {t('factoryQuality.recurringFailure', {
                     count: failure.failures,
@@ -295,7 +313,7 @@ function BlockerTable(props: { title: string; counts: BlockerCount[] }) {
                 <td class="py-2 pr-3 tabular-nums">{count.blockers}</td>
                 <td class="py-2 tabular-nums">
                   {count.reviews > 0
-                    ? (count.blockers / count.reviews).toFixed(1)
+                    ? formatPerReview(count.blockers / count.reviews)
                     : '–'}
                 </td>
               </tr>

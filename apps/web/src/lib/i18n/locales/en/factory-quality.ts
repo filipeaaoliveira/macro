@@ -24,9 +24,9 @@ export default {
   causeOwn: 'The pull request’s',
   causeSetup: 'Setup',
   causeFlaky: 'Flaky',
-  causeCancelled: 'Cancelled by a newer push',
+  causeCancelled: 'Cancelled',
   causesNote:
-    'Setup: the job failed before its own work ran. Flaky: the same job and step failed on two or more pull requests.',
+    'Setup: the job failed before its own work ran. Flaky: the same test, or the same named step, failed on two or more pull requests. Cancelled: a newer push replaced the run, or a person cancelled it.',
   jobs: 'Jobs',
   job: 'Job',
   finished: 'Finished',
@@ -36,7 +36,7 @@ export default {
   recurringFailures: 'Failed on two or more pull requests',
   recurringFailuresDescription: 'Newest first',
   noRecurringFailures:
-    'No job and step failed on more than one pull request in this period.',
+    'No test or named step failed on more than one pull request in this period.',
   failedStep: '{{job}} · {{step}}',
   recurringFailure: {
     one: '{{count}} failure on {{pullRequests}} pull requests, last {{date}}',
@@ -73,7 +73,7 @@ export default {
   // Cost and autonomy.
   delivery: 'Cost and autonomy',
   deliveryDescription:
-    'What merging cost, and how often a run merged with no person stepping in',
+    'What merging cost, and the share of ended runs that merged with no person stepping in',
   autonomyRate: 'Autonomy rate',
   autonomyRateDefinition:
     'The share of ended runs that merged with no person stepping in: no gate a person answered, no step they steered, and no manual end.',
