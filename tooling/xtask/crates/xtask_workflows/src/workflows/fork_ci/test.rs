@@ -111,3 +111,26 @@ fn a_manual_run_checks_every_package() {
             .starts_with("${{ github.event_name == 'pull_request' &&")
     );
 }
+
+/// The web job's checkout has no blobs, and git fetches missing ones with a
+/// helper that aborts inside the dev shell, so every step that makes git read
+/// the change's blobs runs before Nix is set up.
+#[test]
+fn the_web_job_fetches_the_diff_s_blobs_before_the_dev_shell() {
+    let job = serde_json::to_value(web()).unwrap();
+    let names: Vec<&str> = job["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|step| step["name"].as_str().unwrap_or_default())
+        .collect();
+    let position = |name: &str| {
+        names
+            .iter()
+            .position(|step| *step == name)
+            .unwrap_or_else(|| panic!("no step {name}: {names:?}"))
+    };
+
+    assert!(position("fetch the blobs of the change's diff") < position("Setup Nix"));
+    assert!(position("compute changed files") < position("fetch the blobs of the change's diff"));
+}
