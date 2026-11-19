@@ -851,6 +851,12 @@ pub struct MergeGithubPullRequestRequest {
 }
 
 impl MergeGithubPullRequestRequest {
+    /// Whether `owner` and `repo` are names GitHub gives, so that the
+    /// pull request merged is the one they name.
+    pub fn names_a_repository(&self) -> bool {
+        super::is_github_owner(&self.owner) && super::is_github_repository_name(&self.repo)
+    }
+
     /// The reference enrichment uses for this pull request.
     pub fn to_reference(&self) -> GithubPullRequestRef {
         GithubPullRequestNumber {

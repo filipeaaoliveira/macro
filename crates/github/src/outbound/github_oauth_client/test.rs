@@ -260,6 +260,43 @@ async fn merge_pull_request_treats_a_failing_github_as_unavailable() {
     server.finish();
 }
 
+/// An owner or repository that is not a name GitHub gives could point the
+/// merge's path at another pull request: it is refused without asking
+/// GitHub.
+#[tokio::test]
+async fn merge_pull_request_refuses_a_crafted_repository_without_asking_github() {
+    let server = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::any())
+        .respond_with(wiremock::ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
+    let client = GithubOauthImpl::with_api_base_url(server.uri());
+
+    for (owner, repo) in [
+        ("macro", "widgets/pulls/7/merge?x="),
+        ("macro", "x/../widgets"),
+        ("macro/widgets/pulls/7/merge#", "app"),
+        ("macro", "widget%73"),
+        ("macro", "widgets.git"),
+    ] {
+        let outcome = client
+            .merge_pull_request("token", owner, repo, 1, GithubMergeMethod::Merge, None)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            outcome,
+            GithubMergeOutcome::Rejected {
+                rejection: GithubMergeRejection::Invalid,
+                message: INVALID_REPOSITORY.to_string(),
+            },
+            "{owner}/{repo}"
+        );
+    }
+    server.verify().await;
+}
+
 fn upstream_failure(error: GithubError) -> Option<UpstreamFailure> {
     match error {
         GithubError::Upstream(UpstreamError { service, failure }) => {
