@@ -240,7 +240,7 @@ export default {
     'Each holds the place it will ask for. Cancel one you no longer need to free its place.',
   standingRulesGateNotices: 'Notify the run’s owner when a gate waits on them',
   standingRulesGateNoticesHint:
-    'On by default. Each gate no rule answers, and each question an agent asks, sends the run’s owner a notification that opens the run. Off, the gate still waits for them.',
+    'On by default, for runs started from now on. Each gate that no rule or stand-in answers, and each question an agent asks, sends the run’s owner a notification that opens the run. Off, the gate still waits for them. A project’s own rules, or the rules.json of your team’s factory definition, replace this setting.',
   standingRulesOwnerGates: 'Send undecided gates to the run’s owner',
   standingRulesOwnerGatesHint:
     'Ask the run’s owner instead of fixing again when a fix leaves the blockers unchanged, and give the next step their comments on the task.',

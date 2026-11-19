@@ -163,6 +163,11 @@ describe('StandingRulesSettings', () => {
       name: 'Notify the run’s owner when a gate waits on them',
     });
     expect((notify as HTMLInputElement).checked).toBe(true);
+    // It says which runs it reaches, which gates notify, and what replaces it.
+    const hint = screen.getByText(/runs started from now on/).textContent;
+    expect(hint).toContain('no rule or stand-in answers');
+    expect(hint).toContain('A project’s own rules');
+    expect(hint).toContain('rules.json');
     fireEvent.click(notify);
 
     await waitFor(() =>
