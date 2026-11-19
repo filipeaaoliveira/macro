@@ -1430,8 +1430,10 @@ where
     ///
     /// On a Flow that routes them, it merges in its base's merge queue: it
     /// waits for the Runs ahead of it, up to [`QUEUE_WAIT`], then ends
-    /// `queued`; and it ends `behind` rather than merge a head that lacks a
-    /// commit of its base. A Run that leaves its merge without merging keeps
+    /// `queued`, which the `code` Flow sends back to `merge` with the
+    /// approval it has; it merges only while the head approved still has
+    /// its checks passing (else `changed`), and it ends `behind` rather than
+    /// merge a head that lacks a commit of its base. A Run that leaves its merge without merging keeps
     /// its place for a while; one that merged leaves the queue.
     pub async fn merge(&self, input: StepInput<'_>) -> Result<StepReport, PullRequestStepError> {
         let run_id = input.key.run_id;
@@ -1538,9 +1540,9 @@ where
                 return Ok(report(
                     QUEUED,
                     format!(
-                        "{}\n\nIt was not merged: runs that reached their merge into {} before it \
-                         have not merged yet. It keeps its place in the queue, and the merge Gate \
-                         asks again.",
+                        "{}\n\nIt was not merged yet: runs that reached their merge into {} before \
+                         it have not merged yet. It keeps its place in the queue and goes on waiting \
+                         with the approval it has, while its head and base stay as approved.",
                         named(&pull_request),
                         recorded.base_branch,
                     ),
@@ -1560,6 +1562,31 @@ where
                         "{}\n\n{}",
                         named(&pull_request),
                         held_note(&recorded.base_branch, &hold)
+                    ),
+                ));
+            }
+        }
+
+        // A merge that waited its turn merges the head approved only while
+        // its checks still pass: a check that failed since (a re-run) goes
+        // back through `ci` to the merge Gate.
+        if input.routes(QUEUED) {
+            let required = self.required_checks(&input, &repository, recorded).await?;
+            let (now, checks) = self
+                .find_with_checks(&input, &repository, required.as_ref(), &mut None)
+                .await?;
+            let green = matches!(
+                verdict(&now, &checks, required.as_ref(), Utc::now()),
+                Verdict::Green(_)
+            );
+            if now.state == PullRequestState::Open && (now.head_sha != head || !green) {
+                return Ok(report(
+                    "changed",
+                    format!(
+                        "{}\n\nIt was not merged: its head is {}, not {head}, the commit approved, \
+                         or a check no longer passes; its checks run again.",
+                        named(&now),
+                        now.head_sha
                     ),
                 ));
             }

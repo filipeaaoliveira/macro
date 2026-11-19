@@ -553,6 +553,51 @@ async fn a_merge_needs_a_merge_gate_s_approval() {
         }
     );
 
+    // A merge that waited its turn goes on waiting with its approval: its
+    // `queued` back to itself reads, but into another merge, or any other
+    // outcome back to itself, does not.
+    let mut waiting = merge_step();
+    waiting["on"]["queued"] = to("merge");
+    let waiting = read(shipping(serde_json::json!([
+        merge_gate("merge-gate", "merge", to("merge")),
+        waiting
+    ])))
+    .await;
+    assert!(waiting.is_ok(), "{waiting:?}");
+
+    let mut elsewhere = merge_step();
+    elsewhere["on"]["queued"] = to("other-merge");
+    let mut other = merge_step();
+    other["id"] = serde_json::json!("other-merge");
+    let elsewhere = read(shipping(serde_json::json!([
+        merge_gate("merge-gate", "merge", to("merge")),
+        elsewhere,
+        other
+    ])))
+    .await;
+    assert_eq!(
+        flow_error(elsewhere),
+        FlowError::UnguardedMerge {
+            from: entry("merge"),
+            to: entry("other-merge"),
+        }
+    );
+
+    let mut again = merge_step();
+    again["on"]["refused"] = to("merge");
+    let again = read(shipping(serde_json::json!([
+        merge_gate("merge-gate", "merge", to("merge")),
+        again
+    ])))
+    .await;
+    assert_eq!(
+        flow_error(again),
+        FlowError::UnguardedMerge {
+            from: entry("merge"),
+            to: entry("merge"),
+        }
+    );
+
     // A Run that would start at the merge.
     let first = read(shipping(serde_json::json!([merge_step()]))).await;
     assert_eq!(

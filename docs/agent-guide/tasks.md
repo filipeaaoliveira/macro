@@ -1444,7 +1444,9 @@ again if they still fail after its wait. When the checks the base requires
 couldn't be read, or it requires none, a note says its merge doesn't wait
 on them. Runs merge into a base branch one at a time, in the order they
 reached their merge: a Run whose turn hasn't come waits at its **Merge**
-Step, and after its wait shows `queued` and asks again. A branch its base
+Step, and after each wait shows `queued` and waits again with the approval
+it has (asking again only after about five hours, or once its head, its
+checks or its base changed). A branch its base
 moved past is never merged: its merge Gate Step (or **Merge**) shows
 `behind`, and an **Update** Step merges the base into the branch, then runs
 the repository's checks; `done` (only the base came in, merged by the

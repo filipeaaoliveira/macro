@@ -382,7 +382,8 @@ fn a_head_that_moved_before_the_merge_goes_back_to_ci() {
 
     assert_eq!(
         steps[6..],
-        ["merge-gate#1", "merge#1", "ci#2", "merge-gate#2", "merge#2"]
+        // Each approval starts `merge`'s visits over.
+        ["merge-gate#1", "merge#1", "ci#2", "merge-gate#2", "merge#1"]
     );
     assert_eq!(end, Ok(RunOutcome::Success));
 }
@@ -606,22 +607,22 @@ fn a_held_merge_asks_again_even_after_tampered_merges_went_back() {
             "merge#1",
             "ci#2",
             "merge-gate#2",
-            "merge#2",
+            "merge#1",
             "ci#3",
             "merge-gate#3",
-            "merge#3",
+            "merge#1",
             "merge-gate#1",
-            "merge#4"
+            "merge#1"
         ]
     );
     assert_eq!(end, Ok(RunOutcome::Success));
 }
 
 /// A branch behind its base is updated and goes through CI to the merge
-/// Gate again; one that waited out its turn in the queue is asked again;
-/// one whose base moved at the merge is updated, and a conflict a person
-/// had to resolve, or an agent resolved, is reviewed and accepted again
-/// before the merge Gate asks again.
+/// Gate again; one that waited out its turn in the queue goes on waiting
+/// with its approval, asking no one; one whose base moved at the merge is
+/// updated, and a conflict a person had to resolve, or an agent resolved,
+/// is reviewed and accepted again before the merge Gate asks again.
 #[test]
 fn a_branch_behind_its_base_is_updated_and_checked_before_it_merges() {
     let (steps, end) = walk(
@@ -638,7 +639,6 @@ fn a_branch_behind_its_base_is_updated_and_checked_before_it_merges() {
             "green",
             "approve",
             "queued",
-            "approve",
             "behind",
             "retry",
             "resolved",
@@ -659,7 +659,6 @@ fn a_branch_behind_its_base_is_updated_and_checked_before_it_merges() {
             "ci#2",
             "merge-gate#2",
             "merge#1",
-            "merge-gate#1",
             "merge#2",
             "update#2",
             "update#3",
@@ -668,10 +667,40 @@ fn a_branch_behind_its_base_is_updated_and_checked_before_it_merges() {
             "publish#2",
             "ci#3",
             "merge-gate#1",
-            "merge#3",
+            "merge#1",
         ]
     );
     assert_eq!(end, Ok(RunOutcome::Success));
+}
+
+/// A Run whose turn in its base's queue keeps not coming waits on with the
+/// approval it has, asking no one, for twelve waits; then its merge Gate
+/// asks again, and a new approval gives it twelve more. Three askings of
+/// the Gate (some fifteen hours in the queue) end it for a person.
+#[test]
+fn a_queued_merge_keeps_its_approval_and_asks_again_after_twelve_waits() {
+    let mut outcomes = vec!["approve", "done", "pass", "pass", "published", "green", "approve"];
+    outcomes.extend(["queued"; 12]);
+    outcomes.push("approve");
+    outcomes.extend(["queued"; 11]);
+    outcomes.push("merged");
+    let (steps, end) = walk(&flow(CODE_FLOW), &outcomes);
+
+    let waits: Vec<String> = (1..=12).map(|visit| format!("merge#{visit}")).collect();
+    assert_eq!(steps[6], "merge-gate#1");
+    assert_eq!(steps[7..19], waits[..]);
+    assert_eq!(steps[19], "merge-gate#2", "asked again after twelve waits");
+    assert_eq!(steps[20..32], waits[..]);
+    assert_eq!(end, Ok(RunOutcome::Success));
+
+    let mut endless = vec!["approve", "done", "pass", "pass", "published", "green"];
+    for _ in 0..3 {
+        endless.push("approve");
+        endless.extend(["queued"; 12]);
+    }
+    let (steps, end) = walk(&flow(CODE_FLOW), &endless);
+    assert_eq!(steps.last().map(String::as_str), Some("merge#12"));
+    assert_eq!(end, Ok(RunOutcome::Manual));
 }
 
 /// A conflict no one resolves ends the Run for a person; so do updates

@@ -359,7 +359,10 @@
 						"to": {
 							"kind": "entry",
 							"entry": "merge"
-						}
+						},
+						"reset": [
+							"merge"
+						]
 					}
 				],
 				"revise": [
@@ -411,6 +414,15 @@
 		{
 			"id": "merge",
 			"step": "merge",
+			"max_visits": 12,
+			"on_exhausted": [
+				{
+					"to": {
+						"kind": "entry",
+						"entry": "merge-gate"
+					}
+				}
+			],
 			"on": {
 				"merged": [
 					{
@@ -443,11 +455,8 @@
 					{
 						"to": {
 							"kind": "entry",
-							"entry": "merge-gate"
-						},
-						"reset": [
-							"merge-gate"
-						]
+							"entry": "merge"
+						}
 					}
 				],
 				"refused": [

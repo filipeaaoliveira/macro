@@ -534,7 +534,8 @@ impl Flow {
     ///
     /// Only a merge Gate asks to merge, and every way into an entry that
     /// runs `merge` goes through its approval: an explicit transition only
-    /// under its approving answer, and the way down from the entry above
+    /// under its approving answer (or a `merge` entry's `queued` back to
+    /// itself, which keeps the approval it waits with), and the way down from the entry above
     /// only from a merge Gate's entry that routes every other outcome. A
     /// Factory Definition's Flow could otherwise merge with no one's
     /// approval, or label a merge Gate as another kind that the
@@ -588,9 +589,15 @@ impl Flow {
 
             for (outcome, transitions) in &entry.on {
                 let approved = merge_gate && outcome.as_str() == approve;
+                // A `merge` that waited out its turn in its base's queue
+                // goes on waiting with the approval it was given: it merges
+                // only the head approved, while that head holds its base and
+                // its checks pass, else it routes back through them.
+                let waits_its_turn = runs(entry, MERGE_STEP) && outcome.as_str() == QUEUED;
                 let leads = transitions.iter().find_map(|t| into_merge(&t.to));
                 if let Some(to) = leads
                     && !approved
+                    && !(waits_its_turn && *to == entry.id)
                 {
                     return Err(unguarded(to));
                 }
@@ -634,6 +641,10 @@ impl Flow {
 
 /// The Step that merges a pull request.
 const MERGE_STEP: &str = "merge";
+
+/// The outcome of `merge` whose turn in its base's merge queue did not
+/// come within its wait.
+const QUEUED: &str = "queued";
 
 /// The Step whose Gate asks to merge a pull request.
 const READY_TO_MERGE_STEP: &str = "ready_to_merge";

@@ -915,8 +915,8 @@ its Flow does not route above `merge` would fall through to the merge):
   resolution is reviewed and accepted before the merge Gate asks, and a
   `merge_when_green` rule never merges it on CI alone. At most five updates a Run, then it
   ends for a person.
-- The merge Gate's approval never carries over an update: whatever came
-  in, the merge Gate asks again (a `merge_when_green` rule answers it as
+- The merge Gate's approval never carries over an update (a wait in the
+  queue keeps it, below): whatever came in, the merge Gate asks again (a `merge_when_green` rule answers it as
   before). Telling "unchanged apart from the base" apart would mean
   trusting a textual merge that can still break the change, and every way
   into `merge` stays that Gate's `approve` (`Flow::check_merges`).
@@ -928,9 +928,18 @@ its Flow does not route above `merge` would fall through to the merge):
   again, so the Runs behind it do not merge first and leave it behind
   again. A Run past that goes on without it, and gets its place back when
   it returns. After `QUEUE_WAIT` (25 minutes) still behind someone, `merge`
-  ends `queued`, which goes back to the merge Gate (its visits reset). A
-  Run that merged leaves the queue; one that leaves its merge otherwise
-  keeps its place. The wait for a Main Hold and the queue's share those 25
+  ends `queued`, which `code` routes back to `merge` itself with the
+  approval it has, asking no one (`Flow::check_merges` lets a `merge`
+  entry's `queued` lead only back to that entry). The approval holds only
+  while nothing changed: `merge` merges the approved head only while its
+  checks still pass (else `changed`, back through `ci` to the Gate), the
+  head holds its base (else `behind`), and GitHub's merge names that head
+  (a push since is `changed`). `merge` runs at most twelve times per
+  approval (each `approve` resets its visits; about five hours of waits),
+  then its merge Gate asks again; the Gate's three visits bound a Run's
+  queue waits to some fifteen hours before it ends for a person. A Run
+  that merged leaves the queue; one that leaves its merge otherwise keeps
+  its place. The wait for a Main Hold and the queue's share those 25
   minutes, short of a Step attempt's 30; a hold set while it waited ends
   it `held` at once.
 
@@ -1664,7 +1673,8 @@ from it (`built_in_flows::walked_flow`; a Run kept before falls back to the
 built-in Flow of its name). A Definition's Flow must merge only through a
 merge Gate (`Flow::check_merges`, which a test holds the built-in Flows
 to): a Gate on `ready_to_merge` or `merge` is of kind `merge`, a `merge` Gate is only on
-`ready_to_merge`, every way into `merge` is that Gate's `approve`, and the
+`ready_to_merge`, every way into `merge` is that Gate's `approve` (or a
+`merge` entry's `queued` back to itself, which keeps that approval), and the
 entry above `merge`, with no `next`, is that Gate's, never skipped and
 routing every other outcome; so the Orchestrator never approves a merge
 and only the `merge_when_green` rule merges without a person. A Run on its

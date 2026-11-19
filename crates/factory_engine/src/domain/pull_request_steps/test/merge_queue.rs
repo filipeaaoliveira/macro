@@ -519,3 +519,27 @@ async fn a_hold_set_while_a_run_waited_its_turn_holds_it() {
     assert!(started.elapsed() < QUEUE_WAIT);
     assert!(github.state().merges.is_empty());
 }
+
+/// A merge that goes on with its approval after waiting in the queue merges
+/// the head approved only while its checks still pass: a check that failed
+/// since sends it back through its checks, merging nothing.
+#[tokio::test]
+async fn a_queued_merge_whose_checks_turned_red_is_not_merged() {
+    let github = github_on(OLD_BASE, true);
+    github.state().checks = [ci(Some("failure"))].into();
+    let repo = FakeRepo::default();
+    let run_id = RunId::generate();
+    approved(&repo, run_id).await;
+    let routes = routes();
+
+    let report = steps(&github, &repo)
+        .merge(crate::domain::models::StepInput {
+            routes: &routes,
+            ..input(run_id)
+        })
+        .await
+        .expect("merge");
+
+    assert_eq!(outcome(&report), "changed");
+    assert!(github.state().merges.is_empty());
+}

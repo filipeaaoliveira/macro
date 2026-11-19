@@ -207,6 +207,8 @@ Gate another kind, does not read.
 The `code` Flow's merge Gate and `merge` route `behind` to an `update` entry,
 which merges the base into a branch the base moved past (the `writer`
 resolves a conflict, or a person at its Gate), and `merge` routes `queued`
-back to the merge Gate, so Runs merge into a base one at a time. A Flow
+back to itself, waiting its turn with the approval it has, so Runs merge
+into a base one at a time. A `merge` entry may route `queued` only to
+itself; every other way into `merge` is the merge Gate's `approve`. A Flow
 that routes neither merges as before: never in a queue, and without
 checking that its branch holds its base.
