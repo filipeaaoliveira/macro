@@ -333,8 +333,11 @@ fn a_session_setup_command_waits_for_the_checkout_s_lock() {
 #[test]
 fn a_private_key_s_whole_block_is_left_out() {
     let body = "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7";
+    // Built in pieces, so the repository's secret scan does not read this
+    // fake block as a key.
+    let key = ["PRIVATE", "KEY"].join(" ");
     let text = format!(
-        "generating\n-----BEGIN OPENSSH PRIVATE KEY-----\n{body}\n{body}\n-----END OPENSSH PRIVATE KEY-----\ndone\n-----BEGIN RSA PRIVATE KEY-----\n{body}"
+        "generating\n-----BEGIN OPENSSH {key}-----\n{body}\n{body}\n-----END OPENSSH {key}-----\ndone\n-----BEGIN RSA {key}-----\n{body}"
     );
 
     let kept = redacted(&text);
