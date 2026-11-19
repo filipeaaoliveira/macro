@@ -420,6 +420,23 @@ where
                 tracing::info!(%team_id, run_id = %detail.run.id, failures = failures.len(), "a self-improvement run started");
             }
             Err(error) => {
+                // A start that failed after the Run was kept and linked may
+                // still have started its workflow: an improvement linked to
+                // a Run that exists stays open, holding its failures, and
+                // is settled by that Run.
+                let linked = self
+                    .repo
+                    .latest_improvement(team_id)
+                    .await
+                    .map_err(internal)?
+                    .filter(|latest| latest.id == id)
+                    .and_then(|latest| latest.run_id);
+                if let Some(run_id) = linked
+                    && self.repo.get_run(run_id).await.map_err(internal)?.is_some()
+                {
+                    tracing::warn!(%error, %team_id, %run_id, "a self-improvement run's start failed, but its run is kept");
+                    return Ok(());
+                }
                 tracing::warn!(%error, %team_id, "a self-improvement run was refused");
                 self.repo
                     .settle_improvement(id, &Settlement::Refused(error.to_string()))

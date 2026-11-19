@@ -161,9 +161,17 @@ struct Bench {
 
 impl Bench {
     fn new(repo: FakeRepo, agents: &str, rules: Option<&str>) -> Self {
+        Self::with_workflows(repo, agents, rules, FakeWorkflows::default())
+    }
+
+    fn with_workflows(
+        repo: FakeRepo,
+        agents: &str,
+        rules: Option<&str>,
+        workflows: FakeWorkflows,
+    ) -> Self {
         let github = FakeGithub::default();
         definition(&github, agents, rules);
-        let workflows = FakeWorkflows::default();
         let service = Arc::new(code_service(&repo, &workflows, &github));
         Self {
             repo,
@@ -1064,6 +1072,64 @@ async fn the_definition_as_it_is_now_decides() {
     assert!(bench.improvement_runs().is_empty(), "below the count now");
     bench.judged_run(0.2).await;
     assert_eq!(bench.improvement_runs().len(), 1);
+}
+
+/// A start that failed once the Run was kept and linked, though its
+/// workflow started, leaves the improvement open, holding its failures:
+/// its Run settles it. A Run whose workflow did not start is refused, with
+/// a short reason rather than the error's words.
+#[tokio::test]
+async fn a_failed_start_with_a_kept_run_stays_open() {
+    /// One failure judged, one more kept: the next Run's end, on a Run API
+    /// whose workflows are `workflows`, starts the improvement.
+    async fn due_with(workflows: FakeWorkflows) -> Bench {
+        let judging = Bench::new(team_repo(true), AGENTS, None);
+        let run = judging.judged_run(0.2).await;
+        judging.repo.keep_failure_at(
+            TEAM,
+            DEFINITION_REPO,
+            run,
+            NewFailure {
+                source: FailureSource::Flawed,
+                reason: "Wrong".to_string(),
+            },
+            Utc::now(),
+        );
+        let bench = Bench::with_workflows(judging.repo.clone(), AGENTS, None, workflows);
+        bench.improvement().after_run_end(run).await.expect("after");
+        bench
+    }
+
+    let bench = due_with(FakeWorkflows {
+        fail: true,
+        started_anyway: true,
+        ..FakeWorkflows::default()
+    })
+    .await;
+    let latest = bench
+        .repo
+        .latest_improvement(TEAM)
+        .await
+        .expect("read")
+        .expect("kept");
+    assert_eq!(latest.state, ImprovementState::Open);
+    let run_id = latest.run_id.expect("its run");
+    assert!(bench.repo.get_run(run_id).await.expect("read").is_some());
+    assert_eq!(bench.pending().await, 0);
+
+    let bench = due_with(FakeWorkflows {
+        fail: true,
+        ..FakeWorkflows::default()
+    })
+    .await;
+    let latest = bench
+        .repo
+        .latest_improvement(TEAM)
+        .await
+        .expect("read")
+        .expect("kept");
+    assert_eq!(latest.state, ImprovementState::Refused);
+    assert_eq!(bench.pending().await, 2);
 }
 
 /// A self-improvement Run kept starting too long is refused, and the next
