@@ -690,6 +690,45 @@ agent's work, cut to the 64 KiB a Step keeps. The rounds show on the Step
 `LocalAgent` runs no command, and answers a round of checks `failed`: no
 check ran.
 
+Each check the engine runs is told the change it checks
+(`src/domain/check_context.rs`), since its worktree may hold only the
+checked commit (fetched at depth 1 in a shallow clone), so git alone
+cannot say what changed. Its shell exports two variables, outside the
+check's own command, which the round records and shows as written:
+
+- `MACRO_CHECK_BASE`: the commit the change is made against, the merge base
+  GitHub's comparison of the Run's base (the commit a Benchmark trial is
+  pinned to, else the base branch) with the checked commit gives. Setting
+  the worktree up fetches it when the repository lacks it (at depth 1 in a
+  shallow clone), so `git diff --name-only "$MACRO_CHECK_BASE" HEAD` works;
+  a fetch that fails is logged in the set-up's output and holds nothing up.
+  Empty when the comparison failed and the Run pins no commit.
+- `MACRO_CHECK_CHANGED`: the absolute path of a file listing the changed
+  paths, `<round>.changed` beside the round's worktree in
+  `${XDG_CACHE_HOME:-$HOME/.cache}/macro-check`: outside the repository's
+  tree, so git never sees it and nothing commits it. Setting the worktree
+  up writes it afresh on each attempt (to a file of its own, moved into
+  place); removing the worktree removes it, and the four-hour sweep takes
+  one left behind.
+
+The file's first line says what the list holds: `complete` (every changed
+path), `partial` (only some: GitHub lists at most 300 files of a
+comparison, and none of one too large to list; a path holding a line
+break, and paths past 64 KiB, are left out too), or `unavailable` (none:
+the comparison failed). Each line after it is one path from the
+repository's root, as GitHub names it: a renamed file under both its names,
+the earlier first, and a removed file though the worktree no longer holds
+it. A check that keeps to the change checks everything unless the first
+line is `complete`, or when `MACRO_CHECK_CHANGED` is unset. A comparison
+that fails never holds the checks up nor fails the round: the checks run,
+told the list is `unavailable`, and the engine logs why. Both are read from
+GitHub in the Step's activity, on each attempt, so the workflow and its
+replay are unchanged. A setup command is told neither, and
+`.macro/setup.json` cannot set either (`MACRO_*`), so no repository
+overrides them. Where the agent runs the checks (a runtime that runs no
+command), neither is set. `accept`'s acceptance checks, run by the same
+round, are told the change the same way.
+
 A repository prepares a fresh checkout for the factory in `.macro/setup.json`
 on its base branch (`src/domain/setup.rs`): `setup`, a list of commands, each
 a `name`, a `run` from the repository's root and an optional `timeout`
@@ -708,7 +747,8 @@ configuration (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`,
 `GIT_ALTERNATE_OBJECT_DIRECTORIES`, `GIT_CONFIG*`, `XDG_CONFIG_HOME`), what
 git runs (`GIT_EXEC_PATH`, `GIT_SSH_COMMAND`, `GIT_SSH`, `GIT_ASKPASS`,
 `GIT_TEMPLATE_DIR`), the linker (`LD_*`, `DYLD_*`) or is the factory's own
-(`MACRO_*`); `PATH` and harmless git values such as `GIT_TERMINAL_PROMPT`
+(`MACRO_*`, such as the checks' `MACRO_CHECK_BASE` and
+`MACRO_CHECK_CHANGED`); `PATH` and harmless git values such as `GIT_TERMINAL_PROMPT`
 are allowed; a value over 1 KiB or with a control character) ends the Step
 `failed`, saying why. Secrets never live there: a file holding something
 shaped like a key or a token (the Definition's check), or an `env` name

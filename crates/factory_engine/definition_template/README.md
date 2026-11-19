@@ -41,6 +41,15 @@ factory reads it from the Run's base, runs it before each agent session's
 first prompt and before each checks round's checks, and counts it as a
 Control File by default. It holds no secrets.
 
+Each check in `.macro/checks.json` that the factory runs itself is told the
+change it checks: `MACRO_CHECK_BASE`, the commit the change is made against,
+and `MACRO_CHECK_CHANGED`, the path of a file outside the checkout whose
+first line is `complete`, `partial` or `unavailable` and whose next lines
+are the changed paths, one per line (a renamed file under both its names, a
+removed file too). A check that keeps to the change checks everything unless
+that first line is `complete`, or when the variable is unset, as it is where
+the agent runs the checks.
+
 Secrets never go here: no field takes an API key or a token, and a file that
 holds something shaped like one does not read.
 
