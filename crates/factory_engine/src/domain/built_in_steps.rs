@@ -331,7 +331,7 @@ impl<A, G, R, M> BuiltInSteps<A, G, R, M>
 where
     A: StepAgent,
     G: PullRequests,
-    R: RunRepository + MainHoldRepository,
+    R: RunRepository + MainHoldRepository + MergeQueueRepository,
     M: MainWatches,
 {
     /// The built-in Steps, with `agent` doing the agent Steps.
@@ -574,7 +574,7 @@ impl<A, G, R, M> BuiltInSteps<A, G, R, M>
 where
     A: StepAgent,
     G: PullRequests,
-    R: RunRepository + MainHoldRepository + ReviewRoundRepository,
+    R: RunRepository + MainHoldRepository + MergeQueueRepository + ReviewRoundRepository,
     M: MainWatches,
 {
     async fn run_built_in(
