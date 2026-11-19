@@ -58,6 +58,10 @@ const FILTER_CACHE_DIR: RuntimePath<'static> =
 /// the CPUs: most tests wait on Postgres in the Docker sidecar.
 const NEXTEST_TEST_THREADS: u32 = 12;
 
+/// Cargo's jobs in the test job, below the runner's 4 CPUs to keep the build
+/// inside its memory.
+const TEST_BUILD_JOBS: u32 = 3;
+
 /// Build the workflow.
 pub fn fork_ci() -> Workflow {
     Workflow::new("Fork CI")
@@ -187,6 +191,12 @@ fn rust_test() -> Job {
             "${{ needs.changes.outputs.rust_packages }}",
         ))
         .add_env(("NEXTEST_TEST_THREADS", NEXTEST_TEST_THREADS))
+        // The runner has 9 GiB. Four rustc or linker processes on the large
+        // service crates fill it, and the job then spends its time paging
+        // instead of building: one run held the runner for three hours on half an
+        // hour of CPU. Three compilers and one link at a time aim to stay below it.
+        .add_env(("CARGO_BUILD_JOBS", TEST_BUILD_JOBS))
+        .add_env(("MOLD_JOBS", 1u32))
         .add_env(("REDIS_URI", "redis://127.0.0.1:6379"))
         .map(code_check_cloud_storage::with_test_compile_env)
         // The default 10-minute idle timeout can stop the server during long
@@ -472,14 +482,22 @@ fn run_tests() -> Step<Run> {
 /// Below the job's timeout, so the steps after it still report.
 const RUN_TESTS_TIMEOUT_MINUTES: u32 = 150;
 
-/// The size of each cache in the runner's cache slot. The node empties a slot
-/// over its cap when the next job starts, which makes that job cold.
+/// The size of each cache in the runner's cache slot, and how close the job
+/// came to the runner's memory limit. The node empties a slot over its cap
+/// when the next job starts, which makes that job cold; a job at its memory
+/// limit pages instead of building.
 fn show_cache_sizes() -> Step<Run> {
-    Step::new("show cache sizes")
-        .run(
-            "cache=\"${CI_CACHE_DIR:-$RUNNER_TEMP/cache}\"\n\
-             du -sh \"$cache\"/* \"$cache\"/target/* 2>/dev/null || true",
-        )
+    Step::new("show cache sizes and memory")
+        .run(indoc::indoc! {r#"
+            cache="${CI_CACHE_DIR:-$RUNNER_TEMP/cache}"
+            du -sh "$cache"/* "$cache"/target/* 2>/dev/null || true
+            for file in memory.max memory.peak memory.events memory.pressure; do
+              if [ -r "/sys/fs/cgroup/$file" ]; then
+                echo "$file: $(tr '\n' ' ' < "/sys/fs/cgroup/$file")"
+              fi
+            done
+            grep -E '^(pgmajfault|workingset_refault_file) ' /sys/fs/cgroup/memory.stat || true
+        "#})
         .if_condition(Expression::new("always()"))
 }
 

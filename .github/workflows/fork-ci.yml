@@ -621,11 +621,17 @@ jobs:
     - name: show sccache stats
       if: always()
       run: sccache --show-stats || true
-    - name: show cache sizes
+    - name: show cache sizes and memory
       if: always()
-      run: |-
+      run: |
         cache="${CI_CACHE_DIR:-$RUNNER_TEMP/cache}"
         du -sh "$cache"/* "$cache"/target/* 2>/dev/null || true
+        for file in memory.max memory.peak memory.events memory.pressure; do
+          if [ -r "/sys/fs/cgroup/$file" ]; then
+            echo "$file: $(tr '\n' ' ' < "/sys/fs/cgroup/$file")"
+          fi
+        done
+        grep -E '^(pgmajfault|workingset_refault_file) ' /sys/fs/cgroup/memory.stat || true
     - name: Teardown Nix
       if: always()
       uses: './.github/actions/teardown-nix'
@@ -637,6 +643,8 @@ jobs:
     env:
       RUST_PACKAGES: ${{ needs.changes.outputs.rust_packages }}
       NEXTEST_TEST_THREADS: '12'
+      CARGO_BUILD_JOBS: '3'
+      MOLD_JOBS: '1'
       REDIS_URI: redis://127.0.0.1:6379
       CARGO_PROFILE_DEV_DEBUG: '0'
       CARGO_PROFILE_TEST_DEBUG: '0'
@@ -844,11 +852,17 @@ jobs:
     - name: show sccache stats
       if: always()
       run: sccache --show-stats || true
-    - name: show cache sizes
+    - name: show cache sizes and memory
       if: always()
-      run: |-
+      run: |
         cache="${CI_CACHE_DIR:-$RUNNER_TEMP/cache}"
         du -sh "$cache"/* "$cache"/target/* 2>/dev/null || true
+        for file in memory.max memory.peak memory.events memory.pressure; do
+          if [ -r "/sys/fs/cgroup/$file" ]; then
+            echo "$file: $(tr '\n' ' ' < "/sys/fs/cgroup/$file")"
+          fi
+        done
+        grep -E '^(pgmajfault|workingset_refault_file) ' /sys/fs/cgroup/memory.stat || true
     - name: Teardown Nix
       if: always()
       uses: './.github/actions/teardown-nix'
