@@ -1242,6 +1242,7 @@ async fn a_routine_step_prompts_as_a_program() {
             action: fx.action(),
             prompt: "approve the review".into(),
             context: None,
+            out_of_sight: false,
         })
         .await
         .unwrap();
