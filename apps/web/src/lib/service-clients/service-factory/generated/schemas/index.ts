@@ -123,6 +123,7 @@ export * from './macroUserIdStr';
 export * from './mainHold';
 export * from './mainHoldTaskId';
 export * from './namedCount';
+export * from './namerStanding';
 export * from './noteStepRequest';
 export * from './orchestratorDefinition';
 export * from './orchestratorDefinitionQueueLimit';

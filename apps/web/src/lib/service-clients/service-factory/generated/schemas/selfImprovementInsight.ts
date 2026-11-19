@@ -5,6 +5,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
+import type { NamerStanding } from './namerStanding';
 import type { PendingSource } from './pendingSource';
 import type { SelfImprovementInsightLast } from './selfImprovementInsightLast';
 import type { SelfImprovementInsightOldestPendingAt } from './selfImprovementInsightOldestPendingAt';
@@ -21,10 +22,11 @@ export interface SelfImprovementInsight {
    * @minimum 0
    */
   failuresThreshold: number;
-  /** Whether someone is kept as naming the Definition: its
-self-improvement Runs are theirs, and none starts without them. */
-  hasOwner: boolean;
   last?: SelfImprovementInsightLast;
+  /** Where the admin who named the Definition stands: its
+self-improvement Runs are theirs, and none starts unless they are
+still an admin of the team. */
+  namer: NamerStanding;
   /**
    * How many days old the oldest pending failure is before a Run starts
 with fewer.

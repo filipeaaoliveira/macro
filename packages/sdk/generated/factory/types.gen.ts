@@ -1033,6 +1033,12 @@ export type NamedCount = {
 };
 
 /**
+ * Whether a self-improvement Run may be started as the Definition's
+ * namer, and why not.
+ */
+export type NamerStanding = 'admin' | 'none' | 'left_team' | 'not_admin';
+
+/**
  * Request body for a note to a running Step's agent.
  */
 export type NoteStepRequest = {
@@ -1782,12 +1788,13 @@ export type SelfImprovementInsight = {
      * How many pending failures start a Run.
      */
     failuresThreshold: number;
-    /**
-     * Whether someone is kept as naming the Definition: its
-     * self-improvement Runs are theirs, and none starts without them.
-     */
-    hasOwner: boolean;
     last?: null | ImprovementInsight;
+    /**
+     * Where the admin who named the Definition stands: its
+     * self-improvement Runs are theirs, and none starts unless they are
+     * still an admin of the team.
+     */
+    namer: NamerStanding;
     /**
      * How many days old the oldest pending failure is before a Run starts
      * with fewer.

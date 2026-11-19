@@ -4354,6 +4354,11 @@
           }
         }
       },
+      "NamerStanding": {
+        "type": "string",
+        "description": "Whether a self-improvement Run may be started as the Definition's\nnamer, and why not.",
+        "enum": ["admin", "none", "left_team", "not_admin"]
+      },
       "NoteStepRequest": {
         "type": "object",
         "description": "Request body for a note to a running Step's agent.",
@@ -5368,7 +5373,7 @@
           "enabled",
           "failuresThreshold",
           "oldestDays",
-          "hasOwner",
+          "namer",
           "pending",
           "pendingBySource"
         ],
@@ -5383,10 +5388,6 @@
             "description": "How many pending failures start a Run.",
             "minimum": 0
           },
-          "hasOwner": {
-            "type": "boolean",
-            "description": "Whether someone is kept as naming the Definition: its\nself-improvement Runs are theirs, and none starts without them."
-          },
           "last": {
             "oneOf": [
               {
@@ -5397,6 +5398,10 @@
                 "description": "The latest self-improvement Run, open or not."
               }
             ]
+          },
+          "namer": {
+            "$ref": "#/components/schemas/NamerStanding",
+            "description": "Where the admin who named the Definition stands: its\nself-improvement Runs are theirs, and none starts unless they are\nstill an admin of the team."
           },
           "oldestDays": {
             "type": "integer",
