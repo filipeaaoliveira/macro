@@ -617,6 +617,103 @@ fn a_held_merge_asks_again_even_after_tampered_merges_went_back() {
     assert_eq!(end, Ok(RunOutcome::Success));
 }
 
+/// A branch behind its base is updated and goes through CI to the merge
+/// Gate again; one that waited out its turn in the queue is asked again;
+/// one whose base moved at the merge is updated, and a conflict a person
+/// had to resolve, or an agent resolved, is reviewed and accepted again
+/// before the merge Gate asks again.
+#[test]
+fn a_branch_behind_its_base_is_updated_and_checked_before_it_merges() {
+    let (steps, end) = walk(
+        &flow(CODE_FLOW),
+        &[
+            "approve",
+            "done",
+            "pass",
+            "pass",
+            "published",
+            "green",
+            "behind",
+            "done",
+            "green",
+            "approve",
+            "queued",
+            "approve",
+            "behind",
+            "retry",
+            "resolved",
+            "pass",
+            "pass",
+            "published",
+            "green",
+            "approve",
+            "merged",
+        ],
+    );
+
+    assert_eq!(
+        steps[6..],
+        [
+            "merge-gate#1",
+            "update#1",
+            "ci#2",
+            "merge-gate#2",
+            "merge#1",
+            "merge-gate#1",
+            "merge#2",
+            "update#2",
+            "update#3",
+            "review#1",
+            "accept#1",
+            "publish#2",
+            "ci#3",
+            "merge-gate#1",
+            "merge#3",
+        ]
+    );
+    assert_eq!(end, Ok(RunOutcome::Success));
+}
+
+/// A conflict no one resolves ends the Run for a person; so do updates
+/// past their five visits.
+#[test]
+fn a_conflict_left_alone_or_endless_updates_end_for_a_person() {
+    let (_, stopped) = walk(
+        &flow(CODE_FLOW),
+        &[
+            "approve",
+            "done",
+            "pass",
+            "pass",
+            "published",
+            "green",
+            "behind",
+            "stop",
+        ],
+    );
+    assert_eq!(stopped, Ok(RunOutcome::Manual));
+
+    let (steps, endless) = walk(
+        &flow(CODE_FLOW),
+        &[
+            "approve",
+            "done",
+            "pass",
+            "pass",
+            "published",
+            "green",
+            "behind",
+            "retry",
+            "retry",
+            "retry",
+            "retry",
+            "retry",
+        ],
+    );
+    assert_eq!(steps.last().map(String::as_str), Some("update#5"));
+    assert_eq!(endless, Ok(RunOutcome::Manual));
+}
+
 /// A review panel whose blockers stay unresolved, or whose review failed,
 /// leaves the branch for a person.
 #[test]

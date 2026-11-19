@@ -30,7 +30,7 @@ use crate::domain::gate::{
 use crate::domain::gate_owner::{GateNotice, OwnerNote};
 use crate::domain::main_hold::{HoldTask, MainLook, MainWatch};
 use crate::domain::models::{
-    ActingAgent, AgentAnswer, AgentCommand, AgentTask, AgentTurn, Answerer, BranchDeletion,
+    ActingAgent, AgentAnswer, AgentCommand, AgentTask, AgentTurn, Answerer, BranchDeletion, BranchUpdating,
     CodeRepository, ControlFilesSettings, DefinitionSettings, FactoryError, FlowSummary,
     HeadChecks, Merging, OpenPullRequest, Opening, PullRequest, RepositoryAccess, RequiredChecks,
     RunDetail, RunFinish, RunStart, SessionSteer, SessionStepRef, StandingRulesSettings,
@@ -402,6 +402,17 @@ pub trait PullRequests: Send + Sync + 'static {
         number: u64,
         head_sha: &str,
     ) -> impl Future<Output = Result<Merging, Self::Err>> + Send;
+
+    /// Ask GitHub to merge the base of pull request `number` of
+    /// `repository` into its branch, only while the branch's head is
+    /// `expected_head`.
+    fn update_branch(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        number: u64,
+        expected_head: &str,
+    ) -> impl Future<Output = Result<BranchUpdating, Self::Err>> + Send;
 
     /// Whether an open pull request of `repository` is based on `branch`.
     fn has_open_pull_request_onto(

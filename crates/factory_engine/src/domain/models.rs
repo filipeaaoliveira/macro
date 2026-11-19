@@ -177,6 +177,18 @@ pub struct StepInput<'a> {
     /// The commit the Run's branch starts from, when the Run is a Benchmark
     /// trial pinned to one; otherwise the branch starts from its base.
     pub base_commit: Option<&'a str>,
+    /// The outcomes the Step's entry routes in the Flow the Run walks: a
+    /// pull request Step ends with one a Flow may lack (`behind`, `queued`)
+    /// only when its entry routes it, so a Run on an older Flow goes on as
+    /// that Flow did.
+    pub routes: &'a [Outcome],
+}
+
+impl StepInput<'_> {
+    /// Whether the Step's entry routes `outcome`.
+    pub fn routes(&self, outcome: &str) -> bool {
+        self.routes.iter().any(|routed| routed.as_str() == outcome)
+    }
 }
 
 /// What an agent is asked to do for one Step.
@@ -544,6 +556,20 @@ pub enum Merging {
     /// Its head is no longer the commit the merge named.
     HeadChanged,
     /// GitHub declined, for this reason.
+    Refused(String),
+}
+
+/// What asking GitHub to merge a pull request's base into its branch came
+/// to: GitHub's "Update branch", which adds a merge commit on top of the
+/// branch's head and never rewrites it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BranchUpdating {
+    /// GitHub took it, and merges the base into the branch shortly.
+    Started,
+    /// The branch's head is no longer the commit named: nothing merged.
+    HeadMoved,
+    /// GitHub declined, for this reason: the base and the branch conflict,
+    /// or there is nothing to merge.
     Refused(String),
 }
 

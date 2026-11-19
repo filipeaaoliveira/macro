@@ -7,6 +7,7 @@ mod flaws;
 mod gate_owner;
 mod gate_replies;
 mod main_hold;
+mod merge_queue;
 pub(crate) mod self_improvement;
 mod standing_acts;
 mod steering;
@@ -39,9 +40,9 @@ use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
 use crate::domain::models::{
-    BranchDeletion, Check, CheckState, CheckSuite, CodeRepository, HeadChecks, Merging,
-    OpenPullRequest, Opening, PullRequest, PullRequestState, RepositoryAccess, RequiredChecks,
-    run_branch,
+    BranchDeletion, BranchUpdating, Check, CheckState, CheckSuite, CodeRepository, HeadChecks,
+    Merging, OpenPullRequest, Opening, PullRequest, PullRequestState, RepositoryAccess,
+    RequiredChecks, run_branch,
 };
 use crate::domain::ports::{
     FileRefusal, FollowUpTask, PullRequests, Retryable, TaskAccess, TaskDirectory, UserDirectory,
@@ -124,6 +125,8 @@ pub(crate) struct FollowUpComment {
 #[derive(Clone, Default)]
 pub(crate) struct FakeRepo {
     pub(crate) runs: Arc<Mutex<BTreeMap<RunId, Run>>>,
+    /// The merge queues and the updates of Runs' branches.
+    pub(crate) queue: Arc<Mutex<merge_queue::FakeQueue>>,
     /// The built-in Flow each Run walks.
     pub(crate) flows: Arc<Mutex<BTreeMap<RunId, String>>>,
     pub(crate) steps: Arc<Mutex<Vec<(RunId, Step)>>>,
@@ -1638,6 +1641,19 @@ pub(crate) struct FakeGithubState {
     pub(crate) descendants: BTreeSet<(String, String)>,
     /// The merge base of two commits neither contains the other of.
     pub(crate) merge_bases: BTreeMap<(String, String), String>,
+    /// The head commit of each branch that is not a Run's, by its name.
+    pub(crate) other_heads: BTreeMap<String, String>,
+    /// The heads updates of the Run's branch were asked from, in order.
+    pub(crate) updates: Vec<String>,
+    /// What GitHub answers an update of the Run's branch with; `Started`
+    /// when none is set, which moves the pull request's and the branch's
+    /// head to [`Self::updated_head`].
+    pub(crate) update_answer: Option<BranchUpdating>,
+    /// The head GitHub's merge of the base makes, once it merged.
+    pub(crate) updated_head: Option<String>,
+    /// The commit `main` moves to as a merge is asked, as when another
+    /// merge lands just before it.
+    pub(crate) main_moves_on_merge: Option<String>,
 }
 
 /// GitHub in memory, for one Run's branch: opening its pull request makes
@@ -1874,6 +1890,9 @@ impl PullRequests for FakeGithub {
         if state.branch_head_fails {
             return Err(FakeGithubError::Down);
         }
+        if let Some(head) = state.other_heads.get(_branch) {
+            return Ok(Some(head.clone()));
+        }
         if state.branch_heads.is_empty() {
             return Ok(state.head.clone());
         }
@@ -1926,6 +1945,9 @@ impl PullRequests for FakeGithub {
     ) -> Result<Merging, FakeGithubError> {
         let mut state = self.state();
         state.merges.push(head_sha.to_string());
+        if let Some(moved) = state.main_moves_on_merge.take() {
+            state.other_heads.insert("main".to_string(), moved);
+        }
         if let Some(why) = state.merge_refusal.clone() {
             return Ok(Merging::Refused(why));
         }
@@ -1937,6 +1959,35 @@ impl PullRequests for FakeGithub {
         }
         pull_request.state = PullRequestState::Merged;
         Ok(Merging::Merged)
+    }
+
+    async fn update_branch(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        _number: u64,
+        expected_head: &str,
+    ) -> Result<BranchUpdating, FakeGithubError> {
+        let mut state = self.state();
+        state.updates.push(expected_head.to_string());
+        if let Some(answer) = state.update_answer.clone() {
+            return Ok(answer);
+        }
+        let head = state
+            .pull_request
+            .as_ref()
+            .map(|pull_request| pull_request.head_sha.clone());
+        if head.as_deref() != Some(expected_head) {
+            return Ok(BranchUpdating::HeadMoved);
+        }
+        if let Some(updated) = state.updated_head.clone() {
+            if let Some(pull_request) = state.pull_request.as_mut() {
+                pull_request.head_sha = updated.clone();
+            }
+            state.branch_heads.clear();
+            state.head = Some(updated);
+        }
+        Ok(BranchUpdating::Started)
     }
 
     async fn has_open_pull_request_onto(

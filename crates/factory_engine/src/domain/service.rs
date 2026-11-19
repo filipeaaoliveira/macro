@@ -2186,6 +2186,27 @@ where
             .trial_base_commit(request.key.run_id)
             .await
             .map_err(internal)?;
+        // What the Step's entry routes, in the Flow the Run kept as it
+        // started, the one its workflow walks. A Run kept before Runs kept
+        // their Flow walks an older Flow than the built-in one of its name,
+        // and one whose Flow does not read is unknown: neither routes an
+        // outcome a pull request Step must ask about (`behind`, `queued`),
+        // so they go on as before. An outcome its Flow does not route goes
+        // to the entry below, which above `merge` would merge unasked.
+        let routes: Vec<Outcome> = self
+            .repo
+            .run_flow(request.key.run_id)
+            .await
+            .map_err(internal)?
+            .filter(|kept| kept.definition.is_some())
+            .and_then(|kept| walked_flow(request.key.run_id, kept))
+            .and_then(|flow| {
+                flow.entries
+                    .into_iter()
+                    .find(|entry| entry.id == request.entry)
+            })
+            .map(|entry| entry.on.into_keys().collect())
+            .unwrap_or_default();
         let input = StepInput {
             key: request.key,
             role: request.role.as_ref(),
@@ -2207,6 +2228,7 @@ where
             resumes: request.resumes,
             owner_notes: &owner_notes,
             base_commit: base_commit.as_deref(),
+            routes: &routes,
         };
         let report = self
             .executor
