@@ -53,11 +53,12 @@ use crate::outbound::pg_soup_repo::notified::{
 use crate::outbound::pg_soup_repo::team::team_gate;
 use crate::outbound::pg_soup_repo::touched::non_touch_tags_sql;
 use crate::outbound::pg_soup_repo::type_err;
+use crate::outbound::pg_soup_repo::user::user_gate;
 
 /// Every type an attention feed can surface, in the order the notified-at
-/// feed decides them, then the CRM records, runtimes and teams only attention
-/// feeds list. Runtimes and teams carry no properties, so a properties filter
-/// rules them out.
+/// feed decides them, then the CRM records, runtimes, teams and the viewer
+/// only attention feeds list. Runtimes, teams and the viewer carry no
+/// properties, so a properties filter rules them out.
 fn requested_types<'a>(req: &AttentionCandidateRequest<'a>) -> Vec<&'static str> {
     let notified = NotifiedSoupRequest {
         user_id: req.user_id.copied(),
@@ -78,9 +79,13 @@ fn requested_types<'a>(req: &AttentionCandidateRequest<'a>) -> Vec<&'static str>
         .filter
         .and_then(|filter| filter.properties_filter.as_deref())
         .is_none_or(properties_filter_matches_propertyless);
-    // Teams carry no properties either.
+    // Teams and the viewer carry no properties either.
     let propertyless: &[&'static str] = if propertyless_ok {
-        &[EntityType::Harness.into(), EntityType::Team.into()]
+        &[
+            EntityType::Harness.into(),
+            EntityType::Team.into(),
+            EntityType::User.into(),
+        ]
     } else {
         &[]
     };
@@ -216,6 +221,7 @@ fn build_query(req: &AttentionCandidateRequest<'_>) -> String {
         crm_contact_gate = crm_contact_gate(),
         harness_gate = harness_gate(),
         team_gate = team_gate(),
+        user_gate = user_gate(),
     )
 }
 

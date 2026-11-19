@@ -39,6 +39,8 @@ pub enum GraphqlSoupEntityType {
     Harness,
     /// A team, listed only by attention feeds.
     Team,
+    /// The viewer, listed only by attention feeds, for notices about them.
+    User,
     /// An entity outside Soup, such as a routine. Only the deprecated
     /// notification `entityType` returns it; read `targetEntityType` instead.
     /// Rejected as input.
@@ -130,8 +132,8 @@ impl GraphqlSoupEntityType {
             EntityType::DatabaseRow => Self::DatabaseRow,
             EntityType::Harness => Self::Harness,
             EntityType::Team => Self::Team,
-            EntityType::User
-            | EntityType::Reminder
+            EntityType::User => Self::User,
+            EntityType::Reminder
             | EntityType::StaticFile
             | EntityType::Skill
             | EntityType::ScheduledAction
@@ -162,6 +164,7 @@ impl GraphqlSoupEntityType {
             Self::DatabaseRow => EntityType::DatabaseRow,
             Self::Harness => EntityType::Harness,
             Self::Team => EntityType::Team,
+            Self::User => EntityType::User,
             Self::OutsideSoup => {
                 return Err(async_graphql::Error::new(
                     "OUTSIDE_SOUP is not a Soup entity type",

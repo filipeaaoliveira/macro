@@ -372,7 +372,8 @@ pub fn project_soup_item<T>(
         | SoupItem::Initiative(_)
         | SoupItem::DatabaseRow(_)
         | SoupItem::Harness(_)
-        | SoupItem::Team(_) => Ok(None),
+        | SoupItem::Team(_)
+        | SoupItem::User(_) => Ok(None),
     }
 }
 

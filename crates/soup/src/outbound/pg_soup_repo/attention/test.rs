@@ -576,6 +576,32 @@ async fn team_notifications_are_candidates_only_for_members(
     Ok(())
 }
 
+#[sqlx::test(
+    fixtures(path = "../../../../fixtures", scripts("work_feed", "attention_users")),
+    migrator = "MACRO_DB_MIGRATIONS"
+)]
+async fn notices_about_the_viewer_are_candidates_only_for_them(
+    pool: Pool<Postgres>,
+) -> anyhow::Result<()> {
+    let link_ids = [Uuid::parse_str(LINK_1)?];
+    let sources = sources();
+    let mut request = req(ATTENTION, &link_ids, &sources);
+    request.types = &[EntityType::User];
+    request.keying = AttentionKeying::FiledEntity;
+    let page = attention_soup_page(&pool, request).await?;
+
+    // The notice filed under user-2 stays out, though it was sent to user-1.
+    assert_eq!(keys(&page), vec![(EntityType::User, USER_1.to_string())]);
+
+    // No one is listed another person's notices: user-2 is sent none.
+    let mut other = req(ATTENTION, &link_ids, &sources);
+    other.types = &[EntityType::User];
+    other.keying = AttentionKeying::FiledEntity;
+    other.user_id = MacroUserIdStr::parse_from_str("macro|user-2@example.com")?;
+    assert!(attention_soup_page(&pool, other).await?.is_empty());
+    Ok(())
+}
+
 // A bulk clear marks a team request done and owns it through `done_by`; its
 // undo reopens it, but a state change made in between takes ownership back, so
 // the undo leaves that notification alone. The UPDATEs mirror the clear and
