@@ -1260,7 +1260,9 @@ every Run in flight replays as before.
   through `PrMergeGuardProvider` to mark a factory Run's pull request, and
   merge one only through that Gate (`POST /runs/{id}/steps/{seq}/answer`);
   until it answered, or while a pull request is `unknown`, they merge
-  nothing. Limits: the guard is in the web app only, so GitHub itself (and
+  nothing. A view rendered outside the provider merges nothing either for a
+  person who may have the factory (`usePrMergeGuard`'s default), and the
+  provider wraps the app's ownerless dialogs too. Limits: the guard is in the web app only, so GitHub itself (and
   any client calling Macro's merge route) still merges a Run's pull
   request; and a viewer who cannot see the Run (a teammate on a hidden
   task, someone off the team) is not guarded, as the lookup must not tell
