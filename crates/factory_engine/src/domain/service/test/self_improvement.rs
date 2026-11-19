@@ -228,6 +228,23 @@ impl Bench {
         improving.into_iter().map(|(_, id)| id).collect()
     }
 
+    /// Take the team's latest self-improvement Run as settled `hours` ago.
+    fn settled_hours_ago(&self, hours: i64) {
+        let mut kept = self.repo.improvement.lock().expect("improvement");
+        let latest = kept.improvements.last_mut().expect("an improvement");
+        latest.settled_at = Some(Utc::now() - TimeDelta::hours(hours));
+    }
+
+    fn latest_state(&self) -> Option<ImprovementState> {
+        self.repo
+            .improvement
+            .lock()
+            .expect("improvement")
+            .improvements
+            .last()
+            .map(|latest| latest.state)
+    }
+
     async fn pending(&self) -> u32 {
         self.repo
             .pending_failures(TEAM, DEFINITION_REPO)
@@ -407,8 +424,10 @@ async fn an_improvement_run_merges_only_by_a_person() {
     }
 }
 
-/// A merged pull request addresses the Run's failures; one closed unmerged
-/// lets them go back to pending, so the next Run's end starts another.
+/// A pull request a person merged after its Run ended addresses the
+/// Run's failures; one closed unmerged, or a Run cancelled with none, lets
+/// them go back to pending but starts no other Run at once: the next waits
+/// a day, two after a second such Run in a row, and a merge ends the wait.
 #[tokio::test]
 async fn the_pull_request_settles_the_failures() {
     let bench = Bench::new(team_repo(true), AGENTS, None);
@@ -433,30 +452,44 @@ async fn the_pull_request_settles_the_failures() {
         .after_run_end(first)
         .await
         .expect("after");
-    let latest = bench.repo.latest_improvement(TEAM).await.expect("read");
-    assert_eq!(
-        latest.map(|latest| latest.state),
-        Some(ImprovementState::Open)
-    );
+    assert_eq!(bench.latest_state(), Some(ImprovementState::Open));
 
-    // Closed unmerged: its failures go back, and a second Run starts.
+    // A person merges it after the Run ended: its failures are addressed.
     if let Some(pull_request) = bench.github.state().pull_request.as_mut() {
-        pull_request.state = PullRequestState::Closed;
+        pull_request.state = PullRequestState::Merged;
     }
     bench
         .improvement()
         .after_run_end(first)
         .await
         .expect("after");
-    let started = bench.improvement_runs();
-    assert_eq!(started.len(), 2, "the released failures start another");
-    let second = started[1];
+    assert_eq!(bench.latest_state(), Some(ImprovementState::Merged));
+    let addressed = || {
+        bench
+            .repo
+            .improvement
+            .lock()
+            .expect("improvement")
+            .failures
+            .iter()
+            .filter(|failure| failure.addressed)
+            .count()
+    };
+    assert_eq!(addressed(), 2);
     assert_eq!(bench.pending().await, 0);
 
-    // Merged by its merge Step: its failures are addressed.
+    // After a merge, new failures start the next at once.
+    bench.github.state().pull_request = None;
+    bench.judged_run(0.2).await;
+    bench.judged_run(0.2).await;
+    assert_eq!(bench.improvement_runs().len(), 2);
+    let second = bench.improvement_runs()[1];
+
+    // Cancelled with no pull request: closed, its failures back, and no
+    // other starts, though they are due.
     bench
         .repo
-        .end_run(second, RunOutcome::Success)
+        .end_run(second, RunOutcome::Cancelled)
         .await
         .expect("end");
     bench
@@ -464,24 +497,60 @@ async fn the_pull_request_settles_the_failures() {
         .after_run_end(second)
         .await
         .expect("after");
-    let latest = bench
+    assert_eq!(bench.latest_state(), Some(ImprovementState::Closed));
+    assert_eq!(bench.pending().await, 2);
+    assert_eq!(bench.improvement_runs().len(), 2, "no other at once");
+    bench.judged_run(0.2).await;
+    assert_eq!(bench.improvement_runs().len(), 2, "none within the day");
+
+    // A day later, the next Run's end starts one.
+    bench.settled_hours_ago(25);
+    bench.judged_run(0.9).await;
+    assert_eq!(bench.improvement_runs().len(), 3);
+    let third = bench.improvement_runs()[2];
+
+    // A person closes its pull request: a second unmerged one in a row,
+    // so the next waits two days.
+    bench
         .repo
-        .latest_improvement(TEAM)
+        .end_run(third, RunOutcome::Manual)
         .await
-        .expect("read")
-        .expect("kept");
-    assert_eq!(latest.state, ImprovementState::Merged);
-    let addressed = bench
+        .expect("end");
+    bench.github.state().pull_request = Some(PullRequest {
+        number: 8,
+        url: "https://github.com/macro/factory-definition/pull/8".to_string(),
+        state: PullRequestState::Closed,
+        head_sha: HEAD.to_string(),
+    });
+    bench
+        .improvement()
+        .after_run_end(third)
+        .await
+        .expect("after");
+    assert_eq!(bench.latest_state(), Some(ImprovementState::Closed));
+    bench.settled_hours_ago(25);
+    bench.judged_run(0.9).await;
+    assert_eq!(bench.improvement_runs().len(), 3, "two days after two");
+    bench.settled_hours_ago(49);
+    bench.judged_run(0.9).await;
+    assert_eq!(bench.improvement_runs().len(), 4);
+
+    // Merged by its merge Step: addressed, and the wait is over.
+    let fourth = bench.improvement_runs()[3];
+    bench
         .repo
-        .improvement
-        .lock()
-        .expect("improvement")
-        .failures
-        .iter()
-        .filter(|failure| failure.addressed)
-        .count();
-    assert_eq!(addressed, 2);
-    assert_eq!(bench.pending().await, 0);
+        .end_run(fourth, RunOutcome::Success)
+        .await
+        .expect("end");
+    bench
+        .improvement()
+        .after_run_end(fourth)
+        .await
+        .expect("after");
+    assert_eq!(bench.latest_state(), Some(ImprovementState::Merged));
+    bench.judged_run(0.2).await;
+    bench.judged_run(0.2).await;
+    assert_eq!(bench.improvement_runs().len(), 5);
 }
 
 /// A Run marked flawed is a failure of its Definition; a failure as old as
@@ -862,4 +931,34 @@ async fn an_improvement_run_s_plan_and_merge_wait_for_a_person_whatever_it_chang
         .and_then(|step| step.gate)
         .expect("the merge gate");
     assert_eq!(merge_gate.answer, None);
+}
+
+/// A self-improvement Run kept starting too long is refused, and the next
+/// waits a day from then, in the same Run's end.
+#[tokio::test]
+async fn a_stale_starting_improvement_pauses_the_next() {
+    let bench = Bench::new(team_repo(true), AGENTS, None);
+    bench.judged_run(0.2).await;
+    bench.judged_run(0.2).await;
+    {
+        let mut kept = bench.repo.improvement.lock().expect("improvement");
+        let latest = kept.improvements.last_mut().expect("an improvement");
+        latest.state = ImprovementState::Starting;
+        latest.run_id = None;
+        latest.created_at = Utc::now() - TimeDelta::hours(1);
+    }
+    bench.judged_run(0.9).await;
+    assert_eq!(bench.latest_state(), Some(ImprovementState::Refused));
+    assert_eq!(bench.pending().await, 2);
+    assert_eq!(
+        bench
+            .repo
+            .improvement
+            .lock()
+            .expect("improvement")
+            .improvements
+            .len(),
+        1,
+        "the refusal pauses the next"
+    );
 }

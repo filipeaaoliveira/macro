@@ -1,8 +1,11 @@
 use chrono::{TimeDelta, Utc};
 use factory_records::domain::models::RunId;
-use factory_records::domain::self_improvement::{Failure, FailureSource};
+use factory_records::domain::self_improvement::{
+    Failure, FailureSource, Improvement, ImprovementState,
+};
+use uuid::Uuid;
 
-use super::{improvement_request, is_due};
+use super::{MAX_UNMERGED_PAUSE, UNMERGED_PAUSE, improvement_request, is_due, paused_until};
 use crate::domain::evaluation::{EvaluationDefinition, SelfImprovementDefinition};
 
 fn failure(source: FailureSource, reason: &str) -> Failure {
@@ -137,4 +140,53 @@ fn the_thresholds_read_from_scorers_json_with_defaults() {
             "{bad}"
         );
     }
+}
+
+fn settled(state: ImprovementState, hours_ago: i64) -> Improvement {
+    let settled_at = Utc::now() - TimeDelta::hours(hours_ago);
+    Improvement {
+        id: Uuid::now_v7(),
+        team_id: Uuid::nil(),
+        repo_url: "https://github.com/macro/factory-definition".to_string(),
+        run_id: None,
+        state,
+        refusal: None,
+        created_at: settled_at,
+        settled_at: Some(settled_at),
+        failures: 1,
+    }
+}
+
+/// After a self-improvement Run that did not merge (closed, cancelled,
+/// refused), the next waits a day; each more in a row since the last that
+/// merged doubles the wait, up to a week; a merged one ends it.
+#[test]
+fn the_pause_doubles_after_each_unmerged_improvement_and_a_merge_resets_it() {
+    use ImprovementState::{Closed, Merged, Refused};
+    let until = |recent: &[Improvement]| {
+        paused_until(recent).map(|until| until - recent[0].settled_at.expect("settled"))
+    };
+
+    assert_eq!(paused_until(&[]), None);
+    assert_eq!(until(&[settled(Merged, 1)]), None);
+    assert_eq!(until(&[settled(Closed, 1)]), Some(UNMERGED_PAUSE));
+    assert_eq!(
+        until(&[settled(Refused, 1), settled(Closed, 30)]),
+        Some(UNMERGED_PAUSE * 2)
+    );
+    assert_eq!(
+        until(&[
+            settled(Closed, 1),
+            settled(Closed, 50),
+            settled(Refused, 100)
+        ]),
+        Some(UNMERGED_PAUSE * 4)
+    );
+    let many: Vec<Improvement> = (0..8).map(|n| settled(Closed, 1 + n * 200)).collect();
+    assert_eq!(until(&many), Some(MAX_UNMERGED_PAUSE));
+    // A merge ends the streak: only the unmerged ones after it count.
+    assert_eq!(
+        until(&[settled(Closed, 1), settled(Merged, 30), settled(Closed, 60)]),
+        Some(UNMERGED_PAUSE)
+    );
 }

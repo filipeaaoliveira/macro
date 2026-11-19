@@ -43,10 +43,19 @@ use crate::domain::ports::{FactoryService, PullRequests, ScoringService};
 /// The most failures one self-improvement Run groups: the oldest.
 pub const MAX_GROUPED_FAILURES: u32 = 50;
 
-/// How long after a self-improvement Run was refused the team's next one
-/// waits, so a Definition its owner cannot run is not tried on every Run's
-/// end.
-pub const REFUSED_PAUSE: chrono::TimeDelta = chrono::TimeDelta::hours(24);
+/// How long after a self-improvement Run settled without merging (closed
+/// or cancelled by a person, ended without a pull request, refused) the
+/// team's next one waits; each such Run in a row since the last merged one
+/// doubles it, up to [`MAX_UNMERGED_PAUSE`]. So a rejected or failing
+/// improvement never starts another at once, and none loops unattended.
+pub const UNMERGED_PAUSE: chrono::TimeDelta = chrono::TimeDelta::hours(24);
+
+/// The longest pause after self-improvement Runs that did not merge.
+pub const MAX_UNMERGED_PAUSE: chrono::TimeDelta = chrono::TimeDelta::days(7);
+
+/// How many of a team's latest self-improvement Runs the pause reads: enough
+/// for the doubling to reach [`MAX_UNMERGED_PAUSE`].
+const RECENT_READ: u32 = 8;
 
 /// How long a self-improvement Run may stay starting before it is taken
 /// for one whose start was lost, and refused.
@@ -107,6 +116,34 @@ fn kept_thresholds(facts: &RunFailureFacts) -> SelfImprovementDefinition {
         .and_then(|kept| serde_json::from_value::<EvaluationDefinition>(kept).ok())
         .map(|evaluation| evaluation.self_improvement())
         .unwrap_or_default()
+}
+
+/// Until when the team's next self-improvement Run waits, given its
+/// latest ones (`recent`, newest first, none open): after each that
+/// settled without merging, in a row since the last that merged,
+/// [`UNMERGED_PAUSE`] doubled for each but the first, up to
+/// [`MAX_UNMERGED_PAUSE`], from the latest one's settlement. None after a
+/// merged one, or none at all.
+pub fn paused_until(recent: &[Improvement]) -> Option<DateTime<Utc>> {
+    let unmerged = recent
+        .iter()
+        .take_while(|improvement| {
+            matches!(
+                improvement.state,
+                ImprovementState::Closed | ImprovementState::Refused
+            )
+        })
+        .count();
+    let settled_at = recent.first()?.settled_at?;
+    if unmerged == 0 {
+        return None;
+    }
+    let doublings = u32::try_from(unmerged - 1).unwrap_or(u32::MAX).min(16);
+    let pause = UNMERGED_PAUSE
+        .checked_mul(1 << doublings)
+        .unwrap_or(MAX_UNMERGED_PAUSE)
+        .min(MAX_UNMERGED_PAUSE);
+    Some(settled_at + pause)
 }
 
 /// Keep the failures of the Run `run_id` for its team, when it ran under
@@ -404,13 +441,13 @@ where
                 None => return Ok(()),
             }
         }
-        let refused_lately = latest.as_ref().is_some_and(|latest| {
-            latest.state == ImprovementState::Refused
-                && latest
-                    .settled_at
-                    .is_some_and(|settled_at| Utc::now() - settled_at < REFUSED_PAUSE)
-        });
-        if refused_lately {
+        // Read after settling, so one settled just now pauses the next.
+        let recent = self
+            .repo
+            .recent_improvements(team_id, RECENT_READ)
+            .await
+            .map_err(internal)?;
+        if paused_until(&recent).is_some_and(|until| Utc::now() < until) {
             return Ok(());
         }
 
