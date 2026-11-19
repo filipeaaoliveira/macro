@@ -28,7 +28,9 @@ from these numbers.
 writes the baselines: `rust [package ...]` for the crates, `web` for the
 feature. Each crate is scored against its own tests' coverage, as a
 per-package check would see it, so code that only another crate's tests reach
-counts as uncovered. Line coverage is used in both languages.
+counts as uncovered. Both sides use line coverage, counted differently:
+cargo-crap takes the lcov lines inside each function, while crap4ts's "line"
+coverage counts the Istanbul statements inside each function's span.
 
 Not scored:
 
@@ -45,7 +47,8 @@ Not scored:
 - `cargo install --locked cargo-llvm-cov cargo-nextest cargo-crap` and
   `rustup component add llvm-tools-preview`.
 - Postgres migrated at `DATABASE_URL` with `SQLX_OFFLINE` unset, as for
-  `cargo test -p factory_records`.
+  `cargo test -p factory_records`. `just setup_macrodb` creates and migrates
+  it (see [Database development](database.md)).
 - `@vitest/coverage-v8` at the installed vitest's version. It is not a
   dependency of the repository yet; the TypeScript check adds it.
   `crap4ts` runs through `bunx` at a pinned version.
@@ -63,9 +66,12 @@ Not scored:
 crap4ts 1.0.1 finds no coverage for a function whose signature wraps onto
 several lines: Istanbul places such a function at its body's first line, and
 crap4ts looks for it at the declaration. It scores those 19 functions as
-untested (the baseline's `unmatched` list), though the tests cover 18 of them
-fully and `mergedCost` to 80%. The corrected row scores them from their own
-lines' coverage.
+untested (the baseline's `unmatched` list), though the tests cover 17 of them
+fully, `reviewsAfresh` to 88.89% and `mergedCost` to 80%. The corrected row
+scores them from their own lines' coverage.
+The committed `factory-runs.json` holds crap4ts's uncorrected scores, so a
+check must apply the same correction to both the baseline and the new run
+and compare corrected against corrected.
 `terminalState` (CC 7) is one: 56 as crap4ts scores it, 7 corrected. The
 worst TypeScript function is then `toRun` in `queries/runs.ts` (CC 18, 89%,
 18.4).
@@ -106,8 +112,9 @@ All three crates from cold: about 9.5 minutes wall and 15 CPU-minutes, with
 cannot share the normal target: building them there would replace the
 normal artifacts. The web side costs about 20 seconds.
 
-The whole workspace was not measured. `factory_service` reaches 828 of the
-lockfile's 1747 packages and 3 of 377 workspace members; the factory crates
+The whole workspace was not measured. Through its normal dependencies,
+`factory_service` reaches 828 of the lockfile's 1747 packages, 96 of them
+among the 377 workspace members; the factory crates
 hold about 55 thousand lines of non-test Rust, against 2.5 million lines of
 Rust (tests included) in all members' sources. Building and testing every member
 instrumented would cost several CPU-hours and tens of GB of target on this
