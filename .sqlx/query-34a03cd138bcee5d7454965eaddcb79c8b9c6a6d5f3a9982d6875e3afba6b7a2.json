@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO factory_ci_wait (run_id, seq, head_sha, verdict)\n        VALUES ($1, $2, $3, $4)\n        ON CONFLICT (run_id, seq) DO UPDATE\n        SET head_sha = EXCLUDED.head_sha, verdict = EXCLUDED.verdict, recorded_at = now()\n        WHERE (factory_ci_wait.head_sha, factory_ci_wait.verdict)\n            IS DISTINCT FROM (EXCLUDED.head_sha, EXCLUDED.verdict)\n        RETURNING seq\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "seq",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "34a03cd138bcee5d7454965eaddcb79c8b9c6a6d5f3a9982d6875e3afba6b7a2"
+}

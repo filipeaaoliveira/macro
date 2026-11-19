@@ -425,6 +425,25 @@ pub trait RunRepository: Send + Sync + 'static {
         url: &str,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
+    /// Keep how a wait of a `ci` Step on its pull request's checks ended,
+    /// with the jobs it saw finish. A Step keeps its last wait: a retry
+    /// that read another head or verdict, as green after a red on the same
+    /// head once a failed job ran again, replaces the wait and its jobs, so
+    /// the kept wait is the one the Step routed. Keeping the same head and
+    /// verdict again changes nothing.
+    fn record_ci_wait(
+        &self,
+        wait: &crate::domain::quality::CiWait,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// The head the Run's last kept `ci` wait before the Step at `before`
+    /// read, with the jobs it kept there, if one was kept.
+    fn last_ci_wait(
+        &self,
+        run_id: RunId,
+        before: u16,
+    ) -> impl Future<Output = Result<Option<crate::domain::quality::LastCiWait>, Self::Err>> + Send;
+
     /// Keep the Control Files the Run's branch changed, as last read,
     /// replacing what was kept before: none clears it. Keeping it again
     /// changes nothing.

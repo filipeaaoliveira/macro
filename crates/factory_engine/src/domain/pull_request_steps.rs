@@ -29,6 +29,7 @@ use chrono::{DateTime, Utc};
 use factory_records::domain::main_hold::{MainHold, MainHoldRepository};
 use factory_records::domain::models::{ControlFileChanges, Outcome, Repository};
 use factory_records::domain::ports::RunRepository;
+use factory_records::domain::quality::{CiJob, CiJobResult, CiVerdict, CiWait};
 use github::domain::models::MacroTaskId;
 
 use crate::domain::check_context::ComparedChanges;
@@ -43,6 +44,7 @@ use crate::domain::models::{
 };
 use crate::domain::ports::{MainWatches, PullRequests, Retryable};
 use crate::domain::setup::SETUP_FILE;
+use crate::domain::quality::ci_jobs;
 use crate::domain::verification::{VERIFY_FILE, VerifyFile, VerifyFileError};
 
 /// How long `ci` waits for a pull request's checks to finish: short of a
@@ -51,6 +53,23 @@ pub const CI_WAIT: Duration = Duration::from_secs(25 * 60);
 
 /// How long `ci` waits between two reads of the checks.
 const CI_POLL: Duration = Duration::from_secs(20);
+
+/// How long keeping a wait of `ci` for CI health may take, GitHub's reads
+/// and the record together; the Step's verdict waits on it at most this
+/// long, about one more poll. A wait ends by [`CI_WAIT`], five minutes short
+/// of the Step attempt's 30, so even one that ends at its deadline keeps
+/// its wait well inside the attempt. A keeping that runs over is dropped
+/// and logged, and the verdict stands.
+const CI_RECORD_BOUND: Duration = Duration::from_secs(25);
+
+/// How long reading a wait's jobs may take within [`CI_RECORD_BOUND`]: a
+/// few listings and a few details, each answered within a second or two.
+/// Past it the wait is kept without its jobs, in the bound's last seconds.
+const CI_JOBS_READ_BOUND: Duration = Duration::from_secs(20);
+
+/// The most heads a newer push replaced whose cancelled runs one wait
+/// reads: two listings each.
+const REPLACED_HEADS_READ: usize = 2;
 
 /// How long `merge` waits for a Main Hold on its base to clear: short of a
 /// Step attempt's 30 minutes, so the Step ends `held` rather than failing.
@@ -877,11 +896,18 @@ where
         let mut actions_unread = false;
         // The page kept by an earlier read of this wait.
         let mut kept = None;
+        // The heads this wait read, in order, each once: a newer push
+        // replaces the head, and cancels its runs.
+        let mut heads: Vec<String> = Vec::new();
         loop {
             let (pull_request, checks) = self
                 .find_with_checks(&input, &repository, required.as_ref(), &mut kept)
                 .await?;
             let head = pull_request.head_sha.clone();
+            if heads.last() != Some(&head) {
+                heads.retain(|seen| *seen != head);
+                heads.push(head.clone());
+            }
             actions_unread |= checks.actions_unread;
             let note = if actions_unread {
                 ACTIONS_UNREAD_NOTE
@@ -903,6 +929,8 @@ where
                             .set_merge_head(input.key.run_id, &head)
                             .await
                             .map_err(PullRequestStepError::records)?;
+                        self.keep_ci_wait(&input, &repository, &heads, CiVerdict::Green, deadline)
+                            .await;
                         return Ok(report(
                             "green",
                             format!(
@@ -914,6 +942,8 @@ where
                     last_green = Some(seen);
                 }
                 Verdict::Red(failed) => {
+                    self.keep_ci_wait(&input, &repository, &heads, CiVerdict::Red, deadline)
+                        .await;
                     return Ok(report(
                         "red",
                         format!(
@@ -933,6 +963,8 @@ where
             }
 
             if tokio::time::Instant::now() + CI_POLL > deadline {
+                self.keep_ci_wait(&input, &repository, &heads, CiVerdict::Timeout, deadline)
+                    .await;
                 return Ok(report(
                     "timeout",
                     format!(
@@ -944,6 +976,148 @@ where
             }
             tokio::time::sleep(CI_POLL).await;
         }
+    }
+
+    /// Keep how this wait of the `ci` Step ended, for CI health: with the
+    /// jobs that finished on the last of `heads`, and the runs a newer push
+    /// cancelled on a head it replaced. It is best effort and bounded by
+    /// [`CI_RECORD_BOUND`], so insights never hold a Run up: jobs that cannot
+    /// be read in time are left out, and a wait that cannot be kept in time
+    /// is only logged. Each failed job's step and annotations are read only
+    /// while the whole keeping ends before the wait's `deadline`. A retried
+    /// Step keeps its last wait.
+    async fn keep_ci_wait(
+        &self,
+        input: &StepInput<'_>,
+        repository: &CodeRepository,
+        heads: &[String],
+        verdict: CiVerdict,
+        deadline: tokio::time::Instant,
+    ) {
+        let Some(head) = heads.last() else {
+            return;
+        };
+        let details = tokio::time::Instant::now() + CI_RECORD_BOUND <= deadline;
+        let keeping = async {
+            let jobs = match tokio::time::timeout(
+                CI_JOBS_READ_BOUND,
+                self.ci_wait_jobs(input, repository, heads, verdict, details),
+            )
+            .await
+            {
+                Ok(jobs) => jobs,
+                Err(_) => {
+                    tracing::warn!("the finished CI jobs took too long to read");
+                    Vec::new()
+                }
+            };
+            let wait = CiWait {
+                key: input.key,
+                head_sha: head.clone(),
+                verdict,
+                jobs,
+            };
+            if let Err(error) = self.repo.record_ci_wait(&wait).await {
+                tracing::warn!(%error, "the ci wait could not be kept");
+            }
+        };
+        if tokio::time::timeout(CI_RECORD_BOUND, keeping)
+            .await
+            .is_err()
+        {
+            tracing::warn!(
+                "keeping the ci wait took too long; the step's verdict stands without it"
+            );
+        }
+    }
+
+    /// The jobs a wait keeps: those that finished on the last of `heads`
+    /// (none for a timeout, whose jobs had not finished), and those
+    /// cancelled on the heads a newer push replaced: earlier heads of this
+    /// wait, and the head the Run's last wait read, less the jobs that wait
+    /// kept there, the newest first, at most [`REPLACED_HEADS_READ`].
+    async fn ci_wait_jobs(
+        &self,
+        input: &StepInput<'_>,
+        repository: &CodeRepository,
+        heads: &[String],
+        verdict: CiVerdict,
+        details: bool,
+    ) -> Vec<CiJob> {
+        let Some((head, earlier)) = heads.split_last() else {
+            return Vec::new();
+        };
+        let mut jobs = if verdict == CiVerdict::Timeout {
+            Vec::new()
+        } else {
+            match self
+                .github
+                .finished_jobs(input.owner, repository, head, details)
+                .await
+            {
+                Ok(jobs) => ci_jobs(&jobs),
+                Err(error) => {
+                    tracing::warn!(%error, "the finished CI jobs could not be read");
+                    Vec::new()
+                }
+            }
+        };
+
+        let last_wait = match self
+            .repo
+            .last_ci_wait(input.key.run_id, input.key.seq)
+            .await
+        {
+            Ok(last) => last,
+            Err(error) => {
+                tracing::warn!(%error, "the run's last ci wait could not be read");
+                None
+            }
+        };
+        // Each replaced head, with the jobs a wait already kept there: those
+        // finished, cancelled as a matrix's fail-fast does, before the push
+        // replaced it, so the push cancelled none of them.
+        let none: &[String] = &[];
+        let mut replaced: Vec<(&str, &[String])> = earlier
+            .iter()
+            .rev()
+            .map(|sha| (sha.as_str(), none))
+            .collect();
+        if let Some(last) = &last_wait
+            && last.head_sha != *head
+        {
+            match replaced.iter_mut().find(|(sha, _)| *sha == last.head_sha) {
+                Some(seen) => seen.1 = &last.jobs,
+                None => replaced.push((&last.head_sha, &last.jobs)),
+            }
+        }
+        for (sha, kept_before) in replaced.into_iter().take(REPLACED_HEADS_READ) {
+            match self
+                .github
+                .finished_jobs(input.owner, repository, sha, false)
+                .await
+            {
+                Ok(finished) => {
+                    for job in ci_jobs(&finished) {
+                        let cancelled = job.result == CiJobResult::Cancelled;
+                        let kept = kept_before.contains(&job.name)
+                            || jobs
+                                .iter()
+                                .any(|other| other.replaced && other.name == job.name);
+                        if cancelled && !kept {
+                            jobs.push(CiJob {
+                                replaced: true,
+                                ..job
+                            });
+                        }
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "a replaced head's CI jobs could not be read");
+                }
+            }
+        }
+        jobs
     }
 
     /// Before a person is asked to merge, check the pull request's head is

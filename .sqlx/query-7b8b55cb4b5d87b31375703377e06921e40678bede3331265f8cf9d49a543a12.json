@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            w.head_sha,\n            coalesce(\n                array_agg(j.name ORDER BY j.name) FILTER (WHERE j.name IS NOT NULL),\n                '{}'\n            ) AS \"jobs!\"\n        FROM (\n            SELECT run_id, seq, head_sha\n            FROM factory_ci_wait\n            WHERE run_id = $1 AND seq < $2\n            ORDER BY seq DESC\n            LIMIT 1\n        ) w\n        LEFT JOIN factory_ci_job j\n            ON j.run_id = w.run_id AND j.seq = w.seq AND NOT j.replaced\n        GROUP BY w.head_sha\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "head_sha",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "jobs!",
+        "type_info": "TextArray"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "7b8b55cb4b5d87b31375703377e06921e40678bede3331265f8cf9d49a543a12"
+}

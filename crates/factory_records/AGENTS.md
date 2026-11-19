@@ -25,6 +25,9 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `src/outbound/pg_run_repository/self_improvement.rs`:
   `SelfImprovementRepository`, a team's failures under its Factory
   Definition and the self-improvement Runs that address them.
+- `src/domain/quality.rs` and `src/outbound/pg_run_repository/quality.rs`:
+  `RunQualityRepository`, the reads behind CI health, review quality, cost
+  and autonomy, and the `ci` Step's waits (`record_ci_wait`).
 - `src/domain/main_hold.rs` and `src/outbound/pg_run_repository/main_hold.rs`:
   `MainHoldRepository`, the merges Runs made and the Main Holds on the base
   branches they merge to.
@@ -106,11 +109,13 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   `20261119020000_factory_self_improvement.sql`,
   `20261119020100_factory_improvement_failure_dismissed.sql`,
   `20261119030000_factory_run_cancelled_in_person.sql`,
+  `20261119043000_factory_ci_wait.sql`,
   `20261119050000_factory_token_budget.sql`,
   `20261119050100_factory_token_budget_validate.sql`), `factory_step_steer`,
   `factory_run_score`, `factory_run_arm`, `factory_benchmark_suite`,
   `factory_benchmark_trial`, `factory_benchmark_trial_score`,
-  `factory_improvement` and `factory_improvement_failure`.
+  `factory_improvement`, `factory_improvement_failure`, `factory_ci_wait`
+  and `factory_ci_job`.
 - Not here: Flows, the interpreter, the workflow, the HTTP API → `crates/factory_engine`.
 
 ## Boundaries

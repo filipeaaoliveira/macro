@@ -6,6 +6,7 @@ import type { InsightsState } from '../../primitives/insights-state';
 import { EvaluationPanel } from '../shared/evaluation-panel';
 import { InsightsBody } from '../shared/insights-body';
 import { InsightsFilters } from '../shared/insights-filters';
+import { QualityPanel } from '../shared/quality-panel';
 import { WaitingRuns } from '../shared/waiting-runs';
 
 /**
@@ -32,6 +33,10 @@ export function MobileInsightsView(props: {
               <InsightsFilters state={props.state} flows={props.flows} />
             </div>
           }
+        />
+        <QualityPanel
+          params={props.state.params}
+          onOpenRun={props.state.setOpenRunId}
         />
         <EvaluationPanel
           params={props.state.params}

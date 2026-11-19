@@ -113,3 +113,47 @@ pub struct GithubCommitStatus {
     /// Its page, when it gives one.
     pub target_url: Option<String>,
 }
+
+/// A check run on a commit as CI health reads it: how it ended, and what it
+/// says of itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GithubCheckRunResult {
+    /// GitHub's id for it; for a GitHub Actions run, its job's id.
+    pub id: u64,
+    /// Its name.
+    pub name: String,
+    /// GitHub's status: `queued`, `in_progress` or `completed`.
+    pub status: String,
+    /// How it concluded, once completed.
+    pub conclusion: Option<String>,
+    /// The slug of the app that runs it.
+    pub app_slug: Option<String>,
+    /// The title of its output, such as the error a CI reports.
+    pub output_title: Option<String>,
+    /// The summary of its output.
+    pub output_summary: Option<String>,
+}
+
+/// One step of a GitHub Actions job, in the job's order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GithubJobStep {
+    /// Its name, as the workflow names it or GitHub names it for an action.
+    pub name: String,
+    /// How it concluded, once completed.
+    pub conclusion: Option<String>,
+}
+
+/// An annotation a check run left on the code, such as a test that failed:
+/// GitHub Actions adds one for each error a step reports.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GithubCheckAnnotation {
+    /// The file it is on, from the repository's root; GitHub Actions puts
+    /// its own errors on `.github`.
+    pub path: String,
+    /// `notice`, `warning` or `failure`.
+    pub level: String,
+    /// Its title, when it has one.
+    pub title: Option<String>,
+    /// What it says.
+    pub message: String,
+}

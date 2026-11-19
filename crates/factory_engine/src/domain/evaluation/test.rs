@@ -335,6 +335,8 @@ fn usage(session: Uuid) -> FakeUsage {
         output: 300,
         cache_read: 5000,
         cache_write: 700,
+        cost_usd: 0.0,
+        unpriced_calls: 0,
     }])
 }
 

@@ -22,12 +22,14 @@ import type {
   FlowsResponse,
   GetFactoryEvaluationParams,
   GetFactoryInsightsParams,
+  GetFactoryQualityParams,
   HandBackRequest,
   LinkTaskRequest,
   ListFactoryBoardParams,
   NoteStepRequest,
   PullRequestRuns,
   PullRequestUrls,
+  QualityInsights,
   ReplyToGateRequest,
   ResumeStepRequest,
   RoutineFiring,
@@ -963,6 +965,92 @@ export const getFactoryEvaluation = async (
     status: res.status,
     headers: res.headers,
   } as getFactoryEvaluationResponse;
+};
+
+/**
+ * @summary CI health, review quality, cost and autonomy of the caller's own Runs
+over a period: each CI job's red rate and its failures by cause, the
+failures that hit two or more pull requests, the time from a pull
+request's first push to green and the fix rounds spent on CI and on
+review; review rounds, Blockers by reviewer and by Agent, and Blocker
+texts that recur; cost per merged pull request and the share of Runs
+that merged with no person stepping in. At most the newest 1,000 Runs of
+the period are read.
+ */
+export type getFactoryQualityResponse200 = {
+  data: QualityInsights;
+  status: 200;
+};
+
+export type getFactoryQualityResponse400 = {
+  data: ErrorResponse;
+  status: 400;
+};
+
+export type getFactoryQualityResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type getFactoryQualityResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type getFactoryQualityResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type getFactoryQualityResponseSuccess = getFactoryQualityResponse200 & {
+  headers: Headers;
+};
+export type getFactoryQualityResponseError = (
+  | getFactoryQualityResponse400
+  | getFactoryQualityResponse401
+  | getFactoryQualityResponse403
+  | getFactoryQualityResponse500
+) & {
+  headers: Headers;
+};
+
+export type getFactoryQualityResponse =
+  | getFactoryQualityResponseSuccess
+  | getFactoryQualityResponseError;
+
+export const getGetFactoryQualityUrl = (params: GetFactoryQualityParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/insights/quality?${stringifiedParams}`
+    : `/insights/quality`;
+};
+
+export const getFactoryQuality = async (
+  params: GetFactoryQualityParams,
+  options?: RequestInit
+): Promise<getFactoryQualityResponse> => {
+  const res = await fetch(getGetFactoryQualityUrl(params), {
+    ...options,
+    method: 'GET',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: getFactoryQualityResponse['data'] = body ? JSON.parse(body) : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as getFactoryQualityResponse;
 };
 
 /**

@@ -8,6 +8,7 @@ mod flaws;
 mod gate_replies;
 mod insights;
 mod main_hold;
+mod quality;
 mod review_rounds;
 mod self_improvement;
 mod standing_acts;
@@ -142,6 +143,10 @@ pub enum PgRunRepositoryErr {
     /// The board read a place for a Run that this code does not know.
     #[error("unknown board state {0:?}")]
     UnknownBoardState(String),
+    /// A stored CI wait's verdict, or a CI job's result, is not one this
+    /// code knows.
+    #[error("unknown ci verdict or job result {0:?}")]
+    UnknownCiWord(String),
     /// A stored round of checks ended with an outcome this code does not
     /// know.
     #[error("unknown check round outcome {0:?}")]
@@ -850,6 +855,20 @@ impl RunRepository for PgRunRepository {
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    #[tracing::instrument(err, skip(self, wait), fields(run_id = %wait.key.run_id, seq = wait.key.seq))]
+    async fn record_ci_wait(&self, wait: &crate::domain::quality::CiWait) -> Result<(), Self::Err> {
+        quality::record_ci_wait(&self.pool, wait).await
+    }
+
+    #[tracing::instrument(err, skip(self))]
+    async fn last_ci_wait(
+        &self,
+        run_id: RunId,
+        before: u16,
+    ) -> Result<Option<crate::domain::quality::LastCiWait>, Self::Err> {
+        quality::last_ci_wait(&self.pool, run_id, before).await
     }
 
     #[tracing::instrument(err, skip(self, changes))]

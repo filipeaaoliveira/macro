@@ -32,10 +32,10 @@ use crate::domain::gate_owner::{GateNotice, OwnerNote};
 use crate::domain::main_hold::{HoldTask, MainLook, MainWatch};
 use crate::domain::models::{
     ActingAgent, AgentAnswer, AgentCommand, AgentTask, AgentTurn, Answerer, BranchDeletion,
-    CodeRepository, ControlFilesSettings, DefinitionSettings, FactoryError, FlowSummary,
-    HeadChecks, Merging, OpenPullRequest, Opening, PullRequest, RepositoryAccess, RequiredChecks,
-    RunDetail, RunFinish, RunStart, SessionSteer, SessionStepRef, StandingRulesSettings,
-    StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
+    CodeRepository, ControlFilesSettings, DefinitionSettings, FactoryError, FinishedJob,
+    FlowSummary, HeadChecks, Merging, OpenPullRequest, Opening, PullRequest, RepositoryAccess,
+    RequiredChecks, RunDetail, RunFinish, RunStart, SessionSteer, SessionStepRef,
+    StandingRulesSettings, StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
 };
 use crate::domain::review_rounds::{ChangedFile, ReviewRoundClosing, ReviewRoundOpening};
 use crate::domain::standing_rules::RuleAnswer;
@@ -303,6 +303,20 @@ pub trait PullRequests: Send + Sync + 'static {
         branch: &str,
         all_runs: bool,
     ) -> impl Future<Output = Result<Option<(PullRequest, HeadChecks)>, Self::Err>> + Send;
+
+    /// The CI jobs that finished on the commit `sha` of `repository`: each
+    /// check run's latest and each commit status, with what a failed check
+    /// run's output says. With `details`, a few failed jobs are read
+    /// further, each at most twice: the first step that failed of a GitHub
+    /// Actions job, and the failures a check run annotated. Jobs still
+    /// running are left out.
+    fn finished_jobs(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        sha: &str,
+        details: bool,
+    ) -> impl Future<Output = Result<Vec<FinishedJob>, Self::Err>> + Send;
 
     /// The commit at the head of `branch` of `repository`, with the checks
     /// on it, read with one token: what a watch of a base branch reads on

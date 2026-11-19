@@ -9,6 +9,7 @@ import { formatLocale, t } from '@app/lib/i18n';
 import { Button } from '@ui';
 import { Index, type JSX, Match, Show, Switch } from 'solid-js';
 import { EntryList } from '../../components/entry-list';
+import { durationFigure } from '../../components/insight-format';
 import {
   INSIGHT_OUTCOME_COLORS,
   insightOutcomeLabel,
@@ -23,29 +24,12 @@ import { UsageSummary } from '../../components/usage-summary';
 import type { RunsSource } from '../../context/runs-context';
 import { flowWordLabel } from '../../core/flow-words';
 import {
-  durationIn,
   INSIGHT_OUTCOMES,
   type RunInsights,
   runCount,
   successRate,
   troubledEntries,
 } from '../../core/insights';
-
-/** A duration as a figure and its unit, in the interface's language. */
-function durationFigure(seconds: number | undefined) {
-  if (seconds === undefined) return { value: undefined, unit: undefined };
-  const { value, unit } = durationIn(seconds);
-  const rounded = Math.round(value * 10) / 10;
-  const parts = new Intl.NumberFormat(formatLocale(), {
-    style: 'unit',
-    unit,
-    unitDisplay: 'short',
-  }).formatToParts(rounded);
-  return {
-    value: rounded,
-    unit: parts.find((part) => part.type === 'unit')?.value,
-  };
-}
 
 /** Placeholders where the first section's figures land. */
 function InsightsSkeleton() {

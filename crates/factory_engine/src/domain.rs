@@ -25,6 +25,7 @@ pub mod models;
 pub mod no_result;
 pub mod ports;
 pub mod pull_request_steps;
+pub mod quality;
 pub mod questions;
 pub mod review_rounds;
 pub mod self_improvement;

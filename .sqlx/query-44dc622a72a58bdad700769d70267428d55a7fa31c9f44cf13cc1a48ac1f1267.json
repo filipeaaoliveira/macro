@@ -1,0 +1,59 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                sessions.id AS \"session_id!\",\n                sum(calls.input_tokens)::bigint AS \"input!\",\n                sum(calls.output_tokens)::bigint AS \"output!\",\n                sum(calls.cache_read_input_tokens)::bigint AS \"cache_read!\",\n                sum(calls.cache_write_input_tokens)::bigint AS \"cache_write!\",\n                coalesce(sum(calls.total::float8), 0)::float8 AS \"cost_usd!\",\n                count(*) FILTER (WHERE calls.total IS NULL) AS \"unpriced_calls!\"\n            FROM unnest($1::uuid[]) AS sessions(id)\n            CROSS JOIN LATERAL (\n                SELECT user_id, input_tokens, output_tokens, cache_read_input_tokens,\n                       cache_write_input_tokens, total\n                FROM ai_usage\n                WHERE agent_session_id = sessions.id\n                OFFSET 0\n            ) calls\n            WHERE calls.user_id = $2\n            GROUP BY sessions.id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "session_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "input!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "output!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "cache_read!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "cache_write!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "cost_usd!",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 6,
+        "name": "unpriced_calls!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "44dc622a72a58bdad700769d70267428d55a7fa31c9f44cf13cc1a48ac1f1267"
+}

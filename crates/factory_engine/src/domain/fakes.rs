@@ -42,9 +42,9 @@ use uuid::Uuid;
 
 use crate::domain::check_context::ComparedChanges;
 use crate::domain::models::{
-    BranchDeletion, Check, CheckState, CheckSuite, CodeRepository, HeadChecks, Merging,
-    OpenPullRequest, Opening, PullRequest, PullRequestState, RepositoryAccess, RequiredChecks,
-    run_branch,
+    BranchDeletion, Check, CheckState, CheckSuite, CodeRepository, FinishedJob, HeadChecks,
+    Merging, OpenPullRequest, Opening, PullRequest, PullRequestState, RepositoryAccess,
+    RequiredChecks, run_branch,
 };
 use crate::domain::ports::{
     FileRefusal, FollowUpTask, PullRequests, Retryable, TaskAccess, TaskDirectory, UserDirectory,
@@ -134,6 +134,8 @@ pub(crate) struct FakeRepo {
     pub(crate) sessions: Arc<Mutex<Vec<FakeSession>>>,
     /// Each Step's steering by its owner.
     pub(crate) steering: Arc<Mutex<HashMap<StepKey, steering::FakeSteering>>>,
+    /// The CI waits kept, in order, the last of each Step.
+    pub(crate) ci_waits: Arc<Mutex<Vec<factory_records::domain::quality::CiWait>>>,
     /// Each Step's rounds of checks, in order.
     pub(crate) check_rounds: Arc<Mutex<Vec<(StepKey, CheckRound)>>>,
     /// The task documents that exist.
@@ -610,6 +612,48 @@ impl RunRepository for FakeRepo {
             .expect("merge heads")
             .insert(id, sha.to_string());
         Ok(())
+    }
+
+    async fn record_ci_wait(
+        &self,
+        wait: &factory_records::domain::quality::CiWait,
+    ) -> Result<(), FakeError> {
+        if self.fails("record_ci_wait") {
+            return Err(FakeError);
+        }
+        let mut waits = self.ci_waits.lock().expect("ci waits");
+        match waits.iter_mut().find(|kept| kept.key == wait.key) {
+            Some(kept) if (&kept.head_sha, kept.verdict) == (&wait.head_sha, wait.verdict) => {}
+            Some(kept) => *kept = wait.clone(),
+            None => waits.push(wait.clone()),
+        }
+        Ok(())
+    }
+
+    async fn last_ci_wait(
+        &self,
+        run_id: RunId,
+        before: u16,
+    ) -> Result<Option<factory_records::domain::quality::LastCiWait>, FakeError> {
+        if self.fails("last_ci_wait") {
+            return Err(FakeError);
+        }
+        Ok(self
+            .ci_waits
+            .lock()
+            .expect("ci waits")
+            .iter()
+            .filter(|kept| kept.key.run_id == run_id && kept.key.seq < before)
+            .max_by_key(|kept| kept.key.seq)
+            .map(|kept| factory_records::domain::quality::LastCiWait {
+                head_sha: kept.head_sha.clone(),
+                jobs: kept
+                    .jobs
+                    .iter()
+                    .filter(|job| !job.replaced)
+                    .map(|job| job.name.clone())
+                    .collect(),
+            }))
     }
 
     async fn set_pull_request_url(&self, id: RunId, url: &str) -> Result<(), FakeError> {
@@ -1585,6 +1629,22 @@ impl RunRepository for FakeRepo {
 /// branch opens in it.
 #[derive(Default)]
 pub(crate) struct FakeGithubState {
+    /// The CI jobs that finished on a commit, as CI health reads them,
+    /// unless [`Self::finished_on`] names that commit.
+    pub(crate) finished: Vec<FinishedJob>,
+    /// The CI jobs that finished on each commit named here.
+    pub(crate) finished_on: BTreeMap<String, Vec<FinishedJob>>,
+    /// Whether reading them fails, as an outage would.
+    pub(crate) finished_fails: bool,
+    /// How long reading them takes, as a slow GitHub would.
+    pub(crate) finished_delay: Option<std::time::Duration>,
+    /// The commits whose finished jobs were read, in order.
+    pub(crate) finished_reads: Vec<String>,
+    /// Whether each read of finished jobs asked for details, in order.
+    pub(crate) finished_details: Vec<bool>,
+    /// The commit each read of the open pull request finds its head at
+    /// next, in order; the last one stays. Empty keeps its head.
+    pub(crate) heads: VecDeque<String>,
     /// Whether the Run's owner cannot reach the repository.
     pub(crate) unreachable: bool,
     /// Whether the Run's owner may only read the repository.
@@ -1723,6 +1783,14 @@ impl FakeGithub {
             } else {
                 state.checks.front().cloned()
             };
+            let head = if state.heads.len() > 1 {
+                state.heads.pop_front()
+            } else {
+                state.heads.front().cloned()
+            };
+            if let (Some(head), Some(pull_request)) = (head, state.pull_request.as_mut()) {
+                pull_request.head_sha = head;
+            }
             state
                 .pull_request
                 .clone()
@@ -1819,6 +1887,34 @@ impl PullRequests for FakeGithub {
         _all_runs: bool,
     ) -> Result<Option<(PullRequest, HeadChecks)>, FakeGithubError> {
         Ok(self.read())
+    }
+
+    async fn finished_jobs(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        sha: &str,
+        details: bool,
+    ) -> Result<Vec<FinishedJob>, FakeGithubError> {
+        let (delay, read) = {
+            let mut state = self.state();
+            state.finished_reads.push(sha.to_string());
+            state.finished_details.push(details);
+            let read = if state.finished_fails {
+                Err(FakeGithubError::Down)
+            } else {
+                Ok(state
+                    .finished_on
+                    .get(sha)
+                    .cloned()
+                    .unwrap_or_else(|| state.finished.clone()))
+            };
+            (state.finished_delay, read)
+        };
+        if let Some(delay) = delay {
+            tokio::time::sleep(delay).await;
+        }
+        read
     }
 
     async fn branch_checks(
