@@ -43,8 +43,8 @@ use uuid::Uuid;
 
 use crate::domain::check_context::ComparedChanges;
 use crate::domain::models::{
-    BranchDeletion, BranchUpdating, Check, CheckState, CheckSuite, CodeRepository, FinishedJob, HeadChecks,
-    Merging, OpenPullRequest, Opening, PullRequest, PullRequestState, RepositoryAccess,
+    BranchDeletion, BranchUpdating, Check, CheckState, CheckSuite, CodeRepository, FinishedJob,
+    HeadChecks, Merging, OpenPullRequest, Opening, PullRequest, PullRequestState, RepositoryAccess,
     RequiredChecks, run_branch,
 };
 use crate::domain::ports::{

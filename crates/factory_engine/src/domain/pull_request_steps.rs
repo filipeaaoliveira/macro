@@ -52,8 +52,8 @@ use crate::domain::models::{
     StepInput, StepReport, run_branch,
 };
 use crate::domain::ports::{MainWatches, PullRequests, Retryable};
-use crate::domain::setup::SETUP_FILE;
 use crate::domain::quality::ci_jobs;
+use crate::domain::setup::SETUP_FILE;
 use crate::domain::verification::{VERIFY_FILE, VerifyFile, VerifyFileError};
 
 /// How long `ci` waits for a pull request's checks to finish: short of a
