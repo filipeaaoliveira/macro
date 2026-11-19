@@ -1,17 +1,30 @@
 import { throwOnErr } from '@core/util/result';
 import { factoryClient } from '@service-factory/client';
 import type { StandingRulesSettings } from '@service-factory/generated/schemas';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/solid-query';
+import {
+  queryOptions,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/solid-query';
 import type { OrchestratorDefinition } from '../core/standing-rules';
 import { factoryRunKeys } from './keys';
 
-/** The Standing Rules the person's Runs start with. */
-export function useStandingRulesQuery() {
-  return useQuery(() => ({
+/**
+ * The read of the Standing Rules, built at module scope so the cached
+ * query keeps no view alive.
+ */
+function standingRulesOptions() {
+  return queryOptions({
     queryKey: factoryRunKeys.standingRules.queryKey,
     queryFn: ({ signal }) =>
       throwOnErr(() => factoryClient.getStandingRules(signal)),
-  }));
+  });
+}
+
+/** The Standing Rules the person's Runs start with. */
+export function useStandingRulesQuery() {
+  return useQuery(() => standingRulesOptions());
 }
 
 /**
