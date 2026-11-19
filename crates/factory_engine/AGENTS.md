@@ -252,7 +252,12 @@ service and worker task onto this code before any team's Definition adds the
 section. Once a Run has kept one, rolling back below this code fails that
 Run's later agent Steps (a Run keeps the section it started with, so removing
 it from the Definition does not help them): remove it, then let the Runs that
-kept it end, or cancel them, before rolling back.
+kept it end, or cancel them, before rolling back. `factory_standing_act.session_id`
+is nullable from `20261119000100_factory_standing_act_sessionless`, with
+no down migration: code from before it reads the column as non-null, so a
+Run that kept an act from a bot in no session no longer reads there.
+Roll back no lower than that code once such an act is kept, or delete
+those rows (`session_id IS NULL`) first.
 
 A person's Queue is their Runs waiting on them at a Gate or an agent's
 question (`GET /runs/waiting`, Insights' "Waiting on you"). A team's
