@@ -230,7 +230,7 @@ fn the_task_thread_section_is_stored_beside_the_kinds_and_off_by_default() {
 /// and the factory's default, notify.
 #[test]
 fn quiet_gates_are_an_opt_out_stored_beside_the_kinds() {
-    assert!(!OrchestratorDefinition::DEFAULT.quiet_gates);
+    const { assert!(!OrchestratorDefinition::DEFAULT.quiet_gates) };
     assert!(
         !OrchestratorDefinition::from_kinds(&["blockers".to_string()])
             .expect("known")

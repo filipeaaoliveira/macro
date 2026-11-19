@@ -360,7 +360,7 @@ async fn the_queue_limit_is_kept_with_the_rules(pool: PgPool) {
 async fn the_quiet_gates_migration_keeps_saved_definitions_notifying(pool: PgPool) {
     let repo = PgRunRepository::new(pool.clone());
     let (team, project) = (id(TEAM), id(PROJECT));
-    assert!(!PLAN_AND_MERGE.owner_gates && !PLAN_AND_MERGE.quiet_gates);
+    const { assert!(!PLAN_AND_MERGE.owner_gates && !PLAN_AND_MERGE.quiet_gates) };
     repo.set_team_rules(team, Some(PLAN_AND_MERGE))
         .await
         .expect("set the team's");
