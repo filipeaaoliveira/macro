@@ -27,7 +27,7 @@ fn a_role_takes_its_agents_in_the_order_the_definition_lists_them() {
                 "model": "large-model",
                 "instructions": "Work in small commits."
             },
-            "backup": { "bot": "00000000-0000-0000-0000-00000000c0de" }
+            "backup": { "bot": "00000000-0000-0000-0000-00000000c0d1" }
         },
         "roles": {
             "planner": ["backup", "primary"],
@@ -151,7 +151,7 @@ fn the_review_panel_roles_default_to_the_reviewer() {
         read(json!({
             "agents": {
                 "primary": { "bot": "00000000-0000-0000-0000-00000000c1a0" },
-                "backup": { "bot": "00000000-0000-0000-0000-00000000c0de" }
+                "backup": { "bot": "00000000-0000-0000-0000-00000000c0d1" }
             },
             "roles": roles
         }))
@@ -245,7 +245,7 @@ fn bot(id: &str) -> BotId {
 }
 
 const PRIMARY_BOT: &str = "00000000-0000-0000-0000-00000000c1a0";
-const BACKUP_BOT: &str = "00000000-0000-0000-0000-00000000c0de";
+const BACKUP_BOT: &str = "00000000-0000-0000-0000-00000000c0d1";
 const OTHER_BOT: &str = "00000000-0000-0000-0000-0000000000ff";
 
 /// A definition with `standing` as its Standing Roles, and the Agents
@@ -442,5 +442,55 @@ fn the_deployments_agents_take_no_standing_roles() {
     assert_eq!(
         AgentDefinition::configured(Some(definition), None),
         Err(AgentDefinitionError::StandingOutsideDefinition)
+    );
+}
+
+/// Codex takes a Role through macrod on a machine: its Agent names that
+/// machine's bot and a Codex model, as any other Agent does. Codex's cloud
+/// agent is refused, naming each Agent on it, since its sessions cannot
+/// hand a Step's result back.
+#[test]
+fn codex_takes_a_role_through_a_machine_and_never_its_cloud_agent() {
+    let definition = |reviewer_bot: &str| {
+        read(json!({
+            "agents": {
+                "primary": { "bot": "00000000-0000-0000-0000-00000000c1a0" },
+                "second-opinion": { "bot": reviewer_bot, "model": "gpt-5.5" }
+            },
+            "roles": {
+                "planner": ["primary"],
+                "writer": ["primary"],
+                "reviewer": ["second-opinion", "primary"],
+                "fixer": ["primary"]
+            }
+        }))
+        .expect("a definition")
+    };
+
+    let on_a_machine = definition("6f1c2a9e-4b7d-4e2a-9c3f-0d8e5b1a7c42");
+    let configured = AgentDefinition::configured(Some(on_a_machine), None)
+        .expect("a machine's Codex fills a role")
+        .expect("a definition");
+    let reviewer = configured.for_role(&role("reviewer"));
+    assert_eq!(reviewer, [agent("second-opinion"), agent("primary")]);
+    assert_eq!(
+        configured
+            .agent(&agent("second-opinion"))
+            .and_then(|agent| agent.model.as_deref()),
+        Some("gpt-5.5")
+    );
+
+    let cloud = definition("00000000-0000-0000-0000-00000000c0de");
+    assert_eq!(cloud.cloud_codex_agents(), [agent("second-opinion")]);
+    let refused = AgentDefinition::configured(Some(cloud), None).expect_err("the cloud agent");
+    assert_eq!(
+        refused,
+        AgentDefinitionError::CloudCodex(vec![agent("second-opinion")])
+    );
+    assert_eq!(
+        refused.to_string(),
+        "agent second-opinion runs on the Codex cloud agent, whose sessions cannot hand back a \
+         step's result: run Codex with macrod on a machine (`macrod service --agent codex`) and \
+         use the bot id of that machine's agent"
     );
 }

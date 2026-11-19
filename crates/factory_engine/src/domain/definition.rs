@@ -34,7 +34,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 
 use factory_records::domain::evaluation::BENCHMARK_FLOW;
-use factory_records::domain::models::Role;
+use factory_records::domain::models::{AgentName, Role};
 use factory_records::domain::self_improvement::IMPROVE_FLOW;
 use factory_records::domain::standing_rules::{
     MAX_QUEUE_LIMIT, MAX_TOKEN_BUDGET, MIN_QUEUE_LIMIT, MIN_TOKEN_BUDGET, OrchestratorDefinition,
@@ -605,21 +605,29 @@ pub async fn read_definition<F: DefinitionFiles>(
     // Run would start and then fail at its first Step. The error lists
     // them as the file does, which only its text still holds.
     let mut placeholders = agents.placeholder_bots();
-    if !placeholders.is_empty() {
+    // An Agent on Codex's cloud agent would start, then never hand a
+    // Step's result back.
+    let mut cloud_codex = agents.cloud_codex_agents();
+    if !placeholders.is_empty() || !cloud_codex.is_empty() {
         let listed = text(files, AGENTS_FILE)
             .await?
             .and_then(|text| serde_json::from_str::<ListedAgents>(&text).ok())
             .map(|listed| listed.agents.0)
             .unwrap_or_default();
-        placeholders.sort_by_key(|name| {
+        let place = |name: &AgentName| {
             listed
                 .iter()
                 .position(|listed| listed == name.as_str())
                 .unwrap_or(usize::MAX)
-        });
-        return Err(
-            DefinitionError::Agents(AgentDefinitionError::PlaceholderBots(placeholders)).into(),
-        );
+        };
+        if !placeholders.is_empty() {
+            placeholders.sort_by_key(place);
+            return Err(
+                DefinitionError::Agents(AgentDefinitionError::PlaceholderBots(placeholders)).into(),
+            );
+        }
+        cloud_codex.sort_by_key(place);
+        return Err(DefinitionError::Agents(AgentDefinitionError::CloudCodex(cloud_codex)).into());
     }
     let roles: BTreeSet<&Role> = flows
         .values()

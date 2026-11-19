@@ -31,7 +31,7 @@ const MANIFEST: &str = r#"{ "version": 1, "description": "Ours.", "flows": ["rep
 const AGENTS: &str = r#"{
     "agents": {
         "primary": { "bot": "00000000-0000-0000-0000-00000000c1a0", "model": "large-model" },
-        "backup": { "bot": "00000000-0000-0000-0000-00000000c0de" }
+        "backup": { "bot": "00000000-0000-0000-0000-00000000c0d1" }
     },
     "roles": { "planner": ["primary", "backup"], "writer": ["primary"] }
 }"#;
@@ -155,7 +155,7 @@ impl DefinitionFiles for Customized {
 
 const PRIMARY_BOT: &str = "00000000-0000-0000-0000-00000000c1a0";
 
-const BACKUP_BOT: &str = "00000000-0000-0000-0000-00000000c0de";
+const BACKUP_BOT: &str = "00000000-0000-0000-0000-00000000c0d1";
 
 #[tokio::test]
 async fn the_starter_definition_reads() {
@@ -753,7 +753,7 @@ async fn every_placeholder_bot_is_named_in_the_file_s_order() {
     let agents = r#"{
         "agents": {
             "primary": { "bot": "00000000-0000-0000-0000-000000000001" },
-            "spare": { "bot": "00000000-0000-0000-0000-00000000c0de" },
+            "spare": { "bot": "00000000-0000-0000-0000-00000000c0d1" },
             "backup": { "bot": "00000000-0000-0000-0000-000000000002" }
         },
         "roles": { "planner": ["primary"], "writer": ["primary"] }
@@ -766,6 +766,33 @@ async fn every_placeholder_bot_is_named_in_the_file_s_order() {
             AgentDefinitionError::PlaceholderBots(vec![name("primary"), name("backup")])
         ))
     );
+}
+
+/// An Agent on Codex's cloud agent does not read, named in the file's
+/// order; one on a machine's agent with a Codex model reads like any other.
+#[tokio::test]
+async fn an_agent_on_the_codex_cloud_agent_does_not_read() {
+    let agents = r#"{
+        "agents": {
+            "primary": { "bot": "00000000-0000-0000-0000-00000000c1a0" },
+            "zeta": { "bot": "00000000-0000-0000-0000-00000000c0de", "model": "gpt-5.5" },
+            "alpha": { "bot": "00000000-0000-0000-0000-00000000c0de" }
+        },
+        "roles": { "planner": ["zeta", "primary"], "writer": ["primary", "alpha"] }
+    }"#;
+    let name = |name: &str| AgentName::try_from(name.to_string()).expect("an agent");
+
+    assert_eq!(
+        read(with("agents.json", agents)).await,
+        Err(DefinitionError::Agents(AgentDefinitionError::CloudCodex(
+            vec![name("zeta"), name("alpha")]
+        )))
+    );
+    let on_a_machine = agents.replace(
+        "00000000-0000-0000-0000-00000000c0de",
+        "6f1c2a9e-4b7d-4e2a-9c3f-0d8e5b1a7c42",
+    );
+    assert!(read(with("agents.json", &on_a_machine)).await.is_ok());
 }
 
 /// The starter's Control Files are the factory's default and its own
@@ -1015,7 +1042,7 @@ fn standing_agents(standing: &str) -> String {
         r#"{{
             "agents": {{
                 "primary": {{ "bot": "00000000-0000-0000-0000-00000000c1a0" }},
-                "backup": {{ "bot": "00000000-0000-0000-0000-00000000c0de" }}
+                "backup": {{ "bot": "00000000-0000-0000-0000-00000000c0d1" }}
             }},
             "roles": {{ "planner": ["primary", "backup"], "writer": ["primary"] }},
             "standing": {standing}

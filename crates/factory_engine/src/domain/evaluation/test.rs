@@ -42,7 +42,7 @@ fn agents() -> AgentDefinition {
     serde_json::from_value(json!({
         "agents": {
             "primary": { "bot": "00000000-0000-0000-0000-00000000c1a0" },
-            "backup": { "bot": "00000000-0000-0000-0000-00000000c0de" }
+            "backup": { "bot": "00000000-0000-0000-0000-00000000c0d1" }
         },
         "roles": { "writer": ["primary", "backup"], "planner": ["primary"] }
     }))
