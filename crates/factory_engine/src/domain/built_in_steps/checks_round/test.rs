@@ -111,6 +111,8 @@ struct ScriptedAgent {
     /// What the machine ran, in order: `set up`, `check <its command>` and
     /// `remove`.
     machine: Arc<Mutex<Vec<String>>>,
+    /// Each command that set a round's worktree up, in order.
+    set_ups: Arc<Mutex<Vec<String>>>,
 }
 
 /// The check a check's command runs: its last line is `timeout … bash
@@ -203,6 +205,7 @@ impl StepAgent for ScriptedAgent {
                 .lock()
                 .expect("machine")
                 .push("set up".to_string());
+            self.set_ups.lock().expect("set ups").push(line.clone());
             return self
                 .set_up
                 .clone()

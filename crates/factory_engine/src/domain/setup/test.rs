@@ -110,6 +110,12 @@ fn a_file_that_breaks_the_rules_says_why() {
         (r#"{"env":{"MACRO_VERIFY_COMMIT":"x"}}"#, |e| {
             matches!(e, SetupFileError::EnvName(_))
         }),
+        (r#"{"env":{"MACRO_CHECK_BASE":"x"}}"#, |e| {
+            matches!(e, SetupFileError::EnvName(_))
+        }),
+        (r#"{"env":{"MACRO_CHECK_CHANGED":"/tmp/x"}}"#, |e| {
+            matches!(e, SetupFileError::EnvName(_))
+        }),
         (r#"{"env":{"LD_PRELOAD":"/tmp/x.so"}}"#, |e| {
             matches!(e, SetupFileError::EnvName(_))
         }),

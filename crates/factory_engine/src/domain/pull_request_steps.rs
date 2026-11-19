@@ -31,6 +31,7 @@ use factory_records::domain::models::{ControlFileChanges, Outcome, Repository};
 use factory_records::domain::ports::RunRepository;
 use github::domain::models::MacroTaskId;
 
+use crate::domain::check_context::ComparedChanges;
 use crate::domain::checks::CHECKS_FILE;
 use crate::domain::control_files::{ControlFiles, ControlFilesError};
 use crate::domain::definition::DEFINITION_FILE_PATTERNS;
@@ -490,6 +491,21 @@ where
         let branch = run_branch(input.key.run_id);
         self.github
             .changed_paths(input.owner, &repository, &recorded.base_branch, &branch)
+            .await
+            .map_err(PullRequestStepError::github)
+    }
+
+    /// What the commit `head` changed against the Run's base: the commit a
+    /// Benchmark trial is pinned to, else its base branch.
+    pub(crate) async fn check_changes(
+        &self,
+        input: &StepInput<'_>,
+        head: &str,
+    ) -> Result<ComparedChanges, PullRequestStepError> {
+        let (repository, recorded) = Self::repository(input)?;
+        let base = input.base_commit.unwrap_or(&recorded.base_branch);
+        self.github
+            .compare_changes(input.owner, &repository, base, head)
             .await
             .map_err(PullRequestStepError::github)
     }

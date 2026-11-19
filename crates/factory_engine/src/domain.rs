@@ -6,6 +6,7 @@ pub mod automations;
 pub mod board;
 pub mod built_in_flows;
 pub mod built_in_steps;
+pub mod check_context;
 pub mod checks;
 pub mod control_files;
 pub mod definition;

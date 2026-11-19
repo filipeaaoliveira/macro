@@ -22,6 +22,7 @@ use crate::domain::automations::{
     AutomationRequest, AutomationsSettings, CreatedAutomation, FiringResult, RoutineFiring,
 };
 use crate::domain::board::{BoardFilter, BoardPage, PullRequestRuns};
+use crate::domain::check_context::ComparedChanges;
 use crate::domain::evaluation::TeamEvaluation;
 use crate::domain::flow::{StepName, StepUse};
 use crate::domain::gate::{
@@ -354,6 +355,17 @@ pub trait PullRequests: Send + Sync + 'static {
         base: &str,
         branch: &str,
     ) -> impl Future<Output = Result<Option<Vec<String>>, Self::Err>> + Send;
+
+    /// What `head` of `repository` changed against its merge base with
+    /// `base`: that merge base, and the paths GitHub lists, with whether
+    /// they are all of them.
+    fn compare_changes(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        base: &str,
+        head: &str,
+    ) -> impl Future<Output = Result<ComparedChanges, Self::Err>> + Send;
 
     /// The commit `branch` of `repository` is at; none when the branch is
     /// not there.

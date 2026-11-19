@@ -38,6 +38,7 @@ use factory_records::domain::standing_rules::{
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
+use crate::domain::check_context::ComparedChanges;
 use crate::domain::models::{
     BranchDeletion, Check, CheckState, CheckSuite, CodeRepository, HeadChecks, Merging,
     OpenPullRequest, Opening, PullRequest, PullRequestState, RepositoryAccess, RequiredChecks,
@@ -1587,6 +1588,13 @@ pub(crate) struct FakeGithubState {
     pub(crate) changed: Option<Vec<String>>,
     /// The branches or commits whose changes were asked for, in order.
     pub(crate) compared: Vec<String>,
+    /// The merge base GitHub gives of a comparison a round's checks are
+    /// told of; none for a commit no comparison names.
+    pub(crate) check_base: Option<String>,
+    /// Whether comparing for a round's checks fails, as GitHub down does.
+    pub(crate) compare_fails: bool,
+    /// The bases and heads compared for a round's checks, in order.
+    pub(crate) compared_changes: Vec<(String, String)>,
     /// The base branch's head commit and the checks on it; none when the
     /// owner reaches no such branch.
     pub(crate) base: Option<(String, HeadChecks)>,
@@ -1862,6 +1870,27 @@ impl PullRequests for FakeGithub {
             return Ok(Some(Vec::new()));
         }
         Ok(state.changed.clone())
+    }
+
+    async fn compare_changes(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        base: &str,
+        head: &str,
+    ) -> Result<ComparedChanges, FakeGithubError> {
+        let mut state = self.state();
+        state
+            .compared_changes
+            .push((base.to_string(), head.to_string()));
+        if state.compare_fails {
+            return Err(FakeGithubError::Down);
+        }
+        Ok(ComparedChanges {
+            merge_base: state.check_base.clone().unwrap_or_default(),
+            paths: state.changed.clone().unwrap_or_default(),
+            complete: state.changed.is_some(),
+        })
     }
 
     async fn branch_head(

@@ -15,6 +15,7 @@ use github::domain::ports::GithubOauth;
 use github::outbound::github_oauth_client::{FileTooLarge, GithubOauthImpl};
 use macro_user_id::user_id::MacroUserIdStr;
 
+use crate::domain::check_context::ComparedChanges;
 use crate::domain::models::{
     BranchDeletion, Check, CheckState, CheckSuite, CodeRepository, CommitStatus, HeadChecks,
     Merging, OpenPullRequest, Opening, PullRequest, PullRequestState, RepositoryAccess,
@@ -322,6 +323,26 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
             .github
             .list_changed_paths(&token, repository.owner(), repository.name(), base, branch)
             .await?)
+    }
+
+    #[tracing::instrument(err, skip(self, owner))]
+    async fn compare_changes(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        base: &str,
+        head: &str,
+    ) -> Result<ComparedChanges, GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        let compared = self
+            .github
+            .compare_changes(&token, repository.owner(), repository.name(), base, head)
+            .await?;
+        Ok(ComparedChanges {
+            merge_base: compared.merge_base,
+            paths: compared.paths,
+            complete: compared.complete,
+        })
     }
 
     #[tracing::instrument(err, skip(self, owner))]

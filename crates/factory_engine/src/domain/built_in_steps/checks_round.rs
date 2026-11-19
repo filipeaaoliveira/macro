@@ -49,6 +49,7 @@ use tokio::time::Instant;
 use uuid::Uuid;
 
 use super::{BuiltInStepError, BuiltInSteps, agent_role, cut};
+use crate::domain::check_context::CheckContext;
 use crate::domain::checks::{
     CHECKS_FILE, DEFAULT_CHECK_TIMEOUT_SECS, RepositoryCheck, RepositoryChecks, fence_for,
     kept_output,
@@ -554,12 +555,13 @@ where
             (None, Checked::Commit { commit, .. }) => (*commit).to_string(),
         };
         let round_id = round.check_action_id;
+        let context = self.check_context(input, &commit).await;
 
         let set_up = self
             .in_checkout(
                 input,
                 &role,
-                worktree::prepare_command(round_id, &commit),
+                worktree::prepare_command(round_id, &commit, &context),
                 worktree::PREPARE_TIMEOUT,
             )
             .await?;
@@ -620,6 +622,7 @@ where
                         &format!("{}{}", setup.exports(), command.run),
                         command.timeout,
                         worktree::LOCK_WAIT_SECS,
+                        None,
                     ),
                     run_for,
                 )
@@ -691,6 +694,7 @@ where
                         &format!("{}{}{run}", setup.exports(), target.environment()),
                         timeout.as_secs(),
                         worktree::LOCK_WAIT_SECS,
+                        Some(&context),
                     ),
                     run_for,
                 )
@@ -757,6 +761,26 @@ where
             )));
         }
         Ok(head)
+    }
+
+    /// What the round's checks on `commit` are told of the change
+    /// ([`crate::domain::check_context`]), read from GitHub on each
+    /// attempt. A comparison that fails does not hold the checks up: they
+    /// run told the list is unavailable, so a check that keeps to the
+    /// change checks everything instead, and the failure is logged.
+    async fn check_context(&self, input: StepInput<'_>, commit: &str) -> CheckContext {
+        match self.pull_requests.check_changes(&input, commit).await {
+            Ok(changes) => CheckContext::compared(changes),
+            Err(error) => {
+                tracing::warn!(
+                    run_id = %input.key.run_id,
+                    seq = input.key.seq,
+                    ?error,
+                    "the change could not be compared for the checks: they are told its paths are unavailable"
+                );
+                CheckContext::unavailable(input.base_commit)
+            }
+        }
     }
 
     /// What a session that runs no command means for a round: with no
