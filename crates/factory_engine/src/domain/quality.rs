@@ -256,20 +256,15 @@ pub struct QualityQuery {
 }
 
 impl QualityQuery {
-    /// The Runs of `period`, of the repository `repository` names
-    /// (`owner/name` or `https://github.com/owner/name`), or of every
-    /// repository.
+    /// The Runs of `period`, of the repository `repository` names, or of
+    /// every repository. It is named as `owner/name` or by its URL, with or
+    /// without `https://`, a `.git` ending or a closing slash, in any case:
+    /// GitHub names repositories case-insensitively, so it is kept as its
+    /// URL in lower case, and Runs are matched in lower case too.
     pub fn new(period: InsightsQuery, repository: Option<String>) -> Result<Self, InsightsError> {
         let repository = repository
             .map(|named| {
-                let url = if named.starts_with("https://") {
-                    named.clone()
-                } else {
-                    format!("https://github.com/{named}")
-                };
-                CodeRepository::parse(&url)
-                    .map(|repository| repository.url())
-                    .ok_or(InsightsError::InvalidRepository(named))
+                normalized_repository(&named).ok_or(InsightsError::InvalidRepository(named))
             })
             .transpose()?;
         Ok(Self { period, repository })
@@ -284,6 +279,21 @@ impl QualityQuery {
             repository: self.repository.clone(),
         })
     }
+}
+
+/// The URL, `https://github.com/owner/name` in lower case, of the
+/// repository `named` names, if it names one.
+fn normalized_repository(named: &str) -> Option<String> {
+    let lower = named.trim().to_lowercase();
+    let path = lower
+        .strip_prefix("https://")
+        .or_else(|| lower.strip_prefix("http://"))
+        .unwrap_or(&lower);
+    let path = path.strip_prefix("www.").unwrap_or(path);
+    let path = path.strip_prefix("github.com/").unwrap_or(path);
+    let path = path.strip_suffix('/').unwrap_or(path);
+    let path = path.strip_suffix(".git").unwrap_or(path);
+    CodeRepository::parse(&format!("https://github.com/{path}")).map(|repository| repository.url())
 }
 
 // What the person reads.
@@ -554,7 +564,15 @@ pub(crate) fn summarize_quality(
         to: query.period.to(),
         time_zone: query.period.time_zone().to_string(),
         flow: query.period.flow().map(str::to_string),
-        repository: query.repository.clone(),
+        // The repository as the Runs name it, when one does.
+        repository: query.repository.as_ref().map(|asked| {
+            records
+                .repositories
+                .iter()
+                .find(|named| named.eq_ignore_ascii_case(asked))
+                .unwrap_or(asked)
+                .clone()
+        }),
         repositories: records.repositories.clone(),
         run_cap: INSIGHTS_RUN_CAP,
         capped: records.capped,

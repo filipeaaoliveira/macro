@@ -228,7 +228,7 @@ impl RunQualityRepository for PgRunRepository {
               AND r.created_at < $3
               AND ($4::text IS NULL OR r.flow = $4)
               AND r.flow IS DISTINCT FROM $7
-              AND ($8::text IS NULL OR r.repo_url = $8)
+              AND ($8::text IS NULL OR lower(r.repo_url) = lower($8))
             ORDER BY r.created_at DESC, r.id DESC
             LIMIT $5
             "#,

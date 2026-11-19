@@ -715,7 +715,43 @@ async fn the_service_reads_one_repository_and_its_runs_usage() {
     )
     .expect("valid period");
     assert!(matches!(
-        QualityQuery::new(period, Some("not a repository".to_string())),
+        QualityQuery::new(period.clone(), Some("not a repository".to_string())),
         Err(InsightsError::InvalidRepository(_))
     ));
+    assert!(matches!(
+        QualityQuery::new(period, Some("https://gitlab.com/macro/app".to_string())),
+        Err(InsightsError::InvalidRepository(_))
+    ));
+}
+
+/// A repository named in another case, by URL with a `.git` ending or a
+/// closing slash, or without its scheme, is the same repository, and reads
+/// back as the Runs name it.
+#[tokio::test]
+async fn a_repository_is_matched_however_it_is_written() {
+    for named in [
+        "Macro/App",
+        "macro/app.git",
+        "https://GitHub.com/Macro/App/",
+        "http://github.com/macro/app.git",
+        "github.com/macro/app",
+        " https://github.com/macro/app ",
+    ] {
+        let records = FakeRecords::new(Default::default()).with_quality(QualityRecords {
+            runs: vec![run(1)],
+            repositories: vec![APP.to_string()],
+            ..QualityRecords::default()
+        });
+        let asked = records.asked_quality.clone();
+        let service = InsightsServiceImpl::new(records, FakeUsage::new(Vec::new()));
+
+        let quality = service
+            .quality(&julia(), query(Some(named)))
+            .await
+            .expect("quality");
+
+        let asked = asked.lock().expect("asked").clone();
+        assert_eq!(asked[0].repository.as_deref(), Some(APP), "{named}");
+        assert_eq!(quality.repository.as_deref(), Some(APP), "{named}");
+    }
 }

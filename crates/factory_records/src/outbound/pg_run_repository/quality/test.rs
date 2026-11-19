@@ -191,6 +191,14 @@ async fn ci_waits_review_rounds_and_blockers_are_read_with_their_runs(pool: PgPo
     fixtures(path = "../fixtures", scripts("people", "quality"))
 )]
 async fn a_repository_narrows_the_runs_but_not_the_repositories_to_pick(pool: PgPool) {
+    // A Run keeps its repository as it was written, in any case.
+    sqlx::query(
+        "UPDATE factory_run SET repo_url = 'https://github.com/Macro/Site' WHERE repo_url = $1",
+    )
+    .bind(SITE)
+    .execute(&pool)
+    .await
+    .expect("rename");
     let repo = PgRunRepository::new(pool);
 
     let site = repo.read_quality(&julia(Some(SITE))).await.expect("site");
@@ -201,7 +209,10 @@ async fn a_repository_narrows_the_runs_but_not_the_repositories_to_pick(pool: Pg
 
     assert_eq!(ids(&site), vec![run(FOOTER)]);
     assert!(site.ci_waits.is_empty());
-    assert_eq!(site.repositories, vec![APP.to_string(), SITE.to_string()]);
+    assert_eq!(
+        site.repositories,
+        vec![APP.to_string(), "https://github.com/Macro/Site".to_string()]
+    );
     assert!(none.runs.is_empty());
     assert_eq!(none.repositories.len(), 2);
 }

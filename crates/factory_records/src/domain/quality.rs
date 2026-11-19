@@ -131,8 +131,8 @@ pub struct CiWait {
 pub struct QualityScope {
     /// The person's Runs over the period, of a Flow or of all.
     pub runs: InsightsScope,
-    /// The repository's URL, `https://github.com/owner/name`, or none for
-    /// every repository.
+    /// The repository's URL, `https://github.com/owner/name`, matched in
+    /// any case, as GitHub names repositories; none for every repository.
     pub repository: Option<String>,
 }
 
