@@ -31,8 +31,8 @@
 //! whatever the definition says, since it exists only to tell them: with
 //! the same kind of notification, lighter: one per entry and Run, not
 //! pushed to their phone, saying the Run goes on, and marked done once the
-//! Run ends. Both lighter notices are about the Run's task, so a Run
-//! without one sends neither.
+//! Run ends. Both lighter notices are about the Run's task, or, as a
+//! waiting Gate's, about the owner for a Run started without one.
 //!
 //! Which Runs wait on their owner is read from the records whatever the
 //! definition says: a Run waiting at a Gate no one answered.
@@ -136,9 +136,7 @@ pub fn gate_notice(run: &Run, step: &Step) -> Option<GateNotice> {
         metadata: FactoryGateWaitingMetadata {
             run_id: run.id.as_uuid(),
             seq: step.seq,
-            // Empty for a Run without a task: the notification opens the
-            // Run by its id, whatever task it names.
-            task_id: run.task_id.map(|task| task.to_string()).unwrap_or_default(),
+            task_id: run_task(run),
             request: FactoryGateWaitingMetadata::excerpt(&run.request),
             question: FactoryGateWaitingMetadata::excerpt(&gate.question),
             asker,
@@ -147,6 +145,12 @@ pub fn gate_notice(run: &Run, step: &Step) -> Option<GateNotice> {
         },
         push: true,
     })
+}
+
+/// The task a notice of `run` names: empty for a Run without a task, as
+/// the notification opens the Run by its id, whatever task it names.
+fn run_task(run: &Run) -> String {
+    run.task_id.map(|task| task.to_string()).unwrap_or_default()
 }
 
 /// The id of the notification the notify-only Gate of the entry `entry`
@@ -159,25 +163,24 @@ pub fn told_id(run_id: RunId, entry: &EntryId) -> Uuid {
 }
 
 /// The notice the notify-only Gate of the Step `step` of `run`, which says
-/// `question`, warrants: none once the Run ended, or when it works on no
-/// task, which Macro notifies about. It is sent whatever the definition
-/// says, since the Gate exists only to tell the owner. The notice is the
-/// waiting Gate's kind, lighter: flagged `notify_only`, so it reads as news
-/// rather than a question, one per entry and Run ([`told_id`]), and not
-/// pushed.
+/// `question`, warrants: none once the Run ended. It is about the Run's
+/// task, or, for a Run started without one, about the owner, as a waiting
+/// Gate's ([`gate_notice`]). It is sent whatever the definition says,
+/// since the Gate exists only to tell the owner. The notice is the waiting
+/// Gate's kind, lighter: flagged `notify_only`, so it reads as news rather
+/// than a question, one per entry and Run ([`told_id`]), and not pushed.
 pub fn gate_told(run: &Run, step: &Step, question: &str) -> Option<GateNotice> {
     if run.end.is_some() {
         return None;
     }
-    let task_id = run.task_id?;
     Some(GateNotice {
         notification_id: told_id(run.id, &step.entry),
         owner: run.user_id.clone(),
-        task_id: Some(task_id),
+        task_id: run.task_id,
         metadata: FactoryGateWaitingMetadata {
             run_id: run.id.as_uuid(),
             seq: step.seq,
-            task_id: task_id.to_string(),
+            task_id: run_task(run),
             request: FactoryGateWaitingMetadata::excerpt(&run.request),
             question: FactoryGateWaitingMetadata::excerpt(question),
             asker: None,
@@ -201,9 +204,10 @@ pub fn stand_in_id(run_id: RunId, seq: u16) -> Uuid {
 /// The notice that the stand-in answered the Gate of `step`, of `run`,
 /// with `answer`, which the owner may change while its window is open (the
 /// Run view says until when, in the viewer's time): none once the
-/// Run ended, or when it works on no task, which Macro notifies about. It
-/// is sent whatever the definition says, since the stand-in answers in
-/// the owner's name. Like a notify-only Gate's notice it is news while the
+/// Run ended. It is about the Run's task, or, for a Run started without
+/// one, about the owner, as a waiting Gate's ([`gate_notice`]). It is sent
+/// whatever the definition says, since the stand-in answers in the
+/// owner's name. Like a notify-only Gate's notice it is news while the
 /// Run goes on, lighter than a waiting Gate's: flagged `notify_only`, not
 /// pushed, one per Gate ([`stand_in_id`]), and marked done once the window
 /// closes or the Gate is answered.
@@ -212,7 +216,6 @@ pub fn stand_in_notice(run: &Run, step: &Step, answer: &Outcome) -> Option<GateN
         return None;
     }
     let gate = step.gate.as_ref()?;
-    let task_id = run.task_id?;
     let told = format!(
         "The stand-in answered {} for you; you can change it in the run until its window \
          closes. {}",
@@ -222,11 +225,11 @@ pub fn stand_in_notice(run: &Run, step: &Step, answer: &Outcome) -> Option<GateN
     Some(GateNotice {
         notification_id: stand_in_id(run.id, step.seq),
         owner: run.user_id.clone(),
-        task_id: Some(task_id),
+        task_id: run.task_id,
         metadata: FactoryGateWaitingMetadata {
             run_id: run.id.as_uuid(),
             seq: step.seq,
-            task_id: task_id.to_string(),
+            task_id: run_task(run),
             request: FactoryGateWaitingMetadata::excerpt(&run.request),
             question: FactoryGateWaitingMetadata::excerpt(&told),
             asker: None,
@@ -257,24 +260,20 @@ pub fn notice_may_be_out(run: &Run, gate: &Gate) -> bool {
 }
 
 /// Whether the notice that the stand-in answered `gate`, of `run`, may have
-/// gone out ([`stand_in_notice`]): only when the stand-in answered, and
-/// never for a Run without a task.
-pub fn stand_in_notice_may_be_out(run: &Run, gate: &Gate) -> bool {
-    run.task_id.is_some() && gate.stand_in.is_some()
+/// gone out ([`stand_in_notice`]): only when the stand-in answered, with
+/// a task or without one, whatever the definition says.
+pub fn stand_in_notice_may_be_out(gate: &Gate) -> bool {
+    gate.stand_in.is_some()
 }
 
 /// The entries among `visited` whose notify-only Gate may have told the
-/// owner ([`gate_told`]), of `run` walking `flow`: none for a Run without a
-/// task, which tells no one so. A Run whose Flow does not read (`None`)
-/// counts every entry it visited, so no notice is left open.
+/// owner ([`gate_told`]) of a Run walking `flow`, with a task or without
+/// one. A Run whose Flow does not read (`None`) counts every entry it
+/// visited, so no notice is left open.
 pub fn told_entries<'a>(
-    run: &Run,
     flow: Option<&Flow>,
     visited: impl IntoIterator<Item = &'a EntryId>,
 ) -> Vec<&'a EntryId> {
-    if run.task_id.is_none() {
-        return Vec::new();
-    }
     let tells = |entry: &EntryId| {
         flow.is_none_or(|flow| {
             flow.entries.iter().any(|defined| {

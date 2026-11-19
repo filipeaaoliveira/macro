@@ -611,7 +611,7 @@ async fn the_model_is_billed_for_the_run_it_reads() {
 /// The owner is told, lightly, when the stand-in answers in their name:
 /// a notice on the Run's task, not pushed, once however often the answer
 /// is asked for, and done once the window closes. A Run with no task tells
-/// no one.
+/// its owner the same way, about no task, so the notice is filed under them.
 #[tokio::test]
 async fn the_owner_is_told_quietly_while_the_stand_in_s_window_is_open() {
     let repo = FakeRepo::default();
@@ -654,17 +654,30 @@ async fn the_owner_is_told_quietly_while_the_stand_in_s_window_is_open() {
             .contains(&stand_in_id(key.run_id, key.seq))
     );
 
-    // No task, no notice.
+    // No task: told all the same, about the owner, and done the same way.
     let repo = FakeRepo::default();
     let key = run_at_plan_gate(&repo, Some(STAND_IN_ONLY), None).await;
     let model = FakeGateModel::picking(Some("approve"), 0.95);
     let notifier = FakeNotifier::default();
-    gates(&repo, &model)
-        .with_notifier(notifier.clone())
-        .stand_in(plan_asking(key))
+    let service = gates(&repo, &model).with_notifier(notifier.clone());
+    service.stand_in(plan_asking(key)).await.expect("stand in");
+    let sent = notifier.sent.lock().expect("sent").clone();
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    let notice = &sent[0];
+    assert_eq!(notice.notification_id, stand_in_id(key.run_id, key.seq));
+    assert_eq!(notice.owner, julia());
+    assert_eq!(notice.task_id, None);
+    assert_eq!(notice.metadata.task_id, "");
+    assert!(!notice.push);
+    assert!(notice.metadata.notify_only);
+    service
+        .keep_stand_in(plan_keeping(key))
         .await
-        .expect("stand in");
-    assert!(notifier.sent.lock().expect("sent").is_empty());
+        .expect("keep");
+    assert_eq!(
+        *notifier.done.lock().expect("done"),
+        [stand_in_id(key.run_id, key.seq)]
+    );
 }
 
 /// The stand-in never answers a Gate kept for a person, a merge Gate, a
@@ -1038,11 +1051,10 @@ async fn the_stand_in_reads_past_answers_of_the_same_flow_and_kind() {
     assert!(!prompt.contains("A question's answer"));
 }
 
-/// A Run without a task sent no notice that the stand-in answered, so
-/// words in its window close none: closing it would leave a withdrawal
-/// behind.
+/// A Run without a task sent a notice that the stand-in answered too, so
+/// words in its window close it, as a Run on a task's.
 #[tokio::test]
-async fn words_in_the_window_of_a_run_without_a_task_close_no_notice() {
+async fn words_in_the_window_of_a_run_without_a_task_close_its_notice() {
     let repo = FakeRepo::default();
     let key = run_at_plan_gate(&repo, Some(STAND_IN_ONLY), None).await;
     let model = FakeGateModel::picking(Some("approve"), 0.95);
@@ -1056,5 +1068,8 @@ async fn words_in_the_window_of_a_run_without_a_task_close_no_notice() {
         .await
         .expect("read");
 
-    assert!(notifier.done.lock().expect("done").is_empty());
+    assert_eq!(
+        *notifier.done.lock().expect("done"),
+        [stand_in_id(key.run_id, key.seq)]
+    );
 }
