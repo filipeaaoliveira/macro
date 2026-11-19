@@ -76,7 +76,9 @@ export const factoryMergeGuard: PrMergeGuardSource = (
       if (loaded) return loaded.merge(url);
       if (off()) return false;
       toast.failure(checking());
-      // Asked to merge after the load failed: try loading again.
+      // Asked to merge after the load failed: try loading again. Only the
+      // board's drag reaches here then; the Merge buttons are disabled by
+      // `mergeRefusal`, whose message says to reload.
       setFailed(false);
       return true;
     },
