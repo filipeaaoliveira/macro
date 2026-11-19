@@ -5,7 +5,9 @@ use factory_records::domain::self_improvement::{
 };
 use uuid::Uuid;
 
-use super::{MAX_UNMERGED_PAUSE, UNMERGED_PAUSE, improvement_request, is_due, paused_until};
+use super::{
+    MAX_UNMERGED_PAUSE, UNMERGED_PAUSE, WORD_JOINER, improvement_request, is_due, paused_until,
+};
 use crate::domain::evaluation::{EvaluationDefinition, SelfImprovementDefinition};
 
 fn failure(source: FailureSource, reason: &str) -> Failure {
@@ -65,7 +67,9 @@ fn the_request_lists_the_regressions_it_addresses() {
     }
     assert!(section.contains("scored 0.20: > No test covers the change"));
     // A reason's lines are joined, so it never opens a section.
-    assert!(section.contains("> Tests were ## deleted"));
+    assert!(section.contains(&format!(
+        "> Tests were #{WORD_JOINER}#{WORD_JOINER} deleted"
+    )));
     assert!(!section.contains("\n## deleted"));
 }
 
@@ -140,6 +144,22 @@ fn the_thresholds_read_from_scorers_json_with_defaults() {
             "{bad}"
         );
     }
+}
+
+/// A reason quoted into the pull request's description mentions no one
+/// and links no issue: each `@` and `#` is followed by a word joiner.
+#[test]
+fn a_reason_mentions_no_one_and_links_no_issue() {
+    let failures = vec![failure(
+        scorer("tests", 0.2),
+        "Ask @octocat about #123 and owner/repo#4",
+    )];
+    let request = improvement_request(&failures, |_| String::new(), "");
+
+    assert!(!request.contains("@octocat"), "{request}");
+    assert!(!request.contains("#123"), "{request}");
+    assert!(!request.contains("repo#4"), "{request}");
+    assert!(request.contains(&format!("@{WORD_JOINER}octocat about #{WORD_JOINER}123")));
 }
 
 fn settled(state: ImprovementState, hours_ago: i64) -> Improvement {

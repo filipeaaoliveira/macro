@@ -241,6 +241,25 @@ fn one_line(text: &str, chars: usize) -> String {
     }
 }
 
+/// A word joiner: invisible, and breaks what GitHub would read as a
+/// mention or an issue reference.
+const WORD_JOINER: char = '\u{2060}';
+
+/// A failure's reason as the request quotes it: on one line
+/// ([`one_line`]), with a word joiner after each `@` and `#`, so a reason
+/// that reaches the pull request's description mentions no one and links
+/// no issue.
+fn quoted_reason(reason: &str) -> String {
+    let mut quoted = String::new();
+    for c in one_line(reason, REASON_CHARS).chars() {
+        quoted.push(c);
+        if c == '@' || c == '#' {
+            quoted.push(WORD_JOINER);
+        }
+    }
+    quoted
+}
+
 /// The request of a self-improvement Run grouping `failures`, with links
 /// to each failing Run (`run_link`) and to the Scorers' judgments
 /// (`judgments_link`). Its first line is its pull request's title; its
@@ -286,7 +305,7 @@ pub fn improvement_request(
                 failure.run_id,
                 run_link(failure.run_id),
                 failure.flow,
-                one_line(&failure.reason, REASON_CHARS)
+                quoted_reason(&failure.reason)
             ));
         }
     }
@@ -298,7 +317,7 @@ pub fn improvement_request(
                 failure.run_id,
                 run_link(failure.run_id),
                 failure.flow,
-                one_line(&failure.reason, REASON_CHARS)
+                quoted_reason(&failure.reason)
             ));
         }
     }
