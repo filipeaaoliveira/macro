@@ -301,7 +301,8 @@ agent's question (a reviewer's too) or from the owner's `retry` after
 `no_result`, the workflow asks the worker
 (`factory_check_budget`, behind the `factory-token-budget` patch marker,
 for at most two minutes): the worker reads the sessions of the Run's
-Steps (`step_sessions`, each once) and sums what the usage log recorded
+Steps (`step_sessions`, each once, those a Step left for a new one, as
+when its session was lost after its agent worked in it, included) and sums what the usage log recorded
 for them as the Run's owner (`ai_usage`'s `SessionUsageReader`), as
 Insights counts tokens: input, output, and input read from or written to
 the prompt cache, all of which the model bills, so a Run's spend is the
@@ -350,8 +351,10 @@ unchecked, and a newer worker replays that history without the marker.
 `domain/insights.rs`) sums up how the caller's own Runs went over a period of
 at most 366 days in a time zone: Runs by day, outcome and Flow, Run and Step
 durations, Gate waits and answers, the entries that failed or were revisited
-with their newest Runs, and the tokens each agent Step's session used, read
-from the usage log by session id (`ai_usage`'s `SessionUsageReader`). It
+with their newest Runs, and the tokens each agent Step's sessions used
+(its current one and those it left for a new one, each once, the same
+sessions the token budget counts), read from the usage log by session id
+(`ai_usage`'s `SessionUsageReader`). It
 reads the newest `INSIGHTS_RUN_CAP` Runs of the period. A bad period, time
 zone or Flow name is 400.
 
@@ -388,7 +391,8 @@ text an earlier round of the Run found) and texts found in two or more
 Runs. A Run merged with no person stepping in when it merged and ended
 with no Gate a person answered (not a Standing Rule, the stand-in or an
 agent), no Step its owner steered, and no `manual` end. Cost per merged
-pull request is every Run's usage over the merged ones: in dollars when
+pull request is every Run's usage (the sessions its token budget counts)
+over the merged ones: in dollars when
 every model call was priced, in tokens otherwise. A repository that names
 none is 400.
 

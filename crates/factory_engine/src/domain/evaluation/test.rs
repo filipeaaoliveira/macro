@@ -314,6 +314,7 @@ async fn ended_run(
         prepared_at: None,
         opened: true,
         setup: None,
+        left: Vec::new(),
     });
     repo.runs
         .lock()
