@@ -14,8 +14,9 @@ Each list row is one row of the server's notification inbox
 top-level message with everything about it (its replies, mentions and reactions,
 once there is more than one thing), an entity's comments, a task assignment, a
 pull request, a calendar event, an access request or grant, an agent session, or
-a factory Run started without a task that waits on you (one row per Run, filed
-under you, so only you see it; opening it opens the Run).
+a factory Run started without a task that waits on you or tells you something
+(a notify-only gate's news, or the stand-in answering for you; one row per Run,
+filed under you, so only you see it; opening it opens the Run).
 A top-level message that mentions you has its own row, with its thread; an
 entity's comments stay on one row even when one mentions you. The server decides
 all of this (`crates/notification_inbox/src/domain/rows.rs`), so live updates and
