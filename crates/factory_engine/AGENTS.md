@@ -887,8 +887,10 @@ its Flow does not route above `merge` would fall through to the merge):
   conflict, the writer resolves it in its session (`resolve.md`: `git
   merge` the base's head, no rebase, reset or force-push). Any other
   refusal from GitHub (a token without a scope, a branch it may not push
-  to) is no conflict: it fails the Step for good with GitHub's message
-  (`UpdateDeclined`). The update is
+  to) is no conflict an agent resolves: the Step ends `conflict` with
+  GitHub's message, which opens the entry's Gate for the owner (below),
+  so a person grants what GitHub asks and answers `retry`, rather than
+  the Run failing. Nothing is kept for it, so `retry` asks GitHub again. The update is
   kept before the agent is asked (`factory_branch_update`), so a retry goes
   on the way it started. GitHub merges after it answers, and may never
   merge (its merge failed later, or someone pushed in between): once its
@@ -897,17 +899,28 @@ its Flow does not route above `merge` would fall through to the merge):
   now, which replaces the update kept; still nothing shown fails the
   attempt for a retry, which does the same, so the Step's retries bound
   it. Then the repository's checks round runs on the
-  branch, as for `write` and `fix`. It ends `done` only when the update
-  merged the base itself (GitHub's merge on the factory's asking moved
-  the branch from the head the update started at), the branch's head is
-  still that merge, and the checks passed: only the base came in, so the
-  Run goes back through `ci` to the merge Gate, which asks again. Any
-  commit the factory's own update did not make ends it `resolved`, which
-  goes back through `review` and `accept`, their visits reset, then
-  `publish`, `ci` and the merge Gate: an agent's resolution, a fix a checks
-  round asked for, someone's push after the merge, and a branch that
-  already held its base when the update started (someone else merged the
-  base in). `conflict` when the writer could not resolve it, or what it
+  branch, as for `write` and `fix`. It ends `done` only when the branch's
+  head is a merge commit whose parents are exactly, in order, the Run's
+  reviewed head and the base's commit the update asked GitHub to merge
+  (`PullRequests::commit_parents`, GitHub's git database), the branch's
+  head is still that merge, and the checks passed: only the base came in,
+  so the Run goes back through `ci` to the merge Gate, which asks again,
+  and the merge becomes the reviewed head, for the next update to merge
+  into. The reviewed head (`factory_reviewed_head`) is the head a review
+  round last passed on (`ReviewRoundsImpl::close_round`) or such a merge;
+  nothing else writes it, so asking GitHub again from a head someone
+  pushed (`restart_branch_update`) never makes that head reviewed. Where
+  the update started does not count: the head GitHub was asked from may be
+  anyone's. Anything else ends it `resolved`, which goes back through
+  `review` and `accept`, their visits reset, then `publish`, `ci` and the
+  merge Gate: an agent's resolution, a fix a checks round asked for,
+  someone's push after the merge or during the wait for it (even one that
+  merged the base itself), a person's resolution GitHub merged a moved
+  base into after their `retry`, a branch that already held its base when
+  the update started, and a Run that keeps no reviewed head (its review
+  passed before the factory kept one). A merge made by hand with exactly
+  those two parents and changes of its own is the one case the parents do
+  not tell apart from GitHub's. `conflict` when the writer could not resolve it, or what it
   pushed does not hold both the base's head and the branch's former head,
   opens the entry's Gate (no kind, so no rule, stand-in or Orchestrator
   answers it): `stop`, or `retry` once a person resolved it on the branch.
@@ -935,7 +948,12 @@ its Flow does not route above `merge` would fall through to the merge):
   `QUEUE_PLACE_KEPT` (90 minutes) ago, to update its branch or be asked
   again, so the Runs behind it do not merge first and leave it behind
   again. A Run past that goes on without it, and gets its place back when
-  it returns. After `QUEUE_WAIT` (25 minutes) still behind someone, `merge`
+  it returns. One Run of a base merges at a time: its turn
+  (`MergeQueueRepository::take_merge_turn`, an advisory lock per base) is
+  taken before it reads the Runs ahead and held through GitHub's merge,
+  so a Run that comes back to its place just as another passed its turn
+  waits for that merge, then finds its head behind the base, rather than
+  merge beside it untested; it is let go on every path, by being dropped. After `QUEUE_WAIT` (25 minutes) still behind someone, `merge`
   ends `queued`, which `code` routes back to `merge` itself with the
   approval it has, asking no one (`Flow::check_merges` lets a `merge`
   entry's `queued` lead only back to that entry). The approval holds only
@@ -2120,16 +2138,20 @@ Definition.
   Event routines need the creator's `enable-event-routines` flag in
   PostHog, and the harness starts no event intake without PostHog: then a
   repository event's or a Task event's routine is refused, or never runs.
-- Deploy the `factory_merge_queue` migration and every worker before the
-  API starts Runs on the `code` Flow with `update`: an older worker does
-  not serve `update`, and fails that Step for good. Runs started before
+- Deploy the `factory_merge_queue` migration, then every worker, and only
+  then the API: a Run started on the new `code` Flow against an older
+  worker fails at the unknown `update` Step for good. A Run whose review
+  passed on an older worker keeps no reviewed head, so its first update
+  goes back through review. Runs started before
   keep walking their Flow, take no queue, and never end `behind`. Nothing
   in the workflow changed, so no patch marker is needed and the recorded
   histories replay as before.
 - The merge queue is per repository and base branch across owners: a Run
   waits on another person's Run ahead of it, which it cannot see: `queued`
   says only that earlier Runs into the base have not merged yet, never
-  which, nor how many. A Run
+  which, nor how many. That much shows by design: a shared queue tells
+  each Run's readers that some Run they may not see is ahead of it on
+  that base. A Run
   stuck at its merge holds the Runs behind it until it ends, merges, or
   has been away from its merge longer than `QUEUE_PLACE_KEPT`.
 - A worker older than `accept` cannot serve a Run of the `code` Flow that

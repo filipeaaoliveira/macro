@@ -1449,12 +1449,14 @@ it has (asking again only after about five hours, or once its head, its
 checks or its base changed). A branch its base
 moved past is never merged: its merge Gate Step (or **Merge**) shows
 `behind`, and an **Update** Step merges the base into the branch, then runs
-the repository's checks; `done` (only the base came in, merged by the
-factory) goes back through CI to the merge Gate, `resolved` (the writer
-resolved a conflict, the owner did before **Retry**, or anything else not
-made by the factory's merge is on the branch) through review and
-acceptance, and `conflict` asks the owner to resolve it on the branch
-(**Retry**) or **Stop**. An approval never carries over an
+the repository's checks; `done` (the branch's head is GitHub's merge of
+the base into the head the review last passed on, and nothing else) goes
+back through CI to the merge Gate, `resolved` (the writer resolved a
+conflict, the owner did before **Retry**, someone pushed during the
+update, or anything else no review has seen is on the branch) through
+review and acceptance, and `conflict` asks the owner to resolve it on the
+branch, or to settle what GitHub said when it refused the update (as a
+missing permission), then **Retry**, or **Stop**. An approval never carries over an
 update: the merge Gate asks again. A review round shows on its first
 reviewer's Step (`Review round 2`, its outcome, whether it reviewed the whole
 change or the fix since a commit, and how many blockers and follow-ups it
