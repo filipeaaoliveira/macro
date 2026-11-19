@@ -519,6 +519,10 @@ pub struct DeliveryInsight {
     pub manual: u32,
     /// Runs with usage recorded.
     pub measured_runs: u32,
+    /// Runs with an agent session whose usage is not known: one on a
+    /// runtime that records none, as Codex or Claude Code on its owner's
+    /// own login. While any, no figure per merged pull request is given.
+    pub unmeasured_runs: u32,
     /// The tokens every Run's agents used.
     pub tokens: TokenCounts,
     /// What their priced model calls cost, in US dollars.
@@ -1097,6 +1101,7 @@ fn delivery(records: &QualityRecords, tokens: &[SessionTokens]) -> DeliveryInsig
         steered,
         manual,
         measured_runs,
+        unmeasured_runs,
         tokens: used,
         cost_usd,
         unpriced_calls,

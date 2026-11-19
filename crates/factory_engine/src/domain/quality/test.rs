@@ -768,6 +768,7 @@ fn cost_per_merged_pull_request_needs_every_run_s_sessions_measured() {
 
     assert_eq!(delivery.merged, 2);
     assert_eq!(delivery.measured_runs, 2);
+    assert_eq!(delivery.unmeasured_runs, 1);
     assert_eq!(delivery.tokens.input, 1500);
     assert_eq!(delivery.cost_usd, 2.0);
     assert_eq!(delivery.cost_per_merged_usd, None);
@@ -793,6 +794,7 @@ fn a_session_that_made_no_model_call_costs_nothing() {
     let delivery = summarize_quality(&query(None), records(failed_early.clone()), &usage).delivery;
 
     assert_eq!(delivery.measured_runs, 2);
+    assert_eq!(delivery.unmeasured_runs, 0);
     assert_eq!(delivery.cost_per_merged_usd, Some(1.0));
     assert_eq!(delivery.tokens_per_merged, Some(750));
 
