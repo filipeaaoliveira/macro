@@ -667,7 +667,6 @@ where
             }
         }
     }
-
 }
 
 /// What the agent is told of the repository's `setup`, which ran in its

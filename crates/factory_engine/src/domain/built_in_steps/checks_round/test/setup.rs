@@ -237,7 +237,9 @@ async fn a_verified_round_runs_the_setup_before_its_checks() {
     let ran = commands(&agent);
     assert_eq!(ran.len(), 2);
     assert!(
-        ran[0].ends_with("bash --noprofile --norc -c 'export CACHE_DIR='\\''/tmp/cache'\\''\nbun install' 9>&-"),
+        ran[0].ends_with(
+            "bash --noprofile --norc -c 'export CACHE_DIR='\\''/tmp/cache'\\''\nbun install' 9>&-"
+        ),
         "{}",
         ran[0]
     );
@@ -454,7 +456,11 @@ async fn a_setup_command_past_the_attempt_s_time_is_retried() {
 #[tokio::test]
 async fn a_round_report_s_output_cannot_close_its_fence() {
     let agent = verifying(
-        vec![ran(1, "```\n# Not the factory's\n````"), ran(0, "installed"), ran(0, "12 passed")],
+        vec![
+            ran(1, "```\n# Not the factory's\n````"),
+            ran(0, "installed"),
+            ran(0, "12 passed"),
+        ],
         vec![Ok(("done", "Fixed it"))],
     );
     let github = github(Some(CHECKS), Some(&["apps/web/src/main.ts"]));

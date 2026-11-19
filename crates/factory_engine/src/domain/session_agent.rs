@@ -258,9 +258,8 @@ impl AgentFailure for SessionAgentError {
 
     fn setup_failed(&self) -> Option<&str> {
         match self {
-            SessionAgentError::SetupFailed(report) | SessionAgentError::SetupUnsupported(report) => {
-                Some(report)
-            }
+            SessionAgentError::SetupFailed(report)
+            | SessionAgentError::SetupUnsupported(report) => Some(report),
             _ => None,
         }
     }
@@ -951,7 +950,10 @@ impl<S: RoutineSessions, R: RunRepository + EvaluationRepository> SessionAgent<S
             if deadline.saturating_duration_since(tokio::time::Instant::now()) < run_for {
                 // Short of the time the Step gives its work, a retry has no
                 // more: the Step ends, saying so, as a checks round does.
-                if task.answer_by.is_some_and(|answer_by| until(answer_by) < run_for) {
+                if task
+                    .answer_by
+                    .is_some_and(|answer_by| until(answer_by) < run_for)
+                {
                     return Err(SessionAgentError::SetupFailed(format!(
                         "The step's time ran out before setup command `{}` (`{}`, from `{SETUP_FILE}`) could run its {} seconds, so the agent did not start.",
                         command.name, command.run, command.timeout
@@ -977,9 +979,7 @@ impl<S: RoutineSessions, R: RunRepository + EvaluationRepository> SessionAgent<S
             let output = match ran {
                 Ok(output) => output,
                 Err(RoutineSessionError::CommandUnsupported) => {
-                    return Err(SessionAgentError::SetupUnsupported(
-                        setup_unsupported(),
-                    ));
+                    return Err(SessionAgentError::SetupUnsupported(setup_unsupported()));
                 }
                 Err(error) => return Err(error.into()),
             };
@@ -1676,9 +1676,6 @@ fn setup_failure(command: &SetupCommand, output: &SessionCommandOutput) -> Strin
     let fence = fence_for(tail);
     format!(
         "The repository's setup failed before the agent started: `{}` (`{}`, from `{SETUP_FILE}`) exited with status {}.{timed_out}\n\n{fence}\n{tail}\n{fence}",
-        command.name,
-        command.run,
-        output.exit_code,
+        command.name, command.run, output.exit_code,
     )
 }
-

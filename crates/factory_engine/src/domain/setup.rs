@@ -326,7 +326,11 @@ pub fn redacted(text: &str) -> String {
                 in_key = !line[at..].contains(PEM_END);
                 return REDACTED;
             }
-            if secret_in(line).is_some() { REDACTED } else { line }
+            if secret_in(line).is_some() {
+                REDACTED
+            } else {
+                line
+            }
         })
         .collect::<Vec<_>>()
         .join("\n")

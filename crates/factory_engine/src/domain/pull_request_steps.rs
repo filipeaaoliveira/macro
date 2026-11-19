@@ -32,7 +32,6 @@ use factory_records::domain::ports::RunRepository;
 use github::domain::models::MacroTaskId;
 
 use crate::domain::checks::CHECKS_FILE;
-use crate::domain::setup::SETUP_FILE;
 use crate::domain::control_files::{ControlFiles, ControlFilesError};
 use crate::domain::definition::DEFINITION_FILE_PATTERNS;
 use crate::domain::main_hold::{MainWatch, held_note};
@@ -42,6 +41,7 @@ use crate::domain::models::{
     run_branch,
 };
 use crate::domain::ports::{MainWatches, PullRequests, Retryable};
+use crate::domain::setup::SETUP_FILE;
 use crate::domain::verification::{VERIFY_FILE, VerifyFile, VerifyFileError};
 
 /// How long `ci` waits for a pull request's checks to finish: short of a

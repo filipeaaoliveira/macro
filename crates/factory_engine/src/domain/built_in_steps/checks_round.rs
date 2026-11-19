@@ -41,8 +41,8 @@ use agent_session::domain::session_command::{SessionCommand, SessionCommandOutpu
 use chrono::{DateTime, Utc};
 use factory_records::domain::main_hold::MainHoldRepository;
 use factory_records::domain::models::{
-    CheckResult, CheckRound, CheckRoundOutcome, CheckRoundStart, HandedBack,
-    MAX_OUTPUT_BYTES, Outcome, Role,
+    CheckResult, CheckRound, CheckRoundOutcome, CheckRoundStart, HandedBack, MAX_OUTPUT_BYTES,
+    Outcome, Role,
 };
 use factory_records::domain::ports::RunRepository;
 use tokio::time::Instant;
@@ -54,10 +54,10 @@ use crate::domain::checks::{
     kept_output,
 };
 use crate::domain::flow::StepName;
-use crate::domain::setup::{RepositorySetup, SETUP_FILE, redacted};
 use crate::domain::models::{AgentCommand, AgentTurn, StepInput, StepReport};
 use crate::domain::ports::{MainWatches, PullRequests, StepAgent};
 use crate::domain::pull_request_steps::PullRequestStepError;
+use crate::domain::setup::{RepositorySetup, SETUP_FILE, redacted};
 
 /// What the agent is told for a round of checks.
 const CHECKS_INSTRUCTIONS: &str = include_str!("checks.md");

@@ -200,8 +200,8 @@ fn notice() -> GateNotice {
 async fn the_owner_is_notified_about_the_run_s_task() {
     let ingress = Arc::new(RecordingIngress::default());
     notifier(ingress.clone(), Arc::new(RecordingReader::default()))
-    .notify(notice())
-    .await;
+        .notify(notice())
+        .await;
 
     let sent = ingress.sent.lock().expect("sent");
     assert_eq!(sent.len(), 1);
@@ -228,8 +228,8 @@ async fn the_owner_of_a_run_without_a_task_is_notified_about_themselves() {
     taskless.task_id = None;
     taskless.metadata.task_id = String::new();
     notifier(ingress.clone(), Arc::new(RecordingReader::default()))
-    .notify(taskless)
-    .await;
+        .notify(taskless)
+        .await;
 
     let sent = ingress.sent.lock().expect("sent");
     assert_eq!(sent.len(), 1);
@@ -268,8 +268,8 @@ async fn a_notice_that_cannot_be_sent_is_dropped() {
         ..RecordingIngress::default()
     });
     notifier(ingress.clone(), Arc::new(RecordingReader::default()))
-    .notify(notice())
-    .await;
+        .notify(notice())
+        .await;
     assert!(ingress.sent.lock().expect("sent").is_empty());
 }
 
@@ -323,7 +323,11 @@ async fn a_gate_answered_before_its_notice_is_created_leaves_nothing_open() {
         .await;
     notifications.deliver();
 
-    assert!(notifications.open().is_empty(), "{:?}", notifications.open());
+    assert!(
+        notifications.open().is_empty(),
+        "{:?}",
+        notifications.open()
+    );
     assert!(notifications.pushed.lock().expect("pushed").is_empty());
 }
 
@@ -343,12 +347,22 @@ async fn a_gate_answered_after_its_notice_is_created_marks_it_done() {
         .answered(&notice().owner, notice().notification_id)
         .await;
 
-    assert!(notifications.open().is_empty(), "{:?}", notifications.open());
+    assert!(
+        notifications.open().is_empty(),
+        "{:?}",
+        notifications.open()
+    );
     assert_eq!(
         *notifications.pushed.lock().expect("pushed"),
         [notice().notification_id]
     );
-    assert!(notifications.withdrawn.lock().expect("withdrawn").is_empty());
+    assert!(
+        notifications
+            .withdrawn
+            .lock()
+            .expect("withdrawn")
+            .is_empty()
+    );
 }
 
 /// Withdraws through `notifications` once the ingress has read every
@@ -383,5 +397,9 @@ async fn a_notice_created_while_it_is_withdrawn_is_marked_done() {
         *notifications.pushed.lock().expect("pushed"),
         [notice().notification_id]
     );
-    assert!(notifications.open().is_empty(), "{:?}", notifications.open());
+    assert!(
+        notifications.open().is_empty(),
+        "{:?}",
+        notifications.open()
+    );
 }

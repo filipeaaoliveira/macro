@@ -93,9 +93,10 @@ fn a_file_that_breaks_the_rules_says_why() {
         (r#"{"setup":[{"name":"a","run":"x","timeout":0}]}"#, |e| {
             matches!(e, SetupFileError::Timeout(_))
         }),
-        (r#"{"setup":[{"name":"a","run":"x","timeout":1201}]}"#, |e| {
-            matches!(e, SetupFileError::Timeout(_))
-        }),
+        (
+            r#"{"setup":[{"name":"a","run":"x","timeout":1201}]}"#,
+            |e| matches!(e, SetupFileError::Timeout(_)),
+        ),
         (&many_env, |e| matches!(e, SetupFileError::TooManyEnv(33))),
         (r#"{"env":{"1A":"x"}}"#, |e| {
             matches!(e, SetupFileError::EnvName(_))
@@ -160,7 +161,10 @@ fn git_s_repository_and_program_names_are_refused() {
     ] {
         let text = format!(r#"{{"env":{{"{name}":"/tmp/x"}}}}"#);
         let error = RepositorySetup::parse(&text).expect_err(&text);
-        assert!(matches!(error, SetupFileError::EnvName(_)), "{name}: {error}");
+        assert!(
+            matches!(error, SetupFileError::EnvName(_)),
+            "{name}: {error}"
+        );
     }
     let allowed = RepositorySetup::parse(
         r#"{"env":{"GIT_TERMINAL_PROMPT":"0","GIT_LFS_SKIP_SMUDGE":"1","XDG_CACHE_HOME":"/tmp/c"}}"#,
@@ -173,10 +177,7 @@ fn git_s_repository_and_program_names_are_refused() {
 fn a_file_over_its_size_does_not_read() {
     let text = format!(r#"{{"env":{{"A":"{}"}}}}"#, " ".repeat(16 * 1024));
 
-    assert_eq!(
-        RepositorySetup::parse(&text),
-        Err(SetupFileError::TooLarge)
-    );
+    assert_eq!(RepositorySetup::parse(&text), Err(SetupFileError::TooLarge));
 }
 
 #[test]
@@ -196,10 +197,7 @@ fn a_file_holding_a_secret_does_not_read() {
     ];
     for text in cases {
         assert!(
-            matches!(
-                RepositorySetup::parse(text),
-                Err(SetupFileError::Secret(_))
-            ),
+            matches!(RepositorySetup::parse(text), Err(SetupFileError::Secret(_))),
             "{text}"
         );
     }
@@ -247,7 +245,10 @@ fn a_setup_s_output_tail_leaves_secrets_and_control_characters_out() {
 
     let tail = output_tail(&output);
 
-    assert!(tail.ends_with(&format!("fetching[0m\ttwo\n{REDACTED}\nerror: 401")), "{tail}");
+    assert!(
+        tail.ends_with(&format!("fetching[0m\ttwo\n{REDACTED}\nerror: 401")),
+        "{tail}"
+    );
     assert!(!tail.contains("ghp_"));
     assert!(tail.len() <= 4096);
     assert!(tail.starts_with('x'));
@@ -285,7 +286,9 @@ fn a_session_setup_command_waits_for_the_checkout_s_lock() {
     // Without `flock` on its `PATH`, the run takes the `mkdir` lock.
     let tools = root.join("tools");
     std::fs::create_dir_all(&tools).unwrap();
-    for tool in ["git", "mkdir", "cat", "mv", "rm", "sleep", "bash", "timeout"] {
+    for tool in [
+        "git", "mkdir", "cat", "mv", "rm", "sleep", "bash", "timeout",
+    ] {
         let found = Command::new("bash")
             .args(["-c", &format!("command -v {tool}")])
             .output()
@@ -297,7 +300,12 @@ fn a_session_setup_command_waits_for_the_checkout_s_lock() {
     }
 
     let busy = Command::new("/bin/bash")
-        .args(["--noprofile", "--norc", "-c", &setup.locked_shell(&setup.setup[0], 1)])
+        .args([
+            "--noprofile",
+            "--norc",
+            "-c",
+            &setup.locked_shell(&setup.setup[0], 1),
+        ])
         .current_dir(&root)
         .env("PATH", &tools)
         .output()
