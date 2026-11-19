@@ -28,6 +28,10 @@ the Gates they asked people in MacroDB, and defines the names Flows use
 - `src/domain/main_hold.rs` and `src/outbound/pg_run_repository/main_hold.rs`:
   `MainHoldRepository`, the merges Runs made and the Main Holds on the base
   branches they merge to.
+- `src/domain/merge_guard.rs` and
+  `src/outbound/pg_run_repository/merge_guard.rs`: `MergeGuardRepository`,
+  the Run that has not ended and opened a pull request, whoever owns it:
+  Macro's GitHub merge route refuses to merge under it.
 - `src/domain/standing_rules.rs` and
   `src/outbound/pg_run_repository/standing_rules.rs`:
   `StandingRulesRepository`, teams' and Projects' Standing Rules, and the
