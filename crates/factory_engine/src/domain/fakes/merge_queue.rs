@@ -144,10 +144,7 @@ impl MergeQueueRepository for FakeRepo {
         update: &BranchUpdate,
     ) -> Result<BranchUpdate, FakeError> {
         let mut queue = self.queue();
-        let kept = queue
-            .updates
-            .get_mut(&key)
-            .ok_or(FakeError)?;
+        let kept = queue.updates.get_mut(&key).ok_or(FakeError)?;
         if !kept.conflict && kept.updated_head.is_none() {
             *kept = update.clone();
         }

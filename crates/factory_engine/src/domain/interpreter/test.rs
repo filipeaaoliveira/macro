@@ -679,7 +679,15 @@ fn a_branch_behind_its_base_is_updated_and_checked_before_it_merges() {
 /// the Gate (some fifteen hours in the queue) end it for a person.
 #[test]
 fn a_queued_merge_keeps_its_approval_and_asks_again_after_twelve_waits() {
-    let mut outcomes = vec!["approve", "done", "pass", "pass", "published", "green", "approve"];
+    let mut outcomes = vec![
+        "approve",
+        "done",
+        "pass",
+        "pass",
+        "published",
+        "green",
+        "approve",
+    ];
     outcomes.extend(["queued"; 12]);
     outcomes.push("approve");
     outcomes.extend(["queued"; 11]);
@@ -722,7 +730,15 @@ fn a_conflict_left_alone_or_endless_updates_end_for_a_person() {
     );
     assert_eq!(stopped, Ok(RunOutcome::Manual));
 
-    let mut retries = vec!["approve", "done", "pass", "pass", "published", "green", "behind"];
+    let mut retries = vec![
+        "approve",
+        "done",
+        "pass",
+        "pass",
+        "published",
+        "green",
+        "behind",
+    ];
     retries.extend(["retry"; 10]);
     let (steps, endless) = walk(&flow(CODE_FLOW), &retries);
     assert_eq!(steps.last().map(String::as_str), Some("update#10"));
@@ -743,7 +759,11 @@ fn a_base_that_keeps_moving_never_exhausts_the_merge_gate() {
     let (steps, end) = walk(&flow(CODE_FLOW), &outcomes);
     assert_eq!(end, Ok(RunOutcome::Success));
     assert_eq!(
-        steps.iter().filter(|step| step.starts_with("merge-gate")).last().map(String::as_str),
+        steps
+            .iter()
+            .filter(|step| step.starts_with("merge-gate"))
+            .last()
+            .map(String::as_str),
         Some("merge-gate#1")
     );
 
@@ -754,7 +774,11 @@ fn a_base_that_keeps_moving_never_exhausts_the_merge_gate() {
     chasing.push("behind");
     let (steps, end) = walk(&flow(CODE_FLOW), &chasing);
     assert_eq!(steps.last().map(String::as_str), Some("merge-gate#1"));
-    assert_eq!(end, Ok(RunOutcome::Manual), "the eleventh update is past the bound");
+    assert_eq!(
+        end,
+        Ok(RunOutcome::Manual),
+        "the eleventh update is past the bound"
+    );
 }
 
 /// A review panel whose blockers stay unresolved, or whose review failed,

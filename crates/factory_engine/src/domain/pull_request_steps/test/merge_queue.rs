@@ -420,10 +420,15 @@ async fn an_update_github_declines_is_no_conflict() {
     let Err(error) = declined else {
         panic!("a declined update is no conflict: {declined:?}");
     };
-    assert!(matches!(error, PullRequestStepError::UpdateDeclined(_)), "{error:?}");
+    assert!(
+        matches!(error, PullRequestStepError::UpdateDeclined(_)),
+        "{error:?}"
+    );
     assert!(!crate::domain::ports::Retryable::retryable(&error));
     assert!(
-        error.to_string().contains("Resource not accessible by integration"),
+        error
+            .to_string()
+            .contains("Resource not accessible by integration"),
         "{error}"
     );
     assert!(repo.queue().updates.is_empty());
