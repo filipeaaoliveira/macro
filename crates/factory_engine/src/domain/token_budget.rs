@@ -71,6 +71,13 @@ pub fn tokens_used(tokens: &[SessionTokens]) -> u64 {
         .fold(0, u64::saturating_add)
 }
 
+/// What `sessions` used, from the usage `tokens` recorded for them: none
+/// when there are sessions and none recorded any usage, so the use is not
+/// measured; nothing when there are no sessions yet.
+pub fn measured(sessions: &[Uuid], tokens: &[SessionTokens]) -> Option<u64> {
+    (sessions.is_empty() || !tokens.is_empty()).then(|| tokens_used(tokens))
+}
+
 /// The budget the Run `run` keeps, if any.
 pub fn budget_of(run: &Run) -> Option<u64> {
     run.standing_rules
@@ -95,12 +102,14 @@ pub fn verdict(budget: u64, used: Option<u64>, unread: u8) -> Result<BudgetVerdi
 #[async_trait::async_trait]
 pub trait RunTokens: Send + Sync {
     /// The tokens `sessions`, run as `owner`, used, as [`tokens_used`]
-    /// counts them.
+    /// counts them: none when there are sessions and none of them recorded
+    /// any usage, as an agent whose runtime is not measured (a local or
+    /// self-hosted one) records none.
     async fn used(
         &self,
         owner: &MacroUserIdStr<'static>,
         sessions: &[Uuid],
-    ) -> Result<u64, rootcause::Report>;
+    ) -> Result<Option<u64>, rootcause::Report>;
 }
 
 #[async_trait::async_trait]
@@ -109,12 +118,12 @@ impl<U: SessionUsageReader> RunTokens for U {
         &self,
         owner: &MacroUserIdStr<'static>,
         sessions: &[Uuid],
-    ) -> Result<u64, rootcause::Report> {
+    ) -> Result<Option<u64>, rootcause::Report> {
         let tokens = self
             .session_tokens(owner, sessions)
             .await
             .map_err(|error| rootcause::Report::new(error).into_dynamic())?;
-        Ok(tokens_used(&tokens))
+        Ok(measured(sessions, &tokens))
     }
 }
 
@@ -138,6 +147,11 @@ pub struct RunTokenBudget {
     /// the usage log could not be read, or the Run was listed rather than
     /// read on its own.
     pub used: Option<u64>,
+    /// False when the Run's agent sessions recorded no usage at all, as an
+    /// agent whose runtime is not measured (local, self-hosted) records
+    /// none: its use reads as 0, and the budget never stops it. True when
+    /// it was measured, or not read.
+    pub measured: bool,
     /// Why the budget ended the Run, when it did.
     pub stop: Option<BudgetStop>,
 }

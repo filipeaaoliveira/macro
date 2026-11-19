@@ -76,7 +76,10 @@ It leaves off:
   told. A Run keeps the budget it started with: changing it here changes
   only the Runs that start after the change merges. A Run whose usage
   cannot be read for three agent Steps in a row ends too, as its budget
-  cannot be checked. The check refuses a budget out of that range.
+  cannot be checked. The budget applies only to agents whose model calls
+  Macro measures: an agent that runs locally or on its own runtime records
+  no token use, its run page says the budget is not measured, and the
+  budget never stops it. The check refuses a budget out of that range.
 
 ## Scorers, Experiments and Benchmarks
 

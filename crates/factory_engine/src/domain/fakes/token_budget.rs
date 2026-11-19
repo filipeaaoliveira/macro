@@ -16,6 +16,8 @@ pub(crate) struct FakeRunTokens {
     reads: Arc<Mutex<VecDeque<Option<u64>>>>,
     last: Arc<Mutex<Option<u64>>>,
     pub(crate) asked: Arc<Mutex<usize>>,
+    /// Every read finds the sessions recorded no usage at all.
+    pub(crate) unmeasured: bool,
 }
 
 impl FakeRunTokens {
@@ -24,6 +26,14 @@ impl FakeRunTokens {
         Self {
             reads: Arc::new(Mutex::new(reads.into_iter().collect())),
             ..Self::default()
+        }
+    }
+
+    /// A log whose reads find the sessions recorded no usage at all.
+    pub(crate) fn unmeasured() -> Self {
+        Self {
+            unmeasured: true,
+            ..Self::reading([Some(0)])
         }
     }
 
@@ -39,7 +49,7 @@ impl RunTokens for FakeRunTokens {
         &self,
         _owner: &MacroUserIdStr<'static>,
         _sessions: &[Uuid],
-    ) -> Result<u64, rootcause::Report> {
+    ) -> Result<Option<u64>, rootcause::Report> {
         *self.asked.lock().expect("asked") += 1;
         let next = self.reads.lock().expect("reads").pop_front();
         let read = match next {
@@ -49,6 +59,7 @@ impl RunTokens for FakeRunTokens {
             }
             None => *self.last.lock().expect("last"),
         };
-        read.ok_or_else(|| rootcause::report!("the usage log is down"))
+        let used = read.ok_or_else(|| rootcause::report!("the usage log is down"))?;
+        Ok((!self.unmeasured).then_some(used))
     }
 }

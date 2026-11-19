@@ -85,3 +85,18 @@ fn a_check_reads_as_its_history_keeps_it() {
         "stopped"
     );
 }
+
+/// Sessions that recorded no usage at all are not measured; a Run with no
+/// sessions yet used nothing; any recorded usage is measured.
+#[test]
+fn use_is_measured_only_when_a_session_recorded_some() {
+    let sessions = [Uuid::now_v7(), Uuid::now_v7()];
+    assert_eq!(measured(&sessions, &[]), None);
+    assert_eq!(measured(&[], &[]), Some(0));
+    assert_eq!(
+        measured(&sessions, &[session(0, 0, 0, 0)]),
+        Some(0),
+        "a session that recorded calls of no tokens is measured"
+    );
+    assert_eq!(measured(&sessions, &[session(10, 5, 0, 0)]), Some(15));
+}

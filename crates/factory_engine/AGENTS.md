@@ -296,7 +296,9 @@ when it is created (`factory_run.token_budget`), so a change to the
 definition, or a task linked later, does not change a Run under way, and
 `RunStart::token_budget` tells its workflow to check it. Before each
 agent Step (an entry with a `role`, or a review panel, whose reviewers are
-checked once, together), the workflow asks the worker
+checked once, together), and before each Step that goes on from an
+agent's question (a reviewer's too) or from the owner's `retry` after
+`no_result`, the workflow asks the worker
 (`factory_check_budget`, behind the `factory-token-budget` patch marker,
 for at most two minutes): the worker reads the sessions of the Run's
 Steps (`step_sessions`, each once) and sums what the usage log recorded
@@ -311,13 +313,29 @@ logged and lets the Step run; the workflow counts such checks in a row
 to the next, and the worker ends the Run, as `BudgetStop::Unread`, at
 the `MAX_UNREAD_CHECKS`th (3), so at most two agent Steps in a row run
 unchecked. A check retried after the stop was kept finds it and stops
-again, whatever the log reads then. Steps that go on from a question,
-or a `retry` after `no_result`, are the same visit and are not checked
-again. Once the Run's end is recorded, `factory_end_run` tells its owner
-through the Gate notice's path (`token_budget::budget_notice`: a
-`factory_gate_waiting` notification, pushed, one per Run, whose text says
-how much was used of the budget, or that the use could not be read),
-unless the Run's definition is quiet. A Run with no budget is never
+again, whatever the log reads then. A Run stopped before a Step that
+would go on from a question or a `retry` ends `blocked` with the asking
+Step still held, so the workflow stops its session, as at `MAX_STEPS`. The
+count of unread checks in a row lives in the workflow's state
+(`FlowWorkflow::budget_unread`), across the Run's Steps. Once the Run's end
+is recorded, `factory_end_run` tells its owner through the Gate notice's
+path (`token_budget::budget_notice`: a `factory_gate_waiting`
+notification flagged `budgetStopped`, pushed, one per Run, whose title
+says the Run stopped at its token budget and whose text says how much was
+used of it, or that the use could not be read; the inbox reads it as
+stopped, not waiting, and nothing waits on it), unless the Run's
+definition is quiet.
+
+The budget applies only to measured runtimes: what an agent's model calls
+recorded in the usage log with its session's id. An agent that records
+none (a local or self-hosted runtime) reads as 0 used, and its Run is
+never stopped; when a Run has Step sessions and none recorded any usage,
+the Run API says so (`tokenBudget.measured` false) and the Run view shows
+the budget as not measured. Usage the factory spends outside the Run's
+Step sessions is not counted: the Gate model's reading of the owner's
+words, the stand-in's answers and the Orchestrator's chat run on other
+sessions. A Benchmark's trials are Runs like any other and take the
+budget of the rules they start under. A Run with no budget is never
 checked: its workflow asks for no marker and calls no activity, so its
 history is what it was, and its Steps run as before. The Run API shows a
 Run's budget (`tokenBudget`: `budget`, what its agents `used` so far, read

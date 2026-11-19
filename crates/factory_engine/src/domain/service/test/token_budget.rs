@@ -365,3 +365,42 @@ async fn a_token_budget_out_of_range_is_refused() {
         );
     }
 }
+
+/// A Run whose agent sessions recorded no usage at all (an agent whose
+/// runtime is not measured) reads as not measured, its use 0, and its
+/// budget never stops it.
+#[tokio::test]
+async fn a_run_whose_agents_record_no_usage_reads_as_not_measured() {
+    let repo = FakeRepo::default();
+    let workflows = FakeWorkflows::default();
+    let usage = FakeRunTokens::unmeasured();
+    let service = code_service(&repo, &workflows, &FakeGithub::default()).with_usage(usage.clone());
+    let run_id = run_with(&repo, budgeted(Some(BUDGET), false)).await;
+
+    let read = service.get_run(&julia(), run_id).await.expect("read");
+    let shown = read.token_budget.expect("a budget");
+    assert_eq!((shown.used, shown.measured), (Some(0), false));
+    let json = serde_json::to_value(&read).expect("serialize");
+    assert_eq!(json["tokenBudget"]["measured"], false);
+
+    let worker = worker(&repo, &usage, &FakeNotifier::default());
+    for unread in 0..MAX_UNREAD_CHECKS {
+        let verdict = worker
+            .check_budget(check(run_id, unread))
+            .await
+            .expect("check");
+        assert_eq!(verdict, BudgetVerdict::Within);
+    }
+    assert_eq!(stop_of(&repo, run_id).await, None);
+
+    // A measured Run reads so.
+    let measured = code_service(&repo, &workflows, &FakeGithub::default())
+        .with_usage(FakeRunTokens::reading([Some(7)]));
+    let shown = measured
+        .get_run(&julia(), run_id)
+        .await
+        .expect("read")
+        .token_budget
+        .expect("a budget");
+    assert_eq!((shown.used, shown.measured), (Some(7), true));
+}

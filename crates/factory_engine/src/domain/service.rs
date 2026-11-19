@@ -551,7 +551,8 @@ where
         };
         Ok(Some(RunTokenBudget {
             budget,
-            used,
+            used: used.map(|used| used.unwrap_or(0)),
+            measured: !matches!(used, Some(None)),
             stop: run.budget_stop,
         }))
     }
@@ -588,6 +589,7 @@ where
             let token_budget = budget_of(&run).map(|budget| RunTokenBudget {
                 budget,
                 used: None,
+                measured: true,
                 stop: run.budget_stop,
             });
             details.push(RunDetail {
@@ -2692,7 +2694,15 @@ where
             None => Err(rootcause::report!("no usage log to read")),
         };
         let used = match used {
-            Ok(used) => Some(used),
+            Ok(Some(used)) => Some(used),
+            // Sessions that recorded no usage at all ran on an agent whose
+            // runtime is not measured: the budget cannot apply to them.
+            Ok(None) => {
+                tracing::info!(
+                    "a run's agent sessions recorded no token use: its budget is not measured"
+                );
+                Some(0)
+            }
             Err(error) => {
                 tracing::warn!(
                     ?error,
