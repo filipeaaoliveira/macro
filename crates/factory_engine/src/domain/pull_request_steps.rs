@@ -565,7 +565,7 @@ where
             .await
             .map_err(PullRequestStepError::github)?;
         if let Some(pull_request) = &found {
-            self.keep_page(input, pull_request).await?;
+            self.keep_page(input, pull_request, &mut None).await?;
         }
         Ok(found)
     }
@@ -575,18 +575,26 @@ where
     /// request: without it the pull request reads as no Run's and merges on
     /// GitHub past the Run's merge Gate. So a write that fails fails the
     /// Step with a records error, which is retried; the write is idempotent.
+    /// `kept` is the page this Step already kept, if any: a Step that reads
+    /// the pull request again and again, as `ci` does, writes only when the
+    /// page changes, so a records blip mid-wait does not start it over.
     async fn keep_page(
         &self,
         input: &StepInput<'_>,
         pull_request: &PullRequest,
+        kept: &mut Option<String>,
     ) -> Result<(), PullRequestStepError> {
-        if !pull_request.url.starts_with("https://") {
+        if !pull_request.url.starts_with("https://")
+            || kept.as_deref() == Some(pull_request.url.as_str())
+        {
             return Ok(());
         }
         self.repo
             .set_pull_request_url(input.key.run_id, &pull_request.url)
             .await
-            .map_err(PullRequestStepError::records)
+            .map_err(PullRequestStepError::records)?;
+        *kept = Some(pull_request.url.clone());
+        Ok(())
     }
 
     /// Open the Run's pull request, or find the one it opened: `published`,
@@ -647,12 +655,14 @@ where
     }
 
     /// The pull request from the Run's branch with the checks on its head,
-    /// read with one token; all its runs when `required` names any.
+    /// read with one token; all its runs when `required` names any. Its
+    /// page is kept unless `kept` already holds it.
     async fn find_with_checks(
         &self,
         input: &StepInput<'_>,
         repository: &CodeRepository,
         required: Option<&RequiredChecks>,
+        kept: &mut Option<String>,
     ) -> Result<(PullRequest, HeadChecks), PullRequestStepError> {
         let all_runs = required.is_some_and(|required| !required.checks.is_empty());
         let (pull_request, checks) = self
@@ -666,7 +676,7 @@ where
             .await
             .map_err(PullRequestStepError::github)?
             .ok_or(PullRequestStepError::NoPullRequest)?;
-        self.keep_page(input, &pull_request).await?;
+        self.keep_page(input, &pull_request, kept).await?;
         Ok((pull_request, checks))
     }
 
@@ -703,9 +713,11 @@ where
         let mut last_green: Option<(String, Vec<String>)> = None;
         // Whether a read could not see the head's Actions runs.
         let mut actions_unread = false;
+        // The page kept by an earlier read of this wait.
+        let mut kept = None;
         loop {
             let (pull_request, checks) = self
-                .find_with_checks(&input, &repository, required.as_ref())
+                .find_with_checks(&input, &repository, required.as_ref(), &mut kept)
                 .await?;
             let head = pull_request.head_sha.clone();
             actions_unread |= checks.actions_unread;
@@ -792,7 +804,7 @@ where
             .map_err(PullRequestStepError::records)?;
         let required = self.required_checks(&input, &repository, recorded).await?;
         let (pull_request, checks) = self
-            .find_with_checks(&input, &repository, required.as_ref())
+            .find_with_checks(&input, &repository, required.as_ref(), &mut None)
             .await?;
 
         match pull_request.state {

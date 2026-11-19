@@ -113,3 +113,24 @@ async fn ci_fails_when_the_page_cannot_be_kept() {
         .expect_err("the page was not kept");
     assert!(matches!(error, PullRequestStepError::Records(_)));
 }
+
+/// `ci` reads the pull request on every poll, but keeps its page once: a
+/// later read of the same page writes nothing, so a write that would fail
+/// then does not start the wait over.
+#[tokio::test(start_paused = true)]
+async fn ci_keeps_the_same_page_once_across_its_polls() {
+    let github = FakeGithub::with_open_pull_request(ci(None));
+    github.state().checks = [ci(None), ci(Some("success")), ci(Some("success"))].into();
+    let repo = FakeRepo::default();
+    let run_id = keep_run(&repo).await;
+    repo.fail_once_after("set_pull_request_url", 1);
+
+    let report = steps(&github, &repo).ci(input(run_id)).await.expect("ci");
+
+    assert_eq!(outcome(&report), "green");
+    assert!(github.state().reads >= 3);
+    assert_eq!(
+        kept_page(&repo, run_id).await.as_deref(),
+        Some("https://github.com/macro/app/pull/7")
+    );
+}
