@@ -10,11 +10,11 @@
 # Each Rust package is scored against the coverage of its own tests only, as a
 # per-package check sees it. Coverage builds go to COV_TARGET_DIR (default
 # target/llvm-cov), apart from the normal target, because instrumented builds
-# would otherwise replace the normal artifacts. Run it from the repository
-# root with Postgres migrated at DATABASE_URL, as for `cargo test`.
+# would otherwise replace the normal artifacts. The Rust side needs Postgres
+# migrated at DATABASE_URL, as for `cargo test`.
 set -euo pipefail
 
-ROOT="$(git rev-parse --show-toplevel)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 OUT="${CRAP_OUT_DIR:-$ROOT/tooling/factory-crap/baseline}"
 WORK="${CRAP_WORK_DIR:-$ROOT/target/factory-crap}"
 COV_TARGET_DIR="${COV_TARGET_DIR:-$ROOT/target/llvm-cov}"
@@ -25,8 +25,6 @@ RUST_PACKAGES=(factory_records factory_engine factory_service)
 RUST_TEST_FILES=(--exclude '**/test.rs' --exclude '**/tests.rs' --exclude '**/test/**')
 WEB_SRC="src/features/factory-runs"
 CRAP4TS="crap4ts@1.0.1"
-
-mkdir -p "$OUT" "$WORK"
 
 rust() {
   local packages=("$@")
@@ -43,7 +41,8 @@ rust() {
       --format json --sort file --output "$WORK/$pkg.json"
     # The diagnostics name this machine's absolute paths; a baseline needs
     # only the entries.
-    jq 'del(.diagnostics)' "$WORK/$pkg.json" >"$OUT/$pkg.json"
+    jq -e 'del(.diagnostics)' "$WORK/$pkg.json" >"$WORK/$pkg.baseline.json"
+    mv "$WORK/$pkg.baseline.json" "$OUT/$pkg.json"
   done
 }
 
@@ -57,19 +56,31 @@ web() {
     --coverage.exclude="$WEB_SRC/browser-test/**" \
     --coverage.reportsDirectory="$WORK/web-coverage"
   # Exit code 1 only means a function is above crap4ts's default threshold.
+  # bunx also exits 1 when it cannot fetch the package, so the output is
+  # checked before it replaces the baseline.
   bunx "$CRAP4TS" --coverage "$WORK/web-coverage/coverage-final.json" \
     --src "$WEB_SRC" --exclude '**/*.test.*' "$WEB_SRC/browser-test/**" \
     --format json >"$WORK/factory-runs.json" || [ $? -eq 1 ]
+  if ! jq -e '(.functions | type == "array" and length > 0) and (.unmatched | type == "array")' \
+    "$WORK/factory-runs.json" >/dev/null 2>&1; then
+    echo "$CRAP4TS wrote no scores; $OUT/factory-runs.json left unchanged" >&2
+    exit 1
+  fi
   # Kept: the scores and the functions crap4ts found no coverage for, which it
   # scores as untested (see the doc). Dropped: the run's time, so unchanged
   # scores leave the file unchanged, and the coverage entries with no
   # function of their own (inner callbacks), which only make it large.
   jq 'del(.timestamp, .warnings) | .unmatched |= map(select(.kind == "no-coverage"))' \
-    "$WORK/factory-runs.json" >"$OUT/factory-runs.json"
+    "$WORK/factory-runs.json" >"$WORK/factory-runs.baseline.json"
+  mv "$WORK/factory-runs.baseline.json" "$OUT/factory-runs.json"
 }
 
 case "${1:-}" in
+  rust | web) ;;
+  *) echo "usage: $0 rust [package ...] | web" >&2; exit 2 ;;
+esac
+mkdir -p "$OUT" "$WORK"
+case "$1" in
   rust) shift; rust "$@" ;;
   web) web ;;
-  *) echo "usage: $0 rust [package ...] | web" >&2; exit 2 ;;
 esac
