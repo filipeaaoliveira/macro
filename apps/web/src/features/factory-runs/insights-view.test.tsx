@@ -736,6 +736,32 @@ describe('RunInsightsView', () => {
     ).toBeTruthy();
   });
 
+  it('says why cost per merged pull request is not given while some runs are unmeasured', () => {
+    const read = quality();
+    mount({
+      insights: november,
+      quality: () => ({
+        ...read,
+        delivery: {
+          ...read.delivery,
+          unmeasuredRuns: 2,
+          unpricedCalls: 3,
+          costPerMergedUsd: null,
+          tokensPerMerged: null,
+        },
+      }),
+    });
+
+    expect(screen.getByTestId('cost-per-merged').textContent).toBe('–');
+    expect(screen.getByTestId('cost-unmeasured').textContent).toBe(
+      '2 runs used an agent that doesn’t record usage, so cost per merged pull request isn’t known.'
+    );
+    // No figure reads in tokens either.
+    expect(
+      screen.queryByText('3 model calls have no price, so cost reads in tokens.')
+    ).toBeNull();
+  });
+
   it('reads one repository once it is picked', async () => {
     const asked: (string | undefined)[] = [];
     mount({

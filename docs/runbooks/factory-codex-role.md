@@ -98,7 +98,8 @@ profile pairs as its own machine (`<hostname> · codex`).
   token use in Macro, as Claude Code under its own login does. A token
   budget counts only the Steps that did; Insights counts the Codex Steps
   among the unmeasured ones and gives no cost or tokens per merged pull
-  request while any Run of the period has an unmeasured Step.
+  request while any Run of the period has an unmeasured Step; the
+  Insights page says why.
 - **Checks:** on the owner's own (paired) machine the engine runs no
   command, so the agent runs the repository's checks itself in later
   prompts of its session, as Claude Code does there. Only a Codex Step that
