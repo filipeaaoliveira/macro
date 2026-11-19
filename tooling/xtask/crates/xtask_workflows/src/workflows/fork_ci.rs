@@ -451,4 +451,7 @@ fn vitest() -> Step<Run> {
             bun run test "${changed[@]}"
         "#})
         .working_directory(xtask_paths::repo_dir!("apps/web"))
+        // Node's default heap on this runner is about 2 GB, and Vitest's main
+        // process ran out of it walking the app's module graph.
+        .add_env(("NODE_OPTIONS", "--max-old-space-size=6144"))
 }

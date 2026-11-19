@@ -834,6 +834,8 @@ jobs:
           changed=(--changed "$(cat /tmp/base-revision)" --passWithNoTests)
         fi
         bun run test "${changed[@]}"
+      env:
+        NODE_OPTIONS: '--max-old-space-size=6144'
       working-directory: apps/web
     - name: Teardown Nix
       if: always()
