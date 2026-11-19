@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE factory_merge_queue\n            SET left_at = now()\n            WHERE run_id = $1 AND left_at IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8bbaa0c7e21c55f5e97bcb7a6953d856433df66837ecc11a50ad3265010483b5"
+}

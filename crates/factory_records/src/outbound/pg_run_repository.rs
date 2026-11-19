@@ -8,6 +8,7 @@ mod flaws;
 mod gate_replies;
 mod insights;
 mod main_hold;
+mod merge_queue;
 mod review_rounds;
 mod self_improvement;
 mod standing_acts;
@@ -133,6 +134,9 @@ pub enum PgRunRepositoryErr {
     /// Underlying database error.
     #[error(transparent)]
     Db(#[from] sqlx::Error),
+    /// A branch update kept a moment ago reads as missing.
+    #[error("a kept branch update is missing")]
+    MissingBranchUpdate,
     /// A stored name breaks the rules its column checks.
     #[error(transparent)]
     InvalidName(#[from] InvalidName),
@@ -2041,6 +2045,14 @@ impl RunRepository for PgRunRepository {
             .execute(&mut *transaction)
             .await?;
         }
+        // A Run that ended holds no place in a merge queue, so a base's
+        // queue holds only Runs still going.
+        sqlx::query!(
+            "DELETE FROM factory_merge_queue WHERE run_id = $1",
+            id.as_uuid(),
+        )
+        .execute(&mut *transaction)
+        .await?;
         transaction.commit().await?;
         Ok(())
     }

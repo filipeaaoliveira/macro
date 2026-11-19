@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO factory_branch_update\n                (run_id, seq, base_sha, from_head, conflict, updated_head)\n            VALUES ($1, $2, $3, $4, $5, $6)\n            ON CONFLICT (run_id, seq) DO NOTHING\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Text",
+        "Text",
+        "Bool",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ebd3df3dabae6bb0dca9f3ea8ebaffec7f40a4a9e211130de2330ee71bde55e5"
+}

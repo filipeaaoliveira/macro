@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT base_sha, from_head, conflict, updated_head\n            FROM factory_branch_update\n            WHERE run_id = $1 AND seq = $2\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "base_sha",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "from_head",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "conflict",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "updated_head",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "222b4ef79e57319b99096e3cf8b6085ea81b408054e7f00f97ba1dfb32c56944"
+}
