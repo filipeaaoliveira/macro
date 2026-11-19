@@ -330,6 +330,19 @@ export type BoardScope = 'mine' | 'team';
 export type BoardState = 'running' | 'waiting' | 'held' | 'stopped' | 'finished';
 
 /**
+ * Why a Run's token budget ended it, before an agent Step.
+ */
+export type BudgetStop = {
+    reason: 'spent';
+    /**
+     * The tokens they had used, as Insights counts them.
+     */
+    used: number;
+} | {
+    reason: 'unread';
+};
+
+/**
  * How one check of a verified round ran.
  */
 export type CheckResult = {
@@ -1123,6 +1136,16 @@ export type OrchestratorDefinition = {
      * Off, as when a definition is sent without it, a Run posts nothing.
      */
     taskThread?: boolean;
+    /**
+     * The token budget: the most tokens a Run's agent Steps may use, as
+     * Insights counts them (input, output, and input read from or written
+     * to the prompt cache). Before each agent Step, a Run that used as
+     * many or more ends `blocked`. None, and a definition sent without it,
+     * sets no budget. From [`MIN_TOKEN_BUDGET`] to [`MAX_TOKEN_BUDGET`].
+     * A Run keeps it with its rules, so a change to the definition does
+     * not change a Run under way.
+     */
+    tokenBudget?: number | null;
 };
 
 /**
@@ -1482,6 +1505,7 @@ export type RulesSource = 'default' | 'team' | 'project' | 'definition';
  */
 export type Run = {
     automation?: null | RunAutomation;
+    budgetStop?: null | BudgetStop;
     controlFiles?: null | ControlFileChanges;
     /**
      * When the Run was created.
@@ -1589,6 +1613,7 @@ export type RunDetail = {
      * Its Steps, in the order they started.
      */
     steps: Array<Step>;
+    tokenBudget?: null | RunTokenBudget;
 };
 
 /**
@@ -1739,6 +1764,23 @@ export type RunRules = {
      * Where they came from.
      */
     source: RulesSource;
+};
+
+/**
+ * A Run's token budget as the Run API shows it.
+ */
+export type RunTokenBudget = {
+    /**
+     * The most tokens its agent Steps may use, as it kept it.
+     */
+    budget: number;
+    stop?: null | BudgetStop;
+    /**
+     * The tokens they used so far, as Insights counts them; none when
+     * the usage log could not be read, or the Run was listed rather than
+     * read on its own.
+     */
+    used?: number | null;
 };
 
 /**

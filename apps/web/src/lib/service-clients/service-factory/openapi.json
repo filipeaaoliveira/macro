@@ -3374,6 +3374,39 @@
         "description": "Where a Run is, as the board groups it.",
         "enum": ["running", "waiting", "held", "stopped", "finished"]
       },
+      "BudgetStop": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Its agent Steps had used its budget or more.",
+            "required": ["used", "reason"],
+            "properties": {
+              "reason": {
+                "type": "string",
+                "enum": ["spent"]
+              },
+              "used": {
+                "type": "integer",
+                "format": "int64",
+                "description": "The tokens they had used, as Insights counts them.",
+                "minimum": 0
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The usage log could not be read for as many agent Steps in a row\nas the factory lets a Run go on unchecked.",
+            "required": ["reason"],
+            "properties": {
+              "reason": {
+                "type": "string",
+                "enum": ["unread"]
+              }
+            }
+          }
+        ],
+        "description": "Why a Run's token budget ended it, before an agent Step."
+      },
       "CheckResult": {
         "type": "object",
         "description": "How one check of a verified round ran.",
@@ -4413,6 +4446,13 @@
           "taskThread": {
             "type": "boolean",
             "description": "The task thread section: a Run on a task posts its main updates\n(its start, each Step's end, its Gates, its pull request, its merge\nand how it ended) to one comment thread on the task, as its owner.\nOff, as when a definition is sent without it, a Run posts nothing."
+          },
+          "tokenBudget": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "The token budget: the most tokens a Run's agent Steps may use, as\nInsights counts them (input, output, and input read from or written\nto the prompt cache). Before each agent Step, a Run that used as\nmany or more ends `blocked`. None, and a definition sent without it,\nsets no budget. From [`MIN_TOKEN_BUDGET`] to [`MAX_TOKEN_BUDGET`].\nA Run keeps it with its rules, so a change to the definition does\nnot change a Run under way.",
+            "maximum": 10000000000,
+            "minimum": 10000
           }
         },
         "additionalProperties": false
@@ -4893,6 +4933,17 @@
               }
             ]
           },
+          "budgetStop": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/BudgetStop",
+                "description": "Why its token budget ended it, when it did; none for a Run it did\nnot end, or that has none."
+              }
+            ]
+          },
           "controlFiles": {
             "oneOf": [
               {
@@ -5075,6 +5126,17 @@
               "$ref": "#/components/schemas/Step"
             },
             "description": "Its Steps, in the order they started."
+          },
+          "tokenBudget": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RunTokenBudget",
+                "description": "Its token budget and what its agent Steps used of it; none for a\nRun that keeps no budget."
+              }
+            ]
           }
         }
       },
@@ -5314,6 +5376,36 @@
           "source": {
             "$ref": "#/components/schemas/RulesSource",
             "description": "Where they came from."
+          }
+        }
+      },
+      "RunTokenBudget": {
+        "type": "object",
+        "description": "A Run's token budget as the Run API shows it.",
+        "required": ["budget"],
+        "properties": {
+          "budget": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The most tokens its agent Steps may use, as it kept it.",
+            "minimum": 0
+          },
+          "stop": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/BudgetStop",
+                "description": "Why the budget ended the Run, when it did."
+              }
+            ]
+          },
+          "used": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "The tokens they used so far, as Insights counts them; none when\nthe usage log could not be read, or the Run was listed rather than\nread on its own.",
+            "minimum": 0
           }
         }
       },
