@@ -1083,17 +1083,17 @@ is no notification to mark, the worker withdraws its id
 ingress never creates or pushes it, and marks it done again in case it was
 created in between. A notice marked done leaves no row; one closed before
 it existed, or never sent, leaves one small row for good, at most one per
-Gate, notify-only entry and stand-in answer of a Run.
+Gate, notify-only entry and stand-in answer of a Run. A Gate a
+Standing Rule or the stand-in answers was never left to a person, so it
+sent no such notification. `GET /runs/waiting` lists the caller's Runs
+waiting at an unanswered Gate, whatever the definition says.
 
 A Run started without a task files its notice under the owner's User
 entity, which the inbox does not list (`notification_inbox`'s
 `CANDIDATE_TYPES`; a User is no item the inbox can show or check access
 to), so that notice reaches the owner only live and by push, and opens the
 Run from there. Its Gate still shows in "Waiting on you" (`GET
-/runs/waiting`), which lists every waiting Run, with a task or without. A Gate a
-Standing Rule or the stand-in answers was never left to a person, so it
-sent no such notification. `GET /runs/waiting` lists the caller's Runs
-waiting at an unanswered Gate, whatever the definition says.
+/runs/waiting`), which lists every waiting Run, with a task or without.
 
 A team's Orchestrator Definition also has an owner section
 (`owner_gates`, `ownerGates` in `PUT /settings/standing-rules` and its
