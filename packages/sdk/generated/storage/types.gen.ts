@@ -20964,6 +20964,12 @@ export type SoupItem = {
      */
     data: SoupTeam;
     tag: 'team';
+} | {
+    /**
+     * The viewer, listed only by attention feeds.
+     */
+    data: SoupUser;
+    tag: 'user';
 };
 
 /**
@@ -21233,6 +21239,19 @@ export type SoupThreadReply = {
      * Update timestamp.
      */
     updated_at: string;
+};
+
+/**
+ * The viewer, listed only by attention feeds: a notice about the viewer
+ * alone (a factory Run started without a task waiting on its owner) is
+ * filed under their User entity, which has no page of its own. Only the
+ * viewer is ever listed, so no one sees another person's.
+ */
+export type SoupUser = {
+    /**
+     * The viewer's Macro user id, which their notices are filed under.
+     */
+    id: string;
 };
 
 /**
