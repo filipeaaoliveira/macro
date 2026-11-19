@@ -1061,10 +1061,10 @@ by default and when a definition leaves it out) notifies no one: its Gates
 still wait on the owner and are listed as waiting. The setting is an
 opt-out: a team or Project that never set rules, the factory's default and
 a Run created before Runs kept rules notify. Only the owner section
-notified before, and a kept definition cannot tell whether someone turned
-that off or left it, so `20261119010000_factory_quiet_gates.sql` made every
-kept definition with the owner section off quiet, a Run's included: a Run
-under way notifies as it did. The marker and the activity run for every
+notified before; notices are now on for everyone and turning them off is
+new, so `20261119010000_factory_quiet_gates.sql` only allows the name and
+makes no kept definition quiet: one with the owner section off, a Run's
+under way included, notifies from now on. The marker and the activity run for every
 Gate left to a person, whatever the definition says: a quiet Run's worker
 sends nothing, so the workflow and its histories are as they were. Once
 the Gate is answered (`factory_answer_gate`, or `factory_read_gate_reply`

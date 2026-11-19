@@ -350,6 +350,85 @@ async fn the_queue_limit_is_kept_with_the_rules(pool: PgPool) {
     assert_eq!(kept.definition, PLAN_AND_MERGE);
 }
 
+/// The migration that adds `quiet_gates` sets it on no kept definition:
+/// a team's, a Project's and a Run's, each with the owner section off as
+/// before it, keep notifying the Run's owner once it runs.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "team", "project"))
+)]
+async fn the_quiet_gates_migration_keeps_saved_definitions_notifying(pool: PgPool) {
+    let repo = PgRunRepository::new(pool.clone());
+    let (team, project) = (id(TEAM), id(PROJECT));
+    assert!(!PLAN_AND_MERGE.owner_gates && !PLAN_AND_MERGE.quiet_gates);
+    repo.set_team_rules(team, Some(PLAN_AND_MERGE))
+        .await
+        .expect("set the team's");
+    repo.set_project_rules(team, project, Some(PLAN_AND_MERGE))
+        .await
+        .expect("set the project's");
+    let rules = RunRules {
+        definition: PLAN_AND_MERGE,
+        source: RulesSource::Team,
+        project_id: None,
+    };
+    let run_id = RunId::generate();
+    let RunInsert::Inserted(_) = repo
+        .insert_run(NewRun {
+            id: run_id,
+            flow: "code",
+            request: "Fix it",
+            user_id: &julia(),
+            task_id: None,
+            project_id: None,
+            repository: None,
+            created_in_person: true,
+            control_file_patterns: &[],
+            control_files_team_id: None,
+            standing_rules: rules,
+            automation: None,
+            definition: None,
+            kept_flow: None,
+        })
+        .await
+        .expect("insert")
+    else {
+        panic!("a run with no task is kept");
+    };
+
+    // The rows now stand as they did before the migration; run it on them.
+    let mut tx = pool.begin().await.expect("begin");
+    sqlx::raw_sql(include_str!(
+        "../../../../../macro_db_client/migrations/20261119010000_factory_quiet_gates.sql"
+    ))
+    .execute(&mut *tx)
+    .await
+    .expect("migrate");
+    tx.commit().await.expect("commit");
+
+    assert_eq!(
+        repo.team_rules(team).await.expect("read"),
+        Some(PLAN_AND_MERGE)
+    );
+    assert_eq!(
+        repo.project_rules(team, project).await.expect("read"),
+        Some(PLAN_AND_MERGE)
+    );
+    let read = repo.get_run(run_id).await.expect("get").expect("kept");
+    assert_eq!(read.standing_rules, Some(rules));
+    let quiet = sqlx::query_scalar!(
+        r#"SELECT
+            (SELECT count(*) FROM factory_team_settings WHERE 'quiet_gates' = ANY(standing_rules))
+            + (SELECT count(*) FROM factory_project_rules WHERE 'quiet_gates' = ANY(standing_rules))
+            + (SELECT count(*) FROM factory_run WHERE 'quiet_gates' = ANY(standing_rules))
+            AS "count!""#
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("count");
+    assert_eq!(quiet, 0);
+}
+
 /// Keep `definition` as a team's, a Project's and a new Run's rules, and
 /// read each back the same.
 async fn kept_everywhere(pool: PgPool, definition: OrchestratorDefinition) {

@@ -267,10 +267,9 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   against those names (`20261119010000_factory_quiet_gates.sql`
   allows every one of them). A definition kept before a section has none of
   it, and reads with it off. `quiet_gates` is an opt-out, so a definition
-  without it notifies: the migration that added it gave it to every kept
-  definition (a team's, a Project's and a Run's) whose owner section was
-  off, since only that section notified before, and no record says whether
-  someone turned it off or left it. The definition's Queue limit has a
+  without it notifies: the migration that added it set it on no row, so
+  every kept definition (a team's, a Project's and a Run's), its owner
+  section off or on, notifies until an admin turns it off. The definition's Queue limit has a
   column of its own beside them (`queue_limit`,
   `20261118131500_factory_queue_limit.sql`, held from `MIN_QUEUE_LIMIT`
   to `MAX_QUEUE_LIMIT`, 1 to 1000, by

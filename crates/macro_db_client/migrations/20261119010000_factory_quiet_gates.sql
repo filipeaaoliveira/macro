@@ -4,17 +4,14 @@
 -- A definition without it notifies, so a team or Project that never set
 -- rules, and the factory's default, do.
 --
--- Until now only a definition with its owner section on (`owner_gates`)
--- notified. A stored definition with the section off cannot tell whether
--- someone turned it off or left it as it was, so each one keeps its owner
--- unnotified: it gets `quiet_gates`, and an admin may turn notifications
--- on. A Run keeps the definition it was created with, so Runs get the same,
--- and a Run under way notifies as it did.
+-- Notifications are on for everyone, and turning them off is new: no
+-- stored definition has asked for it, so this only allows the name and
+-- changes no row. A kept definition with the owner section off (a team's,
+-- a Project's or a Run's) notifies from now on, a Run under way included.
 --
 -- Swapping each check scans its table under its ACCESS EXCLUSIVE lock,
--- which these small tables hold briefly, and the updates rewrite only the
--- rows of definitions with the owner section off. Give up rather than queue
--- behind a long transaction on any of them.
+-- which these small tables hold briefly. Give up rather than queue behind
+-- a long transaction on any of them.
 SET LOCAL lock_timeout = '5s';
 
 ALTER TABLE factory_run
@@ -46,20 +43,3 @@ ALTER TABLE factory_project_rules
             'orchestrator_plan', 'orchestrator_blockers', 'task_thread', 'quiet_gates'
         ]
     );
-
-UPDATE factory_team_settings
-SET standing_rules = array_append(standing_rules, 'quiet_gates')
-WHERE standing_rules IS NOT NULL
-    AND NOT standing_rules @> ARRAY['owner_gates']
-    AND NOT standing_rules @> ARRAY['quiet_gates'];
-
-UPDATE factory_project_rules
-SET standing_rules = array_append(standing_rules, 'quiet_gates')
-WHERE NOT standing_rules @> ARRAY['owner_gates']
-    AND NOT standing_rules @> ARRAY['quiet_gates'];
-
-UPDATE factory_run
-SET standing_rules = array_append(standing_rules, 'quiet_gates')
-WHERE standing_rules IS NOT NULL
-    AND NOT standing_rules @> ARRAY['owner_gates']
-    AND NOT standing_rules @> ARRAY['quiet_gates'];
