@@ -328,8 +328,10 @@ definition is quiet.
 
 The budget applies only to measured runtimes: what an agent's model calls
 recorded in the usage log with its session's id. An agent that records
-none (a local or self-hosted runtime) reads as 0 used, and its Run is
-never stopped; when a Run has Step sessions and none recorded any usage,
+none (a local or self-hosted runtime, as Codex or Claude Code through
+macrod on its owner's own login) reads as 0 used, and its Run is never
+stopped; a Run whose Steps ran on both counts only the measured ones' use
+against its budget. When a Run has Step sessions and none recorded any usage,
 the Run API says so (`tokenBudget.measured` false) and the Run view shows
 the budget as not measured. Usage the factory spends outside the Run's
 Step sessions is not counted: the Gate model's reading of the owner's
@@ -389,7 +391,10 @@ Runs. A Run merged with no person stepping in when it merged and ended
 with no Gate a person answered (not a Standing Rule, the stand-in or an
 agent), no Step its owner steered, and no `manual` end. Cost per merged
 pull request is every Run's usage over the merged ones: in dollars when
-every model call was priced, in tokens otherwise. A repository that names
+every model call was priced, in tokens otherwise, and neither while a Run
+of the period has an agent session that recorded no usage (a Step on a
+runtime its owner signed in to, as Codex or Claude Code through macrod),
+whose spend is unknown, not nothing. A repository that names
 none is 400.
 
 Evaluation (`src/domain/evaluation.rs`, `evaluation/service.rs`,
@@ -537,7 +542,8 @@ A Run ends `infrastructure`, not `failed`, when it fails for a machine, quota
 or network reason rather than its work. Only what is surely the factory's
 counts; when unsure, the failure is the work's (`workflow/work.rs`,
 `work_failure`). A Step's work failed for infrastructure when every Agent of
-its Role was out of quota (`StepError::OutOfQuota`, type
+its Role was out of quota, or the usage limit of its Agent's own provider
+account ended a turn that did work (`StepError::OutOfQuota`, type
 `FactoryInfrastructure`), or when it timed out because its worker went
 quiet (`Heartbeat`) or no worker took it (`ScheduleToStart`); an attempt
 that ran past its own time (`StartToClose`) may be an agent slower than its
@@ -616,7 +622,42 @@ last is always asked. Neither the harness nor billing tells ahead of a
 session whether a quota is used up, so recovery is found by asking again
 once the cool-down passed: a start forgets the refusal, another refusal
 remembers it anew, and a skip never renews it. The memory is each
-worker's own, and a restart forgets it. An attempt
+worker's own, and a restart forgets it. A turn the usage limit of its
+runtime's own provider account ended (`RoutineFailureReason::UsageLimit`:
+the routine status reads it from a failed turn the runtime classified as
+`ProviderUsageLimit`, as Codex's adapter's error does, below) is out of
+quota too (`AgentFailure::out_of_quota`), and remembered as a refusal is.
+A first turn that ended so before calling any tool (`RoutineSessions::activity`)
+changed nothing: its session is deleted and the next Agent of the Role
+takes the Step in a new session, the Agent recorded passed over as
+`usage_limit` (`USAGE_LIMIT`). One that called a tool, or whose activity
+cannot be read, or with no Agent after it, ends the Step out of quota
+(`StepError::OutOfQuota`), so its Run ends `infrastructure` rather than
+`failed`.
+
+A Role runs on Codex as on any runtime (`docs/runbooks/factory-codex-role.md`
+sets one up on a bench): its Agent's `bot` is the agent of a machine whose
+macrod runs Codex (`macrod service --agent codex`, the
+`@agentclientprotocol/codex-acp` adapter over the installed `codex` CLI,
+signed in with its owner's own login), and its `model` one `codex` lists
+(`gpt-5.5`), set on the session as Claude Code's is. Its sessions open,
+take the Step's prompt, reach Macro's tools through the MCP servers macrod
+forwards, and hand back with `macro.factory.handBack`, as Claude Code's
+do; its turn's end, no result, last message and Step Terminal are read
+from the same session history. The adapter answers a turn Codex ended in
+error with JSON-RPC's bare `Internal error` and Codex's message and error
+class in `data` (`{ message, codexErrorInfo }`; `codex_error_info` from the
+deprecated Rust adapter): the session's fold keeps Codex's message, and
+reads `usageLimitExceeded` as a `ProviderUsageLimit` notice
+(`agent_fold`'s `harness/codex.rs`), so the Step is out of quota as above.
+Codex's cloud agent (`bot_id::CODEX_BOT_ID`) cannot take a Step: its
+sessions work in a cloud environment of their own and are handed no Macro
+tools, so they never hand back. An agent definition naming it does not
+read: `FACTORY_AGENTS` stops the service, and a Definition's `agents.json`
+is refused, each naming the Agents on it
+(`AgentDefinitionError::CloudCodex`). Neither a Codex nor a Claude Code
+Agent signed in with its owner's own login records token use, so their
+Steps are unmeasured (below). An attempt
 prepares, opens and prompts only the session the Step works in now, so an
 overlapping attempt never prompts a session handed on: it deletes the one
 it opened and goes on in the Step's current session. Each session keeps the
@@ -771,8 +812,9 @@ on from. A later prompt refused for lack of quota is not passed to another
 Agent, since the work is in its session: the Step ends `red`, with an open
 round ended failed saying the quota ran out, and the round is kept as
 ended by it (`quota_ran_out`), so a retry ends the Step the same way
-without asking again. A quota that runs out while the agent works on a
-turn is the session's failure, and fails the Step as any other. The agent's work and all
+without asking again. A usage limit that ends the agent's turn on a later
+prompt is out of quota the same way: the Step ends `red`, the round ended
+by it (`quota_ran_out`). The agent's work and all
 rounds run in the Step's one activity: waiting for them stops
 `ROUNDS_END_BY` (105 minutes) after the Step started, short of its two
 hours, and the Step ends `red` saying so, with a round still open ended
@@ -2246,8 +2288,10 @@ Definition.
   back first (`infrastructure` to `failed`, `flawed` to `success` with its
   flaw columns cleared), or the older code fails to read them.
 - Known limits of `infrastructure`: an agent whose provider's usage limit
-  ends its turn mid-way (`SessionAgentError::TurnFailed`) cannot be told
-  from any other failed turn, and a round of checks that ends red because
+  ends its turn mid-way is told from any other failed turn only when its
+  runtime classifies it (Codex's adapter, a cloud agent's notice): Claude
+  Code's adapter does not yet, so its usage limit fails the Step as any
+  failed turn, and a round of checks that ends red because
   the fixer's quota ran out (`Red::QuotaRanOut`) is the Step's outcome, not
   a failure of its work: both still end the Run `failed` when the Flow
   routes them there. An edge the other way: when an earlier attempt's
@@ -2292,9 +2336,12 @@ Definition.
 - Renaming or removing an Agent while its Steps run fails their retries
   (`UnknownAgent`: its model and instructions are gone), though stops and
   releases still reach their sessions through the recorded bot.
-- A subscription that runs out mid-turn (a turn that fails with the
-  provider's usage limit) is not a refusal to start: it fails the Step as any
-  failed turn does, and no other Agent takes it.
+- A subscription that runs out mid-turn (a turn the runtime ends with the
+  provider's usage limit) is out of quota but not a refusal to start: once
+  the turn called a tool, no other Agent takes the Step. A worker older
+  than the routine status `usage_limit` does not read it from a newer
+  `agent_harness_service`: its Step fails once five reads in a row have
+  not, as a failed turn failed it before, so either may deploy first.
 - Deploy `agent_harness_service` with an SDK that has
   `macro.factory.fireAutomation` before a factory that makes Automations:
   saving the routine type-checks its code step against the harness's SDK.
