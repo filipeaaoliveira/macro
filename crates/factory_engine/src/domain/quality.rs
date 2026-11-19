@@ -526,9 +526,11 @@ pub struct DeliveryInsight {
     /// Their model calls with no price.
     pub unpriced_calls: u64,
     /// What every Run cost per merged pull request, in US dollars; none
-    /// unless every call was priced.
+    /// unless every Run's agent sessions recorded their usage and every
+    /// call was priced.
     pub cost_per_merged_usd: Option<f64>,
-    /// The tokens every Run used per merged pull request.
+    /// The tokens every Run used per merged pull request; none unless every
+    /// Run's agent sessions recorded their usage.
     pub tokens_per_merged: Option<u64>,
 }
 
@@ -1029,6 +1031,10 @@ fn delivery(records: &QualityRecords, tokens: &[SessionTokens]) -> DeliveryInsig
     let mut steered = 0;
     let mut manual = 0;
     let mut measured_runs = 0;
+    // Runs with an agent session that recorded no usage: a runtime on
+    // someone's own login (Codex or Claude Code through macrod) records
+    // none, so what those Runs spent is not known.
+    let mut unmeasured_runs = 0;
     let mut used = TokenCounts::default();
     let mut cost_usd = 0.0;
     let mut unpriced_calls = 0;
@@ -1049,21 +1055,28 @@ fn delivery(records: &QualityRecords, tokens: &[SessionTokens]) -> DeliveryInsig
             }
         }
         let mut measured = false;
+        let mut unmeasured = false;
         for session in &run.sessions {
-            if let Some(session) = by_session.get(session) {
-                measured = true;
-                used.input += session.input;
-                used.output += session.output;
-                used.cache_read += session.cache_read;
-                used.cache_write += session.cache_write;
-                cost_usd += session.cost_usd;
-                unpriced_calls += session.unpriced_calls;
-            }
+            let Some(session) = by_session.get(session) else {
+                unmeasured = true;
+                continue;
+            };
+            measured = true;
+            used.input += session.input;
+            used.output += session.output;
+            used.cache_read += session.cache_read;
+            used.cache_write += session.cache_write;
+            cost_usd += session.cost_usd;
+            unpriced_calls += session.unpriced_calls;
         }
         measured_runs += u32::from(measured);
+        unmeasured_runs += u32::from(unmeasured);
     }
     let total_tokens = used.input + used.output + used.cache_read + used.cache_write;
-    let priced = measured_runs > 0 && unpriced_calls == 0;
+    // A figure per merged pull request is every Run's spend over the
+    // merges: only known when every Run's agent sessions recorded theirs.
+    let whole = measured_runs > 0 && unmeasured_runs == 0;
+    let priced = whole && unpriced_calls == 0;
     DeliveryInsight {
         ended_runs,
         merged,
@@ -1077,7 +1090,6 @@ fn delivery(records: &QualityRecords, tokens: &[SessionTokens]) -> DeliveryInsig
         cost_usd,
         unpriced_calls,
         cost_per_merged_usd: (merged > 0 && priced).then(|| cost_usd / f64::from(merged)),
-        tokens_per_merged: (merged > 0 && measured_runs > 0)
-            .then(|| total_tokens / u64::from(merged)),
+        tokens_per_merged: (merged > 0 && whole).then(|| total_tokens / u64::from(merged)),
     }
 }

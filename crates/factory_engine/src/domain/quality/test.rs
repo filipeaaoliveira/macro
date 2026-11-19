@@ -730,6 +730,35 @@ fn cost_per_merged_pull_request_is_money_where_priced_and_tokens_otherwise() {
     assert_eq!(unpriced.tokens_per_merged, Some(1500));
 }
 
+/// A Run whose Step ran on a runtime that records no usage (a reviewer on
+/// Codex or Claude Code under the owner's own login, through macrod) spent
+/// what no one knows: its measured Steps still count, but no figure per
+/// merged pull request is given, which would read the unknown as nothing.
+#[test]
+fn cost_per_merged_pull_request_needs_every_run_s_sessions_measured() {
+    let mut mixed = run(2);
+    // The writer's session recorded usage; the reviewer's did not.
+    mixed.sessions.push(Uuid::from_u128(0xc0d3));
+    let records = QualityRecords {
+        runs: vec![run(1), mixed],
+        ..QualityRecords::default()
+    };
+
+    let delivery = summarize_quality(
+        &query(None),
+        records,
+        &[tokens(1, 1000, 1.5, 0), tokens(2, 500, 0.5, 0)],
+    )
+    .delivery;
+
+    assert_eq!(delivery.merged, 2);
+    assert_eq!(delivery.measured_runs, 2);
+    assert_eq!(delivery.tokens.input, 1500);
+    assert_eq!(delivery.cost_usd, 2.0);
+    assert_eq!(delivery.cost_per_merged_usd, None);
+    assert_eq!(delivery.tokens_per_merged, None);
+}
+
 /// The service reads the repository asked for, by its URL, and the usage
 /// of the Runs' sessions; a repository that names none is refused.
 #[tokio::test]
