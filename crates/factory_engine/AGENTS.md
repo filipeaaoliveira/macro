@@ -701,7 +701,8 @@ check's own command, which the round records and shows as written:
   pinned to, else the base branch) with the checked commit gives. Setting
   the worktree up fetches it when the repository lacks it (at depth 1 in a
   shallow clone), so `git diff --name-only "$MACRO_CHECK_BASE" HEAD` works;
-  a fetch that fails is logged in the set-up's output and holds nothing up.
+  a fetch that fails is said in the set-up's output and on the file's
+  first line (`partial`), and holds nothing up.
   Empty when the comparison failed and the Run pins no commit.
 - `MACRO_CHECK_CHANGED`: the absolute path of a file listing the changed
   paths, `<round>.changed` beside the round's worktree in
@@ -712,10 +713,13 @@ check's own command, which the round records and shows as written:
   one left behind.
 
 The file's first line says what the list holds: `complete` (every changed
-path), `partial` (only some: GitHub lists at most 300 files of a
-comparison, and none of one too large to list; a path holding a line
-break, and paths past 64 KiB, are left out too), or `unavailable` (none:
-the comparison failed). Each line after it is one path from the
+path, and the base is in the repository), `partial` (the list or the base
+cannot be trusted whole: GitHub lists at most 300 files of a comparison,
+and none of one too large to list; a path holding a line break, and paths
+past 64 KiB once single-quoted for the shell, are left out, since
+sandboxes run the set-up as one `bash -c` argument, which Linux holds to
+128 KiB; or the base could not be fetched, or GitHub gave none), or
+`unavailable` (none: the comparison failed). Each line after it is one path from the
 repository's root, as GitHub names it: a renamed file under both its names,
 the earlier first, and a removed file though the worktree no longer holds
 it. A check that keeps to the change checks everything unless the first

@@ -614,9 +614,10 @@ async fn each_check_is_told_the_change_s_base_and_paths() {
         "{}",
         set_ups[0]
     );
+    assert!(set_ups[0].contains("listing=complete\n"), "{}", set_ups[0]);
     assert!(
         set_ups[0].contains(
-            "printf '%s\\n' 'complete' 'apps/web/src/main.ts' 'crates/app/src/lib.rs' > \"$worktree.changed.new\" && mv -f \"$worktree.changed.new\" \"$worktree.changed\""
+            "printf '%s\\n' \"$listing\" 'apps/web/src/main.ts' 'crates/app/src/lib.rs' > \"$worktree.changed.new\" && mv -f \"$worktree.changed.new\" \"$worktree.changed\""
         ),
         "{}",
         set_ups[0]
@@ -672,11 +673,7 @@ async fn a_list_github_gave_in_part_says_so() {
         .expect("write");
 
     let (set_ups, _) = sent(&agent);
-    assert!(
-        set_ups[0].contains("printf '%s\\n' 'partial' > \"$worktree.changed.new\""),
-        "{}",
-        set_ups[0]
-    );
+    assert!(set_ups[0].contains("listing=partial\n"), "{}", set_ups[0]);
 }
 
 /// A comparison that fails holds no check up: the checks run, told the
@@ -696,7 +693,7 @@ async fn a_failed_comparison_runs_the_checks_told_the_list_is_unavailable() {
     let (set_ups, checks) = sent(&agent);
     assert!(set_ups[0].contains("check_base=''\n"), "{}", set_ups[0]);
     assert!(
-        set_ups[0].contains("printf '%s\\n' 'unavailable' > "),
+        set_ups[0].contains("listing=unavailable\n"),
         "{}",
         set_ups[0]
     );

@@ -17,9 +17,12 @@
 //! The file's first line says what the list holds, one of:
 //!
 //! - `complete`: every path the change touched;
-//! - `partial`: only some of them, as GitHub lists at most 300 files of a
-//!   comparison, none of one too large to list, and a path holding a line
-//!   break, or a list over 64 KiB, is left out;
+//! - `partial`: the list, or the base, cannot be trusted whole: GitHub
+//!   lists at most 300 files of a comparison and none of one too large to
+//!   list; a path holding a line break, and paths past 64 KiB once quoted
+//!   for the shell, are left out; or the base is not in the repository
+//!   (it could not be fetched, or GitHub gave none), so a check cannot
+//!   diff against it;
 //! - `unavailable`: none, as the comparison failed.
 //!
 //! Each line after it is one path from the repository's root, as GitHub
@@ -37,11 +40,18 @@ pub const BASE_VARIABLE: &str = "MACRO_CHECK_BASE";
 /// The variable that names the file listing the changed paths.
 pub const CHANGED_VARIABLE: &str = "MACRO_CHECK_CHANGED";
 
-/// The most bytes of paths the file lists: what follows is left out, and
-/// the list says it is partial. The file is written by a command sent to
-/// the agent's machine, which keeps it well short of what one command's
-/// argument may hold.
-const MAX_LISTED_BYTES: usize = 64 * 1024;
+/// The most bytes the listed paths take in the command that writes the
+/// file, each single-quoted for the shell (a `'` in a path takes four):
+/// what follows is left out, and the list says it is partial. Sandboxes
+/// run the command as one `bash -c` argument, which Linux holds to 128 KiB,
+/// so the list keeps the whole command well short of that.
+pub const MAX_QUOTED_BYTES: usize = 64 * 1024;
+
+/// What `path` takes in the command that writes the file: single-quoted,
+/// each `'` in it written `'\''`, and a space before it.
+pub fn quoted_len(path: &str) -> usize {
+    path.len() + 3 * path.matches('\'').count() + 3
+}
 
 /// What `head` changed against its merge base with a Run's base, as GitHub
 /// compares them.
@@ -92,11 +102,12 @@ pub struct CheckContext {
 impl CheckContext {
     /// The context of a comparison GitHub made: its merge base, and its
     /// paths, but for one holding a line break, which one path per line
-    /// cannot hold, and those past [`MAX_LISTED_BYTES`], either of which
+    /// cannot hold, and those past [`MAX_QUOTED_BYTES`], either of which
     /// makes the list partial. A merge base that is not a commit's id is
-    /// not given.
+    /// not given, and makes the list partial too: there is no commit to
+    /// compare the worktree with.
     pub fn compared(changes: ComparedChanges) -> Self {
-        let mut complete = changes.complete;
+        let mut complete = changes.complete && is_commit(&changes.merge_base);
         let mut paths = Vec::new();
         let mut listed = 0;
         for path in changes.paths {
@@ -104,8 +115,8 @@ impl CheckContext {
                 complete = false;
                 continue;
             }
-            listed += path.len() + 1;
-            if listed > MAX_LISTED_BYTES {
+            listed += quoted_len(&path);
+            if listed > MAX_QUOTED_BYTES {
                 complete = false;
                 break;
             }

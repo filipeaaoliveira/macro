@@ -25,7 +25,7 @@ use std::time::Duration;
 use uuid::Uuid;
 
 pub(super) use crate::domain::check_context::is_commit;
-use crate::domain::check_context::{BASE_VARIABLE, CHANGED_VARIABLE, CheckContext};
+use crate::domain::check_context::{BASE_VARIABLE, CHANGED_VARIABLE, CheckContext, Listing};
 use crate::domain::shell_lock::take_lock;
 
 pub(super) use crate::domain::shell_lock::{LOCK_BUSY, LOCK_BUSY_STATUS, LOCK_WAIT_SECS, NO_FLOCK};
@@ -103,12 +103,13 @@ if g -C \"$worktree\" ls-files -v | grep -qE '^([a-z]|S) '; then
   exit 1
 fi
 check_base={check_base}
+base_missing=
 if [ -n \"$check_base\" ] && ! g cat-file -e \"$check_base^{{commit}}\" 2>/dev/null; then
   if [ \"$(g rev-parse --is-shallow-repository)\" = true ]; then
     ( commit=$check_base; fetch_commit --depth=1 )
   else
     ( commit=$check_base; fetch_commit )
-  fi || echo \"macro-check: could not fetch the base $check_base\" >&2
+  fi || {{ echo \"macro-check: could not fetch the base $check_base\" >&2; base_missing=1; }}
 fi
 {changed}
 echo \"{READY} $commit\"",
@@ -120,12 +121,22 @@ echo \"{READY} $commit\"",
 
 /// Write `context`'s list of changed paths to the file beside the
 /// worktree (`$worktree.changed`), through a file of its own moved into
-/// place, so a check never reads half of it.
+/// place, so a check never reads half of it. A `complete` list whose base
+/// could not be fetched says `partial` instead, so no check diffs against
+/// a commit the repository lacks.
 fn changed_file_command(context: &CheckContext) -> String {
-    let lines: Vec<String> = context.lines().map(shell_quote).collect();
+    let paths: String = context
+        .paths
+        .iter()
+        .map(|path| format!(" {}", shell_quote(path)))
+        .collect();
     format!(
-        "printf '%s\\n' {} > \"$worktree.changed.new\" && mv -f \"$worktree.changed.new\" \"$worktree.changed\" || {{ echo 'macro-check: the list of changed paths could not be written' >&2; exit 1; }}",
-        lines.join(" ")
+        "listing={listing}
+if [ -n \"$base_missing\" ] && [ \"$listing\" = {complete} ]; then listing={partial}; fi
+printf '%s\\n' \"$listing\"{paths} > \"$worktree.changed.new\" && mv -f \"$worktree.changed.new\" \"$worktree.changed\" || {{ echo 'macro-check: the list of changed paths could not be written' >&2; exit 1; }}",
+        listing = context.listing.as_str(),
+        complete = Listing::Complete.as_str(),
+        partial = Listing::Partial.as_str(),
     )
 }
 

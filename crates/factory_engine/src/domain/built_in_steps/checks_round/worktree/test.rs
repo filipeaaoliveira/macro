@@ -512,8 +512,9 @@ fn a_shallow_clone_fetches_the_base() {
     assert_eq!(text(&checked.stdout), "a.txt\n");
 }
 
-/// A base the repository lacks and cannot fetch is said, and the worktree
-/// is set up all the same: the list of paths is still there.
+/// A base the repository lacks and cannot fetch is said, on the set-up's
+/// output and on the file's first line, `partial`, so no check diffs
+/// against it; the worktree is set up all the same, with the paths.
 #[test]
 fn a_base_that_cannot_be_fetched_still_sets_the_worktree_up() {
     let machine = Machine::new("no-base");
@@ -524,6 +525,29 @@ fn a_base_that_cannot_be_fetched_still_sets_the_worktree_up() {
     assert!(text(&set_up.stderr).contains("could not fetch the base"));
     assert_eq!(
         std::fs::read_to_string(machine.changed()).unwrap(),
-        "complete\na.txt\n"
+        "partial\na.txt\n"
     );
+}
+
+/// Paths full of quotes are cut so the set-up command, sent as one
+/// argument, stays well under Linux's 128 KiB for one, and the list says
+/// it is partial; what is listed reads back as the names were.
+#[test]
+fn quote_heavy_paths_keep_the_set_up_command_short() {
+    let machine = Machine::new("quotes");
+    let quotes = "'".repeat(1000);
+    let names: Vec<String> = (0..60).map(|n| format!("{quotes}{n}")).collect();
+    let names: Vec<&str> = names.iter().map(String::as_str).collect();
+    let context = told(&machine.pushed, &names, true);
+
+    let command = prepare_command(ROUND, &machine.pushed, &context);
+    assert!(command.len() < 96 * 1024, "{}", command.len());
+    machine.prepare_told(&machine.pushed, &context);
+
+    let listed = std::fs::read_to_string(machine.changed()).unwrap();
+    let mut lines = listed.lines();
+    assert_eq!(lines.next(), Some("partial"));
+    let read: Vec<&str> = lines.collect();
+    assert!(!read.is_empty() && read.len() < names.len());
+    assert_eq!(read, names[..read.len()]);
 }

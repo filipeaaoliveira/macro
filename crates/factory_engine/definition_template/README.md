@@ -47,7 +47,8 @@ and `MACRO_CHECK_CHANGED`, the path of a file outside the checkout whose
 first line is `complete`, `partial` or `unavailable` and whose next lines
 are the changed paths, one per line (a renamed file under both its names, a
 removed file too). A check that keeps to the change checks everything unless
-that first line is `complete`, or when the variable is unset, as it is where
+that first line is `complete` (which also says the base commit is in the
+checkout), or when the variable is unset, as it is where
 the agent runs the checks.
 
 Secrets never go here: no field takes an API key or a token, and a file that

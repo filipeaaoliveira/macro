@@ -49,11 +49,15 @@ fn a_path_with_a_line_break_is_left_out_and_the_list_is_partial() {
     assert_eq!(context.file_text(), "partial\na.rs\nc.rs\n");
 }
 
-/// A list too long to send whole is cut, and says it is partial.
+/// A list too long to send whole once quoted for the shell is cut, and
+/// says it is partial: names full of quotes, a quarter of the cap raw,
+/// take four times their length quoted.
 #[test]
-fn a_list_over_its_size_is_cut_and_partial() {
-    let long = "d/".repeat(1000);
-    let paths: Vec<String> = (0..100).map(|n| format!("{long}{n}")).collect();
+fn a_list_over_its_quoted_size_is_cut_and_partial() {
+    let quotes = "'".repeat(1000);
+    let paths: Vec<String> = (0..20).map(|n| format!("{quotes}{n}")).collect();
+    let raw: usize = paths.iter().map(String::len).sum();
+    assert!(raw < MAX_QUOTED_BYTES / 2);
     let context = CheckContext::compared(ComparedChanges {
         merge_base: BASE.to_string(),
         paths,
@@ -61,8 +65,16 @@ fn a_list_over_its_size_is_cut_and_partial() {
     });
 
     assert_eq!(context.listing, Listing::Partial);
-    assert!(context.paths.len() < 100);
-    assert!(context.file_text().len() <= MAX_LISTED_BYTES + "partial\n".len());
+    assert!(context.paths.len() < 20);
+    let quoted: usize = context.paths.iter().map(|path| quoted_len(path)).sum();
+    assert!(quoted <= MAX_QUOTED_BYTES, "{quoted}");
+}
+
+/// A path's quoted length is what the shell's single quotes make of it.
+#[test]
+fn a_quoted_length_counts_each_quote_four_times() {
+    assert_eq!(quoted_len("a.rs"), " 'a.rs'".len());
+    assert_eq!(quoted_len("it's"), r" 'it'\''s'".len());
 }
 
 /// A failed comparison lists nothing and says the list is unavailable; the
@@ -77,7 +89,8 @@ fn a_failed_comparison_is_unavailable() {
     assert_eq!(CheckContext::unavailable(Some("main; rm -rf /")).base, "");
 }
 
-/// A merge base that is no commit's id is not given.
+/// A merge base that is no commit's id is not given, and the list is
+/// partial: no check may diff against it.
 #[test]
 fn a_merge_base_that_is_no_commit_is_not_given() {
     let context = CheckContext::compared(ComparedChanges {
@@ -87,5 +100,5 @@ fn a_merge_base_that_is_no_commit_is_not_given() {
     });
 
     assert_eq!(context.base, "");
-    assert_eq!(context.file_text(), "complete\n");
+    assert_eq!(context.file_text(), "partial\n");
 }
