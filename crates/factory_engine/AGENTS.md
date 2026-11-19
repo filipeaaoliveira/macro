@@ -1064,14 +1064,26 @@ a Run created before Runs kept rules notify. Only the owner section
 notified before; notices are now on for everyone and turning them off is
 new, so `20261119010000_factory_quiet_gates.sql` only allows the name and
 makes no kept definition quiet: one with the owner section off, a Run's
-under way included, notifies from now on. The marker and the activity run for every
+under way included, notifies from now on. Rolling the service back past
+`quiet_gates` once one is stored is not clean: the older build reads a
+definition naming it as no definition at all (`from_kinds` returns `None`),
+and its `deny_unknown_fields` refuses a `PUT` carrying `quietGates`, as with
+every name added to the definition before it. The marker and the activity run for every
 Gate left to a person, whatever the definition says: a quiet Run's worker
 sends nothing, so the workflow and its histories are as they were. Once
 the Gate is answered (`factory_answer_gate`, or `factory_read_gate_reply`
 for words, by whoever answers), or the Run ends with it open
 (`factory_end_run`), the worker marks its notification done through the
 notifications' reader, as the owner marking it done would, which also
-clears its push; one never sent (a quiet Run's) changes nothing. A Gate a
+clears its push; one never sent (a quiet Run's) changes nothing. The
+ingress creates the notification only when it reads the message, so an
+answer or a cancel within moments of the notice can come first: when there
+is no notification to mark, the worker withdraws its id
+(`NotificationWithdrawal`, a row in `notification_withdrawal`), so the
+ingress never creates or pushes it, and marks it done again in case it was
+created in between. A notice marked done leaves no row; one closed before
+it existed, or never sent, leaves one small row for good, at most one per
+Gate, notify-only entry and stand-in answer of a Run. A Gate a
 Standing Rule or the stand-in answers was never left to a person, so it
 sent no such notification. `GET /runs/waiting` lists the caller's Runs
 waiting at an unanswered Gate, whatever the definition says.

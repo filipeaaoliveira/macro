@@ -75,6 +75,7 @@ use notification::domain::service::{
 use notification::outbound::queue::SqsQueue;
 use notification::outbound::repository::DbNotificationRepository;
 use notification::outbound::sns_endpoint::SnsEndpointManagerAdapter;
+use notification::outbound::withdrawal::PgNotificationWithdrawal;
 use sqlx::postgres::PgPoolOptions;
 use temporalio_client::{Client, ClientOptions, ConnectionOptions};
 use temporalio_sdk::Runtime;
@@ -205,7 +206,8 @@ async fn run() -> Result<(), rootcause::Report> {
         // A Gate left for a person tells the Run's owner through the
         // notification ingress, as every Macro producer notifies; once it
         // is answered, the notifications' reader marks it done and clears
-        // its push, as the owner marking it done would.
+        // its push, as the owner marking it done would, and one the ingress
+        // has not created yet is withdrawn, so it never is.
         gate_notifier: IngressGateNotifier::new(
             Arc::new(SqsNotificationIngress {
                 queue: SqsQueue::new(
@@ -228,6 +230,7 @@ async fn run() -> Result<(), rootcause::Report> {
                 },
                 realtime: NoopNotificationRealtimePublisher,
             }),
+            Arc::new(PgNotificationWithdrawal(db.clone())),
         ),
         // A schedule's, a repository event's and a Task event's Automation
         // is a routine of its creator's, made through the scheduler with
@@ -281,7 +284,11 @@ struct Parts {
     hold_tasks: DocumentHoldTasks,
     task_notes: DocumentTaskNotes,
     task_thread: DocumentTaskThread,
-    gate_notifier: IngressGateNotifier<SqsNotificationIngress<SqsQueue>, NotificationReader>,
+    gate_notifier: IngressGateNotifier<
+        SqsNotificationIngress<SqsQueue>,
+        NotificationReader,
+        PgNotificationWithdrawal,
+    >,
     automation_triggers: RoutineAutomationTriggers,
     client: Client,
     authorization_state: MacroAuthorizationState<Authorization>,
