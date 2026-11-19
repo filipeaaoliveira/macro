@@ -1478,8 +1478,10 @@ triggers:
   run; the factory takes the routine from the credential the scheduler
   signed for it (`agent_correlation::context::current_routine`, never the
   body) and fires the Automation of that routine only for its creator.
-  A person firing it by hand in person and a webhook (which carries no
-  login) fire it as its creator, unchecked by Standing Roles. A routine run
+  A webhook (which carries no login) fires it as its creator, unchecked by
+  Standing Roles. A routine the creator switched, in person, to write as
+  its owner signs no bot, so its runs fire as the creator unchecked too;
+  this is a known limit (a program can Run Now such a routine). A routine run
   for a bot or in an agent session fires it as that agent
   (`program_agent`): under a Definition with Standing Roles its bot must
   fill one that allows `start`, else the firing is skipped as `refused`;
@@ -1487,7 +1489,7 @@ triggers:
   events: the routine is made as an `Agent` routine, so the scheduler signs
   its code step for the Macro routine bot (`MACRO_NEW_BOT_ID`,
   `00000000-0000-0000-0000-00000000a2a2`), and a Run Now or edited routine
-  code carries the same claims, so they are not told apart. Under Standing
+  code carries the same claims, so they are not told apart; a person's Run Now is checked like the schedule. Under Standing
   Roles, to keep schedule and event Automations firing, give that bot an
   Agent in a Standing Role that allows `start`. Known limit, with a
   follow-up: let only the scheduler's own firing act as the creator. A
