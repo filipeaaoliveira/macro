@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE factory_run\n            SET cancelled_in_person = cancelled_in_person OR $2\n            WHERE id = $1 AND outcome IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "396868d857643c345e8cb20bd51e50aaf085449a11243366a5a8d63c25bcd641"
+}

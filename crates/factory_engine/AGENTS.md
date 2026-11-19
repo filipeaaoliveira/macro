@@ -1692,7 +1692,8 @@ cancelled the Run in person, is a person's rejection (`Settlement::Rejected`, ke
 to pending (`closed`); each pauses the next as above. A cancel is in person only
 from the owner in their own signed-in session, from an account that is not
 an agent's (`factory_run.cancelled_in_person`, kept by `cancel_run` before
-the cancel is sent, the last one before the Run's end winning); a cancel by
+the cancel is sent, before the Run's end; once a person's cancel is kept, a
+later one by an agent does not undo it); a cancel by
 an agent, a bot under a Standing Role, an internal caller or a program only
 means the Run did not finish, so its failures are pending again. Dismissed failures
 never start another Run; new failures, of the same Scorer too, count. A pull request a person

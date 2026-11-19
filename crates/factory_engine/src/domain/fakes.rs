@@ -1514,10 +1514,12 @@ impl RunRepository for FakeRepo {
             .get(&id)
             .is_some_and(|run| run.end.is_none());
         if open {
-            self.cancelled_in_person
+            *self
+                .cancelled_in_person
                 .lock()
                 .expect("cancelled in person")
-                .insert(id, in_person);
+                .entry(id)
+                .or_default() |= in_person;
         }
         Ok(())
     }

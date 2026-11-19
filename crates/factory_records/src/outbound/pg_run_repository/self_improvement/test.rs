@@ -300,19 +300,22 @@ async fn a_runs_failure_facts_read_its_judgments(pool: PgPool) {
     );
 }
 
-/// A Run keeps whether the last cancel sent to it before it ended came
-/// from its owner in person: a later cancel replaces an earlier one's,
-/// and none after its end changes it. A Run never cancelled reads as not.
+/// A Run keeps whether a cancel sent to it before it ended came from its
+/// owner in person: once kept, a later cancel by an agent does not undo
+/// it, and none after its end changes it. A Run never cancelled, or
+/// cancelled only by an agent, reads as not.
 #[sqlx::test(
     migrator = "MACRO_DB_MIGRATIONS",
     fixtures(path = "../fixtures", scripts("people", "team"))
 )]
-async fn a_run_keeps_whether_its_last_cancel_was_in_person(pool: PgPool) {
+async fn a_person_s_cancel_stays_in_person(pool: PgPool) {
     let repo = PgRunRepository::new(pool);
     let in_person = RunId::generate();
+    let then_agent = RunId::generate();
     let by_agent = RunId::generate();
     insert(&repo, in_person, "Add dark mode").await;
-    insert(&repo, by_agent, "Fix the login bug").await;
+    insert(&repo, then_agent, "Fix the login bug").await;
+    insert(&repo, by_agent, "Tidy the settings page").await;
     let kept = |id| {
         let repo = &repo;
         async move {
@@ -337,9 +340,15 @@ async fn a_run_keeps_whether_its_last_cancel_was_in_person(pool: PgPool) {
     repo.record_cancel_sender(in_person, false)
         .await
         .expect("after its end");
-    repo.record_cancel_sender(by_agent, true)
+    repo.record_cancel_sender(then_agent, true)
         .await
         .expect("person's");
+    repo.record_cancel_sender(then_agent, false)
+        .await
+        .expect("agent's after the person's");
+    repo.end_run(then_agent, RunOutcome::Cancelled)
+        .await
+        .expect("end");
     repo.record_cancel_sender(by_agent, false)
         .await
         .expect("agent's");
@@ -348,6 +357,10 @@ async fn a_run_keeps_whether_its_last_cancel_was_in_person(pool: PgPool) {
         .expect("end");
 
     assert!(kept(in_person).await);
+    assert!(
+        kept(then_agent).await,
+        "an agent's later cancel keeps the person's rejection"
+    );
     assert!(!kept(by_agent).await);
 }
 

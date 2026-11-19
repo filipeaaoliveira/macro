@@ -2002,7 +2002,7 @@ impl RunRepository for PgRunRepository {
         sqlx::query!(
             r#"
             UPDATE factory_run
-            SET cancelled_in_person = $2
+            SET cancelled_in_person = cancelled_in_person OR $2
             WHERE id = $1 AND outcome IS NULL
             "#,
             id.as_uuid(),
