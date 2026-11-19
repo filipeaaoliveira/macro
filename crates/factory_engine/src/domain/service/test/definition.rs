@@ -29,10 +29,10 @@ use crate::outbound::local_agent::LocalAgent;
 
 const TEAM: Uuid = Uuid::from_u128(0x7ea4);
 
-const DEFINITION_REPO: &str = "https://github.com/macro/factory-definition";
+pub(super) const DEFINITION_REPO: &str = "https://github.com/macro/factory-definition";
 
 /// The commit the Definition's default branch is at first.
-const FIRST: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+pub(super) const FIRST: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 /// The commit a merged change to the Definition takes it to.
 const SECOND: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
@@ -74,7 +74,7 @@ fn definition_files(github: &FakeGithub, commit: &str, description: &str, rules:
 }
 
 /// Julia administers the team, which names the Definition; Teo is on it.
-fn team_repo() -> FakeRepo {
+pub(super) fn team_repo() -> FakeRepo {
     let repo = FakeRepo::default();
     let mut teams = repo.teams.lock().expect("teams");
     teams.insert(
@@ -99,7 +99,7 @@ fn team_repo() -> FakeRepo {
     repo
 }
 
-fn github_at(commit: &str) -> FakeGithub {
+pub(super) fn github_at(commit: &str) -> FakeGithub {
     let github = FakeGithub::default();
     github.state().head = Some(commit.to_string());
     github
@@ -134,6 +134,7 @@ async fn a_run_starts_of_its_team_s_definition_and_keeps_the_commit_it_read() {
             None,
             None,
             true,
+            None,
         )
         .await
         .expect("a run of the definition's flow");
@@ -149,6 +150,7 @@ async fn a_run_starts_of_its_team_s_definition_and_keeps_the_commit_it_read() {
             None,
             None,
             true,
+            None,
         )
         .await
         .expect("a second run");
@@ -216,6 +218,7 @@ async fn a_team_s_definition_names_the_flows_its_runs_start_of() {
             None,
             None,
             true,
+            None,
         )
         .await;
     let flows = service.list_flows(&teo()).await.expect("flows");
@@ -251,6 +254,7 @@ async fn a_definition_that_does_not_read_starts_no_run() {
             None,
             None,
             true,
+            None,
         )
         .await;
     github.state().unreachable = true;
@@ -262,6 +266,7 @@ async fn a_definition_that_does_not_read_starts_no_run() {
             None,
             None,
             true,
+            None,
         )
         .await;
 
@@ -402,6 +407,7 @@ async fn a_run_on_the_definition_repository_guards_its_files() {
             None,
             Some("https://github.com/Macro/Factory-Definition".to_string()),
             true,
+            None,
         )
         .await
         .expect("a run on the definition repository, named in another case");
@@ -413,6 +419,7 @@ async fn a_run_on_the_definition_repository_guards_its_files() {
             None,
             Some("https://github.com/macro/app".to_string()),
             true,
+            None,
         )
         .await
         .expect("a run on another repository");
@@ -482,6 +489,7 @@ async fn a_definition_run_that_asks_holds_its_queue_place() {
             None,
             Some("https://github.com/macro/app".to_string()),
             true,
+            None,
         )
         .await
         .expect("a run");
@@ -543,6 +551,7 @@ async fn a_file_github_will_not_give_is_the_definition_s_problem() {
             None,
             None,
             true,
+            None,
         )
         .await;
 
@@ -574,6 +583,7 @@ async fn a_definition_repository_github_moved_is_named_where_it_is() {
             None,
             None,
             true,
+            None,
         )
         .await;
     github.state().full_name = Some("Macro/Factory-Definition".to_string());
@@ -585,6 +595,7 @@ async fn a_definition_repository_github_moved_is_named_where_it_is() {
             None,
             None,
             true,
+            None,
         )
         .await;
 
@@ -646,6 +657,7 @@ async fn a_definition_s_scorers_judge_its_runs_and_the_deployment_s_the_others()
             Some(task_id),
             None,
             true,
+            None,
         )
         .await
         .expect("a run of the definition's flow");
@@ -664,6 +676,7 @@ async fn a_definition_s_scorers_judge_its_runs_and_the_deployment_s_the_others()
             Some(task_id),
             None,
             true,
+            None,
         )
         .await
         .expect("a run of a built-in flow");

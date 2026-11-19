@@ -418,6 +418,7 @@ async fn at_the_queue_limit_no_new_run_starts() {
             None,
             None,
             false,
+            None,
         )
     };
 
@@ -527,6 +528,7 @@ async fn at_the_queue_limit_no_new_run_starts() {
             Some(task),
             None,
             false,
+            None,
         )
         .await
         .expect("the project sets no limit");

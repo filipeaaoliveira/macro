@@ -207,6 +207,58 @@ left out of the owner's past answers, the replay measure and Insights' Gate
 answers. A reply in words and the factory's settings stay the person's own
 session's.
 
+Standing Roles (`src/domain/agents/standing.rs`, `src/domain/service/standing.rs`)
+narrow which agent does what. A Factory Definition's `agents.json` may have a
+`standing` section: each Standing Role names the acts it allows (`start`,
+`cancel`, `link`, `answer_plan`, `answer_blockers`, a fixed set: none merges,
+and an act that names a merge, or any other, does not read) and the Agents whose
+bots fill it. The Run keeps it with its Agents (`definition_agents`);
+`FACTORY_AGENTS` takes none (`StandingOutsideDefinition`), as a Run under no
+Definition keeps no Agents. The section governs bots. A call not in person
+acts as an agent (`acting_agent` for start, cancel and link, an
+`ActingAgent`; `Answerer::Agent` for an answer): code in an agent session
+(the correlation layer's session on a person's credential) acts as that
+session, and the service reads its bot (`StandingActRepository::session_bot`,
+the owner's sessions only); code in no session whose credential is signed
+for a bot (`agent_id`: a self-hosted agent's code-mode call, a routine's run
+for an agent) acts as that bot, which the signature names. A program signed
+only for the person (their API key or token, a routine running as them with
+no agent) is the person acting, which the section does not govern; nor an
+internal caller. Public MCP signs the person's own MCP client or API key,
+direct or through code mode, for the Macro bot (`MACRO_AI_BOT_ID`) only to
+label its posts, so such a credential in no session and no routine is the
+person too (`signed_for_the_person`); in an agent session it acts as that
+session. A Gate answer still takes an agent session. When the
+Definition the Run starts under, or the one it kept, has the section, the
+act is taken only when the bot is an Agent of a Standing Role that allows
+it; else 403 `notInStandingRole`, naming the act and the Standing Roles that
+allow it. A Gate answer is checked after
+`agent_may_answer`, by the kind it read: a plan Gate is `answer_plan`, a
+Blockers Gate `answer_blockers`, and a merge Gate no act at all, so under the
+section an agent's every answer to a merge Gate is refused
+(`PersonOnly::Merge`). Without the section, or for the person in person or an
+internal caller, nothing changes. The Run keeps who did each act, with its bot,
+Agent, Standing Role and session, if any (`factory_standing_act`): a start before its workflow
+starts (a start whose record fails is removed as unstarted), a cancel once the
+workflow takes it, a link once linked, and an answer in `factory_answer_gate`, from
+`AnswerGate::standing` (left out when none, so histories replay as before; the
+workflow only hands it on). The Run API lists them as `standingActs`.
+
+Deploy order and rollback: before Standing Roles, `AgentDefinitionFields` is
+`deny_unknown_fields`, and an agent Step reads its Run's kept Agents
+(`SessionAgent::run_agents`). A worker from before them fails every agent Step
+of a Run that kept a `standing` section (`DefinitionAgents`). Roll every
+service and worker task onto this code before any team's Definition adds the
+section. Once a Run has kept one, rolling back below this code fails that
+Run's later agent Steps (a Run keeps the section it started with, so removing
+it from the Definition does not help them): remove it, then let the Runs that
+kept it end, or cancel them, before rolling back. `factory_standing_act.session_id`
+is nullable from `20261119000100_factory_standing_act_sessionless`, with
+no down migration: code from before it reads the column as non-null, so a
+Run that kept an act from a bot in no session no longer reads there.
+Roll back no lower than that code once such an act is kept, or delete
+those rows (`session_id IS NULL`) first.
+
 A person's Queue is their Runs waiting on them at a Gate or an agent's
 question (`GET /runs/waiting`, Insights' "Waiting on you"). A team's
 Orchestrator Definition, or a Project's own, may set a Queue limit
@@ -1368,7 +1420,7 @@ GitHub repository the team names and changed by pull requests, that hold its
 factory: `factory.json` (the format's `version`, 1, and its Flows by name),
 `flows/{name}.json` (each Flow, in the built-in Flows' format, checked as they
 are), `agents.json` (`FACTORY_AGENTS`' format; it must fill every Role its
-Flows name), and the optional `rules.json` (`standingRules`, an Orchestrator
+Flows name; its optional `standing` section holds the Standing Roles), and the optional `rules.json` (`standingRules`, an Orchestrator
 Definition, and `controlFiles`, each the factory's default when left out) and
 `scorers.json` (the team's Scorers, Experiments and Benchmarks, in
 `FACTORY_EVALUATION`'s format, naming only its own Flows and Agents; see

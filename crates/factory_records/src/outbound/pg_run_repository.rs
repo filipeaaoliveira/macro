@@ -9,6 +9,7 @@ mod gate_replies;
 mod insights;
 mod main_hold;
 mod review_rounds;
+mod standing_acts;
 mod standing_rules;
 mod steering;
 #[cfg(test)]
@@ -186,6 +187,9 @@ pub enum PgRunRepositoryErr {
     /// A stored Automation's trigger kind is not one this code knows.
     #[error("unknown automation trigger kind {0:?}")]
     UnknownTriggerKind(String),
+    /// A stored standing act is not one this code knows.
+    #[error("unknown standing act {0:?}")]
+    UnknownStandingAct(String),
     /// A stored Automation's trigger does not read.
     #[error("a stored automation's trigger does not read: {0}")]
     UnreadableTrigger(serde_json::Error),

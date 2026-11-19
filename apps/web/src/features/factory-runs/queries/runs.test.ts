@@ -61,6 +61,7 @@ const started: RunDetail = {
       ],
     },
   ],
+  standingActs: [],
   reviewRounds: [
     {
       round: 1,
@@ -118,6 +119,7 @@ describe('createAppRunsContext', () => {
 
     const run: Run = {
       id: 'run-2',
+      standingActs: [],
       request: 'Add a due date column',
       createdAt: '2026-11-16T09:00:00Z',
       ownerId: 'macro|owner@example.com',
@@ -236,6 +238,78 @@ describe('createAppRunsContext', () => {
       result.ok ? result.value.steps[0]?.gate?.answer : undefined;
     expect(answerOf(byAgent)?.byOrchestrator).toBe(true);
     expect(answerOf(byPerson)?.byOrchestrator).toBe(false);
+  });
+
+  it('reads which agent answered a Gate and did each act under a Standing Role', async () => {
+    const detail: RunDetail = {
+      ...started,
+      steps: [1, 2].map((seq) => ({
+        terminal: { betweenTurns: false, steers: [] },
+        seq,
+        entry: 'plan',
+        visit: seq,
+        startedAt: '2026-11-16T09:00:01Z',
+        passedOver: [],
+        checks: [],
+        gate: {
+          kind: 'flow',
+          question: 'Approve the plan?',
+          answers: ['approve', 'revise'],
+          openedAt: '2026-11-16T09:01:00Z',
+          answer: {
+            answer: 'revise',
+            answeredAt: '2026-11-16T09:02:00Z',
+            byStandIn: false,
+            agentSessionId: '01960000-0000-7000-8000-000000000009',
+          },
+        },
+      })),
+      standingActs: [
+        {
+          act: 'start',
+          seq: null,
+          botId: '01960000-0000-7000-8000-0000000000b1',
+          agent: 'backup',
+          standingRole: 'intake',
+          sessionId: '01960000-0000-7000-8000-000000000008',
+          at: '2026-11-16T09:00:00Z',
+        },
+        {
+          act: 'answer_plan',
+          seq: 2,
+          botId: '01960000-0000-7000-8000-0000000000b2',
+          agent: 'primary',
+          standingRole: 'gatekeeper',
+          sessionId: '01960000-0000-7000-8000-000000000009',
+          at: '2026-11-16T09:02:00Z',
+        },
+      ],
+    };
+    vi.mocked(factoryClient.startRun).mockResolvedValueOnce(ok(detail));
+
+    const result = await createAppRunsContext(new QueryClient()).startRun({
+      taskId: 'task-1',
+      flow: 'plan',
+      request: 'Plan it',
+    });
+
+    const run = result.ok ? result.value : undefined;
+    expect(run?.steps[0]?.gate?.answer?.standing).toBeUndefined();
+    expect(run?.steps[1]?.gate?.answer?.standing).toEqual({
+      agent: 'primary',
+      standingRole: 'gatekeeper',
+    });
+    expect(run?.standingActs?.map((standing) => standing.act)).toEqual([
+      'start',
+      'answer_plan',
+    ]);
+    expect(run?.standingActs?.[0]).toEqual({
+      act: 'start',
+      seq: undefined,
+      agent: 'backup',
+      standingRole: 'intake',
+      at: '2026-11-16T09:00:00Z',
+    });
   });
 
   it('starts a Run on the repository it names and keeps it on the Run', async () => {

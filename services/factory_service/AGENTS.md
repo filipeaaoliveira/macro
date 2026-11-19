@@ -148,7 +148,10 @@ worker that walks each Run's Flow, in one process.
   A team that names a Factory Definition (`crates/factory_engine`'s
   `domain/definition.rs`) gives its Runs the Agents in its `agents.json`,
   which each Run keeps: `FACTORY_AGENTS` is then the fallback for the Runs
-  of teams that name none. The agent Steps still run on `LocalAgent` when it
+  of teams that name none. Only a Definition's `agents.json` holds Standing
+  Roles (a `standing` section, which says which agents' bots may start,
+  cancel or link a Run, or answer its plan or Blockers Gate, for its
+  owner): `FACTORY_AGENTS` with one stops the service from starting. The agent Steps still run on `LocalAgent` when it
   is unset, Definition or not, so a deployment that runs agents sets it.
 
   Unset, the agent Steps run on `LocalAgent`, which does no work, unless the

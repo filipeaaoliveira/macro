@@ -50,6 +50,7 @@ async fn a_run_on_a_task_keeps_its_arm_before_its_workflow_starts() {
             Some(task_id),
             Some(REPO_URL.to_string()),
             true,
+            None,
         )
         .await
         .expect("create");
@@ -61,6 +62,7 @@ async fn a_run_on_a_task_keeps_its_arm_before_its_workflow_starts() {
             None,
             Some(REPO_URL.to_string()),
             true,
+            None,
         )
         .await
         .expect("create");
@@ -92,6 +94,7 @@ async fn a_run_whose_arm_is_not_kept_does_not_start() {
             Some(task_id),
             Some(REPO_URL.to_string()),
             true,
+            None,
         )
         .await;
 
@@ -122,6 +125,7 @@ async fn the_benchmark_flow_runs_only_as_a_suite_s_trial() {
             None,
             Some(REPO_URL.to_string()),
             true,
+            None,
         )
         .await;
     assert!(matches!(refused, Err(FactoryError::UnknownFlow)));

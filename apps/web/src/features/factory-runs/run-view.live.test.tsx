@@ -59,6 +59,7 @@ const planning: RunDetail = {
     },
   ],
   reviewRounds: [],
+  standingActs: [],
 };
 
 const waiting: RunDetail = {

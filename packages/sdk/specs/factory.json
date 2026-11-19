@@ -4943,7 +4943,7 @@
       "RunDetail": {
         "type": "object",
         "description": "A Run and the Steps it took.",
-        "required": ["run", "steps", "reviewRounds"],
+        "required": ["run", "steps", "reviewRounds", "standingActs"],
         "properties": {
           "baseRequiredChecks": {
             "oneOf": [
@@ -4977,6 +4977,13 @@
           "run": {
             "$ref": "#/components/schemas/Run",
             "description": "The Run."
+          },
+          "standingActs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StandingActRecord"
+            },
+            "description": "What agents did to it under its Factory Definition's Standing\nRoles, in order: who started, cancelled or linked it, and answered\nits Gates."
           },
           "steps": {
             "type": "array",
@@ -5023,6 +5030,7 @@
           "controlFilesNotApproved",
           "queueFull",
           "reservedForAPerson",
+          "notInStandingRole",
           "unreachableDefinition",
           "invalidDefinition",
           "definitionNamed"
@@ -5394,6 +5402,55 @@
           }
         },
         "additionalProperties": false
+      },
+      "StandingAct": {
+        "type": "string",
+        "description": "An act a Standing Role may allow. The set is fixed: none merges, and a\nFactory Definition cannot add one.",
+        "enum": ["start", "cancel", "link", "answer_plan", "answer_blockers"]
+      },
+      "StandingActRecord": {
+        "type": "object",
+        "description": "A standing act a Run keeps, as the Run API shows it.",
+        "required": ["act", "botId", "agent", "standingRole", "at"],
+        "properties": {
+          "act": {
+            "$ref": "#/components/schemas/StandingAct",
+            "description": "What was done."
+          },
+          "agent": {
+            "$ref": "#/components/schemas/AgentName",
+            "description": "The Agent the Run's Definition names for that bot."
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was recorded."
+          },
+          "botId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The bot that did it."
+          },
+          "seq": {
+            "type": ["integer", "null"],
+            "format": "int32",
+            "description": "The Step whose Gate was answered, for an answer; none otherwise.",
+            "minimum": 0
+          },
+          "sessionId": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "The agent session it came from; none for a bot's code that ran in\nno agent session."
+          },
+          "standingRole": {
+            "$ref": "#/components/schemas/StandingRoleName",
+            "description": "The Standing Role that allowed it."
+          }
+        }
+      },
+      "StandingRoleName": {
+        "type": "string",
+        "description": "The name a Factory Definition gives a Standing Role, such as `intake`,\n`gatekeeper` or `operator`."
       },
       "StandingRule": {
         "type": "string",

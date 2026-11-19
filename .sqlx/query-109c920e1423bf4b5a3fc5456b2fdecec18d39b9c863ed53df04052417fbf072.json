@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT run_id, act, seq, bot_id, agent, standing_role, session_id, at\n            FROM factory_standing_act\n            WHERE run_id = ANY($1)\n            ORDER BY run_id, at, id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "run_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "act",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "seq",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "bot_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "agent",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "standing_role",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "session_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "109c920e1423bf4b5a3fc5456b2fdecec18d39b9c863ed53df04052417fbf072"
+}

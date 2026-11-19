@@ -1518,6 +1518,12 @@ export type RunDetail = {
      */
     run: Run;
     /**
+     * What agents did to it under its Factory Definition's Standing
+     * Roles, in order: who started, cancelled or linked it, and answered
+     * its Gates.
+     */
+    standingActs: Array<StandingActRecord>;
+    /**
      * Its Steps, in the order they started.
      */
     steps: Array<Step>;
@@ -1541,7 +1547,7 @@ export type RunEnd = {
 /**
  * Why a request was refused, where a client acts on the cause.
  */
-export type RunErrorCode = 'unreachableRepository' | 'noPushAccess' | 'controlFilesNotApproved' | 'queueFull' | 'reservedForAPerson' | 'unreachableDefinition' | 'invalidDefinition' | 'definitionNamed';
+export type RunErrorCode = 'unreachableRepository' | 'noPushAccess' | 'controlFilesNotApproved' | 'queueFull' | 'reservedForAPerson' | 'notInStandingRole' | 'unreachableDefinition' | 'invalidDefinition' | 'definitionNamed';
 
 /**
  * What a refused or failed request answers: a message, and for a refusal
@@ -1817,6 +1823,53 @@ export type StandInKinds = {
      */
     plan: boolean;
 };
+
+/**
+ * An act a Standing Role may allow. The set is fixed: none merges, and a
+ * Factory Definition cannot add one.
+ */
+export type StandingAct = 'start' | 'cancel' | 'link' | 'answer_plan' | 'answer_blockers';
+
+/**
+ * A standing act a Run keeps, as the Run API shows it.
+ */
+export type StandingActRecord = {
+    /**
+     * What was done.
+     */
+    act: StandingAct;
+    /**
+     * The Agent the Run's Definition names for that bot.
+     */
+    agent: AgentName;
+    /**
+     * When it was recorded.
+     */
+    at: string;
+    /**
+     * The bot that did it.
+     */
+    botId: string;
+    /**
+     * The Step whose Gate was answered, for an answer; none otherwise.
+     */
+    seq?: number | null;
+    /**
+     * The agent session it came from; none for a bot's code that ran in
+     * no agent session.
+     */
+    sessionId?: string | null;
+    /**
+     * The Standing Role that allowed it.
+     */
+    standingRole: StandingRoleName;
+};
+
+/**
+ * The name a Factory Definition gives a Standing Role, such as `intake`,
+ * `gatekeeper` or `operator`.
+ */
+export type StandingRoleName = string;
 
 /**
  * A Standing Rule: the answer the factory gives a Gate of one kind on its

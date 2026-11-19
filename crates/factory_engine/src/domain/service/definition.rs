@@ -7,6 +7,7 @@ use factory_records::domain::board::RunBoardRepository;
 use factory_records::domain::evaluation::EvaluationRepository;
 use factory_records::domain::flaws::FlawRepository;
 use factory_records::domain::main_hold::MainHoldRepository;
+use factory_records::domain::standing_acts::StandingActRepository;
 use std::collections::BTreeMap;
 
 use factory_records::domain::models::{NewRunDefinition, RunFlow, RunId, TeamMembership};
@@ -116,7 +117,8 @@ where
         + AutomationRepository
         + FlawRepository
         + RunBoardRepository
-        + EvaluationRepository,
+        + EvaluationRepository
+        + StandingActRepository,
     W: RunWorkflows,
     E: StepExecutor,
     U: UserDirectory,

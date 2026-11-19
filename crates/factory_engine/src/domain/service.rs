@@ -3,6 +3,7 @@
 
 mod board;
 mod definition;
+mod standing;
 #[cfg(test)]
 mod test;
 
@@ -26,6 +27,7 @@ use factory_records::domain::models::{
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::{ReviewRound, ReviewRoundRepository};
+use factory_records::domain::standing_acts::{StandingAct, StandingActRepository, StandingActor};
 use factory_records::domain::standing_rules::{
     MAX_QUEUE_LIMIT, MIN_QUEUE_LIMIT, OrchestratorDefinition, ProjectRulesSet, RuleGateKind,
     RulesSource, RunRules, StandingRulesRepository,
@@ -33,6 +35,7 @@ use factory_records::domain::standing_rules::{
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
+use crate::domain::agents::AgentDefinition;
 use crate::domain::board::{BoardFilter, BoardPage, PullRequestRuns};
 use crate::domain::built_in_flows::BUILT_IN_FLOWS;
 use crate::domain::control_files::ControlFiles;
@@ -41,15 +44,15 @@ use crate::domain::evaluation::{EvaluationDefinition, TeamEvaluation};
 use crate::domain::flaws::mark_flawed;
 use crate::domain::flow::Flow;
 use crate::domain::gate::{
-    AnswerGate, GateAnswered, GateOpening, GateRuling, GateTelling, ReplyGate,
+    AnswerGate, GateAnswered, GateOpening, GateRuling, GateTelling, ReplyGate, StandingAnswer,
 };
 use crate::domain::gate_owner::{
     OwnerNote, gate_notice, gate_told, is_factory_comment, notes_since, notice_id, stand_in_id,
     told_id,
 };
 use crate::domain::models::{
-    Answerer, CodeRepository, ControlFilesSettings, DefinitionSettings, FactoryError, FlowSummary,
-    PersonOnly, RunDetail, RunFinish, RunStart, SessionSteer, SessionStepRef,
+    ActingAgent, Answerer, CodeRepository, ControlFilesSettings, DefinitionSettings, FactoryError,
+    FlowSummary, PersonOnly, RunDetail, RunFinish, RunStart, SessionSteer, SessionStepRef,
     StandingRulesSettings, StepEnding, StepError, StepInput, StepReport, StepRequest, StepStart,
 };
 use crate::domain::ports::{
@@ -105,6 +108,14 @@ pub const WAITING_RUNS_LISTED: u16 = 50;
 /// one whose workflow never started.
 const UNSTARTED_AFTER: chrono::TimeDelta = chrono::TimeDelta::minutes(5);
 
+/// How many times a cancel's standing act is tried before who sent the
+/// cancel is given up as lost.
+const CANCEL_RECORD_ATTEMPTS: u8 = 3;
+
+/// The wait before the second try of a cancel's standing act, and the
+/// step it grows by for each later one.
+const CANCEL_RECORD_BACKOFF: std::time::Duration = std::time::Duration::from_millis(200);
+
 /// A Run to record and start: what [`FactoryService::create_run`] takes,
 /// and the Automation that starts it, if one does.
 struct RunOrder<'a> {
@@ -114,6 +125,8 @@ struct RunOrder<'a> {
     task_id: Option<Uuid>,
     repo_url: Option<String>,
     in_person: bool,
+    /// The agent that starts the Run for its owner, when one does.
+    acting: Option<ActingAgent>,
     automation: Option<AutomationStart<'a>>,
     /// The Benchmark trial it is, if a suite starts it, and the commit its
     /// write starts from.
@@ -146,7 +159,8 @@ where
         + AutomationRepository
         + FlawRepository
         + RunBoardRepository
-        + EvaluationRepository,
+        + EvaluationRepository
+        + StandingActRepository,
     W: RunWorkflows,
     E: StepExecutor,
     U: UserDirectory,
@@ -467,12 +481,20 @@ where
         let base = self
             .base_shown(&run, &steps, flow.as_ref(), &mut BTreeMap::new())
             .await?;
+        let standing_acts = self
+            .repo
+            .runs_standing_acts(&[run.id])
+            .await
+            .map_err(internal)?
+            .remove(&run.id)
+            .unwrap_or_default();
         Ok(RunDetail {
             run,
             steps: with_pause_ends(steps),
             main_hold: base.hold,
             base_required_checks: base.required,
             review_rounds,
+            standing_acts,
         })
     }
 
@@ -482,6 +504,7 @@ where
         let ids: Vec<RunId> = runs.iter().map(|run| run.id).collect();
         let mut steps = self.repo.list_runs_steps(&ids).await.map_err(internal)?;
         let mut rounds = self.repo.runs_review_rounds(&ids).await.map_err(internal)?;
+        let mut standing_acts = self.repo.runs_standing_acts(&ids).await.map_err(internal)?;
         // The Flows of the Runs that may be at their merge, in one read.
         let at_merge_ids: Vec<RunId> = runs
             .iter()
@@ -501,12 +524,14 @@ where
             let base = self
                 .base_shown(&run, &steps, flows.get(&run.id), &mut known)
                 .await?;
+            let standing_acts = standing_acts.remove(&run.id).unwrap_or_default();
             details.push(RunDetail {
                 run,
                 steps,
                 main_hold: base.hold,
                 base_required_checks: base.required,
                 review_rounds,
+                standing_acts,
             });
         }
         Ok(details)
@@ -547,7 +572,8 @@ where
     /// `stop`). It gives the approving answer (`approve`, `fix`) only where
     /// the Run's Orchestrator Definition lets it, for that kind, never for
     /// a merge, never approving a Tampered Run, and never sending Blockers
-    /// to a fix the `fix_blockers` rule would leave to the owner.
+    /// to a fix the `fix_blockers` rule would leave to the owner. Gives
+    /// the kind of the Gate when it may answer it.
     async fn agent_may_answer(
         &self,
         run: &Run,
@@ -556,7 +582,7 @@ where
         answer: &Outcome,
         approved_control_files: bool,
         session_id: Uuid,
-    ) -> Result<(), FactoryError> {
+    ) -> Result<RuleGateKind, FactoryError> {
         // The agents doing a Run's Steps work as its owner too: one could
         // otherwise approve the plan it wrote.
         if self
@@ -609,7 +635,7 @@ where
         // Sending work back changes nothing a person has not seen.
         let [approving, _] = kind_answers(kind);
         if answer.as_str() != approving {
-            return Ok(());
+            return Ok(kind);
         }
 
         let tampered = run
@@ -643,7 +669,76 @@ where
                 }
             }
         }
+        Ok(kind)
+    }
+
+    /// Cancel the workflow of the Run `id`, which has not ended: fails
+    /// when the workflow ended it before the cancel reached it.
+    async fn send_cancel(&self, id: RunId) -> Result<(), FactoryError> {
+        if self.workflows.cancel(id).await? {
+            return Ok(());
+        }
+        // Temporal had no running workflow for the Run. One may have
+        // started since, which a second cancel reaches; one that completed
+        // before its Run's end was recorded has ended the Run, though the
+        // records don't say so yet.
+        if self.workflows.exists(id).await? {
+            return if self.workflows.cancel(id).await? {
+                Ok(())
+            } else {
+                Err(FactoryError::RunEnded)
+            };
+        }
+        // A Run whose workflow never started has nothing to stop: it ends
+        // cancelled here. A workflow that starts late takes no Step of it,
+        // and is cancelled if it is there by now.
+        self.repo
+            .end_run(id, RunOutcome::Cancelled)
+            .await
+            .map_err(internal)?;
+        if self.workflows.exists(id).await? {
+            self.workflows.cancel(id).await?;
+        }
         Ok(())
+    }
+
+    /// Keep `actor` as who cancelled the Run `id`, once its cancel was
+    /// taken. The cancel cannot be taken back, and a caller's retry finds
+    /// the Run cancelled, which keeps no one, so a failed record is tried
+    /// again here, `CANCEL_RECORD_ATTEMPTS` times in all, and one that
+    /// still fails is logged as lost before its error is answered.
+    async fn record_cancel(&self, id: RunId, actor: &StandingActor) -> Result<(), FactoryError> {
+        let mut attempt: u8 = 1;
+        loop {
+            match self
+                .repo
+                .record_standing_act(id, StandingAct::Cancel, None, actor)
+                .await
+            {
+                Ok(()) => return Ok(()),
+                Err(error) if attempt < CANCEL_RECORD_ATTEMPTS => {
+                    tracing::warn!(
+                        ?error,
+                        run_id = %id,
+                        attempt,
+                        "recording who cancelled a run failed; trying again"
+                    );
+                    tokio::time::sleep(CANCEL_RECORD_BACKOFF * u32::from(attempt)).await;
+                    attempt += 1;
+                }
+                Err(error) => {
+                    tracing::error!(
+                        ?error,
+                        run_id = %id,
+                        bot_id = %actor.bot_id,
+                        session_id = ?actor.session_id,
+                        standing_role = %actor.standing_role,
+                        "a run's cancel was taken but who sent it was not recorded"
+                    );
+                    return Err(internal(error).into());
+                }
+            }
+        }
     }
 
     /// Record the Run `order` asks for and start it, as
@@ -658,6 +753,7 @@ where
             task_id,
             repo_url,
             in_person,
+            acting,
             automation,
             trial,
         } = order;
@@ -677,6 +773,16 @@ where
         // still keeps the Definition, whose Agents its Steps take.
         let flows_of = definition.as_ref().filter(|_| trial.is_none());
         let flow = self.flow_named(&flow_name, flows_of)?;
+        // An agent starts a Run under a Definition with Standing Roles only
+        // when its bot fills one that allows it.
+        let started_by = self
+            .standing_actor(
+                &actor,
+                definition.as_ref().map(|pinned| &pinned.definition.agents),
+                StandingAct::Start,
+                acting,
+            )
+            .await?;
         if request.trim().is_empty() {
             return Err(FactoryError::EmptyRequest);
         }
@@ -837,6 +943,19 @@ where
             return Err(FactoryError::Internal(internal(error)));
         }
 
+        // The agent that started it is kept before its workflow starts: a
+        // Run whose start could not be kept is removed, as one whose
+        // workflow did not start.
+        if let Some(started_by) = &started_by
+            && let Err(error) = self
+                .repo
+                .record_standing_act(run_id, StandingAct::Start, None, started_by)
+                .await
+        {
+            self.forget_unstarted(run_id).await;
+            return Err(internal(error).into());
+        }
+
         // The Run is recorded before its workflow starts, so the workflow can
         // record its Steps against it.
         let start = RunStart { run_id, flow };
@@ -878,7 +997,8 @@ where
         + AutomationRepository
         + FlawRepository
         + RunBoardRepository
-        + EvaluationRepository,
+        + EvaluationRepository
+        + StandingActRepository,
     W: RunWorkflows,
     E: StepExecutor,
     U: UserDirectory,
@@ -925,6 +1045,7 @@ where
         task_id: Option<Uuid>,
         repo_url: Option<String>,
         in_person: bool,
+        acting: Option<ActingAgent>,
     ) -> Result<RunDetail, FactoryError> {
         self.start_run(RunOrder {
             actor,
@@ -933,6 +1054,7 @@ where
             task_id,
             repo_url,
             in_person,
+            acting,
             automation: None,
             trial: None,
         })
@@ -982,6 +1104,7 @@ where
             task_id: None,
             repo_url: Some(repo_url),
             in_person: false,
+            acting: None,
             automation: None,
             trial: Some((trial, base_commit)),
         })
@@ -1033,6 +1156,7 @@ where
             task_id,
             repo_url: automation.repo_url.clone(),
             in_person: false,
+            acting: None,
             automation: Some(AutomationStart {
                 automation: &started_by,
                 firing_key,
@@ -1177,12 +1301,27 @@ where
         actor: &MacroUserIdStr<'static>,
         id: RunId,
         task_id: Uuid,
+        acting: Option<ActingAgent>,
     ) -> Result<RunDetail, FactoryError> {
         self.owned_run(actor, id).await?;
+        let agents = self.acting_agents(id, acting).await?;
+        let linked_by = self
+            .standing_actor(actor, agents.as_ref(), StandingAct::Link, acting)
+            .await?;
         self.visible_task(actor, task_id).await?;
 
         match self.repo.link_task(id, task_id).await.map_err(internal)? {
-            TaskLink::Linked => self.get_run(actor, id).await,
+            TaskLink::Linked => {
+                // Linking again is safe: a failed record is kept by the
+                // caller's retry.
+                if let Some(linked_by) = &linked_by {
+                    self.repo
+                        .record_standing_act(id, StandingAct::Link, None, linked_by)
+                        .await
+                        .map_err(internal)?;
+                }
+                self.get_run(actor, id).await
+            }
             TaskLink::NoSuchRun => Err(FactoryError::NotFound),
             TaskLink::NoSuchTask => Err(FactoryError::UnknownTask),
         }
@@ -1314,6 +1453,7 @@ where
                 user_id: actor,
                 approved_control_files: None,
                 agent_session: None,
+                standing: None,
             };
             self.workflows.answer(id, &answer).await?
         } else {
@@ -1368,16 +1508,47 @@ where
                 offered: gate.answers.iter().map(|a| a.as_str().to_owned()).collect(),
             });
         }
+        let mut standing = None;
         if let Answerer::Agent { session_id } = answerer {
-            self.agent_may_answer(
-                &run,
-                &steps,
-                seq,
-                &answer,
-                approved_control_files.is_some(),
-                session_id,
-            )
-            .await?;
+            let kind = self
+                .agent_may_answer(
+                    &run,
+                    &steps,
+                    seq,
+                    &answer,
+                    approved_control_files.is_some(),
+                    session_id,
+                )
+                .await?;
+            // Under a Definition with Standing Roles, the agent's bot must
+            // fill one that allows answering this kind of Gate. No act
+            // answers a merge Gate, whatever the answer.
+            let agents = self.kept_agents(id).await?;
+            let act = match kind {
+                RuleGateKind::Plan => Some(StandingAct::AnswerPlan),
+                RuleGateKind::Blockers => Some(StandingAct::AnswerBlockers),
+                RuleGateKind::Merge => None,
+            };
+            match act {
+                Some(act) => {
+                    standing = self
+                        .standing_actor(
+                            &actor,
+                            agents.as_ref(),
+                            act,
+                            Some(ActingAgent::Session(session_id)),
+                        )
+                        .await?
+                        .map(|by| StandingAnswer { act, by });
+                }
+                None if agents
+                    .as_ref()
+                    .is_some_and(AgentDefinition::has_standing_roles) =>
+                {
+                    return Err(PersonOnly::Merge.into());
+                }
+                None => {}
+            }
         }
         // An agent's question is answered in the owner's own words: the
         // agent goes on with them.
@@ -1420,6 +1591,7 @@ where
                 Answerer::InPerson => None,
                 Answerer::Agent { session_id } => Some(session_id),
             },
+            standing,
         };
         match self.workflows.answer(id, &answer).await? {
             AnswerDelivery::Taken => Ok(()),
@@ -1615,33 +1787,21 @@ where
         &self,
         actor: &MacroUserIdStr<'static>,
         id: RunId,
+        acting: Option<ActingAgent>,
     ) -> Result<(), FactoryError> {
         let run = self.owned_run(actor, id).await?;
+        let agents = self.acting_agents(id, acting).await?;
+        let cancelled_by = self
+            .standing_actor(actor, agents.as_ref(), StandingAct::Cancel, acting)
+            .await?;
         match run.end.map(|end| end.outcome) {
             None => {
-                if self.workflows.cancel(id).await? {
-                    return Ok(());
-                }
-                // Temporal had no running workflow for the Run. One may have
-                // started since, which a second cancel reaches; one that
-                // completed before its Run's end was recorded has ended the
-                // Run, though the records don't say so yet.
-                if self.workflows.exists(id).await? {
-                    return if self.workflows.cancel(id).await? {
-                        Ok(())
-                    } else {
-                        Err(FactoryError::RunEnded)
-                    };
-                }
-                // A Run whose workflow never started has nothing to stop: it
-                // ends cancelled here. A workflow that starts late takes no
-                // Step of it, and is cancelled if it is there by now.
-                self.repo
-                    .end_run(id, RunOutcome::Cancelled)
-                    .await
-                    .map_err(internal)?;
-                if self.workflows.exists(id).await? {
-                    self.workflows.cancel(id).await?;
+                self.send_cancel(id).await?;
+                // The agent that asked for the cancel is kept once the
+                // cancel is accepted, so a refused or failed one names no
+                // one; a Run keeps the first cancel's.
+                if let Some(cancelled_by) = &cancelled_by {
+                    self.record_cancel(id, cancelled_by).await?;
                 }
                 Ok(())
             }
@@ -1703,7 +1863,11 @@ pub struct StepServiceImpl<R, E, N = NoOwnerGates, T = NoOwnerGates, P = NoTaskT
 
 impl<R, E> StepServiceImpl<R, E>
 where
-    R: RunRepository + ReviewRoundRepository + MainHoldRepository + EvaluationRepository,
+    R: RunRepository
+        + ReviewRoundRepository
+        + MainHoldRepository
+        + EvaluationRepository
+        + StandingActRepository,
     E: StepExecutor,
 {
     /// Create the Step service, which tells no owner of a waiting Gate,
@@ -1722,7 +1886,11 @@ where
 
 impl<R, E, N, T, P> StepServiceImpl<R, E, N, T, P>
 where
-    R: RunRepository + ReviewRoundRepository + MainHoldRepository + EvaluationRepository,
+    R: RunRepository
+        + ReviewRoundRepository
+        + MainHoldRepository
+        + EvaluationRepository
+        + StandingActRepository,
     E: StepExecutor,
     N: GateNotifier,
     T: TaskNotes,
@@ -1800,7 +1968,11 @@ where
 
 impl<R, E, N, T, P> StepService for StepServiceImpl<R, E, N, T, P>
 where
-    R: RunRepository + ReviewRoundRepository + MainHoldRepository + EvaluationRepository,
+    R: RunRepository
+        + ReviewRoundRepository
+        + MainHoldRepository
+        + EvaluationRepository
+        + StandingActRepository,
     E: StepExecutor,
     N: GateNotifier,
     T: TaskNotes,
@@ -1983,6 +2155,19 @@ where
             )
             .await
             .map_err(internal)?;
+        // The agent and Standing Role that answered are kept beside the
+        // answer; a retry keeps the first.
+        if let Some(standing) = &answer.standing {
+            self.repo
+                .record_standing_act(
+                    answered.key.run_id,
+                    standing.act,
+                    Some(answered.key.seq),
+                    &standing.by,
+                )
+                .await
+                .map_err(internal)?;
+        }
 
         // A Gate its owner was told of is answered: its notification is
         // done, whoever answered.

@@ -3,6 +3,7 @@
 #[cfg(test)]
 mod test;
 
+use bot_id::BotId;
 use chrono::{DateTime, Utc};
 use factory_records::domain::main_hold::{MainHold, RequiredChecksState};
 use factory_records::domain::models::{
@@ -10,6 +11,7 @@ use factory_records::domain::models::{
     StepKey,
 };
 use factory_records::domain::review_rounds::ReviewRound;
+use factory_records::domain::standing_acts::{StandingAct, StandingActRecord, StandingRoleName};
 use factory_records::domain::standing_rules::{OrchestratorDefinition, ProjectRules, RulesSource};
 use macro_user_id::user_id::MacroUserIdStr;
 use serde::{Deserialize, Serialize};
@@ -606,6 +608,10 @@ pub struct RunDetail {
     pub base_required_checks: Option<RequiredChecksState>,
     /// Its review rounds, in order, each with what its reviewers found.
     pub review_rounds: Vec<ReviewRound>,
+    /// What agents did to it under its Factory Definition's Standing
+    /// Roles, in order: who started, cancelled or linked it, and answered
+    /// its Gates.
+    pub standing_acts: Vec<StandingActRecord>,
 }
 
 /// The Control File patterns a person's Runs are checked against: their
@@ -707,6 +713,24 @@ pub enum Answerer {
     },
 }
 
+/// The agent a program acts as when it starts, cancels or links one of
+/// its owner's Runs: what Standing Roles check. None acts for a person in
+/// their own signed-in session, an internal caller, or a program signed
+/// only for the person (their own API key or token, a routine running as
+/// them with no agent): that is the person acting, which Standing Roles do
+/// not govern.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActingAgent {
+    /// Code in an agent session, as the correlation layer validated it
+    /// against the call's credential: its bot acts, when the owner owns
+    /// the session.
+    Session(Uuid),
+    /// Code signed for a bot that runs in no agent session, such as a
+    /// self-hosted agent's code-mode call or a routine's run for an agent:
+    /// the bot its credential is signed for acts.
+    Bot(BotId),
+}
+
 /// What the factory keeps for the Run's owner in person, which an agent
 /// answering for them may not do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -745,6 +769,20 @@ pub enum PersonOnly {
     /// unchanged after a fix.
     #[error("these blockers are the run's owner's to send to another fix")]
     OwnersBlockers,
+}
+
+/// Why an agent may not do `act`, naming the Standing Roles that allow it.
+fn standing_refusal(act: StandingAct, allowing: &[StandingRoleName]) -> String {
+    if allowing.is_empty() {
+        return format!(
+            "no standing role of the run's factory definition allows {act}: the run's owner does it"
+        );
+    }
+    let roles: Vec<&str> = allowing.iter().map(StandingRoleName::as_str).collect();
+    format!(
+        "this agent fills no standing role that allows {act}; the standing roles that allow it: {}",
+        roles.join(", ")
+    )
 }
 
 /// Who set a Queue limit, in words.
@@ -934,6 +972,16 @@ pub enum FactoryError {
     /// for the owner in person.
     #[error(transparent)]
     ReservedForAPerson(#[from] PersonOnly),
+    /// An agent acting for the Run's owner tried an act no Standing Role
+    /// its bot fills allows, under a Factory Definition with Standing
+    /// Roles.
+    #[error("{}", standing_refusal(*act, allowing))]
+    NotInStandingRole {
+        /// The act it tried.
+        act: StandingAct,
+        /// The Standing Roles that allow the act.
+        allowing: Vec<StandingRoleName>,
+    },
     /// The person holds as many places in their Queue as the Queue limit of
     /// the rules a new Run of theirs would start under: Runs waiting on
     /// them at a Gate or a question, and Runs of a Flow with a Gate that

@@ -36,8 +36,8 @@ use crate::domain::board::{
     BoardNext, BoardPage, BoardRun, BoardScope, PullRequestRun, PullRequestRuns,
 };
 use crate::domain::models::{
-    Answerer, ControlFilesSettings, DefinitionSettings, FactoryError, FlowSummary, PersonOnly,
-    RunDetail, SessionStepRef, StandingRulesSettings,
+    ActingAgent, Answerer, ControlFilesSettings, DefinitionSettings, FactoryError, FlowSummary,
+    PersonOnly, RunDetail, SessionStepRef, StandingRulesSettings,
 };
 use crate::domain::ports::FactoryService;
 use crate::domain::step_terminal::TerminalRequest;
@@ -425,6 +425,7 @@ where
     // request names: an agent could otherwise name the file it means to
     // weaken.
     let created_in_person = is_in_person(&caller.authorization, &headers);
+    let acting = acting_agent(&caller.authorization, &headers);
     // The id is lowercase, whatever case the caller named it in: a
     // `MacroUserIdStr` lowercases what it parses, as `"User".id` is stored.
     let actor = caller.authorization.user.macro_user_id;
@@ -437,6 +438,7 @@ where
             body.task_id,
             body.repo_url,
             created_in_person,
+            acting,
         )
         .await?;
     Ok((StatusCode::CREATED, Json(created)))
@@ -931,6 +933,44 @@ fn answerer(
     ))
 }
 
+/// The agent a call acts as for the caller, for Standing Roles to check:
+/// none for the person in their own signed-in session and for an internal
+/// caller. A program in an agent session acts as that session, as the
+/// correlation layer validated it against the call's credential. A program
+/// in no session whose credential is signed for a bot (a self-hosted
+/// agent's code-mode call, a routine's run for an agent) acts as that bot:
+/// the signature names it, so it cannot be forged. A program signed only
+/// for the person (their own API key or token, a routine running as them
+/// with no agent) is the person acting, which Standing Roles do not
+/// govern. So is a public MCP credential in no session: Macro signs the
+/// person's own MCP client or API key, directly or through code mode, for
+/// the Macro bot only to label its posts (`signed_for_the_person`).
+fn acting_agent(
+    authorization: &UserOrInternalAuthorization,
+    headers: &HeaderMap,
+) -> Option<ActingAgent> {
+    if is_in_person(authorization, headers) || authorization.caller != UserOrInternalCaller::User {
+        return None;
+    }
+    agent_correlation::context::current_session()
+        .map(ActingAgent::Session)
+        .or_else(|| {
+            authorization
+                .user
+                .agent_id
+                .filter(|_| !signed_for_the_person(&authorization.user))
+                .map(ActingAgent::Bot)
+        })
+}
+
+/// Whether a credential in no session names the Macro bot only as the
+/// label of the person's own client: public MCP signs the person's MCP
+/// client or API key for `MACRO_AI_BOT_ID`, with no routine, where a
+/// self-hosted agent's call is signed for its own bot.
+fn signed_for_the_person(user: &macro_authorization::MacroUserAuthentication) -> bool {
+    user.agent_id == Some(bot_id::MACRO_AI_BOT_ID) && user.routine_id.is_none()
+}
+
 /// Whether the caller is the person in their own signed-in session: not an
 /// internal caller, an API key or token, an agent's or a routine's program.
 /// An agent's account signs in as a person does; the service, which reads
@@ -969,14 +1009,16 @@ pub(crate) fn is_in_person(
 pub async fn cancel_run_handler<S, Auth>(
     State(state): State<FactoryRouterState<S, Auth>>,
     caller: MacroAuthorizationExtractor<Auth, UserOrInternal>,
+    headers: HeaderMap,
     Path(params): Path<GetRunParams>,
 ) -> Result<StatusCode, FactoryError>
 where
     S: FactoryService,
     Auth: MacroAuthorizationService,
 {
+    let acting = acting_agent(&caller.authorization, &headers);
     let actor = caller.authorization.user.macro_user_id;
-    state.service.cancel_run(&actor, params.id).await?;
+    state.service.cancel_run(&actor, params.id, acting).await?;
     Ok(StatusCode::ACCEPTED)
 }
 
@@ -1044,6 +1086,7 @@ where
 pub async fn link_task_handler<S, Auth>(
     State(state): State<FactoryRouterState<S, Auth>>,
     caller: MacroAuthorizationExtractor<Auth, UserOrInternal>,
+    headers: HeaderMap,
     Path(params): Path<GetRunParams>,
     Json(body): Json<LinkTaskRequest>,
 ) -> Result<Json<RunDetail>, FactoryError>
@@ -1051,11 +1094,12 @@ where
     S: FactoryService,
     Auth: MacroAuthorizationService,
 {
+    let acting = acting_agent(&caller.authorization, &headers);
     let actor = caller.authorization.user.macro_user_id;
     Ok(Json(
         state
             .service
-            .link_task(&actor, params.id, body.task_id)
+            .link_task(&actor, params.id, body.task_id, acting)
             .await?,
     ))
 }
@@ -1146,6 +1190,7 @@ impl FactoryError {
             | FactoryError::NotAPerson
             | FactoryError::NotATeamAdmin
             | FactoryError::ReservedForAPerson(_)
+            | FactoryError::NotInStandingRole { .. }
             | FactoryError::NotTheAutomationOwner
             | FactoryError::NotARoutine => StatusCode::FORBIDDEN,
             FactoryError::NotFound | FactoryError::TaskNotFound => StatusCode::NOT_FOUND,
@@ -1188,6 +1233,9 @@ pub enum RunErrorCode {
     /// An agent answering for the Run's owner tried what the factory keeps
     /// for the owner in person.
     ReservedForAPerson,
+    /// An agent acting for the caller tried an act no Standing Role its bot
+    /// fills allows; the message names the Standing Roles that allow it.
+    NotInStandingRole,
     /// The caller's linked GitHub account cannot read the repository of
     /// their team's Factory Definition.
     UnreachableDefinition,
@@ -1220,6 +1268,7 @@ impl FactoryError {
             FactoryError::ControlFilesNotApproved => Some(RunErrorCode::ControlFilesNotApproved),
             FactoryError::QueueFull { .. } => Some(RunErrorCode::QueueFull),
             FactoryError::ReservedForAPerson(_) => Some(RunErrorCode::ReservedForAPerson),
+            FactoryError::NotInStandingRole { .. } => Some(RunErrorCode::NotInStandingRole),
             FactoryError::UnreachableDefinition => Some(RunErrorCode::UnreachableDefinition),
             FactoryError::InvalidDefinition(_) => Some(RunErrorCode::InvalidDefinition),
             FactoryError::DefinitionNamed => Some(RunErrorCode::DefinitionNamed),

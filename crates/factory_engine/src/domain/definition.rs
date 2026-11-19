@@ -13,7 +13,10 @@
 //! - `factory.json`: the format's `version` and the Flows, by name.
 //! - `flows/{name}.json`: each Flow, in the built-in Flows' format.
 //! - `agents.json`: the Agents and the Roles they fill, in `FACTORY_AGENTS`'
-//!   format. It must fill every Role its Flows name.
+//!   format. It must fill every Role its Flows name. Its optional
+//!   `standing` section holds the Standing Roles: which Agents' bots may
+//!   start, cancel or link a Run, or answer its plan or Blockers Gate, for
+//!   its owner (`agents::standing`).
 //! - `rules.json` (optional): the Standing Rules (`standingRules`, an
 //!   Orchestrator Definition) and the Control File patterns
 //!   (`controlFiles`). Left out, the factory's defaults apply.

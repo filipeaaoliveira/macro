@@ -156,6 +156,8 @@ async fn the_starter_definition_reads() {
     let scorers = definition.evaluation.scorers();
     assert!(!scorers.is_empty());
     assert!(scorers.iter().all(|scorer| scorer.sample_percent == 0));
+    // The starter documents Standing Roles without turning them on.
+    assert!(!definition.agents.has_standing_roles());
 }
 
 #[tokio::test]
@@ -811,4 +813,90 @@ async fn more_secret_shapes_do_not_read_and_public_text_does() {
     );
     assert_eq!(kind("xoxe-0123456789abcdefABCDEF").await, Some("xoxe-"));
     assert_eq!(kind("https://github.com/macro/app").await, None);
+}
+
+/// `agents.json` with the Definition's Agents and `standing` as its
+/// Standing Roles.
+fn standing_agents(standing: &str) -> String {
+    format!(
+        r#"{{
+            "agents": {{
+                "primary": {{ "bot": "00000000-0000-0000-0000-00000000c1a0" }},
+                "backup": {{ "bot": "00000000-0000-0000-0000-00000000c0de" }}
+            }},
+            "roles": {{ "planner": ["primary", "backup"], "writer": ["primary"] }},
+            "standing": {standing}
+        }}"#
+    )
+}
+
+/// A Definition reads with one Agent in every Standing Role, and with an
+/// Agent per Standing Role.
+#[tokio::test]
+async fn a_definition_reads_with_standing_roles() {
+    let one_agent = standing_agents(
+        r#"{
+            "intake": { "acts": ["start", "link"], "agents": ["primary"] },
+            "gatekeeper": { "acts": ["answer_plan", "answer_blockers"], "agents": ["primary"] },
+            "operator": { "acts": ["cancel"], "agents": ["primary"] }
+        }"#,
+    );
+    let own_agents = standing_agents(
+        r#"{
+            "intake": { "description": "Starts runs", "acts": ["start", "link"], "agents": ["backup"] },
+            "gatekeeper": { "acts": ["answer_plan"], "agents": ["primary", "backup"] }
+        }"#,
+    );
+
+    for agents in [one_agent, own_agents] {
+        let definition = read(with("agents.json", &agents))
+            .await
+            .expect("a definition with standing roles");
+        assert!(definition.agents.has_standing_roles());
+    }
+}
+
+/// The validator refuses an unknown act, any merge, an Agent the
+/// Definition does not have, a Standing Role no Agent fills, and a
+/// Standing Role named twice, naming the file, the Standing Role and the
+/// problem.
+#[tokio::test]
+async fn standing_roles_that_do_not_hold_together_do_not_read() {
+    let refused = [
+        (
+            r#"{ "intake": { "acts": ["start", "approve_everything"], "agents": ["primary"] } }"#,
+            r#"standing role intake names act "approve_everything", which is not one of"#,
+        ),
+        (
+            r#"{ "release": { "acts": ["merge"], "agents": ["primary"] } }"#,
+            r#"standing role release names act "merge": no standing role merges"#,
+        ),
+        (
+            r#"{ "gatekeeper": { "acts": ["answer_merge"], "agents": ["primary"] } }"#,
+            r#"standing role gatekeeper names act "answer_merge": no standing role merges"#,
+        ),
+        (
+            r#"{ "intake": { "acts": ["start"], "agents": ["stranger"] } }"#,
+            "standing role intake lists agent stranger, which the definition does not have",
+        ),
+        (
+            r#"{ "intake": { "acts": ["start"], "agents": [] } }"#,
+            "standing role intake lists no agent",
+        ),
+        (
+            r#"{
+                "intake": { "acts": ["start"], "agents": ["primary"] },
+                "intake": { "acts": ["start", "cancel"], "agents": ["backup"] }
+            }"#,
+            r#"key "intake" appears twice"#,
+        ),
+    ];
+
+    for (standing, why) in refused {
+        let read = read(with("agents.json", &standing_agents(standing))).await;
+        assert!(
+            matches!(&read, Err(DefinitionError::Unreadable { path, error }) if path == "agents.json" && error.contains(why)),
+            "{why}: {read:?}"
+        );
+    }
 }
