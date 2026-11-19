@@ -539,3 +539,31 @@ async fn a_queued_merge_whose_checks_turned_red_is_not_merged() {
     assert_eq!(outcome(&report), "changed");
     assert!(github.state().merges.is_empty());
 }
+
+/// A merge that goes on with its approval after waiting in the queue merges
+/// nothing once the pull request's head moved from the head approved, even
+/// with every check on the new head passing: its checks run again and the
+/// merge Gate asks again.
+#[tokio::test]
+async fn a_queued_merge_whose_head_moved_is_not_merged() {
+    let github = github_on(OLD_BASE, true);
+    if let Some(pull_request) = github.state().pull_request.as_mut() {
+        pull_request.head_sha = UPDATED.to_string();
+    }
+    let repo = FakeRepo::default();
+    let run_id = RunId::generate();
+    approved(&repo, run_id).await;
+    let routes = routes();
+
+    let report = steps(&github, &repo)
+        .merge(crate::domain::models::StepInput {
+            routes: &routes,
+            ..input(run_id)
+        })
+        .await
+        .expect("merge");
+
+    assert_eq!(outcome(&report), "changed");
+    assert!(report.output.contains(UPDATED), "{}", report.output);
+    assert!(github.state().merges.is_empty(), "GitHub is never asked");
+}
