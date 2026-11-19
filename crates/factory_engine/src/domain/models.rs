@@ -568,9 +568,11 @@ pub enum BranchUpdating {
     Started,
     /// The branch's head is no longer the commit named: nothing merged.
     HeadMoved,
-    /// GitHub declined, for this reason: the base and the branch conflict,
-    /// or there is nothing to merge.
-    Refused(String),
+    /// The base and the branch conflict, for this reason: nothing merged.
+    Conflict(String),
+    /// GitHub declined for another reason, as for a token that lacks a
+    /// scope: no conflict, and asking again changes nothing.
+    Declined(String),
 }
 
 /// What an agent handed back for a Step.

@@ -882,9 +882,12 @@ its Flow does not route above `merge` would fall through to the merge):
   pushed is lost, nothing is force-pushed, and the commits review rounds
   and checks recorded stay reachable. GitHub merges it (`update_branch`,
   "Update branch", only while the branch's head is the one read; a push
-  since fails the attempt for a retry); when GitHub cannot, as for a
+  since fails the attempt for a retry); when GitHub answers with a merge
   conflict, the writer resolves it in its session (`resolve.md`: `git
-  merge` the base's head, no rebase, reset or force-push). The update is
+  merge` the base's head, no rebase, reset or force-push). Any other
+  refusal from GitHub (a token without a scope, a branch it may not push
+  to) is no conflict: it fails the Step for good with GitHub's message
+  (`UpdateDeclined`). The update is
   kept before the agent is asked (`factory_branch_update`), so a retry goes
   on the way it started. Then the repository's checks round runs on the
   branch, as for `write` and `fix`. It ends `done` when the branch's head

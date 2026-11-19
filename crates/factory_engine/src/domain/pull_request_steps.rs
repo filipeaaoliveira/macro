@@ -124,6 +124,10 @@ pub enum PullRequestStepError {
     /// reads the branch again.
     #[error("the run's branch moved while it was updated: {0}")]
     BranchMoving(String),
+    /// GitHub declined to merge the Run's base into its branch for a reason
+    /// other than a conflict, as for a token that lacks a scope.
+    #[error("github declined to merge the base into the run's branch: {0}")]
+    UpdateDeclined(String),
     /// GitHub could not be asked.
     #[error("github failed: {report:?}")]
     Github {
@@ -182,6 +186,7 @@ impl Retryable for PullRequestStepError {
             | Self::NoPullRequest
             | Self::NoMergeHead
             | Self::NoBase
+            | Self::UpdateDeclined(_)
             | Self::ControlFiles(_) => false,
         }
     }
@@ -1214,8 +1219,11 @@ where
                             conflict: false,
                             updated_head: None,
                         },
-                        BranchUpdating::Refused(why) => {
-                            tracing::info!(%why, "github did not merge the base into the run's branch");
+                        BranchUpdating::Declined(why) => {
+                            return Err(PullRequestStepError::UpdateDeclined(why));
+                        }
+                        BranchUpdating::Conflict(why) => {
+                            tracing::info!(%why, "the run's base conflicts with its branch");
                             BranchUpdate {
                                 base_sha,
                                 from_head: head,

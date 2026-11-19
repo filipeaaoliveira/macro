@@ -304,7 +304,7 @@ async fn an_update_merges_the_base_in_and_a_retry_goes_on_from_it() {
 #[tokio::test]
 async fn an_update_github_cannot_merge_is_a_conflict() {
     let github = github_on(NEW_BASE, false);
-    github.state().update_answer = Some(BranchUpdating::Refused(
+    github.state().update_answer = Some(BranchUpdating::Conflict(
         "merge conflict between base and head".to_string(),
     ));
     let repo = FakeRepo::default();
@@ -324,6 +324,33 @@ async fn an_update_github_cannot_merge_is_a_conflict() {
     assert_eq!(update, conflict);
     assert_eq!(again, conflict);
     assert_eq!(github.state().updates.len(), 1);
+}
+
+/// GitHub declining an update for a reason other than a conflict, as for
+/// a token that lacks a scope, fails the Step with GitHub's reason, for
+/// good: it is no conflict for the writer or a person, and nothing is kept.
+#[tokio::test]
+async fn an_update_github_declines_is_no_conflict() {
+    let github = github_on(NEW_BASE, false);
+    github.state().update_answer = Some(BranchUpdating::Declined(
+        "Resource not accessible by integration".to_string(),
+    ));
+    let repo = FakeRepo::default();
+
+    let declined = steps(&github, &repo)
+        .update_branch(&input(RunId::generate()))
+        .await;
+
+    let Err(error) = declined else {
+        panic!("a declined update is no conflict: {declined:?}");
+    };
+    assert!(matches!(error, PullRequestStepError::UpdateDeclined(_)), "{error:?}");
+    assert!(!crate::domain::ports::Retryable::retryable(&error));
+    assert!(
+        error.to_string().contains("Resource not accessible by integration"),
+        "{error}"
+    );
+    assert!(repo.queue().updates.is_empty());
 }
 
 /// A push to the branch since it was read is never merged over: the update

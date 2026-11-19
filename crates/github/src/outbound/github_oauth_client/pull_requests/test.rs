@@ -796,8 +796,9 @@ async fn update_pull_request_branch_names_the_head_it_updates() {
     );
 }
 
-/// A head that moved, and a base that conflicts with the branch, are
-/// GitHub's answers about the branch, told apart.
+/// A head that moved, a base that conflicts with the branch, and any other
+/// refusal are GitHub's answers about the branch, told apart: only GitHub's
+/// merge-conflict answer is a conflict.
 #[tokio::test]
 async fn update_pull_request_branch_reads_github_s_refusals() {
     let (moved, client) = answering(
@@ -833,9 +834,32 @@ async fn update_pull_request_branch_reads_github_s_refusals() {
         .unwrap();
     assert_eq!(
         answer,
-        GithubBranchUpdate::Refused("merge conflict between base and head".to_string())
+        GithubBranchUpdate::Conflict("merge conflict between base and head".to_string())
     );
     conflict.finish();
+
+    // Any other 422 is no conflict, and says what GitHub said.
+    let (scope, client) = answering(
+        "422 Unprocessable Entity",
+        r#"{"message":"Resource not accessible: the token lacks the workflow scope"}"#,
+    );
+    let answer = client
+        .update_pull_request_branch(
+            "token",
+            "macro",
+            "app",
+            7,
+            "1111111111111111111111111111111111111111",
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        answer,
+        GithubBranchUpdate::Declined(
+            "Resource not accessible: the token lacks the workflow scope".to_string()
+        )
+    );
+    scope.finish();
 
     let (forbidden, client) = answering("403 Forbidden", r#"{"message":"Forbidden"}"#);
     let answer = client

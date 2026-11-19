@@ -555,7 +555,8 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
         Ok(match updated {
             GithubBranchUpdate::Started => BranchUpdating::Started,
             GithubBranchUpdate::HeadMoved => BranchUpdating::HeadMoved,
-            GithubBranchUpdate::Refused(why) => BranchUpdating::Refused(why),
+            GithubBranchUpdate::Conflict(why) => BranchUpdating::Conflict(why),
+            GithubBranchUpdate::Declined(why) => BranchUpdating::Declined(why),
         })
     }
 

@@ -128,7 +128,7 @@ async fn a_branch_changed_after_the_merge_ends_resolved() {
 #[tokio::test]
 async fn a_conflict_the_writer_resolves_ends_resolved() {
     let github = behind();
-    github.state().update_answer = Some(BranchUpdating::Refused(
+    github.state().update_answer = Some(BranchUpdating::Conflict(
         "merge conflict between base and head".to_string(),
     ));
     github.state().head = Some(RESOLVED.to_string());
@@ -156,7 +156,7 @@ async fn a_conflict_no_one_resolved_goes_to_a_person() {
     let repository = repository();
 
     let gave_up = behind();
-    gave_up.state().update_answer = Some(BranchUpdating::Refused("conflict".to_string()));
+    gave_up.state().update_answer = Some(BranchUpdating::Conflict("conflict".to_string()));
     let mut update = input(&[]);
     update.repository = Some(&repository);
     let report = run_update(
@@ -170,7 +170,7 @@ async fn a_conflict_no_one_resolved_goes_to_a_person() {
     assert_eq!(report.outcome.as_str(), "conflict");
 
     let lacking = behind();
-    lacking.state().update_answer = Some(BranchUpdating::Refused("conflict".to_string()));
+    lacking.state().update_answer = Some(BranchUpdating::Conflict("conflict".to_string()));
     // A head that holds neither: a rewrite, or no merge at all.
     lacking.state().head = Some("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee".to_string());
     let mut update = input(&[]);

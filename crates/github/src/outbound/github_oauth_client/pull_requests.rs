@@ -42,6 +42,11 @@ const MISSING_REFERENCE: &str = "Reference does not exist";
 /// updated because its head is no longer the commit the caller named.
 const EXPECTED_HEAD_MOVED: &str = "expected head sha didn";
 
+/// What GitHub's message holds, in any case, when a pull request's branch
+/// is not updated because its base and it conflict ("merge conflict between
+/// base and head").
+const MERGE_CONFLICT: &str = "merge conflict";
+
 /// What GitHub did when asked to merge a pull request's base into its
 /// branch ([`GithubOauthImpl::update_pull_request_branch`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,9 +57,13 @@ pub enum GithubBranchUpdate {
     /// The branch's head is no longer the commit the caller named: someone
     /// pushed to it, and nothing was merged.
     HeadMoved,
-    /// GitHub declined, with its message: the base and the branch conflict,
-    /// or there is nothing to merge.
-    Refused(String),
+    /// The base and the branch conflict, with GitHub's message: nothing
+    /// was merged, and someone resolves it by hand.
+    Conflict(String),
+    /// GitHub declined for another reason, with its message, as for a
+    /// token that lacks a scope or a branch it may not push to: no
+    /// conflict, and asking again changes nothing.
+    Declined(String),
 }
 
 /// Whether git takes `branch` as a branch's name, by the rules of
@@ -885,7 +894,10 @@ impl GithubOauthImpl {
             if message.starts_with(EXPECTED_HEAD_MOVED) {
                 return Ok(GithubBranchUpdate::HeadMoved);
             }
-            return Ok(GithubBranchUpdate::Refused(message));
+            if message.to_ascii_lowercase().contains(MERGE_CONFLICT) {
+                return Ok(GithubBranchUpdate::Conflict(message));
+            }
+            return Ok(GithubBranchUpdate::Declined(message));
         }
         Err(refusal(status).unwrap_or_else(|| {
             unexpected(
