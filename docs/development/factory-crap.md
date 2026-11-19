@@ -56,7 +56,7 @@ Not scored:
 | --- | --: | --: | --: | --: | --: | --: | --: | --: | --: |
 | factory_records | 285 | 2 | 8 | 11.1 | 23.2 | 28.6 | 5 | 0 | 26 |
 | factory_engine | 1269 | 2 | 10 | 14.8 | 34 | 182 | 52 | 14 | 159 |
-| factory_service | see below | | | | | | | | |
+| factory_service | 10 | 2 | – | – | – | 420 | 4 | 2 | 10 |
 | factory-runs (TS), as crap4ts scores it | 245 | 2 | 6 | 9.1 | 20 | 56 | 5 | 1 | 51 |
 | factory-runs (TS), corrected | 245 | 2 | 4.1 | 6 | 12 | 18.4 | 1 | 0 | 32 |
 
@@ -70,7 +70,11 @@ lines' coverage.
 worst TypeScript function is then `toRun` in `queries/runs.ts` (CC 18, 89%,
 18.4).
 
-Two kinds of Rust function sit above 30:
+`factory_service` is the composition root: its `main`s, `run` (CC 20, 420)
+and `serve` (CC 8, 72) wire the adapters and start the servers, and its one
+test reaches none of them.
+
+Two kinds of Rust function sit above 30 in the crates:
 
 - Untested ones: `FactoryServiceImpl::reply_to_gate` (CC 13, 0%, 182),
   `MainWatchWorkflow::run` (CC 9, 0%, 90), and the GitHub and Temporal
@@ -84,7 +88,8 @@ Two kinds of Rust function sit above 30:
 Measured on an 11-core Apple M3 with 18 GB of RAM, `CARGO_BUILD_JOBS=2`,
 `nice -n 15`, the packages one after another into one coverage target. The
 first package pays for the instrumented build of the dependencies it shares
-with the others. Two runs each; the second ran through the script.
+with the others. `factory_records` and `factory_engine` ran twice, the second
+time through the script; `factory_service` once.
 
 | Step | Wall | CPU (user + sys) | Peak RSS | Coverage target after |
 | --- | --: | --: | --: | --: |
@@ -118,6 +123,9 @@ machine, so the checks should score changed packages only.
   functions.
 - Leave the functions already above 30 to the baseline; don't fail every
   change on them.
+- Leave out service binaries' startup code (`services/*/src/main.rs` and the
+  other `main`s): it wires adapters and is exercised by running the service,
+  not by unit tests.
 - Show reviewers the changed functions above 16 (crap4ts's default; 57 Rust
   functions and 1 TypeScript function today) as rows to look at, not failures.
 - Time out the Rust check at 30 minutes cold at two build jobs (about three
