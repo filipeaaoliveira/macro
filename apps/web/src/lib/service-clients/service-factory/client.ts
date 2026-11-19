@@ -73,10 +73,16 @@ export type StartRunErrorCode =
   | 'QUEUE_FULL'
   | 'DEFINITION_UNREADABLE';
 
-/** The codes the service refuses a start with. */
+/**
+ * The codes the service refuses a start with. A person starts as themselves,
+ * so Standing Roles never refuse them.
+ */
 type StartRunRefusal = Exclude<
   RunErrorCode,
-  'controlFilesNotApproved' | 'reservedForAPerson' | 'definitionNamed'
+  | 'controlFilesNotApproved'
+  | 'reservedForAPerson'
+  | 'definitionNamed'
+  | 'notInStandingRole'
 >;
 
 const START_RUN_ERROR_CODES: Record<StartRunRefusal, StartRunErrorCode> = {
