@@ -9,6 +9,7 @@ mod diff;
 mod index;
 mod key;
 mod pull_request;
+mod repository_name;
 mod update;
 
 use chrono::{DateTime, Utc};
@@ -43,6 +44,7 @@ pub use pull_request::{
     GithubPullRequestUser, GithubRepositoryAccess, GithubRepositoryMergeSettings,
     MergeGithubPullRequestRequest, MergeGithubPullRequestResponse, latest_reviews,
 };
+pub use repository_name::{is_github_owner, is_github_repository_name};
 pub use update::{
     GithubDraftOutcome, GithubPullRequestState, GithubPullRequestUpdateRejection,
     GithubStateOutcome, SetGithubPullRequestDraftRequest, SetGithubPullRequestDraftResponse,

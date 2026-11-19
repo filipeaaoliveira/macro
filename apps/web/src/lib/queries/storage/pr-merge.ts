@@ -33,8 +33,9 @@ export function invalidateMergedPullRequestCaches(): void {
 
 /**
  * Merge a GitHub pull request as the signed-in user, with their own GitHub
- * grant. GitHub decides whether they may: a refusal rejects with GitHub's
- * message as the error text, so callers can show it as is.
+ * grant. GitHub decides whether they may, and the route refuses a pull
+ * request a factory Run that has not ended opened: a refusal rejects with
+ * its message as the error text, so callers can show it as is.
  */
 export function useMergeGithubPullRequestMutation(
   options?: UseMergeGithubPullRequestMutationOptions

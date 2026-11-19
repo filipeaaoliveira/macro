@@ -21,6 +21,12 @@ use crate::domain::{
     ports::GithubOauth,
 };
 
+use github_pull_requests::domain::models::{is_github_owner, is_github_repository_name};
+
+/// The refusal of a request whose owner or repository is not a name
+/// GitHub gives.
+pub const INVALID_REPOSITORY: &str = "owner or repo is not a GitHub repository name";
+
 mod branches;
 pub use branches::{ComparedChanges, ComparedFile, FileTooLarge};
 mod pull_requests;
@@ -553,6 +559,15 @@ impl GithubOauth for GithubOauthImpl {
         merge_method: GithubMergeMethod,
         head_sha: Option<String>,
     ) -> Result<GithubMergeOutcome, Self::Err> {
+        // The parts are written into the path as they come: refuse any that
+        // could reach another pull request than the one named.
+        if !is_github_owner(owner) || !is_github_repository_name(repo) {
+            return Ok(GithubMergeOutcome::Rejected {
+                rejection: GithubMergeRejection::Invalid,
+                message: INVALID_REPOSITORY.to_string(),
+            });
+        }
+
         #[derive(serde::Serialize)]
         struct MergeRequest {
             merge_method: GithubMergeMethod,

@@ -24,6 +24,7 @@ use contacts::{domain::service::SqsContactsIngress, outbound::ingress::SqsContac
 use document_storage_service_client::DocumentStorageServiceClient;
 use entity_access::{domain::service::EntityAccessServiceImpl, outbound::PgAccessRepository};
 use entity_registry::{EntityRegistryServiceImpl, PgEntityRegistryRepository};
+use factory_records::outbound::pg_run_repository::PgRunRepository;
 use foreign_entity::{
     domain::service::ForeignEntityServiceImpl,
     outbound::pg_foreign_entity_repo::PgForeignEntityRepo,
@@ -97,9 +98,11 @@ use crate::{
         },
     },
     config::{Config, Environment},
+    domain::factory_merge_guard::FactoryMergeGuard,
     microsoft_token_cipher::{
         EnvelopeMicrosoftTokenCipher, KmsDataKeyProvider, MicrosoftTokenCipher,
     },
+    outbound::factory_merge_guard::GithubLinkSight,
     outbound::team_owned_entity_cleanup::{
         TeamOwnedEntityCleanupAdapter, TeamOwnedEntityCleanupConfig,
     },
@@ -917,13 +920,18 @@ async fn run_server() -> anyhow::Result<()> {
         ),
     ));
 
+    let github_link_service = Arc::new(github_link_service_impl);
     let server_result = api::setup_and_serve(
         ApiContext {
             inbox_connections: Arc::new(email::domain::inbox_entitlement::InboxConnectionService(
                 email::outbound::EmailPgRepo::new(db.clone()),
             )),
+            factory_merge_guard: Arc::new(FactoryMergeGuard::new(
+                PgRunRepository::new(db.clone()),
+                GithubLinkSight(github_link_service.clone()),
+            )),
             db,
-            github_link_service: Arc::new(github_link_service_impl),
+            github_link_service,
             auth_client: Arc::new(auth_client),
             microsoft_auth,
             cursor_api_key_cipher,

@@ -96,6 +96,7 @@ entity_registry = { path = "../../crates/entity_registry/entity_registry", featu
   "postgres",
 ] }
 foreign_entity = { path = "../../crates/foreign_entity" }
+factory_records = { path = "../../crates/factory_records" }
 favorites = { path = "../../crates/favorites", features = ["postgres"] }
 feature_flags = { path = "../../crates/feature_flags" }
 fusionauth = { path = "../../crates/fusionauth" }

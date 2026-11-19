@@ -8,6 +8,7 @@ mod flaws;
 mod gate_replies;
 mod insights;
 mod main_hold;
+mod merge_guard;
 mod quality;
 mod review_rounds;
 mod self_improvement;

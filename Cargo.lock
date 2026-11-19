@@ -2348,6 +2348,7 @@ dependencies = [
  "email_validator",
  "entity_access",
  "entity_registry",
+ "factory_records",
  "favorites",
  "feature_flags",
  "foreign_entity",
