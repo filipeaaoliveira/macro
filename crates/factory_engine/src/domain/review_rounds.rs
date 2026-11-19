@@ -27,6 +27,7 @@ pub use brief::{BRIEF_BUDGET, blockers_brief, carried_blockers, fenced_review, f
 use std::collections::BTreeMap;
 
 use agent_session::domain::session_task::TaskDocumentId;
+use factory_records::domain::merge_queue::MergeQueueRepository;
 use factory_records::domain::models::StepKey;
 use factory_records::domain::models::{Outcome, RunId};
 use factory_records::domain::ports::RunRepository;
@@ -469,7 +470,7 @@ where
 impl<R, G, T, P> ReviewService for ReviewRoundsImpl<R, G, T, P>
 where
     P: TaskThread,
-    R: RunRepository + ReviewRoundRepository,
+    R: RunRepository + ReviewRoundRepository + MergeQueueRepository,
     G: PullRequests,
     T: TaskDirectory,
 {
@@ -544,6 +545,18 @@ where
     #[tracing::instrument(err, skip_all, fields(run_id = %closing.run_id, seq = closing.seq))]
     async fn close_round(&self, closing: ReviewRoundClosing) -> Result<Outcome, StepError> {
         let ended = self.closed(&closing).await?;
+        // The head a passed round reviewed is the one an update of the
+        // branch is told apart from: only GitHub's merge of the base into
+        // it skips the review that follows an update. Kept on a retry too.
+        if ended == ReviewRoundOutcome::Pass {
+            let round = self.round(closing.run_id, closing.seq).await?;
+            if let Some(head) = round.head_sha.as_deref() {
+                self.repo
+                    .set_reviewed_head(closing.run_id, head)
+                    .await
+                    .map_err(internal)?;
+            }
+        }
         // The round's reviewers are told as one comment, once it closed.
         let closed = RunUpdate::RoundClosed { seq: closing.seq };
         post_update(&self.repo, &self.thread, closing.run_id, closed).await;

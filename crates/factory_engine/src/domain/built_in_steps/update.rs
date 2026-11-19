@@ -12,14 +12,17 @@
 //! Flow asks about at a Gate).
 //!
 //! The Step ends:
-//! - `done` when the branch's head is still the one the merge GitHub made
-//!   on the factory's asking made, and its checks passed: only the base
-//!   came in, so the Run goes on to CI, and the merge Gate asks again;
+//! - `done` when the branch's head is a merge commit whose parents are
+//!   exactly the head the Run's review last passed on and the base's commit
+//!   the factory asked GitHub to merge, it is still the branch's head, and
+//!   its checks passed: only the base came in, so the Run goes on to CI,
+//!   and the merge Gate asks again. That merge is then kept as reviewed;
 //! - `resolved` when anything else is on it now, as an agent's resolution
 //!   of a conflict, a person's pushed before the conflict Gate's `retry`
-//!   (the branch then holds its base already), or a fix a checks round
-//!   asked for: the change itself changed, so its review and acceptance
-//!   run again;
+//!   (the branch then holds its base already, or GitHub merged a moved base
+//!   into the person's head), a push while GitHub's merge was awaited, or a
+//!   fix a checks round asked for: the change itself changed, so its review
+//!   and acceptance run again;
 //! - `conflict` when the agent could not resolve the conflict, or what it
 //!   pushed does not hold the base and every commit the branch had;
 //! - `red` when the checks never passed, and `merged` or `closed` when the
@@ -68,12 +71,6 @@ where
             Update::Ended(report) => Ok(report),
             Update::Merged(update) => {
                 let head = update.updated_head.clone().unwrap_or_default();
-                // Only a merge GitHub made on the factory's asking moved the
-                // branch from where the update started; a branch that held
-                // its base already holds someone else's commits (a person's
-                // or an agent's resolution after the conflict Gate's
-                // `retry`), which no review has seen.
-                let factory_merge = update.from_head != head;
                 let instructions = UPDATE_INSTRUCTIONS
                     .replace("{base_sha}", &update.base_sha)
                     .replace("{head}", &head);
@@ -83,28 +80,36 @@ where
                 if checked.outcome != Outcome::done() {
                     return Ok(checked);
                 }
-                if !factory_merge {
+                // Only GitHub's merge of the base into the head the review
+                // passed on goes on without a review: anyone's other
+                // commits, a merge from a head someone pushed, or a merge
+                // someone made by hand, none of which a review has seen,
+                // go back through it.
+                if let Err(why) = self
+                    .pull_requests
+                    .merged_only_base(&input, &update, &head)
+                    .await?
+                {
+                    return Ok(StepReport {
+                        outcome: outcome(RESOLVED),
+                        output: format!("{why}, so its review runs again.\n\n{}", checked.output),
+                    });
+                }
+                let now = self.pull_requests.branch_head(&input).await?;
+                if now.as_deref() != Some(head.as_str()) {
                     return Ok(StepReport {
                         outcome: outcome(RESOLVED),
                         output: format!(
-                            "The branch already held the base at {head}, through commits the \
-                             factory did not make, so its review runs again.\n\n{}",
+                            "The base was merged into the branch at {head}, and the branch \
+                             changed since, so its review runs again.\n\n{}",
                             checked.output
                         ),
                     });
                 }
-                let now = self.pull_requests.branch_head(&input).await?;
-                if now.as_deref() == Some(head.as_str()) {
-                    return Ok(checked);
-                }
-                Ok(StepReport {
-                    outcome: outcome(RESOLVED),
-                    output: format!(
-                        "The base was merged into the branch at {head}, and the branch changed \
-                         since, so its review runs again.\n\n{}",
-                        checked.output
-                    ),
-                })
+                // Only the base came in: the merge stands for what the
+                // review passed on, for the next update to merge into.
+                self.pull_requests.keep_reviewed_head(&input, &head).await?;
+                Ok(checked)
             }
             Update::Conflict(update) => {
                 let instructions = RESOLVE_INSTRUCTIONS

@@ -464,6 +464,20 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
             .await?)
     }
 
+    #[tracing::instrument(err, skip(self, owner))]
+    async fn commit_parents(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        sha: &str,
+    ) -> Result<Option<Vec<String>>, GithubPullRequestsErr> {
+        let token = self.token(owner).await?;
+        Ok(self
+            .github
+            .commit_parents(&token, repository.owner(), repository.name(), sha)
+            .await?)
+    }
+
     #[tracing::instrument(err, skip(self, owner, pull_request), fields(branch = %pull_request.branch))]
     async fn open(
         &self,

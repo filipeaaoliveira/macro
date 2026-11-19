@@ -1643,6 +1643,9 @@ pub(crate) struct FakeGithubState {
     pub(crate) descendants: BTreeSet<(String, String)>,
     /// The merge base of two commits neither contains the other of.
     pub(crate) merge_bases: BTreeMap<(String, String), String>,
+    /// The parents of each commit, by its id; a commit not listed is none
+    /// GitHub has.
+    pub(crate) parents: BTreeMap<String, Vec<String>>,
     /// The head commit of each branch that is not a Run's, by its name.
     pub(crate) other_heads: BTreeMap<String, String>,
     /// The heads updates of the Run's branch were asked from, in order.
@@ -2029,6 +2032,15 @@ impl PullRequests for FakeGithub {
         }
         state.deleted_branches.push(run_branch(run_id));
         Ok(BranchDeletion::Deleted)
+    }
+
+    async fn commit_parents(
+        &self,
+        _owner: &MacroUserIdStr<'static>,
+        _repository: &CodeRepository,
+        sha: &str,
+    ) -> Result<Option<Vec<String>>, FakeGithubError> {
+        Ok(self.state().parents.get(sha).cloned())
     }
 
     async fn merge_base(

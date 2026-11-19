@@ -385,6 +385,16 @@ pub trait PullRequests: Send + Sync + 'static {
         head: &str,
     ) -> impl Future<Output = Result<Option<String>, Self::Err>> + Send;
 
+    /// The parents of the commit `sha` of `repository`, in their order (a
+    /// merge's first is the branch merged into); none when the repository
+    /// has no such commit.
+    fn commit_parents(
+        &self,
+        owner: &MacroUserIdStr<'static>,
+        repository: &CodeRepository,
+        sha: &str,
+    ) -> impl Future<Output = Result<Option<Vec<String>>, Self::Err>> + Send;
+
     /// Ask GitHub to open `pull_request` in `repository`.
     fn open(
         &self,

@@ -4,7 +4,7 @@
 use factory_records::domain::merge_queue::{BranchUpdate, MergeQueueRepository};
 use factory_records::domain::models::Repository;
 
-use factory_records::domain::models::EntryId;
+use factory_records::domain::models::{EntryId, RunId};
 use factory_records::domain::ports::RunRepository;
 
 use super::{FakeAgent, input, step};
@@ -37,8 +37,22 @@ fn behind() -> FakeGithub {
             .descendants
             .insert((older.to_string(), newer.to_string()));
     }
+    // GitHub's "Update branch" merge: the head it read, then the base.
+    state.parents.insert(
+        UPDATED.to_string(),
+        vec![FakeGithub::HEAD.to_string(), NEW_BASE.to_string()],
+    );
     drop(state);
     github
+}
+
+/// Records whose Run's review last passed on [`FakeGithub::HEAD`].
+async fn reviewed_at_head(run_id: RunId) -> FakeRepo {
+    let repo = FakeRepo::default();
+    repo.set_reviewed_head(run_id, FakeGithub::HEAD)
+        .await
+        .expect("reviewed");
+    repo
 }
 
 fn repository() -> Repository {
@@ -75,13 +89,22 @@ async fn a_base_github_merges_in_ends_done() {
     let repository = repository();
     let mut update = input(&[]);
     update.repository = Some(&repository);
+    let repo = reviewed_at_head(update.key.run_id).await;
 
-    let report = run_update(&agent, &github, &FakeRepo::default(), update)
+    let report = run_update(&agent, &github, &repo, update)
         .await
         .expect("update");
 
-    assert_eq!(report.outcome.as_str(), "done");
+    assert_eq!(report.outcome.as_str(), "done", "{}", report.output);
     assert_eq!(github.state().updates, vec![FakeGithub::HEAD.to_string()]);
+    assert_eq!(
+        repo.reviewed_head(update.key.run_id)
+            .await
+            .expect("read")
+            .as_deref(),
+        Some(UPDATED),
+        "GitHub's merge into the reviewed head stands for it"
+    );
     let tasks = agent.tasks.lock().expect("tasks");
     assert_eq!(tasks[0].role.as_str(), "writer");
     assert!(tasks[0].prompt.contains(UPDATED), "{}", tasks[0].prompt);
@@ -221,4 +244,165 @@ async fn a_branch_someone_else_brought_up_to_date_ends_resolved() {
         report.output
     );
     assert!(github.state().updates.is_empty(), "nothing to merge");
+}
+
+/// A person's resolution of a conflict, pushed on a base that moved again
+/// before their `retry`, has GitHub merge the new base into the person's
+/// head: the merge's first parent is no head a review passed on, so the
+/// Step ends `resolved` and the resolution is reviewed.
+#[tokio::test(start_paused = true)]
+async fn a_moved_base_merged_into_a_person_s_resolution_ends_resolved() {
+    let github = behind();
+    let resolution = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+    {
+        let mut state = github.state();
+        state.head = Some(resolution.to_string());
+        if let Some(pull_request) = state.pull_request.as_mut() {
+            pull_request.head_sha = resolution.to_string();
+        }
+        state.updated_head = Some(UPDATED.to_string());
+        state.parents.insert(
+            UPDATED.to_string(),
+            vec![resolution.to_string(), NEW_BASE.to_string()],
+        );
+        state
+            .descendants
+            .insert((resolution.to_string(), UPDATED.to_string()));
+    }
+    let agent = FakeAgent::ending_with("done");
+    let repository = repository();
+    let mut update = input(&[]);
+    update.repository = Some(&repository);
+    let repo = reviewed_at_head(update.key.run_id).await;
+
+    let report = run_update(&agent, &github, &repo, update)
+        .await
+        .expect("update");
+
+    assert_eq!(report.outcome.as_str(), "resolved", "{}", report.output);
+    assert_eq!(github.state().updates, vec![resolution.to_string()]);
+    assert!(
+        report.output.contains("no review has seen"),
+        "{}",
+        report.output
+    );
+    assert_eq!(
+        repo.reviewed_head(update.key.run_id)
+            .await
+            .expect("read")
+            .as_deref(),
+        Some(FakeGithub::HEAD),
+        "the reviewed head stays the one the review passed on"
+    );
+}
+
+/// A push while GitHub's merge was awaited, which itself holds the base, is
+/// not taken for GitHub's merge: its parents are not the reviewed head and
+/// the base, so the Step ends `resolved`.
+#[tokio::test(start_paused = true)]
+async fn a_push_that_holds_the_base_during_the_wait_ends_resolved() {
+    let github = behind();
+    let pushed = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+    let own = "ffffffffffffffffffffffffffffffffffffffff";
+    {
+        let mut state = github.state();
+        // GitHub takes the request, and someone's push lands first: a merge
+        // of the base into their own commit on the branch.
+        state.update_answer = Some(BranchUpdating::Started);
+        state.head = Some(pushed.to_string());
+        state.parents.insert(
+            pushed.to_string(),
+            vec![own.to_string(), NEW_BASE.to_string()],
+        );
+        state
+            .descendants
+            .insert((NEW_BASE.to_string(), pushed.to_string()));
+    }
+    let agent = FakeAgent::ending_with("done");
+    let repository = repository();
+    let mut update = input(&[]);
+    update.repository = Some(&repository);
+    let repo = reviewed_at_head(update.key.run_id).await;
+
+    let report = run_update(&agent, &github, &repo, update)
+        .await
+        .expect("update");
+
+    assert_eq!(report.outcome.as_str(), "resolved", "{}", report.output);
+}
+
+/// An update asked again from a head someone pushed, as when GitHub's first
+/// merge never showed, merges the base into that head: the merge's first
+/// parent is the push, not the reviewed head, so it ends `resolved`.
+#[tokio::test(start_paused = true)]
+async fn an_update_asked_again_from_a_pushed_head_ends_resolved() {
+    let github = behind();
+    let pushed = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+    {
+        let mut state = github.state();
+        state.head = Some(pushed.to_string());
+        if let Some(pull_request) = state.pull_request.as_mut() {
+            pull_request.head_sha = pushed.to_string();
+        }
+        state.updated_head = Some(UPDATED.to_string());
+        state.parents.insert(
+            UPDATED.to_string(),
+            vec![pushed.to_string(), NEW_BASE.to_string()],
+        );
+        state
+            .descendants
+            .insert((pushed.to_string(), UPDATED.to_string()));
+    }
+    let repository = repository();
+    let mut update = input(&[]);
+    update.repository = Some(&repository);
+    let repo = reviewed_at_head(update.key.run_id).await;
+    // The first ask, from the reviewed head, never showed.
+    repo.keep_branch_update(
+        update.key,
+        &BranchUpdate {
+            base_sha: NEW_BASE.to_string(),
+            from_head: FakeGithub::HEAD.to_string(),
+            conflict: false,
+            updated_head: None,
+        },
+    )
+    .await
+    .expect("keep");
+
+    let report = run_update(&FakeAgent::ending_with("done"), &github, &repo, update)
+        .await
+        .expect("update");
+
+    assert_eq!(report.outcome.as_str(), "resolved", "{}", report.output);
+    assert_eq!(github.state().updates, vec![pushed.to_string()]);
+    assert_eq!(
+        repo.reviewed_head(update.key.run_id)
+            .await
+            .expect("read")
+            .as_deref(),
+        Some(FakeGithub::HEAD)
+    );
+}
+
+/// A Run that keeps no reviewed head, as one whose review passed before the
+/// factory kept it, is reviewed again after any update.
+#[tokio::test(start_paused = true)]
+async fn an_update_of_a_run_with_no_reviewed_head_ends_resolved() {
+    let github = behind();
+    github.state().updated_head = Some(UPDATED.to_string());
+    let repository = repository();
+    let mut update = input(&[]);
+    update.repository = Some(&repository);
+
+    let report = run_update(
+        &FakeAgent::ending_with("done"),
+        &github,
+        &FakeRepo::default(),
+        update,
+    )
+    .await
+    .expect("update");
+
+    assert_eq!(report.outcome.as_str(), "resolved", "{}", report.output);
 }

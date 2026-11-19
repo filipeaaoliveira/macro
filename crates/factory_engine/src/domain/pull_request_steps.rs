@@ -1349,6 +1349,76 @@ where
         }
     }
 
+    /// Whether `head`, the head an update of the Run's branch left, holds
+    /// nothing but the base merged into what the Run's review passed on:
+    /// a merge commit whose parents are exactly the head the Run keeps as
+    /// reviewed and the base's commit `update` asked GitHub to merge, in
+    /// that order, as GitHub's "Update branch" makes it. Otherwise why not,
+    /// for the Step's output: a head the update did not move (the branch
+    /// held its base already, through commits someone else made), a merge
+    /// from a head no review passed on (a person's resolution, a push while
+    /// GitHub's merge was awaited, an update asked again from a pushed
+    /// head), or a Run with no reviewed head kept.
+    pub(crate) async fn merged_only_base(
+        &self,
+        input: &StepInput<'_>,
+        update: &BranchUpdate,
+        head: &str,
+    ) -> Result<Result<(), String>, PullRequestStepError> {
+        if update.from_head == head {
+            return Ok(Err(format!(
+                "The branch already held the base at {head}, through commits the factory did \
+                 not make"
+            )));
+        }
+        let reviewed = self
+            .repo
+            .reviewed_head(input.key.run_id)
+            .await
+            .map_err(PullRequestStepError::records)?;
+        let Some(reviewed) = reviewed else {
+            return Ok(Err(format!(
+                "The base was merged into the branch at {head}, and the run keeps no head its \
+                 review passed on"
+            )));
+        };
+        let (repository, _) = Self::repository(input)?;
+        let parents = self
+            .github
+            .commit_parents(input.owner, &repository, head)
+            .await
+            .map_err(PullRequestStepError::github)?;
+        let expected = [reviewed.as_str(), update.base_sha.as_str()];
+        let only_base = parents.is_some_and(|parents| {
+            parents.len() == expected.len()
+                && parents
+                    .iter()
+                    .zip(expected)
+                    .all(|(parent, want)| parent == want)
+        });
+        if only_base {
+            return Ok(Ok(()));
+        }
+        Ok(Err(format!(
+            "The branch's head {head} is not GitHub's merge of the base's {} into {reviewed}, \
+             the head its review passed on, alone: it holds commits no review has seen",
+            update.base_sha
+        )))
+    }
+
+    /// Keep `head` as the head of the Run's branch its review passed on,
+    /// once an update merged only the base into the one kept.
+    pub(crate) async fn keep_reviewed_head(
+        &self,
+        input: &StepInput<'_>,
+        head: &str,
+    ) -> Result<(), PullRequestStepError> {
+        self.repo
+            .set_reviewed_head(input.key.run_id, head)
+            .await
+            .map_err(PullRequestStepError::records)
+    }
+
     /// Wait while the Main Hold on the Run's base `recorded` lasts, up to
     /// [`HOLD_WAIT`]: none once it clears, or the hold still set then. A
     /// held base has its watch started, as the Run's owner, in case none
