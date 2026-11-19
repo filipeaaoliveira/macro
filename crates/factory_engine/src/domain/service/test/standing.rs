@@ -544,13 +544,9 @@ async fn a_cancel_that_is_not_taken_keeps_no_standing_act() {
     assert_eq!(kept, [(StandingAct::Cancel, Some(other))]);
 }
 
-/// Starting a Run of a Definition with Standing Roles takes a bot that
-/// fills one allowing `start`, and the Run keeps who started it; the
-/// owner in person starts it as before.
-#[tokio::test]
-async fn starting_a_run_takes_a_bot_in_a_standing_role_that_allows_it() {
-    let repo = team_repo();
-    let workflows = FakeWorkflows::default();
+/// GitHub holding a Definition at `FIRST` with one Flow, `notes`, and the
+/// split Standing Roles over the `primary` and `backup` Agents.
+fn notes_definition() -> FakeGithub {
     let github = github_at(FIRST);
     let flow = r#"{
         "entries": [{
@@ -582,6 +578,106 @@ async fn starting_a_run_takes_a_bot_in_a_standing_role_that_allows_it() {
                 .insert((FIRST.to_string(), path.to_string()), text);
         }
     }
+    github
+}
+
+/// GitHub holding a Definition at `FIRST` with one Flow, `notes`, and the
+/// split Standing Roles over the `primary` and `backup` Agents.
+fn notes_definition() -> FakeGithub {
+    let github = github_at(FIRST);
+    let flow = r#"{
+        "entries": [{
+            "id": "reply",
+            "step": "reply",
+            "on": { "done": [{ "to": { "kind": "end", "outcome": "success" } }] }
+        }]
+    }"#;
+    let agents = json!({
+        "agents": {
+            "primary": { "bot": PRIMARY_BOT.to_string() },
+            "backup": { "bot": BACKUP_BOT.to_string() }
+        },
+        "roles": { "writer": ["primary"] },
+        "standing": split_roles()
+    });
+    {
+        let mut state = github.state();
+        for (path, text) in [
+            (
+                "factory.json",
+                r#"{ "version": 1, "flows": ["notes"] }"#.to_string(),
+            ),
+            ("flows/notes.json", flow.to_string()),
+            ("agents.json", agents.to_string()),
+        ] {
+            state
+                .files
+                .insert((FIRST.to_string(), path.to_string()), text);
+        }
+    }
+    github
+}
+
+/// A cancel that was taken keeps who sent it through a record that fails
+/// for a moment: the record is tried again, since a caller's retry would
+/// find the Run cancelled and keep no one. A record that keeps failing
+/// answers an error.
+#[tokio::test(start_paused = true)]
+async fn a_taken_cancel_keeps_its_sender_through_a_failing_record() {
+    let repo = FakeRepo::default();
+    let workflows = FakeWorkflows::default();
+    let service = code_service(&repo, &workflows, &FakeGithub::default());
+    let run_id = waiting_run(
+        &repo,
+        Some(agents(Some(split_roles()))),
+        "plan",
+        "done",
+        &["approve", "revise"],
+    )
+    .await;
+    let backup = Some(ActingAgent::Bot(BotId::new_from_uuid(BACKUP_BOT)));
+    repo.failing
+        .lock()
+        .expect("failing")
+        .insert("record_standing_act", (0, 2));
+
+    service
+        .cancel_run(&julia(), run_id, backup)
+        .await
+        .expect("the operator cancels");
+
+    let detail = service.get_run(&julia(), run_id).await.expect("read");
+    let kept: Vec<_> = detail
+        .standing_acts
+        .iter()
+        .map(|act| (act.act, act.bot_id))
+        .collect();
+    assert_eq!(kept, [(StandingAct::Cancel, BACKUP_BOT)]);
+
+    let other = waiting_run(
+        &repo,
+        Some(agents(Some(split_roles()))),
+        "plan",
+        "done",
+        &["approve", "revise"],
+    )
+    .await;
+    repo.failing
+        .lock()
+        .expect("failing")
+        .insert("record_standing_act", (0, 3));
+    let lost = service.cancel_run(&julia(), other, backup).await;
+    assert!(lost.is_err(), "{lost:?}");
+}
+
+/// Starting a Run of a Definition with Standing Roles takes a bot that
+/// fills one allowing `start`, and the Run keeps who started it; the
+/// owner in person starts it as before.
+#[tokio::test]
+async fn starting_a_run_takes_a_bot_in_a_standing_role_that_allows_it() {
+    let repo = team_repo();
+    let workflows = FakeWorkflows::default();
+    let github = notes_definition();
     let service = code_service(&repo, &workflows, &github);
     let primary = Uuid::now_v7();
     let backup = Uuid::now_v7();
@@ -643,6 +739,56 @@ async fn starting_a_run_takes_a_bot_in_a_standing_role_that_allows_it() {
         )]
     );
     assert!(in_person.standing_acts.is_empty());
+}
+
+/// A bot in no agent session starting a Run is checked as that bot: one in
+/// no Standing Role that allows `start` is refused, and the Run another
+/// starts keeps its bot with no session.
+#[tokio::test]
+async fn a_sessionless_bot_starts_a_run_only_through_a_standing_role() {
+    let repo = team_repo();
+    let workflows = FakeWorkflows::default();
+    let github = notes_definition();
+    let service = code_service(&repo, &workflows, &github);
+    let start = |bot: Uuid| {
+        service.create_run(
+            teo(),
+            "notes".to_string(),
+            "Note it".to_string(),
+            None,
+            None,
+            false,
+            Some(ActingAgent::Bot(BotId::new_from_uuid(bot))),
+        )
+    };
+
+    let refused = start(PRIMARY_BOT).await;
+    let started = start(BACKUP_BOT).await.expect("the intake starts");
+
+    let Err(FactoryError::NotInStandingRole { act, allowing }) = refused else {
+        panic!("a sessionless bot in no standing role that starts is refused");
+    };
+    assert_eq!(
+        (act, allowing),
+        (StandingAct::Start, vec![standing_role("intake")])
+    );
+    assert_eq!(repo.runs.lock().expect("runs").len(), 1);
+    let kept: Vec<_> = started
+        .standing_acts
+        .iter()
+        .map(|act| {
+            (
+                act.act,
+                act.standing_role.as_str().to_string(),
+                act.bot_id,
+                act.session_id,
+            )
+        })
+        .collect();
+    assert_eq!(
+        kept,
+        [(StandingAct::Start, "intake".to_string(), BACKUP_BOT, None)]
+    );
 }
 
 /// Code signed for a bot that runs in no agent session is checked as that
