@@ -854,6 +854,24 @@ jobs:
     - name: show sccache stats
       if: always()
       run: sccache --show-stats || true
+    - name: keep the cache slot under its cap
+      if: always()
+      run: |
+        set -euo pipefail
+        cache="${CI_CACHE_DIR:-$RUNNER_TEMP/cache}"
+        size=$(du -sm "$cache/" | cut -f1)
+        echo "cache slot: $size MB"
+        if [ "$size" -le "$SLOT_TRIM_MB" ]; then
+          exit 0
+        fi
+        deps="${CARGO_TARGET_ROOT:-$cache/target}/test/debug/deps"
+        [ -d "$deps" ] || exit 0
+        # A test binary is an executable with no extension; libraries
+        # (.rlib, .rmeta, .so) and dependency files stay.
+        find "$deps" -maxdepth 1 -type f -perm -u+x ! -name '*.*' -delete
+        echo "after dropping the test binaries: $(du -sm "$cache/" | cut -f1) MB"
+      env:
+        SLOT_TRIM_MB: '15360'
     - name: show cache sizes
       if: always()
       run: |

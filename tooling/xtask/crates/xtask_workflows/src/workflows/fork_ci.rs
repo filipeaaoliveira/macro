@@ -215,6 +215,7 @@ fn rust_test() -> Job {
         .add_step(prepare_tests())
         .add_step(run_tests())
         .add_step(steps::show_sccache_stats())
+        .add_step(trim_test_binaries())
         .add_step(show_cache_sizes())
         .add_step(steps::teardown_nix())
 }
@@ -490,6 +491,37 @@ fn run_tests() -> Step<Run> {
 
 /// Below the job's timeout, so the steps after it still report.
 const RUN_TESTS_TIMEOUT_MINUTES: u32 = 150;
+
+/// The size of the runner's cache slot, in MB, above which the test job drops
+/// its linked test binaries. The node empties a slot over 20 GB when the next
+/// job starts, and the test build of a change to a widely used crate alone
+/// took 26 GB, so every such run left the next one to build from nothing.
+const SLOT_TRIM_MB: u32 = 15360;
+
+/// Keeps the cache slot under the node's cap by deleting the linked test
+/// binaries, most of the test build's size, when the slot is over
+/// [`SLOT_TRIM_MB`]. The compiled libraries stay, so the next run links its
+/// tests again and compiles only the test crates, instead of everything.
+fn trim_test_binaries() -> Step<Run> {
+    Step::new("keep the cache slot under its cap")
+        .run(indoc::indoc! {r#"
+            set -euo pipefail
+            cache="${CI_CACHE_DIR:-$RUNNER_TEMP/cache}"
+            size=$(du -sm "$cache/" | cut -f1)
+            echo "cache slot: $size MB"
+            if [ "$size" -le "$SLOT_TRIM_MB" ]; then
+              exit 0
+            fi
+            deps="${CARGO_TARGET_ROOT:-$cache/target}/test/debug/deps"
+            [ -d "$deps" ] || exit 0
+            # A test binary is an executable with no extension; libraries
+            # (.rlib, .rmeta, .so) and dependency files stay.
+            find "$deps" -maxdepth 1 -type f -perm -u+x ! -name '*.*' -delete
+            echo "after dropping the test binaries: $(du -sm "$cache/" | cut -f1) MB"
+        "#})
+        .add_env(("SLOT_TRIM_MB", SLOT_TRIM_MB))
+        .if_condition(Expression::new("always()"))
+}
 
 /// The size of each cache in the runner's cache slot, and of each target
 /// directory in it. The node empties a slot over its cap when the next job
