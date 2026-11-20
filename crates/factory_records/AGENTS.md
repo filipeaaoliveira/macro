@@ -470,12 +470,14 @@ the Gates they asked people in MacroDB, and defines the names Flows use
   takes a merged Run out, and `end_run` one that ended unmerged.
   `take_merge_turn` takes a base's merge turn: it reads the Run's
   repository and base, outside the turn, as the base's key, then holds a
-  transaction that runs only `SELECT pg_try_advisory_xact_lock($key)`
+  transaction that sets its own `idle_in_transaction_session_timeout`
+  (`set_config(..., true)`) and runs `SELECT pg_try_advisory_xact_lock($key)`
   (`None` while another Run holds it; never waited on, so no connection
   blocks). The transaction reads, locks and writes no factory table, so a
   turn held for minutes holds back no write to a Run nor a migration of
   its table; the key is the one earlier workers took, so a rolling deploy
-  keeps one turn per base.
+  keeps one turn per base (`a_merge_turn_keeps_the_key_earlier_workers_took`
+  pins it).
   The turn is the transaction: dropping it rolls back, which lets the
   lock go once the pool takes the connection back, on every path, and the
   transaction's `idle_in_transaction_session_timeout` (five minutes) ends
