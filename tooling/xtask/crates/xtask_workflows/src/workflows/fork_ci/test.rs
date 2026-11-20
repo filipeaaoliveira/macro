@@ -32,7 +32,7 @@ fn self_hosted_jobs_run_only_trusted_code() {
         .map(|(id, _)| id)
         .collect();
 
-    assert_eq!(self_hosted, ["rust-check", "rust-test", "web"]);
+    assert_eq!(self_hosted, ["rust-check", "rust-test"]);
 
     for id in self_hosted {
         let condition = jobs[id]["if"].as_str().unwrap();
@@ -133,4 +133,30 @@ fn the_web_job_fetches_the_diff_s_blobs_before_the_dev_shell() {
 
     assert!(position("fetch the blobs of the change's diff") < position("Setup Nix"));
     assert!(position("compute changed files") < position("fetch the blobs of the change's diff"));
+}
+
+/// The web job holds about 7 GB, which the self-hosted runner's node cannot
+/// hold beside a test build, so it runs on a hosted runner, beside the Rust
+/// jobs instead of after them.
+#[test]
+fn the_web_job_runs_on_a_hosted_runner() {
+    let job = serde_json::to_value(web()).unwrap();
+
+    assert_eq!(job["runs-on"], HOSTED_RUNNER);
+}
+
+/// Teardown Nix kills every process on the file system that holds /nix, for
+/// a cache volume to unmount. On a hosted runner that is the root file
+/// system, the runner's own processes included, so the web job leaves it out.
+#[test]
+fn the_web_job_does_not_tear_down_nix() {
+    let job = serde_json::to_value(web()).unwrap();
+    let names: Vec<&str> = job["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|step| step["name"].as_str())
+        .collect();
+
+    assert!(!names.contains(&"Teardown Nix"), "{names:?}");
 }
