@@ -356,3 +356,44 @@ async fn the_last_ci_wait_is_the_latest_before_a_step_with_its_heads_jobs(pool: 
     assert_eq!(before_any, None);
     assert_eq!(spaces.map(|wait| wait.jobs), Some(vec!["test".to_string()]));
 }
+
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "quality"))
+)]
+async fn a_session_over_several_steps_keeps_the_bot_one_of_them_recorded(pool: PgPool) {
+    // One session asked a question and went on over three Steps: the first
+    // from before Steps recorded their bot, the next with it, the last
+    // without it again.
+    sqlx::query(
+        "INSERT INTO factory_step (run_id, seq, entry, visit, started_at, outcome, output, ended_at,
+                                   session_id, action_id, offered, role, agent, bot_id)
+         SELECT $1, seq, 'write', 1, '2026-11-11 09:00Z', 'done', 'Written', '2026-11-11 09:05Z',
+                '00000000-0000-7000-8000-000000000506', action_id, '{done}', 'writer', 'primary', bot_id
+         FROM (VALUES
+             (3, '00000000-0000-7000-8000-000000000606'::uuid, NULL::uuid),
+             (4, '00000000-0000-7000-8000-000000000607'::uuid, '00000000-0000-7000-8000-000000000a02'::uuid),
+             (5, '00000000-0000-7000-8000-000000000608'::uuid, NULL::uuid)
+         ) AS steps (seq, action_id, bot_id)",
+    )
+    .bind(Uuid::parse_str(SPACES).expect("valid run id"))
+    .execute(&pool)
+    .await
+    .expect("steps");
+    let repo = PgRunRepository::new(pool);
+
+    let records = repo.read_quality(&julia(None)).await.expect("read");
+
+    let spaces = records
+        .runs
+        .iter()
+        .find(|record| record.run.id == run(SPACES))
+        .expect("the run");
+    assert_eq!(
+        spaces.sessions,
+        vec![QualitySession {
+            id: Uuid::parse_str("00000000-0000-7000-8000-000000000506").unwrap(),
+            bot: Some(Uuid::parse_str("00000000-0000-7000-8000-000000000a02").unwrap()),
+        }]
+    );
+}
