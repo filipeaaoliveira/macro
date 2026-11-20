@@ -1,5 +1,6 @@
 use super::super::GithubOauthImpl;
 use super::super::test::{MockResponse, MockServer};
+use super::CommitMade;
 use crate::domain::models::GithubError;
 
 fn answering(status: &'static str, body: &str) -> (MockServer, GithubOauthImpl) {
@@ -422,35 +423,57 @@ async fn merge_base_refuses_an_owner_or_repository_github_would_not_take() {
     }
 }
 
-/// A commit's parents are read from the git database, in their order; a
-/// commit GitHub does not have has none, and an id that is not a full
-/// commit id is never sent.
+/// A commit is read with its parents in their order, its committer's
+/// account and whether its signature is verified; a commit GitHub does not
+/// have is none, and an id that is not a full commit id is never sent.
 #[tokio::test]
-async fn a_commit_s_parents_are_read_in_their_order() {
+async fn a_commit_is_read_with_its_parents_and_committer() {
     let merge = "3333333333333333333333333333333333333333";
     let (server, client) = answering(
         "200 OK",
-        r#"{"sha":"3333333333333333333333333333333333333333","parents":[{"sha":"1111111111111111111111111111111111111111"},{"sha":"2222222222222222222222222222222222222222"}]}"#,
+        r#"{"sha":"3333333333333333333333333333333333333333","commit":{"verification":{"verified":true,"reason":"valid"}},"committer":{"login":"web-flow","id":19864447},"parents":[{"sha":"1111111111111111111111111111111111111111"},{"sha":"2222222222222222222222222222222222222222"}],"files":[]}"#,
     );
-    let parents = client
-        .commit_parents("token", "macro", "app", merge)
+    let commit = client
+        .commit_made("token", "macro", "app", merge)
         .await
         .unwrap();
     assert_eq!(
-        parents,
-        Some(vec![
-            "1111111111111111111111111111111111111111".to_string(),
-            "2222222222222222222222222222222222222222".to_string(),
-        ])
+        commit,
+        Some(CommitMade {
+            parents: vec![
+                "1111111111111111111111111111111111111111".to_string(),
+                "2222222222222222222222222222222222222222".to_string(),
+            ],
+            committer_login: Some("web-flow".to_string()),
+            verified: true,
+        })
     );
     assert!(server.finish().starts_with(&format!(
-        "GET /repos/macro/app/git/commits/{merge} HTTP/1.1"
+        "GET /repos/macro/app/commits/{merge}?per_page=1 HTTP/1.1"
     )));
+
+    // A commit whose committer's email belongs to no account, unsigned.
+    let (server, client) = answering(
+        "200 OK",
+        r#"{"sha":"3333333333333333333333333333333333333333","commit":{"verification":{"verified":false,"reason":"unsigned"}},"committer":null,"parents":[{"sha":"1111111111111111111111111111111111111111"}]}"#,
+    );
+    assert_eq!(
+        client
+            .commit_made("token", "macro", "app", merge)
+            .await
+            .unwrap(),
+        Some(CommitMade {
+            parents: vec!["1111111111111111111111111111111111111111".to_string()],
+            committer_login: None,
+            verified: false,
+        })
+    );
+    server.finish();
 
     let (missing, client) = answering("404 Not Found", r#"{"message":"Not Found"}"#);
     assert_eq!(
         client
-            .commit_parents("token", "macro", "app", merge)
+            .commit_made("token", "macro", "app", merge)
             .await
             .unwrap(),
         None
@@ -460,14 +483,14 @@ async fn a_commit_s_parents_are_read_in_their_order() {
     let (_unused, client) = answering("200 OK", "{}");
     assert_eq!(
         client
-            .commit_parents("token", "macro", "app", "main")
+            .commit_made("token", "macro", "app", "main")
             .await
             .unwrap(),
         None
     );
     let client = GithubOauthImpl::with_api_base_url("http://127.0.0.1:9".to_string());
     assert!(matches!(
-        client.commit_parents("token", "..", "app", merge).await,
+        client.commit_made("token", "..", "app", merge).await,
         Err(GithubError::Internal(_))
     ));
 }

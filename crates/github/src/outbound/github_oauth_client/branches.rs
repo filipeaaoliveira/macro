@@ -59,8 +59,43 @@ struct CompareMergeBase {
 }
 
 #[derive(serde::Deserialize)]
-struct GitCommit {
+struct CommitResponse {
+    commit: CommitDetail,
+    /// The GitHub account the committer's email belongs to; none when it
+    /// belongs to no account.
+    #[serde(default)]
+    committer: Option<CommitAccount>,
     parents: Vec<BranchCommit>,
+}
+
+#[derive(serde::Deserialize)]
+struct CommitDetail {
+    #[serde(default)]
+    verification: Option<CommitVerification>,
+}
+
+#[derive(serde::Deserialize)]
+struct CommitVerification {
+    verified: bool,
+}
+
+#[derive(serde::Deserialize)]
+struct CommitAccount {
+    login: String,
+}
+
+/// A commit as GitHub tells who made it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitMade {
+    /// Its parents, in their order: a merge commit's first is the branch
+    /// merged into, the second the one merged in.
+    pub parents: Vec<String>,
+    /// The login of the GitHub account its committer's email belongs to
+    /// (`web-flow` for a commit GitHub made itself); none when it belongs
+    /// to no account.
+    pub committer_login: Option<String>,
+    /// Whether GitHub verified its signature against its committer.
+    pub verified: bool,
 }
 
 #[derive(serde::Deserialize)]
@@ -370,21 +405,22 @@ impl GithubOauthImpl {
         }
     }
 
-    /// The parents of the commit `sha`, a full commit id, in their order: a
-    /// merge commit's first is the branch merged into, the second the one
-    /// merged in. `None` when the repository has no such commit (GitHub
-    /// answers 404), and for an id that is not a full commit id. It reads
-    /// the git database, which lists no files, so the read stays small
-    /// whatever the commit changed. An owner or repository name GitHub would
-    /// not take is refused before any request.
+    /// The commit `sha`, a full commit id: its parents in their order, its
+    /// committer's GitHub account and whether its signature is verified.
+    /// `None` when the repository has no such commit (GitHub answers 404),
+    /// and for an id that is not a full commit id. The git database tells
+    /// no committer's account, so this reads the commit's page of the
+    /// commits API, asking for one file of its changes, so the read stays
+    /// small whatever the commit changed. An owner or repository name
+    /// GitHub would not take is refused before any request.
     #[tracing::instrument(skip(self, access_token), err)]
-    pub async fn commit_parents(
+    pub async fn commit_made(
         &self,
         access_token: &str,
         owner: &str,
         repo: &str,
         sha: &str,
-    ) -> Result<Option<Vec<String>>, GithubError> {
+    ) -> Result<Option<CommitMade>, GithubError> {
         if !is_repository_part(owner) || !is_repository_part(repo) {
             return Err(GithubError::Internal(anyhow::anyhow!(
                 "not a repository: {owner:?}/{repo:?}"
@@ -393,22 +429,27 @@ impl GithubOauthImpl {
         if !is_commit_id(sha) {
             return Ok(None);
         }
-        let commit: Result<GitCommit, GithubError> = self
+        let commit: Result<CommitResponse, GithubError> = self
             .read(
                 access_token,
-                &format!("/repos/{owner}/{repo}/git/commits/{sha}"),
-                &[],
+                &format!("/repos/{owner}/{repo}/commits/{sha}"),
+                &[("per_page", "1")],
                 "failed to read a commit",
             )
             .await;
         match commit {
-            Ok(commit) => Ok(Some(
-                commit
+            Ok(commit) => Ok(Some(CommitMade {
+                parents: commit
                     .parents
                     .into_iter()
                     .map(|parent| parent.sha)
                     .collect(),
-            )),
+                committer_login: commit.committer.map(|account| account.login),
+                verified: commit
+                    .commit
+                    .verification
+                    .is_some_and(|verification| verification.verified),
+            })),
             Err(GithubError::RepositoryUnavailable) => Ok(None),
             Err(error) => Err(error),
         }

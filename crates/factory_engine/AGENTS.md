@@ -1042,8 +1042,10 @@ its Flow does not route above `merge` would fall through to the merge):
   it. Then the repository's checks round runs on the
   branch, as for `write` and `fix`. It ends `done` only when the branch's
   head is a merge commit whose parents are exactly, in order, the Run's
-  reviewed head and the base's commit the update asked GitHub to merge
-  (`PullRequests::commit_parents`, GitHub's git database), the branch's
+  reviewed head and the base's commit the update asked GitHub to merge,
+  that GitHub made itself: committed as its `web-flow` account with a
+  signature GitHub verified (`PullRequests::commit_made`,
+  `CommitMade::made_by_github`), the branch's
   head is still that merge, and the checks passed: only the base came in,
   so the Run goes back through `ci` to the merge Gate, which asks again,
   and the merge becomes the reviewed head, for the next update to merge
@@ -1059,9 +1061,9 @@ its Flow does not route above `merge` would fall through to the merge):
   merged the base itself), a person's resolution GitHub merged a moved
   base into after their `retry`, a branch that already held its base when
   the update started, and a Run that keeps no reviewed head (its review
-  passed before the factory kept one). A merge made by hand with exactly
-  those two parents and changes of its own is the one case the parents do
-  not tell apart from GitHub's. `conflict` when the writer could not resolve it, or what it
+  passed before the factory kept one), and a merge made by hand with
+  exactly those two parents and changes of its own: it may name GitHub's
+  email as its committer, but cannot sign as GitHub. `conflict` when the writer could not resolve it, or what it
   pushed does not hold both the base's head and the branch's former head,
   opens the entry's Gate (no kind, so no rule, stand-in or Orchestrator
   answers it): `stop`, or `retry` once a person resolved it on the branch.
@@ -1090,7 +1092,8 @@ its Flow does not route above `merge` would fall through to the merge):
   again, so the Runs behind it do not merge first and leave it behind
   again. A Run past that goes on without it, and gets its place back when
   it returns. One Run of a base merges at a time: its turn
-  (`MergeQueueRepository::take_merge_turn`, an advisory lock per base) is
+  (`MergeQueueRepository::take_merge_turn`, an advisory lock per base,
+  taken in a transaction that touches no factory table) is
   taken before it reads the Runs ahead and held through GitHub's merge,
   so a Run that comes back to its place just as another passed its turn
   waits for that merge, then finds its head behind the base, rather than

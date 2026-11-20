@@ -17,9 +17,9 @@ use macro_user_id::user_id::MacroUserIdStr;
 
 use crate::domain::check_context::ComparedChanges;
 use crate::domain::models::{
-    BranchDeletion, BranchUpdating, Check, CheckState, CheckSuite, CodeRepository, CommitStatus,
-    FailureAnnotation, FinishedJob, HeadChecks, Merging, OpenPullRequest, Opening, PullRequest,
-    PullRequestState, RepositoryAccess, RequiredCheck, RequiredChecks, run_branch,
+    BranchDeletion, BranchUpdating, Check, CheckState, CheckSuite, CodeRepository, CommitMade,
+    CommitStatus, FailureAnnotation, FinishedJob, HeadChecks, Merging, OpenPullRequest, Opening,
+    PullRequest, PullRequestState, RepositoryAccess, RequiredCheck, RequiredChecks, run_branch,
 };
 use crate::domain::ports::{FileRefusal, PullRequests, Retryable};
 use crate::domain::review_rounds::ChangedFile;
@@ -606,17 +606,22 @@ impl<T: OwnerTokens> PullRequests for GithubPullRequests<T> {
     }
 
     #[tracing::instrument(err, skip(self, owner))]
-    async fn commit_parents(
+    async fn commit_made(
         &self,
         owner: &MacroUserIdStr<'static>,
         repository: &CodeRepository,
         sha: &str,
-    ) -> Result<Option<Vec<String>>, GithubPullRequestsErr> {
+    ) -> Result<Option<CommitMade>, GithubPullRequestsErr> {
         let token = self.token(owner).await?;
-        Ok(self
+        let commit = self
             .github
-            .commit_parents(&token, repository.owner(), repository.name(), sha)
-            .await?)
+            .commit_made(&token, repository.owner(), repository.name(), sha)
+            .await?;
+        Ok(commit.map(|commit| CommitMade {
+            parents: commit.parents,
+            committer_login: commit.committer_login,
+            verified: commit.verified,
+        }))
     }
 
     #[tracing::instrument(err, skip(self, owner, pull_request), fields(branch = %pull_request.branch))]
