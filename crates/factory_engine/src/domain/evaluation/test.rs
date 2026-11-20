@@ -556,6 +556,76 @@ async fn a_trial_keeps_its_score_tokens_and_judgments_apart_from_the_live_scorer
     assert_eq!(kept.branches_deleted, [(suite_id, "typo".to_string())]);
 }
 
+/// A trial whose write Step lost its first session after its agent
+/// worked in it, and went on in a second, keeps the tokens of both, as
+/// its Run's token budget and Insights count them.
+#[tokio::test]
+async fn a_trial_keeps_the_tokens_of_a_session_its_step_lost() {
+    let repo = FakeRepo::default();
+    let (lost, second) = (Uuid::from_u128(70), Uuid::from_u128(71));
+    let trial_run = ended_run(&repo, "benchmark", RunOutcome::Manual, "red", second).await;
+    repo.sessions.lock().expect("sessions")[0].left.push(lost);
+    let suite_id = Uuid::from_u128(601);
+    let trial = TrialKey {
+        suite_id,
+        task: "typo".to_string(),
+    };
+    let configuration = [(role("writer"), agent("backup"))].into_iter().collect();
+    repo.insert_suite(&NewSuite {
+        id: suite_id,
+        user_id: &julia(),
+        benchmark: "core",
+        agents: &configuration,
+        trials: 1,
+    })
+    .await
+    .expect("suite");
+    repo.insert_trial(
+        &trial,
+        trial_run,
+        "1111111111111111111111111111111111111111",
+    )
+    .await
+    .expect("trial");
+    let judge = Arc::new(FakeJudge::default());
+    judge.then(0.2);
+    let github = FakeGithub::default();
+    github.state().head = Some("1111111111111111111111111111111111111111".to_string());
+    let used = |session_id, input| SessionTokens {
+        session_id,
+        input,
+        output: 10,
+        cache_read: 0,
+        cache_write: 0,
+        cost_usd: 0.0,
+        unpriced_calls: 0,
+    };
+    let scoring = ScoringServiceImpl::new(
+        repo.clone(),
+        judge,
+        FakeUsage::new(vec![used(lost, 900), used(second, 100)]),
+        github,
+        Arc::new(definition()),
+    );
+
+    scoring
+        .score_run(trial_run, false)
+        .await
+        .expect("trial scored");
+
+    let kept = repo.evaluation.lock().expect("evaluation").clone();
+    let result = kept.trial_results[&(suite_id, "typo".to_string())];
+    assert_eq!(
+        result.tokens,
+        TrialTokens {
+            input: 1000,
+            output: 20,
+            cache_read: 0,
+            cache_write: 0,
+        }
+    );
+}
+
 /// A trial's pinned start, as GitHub shows its branch's head and its base
 /// branch's head.
 struct PinCase {

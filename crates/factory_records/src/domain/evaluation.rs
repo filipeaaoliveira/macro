@@ -143,6 +143,10 @@ pub struct ScoringSubject {
     pub outcome: Option<RunOutcome>,
     /// Its Steps, in order.
     pub steps: Vec<ScoringStep>,
+    /// The agent sessions its Steps worked in, each once, those a Step left
+    /// for a new one included: the sessions its token budget and Insights
+    /// count (`RunRepository::step_sessions`).
+    pub sessions: Vec<Uuid>,
     /// The trial it is, if a Benchmark suite started it.
     pub trial: Option<SubjectTrial>,
     /// The Scorers that judged it already: into the live judgments, or into
