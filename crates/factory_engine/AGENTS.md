@@ -219,7 +219,12 @@ Definition keeps no Agents. The section governs bots. A call not in person
 acts as an agent (`acting_agent` for start, cancel and link, an
 `ActingAgent`, and for a start through a Benchmark suite or a routine
 firing an Automation, `program_agent`, unless the scheduler's proof makes it
-the Automation's creator, see Automations; `Answerer::Agent` for an answer): code in an agent session
+the Automation's creator, see Automations; `Answerer::Agent` for an answer).
+A schedule or event Automation's firing that Macro's scheduler started
+itself needs no Standing Role for the Macro routine bot: it starts its Run
+as the creator. Any other run of its routine (Run Now, an edited routine, a
+routine writing as its owner) acts as that bot and is checked. Otherwise,
+code in an agent session
 (the correlation layer's session on a person's credential) acts as that
 session, and the service reads its bot (`StandingActRepository::session_bot`,
 the owner's sessions only); code in no session whose credential is signed
