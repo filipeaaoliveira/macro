@@ -984,7 +984,28 @@ data: no `<` or `>`, code fence or heading line (ATX or setext) left in it,
 paths included, cut to `BRIEF_BUDGET`. Reviewers' outputs reach every later
 Step's history fenced the same way. A finding's path must be a plain path:
 no control character, backtick or angle bracket. An answer that never read
-is not carried to the next round. In `code`, the review panel
+is not carried to the next round. The fix ends its text with a fenced `json` block that
+says, per Blocker by its number in its brief, `fixed` or `disputed` with a
+`reason` (`review_rounds/fix_answer.rs`); once its work hands back `done`,
+before its checks, that is kept on the Blockers (`fix_status`, `dispute`, cut
+to `MAX_DISPUTE_BYTES`, 2 KiB). A Blocker it leaves out, a dispute with no
+reason, a block that does not read and an answer that never read are
+`fixed`. In the next round the dispute's reason stands in the findings'
+block, escaped as findings are, and the reviewer whose Role found the
+Blocker (the round's first, for a finding of no Role) rules on it: it lists
+it again with `previous`, and upholds it, or names it in `"dropped"`, and it
+blocks nothing (`ruling`, by its Step, `ruled_by`). A dispute it does
+neither for is upheld: the engine adds the Blocker to its answer, blocking
+wherever it is, so a dispute never passes a round unless its reviewer drops
+it. A reviewer that drops a number it does not rule on, or one it also
+lists again, is asked again. A Blocker a reviewer raises at the place of one
+it dropped earlier in the visit (the entry's rounds since its last reset) is
+kept `dismissed` (`repeats_dropped`): it blocks nothing and becomes no
+task, and the reviewer is reminded of what it dropped. The Run API counts
+per Run the Blockers fixed, disputed and upheld, and disputed and dropped
+(`blockerResolutions`); Insights' review quality counts them over its Runs
+(`resolutions`). None of this is in the workflow: the fix, the reviewers
+and the round's close are activities, so Runs in flight replay as before. In `code`, the review panel
 runs at most `max_visits` rounds (three, or `FACTORY_REVIEW_ROUNDS`, which
 the service writes into the Flow a Run starts with). Rounds and their
 findings show on the Run (`reviewRounds` in the Run API), numbered across

@@ -15,6 +15,7 @@
 
 mod answer;
 mod brief;
+mod fix_answer;
 #[cfg(test)]
 mod test;
 
@@ -22,7 +23,10 @@ pub(crate) use answer::json_block;
 use answer::place;
 pub use answer::{ReviewerAnswer, ReviewerAnswerError, WHOLE_CHANGE};
 pub(crate) use brief::escape;
-pub use brief::{BRIEF_BUDGET, blockers_brief, carried_blockers, fenced_review, findings_block};
+pub use brief::{
+    BRIEF_BUDGET, blockers_brief, carried_blockers, dropped_in_visit, fenced_review, findings_block,
+};
+pub use fix_answer::fix_answers;
 
 use std::collections::BTreeMap;
 
@@ -302,12 +306,22 @@ fn normalised(path: &str) -> String {
 /// Whether the findings `a` and `b` point at the same file, at lines that
 /// meet: a finding that names no lines is about the whole file.
 fn same_place(a: &ReviewFinding, b: &ReviewFinding) -> bool {
-    let path = |finding: &ReviewFinding| normalised(&finding.path);
-    let lines_meet = match (a.lines, b.lines) {
+    places_meet(&a.path, a.lines, &b.path, b.lines)
+}
+
+/// Whether the places `a_path` at `a_lines` and `b_path` at `b_lines` are
+/// the same file at lines that meet: no lines are the whole file.
+pub(crate) fn places_meet(
+    a_path: &str,
+    a_lines: Option<Lines>,
+    b_path: &str,
+    b_lines: Option<Lines>,
+) -> bool {
+    let lines_meet = match (a_lines, b_lines) {
         (Some(a), Some(b)) => a.start <= b.end && b.start <= a.end,
         _ => true,
     };
-    path(a) == path(b) && lines_meet
+    normalised(a_path) == normalised(b_path) && lines_meet
 }
 
 /// The follow-ups of a round, grouped by problem: each finding joins the
@@ -443,19 +457,23 @@ where
             .filter(|finding| finding.kind.is_none())
             .map(|finding| {
                 // A Blocker found again, or an answer that never read,
-                // blocks wherever it is.
+                // blocks wherever it is; one its reviewer dropped earlier
+                // in the visit blocks nowhere.
                 let inside = finding.blocks_anywhere
                     || files
                         .as_deref()
                         .is_none_or(|files| in_diff(&finding.path, finding.lines, files));
+                let kind = if finding.repeats_dropped && !finding.blocks_anywhere {
+                    FindingKind::Dismissed
+                } else if inside {
+                    FindingKind::Blocker
+                } else {
+                    FindingKind::FollowUp
+                };
                 FindingClass {
                     seq: finding.seq,
                     place: finding.place,
-                    kind: if inside {
-                        FindingKind::Blocker
-                    } else {
-                        FindingKind::FollowUp
-                    },
+                    kind,
                 }
             })
             .collect();

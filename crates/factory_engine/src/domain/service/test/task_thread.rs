@@ -479,6 +479,7 @@ async fn a_review_round_is_one_comment() {
         problem: "It drops the error".to_string(),
         why: "A failed save looks saved".to_string(),
         blocks_anywhere: false,
+        repeats_dropped: false,
     };
     repo.record_findings(StepKey { run_id, seq: 2 }, 2, &[blocker])
         .await

@@ -7,7 +7,8 @@ use factory_records::domain::models::{
 };
 use factory_records::domain::ports::RunRepository;
 use factory_records::domain::review_rounds::{
-    Finding, FindingKind, Lines, ReviewRoundOutcome, ReviewRoundRepository,
+    BlockerResolutions, DisputeRuling, Finding, FindingKind, FixAnswer, FixStatus, Lines,
+    ReviewRoundOutcome, ReviewRoundRepository, Ruling,
 };
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
@@ -87,6 +88,7 @@ fn finding(path: &str, lines: Option<(u32, u32)>) -> Finding {
         problem: format!("{path} drops the error"),
         why: "A failed save looks like a saved one".to_string(),
         blocks_anywhere: false,
+        repeats_dropped: false,
     }
 }
 
@@ -638,6 +640,119 @@ async fn a_run_shows_its_review_rounds_and_their_findings() {
         Some(role("tests-reviewer"))
     );
     assert_eq!(listed[0].review_rounds, read.review_rounds);
+}
+
+/// A Run read alone counts what became of its Blockers: one the fix
+/// fixed, one it disputed that the next round upheld, and one it disputed
+/// that the next round dropped, and one no round ruled on yet, which counts
+/// as upheld.
+#[tokio::test]
+async fn a_run_counts_its_blockers_fixed_upheld_and_dropped() {
+    let repo = FakeRepo::default();
+    let github = FakeGithub::default();
+    let run_id = code_run(&repo).await;
+    github.state().branch_heads = [Some("aaa".to_string()), Some("bbb".to_string())].into();
+    let rounds_impl = rounds(&repo, &github);
+    rounds_impl
+        .open_round(opening(run_id, 3, 1))
+        .await
+        .expect("open");
+    start_reviewers(&repo, run_id, 3, &["tests-reviewer"]).await;
+    let first = StepKey { run_id, seq: 3 };
+    repo.record_findings(
+        first,
+        3,
+        &[
+            finding("src/a.rs", None),
+            finding("src/b.rs", None),
+            finding("src/c.rs", None),
+            finding("src/d.rs", None),
+        ],
+    )
+    .await
+    .expect("record");
+    rounds_impl
+        .close_round(closing(run_id, 3))
+        .await
+        .expect("close");
+    let disputed = |place, why: &str| FixAnswer {
+        seq: 3,
+        place,
+        status: FixStatus::Disputed,
+        dispute: Some(why.to_string()),
+    };
+    repo.record_fix(
+        run_id,
+        3,
+        &[
+            FixAnswer {
+                seq: 3,
+                place: 1,
+                status: FixStatus::Fixed,
+                dispute: None,
+            },
+            disputed(2, "The sandbox has no network"),
+            disputed(3, "The file is generated"),
+            // No round ruled on it yet: it counts as upheld.
+            disputed(4, "It is vendored"),
+        ],
+    )
+    .await
+    .expect("fix");
+    rounds_impl
+        .open_round(opening(run_id, 5, 2))
+        .await
+        .expect("open");
+    start_reviewers(&repo, run_id, 5, &["tests-reviewer"]).await;
+    let ruling = |place, ruling| Ruling {
+        seq: 3,
+        place,
+        ruling,
+    };
+    repo.record_answer(
+        StepKey { run_id, seq: 5 },
+        5,
+        &[found_again("src/b.rs")],
+        &[
+            ruling(2, DisputeRuling::Upheld),
+            ruling(3, DisputeRuling::Dropped),
+        ],
+    )
+    .await
+    .expect("record");
+    let service = crate::domain::service::FactoryServiceImpl::new(
+        repo.clone(),
+        Started,
+        Reviewer::default(),
+        repo.clone(),
+        repo.clone(),
+        github.clone(),
+    );
+
+    let read = crate::domain::ports::FactoryService::get_run(&service, &julia(), run_id)
+        .await
+        .expect("read");
+
+    assert_eq!(
+        read.blocker_resolutions,
+        BlockerResolutions {
+            fixed: 1,
+            disputed_upheld: 2,
+            disputed_dropped: 1,
+        }
+    );
+    let blockers = &read.review_rounds[0].findings;
+    assert_eq!(
+        blockers[1].dispute.as_deref(),
+        Some("The sandbox has no network")
+    );
+    assert_eq!(blockers[2].ruling, Some(DisputeRuling::Dropped));
+    let json = serde_json::to_value(&read).expect("json");
+    assert_eq!(json["blockerResolutions"]["disputedDropped"], 1);
+    assert_eq!(
+        json["reviewRounds"][0]["findings"][1]["fixStatus"],
+        "disputed"
+    );
 }
 
 /// A finding that blocks wherever it is.

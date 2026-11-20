@@ -6,7 +6,9 @@ use factory_records::domain::quality::{
     BlockerRecord, CiJob, CiJobResult, CiVerdict, CiWaitRecord, QualityRecords, QualityRun,
     ReviewRoundRecord, ReviewerRecord,
 };
-use factory_records::domain::review_rounds::ReviewRoundOutcome;
+use factory_records::domain::review_rounds::{
+    BlockerResolutions, DisputeRuling, FixStatus, ReviewRoundOutcome,
+};
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
@@ -591,6 +593,8 @@ fn review_rounds_and_blockers_are_counted() {
         seq,
         round_seq,
         problem: problem.to_string(),
+        fix_status: None,
+        ruling: None,
     };
     let records = QualityRecords {
         runs: vec![run(3), run(2), run(1)],
@@ -663,6 +667,44 @@ fn review_rounds_and_blockers_are_counted() {
             .map(|link| link.id)
             .collect::<Vec<_>>(),
         vec![run_id(2), run_id(1)]
+    );
+}
+
+/// The Blockers given to a fix are counted fixed, disputed and upheld, or
+/// disputed and dropped; a dispute no round ruled on counts as upheld, and
+/// a Blocker no fix was given counts in none.
+#[test]
+fn blockers_fixed_upheld_and_dropped_are_counted() {
+    let blocker = |seq: u16, fix_status, ruling| BlockerRecord {
+        run_id: run_id(1),
+        seq,
+        round_seq: 2,
+        problem: format!("Problem {seq}"),
+        fix_status,
+        ruling,
+    };
+    let records = QualityRecords {
+        runs: vec![run(1)],
+        blockers: vec![
+            blocker(2, Some(FixStatus::Fixed), None),
+            blocker(3, Some(FixStatus::Fixed), None),
+            blocker(4, Some(FixStatus::Disputed), Some(DisputeRuling::Upheld)),
+            blocker(5, Some(FixStatus::Disputed), None),
+            blocker(6, Some(FixStatus::Disputed), Some(DisputeRuling::Dropped)),
+            blocker(7, None, None),
+        ],
+        ..QualityRecords::default()
+    };
+
+    let review = summarize_quality(&query(None), records, &[]).review;
+
+    assert_eq!(
+        review.resolutions,
+        BlockerResolutions {
+            fixed: 2,
+            disputed_upheld: 2,
+            disputed_dropped: 1,
+        }
     );
 }
 

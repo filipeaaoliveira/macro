@@ -10,7 +10,7 @@ use factory_records::domain::models::{
     EntryId, InvalidName, Outcome, Repository, Role, Run, RunId, RunOutcome, SteerRefusal, Step,
     StepKey,
 };
-use factory_records::domain::review_rounds::ReviewRound;
+use factory_records::domain::review_rounds::{BlockerResolutions, ReviewRound};
 use factory_records::domain::standing_acts::{StandingAct, StandingActRecord, StandingRoleName};
 use factory_records::domain::standing_rules::{OrchestratorDefinition, ProjectRules, RulesSource};
 use macro_user_id::user_id::MacroUserIdStr;
@@ -678,6 +678,9 @@ pub struct RunDetail {
     pub base_required_checks: Option<RequiredChecksState>,
     /// Its review rounds, in order, each with what its reviewers found.
     pub review_rounds: Vec<ReviewRound>,
+    /// What became of its Blockers: fixed, or disputed and then upheld or
+    /// dropped.
+    pub blocker_resolutions: BlockerResolutions,
     /// What agents did to it under its Factory Definition's Standing
     /// Roles, in order: who started, cancelled or linked it, and answered
     /// its Gates.

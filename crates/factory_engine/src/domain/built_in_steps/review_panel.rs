@@ -3,6 +3,12 @@
 //! the reviewer's session; one that still does not read is one Blocker on
 //! the whole change, so a round never passes on it and the Run never fails
 //! for it.
+//!
+//! A Blocker of the round before that the fix disputes is ruled on by the
+//! reviewer whose Role found it (the round's first reviewer, for a finding
+//! of no Role): it lists it again, and upholds it, or drops it. One it does
+//! neither for stands as upheld, and blocks again; one it dropped, and
+//! raises again later in the visit, is dismissed.
 
 #[cfg(test)]
 mod test;
@@ -11,7 +17,9 @@ use factory_records::domain::main_hold::MainHoldRepository;
 use factory_records::domain::merge_queue::MergeQueueRepository;
 use factory_records::domain::models::{Outcome, Role};
 use factory_records::domain::ports::RunRepository;
-use factory_records::domain::review_rounds::{ReviewFinding, ReviewRound, ReviewRoundRepository};
+use factory_records::domain::review_rounds::{
+    DisputeRuling, Finding, FixStatus, ReviewFinding, ReviewRound, ReviewRoundRepository, Ruling,
+};
 use uuid::Uuid;
 
 use super::checks_round::{lost, records};
@@ -20,7 +28,8 @@ use crate::domain::flow::StepName;
 use crate::domain::models::{AgentTurn, StepInput, StepReport};
 use crate::domain::ports::{MainWatches, PullRequests, StepAgent};
 use crate::domain::review_rounds::{
-    ReviewerAnswer, ReviewerAnswerError, carried_blockers, findings_block,
+    ReviewerAnswer, ReviewerAnswerError, carried_blockers, dropped_in_visit, findings_block,
+    places_meet,
 };
 
 /// The place of the prompt that asks a reviewer again among its Step's
@@ -48,7 +57,22 @@ where
             .await
             .map_err(records)?;
         let carried = carried_blockers(&rounds, round);
-        let instructions = panel_instructions(round, input.role, &carried);
+        let first = input.key.seq == round.seq;
+        let rules: Vec<usize> = (1..)
+            .zip(&carried)
+            .filter(|(_, blocker)| {
+                blocker.fix_status == Some(FixStatus::Disputed)
+                    && rules_on(blocker, input.role, first)
+            })
+            .map(|(number, _)| number)
+            .collect();
+        let dropped = dropped_in_visit(&rounds, round, |seq| {
+            input
+                .earlier
+                .iter()
+                .any(|step| step.seq == seq && step.role.as_ref() == input.role)
+        });
+        let instructions = panel_instructions(round, input.role, &carried, &rules, &dropped);
         let report = self
             .ask_agent_in_repository(step, &instructions, review_outcomes(), input)
             .await?;
@@ -59,14 +83,19 @@ where
             return Ok(report);
         }
 
-        let (outcome, answer) =
-            match ReviewerAnswer::read(&report.outcome, &report.output, carried.len()) {
-                Ok(answer) => (report.outcome, answer),
-                Err(error) => self.ask_again(round, input, carried.len(), &error).await?,
-            };
+        let read =
+            ReviewerAnswer::read_ruling(&report.outcome, &report.output, carried.len(), &rules);
+        let (outcome, answer) = match read {
+            Ok(answer) => (report.outcome, answer),
+            Err(error) => {
+                self.ask_again(round, input, carried.len(), &rules, &error)
+                    .await?
+            }
+        };
+        let (outcome, answer, rulings) = rule(outcome, answer, &carried, &rules, &dropped);
 
         let recorded = repo
-            .record_findings(input.key, round.seq, &answer.findings)
+            .record_answer(input.key, round.seq, &answer.findings, &rulings)
             .await
             .map_err(records)?;
         if !recorded {
@@ -89,6 +118,7 @@ where
         round: &ReviewRound,
         input: StepInput<'_>,
         carried: usize,
+        rules: &[usize],
         error: &ReviewerAnswerError,
     ) -> Result<(Outcome, ReviewerAnswer), BuiltInStepError> {
         let repo = self.pull_requests.records();
@@ -118,7 +148,7 @@ where
 
         let changes = Outcome::try_from("changes".to_string()).map_err(|_| lost("no outcome"))?;
         let read = if review_outcomes().contains(&again.outcome) {
-            ReviewerAnswer::read(&again.outcome, &again.text, carried)
+            ReviewerAnswer::read_ruling(&again.outcome, &again.text, carried, rules)
         } else {
             Err(ReviewerAnswerError::OutcomeAndBlockers)
         };
@@ -127,6 +157,86 @@ where
             Err(error) => Ok((changes, ReviewerAnswer::unreadable(&again.text, &error))),
         }
     }
+}
+
+/// Whether the reviewer of `role` rules on the dispute of `blocker`: it
+/// found it, or, for a finding of no Role, it is the round's `first`
+/// reviewer. A panel names each Role once, and a Run keeps its panel, so
+/// one reviewer of each round rules on each dispute.
+fn rules_on(blocker: &ReviewFinding, role: Option<&Role>, first: bool) -> bool {
+    match &blocker.role {
+        Some(found_by) => role == Some(found_by),
+        None => first,
+    }
+}
+
+/// The answer as the round records it, with its rulings on the disputes
+/// among the `carried` Blockers numbered `rules`. A dispute it dropped is
+/// dropped; one it listed again, or did neither for, is upheld, and one it
+/// did not list again is added to its Blockers as the reviewer of the round
+/// before wrote it, blocking wherever it is: a dispute never passes a round
+/// unless its reviewer drops it. A Blocker it raises at the place of one it
+/// dropped, in this round or earlier in the visit (`dropped`), is marked
+/// so the close dismisses it. An answer that passes but gains a Blocker
+/// asks for changes.
+fn rule(
+    outcome: Outcome,
+    mut answer: ReviewerAnswer,
+    carried: &[&ReviewFinding],
+    rules: &[usize],
+    dropped: &[&ReviewFinding],
+) -> (Outcome, ReviewerAnswer, Vec<Ruling>) {
+    let mut rulings = Vec::with_capacity(rules.len());
+    let mut upheld = Vec::new();
+    for &number in rules {
+        let Some(blocker) = carried.get(number - 1) else {
+            continue;
+        };
+        let ruling = if answer.dropped.contains(&number) {
+            DisputeRuling::Dropped
+        } else {
+            if !answer.listed_again.contains(&number) {
+                upheld.push(Finding {
+                    path: blocker.path.clone(),
+                    lines: blocker.lines,
+                    problem: blocker.problem.clone(),
+                    why: blocker.why.clone(),
+                    blocks_anywhere: true,
+                    repeats_dropped: false,
+                });
+            }
+            DisputeRuling::Upheld
+        };
+        rulings.push(Ruling {
+            seq: blocker.seq,
+            place: blocker.place,
+            ruling,
+        });
+    }
+
+    let dropped_now: Vec<&ReviewFinding> = answer
+        .dropped
+        .iter()
+        .filter_map(|number| carried.get(number - 1).copied())
+        .collect();
+    for finding in answer
+        .findings
+        .iter_mut()
+        .filter(|finding| !finding.blocks_anywhere)
+    {
+        finding.repeats_dropped = dropped
+            .iter()
+            .chain(&dropped_now)
+            .any(|blocker| places_meet(&blocker.path, blocker.lines, &finding.path, finding.lines));
+    }
+
+    let outcome = if upheld.is_empty() {
+        outcome
+    } else {
+        Outcome::try_from("changes".to_string()).unwrap_or(outcome)
+    };
+    answer.findings.extend(upheld);
+    (outcome, answer, rulings)
 }
 
 /// The outcomes a reviewer ends with.
@@ -153,6 +263,8 @@ pub(super) fn panel_instructions(
     round: &ReviewRound,
     role: Option<&Role>,
     carried: &[&ReviewFinding],
+    rules: &[usize],
+    dropped: &[&ReviewFinding],
 ) -> String {
     let focus = REVIEW_FOCUS
         .iter()
@@ -186,6 +298,32 @@ pub(super) fn panel_instructions(
              not only in the diff under review. List each one still there as a blocker, with \
              `\"previous\"` set to its number below: it then blocks wherever it is.\n\n{}",
             findings_block(carried)
+        ));
+    }
+    if !rules.is_empty() {
+        let numbers: Vec<String> = rules.iter().map(ToString::to_string).collect();
+        instructions.push_str(&format!(
+            "\n## Disputed blockers\n\nThe fix disputes the blockers numbered {} above, \
+             which you found, with the reasons the block gives. Rule on each one: list it \
+             again as a blocker, with `\"previous\"` set to its number, to uphold it; or add \
+             its number to `\"dropped\"` in your json block (`{{\"blockers\": [], \
+             \"dropped\": [2]}}`) to drop it, when the fixer's reason holds. A dropped \
+             blocker blocks nothing. A dispute you neither list again nor drop is upheld, \
+             and blocks again.\n",
+            numbers.join(", ")
+        ));
+    } else if carried.iter().any(|blocker| blocker.dispute.is_some()) {
+        instructions.push_str(
+            "\nThe reviewer that found a disputed blocker above rules on its dispute: list \
+             one again only when your own focus finds it still there.\n",
+        );
+    }
+    if !dropped.is_empty() {
+        instructions.push_str(&format!(
+            "\n## Blockers you dropped\n\nYou dropped these disputed blockers earlier in this \
+             review. Do not raise them again: one you raise again at their place blocks \
+             nothing.\n\n{}",
+            findings_block(dropped)
         ));
     }
     instructions

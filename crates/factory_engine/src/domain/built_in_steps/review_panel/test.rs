@@ -1,5 +1,7 @@
 //! A reviewer's Step of a review round, with an agent the test scripts.
 
+mod dispute;
+
 use factory_records::domain::standing_rules::RunRules;
 use std::sync::{Arc, LazyLock, Mutex};
 
@@ -172,6 +174,7 @@ async fn second_round(repo: &FakeRepo, blockers: &[&str], fix_diff: bool) -> (Ru
             problem: format!("{path} drops the error"),
             why: "Saves look done".to_string(),
             blocks_anywhere: false,
+            repeats_dropped: false,
         })
         .collect();
     repo.record_findings(first, 3, &found)

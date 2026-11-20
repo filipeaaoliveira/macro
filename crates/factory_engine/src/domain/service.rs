@@ -26,7 +26,9 @@ use factory_records::domain::models::{
     RunOutcome, SteerRefusal, Step, StepKey, TaskLink, TeamMembership,
 };
 use factory_records::domain::ports::RunRepository;
-use factory_records::domain::review_rounds::{ReviewRound, ReviewRoundRepository};
+use factory_records::domain::review_rounds::{
+    BlockerResolutions, ReviewRound, ReviewRoundRepository,
+};
 use factory_records::domain::self_improvement::{IMPROVE_FLOW, SelfImprovementRepository};
 use factory_records::domain::standing_acts::{StandingAct, StandingActRepository, StandingActor};
 use factory_records::domain::standing_rules::{
@@ -523,6 +525,7 @@ where
             steps: with_pause_ends(steps),
             main_hold: base.hold,
             base_required_checks: base.required,
+            blocker_resolutions: BlockerResolutions::of_rounds(&review_rounds),
             review_rounds,
             standing_acts,
             token_budget,
@@ -597,6 +600,7 @@ where
                 steps,
                 main_hold: base.hold,
                 base_required_checks: base.required,
+                blocker_resolutions: BlockerResolutions::of_rounds(&review_rounds),
                 review_rounds,
                 standing_acts,
                 token_budget,
