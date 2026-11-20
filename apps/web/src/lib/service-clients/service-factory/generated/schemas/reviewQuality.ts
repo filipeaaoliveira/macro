@@ -47,8 +47,9 @@ export interface ReviewQuality {
    * @minimum 0
    */
   repeatedBlockers: number;
-  /** What became of the Blockers given to a fix: fixed, or disputed and
-then upheld or dropped, over every reviewed Run. */
+  /** What became of the Blockers given to a fix: fixed as the fixer
+says, or disputed and then upheld or dropped, and the findings
+dismissed, over every reviewed Run. */
   resolutions: BlockerResolutions;
   /**
    * Runs with one or more review rounds.

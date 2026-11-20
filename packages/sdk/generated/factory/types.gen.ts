@@ -286,10 +286,16 @@ export type BlockerCount = {
 };
 
 /**
- * What became of a Run's Blockers: fixed, or disputed and then upheld or
- * dropped. A dispute no round ruled on yet counts as upheld.
+ * What became of a Run's Blockers: fixed as the fixer says, or disputed
+ * and then upheld or dropped, and the findings dismissed as repeats of a
+ * dropped one. A dispute no round ruled on yet counts as upheld.
  */
 export type BlockerResolutions = {
+    /**
+     * Findings dismissed: a reviewer raised again, in a later round of the
+     * visit, the same problem at the same lines as a Blocker it dropped.
+     */
+    dismissed: number;
     /**
      * Blockers the fix disputed that a reviewer dropped.
      */
@@ -299,7 +305,8 @@ export type BlockerResolutions = {
      */
     disputedUpheld: number;
     /**
-     * Blockers the fix said it fixed.
+     * Blockers the fixer said it fixed: its claim, which the next round
+     * checks.
      */
     fixed: number;
 };
@@ -1782,8 +1789,9 @@ export type ReviewQuality = {
      */
     repeatedBlockers: number;
     /**
-     * What became of the Blockers given to a fix: fixed, or disputed and
-     * then upheld or dropped, over every reviewed Run.
+     * What became of the Blockers given to a fix: fixed as the fixer
+     * says, or disputed and then upheld or dropped, and the findings
+     * dismissed, over every reviewed Run.
      */
     resolutions: BlockerResolutions;
     /**

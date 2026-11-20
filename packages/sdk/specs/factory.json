@@ -3433,9 +3433,15 @@
       },
       "BlockerResolutions": {
         "type": "object",
-        "description": "What became of a Run's Blockers: fixed, or disputed and then upheld or\ndropped. A dispute no round ruled on yet counts as upheld.",
-        "required": ["fixed", "disputedUpheld", "disputedDropped"],
+        "description": "What became of a Run's Blockers: fixed as the fixer says, or disputed\nand then upheld or dropped, and the findings dismissed as repeats of a\ndropped one. A dispute no round ruled on yet counts as upheld.",
+        "required": ["fixed", "disputedUpheld", "disputedDropped", "dismissed"],
         "properties": {
+          "dismissed": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Findings dismissed: a reviewer raised again, in a later round of the\nvisit, the same problem at the same lines as a Blocker it dropped.",
+            "minimum": 0
+          },
           "disputedDropped": {
             "type": "integer",
             "format": "int32",
@@ -3451,7 +3457,7 @@
           "fixed": {
             "type": "integer",
             "format": "int32",
-            "description": "Blockers the fix said it fixed.",
+            "description": "Blockers the fixer said it fixed: its claim, which the next round\nchecks.",
             "minimum": 0
           }
         }
@@ -5481,7 +5487,7 @@
           },
           "resolutions": {
             "$ref": "#/components/schemas/BlockerResolutions",
-            "description": "What became of the Blockers given to a fix: fixed, or disputed and\nthen upheld or dropped, over every reviewed Run."
+            "description": "What became of the Blockers given to a fix: fixed as the fixer\nsays, or disputed and then upheld or dropped, and the findings\ndismissed, over every reviewed Run."
           },
           "reviewedRuns": {
             "type": "integer",
