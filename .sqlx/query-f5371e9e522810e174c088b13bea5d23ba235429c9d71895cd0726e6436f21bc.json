@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT g.role, g.rule,\n                   (array_agg(g.agent ORDER BY r.created_at DESC))[1] AS \"agent!\",\n                   count(*) AS \"runs!\",\n                   count(r.outcome) FILTER (WHERE r.outcome <> 'infrastructure') AS \"ended!\",\n                   count(*) FILTER (WHERE r.outcome = 'success') AS \"succeeded!\",\n                   count(*) FILTER (\n                       WHERE EXISTS (\n                           SELECT 1\n                           FROM factory_step st\n                           WHERE st.run_id = g.run_id\n                             AND st.role = g.role\n                             AND (st.agent <> g.agent OR g.agent = ANY (st.passed_over))\n                       )\n                   ) AS \"fell_back!\"\n            FROM factory_run_agent_rule g\n            JOIN factory_run r ON r.id = g.run_id\n            WHERE g.run_id = ANY($1)\n            GROUP BY g.role, g.rule\n            ORDER BY g.role, g.rule\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "role",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "rule",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "agent!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "runs!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "ended!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "succeeded!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "fell_back!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "f5371e9e522810e174c088b13bea5d23ba235429c9d71895cd0726e6436f21bc"
+}

@@ -5,8 +5,8 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::domain::evaluation::{
-    AgentChoices, EvaluationRepository, Judgment, MAX_OPEN_TRIALS, NewSuite, RunAgents, RunArm,
-    SuiteInsert, TrialKey, TrialResult, TrialTokens,
+    AgentChoices, EvaluationRepository, Judgment, MAX_OPEN_TRIALS, NewSuite, RunAgentRule,
+    RunAgents, RunArm, SuiteInsert, TrialKey, TrialResult, TrialTokens,
 };
 use crate::domain::insights::{InsightsScope, RunInsightsRepository};
 use crate::domain::models::{AgentName, Role, RunId};
@@ -90,6 +90,7 @@ async fn a_run_takes_the_agents_of_its_arms_and_a_trial_those_of_its_suite(pool:
         repo.run_agents(run(TYPO_TRIAL)).await.expect("agents read"),
         RunAgents {
             choices: choices(&[("planner", "backup")]),
+            ruled: AgentChoices::new(),
             trial: true,
         }
     );
@@ -111,6 +112,62 @@ async fn a_run_takes_the_agents_of_its_arms_and_a_trial_those_of_its_suite(pool:
             .expect("agents read")
             .choices,
         choices(&[("writer", "backup")])
+    );
+}
+
+fn agent_rule(role: &str, rule: &str, agent: &str) -> RunAgentRule {
+    RunAgentRule {
+        role: Role::try_from(role.to_string()).expect("valid role"),
+        rule: rule.to_string(),
+        agent: AgentName::try_from(agent.to_string()).expect("valid agent"),
+    }
+}
+
+/// A Run keeps the Agent Rules that chose its Roles' Agents, one per Role:
+/// its Steps read them beside its arms' choices, and the Run API lists
+/// them.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "evaluation"))
+)]
+async fn a_run_keeps_the_agent_rules_that_chose_its_agents(pool: PgPool) {
+    let repo = PgRunRepository::new(pool);
+
+    repo.record_agent_rules(
+        run(IMPORT),
+        &[
+            agent_rule("planner", "docs", "backup"),
+            agent_rule("reviewer", "docs-review", "primary"),
+        ],
+    )
+    .await
+    .expect("rules recorded");
+    // Recording a Role's rule again keeps the first.
+    repo.record_agent_rules(run(IMPORT), &[agent_rule("planner", "other", "primary")])
+        .await
+        .expect("rules recorded");
+
+    let agents = repo.run_agents(run(IMPORT)).await.expect("agents read");
+    assert_eq!(agents.choices, choices(&[("writer", "backup")]));
+    assert_eq!(
+        agents.ruled,
+        choices(&[("planner", "backup"), ("reviewer", "primary")])
+    );
+    let kept = repo
+        .runs_agent_rules(&[run(IMPORT), run(EXPORT)])
+        .await
+        .expect("rules read");
+    assert_eq!(kept.len(), 1);
+    assert_eq!(
+        kept[&run(IMPORT)],
+        [
+            agent_rule("planner", "docs", "backup"),
+            agent_rule("reviewer", "docs-review", "primary"),
+        ]
+    );
+    assert_eq!(
+        repo.run_agents(run(EXPORT)).await.expect("agents read"),
+        RunAgents::default()
     );
 }
 
@@ -286,6 +343,7 @@ async fn a_suite_keeps_its_trials_runs_and_base_and_a_suite_still_running_holds_
         repo.run_agents(run(TYPO_TRIAL)).await.expect("agents read"),
         RunAgents {
             choices: agents.clone(),
+            ruled: AgentChoices::new(),
             trial: true,
         }
     );
@@ -576,4 +634,51 @@ async fn an_arm_leaves_its_runs_that_ended_for_infrastructure_out_of_its_ended(p
         .map(|arm| (arm.arm.as_str(), arm.runs, arm.ended, arm.succeeded))
         .collect();
     assert_eq!(arms, vec![("backup", 2, 1, 0), ("control", 1, 1, 1)]);
+}
+
+/// Insights count the Runs each Agent Rule chose an Agent for, by Role:
+/// how many ended, succeeded, and fell back to another Agent of the Role.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people", "evaluation"))
+)]
+async fn agent_rules_are_counted_with_the_runs_they_chose_for(pool: PgPool) {
+    let repo = PgRunRepository::new(pool.clone());
+    // The export succeeded with the docs rule's writer; the import's writer
+    // was passed over for lack of quota and `primary` wrote it.
+    repo.record_agent_rules(run(EXPORT), &[agent_rule("writer", "docs", "docs-writer")])
+        .await
+        .expect("rules recorded");
+    repo.record_agent_rules(run(IMPORT), &[agent_rule("writer", "docs", "docs-writer")])
+        .await
+        .expect("rules recorded");
+    sqlx::query!(
+        "INSERT INTO factory_step (run_id, seq, entry, visit, started_at, outcome, output, ended_at, \
+             session_id, action_id, offered, role, agent, passed_over, pass_reasons) \
+         VALUES ($1, 1, 'write', 1, '2026-11-11 09:00Z', 'done', 'Written', '2026-11-11 09:30Z', \
+             $2, $3, '{done}', 'writer', 'primary', '{docs-writer}', '{ai_allowance_exhausted}')",
+        Uuid::parse_str(IMPORT).expect("valid run id"),
+        Uuid::from_u128(0x731),
+        Uuid::from_u128(0x732),
+    )
+    .execute(&pool)
+    .await
+    .expect("step recorded");
+
+    let read = repo.read_evaluation(&november()).await.expect("read");
+
+    assert_eq!(read.rules.len(), 1);
+    let docs = &read.rules[0];
+    assert_eq!(
+        (
+            docs.role.as_str(),
+            docs.rule.as_str(),
+            docs.agent.as_str(),
+            docs.runs,
+            docs.ended,
+            docs.succeeded,
+            docs.fell_back
+        ),
+        ("writer", "docs", "docs-writer", 2, 2, 1, 1)
+    );
 }

@@ -42,6 +42,20 @@ pub const SUITE_STARTING_SECS: f64 = 300.0;
 /// definition's first; a Role it leaves out keeps the definition's.
 pub type AgentChoices = BTreeMap<Role, AgentName>;
 
+/// The Agent Rule of its Factory Definition that chose the Agent a Run's
+/// Steps of one Role start with, as the Run keeps it and the Run API shows
+/// it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RunAgentRule {
+    /// The Role.
+    pub role: Role,
+    /// The rule, by name.
+    pub rule: String,
+    /// The Agent it chose.
+    pub agent: AgentName,
+}
+
 /// The arm of an Experiment a Run was assigned.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunArm {
@@ -188,6 +202,9 @@ pub enum SuiteInsert {
 pub struct RunAgents {
     /// The Agents its arms, or its suite, give its Roles.
     pub choices: AgentChoices,
+    /// The Agents its Definition's Agent Rules gave its Roles when it
+    /// started. An arm's choice for the same Role comes first.
+    pub ruled: AgentChoices,
     /// Whether it is a Benchmark trial: its Steps take no other Agent when
     /// the chosen one cannot start, so every trial runs on its
     /// configuration.
@@ -226,6 +243,28 @@ pub struct ArmTally {
     /// How many had a Step of a Role the arm chooses for that another
     /// Agent took: the chosen one could not start, or the agent definition
     /// no longer has it.
+    pub fell_back: u32,
+}
+
+/// The Runs read whose Agent for one Role one Agent Rule chose.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RuleTally {
+    /// The Role.
+    pub role: Role,
+    /// The rule.
+    pub rule: String,
+    /// The Agent it chose for the newest of them.
+    pub agent: AgentName,
+    /// How many Runs it chose for.
+    pub runs: u32,
+    /// How many of them ended, but for those that ended `infrastructure`:
+    /// their work never ran.
+    pub ended: u32,
+    /// How many ended `success`.
+    pub succeeded: u32,
+    /// How many had a Step of the Role that another Agent took: the
+    /// chosen one could not start, or the agent definition no longer has
+    /// it.
     pub fell_back: u32,
 }
 
@@ -284,6 +323,8 @@ pub struct EvaluationRecords {
     pub arms: Vec<ArmTally>,
     /// Each Scorer's judgments of each arm's Runs.
     pub arm_scores: Vec<ArmScore>,
+    /// Each Agent Rule that chose an Agent for one of the Runs, by Role.
+    pub rules: Vec<RuleTally>,
     /// The person's suites started in the period, newest first, at most
     /// [`SUITES_READ`].
     pub suites: Vec<SuiteRecord>,
@@ -303,7 +344,23 @@ pub trait EvaluationRepository: Send + Sync + 'static {
         arms: &[RunArm],
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
-    /// The Agents the Run's arms, or its suite, give its Roles.
+    /// Record the Agent Rules that chose Agents for a new Run's Roles. A
+    /// Role keeps the first rule recorded for it.
+    fn record_agent_rules(
+        &self,
+        run_id: RunId,
+        rules: &[RunAgentRule],
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// The Agent Rules each of `run_ids` keeps, by Role; a Run that keeps
+    /// none is left out.
+    fn runs_agent_rules(
+        &self,
+        run_ids: &[RunId],
+    ) -> impl Future<Output = Result<BTreeMap<RunId, Vec<RunAgentRule>>, Self::Err>> + Send;
+
+    /// The Agents the Run's arms, or its suite, give its Roles, and those
+    /// its Agent Rules chose.
     fn run_agents(
         &self,
         run_id: RunId,
