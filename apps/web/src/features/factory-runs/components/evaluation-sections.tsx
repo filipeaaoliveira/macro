@@ -297,6 +297,12 @@ function UndoDismissal(props: { improvementId: string }) {
   const [undoing, setUndoing] = createSignal(false);
   const messageId = createUniqueId();
   let undoButton: HTMLButtonElement | undefined;
+  let keepButton: HTMLButtonElement | undefined;
+
+  const askToUndo = () => {
+    setConfirming(true);
+    queueMicrotask(() => keepButton?.focus());
+  };
 
   const keepDismissed = () => {
     setConfirming(false);
@@ -326,7 +332,7 @@ function UndoDismissal(props: { improvementId: string }) {
             ref={undoButton}
             type="button"
             variant="ghost"
-            onClick={() => setConfirming(true)}
+            onClick={askToUndo}
           >
             {t('factoryEvaluation.undoDismissal')}
           </Button>
@@ -343,6 +349,7 @@ function UndoDismissal(props: { improvementId: string }) {
           </span>
         </p>
         <Button
+          ref={keepButton}
           type="button"
           variant="ghost"
           aria-describedby={messageId}

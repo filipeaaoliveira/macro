@@ -4,6 +4,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
   within,
 } from '@solidjs/testing-library';
 import { type Accessor, createSignal } from 'solid-js';
@@ -627,20 +628,28 @@ describe('RunInsightsView', () => {
       within(section).getByText('3 failures dismissed by the rejection')
     ).toBeTruthy();
 
-    // Keep dismissed leaves it be.
+    // Keep dismissed, focused as the confirmation opens, leaves it be and
+    // hands focus back to Undo dismissal.
     fireEvent.click(
       within(section).getByRole('button', { name: 'Undo dismissal' })
     );
     expect(
       within(section).getByText('Count these failures again?')
     ).toBeTruthy();
-    fireEvent.click(
-      within(section).getByRole('button', { name: 'Keep dismissed' })
-    );
+    const keep = within(section).getByRole('button', {
+      name: 'Keep dismissed',
+    });
+    await waitFor(() => expect(document.activeElement).toBe(keep));
+    fireEvent.click(keep);
     expect(undoDismissal).not.toHaveBeenCalled();
     expect(
       within(section).queryByText('Count these failures again?')
     ).toBeNull();
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        within(section).getByRole('button', { name: 'Undo dismissal' })
+      )
+    );
 
     fireEvent.click(
       within(section).getByRole('button', { name: 'Undo dismissal' })
