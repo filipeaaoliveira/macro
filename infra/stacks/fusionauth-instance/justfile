@@ -29,6 +29,7 @@ destroy_local_stack:
 
 # Destroys the local FusionAuth instance and pulumi stack.
 destroy:
+  ../../../tooling/scripts/refuse-persistent-wipe.sh "delete FusionAuth's volumes"
   just destroy_local_stack || true
   docker compose down -v
   docker volume rm fusionauth_db_data fusionauth_config || true

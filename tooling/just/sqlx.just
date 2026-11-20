@@ -16,6 +16,7 @@ prepare_db $DATABASE_URL *FLAGS:
 
 [no-cd]
 drop_db $DATABASE_URL *FLAGS:
+    {{ source_directory() }}/../scripts/refuse-persistent-wipe.sh "drop the database" "$DATABASE_URL"
     sqlx database drop {{ FLAGS }}
 
 [no-cd]

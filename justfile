@@ -46,6 +46,7 @@ docker_up *ARGS:
 
 # Reset and seed deterministic data used by local E2E tests.
 local-e2e-seed:
+  tooling/scripts/refuse-persistent-wipe.sh "reset macrodb for local E2E"
   just run_dbs -d
   -just crates/macro_db_client/drop_db -y -f
   just initialize_dbs
@@ -173,5 +174,6 @@ setup:
   @echo "Setup complete."
 
 destroy:
+  tooling/scripts/refuse-persistent-wipe.sh "delete the local stack's volumes"
   just infra/stacks/fusionauth-instance/destroy
   {{ compose }} down -v
