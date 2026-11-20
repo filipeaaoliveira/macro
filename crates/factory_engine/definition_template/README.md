@@ -385,7 +385,7 @@ and a name given twice.
 A Role's Steps start with its first Agent in `roles`. An Agent Rule picks
 another one for some Runs: those whose task carries a tag, those on a
 repository, or both. For example, to have a cheaper model write the
-changes of tasks tagged `docs`, add an Agent on that model, and a `rules`
+changes of tasks tagged `docs`, add an Agent on that model to the Role, and a `rules`
 list beside `agents` and `roles`:
 
 ```json
@@ -393,6 +393,9 @@ list beside `agents` and `roles`:
   "primary": { "bot": "00000000-0000-0000-0000-000000000001" },
   "backup": { "bot": "00000000-0000-0000-0000-000000000002" },
   "docs-writer": { "bot": "00000000-0000-0000-0000-000000000002", "model": "a-smaller-model" }
+},
+"roles": {
+  "writer": ["primary", "backup", "docs-writer"]
 },
 "rules": [
   { "name": "docs", "role": "writer", "tag": "docs", "agent": "docs-writer" },
@@ -404,9 +407,12 @@ A Run on a task tagged `docs` (your own tags or your team's, in any case)
 then has `docs-writer` write first. A Run on `acme/site` has `backup`
 plan first. A rule naming both a `tag` and a `repository` matches only a
 Run that has both. Each rule needs a `name` (lower-case letters, digits,
-`-` or `_`), a `role` that `roles` fills, an `agent` that `agents`
-defines (one only a Standing Role lists is allowed, as for an Experiment
-arm), and a `tag`, a `repository` (`owner/name`), or both.
+`-` or `_`), a `role` that `roles` fills, an `agent` that the Role lists
+in `roles` (a rule only moves one of the Role's own Agents first, so a tag
+someone adds never hands a Run to an Agent kept for something else, such
+as one only a Standing Role lists), and a `tag`, a `repository`
+(`owner/name`, without `.git`), or both. Keep the rest of `roles` as it
+is: the example shows only `writer`.
 
 How the first Agent of a Role is chosen, first match first:
 
@@ -419,12 +425,15 @@ When the chosen Agent cannot start for lack of quota, the Role's own
 Agents take the Step in their order, as before. A Run matches its rules
 once, when it starts, and keeps the rule that chose each Role: a tag
 added or removed later, or a change to the rules, does not change a Run
-under way. The Run's page shows the rule that chose each Role.
+under way. The Run's page shows the rule that chose each Role, and says
+when the task's tags couldn't be read as it started, so no rule on a tag
+applied.
 
-The validator refuses a rule whose Agent `agents` does not define, whose
-Role `roles` does not fill, that names neither a tag nor a repository, a
-repository not written `owner/name`, an empty tag, more than 64 rules, and
-a name given twice.
+The validator refuses a rule whose Agent `agents` does not define or its
+Role does not list, whose Role `roles` does not fill, that names neither a
+tag nor a repository, a repository not written `owner/name`, an empty tag,
+a rule that matches the same Runs for the same Role as an earlier one (it
+could never choose), more than 64 rules, and a name given twice.
 
 ## Self-improvement
 

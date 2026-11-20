@@ -275,7 +275,9 @@ a Run whose rules are not kept does not start. The task's tags are read
 then, as the owner sees them (their own and their team's tag sets,
 `TaskDirectory::task_tags`), only when a rule names a tag; tags that cannot
 be read are taken as none, so no tag rule matches and the Run starts, as
-for its Project. The workflow never matches: `SessionAgent` reads the kept
+for its Project, and the Run keeps that they went unread
+(`factory_run_task_tags_unread`), which the Run API shows as
+`taskTagsUnread`, so a silent default is not read as "no rule matched". The workflow never matches: `SessionAgent` reads the kept
 choice with the arms' (`RunAgents::ruled`), so a retry, a replay, a tag
 changed later or a changed Definition does not change a Run under way, and
 no workflow code changed (no patch marker). The order a Step takes its
@@ -290,14 +292,20 @@ only keeps a Run that kept both on its arm. A rule is the Definition's
 standing default for a kind of task; an arm with no choice for the Role
 (an Experiment's control) leaves the rule in place. A Benchmark trial and
 a self-improvement Run take no rules, as they take no arms: a trial runs
-on its suite's configuration only. A rule's Agent is checked where the
-Definition is read as an arm's is (`evaluation::check_choices`, refused as
-`agents.json: agent rule {name} gives role ...`): it must be an Agent of
-the Definition, one only a Standing Role lists among them. A rule naming
-a Role the Definition does not fill, two rules of one name, an empty or
-too long tag, a repository not `owner/name`, and more than
-`MAX_AGENT_RULES` rules do not read, in a Definition and in
-`factory_definition_check` alike. `FACTORY_AGENTS` takes no rules
+on its suite's configuration only. A rule's Agent must be one its own
+Role lists (`for_role`; `RuleAgentOutsideRole`): tags are set by people,
+so a tag edit must never route a Run onto an Agent kept for something
+else, such as a bot only a Standing Role lists to answer Gates. A rule
+only moves one of the Role's Agents first. Its Agent is also checked where
+the Definition is read as an arm's is (`evaluation::check_choices`,
+refused as `agents.json: agent rule {name} gives role ...`), so any Agent
+an arm could not take is refused for a rule too. A rule naming a Role the
+Definition does not fill, two rules of one name, a rule matching the same
+Runs for the same Role as an earlier one (`RuleShadowed`, which could
+never choose), an empty or too long tag, a repository not `owner/name` as
+a Run keeps it (`CodeRepository::parse`: no `.git` ending, no `.` or `..`
+segment, no trailing slash), and more than `MAX_AGENT_RULES` rules do not
+read, in a Definition and in `factory_definition_check` alike. `FACTORY_AGENTS` takes no rules
 (`RulesOutsideDefinition`): the service holds no deployment agents at a
 Run's start. The Run API lists the kept rules as `agentRules` (Role,
 rule, Agent); the web Run view shows them under the Run's summary.
@@ -307,7 +315,9 @@ from before them reads a Run's kept Agents with `deny_unknown_fields`, so
 it fails every agent Step of a Run that kept a `rules` list. Roll every
 service and worker task onto this code before any team's Definition adds
 the list. `factory_run_agent_rule` (`20261120020000_factory_run_agent_rule.sql`)
-is a new table, so code from before it ignores it; rolling back leaves
+and `factory_run_task_tags_unread`
+(`20261120020100_factory_run_task_tags_unread.sql`) are new tables, so
+code from before them ignores them; rolling back leaves
 its rows unread, and a Run that kept a `rules` list fails its later agent
 Steps on the old worker, as above.
 
