@@ -1,4 +1,5 @@
 /** @vitest-environment jsdom */
+import { toast } from '@core/component/Toast/Toast';
 import {
   cleanup,
   fireEvent,
@@ -23,6 +24,10 @@ import type { InsightsParams, RunInsights } from './core/insights';
 import type { QualityInsights, QualityParams } from './core/quality';
 import type { Run } from './core/run';
 import { RunInsightsView } from './insights-view';
+
+vi.mock('@core/component/Toast/Toast', () => ({
+  toast: { alert: vi.fn(), failure: vi.fn(), success: vi.fn() },
+}));
 
 vi.mock('@core/mobile/isTouchDevice', () => ({
   isTouchDevice: () => false,
@@ -659,6 +664,47 @@ describe('RunInsightsView', () => {
     );
     expect(undoDismissal).toHaveBeenCalledWith('improvement-1');
     expect(undoDismissal).toHaveBeenCalledTimes(1);
+  });
+
+  it('says when the person may no longer undo, and hands focus back to Undo dismissal', async () => {
+    const undoDismissal = vi.fn(async () => ({
+      ok: false as const,
+      reason: 'forbidden' as const,
+    }));
+    mount({
+      insights: november,
+      undoDismissal,
+      evaluation: {
+        ...judged,
+        selfImprovement: {
+          ...rejected,
+          last: { ...rejected.last!, canUndoDismissal: true },
+        },
+      },
+    });
+    const section = screen.getByRole('heading', { name: 'Self-improvement' })
+      .parentElement?.parentElement?.parentElement as HTMLElement;
+
+    fireEvent.click(
+      within(section).getByRole('button', { name: 'Undo dismissal' })
+    );
+    fireEvent.click(
+      within(section).getByRole('button', { name: 'Undo dismissal' })
+    );
+
+    await waitFor(() =>
+      expect(toast.failure).toHaveBeenCalledWith(
+        'You may no longer undo this rejection.'
+      )
+    );
+    expect(
+      within(section).queryByText('Count these failures again?')
+    ).toBeNull();
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        within(section).getByRole('button', { name: 'Undo dismissal' })
+      )
+    );
   });
 
   it('offers no undo to someone who may not, and says when it was undone', () => {

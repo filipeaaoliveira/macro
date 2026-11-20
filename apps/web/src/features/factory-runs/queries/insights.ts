@@ -122,11 +122,12 @@ export function createAppInsightsContext(client: QueryClient): InsightsContext {
         queryKey: factoryRunKeys.evaluation._def,
       });
       if (result.isErr()) {
-        const conflict = result.error.some(
-          (error) => error.code === 'CONFLICT'
-        );
+        const coded = (code: string) =>
+          result.error.some((error) => error.code === code);
         fireAndForget(reads, 'factory-runs');
-        return { ok: false, reason: conflict ? 'conflict' : 'failed' };
+        if (coded('CONFLICT')) return { ok: false, reason: 'conflict' };
+        if (coded('FORBIDDEN')) return { ok: false, reason: 'forbidden' };
+        return { ok: false, reason: 'failed' };
       }
       await reads.catch(() => undefined);
       return { ok: true, value: undefined };

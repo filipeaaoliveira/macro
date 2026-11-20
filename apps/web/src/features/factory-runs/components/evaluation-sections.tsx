@@ -315,9 +315,16 @@ function UndoDismissal(props: { improvementId: string }) {
     const result = await context.undoDismissal(props.improvementId);
     setUndoing(false);
     if (result.ok) return;
+    // The confirmation closes; focus goes back to Undo dismissal, if it
+    // is still offered, rather than to the page.
     setConfirming(false);
+    queueMicrotask(() => undoButton?.focus());
     if (result.reason === 'conflict') {
       toast.alert(t('factoryEvaluation.undoDismissalConflict'));
+      return;
+    }
+    if (result.reason === 'forbidden') {
+      toast.failure(t('factoryEvaluation.undoDismissalForbidden'));
       return;
     }
     toast.failure(t('factoryEvaluation.undoDismissalFailed'));

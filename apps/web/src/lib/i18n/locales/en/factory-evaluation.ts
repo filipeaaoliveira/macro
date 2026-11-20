@@ -56,6 +56,7 @@ export default {
   keepDismissed: 'Keep dismissed',
   undoDismissalConflict: 'These failures are no longer dismissed.',
   undoDismissalFailed: 'Couldn’t undo the dismissal. Try again.',
+  undoDismissalForbidden: 'You may no longer undo this rejection.',
   // Experiments.
   experiments: 'Experiments',
   experimentsDescription:

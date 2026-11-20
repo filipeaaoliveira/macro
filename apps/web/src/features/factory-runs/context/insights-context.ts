@@ -33,10 +33,16 @@ export type InsightsContext = {
   /**
    * Sends the failures the rejected self-improvement run `improvementId`
    * dismissed back to pending, then reads the evaluation again. `conflict`
-   * means it holds no dismissed failure any more.
+   * means it holds no dismissed failure any more; `forbidden`, that the
+   * person may no longer undo it (no longer an admin of the team, say).
    */
-  undoDismissal: (improvementId: string) => Promise<RunActionResult>;
+  undoDismissal: (improvementId: string) => Promise<UndoDismissalResult>;
 };
+
+/** How undoing a rejection's dismissal went. */
+export type UndoDismissalResult =
+  | RunActionResult
+  | { ok: false; reason: 'forbidden' };
 
 const Context = createContext<InsightsContext>();
 

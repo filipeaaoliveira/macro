@@ -61,9 +61,22 @@ describe('undoDismissal', () => {
     expect(stale()).toBe(true);
   });
 
-  it('says failed when the undo is refused otherwise', async () => {
+  it('says forbidden when the person may no longer undo it, and reads again', async () => {
     vi.mocked(factoryClient.undoImprovementDismissal).mockResolvedValue(
       err([{ code: 'FORBIDDEN', message: 'not yours' }])
+    );
+    const { client, stale } = seeded();
+
+    const result =
+      await createAppInsightsContext(client).undoDismissal('improvement-1');
+
+    expect(result).toEqual({ ok: false, reason: 'forbidden' });
+    expect(stale()).toBe(true);
+  });
+
+  it('says failed when the undo fails otherwise', async () => {
+    vi.mocked(factoryClient.undoImprovementDismissal).mockResolvedValue(
+      err([{ code: 'INTERNAL_SERVER_ERROR', message: 'down' }])
     );
     const { client } = seeded();
 
