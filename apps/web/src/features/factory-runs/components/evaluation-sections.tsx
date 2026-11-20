@@ -2,6 +2,7 @@ import { InsightSection } from '@app/features/scheduling/components/insights-pan
 import { t } from '@app/lib/i18n';
 import { For, type JSX, Show } from 'solid-js';
 import type {
+  AgentRuleInsight,
   ArmInsight,
   BenchmarkSummary,
   EvaluationInsights,
@@ -167,6 +168,59 @@ function ExperimentRow(props: { experiment: ExperimentInsight }) {
         </table>
       </div>
     </li>
+  );
+}
+
+function AgentRuleRow(props: { rule: AgentRuleInsight }) {
+  return (
+    <tr class="border-t border-edge-muted">
+      <th scope="row" class="py-2 pr-3 text-left font-medium">
+        <span class="block">{props.rule.rule}</span>
+        <span class="block text-xs font-normal text-ink-muted">
+          {t('factoryEvaluation.agentRuleChose', {
+            role: props.rule.role,
+            agent: props.rule.agent,
+          })}
+        </span>
+        <Show when={props.rule.fellBack > 0}>
+          <span class="block text-xs font-normal text-ink-muted">
+            {t('factoryEvaluation.fellBack', { count: props.rule.fellBack })}
+          </span>
+        </Show>
+      </th>
+      <td class="py-2 pr-3 tabular-nums">{props.rule.runs}</td>
+      <td class="py-2 tabular-nums">
+        {props.rule.ended > 0
+          ? formatShare(props.rule.succeeded / props.rule.ended)
+          : '–'}
+      </td>
+    </tr>
+  );
+}
+
+/** The Agent Rules that chose Agents for the period's Runs, side by side. */
+function AgentRulesTable(props: { rules: AgentRuleInsight[] }) {
+  return (
+    <div class="overflow-x-auto px-4 py-4 sm:px-5">
+      <table data-agent-rules class="w-full min-w-[20rem] text-sm">
+        <thead class="text-xs text-ink-muted">
+          <tr>
+            <th scope="col" class="pb-1 pr-3 text-left font-normal">
+              {t('factoryEvaluation.agentRule')}
+            </th>
+            <th scope="col" class="pb-1 pr-3 text-left font-normal">
+              {t('factoryEvaluation.armRuns')}
+            </th>
+            <th scope="col" class="pb-1 text-left font-normal">
+              {t('factoryEvaluation.armSucceeded')}
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          <For each={props.rules}>{(rule) => <AgentRuleRow rule={rule} />}</For>
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -409,7 +463,8 @@ function SelfImprovementBody(props: {
 
 /**
  * How the period's Runs were judged and compared: each Scorer's judgments,
- * each Experiment's arms side by side, and the Benchmarks with the suites
+ * each Experiment's arms side by side, the Agent Rules that chose Agents,
+ * and the Benchmarks with the suites
  * replayed in the period, trial by trial.
  */
 export function EvaluationSections(props: {
@@ -459,6 +514,14 @@ export function EvaluationSections(props: {
           </For>
         </ul>
       </InsightSection>
+      <Show when={(props.evaluation.agentRules ?? []).length > 0}>
+        <InsightSection
+          title={t('factoryEvaluation.agentRules')}
+          description={t('factoryEvaluation.agentRulesDescription')}
+        >
+          <AgentRulesTable rules={props.evaluation.agentRules ?? []} />
+        </InsightSection>
+      </Show>
       <InsightSection
         title={t('factoryEvaluation.benchmarks')}
         description={t('factoryEvaluation.benchmarksDescription')}

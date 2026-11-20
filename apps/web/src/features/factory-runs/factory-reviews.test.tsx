@@ -73,6 +73,7 @@ const found: PullRequestRuns = {
           ],
           reviewRounds: [],
           standingActs: [],
+          agentRules: [],
         },
       },
     },

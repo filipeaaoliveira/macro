@@ -73,7 +73,8 @@ export function tokenBudgetLine(budget: RunTokenBudget): string {
 /**
  * Where the Run is, when it started and ended, the repository it works on,
  * the Factory Definition commit it read, the Automation that started it,
- * its token budget and what its agents used of it, and what its request
+ * its token budget and what its agents used of it, the Agent Rules that
+ * chose its Agents, and what its request
  * says past the title. The status line takes focus
  * when the control a person used goes away (an answered Gate, a cancelled
  * Run).
@@ -192,6 +193,29 @@ export function RunSummary(props: {
                     agent: standing.agent,
                     role: standing.standingRole,
                     time: props.time(standing.at),
+                  })}
+                </li>
+              )}
+            </For>
+          </ul>
+        </section>
+      </Show>
+      <Show when={(props.run.agentRules ?? []).length > 0}>
+        <section class="flex flex-col gap-1.5">
+          <h3 class="text-xs font-medium text-ink-muted">
+            {t('factoryRuns.agentRules')}
+          </h3>
+          <ul
+            data-agent-rules
+            class="flex flex-col gap-1 text-sm leading-5 [overflow-wrap:anywhere]"
+          >
+            <For each={props.run.agentRules}>
+              {(chosen) => (
+                <li>
+                  {t('factoryRuns.agentRuleChose', {
+                    role: chosen.role,
+                    agent: chosen.agent,
+                    rule: chosen.rule,
                   })}
                 </li>
               )}

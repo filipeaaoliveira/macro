@@ -188,6 +188,12 @@ export function toRun(detail: RunDetail): Run {
       standingRole: standing.standingRole,
       at: standing.at,
     })),
+    // A service older than Agent Rules sends none.
+    agentRules: (detail.agentRules ?? []).map((chosen) => ({
+      role: chosen.role,
+      rule: chosen.rule,
+      agent: chosen.agent,
+    })),
     reviewRounds: detail.reviewRounds.map((round) => ({
       round: round.round,
       visit: round.visit,

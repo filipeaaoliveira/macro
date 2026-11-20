@@ -393,6 +393,7 @@ function createFixtureInsights(): InsightsContext {
         timeZone: params().timeZone,
         scorers: [],
         experiments: [],
+        agentRules: [],
         benchmarks: [],
         suites: [],
       }),
