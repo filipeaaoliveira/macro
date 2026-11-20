@@ -143,7 +143,7 @@ impl QueryRoot {
     async fn unsupported_deletion(&self) -> super::GraphqlMutationSuccess<TestSoupEdges> {
         super::GraphqlMutationSuccess {
             effects: vec![EntityMutationEffect::deleted(
-                EntityType::User.with_entity_string("user-1".to_string()),
+                EntityType::Skill.with_entity_string("skill-1".to_string()),
             )],
             edges: std::marker::PhantomData,
         }
