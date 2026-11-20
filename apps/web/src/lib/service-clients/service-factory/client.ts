@@ -35,6 +35,7 @@ import {
   getSetFactoryDefinitionUrl,
   getSetFactoryStandingRulesUrl,
   getStopFactoryStepUrl,
+  getUndoFactoryImprovementDismissalUrl,
 } from './generated/client';
 import type {
   AnswerGateRequest,
@@ -46,6 +47,7 @@ import type {
   CreatedAutomation,
   CreateRunRequest,
   DefinitionSettings,
+  DismissalUndoneResponse,
   EvaluationInsights,
   FlawRunRequest,
   FlowsResponse,
@@ -480,6 +482,19 @@ export const factoryClient = {
     return fetchWithToken<RunDetail>(
       `${host()}${getFlawFactoryRunUrl(encodeURIComponent(runId))}`,
       { method: 'POST', body: JSON.stringify(body) }
+    );
+  },
+
+  /**
+   * Sends the failures a rejected self-improvement Run of the caller's team
+   * dismissed back to pending; only its Definition's namer or the Run's
+   * owner may. Repeating it answers the first undo. 409 when it dismissed
+   * nothing.
+   */
+  undoImprovementDismissal(improvementId: string) {
+    return fetchWithToken<DismissalUndoneResponse>(
+      `${host()}${getUndoFactoryImprovementDismissalUrl(encodeURIComponent(improvementId))}`,
+      { method: 'POST' }
     );
   },
 };

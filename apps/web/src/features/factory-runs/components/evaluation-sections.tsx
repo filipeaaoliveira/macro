@@ -1,6 +1,10 @@
 import { InsightSection } from '@app/features/scheduling/components/insights-panel';
 import { t } from '@app/lib/i18n';
-import { For, type JSX, Show } from 'solid-js';
+import { toast } from '@core/component/Toast/Toast';
+import { fireAndForget } from '@core/util/fireAndForget';
+import { Button } from '@ui';
+import { createSignal, createUniqueId, For, type JSX, Show } from 'solid-js';
+import { useInsightsContext } from '../context/insights-context';
 import type {
   ArmInsight,
   BenchmarkSummary,
@@ -282,6 +286,85 @@ function sourceLabel(source: string): string {
   return source === 'flawed' ? t('factoryEvaluation.flawedSource') : source;
 }
 
+/**
+ * Undo dismissal, for a rejected self-improvement run whose failures the
+ * person may count again: confirmed in place, as Cancel run is, so no
+ * dialog stacks on a phone's sheet.
+ */
+function UndoDismissal(props: { improvementId: string }) {
+  const context = useInsightsContext();
+  const [confirming, setConfirming] = createSignal(false);
+  const [undoing, setUndoing] = createSignal(false);
+  const messageId = createUniqueId();
+  let undoButton: HTMLButtonElement | undefined;
+
+  const keepDismissed = () => {
+    setConfirming(false);
+    queueMicrotask(() => undoButton?.focus());
+  };
+
+  const undo = async () => {
+    if (undoing()) return;
+    setUndoing(true);
+    const result = await context.undoDismissal(props.improvementId);
+    setUndoing(false);
+    if (result.ok) return;
+    setConfirming(false);
+    if (result.reason === 'conflict') {
+      toast.alert(t('factoryEvaluation.undoDismissalConflict'));
+      return;
+    }
+    toast.failure(t('factoryEvaluation.undoDismissalFailed'));
+  };
+
+  return (
+    <Show
+      when={confirming()}
+      fallback={
+        <div>
+          <Button
+            ref={undoButton}
+            type="button"
+            variant="ghost"
+            onClick={() => setConfirming(true)}
+          >
+            {t('factoryEvaluation.undoDismissal')}
+          </Button>
+        </div>
+      }
+    >
+      <div class="flex w-full flex-wrap items-center justify-end gap-2">
+        <p id={messageId} class="mr-auto min-w-0 flex-1 basis-60 text-sm">
+          <span class="font-medium">
+            {t('factoryEvaluation.undoDismissalTitle')}
+          </span>{' '}
+          <span class="text-ink-muted">
+            {t('factoryEvaluation.undoDismissalBody')}
+          </span>
+        </p>
+        <Button
+          type="button"
+          variant="ghost"
+          aria-describedby={messageId}
+          disabled={undoing()}
+          onClick={keepDismissed}
+        >
+          {t('factoryEvaluation.keepDismissed')}
+        </Button>
+        <Button
+          type="button"
+          variant="primary"
+          aria-describedby={messageId}
+          loading={undoing()}
+          onClick={() => fireAndForget(undo(), 'factory-runs')}
+        >
+          {t('factoryEvaluation.undoDismissal')}
+        </Button>
+      </div>
+    </Show>
+  );
+}
+
 function LastImprovement(props: {
   last: ImprovementInsight;
   onOpenRun: (runId: string) => void;
@@ -318,6 +401,25 @@ function LastImprovement(props: {
         {(refusal) => (
           <p class="text-xs text-ink-muted line-clamp-2">{refusal()}</p>
         )}
+      </Show>
+      <Show when={props.last.dismissed > 0}>
+        <p class="text-xs text-ink-muted">
+          {t('factoryEvaluation.improvementDismissed', {
+            count: props.last.dismissed,
+          })}
+        </p>
+      </Show>
+      <Show when={props.last.dismissalUndoneAt}>
+        {(undoneAt) => (
+          <p class="text-xs text-ink-muted">
+            {t('factoryEvaluation.dismissalUndone', {
+              time: formatRunDate(undoneAt()),
+            })}
+          </p>
+        )}
+      </Show>
+      <Show when={props.last.canUndoDismissal}>
+        <UndoDismissal improvementId={props.last.id} />
       </Show>
     </div>
   );

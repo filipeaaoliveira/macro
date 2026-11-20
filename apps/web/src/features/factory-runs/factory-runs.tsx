@@ -142,7 +142,7 @@ export function FactoryInsights() {
   return (
     <ShowFeatureFlag flag={enableFactoryRuns}>
       <RunsProvider value={appRunsContext()}>
-        <InsightsProvider value={createAppInsightsContext()}>
+        <InsightsProvider value={createAppInsightsContext(queryClient)}>
           <RunInsightsView
             timeZone={Intl.DateTimeFormat().resolvedOptions().timeZone}
             now={() => new Date()}
