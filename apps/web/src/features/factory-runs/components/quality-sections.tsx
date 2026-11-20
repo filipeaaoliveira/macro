@@ -6,6 +6,7 @@ import { formatLocale, t } from '@app/lib/i18n';
 import { For, type JSX, Show } from 'solid-js';
 import {
   type BlockerCount,
+  type BlockerResolutions,
   CI_CAUSES,
   type CiCause,
   type CiCauseCounts,
@@ -325,6 +326,32 @@ function BlockerTable(props: { title: string; counts: BlockerCount[] }) {
   );
 }
 
+/** What became of the Blockers given to a fix: fixed, or disputed and then upheld or dropped. */
+export function BlockerResolutionMetrics(props: {
+  resolutions: BlockerResolutions;
+}) {
+  return (
+    <MetricRow>
+      <Metric
+        label={t('factoryQuality.fixedBlockers')}
+        definition={t('factoryQuality.fixedBlockersDefinition')}
+        value={props.resolutions.fixed}
+      />
+      <Metric
+        label={t('factoryQuality.upheldDisputes')}
+        definition={t('factoryQuality.upheldDisputesDefinition')}
+        value={props.resolutions.disputedUpheld}
+        lowerIsBetter
+      />
+      <Metric
+        label={t('factoryQuality.droppedDisputes')}
+        definition={t('factoryQuality.droppedDisputesDefinition')}
+        value={props.resolutions.disputedDropped}
+      />
+    </MetricRow>
+  );
+}
+
 function ReviewSection(props: {
   review: ReviewQuality;
   onOpenRun: (runId: string) => void;
@@ -367,6 +394,7 @@ function ReviewSection(props: {
           lowerIsBetter
         />
       </MetricRow>
+      <BlockerResolutionMetrics resolutions={props.review.resolutions} />
       <Show
         when={props.review.reviewedRuns > 0}
         fallback={<EmptyNote>{t('factoryQuality.noReviews')}</EmptyNote>}

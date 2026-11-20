@@ -6,6 +6,7 @@ import type { InsightsParams } from './insights';
 
 export type {
   BlockerCount,
+  BlockerResolutions,
   CiCause,
   CiCauseCounts,
   CiHealth,

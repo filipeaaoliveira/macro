@@ -110,6 +110,17 @@ export default {
   findingLines: '{{path}}, lines {{start}}–{{end}}',
   findingWholeChange: 'The whole change',
   findingFoundAgain: 'Still there from the round before',
+  findingDismissed: 'Dismissed',
+  findingDismissedNote:
+    'Its reviewer dropped this blocker earlier in the review: it blocks nothing',
+  findingFixed: 'The fix says it fixed this',
+  findingDisputed: 'The fix disputes this: {{reason}}',
+  findingDisputeUpheld: 'The next round upheld the dispute: it blocked again',
+  findingDisputeDropped:
+    'The next round dropped the dispute: it blocked nothing',
+  blockerResolutions: 'Blockers',
+  blockerResolutionsLine:
+    '{{fixed}} fixed · {{upheld}} disputed and upheld · {{dropped}} disputed and dropped',
   checksVerified: 'Run on the pushed commit',
   checksVerifiedOn: 'Run on pushed commit {{commit}}',
   checksReported: 'Reported by the agent',

@@ -4,6 +4,7 @@ import { Button } from '@ui';
 import { createSignal, createUniqueId, For, Show } from 'solid-js';
 import {
   type AutomationTriggerKind,
+  anyResolved,
   type BaseRequiredChecks,
   type MainHold,
   type ReviewRound,
@@ -175,6 +176,30 @@ export function RunSummary(props: {
               class="text-sm leading-5 [overflow-wrap:anywhere]"
             >
               {tokenBudgetLine(budget())}
+            </p>
+          </section>
+        )}
+      </Show>
+      <Show
+        when={
+          anyResolved(props.run.blockerResolutions) &&
+          props.run.blockerResolutions
+        }
+      >
+        {(resolutions) => (
+          <section class="flex flex-col gap-1.5">
+            <h3 class="text-xs font-medium text-ink-muted">
+              {t('factoryRuns.blockerResolutions')}
+            </h3>
+            <p
+              data-blocker-resolutions
+              class="text-sm leading-5 [overflow-wrap:anywhere]"
+            >
+              {t('factoryRuns.blockerResolutionsLine', {
+                fixed: resolutions().fixed,
+                upheld: resolutions().disputedUpheld,
+                dropped: resolutions().disputedDropped,
+              })}
             </p>
           </section>
         )}

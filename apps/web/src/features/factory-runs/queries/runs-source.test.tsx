@@ -35,6 +35,7 @@ const ended: RunDetail = {
   steps: [],
   reviewRounds: [],
   standingActs: [],
+  blockerResolutions: { fixed: 0, disputedUpheld: 0, disputedDropped: 0 },
 };
 
 afterEach(() => {

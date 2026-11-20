@@ -57,6 +57,14 @@ export default {
   repeatedBlockers: 'Repeated blockers',
   repeatedBlockersDefinition:
     'Blockers an earlier round of the same run found too: they were not fixed.',
+  fixedBlockers: 'Fixed blockers',
+  fixedBlockersDefinition: 'Blockers the fix said it fixed.',
+  upheldDisputes: 'Disputes upheld',
+  upheldDisputesDefinition:
+    'Blockers the fix disputed that the next review round upheld, or did not drop: they blocked again.',
+  droppedDisputes: 'Disputes dropped',
+  droppedDisputesDefinition:
+    'Blockers the fix disputed that the next review round dropped: they blocked nothing.',
   byReviewer: 'Blockers by reviewer',
   byAgent: 'Blockers by agent',
   reviews: 'Reviews',

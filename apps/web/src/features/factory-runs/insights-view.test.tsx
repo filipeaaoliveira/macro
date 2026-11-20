@@ -699,6 +699,9 @@ describe('RunInsightsView', () => {
     expect(figure('Rounds per run')).toBe('1.3');
     expect(figure('Clean after the first round')).toBe('33%');
     expect(figure('Repeated blockers')).toBe('1');
+    expect(figure('Fixed blockers')).toBe('2');
+    expect(figure('Disputes upheld')).toBe('1');
+    expect(figure('Disputes dropped')).toBe('3');
   });
 
   it('reads cost per merged pull request in money when priced and in tokens otherwise, beside the autonomy rate', () => {
@@ -852,6 +855,7 @@ function quality(): QualityInsights {
       blockers: 4,
       newBlockers: 3,
       repeatedBlockers: 1,
+      resolutions: { fixed: 2, disputedUpheld: 1, disputedDropped: 3 },
       byReviewer: [
         { name: 'correctness-reviewer', reviews: 4, blockers: 3 },
         { name: 'scope-reviewer', reviews: 1, blockers: 1 },

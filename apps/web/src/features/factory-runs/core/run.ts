@@ -207,8 +207,10 @@ export type RunStep = {
 
 /**
  * What a reviewer found: where, what is wrong and why. Once its round ends
- * it is a `blocker`, in the diff the round reviewed, which the fix gets, or
- * a `follow_up`, outside it, which became a task of its own.
+ * it is a `blocker`, in the diff the round reviewed, which the fix gets, a
+ * `follow_up`, outside it, which became a task of its own, or `dismissed`,
+ * a blocker its reviewer dropped earlier and raised again, which blocks
+ * nothing.
  */
 export type ReviewFinding = {
   /** The reviewer's Step. */
@@ -224,9 +226,25 @@ export type ReviewFinding = {
    * read: it blocks wherever it is. */
   blocksAnywhere: boolean;
   /** Unset while its round reviews. */
-  kind?: 'blocker' | 'follow_up';
+  kind?: 'blocker' | 'follow_up' | 'dismissed';
   /** The task a follow-up became, when it was made. */
   followUpTaskId?: string;
+  /** What the fix said of a blocker it was given. */
+  fixStatus?: 'fixed' | 'disputed';
+  /** Why the fix disputes it, as the fixer wrote it. */
+  dispute?: string;
+  /** How the next round ruled on the dispute, once a reviewer answered. */
+  ruling?: 'upheld' | 'dropped';
+};
+
+/**
+ * What became of a Run's blockers: fixed, or disputed and then upheld or
+ * dropped. A dispute no round ruled on yet counts as upheld.
+ */
+export type BlockerResolutions = {
+  fixed: number;
+  disputedUpheld: number;
+  disputedDropped: number;
 };
 
 /**
@@ -416,6 +434,8 @@ export type Run = {
   standingActs?: RunStandingAct[];
   /** Its token budget; none for a Run that keeps none. */
   tokenBudget?: RunTokenBudget;
+  /** What became of its blockers; none from a service older than disputes. */
+  blockerResolutions?: BlockerResolutions;
 };
 
 /** A Flow a person can start a Run of. */
@@ -531,6 +551,17 @@ export function findingsOf(
 }
 
 /** How many of a round's findings block, and how many became follow-ups. */
+/** Whether any of `resolutions`' blockers was fixed or disputed. */
+export function anyResolved(resolutions: BlockerResolutions | undefined) {
+  return (
+    resolutions !== undefined &&
+    resolutions.fixed +
+      resolutions.disputedUpheld +
+      resolutions.disputedDropped >
+      0
+  );
+}
+
 export function findingCounts(round: ReviewRound): {
   blockers: number;
   followUps: number;
