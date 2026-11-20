@@ -754,7 +754,7 @@ describe('RunInsightsView', () => {
 
     expect(screen.getByTestId('cost-per-merged').textContent).toBe('–');
     expect(screen.getByTestId('cost-unmeasured').textContent).toBe(
-      '2 runs used an agent that doesn’t record usage, so cost per merged pull request isn’t known.'
+      '2 runs have no recorded usage, so cost per merged pull request isn’t known.'
     );
     // No figure reads in tokens either.
     expect(

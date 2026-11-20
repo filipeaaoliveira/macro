@@ -101,8 +101,8 @@ export default {
     other: '{{count}} model calls have no price, so cost reads in tokens.',
   },
   unmeasured: {
-    one: '{{count}} run used an agent that doesn’t record usage, so cost per merged pull request isn’t known.',
+    one: '{{count}} run has no recorded usage, so cost per merged pull request isn’t known.',
     other:
-      '{{count}} runs used an agent that doesn’t record usage, so cost per merged pull request isn’t known.',
+      '{{count}} runs have no recorded usage, so cost per merged pull request isn’t known.',
   },
 };
