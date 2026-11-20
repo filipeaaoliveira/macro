@@ -100,9 +100,13 @@ Outside the files, all must be done:
 
 `scorers.json` (may):
 
-- `samplePercent`: the share of finished `code` Runs the
-  `does-what-was-asked` Scorer judges. Left at 0, it judges none, and only
-  Runs a person marks flawed count as failures for self-improvement.
+- `samplePercent`: the share of finished `code` Runs each Scorer judges,
+  25 in the template. Each judgment is a model call, counted in the Run's
+  owner's model usage: lower it to spend less, or set it to 0 to judge
+  none. With every Scorer at 0, only Runs a person marks flawed count as
+  failures for self-improvement.
+- `instructions`: what each Scorer judges (Scorers, Experiments and
+  Benchmarks, below). Reword them to your team's standards.
 - `experiments` and `benchmarks`: left empty, the team has none.
 - `selfImprovement`: left out, on, starting a Run at 25 pending failures or
   when the oldest is 7 days old.
@@ -135,7 +139,7 @@ From this template to a first merged pull request:
 4. On a branch, replace the two `bot` ids in `agents.json`, and anything
    else from Customize the template you want now.
 5. Check it: `factory_definition_check .` prints `.: the definition reads:
-   flows code, plan, reply, 1 scorers, 0 experiments, 0 benchmarks`. Open
+   flows code, plan, reply, 2 scorers, 0 experiments, 0 benchmarks`. Open
    a pull request, and merge it once its check passes.
 6. An admin names the repository in team settings, Factory definition, and
    saves. Macro reads it first and refuses one that does not read, saying
@@ -214,8 +218,9 @@ Run insights opens from the chart button in a task's Runs section, or at
 period: their success rate, how long each Step took, where Runs stop, and
 the tokens the agents used. Its Scorers, Experiments and Benchmarks
 sections list the team's, with the results of your own Runs and suites;
-its Self-improvement section is the team's. The template's one Scorer is
-listed, with no judgments while its `samplePercent` is 0.
+its Self-improvement section is the team's. The template's two Scorers
+are listed, with the judgments of the quarter of your `code` Runs they
+sampled.
 
 Change one setting at a time, and repeat a Run before you compare: one
 Run says little. To compare Agents on the same kind of work, use an
@@ -314,9 +319,24 @@ The Flows and Agents they name must be this Definition's own. A
 Benchmark's trials walk the factory's own `benchmark` Flow (plan, then
 write, asking no one), which no Flow here may be named: with Benchmarks,
 `agents.json` must fill its `planner` and `writer` Roles. A Run keeps
-the Scorers it started with, as it keeps the commit. Every judgment is a
-model call: this template's Scorer judges no Run (`samplePercent` 0) until
-you raise it.
+the Scorers it started with, as it keeps the commit.
+
+This template's two Scorers each judge 25 percent of the finished `code`
+Runs. A judge reads the Run's request, how it ended, and its Steps' outputs
+(the last 30 Steps, the first 4000 characters of each); it reads no diff,
+so it judges the change from what the Steps report of it.
+
+- `delivers-done-when`: did the change deliver the request's Done-when
+  clauses, and only those? It scores 1 when every clause is met and
+  nothing else changed, and less for each clause missed and each change
+  no clause asked for.
+- `blockers-actionable`: did each Blocker the `review` Step's reviewers
+  found name a file, the harm it does, and a fix? It scores the share of
+  Blockers that do, and 1 for a Run whose review found none.
+
+Sampling costs model usage: every judgment is a model call, counted in the
+Run's owner's model usage. Lower `samplePercent` to spend less, or set
+it to 0 to judge no Run.
 
 ## Standing Roles
 
