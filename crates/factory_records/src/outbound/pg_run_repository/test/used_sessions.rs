@@ -7,6 +7,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use super::{entry, insert, julia, key, outcome, planner, session_of};
+use crate::domain::evaluation::EvaluationRepository as _;
 use crate::domain::insights::{InsightsScope, RunInsightsRepository};
 use crate::domain::models::{Outcome, PassedOver, RunId, StepSession};
 use crate::domain::ports::RunRepository;
@@ -46,7 +47,7 @@ fn julia_s_runs() -> InsightsScope {
 
 /// A Step whose session was lost after its agent worked in it goes on in a
 /// new one, and keeps both: the Run's token budget reads both, and so do
-/// Insights' cost by entry and by Run.
+/// Insights' cost by entry and by Run, and a Benchmark trial's tokens.
 #[sqlx::test(
     migrator = "MACRO_DB_MIGRATIONS",
     fixtures(path = "../fixtures", scripts("people"))
@@ -94,7 +95,7 @@ async fn a_step_keeps_the_session_it_lost_with_the_one_it_went_on_in(pool: PgPoo
             .sessions
             .iter()
             .filter(|session| session.run_id == id)
-            .inspect(|session| assert_eq!(session.entry, entry("plan")))
+            .inspect(|session| assert_eq!((session.seq, &session.entry), (1, &entry("plan"))))
             .map(|session| session.session_id)
             .collect(),
     );
@@ -112,6 +113,77 @@ async fn a_step_keeps_the_session_it_lost_with_the_one_it_went_on_in(pool: PgPoo
         .find(|run| run.run.id == id)
         .expect("the run is read");
     assert_eq!(run.sessions, both);
+    // A Benchmark trial's tokens read the same sessions.
+    let subject = repo
+        .scoring_subject(id)
+        .await
+        .expect("subject")
+        .expect("the run is read");
+    assert_eq!(subject.sessions, both);
+}
+
+/// The sessions the Step `step` of `id` is kept to have worked in, from
+/// the table alone.
+async fn kept_for(pool: &PgPool, id: RunId, seq: i32) -> Vec<Uuid> {
+    sqlx::query_scalar!(
+        "SELECT session_id FROM factory_step_used_session \
+         WHERE run_id = $1 AND seq = $2 ORDER BY session_id",
+        id.as_uuid(),
+        seq,
+    )
+    .fetch_all(pool)
+    .await
+    .expect("read")
+}
+
+/// A claim keeps the Step's first session, and each pass keeps the
+/// session it leaves: a Step that loses A, goes on in B, loses B and goes
+/// on in C counts all three, though only C is its current session.
+#[sqlx::test(
+    migrator = "MACRO_DB_MIGRATIONS",
+    fixtures(path = "../fixtures", scripts("people"))
+)]
+async fn a_step_that_loses_two_sessions_counts_all_three(pool: PgPool) {
+    let repo = PgRunRepository::new(pool.clone());
+    let id = RunId::generate();
+    insert(&repo, id, "Plan the billing page").await;
+    repo.start_step(key(id, 1), &entry("plan"), 1)
+        .await
+        .expect("start");
+    let a = repo
+        .claim_session(
+            key(id, 1),
+            session_of("primary"),
+            &planner(),
+            &[outcome("done")],
+        )
+        .await
+        .expect("claim")
+        .session;
+    assert_eq!(kept_for(&pool, id, 1).await, [a.session_id]);
+
+    let (b, c) = (session_of("primary"), session_of("primary"));
+    for (from, to) in [(&a, &b), (&b, &c)] {
+        assert!(
+            repo.pass_session(
+                key(id, 1),
+                from.session_id,
+                &planner(),
+                &lost("primary"),
+                Some(to),
+            )
+            .await
+            .expect("pass")
+        );
+    }
+    assert_eq!(
+        repo.claimed_session(key(id, 1)).await.expect("read"),
+        Some(c.clone())
+    );
+
+    let all = sorted(vec![a.session_id, b.session_id, c.session_id]);
+    assert_eq!(kept_for(&pool, id, 1).await, all);
+    assert_eq!(sorted_sessions(&repo, id).await, all);
 }
 
 /// A session counts once however many Steps worked in it and however often
@@ -193,15 +265,23 @@ async fn a_session_counts_once_however_often_it_is_kept(pool: PgPool) {
         sorted_sessions(&repo, id).await,
         sorted(vec![asking.session_id, afresh.session_id])
     );
+    // Insights read each Step's sessions once: the asking Step's, and the
+    // two the Step that went on worked in.
     let insights = repo.read_insights(&julia_s_runs()).await.expect("insights");
-    assert_eq!(
-        insights
-            .sessions
-            .iter()
-            .filter(|session| session.run_id == id)
-            .count(),
-        2
-    );
+    let mut read: Vec<(u16, Uuid)> = insights
+        .sessions
+        .iter()
+        .filter(|session| session.run_id == id)
+        .map(|session| (session.seq, session.session_id))
+        .collect();
+    read.sort();
+    let mut expected = vec![
+        (1, asking.session_id),
+        (2, asking.session_id),
+        (2, afresh.session_id),
+    ];
+    expected.sort();
+    assert_eq!(read, expected);
 }
 
 /// The migration keeps each Step's current session among the sessions it
