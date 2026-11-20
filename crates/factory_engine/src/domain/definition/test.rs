@@ -335,8 +335,8 @@ async fn a_token_budget_in_range_reads() {
 
 /// `scorers.json` is refused when its Scorers do not hold together, when
 /// they or its Experiments name a Flow or an Agent the Definition does not
-/// have (a built-in Flow among them), and when it names a key twice or is
-/// in another shape.
+/// have (a built-in Flow among them), and when it names a key twice, is in
+/// another shape, or has a Scorer read what no judge is given.
 #[tokio::test]
 async fn scorers_that_do_not_fit_the_definition_do_not_read() {
     let unreadable = |error: Result<FactoryDefinition, DefinitionError>| match error {
@@ -392,6 +392,14 @@ async fn scorers_that_do_not_fit_the_definition_do_not_read() {
         .await,
     );
     assert!(error.contains("settings"), "{error}");
+    let (_, error) = unreadable(
+        read(with(
+            "scorers.json",
+            r#"{ "scorers": [{ "name": "slop", "instructions": "Slop?", "samplePercent": 5, "reads": ["logs"] }] }"#,
+        ))
+        .await,
+    );
+    assert!(error.contains("unknown variant `logs`"), "{error}");
 }
 
 /// The improve Flow is the factory's own, which only a self-improvement

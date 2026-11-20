@@ -45,9 +45,28 @@ pub struct ScorerDefinition {
     pub flows: Vec<String>,
     /// The percentage of those finished Runs it judges, from 0 to 100.
     pub sample_percent: u8,
+    /// What its judge reads beside the request, the outcome and the Steps'
+    /// outputs; nothing more when empty. A value not listed in
+    /// [`ScorerRead`] does not read.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reads: Vec<ScorerRead>,
+}
+
+/// Something more a Scorer's judge reads of a Run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ScorerRead {
+    /// The change the Run merged, or its branch's head proposes when it
+    /// merged nothing, as a unified diff cut to a budget.
+    Diff,
 }
 
 impl ScorerDefinition {
+    /// Whether its judge reads the Run's change.
+    pub fn reads_diff(&self) -> bool {
+        self.reads.contains(&ScorerRead::Diff)
+    }
+
     /// Whether it judges `run_id`, a finished Run of `flow`: a Run of one of
     /// its Flows, in its sample.
     pub fn samples(&self, flow: Option<&str>, run_id: RunId) -> bool {
