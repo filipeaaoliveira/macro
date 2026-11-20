@@ -2045,6 +2045,13 @@ export type RunDetail = {
      * Its Steps, in the order they started.
      */
     steps: Array<Step>;
+    /**
+     * Whether its task's tags could not be read as it started: its
+     * Definition's Agent Rules on a tag then matched no tag, which is not
+     * the same as a task no rule matched. False for a Run whose tags were
+     * read, or that no rule on a tag needed them for.
+     */
+    taskTagsUnread: boolean;
     tokenBudget?: null | RunTokenBudget;
 };
 

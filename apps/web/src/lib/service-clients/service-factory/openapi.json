@@ -5816,7 +5816,8 @@
           "steps",
           "reviewRounds",
           "standingActs",
-          "agentRules"
+          "agentRules",
+          "taskTagsUnread"
         ],
         "properties": {
           "agentRules": {
@@ -5872,6 +5873,10 @@
               "$ref": "#/components/schemas/Step"
             },
             "description": "Its Steps, in the order they started."
+          },
+          "taskTagsUnread": {
+            "type": "boolean",
+            "description": "Whether its task's tags could not be read as it started: its\nDefinition's Agent Rules on a tag then matched no tag, which is not\nthe same as a task no rule matched. False for a Run whose tags were\nread, or that no rule on a tag needed them for."
           },
           "tokenBudget": {
             "oneOf": [
