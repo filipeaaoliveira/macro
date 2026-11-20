@@ -45,6 +45,7 @@ function page(steps: number): BoardPage {
             fixed: 0,
             disputedUpheld: 0,
             disputedDropped: 0,
+            dismissed: 0,
           },
         },
       },

@@ -63,7 +63,7 @@ const started: RunDetail = {
     },
   ],
   standingActs: [],
-  blockerResolutions: { fixed: 0, disputedUpheld: 0, disputedDropped: 0 },
+  blockerResolutions: { fixed: 0, disputedUpheld: 0, disputedDropped: 0, dismissed: 0 },
   reviewRounds: [
     {
       round: 1,
@@ -122,7 +122,7 @@ describe('createAppRunsContext', () => {
     const run: Run = {
       id: 'run-2',
       standingActs: [],
-      blockerResolutions: { fixed: 0, disputedUpheld: 0, disputedDropped: 0 },
+      blockerResolutions: { fixed: 0, disputedUpheld: 0, disputedDropped: 0, dismissed: 0 },
       request: 'Add a due date column',
       createdAt: '2026-11-16T09:00:00Z',
       ownerId: 'macro|owner@example.com',

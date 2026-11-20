@@ -77,6 +77,7 @@ const found: PullRequestRuns = {
             fixed: 0,
             disputedUpheld: 0,
             disputedDropped: 0,
+            dismissed: 0,
           },
         },
       },

@@ -348,6 +348,12 @@ export function BlockerResolutionMetrics(props: {
         definition={t('factoryQuality.droppedDisputesDefinition')}
         value={props.resolutions.disputedDropped}
       />
+      <Metric
+        label={t('factoryQuality.dismissedFindings')}
+        definition={t('factoryQuality.dismissedFindingsDefinition')}
+        value={props.resolutions.dismissed}
+        lowerIsBetter
+      />
     </MetricRow>
   );
 }

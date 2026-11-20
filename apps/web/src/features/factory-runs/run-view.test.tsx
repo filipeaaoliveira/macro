@@ -325,26 +325,26 @@ describe('RunView', () => {
           ],
         },
       ],
-      blockerResolutions: { fixed: 1, disputedUpheld: 1, disputedDropped: 1 },
+      blockerResolutions: { fixed: 1, disputedUpheld: 1, disputedDropped: 1, dismissed: 1 },
     });
 
     expect(await screen.findByText('Review round 1')).toBeTruthy();
-    expect(screen.getByText('The fix says it fixed this')).toBeTruthy();
+    expect(screen.getByText('The fixer says it fixed this')).toBeTruthy();
     expect(
       screen.getByText(
-        'The fix disputes this: The sandbox cannot reach production'
+        'The fixer disputes this: The sandbox cannot reach production'
       )
     ).toBeTruthy();
     expect(
-      screen.getByText('The next round dropped the dispute: it blocked nothing')
+      screen.getByText('The next round dropped this blocker: it blocked nothing')
     ).toBeTruthy();
     expect(
-      screen.getByText('The next round upheld the dispute: it blocked again')
+      screen.getByText('The next round upheld this blocker: it blocked again')
     ).toBeTruthy();
     expect(screen.getByText('Dismissed')).toBeTruthy();
     expect(
       screen.getByText(
-        '1 fixed · 1 disputed and upheld · 1 disputed and dropped'
+        '1 fixed, as the fixer says · 1 disputed, then upheld · 1 disputed, then dropped · 1 dismissed as repeats'
       )
     ).toBeTruthy();
   });

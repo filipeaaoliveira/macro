@@ -199,6 +199,7 @@ export function RunSummary(props: {
                 fixed: resolutions().fixed,
                 upheld: resolutions().disputedUpheld,
                 dropped: resolutions().disputedDropped,
+                dismissed: resolutions().dismissed,
               })}
             </p>
           </section>

@@ -57,14 +57,18 @@ export default {
   repeatedBlockers: 'Repeated blockers',
   repeatedBlockersDefinition:
     'Blockers an earlier round of the same run found too: they were not fixed.',
-  fixedBlockers: 'Fixed blockers',
-  fixedBlockersDefinition: 'Blockers the fix said it fixed.',
-  upheldDisputes: 'Disputes upheld',
+  fixedBlockers: 'Fixed, as the fixer says',
+  fixedBlockersDefinition:
+    'Blockers the fixer said it fixed. The next review round checks each claim.',
+  upheldDisputes: 'Disputed, then upheld',
   upheldDisputesDefinition:
-    'Blockers the fix disputed that the next review round upheld, or did not drop: they blocked again.',
-  droppedDisputes: 'Disputes dropped',
+    'Blockers the fixer disputed that the next review round upheld, or did not drop: they blocked again.',
+  droppedDisputes: 'Disputed, then dropped',
   droppedDisputesDefinition:
-    'Blockers the fix disputed that the next review round dropped: they blocked nothing.',
+    'Blockers the fixer disputed that the next review round dropped: they blocked nothing.',
+  dismissedFindings: 'Dismissed as repeats',
+  dismissedFindingsDefinition:
+    'Findings a reviewer raised again, in a later round, as the same problem at the same lines as a blocker it dropped. A run with one waits for a person to merge.',
   byReviewer: 'Blockers by reviewer',
   byAgent: 'Blockers by agent',
   reviews: 'Reviews',

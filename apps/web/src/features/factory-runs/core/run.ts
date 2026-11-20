@@ -238,13 +238,15 @@ export type ReviewFinding = {
 };
 
 /**
- * What became of a Run's blockers: fixed, or disputed and then upheld or
- * dropped. A dispute no round ruled on yet counts as upheld.
+ * What became of a Run's blockers: fixed as the fixer says, or disputed and
+ * then upheld or dropped, and its findings dismissed as repeats of a
+ * dropped blocker. A dispute no round ruled on yet counts as upheld.
  */
 export type BlockerResolutions = {
   fixed: number;
   disputedUpheld: number;
   disputedDropped: number;
+  dismissed: number;
 };
 
 /**
@@ -557,7 +559,8 @@ export function anyResolved(resolutions: BlockerResolutions | undefined) {
     resolutions !== undefined &&
     resolutions.fixed +
       resolutions.disputedUpheld +
-      resolutions.disputedDropped >
+      resolutions.disputedDropped +
+      resolutions.dismissed >
       0
   );
 }

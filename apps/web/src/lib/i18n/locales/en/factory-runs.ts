@@ -112,15 +112,15 @@ export default {
   findingFoundAgain: 'Still there from the round before',
   findingDismissed: 'Dismissed',
   findingDismissedNote:
-    'Its reviewer dropped this blocker earlier in the review: it blocks nothing',
-  findingFixed: 'The fix says it fixed this',
-  findingDisputed: 'The fix disputes this: {{reason}}',
-  findingDisputeUpheld: 'The next round upheld the dispute: it blocked again',
+    'Its reviewer dropped this same problem earlier in the review: it blocks nothing',
+  findingFixed: 'The fixer says it fixed this',
+  findingDisputed: 'The fixer disputes this: {{reason}}',
+  findingDisputeUpheld: 'The next round upheld this blocker: it blocked again',
   findingDisputeDropped:
-    'The next round dropped the dispute: it blocked nothing',
+    'The next round dropped this blocker: it blocked nothing',
   blockerResolutions: 'Blockers',
   blockerResolutionsLine:
-    '{{fixed}} fixed · {{upheld}} disputed and upheld · {{dropped}} disputed and dropped',
+    '{{fixed}} fixed, as the fixer says · {{upheld}} disputed, then upheld · {{dropped}} disputed, then dropped · {{dismissed}} dismissed as repeats',
   checksVerified: 'Run on the pushed commit',
   checksVerifiedOn: 'Run on pushed commit {{commit}}',
   checksReported: 'Reported by the agent',
