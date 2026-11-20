@@ -28,7 +28,8 @@ each run.
   `CodeRun::scheduler_run`, the run's id (`run.id`) and the configuration
   revision it was claimed at, which the harness signs as the scheduler's
   proof. Run Now (`RunStarter::Request`) never does, even when it consumes
-  a due schedule; nor does a dry run.
+  a due schedule; nor does a dry run, nor a run of code an SDK code upgrade
+  rewrote (`RoutineProgram::code_rewritten`, below).
   `run_context` builds what code receives: the trigger's time (not the
   clock), the schedule's zone or else the owner's, and the previous run
   (`ScheduledActionRepo::run_history`, skipped runs excluded). Every tool and
@@ -297,7 +298,11 @@ each run.
   older version (SDK or `StepContext`), it is checked again, and rewritten by
   a model only if that fails (once per routine and version,
   `scheduled_action_code_upgrade`); a
-  failed rewrite pauses the routine. A routine whose code writes as its
+  failed rewrite pauses the routine. A saved rewrite keeps the routine's
+  configuration revision but marks its task `code_rewritten`, kept until
+  the routine is saved without it: code it rewrote is not the code saved at
+  that revision, so neither that run nor any later one carries the
+  scheduler's proof (`CodeRun::scheduler_run`). A routine whose code writes as its
   owner (`dangerously_operate_as_user`) is never rewritten: it is paused for
   the owner with its code as it was. Nor can a model's rewrite, saved
   unreviewed while the routine wrote as Macro, start writing as the owner:

@@ -114,15 +114,7 @@ where
         let routine_id = action.id.context("persisted routine required")?;
         let has_code = !program.code_steps().is_empty();
         let acts_as = program.code_identity();
-        // The scheduler's proof, for a run it started itself: the run's id
-        // (its code's `run.id`) at the configuration it was claimed at.
-        let scheduler_run =
-            firing
-                .started_by_scheduler()
-                .then(|| agent_correlation::context::SchedulerRun {
-                    run_id: handle.action_id,
-                    revision: action.configuration_revision.get(),
-                });
+        let started_by_scheduler = firing.started_by_scheduler();
         // Code gets the triggering item whenever there is one.
         let trigger = match firing {
             RoutineRun::Event(run) if has_code => Some(self.trigger(owner, run).await?),
@@ -142,6 +134,16 @@ where
             &code_context,
         )
         .await?;
+        // The scheduler's proof, for a run it started itself: the run's id
+        // (its code's `run.id`) at the configuration it was claimed at. Code
+        // an SDK upgrade rewrote, in this run or before, gets none: it is not
+        // the code saved at that configuration.
+        let scheduler_run = (started_by_scheduler && !program.code_rewritten).then(|| {
+            agent_correlation::context::SchedulerRun {
+                run_id: handle.action_id,
+                revision: action.configuration_revision.get(),
+            }
+        });
         tracing::Span::current().record("steps", program.steps.len());
         let mut outputs = json!({});
         for (index, step) in program.steps.iter().enumerate() {

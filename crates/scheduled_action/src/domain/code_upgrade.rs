@@ -193,6 +193,9 @@ async fn rewrite(
     }
     program.assign_step_ids();
     program.sdk = Some(version.clone());
+    // Rewritten code is no longer the code its routine was saved with: its
+    // runs no longer carry the scheduler's proof.
+    program.code_rewritten = true;
     let task = task_with(&action.task, &program).map_err(|error| (error.to_string(), None))?;
     let failed = |reason: String| (reason, Some(task.clone()));
     // A rewrite keeps the step's knobs, so it must still read every one.
@@ -257,7 +260,8 @@ async fn rewrite(
     Ok((program, task))
 }
 
-/// `task` with `program`'s steps and recorded SDK, keeping everything else.
+/// `task` with `program`'s steps, recorded SDK and whether its code was
+/// rewritten, keeping everything else.
 fn task_with(task: &Value, program: &RoutineProgram) -> Result<Value> {
     let mut task = task.clone();
     let Value::Object(fields) = &mut task else {
@@ -265,6 +269,9 @@ fn task_with(task: &Value, program: &RoutineProgram) -> Result<Value> {
     };
     fields.insert("steps".into(), serde_json::to_value(&program.steps)?);
     fields.insert("sdk".into(), serde_json::to_value(&program.sdk)?);
+    if program.code_rewritten {
+        fields.insert("code_rewritten".into(), Value::Bool(true));
+    }
     Ok(task)
 }
 

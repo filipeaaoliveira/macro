@@ -266,7 +266,8 @@ network/resource-only Pulumi stacks; they do not host extra agent processes.
   its dispatch found due, or a watched event; never Run Now) also signs
   `scheduler_run` (`CodeRun::scheduler_run`): the run's id and the routine's
   configuration revision, the proof the factory reads to fire an Automation
-  as its creator. A dry run's token never signs it. A dry run's token (a code upgrade's check of a
+  as its creator. A dry run's token never signs it, nor does the token of a
+  routine whose code an SDK code upgrade rewrote (`code_rewritten`). A dry run's token (a code upgrade's check of a
   rewritten step, at run time or in the startup sweep) also signs the
   `dry_run` scope (`routine_claims`), so every SDK host refuses its writes
   even when code gets past the dry run inside its process.

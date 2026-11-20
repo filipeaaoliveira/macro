@@ -42,6 +42,12 @@ pub struct RoutineProgram {
     /// change. A single agent task has no code steps, so it never applies.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub dangerously_operate_as_user: bool,
+    /// Macro rewrote its code steps to bring them to a new SDK, so they are
+    /// no longer the code whoever saved the routine wrote, and its runs
+    /// carry no scheduler's proof of who started them. Set by that rewrite
+    /// and kept until the routine is saved without it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub code_rewritten: bool,
 }
 
 /// Who a routine's code steps write as.
@@ -314,6 +320,7 @@ impl RoutineProgram {
             single_agent_task: false,
             sdk: None,
             dangerously_operate_as_user: false,
+            code_rewritten: false,
         }
     }
 
@@ -338,6 +345,7 @@ impl RoutineProgram {
             single_agent_task: true,
             sdk: None,
             dangerously_operate_as_user: false,
+            code_rewritten: false,
         })
     }
 
