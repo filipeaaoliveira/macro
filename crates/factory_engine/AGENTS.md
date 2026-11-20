@@ -261,6 +261,56 @@ Run that kept an act from a bot in no session no longer reads there.
 Roll back no lower than that code once such an act is kept, or delete
 those rows (`session_id IS NULL`) first.
 
+Agent Rules (`src/domain/agents/rules.rs`) choose another first Agent for
+some Runs. A Factory Definition's `agents.json` may have a `rules` list:
+each rule has a `name`, the `role` it chooses for, what it matches (a `tag`
+of the Run's task, the `repository` the Run works on as `owner/name`, or
+both, all ignoring case) and the `agent` the Role's Steps start with. Rules
+are matched in the order listed, and the first that matches a Role
+chooses; a rule matches only what it names, so one naming neither does not
+read. `start_run` matches them once, before the workflow starts, beside the
+arms (`AgentDefinition::chosen_by_rules`), and keeps the rule that chose
+each Role (`factory_run_agent_rule`, `EvaluationRepository::record_agent_rules`);
+a Run whose rules are not kept does not start. The task's tags are read
+then, as the owner sees them (their own and their team's tag sets,
+`TaskDirectory::task_tags`), only when a rule names a tag; tags that cannot
+be read are taken as none, so no tag rule matches and the Run starts, as
+for its Project. The workflow never matches: `SessionAgent` reads the kept
+choice with the arms' (`RunAgents::ruled`), so a retry, a replay, a tag
+changed later or a changed Definition does not change a Run under way, and
+no workflow code changed (no patch marker). The order a Step takes its
+Agents in is the arm's choice, then the rule's, then the Role's own, each
+once; the Role's own still take the Step on lack of quota, as before, and
+a rule's Agent the Run's Definition no longer has is passed over and
+logged, as an arm's. An arm comes before a rule because an Experiment
+measures its arms on the Runs it splits: a rule that moved an arm's Runs
+onto its own Agent would count them as fallen back and compare nothing. So
+the start keeps no rule for a Role an arm chose for, and the session order
+only keeps a Run that kept both on its arm. A rule is the Definition's
+standing default for a kind of task; an arm with no choice for the Role
+(an Experiment's control) leaves the rule in place. A Benchmark trial and
+a self-improvement Run take no rules, as they take no arms: a trial runs
+on its suite's configuration only. A rule's Agent is checked where the
+Definition is read as an arm's is (`evaluation::check_choices`, refused as
+`agents.json: agent rule {name} gives role ...`): it must be an Agent of
+the Definition, one only a Standing Role lists among them. A rule naming
+a Role the Definition does not fill, two rules of one name, an empty or
+too long tag, a repository not `owner/name`, and more than
+`MAX_AGENT_RULES` rules do not read, in a Definition and in
+`factory_definition_check` alike. `FACTORY_AGENTS` takes no rules
+(`RulesOutsideDefinition`): the service holds no deployment agents at a
+Run's start. The Run API lists the kept rules as `agentRules` (Role,
+rule, Agent); the web Run view shows them under the Run's summary.
+
+Deploy order and rollback for Agent Rules: as for Standing Roles, a worker
+from before them reads a Run's kept Agents with `deny_unknown_fields`, so
+it fails every agent Step of a Run that kept a `rules` list. Roll every
+service and worker task onto this code before any team's Definition adds
+the list. `factory_run_agent_rule` (`20261120020000_factory_run_agent_rule.sql`)
+is a new table, so code from before it ignores it; rolling back leaves
+its rows unread, and a Run that kept a `rules` list fails its later agent
+Steps on the old worker, as above.
+
 A person's Queue is their Runs waiting on them at a Gate or an agent's
 question (`GET /runs/waiting`, Insights' "Waiting on you"). A team's
 Orchestrator Definition, or a Project's own, may set a Queue limit
