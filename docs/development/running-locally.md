@@ -569,14 +569,19 @@ guards apply before the first bring-up:
 docker volume create macro_localstack_data
 ```
 
+From then on, an attached `just run_local` resumes over the instance's volumes
+instead of starting clean, even before the first bring-up: on a machine with no
+data yet it brings up an empty stack, which is what a first start does anyway.
+
 ### What changes
 
 | Area | Persistent instance |
 | --- | --- |
 | Attached `just run_local` | Resumes over the existing volumes instead of starting clean. |
 | `--fresh`, `just stack up`, `just stack down`, `just destroy_local`, `just reset_local` | Refuse while the instance has data, and say why. Pass `--wipe-persistent-data` to delete it on purpose. An instance with no volumes yet starts clean as usual. |
-| The `q` hotkey | Stops the containers and keeps the data. It tears the stack down only if `run_local` was started with `--wipe-persistent-data`. Docker does not restart containers that were stopped this way, so the stack stays down, across reboots too, until `just run_local` or the [boot unit](#start-it-at-boot) starts it. |
-| `just destroy`, `just local-e2e-seed`, and every `drop_db` or `reset_db` recipe aimed at `localhost:5432` | Refuse, and say why. Set `MACRO_LOCAL_WIPE_PERSISTENT_DATA=1` to run them on purpose. These recipes only know the default instance. |
+| The `q` hotkey | Stops the containers and keeps the data, even after a start with `--wipe-persistent-data`. Docker does not restart containers that were stopped this way, so the stack stays down, across reboots too, until `just run_local` or the [boot unit](#start-it-at-boot) starts it. |
+| `just destroy`, `just local-e2e-seed`, and every `drop_db` or `reset_db` recipe aimed at this machine's port 5432 | Refuse, and say why. Set `MACRO_LOCAL_WIPE_PERSISTENT_DATA=1` to run them on purpose. These recipes only know the default instance. |
+| Docker can't answer | When `docker volume inspect` fails, or `docker` is missing, the commands and recipes above refuse rather than assume the stack is not persistent. Only rendering files, such as `cargo x gen-compose`, carries on as if persistent mode were off. |
 | LocalStack | Runs `gresau/localstack-persist:4.14.0`, the same LocalStack 4.14.0, pinned by digest. It writes S3, DynamoDB, SQS and KMS state to the instance's LocalStack volume every 2 seconds. Provisioning creates only missing resources and never replaces an existing KMS key or alias. |
 | Postgres | Runs with `-c jit=off`. JIT compiled the home feed's query plan on every call, which took seconds on tables this small. |
 | Restarts | Every container has `restart: unless-stopped`, so Docker brings the stack back after a daemon or host restart. `just run_local stop` and the `q` hotkey still stop it, and it then stays stopped until started again. |
