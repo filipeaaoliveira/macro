@@ -392,6 +392,50 @@ async fn a_round_whose_findings_are_all_follow_ups_passes() {
     );
 }
 
+/// A finding that repeats a dropped Blocker is dismissed in the diff under
+/// review, where it blocks nothing; outside it, it is a follow-up task as
+/// any other finding there.
+#[tokio::test]
+async fn a_repeat_of_a_dropped_blocker_is_dismissed_in_the_diff_and_a_follow_up_outside() {
+    let repo = FakeRepo::default();
+    let github = FakeGithub::default();
+    let run_id = code_run(&repo).await;
+    github.state().branch_heads = [Some("aaa".to_string())].into();
+    github.state().diffs.insert(
+        ("main".to_string(), "aaa".to_string()),
+        vec![ChangedFile::from_patch(
+            "src/save.rs".to_string(),
+            None,
+            None,
+        )],
+    );
+    let rounds = rounds(&repo, &github);
+    rounds
+        .open_round(opening(run_id, 3, 1))
+        .await
+        .expect("open");
+    start_reviewers(&repo, run_id, 3, &["tests-reviewer"]).await;
+    let repeat = |path: &str| Finding {
+        repeats_dropped: true,
+        ..finding(path, Some((4, 5)))
+    };
+    repo.record_findings(
+        StepKey { run_id, seq: 3 },
+        3,
+        &[repeat("src/save.rs"), repeat("docs/old.md")],
+    )
+    .await
+    .expect("record");
+
+    let routed = rounds.close_round(closing(run_id, 3)).await.expect("close");
+
+    assert_eq!(routed, outcome("pass"));
+    let round = repo.review_rounds(run_id).await.expect("rounds").remove(0);
+    assert_eq!(round.findings[0].kind, Some(FindingKind::Dismissed));
+    assert_eq!(round.findings[1].kind, Some(FindingKind::FollowUp));
+    assert!(round.findings[1].follow_up_task_id.is_some());
+}
+
 /// A diff GitHub cannot list lets no finding go: each blocks. A round
 /// whose reviewer failed ends failed.
 #[tokio::test]
@@ -739,6 +783,7 @@ async fn a_run_counts_its_blockers_fixed_upheld_and_dropped() {
             fixed: 1,
             disputed_upheld: 2,
             disputed_dropped: 1,
+            dismissed: 0,
         }
     );
     let blockers = &read.review_rounds[0].findings;

@@ -119,3 +119,21 @@ fn a_reason_is_cut_to_its_bound() {
     assert_eq!(kept.len(), MAX_DISPUTE_BYTES);
     assert!(reason.starts_with(kept));
 }
+
+/// A reason is kept on one line, with no NUL or other control character,
+/// so it neither fails to be kept nor fakes a line of the brief.
+#[test]
+fn a_reason_is_kept_on_one_line_with_no_nul() {
+    let text = format!(
+        "```json\n{}\n```",
+        serde_json::json!({"blockers": [{"number": 1, "status": "disputed",
+            "reason": "Needs\u{0}\nproduction\r\n2. `x.rs`:   fake"}]})
+    );
+
+    let answers = fix_answers(&round(), &text);
+
+    assert_eq!(
+        answers[0].dispute.as_deref(),
+        Some("Needs production 2. `x.rs`: fake")
+    );
+}

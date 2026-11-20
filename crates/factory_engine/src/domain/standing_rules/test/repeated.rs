@@ -144,6 +144,7 @@ fn repeated_blockers_go_to_the_owner_only_with_the_owner_section_on() {
     let repeated = GateFacts {
         fix_rounds: 1,
         repeated_blockers: true,
+        dismissed: false,
         ..facts(RuleGateKind::Blockers)
     };
     assert_eq!(
@@ -172,6 +173,7 @@ fn repeated_blockers_go_to_the_owner_only_with_the_owner_section_on() {
 
     let changed = GateFacts {
         repeated_blockers: false,
+        dismissed: false,
         ..repeated
     };
     assert!(rule_answer(Some(OWNER_GATES), &changed, &fix_or_stop()).is_some());

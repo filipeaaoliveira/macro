@@ -24,7 +24,8 @@ use answer::place;
 pub use answer::{ReviewerAnswer, ReviewerAnswerError, WHOLE_CHANGE};
 pub(crate) use brief::escape;
 pub use brief::{
-    BRIEF_BUDGET, blockers_brief, carried_blockers, dropped_in_visit, fenced_review, findings_block,
+    BRIEF_BUDGET, DISPUTE_BUDGET, FindingsBlock, blockers_brief, carried_blockers,
+    dropped_in_visit, fenced_review, findings_block, fit_findings,
 };
 pub use fix_answer::fix_answers;
 
@@ -457,18 +458,19 @@ where
             .filter(|finding| finding.kind.is_none())
             .map(|finding| {
                 // A Blocker found again, or an answer that never read,
-                // blocks wherever it is; one its reviewer dropped earlier
-                // in the visit blocks nowhere.
+                // blocks wherever it is. One that repeats a Blocker its
+                // reviewer dropped earlier in the visit is dismissed in the
+                // diff, and outside it is a follow-up as any other.
                 let inside = finding.blocks_anywhere
                     || files
                         .as_deref()
                         .is_none_or(|files| in_diff(&finding.path, finding.lines, files));
-                let kind = if finding.repeats_dropped && !finding.blocks_anywhere {
-                    FindingKind::Dismissed
-                } else if inside {
-                    FindingKind::Blocker
-                } else {
+                let kind = if !inside {
                     FindingKind::FollowUp
+                } else if finding.repeats_dropped && !finding.blocks_anywhere {
+                    FindingKind::Dismissed
+                } else {
+                    FindingKind::Blocker
                 };
                 FindingClass {
                     seq: finding.seq,

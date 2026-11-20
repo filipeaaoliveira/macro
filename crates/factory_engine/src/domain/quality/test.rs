@@ -595,6 +595,7 @@ fn review_rounds_and_blockers_are_counted() {
         problem: problem.to_string(),
         fix_status: None,
         ruling: None,
+        dismissed: false,
     };
     let records = QualityRecords {
         runs: vec![run(3), run(2), run(1)],
@@ -672,7 +673,8 @@ fn review_rounds_and_blockers_are_counted() {
 
 /// The Blockers given to a fix are counted fixed, disputed and upheld, or
 /// disputed and dropped; a dispute no round ruled on counts as upheld, and
-/// a Blocker no fix was given counts in none.
+/// a Blocker no fix was given counts in none. A dismissed finding counts
+/// only as dismissed.
 #[test]
 fn blockers_fixed_upheld_and_dropped_are_counted() {
     let blocker = |seq: u16, fix_status, ruling| BlockerRecord {
@@ -682,6 +684,7 @@ fn blockers_fixed_upheld_and_dropped_are_counted() {
         problem: format!("Problem {seq}"),
         fix_status,
         ruling,
+        dismissed: false,
     };
     let records = QualityRecords {
         runs: vec![run(1)],
@@ -692,6 +695,10 @@ fn blockers_fixed_upheld_and_dropped_are_counted() {
             blocker(5, Some(FixStatus::Disputed), None),
             blocker(6, Some(FixStatus::Disputed), Some(DisputeRuling::Dropped)),
             blocker(7, None, None),
+            BlockerRecord {
+                dismissed: true,
+                ..blocker(8, None, None)
+            },
         ],
         ..QualityRecords::default()
     };
@@ -704,8 +711,11 @@ fn blockers_fixed_upheld_and_dropped_are_counted() {
             fixed: 2,
             disputed_upheld: 2,
             disputed_dropped: 1,
+            dismissed: 1,
         }
     );
+    // A dismissed finding is no Blocker.
+    assert_eq!(review.blockers, 6);
 }
 
 /// A Run whose Gate a person answered, one its owner steered and one left

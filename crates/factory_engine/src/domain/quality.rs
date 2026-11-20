@@ -490,8 +490,9 @@ pub struct ReviewQuality {
     pub new_blockers: u32,
     /// Blockers an earlier round of their Run found too: not fixed.
     pub repeated_blockers: u32,
-    /// What became of the Blockers given to a fix: fixed, or disputed and
-    /// then upheld or dropped, over every reviewed Run.
+    /// What became of the Blockers given to a fix: fixed as the fixer
+    /// says, or disputed and then upheld or dropped, and the findings
+    /// dismissed, over every reviewed Run.
     pub resolutions: BlockerResolutions,
     /// Blockers by reviewer Role, most first.
     pub by_reviewer: Vec<BlockerCount>,
@@ -943,6 +944,10 @@ fn review_quality(records: &QualityRecords, runs: &HashMap<RunId, &QualityRun>) 
     let mut texts: BTreeMap<String, Recurring> = BTreeMap::new();
     let mut resolutions = BlockerResolutions::default();
     for blocker in ordered {
+        if blocker.dismissed {
+            resolutions.dismissed += 1;
+            continue;
+        }
         resolutions.count(blocker.fix_status, blocker.ruling);
         let text = blocker_text(&blocker.problem);
         let earlier = found_before.entry(blocker.run_id).or_default();

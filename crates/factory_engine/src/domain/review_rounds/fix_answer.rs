@@ -10,10 +10,12 @@ use factory_records::domain::review_rounds::{
 };
 
 use super::answer::{WHOLE_CHANGE, cut, json_block};
+use super::brief::one_line;
 
 /// What the fix handed back, `text`, says of each Blocker of `round`,
 /// numbered from 1 as its brief numbers them. A Blocker it disputes with a
-/// reason is disputed, the reason trimmed and cut to
+/// reason is disputed, the reason on one line (no NUL or other control
+/// character, white space collapsed) and cut to
 /// [`MAX_DISPUTE_BYTES`]; any other is fixed: one it left out, one it
 /// disputes with no reason, and every one when its block does not read.
 /// An answer that never read names nothing to rule on, so it is never
@@ -80,9 +82,8 @@ fn said_of(text: &str) -> Vec<(usize, Option<String>)> {
             let reason = entry
                 .get("reason")
                 .and_then(serde_json::Value::as_str)
-                .map(str::trim)
-                .filter(|reason| disputed && !reason.is_empty())
-                .map(str::to_string);
+                .map(one_line)
+                .filter(|reason| disputed && !reason.is_empty());
             Some((number, reason))
         })
         .collect()

@@ -990,21 +990,32 @@ says, per Blocker by its number in its brief, `fixed` or `disputed` with a
 before its checks, that is kept on the Blockers (`fix_status`, `dispute`, cut
 to `MAX_DISPUTE_BYTES`, 2 KiB). A Blocker it leaves out, a dispute with no
 reason, a block that does not read and an answer that never read are
-`fixed`. In the next round the dispute's reason stands in the findings'
-block, escaped as findings are, and the reviewer whose Role found the
-Blocker (the round's first, for a finding of no Role) rules on it: it lists
-it again with `previous`, and upholds it, or names it in `"dropped"`, and it
-blocks nothing (`ruling`, by its Step, `ruled_by`). A dispute it does
-neither for is upheld: the engine adds the Blocker to its answer, blocking
-wherever it is, so a dispute never passes a round unless its reviewer drops
-it. A reviewer that drops a number it does not rule on, or one it also
-lists again, is asked again. A Blocker a reviewer raises at the place of one
-it dropped earlier in the visit (the entry's rounds since its last reset) is
-kept `dismissed` (`repeats_dropped`): it blocks nothing and becomes no
-task, and the reviewer is reminded of what it dropped. The Run API counts
-per Run the Blockers fixed, disputed and upheld, and disputed and dropped
-(`blockerResolutions`); Insights' review quality counts them over its Runs
-(`resolutions`). None of this is in the workflow: the fix, the reviewers
+`fixed`. A reason is kept on one line, with no NUL or other control
+character. In the next round's brief every carried Blocker is listed
+first, within `BRIEF_BUDGET`; the reasons follow in a budget of their own
+(`DISPUTE_BUDGET`), each escaped as findings are and then cut to 2 KiB
+(`fit_findings`), so no reason pushes a Blocker out. The reviewer whose Role
+found the Blocker (the round's first, for a finding of no Role) rules on
+each dispute whose reason the brief carries: it lists it again with
+`previous`, and upholds it, or names it in `"dropped"`, and it blocks
+nothing (`ruling`, by its Step, `ruled_by`). A dispute it does neither for,
+or whose reason the brief had no room for, is upheld, and a carried
+Blocker the brief had no room for stands too: the engine adds each to that
+reviewer's answer, blocking wherever it is, so neither a dispute nor a lack
+of room passes a round. A reviewer that drops a number it does not rule
+on, or one it also lists again, is asked again. A new finding by the
+reviewer that dropped a Blocker, in a later round of the visit (the
+entry's rounds since its last reset), at lines that meet the dropped one's
+and with the same problem once case, punctuation and spacing are set aside,
+is kept `dismissed` (`repeats_dropped`) when it is in the diff under review:
+it blocks nothing. Outside the diff it is a follow-up as any other. A
+finding with no lines, or a dropped Blocker with none, dismisses nothing,
+and nothing is dismissed in the round of the drop. No Standing Rule merges
+a Run with a dismissed finding (`any_dismissed`): its merge Gate waits for
+a person. The Run API counts per Run the Blockers fixed (as the fixer
+says), disputed and upheld, disputed and dropped, and its findings
+dismissed (`blockerResolutions`); Insights' review quality counts them over
+its Runs (`resolutions`). None of this is in the workflow: the fix, the reviewers
 and the round's close are activities, so Runs in flight replay as before. In `code`, the review panel
 runs at most `max_visits` rounds (three, or `FACTORY_REVIEW_ROUNDS`, which
 the service writes into the Flow a Run starts with). Rounds and their
@@ -2352,6 +2363,12 @@ Definition.
   `named_by_user_id` starts no self-improvement Run until an admin names it
   again. Thresholds are checked only when a team's Run ends: a team whose
   Runs stop starts none, however old its failures.
+- Deploy the `factory_review_dispute` migrations, then every worker and
+  the API together: an older binary reads a finding kept `dismissed` as
+  `UnknownReviewWord` and fails the read of
+  the Run's review rounds (the Run API, the Steps of a review panel, the
+  Gates' Standing Rules). Rolling back past them needs the findings set
+  back first (`kind` `dismissed` to `blocker`).
 - A worker older than `selfImprovement` in `scorers.json` cannot read a
   Definition that sets it (`deny_unknown_fields`); one that leaves the
   defaults keeps the JSON it kept before.

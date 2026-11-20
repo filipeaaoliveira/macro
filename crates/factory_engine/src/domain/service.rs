@@ -64,8 +64,8 @@ use crate::domain::ports::{
     TaskAccess, TaskDirectory, TaskNotes, TaskThread, UserDirectory,
 };
 use crate::domain::standing_rules::{
-    GateFacts, RuleAnswer, kind_answers, offers_kind_answers, repeated_blockers, rule_answer,
-    rule_fix_limit,
+    GateFacts, RuleAnswer, any_dismissed, kind_answers, offers_kind_answers, repeated_blockers,
+    rule_answer, rule_fix_limit,
 };
 use crate::domain::step_terminal::{
     PAUSE_RAN_OUT_OUTPUT, STOPPED_OUTPUT, TerminalRequest, note_prompt, paused_step_ends_by,
@@ -2543,6 +2543,16 @@ where
             }
             _ => false,
         };
+        let dismissed = match ruling.kind {
+            RuleGateKind::Merge => any_dismissed(
+                &self
+                    .repo
+                    .review_rounds(key.run_id)
+                    .await
+                    .map_err(internal)?,
+            ),
+            _ => false,
+        };
         let facts = GateFacts {
             kind: ruling.kind,
             fix_rounds: ruling.fix_rounds,
@@ -2553,6 +2563,7 @@ where
                 .is_some_and(|changes| changes.is_tampered()),
             held,
             repeated_blockers: repeated,
+            dismissed,
         };
         let Some(ruled) = rule_answer(Some(rules.definition), &facts, &ruling.answers) else {
             return Ok(None);
