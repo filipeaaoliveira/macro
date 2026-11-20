@@ -460,6 +460,7 @@ pub(crate) fn bring_up(
         }
         None => bring_up_infra(stage, mode, instance, &env, InfraInit::Full)?,
     }
+    persistent::refuse_test_databases(stage, mode, instance, &env)?;
     let join_frontend = |label: &str, handle: std::thread::JoinHandle<Result<()>>| {
         stage.run_step(label, move || {
             handle

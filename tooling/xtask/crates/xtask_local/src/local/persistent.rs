@@ -11,8 +11,8 @@
 //!   deletes them without `--wipe-persistent-data` ([`ensure_may_wipe`]);
 //! - LocalStack keeps S3, DynamoDB, SQS and KMS on a volume, Postgres runs
 //!   without JIT, and every container restarts with Docker ([`apply_to_compose`]);
-//! - Temporal's gRPC port stays off the host, so tests can't start workflows
-//!   on it.
+//! - tests can't use its Postgres or Temporal ([`refuse_test_databases`], and
+//!   Temporal's gRPC port stays off the host).
 //!
 //! Everything else behaves as upstream, so this module holds the whole mode and
 //! the orchestrator only calls into it.
@@ -23,7 +23,8 @@ use anyhow::{Context, Result, bail};
 use serde_yaml::{Mapping, Value};
 
 use super::instance::Instance;
-use super::{Start, repo_root};
+use super::stage::Stage;
+use super::{Mode, Start, repo_root};
 
 #[cfg(test)]
 mod test;
@@ -42,6 +43,29 @@ const PERSIST_FREQUENCY: &str = "2";
 
 /// The compose key of LocalStack's data volume.
 const LOCALSTACK_VOLUME_KEY: &str = "localstack_data";
+
+/// Raised by the bench's Postgres when a `#[sqlx::test]` registers a test
+/// database. `sqlx` records each test database in `_sqlx_test.databases`
+/// before it creates it, so refusing that insert stops the test before
+/// anything is created. Creating the table here first is harmless: `sqlx`
+/// creates it with `if not exists` and the same columns.
+const REFUSE_TEST_DATABASES_SQL: &str = r#"
+create schema if not exists _sqlx_test;
+create table if not exists _sqlx_test.databases (
+    db_name text primary key,
+    test_path text not null,
+    created_at timestamptz not null default now()
+);
+create or replace function _sqlx_test.refuse_persistent_stack() returns trigger
+language plpgsql as $$
+begin
+    raise exception 'this Postgres holds a persistent local stack''s data: point DATABASE_URL at a throwaway Postgres to run tests';
+end
+$$;
+drop trigger if exists refuse_persistent_stack on _sqlx_test.databases;
+create trigger refuse_persistent_stack before insert on _sqlx_test.databases
+    for each row execute function _sqlx_test.refuse_persistent_stack();
+"#;
 
 /// The volume LocalStack keeps its state on.
 pub fn localstack_volume(instance: &Instance) -> String {
@@ -249,4 +273,35 @@ fn child_sequence<'a>(parent: &'a mut Mapping, key: &str) -> &'a mut Vec<Value> 
         *child = Value::Sequence(Vec::new());
     }
     child.as_sequence_mut().expect("just made a sequence")
+}
+
+/// Make the persistent instance's Postgres refuse `#[sqlx::test]` databases,
+/// which tests on this machine would otherwise create on it through the
+/// default `localhost:5432` URL. Runs after any init snapshot is saved, so the
+/// machine-wide snapshot never carries the refusal to other instances.
+pub fn refuse_test_databases(
+    stage: &Stage,
+    mode: Mode,
+    instance: &Instance,
+    env: &super::env_layer::ResolvedEnv,
+) -> Result<()> {
+    if stage.is_dry_run() || !mode.spec().migrates_db || !is_on(instance)? {
+        return Ok(());
+    }
+    let mut psql = super::compose_cmd(instance, env);
+    psql.args([
+        "exec",
+        "-T",
+        "postgres",
+        "psql",
+        "-U",
+        "user",
+        "-d",
+        "macrodb",
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-c",
+        REFUSE_TEST_DATABASES_SQL,
+    ]);
+    stage.run("Refusing test databases on the persistent Postgres", &mut psql)
 }
