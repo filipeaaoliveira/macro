@@ -76,7 +76,7 @@ describe('undoDismissal', () => {
 
   it('says failed when the undo fails otherwise', async () => {
     vi.mocked(factoryClient.undoImprovementDismissal).mockResolvedValue(
-      err([{ code: 'INTERNAL_SERVER_ERROR', message: 'down' }])
+      err([{ code: 'SERVER_ERROR', message: 'down' }])
     );
     const { client } = seeded();
 
