@@ -356,20 +356,21 @@ impl RunInsightsRepository for PgRunRepository {
         // Fenced, so the Runs' ids find their Steps by primary key, rather
         // than every agent Step being walked through the session index. A
         // Step that went on after its agent's question works in the asking
-        // Step's session, whose usage counts once. A Step counts the sessions
+        // Step's session, and each Step reads it. A Step reads the sessions
         // it left too, as one that was lost after its agent worked in it.
         let sessions = sqlx::query!(
             r#"
-            SELECT run_id AS "run_id!", entry AS "entry!", session_id AS "session_id!"
+            SELECT run_id AS "run_id!", seq AS "seq!", entry AS "entry!",
+                session_id AS "session_id!"
             FROM (
-                SELECT run_id, entry, session_id
+                SELECT run_id, seq, entry, session_id
                 FROM factory_step
                 WHERE run_id = ANY($1)
                 OFFSET 0
             ) steps
             WHERE session_id IS NOT NULL
             UNION
-            SELECT u.run_id, s.entry, u.session_id
+            SELECT u.run_id, u.seq, s.entry, u.session_id
             FROM factory_step_used_session u
             JOIN factory_step s ON s.run_id = u.run_id AND s.seq = u.seq
             WHERE u.run_id = ANY($1)
@@ -382,6 +383,7 @@ impl RunInsightsRepository for PgRunRepository {
         .map(|row| {
             Ok(StepSessionRef {
                 run_id: RunId::from_uuid(row.run_id),
+                seq: u16::try_from(row.seq).map_err(|_| PgRunRepositoryErr::OutOfRange(row.seq))?,
                 entry: EntryId::try_from(row.entry)?,
                 session_id: row.session_id,
             })

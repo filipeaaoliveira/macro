@@ -117,11 +117,16 @@ pub struct EntryTrouble {
     pub visits: u32,
 }
 
-/// An agent Step's session, for reading what its agent used.
+/// An agent Step's session, for reading what its agent used. A Step that
+/// went on in a new session has one for each session it worked in, and a
+/// session Steps shared (one went on from the other's question) has one
+/// for each Step.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StepSessionRef {
     /// The Run.
     pub run_id: RunId,
+    /// The Step's place among the Run's Steps.
+    pub seq: u16,
     /// The Step's entry.
     pub entry: EntryId,
     /// An agent session the Step worked in: its current one, or one it

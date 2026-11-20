@@ -266,6 +266,7 @@ async fn the_runs_where_an_entry_failed_or_looped_are_named_newest_first(pool: P
         records.sessions,
         vec![StepSessionRef {
             run_id: run(EXPORT),
+            seq: 3,
             entry: entry("write"),
             session_id: Uuid::parse_str("00000000-0000-7000-8000-000000000301")
                 .expect("valid session id"),

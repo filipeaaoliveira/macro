@@ -354,17 +354,20 @@ async fn usage_is_summed_by_entry_and_run_for_the_caller() {
         sessions: vec![
             StepSessionRef {
                 run_id: run_id(1),
+                seq: 1,
                 entry: entry("plan"),
                 session_id: session(1),
             },
             StepSessionRef {
                 run_id: run_id(1),
+                seq: 2,
                 entry: entry("write"),
                 session_id: session(2),
             },
             // An agent on the person's own computer records no usage.
             StepSessionRef {
                 run_id: run_id(2),
+                seq: 1,
                 entry: entry("plan"),
                 session_id: session(3),
             },
@@ -404,6 +407,84 @@ async fn usage_is_summed_by_entry_and_run_for_the_caller() {
     assert_eq!(insights.usage.heaviest[0].run.id, run_id(1));
     assert_eq!(insights.entries[0].tokens, Some(tokens(100, 10)));
     assert_eq!(insights.entries[1].tokens, Some(tokens(50, 5)));
+}
+
+/// A Step that went on in a new session counts as one Step: one passed
+/// to a backup Agent whose first session never started is measured by
+/// the session that worked, and one whose first session was lost after
+/// its agent worked in it sums both. A session two Steps of an entry
+/// shared (one went on from the other's question) is two Steps, and its
+/// tokens count once.
+#[tokio::test]
+async fn a_step_counts_once_however_many_sessions_it_worked_in() {
+    let session = |n: u128| Uuid::from_u128(200 + n);
+    let step = |run: u128, seq, name: &str, n| StepSessionRef {
+        run_id: run_id(run),
+        seq,
+        entry: entry(name),
+        session_id: session(n),
+    };
+    let records = InsightsRecords {
+        runs: vec![
+            summary(2, Some("plan"), "2026-11-11T10:00:00Z", None),
+            summary(1, Some("plan"), "2026-11-10T10:00:00Z", None),
+        ],
+        entries: vec![entry_summary("plan", 3), entry_summary("write", 1)],
+        sessions: vec![
+            // Passed to the backup Agent: the primary's session never
+            // started, so it recorded nothing.
+            step(1, 1, "plan", 1),
+            step(1, 1, "plan", 2),
+            // Lost after its agent worked in it, then went on afresh.
+            step(1, 2, "write", 3),
+            step(1, 2, "write", 4),
+            // Asked a question; the Step that went on shared its session.
+            step(2, 1, "plan", 5),
+            step(2, 2, "plan", 5),
+        ],
+        ..InsightsRecords::default()
+    };
+    let used = |n, input| SessionTokens {
+        session_id: session(n),
+        input,
+        output: 0,
+        cache_read: 0,
+        cache_write: 0,
+        cost_usd: 0.0,
+        unpriced_calls: 0,
+    };
+    let service = service(
+        records,
+        vec![used(2, 100), used(3, 40), used(4, 60), used(5, 7)],
+    );
+
+    let insights = service
+        .insights(&julia(), query("2026-11-10", "2026-11-12", "UTC"))
+        .await
+        .expect("insights");
+
+    // Each session is read once.
+    assert_eq!(
+        *service.usage.asked.lock().expect("asked"),
+        vec![(julia(), 5)]
+    );
+    let tokens = |input| TokenCounts {
+        input,
+        ..TokenCounts::default()
+    };
+    assert_eq!(insights.usage.agent_steps, 4);
+    assert_eq!(insights.usage.measured_steps, 4);
+    assert_eq!(insights.usage.measured_runs, 2);
+    assert_eq!(insights.usage.tokens, tokens(207));
+    assert_eq!(insights.entries[0].tokens, Some(tokens(107)));
+    assert_eq!(insights.entries[1].tokens, Some(tokens(100)));
+    let run_one = insights
+        .usage
+        .heaviest
+        .iter()
+        .find(|run| run.run.id == run_id(1))
+        .expect("run 1");
+    assert_eq!(run_one.tokens, tokens(200));
 }
 
 #[test]
