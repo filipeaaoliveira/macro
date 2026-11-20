@@ -60,7 +60,12 @@ const planning: RunDetail = {
   ],
   reviewRounds: [],
   standingActs: [],
-  blockerResolutions: { fixed: 0, disputedUpheld: 0, disputedDropped: 0, dismissed: 0 },
+  blockerResolutions: {
+    fixed: 0,
+    disputedUpheld: 0,
+    disputedDropped: 0,
+    dismissed: 0,
+  },
 };
 
 const waiting: RunDetail = {

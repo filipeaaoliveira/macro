@@ -325,7 +325,12 @@ describe('RunView', () => {
           ],
         },
       ],
-      blockerResolutions: { fixed: 1, disputedUpheld: 1, disputedDropped: 1, dismissed: 1 },
+      blockerResolutions: {
+        fixed: 1,
+        disputedUpheld: 1,
+        disputedDropped: 1,
+        dismissed: 1,
+      },
     });
 
     expect(await screen.findByText('Review round 1')).toBeTruthy();
@@ -336,7 +341,9 @@ describe('RunView', () => {
       )
     ).toBeTruthy();
     expect(
-      screen.getByText('The next round dropped this blocker: it blocked nothing')
+      screen.getByText(
+        'The next round dropped this blocker: it blocked nothing'
+      )
     ).toBeTruthy();
     expect(
       screen.getByText('The next round upheld this blocker: it blocked again')

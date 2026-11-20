@@ -856,7 +856,12 @@ function quality(): QualityInsights {
       blockers: 4,
       newBlockers: 3,
       repeatedBlockers: 1,
-      resolutions: { fixed: 2, disputedUpheld: 1, disputedDropped: 3, dismissed: 4 },
+      resolutions: {
+        fixed: 2,
+        disputedUpheld: 1,
+        disputedDropped: 3,
+        dismissed: 4,
+      },
       byReviewer: [
         { name: 'correctness-reviewer', reviews: 4, blockers: 3 },
         { name: 'scope-reviewer', reviews: 1, blockers: 1 },
