@@ -4,9 +4,10 @@
 -- failures it dismissed back to pending. The undo is kept once on the
 -- improvement, with who did it and when; repeating it changes nothing.
 --
--- Adding nullable columns rewrites no row. Their check is added NOT VALID
--- and validated after, so no row is scanned under the ACCESS EXCLUSIVE lock.
--- Give up rather than queue behind a long transaction on the table.
+-- Adding nullable columns rewrites no row. Their check is added NOT VALID,
+-- so no row is scanned under the ACCESS EXCLUSIVE lock, and validated in
+-- 20261120010100_factory_improvement_dismissal_undone_validate.sql. Give up
+-- rather than queue behind a long transaction on the table.
 SET LOCAL lock_timeout = '5s';
 
 ALTER TABLE factory_improvement
@@ -18,6 +19,3 @@ ALTER TABLE factory_improvement
         (dismissal_undone_at IS NULL) = (dismissal_undone_by_user_id IS NULL)
         AND (dismissal_undone_at IS NULL OR state = 'closed')
     ) NOT VALID;
-
-ALTER TABLE factory_improvement
-    VALIDATE CONSTRAINT factory_improvement_dismissal_undone;
