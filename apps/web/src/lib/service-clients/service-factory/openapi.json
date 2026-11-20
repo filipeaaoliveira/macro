@@ -3049,6 +3049,57 @@
         "type": "string",
         "description": "The name the factory's agent definition gives an Agent: a harness, a\nmodel and its instructions."
       },
+      "AgentRuleInsight": {
+        "type": "object",
+        "description": "An Agent Rule and how the Runs it chose an Agent for did over the\nperiod, to compare with the Role's other Runs.",
+        "required": [
+          "role",
+          "rule",
+          "agent",
+          "runs",
+          "ended",
+          "succeeded",
+          "fellBack"
+        ],
+        "properties": {
+          "agent": {
+            "type": "string",
+            "description": "The Agent it chose, for the newest of its Runs."
+          },
+          "ended": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many of them ended, but for those that ended `infrastructure`:\ntheir work never ran.",
+            "minimum": 0
+          },
+          "fellBack": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many had a Step of the Role the rule's Agent could not start,\nwhich another Agent took.",
+            "minimum": 0
+          },
+          "role": {
+            "type": "string",
+            "description": "The Role it chose for."
+          },
+          "rule": {
+            "type": "string",
+            "description": "Its name."
+          },
+          "runs": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many of the period's Runs it chose for.",
+            "minimum": 0
+          },
+          "succeeded": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many ended `success`.",
+            "minimum": 0
+          }
+        }
+      },
       "AnswerGateRequest": {
         "type": "object",
         "description": "Request body for answering a Gate.",
@@ -4163,10 +4214,18 @@
           "timeZone",
           "scorers",
           "experiments",
+          "agentRules",
           "benchmarks",
           "suites"
         ],
         "properties": {
+          "agentRules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentRuleInsight"
+            },
+            "description": "Each Agent Rule that chose an Agent for one of the period's Runs,\nby Role."
+          },
           "benchmarks": {
             "type": "array",
             "items": {
@@ -5695,6 +5754,25 @@
           }
         }
       },
+      "RunAgentRule": {
+        "type": "object",
+        "description": "The Agent Rule of its Factory Definition that chose the Agent a Run's\nSteps of one Role start with, as the Run keeps it and the Run API shows\nit.",
+        "required": ["role", "rule", "agent"],
+        "properties": {
+          "agent": {
+            "$ref": "#/components/schemas/AgentName",
+            "description": "The Agent it chose."
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role",
+            "description": "The Role."
+          },
+          "rule": {
+            "type": "string",
+            "description": "The rule, by name."
+          }
+        }
+      },
       "RunAutomation": {
         "type": "object",
         "description": "The Automation that started a Run, as it was then.",
@@ -5733,8 +5811,21 @@
       "RunDetail": {
         "type": "object",
         "description": "A Run and the Steps it took.",
-        "required": ["run", "steps", "reviewRounds", "standingActs"],
+        "required": [
+          "run",
+          "steps",
+          "reviewRounds",
+          "standingActs",
+          "agentRules"
+        ],
         "properties": {
+          "agentRules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunAgentRule"
+            },
+            "description": "The Agent Rules of its Factory Definition that chose the Agent its\nSteps of a Role start with, by Role: each matched its task's tags\nor its repository as it started. A Role no rule chose for is not\nlisted."
+          },
           "baseRequiredChecks": {
             "oneOf": [
               {
