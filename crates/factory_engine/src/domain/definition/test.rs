@@ -1095,7 +1095,8 @@ async fn standing_roles_that_do_not_hold_together_do_not_read() {
 }
 
 /// `agents.json` with the Definition's Agents, a `scribe` Agent only a
-/// Standing Role lists, and `rules` as its Agent Rules.
+/// Standing Role lists (as a bot that answers Gates), and `rules` as its
+/// Agent Rules.
 fn ruled_agents(rules: &str) -> String {
     format!(
         r#"{{
@@ -1104,22 +1105,22 @@ fn ruled_agents(rules: &str) -> String {
                 "backup": {{ "bot": "00000000-0000-0000-0000-00000000c0de" }},
                 "scribe": {{ "bot": "00000000-0000-0000-0000-00000000d0c5" }}
             }},
-            "roles": {{ "planner": ["primary", "backup"], "writer": ["primary"] }},
+            "roles": {{ "planner": ["primary", "backup"], "writer": ["primary", "backup"] }},
             "standing": {{ "intake": {{ "acts": ["start"], "agents": ["scribe"] }} }},
             "rules": {rules}
         }}"#
     )
 }
 
-/// A Definition reads with Agent Rules on a tag, a repository or both, and
-/// a rule may choose an Agent only a Standing Role lists, as an arm may.
+/// A Definition reads with Agent Rules on a tag, a repository or both,
+/// each choosing one of its Role's own Agents.
 #[tokio::test]
 async fn a_definition_reads_with_agent_rules() {
     let agents = ruled_agents(
         r#"[
             { "name": "docs", "role": "writer", "tag": "docs", "agent": "backup" },
-            { "name": "site", "role": "planner", "repository": "acme/site", "agent": "scribe" },
-            { "name": "site-docs", "role": "writer", "tag": "Docs", "repository": "acme/site", "agent": "scribe" }
+            { "name": "site", "role": "planner", "repository": "acme/site", "agent": "backup" },
+            { "name": "site-docs", "role": "writer", "tag": "Docs", "repository": "acme/site", "agent": "primary" }
         ]"#,
     );
 
@@ -1137,10 +1138,12 @@ async fn a_definition_reads_with_agent_rules() {
 }
 
 /// The validator refuses an Agent Rule whose Agent the Definition does not
-/// have (as an arm's, through `check_choices`), one for a Role it does not
-/// fill, one that matches nothing, one whose repository is not
-/// `owner/name`, one with an empty tag, and two rules of one name, naming
-/// the file, the rule and the problem.
+/// have (as an arm's, through `check_choices`), one whose Agent its Role
+/// does not list (one only a Standing Role lists among them), one for a
+/// Role it does not fill, one that matches nothing, one whose repository is
+/// not `owner/name` as a Run keeps it, one with an empty tag, one an
+/// earlier rule shadows, and two rules of one name, naming the file, the
+/// rule and the problem.
 #[tokio::test]
 async fn agent_rules_that_do_not_hold_together_do_not_read() {
     let unknown_agent = read(with(
@@ -1163,6 +1166,37 @@ async fn agent_rules_that_do_not_hold_together_do_not_read() {
     );
 
     let refused = [
+        (
+            r#"[{ "name": "docs", "role": "writer", "tag": "docs", "agent": "scribe" }]"#,
+            "agent rule docs chooses agent scribe, which role writer does not list",
+        ),
+        (
+            r#"[{ "name": "plans", "role": "planner", "tag": "docs", "agent": "scribe" }]"#,
+            "agent rule plans chooses agent scribe, which role planner does not list",
+        ),
+        (
+            r#"[{ "name": "site", "role": "writer", "repository": "acme/site.git", "agent": "backup" }]"#,
+            "agent rule site must name its repository as owner/name",
+        ),
+        (
+            r#"[{ "name": "site", "role": "writer", "repository": "acme/..", "agent": "backup" }]"#,
+            "agent rule site must name its repository as owner/name",
+        ),
+        (
+            r#"[{ "name": "site", "role": "writer", "repository": "./site", "agent": "backup" }]"#,
+            "agent rule site must name its repository as owner/name",
+        ),
+        (
+            r#"[{ "name": "site", "role": "writer", "repository": "acme/site/", "agent": "backup" }]"#,
+            "agent rule site must name its repository as owner/name",
+        ),
+        (
+            r#"[
+                { "name": "docs", "role": "writer", "tag": "docs", "repository": "acme/site", "agent": "backup" },
+                { "name": "docs-again", "role": "writer", "tag": " Docs ", "repository": "Acme/Site", "agent": "primary" }
+            ]"#,
+            "agent rule docs-again matches the same runs for the same role as agent rule docs",
+        ),
         (
             r#"[{ "name": "docs", "role": "publisher", "tag": "docs", "agent": "backup" }]"#,
             "agent rule docs chooses for role publisher, which the definition does not fill",
@@ -1203,4 +1237,23 @@ async fn agent_rules_that_do_not_hold_together_do_not_read() {
             "{why}: {read:?}"
         );
     }
+}
+
+/// Rules that differ in their Role or in what they match read: only one
+/// that an earlier rule always beats is refused.
+#[tokio::test]
+async fn agent_rules_that_differ_in_role_or_match_read() {
+    let agents = ruled_agents(
+        r#"[
+            { "name": "docs", "role": "writer", "tag": "docs", "agent": "backup" },
+            { "name": "docs-plans", "role": "planner", "tag": "docs", "agent": "backup" },
+            { "name": "site-docs", "role": "writer", "tag": "docs", "repository": "acme/site", "agent": "primary" },
+            { "name": "site", "role": "writer", "repository": "acme/site", "agent": "backup" }
+        ]"#,
+    );
+
+    let definition = read(with("agents.json", &agents))
+        .await
+        .expect("rules that differ read");
+    assert_eq!(definition.agents.rules().len(), 4);
 }

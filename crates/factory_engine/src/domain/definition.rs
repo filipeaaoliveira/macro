@@ -633,8 +633,9 @@ pub async fn read_definition<F: DefinitionFiles>(
         .collect();
     agents.fills(roles).map_err(DefinitionError::Agents)?;
     // An Agent Rule gives its Role's Step its Agent as an arm does, so it
-    // may choose only what an arm may: an Agent of the Definition, one
-    // only a Standing Role lists among them.
+    // is checked as an arm's choice is: an Agent of the Definition, never
+    // one an arm could not take. Reading `agents.json` already held it to
+    // the Agents its Role lists.
     for (name, choice) in agents.rule_choices() {
         check_choices(&format!("agent rule {name}"), &choice, Some(&agents))
             .map_err(DefinitionError::AgentRule)?;

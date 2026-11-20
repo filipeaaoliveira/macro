@@ -23,9 +23,9 @@ fn writer() -> Role {
     Role::try_from("writer".to_string()).expect("valid")
 }
 
-/// The Definition a Run kept: `primary` then `backup` write, `spare` is
-/// only a Standing Role's, and a task tagged `docs` is written by
-/// `docs-writer` first.
+/// The Definition a Run kept: `primary`, `backup`, then `docs-writer`
+/// write, `spare` is only a Standing Role's, and a task tagged `docs` is
+/// written by `docs-writer` first.
 fn kept() -> serde_json::Value {
     serde_json::json!({
         "agents": {
@@ -34,7 +34,7 @@ fn kept() -> serde_json::Value {
             "spare": { "bot": Uuid::from_u128(0x5a5e) },
             "docs-writer": { "bot": Uuid::from_u128(0xd0c5), "model": "small-model" }
         },
-        "roles": { "planner": ["primary"], "writer": ["primary", "backup"] },
+        "roles": { "planner": ["primary"], "writer": ["primary", "backup", "docs-writer"] },
         "standing": { "intake": { "acts": ["start"], "agents": ["spare"] } },
         "rules": [
             { "name": "docs", "role": "writer", "tag": "docs", "agent": "docs-writer" }

@@ -17,6 +17,7 @@ use factory_records::domain::models::{AgentName, Role, checked_name};
 use serde::{Deserialize, Serialize};
 
 use super::AgentDefinitionError;
+use crate::domain::models::CodeRepository;
 
 /// The most Agent Rules a definition holds.
 pub const MAX_AGENT_RULES: usize = 64;
@@ -57,18 +58,12 @@ pub struct RuleSubject<'a> {
     pub repository: Option<&'a str>,
 }
 
-/// Whether `repository` reads as `owner/name`.
+/// Whether `repository` reads as `owner/name`, as a Run's repository is
+/// kept ([`CodeRepository::parse`]): no `.git` ending, no `.` or `..`
+/// segment, no trailing slash. A rule written another way could never
+/// match a Run, so it does not read.
 fn is_owner_and_name(repository: &str) -> bool {
-    let mut parts = repository.split('/');
-    let readable = |part: Option<&str>| {
-        part.is_some_and(|part| {
-            !part.is_empty()
-                && part
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || b"-_.".contains(&byte))
-        })
-    };
-    readable(parts.next()) && readable(parts.next()) && parts.next().is_none()
+    CodeRepository::parse(&format!("{GITHUB}{repository}")).is_some()
 }
 
 impl AgentRule {
@@ -111,6 +106,20 @@ impl AgentRule {
             })
         });
         tagged && on_repository
+    }
+
+    /// Whether the rule matches exactly the Runs `other` matches: the same
+    /// Role, tag and repository, ignoring case. The later of two such
+    /// rules could never choose.
+    pub(super) fn same_match(&self, other: &Self) -> bool {
+        let same = |first: &Option<String>, second: &Option<String>| match (first, second) {
+            (Some(first), Some(second)) => first.trim().eq_ignore_ascii_case(second.trim()),
+            (None, None) => true,
+            _ => false,
+        };
+        self.role == other.role
+            && same(&self.tag, &other.tag)
+            && same(&self.repository, &other.repository)
     }
 
     /// The rule's choice, as an arm's: its Role and its Agent.

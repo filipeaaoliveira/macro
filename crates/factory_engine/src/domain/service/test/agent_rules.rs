@@ -38,7 +38,7 @@ fn definition(github: &FakeGithub, scorers: Option<&str>) {
             "docs-writer": { "bot": "00000000-0000-0000-0000-00000000d0c5" }
         },
         "roles": {
-            "planner": ["primary", "backup"], "writer": ["primary", "backup"],
+            "planner": ["primary", "backup"], "writer": ["primary", "backup", "docs-writer"],
             "reviewer": ["backup"], "fixer": ["primary"]
         },
         "rules": [

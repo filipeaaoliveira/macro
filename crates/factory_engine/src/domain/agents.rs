@@ -225,6 +225,31 @@ pub enum AgentDefinitionError {
         /// The Role it names.
         role: Role,
     },
+    /// An Agent Rule chooses an Agent its Role does not list.
+    #[error(
+        "agent rule {rule} chooses agent {agent}, which role {role} does not list: \
+         a rule may only move one of the role's own agents first"
+    )]
+    RuleAgentOutsideRole {
+        /// The rule.
+        rule: String,
+        /// The Role it chooses for.
+        role: Role,
+        /// The Agent it names.
+        agent: AgentName,
+    },
+    /// An Agent Rule matches the same Runs for the same Role as an earlier
+    /// one, which always chooses first, so it could never choose.
+    #[error(
+        "agent rule {rule} matches the same runs for the same role as agent rule {earlier}, \
+         which comes first: it would never choose"
+    )]
+    RuleShadowed {
+        /// The later rule.
+        rule: String,
+        /// The earlier rule.
+        earlier: String,
+    },
     /// The definition has more than [`MAX_AGENT_RULES`] Agent Rules.
     #[error("at most {MAX_AGENT_RULES} agent rules")]
     TooManyRules,
@@ -317,9 +342,12 @@ impl TryFrom<AgentDefinitionFields> for AgentDefinition {
             standing,
             rules: Vec::new(),
         };
-        // A rule's Agent is checked as an arm's is, where the Definition
-        // is read (`AgentDefinition::rule_choices`): an Agent only a
-        // Standing Role lists may take a Role's Step there too.
+        // A rule's Agent must be one its Role lists: tags are set by
+        // people, so a tag must never route a Run onto an Agent kept for
+        // something else, such as one only a Standing Role lists to answer
+        // Gates. An Agent the definition does not have is left to the
+        // Definition's read, which checks it as an arm's
+        // (`AgentDefinition::rule_choices`).
         if fields.rules.len() > MAX_AGENT_RULES {
             return Err(AgentDefinitionError::TooManyRules);
         }
@@ -331,10 +359,27 @@ impl TryFrom<AgentDefinitionFields> for AgentDefinition {
             {
                 return Err(AgentDefinitionError::DuplicateRule(rule.name.clone()));
             }
-            if definition.for_role(&rule.role).is_empty() {
+            if let Some(earlier) = fields.rules[..place]
+                .iter()
+                .find(|earlier| earlier.same_match(rule))
+            {
+                return Err(AgentDefinitionError::RuleShadowed {
+                    rule: rule.name.clone(),
+                    earlier: earlier.name.clone(),
+                });
+            }
+            let listed = definition.for_role(&rule.role);
+            if listed.is_empty() {
                 return Err(AgentDefinitionError::RuleUnknownRole {
                     rule: rule.name.clone(),
                     role: rule.role.clone(),
+                });
+            }
+            if definition.agents.contains_key(&rule.agent) && !listed.contains(&rule.agent) {
+                return Err(AgentDefinitionError::RuleAgentOutsideRole {
+                    rule: rule.name.clone(),
+                    role: rule.role.clone(),
+                    agent: rule.agent.clone(),
                 });
             }
         }
