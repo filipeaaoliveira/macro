@@ -23,24 +23,41 @@ refuse() {
   exit 1
 }
 
-# Whether the URL's host is this machine and its port is 5432 (or omitted,
-# which means 5432).
+# The value of `name` among `separator`-separated key=value pairs, unquoted.
+param() {
+  printf '%s' "$3" | tr "$2" '\n' | sed -n "s/^$1=//p" | head -n 1 | tr -d "'\""
+}
+
+# Whether a Postgres URL or keyword DSN names this machine's port 5432. No host
+# means a local socket and no port means 5432, so both count as local.
 on_local_postgres() {
-  local rest host_port host port
-  rest="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
-  rest="${rest#*://}"   # scheme
-  rest="${rest%%/*}"    # path
-  rest="${rest%%\?*}"   # query, for a URL without a path
-  rest="${rest##*@}"    # userinfo
-  host_port="$rest"
-  case "$host_port" in
-    \[*\]:*) host="${host_port%%]:*}]"; port="${host_port##*]:}" ;;
-    \[*\]) host="$host_port"; port=5432 ;;
-    *:*) host="${host_port%%:*}"; port="${host_port##*:}" ;;
-    *) host="$host_port"; port=5432 ;;
+  local dsn rest authority query host port
+  dsn="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  case "$dsn" in
+    *://*)
+      rest="${dsn#*://}"
+      rest="${rest##*@}"             # userinfo, up to the last @
+      authority="${rest%%[/?#]*}"
+      query=""
+      case "$rest" in *\?*) query="${rest#*\?}" ;; esac
+      query="${query%%#*}"
+      case "$authority" in
+        \[*\]:*) host="${authority%%]:*}]"; port="${authority##*]:}" ;;
+        \[*\]) host="$authority"; port="" ;;
+        *:*) host="${authority%%:*}"; port="${authority##*:}" ;;
+        *) host="$authority"; port="" ;;
+      esac
+      # Query parameters override the authority, as in libpq.
+      [ -n "$(param host '&' "$query")" ] && host="$(param host '&' "$query")"
+      [ -n "$(param port '&' "$query")" ] && port="$(param port '&' "$query")"
+      ;;
+    *)
+      host="$(param host ' ' "$dsn")"
+      port="$(param port ' ' "$dsn")"
+      ;;
   esac
   case "$host" in
-    localhost | 127.0.0.1 | '[::1]' | 0.0.0.0 | host.docker.internal) ;;
+    '' | localhost | 127.0.0.1 | '[::1]' | ::1 | 0.0.0.0 | host.docker.internal | /*) ;;
     *) return 1 ;;
   esac
   [ "${port:-5432}" = 5432 ]
