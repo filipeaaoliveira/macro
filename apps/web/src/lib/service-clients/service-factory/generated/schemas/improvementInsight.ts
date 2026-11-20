@@ -4,6 +4,7 @@
  * factory_engine
  * OpenAPI spec version: 0.1.0
  */
+import type { ImprovementInsightDismissalUndoneAt } from './improvementInsightDismissalUndoneAt';
 import type { ImprovementInsightRefusal } from './improvementInsightRefusal';
 import type { ImprovementInsightRunId } from './improvementInsightRunId';
 import type { ImprovementInsightSettledAt } from './improvementInsightSettledAt';
@@ -13,13 +14,29 @@ import type { ImprovementState } from './improvementState';
  * A team's latest self-improvement Run.
  */
 export interface ImprovementInsight {
+  /** Whether the caller may undo the dismissal now: it holds dismissed
+failures, was not undone, and they named the Definition or own its
+Run. */
+  canUndoDismissal: boolean;
   /** When it began. */
   createdAt: string;
+  /** When the dismissal of its failures was undone, sending them back to
+pending; none while it was not. */
+  dismissalUndoneAt?: ImprovementInsightDismissalUndoneAt;
+  /**
+   * How many of its failures are dismissed: a person rejected it (closed
+its pull request unmerged, or cancelled its Run), so they count
+toward no other Run until the dismissal is undone.
+   * @minimum 0
+   */
+  dismissed: number;
   /**
    * How many failures it groups.
    * @minimum 0
    */
   failures: number;
+  /** Its id, which undoing its dismissal names. */
+  id: string;
   /** Why its Run could not start, when refused. */
   refusal?: ImprovementInsightRefusal;
   runId?: ImprovementInsightRunId;

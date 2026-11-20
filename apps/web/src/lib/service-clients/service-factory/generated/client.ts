@@ -15,6 +15,7 @@ import type {
   CreatedAutomation,
   CreateRunRequest,
   DefinitionSettings,
+  DismissalUndoneResponse,
   ErrorResponse,
   EvaluationInsights,
   FiringResult,
@@ -2266,6 +2267,92 @@ export const linkFactoryRunTask = async (
     status: res.status,
     headers: res.headers,
   } as linkFactoryRunTaskResponse;
+};
+
+/**
+ * @summary Undo the dismissal of the failures a person's rejection of one of the
+caller's team's self-improvement Runs dismissed (its pull request closed
+unmerged, or its Run cancelled in person): when the rejection was of the
+proposed fix and not of the failures, they go back to pending and count
+toward the next self-improvement Run's thresholds at the team's next
+Run end, after any pause the rejection started. Only failures it still
+holds go back. Only the admin who named the team's Definition, or the
+owner of the self-improvement Run, may, in their own signed-in session
+(403 otherwise); a Run that dismissed nothing is refused (409). The undo
+is kept with who and when; undoing again answers it and changes nothing
+(`restored` 0).
+ */
+export type undoFactoryImprovementDismissalResponse200 = {
+  data: DismissalUndoneResponse;
+  status: 200;
+};
+
+export type undoFactoryImprovementDismissalResponse401 = {
+  data: ErrorResponse;
+  status: 401;
+};
+
+export type undoFactoryImprovementDismissalResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type undoFactoryImprovementDismissalResponse404 = {
+  data: ErrorResponse;
+  status: 404;
+};
+
+export type undoFactoryImprovementDismissalResponse409 = {
+  data: ErrorResponse;
+  status: 409;
+};
+
+export type undoFactoryImprovementDismissalResponse500 = {
+  data: ErrorResponse;
+  status: 500;
+};
+
+export type undoFactoryImprovementDismissalResponseSuccess =
+  undoFactoryImprovementDismissalResponse200 & {
+    headers: Headers;
+  };
+export type undoFactoryImprovementDismissalResponseError = (
+  | undoFactoryImprovementDismissalResponse401
+  | undoFactoryImprovementDismissalResponse403
+  | undoFactoryImprovementDismissalResponse404
+  | undoFactoryImprovementDismissalResponse409
+  | undoFactoryImprovementDismissalResponse500
+) & {
+  headers: Headers;
+};
+
+export type undoFactoryImprovementDismissalResponse =
+  | undoFactoryImprovementDismissalResponseSuccess
+  | undoFactoryImprovementDismissalResponseError;
+
+export const getUndoFactoryImprovementDismissalUrl = (id: string) => {
+  return `/self-improvements/${id}/undo-dismissal`;
+};
+
+export const undoFactoryImprovementDismissal = async (
+  id: string,
+  options?: RequestInit
+): Promise<undoFactoryImprovementDismissalResponse> => {
+  const res = await fetch(getUndoFactoryImprovementDismissalUrl(id), {
+    ...options,
+    method: 'POST',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: undoFactoryImprovementDismissalResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as undoFactoryImprovementDismissalResponse;
 };
 
 /**

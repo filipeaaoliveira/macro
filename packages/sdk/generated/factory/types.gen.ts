@@ -744,6 +744,21 @@ export type DeliveryInsight = {
 };
 
 /**
+ * What undoing a rejected self-improvement Run's dismissal did.
+ */
+export type DismissalUndoneResponse = {
+    /**
+     * How many failures went back to pending: none when it was undone
+     * already.
+     */
+    restored: number;
+    /**
+     * When it was undone, the first time.
+     */
+    undoneAt: string;
+};
+
+/**
  * A spread of durations: how many, their median and 90th percentile.
  */
 export type DurationStats = {
@@ -1124,13 +1139,34 @@ export type HandBackRequest = {
  */
 export type ImprovementInsight = {
     /**
+     * Whether the caller may undo the dismissal now: it holds dismissed
+     * failures, was not undone, and they named the Definition or own its
+     * Run.
+     */
+    canUndoDismissal: boolean;
+    /**
      * When it began.
      */
     createdAt: string;
     /**
+     * When the dismissal of its failures was undone, sending them back to
+     * pending; none while it was not.
+     */
+    dismissalUndoneAt?: string | null;
+    /**
+     * How many of its failures are dismissed: a person rejected it (closed
+     * its pull request unmerged, or cancelled its Run), so they count
+     * toward no other Run until the dismissal is undone.
+     */
+    dismissed: number;
+    /**
      * How many failures it groups.
      */
     failures: number;
+    /**
+     * Its id, which undoing its dismissal names.
+     */
+    id: string;
     /**
      * Why its Run could not start, when refused.
      */
@@ -3572,6 +3608,34 @@ export type LinkFactoryRunTaskResponses = {
 };
 
 export type LinkFactoryRunTaskResponse = LinkFactoryRunTaskResponses[keyof LinkFactoryRunTaskResponses];
+
+export type UndoFactoryImprovementDismissalData = {
+    body?: never;
+    path: {
+        /**
+         * The self-improvement Run's id (`selfImprovement.last.id`).
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/self-improvements/{id}/undo-dismissal';
+};
+
+export type UndoFactoryImprovementDismissalErrors = {
+    401: ErrorResponse;
+    403: ErrorResponse;
+    404: ErrorResponse;
+    409: ErrorResponse;
+    500: ErrorResponse;
+};
+
+export type UndoFactoryImprovementDismissalError = UndoFactoryImprovementDismissalErrors[keyof UndoFactoryImprovementDismissalErrors];
+
+export type UndoFactoryImprovementDismissalResponses = {
+    200: DismissalUndoneResponse;
+};
+
+export type UndoFactoryImprovementDismissalResponse = UndoFactoryImprovementDismissalResponses[keyof UndoFactoryImprovementDismissalResponses];
 
 export type GetFactorySessionStepData = {
     body?: never;
