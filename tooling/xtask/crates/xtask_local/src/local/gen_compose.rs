@@ -268,7 +268,7 @@ pub fn generate(
     if !instance.is_default() {
         set_external_project_networks(&mut value, instance);
     }
-    if mode.spec().runs_local_infra && super::persistent::is_on(instance)? {
+    if mode.spec().runs_local_infra && super::persistent::is_on(instance) {
         super::persistent::apply_to_compose(&mut value, instance)?;
     }
 

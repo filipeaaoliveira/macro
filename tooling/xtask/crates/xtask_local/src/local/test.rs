@@ -151,3 +151,31 @@ fn only_the_container_binding_host_port_4318_holds_the_collector_port() {
     );
     assert_eq!(pick_otlp_port_holder(""), None);
 }
+
+#[test]
+fn destroy_reset_and_an_attached_start_refuse_to_wipe_a_persistent_stack() {
+    let _probe = persistent::fake_probe(true, true);
+    let name = "persistent-guard-test";
+    let refusal = persistent::refusal(&Instance::derive(Some(name), None).unwrap());
+    let instance = cli::InstanceArgs {
+        instance: Some(name.to_string()),
+        port_base: None,
+    };
+
+    assert_eq!(destroy(&instance, false).unwrap_err().to_string(), refusal);
+    assert_eq!(reset(&instance, false).unwrap_err().to_string(), refusal);
+
+    let fresh = cli::RunLocalArgs {
+        run: cli::RunArgs {
+            instance: instance.clone(),
+            ..Default::default()
+        },
+        flags: supervisor::RunLocalFlags {
+            fresh: true,
+            ..Default::default()
+        },
+        action: None,
+    };
+    let attached = run_attached(Stage::from_env(), Mode::Local, &fresh).unwrap_err();
+    assert_eq!(attached.to_string(), refusal);
+}

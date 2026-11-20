@@ -73,13 +73,19 @@ pub fn localstack_volume(instance: &Instance) -> String {
 }
 
 /// Whether `instance` runs in persistent mode: the switch names it, or its
-/// LocalStack data volume exists.
-pub fn is_on(instance: &Instance) -> Result<bool> {
+/// LocalStack data volume exists. Without a reachable Docker daemon nothing
+/// can be started or wiped, so a failed volume lookup counts as off: commands
+/// that only render files, such as `gen-compose`, need no daemon.
+pub fn is_on(instance: &Instance) -> bool {
+    #[cfg(test)]
+    if let Some(probe) = FAKE_PROBE.get() {
+        return probe.persistent;
+    }
     let switch = macro_env_var::maybe_read_env(SWITCH_VAR);
     if names(switch.as_deref(), instance.name()) {
-        return Ok(true);
+        return true;
     }
-    super::docker::volume_exists(&localstack_volume(instance))
+    super::docker::volume_exists(&localstack_volume(instance)).unwrap_or(false)
 }
 
 /// Whether the switch's value names `instance`.
@@ -87,20 +93,85 @@ fn names(switch: Option<&str>, instance: &str) -> bool {
     switch.is_some_and(|value| value.split(',').any(|name| name.trim() == instance))
 }
 
+/// What the guards need to know about an instance.
+#[derive(Clone, Copy, Debug)]
+struct Probe {
+    persistent: bool,
+    /// The instance has a data volume. Only looked up for a persistent one.
+    has_data: bool,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Set by [`fake_probe`]: what the guards see instead of Docker.
+    static FAKE_PROBE: std::cell::Cell<Option<Probe>> = const { std::cell::Cell::new(None) };
+}
+
+/// Make this thread's guards see `persistent` and `has_data` instead of
+/// asking Docker, until the returned value is dropped.
+#[cfg(test)]
+pub fn fake_probe(persistent: bool, has_data: bool) -> impl Drop {
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            FAKE_PROBE.set(None);
+        }
+    }
+    FAKE_PROBE.set(Some(Probe {
+        persistent,
+        has_data,
+    }));
+    Reset
+}
+
+fn probe(instance: &Instance) -> Result<Probe> {
+    #[cfg(test)]
+    if let Some(probe) = FAKE_PROBE.get() {
+        return Ok(probe);
+    }
+    let persistent = is_on(instance);
+    let has_data = persistent && super::instance_has_volumes(instance)?;
+    Ok(Probe {
+        persistent,
+        has_data,
+    })
+}
+
+/// Proof that a command may delete an instance's data. Every function that
+/// deletes volumes or the database takes one, and only [`ensure_may_wipe`]
+/// makes one, so no command can wipe without asking the guard first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WipePermit {
+    wipes_persistent_data: bool,
+}
+
+impl WipePermit {
+    /// Whether the wipe deletes a persistent instance's data, which also
+    /// switches persistent mode off unless `MACRO_LOCAL_PERSISTENT` names it.
+    pub fn wipes_persistent_data(self) -> bool {
+        self.wipes_persistent_data
+    }
+
+    /// A permit for tests that build bring-up plans without wiping anything.
+    #[cfg(test)]
+    pub fn for_test() -> Self {
+        WipePermit {
+            wipes_persistent_data: false,
+        }
+    }
+}
+
 /// Refuse a command that would delete the data of a persistent instance,
 /// unless `wipe` (`--wipe-persistent-data`) says to. An instance with no
 /// volumes has nothing to lose, so its first start may run clean.
-pub fn ensure_may_wipe(instance: &Instance, wipe: bool) -> Result<()> {
-    if wipe {
-        return Ok(());
+pub fn ensure_may_wipe(instance: &Instance, wipe: bool) -> Result<WipePermit> {
+    let probe = probe(instance)?;
+    if !may_wipe(probe.persistent, probe.has_data, wipe) {
+        bail!(refusal(instance));
     }
-    let persistent = is_on(instance)?;
-    let has_data = persistent && super::instance_has_volumes(instance)?;
-    if may_wipe(persistent, has_data, wipe) {
-        Ok(())
-    } else {
-        bail!(refusal(instance))
-    }
+    Ok(WipePermit {
+        wipes_persistent_data: probe.persistent && probe.has_data,
+    })
 }
 
 /// Whether a command may delete an instance's data: always upstream, and for
@@ -110,7 +181,7 @@ fn may_wipe(persistent: bool, has_data: bool, wipe: bool) -> bool {
 }
 
 /// Why a persistent instance's data was kept, and how to delete it on purpose.
-fn refusal(instance: &Instance) -> String {
+pub fn refusal(instance: &Instance) -> String {
     format!(
         "instance {name} is a persistent stack ({SWITCH_VAR} names it, or its volume {volume} \
          exists), so its data is kept. `just run_local --instance {name}` resumes it. To delete \
@@ -121,30 +192,20 @@ fn refusal(instance: &Instance) -> String {
 }
 
 /// How an attached `run_local` starts. Upstream it always starts clean; a
-/// persistent instance resumes over its volumes unless `--fresh` asks for a
-/// clean start, which [`ensure_may_wipe`] then still guards.
-pub fn attached_start(instance: &Instance, fresh: bool) -> Result<Start> {
-    if fresh {
-        return Ok(Start::Fresh);
+/// persistent instance with data resumes over its volumes, unless `--fresh`
+/// asks for a clean start, which the guard then still has to allow.
+pub fn attached_start(instance: &Instance, fresh: bool, wipe: bool) -> Result<Start> {
+    let probe = probe(instance)?;
+    if probe.persistent && probe.has_data && !fresh {
+        return Ok(Start::Resume);
     }
-    let persistent = is_on(instance)?;
-    let has_data = persistent && super::instance_has_volumes(instance)?;
-    Ok(attached_start_for(persistent, has_data, fresh))
-}
-
-fn attached_start_for(persistent: bool, has_data: bool, fresh: bool) -> Start {
-    if persistent && has_data && !fresh {
-        Start::Resume
-    } else {
-        Start::Fresh
-    }
+    Ok(Start::Fresh(ensure_may_wipe(instance, wipe)?))
 }
 
 /// Layer persistent mode onto the generated compose override.
 pub fn apply_to_compose(value: &mut Value, instance: &Instance) -> Result<()> {
     let base = BaseCompose::read(&repo_root())?;
-    apply(value, instance, &base);
-    Ok(())
+    apply(value, instance, &base)
 }
 
 /// What persistent mode needs from the checked-in compose files, which the
@@ -196,7 +257,9 @@ fn read_yaml(path: &Path) -> Result<Value> {
 }
 
 /// The override changes, given the base compose files:
-/// - LocalStack runs the persisting image on its own volume;
+/// - LocalStack runs the persisting image on its own volume. The volume is
+///   external, like Postgres's, so a hand-typed `docker compose down -v` keeps
+///   it; the orchestrator creates it (see `ensure_external_resources`);
 /// - Postgres runs with `jit=off`. Compiling the plan of a large query costs
 ///   seconds on every call, and the stack's tables are far too small to gain
 ///   from it;
@@ -204,29 +267,35 @@ fn read_yaml(path: &Path) -> Result<Value> {
 ///   `127.0.0.1:7233` can't start workflows on it. Its UI stays published;
 /// - every service restarts with Docker. `unless-stopped` honours an explicit
 ///   stop, so `run_local stop` still stops the stack.
-fn apply(value: &mut Value, instance: &Instance, base: &BaseCompose) {
-    let root = value.as_mapping_mut().expect("compose root is a mapping");
+fn apply(value: &mut Value, instance: &Instance, base: &BaseCompose) -> Result<()> {
+    let root = value
+        .as_mapping_mut()
+        .context("the compose override is not a mapping")?;
     let mut volume = Mapping::new();
+    volume.insert("external".into(), true.into());
     volume.insert("name".into(), localstack_volume(instance).into());
-    child_mapping(root, "volumes").insert(LOCALSTACK_VOLUME_KEY.into(), Value::Mapping(volume));
+    child_mapping(root, "volumes")?.insert(LOCALSTACK_VOLUME_KEY.into(), Value::Mapping(volume));
 
-    let services = child_mapping(root, "services");
-    if let Some(localstack) = services
-        .get_mut("localstack")
-        .and_then(Value::as_mapping_mut)
-    {
+    let services = child_mapping(root, "services")?;
+    if let Some(localstack) = services.get_mut("localstack") {
+        let localstack = localstack
+            .as_mapping_mut()
+            .context("the localstack service is not a mapping")?;
         localstack.insert("image".into(), LOCALSTACK_IMAGE.into());
-        child_mapping(localstack, "environment")
+        child_mapping(localstack, "environment")?
             .insert("PERSIST_FREQUENCY".into(), PERSIST_FREQUENCY.into());
-        child_sequence(localstack, "volumes")
+        child_sequence(localstack, "volumes")?
             .push(format!("{LOCALSTACK_VOLUME_KEY}:/persisted-data").into());
     }
 
-    let postgres = child_mapping(services, "postgres");
+    let postgres = child_mapping(services, "postgres")?;
     postgres.insert("command".into(), without_jit(&base.postgres_command));
 
-    if let Some(temporal) = services.get_mut("temporal").and_then(Value::as_mapping_mut) {
-        child_sequence(temporal, "ports")
+    if let Some(temporal) = services.get_mut("temporal") {
+        let temporal = temporal
+            .as_mapping_mut()
+            .context("the temporal service is not a mapping")?;
+        child_sequence(temporal, "ports")?
             .retain(|port| !port.as_str().is_some_and(|port| port.ends_with(":7233")));
     }
 
@@ -234,12 +303,13 @@ fn apply(value: &mut Value, instance: &Instance, base: &BaseCompose) {
     names.extend(base.services.iter().map(|name| Value::from(name.as_str())));
     for name in names {
         let service = services
-            .entry(name)
-            .or_insert_with(|| Value::Mapping(Mapping::new()));
-        if let Some(service) = service.as_mapping_mut() {
-            service.insert("restart".into(), "unless-stopped".into());
-        }
+            .entry(name.clone())
+            .or_insert_with(|| Value::Mapping(Mapping::new()))
+            .as_mapping_mut()
+            .with_context(|| format!("compose service {name:?} is not a mapping"))?;
+        service.insert("restart".into(), "unless-stopped".into());
     }
+    Ok(())
 }
 
 /// The Postgres command with `-c jit=off` appended, in its own form.
@@ -255,53 +325,70 @@ fn without_jit(command: &Value) -> Value {
     }
 }
 
-fn child_mapping<'a>(parent: &'a mut Mapping, key: &str) -> &'a mut Mapping {
-    let child = parent
+/// The mapping under `key`, created when absent. Any other shape is an error:
+/// replacing it would silently drop what upstream put there.
+fn child_mapping<'a>(parent: &'a mut Mapping, key: &str) -> Result<&'a mut Mapping> {
+    parent
         .entry(key.into())
-        .or_insert_with(|| Value::Mapping(Mapping::new()));
-    if !child.is_mapping() {
-        *child = Value::Mapping(Mapping::new());
-    }
-    child.as_mapping_mut().expect("just made a mapping")
+        .or_insert_with(|| Value::Mapping(Mapping::new()))
+        .as_mapping_mut()
+        .with_context(|| format!("compose key {key:?} is not a mapping"))
 }
 
-fn child_sequence<'a>(parent: &'a mut Mapping, key: &str) -> &'a mut Vec<Value> {
-    let child = parent
+/// The sequence under `key`, created when absent. Any other shape is an error.
+fn child_sequence<'a>(parent: &'a mut Mapping, key: &str) -> Result<&'a mut Vec<Value>> {
+    parent
         .entry(key.into())
-        .or_insert_with(|| Value::Sequence(Vec::new()));
-    if !child.is_sequence() {
-        *child = Value::Sequence(Vec::new());
-    }
-    child.as_sequence_mut().expect("just made a sequence")
+        .or_insert_with(|| Value::Sequence(Vec::new()))
+        .as_sequence_mut()
+        .with_context(|| format!("compose key {key:?} is not a sequence"))
 }
+
+/// The databases on the stack's Postgres that tests name in `DATABASE_URL`.
+const TEST_MASTER_DATABASES: &[&str] = &["macrodb", "contacts", "macrodb_pwconc"];
 
 /// Make the persistent instance's Postgres refuse `#[sqlx::test]` databases,
 /// which tests on this machine would otherwise create on it through the
-/// default `localhost:5432` URL. Runs after any init snapshot is saved, so the
-/// machine-wide snapshot never carries the refusal to other instances.
+/// default `localhost:5432` URL. `sqlx` registers test databases in the
+/// database the URL names, so the refusal goes into each of
+/// [`TEST_MASTER_DATABASES`] that exists. Runs after any init snapshot is saved,
+/// so the machine-wide snapshot never carries the refusal to other instances.
 pub fn refuse_test_databases(
     stage: &Stage,
     mode: Mode,
     instance: &Instance,
     env: &super::env_layer::ResolvedEnv,
 ) -> Result<()> {
-    if stage.is_dry_run() || !mode.spec().migrates_db || !is_on(instance)? {
+    if stage.is_dry_run() || !mode.spec().migrates_db || !is_on(instance) {
         return Ok(());
     }
-    let mut psql = super::compose_cmd(instance, env);
-    psql.args([
-        "exec",
-        "-T",
-        "postgres",
-        "psql",
-        "-U",
-        "user",
-        "-d",
-        "macrodb",
-        "-v",
-        "ON_ERROR_STOP=1",
-        "-c",
-        REFUSE_TEST_DATABASES_SQL,
-    ]);
-    stage.run("Refusing test databases on the persistent Postgres", &mut psql)
+    let psql = |database: &str| {
+        let mut psql = super::compose_cmd(instance, env);
+        psql.args([
+            "exec", "-T", "postgres", "psql", "-U", "user", "-d", database, "-v",
+            "ON_ERROR_STOP=1",
+        ]);
+        psql
+    };
+
+    let listed = psql("macrodb")
+        .args(["-At", "-c", "select datname from pg_database"])
+        .output()
+        .context("listing the persistent Postgres's databases")?;
+    anyhow::ensure!(
+        listed.status.success(),
+        "listing the persistent Postgres's databases failed: {}",
+        String::from_utf8_lossy(&listed.stderr)
+    );
+    let existing = String::from_utf8_lossy(&listed.stdout).into_owned();
+    for database in TEST_MASTER_DATABASES {
+        if !existing.lines().any(|name| name.trim() == *database) {
+            continue;
+        }
+        stage.run(
+            &format!("Refusing test databases in {database}"),
+            psql(database).args(["-c", REFUSE_TEST_DATABASES_SQL]),
+        )?;
+    }
+    Ok(())
 }

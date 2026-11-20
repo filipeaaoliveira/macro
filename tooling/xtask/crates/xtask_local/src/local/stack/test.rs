@@ -277,3 +277,30 @@ fn a_dev_rebuild_starts_no_infra() {
         }
     );
 }
+
+#[test]
+fn stack_up_and_down_refuse_to_wipe_a_persistent_stack_without_the_flag() {
+    let _probe = super::super::persistent::fake_probe(true, true);
+    let name = "persistent-guard-test";
+    let instance = Instance::derive(Some(name), None).unwrap();
+    let refusal = super::super::persistent::refusal(&instance);
+    let instance_args = InstanceArgs {
+        instance: Some(name.to_string()),
+        port_base: None,
+    };
+
+    let up_args = UpArgs {
+        run: RunArgs {
+            instance: instance_args.clone(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    assert_eq!(up(Mode::Local, &up_args).unwrap_err().to_string(), refusal);
+
+    let down_args = DownArgs {
+        instance: instance_args,
+        ..Default::default()
+    };
+    assert_eq!(down(&down_args).unwrap_err().to_string(), refusal);
+}

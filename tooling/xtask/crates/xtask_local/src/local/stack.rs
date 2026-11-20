@@ -231,6 +231,14 @@ pub(super) fn clear_state(instance: &Instance) -> Result<()> {
 pub fn up(mode: Mode, args: &UpArgs) -> Result<Instance> {
     let started_at = std::time::SystemTime::now();
     let stage = Stage::from_env_cli(args.run.verbose);
+    // Before anything is allocated or stopped: `up` always wipes.
+    let permit = super::persistent::ensure_may_wipe(
+        &Instance::derive(
+            args.run.instance.instance.as_deref(),
+            args.run.instance.port_base,
+        )?,
+        args.run.wipe_persistent_data,
+    )?;
     let instance = super::allocator::allocate(
         &stage,
         mode,
@@ -239,7 +247,7 @@ pub fn up(mode: Mode, args: &UpArgs) -> Result<Instance> {
     )?;
     let (stage, telemetry) =
         RunTelemetry::attach(stage, Some(&instance), RunKind::StackUp, started_at);
-    let result = up_allocated(&stage, mode, args, instance);
+    let result = up_allocated(&stage, mode, args, instance, permit);
     RunTelemetry::close(telemetry, &result);
     result
 }
@@ -249,6 +257,7 @@ fn up_allocated(
     mode: Mode,
     args: &UpArgs,
     mut instance: Instance,
+    permit: super::persistent::WipePermit,
 ) -> Result<Instance> {
     stage.section(&format!(
         "macro {} stack (headless) — instance {}",
@@ -256,7 +265,6 @@ fn up_allocated(
         instance.name()
     ));
     if !stage.is_dry_run() {
-        super::persistent::ensure_may_wipe(&instance, args.run.wipe_persistent_data)?;
         supervisor::stop_processes(&instance);
         // A failed run_local's record would otherwise outrank this bring-up in
         // the phase.
@@ -271,7 +279,7 @@ fn up_allocated(
         // and previews stay reachable on that box only.
         share_app: false,
         infra_only: args.infra_only,
-        start: Start::Fresh,
+        start: Start::Fresh(permit),
         // Off unless asked: headless stacks serve agents and CI, which should
         // not pay for building the computer image.
         computers: args.run.computers.fleet(Fleet::Off),

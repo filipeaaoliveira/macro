@@ -154,7 +154,7 @@ fn only_the_static_flag_turns_vite_off_and_sharing_serves_a_bundle_too() {
             with_cf_tunnel: true,
             ..Default::default()
         },
-        Start::Fresh,
+        Start::Fresh(crate::local::persistent::WipePermit::for_test()),
     );
     assert!(shared.vite && shared.static_bundle && shared.share_app);
 }
@@ -213,4 +213,27 @@ fn concurrent_steps_never_leave_a_half_written_record() {
     }
     std::fs::remove_dir_all(&dir).unwrap();
     assert_eq!(unreadable, 0, "reads that found a half-written record");
+}
+
+#[test]
+fn a_detached_fresh_start_of_a_persistent_stack_refuses_before_stopping_anything() {
+    let _probe = crate::local::persistent::fake_probe(true, true);
+    let run = RunArgs {
+        instance: InstanceArgs {
+            instance: Some("persistent-guard-test".to_string()),
+            port_base: None,
+        },
+        ..Default::default()
+    };
+    let flags = RunLocalFlags {
+        fresh: true,
+        no_wait: true,
+        ..Default::default()
+    };
+    let refused = start_detached(&flags, &run).unwrap_err();
+    let instance = Instance::derive(Some("persistent-guard-test"), None).unwrap();
+    assert_eq!(
+        refused.to_string(),
+        crate::local::persistent::refusal(&instance)
+    );
 }

@@ -212,8 +212,9 @@ const LOCAL_PULL_SERVICE_IMAGES: &[&str] = &["proxy", "mailpit", "static_file_cd
 pub(crate) enum Start {
     /// Full delete + full create: tear the previous stack and ALL its stateful
     /// volumes down, so no persisted state (a stale FusionAuth DB, an old
-    /// migration) can poison the run.
-    Fresh,
+    /// migration) can poison the run. The permit is the persistent-mode guard's
+    /// consent to that.
+    Fresh(persistent::WipePermit),
     /// Keep the volumes and bring everything up over them. Init steps are all
     /// idempotent, so this also applies new migrations and restores what
     /// LocalStack loses on a stop.
@@ -259,9 +260,6 @@ pub(crate) fn bring_up(
     plan: &BringUp,
 ) -> Result<StackUp> {
     if !stage.is_dry_run() {
-        if plan.start == Start::Fresh {
-            persistent::ensure_may_wipe(instance, args.wipe_persistent_data)?;
-        }
         stack::clear_state(instance)?;
     }
     stage.record_bring_up(mode, plan);
@@ -304,10 +302,19 @@ pub(crate) fn bring_up(
     // Run the teardown in the BACKGROUND: tearing the old stack down is
     // independent of the host-side build, so the two overlap instead of summing
     // (stopping ~20 containers is otherwise the slow part of a re-run).
-    let teardown = if plan.start == Start::Fresh {
-        BackgroundTeardown::start(stage, instance)
-    } else {
-        None
+    let teardown = match plan.start {
+        Start::Fresh(permit) => BackgroundTeardown::start(stage, instance, permit),
+        Start::Resume => None,
+    };
+    // Generating the compose override asks whether the LocalStack volume
+    // exists, which a teardown of a persistent instance is deleting: wait for
+    // it, so the answer doesn't depend on which finishes first.
+    let teardown = match (teardown, plan.start) {
+        (Some(teardown), Start::Fresh(permit)) if permit.wipes_persistent_data() => {
+            teardown.finish(stage)?;
+            None
+        }
+        (teardown, _) => teardown,
     };
 
     // Sharing posture (`--with-cf-tunnel`, local only): besides the tunnels,
@@ -397,7 +404,8 @@ pub(crate) fn bring_up(
 
     // Foreground: resolve env, build binaries + runtime image, generate the
     // compose override / Caddyfile / kickstart. None of this touches the volumes
-    // or containers the teardown is removing, so it's safe to overlap.
+    // or containers the teardown is removing, so it's safe to overlap. The one
+    // exception, a persistent instance's LocalStack volume, was waited for above.
     let egress_url = egress_tunnel.as_ref().map(|tunnel| tunnel.url.clone());
     // The open tunnels point at this window's ports, so it can't move under them.
     let pinned_base = args
@@ -427,7 +435,9 @@ pub(crate) fn bring_up(
     // seeds itself. The full-delete/full-create idempotency is unchanged: the
     // key *is* the definition of clean, so any input change is a structural miss.
     // Resuming keeps the volumes it would otherwise restore over.
-    let snapshot_plan = (plan.start == Start::Fresh && !args.no_snapshot && !stage.is_dry_run())
+    let snapshot_plan = (matches!(plan.start, Start::Fresh(_))
+        && !args.no_snapshot
+        && !stage.is_dry_run())
         .then(|| snapshot::Plan::compute(instance))
         .transpose()?;
 
@@ -622,6 +632,13 @@ fn run_attached(mut stage: Stage, mode: Mode, run: &cli::RunLocalArgs) -> Result
         // that can't do that before any containers start.
         kafka::ensure_available(&format!("run-{}", mode.label()))?;
     }
+    // Before anything is allocated or stopped: a persistent instance resumes,
+    // and a clean start of one needs the explicit flag.
+    let start = persistent::attached_start(
+        &Instance::derive(args.instance.instance.as_deref(), args.instance.port_base)?,
+        run.flags.fresh,
+        args.wipe_persistent_data,
+    )?;
     let mut instance = allocator::allocate(
         &stage,
         mode,
@@ -633,11 +650,6 @@ fn run_attached(mut stage: Stage, mode: Mode, run: &cli::RunLocalArgs) -> Result
         mode.label(),
         instance.name()
     ));
-    let start = if stage.is_dry_run() {
-        Start::Fresh
-    } else {
-        persistent::attached_start(&instance, run.flags.fresh)?
-    };
     let plan = supervisor::plan_for(mode, &run.flags, args, start);
     let attached_run = (!stage.is_dry_run())
         .then(|| supervisor::begin_attached(&instance))
@@ -922,21 +934,25 @@ fn interact(
                 // bun — otherwise Vite is orphaned and keeps holding the port.
                 fe.shutdown();
                 // A persistent stack keeps its data: quitting only stops it.
-                if let Err(kept) =
-                    persistent::ensure_may_wipe(instance, args.wipe_persistent_data)
-                {
-                    stage.note(&format!("{kept:#}"));
-                    return stop(&cli::InstanceArgs {
-                        instance: Some(instance.name().to_string()),
-                        port_base: Some(instance.port_base()),
-                    });
-                }
+                let permit = match persistent::ensure_may_wipe(
+                    instance,
+                    args.wipe_persistent_data,
+                ) {
+                    Ok(permit) => permit,
+                    Err(kept) => {
+                        stage.note(&format!("{kept:#}"));
+                        return stop(&cli::InstanceArgs {
+                            instance: Some(instance.name().to_string()),
+                            port_base: Some(instance.port_base()),
+                        });
+                    }
+                };
                 // Tear the stack down on quit, while the user is already leaving:
                 // stopping the running containers now is the slow part of
                 // teardown, so doing it here makes the *next* `run_local` skip it
                 // (its start-of-run teardown then has nothing to stop). Best-effort
                 // — we're exiting regardless.
-                let _ = teardown(stage, instance);
+                let _ = teardown(stage, instance, permit);
                 let _ = allocator::release(instance);
                 let _ = stack::clear_state(instance);
                 return Ok(());
@@ -1738,7 +1754,7 @@ pub(crate) fn instance_has_volumes(instance: &Instance) -> Result<bool> {
 /// volume is absent from this command's Compose file set. The default networks
 /// are shared with the base Compose files, so they stay. Output is captured
 /// (best-effort and noisy); absent containers and volumes are ignored.
-fn teardown_commands(instance: &Instance) {
+fn teardown_commands(instance: &Instance, _permit: persistent::WipePermit) {
     sdk_webhook::stop(instance);
     computers::remove_containers(instance);
     // Detach the global trace collector first or `down` can't remove the
@@ -1778,12 +1794,12 @@ fn teardown_commands(instance: &Instance) {
 /// [`teardown_commands`] shown as a single progress row (for the quit hotkey and
 /// `destroy-local`). `run_local` instead runs it in the background — see
 /// `run_stack`.
-fn teardown(stage: &Stage, instance: &Instance) -> Result<()> {
+fn teardown(stage: &Stage, instance: &Instance, permit: persistent::WipePermit) -> Result<()> {
     if stage.is_dry_run() {
         return Ok(());
     }
     stage.run_step("Tearing down stack", || {
-        teardown_commands(instance);
+        teardown_commands(instance, permit);
         Ok(())
     })
 }
@@ -1795,11 +1811,11 @@ struct BackgroundTeardown(Option<std::thread::JoinHandle<()>>);
 
 impl BackgroundTeardown {
     /// `None` on a dry run, which tears nothing down.
-    fn start(stage: &Stage, instance: &Instance) -> Option<Self> {
+    fn start(stage: &Stage, instance: &Instance, permit: persistent::WipePermit) -> Option<Self> {
         (!stage.is_dry_run()).then(|| {
             let instance = instance.clone();
             Self(Some(std::thread::spawn(move || {
-                teardown_commands(&instance)
+                teardown_commands(&instance, permit)
             })))
         })
     }
@@ -1828,7 +1844,10 @@ impl Drop for BackgroundTeardown {
 /// reference (idempotent — replaces the old `just create_networks`).
 fn ensure_external_resources(stage: &Stage, instance: &Instance) -> Result<()> {
     let networks = instance.networks();
-    let volumes = external_volumes(instance);
+    let mut volumes = external_volumes(instance).to_vec();
+    if persistent::is_on(instance) {
+        volumes.push(persistent::localstack_volume(instance));
+    }
     stage.run_step("Ensuring networks & volumes", || {
         for (name, subnet) in &networks {
             docker::ensure_network(name, subnet.as_deref())?;
@@ -1940,8 +1959,8 @@ pub fn stop(args: &cli::InstanceArgs) -> Result<()> {
 pub fn reset(args: &cli::InstanceArgs, wipe_persistent_data: bool) -> Result<()> {
     let stage = Stage::from_env();
     let instance = Instance::resolve(args.instance.as_deref(), args.port_base)?;
-    persistent::ensure_may_wipe(&instance, wipe_persistent_data)?;
-    db::reset(&stage, &instance)
+    let permit = persistent::ensure_may_wipe(&instance, wipe_persistent_data)?;
+    db::reset(&stage, &instance, permit)
 }
 
 /// `cargo x destroy-local` — remove the instance's containers, volumes, and
@@ -1949,11 +1968,11 @@ pub fn reset(args: &cli::InstanceArgs, wipe_persistent_data: bool) -> Result<()>
 pub fn destroy(args: &cli::InstanceArgs, wipe_persistent_data: bool) -> Result<()> {
     let stage = Stage::from_env();
     let instance = Instance::resolve(args.instance.as_deref(), args.port_base)?;
-    persistent::ensure_may_wipe(&instance, wipe_persistent_data)?;
+    let permit = persistent::ensure_may_wipe(&instance, wipe_persistent_data)?;
     supervisor::stop_processes(&instance);
     // Containers + all volumes (incl. FusionAuth's external ones, which `down -v`
     // leaves behind — the same teardown run_local does for its clean slate).
-    teardown(&stage, &instance)?;
+    teardown(&stage, &instance, permit)?;
     stack::clear_state(&instance)?;
     supervisor::clear_job(&instance);
     if !stage.is_dry_run() {

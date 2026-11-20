@@ -44,7 +44,7 @@ pub fn migrate(stage: &Stage, instance: &Instance) -> Result<()> {
 }
 
 /// Drop + recreate + migrate the instance database.
-pub fn reset(stage: &Stage, instance: &Instance) -> Result<()> {
+pub fn reset(stage: &Stage, instance: &Instance, _permit: super::persistent::WipePermit) -> Result<()> {
     let url = host_database_url(instance);
     let mut drop = Command::new("sqlx");
     drop.arg("database")

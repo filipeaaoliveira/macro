@@ -30,12 +30,56 @@ fn the_refusal_names_the_instance_and_the_flag() {
 }
 
 #[test]
+fn the_guard_grants_a_permit_only_when_the_data_may_go() {
+    let instance = Instance::derive(Some("persistent-guard-test"), None).unwrap();
+    {
+        let _probe = fake_probe(true, true);
+        assert_eq!(
+            ensure_may_wipe(&instance, false).unwrap_err().to_string(),
+            refusal(&instance)
+        );
+        assert!(ensure_may_wipe(&instance, true).unwrap().wipes_persistent_data());
+    }
+    {
+        let _probe = fake_probe(true, false);
+        assert!(!ensure_may_wipe(&instance, false).unwrap().wipes_persistent_data());
+    }
+    {
+        let _probe = fake_probe(false, true);
+        assert!(!ensure_may_wipe(&instance, false).unwrap().wipes_persistent_data());
+    }
+}
+
+#[test]
 fn an_attached_start_resumes_a_persistent_instance_with_data() {
-    assert_eq!(attached_start_for(true, true, false), Start::Resume);
-    assert_eq!(attached_start_for(true, true, true), Start::Fresh);
-    assert_eq!(attached_start_for(true, false, false), Start::Fresh);
-    // Off, an attached start is always clean.
-    assert_eq!(attached_start_for(false, true, false), Start::Fresh);
+    let instance = Instance::derive(Some("persistent-guard-test"), None).unwrap();
+    {
+        let _probe = fake_probe(true, true);
+        assert_eq!(attached_start(&instance, false, false).unwrap(), Start::Resume);
+        assert_eq!(
+            attached_start(&instance, true, false).unwrap_err().to_string(),
+            refusal(&instance)
+        );
+        assert!(matches!(
+            attached_start(&instance, true, true).unwrap(),
+            Start::Fresh(permit) if permit.wipes_persistent_data()
+        ));
+    }
+    {
+        let _probe = fake_probe(true, false);
+        assert!(matches!(
+            attached_start(&instance, false, false).unwrap(),
+            Start::Fresh(_)
+        ));
+    }
+    {
+        // Off, an attached start is always clean.
+        let _probe = fake_probe(false, true);
+        assert!(matches!(
+            attached_start(&instance, false, false).unwrap(),
+            Start::Fresh(_)
+        ));
+    }
 }
 
 #[test]
@@ -63,4 +107,19 @@ fn jit_is_appended_to_either_command_form() {
         without_jit(&serde_yaml::from_str("[postgres, -c, max_connections=500]").unwrap()),
         serde_yaml::from_str::<Value>("[postgres, -c, max_connections=500, -c, jit=off]").unwrap()
     );
+}
+
+#[test]
+fn an_unexpected_compose_shape_is_an_error_not_replaced() {
+    let mut service: Mapping =
+        serde_yaml::from_str("environment: [SERVICES=s3]\nvolumes: {data: /data}").unwrap();
+    assert!(child_mapping(&mut service, "environment").is_err());
+    assert!(child_sequence(&mut service, "volumes").is_err());
+    assert_eq!(
+        service,
+        serde_yaml::from_str::<Mapping>("environment: [SERVICES=s3]\nvolumes: {data: /data}")
+            .unwrap()
+    );
+    child_mapping(&mut service, "labels").unwrap();
+    child_sequence(&mut service, "ports").unwrap();
 }

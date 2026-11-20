@@ -273,7 +273,7 @@ impl RunTelemetry {
     /// The bring-up's shape, added to every later step and to the run event.
     pub(super) fn bring_up(&self, mode: Mode, plan: &BringUp) {
         let start = match plan.start {
-            Start::Fresh => "fresh",
+            Start::Fresh(_) => "fresh",
             Start::Resume => "resume",
         };
         let mut state = self.shared.state();

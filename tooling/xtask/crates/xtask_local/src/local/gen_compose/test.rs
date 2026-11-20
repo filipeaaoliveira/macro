@@ -353,7 +353,7 @@ fn persistent_mode_keeps_aws_state_on_a_volume_and_restarts_every_service() {
             value["volumes"]["localstack_data"]["name"],
             crate::local::persistent::localstack_volume(&instance)
         );
-        assert!(value["volumes"]["localstack_data"]["external"].is_null());
+        assert_eq!(value["volumes"]["localstack_data"]["external"], true);
 
         let postgres = value["services"]["postgres"]["command"].as_str().unwrap();
         assert!(postgres.starts_with("postgres -c max_connections=500"));

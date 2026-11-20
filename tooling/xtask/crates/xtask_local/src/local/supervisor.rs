@@ -574,6 +574,8 @@ pub(super) fn decide_start(phase: stack::Phase, job_running: bool, fresh: bool) 
 /// resumes with its data. Only `--fresh` wipes.
 pub fn start_detached(args: &RunLocalFlags, run: &RunArgs) -> Result<()> {
     let instance = Instance::resolve(run.instance.instance.as_deref(), run.instance.port_base)?;
+    // Refuse here, before the running supervisor is stopped, rather than in
+    // the background bring-up, which refuses too.
     if args.fresh {
         super::persistent::ensure_may_wipe(&instance, run.wipe_persistent_data)?;
     }
@@ -672,7 +674,10 @@ pub fn supervise(mode: Mode, flags: &RunLocalFlags, run: &RunArgs) -> Result<()>
         )?;
         // Volumes mean someone's data, so only an explicit `--fresh` may wipe them.
         let start = if flags.fresh || !super::instance_has_volumes(&instance)? {
-            Start::Fresh
+            Start::Fresh(super::persistent::ensure_may_wipe(
+                &instance,
+                run.wipe_persistent_data,
+            )?)
         } else {
             Start::Resume
         };
@@ -680,7 +685,7 @@ pub fn supervise(mode: Mode, flags: &RunLocalFlags, run: &RunArgs) -> Result<()>
             "macro {} stack (detached, {}) — instance {}",
             mode.label(),
             match start {
-                Start::Fresh => "fresh",
+                Start::Fresh(_) => "fresh",
                 Start::Resume => "keeping data",
             },
             instance.name()
