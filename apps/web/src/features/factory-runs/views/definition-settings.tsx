@@ -5,14 +5,20 @@ import { ThrownResultError } from '@core/util/result';
 import { Button, TextField } from '@ui';
 import { createSignal, Match, Show, Switch } from 'solid-js';
 import {
+  DefinitionContents,
+  DefinitionPullRequests,
+} from '../components/definition-contents';
+import {
   useDefinitionQuery,
   useSetDefinitionMutation,
 } from '../queries/definition';
 
 /**
  * The team's Factory Definition: the repository whose files its Runs take
- * their Flows, Agents and rules from, and whether it reads at its head. Its
- * admins name one or stop using it; other members read it.
+ * their Flows, Agents and rules from, whether it reads at its head (and why
+ * not), what it holds at the commit the newest Run read, and the pull
+ * requests open on it. Its admins name one or stop using it; other members
+ * read it.
  */
 export function DefinitionSettings() {
   const query = useDefinitionQuery();
@@ -117,6 +123,21 @@ export function DefinitionSettings() {
                 <p class="text-xs text-ink-muted">
                   {t('factoryRuns.definitionHowTo')}
                 </p>
+                <Show when={settings().repoUrl}>
+                  {(repoUrl) => (
+                    <>
+                      <DefinitionContents
+                        repoUrl={repoUrl()}
+                        newestRun={settings().newestRun}
+                        contents={settings().contents}
+                      />
+                      <DefinitionPullRequests
+                        repoUrl={repoUrl()}
+                        pullRequests={settings().openPullRequests}
+                      />
+                    </>
+                  )}
+                </Show>
               </Show>
               <Show
                 when={settings().canEdit}
