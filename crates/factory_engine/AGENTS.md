@@ -433,7 +433,10 @@ or branch) is judged on that. A change GitHub lists only in part (300
 files or more), or one that could not be read (a GitHub read that fails on
 the last attempt; an earlier one fails the attempt, to retry), is not
 judged at all by the Scorers that read it, and is logged: a judgment
-without the change would be noise in insights. A trial's branch is deleted
+without the change would be noise in insights. Such Runs drop out of that
+Scorer's mean, so an Experiment's arm that makes larger changes reads
+better on it than it is: compare arms' Run counts on such a Scorer, not
+its mean alone. A trial's branch is deleted
 only once its Scorers judged it, or on the last attempt, so a retry still
 reads its change; a trial whose branch is gone is not judged by them.
 `reads` takes only `diff`: any other value does not read, in
