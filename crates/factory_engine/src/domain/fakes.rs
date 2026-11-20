@@ -207,6 +207,8 @@ pub(crate) struct FakeRepo {
     pub(crate) projects: Arc<Mutex<BTreeSet<Uuid>>>,
     /// The Project each task is in.
     pub(crate) task_projects: Arc<Mutex<BTreeMap<Uuid, Uuid>>>,
+    /// The tags each task carries.
+    pub(crate) task_tags: Arc<Mutex<BTreeMap<Uuid, Vec<String>>>>,
     /// Whether reading a task's Project fails, as an outage would.
     pub(crate) project_reads_fail: Arc<Mutex<bool>>,
     /// The Projects a person may not edit: their id and the Project's.
@@ -310,6 +312,23 @@ impl TaskDirectory for FakeRepo {
             .expect("task projects")
             .get(&task_id)
             .copied())
+    }
+
+    async fn task_tags(
+        &self,
+        _user_id: &MacroUserIdStr<'static>,
+        task_id: Uuid,
+    ) -> Result<Vec<String>, FakeError> {
+        if self.fails("task_tags") {
+            return Err(FakeError);
+        }
+        Ok(self
+            .task_tags
+            .lock()
+            .expect("task tags")
+            .get(&task_id)
+            .cloned()
+            .unwrap_or_default())
     }
 
     async fn may_edit_project(

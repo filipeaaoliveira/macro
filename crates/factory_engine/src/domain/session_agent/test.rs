@@ -28,6 +28,7 @@ use crate::domain::flow::StepName;
 use crate::domain::models::AgentTask;
 use crate::domain::ports::{Retryable, StepAgent};
 
+mod agent_rules;
 mod follow_up;
 mod going_on;
 mod quota_memory;

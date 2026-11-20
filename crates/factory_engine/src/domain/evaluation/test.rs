@@ -892,7 +892,9 @@ async fn a_trial_is_scored_by_how_its_write_step_ended() {
 #[test]
 fn evaluation_insights_list_defined_and_retired_scorers_and_arms() {
     use chrono::NaiveDate;
-    use factory_records::domain::evaluation::{ArmScore, ArmTally, EvaluationRecords, ScorerTally};
+    use factory_records::domain::evaluation::{
+        ArmScore, ArmTally, EvaluationRecords, RuleTally, ScorerTally,
+    };
 
     use super::insights::evaluation_insights;
     use crate::domain::insights::InsightsQuery;
@@ -950,6 +952,15 @@ fn evaluation_insights_list_defined_and_retired_scorers_and_arms() {
             judged: 2,
             mean_score: 0.9,
         }],
+        rules: vec![RuleTally {
+            role: Role::try_from("writer".to_string()).expect("valid role"),
+            rule: "docs".to_string(),
+            agent: AgentName::try_from("docs-writer".to_string()).expect("valid agent"),
+            runs: 3,
+            ended: 2,
+            succeeded: 1,
+            fell_back: 1,
+        }],
         suites: Vec::new(),
     };
 
@@ -994,4 +1005,20 @@ fn evaluation_insights_list_defined_and_retired_scorers_and_arms() {
     );
     assert_eq!(insights.experiments[0].arms[1].scores[0].mean_score, 0.9);
     assert_eq!(insights.benchmarks[0].tasks, ["typo", "export"]);
+    let rules: Vec<_> = insights
+        .agent_rules
+        .iter()
+        .map(|rule| {
+            (
+                rule.role.as_str(),
+                rule.rule.as_str(),
+                rule.agent.as_str(),
+                rule.runs,
+                rule.ended,
+                rule.succeeded,
+                rule.fell_back,
+            )
+        })
+        .collect();
+    assert_eq!(rules, [("writer", "docs", "docs-writer", 3, 2, 1, 1)]);
 }

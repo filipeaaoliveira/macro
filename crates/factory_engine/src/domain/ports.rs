@@ -712,6 +712,15 @@ pub trait TaskDirectory: Send + Sync + 'static {
         task_id: Uuid,
     ) -> impl Future<Output = Result<Option<Uuid>, Self::Err>> + Send;
 
+    /// The tags the task document `task_id` carries, by label, as `user_id`
+    /// sees them: their own and their team's. None when it carries none,
+    /// or `user_id` no longer sees it.
+    fn task_tags(
+        &self,
+        user_id: &MacroUserIdStr<'static>,
+        task_id: Uuid,
+    ) -> impl Future<Output = Result<Vec<String>, Self::Err>> + Send;
+
     /// Whether `user_id` may edit the Project (an initiative) `project_id`:
     /// one they cannot reach, or that is gone, is a no.
     fn may_edit_project(

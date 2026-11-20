@@ -36,7 +36,7 @@ use factory_records::domain::standing_rules::{
 use macro_user_id::user_id::MacroUserIdStr;
 use uuid::Uuid;
 
-use crate::domain::agents::AgentDefinition;
+use crate::domain::agents::{AgentDefinition, RuleSubject};
 use crate::domain::board::{BoardFilter, BoardPage, PullRequestRuns};
 use crate::domain::built_in_flows::{BUILT_IN_FLOWS, walked_flow};
 use crate::domain::control_files::ControlFiles;
@@ -330,6 +330,25 @@ where
         }
     }
 
+    /// The tags of the task `task_id` as `user_id` sees them, for the
+    /// Agent Rules of the Definition a Run starts under. One that cannot
+    /// be read is taken as none, so a rule on a tag does not match and the
+    /// Role's own order applies, as for a task with no tags; the Run does
+    /// not wait on document storage.
+    async fn run_task_tags(&self, user_id: &MacroUserIdStr<'static>, task_id: Uuid) -> Vec<String> {
+        match self.tasks.task_tags(user_id, task_id).await {
+            Ok(tags) => tags,
+            Err(error) => {
+                tracing::warn!(
+                    ?error,
+                    %task_id,
+                    "the run task's tags could not be read: no agent rule on a tag matches it"
+                );
+                Vec::new()
+            }
+        }
+    }
+
     /// The Standing Rules a Run is created with, in the Project `project`
     /// when its task is in one: its team's Factory Definition's when the
     /// team names one; else the Project's own, when its owner's team set
@@ -517,6 +536,13 @@ where
             .map_err(internal)?
             .remove(&run.id)
             .unwrap_or_default();
+        let agent_rules = self
+            .repo
+            .runs_agent_rules(&[run.id])
+            .await
+            .map_err(internal)?
+            .remove(&run.id)
+            .unwrap_or_default();
         let token_budget = self.token_budget(&run).await?;
         Ok(RunDetail {
             run,
@@ -525,6 +551,7 @@ where
             base_required_checks: base.required,
             review_rounds,
             standing_acts,
+            agent_rules,
             token_budget,
         })
     }
@@ -564,6 +591,7 @@ where
         let mut steps = self.repo.list_runs_steps(&ids).await.map_err(internal)?;
         let mut rounds = self.repo.runs_review_rounds(&ids).await.map_err(internal)?;
         let mut standing_acts = self.repo.runs_standing_acts(&ids).await.map_err(internal)?;
+        let mut agent_rules = self.repo.runs_agent_rules(&ids).await.map_err(internal)?;
         // The Flows of the Runs that may be at their merge, in one read.
         let at_merge_ids: Vec<RunId> = runs
             .iter()
@@ -584,6 +612,7 @@ where
                 .base_shown(&run, &steps, flows.get(&run.id), &mut known)
                 .await?;
             let standing_acts = standing_acts.remove(&run.id).unwrap_or_default();
+            let agent_rules = agent_rules.remove(&run.id).unwrap_or_default();
             // A list shows each Run's budget, not its use: reading the
             // usage log for every Run listed would cost a read each.
             let token_budget = budget_of(&run).map(|budget| RunTokenBudget {
@@ -599,6 +628,7 @@ where
                 base_required_checks: base.required,
                 review_rounds,
                 standing_acts,
+                agent_rules,
                 token_budget,
             });
         }
@@ -957,6 +987,15 @@ where
         // team's or the Project's rules, or a task linked later, does not
         // change which of its Gates a rule answers.
         let project_id = self.run_project(&actor, task_id).await;
+        // The tags its Definition's Agent Rules match, read once as it
+        // starts: the rules it keeps say which chose its Agents, so a tag
+        // changed later does not change a Run under way.
+        let task_tags = match (&definition, task_id) {
+            (Some(pinned), Some(task_id)) if pinned.definition.agents.has_tag_rules() => {
+                self.run_task_tags(&actor, task_id).await
+            }
+            _ => Vec::new(),
+        };
         let standing_rules = self
             .run_rules(team, project_id, definition.as_ref())
             .await?;
@@ -1053,7 +1092,25 @@ where
                     None => &*self.evaluation,
                 };
                 let arms = evaluation.assign_arms(&flow_name, task_id);
-                self.repo.record_arms(run_id, &arms).await
+                match self.repo.record_arms(run_id, &arms).await {
+                    // Its Definition's Agent Rules choose the first Agent
+                    // of each Role no arm chose for: an arm's choice comes
+                    // first, so an Experiment compares what it set out to.
+                    Ok(()) => match &definition {
+                        Some(pinned) => {
+                            let subject = RuleSubject {
+                                tags: &task_tags,
+                                repository: repository.as_ref().map(|kept| kept.url.as_str()),
+                            };
+                            let rules = pinned.definition.agents.chosen_by_rules(subject, |role| {
+                                arms.iter().any(|arm| arm.agents.contains_key(role))
+                            });
+                            self.repo.record_agent_rules(run_id, &rules).await
+                        }
+                        None => Ok(()),
+                    },
+                    Err(error) => Err(error),
+                }
             }
         };
         if let Err(error) = kept {

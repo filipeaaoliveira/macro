@@ -23,6 +23,7 @@ use crate::domain::ports::{
     StepExecutor, StepService,
 };
 
+mod agent_rules;
 mod automations;
 mod board;
 mod control_files;

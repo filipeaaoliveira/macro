@@ -444,3 +444,175 @@ fn the_deployments_agents_take_no_standing_roles() {
         Err(AgentDefinitionError::StandingOutsideDefinition)
     );
 }
+
+/// A definition with `rules` as its Agent Rules, over `primary` and
+/// `backup`.
+fn ruled(rules: serde_json::Value) -> AgentDefinition {
+    read(json!({
+        "agents": {
+            "primary": { "bot": "00000000-0000-0000-0000-00000000c1a0" },
+            "backup": { "bot": "00000000-0000-0000-0000-00000000c0de" }
+        },
+        "roles": { "planner": ["primary"], "writer": ["primary", "backup"] },
+        "rules": rules
+    }))
+    .expect("a definition with agent rules")
+}
+
+fn tags(tags: &[&str]) -> Vec<String> {
+    tags.iter().map(ToString::to_string).collect()
+}
+
+/// The (Role, rule, Agent) of each rule chosen.
+fn picked(
+    chosen: &[factory_records::domain::evaluation::RunAgentRule],
+) -> Vec<(String, String, String)> {
+    chosen
+        .iter()
+        .map(|rule| {
+            (
+                rule.role.to_string(),
+                rule.rule.clone(),
+                rule.agent.to_string(),
+            )
+        })
+        .collect()
+}
+
+/// A rule on a tag chooses its Agent for a Run whose task carries the tag,
+/// whatever its case; a task without it keeps the Role's own order.
+#[test]
+fn an_agent_rule_matches_a_task_tag() {
+    use super::RuleSubject;
+
+    let definition = ruled(json!([
+        { "name": "docs", "role": "writer", "tag": "docs", "agent": "backup" }
+    ]));
+    let docs = tags(&["urgent", " Docs "]);
+    let other = tags(&["urgent"]);
+
+    assert!(definition.has_tag_rules());
+    assert_eq!(
+        picked(&definition.chosen_by_rules(
+            RuleSubject {
+                tags: &docs,
+                repository: None
+            },
+            |_| false
+        )),
+        [("writer".into(), "docs".into(), "backup".into())]
+    );
+    assert_eq!(
+        definition.chosen_by_rules(
+            RuleSubject {
+                tags: &other,
+                repository: Some("https://github.com/acme/site")
+            },
+            |_| false
+        ),
+        []
+    );
+    assert_eq!(
+        definition.chosen_by_rules(RuleSubject::default(), |_| false),
+        []
+    );
+}
+
+/// A rule on a repository chooses its Agent for a Run on it, whatever the
+/// case of its owner and name; a rule naming a tag and a repository needs
+/// both.
+#[test]
+fn an_agent_rule_matches_the_run_s_repository() {
+    use super::RuleSubject;
+
+    let definition = ruled(json!([
+        { "name": "site-docs", "role": "writer", "tag": "docs", "repository": "acme/site", "agent": "primary" },
+        { "name": "site", "role": "writer", "repository": "acme/site", "agent": "backup" },
+        { "name": "plans", "role": "planner", "repository": "Acme/Site", "agent": "backup" }
+    ]));
+    let none = tags(&[]);
+    let docs = tags(&["docs"]);
+    let on_site = |tags| RuleSubject {
+        tags,
+        repository: Some("https://github.com/ACME/site"),
+    };
+
+    assert!(
+        !ruled(json!([
+            { "name": "site", "role": "writer", "repository": "acme/site", "agent": "backup" }
+        ]))
+        .has_tag_rules()
+    );
+    // The first rule that matches a Role chooses its Agent.
+    assert_eq!(
+        picked(&definition.chosen_by_rules(on_site(&none), |_| false)),
+        [
+            ("writer".into(), "site".into(), "backup".into()),
+            ("planner".into(), "plans".into(), "backup".into()),
+        ]
+    );
+    assert_eq!(
+        picked(&definition.chosen_by_rules(on_site(&docs), |_| false)),
+        [
+            ("writer".into(), "site-docs".into(), "primary".into()),
+            ("planner".into(), "plans".into(), "backup".into()),
+        ]
+    );
+    assert_eq!(
+        definition.chosen_by_rules(
+            RuleSubject {
+                tags: &docs,
+                repository: Some("https://github.com/acme/app")
+            },
+            |_| false
+        ),
+        []
+    );
+    // A Role an Experiment arm chose for takes no rule.
+    assert_eq!(
+        picked(&definition.chosen_by_rules(on_site(&docs), |role| role.as_str() == "writer")),
+        [("planner".into(), "plans".into(), "backup".into())]
+    );
+}
+
+/// `FACTORY_AGENTS` takes no Agent Rules: only a Factory Definition's Runs
+/// match them.
+#[test]
+fn the_deployment_s_agents_take_no_agent_rules() {
+    let definition = ruled(json!([
+        { "name": "docs", "role": "writer", "tag": "docs", "agent": "backup" }
+    ]));
+
+    assert_eq!(
+        AgentDefinition::configured(Some(definition), None),
+        Err(AgentDefinitionError::RulesOutsideDefinition)
+    );
+}
+
+/// A definition's Agent Rules are kept with a Run as it reads them, and a
+/// definition with none writes no `rules`, so Runs kept before them read
+/// as before.
+#[test]
+fn agent_rules_are_written_as_they_are_read() {
+    let definition = ruled(json!([
+        { "name": "docs", "role": "writer", "tag": "docs", "agent": "backup" }
+    ]));
+    let written = serde_json::to_value(&definition).expect("written");
+    assert_eq!(read(written.clone()).expect("read back"), definition);
+    assert_eq!(
+        written["rules"],
+        json!([{ "name": "docs", "role": "writer", "tag": "docs", "agent": "backup" }])
+    );
+
+    let without = read(json!({
+        "agents": { "primary": { "bot": "00000000-0000-0000-0000-00000000c1a0" } },
+        "roles": { "writer": ["primary"] }
+    }))
+    .expect("a definition");
+    assert!(
+        serde_json::to_value(&without)
+            .expect("written")
+            .get("rules")
+            .is_none()
+    );
+}

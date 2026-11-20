@@ -1,8 +1,11 @@
 //! The factory's agent definition: the Agents it may run, each a harness, a
 //! model and its instructions, and for each Role the Agents that may fill
 //! it, in order. The first is the Role's default; each later one takes a
-//! Step the one before it could not start for lack of quota.
+//! Step the one before it could not start for lack of quota. A Factory
+//! Definition's Agent Rules may choose another first Agent for a Run whose
+//! task or repository they match (`agents::rules`).
 
+mod rules;
 mod standing;
 #[cfg(test)]
 mod test;
@@ -10,10 +13,12 @@ mod test;
 use std::collections::BTreeMap;
 
 use bot_id::BotId;
+use factory_records::domain::evaluation::{AgentChoices, RunAgentRule};
 use factory_records::domain::models::{AgentName, Role};
 use factory_records::domain::standing_acts::{StandingAct, StandingRoleName};
 use serde::{Deserialize, Serialize};
 
+pub use self::rules::{AgentRule, MAX_AGENT_RULES, MAX_TAG_CHARS, RuleSubject};
 use self::standing::StandingRoleFields;
 pub use self::standing::{StandingCheck, StandingRole};
 
@@ -69,6 +74,10 @@ pub struct AgentDefinition {
     /// section, so any agent of the owner does every act.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     standing: Option<BTreeMap<StandingRoleName, StandingRole>>,
+    /// The Agent Rules, in the order they are matched; none when the
+    /// definition has no `rules` section.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    rules: Vec<AgentRule>,
 }
 
 /// An [`AgentDefinition`] as written, before its checks.
@@ -79,6 +88,8 @@ struct AgentDefinitionFields {
     roles: BTreeMap<Role, Vec<AgentName>>,
     #[serde(default, deserialize_with = "present_standing")]
     standing: Option<BTreeMap<StandingRoleName, StandingRoleFields>>,
+    #[serde(default)]
+    rules: Vec<AgentRule>,
 }
 
 /// A `standing` section that is written: `null` is refused rather than
@@ -187,6 +198,43 @@ pub enum AgentDefinitionError {
          from a factory definition's agents.json"
     )]
     StandingOutsideDefinition,
+    /// An Agent Rule's name is not one a Run keeps.
+    #[error("agent rule name {0:?} must be 1 to 64 lower-case letters, digits, `-` or `_`")]
+    RuleName(String),
+    /// Two Agent Rules have one name.
+    #[error("two agent rules are named {0}")]
+    DuplicateRule(String),
+    /// An Agent Rule names neither a tag nor a repository, so it would
+    /// match every Run: that is the Role's own order.
+    #[error(
+        "agent rule {0} must name a tag, a repository, or both: to change every run's agent, \
+         change the order of the role's agents"
+    )]
+    RuleMatchesNothing(String),
+    /// An Agent Rule's tag is empty or too long.
+    #[error("agent rule {0} must name a tag of 1 to {MAX_TAG_CHARS} characters")]
+    RuleTag(String),
+    /// An Agent Rule's repository is not `owner/name`.
+    #[error("agent rule {0} must name its repository as owner/name")]
+    RuleRepository(String),
+    /// An Agent Rule chooses for a Role the definition does not fill.
+    #[error("agent rule {rule} chooses for role {role}, which the definition does not fill")]
+    RuleUnknownRole {
+        /// The rule.
+        rule: String,
+        /// The Role it names.
+        role: Role,
+    },
+    /// The definition has more than [`MAX_AGENT_RULES`] Agent Rules.
+    #[error("at most {MAX_AGENT_RULES} agent rules")]
+    TooManyRules,
+    /// `FACTORY_AGENTS` has a `rules` section, which only a Factory
+    /// Definition's Runs match.
+    #[error(
+        "FACTORY_AGENTS has a rules section: agent rules are read only from a factory \
+         definition's agents.json"
+    )]
+    RulesOutsideDefinition,
     /// Only the retired `FACTORY_AGENT_ID` is set.
     #[error(
         "FACTORY_AGENT_ID is no longer read: set FACTORY_AGENTS to the agent definition \
@@ -263,11 +311,35 @@ impl TryFrom<AgentDefinitionFields> for AgentDefinition {
             }
         };
 
-        Ok(Self {
+        let mut definition = Self {
             agents: fields.agents,
             roles: fields.roles,
             standing,
-        })
+            rules: Vec::new(),
+        };
+        // A rule's Agent is checked as an arm's is, where the Definition
+        // is read (`AgentDefinition::rule_choices`): an Agent only a
+        // Standing Role lists may take a Role's Step there too.
+        if fields.rules.len() > MAX_AGENT_RULES {
+            return Err(AgentDefinitionError::TooManyRules);
+        }
+        for (place, rule) in fields.rules.iter().enumerate() {
+            rule.check()?;
+            if fields.rules[..place]
+                .iter()
+                .any(|earlier| earlier.name == rule.name)
+            {
+                return Err(AgentDefinitionError::DuplicateRule(rule.name.clone()));
+            }
+            if definition.for_role(&rule.role).is_empty() {
+                return Err(AgentDefinitionError::RuleUnknownRole {
+                    rule: rule.name.clone(),
+                    role: rule.role.clone(),
+                });
+            }
+        }
+        definition.rules = fields.rules;
+        Ok(definition)
     }
 }
 
@@ -304,6 +376,37 @@ impl AgentDefinition {
             .filter(|(_, agent)| is_placeholder_bot(agent.bot))
             .map(|(name, _)| name.clone())
             .collect()
+    }
+
+    /// Its Agent Rules, in the order they are matched.
+    pub fn rules(&self) -> &[AgentRule] {
+        &self.rules
+    }
+
+    /// Each Agent Rule, by name, with the choice it makes, as an arm's:
+    /// the Definition's read checks them as it checks its arms'
+    /// (`evaluation::check_choices`).
+    pub fn rule_choices(&self) -> impl Iterator<Item = (&str, AgentChoices)> {
+        self.rules
+            .iter()
+            .map(|rule| (rule.name.as_str(), rule.choice()))
+    }
+
+    /// Whether an Agent Rule matches a tag, so a Run's start reads its
+    /// task's tags.
+    pub fn has_tag_rules(&self) -> bool {
+        self.rules.iter().any(|rule| rule.tag.is_some())
+    }
+
+    /// The Agent Rules that choose the Agents of a Run matched as
+    /// `subject`, one per Role at most: the first that matches each Role,
+    /// leaving out the Roles `taken` says an Experiment arm chose for.
+    pub fn chosen_by_rules(
+        &self,
+        subject: RuleSubject<'_>,
+        taken: impl Fn(&Role) -> bool,
+    ) -> Vec<RunAgentRule> {
+        rules::chosen_by_rules(&self.rules, subject, taken)
     }
 
     /// Whether the definition has a `standing` section, so an agent acting
@@ -356,6 +459,9 @@ impl AgentDefinition {
             (Some(agents), _) => {
                 if agents.standing.is_some() {
                     return Err(AgentDefinitionError::StandingOutsideDefinition);
+                }
+                if !agents.rules.is_empty() {
+                    return Err(AgentDefinitionError::RulesOutsideDefinition);
                 }
                 agents.fills_built_in_flows()?;
                 Ok(Some(agents))

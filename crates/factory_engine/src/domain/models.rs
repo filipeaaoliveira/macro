@@ -5,6 +5,7 @@ mod test;
 
 use bot_id::BotId;
 use chrono::{DateTime, Utc};
+use factory_records::domain::evaluation::RunAgentRule;
 use factory_records::domain::main_hold::{MainHold, RequiredChecksState};
 use factory_records::domain::models::{
     EntryId, InvalidName, Outcome, Repository, Role, Run, RunId, RunOutcome, SteerRefusal, Step,
@@ -682,6 +683,11 @@ pub struct RunDetail {
     /// Roles, in order: who started, cancelled or linked it, and answered
     /// its Gates.
     pub standing_acts: Vec<StandingActRecord>,
+    /// The Agent Rules of its Factory Definition that chose the Agent its
+    /// Steps of a Role start with, by Role: each matched its task's tags
+    /// or its repository as it started. A Role no rule chose for is not
+    /// listed.
+    pub agent_rules: Vec<RunAgentRule>,
     /// Its token budget and what its agent Steps used of it; none for a
     /// Run that keeps no budget.
     pub token_budget: Option<RunTokenBudget>,

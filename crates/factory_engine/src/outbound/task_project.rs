@@ -11,8 +11,8 @@ use document_storage_service_client::task::{
     NewTaskProperty, NewTaskPropertyValue, PropertiesReadError, TaskEntityReference,
 };
 use macro_user_id::user_id::MacroUserIdStr;
-use models_properties::EntityType;
 use models_properties::service::property_value::PropertyValue;
+use models_properties::{DataType, EntityType};
 use system_properties::{StatusOption, SystemPropertyKey};
 use uuid::Uuid;
 
@@ -53,6 +53,55 @@ pub(crate) async fn initiative_of(
                 .map(|reference| reference.entity_id),
             _ => None,
         }))
+}
+
+/// The tags the task document `task_id` carries, as `owner` sees them (their
+/// own tags and their team's), by label, in the order its tag properties
+/// list them; none when the owner no longer sees the task, or its
+/// properties do not read (with a warning: reading them again would read
+/// the same). An error when document storage did not answer, which is
+/// worth trying again.
+pub(crate) async fn tags_of(
+    documents: &DocumentStorageServiceClient,
+    owner: &MacroUserIdStr<'static>,
+    task_id: Uuid,
+) -> Result<Vec<String>, rootcause::Report> {
+    let properties = match documents
+        .get_document_properties(&task_id.to_string(), owner.as_ref())
+        .await
+    {
+        Ok(Some(properties)) => properties,
+        Ok(None) => return Ok(Vec::new()),
+        Err(PropertiesReadError::Unreadable(error)) => {
+            tracing::warn!(
+                %error,
+                %task_id,
+                "the run task's properties do not read: it is taken to carry no tags"
+            );
+            return Ok(Vec::new());
+        }
+        Err(PropertiesReadError::Unavailable(error)) => return Err(error),
+    };
+    let mut tags = Vec::new();
+    for property in properties.properties {
+        if property.definition.data_type != DataType::Tag {
+            continue;
+        }
+        let Some(PropertyValue::SelectOption(chosen)) = property.value else {
+            continue;
+        };
+        let options = property.options.unwrap_or_default();
+        for id in chosen {
+            let label = options
+                .iter()
+                .find(|option| option.id == id)
+                .and_then(|option| option.value.as_string());
+            if let Some(label) = label {
+                tags.push(label.to_string());
+            }
+        }
+    }
+    Ok(tags)
 }
 
 /// The properties a task the factory files for `owner` starts with: the
