@@ -197,9 +197,14 @@ run of an Automation's routine calls it, with the credential the
 scheduler signed for the routine (403 for any other caller). It starts
 a Run as the Automation's creator, once per routine run, unless the
 Automation is switched off, the queue is full or a Run already runs on
-the task. A routine run for an agent, or in an agent session, starts it
-as that agent: under a Definition with Standing Roles its bot must fill
-one that allows `start`, or the firing is skipped as `refused`.
+the task. Only a run the scheduler started itself, from the routine's
+schedule or event as the factory last wrote it, starts it as its creator,
+proved by the `scheduler_run` claim its credential signs. Any other run
+(Run Now, by a person or an agent; a run of a routine changed since; a
+run for another agent or in an agent session) starts it as that agent,
+else as the Macro routine bot: under a Definition with Standing Roles
+its bot must fill one that allows `start`, or the firing is skipped as
+`refused`.
  */
 export type fireFactoryAutomationResponse200 = {
   data: FiringResult;

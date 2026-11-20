@@ -128,7 +128,7 @@
     "/automations/fire": {
       "post": {
         "tags": ["factory"],
-        "summary": "Fire the Automation whose routine this run is: only the code step of a\nrun of an Automation's routine calls it, with the credential the\nscheduler signed for the routine (403 for any other caller). It starts\na Run as the Automation's creator, once per routine run, unless the\nAutomation is switched off, the queue is full or a Run already runs on\nthe task. A routine run for an agent, or in an agent session, starts it\nas that agent: under a Definition with Standing Roles its bot must fill\none that allows `start`, or the firing is skipped as `refused`.",
+        "summary": "Fire the Automation whose routine this run is: only the code step of a\nrun of an Automation's routine calls it, with the credential the\nscheduler signed for the routine (403 for any other caller). It starts\na Run as the Automation's creator, once per routine run, unless the\nAutomation is switched off, the queue is full or a Run already runs on\nthe task. Only a run the scheduler started itself, from the routine's\nschedule or event as the factory last wrote it, starts it as its creator,\nproved by the `scheduler_run` claim its credential signs. Any other run\n(Run Now, by a person or an agent; a run of a routine changed since; a\nrun for another agent or in an agent session) starts it as that agent,\nelse as the Macro routine bot: under a Definition with Standing Roles\nits bot must fill one that allows `start`, or the firing is skipped as\n`refused`.",
         "operationId": "fire_factory_automation",
         "requestBody": {
           "content": {
