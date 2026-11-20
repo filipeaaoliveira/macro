@@ -146,7 +146,11 @@ struct RecordingExecutor {
 }
 
 impl ScheduledActionExecutor for RecordingExecutor {
-    async fn execute_action(&self, action: ScheduledAction) -> Result<InProgressExecution> {
+    async fn execute_action(
+        &self,
+        action: ScheduledAction,
+        _: crate::domain::ports::RunStarter,
+    ) -> Result<InProgressExecution> {
         self.execution_count.fetch_add(1, Ordering::SeqCst);
         Ok(InProgressExecution {
             action_id: action.id.expect("test action should have an id"),
@@ -164,7 +168,11 @@ struct GatedExecutor {
 }
 
 impl ScheduledActionExecutor for GatedExecutor {
-    async fn execute_action(&self, action: ScheduledAction) -> Result<InProgressExecution> {
+    async fn execute_action(
+        &self,
+        action: ScheduledAction,
+        _: crate::domain::ports::RunStarter,
+    ) -> Result<InProgressExecution> {
         let execution_index = self.execution_count.fetch_add(1, Ordering::SeqCst);
         if execution_index == 0 {
             self.first_execution_started.add_permits(1);

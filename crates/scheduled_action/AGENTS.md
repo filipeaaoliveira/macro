@@ -22,7 +22,13 @@ each run.
   (`event_runs/condition.rs`), not by the runner.
   Each code step's credential says who it writes as (`CodeRun::acts_as`,
   from the task's `dangerously_operate_as_user`) and carries the routine id;
-  the run records it as `run.code_acts_as`.
+  the run records it as `run.code_acts_as`. A run the scheduler started
+  itself (`RoutineRun::started_by_scheduler`: a schedule its dispatch found
+  due, `RunStarter::Scheduler`, or an event) also carries
+  `CodeRun::scheduler_run`, the run's id (`run.id`) and the configuration
+  revision it was claimed at, which the harness signs as the scheduler's
+  proof. Run Now (`RunStarter::Request`) never does, even when it consumes
+  a due schedule; nor does a dry run.
   `run_context` builds what code receives: the trigger's time (not the
   clock), the schedule's zone or else the owner's, and the previous run
   (`ScheduledActionRepo::run_history`, skipped runs excluded). Every tool and

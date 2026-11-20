@@ -11,7 +11,7 @@ mod test;
 
 use crate::domain::models::{DispatchEvent, InProgressExecution};
 use crate::domain::ports::{
-    ScheduledActionDispatcher, ScheduledActionExecutor, ScheduledActionRepo,
+    RunStarter, ScheduledActionDispatcher, ScheduledActionExecutor, ScheduledActionRepo,
 };
 
 const BUFFER_SIZE: usize = 1024;
@@ -195,7 +195,7 @@ where
                             if cancellation_token.is_cancelled() {
                                 return;
                             }
-                            match executor.execute_action(action).await {
+                            match executor.execute_action(action, RunStarter::Scheduler).await {
                                 Ok(execution) => {
                                     let _ = extx.send(execution).await;
                                 }

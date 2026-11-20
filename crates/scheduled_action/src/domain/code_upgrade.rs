@@ -243,6 +243,7 @@ async fn rewrite(
                     dry_run: true,
                     acts_as: program.code_identity(),
                     routine_id,
+                    scheduler_run: None,
                 },
             )
             .await;

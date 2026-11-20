@@ -31,7 +31,7 @@ use super::models::{
     ScheduledAction, SubRoutine, SubRoutineKey,
 };
 use super::ports::{
-    CodeUpgrades, DraftHandBacks, NoRoutineCode, RequestSessions, RoutineCode, SavedAction,
+    CodeUpgrades, DraftHandBacks, NoRoutineCode, RequestSessions, RoutineCode, RunStarter, SavedAction,
     ScheduledActionExecutor, ScheduledActionRepo, ScheduledActionService, StepProblems,
     SubRoutines, SuggestionOrigins, TaskTargetValidator,
 };
@@ -1158,8 +1158,11 @@ where
     ) -> Result<InProgressExecution> {
         let action = self.load_granted(&receipt).await?;
         action.owner_user()?;
-        // Manual execution deliberately has no event reference or event-run ID.
-        self.executor.execute_action(action).await
+        // Manual execution deliberately has no event reference or event-run ID,
+        // and is never the scheduler's own run, even when it consumes a due one.
+        self.executor
+            .execute_action(action, RunStarter::Request)
+            .await
     }
 
     async fn get_execution_records(

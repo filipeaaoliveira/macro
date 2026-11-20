@@ -18,7 +18,9 @@
 use bot_id::BotId;
 use chrono::{DateTime, Duration as ChronoDuration, TimeZone, Utc};
 use lru::LruCache;
-use macro_auth::macro_api_token::{EncodeMacroApiTokenArgs, encode_macro_api_token};
+use macro_auth::macro_api_token::{
+    EncodeMacroApiTokenArgs, SchedulerRunClaim, encode_macro_api_token,
+};
 use macro_user_id::user_id::MacroUserIdStr;
 use std::num::NonZeroUsize;
 use std::sync::Mutex;
@@ -291,6 +293,7 @@ impl MacroApiTokenSigner {
             agent_correlation_id: correlation.map(|correlation| correlation.id),
             agent_scope: correlation.and_then(|correlation| correlation.scope),
             routine_id: None,
+            scheduler_run: None,
         };
         self.sign(owner, lifetime_seconds, claims).await
     }
@@ -299,8 +302,10 @@ impl MacroApiTokenSigner {
     /// routine so the events its writes produce never trigger routines.
     /// `agent_id` attributes writes to an agent; `None` writes as the owner.
     /// `scope` narrows it, as for a dry run (`SessionScope::DryRun`), which
-    /// every service that accepts it then enforces.
-    #[tracing::instrument(skip_all, err, fields(?agent_id, %routine_id, ?scope))]
+    /// every service that accepts it then enforces. `scheduler_run` is the
+    /// scheduler's proof that it started the run itself; only the scheduler
+    /// passes one, for a run it started.
+    #[tracing::instrument(skip_all, err, fields(?agent_id, %routine_id, ?scope, ?scheduler_run))]
     pub async fn mint_for_routine(
         &self,
         owner: &MacroUserIdStr<'static>,
@@ -308,8 +313,9 @@ impl MacroApiTokenSigner {
         agent_id: Option<macro_uuid::Uuid>,
         routine_id: macro_uuid::Uuid,
         scope: Option<agent_correlation::scope::SessionScope>,
+        scheduler_run: Option<agent_correlation::context::SchedulerRun>,
     ) -> Result<String, EgressError> {
-        let claims = SignedClaims::routine(agent_id, routine_id, scope);
+        let claims = SignedClaims::routine(agent_id, routine_id, scope, scheduler_run);
         self.sign(owner, lifetime_seconds, claims).await
     }
 
@@ -326,6 +332,7 @@ impl MacroApiTokenSigner {
             agent_correlation_id,
             agent_scope,
             routine_id,
+            scheduler_run,
         } = claims;
         if !(1..=MINTED_TOKEN_LIFETIME_SECONDS).contains(&lifetime_seconds) {
             return Err(EgressError::Internal(rootcause::report!(
@@ -372,6 +379,10 @@ impl MacroApiTokenSigner {
             agent_via,
             routine_id,
             agent_scope: agent_scope.map(|scope| scope.as_str().to_owned()),
+            scheduler_run: scheduler_run.map(|run| SchedulerRunClaim {
+                run_id: run.run_id,
+                revision: run.revision,
+            }),
         })
         .map_err(|error| {
             EgressError::Internal(rootcause::report!(
@@ -400,15 +411,17 @@ struct SignedClaims {
     agent_correlation_id: Option<uuid::Uuid>,
     agent_scope: Option<agent_correlation::scope::SessionScope>,
     routine_id: Option<macro_uuid::Uuid>,
+    scheduler_run: Option<agent_correlation::context::SchedulerRun>,
 }
 
 impl SignedClaims {
-    /// What a routine run's token signs: its routine, its agent if any, and
-    /// its scope if narrower.
+    /// What a routine run's token signs: its routine, its agent if any, its
+    /// scope if narrower, and the scheduler's proof for a run it started.
     fn routine(
         agent_id: Option<macro_uuid::Uuid>,
         routine_id: macro_uuid::Uuid,
         scope: Option<agent_correlation::scope::SessionScope>,
+        scheduler_run: Option<agent_correlation::context::SchedulerRun>,
     ) -> Self {
         Self {
             agent_id,
@@ -417,6 +430,7 @@ impl SignedClaims {
             agent_correlation_id: None,
             agent_scope: scope,
             routine_id: Some(routine_id),
+            scheduler_run,
         }
     }
 }

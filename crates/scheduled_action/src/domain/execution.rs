@@ -22,7 +22,7 @@ use crate::domain::models::{
     ScheduledActionUpdate,
 };
 use crate::domain::ports::{
-    FinishedRoutineRun, RoutineRun, RoutineRunObserver, RunEnd, RunTarget, RunTrigger,
+    FinishedRoutineRun, RoutineRun, RoutineRunObserver, RunEnd, RunStarter, RunTarget, RunTrigger,
     ScheduledActionExecutor, ScheduledActionLiveUpdate, ScheduledActionRepo, ScheduledAgentRunner,
 };
 
@@ -345,18 +345,24 @@ where
     Live: ScheduledActionLiveUpdate,
     Runner: ScheduledAgentRunner,
 {
-    async fn execute_action(&self, action: ScheduledAction) -> Result<InProgressExecution> {
+    async fn execute_action(
+        &self,
+        action: ScheduledAction,
+        starter: RunStarter,
+    ) -> Result<InProgressExecution> {
         action.owner_user()?;
         anyhow::ensure!(!self.cancellation.is_cancelled(), "executor is stopping");
         let id = action.id.context("persisted action required")?;
         let start_time = Utc::now();
         let deadline = start_time + MAX_ACTION_TIME;
         // The claim is fenced to `next_run_at`, so a run started once it is
-        // due consumes that firing, whoever started it.
+        // due consumes that firing, whoever started it; only the scheduler's
+        // own dispatch counts as started by the scheduler.
         let firing = match action.next_run_at {
-            Some(scheduled_for) if scheduled_for <= start_time => {
-                RoutineRun::Scheduled { scheduled_for }
-            }
+            Some(scheduled_for) if scheduled_for <= start_time => RoutineRun::Scheduled {
+                scheduled_for,
+                by_scheduler: starter == RunStarter::Scheduler,
+            },
             _ => RoutineRun::Manual {
                 requested_at: start_time,
             },

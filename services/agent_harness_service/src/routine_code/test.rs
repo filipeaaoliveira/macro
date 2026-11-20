@@ -206,6 +206,7 @@ impl RoutineCredentials for RecordedTokens {
         acts_as: CodeIdentity,
         routine_id: Uuid,
         _: bool,
+        _: Option<agent_correlation::context::SchedulerRun>,
     ) -> anyhow::Result<String> {
         self.0.lock().unwrap().push((acts_as, routine_id));
         Ok("fixture-routine-token".into())
@@ -250,6 +251,7 @@ async fn a_step_waits_for_a_free_slot_before_its_credential_and_gives_up_after_f
                     dry_run: false,
                     acts_as: CodeIdentity::Owner,
                     routine_id,
+                    scheduler_run: None,
                 },
             )
             .await
@@ -305,6 +307,7 @@ impl RoutineCredentials for SignedTokens {
         acts_as: CodeIdentity,
         routine_id: Uuid,
         dry_run: bool,
+        scheduler_run: Option<agent_correlation::context::SchedulerRun>,
     ) -> anyhow::Result<String> {
         let (agent_id, scope) = routine_claims(acts_as, dry_run);
         macro_auth::macro_api_token::encode_macro_api_token(
@@ -321,6 +324,12 @@ impl RoutineCredentials for SignedTokens {
                 agent_session_id: None,
                 routine_id: Some(routine_id),
                 agent_scope: scope.map(|scope| scope.as_str().to_owned()),
+                scheduler_run: scheduler_run.map(|run| {
+                    macro_auth::macro_api_token::SchedulerRunClaim {
+                        run_id: run.run_id,
+                        revision: run.revision,
+                    }
+                }),
             },
         )
     }
@@ -384,6 +393,7 @@ async fn a_dry_run_token_is_refused_every_write() {
                     dry_run,
                     acts_as,
                     routine_id: Uuid::from_u128(7),
+                    scheduler_run: None,
                 },
             )
             .await;
@@ -449,6 +459,79 @@ async fn a_dry_run_token_is_refused_every_write() {
     );
 }
 
+/// A run's token signs the scheduler's proof the run carries, beside its
+/// routine; a dry run's never does, even when asked to.
+#[tokio::test]
+async fn a_run_token_signs_the_schedulers_proof_and_a_dry_run_never_does() {
+    let tokens = Arc::new(RunTokens::default());
+    let code = SdkRoutineCode::new(
+        Arc::clone(&tokens) as Arc<dyn ProgramExecutor>,
+        Arc::new(NoChecks),
+        SignedTokens,
+        code_execution::domain::SdkEndpoints::default(),
+        Arc::new(ai_usage::NoOpUsageRecorder),
+        None,
+        Arc::new(NoTimeZones),
+    );
+    let owner = MacroUserIdStr::parse_from_str("macro|owner@example.com").unwrap();
+    let step = routine_program::CodeStep {
+        id: None,
+        title: "Fire it".into(),
+        summary: String::new(),
+        source: "export async function main() {}".into(),
+        knobs: Vec::new(),
+        sentence: None,
+    };
+    let proof = agent_correlation::context::SchedulerRun {
+        run_id: Uuid::from_u128(9),
+        revision: 3,
+    };
+    for dry_run in [false, true] {
+        code.run(
+            &owner,
+            CodeRun {
+                step: &step,
+                context: &json!({ "run": {} }),
+                steps: &json!({}),
+                dry_run,
+                acts_as: CodeIdentity::Agent,
+                routine_id: Uuid::from_u128(7),
+                scheduler_run: Some(proof),
+            },
+        )
+        .await;
+    }
+    let key = jsonwebtoken::DecodingKey::from_rsa_pem(PUBLIC.as_bytes()).unwrap();
+    let mut validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::RS256);
+    validation.set_issuer(&["fixture"]);
+    let signed: Vec<_> = tokens
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|token| {
+            jsonwebtoken::decode::<macro_auth::macro_api_token::MacroApiToken>(
+                token,
+                &key,
+                &validation,
+            )
+            .unwrap()
+            .claims
+            .scheduler_run
+        })
+        .collect();
+    assert_eq!(
+        signed,
+        [
+            Some(macro_auth::macro_api_token::SchedulerRunClaim {
+                run_id: Uuid::from_u128(9),
+                revision: 3,
+            }),
+            None,
+        ]
+    );
+}
+
 /// Owners without calendars: every owner reads UTC.
 struct NoTimeZones;
 
@@ -483,6 +566,7 @@ mod real_deno {
             _: CodeIdentity,
             _: Uuid,
             _: bool,
+            _: Option<agent_correlation::context::SchedulerRun>,
         ) -> anyhow::Result<String> {
             Ok("fixture-routine-token".into())
         }
@@ -719,6 +803,7 @@ export async function main({ macro, trigger, steps, run }: StepContext) {
                     dry_run: false,
                     acts_as: CodeIdentity::Agent,
                     routine_id: Uuid::from_u128(1),
+                    scheduler_run: None,
                 },
             )
             .await;
@@ -787,6 +872,7 @@ export async function main({ macro, trigger, steps, run }: StepContext) {
                     dry_run: false,
                     acts_as: CodeIdentity::Agent,
                     routine_id: Uuid::from_u128(1),
+                    scheduler_run: None,
                 },
             )
             .await;
@@ -827,6 +913,7 @@ export async function main({ macro, trigger, steps, run }: StepContext) {
                     dry_run: true,
                     acts_as: CodeIdentity::Agent,
                     routine_id: Uuid::from_u128(1),
+                    scheduler_run: None,
                 },
             )
             .await;
